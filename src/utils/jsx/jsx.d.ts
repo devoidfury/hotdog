@@ -2,10 +2,11 @@
  *
  * Deliberately permissive: every host tag accepts an open prop bag and any children type.
  * 
- * TODO: clean this up (per-tag attribute types, `ComponentProps` instead of `unknown`)
- *       once the webui is reworked as a consumer and we know which tags/props actually need checking.
+ * TODO: per-tag attribute types, `ComponentProps` instead of `unknown` (the webui is the
+ *       consumer now; only `ref` is typed precisely, so ref callbacks contextualize).
  */
 import type { JsxChild } from "./core.ts";
+import type { Ref } from "./client.ts";
 
 declare global {
   namespace JSX {
@@ -17,7 +18,9 @@ declare global {
     }
 
     interface IntrinsicElements {
-      [elemName: string]: { [prop: string]: unknown };
+      // `ref` gets a real type so ref callbacks contextualize to
+      // (el: DomElement | null); everything else stays open.
+      [elemName: string]: { [prop: string]: unknown; ref?: Ref };
     }
   }
 }

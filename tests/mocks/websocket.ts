@@ -109,7 +109,7 @@ export function createWsMockWs(): HotdogServerSocket & { messages: string[] } {
     send: (data: string) => { messages.push(data); },
     sendText: (data: string) => { messages.push(data); },
     sendBinary: () => {},
-    close: mock(() => {}),
+    close: mock((_code?: number, _reason?: string) => {}),
     terminate: mock(() => {}),
     ping: mock(() => true),
     onopen: null,

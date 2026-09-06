@@ -62,6 +62,16 @@ export interface DomDocument {
 
 export type DomListener = (event?: unknown) => void;
 
+/**
+ * Callback ref on a host element: called with the DOM node when the element
+ * first enters the tree (on the create path this runs before the element's
+ * children are appended and before it is inserted into its parent), and with
+ * `null` when it is removed or the ref prop changes.
+ * Lets a JSX tree hand a live node out to imperative code (canvas, focus,
+ * third-party renderers) without abandoning the diff. SSR ignores `ref`.
+ */
+export type Ref = (el: DomElement | null) => void;
+
 /* ------------------------------ unit model ------------------------------- */
 
 // A child slot after flattening arrays/Fragments and calling function components:
@@ -127,6 +137,7 @@ interface Entry {
   kids?: Entry[]; // host elements only
   events?: Map<string, DomListener>; // host elements only, keyed by DOM event type (evtType(propName))
   warned?: Set<string>; // host elements only: warning names already emitted
+  ref?: Ref; // host elements only: current callback ref (invoked null on removal)
 }
 
 // Each warning fires at most once per node, so a static tree with an ignored prop does not re-warn on every render.
@@ -171,6 +182,11 @@ function create(u: Unit, doc: DomDocument, depth: number): Entry {
   const el = doc.createElement(tag);
   const entry: Entry = { unit: u, dom: el, kids: [], events: new Map() };
   applyProps(el, {}, u.vnode.props, entry, tag);
+  const ref = u.vnode.props.ref as Ref | undefined;
+  if (typeof ref === "function") {
+    entry.ref = ref;
+    ref(el);
+  }
   const isVoid = VOID_ELEMENTS.has(tag);
   if (isVoid) {
     // void elements never carry child nodes, so warn and drop.
@@ -203,7 +219,7 @@ const evtType = (propName: string): string => {
 function applyProps(el: DomElement, oldProps: ComponentProps, newProps: ComponentProps, entry: Entry, tag: string): void {
   const events = entry.events!;
   for (const [name, value] of Object.entries(oldProps)) {
-    if (name === "children" || name === "key" || name === "dangerouslySetInnerHTML") continue;
+    if (name === "children" || name === "key" || name === "ref" || name === "dangerouslySetInnerHTML") continue;
     if (EVENT_ATTR.test(name)) {
       if (typeof value === "function" && newProps[name] !== value) {
         const type = evtType(name);
@@ -221,7 +237,7 @@ function applyProps(el: DomElement, oldProps: ComponentProps, newProps: Componen
   }
 
   for (const [name, value] of Object.entries(newProps)) {
-    if (name === "children" || name === "key") continue;
+    if (name === "children" || name === "key" || name === "ref") continue;
     if (name === "dangerouslySetInnerHTML") {
       warnOnce(entry, "rawHtml", "[jsx] dangerouslySetInnerHTML is ignored by client mount");
       continue;
@@ -263,6 +279,18 @@ function applyProps(el: DomElement, oldProps: ComponentProps, newProps: Componen
 
 /* ------------------------------- diffing --------------------------------- */
 
+// Remove a subtree's DOM node(s) and null out any refs they carry, so
+// imperative ref holders never keep a detached node alive.
+function removeEntry(e: Entry): void {
+  for (const k of e.kids ?? []) removeEntry(k);
+  e.dom.remove();
+  if (e.ref) {
+    const ref = e.ref;
+    e.ref = undefined;
+    ref(null);
+  }
+}
+
 function patch(e: Entry, u: Unit, doc: DomDocument, depth: number): Entry {
   if (u.kind === "placeholder") return e;
   if (u.kind === "text") {
@@ -278,11 +306,19 @@ function patch(e: Entry, u: Unit, doc: DomDocument, depth: number): Entry {
   // -- so e is always a host entry here.
   const old = e.unit as HostUnit;
   applyProps(el, old.vnode.props, u.vnode.props, e, tag);
+  const ref = u.vnode.props.ref as Ref | undefined;
+  if (ref !== e.ref) {
+    // Ref identity changed (inline arrows do every render): detach old, attach new.
+    const prev = e.ref;
+    e.ref = typeof ref === "function" ? ref : undefined;
+    if (prev) prev(null);
+    if (e.ref) e.ref(el);
+  }
   e.unit = u;
   if (VOID_ELEMENTS.has(tag)) {
     // Re-render onto the same (now void) tag: a real DOM cannot hold children there, if any were requested warn and drop.
     if (childrenPresent(u.vnode.props.children)) warnVoidDropped(e, tag);
-    for (const k of e.kids ?? []) k.dom.remove();
+    for (const k of e.kids ?? []) removeEntry(k);
     e.kids = [];
     return e;
   }
@@ -335,7 +371,7 @@ function reconcile(
   }
 
   for (const e of oldKids) {
-    if (!consumed.has(e)) e.dom.remove();
+    if (!consumed.has(e)) removeEntry(e);
   }
 
   // Order pass: walk the new list and insert each dom at position i. Nothing moves when the order already matches; each mismatch is one insertBefore.
@@ -373,7 +409,7 @@ export function mount(node: JsxChild, container: DomNode): Mounted {
       kids = reconcile(container, kids, next, doc, 0);
     },
     unmount() {
-      for (const e of kids) e.dom.remove();
+      for (const e of kids) removeEntry(e);
       kids = [];
     },
   };

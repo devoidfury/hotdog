@@ -98,6 +98,11 @@ export type HotdogServerSocket<T = undefined> = Bun.ServerWebSocket<T> & {
   authToken?: string;
 };
 
+// How long a socket that never authenticates is kept before the cleanup
+// loop closes it. Comfortably longer than a legit AUTH round-trip (first
+// message after open), short enough that anonymous sockets do not pile up.
+const PENDING_AUTH_TIMEOUT_MS = 30_000;
+
 export class SessionRegistry {
   #sessionManager: SessionManager;
   #buildAgent: (config: {
@@ -110,6 +115,11 @@ export class SessionRegistry {
   #cleanupTimer: ReturnType<typeof setInterval> | null = null;
   #timeoutMin: number;
   #allConnections = new Set<HotdogServerSocket<unknown>>();
+  // Sockets that opened without a validated token and are waiting on the
+  // protocol AUTH handshake (webui upgrades arrive unauthenticated). The
+  // cleanup loop reaps these: without it a client could hold an anonymous
+  // socket open forever.
+  #pendingAuth = new Map<HotdogServerSocket<unknown>, number>();
   #metadata: Map<string, SessionMetadata>;
   #channels: Map<string, Set<WebSocketChannel>>;
   #profiles: Record<string, SwitchProfile>;
@@ -149,6 +159,14 @@ export class SessionRegistry {
 
   unregisterConnection(ws: HotdogServerSocket<unknown>): void {
     this.#allConnections.delete(ws);
+  }
+
+  addPendingAuth(ws: HotdogServerSocket<unknown>): void {
+    this.#pendingAuth.set(ws, Date.now());
+  }
+
+  removePendingAuth(ws: HotdogServerSocket<unknown>): void {
+    this.#pendingAuth.delete(ws);
   }
 
   broadcast(msg: Record<string, unknown>): void {
@@ -391,6 +409,7 @@ export class SessionRegistry {
     if (this.#cleanupTimer) return;
     this.#cleanupTimer = setInterval(() => {
       this.#cleanupIdleSessions();
+      this.#reapPendingAuth();
     }, 60_000);
   }
 
@@ -414,6 +433,23 @@ export class SessionRegistry {
     }
   }
 
+  // Close sockets that never completed the AUTH handshake. A validated
+  // token lands in ws.authToken (routeMessage), so authenticated sockets
+  // just leave the map without being touched.
+  #reapPendingAuth(): void {
+    const now = Date.now();
+    for (const [ws, since] of this.#pendingAuth) {
+      if (ws.authToken) {
+        this.#pendingAuth.delete(ws);
+      } else if (now - since > PENDING_AUTH_TIMEOUT_MS) {
+        this.#pendingAuth.delete(ws);
+        try {
+          ws.close(4001, "Authentication timeout");
+        } catch {}
+      }
+    }
+  }
+
   get size(): number {
     return this.#metadata.size;
   }
@@ -429,8 +465,14 @@ export class SessionRegistry {
   }
 
   /** @internal */
+  get _test_pendingAuth(): Map<HotdogServerSocket<unknown>, number> {
+    return this.#pendingAuth;
+  }
+
+  /** @internal */
   _test_cleanupIdleSessions(): void {
     this.#cleanupIdleSessions();
+    this.#reapPendingAuth();
   }
 }
 
@@ -584,7 +626,9 @@ async function routeMessage(
   // upgrade (URL ?token=) or by a successful AUTH message. This makes the
   // gate hold even for UIs that skip token checks on the HTTP upgrade.
   if (authMiddleware && !ws.authToken && msg.type !== C2S.AUTH) {
-    ws.send(JSON.stringify({ type: S2C.AUTH_ERROR, message: "Authentication required" }));
+    // code:"auth_required" is machine-readable: clients must not treat a
+    // pre-auth gate hit as a token failure (see webui/ui/chat.ts authError).
+    ws.send(JSON.stringify({ type: S2C.AUTH_ERROR, code: "auth_required", message: "Authentication required" }));
     return;
   }
 
@@ -592,24 +636,35 @@ async function routeMessage(
 
   switch (msg.type) {
     case C2S.AUTH: {
-      if (authMiddleware && msg.token) {
-        const valid = authMiddleware.validateToken(msg.token as string);
-        if (valid) {
-          ws.authToken = msg.token as string;
-          // Authed sockets join the broadcast group (no-op if already
-          // registered via a token upgrade).
-          registry.registerConnection(ws);
-          ws.send(JSON.stringify({ type: "authOk" }));
-          if (!ws.activeSessionId) {
-            if (registry.size > 0) {
-              attachToMostRecentSession(ws, registry);
-            } else {
-              createAndAttachSession(ws, registry);
+      if (authMiddleware) {
+        if (msg.token) {
+          const valid = authMiddleware.validateToken(msg.token as string);
+          if (valid) {
+            ws.authToken = msg.token as string;
+            // Handshake complete: drop the pending-auth stamp now instead of
+            // leaving the reaper to notice ws.authToken on its next sweep.
+            registry.removePendingAuth(ws);
+            // Authed sockets join the broadcast group (no-op if already
+            // registered via a token upgrade).
+            registry.registerConnection(ws);
+            ws.send(JSON.stringify({ type: S2C.AUTH_OK }));
+            if (!ws.activeSessionId) {
+              if (registry.size > 0) {
+                attachToMostRecentSession(ws, registry);
+              } else {
+                createAndAttachSession(ws, registry);
+              }
             }
+          } else {
+            ws.send(
+              JSON.stringify({ type: S2C.AUTH_ERROR, message: "Invalid token" }),
+            );
           }
         } else {
+          // Malformed AUTH: answer instead of going silent, or the client
+          // waits out the pending-auth timeout with no clue why.
           ws.send(
-            JSON.stringify({ type: S2C.AUTH_ERROR, message: "Invalid token" }),
+            JSON.stringify({ type: S2C.AUTH_ERROR, message: "AUTH message requires a token" }),
           );
         }
       }
@@ -1131,7 +1186,9 @@ export function createWsServer(
     } else if (auth && !token) {
       // Socket stays open so the client can still authenticate via a
       // protocol AUTH message; routeMessage() gates everything else.
-      // Registration for broadcasts happens on AUTH success.
+      // Registration for broadcasts happens on AUTH success. The cleanup
+      // loop reaps the socket if AUTH never arrives (see #pendingAuth).
+      registry.addPendingAuth(ws);
       ws.send(JSON.stringify({ type: S2C.AUTH_REQUIRED }));
       return;
     } else {
@@ -1190,6 +1247,7 @@ export function createWsServer(
       registry.removeChannel(ws.activeSessionId, ws.activeChannel);
       ws.activeChannel.close();
     }
+    registry.removePendingAuth(ws);
     registry.unregisterConnection(ws);
   }
 

@@ -224,6 +224,55 @@ describe("createWebuiServer", () => {
       return result;
     }
 
+    /** Poll a received-message list until a predicate matches (deterministic on arrival, fails loudly on timeout). */
+    async function waitForMessage(
+      messages: Array<Record<string, unknown>>,
+      predicate: (m: Record<string, unknown>) => boolean,
+      timeoutMs = 2000,
+    ): Promise<Record<string, unknown>> {
+      const deadline = Date.now() + timeoutMs;
+      let hit = messages.find(predicate);
+      while (!hit && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 5));
+        hit = messages.find(predicate);
+      }
+      if (!hit) {
+        throw new Error(
+          `timed out waiting for message; got: ${JSON.stringify(messages)}`,
+        );
+      }
+      return hit;
+    }
+
+    async function getToken(): Promise<string> {
+      const res = await fetch(`${baseUrl}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "test-secret" }),
+      });
+      const { token } = await res.json();
+      return token as string;
+    }
+
+    /** Open a socket against /ws (no URL token) with message capture wired up. */
+    async function openWs(): Promise<{
+      ws: WebSocket;
+      waitFor: (
+        predicate: (m: Record<string, unknown>) => boolean,
+      ) => Promise<Record<string, unknown>>;
+    }> {
+      const ws = new WebSocket(`${baseUrl.replace("http", "ws")}/ws`);
+      const received: Array<Record<string, unknown>> = [];
+      ws.onmessage = (event) => {
+        received.push(JSON.parse(event.data as string));
+      };
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = () => reject(new Error("WebSocket connection failed"));
+      });
+      return { ws, waitFor: (predicate) => waitForMessage(received, predicate) };
+    }
+
     it("serves frontend at /", async () => {
       await startServer();
       const res = await fetch(`${baseUrl}/`);
@@ -274,7 +323,9 @@ describe("createWebuiServer", () => {
       const { token } = await loginRes.json();
 
       // Verify the token
-      const verifyRes = await fetch(`${baseUrl}/verify?token=${token}`);
+      const verifyRes = await fetch(`${baseUrl}/verify`, {
+        headers: { "x-hotdog-token": token },
+      });
       expect(verifyRes.status).toBe(200);
       const data = await verifyRes.json();
       expect(data.valid).toBe(true);
@@ -282,7 +333,9 @@ describe("createWebuiServer", () => {
 
     it("GET /verify with invalid token returns 401", async () => {
       await startServer();
-      const res = await fetch(`${baseUrl}/verify?token=invalid-token`);
+      const res = await fetch(`${baseUrl}/verify`, {
+        headers: { "x-hotdog-token": "invalid-token" },
+      });
       expect(res.status).toBe(401);
       const data = await res.json();
       expect(data.valid).toBe(false);
@@ -294,120 +347,68 @@ describe("createWebuiServer", () => {
       expect(res.status).toBe(401);
     });
 
-    it("GET /ws without token returns 401", async () => {
+    it("WebSocket upgrade succeeds without URL token and requires AUTH message", async () => {
       await startServer();
-      const res = await fetch(`${baseUrl}/ws`);
-      expect(res.status).toBe(401);
-      const data = await res.json();
-      expect(data.error).toContain("Token required");
-    });
+      const token = await getToken();
 
-    it("GET /ws with invalid token returns 401", async () => {
-      await startServer();
-      const res = await fetch(`${baseUrl}/ws?token=invalid-token`);
-      expect(res.status).toBe(401);
-      const data = await res.json();
-      expect(data.error).toContain("Invalid token");
-    });
+      // Connect via WebSocket with no token in the URL.
+      const { ws, waitFor } = await openWs();
 
-    it("WebSocket upgrade succeeds with valid token", async () => {
-      await startServer();
+      // The server must ask for auth instead of rejecting the upgrade.
+      await waitFor((m) => m.type === "authRequired");
 
-      // Get a valid token
-      const loginRes = await fetch(`${baseUrl}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "test-secret" }),
-      });
-      const { token } = await loginRes.json();
+      // An invalid token is rejected over the protocol, not at upgrade.
+      ws.send(JSON.stringify({ type: "auth", token: "invalid-token" }));
+      await waitFor((m) => m.type === "authError");
 
-      // Connect via WebSocket
-      const wsUrl = `${baseUrl.replace("http", "ws")}/ws?token=${token}`;
-      const ws = new WebSocket(wsUrl);
-
-      await new Promise<void>((resolve) => {
-        ws.onopen = () => {
-          resolve();
-        };
-        ws.onerror = () => {
-          throw new Error("WebSocket connection failed");
-        };
-      });
+      // A valid token completes the handshake.
+      ws.send(JSON.stringify({ type: "auth", token }));
+      await waitFor((m) => m.type === "authOk");
 
       expect(ws.readyState).toBe(WebSocket.OPEN);
       ws.close();
-      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    it("WebSocket rejects non-AUTH messages before authentication", async () => {
+      await startServer();
+
+      const { ws, waitFor } = await openWs();
+      await waitFor((m) => m.type === "authRequired");
+
+      // Gated: the socket has no validated token yet.
+      ws.send(JSON.stringify({ type: "listSessions" }));
+      await waitFor((m) => m.type === "authError" && m.code === "auth_required");
+
+      ws.close();
     });
 
     it("WebSocket message handler forwards messages to wsServer", async () => {
       await startServer();
+      const token = await getToken();
 
-      // Get a valid token
-      const loginRes = await fetch(`${baseUrl}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "test-secret" }),
-      });
-      const { token } = await loginRes.json();
+      // Connect via WebSocket (no URL token) and authenticate via AUTH
+      const { ws, waitFor } = await openWs();
+      ws.send(JSON.stringify({ type: "auth", token }));
+      await waitFor((m) => m.type === "authOk");
 
-      // Connect via WebSocket
-      const wsUrl = `${baseUrl.replace("http", "ws")}/ws?token=${token}`;
-      const ws = new WebSocket(wsUrl);
-
-      await new Promise<void>((resolve, reject) => {
-        ws.onopen = () => resolve();
-        ws.onerror = () => reject(new Error("WebSocket connection failed"));
-      });
-
-      // Send a valid JSON message (LIST_SESSIONS)
-      const received: string[] = [];
-      ws.onmessage = (event) => {
-        received.push(event.data as string);
-      };
-
+      // LIST_SESSIONS must come back as a sessions list; accepting any
+      // "error" here would let a broken forward pass.
       ws.send(JSON.stringify({ type: "listSessions" }));
-
-      // Poll for a response (deterministic on arrival, fails loudly on
-      // timeout) instead of a fixed sleep.
-      const deadline = Date.now() + 2000;
-      while (received.length === 0 && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 5));
-      }
-
-      // The message handler should have forwarded the message
-      // and we should get a response (sessions list or error)
-      expect(received.length).toBeGreaterThan(0);
+      const sessionsMsg = await waitFor((m) => m.type === "sessions");
+      expect(Array.isArray(sessionsMsg.sessions)).toBe(true);
 
       ws.close();
-      await new Promise((r) => setTimeout(r, 50));
     });
 
     it("WebSocket close handler cleans up connection", async () => {
       await startServer();
 
-      // Get a valid token
-      const loginRes = await fetch(`${baseUrl}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "test-secret" }),
-      });
-      const { token } = await loginRes.json();
-
-      // Connect via WebSocket
-      const wsUrl = `${baseUrl.replace("http", "ws")}/ws?token=${token}`;
-      const ws = new WebSocket(wsUrl);
-
-      await new Promise<void>((resolve, reject) => {
-        ws.onopen = () => resolve();
-        ws.onerror = () => reject(new Error("WebSocket connection failed"));
-      });
-
+      // Close bookkeeping is token-agnostic; no AUTH needed for this one.
+      const { ws } = await openWs();
       expect(ws.readyState).toBe(WebSocket.OPEN);
 
-      // Close the connection
+      // Close the connection and wait for close to complete
       ws.close();
-
-      // Wait for close to complete
       await new Promise<void>((resolve) => {
         ws.onclose = () => resolve();
       });
@@ -418,17 +419,9 @@ describe("createWebuiServer", () => {
     it("GET /ws upgrade failure returns 400", async () => {
       await startServer();
 
-      // Get a valid token
-      const loginRes = await fetch(`${baseUrl}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "test-secret" }),
-      });
-      const { token } = await loginRes.json();
-
       // A non-WebSocket GET to /ws fails Bun's upgrade and the app answers
       // with its own 400 "Upgrade failed" response (server.ts, not Bun).
-      const res = await fetch(`${baseUrl}/ws?token=${token}`, {
+      const res = await fetch(`${baseUrl}/ws`, {
         headers: { "Upgrade": "not-websocket" },
       });
       expect(res.status).toBe(400);

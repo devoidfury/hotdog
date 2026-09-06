@@ -31,6 +31,7 @@ export const S2C = {
   SESSION_DELETED: "sessionDeleted",
   SESSIONS: "sessions",
   AUTH_REQUIRED: "authRequired",
+  AUTH_OK: "authOk",
   AUTH_ERROR: "authError",
 
   // Cold session log management

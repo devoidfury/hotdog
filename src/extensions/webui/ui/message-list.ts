@@ -125,15 +125,18 @@ export interface MessageListManager {
   handleError: (data: ErrorMessage) => void;
   finalizeAssistant: () => void;
   clear: () => void;
+  /** Append a system notice (e.g. profile switched). Input must be a trusted display name. */
+  addSystemMessage: (text: string) => void;
+  /** Detach the container's scroll listener. The #message-list div outlives the chat across logins, so the owner must call this before dropping the manager. */
+  destroy: () => void;
   /** Render a batch of session log entries (for viewing cold session logs). */
   renderLogEntries: (entries: LogEntry[]) => void;
 }
 
 export function createMessageList(
-  _sessionId: string,
+  container: HTMLElement,
   { hideThinking = false, onQuestionAnswer }: MessageListOptions = {},
 ): MessageListManager {
-  const container = document.getElementById("message-list") as HTMLDivElement;
   let currentAssistantEl: HTMLDivElement | null = null;
   let currentThinkingEl: HTMLDivElement | null = null;
   let currentToolCalls: HTMLDivElement[] = [];
@@ -244,6 +247,10 @@ export function createMessageList(
 
   // ── Message Handlers ──────────────────────────────────────────────────────
   function handleUserMessage({ content }: UserMessage): void {
+    // Close any in-flight assistant/thinking element first in case an interruption occurred;
+    // without this the next turn's streaming chunks resume the stale element above this message.
+    finalizeAssistant();
+
     const el = document.createElement("div");
     el.className = "message user";
 
@@ -699,11 +706,12 @@ export function createMessageList(
   // message is taller than the threshold — e.g. a long history replay on
   // load, which would otherwise leave the view stuck at the top.
   let followBottom = true;
-  container.addEventListener("scroll", () => {
+  const onScroll = () => {
     const distFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
     followBottom = distFromBottom <= 150;
-  });
+  };
+  container.addEventListener("scroll", onScroll);
 
   function scrollBottom(): void {
     if (followBottom) {
@@ -789,6 +797,20 @@ export function createMessageList(
     scrollBottom();
   }
 
+  /** Append a system notice bubble (used for profile-switch confirmations). */
+  function addSystemMessage(text: string): void {
+    const el = document.createElement("div");
+    el.className = "message system-message";
+    el.innerHTML = `<span class="message-role system-label">System</span><div class="message-content"><p>Switched to profile: ${sanitize(text)}</p></div>`;
+    container.appendChild(el);
+    scrollBottom();
+  }
+
+  /** Detach the container's scroll listener; the container itself is left untouched. */
+  function destroy(): void {
+    container.removeEventListener("scroll", onScroll);
+  }
+
   return {
     handleUserMessage,
     handleAssistantMessage,
@@ -808,6 +830,8 @@ export function createMessageList(
     handleError,
     finalizeAssistant,
     clear,
+    addSystemMessage,
+    destroy,
     renderLogEntries,
   };
 }

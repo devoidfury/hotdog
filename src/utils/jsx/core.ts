@@ -182,7 +182,8 @@ function renderAttrs(props: ComponentProps, tag: string): string {
   for (const [name, value] of Object.entries(props)) {
     // `key` is a node field, not an attribute; the transform hoists it out of
     // props for real JSX, but hand-built createNode props can still carry one.
-    if (name === "children" || name === "key" || name === "dangerouslySetInnerHTML") continue;
+    // `ref` is a client-only handle (see client.ts); SSR ignores it like handlers.
+    if (name === "children" || name === "key" || name === "ref" || name === "dangerouslySetInnerHTML") continue;
     if (EVENT_ATTR.test(name)) continue;
     if (value == null) continue;
     if (typeof value === "function") continue; // on* handlers are SSR no-ops

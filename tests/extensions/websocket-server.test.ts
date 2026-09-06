@@ -794,7 +794,7 @@ describe("createWsServer - auth", () => {
 
     // waitForMessage rejects on timeout, so both awaits are the assertion:
     // the AUTH reply arrives and a session gets opened.
-    await waitForMessage(ws, "authOk");
+    await waitForMessage(ws, S2C.AUTH_OK);
     await waitForMessage(ws, S2C.SESSION_CREATED);
   });
 
@@ -841,7 +841,7 @@ describe("createWsServer - auth", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     wsServer.onMessage(ws, JSON.stringify({ type: C2S.AUTH, token: "valid-token" }));
-    await waitForMessage(ws, "authOk");
+    await waitForMessage(ws, S2C.AUTH_OK);
 
     wsServer.onMessage(ws, JSON.stringify({ type: C2S.LIST_SESSIONS }));
     await waitForMessage(ws, S2C.SESSIONS);
@@ -887,7 +887,7 @@ describe("createWsServer - auth", () => {
 
     // After protocol AUTH, ws2 joins the broadcast group.
     wsServer.onMessage(ws2, JSON.stringify({ type: C2S.AUTH, token: "valid-token" }));
-    await waitForMessage(ws2, "authOk");
+    await waitForMessage(ws2, S2C.AUTH_OK);
     // AUTH success attaches ws2 to the most recent session (direct send).
     await waitForMessage(ws2, S2C.SESSION_CREATED);
     const afterIdx = ws2.messages.length;
@@ -895,6 +895,73 @@ describe("createWsServer - auth", () => {
     // A broadcast from another client must now reach ws2.
     wsServer.onMessage(ws1, JSON.stringify({ type: C2S.CREATE_SESSION }));
     await waitForMessage(ws2, S2C.SESSION_CREATED, { after: afterIdx });
+  });
+
+  it("reaps pre-auth sockets that never authenticate", () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    const registry = wsServer.sessionRegistry;
+    expect(registry._test_pendingAuth.size).toBe(1);
+
+    const closeMock = ws.close as unknown as Mock<(code?: number, reason?: string) => void>;
+
+    // Not yet expired: the sweep leaves it alone.
+    registry._test_cleanupIdleSessions();
+    expect(closeMock.mock.calls.length).toBe(0);
+    expect(registry._test_pendingAuth.size).toBe(1);
+
+    // Expired: closed with a policy code and dropped from the map.
+    registry._test_pendingAuth.set(ws, Date.now() - 60_000);
+    registry._test_cleanupIdleSessions();
+    expect(closeMock.mock.calls[0]?.[0]).toBe(4001);
+    expect(registry._test_pendingAuth.size).toBe(0);
+  });
+
+  it("does not reap a socket once it authenticates", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.AUTH, token: "valid-token" }));
+    await waitForMessage(ws, S2C.AUTH_OK);
+
+    const registry = wsServer.sessionRegistry;
+    // The AUTH success path drops the stamp itself; no sweep needed.
+    expect(registry._test_pendingAuth.size).toBe(0);
+    // Even with a stale stamp an authenticated socket just leaves the map.
+    registry._test_pendingAuth.set(ws, Date.now() - 60_000);
+    registry._test_cleanupIdleSessions();
+    expect((ws.close as Mock<() => void>).mock.calls.length).toBe(0);
+    expect(registry._test_pendingAuth.size).toBe(0);
+  });
+
+  it("replies to a token-less AUTH instead of going silent", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.AUTH }));
+    const err = await waitForMessage(ws, S2C.AUTH_ERROR);
+    expect(err.message).toContain("token");
+    // Not a close-worthy failure: the client may retry with a real token,
+    // so the socket stays in the pending set until then.
+    expect((ws.close as Mock<() => void>).mock.calls.length).toBe(0);
+    expect(wsServer.sessionRegistry._test_pendingAuth.size).toBe(1);
+  });
+
+  it("removes pending-auth bookkeeping when the socket closes", () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    const registry = wsServer.sessionRegistry;
+    expect(registry._test_pendingAuth.size).toBe(1);
+
+    wsServer.onClose(ws);
+    expect(registry._test_pendingAuth.size).toBe(0);
   });
 });
 

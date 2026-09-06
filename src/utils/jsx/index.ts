@@ -5,5 +5,5 @@
 export { Fragment, createNode, renderToString } from "./core.ts";
 export { jsx, jsxs } from "./jsx-runtime.ts";
 export { mount } from "./client.ts";
-export type { Mounted, DomDocument, DomElement, DomNode, DomText } from "./client.ts";
+export type { Mounted, DomDocument, DomElement, DomNode, DomText, Ref } from "./client.ts";
 export type { Component, ComponentProps, JsxChild, JsxNode } from "./core.ts";

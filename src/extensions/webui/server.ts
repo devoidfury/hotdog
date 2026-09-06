@@ -15,7 +15,6 @@ import { BunRequest } from "bun";
 import webuiFrontend from "./ui/index.html";
 
 interface WebuiWsData {
-  token: string;
   url: string;
 }
 
@@ -114,8 +113,7 @@ export async function createWebuiServer(
       "/": webuiFrontend,
 
       "/verify": async function (req: BunRequest) {
-        const url = new URL(req.url);
-        const token = url.searchParams.get("token");
+        const token = req.headers.get("x-hotdog-token");
         const valid = token ? authMiddleware.validateToken(token) : false;
         return valid
           ? Response.json({ valid })
@@ -123,19 +121,12 @@ export async function createWebuiServer(
       },
 
       "/ws": async function (req: BunRequest) {
-        const url = new URL(req.url);
-        const token = url.searchParams.get("token");
-        if (!token) {
-          return Response.json(
-            { error: "Token required. Use ?token= in WebSocket URL" },
-            { status: 401 },
-          );
-        }
-        if (!authMiddleware.validateToken(token)) {
-          return Response.json({ error: "Invalid token" }, { status: 401 });
-        }
+        // No token check at upgrade: the socket opens unauthenticated and
+        // the websocket extension gates all non-AUTH traffic until the
+        // first AUTH message validates (onUpgrade/routeMessage in
+        // ../websocket/server.ts).
         const upgraded = server.upgrade(req, {
-          data: { token, url: req.url } as WebuiWsData,
+          data: { url: req.url } as WebuiWsData,
         });
         if (!upgraded) {
           return Response.json({ error: "Upgrade failed" }, { status: 400 });

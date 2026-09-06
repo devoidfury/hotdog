@@ -4,7 +4,7 @@
 // not a mock.module -- real browser nodes satisfy the same shape.
 
 import { describe, it, expect, spyOn } from "bun:test";
-import { mount, createNode, type JsxChild } from "../../../src/utils/jsx/index.ts";
+import { mount, createNode, type DomElement, type JsxChild } from "../../../src/utils/jsx/index.ts";
 import { VOID_ELEMENTS } from "../../../src/utils/jsx/core.ts";
 
 // A real browser throws IndexSizeError when children are inserted into void
@@ -349,5 +349,52 @@ describe("mount", () => {
       return <Loop depth={(_props.depth ?? 0) + 1} />;
     }
     expect(() => mount(<Loop />, container)).toThrow("Maximum JSX render depth exceeded");
+  });
+
+  it("leaves imperatively added children alone in a childless host element", () => {
+    // The webui mounts its streaming markdown renderer inside a JSX-owned div
+    // via ref; the diff must never touch children the tree did not create.
+    const { doc, container, html } = setup();
+    const m = mount(<div id="box"></div>, container);
+    const box = container.children[0] as FElement;
+    box.insertBefore(doc.createTextNode("imperative"), null);
+    m.render(<div id="box"></div>);
+    expect(html()).toBe('<div id="box">imperative</div>');
+    expect(box.children).toHaveLength(1);
+  });
+
+  it("attaches refs on mount and nulls them on unmount", () => {
+    const { container } = setup();
+    const seen: (DomElement | null)[] = [];
+    const ref = (el: DomElement | null) => { seen.push(el); };
+    const m = mount(<div ref={ref}><span id="inner" /></div>, container);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(container.children[0] as FElement | undefined);
+    m.unmount();
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toBe(null);
+  });
+
+  it("swaps refs when the ref prop identity changes across renders", () => {
+    const { container } = setup();
+    const calls: string[] = [];
+    const refA = (el: DomElement | null) => calls.push(`a:${el ? "on" : "off"}`);
+    const m = mount(<div ref={refA} />, container);
+    // Same identity: no re-attach.
+    m.render(<div ref={refA} className="x" />);
+    expect(calls).toEqual(["a:on"]);
+    m.render(<div ref={(el) => calls.push(`b:${el ? "on" : "off"}`)} />);
+    expect(calls).toEqual(["a:on", "a:off", "b:on"]);
+    // The DOM node was reused across the ref swap.
+    expect(container.children).toHaveLength(1);
+  });
+
+  it("nulls nested refs when a subtree is removed", () => {
+    const { container } = setup();
+    const calls: (string | null)[] = [];
+    const m = mount(<div><p ref={(el) => calls.push(el ? "p" : null)}>x</p></div>, container);
+    expect(calls).toEqual(["p"]);
+    m.render(<div />);
+    expect(calls).toEqual(["p", null]);
   });
 });

@@ -1,10 +1,9 @@
 /// <reference lib="dom" />
-// Chat view: WS client + message routing; atoms drive the DOM via effects.
+// Chat view: WS client + message routing; atoms expose state to the JSX app.
 
-import { reactiveState, effect, Atom } from "./utils.ts";
+import { reactiveState, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
-import type { SessionInfo } from "./sessions.ts";
-import { sanitize } from "./utils.ts";
+import type { SessionInfo } from "./sessions.tsx";
 
 // The core logger touches process.*, which doesn't exist in the browser.
 const logger = {
@@ -16,13 +15,13 @@ const logger = {
   },
 };
 
-type ProfileInfo = {
+export type ProfileInfo = {
   role: string;
   body: string;
   model: string | null;
 };
 const profilesAtom = reactiveState<Record<string, ProfileInfo>>({});
-let currentProfile = "default";
+const currentProfileAtom = reactiveState<string>("default");
 // Explicit session name for the active session; null = show the short id.
 const sessionTitleAtom = reactiveState<string | null>(null);
 // >0 means switching profiles will clear context, so confirm first.
@@ -82,9 +81,16 @@ interface AuthRequiredMessage {
   type: "authRequired";
 }
 
+interface AuthOkMessage {
+  type: "authOk";
+}
+
 interface AuthErrorMessage {
   type: "authError";
   message: string;
+  // Machine-readable discriminator on the server's pre-auth gate rejection
+  // (see routeMessage in ../websocket/server.ts): "auth_required".
+  code?: string;
 }
 
 interface UserMessage {
@@ -207,6 +213,7 @@ type ServerMessage =
   | LogViewedMessage
   | LogDeletedMessage
   | AuthRequiredMessage
+  | AuthOkMessage
   | AuthErrorMessage
   | UserMessage
   | AssistantMessage
@@ -230,12 +237,13 @@ type ServerMessage =
 interface ChatConfig {
   token: string | null;
   host?: string;
+  /** The #message-list element, handed out by the JSX tree via ref. */
+  getMessageListContainer: () => HTMLElement | null;
   onSessionCreated?: (data: { sessionId: string }) => void;
   onSessionsUpdate?: (sessions: SessionInfo[], activeSessionId: string | null) => void;
   onLogsUpdate?: (logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number }>) => void;
   onLogViewed?: (logId: string, entries: LogEntry[]) => void;
   onLogDeleted?: (logId: string) => void;
-  onConnectionChange?: (connected: boolean) => void;
   onAuthFailure?: () => void;
   onWorkingMapChange?: () => void;
 }
@@ -264,10 +272,15 @@ export interface ChatController {
   send: (obj: Record<string, unknown>) => void;
   ws: WebSocket | null;
   sessionIdAtom: Atom<string | null>;
+  sessionTitleAtom: Atom<string | null>;
   currentModelAtom: Atom<string>;
   modelsAtom: Atom<string[]>;
+  profilesAtom: Atom<Record<string, ProfileInfo>>;
+  currentProfileAtom: Atom<string>;
   connectedAtom: Atom<boolean>;
   workingAtom: Atom<boolean>;
+  // User messages in the active session; >0 means profile switches clear context.
+  getUserMessageCount: () => number;
   // Per-session working state for the sidebar indicators.
   sessionWorkingMap: Map<string, boolean>;
   messageListAtom: () => MessageListManager | null;
@@ -277,16 +290,16 @@ export interface ChatController {
 export function createChat({
   token,
   host = window.location.host,
+  getMessageListContainer,
   onSessionCreated,
   onSessionsUpdate,
   onLogsUpdate,
   onLogViewed,
   onLogDeleted,
-  onConnectionChange,
   onAuthFailure,
   onWorkingMapChange,
 }: ChatConfig): ChatController {
-  const wsUrl = `ws://${host}/ws?token=${token}`;
+  const wsUrl = `ws://${host}/ws`;
   let ws: WebSocket | null = null;
   let messageList: MessageListManager | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -301,84 +314,6 @@ export function createChat({
   // Per-session working state; kept across switches so the sidebar stays accurate.
   const sessionWorkingMap = new Map<string, boolean>();
 
-  effect(() => {
-    const select = document.getElementById("model-select") as HTMLSelectElement | null;
-    if (!select) return;
-    const models = modelsAtom();
-    const current = currentModelAtom();
-    select.innerHTML = "";
-    for (const name of models) {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
-      if (name === current) opt.selected = true;
-      select.appendChild(opt);
-    }
-  }, [modelsAtom, currentModelAtom]);
-
-  effect(() => {
-    const el = document.getElementById("connection-status") as HTMLElement | null;
-    if (!el) return;
-    const connected = connectedAtom();
-    el.className = connected ? "status-connected" : "status-disconnected";
-    el.textContent = connected ? "Connected" : "Disconnected";
-    onConnectionChange?.(connected);
-  }, [connectedAtom]);
-
-  // The cancel button is nested in the indicator, so hiding the indicator hides both.
-  effect(() => {
-    const el = document.getElementById("working-indicator") as HTMLElement | null;
-    if (!el) return;
-    const working = workingAtom();
-    el.classList.toggle("hidden", !working);
-  }, [workingAtom]);
-
-  // The session label shows the explicit title when set, else the short id.
-  effect(() => {
-    const el = document.getElementById("current-session-id") as HTMLElement | null;
-    if (!el) return;
-    const title = sessionTitleAtom();
-    const sid = sessionIdAtom();
-    el.textContent = title || (sid ? sid.slice(0, 8) : "");
-  }, [sessionTitleAtom, sessionIdAtom]);
-
-  effect(() => {
-    const select = document.getElementById("profile-select") as HTMLSelectElement | null;
-    if (!select) return;
-    const profiles = profilesAtom();
-    const current = currentProfile;
-    select.innerHTML = "";
-    for (const name of Object.keys(profiles)) {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
-      if (name === current) opt.selected = true;
-      select.appendChild(opt);
-    }
-  }, [profilesAtom]);
-
-  // Clone the select on each profiles change so stale listeners are dropped.
-  effect(() => {
-    profilesAtom(); // read for the subscription: re-runs this effect when profiles change
-    const select = document.getElementById("profile-select") as HTMLSelectElement | null;
-    if (!select) return;
-
-    const newSelect = select.cloneNode(true) as HTMLSelectElement;
-    select.parentNode?.replaceChild(newSelect, select);
-
-    newSelect.addEventListener("change", (e) => {
-      const target = e.target as HTMLSelectElement;
-      const profileName = target.value;
-
-      if (userMessageCount > 0 && !confirm("Switching profile will clear session context and all messages. Continue?")) {
-        target.value = currentProfile;
-        return;
-      }
-
-      switchProfile(profileName, true); // force: confirm() above already asked
-    });
-  }, [profilesAtom]);
-
   function handleServerMessage(data: ServerMessage): void {
     // Session-management messages are handled even before messageList is ready.
     switch (data.type) {
@@ -387,7 +322,7 @@ export function createChat({
         sessionTitleAtom(data.title ?? null);
         currentModelAtom(data.currentModel || "");
         if (data.profile) {
-          currentProfile = data.profile;
+          currentProfileAtom(data.profile);
         }
         if (data.models && data.models.length > 0) {
           modelsAtom(data.models);
@@ -413,9 +348,7 @@ export function createChat({
         const activeSession = sessions.find(s => s.id === sessionIdAtom());
         if (activeSession) {
           if (activeSession.profile) {
-            currentProfile = activeSession.profile;
-            const select = document.getElementById("profile-select") as HTMLSelectElement | null;
-            if (select) select.value = currentProfile;
+            currentProfileAtom(activeSession.profile);
           }
           // The list is authoritative for the active session's title
           // (e.g. after a rename from this or another tab).
@@ -430,16 +363,9 @@ export function createChat({
         return;
       case "profileSwitched":
         if (data.success) {
-          currentProfile = data.profile || "default";
-          const select = document.getElementById("profile-select") as HTMLSelectElement | null;
-          if (select) select.value = currentProfile;
-          if (messageList) {
-            const msgEl = document.createElement("div");
-            msgEl.className = "message system-message";
-            msgEl.innerHTML = `<span class="message-role system-label">System</span><div class="message-content"><p>Switched to profile: ${sanitize(data.profile || "default")}</p></div>`;
-            const msgList = document.getElementById("message-list");
-            if (msgList) msgList.appendChild(msgEl);
-          }
+          const switched = data.profile || "default";
+          currentProfileAtom(switched);
+          messageList?.addSystemMessage(switched);
         }
         return;
       case "logsListed":
@@ -452,10 +378,27 @@ export function createChat({
         onLogDeleted?.(data.logId);
         return;
       case "authRequired":
-        console.warn("[chat] Auth required but not provided");
+        // Expected: the upgrade carries no token, so the server holds the
+        // socket open until our AUTH message validates.
         return;
       case "authError":
+        if (data.code === "auth_required") {
+          // A message raced ahead of the AUTH handshake; the handshake
+          // itself decides the outcome, so this is not a token failure.
+          console.warn("[chat] Message sent before auth completed, ignored");
+          return;
+        }
         logger.error("[chat] Auth error:", data.message);
+        authFailed = true;
+        onAuthFailure?.();
+        return;
+      case "authOk":
+        // Handshake done. Flip connected last: the effects it triggers
+        // (listProfiles, listSessions) are only legal after AUTH. The
+        // server may already be attaching a session; sessionCreated
+        // drives the rest.
+        connectedAtom(true);
+        listLogs();
         return;
     }
 
@@ -534,9 +477,7 @@ export function createChat({
           modelsAtom(data.value as string[]);
         }
         if (data.key === "profile") {
-          currentProfile = data.value as string;
-          const select = document.getElementById("profile-select") as HTMLSelectElement | null;
-          if (select) select.value = currentProfile;
+          currentProfileAtom(data.value as string);
         }
         if (data.key === "title") {
           sessionTitleAtom(typeof data.value === "string" ? data.value : null);
@@ -570,8 +511,16 @@ export function createChat({
     }
 
     ws.onopen = () => {
-      connectedAtom(true);
-      listLogs();
+      if (!token) {
+        // Nothing to auth with; verifyTokenAndReconnect routes to onAuthFailure.
+        verifyTokenAndReconnect();
+        return;
+      }
+      // The token rides the first WS message, not the upgrade URL. Nothing
+      // else may be sent before it: the server gates all non-AUTH traffic.
+      // connectedAtom flips on authOk, so no connected effects (listProfiles
+      // etc.) can race ahead of the handshake.
+      send({ type: "auth", token });
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -609,7 +558,9 @@ export function createChat({
       return;
     }
 
-    fetch(`/verify?token=${encodeURIComponent(token)}`)
+    fetch(`/verify`, {
+      headers: { "x-hotdog-token": token },
+    })
       .then((res) => {
         if (res.status === 401) {
           authFailed = true;
@@ -675,7 +626,7 @@ export function createChat({
   }
 
   function createSession(opts: Record<string, unknown> = {}): void {
-    const profile = (opts.profile as string | undefined) || currentProfile;
+    const profile = (opts.profile as string | undefined) || currentProfileAtom();
     send({ type: "createSession", ...opts, profile });
   }
 
@@ -713,7 +664,16 @@ export function createChat({
   }
 
   function setSession(sessionId: string): void {
-    messageList = createMessageList(sessionId, {
+    const container = getMessageListContainer();
+    if (!container) {
+      console.warn("[chat] message list container not mounted");
+      return;
+    }
+    // Reuse the manager across sessions: it is session-agnostic (the
+    // question-answer callback reads sessionIdAtom() at call time and
+    // clear() resets all its state), and recreating it would re-attach the
+    // container's scroll listener on every switch.
+    messageList ??= createMessageList(container, {
       hideThinking: false,
       onQuestionAnswer: (answers) => sendQuestionAnswer(answers),
     });
@@ -735,53 +695,11 @@ export function createChat({
   }
 
   function getCurrentProfile(): string {
-    return currentProfile;
+    return currentProfileAtom();
   }
 
-  const chatForm = document.getElementById("chat-form") as HTMLFormElement | null;
-  const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
-  if (chatForm && chatInput) {
-    const autoResize = () => {
-      chatInput.style.height = "auto";
-      chatInput.style.height = Math.min(chatInput.scrollHeight, 160) + "px";
-    };
-    chatInput.addEventListener("input", autoResize);
-    chatInput.addEventListener("keydown", (e: KeyboardEvent) => {
-      // Enter submits, Shift+Enter inserts a newline.
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        chatForm.requestSubmit();
-      }
-    });
-    chatForm.addEventListener("submit", (e: SubmitEvent) => {
-      e.preventDefault();
-      const text = chatInput.value.trim();
-      if (!text) return;
-      chatInput.value = "";
-      autoResize();
-
-      if (text.startsWith("/")) {
-        sendSlashCommand(text);
-      } else {
-        sendMessage(text);
-      }
-    });
-  }
-
-  const cancelBtn = document.getElementById("cancel-btn") as HTMLButtonElement | null;
-  if (cancelBtn) {
-    cancelBtn.addEventListener("click", () => {
-      cancel();
-    });
-  }
-
-  const modelSelect = document.getElementById("model-select") as HTMLSelectElement | null;
-  if (modelSelect) {
-    modelSelect.addEventListener("change", (e: Event) => {
-      const modelName = (e.target as HTMLSelectElement).value;
-      if (!modelName || !sessionIdAtom()) return;
-      sendSlashCommand(`/model ${modelName}`);
-    });
+  function getUserMessageCount(): number {
+    return userMessageCount;
   }
 
   connect();
@@ -826,10 +744,14 @@ export function createChat({
     send,
     ws,
     sessionIdAtom,
+    sessionTitleAtom,
     currentModelAtom,
     modelsAtom,
+    profilesAtom,
+    currentProfileAtom,
     connectedAtom,
     workingAtom,
+    getUserMessageCount,
     sessionWorkingMap,
     messageListAtom: () => messageList,
   };

@@ -13,16 +13,6 @@
           "default": true,
           "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
         },
-        "port": {
-          "type": "number",
-          "default": 3000,
-          "description": "WebSocket server port"
-        },
-        "host": {
-          "type": "string",
-          "default": "127.0.0.1",
-          "description": "WebSocket server host. Loopback by default; set 0.0.0.0 explicitly to expose beyond localhost."
-        },
         "sessionTimeoutMin": {
           "type": "number",
           "default": 30,

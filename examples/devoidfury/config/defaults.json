@@ -40,8 +40,6 @@
     "autoload": false
   },
   "websocket": {
-    "port": 3001,
-    "host": "0.0.0.0",
     "session-timeout-min": 30,
     "question-timeout-secs": 300,
     "question-strategy": "wait"

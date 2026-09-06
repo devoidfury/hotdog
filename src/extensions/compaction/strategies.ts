@@ -7,7 +7,6 @@ export interface CompactionSettings {
   enabled: boolean;
   reserveTokens: number;
   keepRecentMessages: number;
-  targetTokens?: number;
   /**
    * Context window size in tokens. The caller (compaction extension)
    * resolves this from compaction.contextLimit / the core contextLimit;

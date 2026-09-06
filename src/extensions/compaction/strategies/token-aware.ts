@@ -20,7 +20,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
     llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
     model: string,
   ): Promise<CompactResult | null> {
-    const targetTokens = settings.targetTokens ?? settings.reserveTokens;
+    const targetTokens = settings.reserveTokens;
     const contextLimit = requireContextLimit(settings.contextLimit);
     const maxKeepTokens = contextLimit - targetTokens;
 
@@ -87,7 +87,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
 
   override canCompact(messages: Message[], settings: CompactionSettings): boolean {
     const nonSystem = messages.filter((m): m is Message => m != null && m.role !== "system");
-    const targetTokens = settings.targetTokens ?? settings.reserveTokens;
+    const targetTokens = settings.reserveTokens;
     const contextLimit = requireContextLimit(settings.contextLimit);
     const maxKeepTokens = contextLimit - targetTokens;
     return estimateContextTokens(nonSystem) > maxKeepTokens;

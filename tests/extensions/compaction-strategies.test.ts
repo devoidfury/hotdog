@@ -37,7 +37,7 @@ describe("TokenAwareStrategy", () => {
 
     const result = await new TokenAwareStrategy().execute(
       messages,
-      { ...defaultSettings, targetTokens: 16384 },
+      { ...defaultSettings, reserveTokens: 16384 },
       noopLlmChat,
       "model"
     );
@@ -48,9 +48,9 @@ describe("TokenAwareStrategy", () => {
     const content = "x".repeat(4000); // 1000 tokens each
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
 
-    // Total: 10000 tokens. targetTokens: 1000, contextLimit: 5000
+    // Total: 10000 tokens. reserveTokens: 1000, contextLimit: 5000
     // maxKeepTokens = 5000 - 1000 = 4000 -> can keep ~4 messages
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 5000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 5000 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -76,7 +76,7 @@ describe("TokenAwareStrategy", () => {
     // maxKeepTokens = 700 - 200 = 500: fits the two tool results (500)
     // but not their parent assistant message. The kept window must back up
     // to include the parent, never start with an orphaned tool result.
-    const settings = { ...defaultSettings, targetTokens: 200, contextLimit: 700 };
+    const settings = { ...defaultSettings, reserveTokens: 200, contextLimit: 700 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -93,7 +93,7 @@ describe("TokenAwareStrategy", () => {
 
     const content = "x".repeat(4000);
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 5000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 5000 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, mockLlmChat, "model");
 
@@ -108,7 +108,7 @@ describe("TokenAwareStrategy", () => {
 
     const content = "x".repeat(4000);
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 5000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 5000 };
 
     await expect(
       new TokenAwareStrategy().execute(messages, settings, failingLlmChat, "model")
@@ -118,7 +118,7 @@ describe("TokenAwareStrategy", () => {
   it("includes token-aware metadata", async () => {
     const content = "x".repeat(4000);
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 5000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 5000 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -129,24 +129,10 @@ describe("TokenAwareStrategy", () => {
     expect(result!.metadata!.tokensAfter).toBeGreaterThan(0);
   });
 
-  it("uses reserveTokens when targetTokens not set", async () => {
-    // 200 * 1000 = 200000 tokens, well over the 120000 keep budget, so
-    // compaction actually happens and the metadata is real.
-    const content = "x".repeat(4000);
-    const messages = Array.from({ length: 200 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, contextLimit: 128000 };
-
-    const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
-
-    expect(result).not.toBeNull();
-    expect(result!.metadata!.targetTokens).toBe(defaultSettings.reserveTokens);
-    expect(result!.metadata!.maxKeepTokens).toBe(128000 - defaultSettings.reserveTokens);
-  });
-
   it("canCompact returns true when over token budget", () => {
     const content = "x".repeat(4000);
     const messages = Array.from({ length: 50 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 10000 };
 
     const result = new TokenAwareStrategy().canCompact(messages, settings);
     expect(result).toBe(true);
@@ -154,7 +140,7 @@ describe("TokenAwareStrategy", () => {
 
   it("canCompact returns false when under token budget", () => {
     const messages = Array.from({ length: 5 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", "x".repeat(10)));
-    const settings = { ...defaultSettings, targetTokens: 16384, contextLimit: 128000 };
+    const settings = { ...defaultSettings, reserveTokens: 16384, contextLimit: 128000 };
 
     const result = new TokenAwareStrategy().canCompact(messages, settings);
     expect(result).toBe(false);
@@ -166,7 +152,7 @@ describe("TokenAwareStrategy", () => {
       makeMessage("system", "You are helpful"),
       ...Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content)),
     ];
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 10000 };
 
     const result = new TokenAwareStrategy().canCompact(messages, settings);
     expect(result).toBe(true);
@@ -184,7 +170,7 @@ describe("TokenAwareStrategy", () => {
       makeMessage("user", content),
       makeMessage("assistant", content),
     ];
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 5000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 5000 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -216,7 +202,7 @@ describe("TokenAwareStrategy", () => {
       makeMessage("user", content),
       makeMessage("assistant", content),
     ];
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 5000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 5000 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -237,7 +223,7 @@ describe("TokenAwareStrategy", () => {
       makeMessage("user", content),
       makeMessage("assistant", content),
     ];
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 5000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 5000 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -248,7 +234,7 @@ describe("TokenAwareStrategy", () => {
   });
 
   it("canCompact returns false for empty messages", () => {
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 10000 };
 
     const result = new TokenAwareStrategy().canCompact([], settings);
     expect(result).toBe(false);
@@ -259,7 +245,7 @@ describe("TokenAwareStrategy", () => {
       makeMessage("system", "You are helpful"),
       makeMessage("system", "Follow rules"),
     ];
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 10000 };
 
     const result = new TokenAwareStrategy().canCompact(messages, settings);
     expect(result).toBe(false);
@@ -271,7 +257,7 @@ describe("TokenAwareStrategy", () => {
       makeMessage("user", "hello"),
       makeMessage("system", "Follow rules"),
     ];
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 10000 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -285,7 +271,7 @@ describe("TokenAwareStrategy", () => {
       makeMessage("system", "You are helpful"),
       makeMessage("system", "Follow rules"),
     ];
-    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+    const settings = { ...defaultSettings, reserveTokens: 1000, contextLimit: 10000 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
 

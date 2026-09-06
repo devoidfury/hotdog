@@ -1086,14 +1086,12 @@ CLI flag: `--shell-mode`.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
-| `port` | `number` | `3000` | WebSocket server port. |
-| `host` | `string` | `"127.0.0.1"` | WebSocket server host. Loopback by default; set `0.0.0.0` explicitly to expose beyond localhost. |
 | `sessionTimeoutMin` | `number` | `30` | Idle session cleanup timeout (minutes). |
 | `questionTimeoutSecs` | `number` | `300` | Default question timeout (seconds). |
 | `questionStrategy` | `string` | `"wait"` | What happens when a question is unanswered. `wait` = hold until a client answers (no timeout); `default` = after `questionTimeoutSecs`, resolve with each question's default; `cancel` = after `questionTimeoutSecs`, interrupt the session. Both can be overridden per session at `createSession`. |
 
 ```json
-{ "websocket": { "port": 8080, "sessionTimeoutMin": 60 } }
+{ "websocket": { "sessionTimeoutMin": 60 } }
 ```
 
 ### `webui`

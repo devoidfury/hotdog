@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.8.0...main
+
+# [v0.8.0] - 2026-09-06
+
+Added `utils/jsx` to hook into [bun's jsx support](https://bun.com/docs/runtime/jsx) as a react-like jsx view layer for the UI, and then refactored most of the webui to use that. There's also a bunch of little QoL things and bug fixes in this release.
+
 - llm-client - retries now honor a server `Retry-After` header (delta-seconds and HTTP-date forms, capped at 60s) instead of the fixed exponential backoff; absent or malformed headers fall back to the existing ladder
 - llm-client - error responses are now read up to the 200K cap but quoted in the LlmError message up to 2K (with a `[truncated]` marker), so a broken endpoint returning a full HTML page no longer dumps hundreds of KB into the sink, logs, and retry lines
 - agent - `run()` is now guarded against re-entrancy: a second overlapping `run()` throws `AgentError.AlreadyRunning` instead of silently interleaving loop state (iteration count, abort controller, stream replay buffers)
@@ -11,6 +17,7 @@
 - package - minimum bun bumped to 1.3.1 (the `--only-failures` flag used by the test scripts landed in 1.3.1)
 
 - internals
+  - webui - rewrote in jsx
   - marker mangler - compiled escape/unescape regexes are now built once per name pair instead of rebuilt per protected prefix on every escape() call
   - cleanup session - remove unused SessionManager.deserialize and related unused serialize/deserialize hooks
   - task-manager - drop unsafe last-set bus fallback
@@ -19,9 +26,7 @@
 
 - CLI colors now honor the NO_COLOR environment convention and TERM=dumb: color output is disabled regardless of config when either is present
 
-
-
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.3...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.3...v0.8.0
 
 [v0.7.3] - 2026-09-01
 

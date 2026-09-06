@@ -91,7 +91,11 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
 
         registry.register("skill", {
           description: "List skills or activate a skill (skill:<name>)",
-          matches: (cmd: string) => cmd.startsWith("skill"),
+          // Exact command plus space/colon forms only. A bare prefix match
+          // would swallow "/skills" (a natural alias users try) and the
+          // handler's slice(6) would "activate" a skill named "s".
+          matches: (cmd: string) =>
+            cmd === "skill" || cmd.startsWith("skill:") || cmd.startsWith("skill "),
           handler: async (agent, cmdValue) => {
             const name = cmdValue?.slice(6).trim();
             if (!name) {

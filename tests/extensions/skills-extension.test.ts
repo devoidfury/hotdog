@@ -808,6 +808,28 @@ Content.
     expect(ext.loader.getSkill("Activate Cmd Skill")!.loaded).toBe(true);
   });
 
+  it("command matching does not swallow lookalike commands like 'skills'", async () => {
+    // Regression: matches() was a bare startsWith("skill"), so typing
+    // "/skills" matched the command and the handler's slice(6) "activated"
+    // a nonexistent skill named "s" while reporting success.
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    const registry: any = {
+      register: mock((_name: string, opts: any) => { registry.registeredCmd = opts; }),
+      registeredCmd: null,
+    };
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]({ registry, agent: {} });
+    const { matches } = registry.registeredCmd;
+
+    expect(matches("skill")).toBe(true);
+    expect(matches("skill:foo")).toBe(true);
+    expect(matches("skill foo")).toBe(true);
+    expect(matches("skills")).toBe(false);
+    expect(matches("skillo")).toBe(false);
+    expect(matches("skillful")).toBe(false);
+  });
+
   it("SYSTEM_PROMPT_BUILD hook returns preamble with visible skills", async () => {
     await createTempSkill("preamble-skill", `---
 name: Preamble Skill

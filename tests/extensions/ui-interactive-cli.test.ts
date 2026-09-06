@@ -643,7 +643,7 @@ const createMockRl = () =>
 
 /** Run `fn` with SessionManager.create stubbed; always restores the original. */
 async function withMockSessionManager(
-  createFn: () => Promise<unknown>,
+  createFn: (opts?: Record<string, unknown>) => Promise<unknown>,
   fn: () => Promise<void>,
 ): Promise<void> {
   const { SessionManager: SM } = await import("../../src/core/session/index.ts");
@@ -773,6 +773,36 @@ describe("runInteractiveSession integration", () => {
     );
 
     expect(customSetupCalled).toBe(true);
+  });
+
+  it("passes the resolved maxIterations through to taskConfig without a backup default", async () => {
+    // Regression: taskConfig used `resolved.maxIterations || 100`, so a
+    // falsy resolved value silently became a stale 100-iteration budget
+    // instead of surfacing the config resolution failure. The resolved
+    // value (schema default 1000) must pass through unchanged.
+    let taskConfig: Record<string, unknown> | null = null;
+
+    await withMockSessionManager(
+      async (opts?: Record<string, unknown>) => {
+        taskConfig = (opts?.taskConfig as Record<string, unknown> | undefined) ?? null;
+        return createMockSessionManager(mockAgent, true);
+      },
+      async () => {
+        await runInteractiveSession(
+          {},
+          createMockCore({ resolved: { maxIterations: 1000 } }),
+          {
+            createReadline: () => createMockRl(),
+            onClose: () => {},
+            onSIGINT: () => {},
+            setupInput: () => {},
+          },
+        );
+      },
+    );
+
+    expect(taskConfig).not.toBeNull();
+    expect(taskConfig!.maxIterations).toBe(1000);
   });
 
   it("shell mode line handler executes system command", async () => {

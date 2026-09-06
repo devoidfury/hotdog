@@ -434,7 +434,9 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     // Throwaway for prompt rendering; empty url/key so it can never send a request.
     llmClient: core.createLlmClient({ baseUrl: "", apiKey: "" }),
     model: resolved.model || "",
-    maxIterations: resolved.maxIterations || 100,
+    // Schema-resolved keys are typed optional; the core schema always
+    // supplies a default (1000), so assert like the adjacent contextLimit.
+    maxIterations: resolved.maxIterations as number,
     contextLimit: resolved.contextLimit as number,
     profileName: resolved.profileName || "default",
     role: resolved.role,

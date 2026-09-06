@@ -411,7 +411,7 @@ export async function runInteractiveSession(
     modelRegistry: resolved.modelRegistry,
     coreConfig: config,
     taskConfig: {
-      maxIterations: resolved.maxIterations || 100,
+      maxIterations: resolved.maxIterations,
       taskProfile: resolved.taskProfile || "task-default",
       taskRole: resolved.taskDefaultRole || "",
     },

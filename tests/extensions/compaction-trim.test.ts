@@ -203,16 +203,19 @@ describe("TrimStrategy", () => {
     expect(result!.metadata!.tokensAfter).toBeLessThanOrEqual(5000);
   });
 
-  it("infers context limit from the model name when not configured", async () => {
-    // 130 * 1000 = 130000 tokens, reserve 0: under the "128k" model limit
-    // (131072) but over the unknown-model default (128000). The divergent
-    // outcomes prove the model name is honored, not silently bumped.
+  it("fails loudly when contextLimit is missing instead of guessing from the model name", async () => {
+    // Regression: the strategy previously inferred a window size from the
+    // model name ("128k" substring) or a hardcoded 128000, masking a
+    // missing config value. It must throw so the misconfig surfaces.
     const content = "x".repeat(4000);
     const messages = Array.from({ length: 130 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, contextLimit: undefined, reserveTokens: 0 };
+    const { contextLimit: _omitted, ...rest } = defaultSettings;
 
-    expect(await new TrimStrategy().execute(messages, settings, noopLlmChat, "gpt-4o-128k")).toBeNull();
-    expect(await new TrimStrategy().execute(messages, settings, noopLlmChat, "unknown-model")).not.toBeNull();
+    await expect(
+      new TrimStrategy().execute(messages, { ...rest, reserveTokens: 0 } as any, noopLlmChat, "gpt-4o-128k"),
+    ).rejects.toThrow("contextLimit");
+
+    expect(() => new TrimStrategy().canCompact(messages, { ...rest, reserveTokens: 0 } as any)).toThrow("contextLimit");
   });
 
   it("handles empty messages array", async () => {

@@ -192,22 +192,17 @@ describe("TokenAwareStrategy", () => {
     expect(result!.messagesCompacted).toBeGreaterThan(0);
   });
 
-  it("infers context limit from the model name when not configured", async () => {
+  it("fails loudly when contextLimit is missing instead of guessing from the model name", async () => {
+    // Regression: the strategy previously inferred a window size from the
+    // model name ("32k"/"128k" substrings) or a hardcoded 128000, masking
+    // a missing config value. It must throw so the misconfig surfaces.
     const content = "x".repeat(4000); // 1000 tokens per message
     const messages = Array.from({ length: 30 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    // 30 * 1000 = 30000 tokens, targetTokens 5000:
-    //   32k model  -> keep budget 27768, over budget  -> must compact
-    //   128k model -> keep budget 126072, under budget -> null
-    // The divergent outcomes prove the model name is honored, not silently
-    // bumped to the 128k default.
-    const settings = { ...defaultSettings, contextLimit: undefined, targetTokens: 5000 };
+    const { contextLimit: _omitted, ...rest } = defaultSettings;
 
-    const result32k = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "claude-3-32k");
-    expect(result32k).not.toBeNull();
-    expect(result32k!.metadata!.maxKeepTokens).toBe(32768 - 5000);
-
-    const result128k = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "gpt-4o-128k");
-    expect(result128k).toBeNull();
+    await expect(
+      new TokenAwareStrategy().execute(messages, rest as any, noopLlmChat, "claude-3-32k"),
+    ).rejects.toThrow("contextLimit");
   });
 
   it("handles null/undefined messages in backward scan", async () => {
@@ -297,15 +292,11 @@ describe("TokenAwareStrategy", () => {
     expect(result).toBeNull();
   });
 
-  it("uses default context limit of 128000 when not specified and model unknown", async () => {
+  it("canCompact fails loudly when contextLimit is missing", () => {
     const content = "x".repeat(4000);
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, contextLimit: undefined, targetTokens: 1000 };
+    const { contextLimit: _omitted, ...rest } = defaultSettings;
 
-    const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "unknown-model");
-
-    // 10 * 1000 = 10000 tokens, maxKeepTokens = 128000 - 1000 = 127000
-    // Should be under budget, so result should be null
-    expect(result).toBeNull();
+    expect(() => new TokenAwareStrategy().canCompact(messages, rest as any)).toThrow("contextLimit");
   });
 });

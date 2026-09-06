@@ -1,5 +1,5 @@
 import { estimateContextTokens, findFirstKeptIndex } from "../utils.ts";
-import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
+import { CompactionStrategy, Message, CompactionSettings, CompactResult, requireContextLimit } from "../strategies.ts";
 
 export class TrimStrategy extends CompactionStrategy {
   override name = "trim";
@@ -9,10 +9,9 @@ export class TrimStrategy extends CompactionStrategy {
     messages: Message[],
     settings: CompactionSettings,
     _llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
-    model: string,
+    _model: string,
   ): Promise<CompactResult | null> {
-    const contextLimit = settings.contextLimit
-      || (model && model.includes("128k") ? 131072 : 128000);
+    const contextLimit = requireContextLimit(settings.contextLimit);
     const effectiveMax = contextLimit - (settings.reserveTokens || 0);
 
     // Separate system and non-system messages, tracking original indices.
@@ -97,7 +96,7 @@ export class TrimStrategy extends CompactionStrategy {
     const nonSystem = messages.filter((m) => m.role !== "system");
     if (nonSystem.length <= settings.keepRecentMessages * 2) return false;
 
-    const contextLimit = settings.contextLimit || 128000;
+    const contextLimit = requireContextLimit(settings.contextLimit);
     const effectiveMax = contextLimit - (settings.reserveTokens || 0);
 
     return estimateContextTokens(nonSystem) > effectiveMax;

@@ -352,6 +352,36 @@ describe("Hook Integration", () => {
     ).rejects.toThrow(/not found in registry/);
   });
 
+  it("should fail loudly when no contextLimit resolves (no silent window guess)", async () => {
+    // Regression: strategies previously fell back to a hardcoded or
+    // model-name-derived window size. With neither compaction.contextLimit
+    // nor a core contextLimit resolvable, the hook must surface a config
+    // error and leave the context untouched.
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+      strategy: "token-aware",
+    });
+    // Note: no `resolved` on this mock core, so nothing is threaded into
+    // settings.contextLimit at create() time.
+    const ext = createCompactionExtension(core)!;
+
+    const context = makeMessages(50, "x".repeat(500));
+    const agent = createMockAgent(context);
+    agent.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+    };
+    const messages = [{ role: "system", content: "" }, ...context];
+
+    await expect(
+      (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent }),
+    ).rejects.toThrow(/contextLimit/);
+
+    // Context must be untouched: no summary injected, no messages dropped.
+    expect(agent.log.length).toBe(context.length);
+  });
+
   it("should not trigger compaction when non-system messages are few", async () => {
     const core = createMockCore({
       enabled: true,

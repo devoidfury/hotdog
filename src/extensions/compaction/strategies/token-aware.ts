@@ -3,7 +3,7 @@ import {
   SUMMARIZATION_USER_PROMPT_TEMPLATE,
 } from "../prompts.ts";
 import { serializeConversation, estimateContextTokens, estimateMessageTokens } from "../utils.ts";
-import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
+import { CompactionStrategy, Message, CompactionSettings, CompactResult, requireContextLimit } from "../strategies.ts";
 import { AgentError } from "../../../core/error.ts";
 
 export class TokenAwareStrategy extends CompactionStrategy {
@@ -20,9 +20,8 @@ export class TokenAwareStrategy extends CompactionStrategy {
     llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
     model: string,
   ): Promise<CompactResult | null> {
-    const targetTokens = settings.targetTokens || settings.reserveTokens || 16384;
-    const contextLimit = settings.contextLimit
-      || (model && model.includes("32k") ? 32768 : model && model.includes("128k") ? 131072 : 128000);
+    const targetTokens = settings.targetTokens ?? settings.reserveTokens;
+    const contextLimit = requireContextLimit(settings.contextLimit);
     const maxKeepTokens = contextLimit - targetTokens;
 
     let cumulativeTokens = 0;
@@ -88,8 +87,8 @@ export class TokenAwareStrategy extends CompactionStrategy {
 
   override canCompact(messages: Message[], settings: CompactionSettings): boolean {
     const nonSystem = messages.filter((m): m is Message => m != null && m.role !== "system");
-    const targetTokens = settings.targetTokens || settings.reserveTokens || 16384;
-    const contextLimit = settings.contextLimit || 128000;
+    const targetTokens = settings.targetTokens ?? settings.reserveTokens;
+    const contextLimit = requireContextLimit(settings.contextLimit);
     const maxKeepTokens = contextLimit - targetTokens;
     return estimateContextTokens(nonSystem) > maxKeepTokens;
   }

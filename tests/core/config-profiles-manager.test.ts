@@ -139,9 +139,11 @@ describe("ProfileManager", () => {
 
       const all = manager.getAllProfiles();
       expect(Object.keys(all)).toEqual(["one", "two"]);
-      expect(all["one"].role).toBe("file one");
-      expect(all["two"].role).toBe("cfg two");
-      expect(all["one"].name).toBe("one");
+      expect(all["one"]).toBeDefined();
+      expect(all["two"]).toBeDefined();
+      expect(all["one"]!.role).toBe("file one");
+      expect(all["two"]!.role).toBe("cfg two");
+      expect(all["one"]!.name).toBe("one");
     });
   });
 
@@ -159,13 +161,14 @@ describe("ProfileManager", () => {
 
       const forAgent = manager.getProfilesForAgent();
       expect(Object.keys(forAgent)).toEqual(["worker"]);
-      expect(forAgent["worker"].role).toBe("Worker role");
-      expect(forAgent["worker"].body).toBe("worker body");
+      expect(forAgent["worker"]).toBeDefined();
+      expect(forAgent["worker"]!.role).toBe("Worker role");
+      expect(forAgent["worker"]!.body).toBe("worker body");
       // resolveSwitchProfile: model comes from the config layer; the file
       // side contributes no whitelist, so the config whitelist applies.
-      expect(forAgent["worker"].model).toBe("task-model");
-      expect(forAgent["worker"].whitelistTools).toEqual(["read"]);
-      expect(forAgent["worker"].blacklistTools).toEqual([]);
+      expect(forAgent["worker"]!.model).toBe("task-model");
+      expect(forAgent["worker"]!.whitelistTools).toEqual(["read"]);
+      expect(forAgent["worker"]!.blacklistTools).toEqual([]);
     });
   });
 });

@@ -112,6 +112,13 @@ describe("renderToString (real JSX)", () => {
     ).toBe('<div style="color:red;margin-top:4px;display:none">s</div>');
   });
 
+  it("serializes style objects under case-variant prop names", () => {
+    // Browsers normalize attribute names, so a spread's `STYLE` lands as the style attribute.
+    expect(renderToString(createNode("div", { STYLE: { backgroundColor: "red" } }))).toBe(
+      '<div STYLE="background-color:red"></div>',
+    );
+  });
+
   it("emits dangerouslySetInnerHTML raw", () => {
     expect(
       renderToString(
@@ -284,6 +291,37 @@ describe("url scheme sanitization", () => {
     ).toBe("<a></a>");
     expect(warn).toHaveBeenCalledTimes(6);
     expect(warn.mock.calls[0]?.[0]).toContain("dropped unsafe url in href");
+    warn.mockRestore();
+  });
+
+  it("drops unsafe urls under case-variant attribute names", () => {
+    // HTML attribute names are ASCII case-insensitive: an untrusted spread's
+    // `HREF` is a live href to the browser, so the guard must match case-insensitively.
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    expect(renderToString(createNode("a", { HREF: "javascript:alert(1)" }))).toBe("<a></a>");
+    expect(renderToString(createNode("img", { Src: "data:text/html,<script>" }))).toBe("<img>");
+    // Safe values under odd casings still render (guard match is case-insensitive, output keeps the given case).
+    expect(renderToString(createNode("a", { HREF: "/docs" }))).toBe('<a HREF="/docs"></a>');
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[0]?.[0]).toContain("dropped unsafe url in HREF");
+    warn.mockRestore();
+  });
+
+  it("allows data:image urls on <img> only", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    expect(renderToString(<img src="data:image/png;base64,AAAA" />)).toBe(
+      '<img src="data:image/png;base64,AAAA">',
+    );
+    // HTML parsers lowercase tag names, so <IMG> renders as a lowercase void <img>.
+    expect(renderToString(createNode("IMG", { src: "data:image/gif;base64,R0lGOD" }))).toBe(
+      '<img src="data:image/gif;base64,R0lGOD">',
+    );
+    // Off-<img> the same url is a live-document vector (iframe/embed src);
+    // non-image data: stays blocked on <img> too.
+    expect(renderToString(<iframe src="data:image/svg+xml,<svg/>" />)).toBe("<iframe></iframe>");
+    expect(renderToString(<a href="data:image/png;base64,AAAA">x</a>)).toBe("<a>x</a>");
+    expect(renderToString(<img src="data:text/html,x" />)).toBe("<img>");
+    expect(warn).toHaveBeenCalledTimes(3);
     warn.mockRestore();
   });
 

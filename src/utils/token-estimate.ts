@@ -2,6 +2,8 @@
 // extensions (compaction). Deliberately overestimates; it only gates
 // decisions, it is never a billing number.
 
+import { contentToText } from "../core/context/message.ts";
+
 /**
  * Structural type for anything message-shaped: core `Message` instances and
  * plain persistence JSON both satisfy it.
@@ -21,11 +23,11 @@ export function estimateMessageTokens(msg: MessageLike): number {
 }
 
 function _messageCharCount(msg: MessageLike): number {
-  const getContentLength = (content: string | Array<unknown> | undefined): number => {
-    if (typeof content === "string") return content.length;
-    if (Array.isArray(content)) return content.map((p) => String(p).length).reduce((a, b) => a + b, 0);
-    return 0;
-  };
+  // contentToText() flattens part arrays (text/untrusted parts, wrapper
+  // parts rendered at rest; images dropped) -- String()ing a part object
+  // would count "[object Object]", not its payload.
+  const getContentLength = (content: string | Array<unknown> | undefined): number =>
+    contentToText(content).length;
 
   if (msg.role !== "assistant") {
     return getContentLength(msg.content);

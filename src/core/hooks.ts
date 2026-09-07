@@ -41,9 +41,17 @@ export type ProviderRequestHookResult = {
 
 export type ToolResultHookResult = { result: unknown };
 
+/**
+ * Result of an INPUT hook. `transform` REPLACES the queued content; it may
+ * be plain text or structured content parts (e.g. wrapper parts from
+ * file-attachment). For structured results the trust marking is the hook's
+ * responsibility: the parts ride the message as-is (a `text` part in a
+ * user-sourced message is mangled at the wire; an `untrusted` part is
+ * always; wrapper parts render per their type's spec).
+ */
 export type InputHookResult =
   | { action: "continue" }
-  | { action: "transform"; text: string; images?: ImageAttachment[] }
+  | { action: "transform"; content: string | Array<Record<string, unknown>>; images?: ImageAttachment[] }
   | { action: "handled" };
 
 export function isInputTransform(result: InputHookResult | undefined | null): result is Extract<InputHookResult, { action: "transform" }> {

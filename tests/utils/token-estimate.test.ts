@@ -37,8 +37,22 @@ describe("estimateMessageTokens", () => {
         { type: "image_url", image_url: { url: "x" } },
       ],
     };
-    // 5 + 3 + String(image part) — images are counted as their stringified form
-    expect(estimateMessageTokens(msg)).toBeGreaterThan(1);
+    // "12345\n678" = 9 chars (parts join with a newline) -- images are
+    // dropped, not stringified
+    expect(estimateMessageTokens(msg)).toBe(3);
+  });
+
+  it("counts wrapper parts by their rendered form, not the part object", () => {
+    // String()ing the part object would count "[object Object]" (15 chars),
+    // not the wrapper XML the model actually sees.
+    const FILE_TAG = "file-include";
+    const rendered =
+      `<${FILE_TAG}>\n<path>note.md</path>\n<contents>\nsome file payload here</contents>\n</${FILE_TAG}>`;
+    const msg: MessageLike = {
+      role: "user",
+      content: [{ type: "file-include", path: "note.md", content: "some file payload here" }],
+    };
+    expect(estimateMessageTokens(msg)).toBe(Math.ceil(rendered.length / 4));
   });
 
   it("counts assistant reasoning and tool calls", () => {

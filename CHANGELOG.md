@@ -216,7 +216,7 @@ It's been a couple weeks since I cut a release, figure it's about time. The focu
 
 - [BRK] renamed TokenTracker fields for clarity
 - [BRK] improve /compaction syntax (see README.md or `--help`)
-- [BRK] remove pager tool (it was never used, never reached for, just dead weight)
+- [BRK] remove pager tool (used exactly once, by a model that did not believe it existed)
 - add HOTDOG_MODEL, AI_MODEL, HOTDOG_API_KEY envvars for config
 - fix some issues with profile loading & switching
 - webui - add profile switching

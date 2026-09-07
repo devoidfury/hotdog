@@ -1,3 +1,5 @@
+import { isWrapperPart, renderWrapper } from "./wrappers.ts";
+
 export interface ImageAttachment {
   type: "image_url";
   mimeType: string;
@@ -36,6 +38,13 @@ export const MESSAGE_SOURCES: readonly MessageSource[] = ["user", "harness", "mo
  *    embedded in a trusted (harness/system) message. Stored RAW in the
  *    context, session log, and display; the wire serializer (serialize.ts)
  *    is the only place it is mangled. Emitted as a "text" part on the wire.
+ *  - { type: "file-include", path, content } -- attached-file wrapper.
+ *    Harness structure one level above the XML: the wire renders the
+ *    wrapper with its real tag and mangles the file data (path, content).
+ *  - { type: "system-notice", text } -- harness system-notice wrapper;
+ *    rendered verbatim at the wire.
+ *    Wrapper parts are core/harness-generated only (the bus queue flattens
+ *    parts arrays arriving without harness provenance); see context/wrappers.ts.
  *  - { type: "image_url", image_url: { url } }
  */
 export interface MessageParams {
@@ -162,21 +171,25 @@ export class Message {
 
 /**
  * Plain-text form of a content value: strings pass through, part arrays are
- * flattened (text + untrusted parts, images dropped). For hooks, logs,
- * and display; the wire serializer works on the raw parts.
+ * flattened (text + untrusted parts, wrapper parts rendered at rest, images
+ * dropped). For hooks, logs, and display; the wire serializer works on the
+ * raw parts.
  */
 export function contentToText(content: string | Array<unknown> | null | undefined): string {
   if (content == null) return "";
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    return content
-      .filter((part): part is Record<string, unknown> => {
-        if (part == null || typeof part !== "object") return false;
-        const p = part as Record<string, unknown>;
-        return (p.type === "text" || p.type === "untrusted") && typeof p.text === "string";
-      })
-      .map((part) => part.text as string)
-      .join("\n");
+    const rendered: string[] = [];
+    for (const part of content) {
+      if (part == null || typeof part !== "object") continue;
+      const p = part as Record<string, unknown>;
+      if ((p.type === "text" || p.type === "untrusted") && typeof p.text === "string") {
+        rendered.push(p.text as string);
+      } else if (isWrapperPart(p)) {
+        rendered.push(renderWrapper(p, null));
+      }
+    }
+    return rendered.join("\n");
   }
   return String(content);
 }

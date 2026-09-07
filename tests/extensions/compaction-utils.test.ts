@@ -193,6 +193,21 @@ describe("serializeConversation", () => {
     expect(result).toContain("[Assistant]: The answer is 42");
   });
 
+  it("renders content part arrays (no stringified part objects)", () => {
+    const messages = [{
+      role: "user",
+      content: [
+        { type: "untrusted", text: "read @note.md" },
+        { type: "file-include", path: "note.md", content: "file body" },
+      ],
+    }];
+    const result = serializeConversation(messages);
+    expect(result).not.toContain("[object Object]");
+    expect(result).toContain("[User]: read @note.md");
+    expect(result).toContain("note.md");
+    expect(result).toContain("file body");
+  });
+
   it("serializes assistant message with reasoning_content (snake_case)", () => {
     const messages = [{
       role: "assistant",

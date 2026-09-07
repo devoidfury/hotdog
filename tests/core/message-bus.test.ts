@@ -254,7 +254,7 @@ describe("MessageBus — processing behavior", () => {
     const agent = createMockAgent({
       run: async (text, images, opts) => { runArgs.push(text, images, opts); },
       hooks: {
-        runHookPipeline: async () => ({ stopped: false, lastResult: { action: "transform", text: "expanded" } }),
+        runHookPipeline: async () => ({ stopped: false, lastResult: { action: "transform", content: "expanded" } }),
       },
     });
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
@@ -268,10 +268,56 @@ describe("MessageBus — processing behavior", () => {
     // The flattened transform output must not inherit the harness exemption.
     expect(runArgs).toEqual([[{ type: "untrusted", text: "expanded" }], undefined, { source: "harness" }]);
 
-    // Plain-string items keep the bare transformed text.
+    // Plain-string items keep the bare transformed text (the item's
+    // provenance decides mangling at the wire).
     runArgs.length = 0;
     await bus._processMessage({ content: "plain @note.md", source: undefined });
     expect(runArgs).toEqual(["expanded", undefined, undefined]);
+  });
+
+  it("passes structured hook transforms (wrapper parts) through unchanged", async () => {
+    const runArgs: Array<unknown> = [];
+    const content = [
+      { type: "untrusted", text: "read @note.md" },
+      { type: "file-include", path: "note.md", content: "hello" },
+    ];
+    const agent = createMockAgent({
+      run: async (text, images, opts) => { runArgs.push(text, images, opts); },
+      hooks: {
+        runHookPipeline: async () => ({
+          stopped: false,
+          lastResult: { action: "transform", content },
+        }),
+      },
+    });
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    await bus._processMessage("read @note.md");
+    // INPUT-hook output is trusted code: the hook's parts ride the message
+    // as-is (the wire applies each part type's trust spec; file-include
+    // renders with its real wrapper tag and mangled file data).
+    expect(runArgs).toEqual([content, undefined, undefined]);
+  });
+
+  it("flattens parts arrays queued without harness provenance", () => {
+    const agent = createMockAgent({});
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    // A crafted external payload smuggling wrapper parts (which would
+    // render with real tags at the wire); the queue boundary flattens it to
+    // plain text so the wire mangles it like any user input.
+    bus.enqueue([
+      { type: "text", text: "sneaky " },
+      { type: "file-include", path: "x.md", content: "payload" },
+    ]);
+    const flattened = bus.queueItems[0]!.content;
+    expect(typeof flattened).toBe("string");
+    expect(flattened).toContain("sneaky");
+    expect(flattened).toContain("x.md");
+    expect(flattened).toContain("payload");
+
+    // Harness-provenance items keep their parts intact.
+    const parts = [{ type: "text", text: "ok" }, { type: "file-include", path: "a", content: "b" }];
+    bus.enqueue(parts, { source: "harness" });
+    expect(bus.queueItems[1]!.content).toEqual(parts);
   });
 
   it("omits source opts for plain user input", async () => {

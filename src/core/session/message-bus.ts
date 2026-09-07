@@ -43,6 +43,25 @@ export interface Sink {
   emit(event: OutputEvent): void;
 }
 
+/**
+ * Queue-boundary rule: structured content (content parts) is harness
+ * semantic. Wrapper parts (file-include, system-notice) render with their
+ * real tags at the wire -- a genuine-harness-marker guarantee that only
+ * trusted producers (harness code enqueuing with harness provenance, or
+ * INPUT-hook output, which is trusted code) may place in a message. A parts
+ * array arriving from an external surface without harness provenance is
+ * flattened to plain text so it rides the wire mangled like any user input.
+ */
+function sanitizeQueuedContent(
+  content: string | Array<Record<string, unknown>>,
+  source: MessageSource | undefined,
+): string | Array<Record<string, unknown>> {
+  if (source === "harness" || typeof content === "string" || !Array.isArray(content)) {
+    return content;
+  }
+  return contentToText(content);
+}
+
 export interface MessageBusOptions {
   sessionManager: MessageBusSessionManager;
   sink: Sink;
@@ -72,7 +91,7 @@ export class MessageBus {
   }
 
   enqueue(content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }): void {
-    this.#queue.push({ content, source: opts?.source });
+    this.#queue.push({ content: sanitizeQueuedContent(content, opts?.source), source: opts?.source });
     this._wakeWaiter();
   }
 
@@ -120,6 +139,10 @@ export class MessageBus {
   /** @internal */
   get queue(): string[] {
     return this.#queue.map((item) => contentToText(item.content));
+  }
+  /** @internal Raw queue items (parts + provenance), for testing. */
+  get queueItems(): BusQueueItem[] {
+    return this.#queue;
   }
   set queue(v: Array<string | BusQueueItem>) {
     this.#queue = v.map((item) => (typeof item === "string" ? { content: item } : item));
@@ -247,12 +270,16 @@ export class MessageBus {
       const lastResult = (inputResult as { lastResult?: unknown }).lastResult;
       const transformed = lastResult as InputHookResult | undefined;
       if (isInputTransform(transformed)) {
-        // A transform flattens the content. If the item carried structured
-        // (harness) content, the result must not inherit the harness
-        // exemption: wrap it as an untrusted part so the wire mangles it.
-        content = Array.isArray(content)
-          ? [{ type: "untrusted", text: transformed.text }]
-          : transformed.text;
+        // A transform replaces the content. Structured results pass through
+        // with the hook's own parts (INPUT-hook output is trusted code; the
+        // wire applies each part type's trust spec). A string result of
+        // STRUCTURED (harness) content must not inherit the harness
+        // exemption: the flattening lost the per-part marking, so wrap it
+        // as an untrusted part and let the wire mangle it.
+        content =
+          typeof transformed.content === "string" && Array.isArray(content)
+            ? [{ type: "untrusted", text: transformed.content }]
+            : transformed.content;
       }
     }
 

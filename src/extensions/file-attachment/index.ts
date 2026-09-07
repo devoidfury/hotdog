@@ -71,16 +71,16 @@ async function expandFileReferences(
   maxFileSize: number,
   maxFiles: number,
 ): Promise<{
-  expanded: string;
+  content: Array<Record<string, unknown>>;
   attachedFiles: Array<{ content: string; path: string }>;
-}> {
+} | null> {
   const attachedFiles: Array<{ content: string; path: string }> = [];
 
   // Reset regex lastIndex before using it (global regex maintains state)
   FILE_REF_RE.lastIndex = 0;
 
   if (!FILE_REF_RE.test(text)) {
-    return { expanded: text, attachedFiles };
+    return null;
   }
 
   // Reset regex lastIndex again before exec
@@ -109,29 +109,30 @@ async function expandFileReferences(
     }
   }
 
-  // If no files were found, return original text. Boundary rejections are
-  // the exception: they always get a note, even when nothing attached.
+  // If no files were found and nothing was rejected, return the input
+  // unchanged. Boundary rejections are the exception: they always get a
+  // note, even when nothing attached.
   if (attachedFiles.length === 0 && boundaryRejections === 0) {
-    return { expanded: text, attachedFiles };
+    return null;
   }
 
-  const blocks: string[] = [];
+  // Semantic parts -- the wire renders each wrapper and applies the mangler;
+  // this extension stays one level above the XML. The original text rides an
+  // `untrusted` part (mangled at the wire for every provenance, including a
+  // harness message whose flattened text a transform saw). The note is
+  // harness text: a plain part, mangled only where the message says so.
+  const content: Array<Record<string, unknown>> = [{ type: "untrusted", text }];
   for (const file of attachedFiles) {
-    const tag = "file-include";
-    const block = `<${tag}>\n<path>${file.path}</path>\n<contents>\n${file.content}</contents>\n</${tag}>`;
-    blocks.push(block);
+    content.push({ type: "file-include", path: file.path, content: file.content });
   }
-
-  let expanded = text;
-  if (blocks.length > 0) {
-    expanded += `\n\n${blocks.join("\n\n")}`;
-  }
-
   if (errors.length > 0) {
-    expanded += `\n\n[File attachment note: could not read the following files: ${errors.join(", ")}]`;
+    content.push({
+      type: "text",
+      text: `[File attachment note: could not read the following files: ${errors.join(", ")}]`,
+    });
   }
 
-  return { expanded, attachedFiles };
+  return { content, attachedFiles };
 }
 
 export function create(core: CoreContext): ExtensionInstance {
@@ -146,7 +147,16 @@ export function create(core: CoreContext): ExtensionInstance {
 
   return {
     hooks: {
-      [HOOKS.INPUT]: async ({ text, agent }) => {
+      [HOOKS.INPUT]: async ({ text, agent, origin }) => {
+        // Only direct user input expands @refs. origin is undefined for normal
+        // user typing (CLI, one-shot, websocket, loop prompts) and "user" for
+        // explicit user-sourced input; harness/model/system/tool (task results,
+        // handoffs, notices, tool output) are not typed by the user and must not
+        // attach files.
+        if (origin !== undefined && origin !== "user") {
+          return { action: "continue" };
+        }
+
         const roots =
           (agent?.config?.workspaceRoots as string[] | undefined) ?? [cwd()];
         // null/undefined both mean "unconfigured" -- fall back to the defaults.
@@ -155,7 +165,7 @@ export function create(core: CoreContext): ExtensionInstance {
 
         const result = await expandFileReferences(text, workspace, maxFileSize, maxFiles);
 
-        if (result.expanded !== text) {
+        if (result) {
           const sink = agent?.sink;
           for (const file of result.attachedFiles) {
             sink?.emit({
@@ -164,7 +174,7 @@ export function create(core: CoreContext): ExtensionInstance {
               detail: file.content,
             });
           }
-          return { action: "transform", text: result.expanded };
+          return { action: "transform", content: result.content };
         }
 
         return { action: "continue" };

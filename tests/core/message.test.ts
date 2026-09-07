@@ -249,6 +249,26 @@ describe('contentToText', () => {
       ]),
     ).toBe('a\nb');
   });
+
+  // NOTE: wrapper tag names are assembled by concatenation so this file
+  // stays free of literal protected markers.
+  it('renders wrapper parts at rest (no mangling)', () => {
+    const FILE_TAG = 'file-include';
+    const NOTICE_TAG = 'system-notice';
+    expect(
+      contentToText([
+        { type: 'untrusted', text: 'read @note.md' },
+        { type: 'file-include', path: 'note.md', content: 'hello' },
+        { type: 'system-notice', text: 'resumed' },
+      ]),
+    ).toBe(
+      [
+        'read @note.md',
+        `<${FILE_TAG}>\n<path>note.md</path>\n<contents>\nhello</contents>\n</${FILE_TAG}>`,
+        `<${NOTICE_TAG}>\nresumed\n</${NOTICE_TAG}>`,
+      ].join('\n'),
+    );
+  });
 });
 
 describe('Message — images', () => {

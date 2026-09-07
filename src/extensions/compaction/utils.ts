@@ -5,6 +5,7 @@ import {
   estimateContextTokens,
   type MessageLike as EstimatableMessageLike,
 } from "@utils/token-estimate.ts";
+import { contentToText } from "@core/context/message.ts";
 
 export { estimateMessageTokens, estimateContextTokens };
 
@@ -67,11 +68,11 @@ export function shouldCompact(
 export function serializeConversation(messages: MessageLike[]): string {
   const parts: string[] = [];
 
-  const getContentStr = (content: string | Array<unknown> | undefined): string => {
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) return content.map((p) => String(p)).join("\n");
-    return "";
-  };
+  // contentToText() flattens part arrays (text/untrusted parts, wrapper
+  // parts rendered at rest) -- String()ing a part object would dump
+  // "[object Object]" into the summarization prompt.
+  const getContentStr = (content: string | Array<unknown> | undefined): string =>
+    contentToText(content);
 
   for (const msg of messages) {
     switch (msg.role) {

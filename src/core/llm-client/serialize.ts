@@ -19,6 +19,11 @@
 //   - `untrusted` content parts are mangled unconditionally (this is how
 //     harness messages embed model-generated payloads: raw in context and
 //     logs, mangled only on the wire);
+//   - wrapper parts (file-include, system-notice) render via
+//     context/wrappers.ts: the wrapper tag is verbatim, and the fields
+//     mangle per the type's trust spec (file-include: its file data is
+//     mangled; system-notice: verbatim). Wrapper parts are harness-
+//     generated only (see wrappers.ts);
 //   - source "user", "model", "tool" (and legacy messages with no source)
 //     are untrusted and always mangled.
 //
@@ -28,6 +33,7 @@
 // NOT a wire field -- image parts live inside `content`.
 
 import type { Message, ToolCall } from "../context/message.ts";
+import { isWrapperPart, renderWrapper } from "../context/wrappers.ts";
 import type { MarkerMangler } from "../marker-mangler.ts";
 import type { WireFormatKind } from "../config/providers.ts";
 
@@ -53,6 +59,12 @@ function manglePart(
     // else; emitted as a plain "text" part on the wire.
     const text = typeof part.text === "string" ? part.text : "";
     return { type: "text", text: mangler ? (mangler.escape(text) ?? text) : text };
+  }
+  if (isWrapperPart(part)) {
+    // Semantic wrapper part: rendered here (the only render point) with the
+    // wrapper tag verbatim and the type's field trust applied. Emitted as a
+    // plain "text" part on the wire.
+    return { type: "text", text: renderWrapper(part, mangler) };
   }
   if (part.type === "text" && typeof part.text === "string") {
     if (trusted || !mangler) return part;

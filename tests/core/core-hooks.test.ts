@@ -589,7 +589,7 @@ describe("GateAction type guards", () => {
 
 describe("InputHookResult type guards", () => {
   const results = [
-    { name: "transform", guard: isInputTransform, value: { action: "transform" as const, text: "modified" } },
+    { name: "transform", guard: isInputTransform, value: { action: "transform" as const, content: "modified" } },
     { name: "handled", guard: isInputHandled, value: { action: "handled" as const } },
   ];
 

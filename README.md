@@ -37,7 +37,7 @@ This is a different axis from the [Safety Disclaimer](#safety-disclaimer) above.
 
 ## Requirements
 
-- **Bun** >= 1.2
+- **Bun** >= 1.3.1
 
 ## Installation
 

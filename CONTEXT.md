@@ -35,6 +35,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 ## Messages
 
 - **Message** — A single turn with role, content, and optional metadata (reasoning_content, tool_calls, tool_call_id, images).
+- **Wrapper Parts** — Semantic content parts (`file-include`, `system-notice`) that wrap a payload in a real harness marker. Extensions emit the part (never the XML); the wire serializer renders and mangles it, with trust fixed per type (file-include: wrapper verbatim, file data mangled; system-notice: verbatim). Origin is enforced at the queue boundary: parts arrays without harness provenance are flattened to mangled text. `src/core/context/wrappers.ts`.
 - **Role** — `system`, `user`, `assistant`, `tool`. One combined system message (all pieces composited).
 - **Reasoning Content** — LLM's chain-of-thought/thinking output. Separate from main response. Model and config dependent.
 - **Tool Call** — Standard OpenAI tool-calling pattern: LLM returns tool_calls → agent executes → result comes back with tool_call_id.

@@ -121,7 +121,7 @@ This is the heart of the system — one iteration of the LLM-tools loop.
 │  2. INPUT ────────────────────► sequential pipeline      │
 │      (preprocess user input, can short-circuit)          │
 │      Actions: { action: "continue" }                     │
-│               { action: "transform", text }              │
+│               { action: "transform", content }           │
 │               { action: "handled" }                      │
 │      Stops on "handled"                                  │
 │                                                          │

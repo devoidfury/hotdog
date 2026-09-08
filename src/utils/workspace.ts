@@ -10,26 +10,33 @@ import fs from "node:fs";
 import { ToolError, ConfigError } from "../core/error.ts";
 import { logger } from "../core/logger.ts";
 
+export type PathEscapeKind = "invalid" | "direct" | "symlink" | "denied";
+
 export class PathEscapeError extends ToolError {
-  constructor(message: string) {
+  /** Why the path was rejected. Consumers (e.g. the sysbox gate policy)
+   * branch on this instead of matching message prefixes. */
+  readonly kind: PathEscapeKind;
+
+  constructor(message: string, kind: PathEscapeKind = "direct") {
     super(message);
     this.name = "PathEscapeError";
+    this.kind = kind;
   }
 
   static invalidInput(input: unknown): PathEscapeError {
-    return new PathEscapeError(`Invalid path: ${input}`);
+    return new PathEscapeError(`Invalid path: ${input}`, "invalid");
   }
 
   static directEscape(path: string): PathEscapeError {
-    return new PathEscapeError(`Path escape rejected: ${path}`);
+    return new PathEscapeError(`Path escape rejected: ${path}`, "direct");
   }
 
   static symlinkEscape(path: string): PathEscapeError {
-    return new PathEscapeError(`Symlink escape rejected: ${path}`);
+    return new PathEscapeError(`Symlink escape rejected: ${path}`, "symlink");
   }
 
   static denied(path: string, rule: string): PathEscapeError {
-    return new PathEscapeError(`Denylisted path rejected (${rule}): ${path}`);
+    return new PathEscapeError(`Denylisted path rejected (${rule}): ${path}`, "denied");
   }
 }
 

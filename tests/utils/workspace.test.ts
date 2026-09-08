@@ -52,6 +52,16 @@ describe("PathEscapeError", () => {
     expect(e).toBeInstanceOf(PathEscapeError);
     expect(e.message).toBe("Symlink escape rejected: link");
   });
+
+  // The sysbox gate policy branches on .kind, not message text (a reword
+  // must not silently reclassify a deny-list ask as an out-of-root ask).
+  it("factories set the kind discriminant", () => {
+    expect(new PathEscapeError("boom").kind).toBe("direct");
+    expect(PathEscapeError.invalidInput("x").kind).toBe("invalid");
+    expect(PathEscapeError.directEscape("../x").kind).toBe("direct");
+    expect(PathEscapeError.symlinkEscape("link").kind).toBe("symlink");
+    expect(PathEscapeError.denied("/p", ".env").kind).toBe("denied");
+  });
 });
 
 describe("Workspace constructor", () => {

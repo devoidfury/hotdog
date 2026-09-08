@@ -15,6 +15,9 @@ import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import type { BuildAgentConfig, DefaultConfig } from "@core/config/index.ts";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { detectCapabilities, launcherCPath } from "@utils/sysbox/capabilities.ts";
 
 interface ConnectivityResult {
   reachable: boolean;
@@ -105,6 +108,33 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
   return printInfoText(resolved, modelRegistry, providers, skillsLoader, connectivity, rawConfig);
 }
 
+// Sandbox diagnostics for `hotdog info` (docs/sysbox-sandbox.md invariant 5:
+// the launcher source hash must be visible alongside what is attainable).
+function sandboxInfo(): {
+  static_available: boolean;
+  fence_available: boolean;
+  landlock_abi: number;
+  gate_available: boolean;
+  reasons: string[];
+  launcher_sha256: string | null;
+} {
+  const caps = detectCapabilities();
+  let sha: string | null = null;
+  try {
+    sha = createHash("sha256").update(readFileSync(launcherCPath())).digest("hex");
+  } catch {
+    /* launcher.c unreadable -- reported as null, detection reasons cover it */
+  }
+  return {
+    static_available: caps.staticAvailable,
+    fence_available: caps.landlockAvailable,
+    landlock_abi: caps.landlockAbi,
+    gate_available: caps.gateAvailable,
+    reasons: caps.reasons,
+    launcher_sha256: sha,
+  };
+}
+
 function printInfoText(
   resolved: BuildAgentConfig,
   modelRegistry: Record<string, unknown>,
@@ -172,6 +202,18 @@ function printInfoText(
     }
   }
 
+  const sandbox = sandboxInfo();
+  console.log();
+  console.log("Sandbox (sysbox):");
+  console.log(
+    `  static: ${sandbox.static_available ? "available" : `unavailable (${sandbox.reasons.join("; ") || "unknown"})`}`,
+  );
+  console.log(
+    `  fence:  ${sandbox.fence_available ? `available (Landlock ABI ${sandbox.landlock_abi})` : "unavailable"}`,
+  );
+  console.log(`  gate:   ${sandbox.gate_available ? "available" : "unavailable"}`);
+  if (sandbox.launcher_sha256) console.log(`  launcher.c sha256: ${sandbox.launcher_sha256}`);
+
   console.log();
   console.log("Connectivity:");
   if (connectivity.reachable) {
@@ -220,6 +262,7 @@ function printInfoJson(
       url: s.url || null,
       command: s.command || null,
     })),
+    sandbox: sandboxInfo(),
     connectivity: {
       url: resolved.baseUrl,
       reachable: connectivity.reachable,

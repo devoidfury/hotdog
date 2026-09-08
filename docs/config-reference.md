@@ -857,10 +857,29 @@ Extensions register their own configuration namespaces. Each extension's config 
 | `bashTimeoutMs` | `number` | `60000` | Timeout for bash commands (ms). |
 | `maxTimeoutMs` | `number` | `600000` | Hard cap on a model-requested `timeoutMs` (ms). Model-supplied timeouts above this are clamped; invalid values fall back to `bashTimeoutMs`. |
 | `maxToolOutputLines` | `number` | `600` | Max output lines for tool results. |
+| `sandbox` | `string` | `"off"` | Kernel gate for commands: `off`, `static`, `fence`, or `gate` -- each level includes the previous. Capabilities per mode are compared in [Bash sandbox modes](#bash-sandbox-modes) below, including what `workspace.deny` does and does NOT protect. Linux x86_64 only; startup ConfigError when a requested mode is unavailable. `"fence"` requires a Landlock-capable kernel; `"gate"` additionally needs `SECCOMP_FILTER_FLAG_NEW_LISTENER` (commonly blocked in containers). |
 
 ```json
 { "bashTool": { "bashTimeoutMs": 30000 } }
 ```
+
+#### Bash sandbox modes
+
+| Capability | `off` | `static` | `fence` | `gate` |
+|------------|-------|----------|---------|--------|
+| Escape-surface syscalls (io_uring, ptrace, mount/namespace ops, bpf, perf, userfaultfd, kexec, keyctl) | allowed | `EPERM` | `EPERM` | `EPERM` |
+| Reads **outside** workspace roots (e.g. `cat ~/.ssh/id_rsa`) | allowed | allowed | `EACCES` (kernel allowlist) | `EACCES` when Landlock is present; readable without it |
+| Writes outside roots, outside scratch | allowed | allowed | `EACCES` | denied by policy; `SANDBOX_GATE` handlers may approve per-operation |
+| **Writes** to `workspace.deny` paths inside roots | allowed | allowed | allowed (Landlock is allowlist-only -- no subtree subtraction) | denied by policy; hook-approvable per-operation |
+| **Reads** of `workspace.deny` paths inside roots | allowed | allowed | allowed | **allowed -- in every mode** (see caveat below) |
+| Metadata ops on deny-listed paths (chmod/chown/utimensat/xattr) | allowed | allowed | allowed | allowed (documented ceiling: no content change, no entry creation) |
+| Outbound TCP connect / connectionless UDP send | allowed | allowed | bind blocked (ABI v4+), connect allowed | blocked (`connect`/`sendto`/`sendmsg`/`sendmmsg` trapped; no proxy in v1) |
+| `execve` audit log | -- | -- | -- | logged per exec (allow-always in v1, not a gate) |
+| Human approvals | -- | -- | -- | via `user-gate` extension / `SANDBOX_GATE` hooks |
+
+Mechanism per level: `static` = seccomp deny filter (the trap floor); `fence` = static + a Landlock ruleset (roots + scratch read-write, system dirs read-only, everything else unreachable); `gate` = fence (stacked whenever Landlock is available) + a USER_NOTIF supervisor whose trap set covers every syscall that can write/create/alias/truncate/egress -- `openat`/`openat2`/`creat`, `truncate`, `unlink`/`unlinkat`/`rmdir`, `mkdir`/`mkdirat`/`mknod`/`mknodat`, `symlink`/`symlinkat`, `link`/`linkat`, `rename`/`renameat`/`renameat2`, `connect`/`sendto`/`sendmsg`/`sendmmsg`, `execve` -- so legacy-syscall bypasses are not possible, and hardlinks are policy-checked on BOTH endpoints (closing the alias-into-scratch exfil).
+
+**The deny list is write-integrity, not confidentiality.** `cat .env` or `cat .env > /tmp/copy` succeeds in-sandbox in every mode. Network egress is blocked in `gate`, but the copy is still reachable out-of-band (a follow-up `cat /tmp/copy` brings the content into the agent's context). Note the asymmetry with the file tools, where `workspace.deny` DOES bind reads (`read`/`grep`/`explore` reject deny-listed paths); plain bash never enforced the deny list at all, and no sandbox mode changes that for reads. Treat `workspace.deny` under bash as "these files may not be modified or aliased", never as "these secrets cannot be read". See `docs/sysbox-sandbox.md` for the architecture and its stated ceilings.
 
 ### `fetchTool`
 
@@ -998,6 +1017,14 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 ### `questionTool`
 
 [Question Tool](../src/extensions/question-tool) — Ask the user questions.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+
+### `userGate`
+
+[User Gate](../src/extensions/user-gate) — Human approval prompts for `bashTool.sandbox="gate"` asks (deny-listed writes and writes outside workspace roots). Registers a `SANDBOX_GATE` hook handler that asks through the existing question-tool input seam; no new prompt channel. In-root non-deny writes are decided by policy and never prompt (approval-fatigue fast path). Prompts are queued one-at-a-time process-wide; an ask whose child died while queued is denied without prompting. Fail-closed: no UI, a non-interactive session, a UI error, or a cancelled run all deny; disabling this extension makes every ask deny. Requires `bashTool.sandbox="gate"`; without it the extension does nothing.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

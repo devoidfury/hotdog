@@ -9,9 +9,13 @@ import {
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { AssistantRetryableError } from "@core/error.ts";
-import { HOOKS } from "@core/hooks.ts";
-import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig } from "@core/extensions/types.ts";
+import { HOOKS, type HookSystem, type SandboxGateAction } from "@core/hooks.ts";
+import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig, type HookPayloads } from "@core/extensions/types.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
+import { spawnSandboxed, spawnSandboxedWithGate, fenceConfigFor, type SandboxGateHandle } from "@utils/sysbox/index.ts";
+import { evaluateGate, EACCES, type GateDecision, type GateRequest } from "@utils/sysbox/policy.ts";
+import { detectCapabilities, type SysboxCapabilities } from "@utils/sysbox/capabilities.ts";
+import { ConfigError, formatError } from "@core/error.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";
 
@@ -31,6 +35,40 @@ interface BashToolOptions {
   maxOutputLines: number;
   /** Hard cap on a model-requested timeoutMs (config: bashTool.maxTimeoutMs). */
   maxTimeoutMs?: number;
+  /** Kernel gate level (config: bashTool.sandbox). off | static | fence | gate. */
+  sandbox?: SandboxMode;
+  /** Hook system for SANDBOX_GATE approvals (gate mode only). */
+  hooks?: HookSystem;
+}
+
+export type SandboxMode = "off" | "static" | "fence" | "gate";
+
+/**
+ * Env for agent-spawned commands, shared by the plain and sandboxed paths so
+ * the two cannot drift. Scrubbed base: the model-reachable child must not
+ * carry hotdog's own secrets (see utils/env.ts).
+ */
+export function agentSpawnEnv(): Record<string, string> {
+  return {
+    ...copyScrubbedEnv(),
+    // enable agent-friendly test output in bun test, maybe others
+    AGENT: "hotdog",
+    HOTDOG: "1",
+    // prior art -- used for automated builds, exporting this ensures
+    // that compilers, interactive CLIs, and scripts suppress blocking
+    // prompt traps (Press any key to continue...), escape sequences, colors
+    CI: "true",
+    TERM: "dumb",
+    NO_COLOR: "1",
+    EDITOR: "cat",
+    // prevent git from opening a blocking nano/vim/etc prompt during a commit
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_EDITOR: "cat",
+    GIT_PAGER: "cat",
+    // this is only here because it changes some behavior in programs like bun test to be more desirable.
+    // https://bun.com/docs/test#ai-agent-integration
+    CLAUDECODE: "1",
+  } as Record<string, string>;
 }
 
 /**
@@ -59,11 +97,15 @@ export class BashTool {
   readonly timeoutMs: number;
   readonly maxOutputLines: number;
   readonly maxTimeoutMs?: number;
+  readonly sandbox: SandboxMode;
+  readonly hooks?: HookSystem;
 
   constructor(options: BashToolOptions) {
     this.timeoutMs = options.timeoutMs;
     this.maxOutputLines = options.maxOutputLines;
     this.maxTimeoutMs = options.maxTimeoutMs;
+    this.sandbox = options.sandbox ?? "off";
+    this.hooks = options.hooks;
   }
 
   toToolDef() {
@@ -96,7 +138,8 @@ export class BashTool {
     // declared root. Falls back to the process CWD only when no workspace
     // is on the context (standalone/test callers). `?.` on get: bare-object
     // ctx doubles in tests expose no methods.
-    const cwd = (ctx?.get?.("workspace") as Workspace | undefined)?.root;
+    const workspace = ctx?.get?.("workspace") as Workspace | undefined;
+    const cwd = workspace?.root;
     const command = args.command as string;
     const timeout = resolveBashTimeout(
       args.timeoutMs ?? args.timeout_ms ?? this.timeoutMs,
@@ -108,8 +151,57 @@ export class BashTool {
       return ToolResult.err("Error: command is required");
     }
 
-    return new Promise((resolve, reject) => {
-      const proc: ChildProcess = spawn(command, [], {
+    // Spawn per sandbox mode. The sysbox helper exec's sh after installing
+    // its filter, so in both sandboxed paths the pid is the command's
+    // process-group leader exactly like the plain detached spawn, and every
+    // handler below is shared.
+    // Gate approvals ride this signal: finish() (exit, timeout, cancel)
+    // aborts it so a pending human prompt cannot outlive its child
+    // (docs/sysbox-sandbox.md "Supervisor loop liveness").
+    const gateAbort = new AbortController();
+    let gate: SandboxGateHandle | null = null;
+    let proc: ChildProcess;
+    if (this.sandbox === "gate") {
+      // A gate without a workspace has no policy to enforce: refuse, never
+      // fall through to a weaker mode (fail-closed invariant).
+      if (!workspace) {
+        return ToolResult.err('bashTool.sandbox="gate" requires a workspace on the tool context; refusing to run');
+      }
+      try {
+        gate = await spawnSandboxedWithGate({
+          command,
+          cwd: cwd ?? null,
+          env: agentSpawnEnv(),
+          // gate implies fence on fence-capable hosts: the TOCTOU bounding
+          // of gate decisions (docs/sysbox-sandbox.md "TOCTOU and the fd-injection problem")
+          // assumes everything outside roots is unreachable kernel-side.
+          fence: detectCapabilities().landlockAvailable ? fenceConfigFor(workspace) : null,
+          decide: this.buildGateDecider(workspace, command, ctx, gateAbort.signal),
+        });
+      } catch (e) {
+        return ToolResult.err(`sysbox gate spawn failed (command did not run): ${formatError(e)}`);
+      }
+      proc = gate.child;
+    } else if (this.sandbox === "fence") {
+      // Same refuse rule as gate: fence roots come from the workspace, and
+      // a fence without roots is not a fence.
+      if (!workspace) {
+        return ToolResult.err('bashTool.sandbox="fence" requires a workspace on the tool context; refusing to run');
+      }
+      try {
+        proc = spawnSandboxed({
+          command,
+          cwd: cwd ?? null,
+          env: agentSpawnEnv(),
+          fence: fenceConfigFor(workspace),
+        });
+      } catch (e) {
+        return ToolResult.err(`sysbox fence spawn failed (command did not run): ${formatError(e)}`);
+      }
+    } else if (this.sandbox === "static") {
+      proc = spawnSandboxed({ command, cwd: cwd ?? null, env: agentSpawnEnv() });
+    } else {
+      proc = spawn(command, [], {
         shell: true,
         // Primary workspace root (see execute); undefined inherits the
         // process CWD, preserving the standalone-caller behavior.
@@ -118,27 +210,11 @@ export class BashTool {
         ...OWN_PROCESS_GROUP,
         // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
         stdio: ["ignore", "pipe", "pipe"],
-        env: {
-          ...copyScrubbedEnv(),
-          // enable agent-friendly test output in bun test, maybe others
-          AGENT: "hotdog",
-          HOTDOG: "1",
-          // prior art -- used for automated builds, exporting this ensures
-          // that compilers, interactive CLIs, and scripts suppress blocking
-          // prompt traps (Press any key to continue...), escape sequences, colors
-          CI: "true",
-          TERM: "dumb",
-          NO_COLOR: "1",
-          EDITOR: "cat",
-          // prevent git from opening a blocking nano/vim/etc prompt during a commit
-          GIT_TERMINAL_PROMPT: "0",
-          GIT_EDITOR: "cat",
-          GIT_PAGER: "cat",
-          // this is only here because it changes some behavior in programs like bun test to be more desirable.
-          // https://bun.com/docs/test#ai-agent-integration
-          CLAUDECODE: "1",
-        },
+        env: agentSpawnEnv(),
       });
+    }
+
+    return new Promise((resolve, reject) => {
 
       let stdout = "";
       let stderr = "";
@@ -157,6 +233,12 @@ export class BashTool {
       const finish = (result: ToolResult | Error) => {
         if (done) return;
         done = true;
+        // Gate mode: release any pending human approval first (its prompt
+        // races this signal), then stop the supervisor. On timeouts this
+        // answers any in-flight notification with -EINTR instead of leaving
+        // the (about to be killed) child blocked waiting on us (invariant 3).
+        gateAbort.abort();
+        gate?.close();
         if (result instanceof Error) {
           reject(result);
         } else {
@@ -249,9 +331,98 @@ export class BashTool {
       });
     });
   }
+
+  /**
+   * gate-mode decider: pure workspace policy first; "ask" cases (deny-listed
+   * paths inside roots, writes outside roots) run the SANDBOX_GATE hook
+   * pipeline. failOnError mirrors the TOOL_CALL gate: a throwing handler
+   * denies, never a silent pass. With no hooks registered, ask denies --
+   * enforcement exists without any interactive layer (docs/sysbox-sandbox.md).
+   */
+  private buildGateDecider(
+    workspace: Workspace,
+    commandLine: string,
+    ctx: ToolContext,
+    signal: AbortSignal,
+  ): (req: GateRequest) => GateDecision | Promise<GateDecision> {
+    return (req) => {
+      const d = evaluateGate(workspace, req);
+      if (d.action !== "ask") return d;
+      if (!this.hooks) return { action: "deny", errno: EACCES, why: d.why };
+      return this.hooks
+        .runHookPipeline<SandboxGateAction, "sandbox:gate">(
+          HOOKS.SANDBOX_GATE,
+          {
+            kind: req.kind,
+            pid: req.pid,
+            paths: req.paths,
+            why: d.why,
+            command: commandLine,
+            workspaceRoots: workspace.roots,
+            // The question-tool UI seam (see HOOKS.SANDBOX_GATE in
+            // core/extensions/types.ts): absent input -> the user-gate
+            // handler denies fail-closed without prompting.
+            input: ctx?.get?.("input") as
+              | HookPayloads["sandbox:gate"]["input"]
+              | undefined,
+            signal,
+          },
+          {
+            failOnError: true,
+            shouldStop: (r) => {
+              const action = (r as SandboxGateAction | undefined)?.action;
+              return action === "allow" || action === "deny";
+            },
+          },
+        )
+        .then((res): GateDecision => {
+          const last = res.lastResult;
+          if (last?.action === "allow") return { action: "allow" };
+          return {
+            action: "deny",
+            errno: EACCES,
+            why:
+              last?.action === "deny" && last.reason
+                ? last.reason
+                : `no hook approved: ${d.why}`,
+          };
+        });
+    };
+  }
 }
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
+
+/**
+ * Resolve bashTool.sandbox to a mode, fail-closed (docs/sysbox-sandbox.md
+ * invariant 1): an unavailable mode is a startup error, never a silent
+ * downgrade to plain spawn. Exported for direct testing.
+ */
+export function resolveSandboxMode(
+  raw: string | undefined,
+  caps: SysboxCapabilities,
+): SandboxMode {
+  const mode = raw ?? "off";
+  if (mode !== "off" && mode !== "static" && mode !== "fence" && mode !== "gate") {
+    throw new ConfigError(`bashTool.sandbox must be "off", "static", "fence", or "gate", got "${mode}"`);
+  }
+  if (mode === "static" && !caps.staticAvailable) {
+    throw new ConfigError(
+      `bashTool.sandbox="static" is not available on this host: ${caps.reasons.join("; ")}`,
+    );
+  }
+  if (mode === "fence" && !caps.landlockAvailable) {
+    throw new ConfigError(
+      `bashTool.sandbox="fence" is not available on this host: ${caps.reasons.join("; ")}`,
+    );
+  }
+  if (mode === "gate" && !caps.gateAvailable) {
+    throw new ConfigError(
+      `bashTool.sandbox="gate" is not available on this host: ${caps.reasons.join("; ")}`,
+    );
+  }
+  return mode;
+}
 
 export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema
@@ -259,15 +430,23 @@ export function create(core: CoreContext): ExtensionInstance {
     bashTimeoutMs: number;
     maxToolOutputLines: number;
     maxTimeoutMs?: number;
+    sandbox?: string;
   }>(core, "bashTool");
   const timeoutMs = config.bashTimeoutMs;
   const maxOutputLines = config.maxToolOutputLines;
   const maxTimeoutMs = config.maxTimeoutMs;
+  // Capability probing spawnSyncs the helper twice (gate + landlock probes).
+  // Skip it entirely when no sandbox is requested; anything other than
+  // off/undefined still resolves fail-closed through detectCapabilities().
+  const sandbox =
+    config.sandbox === undefined || config.sandbox === "off"
+      ? "off"
+      : resolveSandboxMode(config.sandbox, detectCapabilities());
 
   return {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        const tool = new BashTool({ timeoutMs, maxOutputLines, maxTimeoutMs });
+        const tool = new BashTool({ timeoutMs, maxOutputLines, maxTimeoutMs, sandbox, hooks: core.hooks });
         registry.register(BashTool.TOOL_NAME, tool);
       },
     },

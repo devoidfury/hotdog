@@ -1,0 +1,20 @@
+{
+  "name": "user-gate",
+  "provides": [],
+  "loadOrder": 2,
+  "description": "Interactive approvals for sysbox gate-mode sandbox asks",
+  "configSchema": {
+    "userGate": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [{ "source": "config", "key": "userGate" }, { "default": {} }]
+    }
+  }
+}

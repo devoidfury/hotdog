@@ -26,6 +26,12 @@
           "type": "number",
           "default": 600,
           "description": "Maximum number of output lines for tool results"
+        },
+        "sandbox": {
+          "type": "string",
+          "enum": ["off", "static", "fence", "gate"],
+          "default": "off",
+          "description": "Kernel gate for commands. \"static\": seccomp deny filter (io_uring, ptrace, mount/namespace, bpf, kexec, keyctl). \"fence\": static + Landlock allowlist -- workspace roots and /tmp-style scratch read-write, system dirs read-only, everything else (including home dirs: `cat ~/.ssh/id_rsa` fails) unreachable, TCP bind blocked where the Landlock ABI supports it. Allowlist-only: workspace.deny is NOT expressible in \"fence\". \"gate\": fence (on Landlock-capable hosts) + USER_NOTIF supervisor enforcing the workspace boundary in-kernel (trap set covers every syscall that can write/create/alias/truncate/egress -- openat/openat2/creat, truncate, unlink/unlinkat/rmdir, mkdir/mkdirat/mknod/mknodat, symlink/symlinkat, link/linkat, rename/renameat/renameat2, connect/sendto/sendmsg/sendmmsg, execve -- so legacy-syscall bypasses are impossible; writes/unlinks outside roots and deny-listed paths are blocked, SANDBOX_GATE hooks may approve per-operation; outbound connect/sendto/sendmsg blocked, execve audit-logged). The deny list is write-integrity only: reads of deny-listed paths inside roots are ungated in EVERY mode (`cat .env` works); unlike the file tools, where workspace.deny also blocks reads. Linux x86_64 only; fails at startup when unavailable. Does not restrict network for \"static\". Comparison table: docs/config-reference.md."
         }
       },
       "additionalProperties": false,

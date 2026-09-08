@@ -33,6 +33,9 @@ export function isGateActionHandled(action: GateAction | undefined | null): acti
 
 export type ContextHookResult = { messages: Message[] };
 
+/** Decision for one sysbox gate notification (HOOKS.SANDBOX_GATE). */
+export type SandboxGateAction = { action: "allow" } | { action: "deny"; reason?: string };
+
 export type ProviderRequestHookResult = {
   messages?: Message[];
   modelConfig?: ModelConfig;
@@ -381,6 +384,12 @@ export const HOOKS = {
 
   // Gate pipeline: continue / modify input / block with a provided result.
   TOOL_CALL: "tool:call",
+
+  // Gate pipeline for sysbox (kernel-enforced sandbox, utils/sysbox).
+  // Handlers see one filesystem/network operation a sandboxed process attempted;
+  // policy already denied/allowed the clear cases.
+  // Return allow/deny to decide an "ask" case; no opinion -> deny.
+  SANDBOX_GATE: "sandbox:gate",
 
   // Pipeline: handlers can replace the tool result before it reaches context.
   TOOL_RESULT: "tool:result",

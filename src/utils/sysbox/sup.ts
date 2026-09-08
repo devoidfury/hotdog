@@ -39,6 +39,7 @@ const out = (m: unknown) => worker.postMessage(m);
 const NOTIFY_DEADLINE_MS = 60_000;
 const POLL_SLICE_MS = 500;
 const EINTR = 4;
+const ENOENT = 2;
 /* Storm cap (docs/sysbox-sandbox.md "Supervisor loop liveness"): a script
  * looping denied writes must not become an unbounded queue of unanswered
  * notifications; beyond this many outstanding, new notifications are
@@ -172,8 +173,11 @@ async function main() {
     respDv.setInt32(16, error | 0, true);
     // allow -> CONTINUE (execute the real syscall); deny -> plain errno.
     respDv.setUint32(20, error === 0 ? NOTIF_FLAG_CONTINUE : 0, true);
-    const sr = g.sbx_notif_send(nfd, resp24);
-    if (sr === -2) return; // EINTR: request canceled, nothing to do
+    let sr = g.sbx_notif_send(nfd, resp24);
+    // -EINTR: interrupted, the request is still unanswered (invariant 3:
+    // never leave the child waiting) -- retry once before deciding.
+    if (sr === -EINTR) sr = g.sbx_notif_send(nfd, resp24);
+    if (sr === -ENOENT) return; // request already canceled (task gone): drop
     if (sr !== 0) {
       nfdOpen = false;
       out({ type: "closed", why: `notif_send: ${sr}` });
@@ -191,11 +195,14 @@ async function main() {
       // buffer before writing it: a reused, dirty buf is -EINVAL on the 2nd recv.
       buf.fill(0);
       const rr = g.sbx_notif_recv(nfd, buf);
-      if (rr === -2) {
-        /* EINTR: nothing pending this slice, loop */
+      if (rr === -ENOENT || rr === -EINTR) {
+        /* -ENOENT: notification canceled between poll and recv (none
+         * pending); -EINTR: interrupted. Nothing received, keep polling. */
       } else if (rr !== 0) {
-        // -ENOENT: no pending notification (canceled race) or no tasks left
-        // with the filter. Either way there is nothing left to gate: fail closed.
+        // Anything else (EBADF/EINVAL/...): the listener is broken or gone.
+        // Nothing left to gate: fail closed. (Persistent -ENOENT = the last
+        // sandboxed task exited; main stops this worker shortly after the
+        // child's close, so looping there is bounded and quiet.)
         out({ type: "closed", why: `notif_recv: ${rr}` });
         break;
       } else {

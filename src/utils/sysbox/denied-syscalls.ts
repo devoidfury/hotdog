@@ -12,6 +12,12 @@
 // - io_uring_*: funnels file and network operations past every path-based
 //   filter; no legitimate agent command needs it.
 // - ptrace: attach to the parent (hotdog itself) and steal its memory/fds.
+//   NOTE: ptrace is not the only parent-access path. Under Yama scope <= 1
+//   (the common distro default) a *descendant* may access an ancestor, so
+//   process_vm_readv/writev and pidfd_getfd are denied for the same reason
+//   -- they reach hotdog's memory/fds without ever calling ptrace. Residual
+//   ceiling (docs/sysbox-sandbox.md "Known ceilings"): opening
+//   /proc/<ancestor>/mem goes through read-openat, which no mode traps.
 // - mount / umount2 / pivot_root / chroot / open_tree / move_mount / fsopen /
 //   fsconfig / fsmount / fspick: filesystem topology changes; also the classic
 //   bind-mount-over-policy tricks.
@@ -37,6 +43,11 @@ export const STATIC_DENIED_SYSCALLS: readonly DeniedSyscall[] = [
   { name: "io_uring_enter", nr: 426 },
   { name: "io_uring_register", nr: 427 },
   { name: "ptrace", nr: 101 },
+  // Parent-memory/fd theft without the ptrace syscall (Yama <= 1 lets a
+  // descendant access an ancestor): the same rationale as ptrace above.
+  { name: "process_vm_readv", nr: 440 },
+  { name: "process_vm_writev", nr: 441 },
+  { name: "pidfd_getfd", nr: 438 },
   { name: "mount", nr: 165 },
   { name: "umount2", nr: 166 },
   { name: "pivot_root", nr: 155 },

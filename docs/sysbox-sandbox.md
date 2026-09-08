@@ -241,6 +241,14 @@ remember-answers, no cache, no new config beyond `userGate.enabled`.
   succeeds in-sandbox; egress is blocked, but the content remains reachable
   into tool output. The file tools' deny list DOES bind reads -- the
   asymmetry is documented in `docs/config-reference.md`.
+- **Parent-process memory under Yama <= 1.** The deny table blocks `ptrace`,
+  `process_vm_readv`/`process_vm_writev`, and `pidfd_getfd` -- but Yama scope <= 1 (the common
+  distro default) also grants a descendant ancestor access through plain `open("/proc/<ancestor>/mem")`,
+  which is a read-openat: untrapped in every mode (the fence mounts /proc read-only, gate's open mask
+  is write-flags-only). On such hosts a sandboxed command can read hotdog's memory and environ (API
+  keys included), bypassing even the fence's "home dirs unreachable" claim for secrets that live in the
+  harness environment. seccomp cannot close this generically; gate could trap read-opens of
+  `/proc/*/mem` in a future revision. v1 states it as a ceiling instead.
 - Metadata-only syscalls (chmod/chown/utimensat/xattr family) still reach
   deny-listed paths unchanged: no content read, no entry creation, no
   aliasing. Out-of-root metadata ops stay fence-blocked (path traversal).

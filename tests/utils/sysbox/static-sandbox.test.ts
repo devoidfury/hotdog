@@ -41,6 +41,12 @@ console.log(
   "unshare=" + sc(272, 0, 0, 0, 0, 0, 0),
   "ptrace=" + sc(101, 0, 0, 0, 0, 0, 0),
   "bpf=" + sc(321, 0, 0, 0, 0, 0, 0),
+  // process_vm_readv/writev must be denied (-1) by the filter. Caveat for
+  // readers on hosts whose OWN seccomp profile already blocks these (e.g.
+  // docker's default): -1 there is not proof of the sysbox filter -- on a
+  // bare kernel these succeed against self and the assertion discriminates.
+  "pvmr=" + sc(440, 0, 0, 0, 0, 0, 0),
+  "pmvw=" + sc(441, 0, 0, 0, 0, 0, 0),
   "getpid_ok=" + (sc(39, 0, 0, 0, 0, 0, 0) > 0),
 );
 `,

@@ -4,10 +4,10 @@
 // protocol-path.test.ts.
 
 import { describe, it, expect } from "bun:test";
-import { openaiProtocol } from "../../../src/core/llm-client/openai-protocol.ts";
-import { MarkerMangler } from "../../../src/core/marker-mangler.ts";
-import type { ProtocolContext } from "../../../src/core/llm-client/protocol.ts";
-import type { StreamEvent } from "../../../src/core/llm-client/client.ts";
+import { openaiProtocol } from "@core/llm-client/openai-protocol.ts";
+import { MarkerMangler } from "@core/marker-mangler.ts";
+import type { ProtocolContext } from "@core/llm-client/protocol.ts";
+import type { StreamEvent } from "@core/llm-client/client.ts";
 
 function ctx(mangler: MarkerMangler | null = null): ProtocolContext {
   return { mangler, baseUrl: "http://p.example", apiKey: "k", sessionId: "s1" };

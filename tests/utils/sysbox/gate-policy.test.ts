@@ -7,8 +7,8 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Workspace } from "../../../src/utils/workspace.ts";
-import { evaluateGate, EACCES, scratchDirs, type GateRequest } from "../../../src/utils/sysbox/policy.ts";
+import { Workspace } from "@utils/workspace.ts";
+import { evaluateGate, EACCES, scratchDirs, type GateRequest } from "@utils/sysbox/policy.ts";
 
 const SCRATCH = ["/tmp", "/var/tmp"];
 

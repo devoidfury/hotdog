@@ -2,8 +2,8 @@ import { describe, it, expect } from "bun:test";
 import {
   CORE_TOOL_NAMES,
   createToolFactory,
-} from "../../src/extensions/core-tools/index.ts";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+} from "@extensions/core-tools/index.ts";
+import { ToolRegistry } from "@core/extensions/tool-registry.ts";
 
 // Mirrors the configSchema defaults in core-tools/extension.json
 const config = {

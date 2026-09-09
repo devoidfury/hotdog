@@ -10,7 +10,7 @@ import readline from "node:readline";
 import {
   ClipboardPasteInterceptor,
   type ClipboardPasteInterceptorOptions,
-} from "../../src/extensions/ui-interactive-cli/clipboard-paste.ts";
+} from "@extensions/ui-interactive-cli/clipboard-paste.ts";
 
 // xterm bracketed paste (DECSET 2004) wire protocol, encoded independently of
 // the implementation so a constant drift in clipboard-paste.ts fails these tests.

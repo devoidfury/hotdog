@@ -1,4 +1,4 @@
-import type { CompletionContext, CompletionOption } from "../../core/completion.ts";
+import type { CompletionContext, CompletionOption } from "@core/completion.ts";
 
 export function matcher(ctx: CompletionContext): boolean {
   return ctx.command === "model";

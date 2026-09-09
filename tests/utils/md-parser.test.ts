@@ -8,8 +8,8 @@ import {
   renderBlocksToHtml,
   type MdHeading,
   type MdList,
-} from "../../src/utils/md-parser.ts";
-import type { MdBlock, MdInline, MdBold, MdItalic } from "../../src/utils/md-parser.ts";
+} from "@utils/md-parser.ts";
+import type { MdBlock, MdInline, MdBold, MdItalic } from "@utils/md-parser.ts";
 
 describe("parseMarkdown", () => {
   // ── Edge cases ────────────────────────────────────────────────────

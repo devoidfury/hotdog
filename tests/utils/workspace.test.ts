@@ -4,10 +4,10 @@ import { describe, it, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Workspace, PathEscapeError, expandWorkspacePaths, DEFAULT_DENY_PATTERNS } from "../../src/utils/workspace.ts";
-import configSchema from "../../src/core/core.config.json" with { type: "json" };
-import { ConfigError } from "../../src/core/error.ts";
-import { logger } from "../../src/utils/logger.ts";
+import { Workspace, PathEscapeError, expandWorkspacePaths, DEFAULT_DENY_PATTERNS } from "@utils/workspace.ts";
+import configSchema from "@core/core.config.json" with { type: "json" };
+import { ConfigError } from "@core/error.ts";
+import { logger } from "@utils/logger.ts";
 
 let workDir: string; // scratch root for the "workspace"
 let outsideDir: string; // sibling dir acting as "outside the workspace"

@@ -18,8 +18,8 @@ import {
   parseMcpInitializeResponse,
   parseMcpToolsListResponse,
   parseMcpToolCallResponse,
-} from "../../src/extensions/mcp-client/types.ts";
-import { contentBlocksToString } from "../../src/extensions/mcp-client/connection.ts";
+} from "@extensions/mcp-client/types.ts";
+import { contentBlocksToString } from "@extensions/mcp-client/connection.ts";
 
 // ── Request builders ────────────────────────────────────────────────────────
 

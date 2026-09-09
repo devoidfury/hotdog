@@ -1,6 +1,6 @@
-import { Channel, ChannelSessionManager } from "../../core/channel.ts";
-import { OutputEvent } from "../../core/context/output.ts";
-import { CliOutputSink } from "../../utils/cli/cli.ts";
+import { Channel, ChannelSessionManager } from "@core/channel.ts";
+import { OutputEvent } from "@core/context/output.ts";
+import { CliOutputSink } from "@utils/cli/cli.ts";
 
 export interface OneShotChannelOptions {
   sessionManager: ChannelSessionManager;

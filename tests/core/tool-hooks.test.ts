@@ -3,9 +3,9 @@
 // This file focuses on tool-specific hook patterns.
 
 import { describe, test, expect } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
-import type { Agent } from "../../src/core/agent.ts";
-import { Message } from "../../src/core/context/message.ts";
+import { HookSystem, HOOKS } from "@core/hooks.ts";
+import type { Agent } from "@core/agent.ts";
+import { Message } from "@core/context/message.ts";
 
 const mockAgent = {} as Agent;
 

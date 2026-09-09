@@ -5,8 +5,8 @@
 // their dedicated files; TrimStrategy in compaction-trim.test.ts.
 
 import { describe, it, expect } from "bun:test";
-import { TokenAwareStrategy } from "../../src/extensions/compaction/strategies/token-aware.ts";
-import { Message } from "../../src/core/context/message.ts";
+import { TokenAwareStrategy } from "@extensions/compaction/strategies/token-aware.ts";
+import { Message } from "@core/context/message.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

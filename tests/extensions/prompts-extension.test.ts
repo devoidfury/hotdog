@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { create } from "../../src/extensions/prompts/index.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
-import { ACTIONS } from "../../src/core/commands.ts";
+import { create } from "@extensions/prompts/index.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { ACTIONS } from "@core/commands.ts";
 import { MockAgent } from "../helpers.ts";
 import fs from "node:fs";
 import os from "node:os";
@@ -175,7 +175,7 @@ describe("Prompts Extension", () => {
 import {
   matcher as promptMatcher,
   completion as promptCompletion,
-} from "../../src/extensions/prompts/completions.ts";
+} from "@extensions/prompts/completions.ts";
 
 describe("prompts completions", () => {
   const agent = {

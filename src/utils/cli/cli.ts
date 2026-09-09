@@ -16,7 +16,7 @@ import {
   TokenUsageEvent,
   SessionStateEvent,
   SystemMessageEvent,
-} from "../../core/context/output.ts";
+} from "@core/context/output.ts";
 import {
   ColorPalette,
   applyThinking,

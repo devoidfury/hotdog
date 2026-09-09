@@ -12,10 +12,10 @@ import {
   applyCommandReplacements,
   buildReadlineCompleter,
   buildOnQuitHandler,
-} from "../../src/extensions/ui-interactive-cli/index.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
-import { runInteractiveSession } from "../../src/extensions/ui-interactive-cli/index.ts";
+} from "@extensions/ui-interactive-cli/index.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import { runInteractiveSession } from "@extensions/ui-interactive-cli/index.ts";
 import { runWithSuppressedStdout } from "../test-helpers.ts";
 
 
@@ -646,7 +646,7 @@ async function withMockSessionManager(
   createFn: (opts?: Record<string, unknown>) => Promise<unknown>,
   fn: () => Promise<void>,
 ): Promise<void> {
-  const { SessionManager: SM } = await import("../../src/core/session/index.ts");
+  const { SessionManager: SM } = await import("@core/session/index.ts");
   const original = SM.create;
   (SM as unknown as { create: unknown }).create = createFn;
   try {
@@ -858,8 +858,8 @@ describe("runInteractiveSession defaults", () => {
     // SessionManager.create, so the completion listener must be registered
     // before create. Otherwise initial-agent argument completions
     // (e.g. /reasoning <levels>) are never wired up.
-    const { createCompletionService } = await import("../../src/core/completion.ts");
-    const { HookSystem } = await import("../../src/core/hooks.ts");
+    const { createCompletionService } = await import("@core/completion.ts");
+    const { HookSystem } = await import("@core/hooks.ts");
 
     const completion = createCompletionService();
     const hooks = new HookSystem();

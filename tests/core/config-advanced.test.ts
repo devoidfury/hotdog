@@ -8,9 +8,9 @@ import {
   normalizeConfigKeys,
   buildAgentConfig,
   buildConfig,
-} from "../../src/core/config/index.ts";
-import type { CoreConfigWithExtensions } from "../../src/core/config/schema-loader.ts";
-import { ConfigError } from "../../src/core/error.ts";
+} from "@core/config/index.ts";
+import type { CoreConfigWithExtensions } from "@core/config/schema-loader.ts";
+import { ConfigError } from "@core/error.ts";
 
 describe("normalizeConfigKeys", () => {
   it("converts snake_case keys to camelCase", () => {

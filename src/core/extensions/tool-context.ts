@@ -1,4 +1,4 @@
-import { Workspace } from "../../utils/workspace.ts";
+import { Workspace } from "@utils/workspace.ts";
 
 /**
  * Default tool context keys and their types.

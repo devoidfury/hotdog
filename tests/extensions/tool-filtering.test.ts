@@ -1,11 +1,11 @@
 // Tests for tool filtering via Agent.getToolDefs().
 
 import { describe, it, expect } from "bun:test";
-import { create } from "../../src/extensions/core-tools/index.ts";
-import { createToolRegistry } from "../../src/core/extensions/tool-registry.ts";
-import { createHooks } from "../../src/core/hooks.ts";
-import { Agent } from "../../src/core/agent.ts";
-import type { CoreContext } from "../../src/core/extensions/types.ts";
+import { create } from "@extensions/core-tools/index.ts";
+import { createToolRegistry } from "@core/extensions/tool-registry.ts";
+import { createHooks } from "@core/hooks.ts";
+import { Agent } from "@core/agent.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
 
 describe("Tool Filtering (Agent.getToolDefs)", () => {
   function createMockCore(config: Record<string, unknown> = {}) {

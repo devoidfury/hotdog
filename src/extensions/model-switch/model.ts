@@ -4,10 +4,10 @@ import {
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import type { ModelRegistry } from "../../core/agent.ts";
-import { ToolContext } from "../../core/extensions/tool-context.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import type { ModelRegistry } from "@core/agent.ts";
+import { ToolContext } from "@core/extensions/tool-context.ts";
 
 interface OnSwitchModel {
   (name: string): Promise<void>;

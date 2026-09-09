@@ -1,12 +1,12 @@
-import { HOOKS } from "../../core/hooks.ts";
-import { ACTIONS } from "../../core/commands.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { ACTIONS } from "@core/commands.ts";
 import { ModelTool } from "./model.ts";
 import {
   CoreContext,
   ExtensionInstance,
   getExtensionConfig,
-} from "../../core/extensions/types.ts";
-import { type Agent } from "../../core/agent.ts";
+} from "@core/extensions/types.ts";
+import { type Agent } from "@core/agent.ts";
 import { matcher, completion } from "./completions.ts";
 
 interface ModelSwitchExtConfig {

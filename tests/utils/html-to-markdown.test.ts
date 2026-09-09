@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { htmlToMarkdown } from "../../src/utils/html-to-markdown.ts";
+import { htmlToMarkdown } from "@utils/html-to-markdown.ts";
 
 describe("htmlToMarkdown", () => {
   // ── Edge cases ────────────────────────────────────────────────────

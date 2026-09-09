@@ -11,8 +11,8 @@ import {
   WaitTool,
   SUBAGENT_TOOL_NAMES,
   SUBAGENT_TOOL_CONSTRUCTORS,
-} from "../../src/extensions/subagents/subagents.ts";
-import { ToolContext } from "../../src/core/extensions/tool-context.ts";
+} from "@extensions/subagents/subagents.ts";
+import { ToolContext } from "@core/extensions/tool-context.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

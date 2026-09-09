@@ -1,5 +1,5 @@
 import { ConfigError } from "../error.ts";
-import { validate } from "../../utils/json-schema.ts";
+import { validate } from "@utils/json-schema.ts";
 import type { SchemaLayer, CliFlagDef } from "../config/schema-types.ts";
 
 

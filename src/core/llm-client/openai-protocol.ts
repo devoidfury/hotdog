@@ -11,7 +11,7 @@
 
 import type { LlmProtocol } from "./protocol.ts";
 import type { StreamEvent } from "./client.ts";
-import { parseSse } from "../../utils/sse-parser.ts";
+import { parseSse } from "@utils/sse-parser.ts";
 import { wireFormatFor } from "./serialize.ts";
 import { LlmError } from "../error.ts";
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { create } from "../../src/extensions/agents-md/index.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
+import { create } from "@extensions/agents-md/index.ts";
+import { HOOKS } from "@core/hooks.ts";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";

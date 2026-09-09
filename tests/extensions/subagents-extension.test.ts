@@ -5,8 +5,8 @@ import {
   create,
   registerTaskManagerService,
   TASK_MANAGER_SERVICE,
-} from "../../src/extensions/subagents/index.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
+} from "@extensions/subagents/index.ts";
+import { HOOKS } from "@core/hooks.ts";
 import { createMockCore } from "../mocks/fixtures.ts";
 import { createFixture, MockLLMClient, buildStreamResponse } from "../helpers.ts";
 

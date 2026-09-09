@@ -21,7 +21,7 @@ import {
   resolveSyscallPath,
   expandFdLink,
   AT_FDCWD,
-} from "../../../src/utils/sysbox/procfs.ts";
+} from "@utils/sysbox/procfs.ts";
 
 const libc = dlopen("libc.so.6", {
   mmap: { args: ["u64", "u64", "i32", "i32", "i32", "i64"], returns: "u64" },

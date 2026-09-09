@@ -4,8 +4,8 @@ import {
   isPrivateAddress,
   assertPublicHost,
   fetchWithSafeRedirects,
-} from "../../src/extensions/fetch-tool/index.ts";
-import { TransientError } from "../../src/core/error.ts";
+} from "@extensions/fetch-tool/index.ts";
+import { TransientError } from "@core/error.ts";
 import { getDisplay } from "../helpers.ts";
 
 // ── Local Test Server ──────────────────────────────────────────────────────

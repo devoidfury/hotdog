@@ -1,7 +1,7 @@
 // Tests for utils/objects.ts — getNested, stripNulls, deepMerge.
 
 import { describe, it, expect } from "bun:test";
-import { getNested, stripNulls, deepMerge } from "../../src/utils/objects.ts";
+import { getNested, stripNulls, deepMerge } from "@utils/objects.ts";
 
 describe("getNested", () => {
   it("returns top-level and nested properties", () => {

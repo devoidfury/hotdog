@@ -11,7 +11,7 @@ import {
   loadConfig,
   validateConfig,
   failOnInvalidConfig,
-} from "../../src/core/config/index.ts";
+} from "@core/config/index.ts";
 
 describe("resolveConfigDir", () => {
   it("returns CLI config-dir when provided", () => {

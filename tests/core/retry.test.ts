@@ -7,8 +7,8 @@ import {
   parseRetryAfterMs,
   resolveRetryDelayMs,
   MAX_RETRY_AFTER_MS,
-} from "../../src/core/llm-client/retry.ts";
-import { LlmError } from "../../src/core/error.ts";
+} from "@core/llm-client/retry.ts";
+import { LlmError } from "@core/error.ts";
 
 describe("shouldRetryLlmError", () => {
   it("retries transient http errors", () => {

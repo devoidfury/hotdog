@@ -1,17 +1,17 @@
 import { describe, it, expect } from "bun:test";
-import { HOOKS } from "../../src/core/hooks.ts";
+import { HOOKS } from "@core/hooks.ts";
 import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { createMockCore } from "../helpers.ts";
 import { captureConsole } from "../test-helpers.ts";
-import type { CoreContext } from "../../src/core/extensions/types.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
 
 // ── Shared helper to reduce boilerplate ─────────────────────────────────────
 
 async function infoCliRunner(coreConfig = {}, defaultCli = {}) {
   const core = createMockCore(coreConfig) as unknown as CoreContext;
-  const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
+  const { create } = await import("@extensions/ui-info-cli/index.ts");
   const ext = create(core);
   await (ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER] as (registry: unknown) => void)(core.cliSubcommandRegistry);
 
@@ -392,7 +392,7 @@ describe("Info CLI - profiles subcommand", () => {
   it("registers the profiles subcommand", async () => {
     await infoCliRunner();
     const core = createMockCore() as unknown as CoreContext;
-    const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
+    const { create } = await import("@extensions/ui-info-cli/index.ts");
     const ext = create(core);
     await (ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER] as (registry: unknown) => void)(core.cliSubcommandRegistry);
 

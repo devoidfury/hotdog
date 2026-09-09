@@ -1,8 +1,8 @@
 // Tests for MessageBus — event-driven dispatch loop, cancellation, interruption.
 
 import { describe, it, expect } from "bun:test";
-import { MessageBus } from "../../src/core/session/message-bus.ts";
-import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
+import { MessageBus } from "@core/session/message-bus.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
 
 // ── Shared mock factories ────────────────────────────────────────────────
 
@@ -355,7 +355,7 @@ describe("MessageBus — processing behavior", () => {
   });
 
   it("handles cancellation error silently", async () => {
-    const { LlmError } = await import("../../src/core/error.ts");
+    const { LlmError } = await import("@core/error.ts");
     const agent = createMockAgent({ run: async () => { throw LlmError.Cancelled("cancelled"); } });
     const sink = createMockSink();
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });

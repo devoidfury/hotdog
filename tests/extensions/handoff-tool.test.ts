@@ -4,10 +4,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "bun:test";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HandoffTool, create } from "../../src/extensions/handoff-tool/index.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
-import { ToolContext } from "../../src/core/extensions/tool-context.ts";
-import type { CoreContext } from "../../src/core/extensions/types.ts";
+import { HandoffTool, create } from "@extensions/handoff-tool/index.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { ToolContext } from "@core/extensions/tool-context.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
 
 interface TestPayload {
   content: string;

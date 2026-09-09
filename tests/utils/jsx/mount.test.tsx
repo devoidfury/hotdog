@@ -4,8 +4,8 @@
 // not a mock.module -- real browser nodes satisfy the same shape.
 
 import { describe, it, expect, spyOn } from "bun:test";
-import { mount, createNode, type DomElement, type JsxChild } from "../../../src/utils/jsx/index.ts";
-import { VOID_ELEMENTS } from "../../../src/utils/jsx/core.ts";
+import { mount, createNode, type DomElement, type JsxChild } from "@utils/jsx/index.ts";
+import { VOID_ELEMENTS } from "@utils/jsx/core.ts";
 
 // A real browser throws IndexSizeError when children are inserted into void
 // elements, so the fake must too. Importing the runtime's own set keeps the

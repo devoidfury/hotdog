@@ -2,7 +2,7 @@
 // Re-exports reactiveState/effect from the shared utils so the UI doesn't
 // duplicate the atom implementation.
 
-export { reactiveState, effect, type Atom } from "../../../utils/reactive-state.ts";
+export { reactiveState, effect, type Atom } from "@utils/reactive-state.ts";
 
 
 // ── Formatting & sanitisation ───────────────────────────────────────────────

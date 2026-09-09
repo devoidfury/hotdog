@@ -2,7 +2,7 @@
 // Only structural/meta flags are hardcoded here (--config, --model, --help, etc.).
 
 import { CliError } from "./error.ts";
-import { parseCliFlagKey } from "../utils/strings.ts";
+import { parseCliFlagKey } from "@utils/strings.ts";
 import type { ConfigRegistry } from "./extensions/config.ts";
 import type { CliFlagDef } from "./config/schema-types.ts";
 

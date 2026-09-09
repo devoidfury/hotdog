@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import util from "node:util";
 import { join, extname, resolve } from "node:path";
-import { AssistantRetryableError, ToolError } from "../../core/error.ts";
+import { AssistantRetryableError, ToolError } from "@core/error.ts";
 import {
   toolDef,
   param,
@@ -10,12 +10,12 @@ import {
   truncateOutput,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
-import { PathEscapeError } from "../../utils/workspace.ts";
-import type { Workspace } from "../../utils/workspace.ts";
-import { ToolContext } from "../../core/extensions/types.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { correctCommonPathMistakes } from "@utils/file-utils.ts";
+import { PathEscapeError } from "@utils/workspace.ts";
+import type { Workspace } from "@utils/workspace.ts";
+import { ToolContext } from "@core/extensions/types.ts";
 
 const execFileAsync = util.promisify(execFile);
 

@@ -13,7 +13,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MarkerMangler, buildAliasPattern } from "../../src/core/marker-mangler.ts";
+import { MarkerMangler, buildAliasPattern } from "@core/marker-mangler.ts";
 
 function collectFiles(dir: string, files: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

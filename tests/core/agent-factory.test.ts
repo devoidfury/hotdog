@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { createAgentFactory } from "../../src/core/agent-factory.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
+import { createAgentFactory } from "@core/agent-factory.ts";
+import { HOOKS } from "@core/hooks.ts";
 
 function makeCore(overrides: Record<string, unknown> = {}) {
   const calls: [string, unknown][] = [];

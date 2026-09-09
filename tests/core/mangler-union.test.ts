@@ -9,11 +9,11 @@ import { describe, it, expect } from "bun:test";
 import {
   MarkerMangler,
   CORE_PROTECTED_PREFIXES,
-} from "../../src/core/marker-mangler.ts";
-import { xmlToolFormat } from "../../src/core/extensions/tool-format-xml.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
-import { Message } from "../../src/core/context/message.ts";
-import type { ModelConfig } from "../../src/core/config/providers.ts";
+} from "@core/marker-mangler.ts";
+import { xmlToolFormat } from "@core/extensions/tool-format-xml.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import { Message } from "@core/context/message.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "prov/model", temperature: null, contextLimit: 128000, tags: [], ...overrides };

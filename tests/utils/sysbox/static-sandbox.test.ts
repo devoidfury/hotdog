@@ -11,9 +11,9 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { BashTool } from "../../../src/extensions/bash-tool/index.ts";
-import { ToolContext } from "../../../src/core/extensions/tool-context.ts";
-import { detectCapabilities, spawnSandboxed } from "../../../src/utils/sysbox/index.ts";
+import { BashTool } from "@extensions/bash-tool/index.ts";
+import { ToolContext } from "@core/extensions/tool-context.ts";
+import { detectCapabilities, spawnSandboxed } from "@utils/sysbox/index.ts";
 
 const caps = detectCapabilities();
 const suite = caps.staticAvailable ? describe : describe.skip;

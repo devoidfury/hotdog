@@ -6,9 +6,9 @@ import {
   StreamProcessor,
   type StreamCallbacks,
   type StreamResult,
-} from "../../src/core/llm-client/stream-processor.ts";
-import type { StreamEvent } from "../../src/core/llm-client/client.ts";
-import { MarkerMangler } from "../../src/core/marker-mangler.ts";
+} from "@core/llm-client/stream-processor.ts";
+import type { StreamEvent } from "@core/llm-client/client.ts";
+import { MarkerMangler } from "@core/marker-mangler.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

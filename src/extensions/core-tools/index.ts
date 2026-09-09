@@ -1,11 +1,11 @@
-import { HOOKS } from "../../core/hooks.ts";
+import { HOOKS } from "@core/hooks.ts";
 import {
   CoreContext,
   ExtensionInstance,
   ToolsRegisterPayload,
   getExtensionConfig,
-} from "../../core/extensions/types.ts";
-import { Tool } from "../../core/extensions/tool-registry.ts";
+} from "@core/extensions/types.ts";
+import { Tool } from "@core/extensions/tool-registry.ts";
 
 export * from "./overwrite.ts";
 export * from "./append.ts";

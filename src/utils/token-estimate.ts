@@ -2,7 +2,7 @@
 // extensions (compaction). Deliberately overestimates; it only gates
 // decisions, it is never a billing number.
 
-import { contentToText } from "../core/context/message.ts";
+import { contentToText } from "@core/context/message.ts";
 
 /**
  * Structural type for anything message-shaped: core `Message` instances and

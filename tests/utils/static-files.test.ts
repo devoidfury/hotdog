@@ -1,7 +1,7 @@
 // Tests for static-files.ts — MIME type detection and static file serving.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { getMimeType, serveStaticFile } from "../../src/utils/static-files.ts";
+import { getMimeType, serveStaticFile } from "@utils/static-files.ts";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";

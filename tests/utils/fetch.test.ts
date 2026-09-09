@@ -2,7 +2,7 @@
 // timeout, and composition of caller-provided abort signals.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { hotdogFetch, readCappedBody, VALID_METHODS, METHODS_WITH_BODY } from "../../src/utils/fetch.ts";
+import { hotdogFetch, readCappedBody, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
 
 // Ephemeral port (0): fixed ports collide when two `bun test` runs are
 // concurrent. Assigned in beforeAll, read by the tests at run time.

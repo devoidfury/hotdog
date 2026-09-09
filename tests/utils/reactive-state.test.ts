@@ -1,7 +1,7 @@
 // Tests for reactive-state.ts — reactive atoms and multi-dependency effects.
 
 import { describe, it, expect } from "bun:test";
-import { reactiveState, effect } from "../../src/utils/reactive-state.ts";
+import { reactiveState, effect } from "@utils/reactive-state.ts";
 
 describe("reactiveState", () => {
   it("creates an atom with initial value", () => {

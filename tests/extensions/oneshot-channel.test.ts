@@ -4,10 +4,10 @@
 // subclass (sink routing, no-input read) is tested here.
 
 import { describe, it, expect, mock } from "bun:test";
-import { OneShotChannel } from "../../src/extensions/ui-one-shot/oneshot-channel.ts";
-import { ChannelSessionManager } from "../../src/core/channel.ts";
-import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
-import { CliOutputSink } from "../../src/utils/cli/cli.ts";
+import { OneShotChannel } from "@extensions/ui-one-shot/oneshot-channel.ts";
+import { ChannelSessionManager } from "@core/channel.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { CliOutputSink } from "@utils/cli/cli.ts";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 

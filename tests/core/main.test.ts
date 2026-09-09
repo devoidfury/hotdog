@@ -4,11 +4,11 @@
 // works without an AI URL configured, and exits with code 0.
 
 import { describe, it, expect } from "bun:test";
-import { main } from "../../src/core/main.ts";
-import { resetLoggerForTesting } from "../../src/utils/logger.ts";
+import { main } from "@core/main.ts";
+import { resetLoggerForTesting } from "@utils/logger.ts";
 
-import pkg from "../../package.json" with { type: "json" };
-import { ConfigRegistry } from "../../src/core/extensions/config.ts";
+import pkg from "@package.json" with { type: "json" };
+import { ConfigRegistry } from "@core/extensions/config.ts";
 
 /**
  * Run main() with given CLI args, capturing stdout and stderr output.
@@ -218,7 +218,7 @@ describe("main -- no subcommand fallback", () => {
 
 describe("createCore service accessor", () => {
   it("core.service() retrieves registered services and throws for missing ones", async () => {
-    const { createCore } = await import("../../src/core/main.ts");
+    const { createCore } = await import("@core/main.ts");
     const { createSubcommandRegistry } = await import(
       "../../src/core/extensions/registries.ts"
     );
@@ -247,7 +247,7 @@ describe("createCore.createLlmClient (modelToolFormat layering)", () => {
     },
   };
 
-  function mc(): import("../../src/core/config/providers.ts").ModelConfig {
+  function mc(): import("@core/config/providers.ts").ModelConfig {
     return { name: "prov/model", temperature: null, contextLimit: 128000, tags: [] };
   }
 
@@ -255,15 +255,15 @@ describe("createCore.createLlmClient (modelToolFormat layering)", () => {
     fileConfig: Record<string, unknown>,
     cli: Record<string, unknown>,
   ) {
-    const { createCore } = await import("../../src/core/main.ts");
-    const { ConfigRegistry } = await import("../../src/core/extensions/config.ts");
-    const { createSubcommandRegistry } = await import("../../src/core/extensions/registries.ts");
+    const { createCore } = await import("@core/main.ts");
+    const { ConfigRegistry } = await import("@core/extensions/config.ts");
+    const { createSubcommandRegistry } = await import("@core/extensions/registries.ts");
     const { buildAgentConfig, resolveConfigDir } = await import(
       "../../src/core/config/index.ts"
     );
 
     const core = createCore(
-      fileConfig as import("../../src/core/config/schema-loader.ts").CoreConfigWithExtensions,
+      fileConfig as import("@core/config/schema-loader.ts").CoreConfigWithExtensions,
       new ConfigRegistry(),
       createSubcommandRegistry(),
     );
@@ -313,9 +313,9 @@ describe("createCore.createLlmClient (modelToolFormat layering)", () => {
   });
 
   it("uses the schema default when core.resolved is not yet set", async () => {
-    const { createCore } = await import("../../src/core/main.ts");
-    const { ConfigRegistry } = await import("../../src/core/extensions/config.ts");
-    const { createSubcommandRegistry } = await import("../../src/core/extensions/registries.ts");
+    const { createCore } = await import("@core/main.ts");
+    const { ConfigRegistry } = await import("@core/extensions/config.ts");
+    const { createSubcommandRegistry } = await import("@core/extensions/registries.ts");
     const core = createCore({} as never, new ConfigRegistry(), createSubcommandRegistry());
     expect(core.createLlmClient().maxRetries).toBe(5);
   });

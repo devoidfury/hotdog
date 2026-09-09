@@ -5,9 +5,9 @@
 // so tests never touch the real ~/.cache/hotdog/sessions directory.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { create } from "../../src/extensions/session-log/index.ts";
-import { readSessionEntries, LOG_SOURCE } from "../../src/core/session/session-log.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
+import { create } from "@extensions/session-log/index.ts";
+import { readSessionEntries, LOG_SOURCE } from "@core/session/session-log.ts";
+import { HOOKS } from "@core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";

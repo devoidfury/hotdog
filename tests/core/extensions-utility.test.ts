@@ -8,8 +8,8 @@ import {
   resolveLoadOrder,
   resolveExtensionDependencies,
   validateServiceContracts,
-} from "../../src/core/extensions/extensions.ts";
-import { extractSchemaDefaults } from "../../src/core/extensions/config.ts";
+} from "@core/extensions/extensions.ts";
+import { extractSchemaDefaults } from "@core/extensions/config.ts";
 
 
 describe("extractSchemaDefaults", () => {

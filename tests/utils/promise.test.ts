@@ -1,7 +1,7 @@
 // Tests for utils/promise.ts — isPromise.
 
 import { describe, it, expect } from "bun:test";
-import { isPromise } from "../../src/utils/promise.ts";
+import { isPromise } from "@utils/promise.ts";
 
 describe("isPromise", () => {
   it("returns true for thenable objects", () => {

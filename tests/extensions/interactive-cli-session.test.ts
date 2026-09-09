@@ -2,10 +2,10 @@
 // Covers the main uncovered function (lines 279-519).
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HOOKS } from "../../src/core/hooks.ts";
-import { HookSystem } from "../../src/core/hooks.ts";
-import { createCompletionService } from "../../src/core/completion.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { HookSystem } from "@core/hooks.ts";
+import { createCompletionService } from "@core/completion.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
 
 /** Poll a condition until true (deterministic replacement for fixed sleeps). */
 async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
@@ -18,10 +18,10 @@ async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
 
 describe("runInteractiveSession", () => {
   let originalSessionManagerCreate: unknown = null;
-  let SessionManagerModule: typeof import("../../src/core/session/index.ts") | null = null;
+  let SessionManagerModule: typeof import("@core/session/index.ts") | null = null;
 
   beforeEach(async () => {
-    SessionManagerModule = await import("../../src/core/session/index.ts");
+    SessionManagerModule = await import("@core/session/index.ts");
     originalSessionManagerCreate = SessionManagerModule.SessionManager.create;
   });
 
@@ -83,7 +83,7 @@ describe("runInteractiveSession", () => {
   }
 
   it("throws when resolved config is missing", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
+    const { runInteractiveSession } = await import("@extensions/ui-interactive-cli/index.ts");
     const core = createMockCore();
     core.resolved = undefined;
 
@@ -91,8 +91,8 @@ describe("runInteractiveSession", () => {
   });
 
   it("creates SessionManager and CliChannel", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const { SessionManager } = await import("../../src/core/session/index.ts");
+    const { runInteractiveSession } = await import("@extensions/ui-interactive-cli/index.ts");
+    const { SessionManager } = await import("@core/session/index.ts");
     const core = createMockCore();
 
     let createOpts: any = null;
@@ -152,8 +152,8 @@ describe("runInteractiveSession", () => {
   });
 
   it("creates AsyncInteractiveCliInput for question tool", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const { SessionManager } = await import("../../src/core/session/index.ts");
+    const { runInteractiveSession } = await import("@extensions/ui-interactive-cli/index.ts");
+    const { SessionManager } = await import("@core/session/index.ts");
     const core = createMockCore();
 
     let inputCreated = false;
@@ -204,8 +204,8 @@ describe("runInteractiveSession", () => {
   });
 
   it("listens for MODEL_CHANGE hook and updates prompt", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const { SessionManager } = await import("../../src/core/session/index.ts");
+    const { runInteractiveSession } = await import("@extensions/ui-interactive-cli/index.ts");
+    const { SessionManager } = await import("@core/session/index.ts");
     const core = createMockCore();
 
     let lastPrompt = "";
@@ -263,8 +263,8 @@ describe("runInteractiveSession", () => {
   });
 
   it("listens for TURN_END hook and re-prompts when stopped", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const { SessionManager } = await import("../../src/core/session/index.ts");
+    const { runInteractiveSession } = await import("@extensions/ui-interactive-cli/index.ts");
+    const { SessionManager } = await import("@core/session/index.ts");
     const core = createMockCore();
 
     // The initial prompt fires during setup, so count calls: TURN_END must
@@ -321,8 +321,8 @@ describe("runInteractiveSession", () => {
   });
 
   it("uses custom readline factory when provided", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const { SessionManager } = await import("../../src/core/session/index.ts");
+    const { runInteractiveSession } = await import("@extensions/ui-interactive-cli/index.ts");
+    const { SessionManager } = await import("@core/session/index.ts");
     const core = createMockCore();
 
     let customRlUsed = false;
@@ -376,8 +376,8 @@ describe("runInteractiveSession", () => {
   });
 
   it("sets up shell mode when configured", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const { SessionManager } = await import("../../src/core/session/index.ts");
+    const { runInteractiveSession } = await import("@extensions/ui-interactive-cli/index.ts");
+    const { SessionManager } = await import("@core/session/index.ts");
     const core = createMockCore();
     core.config.uiInteractiveCli = { ...core.config.uiInteractiveCli, shellMode: true };
 
@@ -433,8 +433,8 @@ describe("runInteractiveSession", () => {
   });
 
   it("uses buildAgent from SessionManager.create options", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const { SessionManager } = await import("../../src/core/session/index.ts");
+    const { runInteractiveSession } = await import("@extensions/ui-interactive-cli/index.ts");
+    const { SessionManager } = await import("@core/session/index.ts");
     const core = createMockCore();
 
     let capturedBuildAgent: any = null;

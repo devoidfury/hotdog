@@ -4,10 +4,10 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 
 describe("discoverExtensionsInDir", async () => {
-  let discoverExtensionsInDir: typeof import("../../src/core/extensions/extensions.ts").discoverExtensionsInDir;
+  let discoverExtensionsInDir: typeof import("@core/extensions/extensions.ts").discoverExtensionsInDir;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.ts");
+    const mod = await import("@core/extensions/extensions.ts");
     discoverExtensionsInDir = mod.discoverExtensionsInDir;
   });
 
@@ -17,14 +17,14 @@ describe("discoverExtensionsInDir", async () => {
   });
 
   it("returns extensions from builtins directory", async () => {
-    const { resolveExtensionPath } = await import("../../src/core/extensions/extensions.ts");
+    const { resolveExtensionPath } = await import("@core/extensions/extensions.ts");
     const result = await discoverExtensionsInDir(resolveExtensionPath("@extensions"));
     expect(Array.isArray(result)).toBe(true);
     expect(result.length).toBeGreaterThan(0);
   });
 
   it("each discovered extension has required fields", async () => {
-    const { resolveExtensionPath } = await import("../../src/core/extensions/extensions.ts");
+    const { resolveExtensionPath } = await import("@core/extensions/extensions.ts");
     const result = await discoverExtensionsInDir(resolveExtensionPath("@extensions"));
     for (const ext of result) {
       expect(ext.name).toBeDefined();
@@ -50,10 +50,10 @@ describe("discoverExtensionsInDir", async () => {
 });
 
 describe("getExtensionConfigDefaults", async () => {
-  let getExtensionConfigDefaults: typeof import("../../src/core/extensions/extensions.ts").getExtensionConfigDefaults;
+  let getExtensionConfigDefaults: typeof import("@core/extensions/extensions.ts").getExtensionConfigDefaults;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.ts");
+    const mod = await import("@core/extensions/extensions.ts");
     getExtensionConfigDefaults = mod.getExtensionConfigDefaults;
   });
 
@@ -73,10 +73,10 @@ describe("getExtensionConfigDefaults", async () => {
 });
 
 describe("getExtensionConfigSchemas", async () => {
-  let getExtensionConfigSchemas: typeof import("../../src/core/extensions/extensions.ts").getExtensionConfigSchemas;
+  let getExtensionConfigSchemas: typeof import("@core/extensions/extensions.ts").getExtensionConfigSchemas;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.ts");
+    const mod = await import("@core/extensions/extensions.ts");
     getExtensionConfigSchemas = mod.getExtensionConfigSchemas;
   });
 
@@ -92,10 +92,10 @@ describe("getExtensionConfigSchemas", async () => {
 });
 
 describe("getExtensionsToLoad", async () => {
-  let getExtensionsToLoad: typeof import("../../src/core/extensions/extensions.ts").getExtensionsToLoad;
+  let getExtensionsToLoad: typeof import("@core/extensions/extensions.ts").getExtensionsToLoad;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.ts");
+    const mod = await import("@core/extensions/extensions.ts");
     getExtensionsToLoad = mod.getExtensionsToLoad;
   });
 
@@ -173,10 +173,10 @@ describe("getExtensionsToLoad", async () => {
 });
 
 describe("registerExtensionMetadata", async () => {
-  let registerExtensionMetadata: typeof import("../../src/core/extensions/extensions.ts").registerExtensionMetadata;
+  let registerExtensionMetadata: typeof import("@core/extensions/extensions.ts").registerExtensionMetadata;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.ts");
+    const mod = await import("@core/extensions/extensions.ts");
     registerExtensionMetadata = mod.registerExtensionMetadata;
   });
 

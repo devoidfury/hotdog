@@ -7,7 +7,7 @@ import {
   findFirstKeptIndex,
   shouldCompact,
   serializeConversation,
-} from "../../src/extensions/compaction/utils.ts";
+} from "@extensions/compaction/utils.ts";
 
 // ── Compaction Decision ─────────────────────────────────────────────────────
 

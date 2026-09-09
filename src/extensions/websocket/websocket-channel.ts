@@ -1,11 +1,11 @@
 // Maps OutputEvent → S2C wire protocol and sends JSON over WS.
 
-import { Channel, ChannelSessionManager } from "../../core/channel.ts";
+import { Channel, ChannelSessionManager } from "@core/channel.ts";
 import {
   OUTPUT_EVENT,
   OutputEvent,
   OutputEventType,
-} from "../../core/context/output.ts";
+} from "@core/context/output.ts";
 import { S2C, S2CType } from "./protocol.ts";
 import type { HotdogServerSocket } from "./server.ts";
 

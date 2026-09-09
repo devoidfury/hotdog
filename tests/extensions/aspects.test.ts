@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { create, isValidAspectName } from "../../src/extensions/aspects/index.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
+import { create, isValidAspectName } from "@extensions/aspects/index.ts";
+import { HOOKS } from "@core/hooks.ts";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";

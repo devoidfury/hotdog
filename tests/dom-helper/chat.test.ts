@@ -4,7 +4,7 @@
 // FakeWebSocket.instances (reset before each test by useFakeWebSocket()).
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { createChat, type ChatController } from "../../src/extensions/webui/ui/chat.ts";
+import { createChat, type ChatController } from "@extensions/webui/ui/chat.ts";
 import { FakeWebSocket, useFakeWebSocket } from "../dom-helper/index.ts";
 
 type Sent = Record<string, unknown>;

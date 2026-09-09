@@ -5,11 +5,11 @@
 //   - executeShellCommand, completions, session wiring: ui-interactive-cli.test.ts
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { SessionManager } from "../../src/core/session/index.ts";
-import { ACTIONS } from "../../src/core/commands.ts";
+import { SessionManager } from "@core/session/index.ts";
+import { ACTIONS } from "@core/commands.ts";
 import {
   handleSlashCommand,
-} from "../../src/extensions/ui-interactive-cli/index.ts";
+} from "@extensions/ui-interactive-cli/index.ts";
 import { createMockRl } from "../helpers.ts";
 
 describe("handleSlashCommand", () => {

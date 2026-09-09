@@ -9,8 +9,8 @@ import {
   estimateMessageTokens,
   estimateContextTokens,
   type MessageLike,
-} from "../../src/utils/token-estimate.ts";
-import { Message } from "../../src/core/context/message.ts";
+} from "@utils/token-estimate.ts";
+import { Message } from "@core/context/message.ts";
 
 describe("estimateMessageTokens", () => {
   it("estimates plain string content (chars/4, rounded up)", () => {

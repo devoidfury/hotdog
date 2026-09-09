@@ -6,7 +6,7 @@ import {
   resolveProvider,
   initSystemPromptTemplate,
   type ProviderDef,
-} from "../../src/core/config/providers.ts";
+} from "@core/config/providers.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -426,7 +426,7 @@ describe("buildModelRegistry with fetchModels", () => {
 
 // ── resolveModelConfig fallback ──────────────────────────────────────────────
 
-import { findModelEntry, resolveModelConfig } from "../../src/core/config/providers.ts";
+import { findModelEntry, resolveModelConfig } from "@core/config/providers.ts";
 
 // ── findModelEntry ────────────────────────────────────────────────────────────
 

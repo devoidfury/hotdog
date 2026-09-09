@@ -5,10 +5,10 @@
 // replay) is tested here.
 
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
-import { ChannelSessionManager } from "../../src/core/channel.ts";
-import { OUTPUT_EVENT, OutputEvent } from "../../src/core/context/output.ts";
-import { S2C } from "../../src/extensions/websocket/protocol.ts";
+import { WebSocketChannel } from "@extensions/websocket/websocket-channel.ts";
+import { ChannelSessionManager } from "@core/channel.ts";
+import { OUTPUT_EVENT, OutputEvent } from "@core/context/output.ts";
+import { S2C } from "@extensions/websocket/protocol.ts";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 

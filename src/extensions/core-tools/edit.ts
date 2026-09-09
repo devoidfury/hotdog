@@ -5,12 +5,12 @@ import {
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { PathEscapeError } from "../../utils/workspace.ts";
-import type { Workspace } from "../../utils/workspace.ts";
-import { AssistantRetryableError } from "../../core/error.ts";
-import { ToolContext } from "../../core/extensions/types.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { PathEscapeError } from "@utils/workspace.ts";
+import type { Workspace } from "@utils/workspace.ts";
+import { AssistantRetryableError } from "@core/error.ts";
+import { ToolContext } from "@core/extensions/types.ts";
 
 interface EditToolOptions {
   maxEditInputSize: number;

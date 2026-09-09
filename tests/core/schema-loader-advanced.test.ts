@@ -10,7 +10,7 @@ import {
   resolveAll,
   resolveExtensionConfig,
   buildConfigSchema,
-} from "../../src/core/config/schema-loader.ts";
+} from "@core/config/schema-loader.ts";
 
 describe("resolveCast", () => {
   it("returns null for non-string input", () => {

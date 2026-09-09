@@ -4,8 +4,8 @@ import {
   CompactionStrategy,
   CompactionStrategyRegistry,
   CompactionSettings,
-} from "../../src/extensions/compaction/strategies.ts";
-import { Message } from "../../src/core/context/message.ts";
+} from "@extensions/compaction/strategies.ts";
+import { Message } from "@core/context/message.ts";
 
 function msg(role: string, content: string) {
   return new Message({ role, content });

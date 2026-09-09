@@ -2,8 +2,8 @@
 // MessageLog, TokenTracker, and SystemPromptBuilder.
 
 import { describe, it, expect } from "bun:test";
-import { ContextManager, createContextManager } from "../../../src/core/context/context-manager.ts";
-import { Message } from "../../../src/core/context/message.ts";
+import { ContextManager, createContextManager } from "@core/context/context-manager.ts";
+import { Message } from "@core/context/message.ts";
 
 describe("ContextManager", () => {
   it("createContextManager returns a ContextManager", () => {

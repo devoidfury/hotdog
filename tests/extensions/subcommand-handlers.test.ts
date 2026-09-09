@@ -1,15 +1,15 @@
 import { describe, it, expect } from "bun:test";
-import { HOOKS } from "../../src/core/hooks.ts";
+import { HOOKS } from "@core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
 import { withSilentConsole } from "../test-helpers.ts";
-import type { CoreContext } from "../../src/core/extensions/types.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
 
 // ── Info Show-Prompt Extension ──────────────────────────────────────────────
 
 describe("Info Show-Prompt Extension", () => {
   it("registers info and show-prompt subcommands", async () => {
     const core = createMockCore() as unknown as CoreContext;
-    const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
+    const { create } = await import("@extensions/ui-info-cli/index.ts");
     const ext = create(core);
 
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
@@ -20,7 +20,7 @@ describe("Info Show-Prompt Extension", () => {
 
   it("info subcommand returns exit code 0 for both JSON and text output", async () => {
     const core = createMockCore() as unknown as CoreContext;
-    const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
+    const { create } = await import("@extensions/ui-info-cli/index.ts");
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
@@ -35,7 +35,7 @@ describe("Info Show-Prompt Extension", () => {
 
   it("show-prompt subcommand returns exit code 0", async () => {
     const core = createMockCore() as unknown as CoreContext;
-    const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
+    const { create } = await import("@extensions/ui-info-cli/index.ts");
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
@@ -56,9 +56,9 @@ describe("Subcommand handler return types", () => {
     const core = createMockCore() as unknown as CoreContext;
 
     // Load all extensions that register subcommands
-    const { create: createReview } = await import("../../src/extensions/ui-session-review-cli/index.ts");
-    const { create: createInfo } = await import("../../src/extensions/ui-info-cli/index.ts");
-    const { create: createOneShot } = await import("../../src/extensions/ui-one-shot/index.ts");
+    const { create: createReview } = await import("@extensions/ui-session-review-cli/index.ts");
+    const { create: createInfo } = await import("@extensions/ui-info-cli/index.ts");
+    const { create: createOneShot } = await import("@extensions/ui-one-shot/index.ts");
 
     const reviewExt = createReview(core);
     const infoExt = createInfo(core);

@@ -1,6 +1,6 @@
 // Tests for the TokenTracker class.
 
-import { TokenTracker } from "../../src/core/token-tracker.ts";
+import { TokenTracker } from "@core/token-tracker.ts";
 import { describe, it, expect } from "bun:test";
 
 describe("TokenTracker", () => {

@@ -1,10 +1,10 @@
 // Shared mock helpers for websocket server tests.
 
 import { mock } from "bun:test";
-import type { AgentLike } from "../../src/core/session/index.ts";
-import type { HookSystem } from "../../src/core/hooks.ts";
-import type { HotdogServerSocket } from "../../src/extensions/websocket/server.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
+import type { AgentLike } from "@core/session/index.ts";
+import type { HookSystem } from "@core/hooks.ts";
+import type { HotdogServerSocket } from "@extensions/websocket/server.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
 
 const mockHooks = {
   notifyHooks: () => {},

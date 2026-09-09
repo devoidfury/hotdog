@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { create } from "../../src/extensions/environment/index.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
+import { create } from "@extensions/environment/index.ts";
+import { HOOKS } from "@core/hooks.ts";
 
 describe("environment extension", () => {
   it("creates extension with systemPrompt:build hook", () => {

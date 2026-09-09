@@ -10,8 +10,8 @@ import {
   type StreamingMdParser,
   type FeedResult,
   type MdDocument,
-} from "../../../utils/md-parser.ts";
-import { contentToText } from "../../../core/context/message.ts";
+} from "@utils/md-parser.ts";
+import { contentToText } from "@core/context/message.ts";
 
 // Debug instrumentation, enabled with ?debug=1 in the URL.
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");

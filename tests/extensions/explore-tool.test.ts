@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import fsSync from "node:fs";
 import path from "node:path";
-import { ExploreTool, SpawnFn } from "../../src/extensions/core-tools/explore.ts";
+import { ExploreTool, SpawnFn } from "@extensions/core-tools/explore.ts";
 import { resultStr, tmpDir, cleanupDir, toolCtx } from "../helpers.ts";
 
 // The tool validates that the target is an existing directory, so tests

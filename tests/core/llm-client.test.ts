@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
-import type { ModelConfig } from "../../src/core/config/providers.ts";
-import { LlmError } from "../../src/core/error.ts";
-import { Message } from "../../src/core/context/message.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
+import { LlmError } from "@core/error.ts";
+import { Message } from "@core/context/message.ts";
 
 /** Build a valid ModelConfig (requires contextLimit + tags now). */
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {

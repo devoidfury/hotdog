@@ -5,22 +5,22 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
-import { Agent, ModelRegistry, AgentConfig } from "../../src/core/agent.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
-import type { CoreContext } from "../../src/core/extensions/types.ts";
-import { MessageLog } from "../../src/core/context/message-log.ts";
-import type { Message } from "../../src/core/context/message.ts";
-import { HookSystem } from "../../src/core/hooks.ts";
+import { Agent, ModelRegistry, AgentConfig } from "@core/agent.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
+import { MessageLog } from "@core/context/message-log.ts";
+import type { Message } from "@core/context/message.ts";
+import { HookSystem } from "@core/hooks.ts";
 import {
   ToolRegistry,
   createToolRegistry,
-} from "../../src/core/extensions/tool-registry.ts";
-import { createHooks } from "../../src/core/hooks.ts";
-import { createSubcommandRegistry } from "../../src/core/extensions/registries.ts";
-import { createServiceRegistry } from "../../src/core/extensions/service-registry.ts";
-import { ConfigRegistry } from "../../src/core/extensions/config.ts";
+} from "@core/extensions/tool-registry.ts";
+import { createHooks } from "@core/hooks.ts";
+import { createSubcommandRegistry } from "@core/extensions/registries.ts";
+import { createServiceRegistry } from "@core/extensions/service-registry.ts";
+import { ConfigRegistry } from "@core/extensions/config.ts";
 import { MockLLMClient } from "./llm.ts";
-import type { OutputEvent } from "../../src/core/context/output.ts";
+import type { OutputEvent } from "@core/context/output.ts";
 
 // ── Agent Test Fixture ──────────────────────────────────────────────────────
 

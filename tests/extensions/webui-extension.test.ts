@@ -2,9 +2,9 @@
 // registration, and the subcommand handler's run/shutdown lifecycle.
 
 import { describe, it, expect } from "bun:test";
-import { create } from "../../src/extensions/webui/index.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
-import { logger } from "../../src/utils/logger.ts";
+import { create } from "@extensions/webui/index.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { logger } from "@utils/logger.ts";
 import { createMockCore, createMockRegistry } from "../test-helpers.ts";
 
 describe("WebUI Extension", () => {

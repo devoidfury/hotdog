@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { ServiceRegistry, createServiceRegistry } from "../../src/core/extensions/service-registry.ts";
-import { ConfigRegistry } from "../../src/core/extensions/config.ts";
-import { createCompletionService } from "../../src/core/completion.ts";
+import { ServiceRegistry, createServiceRegistry } from "@core/extensions/service-registry.ts";
+import { ConfigRegistry } from "@core/extensions/config.ts";
+import { createCompletionService } from "@core/completion.ts";
 
 describe("ServiceRegistry", () => {
   it("createServiceRegistry returns a new instance", () => {
@@ -101,12 +101,12 @@ describe("ServiceRegistry", () => {
 
 describe("SERVICES_REGISTER hook integration", () => {
   it("SERVICES_REGISTER hook is defined in HOOKS", async () => {
-    const { HOOKS } = await import("../../src/core/hooks.ts");
+    const { HOOKS } = await import("@core/hooks.ts");
     expect(HOOKS.SERVICES_REGISTER).toBe("services:register");
   });
 
   it("ExtensionLoader fires SERVICES_REGISTER during load", async () => {
-    const { createHooks } = await import("../../src/core/hooks.ts");
+    const { createHooks } = await import("@core/hooks.ts");
     const { createToolRegistry } = await import(
       "../../src/core/extensions/tool-registry.ts"
     );
@@ -119,7 +119,7 @@ describe("SERVICES_REGISTER hook integration", () => {
     const { createSubcommandRegistry } = await import(
       "../../src/core/extensions/registries.ts"
     );
-    const { HOOKS } = await import("../../src/core/hooks.ts");
+    const { HOOKS } = await import("@core/hooks.ts");
 
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
@@ -149,7 +149,7 @@ describe("SERVICES_REGISTER hook integration", () => {
   });
 
   it("services registered via hook are available to downstream extensions", async () => {
-    const { createHooks } = await import("../../src/core/hooks.ts");
+    const { createHooks } = await import("@core/hooks.ts");
     const { createToolRegistry } = await import(
       "../../src/core/extensions/tool-registry.ts"
     );
@@ -162,7 +162,7 @@ describe("SERVICES_REGISTER hook integration", () => {
     const { createSubcommandRegistry } = await import(
       "../../src/core/extensions/registries.ts"
     );
-    const { HOOKS } = await import("../../src/core/hooks.ts");
+    const { HOOKS } = await import("@core/hooks.ts");
 
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();

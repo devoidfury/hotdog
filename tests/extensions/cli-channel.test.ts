@@ -5,10 +5,10 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import readline from "node:readline";
-import { CliChannel } from "../../src/extensions/ui-interactive-cli/cli-channel.ts";
-import { ChannelSessionManager } from "../../src/core/channel.ts";
-import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
-import { CliOutputSink } from "../../src/utils/cli/cli.ts";
+import { CliChannel } from "@extensions/ui-interactive-cli/cli-channel.ts";
+import { ChannelSessionManager } from "@core/channel.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { CliOutputSink } from "@utils/cli/cli.ts";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 

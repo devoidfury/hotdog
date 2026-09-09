@@ -4,13 +4,13 @@
 // literal tag text, so the mangler-alias fossil scan stays green.
 
 import { describe, it, expect } from "bun:test";
-import { MarkerMangler, buildAliasPattern } from "../../src/core/marker-mangler.ts";
+import { MarkerMangler, buildAliasPattern } from "@core/marker-mangler.ts";
 import {
   renderWrapper,
   isWrapperPart,
   type FileIncludePart,
   type SystemNoticePart,
-} from "../../src/core/context/wrappers.ts";
+} from "@core/context/wrappers.ts";
 
 const FILE_TAG = "file-include";
 const NOTICE_TAG = "system-notice";

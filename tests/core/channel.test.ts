@@ -6,8 +6,8 @@ import { describe, it, expect, beforeEach, mock } from "bun:test";
 import {
   Channel,
   ChannelSessionManager,
-} from "../../src/core/channel.ts";
-import { OUTPUT_EVENT, OutputEvent } from "../../src/core/context/output.ts";
+} from "@core/channel.ts";
+import { OUTPUT_EVENT, OutputEvent } from "@core/context/output.ts";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 

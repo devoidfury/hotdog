@@ -7,14 +7,14 @@ import {
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
-import { PathEscapeError } from "../../utils/workspace.ts";
-import type { Workspace } from "../../utils/workspace.ts";
-import { AssistantRetryableError } from "../../core/error.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { correctCommonPathMistakes } from "@utils/file-utils.ts";
+import { PathEscapeError } from "@utils/workspace.ts";
+import type { Workspace } from "@utils/workspace.ts";
+import { AssistantRetryableError } from "@core/error.ts";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.ts";
-import { ToolContext } from "../../core/extensions/types.ts";
+import { ToolContext } from "@core/extensions/types.ts";
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
   ".jpg": "image/jpeg",

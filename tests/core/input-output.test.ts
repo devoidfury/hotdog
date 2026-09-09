@@ -6,7 +6,7 @@ import {
   OutputSink,
   NoopSink,
   OUTPUT_EVENT,
-} from "../../src/core/context/output.ts";
+} from "@core/context/output.ts";
 
 describe("OutputSink", () => {
   let capturedStdout: string[] = [];

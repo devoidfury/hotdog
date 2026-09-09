@@ -8,12 +8,12 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
-import { BashTool } from "../../../src/extensions/bash-tool/index.ts";
-import { ToolContext } from "../../../src/core/extensions/tool-context.ts";
-import { HookSystem, HOOKS } from "../../../src/core/hooks.ts";
-import { Workspace } from "../../../src/utils/workspace.ts";
-import { detectCapabilities } from "../../../src/utils/sysbox/index.ts";
-import { initializeLogger, resetLoggerForTesting } from "../../../src/utils/logger.ts";
+import { BashTool } from "@extensions/bash-tool/index.ts";
+import { ToolContext } from "@core/extensions/tool-context.ts";
+import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { Workspace } from "@utils/workspace.ts";
+import { detectCapabilities } from "@utils/sysbox/index.ts";
+import { initializeLogger, resetLoggerForTesting } from "@utils/logger.ts";
 
 const caps = detectCapabilities();
 const suite = caps.gateAvailable ? describe : describe.skip;

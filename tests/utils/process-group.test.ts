@@ -4,7 +4,7 @@
 import { describe, it, expect } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
-import { IS_POSIX, OWN_PROCESS_GROUP, killProcessGroup } from "../../src/utils/process-group.ts";
+import { IS_POSIX, OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";
 import { tmpDir, cleanupDir } from "../mocks/io.ts";
 import { processAlive, waitForExit } from "../mocks/process.ts";
 

@@ -5,11 +5,11 @@
 // which also keeps the interception scoped to this file's server.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { LlmClient } from "../../../src/core/llm-client/client.ts";
-import { Message } from "../../../src/core/context/message.ts";
-import type { ModelConfig } from "../../../src/core/config/providers.ts";
-import { createLlmProtocolRegistry, type LlmProtocol } from "../../../src/core/llm-client/protocol.ts";
-import { openaiProtocol } from "../../../src/core/llm-client/openai-protocol.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import { Message } from "@core/context/message.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
+import { createLlmProtocolRegistry, type LlmProtocol } from "@core/llm-client/protocol.ts";
+import { openaiProtocol } from "@core/llm-client/openai-protocol.ts";
 
 // Ephemeral ports (0): fixed ports collide when two `bun test` runs are
 // concurrent. Assigned in beforeAll, read by the tests at run time.

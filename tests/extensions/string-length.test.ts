@@ -2,8 +2,8 @@ import { describe, it, expect } from "bun:test";
 import {
   StringLengthTool,
   measureString,
-} from "../../src/extensions/string-length/index.ts";
-import type { ToolResult } from "../../src/core/extensions/tool-utils.ts";
+} from "@extensions/string-length/index.ts";
+import type { ToolResult } from "@core/extensions/tool-utils.ts";
 import { resultStr, toolCtx } from "../helpers.ts";
 
 const tool = new StringLengthTool();

@@ -10,7 +10,7 @@ import {
   deleteSessionLog,
   sessionPath,
   sessionsDir,
-} from "../../src/core/session/session-log.ts";
+} from "@core/session/session-log.ts";
 import { TestSessionLog } from "../mocks/io.ts";
 import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";

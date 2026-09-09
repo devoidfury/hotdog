@@ -1,9 +1,9 @@
 import { describe, it, expect } from "bun:test";
-import { create as createModelSwitchExtension } from "../../src/extensions/model-switch/index.ts";
-import { ModelTool } from "../../src/extensions/model-switch/model.ts";
-import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
-import { createCommandRegistry } from "../../src/core/extensions/registries.ts";
+import { create as createModelSwitchExtension } from "@extensions/model-switch/index.ts";
+import { ModelTool } from "@extensions/model-switch/model.ts";
+import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { ToolRegistry } from "@core/extensions/tool-registry.ts";
+import { createCommandRegistry } from "@core/extensions/registries.ts";
 
 function mkModel(name: string) {
   return { name, temperature: 0.7, contextLimit: 128000, tags: [], capabilities: {} };
@@ -307,7 +307,7 @@ describe("Model-switch extension > edge cases", () => {
 import {
   matcher as modelMatcher,
   completion as modelCompletion,
-} from "../../src/extensions/model-switch/completions.ts";
+} from "@extensions/model-switch/completions.ts";
 
 describe("model-switch completions", () => {
   const agent = {

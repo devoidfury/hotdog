@@ -6,8 +6,8 @@ import {
   initializeLogger,
   logger,
   resetLoggerForTesting,
-} from "../../src/utils/logger.ts";
-import { HookSystem } from "../../src/core/hooks.ts";
+} from "@utils/logger.ts";
+import { HookSystem } from "@core/hooks.ts";
 
 describe("LOG_LEVELS", () => {
   it("orders levels from most to least verbose", () => {

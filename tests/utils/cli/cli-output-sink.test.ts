@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   CliOutputSink,
-} from "../../../src/utils/cli/cli.ts";
-import { OUTPUT_EVENT } from "../../../src/core/context/output.ts";
-import { ColorPalette } from "../../../src/utils/cli/colors.ts";
+} from "@utils/cli/cli.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { ColorPalette } from "@utils/cli/colors.ts";
 
 describe("CliOutputSink", () => {
   let sink: CliOutputSink;

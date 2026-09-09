@@ -4,7 +4,7 @@ import {
 } from "../prompts.ts";
 import { serializeConversation, findFirstKeptIndex, estimateContextTokens } from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
-import { AgentError } from "../../../core/error.ts";
+import { AgentError } from "@core/error.ts";
 
 export class SummarizeShortStrategy extends CompactionStrategy {
   override name = "summarize-short";

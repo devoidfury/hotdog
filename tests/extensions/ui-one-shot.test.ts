@@ -2,17 +2,17 @@
 // Covers create(), hook handlers, handlePromptSubcommand(), and runOneShot().
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HOOKS } from "../../src/core/hooks.ts";
-import { HookSystem } from "../../src/core/hooks.ts";
-import { CliSubcommandRegistryLike, SubcommandDefinition } from "../../src/core/extensions/registries.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { HookSystem } from "@core/hooks.ts";
+import { CliSubcommandRegistryLike, SubcommandDefinition } from "@core/extensions/registries.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
 
 describe("ui-one-shot extension", () => {
   let originalSessionManagerCreate: unknown = null;
-  let SessionManagerModule: typeof import("../../src/core/session/index.ts") | null = null;
+  let SessionManagerModule: typeof import("@core/session/index.ts") | null = null;
 
   beforeEach(async () => {
-    SessionManagerModule = await import("../../src/core/session/index.ts");
+    SessionManagerModule = await import("@core/session/index.ts");
     originalSessionManagerCreate = SessionManagerModule.SessionManager.create;
   });
 
@@ -74,7 +74,7 @@ describe("ui-one-shot extension", () => {
 
   describe("create", () => {
     it("returns extension without hooks when core.hooks is undefined", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
       const core = { ...createMockCore(), hooks: undefined };
 
       const ext = create(core);
@@ -84,7 +84,7 @@ describe("ui-one-shot extension", () => {
 
   describe("CLI_ARGS_PARSED hook", () => {
     it("sets subcommand to 'prompt' when cli.prompt is provided", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -95,7 +95,7 @@ describe("ui-one-shot extension", () => {
     });
 
     it("does not set subcommand when cli.prompt is undefined", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -106,7 +106,7 @@ describe("ui-one-shot extension", () => {
     });
 
     it("does not set subcommand when cli.prompt is empty string", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -117,7 +117,7 @@ describe("ui-one-shot extension", () => {
     });
 
     it("does not interfere with other subcommands", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -128,7 +128,7 @@ describe("ui-one-shot extension", () => {
     });
 
     it("overrides existing subcommand when prompt is set", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -141,7 +141,7 @@ describe("ui-one-shot extension", () => {
 
   describe("CLI_SUBCOMMANDS_REGISTER hook", () => {
     it("registers the 'prompt' subcommand", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -162,7 +162,7 @@ describe("ui-one-shot extension", () => {
 
   describe("handlePromptSubcommand", () => {
     it("throws when resolved config is missing", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
       const core = createMockCore();
       core.resolved = undefined;
       const ext = create(core);
@@ -174,8 +174,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("creates SessionManager and runs one-shot with prompt", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -217,8 +217,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("handles null bus gracefully", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -241,8 +241,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("propagates SessionManager.create failures", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -259,8 +259,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("enqueues an empty prompt when neither prompt nor args are given", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -284,8 +284,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("uses args joined as prompt when prompt is not provided", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -314,8 +314,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("uses custom sessionId from cli", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -346,8 +346,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("returns non-zero exit code when bus.runUntilCancelled throws", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -374,8 +374,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("preserves custom exit code from error", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -406,8 +406,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("calls extensions.cleanup in finally block", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -437,8 +437,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("executes buildAgent callback with agent configuration", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -476,8 +476,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("buildAgent generates UUID when sessionId not provided", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -512,8 +512,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("buildAgent uses agentConfig overrides for model and maxIterations", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -550,8 +550,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("buildAgent fires COMMANDS_REGISTER hook", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 
@@ -593,8 +593,8 @@ describe("ui-one-shot extension", () => {
     });
 
     it("uses custom colors and theme from cli", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
       const ext = create(core);
 

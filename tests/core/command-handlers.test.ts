@@ -1,5 +1,5 @@
 import { describe, it, expect, mock } from "bun:test";
-import { Command } from "../../src/core/commands.ts";
+import { Command } from "@core/commands.ts";
 import {
   handleClear,
   handleQuit,
@@ -10,7 +10,7 @@ import {
   handleRegenerate,
   handleReasoning,
   CORE_COMMAND_HANDLERS,
-} from "../../src/core/command-handlers.ts";
+} from "@core/command-handlers.ts";
 
 type TokenUsage = {
   turns: number;

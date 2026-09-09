@@ -3,12 +3,12 @@
 // prompt template they use, so they are tested together in a single
 // parameterized suite against their respective templates.
 import { describe, it, expect } from "bun:test";
-import { SummarizeStrategy } from "../../src/extensions/compaction/strategies/summarize.ts";
-import { SummarizeShortStrategy } from "../../src/extensions/compaction/strategies/summarize-short.ts";
-import { CompactionSettings } from "../../src/extensions/compaction/strategies.ts";
-import { SUMMARIZATION_SYSTEM_PROMPT } from "../../src/extensions/compaction/prompts.ts";
-import { Message } from "../../src/core/context/message.ts";
-import { AgentError } from "../../src/core/error.ts";
+import { SummarizeStrategy } from "@extensions/compaction/strategies/summarize.ts";
+import { SummarizeShortStrategy } from "@extensions/compaction/strategies/summarize-short.ts";
+import { CompactionSettings } from "@extensions/compaction/strategies.ts";
+import { SUMMARIZATION_SYSTEM_PROMPT } from "@extensions/compaction/prompts.ts";
+import { Message } from "@core/context/message.ts";
+import { AgentError } from "@core/error.ts";
 
 function msg(role: string, content: string) {
   return new Message({ role, content });

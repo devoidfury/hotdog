@@ -6,7 +6,7 @@ import {
   WebSocketQuestionBridge,
   type QuestionBridgeHooks,
   type QuestionPolicy,
-} from "../../src/extensions/websocket/question-input.ts";
+} from "@extensions/websocket/question-input.ts";
 
 interface MockHooksState {
   policy: QuestionPolicy;

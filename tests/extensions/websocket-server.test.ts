@@ -3,14 +3,14 @@
 // (Merged from websocket-server.test.ts + websocket-server-extended.test.ts.)
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, mock, Mock } from "bun:test";
-import { SessionRegistry, createWsServer, type HotdogServerSocket } from "../../src/extensions/websocket/server.ts";
-import { C2S, S2C } from "../../src/extensions/websocket/protocol.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
-import { MessageLog } from "../../src/core/context/message-log.ts";
-import type { AgentLike } from "../../src/core/session/index.ts";
+import { SessionRegistry, createWsServer, type HotdogServerSocket } from "@extensions/websocket/server.ts";
+import { C2S, S2C } from "@extensions/websocket/protocol.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import { MessageLog } from "@core/context/message-log.ts";
+import type { AgentLike } from "@core/session/index.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 import { createFixture, simpleTool } from "../helpers.ts";
-import { Message } from "../../src/core/context/message.ts";
+import { Message } from "@core/context/message.ts";
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";

@@ -2,9 +2,9 @@
 // protocol so the extraction from LlmClient is provably behavior-preserving.
 
 import { describe, it, expect } from "bun:test";
-import { LlmClient } from "../../../src/core/llm-client/client.ts";
-import { Message } from "../../../src/core/context/message.ts";
-import type { ModelConfig } from "../../../src/core/config/providers.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import { Message } from "@core/context/message.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "prov/gpt-4", temperature: null, contextLimit: 128000, tags: [], ...overrides };

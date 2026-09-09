@@ -6,10 +6,10 @@ import {
   parseToolInput,
   ToolResult,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolDef, ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import type { ToolContext } from "../../core/extensions/types.ts";
-import { TaskManager } from "../../core/session/task-manager.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolDef, ToolMetadata } from "@core/extensions/tool-registry.ts";
+import type { ToolContext } from "@core/extensions/types.ts";
+import { TaskManager } from "@core/session/task-manager.ts";
 
 interface SubagentToolOptions {
   sessionCore?: unknown;

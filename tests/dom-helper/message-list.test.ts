@@ -4,7 +4,7 @@
 // Spreading querySelectorAll()/children results needs dom.iterable.
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { createMessageList, type MessageListManager } from "../../src/extensions/webui/ui/message-list.ts";
+import { createMessageList, type MessageListManager } from "@extensions/webui/ui/message-list.ts";
 
 let container: HTMLElement;
 let ml: MessageListManager;

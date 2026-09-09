@@ -1,11 +1,11 @@
 // Tests for skills extension — create(), hooks, and SkillsLoader.
 
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { create } from "../../src/extensions/skills/index.ts";
-import { SkillsLoader, patternMatches } from "../../src/extensions/skills/loader.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
-import { ACTIONS } from "../../src/core/commands.ts";
-import { createCompletionService } from "../../src/core/completion.ts";
+import { create } from "@extensions/skills/index.ts";
+import { SkillsLoader, patternMatches } from "@extensions/skills/loader.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { ACTIONS } from "@core/commands.ts";
+import { createCompletionService } from "@core/completion.ts";
 import fs from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";

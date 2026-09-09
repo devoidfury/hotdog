@@ -9,16 +9,16 @@ import {
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { NoopInput } from "../../core/context/input.ts";
-import { isPromise } from "../../utils/promise.ts";
-import { HOOKS } from "../../core/hooks.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { NoopInput } from "@core/context/input.ts";
+import { isPromise } from "@utils/promise.ts";
+import { HOOKS } from "@core/hooks.ts";
 import {
   CoreContext,
   ExtensionInstance,
   ToolContext,
-} from "../../core/extensions/types.ts";
+} from "@core/extensions/types.ts";
 
 interface Question {
   key?: string;

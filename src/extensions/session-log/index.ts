@@ -3,11 +3,11 @@
 
 import { join } from "node:path";
 import { appendFile, readFile, access, mkdir } from "node:fs/promises";
-import { HOOKS } from "../../core/hooks.ts";
-import { stripNulls } from "../../utils/objects.ts";
-import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { stripNulls } from "@utils/objects.ts";
+import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 
-import { LOG_SOURCE, sessionsDir, type LogEntry } from "../../core/session/session-log.ts";
+import { LOG_SOURCE, sessionsDir, type LogEntry } from "@core/session/session-log.ts";
 
 interface SessionLogMessage {
   sessionId?: string;

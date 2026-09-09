@@ -9,24 +9,24 @@ import { describe, it, expect } from "bun:test";
 import {
   createToolFormatRegistry,
   resolveToolFormatId,
-} from "../../src/core/extensions/tool-format.ts";
-import { xmlToolFormat } from "../../src/core/extensions/tool-format-xml.ts";
+} from "@core/extensions/tool-format.ts";
+import { xmlToolFormat } from "@core/extensions/tool-format-xml.ts";
 import {
   ToolResult,
   toolResult,
   formatToolResult,
-} from "../../src/core/extensions/tool-utils.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
-import { MarkerMangler } from "../../src/core/marker-mangler.ts";
-import { Message } from "../../src/core/context/message.ts";
-import type { ModelConfig, ProviderDef } from "../../src/core/config/providers.ts";
+} from "@core/extensions/tool-utils.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import { MarkerMangler } from "@core/marker-mangler.ts";
+import { Message } from "@core/context/message.ts";
+import type { ModelConfig, ProviderDef } from "@core/config/providers.ts";
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "prov/model", temperature: null, contextLimit: 128000, tags: [], ...overrides };
 }
 
 // Toy format #1: markdown table. Emits raw text; never mangles.
-const mdTableFormat: import("../../src/core/extensions/tool-format.ts").ToolFormat = {
+const mdTableFormat: import("@core/extensions/tool-format.ts").ToolFormat = {
   id: "md-table",
   markers: ["tool-result"],
   formatResult(result, toolName, meta) {
@@ -37,7 +37,7 @@ const mdTableFormat: import("../../src/core/extensions/tool-format.ts").ToolForm
 };
 
 // Toy format #2: content-parts output (exercises the parts path).
-const partsFormat: import("../../src/core/extensions/tool-format.ts").ToolFormat = {
+const partsFormat: import("@core/extensions/tool-format.ts").ToolFormat = {
   id: "parts",
   markers: [],
   formatResult(result, toolName, _meta) {

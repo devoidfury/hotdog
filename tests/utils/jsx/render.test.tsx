@@ -7,7 +7,7 @@ import {
   renderToString,
   createNode,
   Fragment,
-} from "../../../src/utils/jsx/index.ts";
+} from "@utils/jsx/index.ts";
 
 function Greeting(props: { name: string }) {
   return <span className="g">{props.name}</span>;

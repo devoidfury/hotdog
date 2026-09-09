@@ -3,7 +3,7 @@
 // getProfilesForAgent.
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { ProfileManager, type ProfileDef } from "../../src/core/config/profiles.ts";
+import { ProfileManager, type ProfileDef } from "@core/config/profiles.ts";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";

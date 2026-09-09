@@ -4,7 +4,7 @@
 // The rest of chat.ts is browser-only by project convention.
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { createChat, type ChatController } from "../../src/extensions/webui/ui/chat.ts";
+import { createChat, type ChatController } from "@extensions/webui/ui/chat.ts";
 
 function makeContainer(): { events: string[]; removed: string[]; innerHTML: string } & Record<string, unknown> {
   const events: string[] = [];

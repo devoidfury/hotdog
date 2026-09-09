@@ -1,11 +1,11 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { ConfigError } from "../error.ts";
-import { deepMerge } from "../../utils/objects.ts";
-import { render } from "../../utils/render.ts";
-import { validate as validateSchema, castAs } from "../../utils/json-schema.ts";
-import { camelCase } from "../../utils/strings.ts";
-import { expandWorkspacePaths, DEFAULT_DENY_PATTERNS } from "../../utils/workspace.ts";
+import { deepMerge } from "@utils/objects.ts";
+import { render } from "@utils/render.ts";
+import { validate as validateSchema, castAs } from "@utils/json-schema.ts";
+import { camelCase } from "@utils/strings.ts";
+import { expandWorkspacePaths, DEFAULT_DENY_PATTERNS } from "@utils/workspace.ts";
 
 export * from "./defaults.ts";
 export * from "./schema-loader.ts";
@@ -16,7 +16,7 @@ export {
   validate,
   validateParams,
   formatValidationErrors,
-} from "../../utils/json-schema.ts";
+} from "@utils/json-schema.ts";
 
 import { DEFAULT_CONFIG_FILENAME, resolveConfigDir } from "./defaults.ts";
 import {

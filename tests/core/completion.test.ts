@@ -6,11 +6,11 @@ import {
   type CompletionContext,
   type CompletionMatcher,
   type CompletionHandler,
-} from "../../src/core/completion.ts";
+} from "@core/completion.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 
 // Mock agent for tests
-const mockAgent: import("../../src/core/session/index.ts").AgentLike = {
+const mockAgent: import("@core/session/index.ts").AgentLike = {
   sessionId: "test",
   model: "test-model",
   profileName: undefined,
@@ -19,7 +19,7 @@ const mockAgent: import("../../src/core/session/index.ts").AgentLike = {
     runHookPipeline: async () => undefined,
     registerHook: () => {},
     unregisterHook: () => {},
-  } as unknown as import("../../src/core/hooks.ts").HookSystem,
+  } as unknown as import("@core/hooks.ts").HookSystem,
   getMessages: () => [],
   sink: null,
   toolWhitelist: null,

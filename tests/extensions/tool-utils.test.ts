@@ -11,7 +11,7 @@ import {
   getRequiredStr,
   ToolResult,
   TOOL_STOP_LOOP,
-} from "../../src/core/extensions/tool-utils.ts";
+} from "@core/extensions/tool-utils.ts";
 
 describe("toolDef", () => {
   it("creates a tool definition", () => {
@@ -409,7 +409,7 @@ describe("parseToolInput", () => {
   let parseToolInput: (input: string | Record<string, unknown> | null) => Record<string, unknown> | null;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/tool-utils.ts");
+    const mod = await import("@core/extensions/tool-utils.ts");
     parseToolInput = mod.parseToolInput;
   });
 
@@ -447,7 +447,7 @@ describe("defaultCallDisplay", () => {
   ) => string;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/tool-utils.ts");
+    const mod = await import("@core/extensions/tool-utils.ts");
     defaultCallDisplay = mod.defaultCallDisplay;
   });
 
@@ -491,7 +491,7 @@ describe("formatToolResult", () => {
   let formatToolResult: (result: unknown, toolName: string, success: boolean) => string;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/tool-utils.ts");
+    const mod = await import("@core/extensions/tool-utils.ts");
     formatToolResult = mod.formatToolResult;
   });
 

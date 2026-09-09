@@ -5,11 +5,11 @@ import {
   launcherCPath,
   sbHelperPath,
   resetCapabilitiesForTesting,
-} from "../../../src/utils/sysbox/capabilities.ts";
-import type { SysboxCapabilities } from "../../../src/utils/sysbox/capabilities.ts";
-import { STATIC_DENIED_SYSCALLS, GATE_TRAPPED_SYSCALLS, MAX_DENY_SYSCALLS, OPEN_WRITE_MASK } from "../../../src/utils/sysbox/denied-syscalls.ts";
-import { resolveSandboxMode } from "../../../src/extensions/bash-tool/index.ts";
-import { ConfigError } from "../../../src/core/error.ts";
+} from "@utils/sysbox/capabilities.ts";
+import type { SysboxCapabilities } from "@utils/sysbox/capabilities.ts";
+import { STATIC_DENIED_SYSCALLS, GATE_TRAPPED_SYSCALLS, MAX_DENY_SYSCALLS, OPEN_WRITE_MASK } from "@utils/sysbox/denied-syscalls.ts";
+import { resolveSandboxMode } from "@extensions/bash-tool/index.ts";
+import { ConfigError } from "@core/error.ts";
 
 describe("sysbox capabilities", () => {
   it("detects without throwing and caches", () => {

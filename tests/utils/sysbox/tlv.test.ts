@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { packTlv, unpackTlv } from "../../../src/utils/sysbox/tlv.ts";
+import { packTlv, unpackTlv } from "@utils/sysbox/tlv.ts";
 
 describe("packTlv / unpackTlv", () => {
   it("round-trips empty and simple items", () => {

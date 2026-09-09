@@ -4,7 +4,7 @@ import {
   resolveAll,
   CONFIG_SCHEMA as CONFIG_KEYS,
   type ResolutionContext,
-} from "../../src/core/config/schema-loader.ts";
+} from "@core/config/schema-loader.ts";
 
 // ── CONFIG_KEYS schema ───────────────────────────────────────────────────
 

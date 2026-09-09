@@ -1,11 +1,11 @@
 // Tests for TaskManager -- manages background task agents.
 
 import { describe, it, expect } from "bun:test";
-import { TaskManager, TaskHandle, TASK_STATUS } from "../../src/core/session/task-manager.ts";
-import { contentToText } from "../../src/core/context/message.ts";
-import { createHooks } from "../../src/core/hooks.ts";
-import { initializeLogger, resetLoggerForTesting, type LogEvent } from "../../src/utils/logger.ts";
-import { LlmError } from "../../src/core/error.ts";
+import { TaskManager, TaskHandle, TASK_STATUS } from "@core/session/task-manager.ts";
+import { contentToText } from "@core/context/message.ts";
+import { createHooks } from "@core/hooks.ts";
+import { initializeLogger, resetLoggerForTesting, type LogEvent } from "@utils/logger.ts";
+import { LlmError } from "@core/error.ts";
 
 /** The harness structure a task result is delivered as. */
 function resultParts(taskId: string, result: string) {

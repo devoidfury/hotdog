@@ -1,9 +1,9 @@
 // Tests for webui/server.ts — WebUI server creation and configuration.
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { createWebuiServer } from "../../src/extensions/webui/server.ts";
-import { logger } from "../../src/utils/logger.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
+import { createWebuiServer } from "@extensions/webui/server.ts";
+import { logger } from "@utils/logger.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
 import { createMockCore as createBaseMockCore } from "../test-helpers.ts";
 
 function createMockCore(config: Record<string, unknown> = {}) {

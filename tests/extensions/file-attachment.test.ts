@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { create, resolveFilePath } from "../../src/extensions/file-attachment/index.ts";
-import { contentToText, Message } from "../../src/core/context/message.ts";
-import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
-import { MessageBus } from "../../src/core/session/message-bus.ts";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
-import { MarkerMangler, buildAliasPattern } from "../../src/core/marker-mangler.ts";
-import type { ModelConfig } from "../../src/core/config/providers.ts";
+import { create, resolveFilePath } from "@extensions/file-attachment/index.ts";
+import { contentToText, Message } from "@core/context/message.ts";
+import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { MessageBus } from "@core/session/message-bus.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import { MarkerMangler, buildAliasPattern } from "@core/marker-mangler.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
 
 type Parts = Array<Record<string, unknown>>;
 
@@ -24,16 +24,16 @@ function transformedContent(result: unknown): Parts {
 function fileIncludeParts(content: Parts): Parts {
   return content.filter((p) => p.type === "file-include");
 }
-import { matcher, completion } from "../../src/extensions/file-attachment/completions.ts";
-import { PathEscapeError, Workspace } from "../../src/utils/workspace.ts";
-import { createCompletionService } from "../../src/core/completion.ts";
+import { matcher, completion } from "@extensions/file-attachment/completions.ts";
+import { PathEscapeError, Workspace } from "@utils/workspace.ts";
+import { createCompletionService } from "@core/completion.ts";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
 // Mock agent for completion tests
-const mockAgent = {} as unknown as import("../../src/core/agent.ts").Agent;
+const mockAgent = {} as unknown as import("@core/agent.ts").Agent;
 
 describe("file-attachment completion matcher", () => {
   it("matches when typing @ at start of word", () => {

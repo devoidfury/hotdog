@@ -1,7 +1,7 @@
 // Tests for mcp-client/tools.ts — McpTool and schema conversion utilities.
 
 import { describe, it, expect, mock } from "bun:test";
-import { McpTool } from "../../src/extensions/mcp-client/tools.ts";
+import { McpTool } from "@extensions/mcp-client/tools.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

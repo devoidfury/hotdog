@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { compileGitignore } from "../../src/utils/gitignore.ts";
+import { compileGitignore } from "@utils/gitignore.ts";
 
 describe("compileGitignore", () => {
   const gitignore = (content: string) => compileGitignore(content);

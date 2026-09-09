@@ -4,7 +4,7 @@ import {
 } from "../prompts.ts";
 import { serializeConversation, estimateContextTokens, estimateMessageTokens } from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult, requireContextLimit } from "../strategies.ts";
-import { AgentError } from "../../../core/error.ts";
+import { AgentError } from "@core/error.ts";
 
 export class TokenAwareStrategy extends CompactionStrategy {
   override name = "token-aware";

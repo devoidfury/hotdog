@@ -5,7 +5,7 @@ import {
   getExtensionConfig,
   getConfigSchemaProperties,
   getConfigDefault,
-} from "../../src/core/extensions/types.ts";
+} from "@core/extensions/types.ts";
 
 describe("getExtensionConfig", () => {
   it("returns config block from core.config", () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fsSync from "node:fs";
 import path from "node:path";
-import { GrepTool, grepNative } from "../../src/extensions/core-tools/grep.ts";
+import { GrepTool, grepNative } from "@extensions/core-tools/grep.ts";
 import { resultStr, getDisplay, tmpDir, toolCtx, cleanupDir } from "../helpers.ts";
 
 let dir: string;

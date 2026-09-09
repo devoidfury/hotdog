@@ -9,7 +9,7 @@
 //   cancel  -- after questionTimeoutSecs, interrupt the session (which
 //              cancels the pending question with defaults)
 
-import type { QuestionDef } from "../../core/context/input.ts";
+import type { QuestionDef } from "@core/context/input.ts";
 
 export type QuestionStrategy = "wait" | "default" | "cancel";
 

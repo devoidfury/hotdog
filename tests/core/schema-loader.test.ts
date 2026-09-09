@@ -11,7 +11,7 @@ import {
   resolveModel,
   resolveModelWithProvider,
   CONFIG_SCHEMA,
-} from "../../src/core/config/schema-loader.ts";
+} from "@core/config/schema-loader.ts";
 
 describe("buildConfigSchema", () => {
   it("returns a schema object with same keys as CONFIG_SCHEMA", () => {

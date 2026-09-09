@@ -10,10 +10,10 @@
 // literal tag text, so the mangler-alias fossil scan stays green.
 
 import { describe, it, expect } from "bun:test";
-import { LlmClient } from "../../../src/core/llm-client/client.ts";
-import { MarkerMangler, buildAliasPattern } from "../../../src/core/marker-mangler.ts";
-import { Message } from "../../../src/core/context/message.ts";
-import type { ModelConfig } from "../../../src/core/config/providers.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import { MarkerMangler, buildAliasPattern } from "@core/marker-mangler.ts";
+import { Message } from "@core/context/message.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "gpt-4", temperature: null, contextLimit: 128000, tags: [], ...overrides };

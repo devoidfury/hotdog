@@ -9,7 +9,7 @@ import {
   sanitize,
   escapeJson,
   resolveQuestionAnswer,
-} from "../../src/extensions/webui/ui/utils.ts";
+} from "@extensions/webui/ui/utils.ts";
 
 describe("formatTime", () => {
   it("formats a timestamp as HH:MM", () => {

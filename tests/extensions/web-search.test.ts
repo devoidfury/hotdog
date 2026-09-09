@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { WebSearchTool } from "../../src/extensions/web-search/index.ts";
+import { WebSearchTool } from "@extensions/web-search/index.ts";
 import { resultStr, withMockFetch, jsonResponse } from "../helpers.ts";
-import type { CoreContext } from "../../src/core/extensions/types.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
 
 const defaultWebSearchOptions = {
   provider: "duckduckgo" as const,
@@ -145,10 +145,10 @@ describe("WebSearchTool provider error handling", () => {
 
 describe("WebSearchTool extension create", () => {
   it("creates extension with default config and registers the tool", async () => {
-    const { create } = await import("../../src/extensions/web-search/index.ts");
-    const { HOOKS } = await import("../../src/core/hooks.ts");
+    const { create } = await import("@extensions/web-search/index.ts");
+    const { HOOKS } = await import("@core/hooks.ts");
     const { createToolRegistry } =
-      await import("../../src/core/extensions/tool-registry.ts");
+      await import("@core/extensions/tool-registry.ts");
 
     const ext = create({ config: {} } as unknown as CoreContext);
     const registry = createToolRegistry();
@@ -157,10 +157,10 @@ describe("WebSearchTool extension create", () => {
   });
 
   it("reads provider settings from config", async () => {
-    const { create } = await import("../../src/extensions/web-search/index.ts");
-    const { HOOKS } = await import("../../src/core/hooks.ts");
+    const { create } = await import("@extensions/web-search/index.ts");
+    const { HOOKS } = await import("@core/hooks.ts");
     const { createToolRegistry } =
-      await import("../../src/core/extensions/tool-registry.ts");
+      await import("@core/extensions/tool-registry.ts");
 
     const ext = create({
       config: { webSearch: { provider: "duckduckgo", maxResults: 3, timeout: 10 } },
@@ -174,10 +174,10 @@ describe("WebSearchTool extension create", () => {
   });
 
   it("reads API keys from config", async () => {
-    const { create } = await import("../../src/extensions/web-search/index.ts");
-    const { HOOKS } = await import("../../src/core/hooks.ts");
+    const { create } = await import("@extensions/web-search/index.ts");
+    const { HOOKS } = await import("@core/hooks.ts");
     const { createToolRegistry } =
-      await import("../../src/core/extensions/tool-registry.ts");
+      await import("@core/extensions/tool-registry.ts");
 
     // A tavily key from config must reach the registered tool: with it the
     // search proceeds; without it the tool reports "not configured".

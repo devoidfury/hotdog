@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   createAuthMiddleware,
   apiKeyEquals,
-} from "../../src/extensions/websocket/auth.ts";
+} from "@extensions/websocket/auth.ts";
 
 /**
  * A zero-TTL token expires as soon as Date.now() advances past its issue

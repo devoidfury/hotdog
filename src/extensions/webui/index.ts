@@ -1,8 +1,8 @@
-import { HOOKS } from "../../core/hooks.ts";
+import { HOOKS } from "@core/hooks.ts";
 import { createWebuiServer, type WebuiConfig } from "./server.ts";
-import { CoreContext, ExtensionInstance, getExtensionConfig } from "../../core/extensions/types.ts";
-import { CliArgv } from "../../core/config/index.ts";
-import { formatError } from "../../core/error.ts";
+import { CoreContext, ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
+import { CliArgv } from "@core/config/index.ts";
+import { formatError } from "@core/error.ts";
 
 async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Promise<number> {
   try {

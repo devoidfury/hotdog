@@ -1,13 +1,13 @@
 // Extended tests for LlmClient streaming and cancellation (public API only).
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
-import type { ModelConfig } from "../../src/core/config/providers.ts";
-import { createLlmProtocolRegistry, type LlmProtocol, type ProtocolContext } from "../../src/core/llm-client/protocol.ts";
-import { LlmError } from "../../src/core/error.ts";
-import { Message } from "../../src/core/context/message.ts";
-import { MarkerMangler } from "../../src/core/marker-mangler.ts";
-import { createStreamProcessor } from "../../src/core/llm-client/stream-processor.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
+import { createLlmProtocolRegistry, type LlmProtocol, type ProtocolContext } from "@core/llm-client/protocol.ts";
+import { LlmError } from "@core/error.ts";
+import { Message } from "@core/context/message.ts";
+import { MarkerMangler } from "@core/marker-mangler.ts";
+import { createStreamProcessor } from "@core/llm-client/stream-processor.ts";
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "test-model", temperature: null, contextLimit: 128000, tags: [], ...overrides };

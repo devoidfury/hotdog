@@ -17,7 +17,7 @@ let correctCommonPathMistakes: (strPath: string, dirPath?: string) => [string, s
 let loadAspects: (aspectNames: string[] | null, aspectsDir?: string) => Promise<{ name: string; content: string }[]>;
 
 beforeAll(async () => {
-  const mod = await import("../../src/utils/file-utils.ts");
+  const mod = await import("@utils/file-utils.ts");
   validateNameable = mod.validateNameable;
   parseFrontMatter = mod.parseFrontMatter;
   correctCommonPathMistakes = mod.correctCommonPathMistakes;

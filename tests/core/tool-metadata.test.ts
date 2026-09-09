@@ -1,7 +1,7 @@
 // Tests for ToolMetadata, filtering methods, and sandbox mode.
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { ToolRegistry, Tool, ToolMetadata } from "../../src/core/extensions/tool-registry.ts";
+import { ToolRegistry, Tool, ToolMetadata } from "@core/extensions/tool-registry.ts";
 
 // ── Test Tool Implementations ───────────────────────────────────────────────
 

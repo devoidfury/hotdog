@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { getNested } from "../../utils/objects.ts";
+import { getNested } from "@utils/objects.ts";
 import configSchema from "../core.config.json" with { type: "json" };
 import type {
   CastFn,

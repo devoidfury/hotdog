@@ -7,11 +7,11 @@ import {
   readSessionEntries,
   sessionExists,
   LOG_SOURCE,
-} from "../../src/core/session/session-log.ts";
-import type { LogEntry } from "../../src/core/session/session-log.ts";
+} from "@core/session/session-log.ts";
+import type { LogEntry } from "@core/session/session-log.ts";
 import { TestSessionLog } from "../mocks/io.ts";
-import { Message } from "../../src/core/context/message.ts";
-import { MessageLog } from "../../src/core/context/message-log.ts";
+import { Message } from "@core/context/message.ts";
+import { MessageLog } from "@core/context/message-log.ts";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";

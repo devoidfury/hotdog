@@ -8,7 +8,7 @@ import {
   getVisibleWorkerProfiles,
   allProfilesForSwitch,
   isValidProfileName,
-} from "../../src/core/config/profiles.ts";
+} from "@core/config/profiles.ts";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";

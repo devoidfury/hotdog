@@ -4,8 +4,8 @@ import {
   formatValidationErrors,
   castAs,
   parseOrThrow,
-} from "../../src/utils/json-schema.ts";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+} from "@utils/json-schema.ts";
+import { ToolRegistry } from "@core/extensions/tool-registry.ts";
 
 function schema(props: Record<string, Record<string, unknown>>, required: string[] = []) {
   return { type: "object" as const, properties: props, required };

@@ -1,8 +1,8 @@
 // Tests for the question tool — non-interactive mode only.
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { QuestionTool, create } from "../../src/extensions/question-tool/index.ts";
-import type { CoreContext } from "../../src/core/extensions/types.ts";
+import { QuestionTool, create } from "@extensions/question-tool/index.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
 
 describe("QuestionTool", () => {
   let tool: QuestionTool;

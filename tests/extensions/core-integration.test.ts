@@ -1,16 +1,16 @@
 import { describe, it, expect } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
-import { ExtensionLoader, type LoaderCore } from "../../src/core/extensions/extensions.ts";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
-import type { CoreContext } from "../../src/core/extensions/types.ts";
-import { ServiceRegistry } from "../../src/core/extensions/service-registry.ts";
-import type { ConfigRegistry } from "../../src/core/extensions/config.ts";
-import type { CliSubcommandRegistry } from "../../src/core/extensions/registries.ts";
-import { createCompletionService } from "../../src/core/completion.ts";
-import { create as createCompactionExtension } from "../../src/extensions/compaction/index.ts";
-import { create as createCoreToolsExtension } from "../../src/extensions/core-tools/index.ts";
-import { create as createSkillsExtension } from "../../src/extensions/skills/index.ts";
-import { create as createSessionLogExtension } from "../../src/extensions/session-log/index.ts";
+import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { ExtensionLoader, type LoaderCore } from "@core/extensions/extensions.ts";
+import { ToolRegistry } from "@core/extensions/tool-registry.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
+import { ServiceRegistry } from "@core/extensions/service-registry.ts";
+import type { ConfigRegistry } from "@core/extensions/config.ts";
+import type { CliSubcommandRegistry } from "@core/extensions/registries.ts";
+import { createCompletionService } from "@core/completion.ts";
+import { create as createCompactionExtension } from "@extensions/compaction/index.ts";
+import { create as createCoreToolsExtension } from "@extensions/core-tools/index.ts";
+import { create as createSkillsExtension } from "@extensions/skills/index.ts";
+import { create as createSessionLogExtension } from "@extensions/session-log/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

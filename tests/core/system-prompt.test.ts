@@ -4,7 +4,7 @@ import {
   SystemPromptBuilder,
   createSystemPromptBuilder,
   collectSystemPromptChunks,
-} from "../../src/core/context/system-prompt.ts";
+} from "@core/context/system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
   it("builds a system prompt with role and chunks", async () => {

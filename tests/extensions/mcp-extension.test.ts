@@ -1,9 +1,9 @@
 // Tests for mcp-client/index.ts — extension create, tool registration, and cleanup.
 
 import { describe, it, expect } from "bun:test";
-import { HOOKS } from "../../src/core/hooks.ts";
-import { create } from "../../src/extensions/mcp-client/index.ts";
-import type { McpConnection, McpConnectionHandle } from "../../src/extensions/mcp-client/connection.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { create } from "@extensions/mcp-client/index.ts";
+import type { McpConnection, McpConnectionHandle } from "@extensions/mcp-client/connection.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

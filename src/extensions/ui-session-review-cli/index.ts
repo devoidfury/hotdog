@@ -1,12 +1,12 @@
-import { HOOKS } from "../../core/hooks.ts";
-import { deleteSessionLog, readSessionEntries, sessionExists, sessionsDir as getSessionsDir, type LogEntry } from "../../core/session/session-log.ts";
-import { contentToText } from "../../core/context/message.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { deleteSessionLog, readSessionEntries, sessionExists, sessionsDir as getSessionsDir, type LogEntry } from "@core/session/session-log.ts";
+import { contentToText } from "@core/context/message.ts";
 import { readdir, access, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { ReviewTool, listRecentSessions } from "./review.ts";
-import { CoreContext, ExtensionInstance, ToolsRegisterPayload } from "../../core/extensions/types.ts";
+import { CoreContext, ExtensionInstance, ToolsRegisterPayload } from "@core/extensions/types.ts";
 import readline from "node:readline";
-import { CoreConfigWithExtensions } from "../../core/config/index.ts";
+import { CoreConfigWithExtensions } from "@core/config/index.ts";
 
 interface CliArgs {
   theme?: string;

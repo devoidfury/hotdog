@@ -1,11 +1,11 @@
 // Tests for ToolRegistry caching.
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
-import { ToolRegistry, type Tool } from "../../src/core/extensions/tool-registry.ts";
-import { Agent } from "../../src/core/agent.ts";
-import { HookSystem } from "../../src/core/hooks.ts";
-import { createToolRegistry } from "../../src/core/extensions/tool-registry.ts";
-import { initializeLogger, resetLoggerForTesting } from "../../src/utils/logger.ts";
+import { ToolRegistry, type Tool } from "@core/extensions/tool-registry.ts";
+import { Agent } from "@core/agent.ts";
+import { HookSystem } from "@core/hooks.ts";
+import { createToolRegistry } from "@core/extensions/tool-registry.ts";
+import { initializeLogger, resetLoggerForTesting } from "@utils/logger.ts";
 
 /** Create a minimal test tool (def name defaults to the registered name) */
 function mkTool(execute: () => unknown | Promise<unknown>, name = "test"): Tool {
@@ -366,7 +366,7 @@ describe("Agent model setter clears tool def cache", () => {
 
     const llmClient = {
       chatStreamCancellable: async function* () {},
-    } as unknown as import("../../src/core/llm-client/client.ts").LlmClient;
+    } as unknown as import("@core/llm-client/client.ts").LlmClient;
 
     const agent = new Agent({
       hooks,

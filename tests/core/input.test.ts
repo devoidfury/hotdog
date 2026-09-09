@@ -1,7 +1,7 @@
 // Tests for core/context/input.ts — NoopInput.
 
 import { describe, it, expect } from "bun:test";
-import { NoopInput } from "../../src/core/context/input.ts";
+import { NoopInput } from "@core/context/input.ts";
 
 describe("NoopInput", () => {
   it("returns false for isInteractive", () => {

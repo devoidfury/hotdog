@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { isSensitiveEnvVar, copyScrubbedEnv } from "../../src/utils/env.ts";
+import { isSensitiveEnvVar, copyScrubbedEnv } from "@utils/env.ts";
 
 describe("isSensitiveEnvVar", () => {
   it("flags keys containing sensitive substrings", () => {

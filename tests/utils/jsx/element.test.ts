@@ -6,12 +6,12 @@ import {
   Fragment,
   jsx,
   jsxs,
-} from "../../../src/utils/jsx/index.ts";
+} from "@utils/jsx/index.ts";
 import {
   Fragment as FragmentDev,
   jsxDEV,
-} from "../../../src/utils/jsx/jsx-dev-runtime.ts";
-import { Fragment as FragmentProd } from "../../../src/utils/jsx/jsx-runtime.ts";
+} from "@utils/jsx/jsx-dev-runtime.ts";
+import { Fragment as FragmentProd } from "@utils/jsx/jsx-runtime.ts";
 
 describe("createNode", () => {
   it("builds a node with type, props, and key", () => {

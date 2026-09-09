@@ -1,5 +1,5 @@
 import { initSystemPromptTemplate } from "../config/providers.ts";
-import { render } from "../../utils/render.ts";
+import { render } from "@utils/render.ts";
 import { HOOKS, type SystemPromptChunk } from "../hooks.ts";
 
 /** Chunks from hook results, prefixed with the handler's registration source, sorted by priority. */

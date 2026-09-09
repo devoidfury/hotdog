@@ -1,14 +1,14 @@
 import { describe, it, expect } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
-import { AgentCommandRegistry } from "../../src/core/extensions/registries.ts";
-import { MessageLog } from "../../src/core/context/message-log.ts";
-import { Message } from "../../src/core/context/message.ts";
-import { create as createCompactionExtension } from "../../src/extensions/compaction/index.ts";
+import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { AgentCommandRegistry } from "@core/extensions/registries.ts";
+import { MessageLog } from "@core/context/message-log.ts";
+import { Message } from "@core/context/message.ts";
+import { create as createCompactionExtension } from "@extensions/compaction/index.ts";
 import {
   matcher as compactMatcher,
   completion as compactCompletion,
-} from "../../src/extensions/compaction/completions.ts";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+} from "@extensions/compaction/completions.ts";
+import { ToolRegistry } from "@core/extensions/tool-registry.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

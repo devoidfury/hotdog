@@ -1,5 +1,5 @@
-import { AgentError, ConfigError } from "../../core/error.ts";
-import { Message } from "../../core/context/message.ts";
+import { AgentError, ConfigError } from "@core/error.ts";
+import { Message } from "@core/context/message.ts";
 
 export { Message };
 

@@ -1,8 +1,8 @@
 // Tests for DropStrategy compaction strategy.
 import { describe, it, expect, beforeEach } from "bun:test";
-import { DropStrategy } from "../../src/extensions/compaction/strategies/drop.ts";
-import { CompactionSettings } from "../../src/extensions/compaction/strategies.ts";
-import { Message } from "../../src/core/context/message.ts";
+import { DropStrategy } from "@extensions/compaction/strategies/drop.ts";
+import { CompactionSettings } from "@extensions/compaction/strategies.ts";
+import { Message } from "@core/context/message.ts";
 
 function msg(role: string, content: string) {
   return new Message({ role, content });

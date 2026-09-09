@@ -3,9 +3,9 @@
 
 import { describe, it, expect } from "bun:test";
 import fs from "node:fs";
-import { McpClient } from "../../src/extensions/mcp-client/client.ts";
-import { McpConnection } from "../../src/extensions/mcp-client/connection.ts";
-import { HttpTransport, StdioTransport } from "../../src/extensions/mcp-client/transports.ts";
+import { McpClient } from "@extensions/mcp-client/client.ts";
+import { McpConnection } from "@extensions/mcp-client/connection.ts";
+import { HttpTransport, StdioTransport } from "@extensions/mcp-client/transports.ts";
 import { tmpDir, cleanupDir, processAlive, waitForExit, withMockFetch, jsonResponse, textResponse } from "../helpers.ts";
 
 // ── McpClient._sendRequest Tests ─────────────────────────────────────────────

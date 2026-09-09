@@ -4,13 +4,13 @@ import {
   LOG_SOURCE,
   listSessionLogs,
   readSessionEntries,
-} from "../../core/session/session-log.ts";
+} from "@core/session/session-log.ts";
 import {
   ToolResult,
   defaultCallDisplay,
   toolDef,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 
 export interface RecentSession {
   id: string;

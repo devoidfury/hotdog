@@ -11,7 +11,7 @@ import {
   isInputHandled,
   type GateAction,
   type InputHookResult,
-} from "../../src/core/hooks.ts";
+} from "@core/hooks.ts";
 import { describe, it, expect } from "bun:test";
 
 describe("HookSystem.on() / notifyHooks()", () => {

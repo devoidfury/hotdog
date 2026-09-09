@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { MessageLog } from "../../src/core/context/message-log.ts";
-import { Message } from "../../src/core/context/message.ts";
+import { MessageLog } from "@core/context/message-log.ts";
+import { Message } from "@core/context/message.ts";
 
 describe("MessageLog", () => {
   it("creates empty log", () => {

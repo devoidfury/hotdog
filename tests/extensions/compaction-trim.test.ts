@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { TrimStrategy } from "../../src/extensions/compaction/strategies/trim.ts";
-import { estimateContextTokens, findFirstKeptIndex } from "../../src/extensions/compaction/utils.ts";
-import { Message } from "../../src/core/context/message.ts";
+import { TrimStrategy } from "@extensions/compaction/strategies/trim.ts";
+import { estimateContextTokens, findFirstKeptIndex } from "@extensions/compaction/utils.ts";
+import { Message } from "@core/context/message.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

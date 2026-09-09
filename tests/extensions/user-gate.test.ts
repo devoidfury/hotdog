@@ -3,10 +3,10 @@
 // decider) is faked at its natural boundary; no kernel involved.
 
 import { describe, it, expect } from "bun:test";
-import { HookSystem, HOOKS, type SandboxGateAction } from "../../src/core/hooks.ts";
-import type { HookPayloads } from "../../src/core/extensions/types.ts";
-import type { CoreContext } from "../../src/core/extensions/types.ts";
-import { create } from "../../src/extensions/user-gate/index.ts";
+import { HookSystem, HOOKS, type SandboxGateAction } from "@core/hooks.ts";
+import type { HookPayloads } from "@core/extensions/types.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
+import { create } from "@extensions/user-gate/index.ts";
 
 type GatePayload = HookPayloads["sandbox:gate"];
 

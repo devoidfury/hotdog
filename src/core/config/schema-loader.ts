@@ -62,15 +62,7 @@ const COMPUTE_BUILTINS: Record<
   joinConfigDir: (arg: unknown, ctx: unknown): string => {
     const subPath = arg as string;
     const configDir = (ctx as { configDir?: string }).configDir;
-    if (configDir) {
-      return join(configDir, subPath);
-    }
-    const fallbacks: Record<string, string> = {
-      skills: "/skills",
-      prompts: "./config/prompts",
-      profiles: "./config/profiles",
-    };
-    return fallbacks[subPath] || join("./config", subPath);
+    return join(configDir || "./config", subPath);
   },
 };
 

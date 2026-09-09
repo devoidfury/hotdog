@@ -93,32 +93,23 @@ describe("Info CLI - printInfoText branches", () => {
   });
 
   it("shows MCP servers when configured", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-mcp-"));
-    const configPath = join(tmpDir, "defaults.json");
-    writeFileSync(
-      configPath,
-      JSON.stringify({
+    const run = await infoCliRunner({
+      coreConfig: {
         mcpServers: [
           { name: "server-http", url: "http://localhost:3000", enabled: true },
           { name: "server-stdio", command: "uvicorn", enabled: false },
         ],
-      }),
-    );
-
-    try {
-      const run = await infoCliRunner({}, { config: configPath });
-      const { exitCode, output } = await run("info");
-      expect(exitCode).toBe(0);
-      expect(output).toContain("MCP Servers:");
-      expect(output).toContain("server-http");
-      expect(output).toContain("HTTP");
-      expect(output).toContain("enabled");
-      expect(output).toContain("server-stdio");
-      expect(output).toContain("stdio");
-      expect(output).toContain("disabled");
-    } finally {
-      try { rmSync(configPath); rmSync(tmpDir); } catch {}
-    }
+      },
+    });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("MCP Servers:");
+    expect(output).toContain("server-http");
+    expect(output).toContain("HTTP");
+    expect(output).toContain("enabled");
+    expect(output).toContain("server-stdio");
+    expect(output).toContain("stdio");
+    expect(output).toContain("disabled");
   });
 
   it("shows connectivity unreachable when ping fails", async () => {
@@ -151,30 +142,19 @@ describe("Info CLI - printInfoText branches", () => {
 
 describe("Info CLI - printInfoJson branches", () => {
   it("includes mcp_servers in JSON output", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-mcp-json-"));
-    const configPath = join(tmpDir, "defaults.json");
-    writeFileSync(
-      configPath,
-      JSON.stringify({
-        mcpServers: [
-          { name: "test-server", url: "http://localhost:3000", enabled: true },
-        ],
-      }),
-    );
+    const run = await infoCliRunner({
+      coreConfig: {
+        mcpServers: [{ name: "test-server", url: "http://localhost:3000", enabled: true }],
+      },
+    }, { wantsJson: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
 
-    try {
-      const run = await infoCliRunner({}, { wantsJson: true, config: configPath });
-      const { exitCode, output } = await run("info");
-      expect(exitCode).toBe(0);
-
-      const parsed = JSON.parse(output.trim());
-      expect(parsed.mcp_servers).toBeDefined();
-      expect(parsed.mcp_servers.length).toBe(1);
-      expect(parsed.mcp_servers[0].name).toBe("test-server");
-      expect(parsed.mcp_servers[0].enabled).toBe(true);
-    } finally {
-      try { rmSync(configPath); rmSync(tmpDir); } catch {}
-    }
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.mcp_servers).toBeDefined();
+    expect(parsed.mcp_servers.length).toBe(1);
+    expect(parsed.mcp_servers[0].name).toBe("test-server");
+    expect(parsed.mcp_servers[0].enabled).toBe(true);
   });
 
   it("includes connectivity error in JSON output", async () => {
@@ -690,5 +670,85 @@ describe("Info CLI - profiles subcommand", () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ── extension info panels ───────────────────────────────────────────────────
+
+describe("Info CLI - extension info panels", () => {
+  // The surface must render whatever an extension contributes without knowing
+  // anything about that extension, so these use a stand-in panel.
+  const panel = {
+    name: "widget",
+    sections: [
+      {
+        fields: [
+          { key: "path", value: "/tmp/widgets" },
+          { key: "count", value: 3 },
+        ],
+      },
+      {
+        title: "health",
+        fields: [
+          { key: "warm", value: true },
+          { key: "tags", value: ["fast", "cheap"] },
+          { key: "note", value: null },
+        ],
+      },
+    ],
+    detail: [{ name: "sprocket" }],
+  };
+
+  function panelRunner(extensions: Array<[string, unknown]>, wantsJson = false) {
+    return infoCliRunner({ extensionInstances: extensions }, { wantsJson });
+  }
+
+  it("renders a contributed panel under its own heading", async () => {
+    const run = await panelRunner([["widget", { infoPanel: () => panel }]]);
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Widget:");
+    expect(output).toContain("  Path:  /tmp/widgets");
+    expect(output).toContain("  Count: 3");
+    expect(output).toContain("  Health:");
+    expect(output).toContain("    Warm: yes");
+    expect(output).toContain("    Tags: fast, cheap");
+    expect(output).toContain("    Note: (none)");
+  });
+
+  it("keeps values structured in JSON, keyed by panel name", async () => {
+    const run = await panelRunner([["widget", { infoPanel: () => panel }]], true);
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.extensions.widget).toEqual({
+      path: "/tmp/widgets",
+      count: 3,
+      health: { warm: true, tags: ["fast", "cheap"], note: null },
+      detail: [{ name: "sprocket" }],
+    });
+  });
+
+  it("prints nothing when no extension contributes a panel", async () => {
+    const run = await panelRunner([["silent", {}]]);
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).not.toContain("Widget:");
+  });
+
+  // Diagnostics must survive one extension's bad panel.
+  it("skips a panel that throws and still reports the others", async () => {
+    const run = await panelRunner([
+      ["broken", {
+        infoPanel: () => {
+          throw new Error("panel exploded");
+        },
+      }],
+      ["widget", { infoPanel: () => panel }],
+    ]);
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Widget:");
   });
 });

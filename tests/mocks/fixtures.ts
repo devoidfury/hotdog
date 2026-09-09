@@ -190,9 +190,13 @@ export function createMockCore(
     providers?: unknown[];
     buildConfig?: (cli: Record<string, unknown>) => Promise<{
       resolved: Record<string, unknown>;
+      /** Merged config with extension config resolved, as core/buildConfig returns it. */
+      config?: Record<string, unknown>;
       modelRegistry: Record<string, unknown>;
       providers: unknown[];
     }>;
+    /** Instances surfaced through core.extensions.all(), e.g. info-panel contributors. */
+    extensionInstances?: Array<[string, unknown]>;
   } = {},
 ): CoreContext {
   const hooks = new HookSystem();
@@ -240,6 +244,7 @@ export function createMockCore(
     modelRegistry: config.modelRegistry || {},
     extensions: {
       has: () => false,
+      all: () => config.extensionInstances || [],
       load: async () => null,
       cleanup: async () => {},
     } as unknown as NonNullable<CoreContext["extensions"]>,
@@ -247,6 +252,9 @@ export function createMockCore(
       config.buildConfig ||
       ((async (_cli: Record<string, unknown>) => ({
         resolved,
+        // Same merged config the real buildConfig hands back: consumers read
+        // extension and file values here rather than re-loading the file.
+        config: config.coreConfig || {},
         modelRegistry: config.modelRegistry || {},
         providers: config.providers || [],
       })) as CoreContext["buildConfig"]),

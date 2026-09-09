@@ -994,4 +994,60 @@ Content.
     expect(ext.isToolAllowed("read_file")).toBe(true);
     expect(ext.isToolAllowed("write")).toBe(false);
   });
+
+  it("infoPanel reports the resolved path and what was discovered", async () => {
+    await createTempSkill("panel-skill", `---
+name: Panel Skill
+description: For panels
+---
+
+Content.
+`);
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    const panel = ext.infoPanel();
+    expect(panel.name).toBe("skills");
+    expect(panel.sections).toHaveLength(1);
+
+    const fields = Object.fromEntries(
+      panel.sections[0].fields.map((f: { key: string; value: unknown }) => [f.key, f.value]),
+    );
+    expect(fields.path).toBe(tempDir);
+    // Discovered on disk, and a count -- not a formatted string, which would
+    // push display decisions onto every surface.
+    expect(fields.loaded).toBe(1);
+    expect(typeof fields.loaded).toBe("number");
+    expect(panel.sections[0].title).toBeUndefined();
+
+    // detail is machine-readable; skill names, not a rendered list.
+    expect(panel.detail).toEqual([
+      {
+        name: "Panel Skill",
+        description: "For panels",
+        activated: false,
+        location: expect.any(String),
+      },
+    ]);
+  });
+
+  it("infoPanel counts skills that were never activated", async () => {
+    await createTempSkill("dormant-skill", `---
+name: Dormant Skill
+description: Never activated
+---
+
+Content.
+`);
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    // Regression: the count came from activeSkills(), which only fills in once
+    // a skill is activated inside a running session -- so info always said 0.
+    expect(ext.getActiveSkills()).toHaveLength(0);
+    const loaded = ext.infoPanel().sections[0].fields.find((f: { key: string }) => f.key === "loaded");
+    expect(loaded.value).toBe(1);
+  });
 });

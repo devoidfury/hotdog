@@ -8,7 +8,7 @@ import { ACTIONS } from "@core/commands.ts";
 import { patternMatches, Skill, SkillsLoader } from "./loader.ts";
 import { LoadSkillTool } from "./load-skill.ts";
 import { Message } from "@core/context/message.ts";
-import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
+import { type CoreContext, type ExtensionInfoPanel, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
 import { ExtensionError } from "@core/error.ts";
 import { matcher, createCompletionHandler } from "./completions.ts";
 
@@ -25,8 +25,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   if (!config.path) {
     throw ExtensionError.ConfigFailed("skills", "skills path not configured");
   }
+  const skillsPath = config.path;
 
-  const loader = new SkillsLoader(config.path);
+  const loader = new SkillsLoader(skillsPath);
   await loader.loadSkills();
 
   // Preload skills from config
@@ -61,6 +62,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     getActiveSkills(): Skill[];
     getCombinedToolPatterns(): Set<string>;
     isToolAllowed(toolName: string): boolean;
+    infoPanel(): ExtensionInfoPanel;
   } = {
     hooks: {
       /** Build skills preamble for system prompt. */
@@ -162,6 +164,32 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
 
     /** Check if a tool is allowed by active skills. */
     isToolAllowed,
+
+    /**
+     * Status panel for diagnostic surfaces: where skills came from and what
+     * was found. Owned here so no other extension has to know skills config
+     * keys or loader internals -- surfaces render whatever this returns.
+     */
+    infoPanel(): ExtensionInfoPanel {
+      const skills = loader.allSkills();
+      return {
+        name: "skills",
+        sections: [
+          {
+            fields: [
+              { key: "path", value: skillsPath },
+              { key: "loaded", value: skills.length },
+            ],
+          },
+        ],
+        detail: skills.map((s) => ({
+          name: s.name,
+          description: s.description,
+          activated: s.loaded,
+          location: s.location,
+        })),
+      };
+    },
   };
 
   // Register completion with completion service (if available)

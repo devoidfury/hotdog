@@ -1,5 +1,4 @@
 import { HOOKS } from "@core/hooks.ts";
-import { SkillsLoader } from "../skills/loader.ts";
 import { DEFAULT_CONFIG_FILENAME } from "@core/config/defaults.ts";
 import { CliArgv, getDefaultConfig, loadConfig, ProviderDef, resolveConfigDir } from "@core/config/index.ts";
 import { ProfileDef, ProfileManager } from "@core/config/profiles.ts";
@@ -11,7 +10,13 @@ import {
   SchemaLayer,
 } from "@core/config/schema-loader.ts";
 import { Agent } from "@core/agent.ts";
-import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
+import {
+  collectInfoPanels,
+  CoreContext,
+  ExtensionInfoPanel,
+  ExtensionInstance,
+  InfoValue,
+} from "@core/extensions/types.ts";
 import type { BuildAgentConfig, DefaultConfig } from "@core/config/index.ts";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -29,14 +34,6 @@ interface McpServerDef {
   enabled?: boolean;
   url?: string;
   command?: string;
-}
-
-// config.skills.path fallback, shared by the info loader and its displays.
-function skillsPathFromConfig(config?: Record<string, unknown>): string {
-  const skills = config?.skills;
-  const pathFromSkills =
-    typeof skills === "object" && skills ? (skills as Record<string, unknown>).path : undefined;
-  return (pathFromSkills as string) || "/skills";
 }
 
 // Fallback for tests/backward compat
@@ -78,12 +75,14 @@ interface TraceContext {
 
 async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
   const buildConfig = core.buildConfig!;
-  const { resolved, modelRegistry, providers } = await buildConfig(cli);
+  // `config` is buildConfig's merged config with extension config resolved --
+  // the same object the session reads, so diagnostics cannot drift from it.
+  const { resolved, config, modelRegistry, providers } = await buildConfig(cli);
   const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
-  const rawConfig = await loadConfig(cli.config, configDir);
 
   if (cli.configDebug) {
-    return await printConfigDebug(cli, rawConfig, providers, resolved);
+    // Layer tracing wants the file values, not the resolved merge.
+    return await printConfigDebug(cli, await loadConfig(cli.config, configDir), providers, resolved);
   }
 
   const client = core.createLlmClient({ stream: false });
@@ -96,16 +95,15 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
     connectivity = { reachable: false, error: (e as Error).message };
   }
 
-  const skillsLoader = new SkillsLoader(
-    (cli.skillsPath as string | string[] | undefined) || skillsPathFromConfig(rawConfig),
-  );
-  await skillsLoader.loadSkills();
+  // Extension-owned status (the skills extension reports its own path and
+  // counts; nothing here knows how any single extension computes them).
+  const panels = collectInfoPanels(core.extensions);
 
   if (cli.wantsJson) {
-    return printInfoJson(resolved, modelRegistry, providers, skillsLoader, connectivity, rawConfig);
+    return printInfoJson(resolved, modelRegistry, providers, panels, connectivity, config);
   }
 
-  return printInfoText(resolved, modelRegistry, providers, skillsLoader, connectivity, rawConfig);
+  return printInfoText(resolved, modelRegistry, providers, panels, connectivity, config);
 }
 
 // Sandbox diagnostics for `hotdog info` (docs/sysbox-sandbox.md invariant 5:
@@ -139,7 +137,7 @@ function printInfoText(
   resolved: BuildAgentConfig,
   modelRegistry: Record<string, unknown>,
   providers: ProviderDef[],
-  skillsLoader: SkillsLoader,
+  panels: ExtensionInfoPanel[],
   connectivity: ConnectivityResult,
   config: Record<string, unknown>,
 ): number {
@@ -150,7 +148,6 @@ function printInfoText(
   console.log(`  Config Dir:      ${configDirAbs}`);
   console.log(`  AI URL:          ${resolved.baseUrl}`);
   console.log(`  Default Model:   ${resolved.model || "(none)"}`);
-  console.log(`  Skills Path:     ${(config?.skillsPath as string) || skillsPathFromConfig(config)}`);
   console.log(`  Chat Timeout:    ${resolved.chatTimeout}s`);
   console.log(`  Profile:         ${resolved.profileName}`);
   if (resolved.profileDef?.whitelistTools) {
@@ -184,8 +181,7 @@ function printInfoText(
     const tagStr = ((m.tags as string[]) || []).length > 0 ? (m.tags as string[]).join(", ") : "no tags";
     console.log(`  ${name} [${tagStr}]`);
   }
-  console.log();
-  console.log(`Skills: ${skillsLoader.activeSkills().length} loaded`);
+  printInfoPanels(panels);
 
   const mcpServers = (config?.mcpServers as McpServerDef[]) || [];
   if (mcpServers.length > 0) {
@@ -224,11 +220,61 @@ function printInfoText(
   return 0;
 }
 
+// Renders extension-contributed status panels. Nothing here knows what any
+// extension measures: keys come from the panel, casing and alignment from here.
+function printInfoPanels(panels: ExtensionInfoPanel[]): void {
+  for (const panel of panels) {
+    console.log();
+    console.log(`${labelFor(panel.name)}:`);
+    for (const section of panel.sections) {
+      // A titled block indents its fields so the grouping stays visible.
+      const indent = section.title ? "    " : "  ";
+      if (section.title) {
+        console.log(`  ${labelFor(section.title)}:`);
+      }
+      // Values in a block line up on the longest key, like the Configuration block.
+      const width = section.fields.reduce((max, f) => Math.max(max, f.key.length), 0);
+      for (const { key, value } of section.fields) {
+        console.log(`${indent}${`${labelFor(key)}:`.padEnd(width + 2)}${formatInfoValue(value)}`);
+      }
+    }
+  }
+}
+
+// path -> Path. Panels send lowercase machine keys; surfaces pick the display case.
+function labelFor(key: string): string {
+  return key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+function formatInfoValue(value: InfoValue): string {
+  if (value === null) return "(none)";
+  if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "(none)";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  return String(value);
+}
+
+// Panels as JSON: fields of the main block inline, titled sections nested,
+// keyed by panel name. Keeps the machine-readable shape flat where it can be.
+function infoPanelsToJson(panels: ExtensionInfoPanel[]): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const panel of panels) {
+    const body: Record<string, unknown> = {};
+    for (const section of panel.sections) {
+      const fields = Object.fromEntries(section.fields.map((f) => [f.key, f.value]));
+      if (section.title) Object.assign(body, { [section.title]: fields });
+      else Object.assign(body, fields);
+    }
+    if (panel.detail !== undefined) body.detail = panel.detail;
+    result[panel.name] = body;
+  }
+  return result;
+}
+
 function printInfoJson(
   resolved: BuildAgentConfig,
   modelRegistry: Record<string, unknown>,
   providers: ProviderDef[],
-  skillsLoader: SkillsLoader,
+  panels: ExtensionInfoPanel[],
   connectivity: ConnectivityResult,
   config: Record<string, unknown>,
 ): number {
@@ -237,7 +283,6 @@ function printInfoJson(
       ai_url: resolved.baseUrl,
       default_model: resolved.model,
       chat_timeout_secs: resolved.chatTimeout,
-      skills_path: (config?.skillsPath as string) || skillsPathFromConfig(config),
       profile: resolved.profileName,
       profile_whitelist: resolved.profileDef?.whitelistTools || null,
       profile_blacklist: resolved.profileDef?.blacklistTools || [],
@@ -255,7 +300,7 @@ function printInfoJson(
       const m = modelRegistry[name] as Record<string, unknown>;
       return { name, tags: (m.tags as string[]) || [] };
     }),
-    skills_loaded: skillsLoader.activeSkills(),
+    extensions: infoPanelsToJson(panels),
     mcp_servers: ((config?.mcpServers as McpServerDef[]) || []).map((s) => ({
       name: s.name,
       enabled: s.enabled !== false,

@@ -31,6 +31,7 @@ export type { ToolContext };
 import type { StreamResult } from "../llm-client/stream-processor.ts";
 import type { LlmClient, LlmClientOptions } from "../llm-client/client.ts";
 import { logger } from "@utils/logger.ts";
+import { formatError } from "../error.ts";
 import { ProfileDef, ProfileManager } from "../config/profiles.ts";
 import { ParsedCliOptions } from "../cli.ts";
 import { SessionManager } from "../session/index.ts";
@@ -273,11 +274,44 @@ export type ExtensionInstance = {
 
   shutdown?: () => Promise<void>;
 
+  /**
+   * Status panel for diagnostic surfaces (`hotdog info` today; the webui and
+   * interactive CLI can render the same shape later). Computed on demand, so
+   * the values reflect the loaded extension rather than a snapshot.
+   */
+  infoPanel?: () => ExtensionInfoPanel;
+
   // Legacy tool registration method.
   registerTools?: (registry: ToolRegistry) => Promise<void>;
 
   [key: string]: unknown;
 };
+
+/**
+ * A panel field value. Typed so surfaces can render each kind properly
+ * (counts stay numbers, lists stay lists); no pre-formatted strings.
+ */
+export type InfoValue = string | number | boolean | string[] | null;
+
+/** A named group of fields. No title means the panel's main block. */
+export interface InfoSection {
+  title?: string;
+  fields: Array<{ key: string; value: InfoValue }>;
+}
+
+/**
+ * A read-only slice of an extension's runtime state, contributed to status
+ * surfaces. The extension decides what is worth reporting and computes it as
+ * structured values; every display decision (label case, units, alignment)
+ * belongs to the surface rendering it.
+ */
+export interface ExtensionInfoPanel {
+  /** Panel identity: heading in text output, key under `extensions` in JSON. */
+  name: string;
+  sections: InfoSection[];
+  /** Optional larger machine-readable payload (e.g. the full list of skills). */
+  detail?: unknown;
+}
 
 export interface ToolsRegisterPayload {
   register(name: string, tool: Tool): void;
@@ -353,4 +387,35 @@ export function getConfigDefault<T = unknown>(
     if (defaultVal === null) return undefined;
     return defaultVal as T | undefined;
   }
+}
+
+/**
+ * Collect info panels from loaded extensions. Status surfaces (hotdog info,
+ * and later the webui / interactive CLI) call this instead of reaching into
+ * individual extension instances, so nothing outside an extension needs to
+ * know how that extension computes its own state.
+ *
+ * A panel that throws is reported and skipped: one broken extension must not
+ * take the diagnostics command down with it.
+ */
+export function collectInfoPanels(
+  extensions: { all(): Iterable<[string, unknown]> } | null | undefined,
+): ExtensionInfoPanel[] {
+  const panels: ExtensionInfoPanel[] = [];
+  if (!extensions) return panels;
+
+  for (const [name, instance] of extensions.all()) {
+    const build = (instance as ExtensionInstance | null | undefined)?.infoPanel;
+    if (typeof build !== "function") continue;
+    try {
+      const panel = build.call(instance);
+      if (panel && typeof panel.name === "string" && Array.isArray(panel.sections)) {
+        panels.push(panel);
+      }
+    } catch (e: unknown) {
+      logger.warn(`[info] Extension '${name}' info panel failed: ${formatError(e)}`);
+    }
+  }
+
+  return panels;
 }

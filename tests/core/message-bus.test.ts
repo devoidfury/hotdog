@@ -3,6 +3,9 @@
 import { describe, it, expect } from "bun:test";
 import { MessageBus } from "@core/session/message-bus.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { LlmError } from "@core/error.ts";
+import { Message } from "@core/context/message.ts";
+import { INTERRUPTED_TOOL_RESULT } from "@core/context/repair.ts";
 
 // ── Shared mock factories ────────────────────────────────────────────────
 
@@ -29,6 +32,8 @@ function createMockAgent(overrides: {
   executeCommand?: (cmd: string) => Promise<{ content?: string; error?: string } | null>;
   getCommandRegistry?: () => unknown;
   hooks?: { runHookPipeline: (hook: string, data: unknown, opts: unknown) => Promise<unknown> };
+  getMessages?: () => Message[];
+  replaceContext?: (messages: Message[]) => void;
 } = {}): Record<string, unknown> {
   return {
     cancel: overrides.cancel ?? (() => {}),
@@ -37,6 +42,8 @@ function createMockAgent(overrides: {
     executeCommand: overrides.executeCommand ?? (async () => null),
     getCommandRegistry: overrides.getCommandRegistry ?? (() => ({ match: () => null, get: () => null })),
     hooks: overrides.hooks,
+    getMessages: overrides.getMessages,
+    replaceContext: overrides.replaceContext,
   };
 }
 
@@ -434,5 +441,135 @@ describe("MessageBus getters", () => {
     const resolve = () => {};
     bus.waiter = { resolve };
     expect(bus.waiter).toEqual({ resolve });
+  });
+});
+
+// ── Cancel path: repair interrupted tool calls ───────────────────────────────
+// A cancelled turn can leave an assistant message whose tool calls never got
+// results (interrupted mid-execution). The next request would 400 on a strict
+// backend, so the bus synthesizes the missing results in memory.
+
+function danglingContext() {
+  return [
+    new Message({ role: "user", content: "do two things", source: "user" }),
+    new Message({
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        { id: "a", type: "function", function: { name: "bash", arguments: "{}" } },
+        { id: "b", type: "function", function: { name: "bash", arguments: "{}" } },
+      ],
+      source: "model",
+    }),
+    new Message({ role: "tool", content: "real", toolCallId: "a", source: "tool" }),
+    // "b" was interrupted: no result.
+  ];
+}
+
+describe("MessageBus — cancel path repairs interrupted tool calls", () => {
+  it("synthesizes missing results into the context after a cancelled turn", async () => {
+    let replaced: Message[] | null = null;
+    const agent = createMockAgent({
+      run: async () => { throw LlmError.Cancelled("cancelled"); },
+      getMessages: () => danglingContext(),
+      replaceContext: (m: Message[]) => { replaced = m; },
+    });
+    const sink = createMockSink();
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
+    await bus._processMessage("go");
+
+    expect(replaced).not.toBeNull();
+    const toolMsgs = replaced!.filter((m) => m.role === "tool");
+    expect(toolMsgs.map((m) => m.toolCallId)).toEqual(["a", "b"]);
+    const synth = toolMsgs.find((m) => m.toolCallId === "b")!;
+    expect(synth.content).toBe(INTERRUPTED_TOOL_RESULT);
+    expect(synth.source).toBe("harness");
+
+    // A SYSTEM_MESSAGE names the repaired call; the cancel error is not
+    // surfaced as a COMMAND_RESULT.
+    const sys = sink._emitted.find((e: any) => e.type === OUTPUT_EVENT.SYSTEM_MESSAGE);
+    expect(sys).toBeDefined();
+    expect((sys as any).content).toContain("b");
+    const err = sink._emitted.find((e: any) => e.type === OUTPUT_EVENT.COMMAND_RESULT);
+    expect(err).toBeUndefined();
+  });
+
+  it("is a no-op when the cancelled context is already wire-valid", async () => {
+    const valid = [
+      new Message({ role: "user", content: "hi", source: "user" }),
+      new Message({
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "a", type: "function", function: { name: "bash", arguments: "{}" } }],
+        source: "model",
+      }),
+      new Message({ role: "tool", content: "ok", toolCallId: "a", source: "tool" }),
+    ];
+    let replaceCalls = 0;
+    const agent = createMockAgent({
+      run: async () => { throw LlmError.Cancelled("cancelled"); },
+      getMessages: () => valid,
+      replaceContext: () => { replaceCalls++; },
+    });
+    const sink = createMockSink();
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
+    await bus._processMessage("go");
+
+    expect(replaceCalls).toBe(0);
+    expect(sink._emitted.find((e: any) => e.type === OUTPUT_EVENT.SYSTEM_MESSAGE)).toBeUndefined();
+  });
+
+  it("drops an orphan result on the cancel path and reports it", async () => {
+    const ctx = [
+      new Message({ role: "user", content: "hi", source: "user" }),
+      new Message({
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "a", type: "function", function: { name: "bash", arguments: "{}" } }],
+        source: "model",
+      }),
+      new Message({ role: "tool", content: "ok", toolCallId: "a", source: "tool" }),
+      new Message({ role: "tool", content: "orphan", toolCallId: "ghost", source: "tool" }),
+    ];
+    let replaced: Message[] | null = null;
+    const agent = createMockAgent({
+      run: async () => { throw LlmError.Cancelled("cancelled"); },
+      getMessages: () => ctx,
+      replaceContext: (m: Message[]) => { replaced = m; },
+    });
+    const sink = createMockSink();
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
+    await bus._processMessage("go");
+
+    expect(replaced!.filter((m) => m.role === "tool").map((m) => m.toolCallId)).toEqual(["a"]);
+    const sys = sink._emitted.find((e: any) => e.type === OUTPUT_EVENT.SYSTEM_MESSAGE) as any;
+    expect(sys.content).toContain("orphan");
+  });
+
+  it("skips repair silently when the agent exposes no repair seam", async () => {
+    // Minimal fake without getMessages/replaceContext must not throw.
+    const agent = createMockAgent({
+      run: async () => { throw LlmError.Cancelled("cancelled"); },
+    });
+    const sink = createMockSink();
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
+    await expect(bus._processMessage("go")).resolves.toBeUndefined();
+    expect(sink._emitted.find((e: any) => e.type === OUTPUT_EVENT.SYSTEM_MESSAGE)).toBeUndefined();
+  });
+
+  it("does not repair on a non-cancellation error", async () => {
+    let replaceCalls = 0;
+    const agent = createMockAgent({
+      run: async () => { throw new Error("boom"); },
+      getMessages: () => danglingContext(),
+      replaceContext: () => { replaceCalls++; },
+    });
+    const sink = createMockSink();
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
+    await bus._processMessage("go");
+
+    expect(replaceCalls).toBe(0);
+    // Non-cancellation errors still surface.
+    expect(sink._emitted.some((e: any) => e.type === OUTPUT_EVENT.COMMAND_RESULT)).toBe(true);
   });
 });

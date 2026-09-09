@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join, resolve as resolveAbs, sep } from "node:path";
 import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
 import { MESSAGE_SOURCES, Message, type ToolCall, type ImageAttachment, type MessageSource } from "../context/message.ts";
+import { repairToolCalls } from "../context/repair.ts";
 import { AgentError, formatError } from "../error.ts";
 import { logger } from "@utils/logger.ts";
 
@@ -252,7 +253,7 @@ export interface AgentForReplay {
 export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntry[]): number {
   if (!entries || entries.length === 0) return 0;
 
-  let replayed = 0;
+  const messages: Message[] = [];
 
   for (const entry of entries) {
     const source = entry.source;
@@ -279,7 +280,7 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
     switch (source) {
       case LOG_SOURCE.INPUT:
       case LOG_SOURCE.PROMPT: {
-        agent.addMessage(
+        messages.push(
           new Message({
             role: role ?? "user",
             content: entry.content,
@@ -287,12 +288,11 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
             source: origin,
           }),
         );
-        replayed++;
         break;
       }
 
       case LOG_SOURCE.LLM: {
-        agent.addMessage(
+        messages.push(
           new Message({
             role: role ?? "assistant",
             content: entry.content,
@@ -301,12 +301,11 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
             source: origin,
           }),
         );
-        replayed++;
         break;
       }
 
       case LOG_SOURCE.TOOL_RESULT: {
-        agent.addMessage(
+        messages.push(
           new Message({
             role: "tool",
             content: entry.content,
@@ -314,13 +313,11 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
             source: origin ?? "tool",
           }),
         );
-        replayed++;
         break;
       }
 
       case LOG_SOURCE.COMPACTION: {
-        agent.addMessage(new Message({ role: "harness", source: "harness", content: entry.content }));
-        replayed++;
+        messages.push(new Message({ role: "harness", source: "harness", content: entry.content }));
         break;
       }
 
@@ -329,5 +326,13 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
     }
   }
 
-  return replayed;
+  // A crash between log flushes (or an interrupt mid-tool-execution) can leave
+  // tool_calls without results, or results without calls -- either way the next
+  // request is a guaranteed 400 on strict backends. Repair before replay so a
+  // restored context is always wire-valid.
+  const { messages: repaired } = repairToolCalls(messages);
+  for (const msg of repaired) {
+    agent.addMessage(msg);
+  }
+  return repaired.length;
 }

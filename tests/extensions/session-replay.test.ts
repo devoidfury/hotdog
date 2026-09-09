@@ -12,6 +12,7 @@ import type { LogEntry } from "@core/session/session-log.ts";
 import { TestSessionLog } from "../mocks/io.ts";
 import { Message } from "@core/context/message.ts";
 import { MessageLog } from "@core/context/message-log.ts";
+import { INTERRUPTED_TOOL_RESULT } from "@core/context/repair.ts";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
@@ -125,27 +126,44 @@ test("replayEntriesIntoContext handles tool calls in assistant messages", () => 
   }];
 
   const replayed = replayEntriesIntoContext(agent, entries);
-  expect(replayed).toBe(1);
+  // The assistant is replayed, and repair synthesizes a result for the
+  // dangling call (a crash left no tool_result entry behind it).
+  expect(replayed).toBe(2);
+  expect(agent.log.at(0)!.role).toBe("assistant");
   expect(agent.log.at(0)!.reasoningContent).toBe("I should list files");
   expect(agent.log.at(0)!.toolCalls).toEqual(toolCalls);
+  expect(agent.log.at(1)!.role).toBe("tool");
+  expect(agent.log.at(1)!.toolCallId).toBe("tc_1");
+  expect(agent.log.at(1)!.content).toBe(INTERRUPTED_TOOL_RESULT);
 });
 
 test("replayEntriesIntoContext handles tool result entries", () => {
   const agent = createMockAgent();
-  const entries: LogEntry[] = [{
-    ts: "2024-01-01T00:00:00Z",
-    session_id: "test",
-    source: LOG_SOURCE.TOOL_RESULT,
-    content: "<output>done</output>",
-    tool_call_id: "tc_1",
-    tool_name: "bash",
-  }];
+  const entries: LogEntry[] = [
+    {
+      ts: "2024-01-01T00:00:00Z",
+      session_id: "test",
+      source: LOG_SOURCE.LLM,
+      content: "Let me check",
+      tool_calls: [{ id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } }],
+    },
+    {
+      ts: "2024-01-01T00:00:01Z",
+      session_id: "test",
+      source: LOG_SOURCE.TOOL_RESULT,
+      content: "<output>done</output>",
+      tool_call_id: "tc_1",
+      tool_name: "bash",
+    },
+  ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
-  expect(replayed).toBe(1);
-  expect(agent.log.at(0)!.role).toBe("tool");
-  expect(agent.log.at(0)!.content).toBe("<output>done</output>");
-  expect(agent.log.at(0)!.toolCallId).toBe("tc_1");
+  // Both replay; the matching result satisfies the call so nothing is synthesized.
+  expect(replayed).toBe(2);
+  expect(agent.log.at(0)!.role).toBe("assistant");
+  expect(agent.log.at(1)!.role).toBe("tool");
+  expect(agent.log.at(1)!.content).toBe("<output>done</output>");
+  expect(agent.log.at(1)!.toolCallId).toBe("tc_1");
 });
 
 test("replayEntriesIntoContext handles compaction entries as harness messages", () => {
@@ -350,16 +368,20 @@ test("replayEntriesIntoContext handles mixed entry types", () => {
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
+  // The orphan tc_1 result (no matching call) is dropped; the dangling tc_2
+  // call gets a synthesized result. Net: still 5 messages, reordered shape.
   expect(replayed).toBe(5);
   expect(agent.log.length).toBe(5);
   expect(agent.log.at(0)!.role).toBe("user");
   expect(agent.log.at(1)!.role).toBe("assistant");
-  expect(agent.log.at(2)!.role).toBe("tool");
-  expect(agent.log.at(3)!.role).toBe("user");
-  expect(agent.log.at(4)!.role).toBe("assistant");
-  expect(agent.log.at(4)!.toolCalls).toEqual([
+  expect(agent.log.at(2)!.role).toBe("user");
+  expect(agent.log.at(3)!.role).toBe("assistant");
+  expect(agent.log.at(3)!.toolCalls).toEqual([
     { id: "tc_2", type: "function", function: { name: "read", arguments: "file.txt" } },
   ]);
+  expect(agent.log.at(4)!.role).toBe("tool");
+  expect(agent.log.at(4)!.toolCallId).toBe("tc_2");
+  expect(agent.log.at(4)!.content).toBe(INTERRUPTED_TOOL_RESULT);
 });
 
 test("replayEntriesIntoContext returns 0 for empty entries", () => {
@@ -385,13 +407,39 @@ test("replayEntriesIntoContext handles assistant without reasoning or tool_calls
   expect(agent.log.at(0)!.toolCalls).toBe(null);
 });
 
-test("replayEntriesIntoContext handles tool result without tool_call_id", () => {
+test("replayEntriesIntoContext drops an orphan tool result (no matching call)", () => {
   const agent = createMockAgent();
   const entries: LogEntry[] = [{ ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.TOOL_RESULT, content: "no id" }];
 
   const replayed = replayEntriesIntoContext(agent, entries);
-  expect(replayed).toBe(1);
-  expect(agent.log.at(0)!.toolCallId).toBe(null);
+  // A tool result with no matching call is a guaranteed 400 on strict
+  // backends, so repair drops it at replay time.
+  expect(replayed).toBe(0);
+  expect(agent.log.length).toBe(0);
+});
+
+test("bridge: compacted-then-replayed session repairs with zero changes", () => {
+  // Compaction backs its boundary up so the kept window never starts with an
+  // orphan tool message (compaction/utils.ts). That context is wire-valid, so
+  // replay repair must be a strict no-op: nothing synthesized, nothing dropped.
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.COMPACTION, content: "[Compacted 12 messages]\n\nEarlier work..." },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Now check the file" },
+    { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Reading it.", tool_calls: [{ id: "tc_1", type: "function", function: { name: "read", arguments: "file.txt" } }] },
+    { ts: "2024-01-01T00:00:03Z", session_id: "test", source: LOG_SOURCE.TOOL_RESULT, content: "<output>contents</output>", tool_call_id: "tc_1", tool_name: "read" },
+    { ts: "2024-01-01T00:00:04Z", session_id: "test", source: LOG_SOURCE.LLM, content: "The file says done." },
+  ];
+
+  const replayed = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(5);
+  expect(agent.log.length).toBe(5);
+  // No synthesized results anywhere.
+  for (const m of agent.log.getAll()) {
+    expect(m.content).not.toBe(INTERRUPTED_TOOL_RESULT);
+  }
+  // Order and roles preserved exactly.
+  expect(agent.log.getAll().map((m) => m.role)).toEqual(["harness", "user", "assistant", "tool", "assistant"]);
 });
 
 test("replayEntriesIntoContext skips unknown source types", () => {
@@ -621,15 +669,20 @@ test("Session restoration: preserves tool calls in assistant messages", async ()
 
     const log = new TestSessionLog(sessionId);
     await log.writeAssistant("Let me check the files.", toolCalls);
+    await log.writeToolResult("<output>file contents</output>", "tc_1", "read");
+    await log.writeToolResult("<output>matches</output>", "tc_2", "grep");
 
     const entries = await readSessionEntries(sessionId);
-    expect(entries.length).toBe(1);
+    expect(entries.length).toBe(3);
     expect(entries[0]!.tool_calls).toEqual(toolCalls);
 
     const agent = createMockAgent(sessionId);
     const replayed = replayEntriesIntoContext(agent, entries);
-    expect(replayed).toBe(1);
+    // Both results satisfy the calls, so nothing is synthesized or dropped.
+    expect(replayed).toBe(3);
     expect(agent.log.at(0)!.toolCalls).toEqual(toolCalls);
+    expect(agent.log.at(1)!.toolCallId).toBe("tc_1");
+    expect(agent.log.at(2)!.toolCallId).toBe("tc_2");
   } finally {
     cleanupSession(sessionId);
   }
@@ -641,17 +694,20 @@ test("Session restoration: tool result entries preserve tool_call_id", async () 
 
   try {
     const log = new TestSessionLog(sessionId);
+    await log.writeAssistant("Let me read the file.", [
+      { id: "tc_1", type: "function", function: { name: "read", arguments: "file.txt" } },
+    ]);
     await log.writeToolResult("<output>file contents</output>", "tc_1", "read");
 
     const entries = await readSessionEntries(sessionId);
-    expect(entries.length).toBe(1);
-    expect(entries[0]!.tool_call_id).toBe("tc_1");
-    expect((entries[0]! as any).tool_name).toBe("read");
+    expect(entries.length).toBe(2);
+    expect(entries[1]!.tool_call_id).toBe("tc_1");
+    expect((entries[1]! as any).tool_name).toBe("read");
 
     const agent = createMockAgent(sessionId);
     const replayed = replayEntriesIntoContext(agent, entries);
-    expect(replayed).toBe(1);
-    expect(agent.log.at(0)!.toolCallId).toBe("tc_1");
+    expect(replayed).toBe(2);
+    expect(agent.log.at(1)!.toolCallId).toBe("tc_1");
   } finally {
     cleanupSession(sessionId);
   }
@@ -765,15 +821,22 @@ test("replayEntriesIntoContext round-trip with readSessionEntries", async () => 
 
     const agent = createMockAgent(sessionId);
     const replayed = replayEntriesIntoContext(agent, entries);
+    // The orphan tc_1 result is dropped; the dangling tc_2 call is synthesized.
+    // 5 in, 5 out (one removed, one added).
     expect(replayed).toBe(5);
 
     expect(agent.log.at(0)!.content).toBe("Hello");
     expect(agent.log.at(1)!.content).toBe("Hi there");
-    expect(agent.log.at(2)!.role).toBe("tool");
-    expect(agent.log.at(3)!.content).toBe("Next question");
-    expect(agent.log.at(4)!.toolCalls).toEqual([
+    expect(agent.log.at(2)!.role).toBe("user");
+    expect(agent.log.at(2)!.content).toBe("Next question");
+    expect(agent.log.at(3)!.content).toBe("Answer");
+    expect(agent.log.at(3)!.reasoningContent).toBe("Reasoning");
+    expect(agent.log.at(3)!.toolCalls).toEqual([
       { id: "tc_2", type: "function", function: { name: "read", arguments: "file.txt" } },
     ]);
+    expect(agent.log.at(4)!.role).toBe("tool");
+    expect(agent.log.at(4)!.toolCallId).toBe("tc_2");
+    expect(agent.log.at(4)!.content).toBe(INTERRUPTED_TOOL_RESULT);
   } finally {
     cleanupSession(sessionId);
   }

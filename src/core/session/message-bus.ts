@@ -1,6 +1,7 @@
 import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
-import { contentToText, type MessageSource } from "../context/message.ts";
+import { contentToText, type Message, type MessageSource } from "../context/message.ts";
+import { repairToolCalls } from "../context/repair.ts";
 import { HOOKS, isInputTransform, type InputHookResult } from "../hooks.ts";
 import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 import type { CommandResult } from "../extensions/registries.ts";
@@ -25,6 +26,14 @@ export interface MessageBusAgent {
   ): Promise<unknown>;
   resetCancel(): void;
   cancel(): void;
+  /**
+   * Tool-call repair seam: present on the real Agent, optional so test fakes
+   * can stay minimal. Used to heal interrupted tool calls after a cancelled
+   * turn (an assistant message whose calls never got results is a guaranteed
+   * 400 on the next request).
+   */
+  getMessages?(): Message[];
+  replaceContext?(messages: Message[]): void;
   commandRegistry?: CommandRegistryLike | null;
   executeCommand(cmd: ParsedCommand): Promise<CommandResult | null>;
 }
@@ -235,6 +244,35 @@ export class MessageBus {
     }
   }
 
+  /**
+   * After a cancelled turn settles, the context may hold an assistant message
+   * whose tool calls never received results (interrupted mid-execution). The
+   * next request would 400 on a strict backend, so the missing results are
+   * synthesized in memory (orphan results dropped). The session log keeps its
+   * original lines: replay repair re-derives the identical repair on resume.
+   */
+  #repairInterruptedToolCalls(agent: MessageBusAgent): void {
+    if (typeof agent.getMessages !== "function" || typeof agent.replaceContext !== "function") {
+      return;
+    }
+    const { messages, repaired, dropped } = repairToolCalls(agent.getMessages());
+    if (repaired.length === 0 && dropped.length === 0) return;
+
+    agent.replaceContext(messages);
+
+    const parts: string[] = [];
+    if (repaired.length > 0) {
+      parts.push(`synthesized results for interrupted tool call(s): ${repaired.join(", ")}`);
+    }
+    if (dropped.length > 0) {
+      parts.push(`dropped ${dropped.length} orphan tool result(s)`);
+    }
+    this.#sink.emit({
+      type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+      content: `Repaired tool calls after cancel: ${parts.join("; ")}.`,
+    });
+  }
+
   /** Runs the input hook pipeline, then hands off to the agent. */
   async _processMessage(item: string | BusQueueItem): Promise<void> {
     // Accept a bare string (tests / simple callers) or a full queue item.
@@ -304,6 +342,8 @@ export class MessageBus {
           type: OUTPUT_EVENT.COMMAND_RESULT,
           content: isExpectedError(e) ? (e as Error).message : formatError(e),
         });
+      } else {
+        this.#repairInterruptedToolCalls(agent);
       }
     }
 

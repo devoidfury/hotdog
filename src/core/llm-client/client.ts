@@ -197,7 +197,12 @@ export class LlmClient {
     this.#mangler.addPrefixes(tokens);
   }
 
-  resolveProviderSettings(modelName: string): { url: string; apiKey: string | null } {
+  resolveProviderSettings(modelName: string): {
+    url: string;
+    apiKey: string | null;
+    /** Name of the provider block that supplied the URL, when one matched. */
+    provider: string | null;
+  } {
     const providerName = modelName.split("/")[0];
     const provider = this.providers.find((p) => p.name === providerName);
     let url: string | null;
@@ -215,25 +220,30 @@ export class LlmClient {
         "config",
       );
     }
-    return { url, apiKey };
+    return { url, apiKey, provider: provider?.name ?? null };
   }
 
   /** Health-check the LLM provider for the model (or the default). */
   async ping(modelName?: string): Promise<void> {
+    let healthUrl = "";
+    let provider: string | null = null;
     try {
-      const base = (
-        modelName
-          ? this.resolveProviderSettings(modelName).url
-          : this.baseUrl ?? ""
-      ).replace(/\/+$/, "");
-      const resp = await hotdogFetch(base + "/health", undefined, this.healthCheckTimeoutSecs * 1000);
+      const { url, provider: matched } = modelName
+        ? this.resolveProviderSettings(modelName)
+        : { url: this.baseUrl ?? "", provider: null };
+      provider = matched;
+      healthUrl = url.replace(/\/+$/, "") + "/health";
+      const resp = await hotdogFetch(healthUrl, undefined, this.healthCheckTimeoutSecs * 1000);
       if (resp.ok) return;
       throw LlmError.Api(`HTTP ${resp.status}`, resp.status);
     } catch (e: unknown) {
       if (e instanceof LlmError) throw e;
+      const at = healthUrl
+        ? ` [endpoint: ${LlmClient.redactEndpoint(healthUrl)}${provider ? ` from provider "${provider}"` : ""}]`
+        : "";
       if (LlmClient.isAbortError(e))
-        throw LlmError.Timeout(`health check timed out after ${this.healthCheckTimeoutSecs}s`);
-      throw LlmError.Http((e as Error).message);
+        throw LlmError.Timeout(`health check timed out after ${this.healthCheckTimeoutSecs}s${at}`);
+      throw LlmError.Http(`${(e as Error).message}${at}`);
     }
   }
 
@@ -268,7 +278,11 @@ export class LlmClient {
     sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
     const { path, body: request } = this.#buildRequest(messages, modelConfig, tools, true);
-    const { url, apiKey } = this.resolveProviderSettings(modelConfig.name);
+    const { url, apiKey, provider } = this.resolveProviderSettings(modelConfig.name);
+    // Names the endpoint in network failures. A provider block supplies the URL
+    // for any model whose prefix matches its name, outranking --ai-url, so a
+    // bare "Unable to connect." leaves the user checking the wrong server.
+    const endpoint = `${LlmClient.redactEndpoint(url)}${path}${provider ? ` from provider "${provider}"` : ""}`;
 
     const abortController = new AbortController();
     let removeCancelListener: (() => void) | null = null;
@@ -316,6 +330,7 @@ export class LlmClient {
             path,
             effectiveSessionId,
             this.chatTimeoutSecs * 1000,
+            endpoint,
           );
         } catch (e: unknown) {
           if (!shouldRetryLlmError(e, attempt, this.maxRetries)) throw e;
@@ -336,7 +351,12 @@ export class LlmClient {
           const failed = response;
           response = null;
           failed.body?.cancel().catch(() => {});
-          const err = LlmClient.classifyStreamError(e, abortController.signal, this.chatTimeoutSecs * 1000);
+          const err = LlmClient.classifyStreamError(
+            e,
+            abortController.signal,
+            this.chatTimeoutSecs * 1000,
+            endpoint,
+          );
           if (!shouldRetryLlmError(err, attempt, this.maxRetries)) throw err;
 
           // A retry re-issues the request from scratch, so consumers must
@@ -375,24 +395,40 @@ export class LlmClient {
    * Otherwise an aborted read is the per-attempt timeout (retryable), and
    * any other failure is a transient network error (retryable). LlmErrors
    * pass through untouched so their own type/status decide retryability.
+   *
+   * `endpoint` names the URL a failure happened against. Provider blocks
+   * outrank `--ai-url` for any model whose prefix matches a provider name, so
+   * Bun's bare "Unable to connect." is otherwise a dead end: the user checked
+   * the wrong endpoint and has no way to know.
    */
+  /**
+   * URL for error text: the query is dropped so a credential carried in the
+   * query string never lands in console output or session logs.
+   */
+  static redactEndpoint(url: string): string {
+    return url.replace(/[?#].*$/, "");
+  }
+
   static classifyStreamError(
     e: unknown,
     signal: AbortSignal | null,
     timeoutMs: number | null | undefined,
+    endpoint?: string | null,
   ): LlmError {
     if (e instanceof LlmError) return e;
+    const at = endpoint ? ` [endpoint: ${endpoint}]` : "";
     if (LlmClient.isAbortError(e)) {
       if (signal?.aborted) {
         return LlmError.Cancelled("request was cancelled");
       }
       if (timeoutMs != null) {
-        return LlmError.Timeout(`Chat request timed out after ${Math.round(timeoutMs / 1000)}s`);
+        return LlmError.Timeout(`Chat request timed out after ${Math.round(timeoutMs / 1000)}s${at}`);
       }
       return LlmError.Cancelled("request was aborted");
     }
     // Network failures (ECONNREFUSED, DNS, TLS, reset mid-body) are transient.
-    return LlmError.Http(e instanceof Error ? e.message : String(e));
+    const msg = e instanceof Error ? e.message : String(e);
+    return LlmError.Http(`${msg}${at}`);
   }
 
   async _doRequest(
@@ -404,6 +440,7 @@ export class LlmClient {
     path: string,
     sessionId?: string,
     timeoutMs?: number | null,
+    endpoint?: string | null,
   ): Promise<Response> {
     // The protocol owns both the path (from buildRequest) and the headers;
     // the ctx carries the *resolved* url/apiKey (provider-level overrides
@@ -434,7 +471,7 @@ export class LlmClient {
       // Translate raw fetch failures into LlmError so the retry logic
       // classifies them: http/timeout are transient and retried, cancelled
       // is rethrown immediately.
-      throw LlmClient.classifyStreamError(e, signal, timeoutMs);
+      throw LlmClient.classifyStreamError(e, signal, timeoutMs, endpoint);
     }
 
     if (!resp.ok) {

@@ -50,6 +50,7 @@ describe("LlmClient.resolveProviderSettings", () => {
     const settings = client.resolveProviderSettings("unknown/model");
     expect(settings.url).toBe("http://default.com");
     expect(settings.apiKey).toBe("default-key");
+    expect(settings.provider).toBeNull();
   });
 
   it("uses provider settings when found", () => {
@@ -65,6 +66,7 @@ describe("LlmClient.resolveProviderSettings", () => {
     const settings = client.resolveProviderSettings("openai/gpt-4");
     expect(settings.url).toBe("http://openai.com");
     expect(settings.apiKey).toBe("openai-key");
+    expect(settings.provider).toBe("openai");
   });
 
   it("uses provider URL but falls back to client apiKey", () => {
@@ -286,6 +288,67 @@ describe("LlmClient array content escaping", () => {
 });
 
 
+describe("LlmClient.classifyStreamError", () => {
+  // A provider block supplies the URL for any model whose prefix matches its
+  // name, outranking --ai-url, so the message must name what actually failed.
+  it("names the endpoint on a network failure", () => {
+    const err = LlmClient.classifyStreamError(
+      new Error("Unable to connect. Is the computer able to access the url?"),
+      null,
+      null,
+      'http://localhost:9001/v1/chat/completions from provider "provA"',
+    );
+    expect(err).toBeInstanceOf(LlmError);
+    expect(err.type).toBe("http");
+    expect(err.message).toContain("Unable to connect");
+    expect(err.message).toContain(
+      '[endpoint: http://localhost:9001/v1/chat/completions from provider "provA"]',
+    );
+  });
+
+  it("drops the query string so a keyed URL is never echoed", () => {
+    expect(LlmClient.redactEndpoint("http://gw.com/v1/chat/completions?api-key=sk-secret")).toBe(
+      "http://gw.com/v1/chat/completions",
+    );
+    expect(LlmClient.redactEndpoint("http://gw.com/v1/chat/completions#frag")).toBe(
+      "http://gw.com/v1/chat/completions",
+    );
+    expect(LlmClient.redactEndpoint("http://gw.com/v1/chat/completions")).toBe(
+      "http://gw.com/v1/chat/completions",
+    );
+  });
+
+  it("leaves the message unchanged when no endpoint is given", () => {
+    const err = LlmClient.classifyStreamError(new Error("connection reset"), null, null);
+    expect(err.message).toBe("connection reset");
+  });
+
+  it("names the endpoint on a timeout", () => {
+    const err = LlmClient.classifyStreamError(
+      Object.assign(new Error("aborted"), { name: "TimeoutError" }),
+      null,
+      30_000,
+      "http://slow.com/v1/chat/completions",
+    );
+    expect(err.type).toBe("timeout");
+    expect(err.message).toContain("timed out after 30s");
+    expect(err.message).toContain("[endpoint: http://slow.com/v1/chat/completions]");
+  });
+
+  it("stays a plain cancellation when the user aborted", () => {
+    const signal = new AbortController().signal;
+    signal.dispatchEvent(new Event("abort"));
+    const err = LlmClient.classifyStreamError(
+      Object.assign(new Error("aborted"), { name: "AbortError" }),
+      signal,
+      null,
+      "http://x/v1/chat/completions",
+    );
+    expect(err.type).toBe("cancelled");
+    expect(err.message).not.toContain("endpoint");
+  });
+});
+
 describe("LlmClient._doRequest", () => {
   let originalFetch: typeof globalThis.fetch;
 
@@ -295,6 +358,35 @@ describe("LlmClient._doRequest", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+  });
+
+  it("includes the endpoint when the connection fails", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+
+    globalThis.fetch = (async () => {
+      throw new Error("Unable to connect. Is the computer able to access the url?");
+    }) as unknown as typeof fetch;
+
+    let thrown: unknown = null;
+    try {
+      await client._doRequest(
+        "http://test.com",
+        null,
+        { model: "gpt-4" },
+        null,
+        mc(),
+        "/v1/chat/completions",
+        undefined,
+        undefined,
+        "http://test.com/v1/chat/completions",
+      );
+    } catch (e) {
+      thrown = e;
+    }
+
+    expect(thrown).toBeInstanceOf(LlmError);
+    expect((thrown as LlmError).type).toBe("http");
+    expect((thrown as Error).message).toContain("[endpoint: http://test.com/v1/chat/completions]");
   });
 
   it("sends request with correct headers and body", async () => {

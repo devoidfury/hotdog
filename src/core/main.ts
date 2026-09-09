@@ -234,7 +234,9 @@ export async function main(): Promise<number> {
   if (cli.help) {
     const subcommandHelp = cliSubcommandRegistry.generateHelpText();
     const fullHelp = generateHelpText(configRegistry);
-    console.log(fullHelp.replace("<subcommands>", subcommandHelp));
+    // trimStart: the placeholder line is already indented, so the block's own
+    // leading spaces would push its first line two columns right of the rest.
+    console.log(fullHelp.replace("<subcommands>", subcommandHelp.trimStart()));
     return 0;
   }
 

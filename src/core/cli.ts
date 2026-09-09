@@ -232,13 +232,16 @@ export function parseArgs(
 
 const HELP_TEXT = `hotdog - AI agent harness with tool calling support
 
-Usage: hotdog [options] [prompt]
+Usage: hotdog                                  Interactive CLI (needs a terminal)
+       hotdog -p "One-shot prompt"             One-shot prompt, then exit
        hotdog info
        hotdog show-prompt
        hotdog sessions show [--session-id <id>] [--json] [--tool-index]
        hotdog sessions delete <id>
        hotdog sessions cleanup [--older-than <days>]
-       hotdog prompt "One-shot prompt"
+       hotdog prompt "One-shot prompt"         Same as -p
+
+A bare prompt is not a subcommand: use -p/--prompt or the "prompt" subcommand.
 
 Subcommands:
   <subcommands>
@@ -263,7 +266,8 @@ export function generateHelpText(
   if (configRegistry) {
     const configFlagsHelp = configRegistry.getCliHelpText();
     if (configFlagsHelp) {
-      help = help.replace("<config_flags>", configFlagsHelp);
+      // trimStart: the placeholder line is already indented (see main.ts).
+      help = help.replace("<config_flags>", configFlagsHelp.trimStart());
     } else {
       help = help.replace("\n  <config_flags>", "");
     }

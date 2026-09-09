@@ -109,6 +109,23 @@ describe("main --help", () => {
     expect(stdout).not.toContain("<subcommands>");
   });
 
+  it("advertises only invocation forms the parser accepts", async () => {
+    const { stdout } = await runMain(["--help"], {
+      AI_URL: "",
+      HOTDOG_AI_URL: "",
+    });
+
+    // `hotdog "hello"` is an unknown subcommand, so the usage block must not
+    // offer a bare positional prompt.
+    expect(stdout).not.toContain("[prompt]");
+    expect(stdout).toContain('hotdog -p "One-shot prompt"');
+
+    // Injected subcommand/flag blocks align flush with the placeholder's own
+    // indentation instead of hanging two columns past it.
+    expect(stdout).toMatch(/\n {2}info {2}/);
+    expect(stdout).not.toMatch(/\n {4}info {2}/);
+  });
+
   it("works with --help and --ai-url combined", async () => {
     const { exitCode, stdout } = await runMain(["--help", "--ai-url", "http://test-url:8080"]);
 

@@ -134,14 +134,15 @@ export function parseArgs(
   if (configRegistry) {
     const registeredFlags = configRegistry.getCliFlags();
     for (const flag of registeredFlags) {
+      // Spread so fields added to CliFlagDef reach the parser; this relay was
+      // written field-by-field and silently dropped "isSubcommand" once.
       const entry: FlagEntry = {
+        ...flag,
         type: flag.type || "string",
         hasValue: flag.hasValue ?? flag.type !== "boolean",
-        description: flag.description,
         long: flag.long,
         short: flag.short || null,
       };
-      if (flag.parse) entry.parse = flag.parse;
       if (flag.short) flagMap.set(flag.short, entry);
       if (flag.long) flagMap.set(flag.long, entry);
     }
@@ -155,9 +156,17 @@ export function parseArgs(
 
     if (flagDef) {
       if (flagDef.isSubcommand) {
-        options.subcommand = "prompt";
-        if (flagDef.hasValue && i + 1 < args.length) {
-          options.prompt = args[++i];
+        // A flag declared with "isSubcommand" in extension.json also selects
+        // the subcommand named after it (--prompt -> "prompt"). Resolved here,
+        // from static metadata, so main() can skip loading extensions when
+        // nothing will run without stranding the flag it declares.
+        const key = parseCliFlagKey(flagDef.long);
+        options.subcommand = key;
+        if (flagDef.hasValue) {
+          if (i + 1 >= args.length) {
+            throw CliError.MissingValue(arg);
+          }
+          options[key] = args[++i];
         }
         i++;
         continue;

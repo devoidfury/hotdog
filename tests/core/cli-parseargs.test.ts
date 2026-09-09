@@ -167,6 +167,29 @@ describe("parseArgs", () => {
   });
 });
 
+describe("subcommand flags (isSubcommand)", () => {
+  const registry = {
+    buildDefaults: () => ({}),
+    getCliFlags: () => [
+      { long: "--prompt", short: "-p", type: "string", description: "", isSubcommand: true },
+    ],
+  } as any;
+
+  it("selects the subcommand named after the long flag", () => {
+    withArgs(["-p", "hello"], () => {
+      const result = parseArgs(registry, ["prompt"]);
+      expect(result.subcommand).toBe("prompt");
+      expect(result.prompt).toBe("hello");
+    });
+  });
+
+  it("throws when the flag has no value", () => {
+    withArgs(["-p"], () => {
+      expect(() => parseArgs(registry, ["prompt"])).toThrow(/value/i);
+    });
+  });
+});
+
 describe("generateHelpText", () => {
   it("returns help text without config flags when no registry", () => {
     const help = generateHelpText(null);

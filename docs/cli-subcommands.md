@@ -68,6 +68,24 @@ Subcommands and CLI flags are declared in `extension.json`:
 | `description` | string | "" | Help text for this flag |
 | `type` | string | "string" | Flag type: 'string', 'boolean', 'number', 'array' |
 | `default` | any | null | Default value when flag is not provided |
+| `isSubcommand` | boolean | false | Also selects the subcommand named after the long form |
+
+### Flags that select a subcommand
+
+`isSubcommand: true` makes a flag an alias for a subcommand of the same name:
+`-p`/`--prompt` sets `cli.subcommand = "prompt"` and puts the value in `cli.prompt`.
+
+```json
+"cli:flags": [
+  { "short": "-p", "long": "--prompt", "description": "One-shot prompt", "type": "string", "isSubcommand": true }
+]
+```
+
+This has to be declared in metadata rather than mapped in `create()`, because
+`main()` exits before loading any extension when no subcommand will run. A flag
+mapped by a `CLI_ARGS_PARSED` handler would be parsed, then dropped on the floor
+with "No subcommand provided" -- the extension code that maps it never runs.
+A flag declared `isSubcommand` without a `long` form is a config error.
 
 ## Creating a CLI Extension
 

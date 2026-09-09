@@ -25,7 +25,8 @@
       "short": "-p",
       "long": "--prompt",
       "description": "One-shot prompt — run a single prompt and exit",
-      "type": "string"
+      "type": "string",
+      "isSubcommand": true
     }
   ],
   "cli:subcommands": [

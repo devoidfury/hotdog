@@ -45,6 +45,8 @@ export interface CliFlagDef {
   description: string;
   type: string;
   hasValue?: boolean;               // derived from type if not provided
+  /** Also selects the subcommand named after this flag's long form. */
+  isSubcommand?: boolean;
   default?: unknown;                // extension defaults
   parse?: (value: string) => unknown;  // custom parser
 }

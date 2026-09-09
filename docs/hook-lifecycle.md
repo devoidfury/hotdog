@@ -283,7 +283,7 @@ The `LlmProtocol` (selected via the `protocol` config field) owns the wire forma
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
 | `CLI_SUBCOMMANDS_REGISTER` | `cli:subcommandsRegister` | sync notify | Register CLI subcommand handlers |
-| `CLI_ARGS_PARSED` | `cli:argsParsed` | sync notify | After CLI args parsed |
+| `CLI_ARGS_PARSED` | `cli:argsParsed` | sync notify | After CLI args parsed. Notification only: it runs after the early exit for "no subcommand", so use `cli:flags[].isSubcommand` to select a subcommand |
 | `COMPLETION_REQUEST` | `completion:request` | async notify | UI requests tab completions |
 | `COMMAND_DISPATCH` | `command:dispatch` | pipeline | Dispatch a command — handlers can intercept |
 | `COMMANDS_REGISTER` | `commands:register` | sync notify | Register slash commands |

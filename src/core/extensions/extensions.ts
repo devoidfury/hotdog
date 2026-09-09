@@ -128,6 +128,7 @@ async function readExtensionMetadata(
           description: (flag.description as string) || "",
           type: (flag.type as string) || "string",
           default: flag.default !== undefined ? flag.default : null,
+          isSubcommand: flag.isSubcommand === true,
         }))
       : [];
 
@@ -584,6 +585,7 @@ export async function registerExtensionMetadata(
         description: flag.description,
         type: flag.type,
         default: flag.default,
+        isSubcommand: flag.isSubcommand,
       }));
       configRegistry.registerCliFlags(flags);
     }

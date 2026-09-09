@@ -24,6 +24,10 @@ export class ConfigRegistry {
       if (!flag.long && !flag.short) {
         throw new ConfigError("Each CLI flag must have a short or long form");
       }
+      if (flag.isSubcommand && !flag.long) {
+        // The subcommand name is derived from the long form, so it is required.
+        throw new ConfigError("A CLI flag with isSubcommand must have a long form");
+      }
       if (!flag.type) {
         flag.type = "string";
       }

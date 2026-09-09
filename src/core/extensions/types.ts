@@ -58,6 +58,8 @@ export interface ExtensionMetadata {
     description: string;
     type: string;
     default: unknown;
+    /** Selects the subcommand named after the flag's long form (--prompt -> "prompt"). */
+    isSubcommand: boolean;
   }>;
   services: Record<string, unknown[]>;
   requires: Record<string, unknown[]>;

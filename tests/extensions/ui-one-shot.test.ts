@@ -82,60 +82,48 @@ describe("ui-one-shot extension", () => {
     });
   });
 
-  describe("CLI_ARGS_PARSED hook", () => {
-    it("sets subcommand to 'prompt' when cli.prompt is provided", async () => {
-      const { create } = await import("@extensions/ui-one-shot/index.ts");
-      const core = createMockCore();
-      const ext = create(core);
+  // The `-p` flag must resolve to the "prompt" subcommand from static
+  // metadata alone: main() bails before loading extensions when no
+  // subcommand will run, so a hook-based mapping would strand `-p` (and did).
+  describe("-p subcommand resolution from metadata", () => {
+    const origArgv = process.argv;
 
-      const cli = { prompt: "hello world" } as any;
-      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
+    async function parseWith(args: string[]) {
+      const { registerExtensionMetadata } = await import("@core/extensions/extensions.ts");
+      const { ConfigRegistry } = await import("@core/extensions/config.ts");
+      const { createSubcommandRegistry } = await import("@core/extensions/registries.ts");
+      const { parseArgs } = await import("@core/cli.ts");
 
+      const configRegistry = new ConfigRegistry();
+      const subcommandRegistry = createSubcommandRegistry();
+      await registerExtensionMetadata(
+        { extensionPaths: ["@extensions"] } as any,
+        configRegistry,
+        subcommandRegistry,
+      );
+      process.argv = ["bun", "hotdog", ...args];
+      try {
+        return parseArgs(configRegistry, subcommandRegistry.names());
+      } finally {
+        process.argv = origArgv;
+      }
+    }
+
+    it("maps -p to the prompt subcommand without loading extensions", async () => {
+      const cli = await parseWith(["-p", "hello world"]);
       expect(cli.subcommand).toBe("prompt");
+      expect(cli.prompt).toBe("hello world");
     });
 
-    it("does not set subcommand when cli.prompt is undefined", async () => {
-      const { create } = await import("@extensions/ui-one-shot/index.ts");
-      const core = createMockCore();
-      const ext = create(core);
-
-      const cli = {} as any;
-      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
-
-      expect(cli.subcommand).toBeUndefined();
-    });
-
-    it("does not set subcommand when cli.prompt is empty string", async () => {
-      const { create } = await import("@extensions/ui-one-shot/index.ts");
-      const core = createMockCore();
-      const ext = create(core);
-
-      const cli = { prompt: "" } as any;
-      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
-
-      expect(cli.subcommand).toBeUndefined();
-    });
-
-    it("does not interfere with other subcommands", async () => {
-      const { create } = await import("@extensions/ui-one-shot/index.ts");
-      const core = createMockCore();
-      const ext = create(core);
-
-      const cli = { subcommand: "info" } as any;
-      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
-
-      expect(cli.subcommand).toBe("info");
-    });
-
-    it("overrides existing subcommand when prompt is set", async () => {
-      const { create } = await import("@extensions/ui-one-shot/index.ts");
-      const core = createMockCore();
-      const ext = create(core);
-
-      const cli = { subcommand: "info", prompt: "hello" } as any;
-      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
-
+    it("maps --prompt to the prompt subcommand", async () => {
+      const cli = await parseWith(["--prompt", "hello world"]);
       expect(cli.subcommand).toBe("prompt");
+      expect(cli.prompt).toBe("hello world");
+    });
+
+    it("leaves subcommand unset when no prompt flag is given", async () => {
+      const cli = await parseWith([]);
+      expect(cli.subcommand).toBeNull();
     });
   });
 

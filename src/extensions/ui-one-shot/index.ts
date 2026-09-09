@@ -13,15 +13,6 @@ import type { PaletteOptions } from "@utils/cli/colors.ts";
 import type { CoreConfigWithExtensions, CliArgv } from "@core/config/index.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
 
-interface CliArgs {
-  prompt?: string;
-  colors?: boolean;
-  theme?: string;
-  sessionId?: string;
-  args?: string[];
-  [key: string]: unknown;
-}
-
 async function runOneShot(
   cli: CliArgv,
   core: CoreContext,
@@ -128,12 +119,9 @@ export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: core.hooks
       ? {
-          [HOOKS.CLI_ARGS_PARSED]: ({ cli }: { cli: CliArgs }) => {
-            if (cli.prompt) {
-              cli.subcommand = "prompt";
-            }
-          },
-
+          // The `-p/--prompt` flag selects this subcommand declaratively
+          // (extension.json "isSubcommand"), so it resolves before extensions
+          // load and `main()` can bail early when nothing will run.
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry: CliSubcommandRegistryLike) => {
             registry.register("prompt", {
               description:

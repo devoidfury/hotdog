@@ -49,11 +49,7 @@ interface ToolInput {
 // ── Provider Implementations ────────────────────────────────────────────────
 
 // No API key required; results are parsed from DDG's HTML endpoint.
-async function searchDuckDuckGo(
-  query: string,
-  maxResults: number,
-  timeout: number,
-): Promise<string> {
+async function searchDuckDuckGo(query: string, maxResults: number, timeout: number): Promise<string> {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const response = await hotdogFetch(url, {
     method: "GET",
@@ -61,9 +57,7 @@ async function searchDuckDuckGo(
   });
 
   if (!response.ok) {
-    throw new ToolError(
-      `DuckDuckGo search failed with status ${response.status}`,
-    );
+    throw new ToolError(`DuckDuckGo search failed with status ${response.status}`);
   }
 
   const results: SearchResult[] = [];
@@ -82,16 +76,14 @@ async function searchDuckDuckGo(
       },
       text(text) {
         if (currentResult && text.text.trim()) {
-          currentResult.title +=
-            (currentResult.title ? " " : "") + text.text.trim();
+          currentResult.title += (currentResult.title ? " " : "") + text.text.trim();
         }
       },
     })
     .on("a.result__snippet", {
       text(text) {
         if (currentResult && text.text.trim()) {
-          currentResult.description +=
-            (currentResult.description ? " " : "") + text.text.trim();
+          currentResult.description += (currentResult.description ? " " : "") + text.text.trim();
         }
       },
     });
@@ -139,10 +131,7 @@ async function searchBrave(
   const url = `https://api.search.brave.com/res/v1/web/search?q=${encoded}&count=${maxResults}`;
 
   const response = await hotdogFetch(url, {
-    headers: {
-      Accept: "application/json",
-      "X-Subscription-Token": apiKey,
-    },
+    headers: { Accept: "application/json", "X-Subscription-Token": apiKey },
     signal: AbortSignal.timeout(timeout * 1000),
   });
 
@@ -151,9 +140,7 @@ async function searchBrave(
   }
 
   const json = (await response.json()) as {
-    web?: {
-      results: Array<{ title?: string; url?: string; description?: string }>;
-    };
+    web?: { results: Array<{ title?: string; url?: string; description?: string }> };
   };
   const webResults = json?.web?.results || [];
 
@@ -192,10 +179,7 @@ async function searchTavily(
 
   const response = await hotdogFetch("https://api.tavily.com/search", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body,
     signal: AbortSignal.timeout(timeout * 1000),
   });
@@ -229,9 +213,7 @@ async function searchSearXNG(
   instanceUrl: string,
 ): Promise<string> {
   if (!instanceUrl) {
-    throw new ToolError(
-      "SearXNG instance URL not configured. Set webSearch.searxngInstanceUrl in config.",
-    );
+    throw new ToolError("SearXNG instance URL not configured. Set webSearch.searxngInstanceUrl in config.");
   }
 
   const base = instanceUrl.replace(/\/+$/, "");
@@ -239,9 +221,7 @@ async function searchSearXNG(
   const url = `${base}/search?q=${encoded}&format=json&pageno=1`;
 
   const response = await hotdogFetch(url, {
-    headers: {
-      Accept: "application/json",
-    },
+    headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(timeout * 1000),
   });
 
@@ -269,11 +249,7 @@ async function searchSearXNG(
 
 // ── Result Formatting ───────────────────────────────────────────────────────
 
-function formatResults(
-  results: SearchResult[],
-  query: string,
-  provider: string,
-): string {
+function formatResults(results: SearchResult[], query: string, provider: string): string {
   const lines: string[] = [`Search results for: ${query} (via ${provider})`];
 
   for (let i = 0; i < results.length; i++) {
@@ -326,10 +302,7 @@ export class WebSearchTool {
       "Search the web for information. Returns relevant results with titles, URLs, and descriptions. Use this to find current information, news, or research topics.",
       {
         properties: {
-          query: param(
-            "string",
-            "The search query. Be specific for better results.",
-          ),
+          query: param("string", "The search query. Be specific for better results."),
         },
         required: ["query"],
       },
@@ -337,15 +310,10 @@ export class WebSearchTool {
   }
 
   callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      input,
-      (args) => `web_search: ${(args as ToolInput).query}`,
-    );
+    return defaultCallDisplay(input, (args) => `web_search: ${(args as ToolInput).query}`);
   }
 
-  async execute(
-    input: string | Record<string, unknown> | null,
-  ): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
@@ -365,28 +333,13 @@ export class WebSearchTool {
           result = await searchDuckDuckGo(query, this.maxResults, this.timeout);
           break;
         case "brave":
-          result = await searchBrave(
-            query,
-            this.maxResults,
-            this.timeout,
-            this.braveApiKey,
-          );
+          result = await searchBrave(query, this.maxResults, this.timeout, this.braveApiKey);
           break;
         case "tavily":
-          result = await searchTavily(
-            query,
-            this.maxResults,
-            this.timeout,
-            this.tavilyApiKey,
-          );
+          result = await searchTavily(query, this.maxResults, this.timeout, this.tavilyApiKey);
           break;
         case "searxng":
-          result = await searchSearXNG(
-            query,
-            this.maxResults,
-            this.timeout,
-            this.searxngInstanceUrl,
-          );
+          result = await searchSearXNG(query, this.maxResults, this.timeout, this.searxngInstanceUrl);
           break;
         default:
           return ToolResult.err(`Unknown search provider: ${provider}`);
@@ -400,11 +353,7 @@ export class WebSearchTool {
       });
     } catch (err) {
       const msg = (err as Error).message;
-      if (
-        msg.includes("timeout") ||
-        msg.includes("timed out") ||
-        msg.includes("AbortError")
-      ) {
+      if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("AbortError")) {
         throw new TransientError(`Web search timed out: ${msg}`);
       }
       return ToolResult.err(`Web search failed: ${msg}`);

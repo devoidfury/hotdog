@@ -20,11 +20,7 @@ import type { ProfileDef } from "./config/profiles.ts";
 import type { ResolvedConfig } from "./extensions/types.ts";
 import type { ProviderDef } from "./config/providers.ts";
 import { getLayerDefault } from "./config/schema-loader.ts";
-import {
-  cliFlagsFromSchema,
-  CONFIG_SCHEMA,
-  type CoreConfigWithExtensions,
-} from "./config/schema-loader.ts";
+import { cliFlagsFromSchema, CONFIG_SCHEMA, type CoreConfigWithExtensions } from "./config/schema-loader.ts";
 import { ConfigRegistry } from "./extensions/config.ts";
 import { CliError } from "./error.ts";
 import { createSubcommandRegistry, type CliSubcommandRegistry } from "./extensions/registries.ts";
@@ -145,8 +141,7 @@ export function createCore(
       // CLI values. Seed the session mangler with that format's markers
       // (per-model formats/controlTokens still grow the union via
       // ensureManglerCovers on first use).
-      const modelToolFormat =
-        (resolved?.modelToolFormat as string | undefined) ?? TOOL_FORMAT_DEFAULT_NAME;
+      const modelToolFormat = (resolved?.modelToolFormat as string | undefined) ?? TOOL_FORMAT_DEFAULT_NAME;
       // Unknown names throw LlmError("config") at the request boundary,
       // mirroring unknown protocol/format ids (no silent fallback to xml).
       const defaultToolFormat = toolFormatForName(modelToolFormat, this.toolFormatRegistry);
@@ -163,10 +158,7 @@ export function createCore(
         toolFormat: modelToolFormat,
         toolFormatRegistry: this.toolFormatRegistry,
         llmProtocolRegistry: this.llmProtocolRegistry,
-        markerMangler: new MarkerMangler([
-          ...CORE_PROTECTED_PREFIXES,
-          ...defaultToolFormat.markers,
-        ]),
+        markerMangler: new MarkerMangler([...CORE_PROTECTED_PREFIXES, ...defaultToolFormat.markers]),
         ...overrides,
       });
     },
@@ -267,6 +259,13 @@ export async function main(): Promise<number> {
   });
 
   core.resolved = resolved as ResolvedConfig;
+
+  // bail early when we won't be running any subcommand
+  if (!cli.subcommand && !process.stdin.isTTY) {
+    logger.error("No subcommand provided.");
+    console.log(`Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`);
+    return 1;
+  }
 
   await loadExtensions(core, { taskManager: null, config });
 

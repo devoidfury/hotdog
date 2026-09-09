@@ -2,6 +2,8 @@
 
 Domain concepts for the hotdog AI agent harness. Implementation details are documented separately in `docs/agents/`.
 
+Status markers: entries tagged **(planned)** are design intent -- nothing in the current code implements them. Entries tagged **(experimental)** exist in code but are not validated. Untagged entries describe shipped behavior.
+
 ## Core Entities
 
 - **Application** — One `hotdog` process. Manages zero or more agents.
@@ -14,7 +16,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 - **Context** — Everything the LLM sees. The high-level concept. Managed via MessageLog (implementation).
 - **MessageLog** — Class in `src/core/context/message-log.ts` that wraps the agent's message array. Provides `push()`, `replace()`, `getAll()`, `clear()`, `toJSON()`, and `buildMessages()`. The agent's `log` property returns this instance. Messages are `Message` objects with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`.
 - **Cache Invalidation** — Triggers: compaction, reset, model switch. These are the known break points. Critical performance concern (can mean difference between 20s and 5m response).
-- **Selective Pruning** (experimental) — Tail-popping messages to reuse older cache layers. Not yet validated.
+- **Selective Pruning** (planned) — Tail-popping messages to reuse older cache layers. Not implemented.
 
 ## Context Enrichment
 
@@ -27,10 +29,10 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 ## Tools
 
 - **Tool** — Single concept: either exposed to context or not. No distinction between "core", "manager", or "MCP" at the domain level.
-- **Tool Group** — A set of tools managed together (like manager tools). Should be extensible, not hardcoded.
+- **Tool Group** (planned) — A set of tools managed together (like manager tools). No grouping primitive exists today; when it lands it must stay extensible, not hardcoded.
 - **MCP Tool** — A third-party tool loaded via the Model Context Protocol spec. Same domain concept as any other tool.
 - **Workspace Roots** — The set of directories bounding file tools, configured via `workspace.paths` (default `["."]`, i.e. the process CWD; legacy `cwdBoundary`/`workspaceRoot` keys still honored as a single root). Relative paths resolve against the primary root (`paths[0]`); absolute paths must fall inside some root. All file paths go through `Workspace.resolveSafe()` which rejects escapes (including symlink escapes).
-- **Tool Guideline** — Per-tool context snippet (implementation detail, under consideration for change).
+- **Tool Guideline** (planned) — Per-tool context snippet. Not implemented; the only shipped per-tool data is `ToolMetadata` (`sideEffects`, `difficulty`).
 
 ## Messages
 
@@ -44,10 +46,10 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 ## Context Management
 
 - **Compaction** — Triggered when token budget exceeded. Current strategy: "full summary + keep recent" — LLM summarizes older messages into a structured checkpoint (Goal, Progress, Key Decisions, Next Steps, Critical Context), injected as system message replacing compacted messages. Recent messages kept verbatim.
-- **Compaction Strategies** — Current: summary + keep recent. Planned experimental: tail optimization with prominent summary prompt + keep recent mix.
+- **Compaction Strategies** — Current default: summary + keep recent (the strategy registry also ships drop, summarize-short, token-aware, trim). Planned: tail optimization with prominent summary prompt + keep recent mix.
 - **Max Iterations** — Configurable safety mechanism. Reset on final response (non-tool-call content).
 - **Final Response** — LLM returns plain content (no tool calls). End of turn or continuation depending on app settings.
-- **Context Pruning** (experimental) — Selective tail-popping to reuse older cache layers. Not yet validated.
+- **Context Pruning** (planned) — Selective tail-popping to reuse older cache layers. Not implemented.
 
 ## Agent Lifecycle
 
@@ -64,7 +66,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 - **Output** — Decoupling agent from UI layer. Agent emits raw data; UI layer formats display. Deliberate domain boundary.
 - **Sink** — UI implementation of OutputSink. `CliOutputSink` extends `OutputSink` with formatting and color support. One sink per agent. Task agents get a silent sink that emits nothing to the UI (only the task-complete callback matters).
 - **OutputEvent** — Domain concept: events representing changes in the agent's state. Emitted to the sink for display. 15 types: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `THINKING`, `TOOL_CALL`, `TOOL_RESULT`, `COMPACTING`, `COMMAND_RESULT`, `QUESTION`, `STREAMING_CHUNK`, `STREAMING_REASONING_CHUNK`, `TASK_PROGRESS`, `TOKEN_USAGE`, `COMPACTION_RESULT`, `SESSION_STATE`, `SYSTEM_MESSAGE`.
-- **Pager / TruncatedOutput** — Context manipulation (pagination of tool output into context), not UI formatting.
+- **TruncatedOutput** — Tool output head-truncated at a max-lines cap with a `[truncated, N more lines]` tail note (`truncateOutput()` in tool-utils); context manipulation, not UI formatting. **Pager** (planned) — paginating the remainder into context; not implemented.
 
 ## Persistence
 
@@ -73,7 +75,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 
 ## Task System
 
-- **Task Lifecycle** — Spawned as background task → LLM loop with tool support → text response → result appended to manager's MessageLog → wake-up callback fires.
+- **Task Lifecycle** — Spawned as background task → LLM loop with tool support → text response → result enqueued on the delegating session's MessageBus → the bus run loop appends it to the manager's context (see Task Communication).
 - **Task Communication** — On completion, the task result is enqueued on the MessageBus of the session that owns the delegating agent as its next message; the bus run loop appends it to the manager's context via `agent.run()`. The delegating agent is captured at spawn time, so in multi-session setups the result is not delivered to whatever session happened to be created last. It is enqueued, not also added directly, so the result is injected exactly once. If no delegating session was captured (or the session manager exposes no `getBus` — sessionless harnesses), the result falls back to a direct append to the manager's context. If a delegating session was captured but has no bus when the task completes (session deleted, or delegator owns no session entry), the result is dropped with a warning rather than misdelivered to a different session. Follow-up via queue (`_followQueue`) drained on each iteration.
 - **Task Cancellation** — CancellationToken on TaskHandle. Parent calls interrupt_task().
 - **Task Concurrency** — Multiple simultaneous task agents via TaskManager HashMap.
@@ -81,7 +83,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 
 ## External Events
 
-- **MessageQueue** — Thread-safe FIFO buffer. Intended mechanism for external event injection.
+- **MessageQueue** — The MessageBus FIFO queue (`enqueue()` resolves a deferred wake). The mechanism for external event injection.
 - **External Events** — File changes, HTTP callbacks, cron schedules, other agents, user interactions from different UIs.
 - **Event Injection** — External events become user messages (possibly wrapped).
 - **MessageBus** — Message queue + dispatcher pattern. Single-threaded dispatch owning the run loop (implementation detail, not a domain constraint).
@@ -120,4 +122,4 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 
 ## Analytics
 
-- **Model Usage Analytics** — KPIs: cache hit/miss patterns, token sizes, context sizes, per-model request counts, success/failure rates. First-class concern for performance monitoring.
+- **Model Usage Analytics** (planned) — KPIs: cache hit/miss patterns, token sizes, context sizes, per-model request counts, success/failure rates. First-class concern for performance monitoring; not implemented (TokenTracker session/request totals only).

@@ -67,7 +67,7 @@ export class StdioTransport implements McpTransport {
     this.#child = spawn(command, args, {
       ...OWN_PROCESS_GROUP,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...copyScrubbedEnv(), ...env },
+      env: { ...copyScrubbedEnv(process.env), ...env },
     });
 
     this.#writeStream = this.#child.stdin;

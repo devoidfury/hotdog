@@ -43,7 +43,7 @@ describe("copyScrubbedEnv", () => {
   });
 
   it("defaults to process.env and never includes sensitive keys", () => {
-    const scrubbed = copyScrubbedEnv();
+    const scrubbed = copyScrubbedEnv(process.env);
     for (const key of Object.keys(scrubbed)) {
       expect(isSensitiveEnvVar(key)).toBe(false);
     }

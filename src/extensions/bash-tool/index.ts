@@ -50,7 +50,7 @@ export type SandboxMode = "off" | "static" | "fence" | "gate";
  */
 export function agentSpawnEnv(): Record<string, string> {
   return {
-    ...copyScrubbedEnv(),
+    ...copyScrubbedEnv(process.env),
     // enable agent-friendly test output in bun test, maybe others
     AGENT: "hotdog",
     HOTDOG: "1",

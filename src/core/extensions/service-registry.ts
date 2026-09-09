@@ -1,6 +1,6 @@
 // Service Registry — maps abstract interface names to implementations.
 
-import { logger } from "../logger.ts";
+import { logger } from "@utils/logger.ts";
 import { ExtensionError } from "../error.ts";
 
 /**

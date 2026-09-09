@@ -1,6 +1,6 @@
 // Designed to be extensible via hooks and reusable by future UIs (web UI).
 
-import { logger } from "./logger.ts";
+import { logger } from "@utils/logger.ts";
 import type { AgentLike } from "./session/index.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────

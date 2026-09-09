@@ -1,7 +1,7 @@
 import { ACTIONS } from "../commands.ts";
 import { HOOKS } from "../hooks.ts";
-import { isPromise } from "../../utils/promise.ts";
-import { logger } from "../logger.ts";
+import { isPromise } from "@utils/promise.ts";
+import { logger } from "@utils/logger.ts";
 import type { CoreContext } from "./types.ts";
 import type { CompletionHandler } from "../completion.ts";
 import type { Agent } from "../agent.ts";

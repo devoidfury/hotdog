@@ -7,8 +7,8 @@
 import { resolve as resolveAbs, sep, dirname } from "node:path";
 import { homedir } from "node:os";
 import fs from "node:fs";
-import { ToolError, ConfigError } from "../core/error.ts";
-import { logger } from "../core/logger.ts";
+import { ToolError, ConfigError } from "@core/error.ts";
+import { logger } from "./logger.ts";
 
 export type PathEscapeKind = "invalid" | "direct" | "symlink" | "denied";
 

@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import { join } from "node:path";
 import { parseFrontMatter, validateNameable } from "@utils/file-utils.ts";
 import { render } from "@utils/render.ts";
-import { logger } from "@core/logger.ts";
+import { logger } from "@utils/logger.ts";
 import { ParseError, formatError } from "@core/error.ts";
 
 export interface Skill {

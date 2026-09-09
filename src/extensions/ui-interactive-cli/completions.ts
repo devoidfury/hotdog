@@ -3,7 +3,7 @@ import type { CompletionContext, CompletionHandler } from "@core/completion.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
 import type { SessionManager } from "@core/session/index.ts";
-import { logger } from "@core/logger.ts";
+import { logger } from "@utils/logger.ts";
 
 const MIN_CMD_LEN = 2;
 

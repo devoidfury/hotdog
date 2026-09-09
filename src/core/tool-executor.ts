@@ -1,12 +1,12 @@
 import { Message, type ToolCall, type ImageAttachment } from "./context/message.ts";
 import { formatError, AssistantRetryableError, TransientError } from "./error.ts";
 import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
-import { logger } from "./logger.ts";
+import { logger } from "@utils/logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
-import { Workspace } from "./../utils/workspace.ts";
+import { Workspace } from "@utils/workspace.ts";
 import type { ToolFormatRegistry } from "./extensions/tool-format.ts";
 
 export interface ToolResult {

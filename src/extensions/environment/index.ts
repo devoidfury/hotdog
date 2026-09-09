@@ -1,10 +1,10 @@
 import { join } from "node:path";
 import { cwd, platform } from "node:process";
 import { readFile } from "node:fs/promises";
-import { HOOKS } from "../../core/hooks.ts";
-import { logger } from "../../core/logger.ts";
-import { render } from "../../utils/render.ts";
-import { ExtensionInstance } from "../../core/extensions/types.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { logger } from "@utils/logger.ts";
+import { render } from "@utils/render.ts";
+import { ExtensionInstance } from "@core/extensions/types.ts";
 import type { Agent } from "@core/agent.ts";
 
 const TEMPLATE_PATH = join(import.meta.dirname, "environment_chunk.md");

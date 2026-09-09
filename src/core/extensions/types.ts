@@ -30,7 +30,7 @@ import type { ToolContext } from "./tool-context.ts";
 export type { ToolContext };
 import type { StreamResult } from "../llm-client/stream-processor.ts";
 import type { LlmClient, LlmClientOptions } from "../llm-client/client.ts";
-import { logger } from "../logger.ts";
+import { logger } from "@utils/logger.ts";
 import { ProfileDef, ProfileManager } from "../config/profiles.ts";
 import { ParsedCliOptions } from "../cli.ts";
 import { SessionManager } from "../session/index.ts";

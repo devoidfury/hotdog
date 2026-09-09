@@ -3,7 +3,7 @@ import { resolve as resolveAbs, isAbsolute } from "node:path";
 import { cwd } from "node:process";
 import { HOOKS } from "@core/hooks.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
-import { logger } from "@core/logger.ts";
+import { logger } from "@utils/logger.ts";
 import { formatError } from "@core/error.ts";
 import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
 import { Workspace, PathEscapeError } from "@utils/workspace.ts";

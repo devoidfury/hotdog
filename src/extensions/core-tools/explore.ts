@@ -7,11 +7,11 @@ import {
   param,
   ToolResult,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { logger } from "../../core/logger.ts";
-import { ToolContext } from "../../core/extensions/types.ts";
-import { PathEscapeError, Workspace } from "../../utils/workspace.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { logger } from "@utils/logger.ts";
+import { ToolContext } from "@core/extensions/types.ts";
+import { PathEscapeError, Workspace } from "@utils/workspace.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "hotdog");

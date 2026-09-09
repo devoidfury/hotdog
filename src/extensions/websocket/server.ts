@@ -1,26 +1,26 @@
 import crypto from "node:crypto";
-import { HOOKS, createHooks } from "../../core/hooks.ts";
-import { SessionManager, type AgentLike } from "../../core/session/index.ts";
-import type { SwitchProfile } from "../../core/config/profiles.ts";
+import { HOOKS, createHooks } from "@core/hooks.ts";
+import { SessionManager, type AgentLike } from "@core/session/index.ts";
+import type { SwitchProfile } from "@core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
 import { C2S, S2C, C2SMessage } from "./protocol.ts";
 import {
   WebSocketQuestionBridge,
   type QuestionStrategy,
 } from "./question-input.ts";
-import type { LlmClient } from "../../core/llm-client/client.ts";
-import type { CoreContext } from "../../core/extensions/types.ts";
+import type { LlmClient } from "@core/llm-client/client.ts";
+import type { CoreContext } from "@core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
-import { Agent } from "../../core/agent.ts";
-import { createAgentFactory } from "../../core/agent-factory.ts";
+import { Agent } from "@core/agent.ts";
+import { createAgentFactory } from "@core/agent-factory.ts";
 import {
   readSessionEntries,
   replayEntriesIntoContext,
   listSessionLogs,
   deleteSessionLog,
-} from "../../core/session/session-log.ts";
-import { AgentError, formatError } from "../../core/error.ts";
-import { logger } from "../../core/logger.ts";
+} from "@core/session/session-log.ts";
+import { AgentError, formatError } from "@core/error.ts";
+import { logger } from "@utils/logger.ts";
 
 interface SessionMetadata {
   profile: string;

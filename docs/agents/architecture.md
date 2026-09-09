@@ -154,7 +154,7 @@ File I/O and path resolution helpers. Key exports:
 - `loadAspects(aspectNames, aspectsDir)` — loads aspect files from a directory
 - `validateNameable(name, label, dirName)` — validates nameable entity names
 
-### Logger (`src/core/logger.ts`)
+### Logger (`src/utils/logger.ts`)
 Centralized, swappable logging via the hook system. Singleton pattern with pre-init buffering. Key exports:
 - `logger` — singleton with `debug()`, `info()`, `warn()`, `error()` methods
 - `initializeLogger({ hooks, minLevel, target })` — bootstrap initialization

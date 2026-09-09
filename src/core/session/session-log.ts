@@ -6,7 +6,7 @@ import { join, resolve as resolveAbs, sep } from "node:path";
 import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
 import { MESSAGE_SOURCES, Message, type ToolCall, type ImageAttachment, type MessageSource } from "../context/message.ts";
 import { AgentError, formatError } from "../error.ts";
-import { logger } from "../logger.ts";
+import { logger } from "@utils/logger.ts";
 
 export const LOG_SOURCE = {
   SYSTEM_PROMPT: "system_prompt",

@@ -1,5 +1,7 @@
+/// <reference lib="dom.iterable" />
 // Tests for webui/ui/message-list.ts against the minimal DOM from
 // tests/dom-helper (installed as a preload via bunfig.toml).
+// Spreading querySelectorAll()/children results needs dom.iterable.
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { createMessageList, type MessageListManager } from "../../src/extensions/webui/ui/message-list.ts";

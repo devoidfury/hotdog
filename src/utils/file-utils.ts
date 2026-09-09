@@ -2,8 +2,8 @@ import fsPromises from "node:fs/promises";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
-import { logger } from "../core/logger.ts";
-import { ToolResult } from "../core/extensions/tool-utils.ts";
+import { logger } from "./logger.ts";
+import { ToolResult } from "@core/extensions/tool-utils.ts";
 
 export interface ParsedFrontMatter {
   frontMatter?: Record<string, unknown>;

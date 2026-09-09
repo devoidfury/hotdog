@@ -2,8 +2,8 @@
 // handlers sequentially and accumulates their return values.
 
 import { formatError } from "./error.ts";
-import { logger } from "./logger.ts";
-import { isPromise } from "../utils/promise.ts";
+import { logger } from "@utils/logger.ts";
+import { isPromise } from "@utils/promise.ts";
 import type { Message } from "./context/message.ts";
 import type { ImageAttachment } from "./context/message.ts";
 import type { ModelConfig } from "./config/providers.ts";

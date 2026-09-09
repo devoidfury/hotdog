@@ -12,15 +12,15 @@
 // service -- validateServiceContracts() runs at extension-load time, when
 // no session (and therefore no TaskManager) exists yet.
 
-import { HOOKS } from "../../core/hooks.ts";
-import { formatError } from "../../core/error.ts";
-import { logger } from "../../core/logger.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { formatError } from "@core/error.ts";
+import { logger } from "@utils/logger.ts";
 import { SUBAGENT_TOOL_NAMES, SUBAGENT_TOOL_CONSTRUCTORS } from "./subagents.ts";
 import {
   CoreContext,
   ExtensionInstance,
-} from "../../core/extensions/types.ts";
-import { TaskManager } from "../../core/session/task-manager.ts";
+} from "@core/extensions/types.ts";
+import { TaskManager } from "@core/session/task-manager.ts";
 
 interface SubagentOptions {
   taskManager?: TaskManager | null;

@@ -5,7 +5,7 @@ import {
   DEFAULT_SYSTEM_PROMPT_FILENAME,
   DEFAULT_SYSTEM_PROMPT_TEMPLATE,
 } from "./defaults.ts";
-import { logger } from "../logger.ts";
+import { logger } from "@utils/logger.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
 /**

@@ -1,8 +1,8 @@
 import {
   validateParams,
   formatValidationErrors,
-} from "../../utils/json-schema.ts";
-import { logger } from "../logger.ts";
+} from "@utils/json-schema.ts";
+import { logger } from "@utils/logger.ts";
 import type { ToolContext, DefaultToolContext } from "./tool-context.ts";
 
 /**

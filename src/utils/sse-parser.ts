@@ -1,4 +1,4 @@
-import { logger } from "../core/logger.ts";
+import { logger } from "./logger.ts";
 
 export interface SseParserOptions {
   /** Maximum accumulated JSON buffer size before warning and discarding. */

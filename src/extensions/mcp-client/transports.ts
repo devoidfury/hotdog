@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from "node:child_process";
-import { logger } from "@core/logger.ts";
+import { logger } from "@utils/logger.ts";
 import { formatError } from "@core/error.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
 import { OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";

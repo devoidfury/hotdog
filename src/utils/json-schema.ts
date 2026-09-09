@@ -7,7 +7,7 @@
  * minItems/maxItems, pattern (regex), and default (skip validation).
  */
 
-import { logger } from "../core/logger.ts";
+import { logger } from "./logger.ts";
 
 type TypeCheckFn = (v: unknown) => boolean;
 

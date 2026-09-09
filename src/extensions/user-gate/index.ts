@@ -22,7 +22,7 @@
 import { HOOKS, type SandboxGateAction } from "@core/hooks.ts";
 import { CoreContext, ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
 import type { HookPayloads } from "@core/extensions/types.ts";
-import { logger } from "@core/logger.ts";
+import { logger } from "@utils/logger.ts";
 
 type GatePayload = HookPayloads["sandbox:gate"];
 

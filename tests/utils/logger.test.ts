@@ -6,7 +6,7 @@ import {
   initializeLogger,
   logger,
   resetLoggerForTesting,
-} from "../../src/core/logger.ts";
+} from "../../src/utils/logger.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
 
 describe("LOG_LEVELS", () => {

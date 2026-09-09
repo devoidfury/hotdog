@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "./logger.ts";
+import { initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "@utils/logger.ts";
 import { createToolRegistry } from "./extensions/tool-registry.ts";
 import {
   createExtensionLoader,

@@ -1,9 +1,9 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import { parseFrontMatter } from "../../utils/file-utils.ts";
+import { parseFrontMatter } from "@utils/file-utils.ts";
 import { DEFAULT_PROFILES_SUBPATH } from "./defaults.ts";
 import type { Dirent } from "node:fs";
-import { logger } from "../logger.ts";
+import { logger } from "@utils/logger.ts";
 import { normalizeConfigKeys } from "./index.ts";
 
 /**

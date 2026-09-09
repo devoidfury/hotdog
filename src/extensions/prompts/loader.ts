@@ -3,12 +3,12 @@
 
 import fs from "node:fs/promises";
 import { join } from "node:path";
-import { parseFrontMatter, validateNameable } from "../../utils/file-utils.ts";
-import { logger } from "../../core/logger.ts";
-import { ParseError, formatError } from "../../core/error.ts";
-import { render } from "../../utils/render.ts";
-import { ACTIONS } from "../../core/commands.ts";
-import type { Agent } from "../../core/agent.ts";
+import { parseFrontMatter, validateNameable } from "@utils/file-utils.ts";
+import { logger } from "@utils/logger.ts";
+import { ParseError, formatError } from "@core/error.ts";
+import { render } from "@utils/render.ts";
+import { ACTIONS } from "@core/commands.ts";
+import type { Agent } from "@core/agent.ts";
 
 interface Prompt {
   name: string;

@@ -5,7 +5,7 @@ import { ToolRegistry, type Tool } from "../../src/core/extensions/tool-registry
 import { Agent } from "../../src/core/agent.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
 import { createToolRegistry } from "../../src/core/extensions/tool-registry.ts";
-import { initializeLogger, resetLoggerForTesting } from "../../src/core/logger.ts";
+import { initializeLogger, resetLoggerForTesting } from "../../src/utils/logger.ts";
 
 /** Create a minimal test tool (def name defaults to the registered name) */
 function mkTool(execute: () => unknown | Promise<unknown>, name = "test"): Tool {

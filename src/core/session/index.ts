@@ -4,7 +4,7 @@ import { MessageBus } from "./message-bus.ts";
 import { TaskManager } from "./task-manager.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { formatError } from "../error.ts";
-import { logger } from "../logger.ts";
+import { logger } from "@utils/logger.ts";
 import type { CommandRegistryLike, ParsedCommand } from "../commands.ts";
 import type { LlmClient } from "../llm-client/client.ts";
 import type { CommandResult } from "../extensions/registries.ts";

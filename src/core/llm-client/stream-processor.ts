@@ -2,7 +2,7 @@
 
 import crypto from "node:crypto";
 import { LlmError } from "../error.ts";
-import { logger } from "../logger.ts";
+import { logger } from "@utils/logger.ts";
 import type { MarkerMangler } from "../marker-mangler.ts";
 import type { StreamEvent } from "./client.ts";
 import { ToolCall } from "../context/message.ts";

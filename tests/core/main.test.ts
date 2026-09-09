@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { main } from "../../src/core/main.ts";
-import { resetLoggerForTesting } from "../../src/core/logger.ts";
+import { resetLoggerForTesting } from "../../src/utils/logger.ts";
 
 import pkg from "../../package.json" with { type: "json" };
 import { ConfigRegistry } from "../../src/core/extensions/config.ts";

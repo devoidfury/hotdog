@@ -1,5 +1,5 @@
 import { HOOKS } from "@core/hooks.ts";
-import { logger } from "@core/logger.ts";
+import { logger } from "@utils/logger.ts";
 import { formatError } from "@core/error.ts";
 import { McpConnection } from "./connection.ts";
 import { McpTool } from "./tools.ts";

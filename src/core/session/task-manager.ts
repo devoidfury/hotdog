@@ -1,4 +1,4 @@
-import { logger } from "../logger.ts";
+import { logger } from "@utils/logger.ts";
 import { Message, type MessageSource } from "../context/message.ts";
 import { LlmError, formatError } from "../error.ts";
 import { loadProfileFile, ProfileManager } from "../config/profiles.ts";

@@ -1,17 +1,17 @@
-import { formatError } from "../../core/error.ts";
-import { HOOKS } from "../../core/hooks.ts";
-import { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
-import { logger } from "../../core/logger.ts";
-import { CliOutputSink } from "../../utils/cli/cli.ts";
-import type { LlmClient } from "../../core/llm-client/client.ts";
-import { SessionManager, type AgentLike } from "../../core/session/index.ts";
-import { createAgentFactory } from "../../core/agent-factory.ts";
+import { formatError } from "@core/error.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { CliSubcommandRegistryLike } from "@core/extensions/registries.ts";
+import { logger } from "@utils/logger.ts";
+import { CliOutputSink } from "@utils/cli/cli.ts";
+import type { LlmClient } from "@core/llm-client/client.ts";
+import { SessionManager, type AgentLike } from "@core/session/index.ts";
+import { createAgentFactory } from "@core/agent-factory.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
-import type { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
-import type { PaletteOptions } from "../../utils/cli/colors.ts";
-import type { CoreConfigWithExtensions, CliArgv } from "../../core/config/index.ts";
-import type { ModelConfig } from "../../core/config/providers.ts";
+import type { CoreContext, ExtensionInstance, ResolvedConfig } from "@core/extensions/types.ts";
+import type { PaletteOptions } from "@utils/cli/colors.ts";
+import type { CoreConfigWithExtensions, CliArgv } from "@core/config/index.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
 
 interface CliArgs {
   prompt?: string;

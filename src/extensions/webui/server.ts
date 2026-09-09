@@ -1,13 +1,13 @@
 import { createWsServer } from "../websocket/server.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
-import { logger } from "../../core/logger.ts";
+import { logger } from "@utils/logger.ts";
 import {
   CoreContext,
   getExtensionConfig,
-} from "../../core/extensions/types.ts";
+} from "@core/extensions/types.ts";
 
-import { ExtensionError } from "../../core/error.ts";
-import { ProfileManager, type ProfileDef } from "../../core/config/index.ts";
+import { ExtensionError } from "@core/error.ts";
+import { ProfileManager, type ProfileDef } from "@core/config/index.ts";
 import { BunRequest } from "bun";
 
 // special bun import that transpiles and serves all linked assets,

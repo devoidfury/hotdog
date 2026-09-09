@@ -4,7 +4,7 @@
 import { describe, it, expect } from "bun:test";
 import { create } from "../../src/extensions/webui/index.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
-import { logger } from "../../src/core/logger.ts";
+import { logger } from "../../src/utils/logger.ts";
 import { createMockCore, createMockRegistry } from "../test-helpers.ts";
 
 describe("WebUI Extension", () => {

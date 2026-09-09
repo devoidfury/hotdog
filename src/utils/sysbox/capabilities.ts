@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { logger } from "../../core/logger.ts";
+import { logger } from "../logger.ts";
 
 export interface SysboxCapabilities {
   /** `static` mode: seccomp deny-filter via the sbx-exec helper. */

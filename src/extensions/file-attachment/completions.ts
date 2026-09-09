@@ -1,7 +1,7 @@
 import fsPromises from "node:fs/promises";
 import { resolve as resolveAbs, isAbsolute, dirname } from "node:path";
 import { cwd } from "node:process";
-import { logger } from "@core/logger.ts";
+import { logger } from "@utils/logger.ts";
 import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 import type { CompletionContext } from "@core/completion.ts";
 

@@ -26,8 +26,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { ConfigError, formatError } from "../../core/error.ts";
-import { logger } from "../../core/logger.ts";
+import { ConfigError, formatError } from "@core/error.ts";
+import { logger } from "../logger.ts";
 import { OWN_PROCESS_GROUP } from "../process-group.ts";
 import type { Workspace } from "../workspace.ts";
 import { detectCapabilities, launcherCPath, sbHelperPath } from "./capabilities.ts";

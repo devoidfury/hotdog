@@ -8,19 +8,19 @@ import { SummarizeShortStrategy } from "./strategies/summarize-short.ts";
 import { TokenAwareStrategy } from "./strategies/token-aware.ts";
 import { TrimStrategy } from "./strategies/trim.ts";
 import { shouldCompact } from "./utils.ts";
-import { HOOKS } from "../../core/hooks.ts";
-import { ACTIONS } from "../../core/commands.ts";
-import { logger } from "../../core/logger.ts";
-import { LlmError, formatError } from "../../core/error.ts";
-import { Message } from "../../core/context/message.ts";
-import type { Agent } from "../../core/agent.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { ACTIONS } from "@core/commands.ts";
+import { logger } from "@utils/logger.ts";
+import { LlmError, formatError } from "@core/error.ts";
+import { Message } from "@core/context/message.ts";
+import type { Agent } from "@core/agent.ts";
 import {
   CoreContext,
   ExtensionInstance,
   CommandsRegisterPayload,
   getExtensionConfig,
-} from "../../core/extensions/types.ts";
-import { findModelEntry, type ModelConfig } from "../../core/config/providers.ts";
+} from "@core/extensions/types.ts";
+import { findModelEntry, type ModelConfig } from "@core/config/providers.ts";
 import { matcher, completion } from "./completions.ts";
 
 interface CompactionSettings {

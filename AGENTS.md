@@ -23,6 +23,12 @@ JS project `hotdog` — an AI agent harness.
 - Do not add speculative config/feature flags "just in case".
 - Never use mock.module in tests; footgun.
 
+### Module Imports
+tsconfig path aliases defined: `@core/*`, `@extensions/*`, `@utils/*`, `@package.json`.
+Within same alias scope, relative imports okay (e.g. `../error.ts` from `src/core/session/`).
+Across alias scopes, use alias instead of `../../core` or `../../utils` climbing paths
+(e.g. `@utils/logger.ts` from `src/core/`, `@core/hooks.ts` from `src/extensions/`).
+
 ### Marker Mangler
 Protected markers are rewritten to a random per-session alias (`<m_...>`) in ALL text you receive.
 Never write one to a file or edit based on it. Verify real bytes via the HEX column of `xxd` (not the ASCII column) or `sed -n 'Np' file | sha256sum` vs `printf '<expected>\n' | sha256sum`.

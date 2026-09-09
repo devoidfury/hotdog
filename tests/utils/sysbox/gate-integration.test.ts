@@ -13,7 +13,7 @@ import { ToolContext } from "../../../src/core/extensions/tool-context.ts";
 import { HookSystem, HOOKS } from "../../../src/core/hooks.ts";
 import { Workspace } from "../../../src/utils/workspace.ts";
 import { detectCapabilities } from "../../../src/utils/sysbox/index.ts";
-import { initializeLogger, resetLoggerForTesting } from "../../../src/core/logger.ts";
+import { initializeLogger, resetLoggerForTesting } from "../../../src/utils/logger.ts";
 
 const caps = detectCapabilities();
 const suite = caps.gateAvailable ? describe : describe.skip;

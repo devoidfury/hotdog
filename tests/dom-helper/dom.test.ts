@@ -1,6 +1,8 @@
+/// <reference lib="dom.iterable" />
 // Smoke tests for the minimal DOM in tests/dom-helper. These keep the test
 // environment itself honest: message-list and chat tests lean on these
 // behaviors (innerHTML round-trip, dataset proxy, bubbling events, selectors).
+// Iteration over querySelector()/children results needs dom.iterable.
 
 import { describe, it, expect } from "bun:test";
 import { FakeWebSocket } from "./index.ts";

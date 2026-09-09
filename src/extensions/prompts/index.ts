@@ -1,14 +1,14 @@
 // Prompts Extension
 // Manages prompt templates loading and execution.
 
-import { HOOKS } from "../../core/hooks.ts";
-import { logger } from "../../core/logger.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { logger } from "@utils/logger.ts";
 import { PromptsLoader } from "./loader.ts";
 import {
   getExtensionConfig,
   type CoreContext,
   type ExtensionInstance,
-} from "../../core/extensions/types.ts";
+} from "@core/extensions/types.ts";
 import { matcher, completion } from "./completions.ts";
 
 /**

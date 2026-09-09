@@ -1,7 +1,7 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { HOOKS } from "@core/hooks.ts";
-import { logger } from "@core/logger.ts";
+import { logger } from "@utils/logger.ts";
 import { render } from "@utils/render.ts";
 import { parseFrontMatter, loadAspects } from "@utils/file-utils.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";

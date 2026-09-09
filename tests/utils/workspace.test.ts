@@ -593,6 +593,43 @@ describe("Workspace — multi-root", () => {
   });
 });
 
+describe("Workspace — the root filesystem as a root", () => {
+  // Regression: the containment tests built the prefix as `root + sep`, so a
+  // root of "/" became "//". No absolute path starts with "//", so every
+  // resolveSafe() call reported "Path escape rejected" -- fail-closed, but it
+  // silently breaks every file tool for a `workspace.paths: ["/"]` config.
+  const rootWs = new Workspace("/");
+
+  it("accepts an absolute path", () => {
+    expect(rootWs.resolveSafe("/etc/hosts")).toBe("/etc/hosts");
+  });
+
+  it("resolves a relative path against the root", () => {
+    expect(rootWs.resolveSafe("etc/hosts")).toBe("/etc/hosts");
+  });
+
+  it("accepts the root itself", () => {
+    expect(rootWs.resolveSafe("/")).toBe("/");
+  });
+
+  it("contains() is true below the root", () => {
+    expect(rootWs.contains("/")).toBe(true);
+    expect(rootWs.contains("/etc/passwd")).toBe(true);
+  });
+
+  it("keeps the denylist in force, with no root exemption", () => {
+    // The root exemption needs root components; "/" has none, so every rule
+    // applies rather than the whole filesystem being exempt.
+    expect(() => rootWs.resolveSafe("/home/dev/.ssh/id_rsa")).toThrow("Denylisted path rejected (.ssh)");
+    expect(() => rootWs.resolveSafe("/app/.env")).toThrow("Denylisted path rejected (.env*)");
+  });
+
+  it("relative() strips only the leading separator", () => {
+    expect(rootWs.relative("/etc/hosts")).toBe("etc/hosts");
+    expect(rootWs.relative("/")).toBe("");
+  });
+});
+
 describe("expandWorkspacePaths", () => {
   let base: string;
   let cwdBefore: string;

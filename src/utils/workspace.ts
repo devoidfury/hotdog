@@ -12,6 +12,19 @@ import { logger } from "./logger.ts";
 
 export type PathEscapeKind = "invalid" | "direct" | "symlink" | "denied";
 
+/**
+ * True if `absolutePath` is at, or lexically under, `root`.
+ *
+ * The root filesystem (`"/"`) must not become `"//"`, and any root handed in
+ * with a trailing separator must not become a doubled one -- no absolute path
+ * starts with `"//"`, so a naive `root + sep` prefix test rejects everything
+ * and the whole workspace silently reads as an escape.
+ */
+function within(absolutePath: string, root: string): boolean {
+  if (absolutePath === root) return true;
+  return absolutePath.startsWith(root.endsWith(sep) ? root : root + sep);
+}
+
 export class PathEscapeError extends ToolError {
   /** Why the path was rejected. Consumers (e.g. the sysbox gate policy)
    * branch on this instead of matching message prefixes. */
@@ -231,7 +244,7 @@ export class Workspace {
   #ownerRoot(absolutePath: string): string | null {
     const resolved = resolveAbs(absolutePath);
     for (const r of this.roots) {
-      if (resolved === r || resolved.startsWith(r + sep)) return r;
+      if (within(resolved, r)) return r;
     }
     return null;
   }
@@ -332,7 +345,7 @@ export class Workspace {
       probe = resolveAbs(dirname(probe), fs.readlinkSync(probe));
       // The root itself may be a symlink; the ancestor walk accepts anything
       // under ANY root's REAL path, so the probe must too.
-      const inLexicalRoot = probe === owner || probe.startsWith(owner + sep);
+      const inLexicalRoot = within(probe, owner);
       if (!inLexicalRoot && !this.#insideRealRoots(probe, realRoots)) {
         throw PathEscapeError.symlinkEscape(path);
       }
@@ -358,7 +371,7 @@ export class Workspace {
       // owner vanished; the lexical form is fine
     }
     const realOwner =
-      realRoots.find((rr) => real === rr || real.startsWith(rr + sep)) ?? ownerReal;
+      realRoots.find((rr) => within(real, rr)) ?? ownerReal;
     const deniedReal = this.#deniedRule(real, realOwner);
     if (deniedReal !== null) {
       throw PathEscapeError.denied(path, deniedReal);
@@ -386,7 +399,7 @@ export class Workspace {
   /** True if p is at, or lexically under, any of the given real root paths. */
   #insideRealRoots(p: string, realRoots: string[]): boolean {
     for (const rr of realRoots) {
-      if (p === rr || p.startsWith(rr + sep)) return true;
+      if (within(p, rr)) return true;
     }
     return false;
   }

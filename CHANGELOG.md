@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- sysbox - `gate` mode no longer allows `sendmsg` through for the supervisor handshake. The filter had a carve-out permitting `sendmsg` when its first argument equalled the helper's control-socket fd NUMBER, and an fd number is not a capability: a sandboxed command closes the fds it inherited, reallocates that number with a socket of its own (`close` + `socket`, no `connect` needed), and sends. Measured -- one UDP datagram egressed through a real gate spawn whose decider denied every notification. `sendmsg` is now trapped unconditionally: the helper `write()`s the notify-fd number to the control socket and the supervisor imports the fd itself with `pidfd_open`/`pidfd_getfd`, after checking the connecting peer's uid (`SO_PEERCRED`); the control socket (`SOCK_CLOEXEC`) and the listener (kernel-set `O_CLOEXEC`) are both gone from the sandboxed command. Only `bashTool.sandbox: "gate"` was affected
+- sysbox - the gate capability probe now does a real parent->child `pidfd_getfd` round trip in addition to the listener install probe: where an outer seccomp policy ERRNOes 438 (hotdog sandboxed inside hotdog), `gate` reports unavailable at startup with a reason instead of hanging in the handshake
+- docs - corrected two false claims (`docs/sysbox-sandbox.md`, `docs/config-reference.md`): the sendmsg carve-out's "post-exec reuse cannot occur", and the parent-memory ceiling, which is Yama `ptrace_scope` 0 / no-Yama rather than "<= 1" (scope 1 denies descendant->ancestor; `open("/proc/<parent>/mem")` measured `EACCES`)
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.8.0...main
 
 # [v0.8.0] - 2026-09-06
@@ -404,3 +408,8 @@ Features that generally work but have rough edges:
 - Tool result formatting - should be configurable/swappable via extension system; a bit too simplistic right now; needs work with io escaping pipeline.
 
 **Full Changelog**: https://github.com/devoidfury/hotdog/releases/tag/v0.1.0
+- sysbox - follow-ups on the `gate` notify-fd handoff, from review of the above:
+  - **the supervisor now verifies the fd it imported is actually a seccomp notify fd** (`isSeccompNotifyFd`, `readlink("/proc/self/fd/N")` -> `anon_inode:seccomp notify`) before answering a single syscall with it, and refuses the spawn if it is not. The `SO_PEERCRED` check proves the connecting uid, not *which of that peer's fds* it chose to name: at `ptrace_scope` 0 a same-uid process that wins the accept can hand the supervisor one of **its own** notify fds from a different sandbox, and the import succeeds -- putting hotdog's decider in front of another supervisor's frozen tasks. A non-notify fd died on `NOTIF_RECV` (`EINVAL`) by accident; a foreign *notify* fd never would have
+  - **the import probe no longer blames the kernel for its own failures.** `--probe-import` exited 3 for everything, so the startup reason claimed "pidfd_getfd blocked by an outer seccomp policy" even when the real cause was a missing C compiler, an unreadable `/proc`, or a probe child that died on the way -- a misdiagnosis with no way to check it. Exit codes are now a contract (`3` only for `EPERM`/`EACCES` on a real parent->child import, `4` = probe could not run), and the helper's stderr is attached to the reason the user sees. Both codes still mean gate is unavailable; nothing is allowed that was not allowed before
+  - the `--probe-import` comment claimed the child's listener link reads `anon_inode:[seccomp]`; measured here it is `anon_inode:seccomp notify`, no brackets. The substring match was always right, the stated bytes were not
+  - tests: the exit-code contract and the notify-fd predicate are covered directly (the predicate pinned against a real listener fd, with pipe/regular-file/bogus-fd negatives), so neither depends on a host where `gate` happens to work

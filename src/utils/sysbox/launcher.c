@@ -281,10 +281,10 @@ int32_t sbx_exec(void *argv_buf, int64_t argv_len, void *env_buf, int64_t env_le
 
 /* ── gate mode: USER_NOTIF listener + supervisor plumbing ─────────────── */
 /* Filter: trap set -> SECCOMP_RET_NOTIFY (supervisor decides), static deny
- * set -> ERRNO, everything else ALLOW. Installed with TSYNC|NEW_LISTENER;
- * the returned listener fd is handed to the supervisor over an abstract
- * unix socket via SCM_RIGHTS (the notify fd must be able to cross into the
- * helper thread of the parent process without any fd-number contract). */
+ * set -> ERRNO, everything else ALLOW. Installed with NEW_LISTENER; the
+ * helper hands the listener fd NUMBER to the supervisor over an abstract
+ * unix socket (see "Handshake + fd import" below); the supervisor imports
+ * the fd itself with pidfd_getfd. */
 
 #define BPF_JMP_JSET_K 0x45
 #define RET_NOTIFY 0x7fc00000
@@ -335,15 +335,26 @@ int32_t sbx_exec(void *argv_buf, int64_t argv_len, void *env_buf, int64_t env_le
 #define NR_openat2 437
 
 /* returns listener fd >= 0, or -errno */
-/* install the gate filter on this process. ctrl_fd is the connected
- * supervisor socket: sendmsg on THAT fd is the SCM_RIGHTS handshake that
- * hands the listener fd up, so it must be allowed; every other sendmsg (and
- * all sendto/sendmmsg) is trapped -- otherwise connectionless UDP egress
- * bypasses "connect blocked" (the review finding). The helper's own send_fd
- * is the only sendmsg it makes pre-exec, on ctrl_fd. Trapping sendmsg
- * unconditionally deadlocks: the fd-pass sendmsg traps before the supervisor
- * holds the notify fd, so nothing can answer it. */
-int32_t sbx_gate_install(const void *deny_buf, int32_t deny_n, int32_t ctrl_fd) {
+/* install the gate filter on this process. sendmsg is trapped
+ * UNCONDITIONALLY (round-3 fix): the previous carve-out ("sendmsg allowed
+ * iff args[0] == the ctrl socket's fd number") treated an fd NUMBER as a
+ * capability. The sandboxed process closes its inherited fds and reallocates
+ * that number with its own socket (close+socket, or a plain dup2 onto it --
+ * no connect needed), and sendmsg then sails through the filter: a probe
+ * egressed one UDP packet through a real gate spawn with the decider
+ * denying everything. The fd-pass now rides write() (untrapped: the decimal
+ * notify-fd number), and the supervisor imports the fd itself with
+ * pidfd_open + pidfd_getfd, so no sendmsg ever needs to be allowed.
+ * Layout for deny_n entries:
+ *  [0..3]   arch guard + ld nr
+ *  [4]  jeq openat     jt=0 -> [5], jf=3 -> [8]
+ *  [5]  ld args2       [6] jset OPEN_WRITE_MASK -> NOTIFY, jf -> [7]
+ *  [7]  RET ALLOW (read-only openat)
+ *  [8..29] jeq <the 22 unconditional traps, sendmsg incl.> -> NOTIFY
+ *  [30..29+n] jeq deny_i -> ERRNO
+ *  [30+n] RET ALLOW | [31+n] RET NOTIFY | [32+n] RET ERRNO
+ */
+int32_t sbx_gate_install(const void *deny_buf, int32_t deny_n) {
   if (!deny_buf || deny_n < 0 || deny_n > MAX_DENY) return -22; /* EINVAL */
   if (syscall(__NR_prctl, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) return (int32_t)SYS_ERR();
 
@@ -359,35 +370,18 @@ int32_t sbx_gate_install(const void *deny_buf, int32_t deny_n, int32_t ctrl_fd) 
    * the default fallthrough -- measured on this kernel: poll(timeout=200)
    * and write(count=13) share bits with OPEN_WRITE_MASK and a fallthrough
    * placement NOTIFY-traps them, wedging the task ("install hangs" bug).
-   * Then sendmsg is decided by its fd: the control-socket sendmsg (the
-   * fd-pass) ALLOWs, any other sendmsg NOTIFYs. Layout for deny_n entries:
-   *  [0..3]  arch guard + ld nr
-   *  [4]  jeq openat     jt=0 -> [5], jf=3 -> [8]
-   *  [5]  ld args2       [6] jset OPEN_WRITE_MASK -> NOTIFY(24+n), jf -> [7]
-   *  [7]  RET ALLOW (read-only openat)
-   *  [8]  jeq sendmsg    jt=0 -> [9], jf=3 -> [12]
-   *  [9]  ld args0       [10] jeq ctrl_fd -> ALLOW(23+n), jf -> [11] NOTIFY
-   *  [11] RET NOTIFY (sendmsg on a non-control fd)
-   *  [12..32] jeq <the 21 unconditional traps> -> NOTIFY(34+n)
-   *  [33..32+n] jeq deny_i -> ERRNO(35+n)
-   *  [33+n] RET ALLOW | [34+n] RET NOTIFY | [35+n] RET ERRNO
    */
-  const int allow_at = 33 + deny_n;
-  const int notif_at = 34 + deny_n;
-  const int errno_at = 35 + deny_n;
+  const int notif_at = 31 + deny_n;
+  const int errno_at = 32 + deny_n;
   g_prog[fi].code = BPF_JMP_JEQ_K; g_prog[fi].jt = 0; g_prog[fi].jf = 3; g_prog[fi].k = NR_openat; fi++;
   g_prog[fi].code = BPF_LD_W_ABS;  g_prog[fi].jt = 0; g_prog[fi].jf = 0; g_prog[fi].k = OFF_ARGS2; fi++;
   g_prog[fi].code = BPF_JMP_JSET_K; g_prog[fi].jt = (uint8_t)(notif_at - fi - 1); g_prog[fi].jf = 0; g_prog[fi].k = OPEN_WRITE_MASK; fi++;
   g_prog[fi].code = BPF_RET_K;     g_prog[fi].jt = 0; g_prog[fi].jf = 0; g_prog[fi].k = RET_ALLOW; fi++;
-  g_prog[fi].code = BPF_JMP_JEQ_K; g_prog[fi].jt = 0; g_prog[fi].jf = 3; g_prog[fi].k = NR_sendmsg; fi++;
-  g_prog[fi].code = BPF_LD_W_ABS;  g_prog[fi].jt = 0; g_prog[fi].jf = 0; g_prog[fi].k = OFF_ARGS0; fi++;
-  g_prog[fi].code = BPF_JMP_JEQ_K; g_prog[fi].jt = (uint8_t)(allow_at - fi - 1); g_prog[fi].jf = 0; g_prog[fi].k = (uint32_t)ctrl_fd; fi++;
-  g_prog[fi].code = BPF_RET_K;     g_prog[fi].jt = 0; g_prog[fi].jf = 0; g_prog[fi].k = RET_NOTIFY; fi++;
   /* Every remaining trapped syscall targets NOTIFY directly. */
   static const uint32_t traps[] = {
     NR_unlinkat, NR_renameat2, NR_connect, NR_execve,
     NR_unlink, NR_rmdir, NR_rename, NR_renameat,
-    NR_openat2, NR_sendto, NR_sendmmsg,
+    NR_openat2, NR_sendto, NR_sendmsg, NR_sendmmsg,
     NR_truncate, NR_creat, NR_mkdir, NR_mknod, NR_link, NR_symlink,
     NR_mkdirat, NR_mknodat, NR_linkat, NR_symlinkat,
   };
@@ -423,38 +417,30 @@ int32_t sbx_gate_install(const void *deny_buf, int32_t deny_n, int32_t ctrl_fd) 
   return r >= 0 ? (int32_t)r : (int32_t)SYS_ERR();
 }
 
-/* ── unix socket + SCM_RIGHTS + notify ioctls ─────────────────────────── */
-struct iovec_x { void *base; uint64_t len; };
-/* x86_64 struct msghdr (natural alignment == kernel layout) */
-struct msghdr_x {
-  void *name; uint32_t namelen;
-  struct iovec_x *iov; uint64_t iovlen;
-  void *control; uint64_t controllen;
-  int32_t flags;
-};
+/* ── unix socket + fd-handoff handshake + notify ioctls ───────────────── */
 struct pollfd_x { int32_t fd; int16_t events; int16_t revents; };
 struct sockaddr_un_x { uint16_t family; char path[108]; };
-/* one-fd SCM record, x86_64 cmsghdr layout: cmsg_len is size_t(8);
- * CMSG_LEN(4) == 20, CMSG_SPACE(4) == 24 (the control buffer wire size) */
-#define SCM_CMSG_LEN 20
-#define SCM_CMSG_SPACE 24
-struct cmsg_fd_x { uint64_t len; int32_t level; int32_t type; int32_t fd; };
 
+#define __NR_read 0
 #define __NR_socket 41
 #define __NR_bind 49
 #define __NR_listen 50
 #define __NR_exit_group 231
 #define __NR_accept4 288
 #define __NR_connect 42
-#define __NR_sendmsg 46
-#define __NR_recvmsg 47
+#define __NR_getsockopt 55
+#define __NR_getuid 102
 #define __NR_poll 7
 #define __NR_close 3
 #define __NR_ioctl 16
+#define __NR_pidfd_open 434
+#define __NR_pidfd_getfd 438
 #define AF_UNIX 1
 #define SOCK_STREAM_C 1
+#define SOCK_CLOEXEC_C 0x80000
 #define SOL_SOCKET 1
-#define SCM_RIGHTS 1
+/* getsockopt(SO_PEERCRED): struct ucred {pid,uid,gid}, three i32s */
+#define SO_PEERCRED 17
 #define IOC_NOTIF_RECV 0xc0502100UL  /* _IOWR('!', 0, seccomp_notif: 80 bytes) */
 #define IOC_NOTIF_SEND 0xc0182101UL /* _IOWR('!', 1, seccomp_notif_resp: 24 bytes) */
 #define IOC_NOTIF_VALID 0x40082102UL /* _IOW('!', 2, u64) */
@@ -487,12 +473,14 @@ int32_t sbx_gate_listen(const char *name) {
 
 /* helper side: connect() to the supervisor's abstract socket (called
  * BEFORE the filter installs, so trapping connect cannot deadlock it).
- * Returns fd or -errno. */
+ * SOCK_CLOEXEC: the ctrl socket must not survive into the command either
+ * (pre-exec it stays open so the supervisor can detect a helper that dies
+ * before exec). Returns fd or -errno. */
 int32_t sbx_gate_connect(const char *name) {
   struct sockaddr_un_x a;
   int n = set_un(&a, name);
   if (n < 0) return (int32_t)n;
-  long fd = syscall(__NR_socket, AF_UNIX, SOCK_STREAM_C, 0);
+  long fd = syscall(__NR_socket, AF_UNIX, SOCK_STREAM_C | SOCK_CLOEXEC_C, 0);
   if (fd < 0) return (int32_t)SYS_ERR();
   long r = syscall(__NR_connect, fd, (long)&a, 2 + 1 + n);
   if (r < 0) { int32_t e = (int32_t)SYS_ERR(); syscall(__NR_close, fd); return e; }
@@ -504,34 +492,94 @@ int32_t sbx_gate_accept(int32_t lfd) {
   return (int32_t)SYS_RET(r);
 }
 
-/* send one byte 'F' plus one fd (SCM_RIGHTS). Returns 1 or -errno. */
-int32_t sbx_send_fd(int32_t sock, int32_t fd) {
-  char tag = 'F';
-  struct cmsg_fd_x cmsg;
-  cmsg.len = SCM_CMSG_LEN; cmsg.level = SOL_SOCKET; cmsg.type = SCM_RIGHTS; cmsg.fd = fd;
-  struct iovec_x io; io.base = &tag; io.len = 1;
-  struct msghdr_x m;
-  m.name = 0; m.namelen = 0; m.iov = &io; m.iovlen = 1;
-  m.control = &cmsg; m.controllen = SCM_CMSG_SPACE; m.flags = 0;
-  long r = syscall(__NR_sendmsg, (long)sock, (long)&m, 0);
+/* fd-handoff handshake (round-3: replaces the SCM_RIGHTS sendmsg, which
+ * required an unbungable filter carve-out -- see sbx_gate_install).
+ * The helper write()s the notify-fd number as decimal + '\n' in ONE write
+ * (a single unix-stream write arrives whole); the caller is the helper,
+ * post-install, where write is not trapped. Returns 0 or -errno. */
+int32_t sbx_write_num(int32_t sock, int32_t num) {
+  if (num < 0) return -22;
+  char rev[12]; int n = 0;
+  do { rev[n++] = (char)('0' + (num % 10)); num /= 10; } while (num);
+  char line[13]; int m = 0;
+  for (int i = n - 1; i >= 0; i--) line[m++] = rev[i];
+  line[m++] = '\n';
+  long r = syscall(__NR_write, (long)sock, (long)line, m);
   if (r < 0) return (int32_t)SYS_ERR();
-  return r == 1 ? 1 : -71; /* EPROTO */
+  return r == m ? 0 : -71; /* EPROTO */
 }
 
-/* receive one 'F' byte plus one fd. Returns fd or -errno/-EPROTO. */
-int32_t sbx_recv_fd(int32_t sock) {
-  char tag = 0;
-  struct cmsg_fd_x cmsg;
-  cmsg.len = 0; cmsg.level = 0; cmsg.type = 0; cmsg.fd = -1;
-  struct iovec_x io; io.base = &tag; io.len = 1;
-  struct msghdr_x m;
-  m.name = 0; m.namelen = 0; m.iov = &io; m.iovlen = 1;
-  m.control = &cmsg; m.controllen = SCM_CMSG_SPACE; m.flags = 0;
-  long r = syscall(__NR_recvmsg, (long)sock, (long)&m, 0);
+/* supervisor side: read the decimal + '\n' written by sbx_write_num into
+ * *out (i32 at ptr). Call only after poll() reports readable: the bytes
+ * arrived with one write, so the byte-at-a-time read never blocks past the
+ * line. Returns 0, -ECONNRESET (helper died before sending), or -EPROTO. */
+int32_t sbx_read_num(int32_t sock, void *out32) {
+  int32_t *out = (int32_t *)out32;
+  int32_t v = 0;
+  int seen = 0;
+  for (;;) {
+    char c;
+    long r = syscall(__NR_read, (long)sock, (long)&c, 1);
+    if (r == 0) return -104; /* ECONNRESET */
+    if (r < 0) return (int32_t)SYS_ERR();
+    if (c == '\n') break;
+    if (c < '0' || c > '9') return -71;
+    v = v * 10 + (c - '0');
+    if (v > (2147483 * 10 + 6)) return -71; /* sane fd range, no overflow */
+    seen++;
+  }
+  if (seen == 0) return -71;
+  *out = v;
+  return 0;
+}
+
+/* supervisor side: peer pid+uid of the accepted connection (SO_PEERCRED).
+ * pid goes to *pidOut, uid to *uidOut. The caller (sup.ts) verifies the uid
+ * equals its own: the abstract socket name is guessable, so this filters
+ * cross-uid racers outright. It does NOT constrain WHICH of the peer's fds
+ * it names, so sup.ts additionally checks the imported fd's /proc link type
+ * before using it: a same-uid racer naming its own foreign notify fd would
+ * otherwise import cleanly. What a racer always loses is the accept: winning
+ * it strands the real helper in the execve trap, never unsupervised.
+ * Returns 0 or -errno. */
+int32_t sbx_peer_cred(int32_t sock, void *pidOut, void *uidOut) {
+  int32_t cred[3] = { -1, -1, -1 };
+  uint32_t len = 12;
+  long r = syscall(__NR_getsockopt, (long)sock, SOL_SOCKET, (long)SO_PEERCRED,
+                   (long)cred, (long)&len);
   if (r < 0) return (int32_t)SYS_ERR();
-  if (r == 0) return -104; /* ECONNRESET: helper died before sending */
-  if (r != 1 || tag != 'F' || cmsg.fd < 0) return -71; /* EPROTO */
-  return cmsg.fd;
+  if (len < 12) return -71;
+  *(int32_t *)pidOut = cred[0];
+  *(int32_t *)uidOut = cred[1];
+  return 0;
+}
+
+/* own uid, for the peer check above. (Bun's process.uid is undefined at
+ * this pin -- measured; go straight to the kernel.) */
+int32_t sbx_getuid(void) {
+  return (int32_t)syscall(__NR_getuid);
+}
+
+/* supervisor side: import the notify fd the helper named. pidfd_open on the
+ * peer pid, then pidfd_getfd dups the fd into THIS process (the kernel does
+ * the ptrace_may_access check -- hotdog is the helper's direct parent, so
+ * Yama scope 0/1 passes; scope 2 needs CAP_SYS_PTRACE and scope 3 denies
+ * outright -- the --probe-import capability probe runs this exact
+ * parent->child import at startup, so those hosts report gate unavailable
+ * instead of hanging a spawn here). Safe against the helper's exec: the
+ * execve traps at syscall ENTRY, so the child is frozen with its fd table
+ * intact while the supervisor imports. The listener fd carries O_CLOEXEC
+ * (kernel-set; verified fd_flags==1 immediately after NEW_LISTENER install),
+ * so when the execve resumes, the helper's copy closes and the SANDBOXED
+ * command never holds a notify fd. Returns imported fd, or -errno. */
+int32_t sbx_import_fd(int32_t peer_pid, int32_t target_fd) {
+  long pidfd = syscall(__NR_pidfd_open, (long)peer_pid, 0);
+  if (pidfd < 0) return (int32_t)SYS_ERR();
+  long fd = syscall(__NR_pidfd_getfd, pidfd, (long)target_fd, 0);
+  int32_t e = fd >= 0 ? 0 : (int32_t)SYS_ERR();
+  syscall(__NR_close, pidfd);
+  if (fd < 0) return e;
+  return (int32_t)fd;
 }
 
 /* poll(POLLIN) with timeout. Returns 1 readable, 0 timeout, or -errno. */
@@ -562,13 +610,10 @@ int32_t sbx_notif_send(int32_t fd, void *resp24) {
   return (int32_t)SYS_RET(r);
 }
 
-/* capability probe: install a real NEW_LISTENER filter that traps NOTHING
- * (a full trap set with no supervisor would block this process's own
- * openat/connect calls -- probe3 taught that the hard way). Success = the
- * kernel grants a listener fd: raw-exit 0 without returning to any
- * bun-shutdown path that would run under the filter. Failure returns
- * -errno (no filter remains installed on failure). */
-int32_t sbx_probe_gate(void) {
+/* import-probe building block: same trap-nothing NEW_LISTENER install, but
+ * RETURNS the listener fd (the probe parent imports it via pidfd_getfd and
+ * must not exit first). */
+int32_t sbx_probe_listen(void) {
   if (syscall(__NR_prctl, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) return (int32_t)SYS_ERR();
   static struct sock_filter probe_prog[5];
   int fi = 0;
@@ -582,8 +627,19 @@ int32_t sbx_probe_gate(void) {
   fprog.filter = probe_prog;
   long r = syscall(__NR_seccomp, SECCOMP_SET_MODE_FILTER,
                    SECCOMP_FILTER_FLAG_NEW_LISTENER, (long)&fprog);
-  if (r < 0) return (int32_t)SYS_ERR();
-  syscall(__NR_close, r);
+  return r >= 0 ? (int32_t)r : (int32_t)SYS_ERR();
+}
+
+/* capability probe: install a real NEW_LISTENER filter that traps NOTHING
+ * (a full trap set with no supervisor would block this process's own
+ * openat/connect calls -- probe3 taught that the hard way). Success = the
+ * kernel grants a listener fd: raw-exit 0 without returning to any
+ * bun-shutdown path that would run under the filter. Failure returns
+ * -errno (no filter remains installed on failure). */
+int32_t sbx_probe_gate(void) {
+  long l = sbx_probe_listen();
+  if (l < 0) return (int32_t)l;
+  syscall(__NR_close, (long)l);
   syscall(__NR_exit_group, 0); /* NOT __NR_exit: that ends one thread only */
   return -1; /* not reached */
 }

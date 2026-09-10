@@ -1,7 +1,13 @@
 import { describe, it, expect } from "bun:test";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readlinkSync, openSync, mkdtempSync, rmSync, closeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { cc } from "bun:ffi";
+import { isSeccompNotifyFd } from "@utils/sysbox/procfs.ts";
+import { spawnSync } from "node:child_process";
 import {
   detectCapabilities,
+  importProbeReason,
   launcherCPath,
   sbHelperPath,
   resetCapabilitiesForTesting,
@@ -64,6 +70,107 @@ describe("capabilities paths and reset", () => {
     expect(b.landlockAbi).toBe(a.landlockAbi);
     expect(b.gateAvailable).toBe(a.gateAvailable);
     resetCapabilitiesForTesting();
+  });
+});
+
+// The import probe is what gates `sandbox: "gate"`, and until now every
+// failure inside it exited 3 with a reason string claiming the kernel blocks
+// pidfd_getfd -- so a missing C compiler, a wedged probe child or a spawnSync
+// timeout were all reported to the user as a kernel policy verdict they have
+// no way to check. Exit 3 is now reserved for EPERM/EACCES on a real
+// parent->child import; everything else is exit 4 ("probe could not run").
+describe("--probe-import exit-code contract", () => {
+  it("exit 0 means available, no reason", () => {
+    expect(importProbeReason(0, "")).toBeNull();
+  });
+
+  it("exit 3 is the outer-policy verdict and nothing else claims it", () => {
+    const blocked = importProbeReason(3, "probe-import: pidfd_getfd -> 1");
+    expect(blocked).toContain("pidfd_getfd blocked");
+    // The broken-probe codes must NOT read like a kernel verdict.
+    const broke = importProbeReason(4, "probe-import: cc failed: gcc not found");
+    expect(broke).toContain("could not run");
+    expect(broke).toContain("NOT a kernel verdict");
+    expect(broke).not.toContain("pidfd_getfd blocked");
+  });
+
+  it("timeout (null) and unexpected codes never report as blocked", () => {
+    for (const s of [null, 1, 2, 126, 137]) {
+      const r = importProbeReason(s, "detail");
+      expect(r).not.toBeNull();
+      expect(r).not.toContain("pidfd_getfd blocked");
+    }
+  });
+
+  it("threads the helper's stderr into the reason so it is diagnosable", () => {
+    expect(importProbeReason(4, "child died before installing a listener")).toContain(
+      "child died before installing a listener",
+    );
+  });
+
+  it("the real probe exits with a contracted code on this kernel", () => {
+    // Runs the actual helper on the actual kernel: the code must be one of
+    // 0/3/4, and whatever it says must not be contradicted by the cached
+    // gateAvailable verdict.
+    const r = spawnSync(process.execPath, [sbHelperPath(), "--probe-import"], {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: {},
+      timeout: 20000,
+    });
+    const code: number | null = r.status;
+    expect([0, 3, 4] as (number | null)[]).toContain(code);
+    // Available on this host => the probe must have said so with 0.
+    if (detectCapabilities().gateAvailable) expect(r.status).toBe(0);
+  });
+});
+
+// Both the import probe and the supervisor decide "is this fd the seccomp
+// notifier?" by substring-matching the /proc link target. That string is a
+// kernel detail (this kernel says "anon_inode:seccomp notify", NOT the
+// bracketed "anon_inode:[seccomp]" the first draft of the comment claimed),
+// so it gets pinned against a real listener fd rather than asserted from
+// memory. Skips where NEW_LISTENER is blocked.
+// Both the import probe and the supervisor decide "is this fd the seccomp
+// notifier?" through isSeccompNotifyFd, a substring match on the /proc link
+// target. That string is a kernel detail -- this kernel says
+// "anon_inode:seccomp notify", NOT the bracketed "anon_inode:[seccomp]" the
+// first draft of the probe comment claimed -- so it is pinned against a real
+// listener fd instead of asserted from memory. Skips where NEW_LISTENER is
+// blocked (the supervisor path cannot be reached there either).
+describe("seccomp notify fd predicate", () => {
+  it("accepts a real listener fd and rejects everything else", () => {
+    let l = -1;
+    try {
+      const { symbols } = cc({
+        source: launcherCPath(),
+        symbols: { sbx_probe_listen: { args: [], returns: "i32" } },
+      });
+      l = (symbols.sbx_probe_listen as unknown as () => number)();
+    } catch {
+      console.log("[sysbox] no compiler here; predicate pin skipped");
+      return;
+    }
+    if (l < 0) {
+      console.log(`[sysbox] NEW_LISTENER unavailable (rc=${l}); predicate pin skipped`);
+      return;
+    }
+    try {
+      expect(readlinkSync(`/proc/self/fd/${l}`)).toContain("seccomp");
+      expect(isSeccompNotifyFd(l)).toBe(true);
+    } finally {
+      closeSync(l);
+    }
+    // Negative controls: the fds a spawn's table actually holds, plus junk.
+    const tmp = mkdtempSync(join(tmpdir(), "sysbox-link-"));
+    const fd = openSync(join(tmp, "f"), "w");
+    try {
+      expect(isSeccompNotifyFd(fd)).toBe(false);
+      expect(isSeccompNotifyFd(9999)).toBe(false);
+      expect(isSeccompNotifyFd(-1)).toBe(false);
+    } finally {
+      closeSync(fd);
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 

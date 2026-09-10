@@ -87,6 +87,15 @@ export function detectCapabilities(): SysboxCapabilities {
       gateOk = probeGateSupport();
       if (!gateOk) {
         reasons.push('SECCOMP_FILTER_FLAG_NEW_LISTENER blocked here (common under container seccomp profiles)');
+      } else {
+        // The supervisor imports the notify fd with pidfd_getfd; an outer
+        // policy ERRNOing it (nested hotdog's static deny set) makes the
+        // gate unbuildable even though the listener installs. The reason
+        // comes from the probe's exit code so "policy blocked it" and "the
+        // probe broke" stay distinguishable to the user.
+        const why = probePidfdImport();
+        gateOk = why === null;
+        if (why) reasons.push(why);
       }
     }
   }
@@ -134,6 +143,45 @@ function probeGateSupport(): boolean {
     logger.debug(`[sysbox] gate probe failed: ${e}`);
     return false;
   }
+}
+
+// pidfd_getfd availability for the notify-fd import: one real parent->child
+// round trip inside the helper (--probe-import spawns its own child; the
+// relationship must be real -- a self-import proves nothing about ptrace
+// access, and an inherited outer deny on 438 only shows up on the real call).
+function probePidfdImport(): string | null {
+  try {
+    const r = spawnSync(process.execPath, [sbHelperPath(), "--probe-import"], {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: {},
+      timeout: 15000,
+    });
+    const detail = r.stderr?.toString().trim() ?? "";
+    const reason = importProbeReason(r.status, detail);
+    if (reason) logger.debug(`[sysbox] pidfd import probe: status=${r.status} ${detail}`);
+    return reason;
+  } catch (e) {
+    logger.debug(`[sysbox] pidfd import probe failed: ${e}`);
+    return importProbeReason(null, String(e));
+  }
+}
+
+// Pure exit-code -> reason mapping for --probe-import (see that function's
+// header for the contract). Both non-zero codes mean "gate is unavailable
+// here" -- the difference is only in what the user is TOLD, and a single
+// shared code let a missing C compiler or a wedged probe child report itself
+// as "your kernel blocks pidfd_getfd", which is a misdiagnosis the user has
+// no way to check. status null = killed by the spawnSync timeout.
+export function importProbeReason(status: number | null, detail: string): string | null {
+  const note = detail ? ` (${detail})` : "";
+  if (status === 0) return null;
+  if (status === 3) {
+    return `pidfd_getfd blocked here (outer seccomp policy, e.g. hotdog-in-hotdog); gate cannot import its notify fd${note}`;
+  }
+  if (status === 4) {
+    return `gate import probe could not run (no compiler, no /proc, or the probe child died); gate availability unverifiable -- NOT a kernel verdict${note}`;
+  }
+  return `gate import probe exited abnormally (status ${status ?? "timeout"})${note}`;
 }
 
 // Helper prints the Landlock ABI on stdout and exits 0; exit 3 = no

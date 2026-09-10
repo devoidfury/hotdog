@@ -5,6 +5,7 @@
 // skips, not fails, inside hardened containers.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import dgram from "node:dgram";
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
@@ -124,6 +125,77 @@ suite("sysbox gate mode (real supervision)", () => {
     expect(existsSync(join(root, "sub"))).toBe(true);
     rmSync(envPath, { force: true });
     rmSync(probe, { force: true });
+  });
+
+  // Third review round: the sendmsg ctrl-fd carve-out. The filter used to
+  // allow sendmsg iff args[0] equalled the helper's control-socket fd
+  // NUMBER -- an fd number is not a capability: the probe closes every
+  // inherited fd, occupies the numbers with its own sockets, and sendmsg's
+  // through the carve-out (measured BYPASS: one datagram reached a listener
+  // with the decider denying everything). sendmsg is now trapped
+  // unconditionally and the fd handoff rides write() + pidfd_getfd.
+  it("egress holds against fd-number reuse + sendmsg (round-3 bypass regression)", async () => {
+    if (!Bun.which("python3")) {
+      console.log("[sysbox] python3 unavailable; round-3 sendmsg probe skipped");
+      return;
+    }
+    const udp = dgram.createSocket({ type: "udp4" });
+    let packets = 0;
+    udp.on("message", () => {
+      packets++;
+    });
+    await new Promise<void>((resolve) => udp.bind(0, "127.0.0.1", resolve));
+    const port = udp.address().port;
+    const probe = join(base, "sendmsg-probe.py");
+    writeFileSync(probe, [
+      "import ctypes, struct",
+      "libc = ctypes.CDLL(None, use_errno=True)",
+      "libc.syscall.restype = ctypes.c_long",
+      "f = libc.syscall",
+      "for fd in range(3, 72):",
+      "    f(3, fd)",
+      "socks = []",
+      "for _ in range(64):",
+      "    s = f(41, 2, 2, 0)",
+      "    if s < 0: break",
+      "    socks.append(s)",
+      `sa = struct.pack("=H", 2) + struct.pack("!H", ${port}) + b"\\x7f\\x00\\x00\\x01" + b"\\x00" * 8`,
+      "sab = ctypes.create_string_buffer(sa, 16)",
+      "pay = ctypes.create_string_buffer(b'SYSBXPROBE')",
+      "iovb = ctypes.create_string_buffer(struct.pack('=QQ', ctypes.addressof(pay), 10), 16)",
+      "msgb = ctypes.create_string_buffer(struct.pack('=QI4xQQQQI4x', ctypes.addressof(sab), 16, ctypes.addressof(iovb), 1, 0, 0, 0), 56)",
+      "attempts = 0",
+      "sent = 0",
+      "for s in socks:",
+      "    attempts += 1",
+      "    if f(46, s, msgb, 0) > 0:",
+      "        sent += 1",
+      'print("attempts=%d sent=%d" % (attempts, sent))',
+    ].join("\n"));
+    const tally = (out: string): { attempts: number; sent: number } => {
+      const m = out.match(/attempts=(\d+) sent=(\d+)/);
+      expect(m).not.toBeNull();
+      return { attempts: Number(m![1]), sent: Number(m![2]) };
+    };
+    try {
+      const r = await tool.execute({ command: `python3 ${probe}` }, ctx);
+      const gated = tally(r.output);
+      expect(gated.attempts).toBeGreaterThan(0); // sockets really existed
+      expect(gated.sent).toBe(0); // none of them sent
+      await Bun.sleep(300);
+      expect(packets).toBe(0); // listener saw nothing
+
+      // Positive control: same probe unsandboxed must egress, or the probe
+      // is silently dead and the assertion above proves nothing.
+      const open = new BashTool({ timeoutMs: 20000, maxOutputLines: 100, sandbox: "off" });
+      const rc = await open.execute({ command: `python3 ${probe}` }, ctx);
+      expect(tally(rc.output).sent).toBeGreaterThan(0);
+      await Bun.sleep(300);
+      expect(packets).toBeGreaterThan(0);
+    } finally {
+      udp.close();
+      rmSync(probe, { force: true });
+    }
   });
 
   it("sandbox:gate hook handler can flip an ask to allow (payload + round trip)", async () => {

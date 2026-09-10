@@ -3,9 +3,10 @@
 //
 // Lives in a Worker on purpose: gate_poll_in and the recv ioctls are
 // blocking FFI and must never block the hotdog main loop. Workers are
-// threads of the same process; the notify fd never crosses thread boundaries
-// anyway -- the helper passes it over SCM_RIGHTS *into this thread*, so no
-// fd-number contract is needed (docs/sysbox-sandbox.md "Process model").
+// threads of the same process; the notify fd reaches this thread via
+// pidfd_getfd (the helper writes its NUMBER over the abstract socket;
+// the import happens here -- fd numbers are not capabilities, so the
+// supervisor must never act on one it did not import itself).
 //
 // Bun worker rules (measured on 1.3.14): only `onmessage` fires (not
 // addEventListener), and messages are DROPPED while the module sits in a
@@ -32,6 +33,7 @@ const NOTIF_FLAG_CONTINUE = 1;
 import { cc } from "bun:ffi";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isSeccompNotifyFd } from "./procfs.ts";
 
 const worker = self as unknown as Worker;
 const out = (m: unknown) => worker.postMessage(m);
@@ -50,7 +52,10 @@ const EAGAIN = 11;
 interface Symbols {
   sbx_gate_listen: (name: Uint8Array, len: number) => number;
   sbx_gate_accept: (lfd: number) => number;
-  sbx_recv_fd: (sock: number) => number;
+  sbx_read_num: (sock: number, out32: Uint8Array) => number;
+  sbx_peer_cred: (sock: number, pidOut: Uint8Array, uidOut: Uint8Array) => number;
+  sbx_getuid: () => number;
+  sbx_import_fd: (peerPid: number, targetFd: number) => number;
   sbx_poll_in: (fd: number, ms: number) => number;
   sbx_notif_recv: (fd: number, buf: Uint8Array) => number;
   sbx_notif_id_valid: (fd: number, id8: Uint8Array) => number;
@@ -101,7 +106,10 @@ function compile(): Symbols {
     symbols: {
       sbx_gate_listen: { args: ["ptr", "i32"], returns: "i32" },
       sbx_gate_accept: { args: ["i32"], returns: "i32" },
-      sbx_recv_fd: { args: ["i32"], returns: "i32" },
+      sbx_read_num: { args: ["i32", "ptr"], returns: "i32" },
+      sbx_peer_cred: { args: ["i32", "ptr", "ptr"], returns: "i32" },
+      sbx_getuid: { args: [], returns: "i32" },
+      sbx_import_fd: { args: ["i32", "i32"], returns: "i32" },
       sbx_poll_in: { args: ["i32", "i32"], returns: "i32" },
       sbx_notif_recv: { args: ["i32", "ptr"], returns: "i32" },
       sbx_notif_id_valid: { args: ["i32", "ptr"], returns: "i32" },
@@ -139,14 +147,56 @@ async function main() {
   g.sbx_close(lfd);
   if (stopping || cfd < 0) { out({ type: "closed", why: "no connection" }); return; }
 
+  // Verify the peer is US before anything else. The abstract socket name is
+  // guessable (pid+seq); the uid check filters cross-uid racers. A same-uid
+  // racer passes it, and the uid check alone cannot stop it from naming some
+  // fd of its own -- hence the notify-fd check on the imported fd below. What
+  // the racer always loses is the accept itself: the genuine helper is left
+  // stranded in the execve trap, never unsupervised, and the spawn fails.
+  const credBuf = new Uint8Array(8);
+  const credDv = new DataView(credBuf.buffer);
+  const cr = g.sbx_peer_cred(cfd, credBuf.subarray(0, 4), credBuf.subarray(4, 8));
+  if (cr !== 0) { g.sbx_close(cfd); out({ type: "fatal", why: `peer cred: ${cr}` }); return; }
+  const peerPid = credDv.getInt32(0, true);
+  const peerUid = credDv.getInt32(4, true);
+  // own uid straight from the kernel (bun's process.uid is undefined here)
+  if (peerPid < 0 || peerUid !== g.sbx_getuid()) {
+    g.sbx_close(cfd);
+    out({ type: "fatal", why: `peer uid ${peerUid} != ours ${g.sbx_getuid()}` });
+    return;
+  }
+
+  // The helper write()s the notify-fd number (decimal); we import the fd
+  // ourselves. The child is ordered into execve only after the write lands,
+  // and execve traps at entry, so its fd table is intact when we import.
+  const numBuf = new Uint8Array(4);
+  const numDv = new DataView(numBuf.buffer);
   let nfd = -1;
   while (!stopping) {
     const pr = g.sbx_poll_in(cfd, POLL_SLICE_MS);
     if (pr < 0) { g.sbx_close(cfd); out({ type: "fatal", why: `poll conn: ${pr}` }); return; }
-    if (pr === 1) { nfd = g.sbx_recv_fd(cfd); break; }
+    if (pr === 1) {
+      const rr = g.sbx_read_num(cfd, numBuf);
+      if (rr !== 0) { g.sbx_close(cfd); out({ type: "closed", why: `read notify fd num: ${rr}` }); return; }
+      nfd = g.sbx_import_fd(peerPid, numDv.getInt32(0, true));
+      break;
+    }
   }
   g.sbx_close(cfd);
-  if (stopping || nfd < 0) { out({ type: "closed", why: `recv notify fd: ${nfd}` }); return; }
+  if (stopping || nfd < 0) { out({ type: "closed", why: `import notify fd: ${nfd}` }); return; }
+
+  // The imported fd must actually BE the seccomp notifier. `nfd` was chosen
+  // by whoever we just accepted, and the uid check alone does not constrain
+  // WHICH of its fds they name: at ptrace_scope 0 the import succeeds for any
+  // same-uid peer, so a racer could hand us the notify fd of a DIFFERENT
+  // sandbox and put our decider in front of another supervisor's frozen tasks.
+  // A non-notify fd dies on NOTIF_RECV (EINVAL) by accident; a foreign notify
+  // fd would not, so the fd type is verified before anything uses it.
+  if (!isSeccompNotifyFd(nfd)) {
+    g.sbx_close(nfd);
+    out({ type: "fatal", why: `imported fd ${nfd} is not a seccomp notify fd` });
+    return;
+  }
 
   const buf = new Uint8Array(80);
   const dv = new DataView(buf.buffer);

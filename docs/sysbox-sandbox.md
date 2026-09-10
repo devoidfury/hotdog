@@ -35,11 +35,18 @@ The as-built model has no fork anywhere:
         │ gate mode only:
         │   connects to supervisor's abstract unix socket BEFORE installing
         │   (the filter traps connect), installs NEW_LISTENER filter,
-        │   passes the notify fd over SCM_RIGHTS, then execve's -- the
-        │   execve itself traps and blocks until the supervisor answers, so
-        │   the command never runs unsupervised.
+        │   write()s the notify fd NUMBER over that socket (write is
+        │   untrapped; no SCM_RIGHTS -- the sendmsg carve-out it needed was
+        │   a bypass, see "The gate trap set"), then execve's -- the execve
+        │   itself traps and blocks until the supervisor answers, so the
+        │   command never runs unsupervised. The supervisor imports the fd
+        │   itself with pidfd_getfd while the child sits frozen at the execve
+        │   entry (its fd table intact); the ctrl socket is SOCK_CLOEXEC and
+        │   the kernel sets O_CLOEXEC on the listener, so on resume the
+        │   sandboxed command holds neither.
         ▼
  sup.ts supervisor (one Bun Worker per gate spawn)
+   accept -> SO_PEERCRED uid must equal ours -> read the number -> import
    NOTIF_RECV → main thread decodes args via /proc (pure TS, no FFI)
    → policy.ts → SANDBOX_GATE hook pipeline → NOTIF_SEND (CONTINUE | errno)
 ```
@@ -65,7 +72,7 @@ other new flags.
 | `off` (default) | current spawn                     | nothing new                                                                                                                                                                                                                                               | any                  |
 | `static`        | seccomp deny-filter, no fs policy | escape surface: `io_uring_*`, `ptrace`, `mount`/`umount2`/`pivot_root`/`chroot`, `setns`/`unshare`, `bpf`, `perf_event_open`, `userfaultfd`, `kexec_*`, `add_key`/`keyctl`/`request_key`, `open_tree`/`move_mount`/`fsopen`/`fsconfig`/`fsmount`/`fspick` | any w/ seccomp       |
 | `fence`         | + Landlock ruleset                | coarse fs allowlist: workspace roots + scratch read-write, system dirs read-only, home dirs unreachable, TCP bind blocked. **Cannot express `workspace.deny`** (allowlist-only, no subtree subtraction)                                                   | ≥ 5.13               |
-| `gate`          | + USER_NOTIF supervisor           | exact policy in TS: the deny list (writes), per-op human approval, egress denial. Trap set: every syscall that can write/create/alias/truncate/egress (see below)                                                                                         | ≥ 5.0 for user_notif |
+| `gate`          | + USER_NOTIF supervisor           | exact policy in TS: the deny list (writes), per-op human approval, egress denial. Trap set: every syscall that can write/create/alias/truncate/egress (see below)                                                                                         | user_notif ≥ 5.0 + pidfd_getfd ≥ 5.6; unusable when an outer seccomp policy denies 438 (e.g. hotdog-in-hotdog) -- the capabilities probe reports this |
 
 Division of labor in `gate`: Landlock is the coarse, race-free fence
 (nothing outside roots is reachable at all); the notify gate is the precise
@@ -108,10 +115,19 @@ variant, and glibc uses the legacy forms. Each addition was a _measured_
 deny-list bypass in review rounds, regression-tested with raw-syscall probes
 (`tests/utils/sysbox/gate-integration.test.ts`).
 
-`sendmsg` has one carve-out: the helper's control-socket fd (the SCM_RIGHTS
-fd-pass happens pre-exec; trapping it unconditionally deadlocks the
-handshake). The fd is matched by number in the filter, is never closed, and
-post-exec reuse cannot occur because the filter installs after connect.
+`sendmsg` is trapped **unconditionally**. It used to carry a carve-out for
+the helper's control socket (the SCM_RIGHTS fd-pass needed one; trapping
+sendmsg there deadlocked the handshake) matched by fd NUMBER, next to the
+claim that the number could never be reused post-exec. That claim was wrong,
+and with it the design: **an fd number is not a capability**. The sandboxed
+process closes its inherited fds and reallocates the number with a socket of
+its own (`close` then `socket`, or a `dup2` onto it; no connect needed), and
+`sendmsg` then sails through the carve-out. Measured: a UDP datagram egressed
+through a real gate spawn whose decider denied every notification. The
+handshake no longer needs a trapped syscall -- the helper `write()`s the notify
+fd's NUMBER (`write` is untrapped, and because the listener is O_CLOEXEC that
+number means nothing to the command: there is no fd behind it any more) and the
+supervisor imports the fd itself with `pidfd_open` + `pidfd_getfd`.
 `ftruncate` needs no trap: a writable fd can only come from a trapped
 write-open.
 
@@ -153,12 +169,36 @@ Noted as a known ceiling, not fixed.
 
 The notify fd is pollable, which keeps the loop event-driven. The supervisor
 is a per-spawn Bun Worker (`sup.ts`): gate polling and the notify ioctls are
-blocking FFI and must never block the agent's main loop. The notify fd never
-crosses threads by number -- the helper passes it over SCM_RIGHTS _into the
-worker thread_ via the abstract socket (`@hotdog-sbx-<pid>-<seq>`), so no
-fd-number contract is needed.
+blocking FFI and must never block the agent's main loop. The fd reaches that
+thread by **import, not by trust**: the abstract socket
+(`@hotdog-sbx-<pid>-<seq>`) carries only the helper's declaration of a number,
+and the worker uses it after verifying the peer -- a number named by someone
+else, or a number the sandbox reallocated, is worthless to us because we never
+act on it, only on the fd `pidfd_getfd` handed back.
 
-Protocol (main thread does ALL parsing; the worker is a thin ioctl pump):
+Handshake (worker side, before the notify loop):
+
+```
+ accept
+ -> getsockopt(SO_PEERCRED): peer uid must equal ours, else fatal.
+    Abstract names are guessable and carry no permissions, so this is the
+    first filter, not the whole story: the worker never acts on the number it
+    was told, only on the fd its own pidfd_getfd returns, and importing from a
+    process that is not our descendant is denied above ptrace_scope 0. A
+    same-uid process racing the handshake also strands the real helper (no
+    acceptor left), so the race cannot produce a silently unsupervised command
+ -> read the decimal notify-fd number the helper write()d
+ -> pidfd_open(peer pid) + pidfd_getfd(that number)  -- the fd, not the number
+ -> verify that fd is a seccomp notify fd (readlink /proc/self/fd/N), else fatal
+ -> close the ctrl socket, enter NOTIF_RECV
+```
+
+Ordering matters and the child is forced into it: connect -> fence ->
+install -> write the number -> execve. `execve` traps at entry, so the child
+is frozen with its fd table intact while the import happens, and the two
+CLOEXEC fds are dropped when it resumes.
+
+Main thread <-> worker protocol (main thread does ALL parsing; the worker is a thin ioctl pump):
 
 ```
  -> {type:"start", gateName}          <- {type:"ready" | "fatal", why}
@@ -241,14 +281,21 @@ remember-answers, no cache, no new config beyond `userGate.enabled`.
   succeeds in-sandbox; egress is blocked, but the content remains reachable
   into tool output. The file tools' deny list DOES bind reads -- the
   asymmetry is documented in `docs/config-reference.md`.
-- **Parent-process memory under Yama <= 1.** The deny table blocks `ptrace`,
-  `process_vm_readv`/`process_vm_writev`, and `pidfd_getfd` -- but Yama scope <= 1 (the common
-  distro default) also grants a descendant ancestor access through plain `open("/proc/<ancestor>/mem")`,
-  which is a read-openat: untrapped in every mode (the fence mounts /proc read-only, gate's open mask
-  is write-flags-only). On such hosts a sandboxed command can read hotdog's memory and environ (API
-  keys included), bypassing even the fence's "home dirs unreachable" claim for secrets that live in the
-  harness environment. seccomp cannot close this generically; gate could trap read-opens of
-  `/proc/*/mem` in a future revision. v1 states it as a ceiling instead.
+- **Parent-process memory when Yama is off (scope 0).** The deny table blocks
+  `ptrace`, `process_vm_readv`/`process_vm_writev`, and `pidfd_getfd` -- the
+  three syscalls a descendant would otherwise use to reach an ancestor. Yama
+  scope 1 (the common distro default, and the host these were measured on) is
+  what denies a descendant reaching an ANCESTOR at all: `open("/proc/<parent>/mem")`
+  -> `EACCES` there, so the residual hole is scope 0 / no-Yama. At scope 0 the
+  same access is unrestricted and needs no denied syscall -- it is a plain
+  read-`openat`, untrapped in every mode (the fence mounts /proc read-only,
+  gate's open mask is write-flags-only). On such hosts a sandboxed command can
+  read hotdog's memory and environ (API keys included), bypassing even the
+  fence's "home dirs unreachable" claim for secrets that live in the harness
+  environment. seccomp cannot close this generically; gate could trap
+  read-opens of `/proc/*/mem` in a future revision. v1 states it as a ceiling
+  instead: check `cat /proc/sys/kernel/yama/ptrace_scope` before treating gate
+  as confidentiality for the harness environment.
 - Metadata-only syscalls (chmod/chown/utimensat/xattr family) still reach
   deny-listed paths unchanged: no content read, no entry creation, no
   aliasing. Out-of-root metadata ops stay fence-blocked (path traversal).
@@ -278,6 +325,28 @@ Recorded so the next reader does not re-learn them expensively:
   syscall numbers (444-446) are arch-generic.
 - `/proc/sys/kernel/seccomp/actions_avail` lies for gate: container's outer seccomp profile can list `user_notif` yet EPERM the NEW_LISTENER flag,
   so availability is decided by a real install probe (a filter trapping nothing, raw-exit 0 on success -- a filtered process must never return to bun shutdown code).
+- **An fd number is not a capability.** Any filter predicate of the form "allow iff `args[0] ==` a number we know" is bypassable by `close` +
+  reallocation (the round-3 `sendmsg` probe egressed a datagram exactly that way, against a decider denying everything). Trap the syscall, or match on
+  something the child cannot forge.
+- SCM_RIGHTS was the old notify-fd handoff and it needed that `sendmsg` carve-out, which had no sound placement. The replacement rides syscalls that stay
+  untrapped: the helper `write()`s the fd NUMBER, the supervisor imports the fd with `pidfd_open` + `pidfd_getfd`.
+- The fd returned by `SECCOMP_FILTER_FLAG_NEW_LISTENER` arrives **O_CLOEXEC** (measured `fd_flags == 1` immediately after install), so it does not survive
+  the helper's execve; `sbx_gate_connect` uses `SOCK_CLOEXEC` for the same reason. Anything that needs to hold it across the exec must import it, not inherit it.
+- Reopening the notify fd through the child's fd table (`open("/proc/<pid>/fd/N")`) fails `EACCES`: not an alternate handoff path.
+- `pidfd_getfd` is gated on the ptrace relationship, so a *self*-import proves nothing about the parent->child case -- the probe (`--probe-import`) spawns a
+  real child and imports from it. That is also the only way an outer policy ERRNOing 438 (hotdog inside hotdog) surfaces: as an honest "gate unavailable"
+  at startup rather than a spawn hanging in the handshake.
+- `--probe-import` exit codes are a **contract** with `capabilities.ts`, because a probe that reports one code for every failure lies about the host:
+  `0` = the import worked; `3` = **only** `EPERM`/`EACCES` from a real parent->child `pidfd_getfd`, i.e. a policy verdict; `4` = the probe could not run the
+  test at all (no compiler, no `/proc`, probe child died), which fails closed too but says "unverifiable, not a kernel verdict" and carries the helper's
+  stderr. Before this split, a missing C compiler told the user "pidfd_getfd is blocked by an outer seccomp policy" -- a diagnosis they cannot check.
+- **The supervisor verifies the imported fd is a seccomp notify fd** (`isSeccompNotifyFd` in `procfs.ts`: `readlink("/proc/self/fd/N")` contains `seccomp`; measured target here is `anon_inode:seccomp notify`) before
+  it answers one syscall with it. The uid check proves who called, not *which of their fds* they named: at `ptrace_scope` 0 any same-uid process that wins the
+  accept can hand us the notify fd of a **different** sandbox, and we would then be deciding another supervisor's frozen tasks. A non-notify fd dies on
+  `NOTIF_RECV` (`EINVAL`) by accident; a foreign *notify* fd does not, so the type is checked explicitly and the spawn is refused.
+- `process.uid` is undefined in bun 1.3.14 (measured); the supervisor's `SO_PEERCRED` check gets our own uid from `getuid(2)` instead of comparing against JS.
+- `child.stdio[N]` is a Stream with **no numeric `.fd`** in bun 1.3.14 (measured), so a spawned child cannot announce anything to the parent over a stdio pipe synchronously. The import
+  probe discovers the child's listener through `/proc/<child>/fd` (`readlink` contains `seccomp`) instead; a parent that cannot read that table is one where `pidfd_getfd` would fail anyway.
 - `sbx_fence_probe` (ABI query + ruleset create/close, never restricts) is side-effect-free, so a normal exit is safe there.
 - Bun `node:child_process` stdio mis-wires under full-suite fd pressure: a spawned child can get fd1/fd2 pointing at the same socketpair end (writes
   EPIPE/EIO). Repros ~1/3 only in single-process `bun test` of the whole suite; fresh spawns and `--parallel` (the repo's `bun run test`) are

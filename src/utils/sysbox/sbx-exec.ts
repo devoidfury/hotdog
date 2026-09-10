@@ -16,9 +16,13 @@
 // "Enforcement ladder").
 // With gateName set ("gate" mode): connects to the supervisor's abstract
 // unix socket BEFORE installing, installs the notify-listener filter
-// (TSYNC|NEW_LISTENER + trap set), passes the listener fd over that socket
-// (SCM_RIGHTS), then execve's -- the execve itself traps and blocks until
-// the supervisor answers, so the command never runs unsupervised.
+// (NEW_LISTENER + trap set), write()s the listener fd NUMBER over that
+// socket (no SCM_RIGHTS -- see launcher.c sbx_gate_install for why the
+// sendmsg carve-out it needed was a bypass), then execve's -- the execve
+// itself traps and blocks until the supervisor answers, so the command
+// never runs unsupervised. The supervisor imports the fd via pidfd_getfd
+// while we are frozen in the trap; CLOEXEC (kernel-set on the listener,
+// SOCK_CLOEXEC on the ctrl socket) keeps both out of the sandboxed command.
 // There is no fork anywhere: installing on self-then-exec sidesteps
 // fork-from-multithreaded-JSC entirely (see docs/sysbox-sandbox.md).
 //
@@ -34,11 +38,22 @@
 // Setup diagnostics go to stderr, which is the tool's stderr pipe.
 
 import { cc } from "bun:ffi";
-import { readSync } from "node:fs";
+import { readSync, readdirSync, readlinkSync, readFileSync, closeSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { packTlv } from "./tlv.ts";
+import { isSeccompNotifyFd } from "./procfs.ts";
 import { MAX_DENY_SYSCALLS } from "./denied-syscalls.ts";
+
+// Import-probe exit codes (contract with capabilities.ts) and the two errnos
+// that mean "an outer policy denied the import" as opposed to "the probe
+// malfunctioned".
+const PROBE_OK = 0;
+const PROBE_BLOCKED = 3;
+const PROBE_INCONCLUSIVE = 4;
+const EPERM = 1;
+const EACCES = 13;
 
 const EXIT_SETUP = 126;
 const EXIT_EXEC = 127;
@@ -145,6 +160,8 @@ function validateFence(f: FenceConfig): void {
 function main(): never {
   if (process.argv[2] === "--probe") probeGate();
   if (process.argv[2] === "--probe-fence") probeFence();
+  if (process.argv[2] === "--probe-import") probeImport();
+  if (process.argv[2] === "--probe-import-child") probeImportChild();
   const cfg = readConfigFd3();
 
   if (cfg.cwd !== null) {
@@ -174,15 +191,17 @@ function main(): never {
     const sock = sbx.sbx_gate_connect(nameBuf, nameBuf.byteLength);
     if (sock < 0) die(EXIT_SETUP, `gate connect failed (-${-sock}); refusing to run unsandboxed`);
     if (cfg.fence !== null) installFence(sbx, cfg.fence);
-    // ctrl_fd rides into the filter so the fd-pass sendmsg below is the one
-    // allowed sendmsg; all other sendmsg/sendto/sendmmsg trap (docs/sysbox-sandbox.md "The gate trap set").
-    const listener = sbx.sbx_gate_install(deny, cfg.deny.length, sock);
+    const listener = sbx.sbx_gate_install(deny, cfg.deny.length);
     if (listener < 0) die(EXIT_SETUP, `gate listener install failed (-${-listener}); refusing to run unsandboxed`);
-    const sent = sbx.sbx_send_fd(sock, listener);
-    sbx.sbx_close(listener); // our copy; the supervisor holds one from here
-    if (sent !== 1) die(EXIT_SETUP, `gate fd send failed (-${-sent}); refusing to run unsandboxed`);
-    // no close(sock): keeping it open keeps the supervisor's read side alive
-    // so it can detect a helper that dies before exec (ECONNRESET).
+    // Hand the listener fd NUMBER to the supervisor (write() is untrapped;
+    // sendmsg is not -- the old SCM_RIGHTS pass needed a filter carve-out on
+    // the ctrl fd number, and an fd number is not a capability: the child
+    // could reallocate it and sendmsg through the carve-out. The supervisor
+    // imports the fd itself via pidfd_getfd). Then execve: it traps and
+    // freezes here, so the supervisor imports while our fd table is intact,
+    // and CLOEXEC drops both the ctrl socket and the listener on resume.
+    const sent = sbx.sbx_write_num(sock, listener);
+    if (sent !== 0) die(EXIT_SETUP, `gate fd-number send failed (-${-sent}); refusing to run unsandboxed`);
   } else {
     if (cfg.fence !== null) installFence(sbx, cfg.fence);
     const installRc = sbx.sbx_install(deny, cfg.deny.length);
@@ -201,9 +220,8 @@ interface GateSymbols {
   sbx_install: (deny: Int32Array, n: number) => number;
   sbx_exec: (argv: Uint8Array, argvLen: number, env: Uint8Array, envLen: number) => number;
   sbx_gate_connect: (name: Uint8Array, nameLen: number) => number;
-  sbx_gate_install: (deny: Int32Array, n: number, ctrlFd: number) => number;
-  sbx_send_fd: (sock: number, fd: number) => number;
-  sbx_close: (fd: number) => number;
+  sbx_gate_install: (deny: Int32Array, n: number) => number;
+  sbx_write_num: (sock: number, num: number) => number;
   sbx_fence_install: (rw: Uint8Array, rwLen: number, ro: Uint8Array, roLen: number) => number;
 }
 
@@ -223,9 +241,8 @@ function compileLauncher(launcherC: string): GateSymbols {
       sbx_install: { args: ["ptr", "i32"], returns: "i32" },
       sbx_exec: { args: ["ptr", "i64", "ptr", "i64"], returns: "i32" },
       sbx_gate_connect: { args: ["ptr", "i32"], returns: "i32" },
-      sbx_gate_install: { args: ["ptr", "i32", "i32"], returns: "i32" },
-      sbx_send_fd: { args: ["i32", "i32"], returns: "i32" },
-      sbx_close: { args: ["i32"], returns: "i32" },
+      sbx_gate_install: { args: ["ptr", "i32"], returns: "i32" },
+      sbx_write_num: { args: ["i32", "i32"], returns: "i32" },
       sbx_fence_install: { args: ["ptr", "i64", "ptr", "i64"], returns: "i32" },
     },
   });
@@ -277,6 +294,139 @@ function probeFence(): never {
   }
   process.stderr.write(`probe: landlock returned -${-rc}\n`);
   process.exit(3);
+}
+
+// Import capability probe (gate prerequisite): the supervisor imports the
+// notify fd with pidfd_getfd, and an OUTER seccomp policy (e.g. running
+// hotdog inside hotdog, where the static deny set ERRNOs 438) blocks that
+// while the NEW_LISTENER probe still passes. A REAL import from a real
+// child is the only honest test (ptrace access is per-relationship; a
+// self-import proves nothing about the parent->child case). Spawn
+// probeImportChild, DISCOVER its listener fd through /proc/<pid>/fd (the
+// link reads "anon_inode:seccomp notify", no brackets -- measured), import
+// it, verify the imported fd really is the seccomp notifier, kill it.
+//
+// Exit codes are a contract with capabilities.ts, which turns them into the
+// startup reason string, so "the policy denied it" must not share a code with
+// "the probe could not run":
+//   0 = import worked, gate can build
+//   3 = pidfd_getfd EPERM/EACCES -- an outer policy denies it here (gate is
+//       genuinely unbuildable; the only honest 3)
+//   4 = INCONCLUSIVE: the probe could not perform the test at all (cc failed,
+//       child never came up, timeout, import errno other than EPERM/EACCES).
+//       Also fails closed, but the user is told the probe broke rather than
+//       being told their kernel blocks something it may not.
+// Discovery is /proc-based on purpose: Bun stdio pipe objects expose no
+// numeric fd (measured 1.3.14), so no parent-side announcement pipe exists --
+// and discovering the fd ourselves mirrors the production path's
+// do-not-trust-the-named-number principle instead of depending on it.
+function probeImport(): never {
+  const launcherC = join(dirname(fileURLToPath(import.meta.url)), "launcher.c");
+  let importFn: (pid: number, fd: number) => number;
+  try {
+    const { symbols } = cc({
+      source: launcherC,
+      symbols: {
+        sbx_import_fd: { args: ["i32", "i32"], returns: "i32" },
+      },
+    });
+    importFn = symbols.sbx_import_fd as unknown as (p: number, f: number) => number;
+  } catch (e) {
+    process.stderr.write(`probe-import: cc failed: ${e}\n`);
+    process.exit(PROBE_INCONCLUSIVE);
+  }
+  let child;
+  try {
+    child = spawn(process.execPath, [process.argv[1]!, "--probe-import-child"], {
+      stdio: "ignore",
+      env: {},
+    });
+  } catch (e) {
+    process.stderr.write(`probe-import: child spawn failed: ${e}\n`);
+    process.exit(PROBE_INCONCLUSIVE);
+  }
+  const cpid = child.pid;
+  // process.exit() skips finally blocks, so every exit path kills the child
+  // itself (the child's own 10s backstop is the last resort, not the plan).
+  // Explicit type annotation on the const: required for TS control-flow
+  // narrowing through never-returning calls.
+  const bail: (msg: string, code?: number) => never = (msg, code = PROBE_INCONCLUSIVE) => {
+    process.stderr.write(`probe-import: ${msg}\n`);
+    try { child.kill(9); } catch { /* gone */ }
+    process.exit(code);
+  };
+  if (cpid === undefined) bail("child has no pid");
+  // The child compiles + installs, then idles holding the listener fd.
+  // Poll its /proc fd table for the seccomp link (~8s bound; cc() of
+  // launcher.c under contention is the slow path). A dead child -- reaped
+  // (/proc gone) or zombie -- ends the scan early with its own message.
+  let target = -1;
+  let died = false;
+  const deadline = Date.now() + 8000;
+  while (target < 0 && Date.now() < deadline) {
+    try {
+      const st = readFileSync(`/proc/${cpid}/stat`, "utf8");
+      if (st.charAt(st.lastIndexOf(")") + 2) === "Z") { died = true; break; }
+    } catch {
+      died = true; // /proc entry gone: reaped
+      break;
+    }
+    try {
+      for (const name of readdirSync(`/proc/${cpid}/fd`)) {
+        let link = "";
+        try {
+          link = readlinkSync(`/proc/${cpid}/fd/${name}`);
+        } catch {
+          continue; // raced with a child-side close
+        }
+        if (link.includes("seccomp")) {
+          target = Number.parseInt(name, 10);
+          break;
+        }
+      }
+    } catch {
+      /* child not up yet */
+    }
+    if (target < 0) Bun.sleepSync(20);
+  }
+  if (target < 0) {
+    bail(died ? "child died before installing a listener" : "child listener never appeared");
+  }
+  const got = importFn(cpid, target);
+  // EPERM/EACCES on our OWN direct child is the outer-policy signature, and
+  // the only answer that earns exit 3. Any other errno (EBADF, EINVAL, ...)
+  // says something odd about the probe, not about the host's policy.
+  if (got < 0) bail(`pidfd_getfd -> -${-got}`, got === -EPERM || got === -EACCES ? PROBE_BLOCKED : PROBE_INCONCLUSIVE);
+  // Same predicate the supervisor uses on its own import.
+  const okKind = isSeccompNotifyFd(got);
+  closeSync(got);
+  if (!okKind) bail("imported fd is not a seccomp notify fd");
+  try { child.kill(9); } catch { /* gone */ }
+  process.exit(PROBE_OK);
+}
+
+// Import-probe child: install a trap-nothing NEW_LISTENER filter, hold the
+// fd open, idle (the importer discovers it via /proc and kills us; the
+// self-exit is a backstop). A seccomp filter survives to here only if the
+// install probe works; everything we do after stays ALLOWed by it.
+function probeImportChild(): never {
+  const launcherC = join(dirname(fileURLToPath(import.meta.url)), "launcher.c");
+  try {
+    const { symbols } = cc({
+      source: launcherC,
+      symbols: { sbx_probe_listen: { args: [], returns: "i32" } },
+    });
+    const l = (symbols.sbx_probe_listen as unknown as () => number)();
+    if (l < 0) process.exit(1);
+    void l; // held open on purpose: that is the whole point
+    // idle until the importer kills us; 10s backstop (event loop has
+    // nothing else to run; sleepSync keeps the never contract)
+    const end = Date.now() + 10_000;
+    while (Date.now() < end) Bun.sleepSync(100);
+    process.exit(0);
+  } catch {
+    process.exit(2);
+  }
 }
 
 main();

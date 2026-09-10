@@ -160,3 +160,27 @@ export function expandFdLink(pid: number, path: string): string {
     return path;
   }
 }
+
+/** True when `fd` (in THIS process) is a seccomp USER_NOTIF listener fd.
+ *
+ * The check exists because the notify fd's NUMBER arrives over an abstract
+ * socket from whoever we just accepted, and `SO_PEERCRED` proves only the
+ * uid -- not which of the peer's fds it named. At ptrace_scope 0 any same-uid
+ * process can win the accept and hand us one of its own notify fds from a
+ * *different* sandbox, which would put our decider in front of another
+ * supervisor's frozen tasks. Import it, then verify what it actually is.
+ *
+ * Measured on this kernel the link target is "anon_inode:seccomp notify"
+ * (no brackets); substring-match so the bracketless/bracketed variants both
+ * hold. Unreadable -> false (fail closed).
+ */
+export function isSeccompNotifyFd(fd: number): boolean {
+  if (fd < 0) return false;
+  let link: string;
+  try {
+    link = readlinkSync(`/proc/self/fd/${fd}`);
+  } catch {
+    return false;
+  }
+  return link.includes("seccomp");
+}

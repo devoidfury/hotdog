@@ -12,12 +12,15 @@
 // - io_uring_*: funnels file and network operations past every path-based
 //   filter; no legitimate agent command needs it.
 // - ptrace: attach to the parent (hotdog itself) and steal its memory/fds.
-//   NOTE: ptrace is not the only parent-access path. Under Yama scope <= 1
-//   (the common distro default) a *descendant* may access an ancestor, so
-//   process_vm_readv/writev and pidfd_getfd are denied for the same reason
-//   -- they reach hotdog's memory/fds without ever calling ptrace. Residual
-//   ceiling (docs/sysbox-sandbox.md "Known ceilings"): opening
-//   /proc/<ancestor>/mem goes through read-openat, which no mode traps.
+//   NOTE: ptrace is not the only parent-access path. At ptrace_scope 0 -- the
+//   default on several distros -- same-uid access is unrestricted, so a
+//   descendant reaches hotdog's memory/fds without ever calling ptrace;
+//   process_vm_readv/writev and pidfd_getfd are denied for that reason. Scope
+//   1 is what denies a descendant reaching an ANCESTOR (measured:
+//   open("/proc/<parent>/mem") -> EACCES on a scope-1 host). Residual ceiling
+//   (docs/sysbox-sandbox.md "Known ceilings"): on scope-0 / no-Yama hosts,
+//   opening /proc/<ancestor>/mem goes through read-openat, which no mode
+//   traps.
 // - mount / umount2 / pivot_root / chroot / open_tree / move_mount / fsopen /
 //   fsconfig / fsmount / fspick: filesystem topology changes; also the classic
 //   bind-mount-over-policy tricks.
@@ -87,8 +90,9 @@ export const MAX_DENY_SYSCALLS = 96;
  * (and its flags hide in a child-memory struct the BPF cannot see, so it
  * traps unconditionally and the supervisor reads open_how over /proc), and
  * connectionless sendto/sendmsg/sendmmsg egress without ever calling
- * connect (sendmsg is trapped EXCEPT on the helper's control socket fd --
- * the SCM_RIGHTS fd-pass needs it and happens pre-exec; see launcher.c).
+ * connect (sendmsg is trapped UNCONDITIONALLY -- the round-3 review removed
+ * the ctrl-fd carve-out it once needed: an fd number is not a capability,
+ * see launcher.c sbx_gate_install).
  *
  * Second review round extended the same principle to the create/link/
  * truncate family, all measured bypasses of the deny list (Landlock grants

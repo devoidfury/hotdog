@@ -86,11 +86,15 @@ function expandTilde(entry: string): string {
  * relative patterns). A glob that matches nothing but exists as a literal
  * path (e.g. a directory whose name contains `[`) is used as-is; a glob
  * that matches nothing and does not exist logs a warning and is dropped;
- * a literal path that does not exist throws.
+ * a literal path that does not exist is dropped the same way -- a missing
+ * root is a warning, not a fatal error, so one stale entry doesn't take
+ * the whole session down. If every entry is dropped, though, there is no
+ * usable workspace, and that is fatal.
  *
- * @returns Absolute lexical paths, deduplicated, order-preserving.
+ * @returns Absolute lexical paths, deduplicated, order-preserving. Never
+ *   empty.
  * @throws ConfigError if the input is not a non-empty array of non-empty
- *   strings, or an explicit (non-glob) path does not exist.
+ *   strings, or no entry resolved to an existing path.
  */
 export function expandWorkspacePaths(entries: readonly string[]): string[] {
   if (!Array.isArray(entries) || entries.length === 0) {
@@ -124,13 +128,20 @@ export function expandWorkspacePaths(entries: readonly string[]): string[] {
     for (const match of matches) {
       const abs = resolveAbs(process.cwd(), match);
       if (!fs.existsSync(abs)) {
-        throw new ConfigError(`workspace path does not exist: ${abs} (from '${entry}')`);
+        logger.warn(`workspace path does not exist: ${abs} (from '${entry}')`);
+        continue;
       }
       roots.push(abs);
     }
   }
 
-  return [...new Set(roots)];
+  const unique = [...new Set(roots)];
+  if (unique.length === 0) {
+    throw new ConfigError(
+      `no workspace paths exist (from ${entries.map((e) => `'${e}'`).join(", ")})`,
+    );
+  }
+  return unique;
 }
 
 /**

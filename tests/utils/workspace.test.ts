@@ -685,9 +685,12 @@ describe("expandWorkspacePaths", () => {
   });
 
   it("warns and drops a glob that matches nothing", () => {
+    const keep = path.join(base, "proj");
     const warnSpy = spyOn(logger, "warn");
     try {
-      expect(expandWorkspacePaths([path.join(base, "no-such-pattern-*.txt")])).toEqual([]);
+      expect(
+        expandWorkspacePaths([path.join(base, "no-such-pattern-*.txt"), keep]),
+      ).toEqual([keep]);
       expect(warnSpy).toHaveBeenCalledTimes(1);
     } finally {
       warnSpy.mockRestore();
@@ -702,10 +705,30 @@ describe("expandWorkspacePaths", () => {
     expect(expandWorkspacePaths([bracketed])).toEqual([bracketed]);
   });
 
-  it("throws for an explicit path that does not exist", () => {
-    expect(() =>
-      expandWorkspacePaths([path.join(base, "never-created")]),
-    ).toThrow(ConfigError);
+  it("warns and drops a literal path that does not exist", () => {
+    const keep = path.join(base, "proj");
+    const missing = path.join(base, "never-created");
+    const warnSpy = spyOn(logger, "warn");
+    try {
+      expect(expandWorkspacePaths([missing, keep])).toEqual([keep]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("throws when no entry survives", () => {
+    const warnSpy = spyOn(logger, "warn");
+    try {
+      expect(() =>
+        expandWorkspacePaths([
+          path.join(base, "never-created"),
+          path.join(base, "gone-*"),
+        ]),
+      ).toThrow(ConfigError);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("throws for a non-array input", () => {

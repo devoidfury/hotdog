@@ -256,7 +256,18 @@ describe("buildAgentConfig — workspaceRoots", () => {
     ).rejects.toThrow(ConfigError);
   });
 
-  it("rejects an explicit workspace path that does not exist", async () => {
+  it("drops a workspace path that does not exist but keeps the rest", async () => {
+    const result = await buildAgentConfig({
+      ...baseOpts,
+      config: {
+        ...baseOpts.config,
+        workspace: { paths: ["/definitely/not/a/real/path", "."] },
+      },
+    });
+    expect(result.workspaceRoots).toEqual([process.cwd()]);
+  });
+
+  it("rejects a workspace.paths where no entry exists", async () => {
     await expect(
       buildAgentConfig({
         ...baseOpts,

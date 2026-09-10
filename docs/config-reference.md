@@ -462,9 +462,9 @@ Configures the workspace roots that bound file tools (`read`, `edit`, `append`, 
 Array of directory paths forming the workspace. Per entry:
 
 - Relative paths resolve against the process CWD.
-- A leading `~` or `~/...` expands to the home directory; `~user` and other tildes stay literal and are treated as ordinary relative paths, so they must exist on disk or startup fails with a config error.
+- A leading `~` or `~/...` expands to the home directory; `~user` and other tildes stay literal and are treated as ordinary relative paths, so they must exist on disk or the entry is dropped.
 - Entries containing glob magic (`*`, `?`, `[`, `{`) are expanded at config resolution time (via `Bun.Glob`); a glob that matches nothing logs a warning and is dropped.
-- An explicit (non-glob) path that does not exist is a config error.
+- A path (glob match or literal) that does not exist logs a warning and is dropped. If no entry survives, startup fails with a config error.
 
 The first entry is the **primary root**: relative tool paths resolve against it only. Absolute paths are accepted if they fall inside any configured root; anything outside all roots is rejected (including symlink escapes, except symlinks whose real location is inside another configured root).
 

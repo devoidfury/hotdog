@@ -383,8 +383,9 @@ export async function buildAgentConfig(options: {
 
   // Workspace roots: workspace.paths when present, else the legacy raw
   // cwdBoundary/workspaceRoot keys (undocumented defaults.json passthroughs),
-  // else the process CWD. expandWorkspacePaths validates and expands tilde,
-  // globs, and existence, throwing ConfigError on bad input.
+  // else the process CWD. expandWorkspacePaths validates and expands tilde
+  // and globs; paths that do not exist are dropped with a warning (fatal only
+  // if nothing survives).
   const legacyRoot =
     typeof config.cwdBoundary === "string" && config.cwdBoundary
       ? config.cwdBoundary

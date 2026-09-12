@@ -134,6 +134,15 @@ export class ToolExecutor {
       agent,
     });
 
+    // The tool context is built (and AGENT_TOOL_CONTEXT fires) BEFORE the
+    // gate pipeline: a TOOL_CALL handler that needs to ask a human (the
+    // user-gate approvals extension) reaches them through the context's
+    // `input` seam -- the one route from an extension to the UI. Context
+    // handlers only mount services on toolCtx/agent, so running them earlier
+    // is order-neutral for everything else.
+    const toolCtx = this.#buildToolContext();
+    hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, { toolCtx, toolName, agent });
+
     // failOnError: a gate handler that throws must not be treated as a
     // pass — the error propagates to execute()'s catch and becomes the tool
     // result, so the tool never runs (fail closed).
@@ -142,6 +151,7 @@ export class ToolExecutor {
       toolName,
       input,
       agent,
+      toolCtx,
     }, { failOnError: true });
     if (callResult.lastResult?.action === "block") {
       const blockedResult = formatToolResult(
@@ -157,8 +167,6 @@ export class ToolExecutor {
       input = callResult.lastResult.input;
     }
 
-    const toolCtx = this.#buildToolContext();
-    hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, { toolCtx, toolName, agent });
     const tool = this.#deps.toolRegistry.get(toolName);
     if (!tool) {
       return this.#writeToolResult(toolName, input, `Unknown tool: ${toolName}`, toolCallId);

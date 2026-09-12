@@ -195,10 +195,11 @@ function componentToRegex(component: string): RegExp {
 }
 
 /**
- * True if a rule's component sequence appears at any position in the
- * path's component list.
+ * True if a rule's component sequence appears at any position in the path's component list.
+ *
+ * Exported so other rule surfaces (`utils/approvals`) share the exact deny-list semantics rather than growing a second glob dialect.
  */
-function pathMatchesRule(components: string[], rule: string): boolean {
+export function pathMatchesRule(components: string[], rule: string): boolean {
   const rx = rule.split("/").filter(Boolean).map(componentToRegex);
   if (rx.length === 0) return false;
   for (let i = 0; i + rx.length <= components.length; i++) {

@@ -856,8 +856,8 @@ Extensions register their own configuration namespaces. Each extension's config 
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `bashTimeoutMs` | `number` | `60000` | Timeout for bash commands (ms). |
 | `maxTimeoutMs` | `number` | `600000` | Hard cap on a model-requested `timeoutMs` (ms). Model-supplied timeouts above this are clamped; invalid values fall back to `bashTimeoutMs`. |
-| `maxToolOutputLines` | `number` | `600` | Max output lines for tool results. |
-| `sandbox` | `string` | `"off"` | Kernel gate for commands: `off`, `static`, `fence`, or `gate` -- each level includes the previous. Capabilities per mode are compared in [Bash sandbox modes](#bash-sandbox-modes) below, including what `workspace.deny` does and does NOT protect. Linux x86_64 only; startup ConfigError when a requested mode is unavailable. `"fence"` requires a Landlock-capable kernel; `"gate"` additionally needs `SECCOMP_FILTER_FLAG_NEW_LISTENER` **and** `pidfd_getfd` (both commonly blocked in containers; hotdog's own static deny set ERRNOes `pidfd_getfd`, so a hotdog sandboxed inside another hotdog reports `gate` unavailable rather than hanging). |
+| `maxToolOutputLines` | `number` | `600` | Max output lines for tool results. When a command's output is cut, the result element carries `truncated="true"` so the model sees the cut in the header instead of only in the marker after the kept lines. |
+| `sandbox` | `string` | `"off"` | Kernel sandbox for commands: `off`, `static`, or `fence` -- each level includes the previous. Capabilities per mode are compared in [Bash sandbox modes](#bash-sandbox-modes) below, including what `workspace.deny` does and does NOT protect. Linux x86_64 only; startup ConfigError when a requested mode is unavailable. `"fence"` requires a Landlock-capable kernel (network denial additionally needs ABI v4+, i.e. kernels ~6.7+; `hotdog info` prints what the running kernel enforces). |
 
 ```json
 { "bashTool": { "bashTimeoutMs": 30000 } }
@@ -865,21 +865,43 @@ Extensions register their own configuration namespaces. Each extension's config 
 
 #### Bash sandbox modes
 
-| Capability | `off` | `static` | `fence` | `gate` |
-|------------|-------|----------|---------|--------|
-| Escape-surface syscalls (io_uring, ptrace, process_vm_readv/writev, pidfd_getfd, mount/namespace ops, bpf, perf, userfaultfd, kexec, keyctl) | allowed | `EPERM` | `EPERM` | `EPERM` |
-| Reads **outside** workspace roots (e.g. `cat ~/.ssh/id_rsa`) | allowed | allowed | `EACCES` (kernel allowlist) | `EACCES` when Landlock is present; readable without it |
-| Writes outside roots, outside scratch | allowed | allowed | `EACCES` | denied by policy; `SANDBOX_GATE` handlers may approve per-operation |
-| **Writes** to `workspace.deny` paths inside roots | allowed | allowed | allowed (Landlock is allowlist-only -- no subtree subtraction) | denied by policy; hook-approvable per-operation |
-| **Reads** of `workspace.deny` paths inside roots | allowed | allowed | allowed | **allowed -- in every mode** (see caveat below) |
-| Metadata ops on deny-listed paths (chmod/chown/utimensat/xattr) | allowed | allowed | allowed | allowed (documented ceiling: no content change, no entry creation) |
-| Outbound TCP connect / connectionless UDP send | allowed | allowed | bind blocked (ABI v4+), connect allowed | blocked (`connect`/`sendto`/`sendmsg`/`sendmmsg` trapped; no proxy in v1) |
-| `execve` audit log | -- | -- | -- | logged per exec (allow-always in v1, not a gate) |
-| Human approvals | -- | -- | -- | via `user-gate` extension / `SANDBOX_GATE` hooks |
+| Capability | `off` | `static` | `fence` |
+|------------|-------|----------|---------|
+| Escape-surface syscalls (io_uring, ptrace, process_vm_readv/writev, pidfd_getfd, mount/namespace ops, bpf, perf, userfaultfd, kexec, keyctl, handle-based opens via name_to_handle_at/open_by_handle_at) | allowed | `EPERM` | `EPERM` |
+| Reads **outside** workspace roots (e.g. `cat ~/.ssh/id_rsa`) | allowed | allowed | `EACCES` (kernel allowlist: system dirs + `$PATH` dirs ro, scratch + roots rw, nothing else) |
+| Writes outside roots, outside scratch | allowed | allowed | `EACCES` |
+| **Writes** to `workspace.deny` paths inside roots | allowed | allowed | allowed (Landlock is allowlist-only -- no subtree subtraction, and nothing else in bash enforces the deny list) |
+| **Reads** of `workspace.deny` paths inside roots | allowed | allowed | allowed (same reason: `cat .env` works under `fence`) |
+| Metadata ops on deny-listed paths (chmod/chown/utimensat/xattr) | allowed | allowed | allowed (any in-root path is covered by the root's rw rule) |
+| Outbound TCP bind/connect, UDP bind/send | allowed | allowed | `EACCES` for every net right the kernel's Landlock ABI knows, with zero allow rules -- TCP from ABI v4 (kernels ~6.7+), UDP bind/connect_send from ABI v10. `hotdog info` prints which. Unix and raw sockets are not covered |
+| Per-spawn DoS limits (cgroup v2 `pids.max` / `memory.max`) | -- | applied when the host delegates a writable subtree | applied (same) |
+| Mid-command approvals | -- | -- | none. All policy is installed before `execve`; there is no per-operation mediation (the `gate` mode that had it is deleted -- `docs/agents/sandbox-direction.md`). Approvals that do exist (`userGate`) decide BEFORE the call and cannot see inside a running command |
 
-Mechanism per level: `static` = seccomp deny filter (the trap floor); `fence` = static + a Landlock ruleset (roots + scratch read-write, system dirs read-only, everything else unreachable); `gate` = fence (stacked whenever Landlock is available) + a USER_NOTIF supervisor whose trap set covers every syscall that can write/create/alias/truncate/egress -- `openat`/`openat2`/`creat`, `truncate`, `unlink`/`unlinkat`/`rmdir`, `mkdir`/`mkdirat`/`mknod`/`mknodat`, `symlink`/`symlinkat`, `link`/`linkat`, `rename`/`renameat`/`renameat2`, `connect`/`sendto`/`sendmsg`/`sendmmsg`, `execve` -- so legacy-syscall bypasses are not possible, and hardlinks are policy-checked on BOTH endpoints (closing the alias-into-scratch exfil).
+Mechanism per level: `static` = seccomp deny filter on the helper before it execs (the escape-surface floor, no fs policy);
+`fence` = static + a Landlock ruleset (workspace roots + scratch read-write, system dirs and the `$PATH` dirs read-only,
+device sinks `/dev/null`-and-friends read-write, everything else unreachable, every known net right denied). Both are
+installed in the helper pre-`execve` and enforced by the kernel afterwards, so hotdog has no decision point in the
+command's path and no userspace supervisor can race, leak an fd, or die. When the host delegates a writable cgroup v2
+subtree, every sandboxed spawn also runs inside a per-spawn cgroup (`pids.max` caps forks at 512 tasks, `memory.max` at
+half host RAM clamped to [512 MiB, 4 GiB], swap off) so fork bombs fail with EAGAIN and memory hogs get an in-cgroup OOM
+kill instead of host damage (an OOM kill is surfaced: the bash tool appends a `sandbox memory limit reached ... (cgroup
+memory.max = ..., oom_kill = ...)` line to the output instead of a bare dead exit code); see `docs/sysbox-sandbox.md`
+"cgroups" for ceilings (disk-fill is NOT contained; `static` cannot keep a task IN its cage -- no path visibility to stop
+a `cgroup.procs` write; `off` mode gets no cgroup -- sandbox opt-in is the boundary).
 
-**The deny list is write-integrity, not confidentiality.** `cat .env` or `cat .env > /tmp/copy` succeeds in-sandbox in every mode. Network egress is blocked in `gate`, but the copy is still reachable out-of-band (a follow-up `cat /tmp/copy` brings the content into the agent's context). Note the asymmetry with the file tools, where `workspace.deny` DOES bind reads (`read`/`grep`/`explore` reject deny-listed paths); plain bash never enforced the deny list at all, and no sandbox mode changes that for reads. Treat `workspace.deny` under bash as "these files may not be modified or aliased", never as "these secrets cannot be read". One more confidentiality gap, host-dependent: on kernels with Yama `ptrace_scope` **0** (or no Yama at all -- scope 1 and up deny a descendant reaching an ancestor), a sandboxed command can read hotdog's own `/proc/<pid>/mem` (process memory, environ -- API keys if they live there) via plain read-open, which no sandbox mode traps; see `docs/sysbox-sandbox.md` "Known ceilings". See `docs/sysbox-sandbox.md` for the architecture and its stated ceilings.
+**Confidentiality of `workspace.deny` under bash: none, in any mode.** `cat .env` succeeds under `off`, `static` *and*
+`fence`. Landlock is allowlist-only and cannot subtract a subtree from a granted root; `static` has no path visibility at
+all; and the mode that used to adjudicate opens (USER_NOTIF `gate`) is deleted --
+`docs/sysbox-sandbox.md` "gate: removed". The `user-gate` extension that exists now approves *tool calls*, above spawn
+(`userGate` below): it is policy triage, not path enforcement, and it never claims to bind `workspace.deny`.
+ The same goes for the surfaces inside the read-only mirrors: `/proc/kcore`,
+`/proc/kpage*`, `/dev/mem|kmem|port` and `/dev/pts/N` (the terminal hotdog is attached to) are admitted by the ro rules on
+`/proc` and `/dev`, and whether they are readable is the kernel's own permission check, not hotdog's. At Yama
+`ptrace_scope` 0 an ancestor's `/proc/<pid>/{mem,fd,...}` is reachable too (the deny table blocks `ptrace`,
+`process_vm_readv`/`writev` and `pidfd_getfd`, and scope 1 -- the common default -- is what denies descendant->ancestor
+access in the first place). So `workspace.deny` under bash means nothing; it binds the **file tools**
+(`read`/`grep`/`explore`) in every configuration, and that is the boundary to configure secrets around. See
+`docs/sysbox-sandbox.md` for the architecture and its stated ceilings.
 
 ### `fetchTool`
 
@@ -1024,11 +1046,105 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 
 ### `userGate`
 
-[User Gate](../src/extensions/user-gate) — Human approval prompts for `bashTool.sandbox="gate"` asks (deny-listed writes and writes outside workspace roots). Registers a `SANDBOX_GATE` hook handler that asks through the existing question-tool input seam; no new prompt channel. In-root non-deny writes are decided by policy and never prompt (approval-fatigue fast path). Prompts are queued one-at-a-time process-wide; an ask whose child died while queued is denied without prompting. Fail-closed: no UI, a non-interactive session, a UI error, or a cancelled run all deny; disabling this extension makes every ask deny. Requires `bashTool.sandbox="gate"`; without it the extension does nothing.
+[User Gate](../src/extensions/user-gate) — Tool-call approvals: whether a tool call runs at all. Registers a `TOOL_CALL`
+gate handler that allows the call, blocks it, or asks the human through the existing question-tool input seam (no second
+prompt channel). **Off by default**: with `default: "ask"` an on-by-default gate would prompt every existing user on every
+tool call.
+
+It sits ABOVE the spawn boundary and is independent of `bashTool.sandbox` -- approvals apply in `sandbox: "off"` too, and
+the fence applies whether or not approvals are on. **This is convenience triage over what the model is about to do, not an
+enforcement boundary.** The bash analysis is best-effort by construction (see the bail list below): everything it cannot
+read becomes a prompt, and a caller that wants to be misread can be. Kernel enforcement is
+[`bashTool.sandbox`](#bash-sandbox-modes); `docs/sysbox-sandbox.md` "gate: removed" explains why nothing mediates a
+running command any more.
+
+Rule grammar, for `allow` and `deny` entries:
+
+| Entry | Matches |
+|-------|---------|
+| `bash` | every call to that tool; `*` works in the tool part (`mcp__*`) |
+| `bash.cmd=git` | a bash segment whose command basename is `git` |
+| `edit.paths=src` | a file-tool path argument (any of `path`, `paths`, `file_path`, `filePath`, `dir`, `directory`), matched in the `workspace.deny` dialect -- component sequence at any depth, `*`/`?` inside one component -- against BOTH the absolute and the workspace-relative path |
+| `bash.path=/etc/passwd` | a path-shaped bash argument or redirection target (same dialect) |
+| `fetch.url=https://docs.example.com/*` | any other named parameter, as a plain `*`/`?` glob over the whole value |
+
+Malformed entries are a startup `ConfigError`, and while the config stays malformed **every** tool call is blocked -- a
+rule that silently vanished from a deny list would be worse than a broken session.
+
+Precedence is **deny > allow > `default`**. A deny blocks with no prompt and no mid-run override. Everything else falls to
+`default`, and the three values are three different products:
+
+| `default` | Unmatched call | Unrecognized tool | Bash analysis bailed | Use |
+|-----------|----------------|-------------------|----------------------|-----|
+| `"ask"` (default) | prompt | prompt | prompt | interactive sessions |
+| `"allow"` | run | **prompt** | prompt | lockdown-by-deny-list: broad trust, specific vetoes |
+| `"deny"` | block, no prompt | block | block | allowlist-only, and the only shape that works with nobody at the keyboard |
+
+(`"allow"` deliberately does not rescue unrecognized tools: a newly connected MCP server should not inherit blanket trust.)
+
+So with `"deny"` the config *is* the capability list, and the block text carries the exact `allow` line that would have
+matched -- the transcript of a headless run is then self-diagnosing. The hazard to accept with it: the tool surface is not
+frozen at startup. MCP servers connect after boot, `subagents` registers `delegate_task`, `model-switch` adds `model`, so
+an allow list that was complete at t=0 goes stale mid-session, and under `"deny"` that is a dead call rather than a
+question. Pin `extensions`/`mcpServers` alongside it if you want the list to stay honest.
+
+Only the interactive CLI and the websocket front ends provide a prompt seam. On a one-shot run (`-p`) `"ask"` therefore
+blocks everything -- the fail-closed rule working, not a missing prompt -- which is exactly the case `"deny"` exists for.
+
+The prompt offers `allow once` / `allow for session` / `deny` (`deny` is the default answer), and prompts queue
+one-at-a-time process-wide. A session allow is in-memory only -- keyed on the tool plus every extracted value, so an allow
+for `git status` never covers `git push --force` -- and it prints the config line that would make it permanent. Nothing is
+ever written to config from a prompt. Fail-closed everywhere: no input seam, a non-interactive session, a
+throwing/rejecting UI, a cancelled run, or an empty answer all block, carrying the reason and that config line so the model
+can tell the human what to add. Only the interactive CLI and the websocket front ends provide that seam, so with the gate
+enabled on a one-shot run (`-p`) every tool call blocks -- that is the fail-closed rule working, not a missing prompt.
+
+Bash command lines are segmented on `;`, `&&`, `||`, `|`, `&` and newlines (every segment must pass; `cd` retargets the
+base for later segments and bails when it leaves the workspace roots). The analysis **bails -- which means ask --** on
+`$(...)`, backticks, `${...}`/`$VAR`, `(`/`)`, `{`/`}`, unquoted globs, here-documents/here-strings, `xargs`, `eval`,
+`env`, `find -exec`/`-execdir`/`-delete`, and inline-code interpreters (`sh -c`, `bash -c`, `python -c`, `node -e`,
+`perl -e`/`-E`, `ruby -e`, `awk`). Flags and non-path words are opaque: they never demand an allow and only deny rules can
+see them.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+| `enabled` | `boolean` | `false` | Turn approvals on. |
+| `default` | `string` | `"ask"` | What an unmatched call does: `ask` prompts, `allow` runs, `deny` blocks without prompting (allowlist-only; also denies unrecognized tools and unanalyzable bash). |
+| `tools` | `object` | `{}` | Extra tool patterns and which of their params are approval targets, e.g. `{ "mcp__db__query": ["statement"] }`. Naming a tool also marks it recognized, so it follows `default` instead of always asking. |
+| `allow` | `string[]` | `[]` | Rules that silence the ask. |
+| `deny` | `string[]` | `[]` | Rules that block without prompting; deny beats allow. |
+
+```json
+{
+  "userGate": {
+    "enabled": true,
+    "allow": ["bash.cmd=git", "bash.cmd=gh", "read", "edit.paths=src", "fetch.url=https://docs.example.com/*"]
+  }
+}
+```
+
+```json
+{
+  "userGate": {
+    "enabled": true,
+    "default": "allow",
+    "deny": ["bash.cmd=rm", "bash.cmd=curl", "edit.paths=.env", "mcp__*"]
+  }
+}
+```
+
+Allowlist-only, for a run nobody is watching (CI, `-p`): everything the list omits blocks with the line to add in its own
+failure text.
+
+```json
+{
+  "userGate": {
+    "enabled": true,
+    "default": "deny",
+    "allow": ["bash.cmd=git", "bash.cmd=bun", "read", "grep", "edit.paths=src", "edit.paths=docs"]
+  }
+}
+```
 
 ### `skills`
 

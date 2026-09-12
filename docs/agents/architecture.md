@@ -187,7 +187,7 @@ Built-in command handler implementations for core commands. Extracted from `agen
 - Each handler is `(agent, value, cmd) => { content?, error? }`
 
 ### Tool Executor (`src/core/tool-executor.ts`)
-Runs the full tool call pipeline (TOOL_BEFORE_EXECUTE → TOOL_CALL gate → AGENT_TOOL_CONTEXT → validate → execute → TOOL_AFTER_EXECUTE → TOOL_RESULT → TOOL_METRICS). Extracted from Agent so tool execution is testable independently. Key exports:
+Runs the full tool call pipeline (TOOL_BEFORE_EXECUTE → AGENT_TOOL_CONTEXT → TOOL_CALL gate → validate → execute → TOOL_AFTER_EXECUTE → TOOL_RESULT → TOOL_METRICS); the gate payload carries the `toolCtx` so an approval-style handler can prompt through it. Extracted from Agent so tool execution is testable independently. Key exports:
 - `ToolExecutor` class — manages the tool execution pipeline
 - `createToolExecutor(deps)` — factory function
 - `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, emitOutput, workspaceRoots, maxRetries, toolRetryDelay, isRestoring, agent)

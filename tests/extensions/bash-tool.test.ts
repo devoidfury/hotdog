@@ -153,6 +153,16 @@ describe('BashTool', () => {
     const result = await tool.execute(JSON.stringify({ command: 'printf "line1\\nline2\\nline3\\nline4\\nline5"' }), {} as any);
     // Should be truncated
     expect(resultStr(result)).toContain('truncated');
+    // ...and the cut is flagged in metadata, so the model sees it in the
+    // result header instead of only in a marker after the kept lines.
+    expect(result.metadata?.get('truncated')).toBe('true');
+  });
+
+  it('omits the truncated flag when the output fits', async () => {
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    const result = await tool.execute(JSON.stringify({ command: 'printf "one\\ntwo\\n"' }), {} as any);
+    expect(result.metadata?.has('truncated')).toBe(false);
+    expect(result.metadata?.get('exit_code')).toBe('0');
   });
 
   it('caps in-memory buffering for huge single-line output', async () => {
@@ -167,6 +177,8 @@ describe('BashTool', () => {
     // Buffer cap (1M chars) + marker, far below the 3MB actually produced.
     expect(str.length).toBeLessThan(1_100_000);
     expect(result.metadata?.get('exit_code')).toBe('0');
+    // the char-buffer cut flags too, not just the line cap
+    expect(result.metadata?.get('truncated')).toBe('true');
   });
 
   it('decodes multibyte output split across stream read boundaries', async () => {

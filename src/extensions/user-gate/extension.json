@@ -2,15 +2,39 @@
   "name": "user-gate",
   "provides": [],
   "loadOrder": 2,
-  "description": "Interactive approvals for sysbox gate-mode sandbox asks",
+  "description": "Tool-call approvals: ask before a tool call runs (opt-in; convenience triage, not enforcement)",
   "configSchema": {
     "userGate": {
       "type": "object",
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": true,
-          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+          "default": false,
+          "description": "OFF by default: with default \"ask\" a default-on gate would prompt on every tool call. Set true to turn approvals on."
+        },
+        "default": {
+          "type": "string",
+          "enum": ["ask", "allow", "deny"],
+          "default": "ask",
+          "description": "What an unmatched tool call does. \"ask\" prompts (interactive); \"allow\" runs (the lockdown style is \"allow\" plus a deny list); \"deny\" blocks without prompting -- allowlist-only, and the only shape usable headless (one-shot/CI): a call the allow list forgot fails with the exact line to add in its own block text. Under \"deny\" an unrecognized tool and a command the bash analyzer bailed on both deny too -- unverifiable is not allowed."
+        },
+        "tools": {
+          "type": "object",
+          "default": {},
+          "description": "Extra tool patterns and which of their params are approval targets, e.g. { \"mcp__db__query\": [\"statement\"] }. Naming a tool here also marks it recognized (so it follows \"default\" instead of always asking).",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        },
+        "allow": {
+          "type": "array",
+          "default": [],
+          "description": "Rules that silence the ask. Grammar: 'tool' or 'tool.param=glob' -- bash.cmd=git, edit.paths=src, fetch.url=https://example.com/*. Paths use the workspace.deny dialect, matched against the absolute AND the root-relative path.",
+          "items": { "type": "string" }
+        },
+        "deny": {
+          "type": "array",
+          "default": [],
+          "description": "Rules that block without prompting and cannot be overridden mid-run. Same grammar; deny beats allow.",
+          "items": { "type": "string" }
         }
       },
       "additionalProperties": false,

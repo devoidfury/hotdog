@@ -1,19 +1,20 @@
 import { describe, it, expect } from "bun:test";
-import { readFileSync, existsSync, readlinkSync, openSync, mkdtempSync, rmSync, closeSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { cc } from "bun:ffi";
-import { isSeccompNotifyFd } from "@utils/sysbox/procfs.ts";
-import { spawnSync } from "node:child_process";
+import { readFileSync, existsSync } from "node:fs";
 import {
+  cgroupMemoryCapBytes,
   detectCapabilities,
-  importProbeReason,
+  findCgroupParentDir,
+  LANDLOCK_NET_RIGHTS,
+  landlockNetPosture,
   launcherCPath,
+  parseMemTotalKb,
+  parseMemoryEventsOomKill,
+  parseUnifiedCgroup,
   sbHelperPath,
   resetCapabilitiesForTesting,
 } from "@utils/sysbox/capabilities.ts";
 import type { SysboxCapabilities } from "@utils/sysbox/capabilities.ts";
-import { STATIC_DENIED_SYSCALLS, GATE_TRAPPED_SYSCALLS, MAX_DENY_SYSCALLS, OPEN_WRITE_MASK } from "@utils/sysbox/denied-syscalls.ts";
+import { STATIC_DENIED_SYSCALLS, MAX_DENY_SYSCALLS } from "@utils/sysbox/denied-syscalls.ts";
 import { resolveSandboxMode } from "@extensions/bash-tool/index.ts";
 import { ConfigError } from "@core/error.ts";
 
@@ -25,9 +26,14 @@ describe("sysbox capabilities", () => {
     expect(typeof a.staticAvailable).toBe("boolean");
     expect(typeof a.landlockAvailable).toBe("boolean");
     expect(Number.isInteger(a.landlockAbi)).toBe(true);
-    expect(typeof a.gateAvailable).toBe("boolean");
-    // gate is a strict superset: it can never be available without static.
-    if (a.gateAvailable) expect(a.staticAvailable).toBe(true);
+    expect(typeof a.cgroupAvailable).toBe("boolean");
+    expect(typeof a.cgroupPidsAvailable).toBe("boolean");
+    expect(typeof a.cgroupMemoryAvailable).toBe("boolean");
+    // cgroupAvailable is the union: it can never be true with neither.
+    if (a.cgroupAvailable) {
+      expect(a.cgroupPidsAvailable || a.cgroupMemoryAvailable).toBe(true);
+      expect(a.cgroupParentDir).not.toBeNull();
+    }
     // fence ladder: fence implies static; abi only nonzero when available.
     if (a.landlockAvailable) {
       expect(a.staticAvailable).toBe(true);
@@ -35,7 +41,7 @@ describe("sysbox capabilities", () => {
     } else {
       expect(a.landlockAbi).toBe(0);
     }
-    if (!a.staticAvailable || !a.gateAvailable || !a.landlockAvailable) {
+    if (!a.staticAvailable || !a.landlockAvailable) {
       expect(a.reasons.length).toBeGreaterThan(0);
     }
   });
@@ -68,109 +74,11 @@ describe("capabilities paths and reset", () => {
     expect(b.staticAvailable).toBe(a.staticAvailable);
     expect(b.landlockAvailable).toBe(a.landlockAvailable);
     expect(b.landlockAbi).toBe(a.landlockAbi);
-    expect(b.gateAvailable).toBe(a.gateAvailable);
+    expect(b.cgroupAvailable).toBe(a.cgroupAvailable);
+    expect(b.cgroupParentDir).toBe(a.cgroupParentDir);
+    expect(b.cgroupPidsAvailable).toBe(a.cgroupPidsAvailable);
+    expect(b.cgroupMemoryAvailable).toBe(a.cgroupMemoryAvailable);
     resetCapabilitiesForTesting();
-  });
-});
-
-// The import probe is what gates `sandbox: "gate"`, and until now every
-// failure inside it exited 3 with a reason string claiming the kernel blocks
-// pidfd_getfd -- so a missing C compiler, a wedged probe child or a spawnSync
-// timeout were all reported to the user as a kernel policy verdict they have
-// no way to check. Exit 3 is now reserved for EPERM/EACCES on a real
-// parent->child import; everything else is exit 4 ("probe could not run").
-describe("--probe-import exit-code contract", () => {
-  it("exit 0 means available, no reason", () => {
-    expect(importProbeReason(0, "")).toBeNull();
-  });
-
-  it("exit 3 is the outer-policy verdict and nothing else claims it", () => {
-    const blocked = importProbeReason(3, "probe-import: pidfd_getfd -> 1");
-    expect(blocked).toContain("pidfd_getfd blocked");
-    // The broken-probe codes must NOT read like a kernel verdict.
-    const broke = importProbeReason(4, "probe-import: cc failed: gcc not found");
-    expect(broke).toContain("could not run");
-    expect(broke).toContain("NOT a kernel verdict");
-    expect(broke).not.toContain("pidfd_getfd blocked");
-  });
-
-  it("timeout (null) and unexpected codes never report as blocked", () => {
-    for (const s of [null, 1, 2, 126, 137]) {
-      const r = importProbeReason(s, "detail");
-      expect(r).not.toBeNull();
-      expect(r).not.toContain("pidfd_getfd blocked");
-    }
-  });
-
-  it("threads the helper's stderr into the reason so it is diagnosable", () => {
-    expect(importProbeReason(4, "child died before installing a listener")).toContain(
-      "child died before installing a listener",
-    );
-  });
-
-  it("the real probe exits with a contracted code on this kernel", () => {
-    // Runs the actual helper on the actual kernel: the code must be one of
-    // 0/3/4, and whatever it says must not be contradicted by the cached
-    // gateAvailable verdict.
-    const r = spawnSync(process.execPath, [sbHelperPath(), "--probe-import"], {
-      stdio: ["ignore", "ignore", "pipe"],
-      env: {},
-      timeout: 20000,
-    });
-    const code: number | null = r.status;
-    expect([0, 3, 4] as (number | null)[]).toContain(code);
-    // Available on this host => the probe must have said so with 0.
-    if (detectCapabilities().gateAvailable) expect(r.status).toBe(0);
-  });
-});
-
-// Both the import probe and the supervisor decide "is this fd the seccomp
-// notifier?" by substring-matching the /proc link target. That string is a
-// kernel detail (this kernel says "anon_inode:seccomp notify", NOT the
-// bracketed "anon_inode:[seccomp]" the first draft of the comment claimed),
-// so it gets pinned against a real listener fd rather than asserted from
-// memory. Skips where NEW_LISTENER is blocked.
-// Both the import probe and the supervisor decide "is this fd the seccomp
-// notifier?" through isSeccompNotifyFd, a substring match on the /proc link
-// target. That string is a kernel detail -- this kernel says
-// "anon_inode:seccomp notify", NOT the bracketed "anon_inode:[seccomp]" the
-// first draft of the probe comment claimed -- so it is pinned against a real
-// listener fd instead of asserted from memory. Skips where NEW_LISTENER is
-// blocked (the supervisor path cannot be reached there either).
-describe("seccomp notify fd predicate", () => {
-  it("accepts a real listener fd and rejects everything else", () => {
-    let l = -1;
-    try {
-      const { symbols } = cc({
-        source: launcherCPath(),
-        symbols: { sbx_probe_listen: { args: [], returns: "i32" } },
-      });
-      l = (symbols.sbx_probe_listen as unknown as () => number)();
-    } catch {
-      console.log("[sysbox] no compiler here; predicate pin skipped");
-      return;
-    }
-    if (l < 0) {
-      console.log(`[sysbox] NEW_LISTENER unavailable (rc=${l}); predicate pin skipped`);
-      return;
-    }
-    try {
-      expect(readlinkSync(`/proc/self/fd/${l}`)).toContain("seccomp");
-      expect(isSeccompNotifyFd(l)).toBe(true);
-    } finally {
-      closeSync(l);
-    }
-    // Negative controls: the fds a spawn's table actually holds, plus junk.
-    const tmp = mkdtempSync(join(tmpdir(), "sysbox-link-"));
-    const fd = openSync(join(tmp, "f"), "w");
-    try {
-      expect(isSeccompNotifyFd(fd)).toBe(false);
-      expect(isSeccompNotifyFd(9999)).toBe(false);
-      expect(isSeccompNotifyFd(-1)).toBe(false);
-    } finally {
-      closeSync(fd);
-      rmSync(tmp, { recursive: true, force: true });
-    }
   });
 });
 
@@ -206,6 +114,8 @@ describe("deny table", () => {
       "fsconfig:431",
       "fsmount:432",
       "fspick:433",
+      "name_to_handle_at:303",
+      "open_by_handle_at:304",
     ]);
   });
 
@@ -216,57 +126,37 @@ describe("deny table", () => {
     expect(nrs.every((n) => Number.isInteger(n) && n >= 0 && n <= 1024)).toBe(true);
   });
 
-  // The gate BPF trap set, pinned exactly (launcher.c reads nothing else):
-  // a change here IS a change in the syscall surface the supervisor sees.
-  // The legacy/openat2/send* entries are the review-fix bypass set: a probe
-  // wrote through the deny list with openat2, unlink(87), rename(82) and a
-  // UDP sendto when only openat/unlinkat/renameat2/connect/execve were trapped.
-  // The second-round entries (creat/truncate/mkdir*/mknod*/link*/symlink*) are
-  // the same legacy-twin class, re-measured: with Landlock granting each root
-  // rw wholesale, ANY untrapped create/alias/truncate syscall is missing
-  // deny-list policy, not just missing audit.
-  it("gate trap set is the pinned x86_64 set and disjoint from the deny set", () => {
-    expect(GATE_TRAPPED_SYSCALLS.map((t) => `${t.name}:${t.nr}:${t.kind}`)).toEqual([
-      "openat:257:open.write",
-      "openat2:437:open.write",
-      "creat:85:open.write",
-      "truncate:76:truncate",
-      "unlink:87:unlink",
-      "unlinkat:263:unlink",
-      "rmdir:84:unlink",
-      "mkdir:83:create",
-      "mkdirat:258:create",
-      "mknod:133:create",
-      "mknodat:259:create",
-      "symlink:88:create",
-      "symlinkat:266:create",
-      "link:86:link",
-      "linkat:265:link",
-      "rename:82:rename",
-      "renameat:264:rename",
-      "renameat2:316:rename",
-      "connect:42:connect",
-      "sendto:44:connect",
-      "sendmsg:46:connect",
-      "sendmmsg:345:connect",
-      "execve:59:execve",
-    ]);
-    const deniedNrs = new Set(STATIC_DENIED_SYSCALLS.map((d) => d.nr));
-    for (const t of GATE_TRAPPED_SYSCALLS) {
-      expect(deniedNrs.has(t.nr)).toBe(false);
+});
+
+// The fence's network claim, and the drift pin between its TS mirror and
+// launcher.c's ll_net_rights. The BIT NUMBERS here are measured, not copied:
+// the plan guessed 8/9 for the UDP pair and this host's ABI-10 kernel rejects
+// those (2/3 is what it takes), which is exactly why the behavior half of the
+// pin lives in fence-integration.test.ts -- bind, connect and sendto must
+// EACCES on a real fenced spawn. A wrong bit would EINVAL the ruleset create:
+// a refused spawn, never a silent hole.
+describe("landlock net rights", () => {
+  it("launcher.c ll_net_rights matches the TS table (name, bit, ABI tier)", () => {
+    const c = readFileSync(launcherCPath(), "utf8");
+    const fn = /static uint64_t ll_net_rights\(int32_t abi\) \{([\s\S]*?)\n\}/.exec(c);
+    expect(fn).not.toBeNull();
+    const body = fn![1]!;
+    for (const r of LANDLOCK_NET_RIGHTS) {
+      expect(c).toContain(`#define LL_NET_${r.name} (1ULL << ${r.bit})`);
+      expect(body).toMatch(new RegExp(`if \\(abi >= ${r.abi}\\) m \\|= [^;]*\\bLL_NET_${r.name}\\b`));
     }
+    // Handled with NO allow rules anywhere: adding a NET_PORT rule would turn
+    // the default-deny into a per-port allowlist nobody reviewed.
+    expect(c).not.toContain("LANDLOCK_RULE_NET_PORT");
+    expect(c).not.toContain("net_port");
   });
 
-  // Drift pin between the TS tables and the C filter: every trap must be
-  // defined in launcher.c as `#define NR_<name> <nr>` and the open-write
-  // flag mask must match the TS constant the supervisor applies to
-  // openat2's struct open_how.
-  it("launcher.c gate defines match the TS trap table and mask", () => {
-    const c = readFileSync(launcherCPath(), "utf8");
-    for (const t of GATE_TRAPPED_SYSCALLS) {
-      expect(c).toContain(`#define NR_${t.name} ${t.nr}\n`);
-    }
-    expect(c).toContain(`#define OPEN_WRITE_MASK ${OPEN_WRITE_MASK}\n`);
+  it("posture wording says unhandled rather than implying safety", () => {
+    expect(landlockNetPosture(0)).toBe("net: unhandled");
+    expect(landlockNetPosture(3)).toBe("net: unhandled");
+    expect(landlockNetPosture(4)).toBe("net: tcp bind+connect denied");
+    expect(landlockNetPosture(9)).toBe("net: tcp bind+connect denied");
+    expect(landlockNetPosture(10)).toBe("net: tcp bind+connect denied +udp");
   });
 });
 
@@ -275,16 +165,18 @@ describe("bashTool resolveSandboxMode (fail-closed)", () => {
     staticAvailable: true,
     landlockAvailable: true,
     landlockAbi: 4,
-    gateAvailable: true,
+    cgroupAvailable: true,
+    cgroupParentDir: "/sys/fs/cgroup",
+    cgroupPidsAvailable: true,
+    cgroupMemoryAvailable: true,
     reasons: [],
   };
 
-  it("defaults to off; accepts static, fence and gate only when available", () => {
+  it("defaults to off; accepts static and fence only when available", () => {
     expect(resolveSandboxMode(undefined, both)).toBe("off");
     expect(resolveSandboxMode("off", both)).toBe("off");
     expect(resolveSandboxMode("static", both)).toBe("static");
     expect(resolveSandboxMode("fence", both)).toBe("fence");
-    expect(resolveSandboxMode("gate", both)).toBe("gate");
   });
 
   it("throws on an unavailable mode instead of downgrading", () => {
@@ -292,47 +184,131 @@ describe("bashTool resolveSandboxMode (fail-closed)", () => {
       staticAvailable: false,
       landlockAvailable: false,
       landlockAbi: 0,
-      gateAvailable: false,
+      cgroupAvailable: false,
+      cgroupParentDir: null,
+      cgroupPidsAvailable: false,
+      cgroupMemoryAvailable: false,
       reasons: ["arch is \"arm64\""],
     };
     expect(() => resolveSandboxMode("static", caps)).toThrow(ConfigError);
     expect(() => resolveSandboxMode("static", caps)).toThrow(/not available[\s\S]*arm64/);
     expect(() => resolveSandboxMode("fence", caps)).toThrow(/fence" is not available/);
-    expect(() => resolveSandboxMode("gate", caps)).toThrow(/gate" is not available/);
     expect(resolveSandboxMode("off", caps)).toBe("off");
   });
 
-  it("static may work while gate is blocked (container seccomp profiles)", () => {
-    const caps: SysboxCapabilities = {
-      staticAvailable: true,
-      landlockAvailable: true,
-      landlockAbi: 4,
-      gateAvailable: false,
-      reasons: ["SECCOMP_FILTER_FLAG_NEW_LISTENER blocked here"],
-    };
-    expect(resolveSandboxMode("static", caps)).toBe("static");
-    expect(resolveSandboxMode("fence", caps)).toBe("fence");
-    expect(() => resolveSandboxMode("gate", caps)).toThrow(/NEW_LISTENER/);
-  });
-
+  // A container may block landlock while seccomp ERRNO works fine (docker's
+  // default profile does exactly this on older kernels): static stays
+  // selectable, fence refuses rather than downgrading to it.
   it("static may work while landlock is blocked (kernels < 5.13, landlock=0)", () => {
     const caps: SysboxCapabilities = {
       staticAvailable: true,
       landlockAvailable: false,
       landlockAbi: 0,
-      gateAvailable: true,
+      cgroupAvailable: false,
+      cgroupParentDir: null,
+      cgroupPidsAvailable: false,
+      cgroupMemoryAvailable: false,
       reasons: ["landlock unavailable (kernel without landlock, disabled at boot, or blocked by container policy)"],
     };
     expect(resolveSandboxMode("static", caps)).toBe("static");
     expect(() => resolveSandboxMode("fence", caps)).toThrow(/landlock unavailable/);
-    // gate stays selectable without landlock (degraded: no TOCTOU bound;
-    // the capability matrix in `hotdog info` is the loud part).
-    expect(resolveSandboxMode("gate", caps)).toBe("gate");
   });
 
   it("throws on an unknown mode even when everything would be fine", () => {
     expect(() => resolveSandboxMode("paranoid", both)).toThrow(
-      /must be "off", "static", "fence", or "gate"/,
+      /must be "off", "static", or "fence"/,
     );
+  });
+});
+
+// Pure logic behind the cgroup DoS limits (all sandbox modes, best-effort).
+// The probe itself (real mkdir under our own subtree) is host-dependent --
+// read-only /sys/fs/cgroup in containers is its COMMON verdict; what is
+// pinned here are the parse/compute functions the probe and the spawner
+// share, and the integration assertion in cgroup-limits.test.ts runs only
+// where the probe says available.
+describe("cgroup limit helpers", () => {
+  it("parseUnifiedCgroup finds only the 0:: entry", () => {
+    expect(parseUnifiedCgroup("0::/\n")).toBe("/");
+    expect(parseUnifiedCgroup("0::/user.slice/user-1000.slice/app\n")).toBe(
+      "/user.slice/user-1000.slice/app",
+    );
+    // v1 hybrid: controller lines have nonzero hierarchy ids; only a real
+    // 0:: line counts.
+    expect(
+      parseUnifiedCgroup("11:memory:/user.slice\n1:name=systemd:/user.slice\n"),
+    ).toBeNull();
+    expect(parseUnifiedCgroup("")).toBeNull();
+    expect(parseUnifiedCgroup("0::relative/invalid\n")).toBeNull();
+  });
+
+  it("parseMemTotalKb extracts MemTotal", () => {
+    expect(
+      parseMemTotalKb("MemTotal:       15645176 kB\nMemFree:   100 kB\n"),
+    ).toBe(15645176);
+    expect(parseMemTotalKb("MemFree: 1 kB\n")).toBeNull();
+    expect(parseMemTotalKb("MemTotal: 0 kB\n")).toBeNull();
+  });
+
+  it("cgroupMemoryCapBytes clamps to [512MiB, 4GiB], half of RAM in between", () => {
+    const MB = 1024 * 1024;
+    expect(cgroupMemoryCapBytes(1024 * 1024)).toBe(512 * MB); // 1GiB host -> floor
+    expect(cgroupMemoryCapBytes(8 * 1024 * 1024)).toBe(4096 * MB); // 8GiB -> half
+    expect(cgroupMemoryCapBytes(64 * 1024 * 1024)).toBe(4 * 1024 * MB); // big -> cap
+    expect(cgroupMemoryCapBytes(null)).toBe(512 * MB); // unknown -> floor, never unlimited
+  });
+
+  it("parseMemoryEventsOomKill reads only the oom_kill counter", () => {
+    expect(
+      parseMemoryEventsOomKill(
+        "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\n",
+      ),
+    ).toBe(0);
+    // real kernel shape: header line included, counters above
+    expect(
+      parseMemoryEventsOomKill(
+        "local 0\ndispatch 0\nanon 0\nlow 3\nhigh 1\nmax 1\noom 1\noom_kill 2\n",
+      ),
+    ).toBe(2);
+    // never misread a sibling counter, never accuse on garbage
+    expect(parseMemoryEventsOomKill("oom_group_kill 7\n")).toBe(0);
+    expect(parseMemoryEventsOomKill("oom_kill not-a-number\n")).toBe(0);
+    expect(parseMemoryEventsOomKill("")).toBe(0);
+  });
+
+  // The ancestor walk that fixes bare-metal systemd hosts: our own cgroup is
+  // a leaf scope with members, so the kernel forbids controllers there and
+  // the ONLY usable host is an ancestor. Predicate-injected: pins the walk
+  // itself (order, stopping conditions), the real fs answers come from the
+  // un-skipped cgroup-limits.test.ts suite.
+  describe("findCgroupParentDir", () => {
+    const LEAF = "/user.slice/user-1000.slice/user@1000.service/app.slice/tab.scope";
+    const usableAt = (...okDirs: string[]) => (abs: string) => okDirs.includes(abs);
+
+    it("takes its own cgroup when it can host limited children", () => {
+      expect(findCgroupParentDir(LEAF, usableAt(`/sys/fs/cgroup${LEAF}`))).toBe(
+        `/sys/fs/cgroup${LEAF}`,
+      );
+    });
+
+    it("walks up to the nearest usable ancestor, deepest first", () => {
+      const anc = "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service";
+      const found = findCgroupParentDir(
+        LEAF,
+        usableAt(anc, "/sys/fs/cgroup/user.slice"),
+      );
+      expect(found).toBe(anc);
+    });
+
+    it("returns null when nothing up to the mount root can host one", () => {
+      expect(findCgroupParentDir(LEAF, usableAt("/some/other/tree"))).toBeNull();
+      // the mount root itself is a candidate (container at the root cgroup),
+      // but nothing above it: usable("/") must not make the walk loop.
+      expect(findCgroupParentDir("/", usableAt())).toBeNull();
+    });
+
+    it("the mount root rel-path normalizes to the mount, not below it", () => {
+      expect(findCgroupParentDir("/", usableAt("/sys/fs/cgroup"))).toBe("/sys/fs/cgroup");
+    });
   });
 });

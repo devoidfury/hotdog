@@ -453,6 +453,99 @@ describe('ToolExecutor', () => {
       expect(captured.toolCtx!.get('isSessionRestoring')).toBe(true);
     });
 
+    it('fires AGENT_TOOL_CONTEXT before the TOOL_CALL gate and passes toolCtx to it', async () => {
+      const deps = createMockDeps();
+      const order: string[] = [];
+      let payloadCtx: { get: (k: string) => unknown } | undefined;
+
+      deps.hooks.on('agent:toolContext', () => { order.push('context'); });
+      deps.hooks.on('tool:call', (p: { toolCtx?: { get: (k: string) => unknown } }) => {
+        order.push('call');
+        payloadCtx = p.toolCtx;
+      });
+
+      deps.toolRegistry.register('order_test', makeTestTool('order_test', async () => 'ok'));
+
+      const executor = createToolExecutor(deps);
+      await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'order_test', arguments: '{}' },
+      }]);
+
+      expect(order).toEqual(['context', 'call']);
+      // The gate handler gets the very context the tool will receive, so an
+      // approval prompt can travel through toolCtx.get('input').
+      expect(payloadCtx).toBeDefined();
+      expect(payloadCtx!.get('agent')).toBe(deps.agent);
+    });
+
+    it('lets a TOOL_CALL approval handler prompt through the toolCtx input seam', async () => {
+      // The point of building the context before the gate: an approval-style
+      // handler reaches the human with the seam the question tool already uses,
+      // and its block/continue actually gates execution.
+      const { create: createUserGate } = await import('@extensions/user-gate/index.ts');
+      const deps = createMockDeps();
+      const fakeInput = {
+        isInteractive: () => true,
+        collectAnswers: (qs: { key: string }[]) => ({ [qs[0]!.key]: 'allow once' }),
+      };
+      deps.hooks.on('agent:toolContext', (data: { toolCtx: { set: (k: string, v: unknown) => void } }) => {
+        data.toolCtx.set('input', fakeInput);
+      });
+      const instance = createUserGate({ hooks: deps.hooks, config: { userGate: { enabled: true } } } as never);
+      for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
+        deps.hooks.on(name, handler as never, 'user-gate');
+      }
+      let executed = 0;
+      deps.toolRegistry.register('approved', makeTestTool('approved', async () => {
+        executed++;
+        return 'ok';
+      }));
+
+      const executor = createToolExecutor(deps);
+      const call = [{ id: 'c1', type: 'function' as const, function: { name: 'approved', arguments: '{}' } }];
+      const first = await executor.execute(call);
+      expect(executed).toBe(1);
+      expect(first.toolResults[0]?.result).toContain('ok');
+
+      // Now make the human say no: the tool must not run again.
+      const denying = {
+        isInteractive: () => true,
+        collectAnswers: (qs: { key: string }[]) => ({ [qs[0]!.key]: 'deny' }),
+      };
+      deps.hooks.on('agent:toolContext', (data: { toolCtx: { set: (k: string, v: unknown) => void } }) => {
+        data.toolCtx.set('input', denying);
+      });
+      const second = await executor.execute(call);
+      expect(executed).toBe(1);
+      expect(second.toolResults[0]?.result).toContain('blocked by userGate');
+    });
+
+    it('still builds the tool context when the TOOL_CALL gate blocks', async () => {
+      const deps = createMockDeps();
+      let contextFired = 0;
+      let toolExecuted = false;
+
+      deps.hooks.on('agent:toolContext', () => { contextFired++; });
+      deps.hooks.on('tool:call', () => ({ action: 'block', result: 'denied' }));
+      deps.toolRegistry.register('block_ctx', makeTestTool('block_ctx', async () => {
+        toolExecuted = true;
+        return 'nope';
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'block_ctx', arguments: '{}' },
+      }]);
+
+      expect(contextFired).toBe(1);
+      expect(toolExecuted).toBe(false);
+      expect(result.toolResults[0]?.result).toContain('denied');
+    });
+
     it('should allow TOOL_CALL gate to block execution', async () => {
       const deps = createMockDeps();
       let toolExecuted = false;

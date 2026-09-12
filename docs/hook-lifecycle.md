@@ -170,15 +170,16 @@ Each tool call goes through a dedicated sub-pipeline:
   TOOL_BEFORE_EXECUTE ───────► async notify
        │
        ▼
-  TOOL_CALL (gate) ──────────► sequential pipeline
+  AGENT_TOOL_CONTEXT ─────────► async notify (build toolCtx, enrich it)
+       │                       Runs BEFORE the gate so a gate handler can
+       │                       reach the human through toolCtx.get("input")
+       ▼
+  TOOL_CALL (gate) ──────────► sequential pipeline (payload carries toolCtx)
        │                       Actions:
        │                         { action: "continue" }
        │                         { action: "modify", input }
        │                         { action: "block", result }
        │                       Stops on "block" or "continue" with no modify
-       │
-       ▼
-  AGENT_TOOL_CONTEXT ─────────► async notify (enrich shared context)
        │
        ▼
   Validate args ─────────────► JSON Schema validation
@@ -245,9 +246,9 @@ Each tool call goes through a dedicated sub-pipeline:
 | `TOOL_METADATA` | `tool:metadata` | async notify | After tools register — extensions can modify tool metadata |
 | `TOOL_BEFORE_EXECUTE` | `tool:beforeExecute` | async notify | Before a tool executes |
 | `TOOL_AFTER_EXECUTE` | `tool:afterExecute` | async notify | After a tool executes |
-| `TOOL_CALL` | `tool:call` | pipeline | Gate — block, modify, or allow tool calls |
+| `TOOL_CALL` | `tool:call` | pipeline | Gate — block, modify, or allow tool calls. Payload: `toolCallId`, `toolName`, `input`, `agent`, `toolCtx` (built before this pipeline, so a handler can prompt through `toolCtx.get("input")`) |
 | `TOOL_RESULT` | `tool:result` | pipeline | Modify tool result before LLM sees it |
-| `AGENT_TOOL_CONTEXT` | `agent:toolContext` | async notify | Enrich shared tool context |
+| `AGENT_TOOL_CONTEXT` | `agent:toolContext` | async notify | Enrich shared tool context — fires before the `TOOL_CALL` gate, so handlers only mount services (idempotent); the same `toolCtx` instance reaches the gate payload and `tool.execute()` |
 | `TOOL_METRICS` | `tool:metrics` | async notify | After each individual tool execution — telemetry, profiling |
 
 ### Services
@@ -335,6 +336,10 @@ Extensions provide tools via the `tools:register` hook. The handler receives the
 ### 3. Pipeline — Gate (block/modify)
 
 The `tool:call` hook uses `runHookPipeline` with `shouldStop`. Handlers can block execution or modify input arguments.
+The pipeline is `failOnError: true`: a handler that throws becomes the tool result and the tool never runs, so a handler
+that itself wants to say "denied" should return `{ action: "block", result }` rather than throw. `user-gate` is the
+built-in handler of this kind — tool-call approvals on top of `toolCtx.get("input")`
+(`docs/config-reference.md` "userGate").
 
 ```js
 [HOOKS.TOOL_CALL]: ({ toolName, input }) => {

@@ -16,16 +16,14 @@ import { ToolContext } from "@core/extensions/tool-context.ts";
 import { detectCapabilities, spawnSandboxed } from "@utils/sysbox/index.ts";
 
 const caps = detectCapabilities();
-const suite = caps.staticAvailable ? describe : describe.skip;
 
 if (!caps.staticAvailable) {
   // Logged, not silent: CI on a non-supporting kernel shows this as skipped.
   console.log(`[sysbox] static tests skipped: ${caps.reasons.join("; ")}`);
 }
 
-const PROBE_PATH = join(tmpdir(), `sysbox-probe-${process.pid}.ts`);
-
-suite("sysbox static mode (real sandbox)", () => {
+describe.skipIf(!caps.staticAvailable)("sysbox static mode (real sandbox)", () => {
+  const PROBE_PATH = join(tmpdir(), `sysbox-probe-${process.pid}.ts`);
   const tool = new BashTool({ timeoutMs: 15000, maxOutputLines: 600, sandbox: "static" });
 
   beforeAll(() => {

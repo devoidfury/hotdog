@@ -1,10 +1,15 @@
 // sysbox -- kernel-gated sandbox spawning for hotdog tools.
 //
 // Mechanism layer (docs/sysbox-sandbox.md). Main-process surface is TS-only:
-// the C launcher is compiled and run exclusively by the sbx-exec helper and
-// the sup.ts supervisor worker, so bun:ffi/cc failure domains never overlap
-// with the agent session, and hotdog itself can run under --no-ffi-cc
-// without disabling the sandbox.
+// the C launcher is compiled and run exclusively by the sbx-exec helper, so
+// bun:ffi/cc failure domains never overlap with the agent session, and hotdog
+// itself can run under --no-ffi-cc without disabling the sandbox.
+//
+// Every guarantee here is installed BEFORE execve and enforced by the kernel
+// afterwards: once the helper execs, hotdog has no decision point left in the
+// command's path. Nothing to race, nothing to leak an fd, nothing that can die
+// and wedge the command -- the reason the USER_NOTIF "gate" mode that used to
+// sit on this path is gone (docs/agents/sandbox-direction.md).
 //
 // static: helper installs a seccomp deny filter on itself and execve's the
 //   target. Callers keep using the returned ChildProcess exactly like the
@@ -12,52 +17,39 @@
 //   unchanged (execve preserves pid, so the detached process group is the
 //   command tree).
 // fence: static + a Landlock ruleset built in the helper before exec
-//   (workspace roots + scratch rw, system dirs ro, TCP bind denied where
-//   the ABI supports it). Allowlist-only: workspace.deny is NOT expressible
-//   here -- that stays gate's job (docs/sysbox-sandbox.md "Enforcement ladder").
-// gate: fence (where Landlock is available) + USER_NOTIF. A per-spawn
-//   supervisor worker (sup.ts) holds
-//   the notify fd; notifications are decoded here (paths via /proc, no FFI
-//   in main), run through the caller's decider (policy.ts -> hooks), and
-//   answered. Every notification gets an answer: decider throw -> deny
-//   (invariant 2); the worker self-answers -EINTR at its deadline
-//   (invariant 3).
+//   (workspace roots + scratch rw, system + $PATH dirs ro, every network right
+//   the kernel's ABI knows handled with no allow rules). Landlock is
+//   allowlist-only, so workspace.deny has no kernel expression here: a
+//   deny-listed file inside a granted root stays reachable. Closing that needs
+//   a mount view (deny-as-absence), which is design-not-code -- see
+//   docs/agents/sandbox-direction.md and docs/sysbox-sandbox.md "Future work".
+// cgroups: when the host exposes a writable cgroup v2 subtree, every
+//   sandboxed spawn (any mode) runs inside a per-spawn cgroup with pids.max
+//   + memory.max set (fork/zip-bomb DoS containment); the helper moves
+//   itself in pre-exec, this module owns creation and removal.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { ConfigError, formatError } from "@core/error.ts";
 import { logger } from "../logger.ts";
 import { OWN_PROCESS_GROUP } from "../process-group.ts";
 import type { Workspace } from "../workspace.ts";
-import { detectCapabilities, launcherCPath, sbHelperPath } from "./capabilities.ts";
 import {
-  STATIC_DENIED_SYSCALLS,
-  OPEN_WRITE_MASK,
-} from "./denied-syscalls.ts";
-import {
-  evaluateGate,
-  scratchDirs,
-  ALLOWED_DEVICE_PATHS,
-  EACCES,
-  type GateDecision,
-  type GateRequest,
-} from "./policy.ts";
-import {
-  readChildBytes,
-  readChildCString,
-  readChildArgv,
-  readChildSaFamily,
-  resolveSyscallPath,
-  expandFdLink,
-} from "./procfs.ts";
+  detectCapabilities,
+  launcherCPath,
+  sbHelperPath,
+  cgroupMemoryCapBytes,
+  parseMemoryEventsOomKill,
+  parseMemTotalKb,
+} from "./capabilities.ts";
+import { STATIC_DENIED_SYSCALLS } from "./denied-syscalls.ts";
 
 export { detectCapabilities } from "./capabilities.ts";
 export type { SysboxCapabilities } from "./capabilities.ts";
-export { STATIC_DENIED_SYSCALLS, GATE_TRAPPED_SYSCALLS, MAX_DENY_SYSCALLS, OPEN_WRITE_MASK } from "./denied-syscalls.ts";
-export type { DeniedSyscall, TrappedSyscall } from "./denied-syscalls.ts";
-export { evaluateGate, EPERM, EACCES } from "./policy.ts";
-export type { GateDecision, GateRequest, GateRequestKind } from "./policy.ts";
+export { STATIC_DENIED_SYSCALLS, MAX_DENY_SYSCALLS } from "./denied-syscalls.ts";
+export type { DeniedSyscall } from "./denied-syscalls.ts";
 
 /** Helper exit codes: setup/exec failures where the command never ran. */
 export const SBX_EXIT_SETUP_FAILED = 126;
@@ -73,29 +65,63 @@ export interface SandboxSpawnOptions {
   exe?: string;
   /** Override the deny set (tests); defaults to STATIC_DENIED_SYSCALLS. */
   deny?: readonly number[];
-  /** Landlock fence (fence mode, and stacked under gate when available). */
+  /** Landlock fence (fence mode); null for static mode. */
   fence?: FenceConfig | null;
 }
 
 /**
  * fence mode ruleset inputs. `rw` gets every fs right the kernel's Landlock
  * ABI supports (workspace roots + scratch), `ro` EXECUTE|READ only. Device
- * sinks (/dev/null &co) get per-file rw rules -- exactly the gate policy's
- * ALLOWED_DEVICE_PATHS, not all of /dev.
+ * sinks (/dev/null &co) get per-file rw rules -- exactly ALLOWED_DEVICE_PATHS,
+ * not all of /dev.
  *
  * Honest scope notes (docs/sysbox-sandbox.md):
- * - allowlist-only: workspace.deny cannot be expressed; precise policy is
- *   the gate trap set.
- * - ro system dirs include /etc, /usr/... wholesale; home dirs are NOT
- *   readable -- `cat ~/.ssh/id_rsa` -> EACCES is the point (Motivation).
+ * - Landlock is allowlist-only: workspace.deny has no expression in the
+ *   RULESET, so a deny-listed file inside a granted root stays reachable and
+ *   writable from a fenced command. Nothing else in bash enforces it either;
+ *   the file tools (`read`/`grep`/`explore`) do.
+ * - ro system dirs include /etc, /usr/... wholesale, plus the $PATH dirs
+ *   (a toolchain installed outside the system dirs, e.g. bun in ~/.bun/bin,
+ *   must stay runnable); home dirs are NOT readable otherwise --
+ *   `cat ~/.ssh/id_rsa` -> EACCES is the point (Motivation).
  */
 export interface FenceConfig {
   rw: string[];
   ro: string[];
 }
 
-/** System dirs a working shell needs read+execute on. Missing entries are
- * skipped kernel-side (ENOENT), so distro layout variation is fine. */
+/** The ruleset for one spawn: everything the command may write (roots,
+ * scratch, device sinks) and everything it may only read+execute. */
+export function fenceConfigFor(workspace: Workspace): FenceConfig {
+  return {
+    rw: [...workspace.roots, ...scratchDirs(), ...ALLOWED_DEVICE_PATHS],
+    ro: fenceReadDirs(),
+  };
+}
+
+/** Device sinks commands write constantly; gating them is noise, not safety.
+ * They carry no data in either direction -- which is why the controlling
+ * terminal (/dev/tty, /dev/console) and the harness's own pty node
+ * (/dev/pts/N) are NOT among them. Nothing closes /dev/pts now that the gate
+ * is gone: the ro /dev mirror admits it, so a fenced command can read the
+ * terminal hotdog is attached to (Known ceilings). */
+export const ALLOWED_DEVICE_PATHS: readonly string[] = [
+  "/dev/null",
+  "/dev/zero",
+  "/dev/random",
+  "/dev/urandom",
+  "/dev/full",
+];
+
+/** System dirs a working shell needs read+execute on: the dynamic loader, /etc
+ * lookups, /proc + /sys, the device sinks. Wholesale ro is deliberate -- the
+ * alternative (a per-library allowlist) breaks on every distro upgrade.
+ * Missing entries are skipped kernel-side (ENOENT).
+ * The confidential surfaces INSIDE these trees (/proc/kcore, /dev/mem, the
+ * per-pid memory files, /dev/tty) are exactly what Landlock cannot express: it
+ * has no negative rules, and a ro rule on /dev still admits /dev/mem. Nothing
+ * closes them -- their openness is a documented ceiling (docs/sysbox-sandbox.md
+ * "Known ceilings"); closing them is what the unbuilt mount view was for. */
 export const FENCE_SYSTEM_RO_DIRS: readonly string[] = [
   "/usr",
   "/bin",
@@ -108,11 +134,44 @@ export const FENCE_SYSTEM_RO_DIRS: readonly string[] = [
   "/dev",
 ];
 
-export function fenceConfigFor(workspace: Workspace): FenceConfig {
-  return {
-    rw: [...workspace.roots, ...scratchDirs(), ...ALLOWED_DEVICE_PATHS],
-    ro: [...FENCE_SYSTEM_RO_DIRS],
-  };
+/** Absolute dirs of $PATH, normalized (trailing slashes dropped). Entries that
+ * are empty or relative are skipped -- the shell resolves those against its
+ * cwd, which no fence rule can express -- and so is "/", whose under() would
+ * match everything and turn the whole filesystem into a read surface. */
+export function pathExecDirs(env?: Record<string, string | undefined>): string[] {
+  const raw = (env ?? process.env).PATH;
+  if (!raw) return [];
+  const dirs: string[] = [];
+  for (const entry of raw.split(":")) {
+    const dir = entry.replace(/\/+$/, "");
+    if (dir === "" || !dir.startsWith("/")) continue;
+    dirs.push(dir);
+  }
+  return dirs;
+}
+
+/** The read/exec allowlist the fence installs -- fenceConfigFor feeds exactly
+ * this to Landlock. Missing entries are skipped kernel-side (ENOENT), so
+ * distro layout and per-user toolchain variation is fine. Without the $PATH
+ * half, a toolchain living outside the system dirs (bun installed to
+ * ~/.bun/bin) is unreadable inside the fence and every sandboxed command that
+ * invokes it EACCESes.
+ * Ceiling: whatever an absolute PATH entry points at becomes readable, so an
+ * entry onto a broad dir (e.g. $HOME itself) widens the read surface -- PATH is
+ * the "what may I run" surface, and running it means reading it. */
+export function fenceReadDirs(env?: Record<string, string | undefined>): string[] {
+  return [...FENCE_SYSTEM_RO_DIRS, ...pathExecDirs(env)];
+}
+
+/** Scratch dirs: the sandbox's write surface outside the workspace roots.
+ * This is the real, machine-shared /tmp -- there is no per-spawn tmpfs (that
+ * needs the unbuilt mount view), so cross-run collision names are the cost,
+ * which is why the tests below use pid-suffixed names. */
+export function scratchDirs(env?: Record<string, string | undefined>): string[] {
+  const dirs = ["/tmp", "/var/tmp"];
+  const t = (env ?? process.env).TMPDIR;
+  if (t && t.startsWith("/")) dirs.push(t.endsWith("/") ? t.slice(0, -1) : t);
+  return dirs;
 }
 
 function validateSpawnOpts(opts: SandboxSpawnOptions): void {
@@ -123,6 +182,133 @@ function validateSpawnOpts(opts: SandboxSpawnOptions): void {
   if (envEntries.length > 256) {
     throw new ConfigError(`sandbox env exceeds 256 entries (${envEntries.length})`);
   }
+}
+
+// ── cgroup DoS containment (all sandbox modes, best-effort) ─────────────
+// Per-spawn cgroup v2 with pids.max (fork bombs: further forks EAGAIN) and
+// memory.max (zip bombs / memory hogs: in-cgroup OOM kill, not a host
+// panic). The helper writes its own pid into cgroup.procs before it does
+// anything else; every descendant inherits via fork/exec. This is NOT a
+// sandbox mode -- it is belt-and-suspenders hardening applied when the host
+// delegates a writable subtree (capabilities.cgroupAvailable); creation
+// failure degrades with a warn instead of refusing, because the requested
+// mode's own guarantees (seccomp/landlock) still hold without it.
+// Known ceiling: hotdog SIGKILLed mid-command leaves a stale empty-ish
+// dir behind (nothing runs cleanup); harmless kernel litter.
+
+/** Process/thread cap per sandbox spawn. Generous: bun helpers + toolchains
+ * are thread-hungry; the point is to make a fork bomb fail at N, not to
+ * tune a build box. */
+export const SBX_CGROUP_PIDS_MAX = 512;
+
+let cgroupSeq = 0;
+
+/** Create `<cgroupParentDir>/hotdog-sbx-<pid>-<seq>` with DoS limits. The
+ * hosting dir is the nearest delegated ancestor of our own cgroup resolved
+ * once by capability detection (findCgroupParentDir) -- our own cgroup is
+ * usually a systemd leaf scope where no child can ever get limit files.
+ * Returns the dir path (passed to the helper, which joins it) or null when
+ * unavailable / failed (caller degrades). */
+function createSbxCgroupDir(seq: number): string | null {
+  try {
+    const parent = detectCapabilities().cgroupParentDir;
+    if (parent === null) return null;
+    const dir = join(parent, `hotdog-sbx-${process.pid}-${seq}`);
+    mkdirSync(dir);
+    let limited = false;
+    // Each limit is optional (controller may not be delegated in our
+    // subtree); at least one must land or the cgroup buys nothing.
+    try {
+      writeFileSync(join(dir, "pids.max"), String(SBX_CGROUP_PIDS_MAX));
+      limited = true;
+    } catch { /* controller absent */ }
+    try {
+      const memKb = (() => {
+        try {
+          return parseMemTotalKb(readFileSync("/proc/meminfo", "utf8"));
+        } catch {
+          return null;
+        }
+      })();
+      writeFileSync(join(dir, "memory.max"), String(cgroupMemoryCapBytes(memKb)));
+      limited = true;
+      // Swap would just move the bomb off the radar; zero it when present.
+      try { writeFileSync(join(dir, "memory.swap.max"), "0"); } catch { /* absent */ }
+    } catch { /* controller absent */ }
+    if (!limited) {
+      try { rmdirSync(dir); } catch { /* gone */ }
+      return null;
+    }
+    return dir;
+  } catch (e) {
+    logger.warn(`[sysbox] cgroup create failed (running without DoS limits): ${formatError(e)}`);
+    return null;
+  }
+}
+
+/** rmdir once the spawn is done: the kernel rejects rmdir while members
+ * live (EBUSY), so retry a bounded while (a daemonized leftover keeps the
+ * limits ON, which is the right failure mode) then give up quietly.
+ *
+ * rmdirSync, not rmSync: rmSync without `recursive` does not issue a plain
+ * rmdir (on bun 1.3.14 it fails outright, measured), and with `recursive`
+ * it would try to unlink the cgroup's virtual files (EPERM). rmdir(2) on a
+ * process-empty cgroup is the only call the kernel accepts here. */
+function removeSbxCgroupDir(dir: string): void {
+  let attempts = 0;
+  const attempt = (): void => {
+    try {
+      rmdirSync(dir);
+      return;
+    } catch (e) {
+      if ((e as { code?: string }).code === "ENOENT") return;
+      if (++attempts >= 20) {
+        logger.debug(`[sysbox] cgroup ${dir} still busy after ${attempts} rmdir attempts; left in place`);
+        return;
+      }
+      const t = setTimeout(attempt, 500);
+      t.unref?.();
+    }
+  };
+  attempt();
+}
+
+/** Recorded when a spawn's cgroup reported an in-cgroup OOM kill (the
+ * memory.events oom_kill counter went up; an in-cgroup OOM SIGKILLs the
+ * task, and the caller otherwise sees only a dead exit code with no why).
+ * Keyed by the spawn's ChildProcess; the bash tool appends the note to the
+ * tool output. WeakMap: entries die with the child object. */
+const memoryKillNotes = new WeakMap<ChildProcess, string>();
+
+/** The OOM note for a finished sandboxed spawn, or null when the cgroup
+ * recorded no oom_kill (or the spawn ran without a cgroup). */
+export function sysboxMemoryKillNote(child: ChildProcess): string | null {
+  return memoryKillNotes.get(child) ?? null;
+}
+
+/** Build the OOM note from a cgroup dir's counters, or null when no
+ * in-cgroup OOM kill was recorded. MUST run before removeSbxCgroupDir:
+ * rmdir destroys memory.events with the directory, and the counters are the
+ * only trace of an in-cgroup OOM kill. Reads are plain readFileSync, so a
+ * fake dir with ordinary files drives it (cgroup-limits.test.ts). */
+export function buildMemoryKillNote(cgroupDir: string): string | null {
+  let events: string;
+  try {
+    events = readFileSync(join(cgroupDir, "memory.events"), "utf8");
+  } catch {
+    return null; // memory controller absent (or dir gone): nothing to accuse
+  }
+  const oomKill = parseMemoryEventsOomKill(events);
+  if (oomKill === 0) return null;
+  let max = "unknown";
+  try {
+    max = readFileSync(join(cgroupDir, "memory.max"), "utf8").trim(); // byte count or "max"
+  } catch { /* not delegated */ }
+  const maxText = /^\d+$/.test(max) ? `${max} bytes` : max; // "max"/"unknown" print bare
+  return `[sysbox] sandbox memory limit reached: the kernel OOM-killed a task inside the sandbox ` +
+    `(cgroup memory.max = ${maxText}, oom_kill = ${oomKill}). ` +
+    `The command exceeded the per-spawn memory cap (half host RAM, clamped to [512 MiB, 4 GiB]); ` +
+    `see docs/sysbox-sandbox.md "cgroups".`;
 }
 
 let launcherHashLogged = false;
@@ -138,30 +324,52 @@ function logLauncherHashOnce(): void {
   }
 }
 
-function buildHelperChild(opts: SandboxSpawnOptions, gateName: string | null): ChildProcess {
+function buildHelperChild(opts: SandboxSpawnOptions): ChildProcess {
+  // cgroup seq is process-wide: every sandboxed spawn, any mode, gets its own limited cgroup when the host allows one.
+  const cgroup = detectCapabilities().cgroupAvailable ? createSbxCgroupDir(++cgroupSeq) : null;
   const cfg = JSON.stringify({
     exe: opts.exe ?? "/bin/sh",
     argv: ["sh", "-c", opts.command],
     env: opts.env,
     cwd: opts.cwd,
     deny: Array.from(opts.deny ?? STATIC_DENIED_SYSCALLS.map((d) => d.nr)),
-    gateName,
     fence: opts.fence ?? null,
+    cgroup,
   });
 
   // stdio[3] is the config pipe (helper reads it to EOF). The helper process
   // itself gets an empty env: scrubbed vars belong to the SANDBOXED command
   // and travel inside the config, so nothing sensitive is exposed via /proc's
   // environ even before exec.
-  const child = spawn(process.execPath, [sbHelperPath()], {
-    stdio: ["ignore", "pipe", "pipe", "pipe"],
-    env: {},
-    ...OWN_PROCESS_GROUP,
-  });
+  let child: ChildProcess;
+  try {
+    child = spawn(process.execPath, [sbHelperPath()], {
+      stdio: ["ignore", "pipe", "pipe", "pipe"],
+      env: {},
+      ...OWN_PROCESS_GROUP,
+    });
+  } catch (e) {
+    if (cgroup) removeSbxCgroupDir(cgroup);
+    throw e;
+  }
+  if (cgroup) {
+    // The helper joins on its first act, so from exit onward the cgroup is
+    // empty unless the command daemonized; removeSbxCgroupDir retries
+    // through that and gives up leaving the (still-limiting) cgroup behind.
+    // The OOM note must be read BEFORE the rmdir: memory.events dies with
+    // the directory (exit fires before any caller-registered handler, so
+    // the flag is set by the time a consumer sees "close").
+    child.on("exit", () => {
+      const note = buildMemoryKillNote(cgroup);
+      if (note) memoryKillNotes.set(child, note);
+      removeSbxCgroupDir(cgroup);
+    });
+  }
 
   const cfgStream = child.stdio[3] as import("node:stream").Writable | null;
   if (!cfgStream) {
     child.kill("SIGKILL");
+    if (cgroup) removeSbxCgroupDir(cgroup);
     throw new ConfigError("sysbox: config pipe (stdio[3]) unavailable");
   }
   cfgStream.on("error", (e: Error) => {
@@ -186,297 +394,5 @@ export function spawnSandboxed(opts: SandboxSpawnOptions): ChildProcess {
   }
   validateSpawnOpts(opts);
   logLauncherHashOnce();
-  return buildHelperChild(opts, null);
-}
-
-// ── gate mode ─────────────────────────────────────────────────────────────
-
-export type GateDecider = (req: GateRequest) => GateDecision | Promise<GateDecision>;
-
-/** Default decider: pure workspace policy, no hooks (ask -> deny). */
-export function defaultDeciderFor(workspace: Workspace | null): GateDecider {
-  return (req) => {
-    const d = evaluateGate(workspace, req);
-    if (d.action === "ask") {
-      return { action: "deny", errno: EACCES, why: `unattended ask denied: ${d.why}` };
-    }
-    return d;
-  };
-}
-
-export interface SandboxGateHandle {
-  child: ChildProcess;
-  /** Stop supervision; pending notifications resolve -EINTR. Idempotent. */
-  close(): void;
-}
-
-let gateSeq = 0;
-
-interface SupNotify {
-  type: "notify";
-  id: string;
-  pid: number;
-  nr: number;
-  args: string[];
-}
-
-export async function spawnSandboxedWithGate(
-  opts: SandboxSpawnOptions & { decide: GateDecider },
-): Promise<SandboxGateHandle> {
-  const caps = detectCapabilities();
-  if (!caps.gateAvailable) {
-    throw new ConfigError(`sysbox gate mode is unavailable here: ${caps.reasons.join("; ")}`);
-  }
-  validateSpawnOpts(opts);
-  logLauncherHashOnce();
-
-  const gateName = `hotdog-sbx-${process.pid}-${++gateSeq}`;
-  const worker = new Worker(new URL("./sup.ts", import.meta.url));
-
-  let closed = false;
-  let termTimer: ReturnType<typeof setTimeout> | null = null;
-  const finishWorker = () => {
-    if (termTimer) { clearTimeout(termTimer); termTimer = null; }
-    if (!workerTerminated) {
-      workerTerminated = true;
-      worker.terminate();
-    }
-  };
-  let workerTerminated = false;
-
-  const startup = new Promise<{ ok: true } | { ok: false; why: string }>((resolve) => {
-    worker.onmessage = (e: MessageEvent) => {
-      const m = e.data;
-      if (m?.type === "need-start") { worker.postMessage({ type: "start", gateName }); return; }
-      if (m?.type === "ready") { resolve({ ok: true }); return; }
-      if (m?.type === "fatal") { resolve({ ok: false, why: String(m.why) }); return; }
-      if (m?.type === "closed") { logger.debug(`[sysbox] supervisor closed: ${m.why}`); resolve({ ok: false, why: `supervisor exited early: ${m.why}` }); }
-      if (m?.type === "log") { logger.info(`[sysbox] ${m.msg}`); }
-    };
-    worker.onerror = (ev) => resolve({ ok: false, why: `supervisor worker error: ${ev.message ?? ev}` });
-    setTimeout(() => resolve({ ok: false, why: "supervisor startup timeout" }), 15000);
-  });
-
-  const start = await startup;
-  if (!start.ok) {
-    if (!workerTerminated) { workerTerminated = true; worker.terminate(); }
-    throw new ConfigError(`sysbox gate startup failed: ${start.why}`);
-  }
-
-  // Replace the startup handler with the notify handler.
-  worker.onmessage = (e: MessageEvent) => {
-    const m = e.data;
-    if (m?.type === "notify") {
-      void handleNotify(worker, m as SupNotify, opts.decide);
-      return;
-    }
-    if (m?.type === "closed") {
-      logger.debug(`[sysbox] supervisor ended: ${m.why}`);
-      finishWorker();
-      return;
-    }
-    if (m?.type === "log") { logger.info(`[sysbox] ${m.msg}`); return; }
-  };
-  worker.onerror = (ev) => {
-    logger.error(`[sysbox] supervisor worker error: ${ev.message ?? ev}`);
-    finishWorker();
-  };
-
-  let child: ChildProcess;
-  try {
-    child = buildHelperChild(opts, gateName);
-  } catch (e) {
-    finishWorker();
-    throw e;
-  }
-  child.on("close", () => {
-    // Give the supervisor a beat to drain the exit-time notifications
-    // (poll slices are 500ms), then stop it. The kernel also releases the
-    // notify fd side once the last sandboxed task is gone.
-    setTimeout(closeHandle, 600);
-  });
-
-  const closeHandle = () => {
-    if (closed) return;
-    closed = true;
-    try { worker.postMessage({ type: "stop" }); } catch { /* already gone */ }
-    termTimer = setTimeout(finishWorker, 1500);
-    termTimer.unref?.();
-  };
-
-  return { child, close: closeHandle };
-}
-
-async function handleNotify(
-  worker: Worker,
-  m: SupNotify,
-  decide: GateDecider,
-): Promise<void> {
-  const pid = m.pid;
-  const nr = m.nr;
-  let error = 0;
-  let why = "";
-  try {
-    const a = m.args.map((s: string) => BigInt(s));
-    const arg = (i: number): bigint => a[i] ?? 0n;
-    let req: GateRequest | null = null;
-    switch (nr) {
-      case 59: { // execve: audit log, always allow (audit-only by design, not a v1 approval gate)
-        const argv = readChildArgv(pid, arg(1));
-        logger.info(`[sysbox] exec pid=${pid}: ${argv.join(" ") || `<pid ${pid}>`}`);
-        break;
-      }
-      case 257: { // openat (write flags only, per BPF mask)
-        req = { kind: "open.write", pid, syscall: nr, paths: [resolvedPath(pid, arg(0), arg(1))] };
-        break;
-      }
-      case 85: { // creat: legacy write-open, path relative to the child's cwd
-        req = { kind: "open.write", pid, syscall: nr, paths: [resolvedPath(pid, AT_FDCWD_BIGINT, arg(0))] };
-        break;
-      }
-      case 76: { // truncate: path truncation, never opens the file
-        req = { kind: "truncate", pid, syscall: nr, paths: [resolvedPath(pid, AT_FDCWD_BIGINT, arg(0))] };
-        break;
-      }
-      case 83: // mkdir
-      case 133: { // mknod
-        req = { kind: "create", pid, syscall: nr, paths: [resolvedPath(pid, AT_FDCWD_BIGINT, arg(0))] };
-        break;
-      }
-      case 258: // mkdirat
-      case 259: { // mknodat
-        req = { kind: "create", pid, syscall: nr, paths: [resolvedPath(pid, arg(0), arg(1))] };
-        break;
-      }
-      case 88: { // symlink(target, linkpath): the ENTRY is the operation; the
-        // target string is inert until an open follows it, and every later
-        // open is itself trapped.
-        req = { kind: "create", pid, syscall: nr, paths: [resolvedPath(pid, AT_FDCWD_BIGINT, arg(1))] };
-        break;
-      }
-      case 266: { // symlinkat(target, newdirfd, linkpath)
-        req = { kind: "create", pid, syscall: nr, paths: [resolvedPath(pid, arg(1), arg(2))] };
-        break;
-      }
-      case 86: { // link(old, new): inode aliasing; both endpoints classified
-        req = {
-          kind: "link",
-          pid,
-          syscall: nr,
-          paths: [resolvedPath(pid, AT_FDCWD_BIGINT, arg(0)), resolvedPath(pid, AT_FDCWD_BIGINT, arg(1))],
-        };
-        break;
-      }
-      case 265: { // linkat(olddirfd, oldpath, newdirfd, newpath, flags)
-        req = {
-          kind: "link",
-          pid,
-          syscall: nr,
-          paths: [resolvedPath(pid, arg(0), arg(1)), resolvedPath(pid, arg(2), arg(3))],
-        };
-        break;
-      }
-      case 437: { // openat2: trapped unconditionally (flags are in child memory)
-        const how = openat2Flags(pid, arg(2));
-        if (how === null) {
-          error = -EACCES;
-          why = "openat2 struct open_how unreadable (fail closed)";
-          logger.info(`[sysbox] deny openat2 pid=${pid}: ${why}`);
-        } else if ((how & BigInt(OPEN_WRITE_MASK)) === 0n) {
-          // read-only open: allow without consulting policy (parity with
-          // the read-only openat ALLOW baked into the filter)
-        } else {
-          req = { kind: "open.write", pid, syscall: nr, paths: [resolvedPath(pid, arg(0), arg(1))] };
-        }
-        break;
-      }
-      case 87: // unlink (legacy: single path, relative to the child's cwd)
-      case 84: { // rmdir
-        req = { kind: "unlink", pid, syscall: nr, paths: [resolvedPath(pid, AT_FDCWD_BIGINT, arg(0))] };
-        break;
-      }
-      case 263: { // unlinkat
-        req = { kind: "unlink", pid, syscall: nr, paths: [resolvedPath(pid, arg(0), arg(1))] };
-        break;
-      }
-      case 82: { // rename (legacy: both paths relative to the child's cwd)
-        req = {
-          kind: "rename",
-          pid,
-          syscall: nr,
-          paths: [resolvedPath(pid, AT_FDCWD_BIGINT, arg(0)), resolvedPath(pid, AT_FDCWD_BIGINT, arg(1))],
-        };
-        break;
-      }
-      case 264: // renameat (same arg layout as renameat2)
-      case 316: { // renameat2: from (dirfd0,path1) -> (dirfd2,path3)
-        req = {
-          kind: "rename",
-          pid,
-          syscall: nr,
-          paths: [resolvedPath(pid, arg(0), arg(1)), resolvedPath(pid, arg(2), arg(3))],
-        };
-        break;
-      }
-      case 42: // connect
-      case 44: // sendto
-      case 46: // sendmsg
-      case 345: { // sendmmsg -- connectionless sends are egress too
-        req = { kind: "connect", pid, syscall: nr, paths: [], domain: nr === 42 ? readChildSaFamily(pid, arg(1)) ?? undefined : undefined };
-        break;
-      }
-      default:
-        // A trap we don't implement: fail closed. (Filter and trap table are
-        // pinned together by tests; this is the runtime backstop.)
-        req = { kind: "connect", pid, syscall: nr, paths: [], domain: undefined };
-        logger.warn(`[sysbox] unexpected trap syscall ${nr} from pid ${pid}: denying`);
-    }
-    if (req) {
-      let decision: GateDecision;
-      try {
-        decision = await decide(req);
-      } catch (e) {
-        // Invariant 2: a handler that throws means deny.
-        decision = { action: "deny", errno: EACCES, why: `decider threw: ${formatError(e)}` };
-      }
-      if (decision.action === "deny") {
-        error = -decision.errno;
-        why = decision.why;
-        logger.info(`[sysbox] deny ${req.kind} pid=${pid}: ${decision.why}`);
-      } else if (decision.action === "ask") {
-        // Unreachable via well-behaved deciders; treat as deny.
-        error = -EACCES;
-        why = "ask not resolved";
-        logger.warn(`[sysbox] unresolved ask denied pid=${pid}: ${decision.why}`);
-      }
-    }
-  } catch (e) {
-    error = -EACCES;
-    why = `notify handling threw: ${formatError(e)}`;
-    logger.error(`[sysbox] ${why}`);
-  }
-  try {
-    worker.postMessage({ type: "resp", id: m.id, error, val: 0 });
-  } catch {
-    logger.debug(`[sysbox] resp lost for ${m.id} (${why || "allow"}) -- worker gone`);
-  }
-}
-
-function resolvedPath(pid: number, dirfdRaw: bigint, pathAddr: bigint): string | null {
-  const raw = readChildCString(pid, pathAddr);
-  if (raw === null) return null;
-  const joined = resolveSyscallPath(pid, dirfdRaw, raw);
-  if (joined === null) return null;
-  return expandFdLink(pid, joined);
-}
-
-const AT_FDCWD_BIGINT = -100n;
-
-/** Read struct open_how.flags (u64 at offset 0) from the child. The kernel
- * only requires size >= 8 (older ABIs); trailing fields are ignored.
- * null = unreadable -> caller denies (fail closed). */
-function openat2Flags(pid: number, howAddr: bigint): bigint | null {
-  const buf = readChildBytes(pid, howAddr, 8);
-  if (buf === null) return null;
-  return new DataView(buf.buffer).getBigUint64(0, true);
+  return buildHelperChild(opts);
 }

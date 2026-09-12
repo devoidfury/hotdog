@@ -7,10 +7,10 @@
 // Acceptance: writes outside roots -> EACCES + file not created; reads
 // outside roots -> EACCES; workspace RW ok; later-created files inside roots
 // covered by the parent-dir rule (no rule re-open); scratch and /dev/null
-// stay writable (consistent with policy.ts); deny-listed paths inside roots
-// REMAIN reachable in pure fence -- allowlist-only is Landlock's design,
-// pinned here so the limitation can't regress silently when gate stacks on
-// fence.
+// stay writable; every handled net right -> EACCES. Deny-listed paths inside
+// roots REMAIN reachable: allowlist-only is Landlock's design, and with the
+// gate deleted nothing in bash enforces workspace.deny at the syscall layer
+// (the file tools do). Pinned so that fact cannot drift out of the docs.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
@@ -22,13 +22,11 @@ import { Workspace } from "@utils/workspace.ts";
 import { detectCapabilities } from "@utils/sysbox/index.ts";
 
 const caps = detectCapabilities();
-const suite = caps.landlockAvailable ? describe : describe.skip;
-
 if (!caps.landlockAvailable) {
   console.log(`[sysbox] fence tests skipped: ${caps.reasons.join("; ")}`);
 }
 
-suite("sysbox fence mode (real landlock)", () => {
+describe.skipIf(!caps.landlockAvailable)("sysbox fence mode (real landlock)", () => {
   let base: string;
   let root: string;
   let tool: BashTool;
@@ -100,8 +98,9 @@ suite("sysbox fence mode (real landlock)", () => {
 
   it("deny-listed paths inside roots REMAIN reachable in pure fence (documented Landlock ceiling)", async () => {
     // Landlock is allowlist-only: workspace.deny has no kernel expression.
-    // Pinned on purpose -- the gate trap set is what enforces deny entries;
-    // if fence ever appears to enforce one, that IS a change in policy.
+    // Pinned on purpose -- nothing enforces deny entries inside bash now that
+    // the gate is gone, so if fence ever appears to enforce one, that IS a
+    // change in policy.
     const envPath = join(root, ".env");
     try {
       const r = await tool.execute({ command: `echo SECRET=1 > ${envPath}; exit $?` }, ctx);
@@ -112,10 +111,16 @@ suite("sysbox fence mode (real landlock)", () => {
     }
   });
 
-  // Landlock network rights exist from ABI v4; older kernels simply don't
-  // deny bind (documented in config-reference).
+  // Landlock network rights exist from ABI v4 (TCP bind/connect) and ABI v10
+  // (UDP bind/send); older kernels simply deny nothing net, so each probe is
+  // gated on the ABI the probe reported. These pin the BIT NUMBERS by
+  // behavior: if launcher.c handled a bit the running kernel reads differently,
+  // the ruleset create would EINVAL (spawn dies with 126) or the syscall would
+  // sail through (this assertion fails) -- either way, no doc trust.
   const netIt = caps.landlockAbi >= 4 ? it : it.skip;
-  netIt("blocks TCP bind (ABI v4+; abi here: " + caps.landlockAbi + ")", async () => {
+  const netAbiNote = " (ABI v4+; abi here: " + caps.landlockAbi + ")";
+
+  netIt("blocks TCP bind" + netAbiNote, async () => {
     const port = 40000 + (process.pid % 20000);
     const js =
       `const net=require("node:net");const s=net.createServer();` +
@@ -124,5 +129,49 @@ suite("sysbox fence mode (real landlock)", () => {
     const r = await tool.execute({ command: `${JSON.stringify(process.execPath)} -e '${js}'` }, ctx);
     expect(r.output).toContain("ERR:EACCES");
     expect(r.metadata?.get("exit_code")).not.toBe("0");
+  });
+
+  // The egress claim, at the syscall level. bun's own node:net is useless for
+  // this pin: a kernel EACCES on connect comes back as ECONNREFUSED (measured
+  // 1.3.14 -- against a black-hole address it fails in 10ms rather than
+  // hanging, so the deny is real but the label lies). bash's /dev/tcp does a
+  // plain connect(2) and prints the kernel errno, which is what we need to
+  // pin. bash is pinned explicitly because /bin/sh is dash here (no /dev/tcp),
+  // and the probe SKIPS rather than passes when bash is absent.
+  const bashIt = caps.landlockAbi >= 4 && Bun.which("bash") !== null ? it : it.skip;
+  bashIt("blocks TCP connect(2) (egress)" + netAbiNote, async () => {
+    const port = 40000 + (process.pid % 20000);
+    const r = await tool.execute({ command: `bash -c 'echo > /dev/tcp/127.0.0.1/${port}'; echo rc=$?` }, ctx);
+    expect(r.output).toContain("Permission denied");
+    expect(r.output).not.toContain("rc=0");
+  });
+
+  // Connectionless egress: sendto never calls connect, so a TCP-only handled
+  // net mask left the UDP hole open (the gate trap set used to close it with
+  // sendto/sendmsg/sendmmsg; landlock-net v10 closes it kernel-side). bun's
+  // dgram reports the errno honestly here, and the implicit auto-bind of an
+  // unbound socket hits the BIND_UDP right.
+  const udpIt = caps.landlockAbi >= 10 ? it : it.skip;
+  udpIt("blocks UDP sendto (BIND_UDP side; abi here: " + caps.landlockAbi + ")", async () => {
+    const port = 41000 + (process.pid % 20000);
+    const js =
+      `const dgram=require("node:dgram");const s=dgram.createSocket("udp4");` +
+      `s.on("error",e=>{console.log("ERR:"+e.code);process.exit(7)});` +
+      `s.send(Buffer.from("x"),0,1,${port},"127.0.0.1",e=>{` +
+      `if(e){console.log("ERR:"+e.code);process.exit(7)}` +
+      `else{console.log("SEND-SUCCEEDED");process.exit(0)}});`;
+    const r = await tool.execute({ command: `${JSON.stringify(process.execPath)} -e '${js}'` }, ctx);
+    expect(r.output).toContain("ERR:EACCES");
+    expect(r.metadata?.get("exit_code")).not.toBe("0");
+  });
+
+  // ...and the CONNECT_SEND_UDP side of the same pair: bash connects the UDP
+  // socket, which needs no auto-bind, so this probe fails only if bit 3 is
+  // handled too.
+  bashIt("blocks UDP connect(2) (CONNECT_SEND_UDP side; abi here: " + caps.landlockAbi + ")", async () => {
+    const port = 41000 + (process.pid % 20000);
+    const r = await tool.execute({ command: `bash -c 'echo x > /dev/udp/127.0.0.1/${port}'; echo rc=$?` }, ctx);
+    expect(r.output).toContain("Permission denied");
+    expect(r.output).not.toContain("rc=0");
   });
 });

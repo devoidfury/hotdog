@@ -24,7 +24,6 @@ import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
 import type { AgentLike } from "../session/index.ts";
 import type { ImageAttachment, Message, MessageSource } from "../context/message.ts";
-import type { QuestionDef } from "../context/input.ts";
 import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
 export type { ToolContext };
@@ -124,36 +123,16 @@ export interface HookPayloads {
   "context": { messages: Message[]; agent: Agent };
 
   // Returns GateAction (continue / modify input / block).
-  "tool:call": { toolCallId: string; toolName: string; input: string; agent: Agent },
-
-  // Returns SandboxGateAction (allow / deny). One operation attempted by a
-  // process inside the sysbox gate sandbox; only "ask" cases reach hooks.
-  // `input` is the same UI seam the question tool uses (from ToolContext,
-  // absent when no UI); `signal` aborts when the child is done (exit,
-  // timeout, or gate.close()) so a prompt never outlives its request.
-  "sandbox:gate": {
-    kind:
-      | "open.write"
-      | "unlink"
-      | "rename"
-      | "truncate"
-      | "create"
-      | "link"
-      | "connect"
-      | "execve";
-    pid: number;
-    paths: Array<string | null>;
-    why: string;
-    command: string;
-    workspaceRoots: string[];
-    input?: {
-      isInteractive(): boolean;
-      collectAnswers(
-        questions: QuestionDef[],
-      ): Promise<Record<string, unknown>> | Record<string, unknown>;
-    };
-    signal?: AbortSignal;
-  };
+  // `toolCtx` is built (and AGENT_TOOL_CONTEXT fired) BEFORE this pipeline
+  // runs, so an approval-style gate handler can reach the human through the
+  // context's `input` seam. Optional: standalone callers may omit it.
+  "tool:call": {
+    toolCallId: string;
+    toolName: string;
+    input: string;
+    agent: Agent;
+    toolCtx?: ToolContext;
+  },
 
   // Returns ToolResultHookResult ({ result } replaces the result).
   "tool:result": {

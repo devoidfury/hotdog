@@ -1147,7 +1147,7 @@ describe("question tool integration (bridge)", () => {
     return input.collectAnswers([{ key: "q1", prompt: "What?" }]);
   }
 
-  it("does not set input for non-question tools", () => {
+  it("sets input for non-question tools too (approvals need the seam)", () => {
     const handlers = core._registeredHooks["agent:toolContext"];
     const store: Record<string, unknown> = {};
     const toolCtx = {
@@ -1156,8 +1156,11 @@ describe("question tool integration (bridge)", () => {
         store[k] = v;
       },
     };
-    handlers[0]!({ toolCtx, toolName: "bash", agent: { sessionId: "s1" } });
-    expect(store["input"]).toBeUndefined();
+    const agent = wsServer.sessionRegistry.get(sessionId)!.agent;
+    handlers[0]!({ toolCtx, toolName: "bash", agent });
+    const input = store["input"] as { isInteractive: () => boolean } | undefined;
+    expect(input).toBeDefined();
+    expect(input!.isInteractive()).toBe(true);
   });
 
   it("resolves a pending question via questionAnswer and broadcasts questionAnswered", async () => {

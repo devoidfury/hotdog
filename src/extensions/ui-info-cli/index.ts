@@ -22,7 +22,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { detectCapabilities, launcherCPath } from "@utils/sysbox/capabilities.ts";
+import { detectCapabilities, landlockNetPosture, launcherCPath } from "@utils/sysbox/capabilities.ts";
 
 interface ConnectivityResult {
   reachable: boolean;
@@ -112,7 +112,13 @@ function sandboxInfo(): {
   static_available: boolean;
   fence_available: boolean;
   landlock_abi: number;
-  gate_available: boolean;
+  /** Network posture of the fence ("net: tcp bind+connect denied +udp" on a
+   * v10 kernel, "net: unhandled" below v4). Derived, not probed. */
+  landlock_net: string;
+  cgroup_limits_available: boolean;
+  /** Which DoS controllers the probe actually found; delegation is
+   * per-controller, so "available" alone must not claim "pids/memory". */
+  cgroup_limits: string[];
   reasons: string[];
   launcher_sha256: string | null;
 } {
@@ -127,7 +133,12 @@ function sandboxInfo(): {
     static_available: caps.staticAvailable,
     fence_available: caps.landlockAvailable,
     landlock_abi: caps.landlockAbi,
-    gate_available: caps.gateAvailable,
+    landlock_net: landlockNetPosture(caps.landlockAbi),
+    cgroup_limits_available: caps.cgroupAvailable,
+    cgroup_limits: [
+      ...(caps.cgroupPidsAvailable ? ["pids"] : []),
+      ...(caps.cgroupMemoryAvailable ? ["memory"] : []),
+    ],
     reasons: caps.reasons,
     launcher_sha256: sha,
   };
@@ -205,9 +216,19 @@ function printInfoText(
     `  static: ${sandbox.static_available ? "available" : `unavailable (${sandbox.reasons.join("; ") || "unknown"})`}`,
   );
   console.log(
-    `  fence:  ${sandbox.fence_available ? `available (Landlock ABI ${sandbox.landlock_abi})` : "unavailable"}`,
+    `  fence:  ${
+      sandbox.fence_available
+        ? `available (Landlock ABI ${sandbox.landlock_abi}, ${sandbox.landlock_net})`
+        : "unavailable"
+    }`,
   );
-  console.log(`  gate:   ${sandbox.gate_available ? "available" : "unavailable"}`);
+  console.log(
+    `  cgroups: ${
+      sandbox.cgroup_limits_available
+        ? `DoS limits (${sandbox.cgroup_limits.join("/")}) applied per spawn`
+        : "unavailable (no writable delegated cgroup v2 subtree)"
+    }`,
+  );
   if (sandbox.launcher_sha256) console.log(`  launcher.c sha256: ${sandbox.launcher_sha256}`);
 
   console.log();

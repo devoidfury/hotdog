@@ -1146,13 +1146,14 @@ export function createWsServer(
     interrupt: (sid) => registry.getSessionManager().interrupt(sid),
   });
 
-  // Give question-tool calls for WS agents an Input implementation that
-  // resolves via the bridge (same pattern as ui-interactive-cli).
+  // Give every tool call for WS agents an Input implementation that resolves
+  // via the bridge (same pattern as ui-interactive-cli, which sets it
+  // unconditionally). Not filtering on toolName here means the approvals
+  // extension can reach the human on any tool, not just `question`.
   if (core.hooks && typeof core.hooks.on === "function") {
     core.hooks.on(
       HOOKS.AGENT_TOOL_CONTEXT,
-      ({ toolCtx, toolName, agent }) => {
-        if (toolName !== "question") return;
+      ({ toolCtx, agent }) => {
         const sessionId = agent?.sessionId;
         if (sessionId) toolCtx.set("input", bridge!.inputFor(sessionId));
       },

@@ -92,6 +92,7 @@ Status markers: entries tagged **(planned)** are design intent -- nothing in the
 
 - **Marker Mangler** — Escapes input that triggers special behavior (tool call actions, internal markers). Protects against prompt injection via crafted input (files, URLs, etc.). Agent sees mangled names. Bypass requires hex/byte-level tricks.
 - **Security Rationale** — All text to an LLM is potentially an instruction. Malicious input (crafted files, fetched URLs) could trigger internal behavior. Mangler prevents RCE via prompt injection.
+- **Spoof Neutralizer** (`src/utils/spoof.ts`) — The mangler protects the MODEL's eyes; this protects the HUMAN's. At every render boundary (tool-call display, approval/question prompts, webui) spoofing code points — bidi controls/isolates, zero-widths, BOM, terminal control introducers — become visible `[U+XXXX]` tokens and are counted; the human seeing THAT something was there is the alert. INVARIANT: neutralize at RENDER, never at storage — the session log keeps original bytes (audit). Two arms, one for the model's eyes, one for yours.
 
 ## Commands
 

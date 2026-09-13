@@ -266,3 +266,57 @@ describe("CliOutputSink", () => {
     }
   });
 });
+
+describe("CliOutputSink spoof neutralization (SPF-1)", () => {
+  let sink: CliOutputSink;
+  let stdoutWrites: string[];
+
+  beforeEach(() => {
+    stdoutWrites = [];
+    spyOn(process.stdout, "write").mockImplementation((s: string) => {
+      stdoutWrites.push(s);
+      return true;
+    });
+    sink = new CliOutputSink({
+      palette: new ColorPalette({ use_colors: false }),
+      toolCallDisplayFormat: "  -> {} {}",
+    });
+  });
+
+  afterEach(() => {
+    (process.stdout.write as any).mockRestore();
+  });
+
+  it("emitToolCall renders bidi/zero-width/ANSI in the input as visible tokens", () => {
+    sink.emit({
+      type: OUTPUT_EVENT.TOOL_CALL,
+      toolName: "bash",
+      input: '{"command":"rm -rf /\u200b* \u202e"}',
+      toolCallId: "1",
+    });
+    const out = stdoutWrites.join("");
+    expect(out).toContain("[U+200B]");
+    expect(out).toContain("[U+202E]");
+    expect(out).not.toContain("\u200b");
+    expect(out).not.toContain("\u202e");
+  });
+
+  it("emitQuestion neutralizes model-supplied prompt, options and default", () => {
+    sink.emit({
+      type: OUTPUT_EVENT.QUESTION,
+      questions: [
+        {
+          key: "k",
+          prompt: "ok\u202e?",
+          options: ["a\u001b[31mb"],
+          default: "c\ufeffd",
+        },
+      ],
+    });
+    const out = stdoutWrites.join("");
+    expect(out).toContain("[U+202E]");
+    expect(out).toContain("[U+001B]");
+    expect(out).toContain("[U+FEFF]");
+    expect(out).not.toContain("\u202e");
+  });
+});

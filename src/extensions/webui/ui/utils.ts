@@ -3,6 +3,7 @@
 // duplicate the atom implementation.
 
 export { reactiveState, effect, type Atom } from "@utils/reactive-state.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 
 
 // ── Formatting & sanitisation ───────────────────────────────────────────────
@@ -20,7 +21,9 @@ export function shortId(sessionId: string | null | undefined): string {
 
 export function sanitize(str: string | null | undefined): string {
   if (!str) return "";
-  return str
+  // HTML escaping stops markup, not bidi/zero-width spoofing -- U+202E reorders rendered text inside a safe element too.
+  // Neutralize code points first (they become visible [U+XXXX] tokens), then escape.
+  return spoofSafe(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

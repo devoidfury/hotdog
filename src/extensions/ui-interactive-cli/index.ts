@@ -2,6 +2,7 @@ import pkg from "@package.json" with { type: "json" };
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { CliOutputSink } from "@utils/cli/cli.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
 import { HOOKS } from "@core/hooks.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
@@ -246,16 +247,17 @@ export class AsyncInteractiveCliInput implements InputInterface {
         const required = q.required !== false;
         const allowOther = (q.allowOther ?? q.allow_other) !== false;
 
-        process.stdout.write(`\n  ? ${promptText}\n`);
+        // prompt, options and default are model-supplied. spoofSafe is idempotent, so double neutralization upstream is harmless.
+        process.stdout.write(`\n  ? ${spoofSafe(promptText)}\n`);
 
         if (options.length > 0) {
           for (let i = 0; i < options.length; i++) {
-            process.stdout.write(`    [${i + 1}] ${options[i]}\n`);
+            process.stdout.write(`    [${i + 1}] ${spoofSafe(options[i] ?? "")}\n`);
           }
         }
 
         if (defaultValue !== "") {
-          process.stdout.write(`    (default: ${defaultValue})\n`);
+          process.stdout.write(`    (default: ${spoofSafe(defaultValue)})\n`);
         }
 
         let answer = "";
@@ -283,7 +285,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
               answer = trimmed;
             } else {
               process.stderr.write(
-                `  Invalid option. Please enter a number 1-${options.length} or one of: ${JSON.stringify(options)}\n`,
+                `  Invalid option. Please enter a number 1-${options.length} or one of: ${spoofSafe(JSON.stringify(options))}\n`,
               );
               continue;
             }

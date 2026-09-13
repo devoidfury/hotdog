@@ -84,6 +84,20 @@ describe("user-gate TOOL_CALL handler", () => {
     expect(asked[0]).toContain("to persist:");
   });
 
+  it("neutralizes spoofing code points in the approval prompt text", async () => {
+    // `git di<U+202E>ff` reads as "git diff" but is not "git diff"; the
+    // prompt the human approves must show the override, never hide it.
+    // (JSON.stringify already escapes ESC/BEL as visible \u00XX text -- it is
+    // the Unicode controls that survive into the echo, and those tokenize.)
+    const { input, asked } = answerWith("deny");
+    const evil = JSON.stringify({ command: "git di\u202eff\u200bx \u001b[2K" });
+    const r = await run({ enabled: true }, payload({ inputOverride: input, input: evil } as never));
+    expect(r.action).toBe("block");
+    expect(asked[0]).toContain("[U+202E]");
+    expect(asked[0]).toContain("[U+200B]");
+    expect(asked[0]).not.toContain("\u001b[2K");
+  });
+
   it("blocks on 'deny' with the reason and the config line", async () => {
     const { input } = answerWith("deny");
     const r = await run({ enabled: true }, payload({ inputOverride: input } as never));

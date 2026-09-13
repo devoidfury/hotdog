@@ -18,6 +18,7 @@ import {
   SystemMessageEvent,
 } from "@core/context/output.ts";
 import { toolContentText } from "@utils/tool-content.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 import {
   ColorPalette,
   applyThinking,
@@ -297,7 +298,7 @@ export class CliOutputSink extends OutputSink {
   override emitToolCall(event: ToolCallEvent): void {
     this._transitionTo(Modes.ToolCall);
     this._processContent(
-      formatToolCall(event.toolName, event.input, this.toolCallDisplayFormat || "{}: {}"),
+      spoofSafe(formatToolCall(event.toolName, event.input, this.toolCallDisplayFormat || "{}: {}")),
     );
   }
 
@@ -324,21 +325,23 @@ export class CliOutputSink extends OutputSink {
     if (this.hideUserMessage) return;
     this._transitionTo(Modes.Question);
     for (const q of event.questions) {
-      this._processContent(`\n${applyFinalResponse(q.prompt, this.palette)}\n`);
+      this._processContent(`\n${applyFinalResponse(spoofSafe(q.prompt), this.palette)}\n`);
       if (q.options) {
         for (let i = 0; i < q.options.length; i++) {
-          this._processContent(`    [${i + 1}] ${q.options[i]}\n`);
+          this._processContent(`    [${i + 1}] ${spoofSafe(q.options[i] ?? "")}\n`);
         }
         if (q.allow_other) {
           this._processContent("[Other] Type your own answer\n");
         } else {
           this._processContent(
-            `    Choose a number 1-${q.options.length} or type one of: ${JSON.stringify(q.options)}\n`,
+            spoofSafe(
+              `    Choose a number 1-${q.options.length} or type one of: ${JSON.stringify(q.options)}\n`,
+            ),
           );
         }
       }
       if (q.default !== undefined) {
-        this._processContent(`    (default: ${q.default})\n`);
+        this._processContent(`    (default: ${spoofSafe(String(q.default))})\n`);
       }
     }
   }

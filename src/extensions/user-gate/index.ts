@@ -37,6 +37,7 @@ import {
   type UserGateConfig,
 } from "@utils/approvals/rules.ts";
 import { extractTargets, suggestRuleLine } from "@utils/approvals/index.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 
 type ToolCallPayload = HookPayloads["tool:call"];
 
@@ -111,7 +112,7 @@ function approvalPromptText(call: ApprovalCall, reasons: string[], argsEcho: str
   if (targets.length > 0) lines.push(`  targets: ${targets.join(" | ")}`);
   lines.push(`  why: ${reasons.join("; ")}`);
   lines.push(`  ${suggestRuleLine(call)}`);
-  return lines.join("\n");
+  return spoofSafe(lines.join("\n"));
 }
 
 /**

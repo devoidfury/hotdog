@@ -1,4 +1,4 @@
-import { findFirstKeptIndex, estimateContextTokens } from "../utils.ts";
+import { findFirstKeptIndex, estimateContextTokens, estimatorFor, type WireRenderContext } from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
 
 export class DropStrategy extends CompactionStrategy {
@@ -15,6 +15,7 @@ export class DropStrategy extends CompactionStrategy {
     settings: CompactionSettings,
     _llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
     _model: string,
+    _wire?: WireRenderContext | null,
   ): Promise<CompactResult | null> {
     const firstKept = findFirstKeptIndex(messages, settings.keepRecentMessages);
     if (firstKept === 0) return null;
@@ -24,8 +25,8 @@ export class DropStrategy extends CompactionStrategy {
       messagesCompacted: firstKept,
       metadata: {
         strategyName: "drop",
-        tokensBefore: estimateContextTokens(messages),
-        tokensAfter: estimateContextTokens(messages.slice(firstKept)),
+        tokensBefore: estimateContextTokens(messages, estimatorFor(_wire)),
+        tokensAfter: estimateContextTokens(messages.slice(firstKept), estimatorFor(_wire)),
       },
     };
   }

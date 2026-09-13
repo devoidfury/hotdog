@@ -11,6 +11,12 @@ import type { OutputEvent } from '../../src/core/context/output.ts';
 import { MockLLMClient, buildStreamResponse, MockTool } from '../helpers.ts';
 import { createFixture } from '../mocks/fixtures.ts';
 import { expectCompletion } from '../test-helpers.ts';
+import { toolContentText } from '@utils/tool-content.ts';
+
+/** Display text of a stored tool-message content (part or harness string). */
+function text(content: string | Array<unknown> | null | undefined): string {
+  return toolContentText(content);
+}
 
 /**
  * A MockLLMClient that uses a custom async generator for streaming.
@@ -113,7 +119,7 @@ describe('Agent — parallel tool calling', () => {
     const ctx = agent.context.log.getAll();
     const toolResults = ctx.filter(m => m.role === 'tool');
     expect(toolResults).toHaveLength(2);
-    const badResult = toolResults.find(m => (m.content as string).includes('Error'));
+    const badResult = toolResults.find(m => text(m.content).includes('Error'));
     expect(badResult).toBeDefined();
   });
 
@@ -360,7 +366,7 @@ describe('Agent — error handling', () => {
     const ctx = agent.context.log.getAll();
     const toolResult = ctx.find(m => m.role === 'tool');
     expect(toolResult).toBeDefined();
-    const content = toolResult!.content ?? '';
+    const content = text(toolResult!.content);
     // Either the tool ran with raw input, or validation failed with an error message
     expect(
       content.includes('ok') || content.includes('Error') ||

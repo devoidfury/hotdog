@@ -12,6 +12,7 @@ import {
   ToolResult,
   TOOL_STOP_LOOP,
 } from "@core/extensions/tool-utils.ts";
+import type { ToolResultPart } from "@core/context/wrappers.ts";
 
 describe("toolDef", () => {
   it("creates a tool definition", () => {
@@ -172,10 +173,6 @@ describe("ToolResult", () => {
     expect(r.metadata!.get("b")).toBe("2");
   });
 
-  it("chains withOutputTag", () => {
-    const r = ToolResult.ok("data").withOutputTag("result");
-    expect(r.outputTag).toBe("result");
-  });
 
   it("chains withImages", () => {
     const images = [{ type: "image_url", mimeType: "image/png", data: "base64..." }];
@@ -215,91 +212,93 @@ describe("ToolResult", () => {
   });
 
   it("toApiContent success no metadata", () => {
-    const r = ToolResult.ok("hello world");
-    const content = r.toApiContent("bash");
-    expect(content).toBe(
-      '<tool name="bash" status="success">\n  <output>hello world</output>\n</tool>',
-    );
+    const part = ToolResult.ok("hello world").toApiContent("bash");
+    expect(part).toEqual({
+      type: "tool-result",
+      tool: "bash",
+      status: "success",
+      meta: [],
+      error: null,
+      hint: null,
+      output: "hello world",
+    });
   });
 
   it("toApiContent failure with error", () => {
-    const r = ToolResult.err("command not found");
-    const content = r.toApiContent("bash");
-    expect(content).toContain('<tool name="bash" status="failure">');
-    expect(content).toContain("<error>command not found</error>");
-    expect(content).toContain("<output></output>");
+    const part = ToolResult.err("command not found").toApiContent("bash");
+    expect(part.status).toBe("failure");
+    expect(part.error).toBe("command not found");
+    // The payload stays empty -- the error never rides in as output.
+    expect(part.output).toBe("");
   });
 
-  it("toApiContent failure with hint renders the hint element after the error", () => {
-    const r = ToolResult.err("File not found: x").withHint("check the path");
-    const content = r.toApiContent("edit");
-    expect(content).toContain('<tool name="edit" status="failure">');
-    expect(content).toContain("<hint>check the path</hint>");
-    // error text stays ahead of the hint text
-    expect(content.indexOf("File not found: x")).toBeLessThan(content.indexOf("<hint>"));
-    // the hint is not a metadata attribute
-    expect(content).not.toContain("hint=");
+  it("toApiContent failure carries the hint as its own field", () => {
+    const part = ToolResult.err("File not found: x").withHint("check the path").toApiContent("edit");
+    expect(part.status).toBe("failure");
+    expect(part.hint).toBe("check the path");
+    // Hint and error stay separate fields; the renderer places the hint
+    // element after the error element (pinned in core/wrappers.test.ts).
+    expect(part.error).toBe("File not found: x");
   });
 
-  it("toApiContent success with hint renders the hint element", () => {
-    const content = ToolResult.ok("done").withHint("truncated; use offset for more").toApiContent("read");
-    expect(content).toContain('<tool name="read" status="success">');
-    expect(content).toContain("<hint>truncated; use offset for more</hint>");
+  it("toApiContent success with hint", () => {
+    const part = ToolResult.ok("done")
+      .withHint("truncated; use offset for more")
+      .toApiContent("read");
+    expect(part.status).toBe("success");
+    expect(part.hint).toBe("truncated; use offset for more");
   });
 
-  it("toApiContent renders no hint element when unset", () => {
-    expect(ToolResult.err("boom").toApiContent("bash")).not.toContain("<hint>");
-    expect(ToolResult.ok("fine").toApiContent("bash")).not.toContain("<hint>");
+  it("toApiContent leaves hint null when unset", () => {
+    expect(ToolResult.err("boom").toApiContent("bash").hint).toBeNull();
+    expect(ToolResult.ok("fine").toApiContent("bash").hint).toBeNull();
   });
 
-  it("toApiContent with metadata", () => {
-    const r = ToolResult.ok("output")
-      .withEntry("key1", "val1")
-      .withEntry("key2", "val2");
-    const content = r.toApiContent("read_file");
-    expect(content).toContain('<tool name="read_file" status="success">');
-    expect(content).toContain("<output>output</output>");
-    expect(content).toContain("<key1>val1</key1>");
-    expect(content).toContain("<key2>val2</key2>");
+  it("toApiContent with metadata keeps declaration order", () => {
+    const part = ToolResult.ok("output").withEntry("key1", "val1").withEntry("key2", "val2").toApiContent("read_file");
+    expect(part.tool).toBe("read_file");
+    expect(part.status).toBe("success");
+    expect(part.meta).toEqual([["key1", "val1"], ["key2", "val2"]]);
+    expect(part.output).toBe("output");
   });
 
-  it("toApiContent no error when success", () => {
-    const content = ToolResult.ok("ok").toApiContent("bash");
-    expect(content).not.toContain("<error>");
+  it("toApiContent leaves error null on success; an error metadata entry stays metadata", () => {
+    const part = ToolResult.ok("ok").withEntry("error", "stale").toApiContent("bash");
+    expect(part.error).toBeNull();
+    expect(part.meta).toEqual([["error", "stale"]]);
   });
 
-  it("toApiContent custom output tag", () => {
-    const content = ToolResult.ok("hello world")
-      .withOutputTag("result")
-      .toApiContent("bash");
-    expect(content).toBe(
-      '<tool name="bash" status="success">\n  <result>hello world</result>\n</tool>',
-    );
+  it("toApiContent drops a tool-authored metadata entry keyed like the error on failure", () => {
+    // Tool code cannot overwrite (or impersonate) the harness error element.
+    const part = ToolResult.err("real failure").withEntry("error", "masquerade").toApiContent("bash");
+    expect(part.error).toBe("real failure");
+    expect(part.meta).toEqual([]);
   });
 
-  it("toApiContent short metadata as attributes", () => {
-    const r = ToolResult.ok("output")
+
+  it("toApiContent keeps short metadata as ordinary entries", () => {
+    // Attribute vs element is the RENDERER's choice (the canonical form is
+    // pinned in core/wrappers.test.ts); the part is order-preserving pairs.
+    const part = ToolResult.ok("output")
       .withEntry("truncated", "true")
       .withEntry("page", "1")
       .withEntry("total_pages", "3")
       .withEntry("duration_ms", "42")
-      .withEntry("diff", "--- a/file\n+++ b/file");
-    const content = r.toApiContent("edit");
-    expect(content).toContain('name="edit"');
-    expect(content).toContain('status="success"');
-    expect(content).toContain('duration_ms="42"');
-    expect(content).toContain('page="1"');
-    expect(content).toContain('total_pages="3"');
-    expect(content).toContain('truncated="true"');
-    expect(content).toContain("<diff>--- a/file\n+++ b/file</diff>");
-    expect(content).toContain("<output>output</output>");
+      .withEntry("diff", "--- a/file\n+++ b/file")
+      .toApiContent("edit");
+    expect(part.meta).toEqual([
+      ["truncated", "true"],
+      ["page", "1"],
+      ["total_pages", "3"],
+      ["duration_ms", "42"],
+      ["diff", "--- a/file\n+++ b/file"],
+    ]);
   });
 
   it("toApiContent does NOT escape output content", () => {
-    const r = ToolResult.ok("a < b & c > d");
-    const content = r.toApiContent("bash");
-    // Output content is raw (not XML-escaped)
-    expect(content).toContain("a < b & c > d");
+    // The part holds the payload as the tool produced it; escaping (and only
+    // of tool-authored fields) happens at the wire.
+    expect(ToolResult.ok("a < b & c > d").toApiContent("bash").output).toBe("a < b & c > d");
   });
 
   it("toolResult passes through ToolResult via toDisplay()", () => {
@@ -310,32 +309,40 @@ describe("ToolResult", () => {
     expect(toolResult(err)).toBe("Error: boom");
   });
 
-  it("toolResult with toolName wraps ToolResult in XML", () => {
-    const r = ToolResult.ok("hello");
-    const result = toolResult(r, "bash");
-    expect(result).toContain('<tool name="bash"');
-    expect(result).toContain('status="success"');
-    expect(result).toContain("<output>hello</output>");
+  it("toolResult with toolName builds a part from a ToolResult", () => {
+    expect(toolResult(ToolResult.ok("hello"), "bash")).toEqual({
+      type: "tool-result",
+      tool: "bash",
+      status: "success",
+      meta: [],
+      error: null,
+      hint: null,
+      output: "hello",
+    });
   });
 
-  it("toolResult with toolName wraps string in XML", () => {
-    const result = toolResult("plain text", "read");
-    expect(result).toContain('<tool name="read"');
-    expect(result).toContain("<output>plain text</output>");
+  it("toolResult with toolName builds a part from a string payload", () => {
+    const part = toolResult("plain text", "read") as ToolResultPart;
+    expect(part.tool).toBe("read");
+    expect(part.status).toBe("success");
+    expect(part.meta).toEqual([]);
+    expect(part.output).toBe("plain text");
   });
 
-  it("toolResult with toolName wraps object in XML", () => {
-    const result = toolResult({ key: "val" }, "fetch");
-    expect(result).toContain('<tool name="fetch"');
-    expect(result).toContain("<output>");
-    // Objects are JSON-stringified then XML-escaped by the xml format.
-    expect(result).toContain('{&quot;key&quot;:&quot;val&quot;}');
+  it("toolResult with toolName keeps a plain object wholly as the payload", () => {
+    // Which keys ride a format's wrapper tag is the FORMAT's business
+    // (extensions/wire-format-xml), so the builder never splits them out:
+    // metadata comes from ToolResult.withEntry, not from a key-name guess.
+    const part = toolResult({ page: 2, key: "val" }, "fetch") as ToolResultPart;
+    expect(part.tool).toBe("fetch");
+    expect(part.meta).toEqual([]);
+    expect(part.output).toBe('{"page":2,"key":"val"}');
   });
 
-  it("toolResult with toolName wraps number in XML", () => {
-    const result = toolResult(42, "calc");
-    expect(result).toContain('<tool name="calc"');
-    expect(result).toContain("<output>42</output>");
+  it("toolResult with toolName builds a part from a number payload", () => {
+    const part = toolResult(42, "calc") as ToolResultPart;
+    expect(part.tool).toBe("calc");
+    expect(part.output).toBe("42");
   });
 
   it("ToolResult.from() creates a result with defaults", () => {
@@ -365,12 +372,11 @@ describe("ToolResult", () => {
     expect(r.error).toBe("warning");
   });
 
-  it("ToolResult.from() accepts metadata and outputTag", () => {
+  it("ToolResult.from() accepts metadata", () => {
     const metadata = new Map();
     metadata.set("key", "value");
-    const r = ToolResult.from({ output: "out", error: null, metadata, outputTag: "result" });
+    const r = ToolResult.from({ output: "out", error: null, metadata });
     expect(r.metadata).toBe(metadata);
-    expect(r.outputTag).toBe("result");
   });
 
   it("ToolResult.from() accepts images", () => {
@@ -488,7 +494,12 @@ describe("defaultCallDisplay", () => {
 });
 
 describe("formatToolResult", () => {
-  let formatToolResult: (result: unknown, toolName: string, success: boolean) => string;
+  let formatToolResult: (
+    result: unknown,
+    toolName: string,
+    success: boolean,
+    hint?: string,
+  ) => ToolResultPart;
 
   beforeAll(async () => {
     const mod = await import("@core/extensions/tool-utils.ts");
@@ -496,33 +507,43 @@ describe("formatToolResult", () => {
   });
 
   it("delegates to toApiContent for ToolResult instances", () => {
-    const r = ToolResult.ok("hello");
-    const result = formatToolResult(r, "bash", true);
-    expect(result).toContain("bash");
-    expect(result).toContain("hello");
+    const part = formatToolResult(ToolResult.ok("hello"), "bash", true);
+    expect(part.tool).toBe("bash");
+    expect(part.status).toBe("success");
+    expect(part.output).toBe("hello");
   });
 
-  it("wraps string in XML on success", () => {
-    const result = formatToolResult("output", "read", true);
-    expect(result).toContain('name="read"');
-    expect(result).toContain('status="success"');
-    expect(result).toContain("<output>output</output>");
+  it("builds a success part for a plain payload", () => {
+    expect(formatToolResult("output", "read", true)).toEqual({
+      type: "tool-result",
+      tool: "read",
+      status: "success",
+      meta: [],
+      error: null,
+      hint: null,
+      output: "output",
+    });
   });
 
-  it("wraps string in XML on failure", () => {
-    const result = formatToolResult("output", "read", false);
-    expect(result).toContain('name="read"');
-    expect(result).toContain('status="error"');
+  it("keeps the thrown-error status spelling on failure", () => {
+    // "error" here vs "failure" from ToolResult.toApiContent(): both pre-seam
+    // spellings, pinned so the wire bytes don't drift.
+    expect(formatToolResult("output", "read", false).status).toBe("error");
   });
 
-  it("stringifies objects (with XML escaping)", () => {
-    const result = formatToolResult({ key: "val" }, "fetch", true);
-    expect(result).toContain("&quot;key&quot;:&quot;val&quot;");
+  it("stringifies object payloads raw", () => {
+    expect(formatToolResult({ key: "val" }, "fetch", true).output).toBe('{"key":"val"}');
   });
 
-  it("escapes XML in string content", () => {
-    const result = formatToolResult("a < b", "bash", true);
-    expect(result).toContain("&lt;");
+  it("leaves markup in the payload for the wire serializer to mangle", () => {
+    // No XML escaping at the builder any more: mangling is the wire's job, and
+    // a payload escaped here could never be recovered unescaped.
+    expect(formatToolResult("a < b", "bash", true).output).toBe("a < b");
+  });
+
+  it("carries the thrown-error hint on the part", () => {
+    expect(formatToolResult("boom", "bash", false, "use the find tool").hint).toBe("use the find tool");
+    expect(formatToolResult("boom", "bash", true).hint).toBeNull();
   });
 });
 

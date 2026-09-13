@@ -4,12 +4,17 @@ import type { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { ToolDef } from "../extensions/tool-registry.ts";
 import {
-  createToolFormatRegistry,
-  resolveToolFormatId,
-  ToolFormat,
-  type ToolFormatRegistry,
-} from "../extensions/tool-format.ts";
-import { xmlToolFormat } from "../extensions/tool-format-xml.ts";
+  createWireFormatRegistry,
+  resolveWireFormatId,
+  WireFormat,
+  type WireFormatRegistry,
+} from "../extensions/wire-format.ts";
+import {
+  createRoleMappingRegistry,
+  resolveRoleMappingId,
+  type RoleMapping,
+  type RoleMappingRegistry,
+} from "../extensions/role-mapping.ts";
 import type { LlmProtocol, ProtocolContext } from "./protocol.ts";
 import { createLlmProtocolRegistry, resolveProtocolId, type LlmProtocolRegistry } from "./protocol.ts";
 import { openaiProtocol } from "./openai-protocol.ts";
@@ -42,10 +47,22 @@ export interface LlmClientOptions {
   stream?: boolean;
   providers?: ProviderDef[];
   markerMangler?: MarkerMangler | null;
-  /** Global toolFormat default (core config); provider/model entries override. */
-  toolFormat?: string | null;
-  /** ToolFormat registry (defaults to a registry with the xml format). */
-  toolFormatRegistry?: ToolFormatRegistry | null;
+  /** Global wireFormat default (core config); provider/model entries override. */
+  wireFormat?: string | null;
+  /**
+   * WireFormat registry. Defaults to an EMPTY registry: core ships no shape,
+   * so a client with no registry (and no `wireFormat` name) can still talk --
+   * it just cannot render a tool result (see serialize.ts).
+   */
+  wireFormatRegistry?: WireFormatRegistry | null;
+  /** Global RoleMapping default (core config); provider/model entries override. */
+  roleMapping?: string | null;
+  /**
+   * RoleMapping registry. Defaults to an EMPTY registry: core ships no
+   * convention, so a client without one cannot serialize messages at all
+   * (every message has a role -- see serialize.ts).
+   */
+  roleMappingRegistry?: RoleMappingRegistry | null;
   /** LlmProtocol registry (defaults to a registry with the openai protocol). */
   llmProtocolRegistry?: LlmProtocolRegistry | null;
   /** Base delay in ms before first retry (default: 1000). Useful for fast tests. */
@@ -92,12 +109,6 @@ function createDefaultProtocolRegistry(): LlmProtocolRegistry {
   return reg;
 }
 
-function createDefaultToolFormatRegistry(): ToolFormatRegistry {
-  const reg = createToolFormatRegistry();
-  reg.register(xmlToolFormat);
-  return reg;
-}
-
 export class LlmClient {
   baseUrl: string | null;
   apiKey: string | null;
@@ -108,9 +119,11 @@ export class LlmClient {
   maxRetries: number;
   stream: boolean;
   providers: ProviderDef[];
-  defaultToolFormat?: string;
+  defaultWireFormat?: string;
+  defaultRoleMapping?: string;
   retryBaseDelayMs?: number;
-  #toolFormatRegistry: ToolFormatRegistry;
+  #wireFormatRegistry: WireFormatRegistry;
+  #roleMappingRegistry: RoleMappingRegistry;
   #protocolRegistry: LlmProtocolRegistry;
   #mangler: MarkerMangler | null;
 
@@ -125,8 +138,12 @@ export class LlmClient {
     this.stream = options.stream !== false;
     this.retryBaseDelayMs = options.retryBaseDelayMs;
     this.providers = options.providers || [];
-    this.defaultToolFormat = options.toolFormat || undefined;
-    this.#toolFormatRegistry = options.toolFormatRegistry ?? createDefaultToolFormatRegistry();
+    this.defaultWireFormat = options.wireFormat || undefined;
+    // No built-in shapes are registered here: core ships no WireFormat, so an
+    // unset registry simply means tool results cannot be rendered.
+    this.#wireFormatRegistry = options.wireFormatRegistry ?? createWireFormatRegistry();
+    this.defaultRoleMapping = options.roleMapping || undefined;
+    this.#roleMappingRegistry = options.roleMappingRegistry ?? createRoleMappingRegistry();
     this.#protocolRegistry = options.llmProtocolRegistry ?? createDefaultProtocolRegistry();
     this.#mangler = options.markerMangler !== undefined ? options.markerMangler : new MarkerMangler();
   }
@@ -135,24 +152,61 @@ export class LlmClient {
     return this.#mangler;
   }
 
-  /** The ToolFormat active for a model (model -> provider -> global chain). */
-  toolFormatFor(modelConfig: ModelConfig): ToolFormat {
-    const id = resolveToolFormatId(modelConfig, this.providers, this.defaultToolFormat);
-    const format = this.#toolFormatRegistry.get(id);
+  /**
+   * Tolerant resolution for compaction and the mangler union: `null` when no
+   * name is configured or nothing is registered. The REQUEST path is stricter
+   * (#requestWireFormat): a configured-but-unregistered name is a config
+   * error there. With nothing configured, requests that carry no wrapper part
+   * are unaffected; one that does throws at the wire boundary (renderWrapper)
+   * rather than inventing a shape.
+   */
+  resolveWireFormat(modelConfig: ModelConfig): WireFormat | null {
+    const id = resolveWireFormatId(modelConfig, this.providers, this.defaultWireFormat);
+    return id === undefined ? null : (this.#wireFormatRegistry.get(id) ?? null);
+  }
+
+  /**
+   * The RoleMapping resolved for a model (model -> provider -> global chain),
+   * or `null` when unset/unregistered -- serialization then fails loudly at
+   * the boundary rather than guessing where harness text should ride. The
+   * request path is stricter (#requestRoleMapping).
+   */
+  resolveRoleMapping(modelConfig: ModelConfig): RoleMapping | null {
+    const id = resolveRoleMappingId(modelConfig, this.providers, this.defaultRoleMapping);
+    return id === undefined ? null : (this.#roleMappingRegistry.get(id) ?? null);
+  }
+
+  /**
+   * WireFormat resolved FOR A REQUEST. Mirrors protocolFor: a name is
+   * configured but nothing registers it, that is a `config` error HERE -- it
+   * must not sail through on requests that happen to carry no wrapper part
+   * (the boundary's "No wire format is active" message would then blame the
+   * config for a mistake it cannot see). Nothing configured stays null.
+   */
+  #requestWireFormat(modelConfig: ModelConfig): WireFormat | null {
+    const id = resolveWireFormatId(modelConfig, this.providers, this.defaultWireFormat);
+    if (id === undefined) return null;
+    const format = this.#wireFormatRegistry.get(id);
     if (!format) {
-      throw new LlmError(`Unknown tool format "${id}"`, "config");
+      throw new LlmError(`Unknown wire format "${id}"`, "config");
     }
     return format;
   }
 
-  /** The session's ToolFormat registry (used by the agent loop to resolve seam renders). */
-  get toolFormatRegistry(): ToolFormatRegistry {
-    return this.#toolFormatRegistry;
+  /** RoleMapping resolved FOR A REQUEST; strict like #requestWireFormat. */
+  #requestRoleMapping(modelConfig: ModelConfig): RoleMapping | null {
+    const id = resolveRoleMappingId(modelConfig, this.providers, this.defaultRoleMapping);
+    if (id === undefined) return null;
+    const mapping = this.#roleMappingRegistry.get(id);
+    if (!mapping) {
+      throw new LlmError(`Unknown role mapping "${id}"`, "config");
+    }
+    return mapping;
   }
 
-  /** The ToolFormat's marker names for the resolved model (mangler union). */
-  toolFormatMarkers(modelConfig: ModelConfig): string[] {
-    return this.toolFormatFor(modelConfig).markers;
+  /** Marker names for the model's WireFormat (mangler union); [] when unresolved. */
+  wireFormatMarkers(modelConfig: ModelConfig): string[] {
+    return this.resolveWireFormat(modelConfig)?.markers ?? [];
   }
 
   /** Resolve the LlmProtocol for a model (model -> provider -> default chain). */
@@ -177,6 +231,11 @@ export class LlmClient {
     }
     return {
       mangler: this.#mangler,
+      // Resolved once per request: the serializer needs it to shape
+      // tool-result parts (and only when a message actually carries one).
+      // Strict: a configured-but-unregistered name throws here, not later.
+      wireFormat: this.#requestWireFormat(modelConfig),
+      roleMapping: this.#requestRoleMapping(modelConfig),
       baseUrl: url,
       apiKey,
       sessionId: this.sessionId,
@@ -184,14 +243,14 @@ export class LlmClient {
   }
 
   /**
-   * Grow the mangler's protected set for a model: active ToolFormat markers +
+   * Grow the mangler's protected set for a model: active WireFormat markers +
    * controlTokens. Existing aliases stay stable (addPrefixes only adds new
    * prefixes), so context stored raw stays valid across model switches.
    */
   ensureManglerCovers(modelConfig: ModelConfig): void {
     if (!this.#mangler) return;
     const tokens = [
-      ...this.toolFormatMarkers(modelConfig),
+      ...this.wireFormatMarkers(modelConfig),
       ...(modelConfig.controlTokens || []),
     ];
     this.#mangler.addPrefixes(tokens);
@@ -449,6 +508,9 @@ export class LlmClient {
     const protocol = this.protocolFor(modelConfig);
     const ctx: ProtocolContext = {
       mangler: this.#mangler,
+      // Headers only: no message content is serialized, so no wire seams.
+      wireFormat: null,
+      roleMapping: null,
       baseUrl: url,
       apiKey,
       sessionId: effectiveSessionId || "",
@@ -510,6 +572,9 @@ export class LlmClient {
     // resolved values, not the raw client-level fallbacks.
     const ctx: ProtocolContext = {
       mangler: this.#mangler,
+      // Stream parsing only: no message content is serialized here.
+      wireFormat: null,
+      roleMapping: null,
       baseUrl: url,
       apiKey,
       sessionId,

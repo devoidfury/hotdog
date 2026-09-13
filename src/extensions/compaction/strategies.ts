@@ -1,5 +1,6 @@
 import { AgentError, ConfigError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
+import type { WireRenderContext } from "./utils.ts";
 
 export { Message };
 
@@ -45,6 +46,7 @@ export class CompactionStrategy {
     _settings: CompactionSettings,
     _llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
     _model: string,
+    _wire?: WireRenderContext | null,
   ): Promise<CompactResult | null> {
     throw AgentError.NotImplemented();
   }

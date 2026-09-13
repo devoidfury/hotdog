@@ -1,0 +1,7 @@
+{
+  "name": "wire-format-xml",
+  "provides": ["wire:formats"],
+  "loadOrder": 1,
+  "description": "XML wire format for harness wrappers (built-in default)",
+  "autoload": true
+}

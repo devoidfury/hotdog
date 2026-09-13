@@ -20,6 +20,12 @@ import {
   createFixture,
 } from '../helpers.ts';
 import { expectCompletion, expectToolReturn } from '../test-helpers.ts';
+import { toolContentText } from '../../src/utils/tool-content.ts';
+
+/** Display text of a stored tool-message content (part or harness string). */
+function text(content: string | Array<unknown> | null | undefined): string {
+  return toolContentText(content);
+}
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -127,7 +133,7 @@ describe('Agent — end-to-end loop', () => {
     const toolMsg = ctx.find(m => m.role === 'tool');
     expect(assistantMsg).toBeTruthy();
     expect(toolMsg).toBeTruthy();
-    expect(toolMsg!.content as string).toContain('42');
+    expect(text(toolMsg!.content)).toContain('42');
   });
 
   it('should fire CONTEXT_MESSAGE once per context message, including tool results', async () => {
@@ -152,7 +158,7 @@ describe('Agent — end-to-end loop', () => {
 
     const logged: Array<{ role: string; content: string }> = [];
     hooks.on(HOOKS.CONTEXT_MESSAGE, ({ message }) => {
-      logged.push({ role: message.role ?? "", content: typeof message.content === 'string' ? message.content : "" });
+      logged.push({ role: message.role ?? "", content: text(message.content) });
     });
 
     await agent.run('What is 2+2?');
@@ -247,7 +253,7 @@ describe('Agent — end-to-end loop', () => {
     // Verify validation error was recorded
     const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
-    expect(toolMsg!.content as string).toContain('validation');
+    expect(text(toolMsg!.content)).toContain('validation');
   });
 
   // ── Unknown tool ─────────────────────────────────────────────────────────
@@ -280,7 +286,7 @@ describe('Agent — end-to-end loop', () => {
     // than the old registry-lookup "Unknown tool".
     const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
-    expect(toolMsg!.content as string).toContain('not available');
+    expect(text(toolMsg!.content)).toContain('not available');
   });
 
   it('should use the model-visible tool defs for availability (PROVIDER_REQUEST can narrow them)', async () => {
@@ -316,7 +322,7 @@ describe('Agent — end-to-end loop', () => {
     expect(tool.executeCount).toBe(0);
     const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
-    expect(toolMsg!.content as string).toContain('not available');
+    expect(text(toolMsg!.content)).toContain('not available');
   });
 
   // ── Tool execution error ──────────────────────────────────────────────────
@@ -350,7 +356,7 @@ describe('Agent — end-to-end loop', () => {
     // Verify error was recorded
     const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
-    expect(toolMsg!.content as string).toContain('Error executing');
+    expect(text(toolMsg!.content)).toContain('Error executing');
   });
 
   // ── Wait tool (yield control) ─────────────────────────────────────────────
@@ -423,8 +429,8 @@ describe('Agent — end-to-end loop', () => {
 
     // Verify whitelist enforcement
     const ctx = agent.context.log.getAll();
-    const allowedResult = ctx.find(m => m.role === 'tool' && (m.content as string).includes('allowed result'));
-    const blockedResult = ctx.find(m => m.role === 'tool' && (m.content as string).includes('not available'));
+    const allowedResult = ctx.find(m => m.role === 'tool' && text(m.content).includes('allowed result'));
+    const blockedResult = ctx.find(m => m.role === 'tool' && text(m.content).includes('not available'));
     expect(allowedResult).toBeTruthy();
     expect(blockedResult).toBeTruthy();
   });
@@ -632,7 +638,7 @@ describe('Agent — end-to-end loop', () => {
     // Verify blocked result was recorded
     const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
-    expect(toolMsg!.content as string).toContain('Blocked');
+    expect(text(toolMsg!.content)).toContain('Blocked');
   });
 
   it('should fire TOOL_RESULT hook and allow modifying result', async () => {
@@ -669,7 +675,7 @@ describe('Agent — end-to-end loop', () => {
     // Verify modified result was recorded
     const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
-    expect(toolMsg!.content as string).toContain('MODIFIED');
+    expect(text(toolMsg!.content)).toContain('MODIFIED');
   });
 
   // ── Max iterations ───────────────────────────────────────────────────────
@@ -897,7 +903,7 @@ describe('Agent — end-to-end loop', () => {
       const result = await agent.run('test');
       expect((result as any)?.content).toBe('Error handled');
       const msgs = agent.context.log.getAll();
-      expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
+      expect(msgs.some(m => m.role === 'tool' && text(m.content).includes('missing a valid name'))).toBe(true);
     });
   });
 
@@ -1033,7 +1039,7 @@ describe('Agent — end-to-end loop', () => {
       const ctx = agent.context.log.getAll();
       const skippedResult = ctx.find(m =>
         m.role === 'tool' &&
-        (m.content as string).includes('Skipped due to maxToolCallsPerIteration')
+        text(m.content).includes('Skipped due to maxToolCallsPerIteration')
       );
       expect(skippedResult).toBeTruthy();
     });

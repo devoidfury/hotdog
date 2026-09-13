@@ -24,7 +24,7 @@ describe("CliOutputSink", () => {
     sink = new CliOutputSink({
       palette: new ColorPalette({ use_colors: false }),
       showTokenUse: true,
-      toolFormat: "  → {} {}",
+      toolCallDisplayFormat: "  → {} {}",
       toolOutputFmt: "----\n{}\n----",
     });
   });
@@ -67,13 +67,40 @@ describe("CliOutputSink", () => {
   });
 
   it("emitToolResult writes to stdout", () => {
-    sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "{}", result: "output", toolCallId: "1" });
+    sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "{}", content: "output", toolCallId: "1" });
     expect(stdoutWrites.some((w) => w.includes("output"))).toBe(true);
+  });
+
+  it("emitToolResult renders a stored tool-result part for the terminal", () => {
+    // The event carries the PART; the sink decides the presentation.
+    sink.emit({
+      type: OUTPUT_EVENT.TOOL_RESULT,
+      toolName: "bash",
+      input: "{}",
+      content: [
+        {
+          type: "tool-result",
+          tool: "bash",
+          status: "failure",
+          meta: [],
+          error: "boom",
+          hint: "check the path",
+          output: "partial output",
+        },
+      ],
+      toolCallId: "1",
+    });
+    const written = stdoutWrites.join("");
+    expect(written).toContain("partial output");
+    expect(written).toContain("Error: boom");
+    expect(written).toContain("HINT: check the path");
+    // No model-facing markup leaks into the terminal.
+    expect(written).not.toContain("<");
   });
 
   it("emitToolResult is suppressed when hideTools is true", () => {
     sink.hideTools = true;
-    sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "{}", result: "output", toolCallId: "1" });
+    sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "{}", content: "output", toolCallId: "1" });
     expect(stdoutWrites).toHaveLength(0);
   });
 

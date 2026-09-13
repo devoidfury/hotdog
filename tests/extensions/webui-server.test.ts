@@ -5,6 +5,13 @@ import { createWebuiServer } from "@extensions/webui/server.ts";
 import { logger } from "@utils/logger.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { createMockCore as createBaseMockCore } from "../test-helpers.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 function createMockCore(config: Record<string, unknown> = {}) {
   return createBaseMockCore({
@@ -27,7 +34,7 @@ function createMockCore(config: Record<string, unknown> = {}) {
       toolRetryDelay: 1,
     },
     createLlmClient: ((overrides?: Record<string, unknown>) =>
-        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+        new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
           chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
   }) as any;
 }

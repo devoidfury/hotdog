@@ -6,13 +6,14 @@
 // extensions; this is just the reference implementation.
 //
 // Wire shape: POST {url}/v1/chat/completions, Bearer auth, `data:` SSE
-// streaming. Message serialization uses the WireFormat layer (serialize.ts)
-// with the session mangler so mangling happens at the wire boundary.
+// streaming. Message serialization (serialize.ts) applies the session
+// mangler, the WireFormat wrapper markup, and the RoleMapping at the wire
+// boundary.
 
 import type { LlmProtocol } from "./protocol.ts";
 import type { StreamEvent } from "./client.ts";
 import { parseSse } from "@utils/sse-parser.ts";
-import { wireFormatFor } from "./serialize.ts";
+import { serializeMessages } from "./serialize.ts";
 import { LlmError } from "../error.ts";
 
 import pkg from "@package.json" with { type: "json" };
@@ -22,7 +23,7 @@ export const openaiProtocol: LlmProtocol = {
 
   buildRequest(messages, modelConfig, toolDefs, stream, ctx) {
     const modelName = modelConfig.name.split("/").pop() || modelConfig.name;
-    const wireMessages = wireFormatFor(modelConfig).serialize(messages, ctx.mangler);
+    const wireMessages = serializeMessages(messages, ctx.mangler, ctx.wireFormat, ctx.roleMapping);
 
     const body: Record<string, unknown> = {
       model: modelName,

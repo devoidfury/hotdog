@@ -17,6 +17,7 @@ import {
   SessionStateEvent,
   SystemMessageEvent,
 } from "@core/context/output.ts";
+import { toolContentText } from "@utils/tool-content.ts";
 import {
   ColorPalette,
   applyThinking,
@@ -70,7 +71,7 @@ const modeStreams: Record<Mode, string> = {
 
 export interface CliOutputSinkOptions {
   thinkerFormat?: string;
-  toolFormat?: string;
+  toolCallDisplayFormat?: string;
   toolOutputFmt?: string;
   palette?: ColorPalette;
   hideTools?: boolean;
@@ -139,7 +140,7 @@ export function formatTaskProgress(activeTasks: number, totalTasks: number): str
  */
 export class CliOutputSink extends OutputSink {
   thinkerFormat: string;
-  toolFormat?: string;
+  toolCallDisplayFormat?: string;
   toolOutputFmt?: string;
   palette: ColorPalette;
   hideTools?: boolean;
@@ -159,7 +160,7 @@ export class CliOutputSink extends OutputSink {
   constructor(options: CliOutputSinkOptions = {}) {
     super(options);
     this.thinkerFormat = options.thinkerFormat || "[Thinking: {}]";
-    this.toolFormat = options.toolFormat;
+    this.toolCallDisplayFormat = options.toolCallDisplayFormat;
     this.toolOutputFmt = options.toolOutputFmt;
     this.palette = options.palette || ColorPalette.default();
     this.hideTools = options.hideTools;
@@ -296,14 +297,16 @@ export class CliOutputSink extends OutputSink {
   override emitToolCall(event: ToolCallEvent): void {
     this._transitionTo(Modes.ToolCall);
     this._processContent(
-      formatToolCall(event.toolName, event.input, this.toolFormat || "{}: {}"),
+      formatToolCall(event.toolName, event.input, this.toolCallDisplayFormat || "{}: {}"),
     );
   }
 
   override emitToolResult(event: ToolResultEvent): void {
     if (this.hideTools) return;
     this._transitionTo(Modes.ToolResult);
-    this._processContent(formatToolResult(event.result, this.toolOutputFmt || "{}"));
+    // The event carries the stored content (harness text or a tool-result
+    // part); the terminal decides how to show it.
+    this._processContent(formatToolResult(toolContentText(event.content), this.toolOutputFmt || "{}"));
   }
 
   override emitCompacting(event: CompactingEvent): void {

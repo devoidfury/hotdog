@@ -11,6 +11,7 @@ import {
   type MessageLike,
 } from "@utils/token-estimate.ts";
 import { Message } from "@core/context/message.ts";
+import type { ToolResultPart } from "@core/context/wrappers.ts";
 
 describe("estimateMessageTokens", () => {
   it("estimates plain string content (chars/4, rounded up)", () => {
@@ -42,17 +43,12 @@ describe("estimateMessageTokens", () => {
     expect(estimateMessageTokens(msg)).toBe(3);
   });
 
-  it("counts wrapper parts by their rendered form, not the part object", () => {
+  it("counts wrapper parts by their at-rest JSON, not the part object", () => {
     // String()ing the part object would count "[object Object]" (15 chars),
-    // not the wrapper XML the model actually sees.
-    const FILE_TAG = "file-include";
-    const rendered =
-      `<${FILE_TAG}>\n<path>note.md</path>\n<contents>\nsome file payload here</contents>\n</${FILE_TAG}>`;
-    const msg: MessageLike = {
-      role: "user",
-      content: [{ type: "file-include", path: "note.md", content: "some file payload here" }],
-    };
-    expect(estimateMessageTokens(msg)).toBe(Math.ceil(rendered.length / 4));
+    // not the data form the flattener produces (see wrappers.ts).
+    const part = { type: "file-include", path: "note.md", content: "some file payload here" };
+    const msg: MessageLike = { role: "user", content: [part] };
+    expect(estimateMessageTokens(msg)).toBe(Math.ceil(JSON.stringify(part).length / 4));
   });
 
   it("counts assistant reasoning and tool calls", () => {
@@ -139,5 +135,52 @@ describe("estimateContextTokens", () => {
       new Message({ role: "assistant", content: "12345678", source: "model" }),
     ];
     expect(estimateContextTokens(messages)).toBe(4);
+  });
+});
+
+// ── session-format estimator ────────────────────────────────────────────────
+
+const toolPart: ToolResultPart = {
+  type: "tool-result",
+  tool: "read",
+  status: "success",
+  meta: [],
+  error: null,
+  hint: null,
+  output: "payload",
+};
+
+describe("estimator override (wire-size measurement)", () => {
+  it("without an estimator a tool-result part counts as its at-rest JSON", () => {
+    expect(estimateMessageTokens({ role: "tool", content: [toolPart] })).toBe(
+      Math.ceil(JSON.stringify(toolPart).length / 4),
+    );
+  });
+
+  it("with an estimator the part counts as the rendered shape", () => {
+    // Toy "wire": a wrapper is ~40 chars around the payload.
+    const wire = (p: typeof toolPart) => `t ${p.tool} ${p.status}\n${p.output}\n/t`;
+    expect(estimateMessageTokens({ role: "tool", content: [toolPart] }, wire)).toBe(
+      Math.ceil(wire(toolPart).length / 4),
+    );
+    // Strictly cheaper than the JSON here -- the point of measuring at wire size.
+    expect(wire(toolPart).length).toBeLessThan(JSON.stringify(toolPart).length);
+  });
+
+  it("the estimator applies only to tool-result parts", () => {
+    const msgs = [
+      { role: "user" as const, content: "plain" },
+      { role: "user" as const, content: [{ type: "text", text: "plain" }] },
+    ];
+    const bogus = () => "x".repeat(4000);
+    for (const msg of msgs) {
+      expect(estimateContextTokens([msg], bogus)).toBe(estimateContextTokens([msg]));
+    }
+  });
+
+  it("core Message instances work with the estimator too", () => {
+    const msg = new Message({ role: "tool", content: [toolPart], toolCallId: "tc", source: "tool" });
+    const wire = () => "0123456789"; // 10 chars
+    expect(estimateMessageTokens(msg, wire)).toBe(3); // ceil(10/4)
   });
 });

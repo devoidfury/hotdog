@@ -179,17 +179,30 @@ Format string for tool call display. First `{}` is the tool name, second `{}` is
 { "toolCallDisplayFormat": "🔧 {} {}" }
 ```
 
-### `modelToolFormat`
+### `modelWireFormat`
 
 - **Type:** `string`
-- **CLI flag:** `--model-tool-format`
+- **CLI flag:** `--model-wire-format`
 - **Default:** `"xml"`
 - **Resolution:** CLI > config > default
 
-Global default for the ToolFormat registry name used when rendering tool results for the model. Provider and model entries can override this with their own `toolFormat` field (see [Providers & Models](#providers--models)). The built-in `"xml"` format emits `<tool name=... status=...>` wrappers; extensions can register additional formats under `EXTENSION_PROVIDES.TOOL_FORMATS`.
+Global default for the WireFormat registry name -- the session's presentation protocol for harness structure in the conversation: tool results, attached-file includes, and system notices all share one markup vocabulary per session. Provider and model entries can override this with their own `wireFormat` field (see [Providers & Models](#providers--models)). Core ships no shapes: the default value `"xml"` comes from the core config (`core.config.json`), and the shape itself (a `<tool name=... status=...>` wrapper) is registered by the autoloaded `wire-format-xml` extension. A name nothing registers -- including `"xml"` when that extension is disabled -- is a config error thrown at request build (`Unknown wire format "<name>"`), even on a request that carries no wrapper; a name that is simply unset resolves to nothing and throws at the wire only when a wrapper actually needs shaping. Never a silent fallback. Extensions can register additional formats under `EXTENSION_PROVIDES.WIRE_FORMATS`.
 
 ```json
-{ "modelToolFormat": "md-table" }
+{ "modelWireFormat": "md-table" }
+```
+
+### `modelRoleMapping`
+
+- **Type:** `string`
+- **CLI flag:** `--model-role-mapping`
+- **Default:** `"system-first"`
+- **Resolution:** CLI > config > default
+
+Global default for the RoleMapping registry name -- where internal roles ride on the wire for a model's chat template. A separate concern from `modelWireFormat` on purpose: presentation is about model comprehension (which markup the conversation speaks), role mapping is about backend compatibility (which roles the endpoint accepts), and one provider can front ten models with ten different expectations. Provider and model entries override with their own `roleMapping` field. Both built-in ids, `"system-first"` and `"developer"`, come from the autoloaded `role-mapping-default` extension; core ships none. An unregistered name is a config error thrown at request build (`Unknown role mapping "<name>"`); with no name configured at all, serializing any non-empty request throws rather than guessing a convention.
+
+```json
+{ "modelRoleMapping": "developer" }
 ```
 
 ### `toolOutputFmt`
@@ -661,9 +674,9 @@ The `providers` array defines available AI providers and their models. Each prov
 | `defaultModel` | `string` | no | — | Default model name for this provider (used when no models array is present). |
 | `temperature` | `number` | no | — | Default temperature for all models in this provider. |
 | `contextLimit` | `number` | no | 128000 | Context window size limit for all models in this provider (triggers compaction when exceeded). |
-| `wireFormat` | `string` | no | `"system-first"` | Chat request wire format for this provider's models: `"system-first"` (llama.cpp/Ollama-style, harness messages ride `role:"user"`) or `"developer"` (OpenAI-style, harness messages sent as `role:"developer"`). Overridable per model. |
+| `roleMapping` | `string` | no | global `modelRoleMapping` (default `"system-first"`) | RoleMapping registry name for this provider's models: where the internal `harness` role rides on the wire (`"user"` under `"system-first"`, `"developer"` under `"developer"`). Both built-ins come from the autoloaded `role-mapping-default` extension; an unregistered name is a config error at request build. Overridable per model. |
 | `protocol` | `string` | no | `"openai"` | LlmProtocol registry name for this provider's models. The built-in `"openai"` protocol speaks the OpenAI chat-completions wire (Bearer auth, `data:` SSE). Extensions can register additional protocols under `EXTENSION_PROVIDES.LLM_PROTOCOLS`. Overridable per model. |
-| `toolFormat` | `string` | no | global `modelToolFormat` (default `"xml"`) | ToolFormat registry name for this provider's models. Falls back to the global `modelToolFormat` setting, then to `"xml"`. Overridable per model. |
+| `wireFormat` | `string` | no | global `modelWireFormat` (default `"xml"`) | WireFormat registry name for this provider's models: the markup shape of harness wrappers (tool results, file includes, system notices). Falls back to the global `modelWireFormat` (default `"xml"`, from the core config; the shape is registered by the autoloaded `wire-format-xml` extension, and an unregistered name is a config error at request build rather than falling back). Overridable per model. |
 | `controlTokens` | `array` | no | `[]` | Server chat-template control tokens (e.g. reasoning-block delimiters, end-of-turn literals) to mangle in message content at the wire. Prevents untrusted tool output from forging template tokens. Overridable per model. |
 | `models` | `array` | no | `[]` | Array of model definitions. |
 
@@ -675,9 +688,9 @@ The `providers` array defines available AI providers and their models. Each prov
 | `contextLimit` | `number` | no | 128000 | Context window size limit for this model (triggers compaction when exceeded). |
 | `temperature` | `number` | no | — | Override temperature for this model. |
 | `reasoning_effort` | `string` | no | — | Reasoning effort level (e.g. `"max"`, `"medium"`, `"low"`). Also accepts camelCase `reasoningEffort`. |
-| `wireFormat` | `string` | no | — | Per-model wire format override (`"system-first"` or `"developer"`). Falls back to the provider-level `wireFormat`, then to `"system-first"`. |
+| `roleMapping` | `string` | no | — | Per-model RoleMapping registry name override (`"system-first"` or `"developer"` are the built-ins). Falls back to the provider-level `roleMapping`, then to the global `modelRoleMapping`. |
 | `protocol` | `string` | no | — | Per-model LlmProtocol registry name override. Falls back to the provider-level `protocol`, then to `"openai"`. |
-| `toolFormat` | `string` | no | — | Per-model ToolFormat registry name override. Falls back to the provider-level `toolFormat`, then to the global `modelToolFormat` setting (default `"xml"`). |
+| `wireFormat` | `string` | no | — | Per-model WireFormat registry name override. Falls back to the provider-level `wireFormat`, then to the global `modelWireFormat` (default `"xml"` from the core config; an unregistered name is a config error at request build rather than falling back). |
 | `controlTokens` | `array` | no | — | Per-model list of server chat-template control tokens to mangle in message content at the wire. Falls back to the provider-level `controlTokens`, then to `[]`. |
 | `tags` | `array` | no | `[]` | Arbitrary tags for model discovery and filtering. |
 | `maxToolDifficulty` | `number` | no | — | Max tool difficulty (1–5) for this model. Tools above this score are hidden. Overrides `defaultMaxToolDifficulty`. Takes lower priority than CLI `--max-tool-difficulty`. |
@@ -719,22 +732,22 @@ The `providers` array defines available AI providers and their models. Each prov
 
 When a provider has no `models` array but defines `defaultModel`, that model is automatically registered with the provider's `temperature` and `contextLimit`.
 
-### Wire Format
+### Role Mapping
 
-`wireFormat` controls how harness-injected messages (compaction summaries, task results, user-turn guards) are serialized into the chat request. Chat templates are per-model even on the same backend, so this is a per-model setting:
+`roleMapping` controls where harness-injected messages (compaction summaries, task results, user-turn guards) ride in the chat request. Chat templates are per-model even on the same backend, so this is a per-model setting:
 
 - `"system-first"` (default) — llama.cpp/Ollama-style templates where only the first message(s) may be `system`. Harness messages are sent as `role:"user"` with their real (un-mangled) marker content.
 - `"developer"` — OpenAI-style templates. Harness messages are sent as `role:"developer"`; everything else is identical to `"system-first"`.
 
-Set it at the provider level to apply to all of the provider's models, or on individual model entries to override. When unset, `"system-first"` is used.
+Set it at the provider level to apply to all of the provider's models, or on individual model entries to override. Both mappings are registered by the autoloaded `role-mapping-default` extension; core ships none. An unregistered name is a config error at request build, and with no name configured at all, serializing any non-empty request throws instead of guessing a convention.
 
-### Protocol & Tool Format
+### Protocol & Wire Format
 
-`protocol` selects the LlmProtocol that builds requests and parses responses for a model (default `"openai"`, the OpenAI chat-completions wire). `toolFormat` selects the ToolFormat that renders tool results for the model (default: global `modelToolFormat`, which defaults to `"xml"`). Both follow the same provider-level → model-level fallback chain as `wireFormat`.
+`protocol` selects the LlmProtocol that builds requests and parses responses for a model (default `"openai"`, the OpenAI chat-completions wire). `wireFormat` selects the WireFormat that shapes harness wrappers for the model (default: global `modelWireFormat`, whose `"xml"` default comes from the core config while the shape itself comes from the autoloaded `wire-format-xml` extension; a name nothing registers is a config error at request build -- there is no core fallback shape). All three seams -- `protocol`, `wireFormat`, `roleMapping` -- follow the same provider-level → model-level fallback chain.
 
 `controlTokens` declares server chat-template control tokens (reasoning-block delimiters, end-of-turn literals, template tool-call delimiters) that should be mangled in message content at the wire. This prevents untrusted tool output from forging template tokens that would otherwise become live control signals after the server applies its chat template. The mangler grows its protected set on model switch when the token set grows; existing aliases stay stable so context stored raw remains valid.
 
-Extensions can register additional protocols (`EXTENSION_PROVIDES.LLM_PROTOCOLS`) and tool formats (`EXTENSION_PROVIDES.TOOL_FORMATS`) from outside core.
+Extensions can register additional protocols (`EXTENSION_PROVIDES.LLM_PROTOCOLS`), wire formats (`EXTENSION_PROVIDES.WIRE_FORMATS`), and role mappings (`EXTENSION_PROVIDES.ROLE_MAPPINGS`) from outside core.
 
 ---
 

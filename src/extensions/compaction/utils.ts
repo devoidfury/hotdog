@@ -4,8 +4,12 @@ import {
   estimateMessageTokens,
   estimateContextTokens,
   type MessageLike as EstimatableMessageLike,
+  type ToolResultEstimator,
 } from "@utils/token-estimate.ts";
 import { contentToText } from "@core/context/message.ts";
+import { isWrapperPart, renderWrapperForWire } from "@core/context/wrappers.ts";
+import type { WireFormat } from "@core/extensions/wire-format.ts";
+import type { MarkerMangler } from "@core/marker-mangler.ts";
 
 export { estimateMessageTokens, estimateContextTokens };
 
@@ -57,22 +61,75 @@ export function shouldCompact(
   messages: MessageLike[],
   contextLimit: number,
   reserveTokens: number = 16384,
+  wire?: WireRenderContext | null,
 ): boolean {
-  const estimated = estimateContextTokens(messages);
+  const estimated = estimateContextTokens(messages, estimatorFor(wire));
   return estimated > contextLimit - reserveTokens;
+}
+
+// ── Model-facing wire render ────────────────────────────────────────────────
+//
+// The summarization dump goes to a model, so it must speak the session's
+// presentation: genuine harness wrappers, aliased tool payloads, one
+// consistent shape per session (the same WireFormat the main loop uses). The
+// dump is PRE-mangled and sent as a harness-sourced message
+// (_performCompaction.llmChat) -- otherwise the wire serializer would treat
+// the whole dump as untrusted text and alias the genuine wrappers right back
+// out of it.
+export interface WireRenderContext {
+  mangler: MarkerMangler | null;
+  wireFormat: WireFormat | null;
+}
+
+/** Estimator measuring tool-result parts at the session's wire size. */
+export function estimatorFor(wire?: WireRenderContext | null): ToolResultEstimator | undefined {
+  const fmt = wire?.wireFormat ?? null;
+  return fmt ? (part) => fmt.renderToolResult(part) : undefined;
+}
+
+/**
+ * Flatten message content for the dump. With a wire context: every
+ * non-harness field is mangled and wrapper parts render through
+ * renderWrapperForWire (real framing, session format). Without one: the
+ * at-rest flatten of contentToText (legacy callers, tests).
+ */
+function dumpContent(
+  content: string | Array<unknown> | null | undefined,
+  wire?: WireRenderContext | null,
+): string {
+  if (content == null) return "";
+  if (!wire) return contentToText(content);
+  const esc = (s: string): string => (wire.mangler ? (wire.mangler.escape(s) ?? s) : s);
+  if (typeof content === "string") return esc(content);
+  const rendered: string[] = [];
+  for (const part of content) {
+    if (isWrapperPart(part)) {
+      rendered.push(renderWrapperForWire(part, wire.mangler, wire.wireFormat));
+    } else if (part && typeof part === "object") {
+      const p = part as Record<string, unknown>;
+      if ((p.type === "text" || p.type === "untrusted") && typeof p.text === "string") {
+        rendered.push(esc(p.text));
+      }
+    }
+  }
+  return rendered.join("\n");
 }
 
 // ── Serialization ───────────────────────────────────────────────────────────
 
 // Role tags on each line stop the model from treating the dump as a live conversation.
-export function serializeConversation(messages: MessageLike[]): string {
+export function serializeConversation(
+  messages: MessageLike[],
+  wire?: WireRenderContext | null,
+): string {
   const parts: string[] = [];
 
-  // contentToText() flattens part arrays (text/untrusted parts, wrapper
-  // parts rendered at rest) -- String()ing a part object would dump
-  // "[object Object]" into the summarization prompt.
+  // With a wire context the dump is pre-mangled and format-rendered (see
+  // dumpContent); without one, contentToText() flattens part arrays at rest.
   const getContentStr = (content: string | Array<unknown> | undefined): string =>
-    contentToText(content);
+    dumpContent(content, wire);
+  const esc = (s: string): string =>
+    wire?.mangler ? (wire.mangler.escape(s) ?? s) : s;
 
   for (const msg of messages) {
     switch (msg.role) {
@@ -82,7 +139,7 @@ export function serializeConversation(messages: MessageLike[]): string {
       case "assistant": {
         const reasoning = msg.reasoningContent ?? msg.reasoning_content;
         if (reasoning) {
-          parts.push(`[Assistant thinking]: ${reasoning}`);
+          parts.push(`[Assistant thinking]: ${esc(reasoning)}`);
         }
         const content = getContentStr(msg.content);
         if (content) {
@@ -93,7 +150,7 @@ export function serializeConversation(messages: MessageLike[]): string {
           const calls = toolCalls
             .map(
               (tc) =>
-                `${(tc as { function?: { name?: string; arguments?: string } }).function?.name}(${(tc as { function?: { name?: string; arguments?: string } }).function?.arguments || ""})`,
+                `${esc((tc as { function?: { name?: string } }).function?.name ?? "")}(${esc((tc as { function?: { name?: string; arguments?: string } }).function?.arguments || "")})`,
             )
             .join("; ");
           parts.push(`[Assistant tool calls]: ${calls}`);

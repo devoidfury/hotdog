@@ -21,6 +21,13 @@ import { createServiceRegistry } from "@core/extensions/service-registry.ts";
 import { ConfigRegistry } from "@core/extensions/config.ts";
 import { MockLLMClient } from "./llm.ts";
 import type { OutputEvent } from "@core/context/output.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 // ── Agent Test Fixture ──────────────────────────────────────────────────────
 
@@ -259,7 +266,7 @@ export function createMockCore(
         providers: config.providers || [],
       })) as CoreContext["buildConfig"]),
     createLlmClient: ((overrides?: Record<string, unknown>) =>
-      new LlmClient({
+      new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
         baseUrl: "http://localhost:8080",
         apiKey: "test-key",
         stream: false,

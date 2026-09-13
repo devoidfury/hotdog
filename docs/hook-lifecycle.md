@@ -508,6 +508,9 @@ Extensions declare what they provide via the `provides` field in `extension.json
 export const EXTENSION_PROVIDES = {
   CLI_SUBCOMMANDS: "cli:subcommands",
   TOOLS: "tools",
+  LLM_PROTOCOLS: "llm:protocols",
+  WIRE_FORMATS: "wire:formats",
+  ROLE_MAPPINGS: "role:mappings",
 };
 ```
 

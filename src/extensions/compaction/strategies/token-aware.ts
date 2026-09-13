@@ -2,7 +2,13 @@ import {
   SUMMARIZATION_SYSTEM_PROMPT,
   SUMMARIZATION_USER_PROMPT_TEMPLATE,
 } from "../prompts.ts";
-import { serializeConversation, estimateContextTokens, estimateMessageTokens } from "../utils.ts";
+import {
+  serializeConversation,
+  estimateContextTokens,
+  estimateMessageTokens,
+  estimatorFor,
+  type WireRenderContext,
+} from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult, requireContextLimit } from "../strategies.ts";
 import { AgentError } from "@core/error.ts";
 
@@ -19,7 +25,9 @@ export class TokenAwareStrategy extends CompactionStrategy {
     settings: CompactionSettings,
     llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
     model: string,
+    wire?: WireRenderContext | null,
   ): Promise<CompactResult | null> {
+    const est = estimatorFor(wire);
     const targetTokens = settings.reserveTokens;
     const contextLimit = requireContextLimit(settings.contextLimit);
     const maxKeepTokens = contextLimit - targetTokens;
@@ -30,7 +38,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (!msg || msg.role === "system") continue;
-      const msgTokens = estimateMessageTokens(msg);
+      const msgTokens = estimateMessageTokens(msg, est);
       if (cumulativeTokens + msgTokens > maxKeepTokens) break;
       cumulativeTokens += msgTokens;
       lastKeptIndex = i;
@@ -45,7 +53,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
     // message; that is cheaper than a hard API error.
     while (lastKeptIndex > 0 && messages[lastKeptIndex]!.role === "tool") {
       lastKeptIndex--;
-      cumulativeTokens += estimateMessageTokens(messages[lastKeptIndex]!);
+      cumulativeTokens += estimateMessageTokens(messages[lastKeptIndex]!, est);
     }
     if (lastKeptIndex <= 0) return null;
 
@@ -53,7 +61,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
     if (messagesToCompact === 0) return null;
 
     const messagesToSummarize = messages.slice(0, messagesToCompact).filter((m): m is Message => m != null);
-    const conversation = serializeConversation(messagesToSummarize);
+    const conversation = serializeConversation(messagesToSummarize, wire);
     const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace("{conversation}", () => conversation);
 
     const summaryMessages = [
@@ -68,7 +76,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
       throw AgentError.SummarizationFailed((e as Error).message);
     }
 
-    const tokensBefore = estimateContextTokens(messages.filter((m): m is Message => m != null));
+    const tokensBefore = estimateContextTokens(messages.filter((m): m is Message => m != null), est);
     const summaryTokens = estimateMessageTokens({ role: "assistant", content: summary });
     const tokensAfter = cumulativeTokens + summaryTokens;
 

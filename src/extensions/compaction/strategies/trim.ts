@@ -1,4 +1,4 @@
-import { estimateContextTokens, findFirstKeptIndex } from "../utils.ts";
+import { estimateContextTokens, findFirstKeptIndex, estimatorFor, type WireRenderContext } from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult, requireContextLimit } from "../strategies.ts";
 
 export class TrimStrategy extends CompactionStrategy {
@@ -10,7 +10,10 @@ export class TrimStrategy extends CompactionStrategy {
     settings: CompactionSettings,
     _llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
     _model: string,
+    wire?: WireRenderContext | null,
   ): Promise<CompactResult | null> {
+    // Wire-faithful tool-result sizes inside execute (see canCompact for the gate).
+    const est = estimatorFor(wire);
     const contextLimit = requireContextLimit(settings.contextLimit);
     const effectiveMax = contextLimit - (settings.reserveTokens || 0);
 
@@ -31,7 +34,7 @@ export class TrimStrategy extends CompactionStrategy {
 
     if (nonSystemCount === 0) return null;
 
-    const tokensBefore = estimateContextTokens(messages);
+    const tokensBefore = estimateContextTokens(messages, est);
     if (tokensBefore <= effectiveMax) return null;
 
     // Messages inside the keep-recent zone are never dropped.
@@ -50,7 +53,7 @@ export class TrimStrategy extends CompactionStrategy {
       // Build candidate: system messages + non-system messages starting from dropCount
       const keptIndices = [...systemMessages, ...nonSystemIndices.slice(mid)];
       const candidate = keptIndices.map((i) => messages[i]!).filter((m): m is Message => m !== undefined);
-      const tokens = estimateContextTokens(candidate);
+      const tokens = estimateContextTokens(candidate, est);
 
       if (tokens <= effectiveMax) {
         bestDrop = mid;
@@ -85,7 +88,7 @@ export class TrimStrategy extends CompactionStrategy {
       metadata: {
         strategyName: "trim",
         tokensBefore,
-        tokensAfter: estimateContextTokens(messages.slice(firstKeptIndex)),
+        tokensAfter: estimateContextTokens(messages.slice(firstKeptIndex), est),
         messagesDropped: dropCount,
         contextLimit,
       },

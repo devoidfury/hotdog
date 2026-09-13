@@ -6,6 +6,7 @@ import { appendFile, readFile, access, mkdir } from "node:fs/promises";
 import { HOOKS } from "@core/hooks.ts";
 import { stripNulls } from "@utils/objects.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
+import { isWrapperPart, isToolResultPart } from "@core/context/wrappers.ts";
 
 import { LOG_SOURCE, sessionsDir, type LogEntry } from "@core/session/session-log.ts";
 
@@ -30,9 +31,19 @@ interface SessionLogMessage {
  */
 function logContent(message: SessionLogMessage): string | Array<Record<string, unknown>> {
   const raw = message.content;
+  // Raw parts ride the log as-is when they carry harness structure:
+  // `untrusted` payloads (mangled only at the wire) and wrapper parts -- a
+  // tool-result part must round-trip as DATA, since rendering it here would
+  // bake one WireFormat's shape into a log that other formats (and the UI)
+  // have to read.
   if (
     Array.isArray(raw) &&
-    raw.some((p) => p != null && typeof p === "object" && (p as Record<string, unknown>).type === "untrusted")
+    raw.some(
+      (p) =>
+        p != null &&
+        typeof p === "object" &&
+        ((p as Record<string, unknown>).type === "untrusted" || isWrapperPart(p)),
+    )
   ) {
     return raw as Array<Record<string, unknown>>;
   }
@@ -47,6 +58,11 @@ function messageToLogEntry(
   message: SessionLogMessage & { content: string | Array<Record<string, unknown>> },
   source: string,
 ): LogEntry {
+  // The executor's tool messages carry one ToolResultPart; its `tool` is the
+  // authoritative name. Legacy string contents have no part, so no name.
+  const toolResult = Array.isArray(message.content)
+    ? (message.content as unknown[]).find(isToolResultPart)
+    : undefined;
   return stripNulls({
     ts: new Date().toISOString(),
     session_id: message.sessionId || "unknown",
@@ -56,7 +72,7 @@ function messageToLogEntry(
     reasoning_content: message.reasoningContent || null,
     tool_calls: message.toolCalls || null,
     tool_call_id: message.toolCallId || null,
-    tool_name: null,
+    tool_name: toolResult?.tool ?? null,
     // Provenance: recorded for every message so resume replay restores the
     // exact source (and the mangle exemption for "harness").
     origin: message.source ?? null,

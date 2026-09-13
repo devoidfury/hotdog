@@ -2,7 +2,13 @@ import {
   SUMMARIZATION_SYSTEM_PROMPT,
   SUMMARIZATION_USER_PROMPT_SHORT,
 } from "../prompts.ts";
-import { serializeConversation, findFirstKeptIndex, estimateContextTokens } from "../utils.ts";
+import {
+  serializeConversation,
+  findFirstKeptIndex,
+  estimateContextTokens,
+  estimatorFor,
+  type WireRenderContext,
+} from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
 import { AgentError } from "@core/error.ts";
 
@@ -23,12 +29,13 @@ export class SummarizeShortStrategy extends CompactionStrategy {
     settings: CompactionSettings,
     llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
     model: string,
+    wire?: WireRenderContext | null,
   ): Promise<CompactResult | null> {
     const firstKept = findFirstKeptIndex(messages, settings.keepRecentMessages);
     if (firstKept === 0) return null;
 
     const messagesToCompact = messages.slice(0, firstKept);
-    const conversation = serializeConversation(messagesToCompact);
+    const conversation = serializeConversation(messagesToCompact, wire);
     const userPrompt = SUMMARIZATION_USER_PROMPT_SHORT.replace("{conversation}", () => conversation);
 
     const summaryMessages = [
@@ -48,8 +55,8 @@ export class SummarizeShortStrategy extends CompactionStrategy {
       messagesCompacted: firstKept,
       metadata: {
         strategyName: "summarize-short",
-        tokensBefore: estimateContextTokens(messages),
-        tokensAfter: estimateContextTokens(messages.slice(firstKept)),
+        tokensBefore: estimateContextTokens(messages, estimatorFor(wire)),
+        tokensAfter: estimateContextTokens(messages.slice(firstKept), estimatorFor(wire)),
       },
     };
   }

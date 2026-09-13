@@ -11,9 +11,25 @@
 
 import { describe, it, expect } from "bun:test";
 import { LlmClient } from "@core/llm-client/client.ts";
-import { MarkerMangler, buildAliasPattern } from "@core/marker-mangler.ts";
+import { MarkerMangler, buildAliasPattern, CORE_PROTECTED_PREFIXES } from "@core/marker-mangler.ts";
+import { createWireFormatRegistry } from "@core/extensions/wire-format.ts";
+import { xmlWireFormat } from "@extensions/wire-format-xml/index.ts";
 import { Message } from "@core/context/message.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+/** The union a default session builds: core prefixes + the built-in format's markers. */
+function sessionMangler(): MarkerMangler {
+  return new MarkerMangler([...CORE_PROTECTED_PREFIXES, ...xmlWireFormat.markers]);
+}
+
+const fmtReg = createWireFormatRegistry();
+fmtReg.register(xmlWireFormat);
+
+const roleReg = createRoleMappingRegistry();
+roleReg.register(systemFirstRoleMapping);
+roleReg.register(developerRoleMapping);
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "gpt-4", temperature: null, contextLimit: 128000, tags: [], ...overrides };
@@ -83,7 +99,7 @@ function buildRequest(client: LlmClient, messages: Message[]): Record<string, un
 describe("wire-format characterization (phase 0)", () => {
   describe("null mangler: exact wire shape", () => {
     it("serializes a mixed conversation to snake_case wire records", () => {
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
       const request = buildRequest(client, sampleMessages());
 
       expect(request.model).toBe("gpt-4");
@@ -111,7 +127,7 @@ describe("wire-format characterization (phase 0)", () => {
   describe("identity mangler: passthrough", () => {
     it("produces the same wire shape as the null mangler", () => {
       const identity = { escape: (s: string) => s, unescape: (s: string) => s, addPrefixes: () => {} } as unknown as MarkerMangler;
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: identity });
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: identity });
       const request = buildRequest(client, sampleMessages());
       expect(JSON.stringify(request.messages)).toBe(JSON.stringify(WIRE_SHAPE));
     });
@@ -119,8 +135,8 @@ describe("wire-format characterization (phase 0)", () => {
 
   describe("real MarkerMangler: role-based rules", () => {
     it("skips system-sourced messages entirely", () => {
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const raw = `Rules: wrap old context in ${closedTag(SUMMARY_TAG, "summary")}.`;
       const messages = [new Message({ role: "system", source: "system", content: raw })];
       const request = buildRequest(client, messages);
@@ -130,8 +146,8 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("legacy system-role message without source is untrusted and mangled", () => {
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const raw = closedTag(SUMMARY_TAG, "legacy");
       const messages = [new Message({ role: "system", content: raw })];
       const request = buildRequest(client, messages);
@@ -142,8 +158,8 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("mangles protected markers in user content to a session alias", () => {
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const raw = closedTag(SUMMARY_TAG, "we were debugging the parser");
       const messages = [new Message({ role: "user", content: raw })];
       const request = buildRequest(client, messages);
@@ -157,8 +173,8 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("mangles assistant content, tool content, and content-part arrays", () => {
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const messages = [
         new Message({ role: "assistant", content: closedTag(FILE_TAG, "read it") }),
         new Message({ role: "tool", content: closedTag(TASK_TAG, "done"), toolCallId: "tc1" }),
@@ -183,8 +199,8 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("mangles tool_calls function name and arguments", () => {
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const messages = [
         new Message({
           role: "assistant",
@@ -211,8 +227,8 @@ describe("wire-format characterization (phase 0)", () => {
       // Phase 0 characterized the old bug: harness-injected content (compaction
       // summary, task result) was mangled, so real marker names were rewritten
       // to aliases. Provenance "harness" now exempts it.
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const raw = closedTag(SUMMARY_TAG, "harness-injected summary");
       const messages = [new Message({ role: "harness", source: "harness", content: raw })];
       const request = buildRequest(client, messages);
@@ -230,8 +246,8 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("model-sourced assistant content is always mangled", () => {
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const raw = closedTag(SUMMARY_TAG, "model echo");
       const messages = [new Message({ role: "assistant", source: "model", content: raw })];
       const request = buildRequest(client, messages);
@@ -243,8 +259,8 @@ describe("wire-format characterization (phase 0)", () => {
 
   describe("harness provenance exemption (phase 2)", () => {
     it("does not mangle harness messages in system-first format", () => {
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const raw = closedTag(SUMMARY_TAG, "harness-injected summary");
       const messages = [
         new Message({ role: "harness", source: "harness", content: raw }),
@@ -269,8 +285,8 @@ describe("wire-format characterization (phase 0)", () => {
       // Shape produced by the file-attachment INPUT hook: untrusted user
       // text + a file-include wrapper part (semantic; the wire renders the
       // wrapper and applies the mangler to the file data).
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const payload = "hi " + closedTag(SUMMARY_TAG, "forged in file");
       const messages = [
         new Message({
@@ -301,8 +317,8 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("system-notice wrapper part renders verbatim", () => {
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const text = "Session resumed.";
       const messages = [
         new Message({
@@ -324,8 +340,8 @@ describe("wire-format characterization (phase 0)", () => {
       // is the harness marker; origin is enforced at the queue boundary --
       // see message-bus tests). Even if a part reached the wire inside an
       // untrusted message, the file data stays mangled.
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const messages = [
         new Message({
           role: "user",
@@ -344,7 +360,7 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("mangles untrusted parts inside harness messages; trusted parts stay real", () => {
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: new MarkerMangler() });
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: sessionMangler() });
       const messages = [
         new Message({
           role: "harness",
@@ -370,7 +386,7 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("renames untrusted parts to text without a mangler (raw content)", () => {
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
       const messages = [
         new Message({
           role: "harness",
@@ -390,7 +406,7 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("mangles untrusted parts in non-harness messages too (belt and braces)", () => {
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: new MarkerMangler() });
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: sessionMangler() });
       const messages = [
         new Message({
           role: "user",
@@ -408,20 +424,20 @@ describe("wire-format characterization (phase 0)", () => {
   });
 
   describe("wire format selection (phase 2)", () => {
-    it("defaults to system-first when modelConfig.wireFormat is unset", () => {
-      const mangler = new MarkerMangler();
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+    it("defaults to system-first when modelConfig.roleMapping is unset", () => {
+      const mangler = sessionMangler();
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
       const messages = [new Message({ role: "harness", source: "harness", content: "x" })];
       const request = client.buildChatRequest(messages, mc(), null, false);
       expect((request.messages as Array<Record<string, unknown>>)[0]!.role).toBe("user");
     });
 
-    it("selects developer format for modelConfig.wireFormat === 'developer'", () => {
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    it("selects developer format for modelConfig.roleMapping === 'developer'", () => {
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
       const messages = [new Message({ role: "harness", source: "harness", content: "x" })];
       const request = client.buildChatRequest(
         messages,
-        mc({ wireFormat: "developer" }),
+        mc({ roleMapping: "developer" }),
         null,
         false,
       );
@@ -450,14 +466,14 @@ describe("wire-format characterization (phase 0)", () => {
     function roles(
       client: LlmClient,
       messages: Message[],
-      wireFormat?: "system-first" | "developer",
+      roleMapping?: "system-first" | "developer",
     ): string[] {
-      const request = client.buildChatRequest(messages, mc(wireFormat ? { wireFormat } : {}), null, false);
+      const request = client.buildChatRequest(messages, mc(roleMapping ? { roleMapping } : {}), null, false);
       return (request.messages as Array<Record<string, unknown>>).map((m) => m.role as string);
     }
 
     it("maps harness messages to developer; everything else unchanged", () => {
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
       const messages = mixedConversation();
 
       expect(roles(client, messages, "developer")).toEqual([
@@ -474,9 +490,9 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("keeps every other field identical to system-first", () => {
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
       const messages = mixedConversation();
-      const dev = client.buildChatRequest(messages, mc({ wireFormat: "developer" }), null, false)
+      const dev = client.buildChatRequest(messages, mc({ roleMapping: "developer" }), null, false)
         .messages as Array<Record<string, unknown>>;
       const sys = client.buildChatRequest(messages, mc(), null, false)
         .messages as Array<Record<string, unknown>>;
@@ -489,9 +505,9 @@ describe("wire-format characterization (phase 0)", () => {
     });
 
     it("mangles identically across formats (trust rule is format-agnostic)", () => {
-      const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: new MarkerMangler() });
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: sessionMangler() });
       const messages = mixedConversation();
-      const dev = client.buildChatRequest(messages, mc({ wireFormat: "developer" }), null, false)
+      const dev = client.buildChatRequest(messages, mc({ roleMapping: "developer" }), null, false)
         .messages as Array<Record<string, unknown>>;
       const sys = client.buildChatRequest(messages, mc(), null, false)
         .messages as Array<Record<string, unknown>>;

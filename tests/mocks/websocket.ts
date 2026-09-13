@@ -5,6 +5,13 @@ import type { AgentLike } from "@core/session/index.ts";
 import type { HookSystem } from "@core/hooks.ts";
 import type { HotdogServerSocket } from "@extensions/websocket/server.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 const mockHooks = {
   notifyHooks: () => {},
@@ -79,7 +86,7 @@ export function createWsMockCore(): any {
       cleanup: async () => {},
     },
     createLlmClient: (overrides?: Record<string, unknown>) =>
-      new LlmClient({
+      new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
         baseUrl: "http://localhost:8000",
         apiKey: "test-key",
         stream: true,

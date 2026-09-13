@@ -1,16 +1,16 @@
 // Wire serialization: converts internal Messages to the OpenAI-compatible
 // chat-completion wire shape.
 //
-// Two formats exist because chat templates are per-model, even on the same
-// backend:
-//   - system-first (llama.cpp / Ollama style): only the first message(s) may
-//     be system; harness-injected user messages ride role:"user".
-//   - developer (OpenAI style): harness-injected user messages are sent as
-//     role:"developer".
-//
-// Wire role: internal role maps to the wire role, except role "harness"
-// (internal-only; no wire backend has a harness role), which rides
-// "developer" in developer format and "user" in system-first format.
+// Two per-model decisions meet here, both pluggable and both resolved by the
+// LlmClient into the ProtocolContext:
+//   - RoleMapping: how an internal role maps to a wire role. Role "harness"
+//     is internal-only (no wire backend has it), so a mapping decides where
+//     harness text rides -- "user" (llama.cpp / Ollama chat templates) or
+//     "developer" (OpenAI style). There is no core default to fall back to:
+//     serializing without a mapping is an error, like rendering a wrapper
+//     without a WireFormat.
+//   - WireFormat (extensions/wire-format.ts): the markup shape of harness
+//     wrapper parts. Wrapper rendering lives in context/wrappers.ts.
 //
 // Escape (marker mangling) happens HERE, at the wire boundary,
 // provenance-based:
@@ -19,11 +19,12 @@
 //   - `untrusted` content parts are mangled unconditionally (this is how
 //     harness messages embed model-generated payloads: raw in context and
 //     logs, mangled only on the wire);
-//   - wrapper parts (file-include, system-notice) render via
-//     context/wrappers.ts: the wrapper tag is verbatim, and the fields
-//     mangle per the type's trust spec (file-include: its file data is
-//     mangled; system-notice: verbatim). Wrapper parts are harness-
-//     generated only (see wrappers.ts);
+//   - wrapper parts render via context/wrappers.ts: the wrapper framing comes
+//     from the session's WireFormat, and the fields mangle per the type's
+//     trust spec (file-include: its file data; tool-result: everything the
+//     tool produced; system-notice: verbatim). Wrapper parts are
+//     harness-generated only (see wrappers.ts); meeting a wrapper with no
+//     WireFormat active throws.
 //   - source "user", "model", "tool" (and legacy messages with no source)
 //     are untrusted and always mangled.
 //
@@ -33,9 +34,11 @@
 // NOT a wire field -- image parts live inside `content`.
 
 import type { Message, ToolCall } from "../context/message.ts";
-import { isWrapperPart, renderWrapper } from "../context/wrappers.ts";
+import { isWrapperPart, renderWrapperForWire } from "../context/wrappers.ts";
+import type { WireFormat } from "../extensions/wire-format.ts";
+import type { RoleMapping } from "../extensions/role-mapping.ts";
 import type { MarkerMangler } from "../marker-mangler.ts";
-import type { WireFormatKind } from "../config/providers.ts";
+import { LlmError } from "../error.ts";
 
 export interface WireMessage {
   role: string;
@@ -45,14 +48,11 @@ export interface WireMessage {
   tool_call_id?: string;
 }
 
-export interface WireFormat {
-  serialize(messages: readonly Message[], mangler: MarkerMangler | null): WireMessage[];
-}
-
 function manglePart(
   part: Record<string, unknown>,
   mangler: MarkerMangler | null,
   trusted: boolean,
+  wireFormat: WireFormat | null,
 ): Record<string, unknown> {
   if (part.type === "untrusted") {
     // Untrusted payload marked at generation time. Mangled here and nowhere
@@ -61,10 +61,9 @@ function manglePart(
     return { type: "text", text: mangler ? (mangler.escape(text) ?? text) : text };
   }
   if (isWrapperPart(part)) {
-    // Semantic wrapper part: rendered here (the only render point) with the
-    // wrapper tag verbatim and the type's field trust applied. Emitted as a
-    // plain "text" part on the wire.
-    return { type: "text", text: renderWrapper(part, mangler) };
+    // Framing from the session's WireFormat, fields per the type's trust
+    // spec (wrappers.ts); emitted as a plain "text" part on the wire.
+    return { type: "text", text: renderWrapperForWire(part, mangler, wireFormat) };
   }
   if (part.type === "text" && typeof part.text === "string") {
     if (trusted || !mangler) return part;
@@ -77,13 +76,14 @@ function mangleContent(
   content: string | Array<Record<string, unknown>>,
   mangler: MarkerMangler | null,
   trusted: boolean,
+  wireFormat: WireFormat | null,
 ): string | Array<Record<string, unknown>> {
   if (typeof content === "string") {
     if (trusted || !mangler) return content;
     return mangler.escape(content) ?? content;
   }
   // Always map: a trusted message can still carry untrusted parts.
-  return content.map((part) => manglePart(part, mangler, trusted));
+  return content.map((part) => manglePart(part, mangler, trusted, wireFormat));
 }
 
 function mangleToolCalls(
@@ -100,18 +100,26 @@ function mangleToolCalls(
   });
 }
 
-function serializeMessage(msg: Message, mangler: MarkerMangler | null, developer: boolean): WireMessage {
+function serializeMessage(
+  msg: Message,
+  mangler: MarkerMangler | null,
+  wireFormat: WireFormat | null,
+  roleMapping: RoleMapping,
+): WireMessage {
   const role = msg.role ?? "";
   // Provenance decides trust: only system and harness content is exempt.
   // (Legacy messages without a source are untrusted and get mangled.)
   const trusted = msg.source === "system" || msg.source === "harness";
-  // Role mapping: role "harness" has no wire equivalent; developer format
-  // (OpenAI style) sends it as "developer", system-first as "user".
-  const wireRole = role === "harness" ? (developer ? "developer" : "user") : role;
+  const wireRole = roleMapping.wireRole(role);
 
   const wire: WireMessage = {
     role: wireRole,
-    content: mangleContent(msg._buildContent() as string | Array<Record<string, unknown>>, mangler, trusted),
+    content: mangleContent(
+      msg._buildContent() as string | Array<Record<string, unknown>>,
+      mangler,
+      trusted,
+      wireFormat,
+    ),
   };
   if (msg.reasoningContent) wire.reasoning_content = msg.reasoningContent;
   const toolCalls = mangleToolCalls(msg.toolCalls, trusted ? null : mangler);
@@ -120,18 +128,30 @@ function serializeMessage(msg: Message, mangler: MarkerMangler | null, developer
   return wire;
 }
 
-const systemFirstFormat: WireFormat = {
-  serialize(messages, mangler) {
-    return messages.map((m) => serializeMessage(m, mangler, false));
-  },
-};
-
-const developerFormat: WireFormat = {
-  serialize(messages, mangler) {
-    return messages.map((m) => serializeMessage(m, mangler, true));
-  },
-};
-
-export function wireFormatFor(modelConfig: { wireFormat?: WireFormatKind }): WireFormat {
-  return modelConfig.wireFormat === "developer" ? developerFormat : systemFirstFormat;
+/**
+ * Serialize internal messages to wire messages. `wireFormat` may be null
+ * until a wrapper part actually needs it (which then throws inside
+ * renderWrapperForWire); `roleMapping` is REQUIRED: the chain
+ * (model -> provider -> global, default layer core.config.json) must resolve
+ * one, and an unresolved mapping is a config error thrown here, never a
+ * silently invented convention.
+ */
+export function serializeMessages(
+  messages: readonly Message[],
+  mangler: MarkerMangler | null,
+  wireFormat: WireFormat | null,
+  roleMapping: RoleMapping | null,
+): WireMessage[] {
+  // An empty request needs no mapping: there is no role to map.
+  if (messages.length === 0) return [];
+  if (!roleMapping) {
+    // A config error, not a bug: classified so formatError() shows the
+    // actionable message without a stack (isExpectedError in error.ts).
+    throw new LlmError(
+      `No role mapping is active, so messages cannot be serialized for the model. ` +
+        `Set "modelRoleMapping" or enable a role-mapping extension (built-in: role-mapping-default).`,
+      "config",
+    );
+  }
+  return messages.map((m) => serializeMessage(m, mangler, wireFormat, roleMapping));
 }

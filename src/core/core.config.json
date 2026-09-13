@@ -62,17 +62,30 @@
       { "default": "----\n{}\n----" }
     ]
   },
-  "modelToolFormat": {
+  "modelWireFormat": {
     "type": "string",
     "cliFlag": {
-      "long": "--model-tool-format",
+      "long": "--model-wire-format",
       "type": "string",
-      "description": "Global default ToolFormat registry name for model-facing tool results (e.g. xml)"
+      "description": "Global default WireFormat registry name for model-facing tool results (e.g. xml)"
     },
     "layers": [
-      { "source": "cli", "key": "modelToolFormat" },
-      { "source": "config", "key": "modelToolFormat" },
+      { "source": "cli", "key": "modelWireFormat" },
+      { "source": "config", "key": "modelWireFormat" },
       { "default": "xml" }
+    ]
+  },
+  "modelRoleMapping": {
+    "type": "string",
+    "cliFlag": {
+      "long": "--model-role-mapping",
+      "type": "string",
+      "description": "Global default RoleMapping registry name for wire roles (e.g. system-first, developer)"
+    },
+    "layers": [
+      { "source": "cli", "key": "modelRoleMapping" },
+      { "source": "config", "key": "modelRoleMapping" },
+      { "default": "system-first" }
     ]
   },
   "chatTimeout": {

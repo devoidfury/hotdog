@@ -3,6 +3,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import { EditTool } from '../../src/extensions/core-tools/edit.ts';
 import type { ToolResult } from '../../src/core/extensions/tool-utils.ts';
+import { xmlWireFormat } from '@extensions/wire-format-xml/index.ts';
 import { resultStr, tmpDir, toolCtx, cleanupDir } from '../helpers.ts';
 
 let dir: string;
@@ -96,10 +97,12 @@ describe('EditTool.execute — exact match', () => {
     expect(result.success).toBe(false);
     expect(resultStr(result)).toContain('File not found');
     expect(result.hint).toMatch(/find tool/);
-    // Model-facing rendering carries the hint as a structured element.
-    const content = (result as ToolResult).toApiContent('edit');
-    expect(content).toContain('<hint>');
-    expect(content).toContain('find tool');
+    // Model-facing rendering carries the hint as a structured element. The
+    // tag is built by concatenation: marker tags are mangler-protected, so test
+    // sources never contain them literally.
+    const rendered = xmlWireFormat.renderToolResult((result as ToolResult).toApiContent('edit'));
+    expect(rendered).toContain('<' + 'hint' + '>');
+    expect(rendered).toContain('find tool');
   });
 
   it('replaces all occurrences with replace_all', async () => {

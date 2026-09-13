@@ -8,22 +8,17 @@ import {
 import { logger } from "@utils/logger.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
-/**
- * Wire format for chat requests (per-model: chat templates are per-model,
- * even on the same backend). Defaults to "system-first".
- */
-export type WireFormatKind = "system-first" | "developer";
-
 export interface ModelConfig {
   name: string;
   temperature: number | null;
   contextLimit: number;
   reasoningEffort?: string;
-  wireFormat?: WireFormatKind;
+  /** RoleMapping registry name (e.g. "system-first", "developer"); provider -> global default. */
+  roleMapping?: string;
   /** LlmProtocol registry name (e.g. "openai"). */
   protocol?: string;
-  /** ToolFormat registry name (e.g. "xml"); falls back to provider, then global default. */
-  toolFormat?: string;
+  /** WireFormat registry name (e.g. "xml"); falls back to provider, then global default. */
+  wireFormat?: string;
   /** Server chat-template control tokens to mangle in message content. */
   controlTokens?: string[];
   tags: string[];
@@ -46,9 +41,10 @@ export interface ProviderModelEntry {
   contextLimit?: number;
   reasoning_effort?: string;
   reasoningEffort?: string;
-  wireFormat?: WireFormatKind;
+  /** RoleMapping registry name (e.g. "system-first", "developer"); provider -> global default. */
+  roleMapping?: string;
   protocol?: string;
-  toolFormat?: string;
+  wireFormat?: string;
   controlTokens?: string[];
   tags?: string[];
   capabilities?: {
@@ -68,9 +64,10 @@ export interface ProviderDef {
   defaultModel?: string;
   temperature?: number;
   contextLimit?: number;
-  wireFormat?: WireFormatKind;
+  /** RoleMapping registry name (e.g. "system-first", "developer"); provider -> global default. */
+  roleMapping?: string;
   protocol?: string;
-  toolFormat?: string;
+  wireFormat?: string;
   controlTokens?: string[];
   tags?: string[];
 }
@@ -207,9 +204,9 @@ export async function buildModelRegistry(
         temperature: modelEntry.temperature ?? null,
         contextLimit: modelEntry.contextLimit || contextLimit,
         reasoningEffort: modelEntry.reasoning_effort || modelEntry.reasoningEffort || undefined,
-        wireFormat: modelEntry.wireFormat ?? provider.wireFormat,
+        roleMapping: modelEntry.roleMapping ?? provider.roleMapping,
         protocol: modelEntry.protocol ?? provider.protocol,
-        toolFormat: modelEntry.toolFormat ?? provider.toolFormat,
+        wireFormat: modelEntry.wireFormat ?? provider.wireFormat,
         controlTokens: modelEntry.controlTokens ?? provider.controlTokens,
         tags: modelEntry.tags || [],
         capabilities: modelEntry.capabilities || {},
@@ -221,9 +218,9 @@ export async function buildModelRegistry(
         name: `${provider.name}/${provider.defaultModel}`,
         temperature: provider.temperature ?? null,
         contextLimit: provider.contextLimit || contextLimit,
-        wireFormat: provider.wireFormat,
+        roleMapping: provider.roleMapping,
         protocol: provider.protocol,
-        toolFormat: provider.toolFormat,
+        wireFormat: provider.wireFormat,
         controlTokens: provider.controlTokens,
         tags: provider.tags || [],
         capabilities: {},
@@ -283,16 +280,16 @@ export function resolveModelConfig(
   reasoningEffort: string | undefined,
 ): ModelConfig {
   const entry = findModelEntry(modelName, modelRegistry);
-  const wireFormat = (entry?.wireFormat as WireFormatKind | undefined) ?? undefined;
+  const roleMapping = (entry?.roleMapping as string | undefined) ?? undefined;
   const fromRegistry: ModelConfig = entry
     ? {
         name: entry.name || modelName,
         temperature: entry.temperature ?? null,
         contextLimit: entry.contextLimit ?? contextLimit,
         reasoningEffort: entry.reasoningEffort,
-        wireFormat,
+        roleMapping,
         protocol: entry.protocol as string | undefined,
-        toolFormat: entry.toolFormat as string | undefined,
+        wireFormat: entry.wireFormat as string | undefined,
         controlTokens: entry.controlTokens as string[] | undefined,
         tags: (entry.tags as string[]) || [],
       }
@@ -301,7 +298,7 @@ export function resolveModelConfig(
         temperature: null,
         contextLimit,
         reasoningEffort: undefined,
-        wireFormat,
+        roleMapping,
         tags: [],
       };
 

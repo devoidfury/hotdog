@@ -15,11 +15,24 @@ import type { ModelConfig, ProviderDef } from "../config/providers.ts";
 import type { ToolDef } from "../extensions/tool-registry.ts";
 import type { StreamEvent } from "./client.ts";
 import type { MarkerMangler } from "../marker-mangler.ts";
+import type { WireFormat } from "../extensions/wire-format.ts";
+import type { RoleMapping } from "../extensions/role-mapping.ts";
 
 /** Context passed to protocol methods at call time. */
 export interface ProtocolContext {
   /** The session's marker mangler (null if disabled). */
   mangler: MarkerMangler | null;
+  /**
+   * The WireFormat resolved for this request: the markup for wrapper parts
+   * (serialize.ts). Null when nothing resolved -- requests that carry no
+   * wrapper part are fine, one that does throws at the boundary.
+   */
+  wireFormat: WireFormat | null;
+  /**
+   * The RoleMapping resolved for this request (serialize.ts): where internal
+   * roles ride on the wire. REQUIRED to serialize any message -- null throws.
+   */
+  roleMapping: RoleMapping | null;
   /** Provider base URL (without trailing slash). */
   baseUrl: string;
   /** Provider API key (null if none). */
@@ -93,7 +106,7 @@ export function createLlmProtocolRegistry(): LlmProtocolRegistry {
 }
 
 /**
- * Resolve the LlmProtocol id for a model, mirroring the wireFormat/toolFormat
+ * Resolve the LlmProtocol id for a model, mirroring the roleMapping/wireFormat
  * chain: model-level -> provider-level -> default ("openai"). The model entry
  * is the resolved ModelConfig (registry lookup already applied).
  */

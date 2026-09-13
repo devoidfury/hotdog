@@ -1,0 +1,7 @@
+{
+  "name": "role-mapping-default",
+  "provides": ["role:mappings"],
+  "loadOrder": 1,
+  "description": "system-first and developer wire-role mappings (built-in defaults)",
+  "autoload": true
+}

@@ -282,7 +282,7 @@ export class BashTool {
         // Which cut happened does not matter to the reader; that one happened
         // does. Both are otherwise invisible until the marker at the END of a
         // 600-line block, by which time the model has already paid for the
-        // block. `truncated` is in SHORT_META_KEYS (tool-format-xml), so this
+        // block. `truncated` is in SHORT_META_KEYS (wire-format-xml), so this
         // arrives as a header attribute on the result element instead.
         const outputTruncated =
           stdoutTruncated || stderrTruncated || truncated !== output;

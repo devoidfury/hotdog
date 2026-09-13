@@ -11,7 +11,7 @@ import {
   type FeedResult,
   type MdDocument,
 } from "@utils/md-parser.ts";
-import { contentToText } from "@core/context/message.ts";
+import { toolContentText, wrapperContentText } from "@utils/tool-content.ts";
 
 // Debug instrumentation, enabled with ?debug=1 in the URL.
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
@@ -53,7 +53,7 @@ interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
 
 // Log entry as returned by the server's logViewed message.
-// `content` may be raw content parts (harness messages); flatten via contentToText().
+// `content` may be raw content parts (harness messages); flatten via wrapperContentText().
 interface LogEntry {
   source: string;
   content: string | Array<Record<string, unknown>>;
@@ -732,8 +732,18 @@ export function createMessageList(
     thinkingBlockCount = 0;
   }
 
-  /** Best-effort tool name from a tool_result entry: JSON "name", then "tool: ..." prefix. */
-  function extractToolNameFromEntry(content: string): string {
+  /** Best-effort tool name from a tool_result entry: stored part, then JSON "name", then "tool: ..." prefix. */
+  function extractToolNameFromEntry(entry: LogEntry | string): string {
+    // A stored tool-result part names its own tool.
+    if (typeof entry !== "string" && Array.isArray(entry.content)) {
+      for (const part of entry.content) {
+        if (part && typeof part === "object" && (part as Record<string, unknown>).type === "tool-result") {
+          const tool = (part as Record<string, unknown>).tool;
+          if (typeof tool === "string" && tool) return tool;
+        }
+      }
+    }
+    const content = typeof entry === "string" ? entry : toolContentText(entry.content);
     try {
       const parsed = JSON.parse(content);
       if (parsed && typeof parsed === "object" && "name" in parsed) {
@@ -754,12 +764,15 @@ export function createMessageList(
   function renderLogEntries(entries: LogEntry[]): void {
     for (const entry of entries) {
       // content may be raw parts (harness messages); flatten once per entry.
+      const isTool = entry.source === "tool_result";
       const content =
         entry.content == null
           ? ""
           : typeof entry.content === "string"
             ? entry.content
-            : contentToText(entry.content);
+            : isTool
+              ? toolContentText(entry.content)
+              : wrapperContentText(entry.content);
       switch (entry.source) {
         case "input":
         case "prompt":
@@ -787,7 +800,11 @@ export function createMessageList(
           break;
         }
         case "tool_result":
-          handleToolResult({ name: extractToolNameFromEntry(content), output: content });
+          handleToolResult({
+            name:
+              (entry as { tool_name?: string | null }).tool_name || extractToolNameFromEntry(entry),
+            output: content,
+          });
           break;
         case "compaction":
           handleCompacting({ message: content });

@@ -10,7 +10,9 @@ import type { ProtocolContext } from "@core/llm-client/protocol.ts";
 import type { StreamEvent } from "@core/llm-client/client.ts";
 
 function ctx(mangler: MarkerMangler | null = null): ProtocolContext {
-  return { mangler, baseUrl: "http://p.example", apiKey: "k", sessionId: "s1" };
+  // No WireFormat: these tests parse streams and build bodies with no
+  // tool-result parts, which is exactly what a null format allows.
+  return { mangler, wireFormat: null, roleMapping: null, baseUrl: "http://p.example", apiKey: "k", sessionId: "s1" };
 }
 
 function sseResponse(body: string): Response {

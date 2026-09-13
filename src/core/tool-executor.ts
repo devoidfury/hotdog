@@ -7,12 +7,19 @@ import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
 import { Workspace } from "@utils/workspace.ts";
-import type { ToolFormatRegistry } from "./extensions/tool-format.ts";
+import type { ToolResultContent } from "./context/wrappers.ts";
 
 export interface ToolResult {
   toolName: string;
   input: string;
-  result: string;
+  /**
+   * What went into the tool message's `content`: a tool-result PART (never
+   * model-facing text -- the session's WireFormat shapes it when the message
+   * reaches the wire) or plain harness text for the paths that never had a
+   * wrapper (unknown tool, validation error, blocked gate message, failure in
+   * the executor itself).
+   */
+  content: ToolResultContent;
   toolCallId: string;
   /** When true, signals the agent run loop to stop after this batch of tools. */
   stopLoop?: boolean;
@@ -40,23 +47,17 @@ export class ToolExecutor {
   }
 
   /**
-   * @param toolFormatName - ToolFormat registry name resolved by the caller
-   *   (the agent loop resolves it per model); falls back to the seam default
-   *   when omitted.
-   * @param toolFormatRegistry - The session's ToolFormat registry; passed
-   *   through so format resolution never depends on process-global state.
-   */
-  /**
    * @param availableToolNames - Names of the tools the model was actually
    *   offered this iteration (the agent passes its request's tool defs).
    *   Omitted only by standalone callers: availability is then resolved
    *   once from the agent's defs. Either way it is resolved ONCE per batch,
    *   not per tool call.
+   *
+   * The executor knows nothing about WireFormat: it stores a tool-result PART
+   * in the message, and the request's WireFormat shapes it at the wire.
    */
   async execute(
     toolCalls: ToolCall[],
-    toolFormatName?: string,
-    toolFormatRegistry?: ToolFormatRegistry | null,
     availableToolNames?: string[],
   ): Promise<{ outcome: "continue" | "return"; toolResults: ToolResult[] }> {
     const toolResults: ToolResult[] = [];
@@ -68,7 +69,7 @@ export class ToolExecutor {
     for (const tc of toolCalls) {
       let result: ToolResult;
       try {
-        result = await this.executeSingle(tc, available, toolFormatName, toolFormatRegistry);
+        result = await this.executeSingle(tc, available);
       } catch (e: unknown) {
         const toolName = tc.function?.name || "(unknown)";
         const toolCallId = tc.id || "";
@@ -87,12 +88,7 @@ export class ToolExecutor {
     return { outcome: "continue", toolResults };
   }
 
-  async executeSingle(
-    tc: ToolCall,
-    available: Set<string>,
-    toolFormatName?: string,
-    toolFormatRegistry?: ToolFormatRegistry | null,
-  ): Promise<ToolResult> {
+  async executeSingle(tc: ToolCall, available: Set<string>): Promise<ToolResult> {
     const toolName = tc.function?.name;
     const toolCallId = tc.id;
     let input = tc.function?.arguments || "{}";
@@ -104,7 +100,7 @@ export class ToolExecutor {
       this.#deps.emitOutput("tool_result", {
         toolName: "(invalid)",
         input,
-        result,
+        content: result,
         toolCallId,
       });
       const msg = new Message({
@@ -114,7 +110,7 @@ export class ToolExecutor {
         source: "tool",
       });
       this.#deps.agent.addMessage(msg);
-      return { toolName: "(invalid)", input, result, toolCallId: toolCallId || "" };
+      return { toolName: "(invalid)", input, content: result, toolCallId: toolCallId || "" };
     }
 
     if (!available.has(toolName)) {
@@ -154,14 +150,11 @@ export class ToolExecutor {
       toolCtx,
     }, { failOnError: true });
     if (callResult.lastResult?.action === "block") {
-      const blockedResult = formatToolResult(
-        callResult.lastResult.result,
-        toolName,
-        false,
-        toolFormatName,
-        toolFormatRegistry,
-      );
-      return this.#writeToolResult(toolName, input, blockedResult, toolCallId);
+      // A blocked call still answers the model with a tool result (the wrapper
+      // says status="error"), so the gate's message is part data like any
+      // other result -- the request's WireFormat shapes it at the wire.
+      const blockedPart = formatToolResult(callResult.lastResult.result, toolName, false);
+      return this.#writeToolResult(toolName, input, [blockedPart], toolCallId);
     }
     if (callResult.lastResult?.action === "modify" && callResult.lastResult.input !== undefined) {
       input = callResult.lastResult.input;
@@ -217,7 +210,7 @@ export class ToolExecutor {
 
         if (e instanceof AssistantRetryableError) {
           result = `Error executing tool ${toolName}: ${e.message}`;
-          // Route the hint through the ToolFormat seam instead of inlining
+          // Route the hint through the WireFormat seam instead of inlining
           // it in the error text: thrown errors and returned
           // ToolResult.err().withHint() then render identically for the model.
           hint = e.hint;
@@ -251,9 +244,12 @@ export class ToolExecutor {
     }
     const images = (result as { images?: unknown })?.images ?? null;
 
-    const resultStr = formatToolResult(result, toolName, success, toolFormatName, toolFormatRegistry, hint);
+    // The tool's answer is stored as a PART, never as model-facing text: the
+    // request's WireFormat shapes it when this message reaches the wire, and
+    // everything at rest (context, log, hooks, UI) sees the fields.
+    const content: ToolResultContent = [formatToolResult(result, toolName, success, hint)];
     const durationMs = Date.now() - t0;
-    const resultSize = typeof resultStr === "string" ? resultStr.length : 0;
+    const resultSize = toolContentSize(content);
     hooks.notifyHooks(HOOKS.TOOL_METRICS, {
       toolName,
       toolCallId,
@@ -267,7 +263,7 @@ export class ToolExecutor {
     return this.#writeToolResult(
       toolName,
       input,
-      resultStr,
+      content,
       toolCallId,
       images as ImageAttachment[] | undefined,
       stopLoop,
@@ -300,15 +296,17 @@ export class ToolExecutor {
   async #writeToolResult(
     toolName: string,
     input: string,
-    result: string,
+    content: ToolResultContent,
     toolCallId: string,
     images?: ImageAttachment[],
     stopLoop = false,
   ): Promise<ToolResult> {
-    this.#deps.emitOutput("tool_result", { toolName, input, result, toolCallId });
+    // Content goes out as-is: UI handlers decide how (or whether) to show a
+    // tool result; core prescribes no rendering for them.
+    this.#deps.emitOutput("tool_result", { toolName, input, content, toolCallId });
     const msg = new Message({
       role: "tool",
-      content: result,
+      content: content as string | Array<unknown>,
       toolCallId,
       images: images as ImageAttachment[] | undefined,
       source: "tool",
@@ -316,12 +314,21 @@ export class ToolExecutor {
     // Go through agent.addMessage() so the CONTEXT_MESSAGE hook fires and
     // extensions (session log) record the tool result.
     this.#deps.agent.addMessage(msg);
-    return { toolName, input, result, toolCallId, stopLoop };
+    return { toolName, input, content, toolCallId, stopLoop };
   }
 }
 
 export function createToolExecutor(deps: ToolExecutorDeps): ToolExecutor {
   return new ToolExecutor(deps);
+}
+
+/** Size of a tool result for TOOL_METRICS: the payload, not any markup. */
+function toolContentSize(content: ToolResultContent): number {
+  if (typeof content === "string") return content.length;
+  return content.reduce(
+    (total, part) => total + part.output.length + (part.error?.length ?? 0) + (part.hint?.length ?? 0),
+    0,
+  );
 }
 
 /** Case- and separator-insensitive key for fuzzy tool-name matching. */

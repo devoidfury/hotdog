@@ -10,17 +10,25 @@ import {
   MarkerMangler,
   CORE_PROTECTED_PREFIXES,
 } from "@core/marker-mangler.ts";
-import { xmlToolFormat } from "@core/extensions/tool-format-xml.ts";
+import { xmlWireFormat } from "@extensions/wire-format-xml/index.ts";
+import { createWireFormatRegistry, type WireFormat } from "@core/extensions/wire-format.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { Message } from "@core/context/message.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "prov/model", temperature: null, contextLimit: 128000, tags: [], ...overrides };
 }
 
 // The default session union: core prefixes + the built-in XML format markers.
-const DEFAULT_UNION = [...CORE_PROTECTED_PREFIXES, ...xmlToolFormat.markers];
+const DEFAULT_UNION = [...CORE_PROTECTED_PREFIXES, ...xmlWireFormat.markers];
 
 describe("characterization: default-config mangler union", () => {
   it("pins the exact protected set for the default config", () => {
@@ -28,9 +36,9 @@ describe("characterization: default-config mangler union", () => {
     expect(mangler.protectedPrefixes().sort()).toEqual([...DEFAULT_UNION].sort());
   });
 
-  it("core list excludes format-owned names; xml markers are exactly tool/output/error/hint", () => {
-    expect(xmlToolFormat.markers).toEqual(["tool", "output", "error", "hint"]);
-    for (const m of xmlToolFormat.markers) {
+  it("core list excludes format-owned names; xml markers are the wrappers the extension renders", () => {
+    expect(xmlWireFormat.markers).toEqual(["tool", "output", "error", "hint", "file-include", "system-notice"]);
+    for (const m of xmlWireFormat.markers) {
       expect(CORE_PROTECTED_PREFIXES).not.toContain(m);
     }
   });
@@ -89,7 +97,7 @@ describe("controlTokens: untrusted content mangled at the wire, raw context clea
     // surface: an untrusted closing tag can prematurely close a block.
     const FAKE_TOKEN = "think";
 
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 60,
       maxRetries: 3,
       markerMangler: new MarkerMangler(DEFAULT_UNION),
@@ -120,7 +128,7 @@ describe("controlTokens: untrusted content mangled at the wire, raw context clea
   });
 
   it("grows the mangler on model switch when the token set grows", () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 60,
       maxRetries: 3,
       markerMangler: new MarkerMangler(DEFAULT_UNION),
@@ -140,5 +148,38 @@ describe("controlTokens: untrusted content mangled at the wire, raw context clea
     // The new token is mangled now.
     const escaped = client.markerMangler!.escape("a <reasoning>b</reasoning>");
     expect(escaped).not.toContain("<reasoning>");
+  });
+
+  it("the request path grows the union itself: model format markers + controlTokens", () => {
+    // Regression pin: buildChatRequest calls ensureManglerCovers, so a
+    // model-level wireFormat override and per-model controlTokens never
+    // reach the wire unprotected. No explicit ensureManglerCovers here.
+    const toyRowTag = "toy-row";
+    const toyFormat: WireFormat = {
+      id: "toy",
+      markers: [toyRowTag],
+      renderToolResult: () => "r",
+      renderFileInclude: () => "f",
+      renderSystemNotice: () => "n",
+    };
+    const wireReg = createWireFormatRegistry();
+    wireReg.register(toyFormat);
+    const client = new LlmClient({
+      roleMapping: "system-first",
+      roleMappingRegistry: testRoleReg,
+      chatTimeoutSecs: 60,
+      maxRetries: 3,
+      markerMangler: new MarkerMangler(CORE_PROTECTED_PREFIXES),
+      wireFormatRegistry: wireReg,
+    });
+    client.buildChatRequest(
+      [new Message({ role: "user", content: "hi", source: "user" })],
+      mc({ wireFormat: "toy", controlTokens: ["no_reasoning"] }),
+      null,
+      false,
+    );
+    const prefixes = client.markerMangler!.protectedPrefixes();
+    expect(prefixes).toContain(toyRowTag);
+    expect(prefixes).toContain("no_reasoning");
   });
 });

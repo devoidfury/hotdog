@@ -17,6 +17,13 @@ import { HOOKS } from "@core/hooks.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { runInteractiveSession } from "@extensions/ui-interactive-cli/index.ts";
 import { runWithSuppressedStdout } from "../test-helpers.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 
 // ── SEND_TO_ASSISTANT_SUFFIX_RE ────────────────────────────────────────────
@@ -623,7 +630,7 @@ function createMockCore(overrides: Record<string, unknown> = {}): never {
       request: async () => [],
     },
     createLlmClient: (o?: Record<string, unknown>) =>
-      new LlmClient({ baseUrl: "http://test", apiKey: "test-key", stream: true,
+      new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://test", apiKey: "test-key", stream: true,
         chatTimeoutSecs: 60, maxRetries: 3, ...o }),
     ...rest,
   } as never;

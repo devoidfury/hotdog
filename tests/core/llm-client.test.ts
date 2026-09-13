@@ -3,6 +3,13 @@ import { LlmClient } from "@core/llm-client/client.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
 import { LlmError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 /** Build a valid ModelConfig (requires contextLimit + tags now). */
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
@@ -11,7 +18,7 @@ function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
 
 describe("LlmClient constructor", () => {
   it("creates with defaults", () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 600,
       maxRetries: 12,
     });
@@ -22,7 +29,7 @@ describe("LlmClient constructor", () => {
   });
 
   it("accepts custom options", () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       baseUrl: "http://custom.com",
       apiKey: "test-key",
       stream: false,
@@ -41,7 +48,7 @@ describe("LlmClient constructor", () => {
 
 describe("LlmClient.resolveProviderSettings", () => {
   it("falls back to defaults when provider not found", () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       baseUrl: "http://default.com",
       apiKey: "default-key",
       chatTimeoutSecs: 600,
@@ -54,7 +61,7 @@ describe("LlmClient.resolveProviderSettings", () => {
   });
 
   it("uses provider settings when found", () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       baseUrl: "http://default.com",
       apiKey: "default-key",
       chatTimeoutSecs: 600,
@@ -70,7 +77,7 @@ describe("LlmClient.resolveProviderSettings", () => {
   });
 
   it("uses provider URL but falls back to client apiKey", () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       baseUrl: "http://default.com",
       apiKey: "default-key",
       chatTimeoutSecs: 600,
@@ -85,7 +92,7 @@ describe("LlmClient.resolveProviderSettings", () => {
 
 describe("LlmClient.buildChatRequest", () => {
   it("builds request with all fields", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const messages = [new Message({ role: "user", content: "Hello" })];
     const request = client.buildChatRequest(
       messages,
@@ -101,7 +108,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("strips provider prefix from model name", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest(
       [],
       mc({ name: "anthropic/claude-sonnet-4-20250514" }),
@@ -111,7 +118,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("disables stream when requested", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest(
       [],
       mc(),
@@ -123,7 +130,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("handles Message objects with tool_calls", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const msg = new Message({
       role: "assistant",
       content: "I will run a command",
@@ -141,7 +148,7 @@ describe("LlmClient.buildChatRequest", () => {
   it("escapes tool_calls function name and arguments", () => {
     const MARKER = "m_pbc8misbbcxouboa";
     const mangler = { escape: (s: string) => s.replace(new RegExp(MARKER, "g"), "m_aliased"), unescape: (s: string) => s, addPrefixes: () => {} } as any;
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
     const argsJson = JSON.stringify({ path: `<${MARKER}>test</${MARKER}>` });
     const msg = new Message({
       role: "assistant",
@@ -169,7 +176,7 @@ describe("LlmClient.buildChatRequest", () => {
 
 
   it("handles Message objects with toolCallId", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const msg = new Message({
       role: "tool",
       content: "output",
@@ -185,7 +192,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("does not include tools fields when no tools provided", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest([], mc(), []);
     expect(request.tools).toBeUndefined();
     expect(request.tool_choice).toBeUndefined();
@@ -193,7 +200,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("does not include temperature when null or undefined", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const req1 = client.buildChatRequest([], mc(), null);
     const req2 = client.buildChatRequest([], mc({ temperature: undefined }), null);
     expect(req1.temperature).toBeUndefined();
@@ -201,7 +208,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("includes temperature 0", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest([], mc({ temperature: 0 }), null);
     expect(request.temperature).toBe(0);
   });
@@ -209,13 +216,13 @@ describe("LlmClient.buildChatRequest", () => {
 
 describe("LlmClient.buildChatRequest reasoning_effort", () => {
   it("includes reasoning_effort when present in modelConfig", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest([], mc({ reasoningEffort: "high" }), null);
     expect(request.reasoning_effort).toBe("high");
   });
 
   it("omits reasoning_effort when undefined", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const req1 = client.buildChatRequest([], mc(), null);
     const req2 = client.buildChatRequest([], mc({ reasoningEffort: undefined }), null);
     expect(req1.reasoning_effort).toBeUndefined();
@@ -223,7 +230,7 @@ describe("LlmClient.buildChatRequest reasoning_effort", () => {
   });
 
   it("supports all reasoning effort values", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     for (const v of ["none", "minimal", "low", "high", "xhigh", "max"]) {
       const request = client.buildChatRequest([], mc({ reasoningEffort: v }), null);
       expect(request.reasoning_effort).toBe(v);
@@ -234,7 +241,7 @@ describe("LlmClient.buildChatRequest reasoning_effort", () => {
 describe("LlmClient markerMangler", () => {
   it("uses provided markerMangler", () => {
     const mangler = { escape: (s: string) => s, unescape: (s: string) => s } as any;
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 600,
       maxRetries: 12,
       markerMangler: mangler,
@@ -243,12 +250,12 @@ describe("LlmClient markerMangler", () => {
   });
 
   it("creates default markerMangler when not provided", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12 });
     expect(client.markerMangler).not.toBeNull();
   });
 
   it("uses null markerMangler when explicitly set", () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 600,
       maxRetries: 12,
       markerMangler: null,
@@ -261,7 +268,7 @@ describe("LlmClient array content escaping", () => {
   it("escapes array content parts with type text", () => {
     const MARKER = "m_7mqcm4tufjt4sujb-call";
     const mangler = { escape: (s: string) => s.replace(new RegExp(MARKER, "g"), "m_aliased"), unescape: (s: string) => s, addPrefixes: () => {} } as any;
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
     const toolCallTag = MARKER.slice(2);
     const msg = new Message({
       role: "user",
@@ -361,7 +368,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("includes the endpoint when the connection fails", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => {
       throw new Error("Unable to connect. Is the computer able to access the url?");
@@ -390,7 +397,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("sends request with correct headers and body", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     let capturedUrl: string | null = null;
     let capturedOptions: RequestInit | null = null;
@@ -412,7 +419,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("includes session affinity header when sessionId provided", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     let capturedOptions: RequestInit | null = null;
 
@@ -427,7 +434,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("uses client sessionId when no explicit sessionId", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", sessionId: "client-session" });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", sessionId: "client-session" });
 
     let capturedOptions: RequestInit | null = null;
 
@@ -442,7 +449,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("throws LlmError.Api on non-OK response", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => ({
       ok: false,
@@ -457,7 +464,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("attaches a parsed Retry-After hint to the api error", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () =>
       new Response("slow down", { status: 429, headers: { "retry-after": "3" } })) as unknown as typeof fetch;
@@ -475,7 +482,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("leaves retryAfterMs unset when the header is absent or malformed", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     for (const headers of [undefined, { "retry-after": "later" }]) {
       globalThis.fetch = (async () =>
@@ -493,7 +500,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("caps oversized error bodies and keeps the status prefix", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => ({
       ok: false,
@@ -518,7 +525,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("truncates a mid-size body in the message even below the read cap", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     // 5KB body: under the 200K read cap (passes through reading untouched)
     // but over the 2K quote cap.
@@ -544,7 +551,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("quotes a small error body in full with no truncation marker", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => ({
       ok: false,
@@ -565,7 +572,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("passes abort signal to fetch", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     let capturedSignal: AbortSignal | null | undefined;
 
@@ -581,7 +588,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("translates raw network failures into LlmError.Http", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => {
       throw new TypeError("fetch failed");
@@ -593,7 +600,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("translates aborted shared signal into LlmError.Cancelled", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async (_: string, options: RequestInit) => {
       return await new Promise<Response>((_resolve, reject) => {
@@ -613,7 +620,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("translates per-attempt timeout into LlmError.Timeout", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async (_: string, options: RequestInit) => {
       return await new Promise<Response>((_resolve, reject) => {

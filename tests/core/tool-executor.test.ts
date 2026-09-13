@@ -6,14 +6,31 @@ import { createToolExecutor, type ToolExecutorDeps } from '../../src/core/tool-e
 import type { Workspace } from '../../src/utils/workspace.ts';
 import { tmpDir, cleanupDir } from '../mocks/io.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
-import { createHooks } from '../../src/core/hooks.ts';
+import { createHooks, HOOKS } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
 import { TransientError, AssistantRetryableError } from '../../src/core/error.ts';
 import type { Tool, ToolDef } from '../../src/core/extensions/tool-registry.ts';
-import { createToolFormatRegistry } from '../../src/core/extensions/tool-format.ts';
-import { xmlToolFormat } from '../../src/core/extensions/tool-format-xml.ts';
+import { xmlWireFormat } from '@extensions/wire-format-xml/index.ts';
+import { toolContentText } from '@utils/tool-content.ts';
+import { renderWrapperForWire, type ToolResultPart } from '../../src/core/context/wrappers.ts';
+import { MarkerMangler, CORE_PROTECTED_PREFIXES } from '../../src/core/marker-mangler.ts';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** The tool-result part the executor stored for a result (never a string). */
+function resultPart(content: unknown): ToolResultPart {
+  const parts = content as ToolResultPart[];
+  expect(Array.isArray(parts)).toBe(true);
+  const part = parts[0];
+  expect(part?.type).toBe('tool-result');
+  return part as ToolResultPart;
+}
+
+/** Wire text for a part: the built-in format plus a session mangler, as serialize.ts does. */
+function toWire(part: ToolResultPart): string {
+  const mangler = new MarkerMangler([...CORE_PROTECTED_PREFIXES, ...xmlWireFormat.markers]);
+  return renderWrapperForWire(part, mangler, xmlWireFormat);
+}
 
 /**
  * Create an inline test tool with the required Tool interface methods.
@@ -254,7 +271,7 @@ describe('ToolExecutor', () => {
         function: { name: 'blocked_tool', arguments: '{}' },
       }]);
 
-      expect(result.toolResults[0]!.result).toContain('not available');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('not available');
     });
   });
 
@@ -273,7 +290,7 @@ describe('ToolExecutor', () => {
         function: { name: 'nonexistent_tool', arguments: '{}' },
       }]);
 
-      expect(result.toolResults[0]!.result).toContain('not available');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('not available');
     });
 
     it('suggests a case/separator near-match from the offered tools', async () => {
@@ -287,12 +304,10 @@ describe('ToolExecutor', () => {
           type: 'function',
           function: { name: 'Read', arguments: '{}' },
         }],
-        undefined,
-        null,
         ['read', 'edit'],
       );
 
-      const msg = result.toolResults[0]!.result;
+      const msg = toolContentText(result.toolResults[0]!.content);
       expect(msg).toContain('not available');
       expect(msg).toContain('Did you mean: read?');
     });
@@ -307,12 +322,10 @@ describe('ToolExecutor', () => {
           type: 'function',
           function: { name: 'search_files', arguments: '{}' },
         }],
-        undefined,
-        null,
         ['search_files_content', 'read'],
       );
 
-      const msg = result.toolResults[0]!.result;
+      const msg = toolContentText(result.toolResults[0]!.content);
       expect(msg).toContain('not available');
       expect(msg).toContain('search_files_content');
     });
@@ -327,12 +340,10 @@ describe('ToolExecutor', () => {
           type: 'function',
           function: { name: 'quantum_flux', arguments: '{}' },
         }],
-        undefined,
-        null,
         ['read', 'edit'],
       );
 
-      const msg = result.toolResults[0]!.result;
+      const msg = toolContentText(result.toolResults[0]!.content);
       expect(msg).toContain('not available');
       expect(msg).not.toContain('Did you mean');
     });
@@ -349,7 +360,7 @@ describe('ToolExecutor', () => {
         function: { name: '', arguments: '{}' },
       }]);
 
-      expect(result.toolResults[0]!.result).toContain('missing a valid name');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('missing a valid name');
     });
   });
 
@@ -507,7 +518,7 @@ describe('ToolExecutor', () => {
       const call = [{ id: 'c1', type: 'function' as const, function: { name: 'approved', arguments: '{}' } }];
       const first = await executor.execute(call);
       expect(executed).toBe(1);
-      expect(first.toolResults[0]?.result).toContain('ok');
+      expect(toolContentText(first.toolResults[0]?.content)).toContain('ok');
 
       // Now make the human say no: the tool must not run again.
       const denying = {
@@ -519,7 +530,7 @@ describe('ToolExecutor', () => {
       });
       const second = await executor.execute(call);
       expect(executed).toBe(1);
-      expect(second.toolResults[0]?.result).toContain('blocked by userGate');
+      expect(toolContentText(second.toolResults[0]?.content)).toContain('blocked by userGate');
     });
 
     it('still builds the tool context when the TOOL_CALL gate blocks', async () => {
@@ -543,7 +554,7 @@ describe('ToolExecutor', () => {
 
       expect(contextFired).toBe(1);
       expect(toolExecuted).toBe(false);
-      expect(result.toolResults[0]?.result).toContain('denied');
+      expect(toolContentText(result.toolResults[0]?.content)).toContain('denied');
     });
 
     it('should allow TOOL_CALL gate to block execution', async () => {
@@ -568,7 +579,7 @@ describe('ToolExecutor', () => {
       }]);
 
       expect(toolExecuted).toBe(false);
-      expect(result.toolResults[0]!.result).toContain('blocked by gate');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('blocked by gate');
     });
 
     it('should allow TOOL_CALL gate to modify input', async () => {
@@ -661,13 +672,11 @@ describe('ToolExecutor', () => {
       const executor = createToolExecutor(deps);
       const result = await executor.execute(
         [{ id: 'c1', type: 'function', function: { name: 'hidden_tool', arguments: '{}' } }],
-        undefined,
-        null,
         ['other_tool'], // what the model actually saw, not the agent's full defs
       );
 
       expect(defsCalls).toBe(0);
-      expect(result.toolResults[0]!.result).toContain('not available');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('not available');
     });
   });
 
@@ -685,11 +694,11 @@ describe('ToolExecutor', () => {
         function: { name: 'failing_tool', arguments: '{}' },
       }]);
 
-      expect(result.toolResults[0]!.result).toContain('Error executing tool');
-      expect(result.toolResults[0]!.result).toContain('boom');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('Error executing tool');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('boom');
     });
 
-    it('routes AssistantRetryableError hints through the ToolFormat seam', async () => {
+    it('routes AssistantRetryableError hints through the WireFormat seam', async () => {
       const deps = createMockDeps();
       deps.toolRegistry.register('hint_tool', makeTestTool('hint_tool', async () => {
         throw AssistantRetryableError.WithHint(
@@ -705,11 +714,17 @@ describe('ToolExecutor', () => {
         function: { name: 'hint_tool', arguments: '{}' },
       }]);
 
-      const rendered = result.toolResults[0]!.result;
-      expect(rendered).toContain('Error executing tool hint_tool: File not found: x.txt');
-      // The hint is a structured element now, not inlined "HINT:" text.
-      expect(rendered).not.toContain('HINT:');
-      expect(rendered).toContain('<hint>Use the find tool to locate the file.</hint>');
+      // The executor stores a PART: the thrown error is the payload and the
+      // hint is a field, never inlined text.
+      const part = resultPart(result.toolResults[0]!.content);
+      expect(part.status).toBe('error');
+      expect(part.output).toContain('Error executing tool hint_tool: File not found: x.txt');
+      expect(part.hint).toBe('Use the find tool to locate the file.');
+      // Shaped at the wire, the hint becomes the format's hint element --
+      // thrown errors and ToolResult.err().withHint() render identically.
+      const wire = toWire(part);
+      const hintTag = xmlWireFormat.markers[3]!;
+      expect(wire).toContain(`<${hintTag}>Use the find tool to locate the file.</${hintTag}>`);
     });
   });
 
@@ -730,7 +745,7 @@ describe('ToolExecutor', () => {
       }]);
 
       expect(calls).toBe(1);
-      expect(result.toolResults[0]!.result).toContain('ran');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('ran');
     });
 
     it('should return an error result without retrying when a transient error occurs and maxRetries is 0', async () => {
@@ -749,8 +764,8 @@ describe('ToolExecutor', () => {
       }]);
 
       expect(calls).toBe(1);
-      expect(result.toolResults[0]!.result).toContain('Error executing tool');
-      expect(result.toolResults[0]!.result).toContain('flaky');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('Error executing tool');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('flaky');
     });
 
     it('maxRetries: 2 makes one initial attempt plus two retries on transient errors', async () => {
@@ -769,7 +784,7 @@ describe('ToolExecutor', () => {
       }]);
 
       expect(calls).toBe(3);
-      expect(result.toolResults[0]!.result).toContain('still flaky');
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('still flaky');
     });
   });
 
@@ -789,7 +804,7 @@ describe('ToolExecutor', () => {
       const msg = deps.addedMessages[0]!;
       expect(msg.role).toBe('tool');
       expect(msg.toolCallId).toBe('call-1');
-      expect(msg.content as string).toContain('hello from tool');
+      expect(resultPart((msg.content as unknown) as never).output).toBe('hello from tool');
     });
 
     it('should add error results to context via agent.addMessage', async () => {
@@ -809,7 +824,9 @@ describe('ToolExecutor', () => {
       const msg = deps.addedMessages[0]!;
       expect(msg.role).toBe('tool');
       expect(msg.toolCallId).toBe('call-2');
-      expect(msg.content as string).toContain('kaboom');
+      const errPart = resultPart((msg.content as unknown) as never);
+      expect(errPart.status).toBe('error');
+      expect(errPart.output).toContain('kaboom');
     });
 
     it('should add a tool message for calls with an invalid name', async () => {
@@ -855,76 +872,72 @@ describe('ToolExecutor', () => {
     });
   });
 
-  describe('tool format name (agent-loop per-model resolution)', () => {
-    const mdTable = {
-      id: 'md-table',
-      markers: ['tool-result'],
-      formatResult(
-        result: string | Record<string, unknown>,
-        toolName: string,
-        meta?: { status: string; [key: string]: string },
-      ): string {
-        const payload = typeof result === 'string' ? result : JSON.stringify(result);
-        return `| ${toolName} | ${meta?.status || 'success'} |\n\n${payload}`;
-      },
-    };
-
+  describe('stores tool results as parts, never as model-facing text', () => {
     function makeEchoExecutor(deps: ReturnType<typeof createMockDeps>) {
       deps.toolRegistry.register('echo', makeTestTool('echo', async () => 'hi'));
       return createToolExecutor(deps);
     }
 
-    it('renders results with the explicitly resolved format', async () => {
-      const reg = createToolFormatRegistry();
-      reg.register(xmlToolFormat);
-      reg.register(mdTable);
-
-      const deps = createMockDeps();
-      const executor = makeEchoExecutor(deps);
-      const result = await executor.execute(
-        [{ id: 'call-1', type: 'function', function: { name: 'echo', arguments: '{}' } }],
-        'md-table',
-        reg,
-      );
-      expect(result.toolResults[0]!.result).toContain('| echo | success |');
-    });
-
-    it('falls back to the built-in xml default when no name is passed', async () => {
+    it('the stored content is a tool-result part with the tool named', async () => {
       const deps = createMockDeps();
       const executor = makeEchoExecutor(deps);
       const result = await executor.execute([
         { id: 'call-1', type: 'function', function: { name: 'echo', arguments: '{}' } },
       ]);
-      expect(result.toolResults[0]!.result).toContain('<tool name="echo"');
+
+      const content = result.toolResults[0]!.content;
+      expect(Array.isArray(content)).toBe(true);
+      const part = resultPart(content);
+      expect(part).toEqual({
+        type: 'tool-result',
+        tool: 'echo',
+        status: 'success',
+        meta: [],
+        error: null,
+        hint: null,
+        output: 'hi',
+      });
+      // No markup at rest: the shape exists only once a format renders it.
+      expect(JSON.stringify(content)).not.toContain('<');
     });
 
-    it('resolves the format from the session registry, not another session\'s', async () => {
-      // md-table exists only in this executor's session registry.
-      const reg = createToolFormatRegistry();
-      reg.register(xmlToolFormat);
-      reg.register(mdTable);
-
+    it('the session log stores the part, and each format shapes it at the wire', async () => {
       const deps = createMockDeps();
       const executor = makeEchoExecutor(deps);
-      const result = await executor.execute(
-        [{ id: 'call-1', type: 'function', function: { name: 'echo', arguments: '{}' } }],
-        'md-table',
-        reg,
-      );
-      expect(result.toolResults[0]!.result).toContain('| echo | success |');
+      const result = await executor.execute([
+        { id: 'call-1', type: 'function', function: { name: 'echo', arguments: '{}' } },
+      ]);
+      const part = resultPart(result.toolResults[0]!.content);
 
-      // Same name against a registry without md-table is a config error at
-      // the seam; execute() converts it to a tool error result (never a
-      // silent fallback to another session's format).
-      const emptyReg = createToolFormatRegistry();
-      const result2 = await executor.execute(
-        [{ id: 'call-2', type: 'function', function: { name: 'echo', arguments: '{}' } }],
-        'md-table',
-        emptyReg,
-      );
-      expect(result2.toolResults[0]!.result).toContain(
-        'Tool execution failed: Unknown tool format "md-table"',
-      );
+      // Same stored part, two different formats -- the stored message never
+      // changes, so switching formats mid-session cannot strand old context.
+      expect(toWire(part)).toContain(`name="echo"`);
+      const mdTable = {
+        id: 'md-table',
+        markers: ['md-row'],
+        renderToolResult: (p: ToolResultPart) => `| ${p.tool} | ${p.status} |`,
+        renderFileInclude: () => '',
+        renderSystemNotice: () => '',
+      };
+      expect(renderWrapperForWire(part, new MarkerMangler(), mdTable)).toBe('| echo | success |');
+    });
+
+    it('a blocked gate call still answers with a part (status "error")', async () => {
+      const deps = createMockDeps();
+      deps.toolRegistry.register('echo', makeTestTool('echo', async () => 'unreachable'));
+      deps.hooks.on(HOOKS.TOOL_CALL, () => ({ action: 'block', result: 'nope' }));
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([
+        { id: 'call-1', type: 'function', function: { name: 'echo', arguments: '{}' } },
+      ]);
+
+      const part = resultPart(result.toolResults[0]!.content);
+      expect(part.status).toBe('error');
+      expect(part.output).toContain('nope');
+      // The block message is tool-authored data: the wire mangles it.
+      const forged = `<${CORE_PROTECTED_PREFIXES[0]}>`;
+      const mangled = toWire({ ...part, output: `${part.output} ${forged}` });
+      expect(mangled).not.toContain(forged);
     });
   });
 });

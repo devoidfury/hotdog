@@ -8,6 +8,13 @@ import { LlmError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
 import { MarkerMangler } from "@core/marker-mangler.ts";
 import { createStreamProcessor } from "@core/llm-client/stream-processor.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "test-model", temperature: null, contextLimit: 128000, tags: [], ...overrides };
@@ -25,7 +32,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("returns undefined on successful health check", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => ({ ok: true })) as unknown as typeof fetch;
 
@@ -34,7 +41,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("throws LlmError.Api on non-OK health check", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => ({ ok: false, status: 503 })) as unknown as typeof fetch;
 
@@ -42,7 +49,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("throws LlmError.Http on network error", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => {
       throw new Error("ECONNREFUSED");
@@ -52,7 +59,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("re-throws LlmError without wrapping", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => {
       throw LlmError.Api("already typed");
@@ -62,7 +69,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("resolves the provider URL when a model name is given (provider-only setup)", async () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 30,
       maxRetries: 3,
       markerMangler: null,
@@ -80,12 +87,12 @@ describe("LlmClient.ping", () => {
   });
 
   it("defaults healthCheckTimeoutSecs to 5", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     expect(client.healthCheckTimeoutSecs).toBe(5);
   });
 
   it("aborts the health check after healthCheckTimeoutSecs and reports it as a timeout", async () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 30,
       maxRetries: 3,
       baseUrl: "http://test.com",
@@ -111,7 +118,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("throws a config LlmError when the resolved provider has no URL", async () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 30,
       maxRetries: 3,
       markerMangler: null,
@@ -128,7 +135,7 @@ describe("LlmClient.chatStreamCancellable", () => {
   }
 
   function setupClient() {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     // Override _doRequest to return a mock SSE response instead of making real HTTP calls
     client._doRequest = async (_url: string, _apiKey: string | null, _request: Record<string, unknown>, signal: AbortSignal | null): Promise<Response> => {
       // If signal is already aborted, simulate a cancelled request
@@ -166,7 +173,7 @@ describe("LlmClient.chatStreamCancellable", () => {
   }
 
   it("returns an async generator", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
       mc(),
@@ -249,7 +256,7 @@ describe("LlmClient.chatStreamCancellable", () => {
       },
     } as LlmProtocol);
 
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 30,
       maxRetries: 3,
       // Raw client-level fallbacks: must NOT be what the protocol sees.
@@ -300,7 +307,7 @@ describe("LlmClient.chatStreamCancellable — Retry-After", () => {
       },
     } as LlmProtocol);
 
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 30,
       maxRetries: 3,
       baseUrl: "http://test.com",
@@ -410,7 +417,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   }
 
   it("retries raw network errors and resolves once the connection succeeds", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -429,7 +436,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("cancels the response body when the consumer abandons the stream mid-way", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 0, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 0, baseUrl: "http://test.com", markerMangler: null });
     let bodyCancelled = false;
 
     globalThis.fetch = (async () => sseResponse("partial", () => {
@@ -448,7 +455,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("cancels the response body after a fully drained stream", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 0, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 0, baseUrl: "http://test.com", markerMangler: null });
     let bodyCancelled = false;
 
     globalThis.fetch = (async () => sseResponse("full", () => {
@@ -465,7 +472,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("exhausts retries on persistent network error and surfaces LlmError.Http", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -485,7 +492,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("does not retry 4xx HTTP errors", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -504,7 +511,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("retries on chat timeout and surfaces a visible timeout error with a fresh signal per attempt", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 0.02, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 0.02, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
     const signalLog: Array<{ signal: AbortSignal | null | undefined; abortedAtEntry: boolean }> = [];
 
     globalThis.fetch = hangingFetch(signalLog);
@@ -535,7 +542,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("surfaces user cancellation as LlmError.Cancelled without retrying", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     const signalLog: Array<{ signal: AbortSignal | null | undefined; abortedAtEntry: boolean }> = [];
 
     globalThis.fetch = hangingFetch(signalLog);
@@ -611,7 +618,7 @@ describe("LlmClient.chatStreamCancellable — mid-stream failures", () => {
   }
 
   it("retries a mid-stream network failure with a fresh full request", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -645,7 +652,7 @@ describe("LlmClient.chatStreamCancellable — mid-stream failures", () => {
   });
 
   it("leaves no partial residue in the assembled result after a mid-stream retry", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -671,7 +678,7 @@ describe("LlmClient.chatStreamCancellable — mid-stream failures", () => {
   });
 
   it("does not retry a non-transient error thrown mid-stream", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -693,7 +700,7 @@ describe("LlmClient.chatStreamCancellable — mid-stream failures", () => {
   });
 
   it("propagates cancellation during a retry wait immediately, without re-requesting", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 5, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 60_000 });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 5, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 60_000 });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -786,7 +793,7 @@ function toolFrame(toolCall: Record<string, unknown>): string {
 }
 
 function makeSseClient(mangler: MarkerMangler, frames: string[]): LlmClient {
-  const client = new LlmClient({
+  const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
     chatTimeoutSecs: 30,
     maxRetries: 0,
     baseUrl: "http://test.com",

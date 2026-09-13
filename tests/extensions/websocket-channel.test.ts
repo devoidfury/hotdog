@@ -133,7 +133,7 @@ describe("WebSocketChannel - write()", () => {
     },
     {
       name: "TOOL_RESULT",
-      event: { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", result: "file.txt" },
+      event: { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", content: "file.txt" },
       expected: (msg: any) => {
         expect(msg.type).toBe(S2C.TOOL_RESULT);
         expect(msg.name).toBe("bash");
@@ -142,7 +142,7 @@ describe("WebSocketChannel - write()", () => {
     },
     {
       name: "TOOL_RESULT with error",
-      event: { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", error: "Permission denied" },
+      event: { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", content: "", error: "Permission denied" },
       expected: (msg: any) => {
         expect(msg.type).toBe(S2C.TOOL_RESULT);
         expect(msg.error).toBe("Permission denied");

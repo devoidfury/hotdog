@@ -415,8 +415,10 @@ export interface CoreConfig {
   thinkerFormat?: string;
   /** CLI display format for tool calls. */
   toolCallDisplayFormat?: string;
-  /** Global default ToolFormat registry name for model-facing tool results (default "xml"). */
-  modelToolFormat?: string;
+  /** Global default WireFormat registry name for model-facing tool results (default "xml"). */
+  modelWireFormat?: string;
+  /** Global default RoleMapping registry name for wire roles (default "system-first"). */
+  modelRoleMapping?: string;
   toolOutputFmt?: string;
   chatTimeout?: number;
   healthCheckTimeout?: number;

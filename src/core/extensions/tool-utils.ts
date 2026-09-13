@@ -1,36 +1,12 @@
 import { ToolError } from "../error.ts";
 import { ToolDef, ToolMetadata } from "./tool-registry.ts";
-import { toolFormatForName, TOOL_FORMAT_DEFAULT_NAME, type ToolFormatRegistry } from "./tool-format.ts";
+import type { ToolResultPart } from "../context/wrappers.ts";
 
 export type { ToolMetadata };
 
-/**
- * Resolve the ToolFormat for a seam render. The caller (agent loop / session)
- * passes its own registry and resolved name; there is no process-global
- * state here because the active format depends on per-session model/provider
- * config.
- */
-function seamToolFormat(
-  toolFormatName: string | undefined,
-  registry: ToolFormatRegistry | null | undefined,
-): ReturnType<typeof toolFormatForName> {
-  return toolFormatForName(toolFormatName ?? TOOL_FORMAT_DEFAULT_NAME, registry);
-}
-
-const SHORT_META_KEYS = new Set([
-  "truncated",
-  "page",
-  "total_pages",
-  "total_lines",
-  "showing",
-  "duration_ms",
-  "timeout",
-  "exit_code",
-  "path",
-  "pattern",
-  "offset",
-  "limit",
-]);
+// Format-agnostic builders: they produce a structured ToolResultPart
+// (context/wrappers.ts), never markup; the request's WireFormat shapes it at
+// the wire, so nothing here takes a format name or registry.
 
 // When set on a ToolResult, tells the run loop to stop after this tool (e.g., "wait", "handoff").
 export const TOOL_STOP_LOOP = Symbol("TOOL_STOP_LOOP");
@@ -40,14 +16,13 @@ export class ToolResult {
   error: string | null;
   metadata: Map<string, string> | null;
   success: boolean;
-  outputTag: string | null;
   images: unknown[] | null;
   /**
    * Recovery guidance for the model (e.g. "use the find tool to locate the
-   * file"). Rendered as a structured hint element by the ToolFormat seam,
-   * right after the error on failures. The model-facing counterpart of
-   * AssistantRetryableError.hint for tools that RETURN errors instead of
-   * throwing them.
+   * file"). Rides the tool-result part as `hint` and is rendered as the
+   * format's hint element, right after the error on failures. The
+   * model-facing counterpart of AssistantRetryableError.hint for tools that
+   * RETURN errors instead of throwing them.
    */
   hint: string | null;
   [TOOL_STOP_LOOP]?: boolean;
@@ -57,7 +32,6 @@ export class ToolResult {
     error = null,
     metadata = null,
     success = true,
-    outputTag = null,
     images = null,
     hint = null,
   }: {
@@ -65,7 +39,6 @@ export class ToolResult {
     error?: string | null;
     metadata?: Map<string, string> | null;
     success?: boolean;
-    outputTag?: string | null;
     images?: unknown[] | null;
     hint?: string | null;
   } = {}) {
@@ -73,7 +46,6 @@ export class ToolResult {
     this.error = error;
     this.metadata = metadata;
     this.success = success;
-    this.outputTag = outputTag;
     this.images = images;
     this.hint = hint;
   }
@@ -101,7 +73,6 @@ export class ToolResult {
     error = null,
     metadata = null,
     success = true,
-    outputTag = null,
     images = null,
     hint = null,
   }: {
@@ -109,7 +80,6 @@ export class ToolResult {
     error?: string | null;
     metadata?: Map<string, string> | null;
     success?: boolean;
-    outputTag?: string | null;
     images?: unknown[] | null;
     hint?: string | null;
   } = {}): ToolResult {
@@ -121,7 +91,6 @@ export class ToolResult {
       error,
       metadata,
       success,
-      outputTag,
       images,
       hint,
     });
@@ -138,11 +107,6 @@ export class ToolResult {
     for (const [key, value] of Object.entries(entries)) {
       this.metadata.set(key, String(value));
     }
-    return this;
-  }
-
-  withOutputTag(tag: string | null): this {
-    this.outputTag = tag;
     return this;
   }
 
@@ -180,31 +144,32 @@ export class ToolResult {
     return parts.join("\n");
   }
 
-  toApiContent(toolName: string, toolFormatName?: string, registry?: ToolFormatRegistry | null): string {
-    const status = this.success ? "success" : "failure";
-    const tag = this.outputTag || "output";
-
-    const meta: Record<string, unknown> = {};
-    if (this.metadata) {
-      for (const [key, value] of this.metadata) {
-        meta[key] = value;
-      }
+  /**
+   * The tool-result wrapper part for this result: structured fields, never
+   * markup. The session's WireFormat renders it at the wire (with the tool's
+   * fields mangled) and the canonical form renders it at rest; the wrapper's
+   * own `output` element name is fixed, so tool code names nothing that
+   * reaches the wire.
+   */
+  toApiContent(toolName: string): ToolResultPart {
+    const meta: Array<[string, string]> = [];
+    for (const [key, value] of this.metadata ?? []) {
+      // On failure the error element is this.error; a tool-authored entry
+      // with that key is dropped rather than rendered as (or overwriting) it.
+      // On success "error" is metadata like any other key.
+      if (!this.success && key === "error") continue;
+      meta.push([key, value]);
     }
-    if (!this.success && this.error) {
-      meta["error"] = this.error;
-    }
 
-    // The resolved ToolFormat owns model-facing rendering (the agent loop
-    // resolves it per model and passes the name + registry explicitly). The
-    // wire serializer is still the only mangle point (tool results are
-    // source:"tool"). The hint rides in the meta parameter so every format
-    // sees it identically on both render paths.
-    const content = seamToolFormat(toolFormatName, registry).formatResult(
-      { output: this.output, outputTag: tag, ...meta },
-      toolName,
-      { status, ...(this.hint ? { hint: this.hint } : {}) },
-    );
-    return typeof content === "string" ? content : JSON.stringify(content);
+    return {
+      type: "tool-result",
+      tool: toolName,
+      status: this.success ? "success" : "failure",
+      meta,
+      error: this.success ? null : this.error,
+      hint: this.hint,
+      output: this.output,
+    };
   }
 }
 
@@ -241,42 +206,38 @@ export function param(
 export function toolResult(
   result: ToolResult | string | Record<string, unknown> | unknown,
   toolName?: string,
-  toolFormatName?: string,
-  registry?: ToolFormatRegistry | null,
-): string {
+): string | ToolResultPart {
   if (result instanceof ToolResult) {
     if (toolName) {
-      return result.toApiContent(toolName, toolFormatName, registry);
+      return result.toApiContent(toolName);
     }
     return result.toDisplay();
   }
 
-  // Non-ToolResult results: delegate to the active ToolFormat. Short metadata
-  // keys ride in `meta`; everything else becomes the payload (JSON for objects,
-  // matching pre-seam behavior).
-  let payload: string;
-  const meta: Record<string, string> = {};
-  if (typeof result === "string") {
-    payload = result;
-  } else if (typeof result === "object" && result !== null) {
-    const remaining = { ...(result as Record<string, unknown>) };
-    for (const key of SHORT_META_KEYS) {
-      if (key in remaining) {
-        meta[key] = String(remaining[key]);
-        delete remaining[key];
-      }
-    }
-    payload = JSON.stringify(remaining);
-  } else {
-    payload = String(result);
-  }
+  // Non-ToolResult results carry no metadata: which keys a format rides on its
+  // wrapper tag is the format's business (see extensions/wire-format-xml), so
+  // nothing here splits them out. Objects become JSON, matching what a plain
+  // return value already does on the executor's formatToolResult path.
+  const payload =
+    typeof result === "string"
+      ? result
+      : typeof result === "object" && result !== null
+        ? JSON.stringify(result)
+        : String(result);
 
   if (!toolName) {
     return payload;
   }
 
-  const content = seamToolFormat(toolFormatName, registry).formatResult(payload, toolName, { status: "success", ...meta });
-  return typeof content === "string" ? content : JSON.stringify(content);
+  return {
+    type: "tool-result",
+    tool: toolName,
+    status: "success",
+    meta: [],
+    error: null,
+    hint: null,
+    output: payload,
+  };
 }
 
 export function truncateOutput(text: string, maxLines: number): string {
@@ -394,27 +355,35 @@ export function getRequiredStr(
 }
 
 /**
- * @param hint - Recovery guidance rendered by the format as a hint element
- *   (the thrown-error path in ToolExecutor). Only applies to plain payload
+ * The tool-result part for a raw (non-ToolResult) outcome -- a thrown error,
+ * a blocked gate call, a plain value returned by a tool. Failure status is
+ * "error" here while `ToolResult.toApiContent()` says "failure": that spelling
+ * predates the seam and is kept verbatim so the wire bytes don't drift.
+ *
+ * @param hint - Recovery guidance carried on the part's hint field (the
+ *   thrown-error path in ToolExecutor). Only applies to plain payload
  *   results; a ToolResult instance carries its own hint and wins.
  */
 export function formatToolResult(
   result: unknown,
   toolName: string,
   success: boolean,
-  toolFormatName?: string,
-  registry?: ToolFormatRegistry | null,
   hint?: string,
-): string {
-  if (result && typeof (result as { toApiContent?: (name: string, fmt?: string, reg?: unknown) => string }).toApiContent === "function") {
-    return (result as { toApiContent: (name: string, fmt?: string, reg?: unknown) => string }).toApiContent(toolName, toolFormatName, registry);
+): ToolResultPart {
+  // Duck-typed rather than instanceof: hooks hand back result objects, and a
+  // structurally compatible one is enough.
+  if (result && typeof (result as { toApiContent?: (name: string) => ToolResultPart }).toApiContent === "function") {
+    return (result as { toApiContent: (name: string) => ToolResultPart }).toApiContent(toolName);
   }
 
-  const status = success ? "success" : "error";
   const payload = typeof result === "object" && result !== null ? JSON.stringify(result) : String(result);
-  const content = seamToolFormat(toolFormatName, registry).formatResult(payload, toolName, {
-    status,
-    ...(hint ? { hint } : {}),
-  });
-  return typeof content === "string" ? content : JSON.stringify(content);
+  return {
+    type: "tool-result",
+    tool: toolName,
+    status: success ? "success" : "error",
+    meta: [],
+    error: null,
+    hint: hint ?? null,
+    output: payload,
+  };
 }

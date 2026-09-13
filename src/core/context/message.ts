@@ -1,4 +1,4 @@
-import { isWrapperPart, renderWrapper } from "./wrappers.ts";
+import { isWrapperPart, renderWrapperAtRest } from "./wrappers.ts";
 
 export interface ImageAttachment {
   type: "image_url";
@@ -14,7 +14,7 @@ export interface ToolCall {
 
 /**
  * Provenance of a message: who produced its content. Pure provenance --
- * carries no wire semantics. The serializer maps (role, source, wireFormat)
+ * carries no wire semantics. The serializer maps (role, source, roleMapping)
  * to the wire role and decides escaping:
  *   - "system"  -- system prompt / harness instructions (never escaped)
  *   - "user"    -- user input (always escaped)
@@ -186,7 +186,7 @@ export function contentToText(content: string | Array<unknown> | null | undefine
       if ((p.type === "text" || p.type === "untrusted") && typeof p.text === "string") {
         rendered.push(p.text as string);
       } else if (isWrapperPart(p)) {
-        rendered.push(renderWrapper(p, null));
+        rendered.push(renderWrapperAtRest(p));
       }
     }
     return rendered.join("\n");

@@ -1,3 +1,5 @@
+import type { ToolResultContent } from "./wrappers.ts";
+
 export const OUTPUT_EVENT = {
   USER_MESSAGE: 1,
   ASSISTANT_MESSAGE: 2,
@@ -65,7 +67,12 @@ export interface ToolResultEvent {
   type: typeof OUTPUT_EVENT.TOOL_RESULT;
   toolName: string;
   input: string;
-  result: string;
+  /**
+   * The tool's answer as stored: harness text or a tool-result part. Passed
+   * through unchanged -- output surfaces decide their own presentation, core
+   * prescribes none (see ToolResultContent in context/wrappers.ts).
+   */
+  content: ToolResultContent;
   toolCallId: string;
   error?: string;
 }

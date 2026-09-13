@@ -9,6 +9,7 @@ import { resetLoggerForTesting } from "@utils/logger.ts";
 
 import pkg from "@package.json" with { type: "json" };
 import { ConfigRegistry } from "@core/extensions/config.ts";
+import { xmlWireFormat } from "@extensions/wire-format-xml/index.ts";
 
 /**
  * Run main() with given CLI args, capturing stdout and stderr output.
@@ -254,14 +255,16 @@ describe("createCore service accessor", () => {
   });
 });
 
-describe("createCore.createLlmClient (modelToolFormat layering)", () => {
+describe("createCore.createLlmClient (modelWireFormat layering)", () => {
   // Second format so the resolved choice is observable.
   const toyFormat = {
     id: "toy",
     markers: ["toy-marker"],
-    formatResult(result: string | Record<string, unknown>) {
-      return String(result);
+    renderToolResult(part: import("@core/context/wrappers.ts").ToolResultPart) {
+      return part.output;
     },
+    renderFileInclude: () => "",
+    renderSystemNotice: () => "",
   };
 
   function mc(): import("@core/config/providers.ts").ModelConfig {
@@ -284,7 +287,7 @@ describe("createCore.createLlmClient (modelToolFormat layering)", () => {
       new ConfigRegistry(),
       createSubcommandRegistry(),
     );
-    core.toolFormatRegistry.register(toyFormat);
+    core.wireFormatRegistry.register(toyFormat);
 
     const resolved = await buildAgentConfig({
       cli: cli as never,
@@ -296,24 +299,32 @@ describe("createCore.createLlmClient (modelToolFormat layering)", () => {
     return core;
   }
 
-  it("CLI --model-tool-format wins over the raw config file value", async () => {
-    const core = await buildCore({ modelToolFormat: "xml" }, { modelToolFormat: "toy" });
-    expect(core.createLlmClient().toolFormatFor(mc()).id).toBe("toy");
+  it("CLI --model-wire-format wins over the raw config file value", async () => {
+    const core = await buildCore({ modelWireFormat: "xml" }, { modelWireFormat: "toy" });
+    expect(core.createLlmClient().resolveWireFormat(mc())?.id).toBe("toy");
   });
 
   it("config file value applies when no CLI flag is given", async () => {
-    const core = await buildCore({ modelToolFormat: "toy" }, {});
-    expect(core.createLlmClient().toolFormatFor(mc()).id).toBe("toy");
+    const core = await buildCore({ modelWireFormat: "toy" }, {});
+    expect(core.createLlmClient().resolveWireFormat(mc())?.id).toBe("toy");
   });
 
-  it("defaults to xml when nothing is set", async () => {
+  it("the schema default name resolves only once an extension registers that shape", async () => {
+    // core.config.json still defaults modelWireFormat to "xml", but core ships
+    // no implementation of it: without the wire-format-xml extension loaded,
+    // the name is unresolvable rather than silently rendering something.
     const core = await buildCore({}, {});
-    expect(core.createLlmClient().toolFormatFor(mc()).id).toBe("xml");
+    expect(core.createLlmClient().resolveWireFormat(mc())).toBeNull();
+    core.wireFormatRegistry.register(xmlWireFormat);
+    expect(core.createLlmClient().resolveWireFormat(mc())?.id).toBe("xml");
   });
 
-  it("throws a config error for an unknown global modelToolFormat (no silent xml fallback)", async () => {
-    const core = await buildCore({ modelToolFormat: "nope" }, {});
-    expect(() => core.createLlmClient()).toThrow(/Unknown tool format "nope"/);
+  it("an unknown global modelWireFormat resolves to nothing (no silent fallback)", async () => {
+    // Unresolved is not an error at client-creation time; a request then
+    // fails at request build with the config error -- even without a wrapper
+    // part to shape (pinned in wire-format.test).
+    const core = await buildCore({ modelWireFormat: "nope" }, {});
+    expect(core.createLlmClient().resolveWireFormat(mc())).toBeNull();
   });
 
   it("a falsy resolved maxRetries (0) survives instead of falling back", async () => {

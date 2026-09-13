@@ -10,6 +10,13 @@ import { Message } from "@core/context/message.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
 import { createLlmProtocolRegistry, type LlmProtocol } from "@core/llm-client/protocol.ts";
 import { openaiProtocol } from "@core/llm-client/openai-protocol.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 // Ephemeral ports (0): fixed ports collide when two `bun test` runs are
 // concurrent. Assigned in beforeAll, read by the tests at run time.
@@ -69,7 +76,7 @@ describe("LlmClient uses the protocol's request path", () => {
   }
 
   it("openai protocol keeps /v1/chat/completions", async () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
@@ -95,7 +102,7 @@ describe("LlmClient uses the protocol's request path", () => {
     };
     const reg = createLlmProtocolRegistry();
     reg.register(customProtocol);
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
@@ -129,7 +136,7 @@ describe("LlmClient uses the protocol's request path", () => {
     const reg = createLlmProtocolRegistry();
     reg.register(providerProto);
     reg.register(modelProto);
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
@@ -150,7 +157,7 @@ describe("LlmClient uses the protocol's request path", () => {
   });
 
   it("auth header uses the provider-level API key and URL, not the global ones", async () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
@@ -169,7 +176,7 @@ describe("LlmClient uses the protocol's request path", () => {
   });
 
   it("x-session-affinity uses the per-call sessionId, falling back to the client's", async () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
@@ -197,7 +204,7 @@ describe("LlmClient uses the protocol's request path", () => {
   });
 
   it("auth header falls back to the global API key when the provider has none", async () => {
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
@@ -232,7 +239,7 @@ describe("LlmClient uses the protocol's request path", () => {
     };
     const reg = createLlmProtocolRegistry();
     reg.register(customProtocol);
-    const client = new LlmClient({
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,

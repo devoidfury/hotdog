@@ -61,50 +61,50 @@ describe("buildModelRegistry", () => {
     expect(registry["b/m2"]!.name).toBe("b/m2");
   });
 
-  it("carries wireFormat from provider into registry entries", async () => {
+  it("carries roleMapping from provider into registry entries", async () => {
     const config: { providers: ProviderDef[] } = {
       providers: [
-        { name: "ollama", wireFormat: "developer", models: [{ name: "qwen" }] },
+        { name: "ollama", roleMapping: "developer", models: [{ name: "qwen" }] },
       ],
     };
     const registry = await buildModelRegistry(config, 32000);
-    expect(registry["ollama/qwen"]!.wireFormat).toBe("developer");
+    expect(registry["ollama/qwen"]!.roleMapping).toBe("developer");
   });
 
-  it("model-level wireFormat overrides provider-level", async () => {
+  it("model-level roleMapping overrides provider-level", async () => {
     const config: { providers: ProviderDef[] } = {
       providers: [
         {
           name: "ollama",
-          wireFormat: "developer",
+          roleMapping: "developer",
           models: [
-            { name: "a", wireFormat: "system-first" },
+            { name: "a", roleMapping: "system-first" },
             { name: "b" },
           ],
         },
       ],
     };
     const registry = await buildModelRegistry(config, 32000);
-    expect(registry["ollama/a"]!.wireFormat).toBe("system-first");
-    expect(registry["ollama/b"]!.wireFormat).toBe("developer");
+    expect(registry["ollama/a"]!.roleMapping).toBe("system-first");
+    expect(registry["ollama/b"]!.roleMapping).toBe("developer");
   });
 
-  it("leaves wireFormat undefined when unset at both levels", async () => {
+  it("leaves roleMapping undefined when unset at both levels", async () => {
     const config = {
       providers: [{ name: "openai", models: [{ name: "gpt-4" }] }],
     };
     const registry = await buildModelRegistry(config, 32000);
-    expect(registry["openai/gpt-4"]!.wireFormat).toBeUndefined();
+    expect(registry["openai/gpt-4"]!.roleMapping).toBeUndefined();
   });
 
-  it("provider-level fallback entry inherits provider wireFormat", async () => {
+  it("provider-level fallback entry inherits provider roleMapping", async () => {
     const config: { providers: ProviderDef[] } = {
       providers: [
-        { name: "test", defaultModel: "gpt-3.5", wireFormat: "developer", models: [] },
+        { name: "test", defaultModel: "gpt-3.5", roleMapping: "developer", models: [] },
       ],
     };
     const registry = await buildModelRegistry(config, 32000);
-    expect(registry["test/gpt-3.5"]!.wireFormat).toBe("developer");
+    expect(registry["test/gpt-3.5"]!.roleMapping).toBe("developer");
   });
 
   it("extracts reasoning_effort from model entries", async () => {
@@ -460,7 +460,7 @@ describe("resolveModelConfig fallback lookup", () => {
     temperature: number | null;
     contextLimit: number;
     tags: string[];
-    wireFormat?: "system-first" | "developer";
+    roleMapping?: "system-first" | "developer";
   };
 
   it("falls back to provider/modelName when direct lookup fails", () => {
@@ -497,24 +497,24 @@ describe("resolveModelConfig fallback lookup", () => {
     expect(resolveModelConfig("provider/some/deep/model", registry, 128000, undefined).contextLimit).toBe(200000);
   });
 
-  it("carries wireFormat through in the entry branch", () => {
+  it("carries roleMapping through in the entry branch", () => {
     const registry: Record<string, ModelEntry> = {
-      "ollama/qwen": { name: "ollama/qwen", temperature: null, contextLimit: 32000, tags: [], wireFormat: "developer" as const },
+      "ollama/qwen": { name: "ollama/qwen", temperature: null, contextLimit: 32000, tags: [], roleMapping: "developer" as const },
     };
-    expect(resolveModelConfig("ollama/qwen", registry, 128000, undefined).wireFormat).toBe("developer");
+    expect(resolveModelConfig("ollama/qwen", registry, 128000, undefined).roleMapping).toBe("developer");
   });
 
-  it("carries wireFormat through the suffix-fallback branch", () => {
+  it("carries roleMapping through the suffix-fallback branch", () => {
     const registry: Record<string, ModelEntry> = {
-      "ollama/qwen": { name: "ollama/qwen", temperature: null, contextLimit: 32000, tags: [], wireFormat: "system-first" as const },
+      "ollama/qwen": { name: "ollama/qwen", temperature: null, contextLimit: 32000, tags: [], roleMapping: "system-first" as const },
     };
-    expect(resolveModelConfig("qwen", registry, 128000, undefined).wireFormat).toBe("system-first");
+    expect(resolveModelConfig("qwen", registry, 128000, undefined).roleMapping).toBe("system-first");
   });
 
-  it("leaves wireFormat undefined when the entry has none", () => {
+  it("leaves roleMapping undefined when the entry has none", () => {
     const registry: Record<string, ModelEntry> = {
       "openai/gpt-4": { name: "openai/gpt-4", temperature: null, contextLimit: 32000, tags: [] },
     };
-    expect(resolveModelConfig("openai/gpt-4", registry, 128000, undefined).wireFormat).toBeUndefined();
+    expect(resolveModelConfig("openai/gpt-4", registry, 128000, undefined).roleMapping).toBeUndefined();
   });
 });

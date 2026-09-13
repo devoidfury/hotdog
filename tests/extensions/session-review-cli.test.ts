@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { createMockCore } from "../helpers.ts";
 import { captureConsole } from "../test-helpers.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
+import { LOG_SOURCE } from "@core/session/session-log.ts";
 
 import { TestSessionLog } from "../mocks/io.ts";
 const { create: createSessionReview } = await import("@extensions/ui-session-review-cli/index.ts");
@@ -171,6 +172,55 @@ describe("Session Review CLI - reviewSession", () => {
     expect(output).toContain("[USER]");
     expect(output).toContain("[ASSISTANT]");
     expect(output).toContain("[TOOL: bash]");
+  });
+
+  it("flattens stored content parts for display (tool and non-tool entries)", async () => {
+    const log = new TestSessionLog(TEST_SESSION_ID);
+    // Harness user input with a file attachment: untrusted text + wrapper part.
+    await log.append({
+      ts: new Date().toISOString(),
+      session_id: TEST_SESSION_ID,
+      source: LOG_SOURCE.INPUT,
+      content: [
+        { type: "untrusted", text: "read @note.md" },
+        { type: "file-include", path: "note.md", content: "hello file" },
+      ],
+    });
+    // Tool result stored as a part (the executor's shape).
+    await log.append({
+      ts: new Date().toISOString(),
+      session_id: TEST_SESSION_ID,
+      source: LOG_SOURCE.TOOL_RESULT,
+      content: [
+        {
+          type: "tool-result",
+          tool: "bash",
+          status: "failure",
+          meta: [["exit_code", "1"]],
+          error: "boom",
+          hint: "check the path",
+          output: "partial",
+        },
+      ],
+      tool_call_id: "tc_1",
+      tool_name: "bash",
+    });
+
+    const cli = { sessionId: TEST_SESSION_ID, wantsJson: false, toolIndex: false, colors: false, theme: "dark", args: ["show"] };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(0);
+    // The tool_result part renders as display prose, not at-rest JSON.
+    expect(output).toContain("[TOOL: bash]");
+    expect(output).toContain("partial");
+    expect(output).toContain("Error: boom");
+    expect(output).toContain("HINT: check the path");
+    expect(output).toContain('META: {"exit_code":"1"}');
+    // The non-tool parts entry gets its own prose (file include inlined).
+    expect(output).toContain("read @note.md");
+    expect(output).toContain("[file note.md]");
+    expect(output).toContain("hello file");
+    expect(output).not.toContain('"type":"tool-result"');
+    expect(output).not.toContain('"type":"file-include"');
   });
 
   it("reviews session with --tool-index flag (JSON)", async () => {

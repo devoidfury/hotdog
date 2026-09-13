@@ -151,7 +151,7 @@ describe("OutputSink", () => {
         const sink = new OutputSink();
         sink.emitUserMessage({ type: OUTPUT_EVENT.USER_MESSAGE, content: "test" });
         sink.emitToolCall({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: "", toolCallId: "1" });
-        sink.emitToolResult({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "", result: "done", toolCallId: "1" });
+        sink.emitToolResult({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "", content: "done", toolCallId: "1" });
         sink.emitCompacting({ type: OUTPUT_EVENT.COMPACTING });
         sink.emitQuestion({ type: OUTPUT_EVENT.QUESTION, questions: [] });
         sink.emitTaskProgress({ type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "1", status: "running" });

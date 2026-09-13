@@ -1,6 +1,6 @@
 import { HOOKS } from "@core/hooks.ts";
 import { deleteSessionLog, readSessionEntries, sessionExists, sessionsDir as getSessionsDir, type LogEntry } from "@core/session/session-log.ts";
-import { contentToText } from "@core/context/message.ts";
+import { toolContentText, wrapperContentText } from "@utils/tool-content.ts";
 import { readdir, access, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { ReviewTool, listRecentSessions } from "./review.ts";
@@ -232,7 +232,9 @@ async function reviewSession(
         ? entry.result || ""
         : typeof entry.content === "string"
           ? entry.content
-          : contentToText(entry.content);
+          : entry.source === "tool_result"
+            ? toolContentText(entry.content)
+            : wrapperContentText(entry.content);
 
     let max = 200;
     if (entry.source === "system_prompt") {

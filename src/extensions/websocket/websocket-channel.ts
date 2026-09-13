@@ -6,6 +6,7 @@ import {
   OutputEvent,
   OutputEventType,
 } from "@core/context/output.ts";
+import { toolContentText } from "@utils/tool-content.ts";
 import { S2C, S2CType } from "./protocol.ts";
 import type { HotdogServerSocket } from "./server.ts";
 
@@ -84,7 +85,9 @@ export class WebSocketChannel extends Channel {
         break;
       case OUTPUT_EVENT.TOOL_RESULT:
         msg.name = event.toolName;
-        if (event.result !== undefined) msg.output = event.result;
+        // Content parts travel as text on this transport: the browser has no
+        // part renderer, so flatten the fields here (display, not a format).
+        msg.output = toolContentText(event.content);
         if (event.error !== undefined) msg.error = event.error;
         break;
       case OUTPUT_EVENT.COMPACTING:

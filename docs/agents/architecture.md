@@ -135,12 +135,18 @@ Maps abstract interface names to implementations. Extensions declare services vi
 - `createServiceRegistry()` — factory function
 - Extensions register services via the `SERVICES_REGISTER` hook, which fires synchronously during `ExtensionLoader.load()` so services are available to downstream extensions.
 
+### Wire Seams (`src/core/extensions/wire-format.ts`, `src/core/extensions/role-mapping.ts`)
+Two pluggable, independently selected seams sit between the LlmClient and the serializer. Core ships no implementations for either; the built-ins come from autoloaded extensions, and selection is by registry name (model -> provider -> global default). Extensions see them as `core.wireFormatRegistry` / `core.roleMappingRegistry`.
+- `WireFormat` -- the session's PRESENTATION protocol for harness structure: `renderToolResult`, `renderFileInclude`, `renderSystemNotice`, plus `markers` feeding the mangler union (framing protection travels with the format). Default name `"xml"` (core.config.json); shape registered by `extensions/wire-format-xml`. A configured name nothing registers is a config error at request build; with no format resolved at all, any wrapper part meeting the wire throws -- never a silent fallback.
+- `RoleMapping` -- where internal roles RIDE on the wire (the internal `harness` role as `"user"` or `"developer"`; everything else maps to itself). A backend-compatibility concern, deliberately separate from presentation: one provider can front ten models with ten different expectations. Default name `"system-first"` (core.config.json); both built-ins registered by `extensions/role-mapping-default`. An unregistered name is a config error at request build; with no mapping resolved at all, serializing any message throws -- never a guessed convention.
+
 ### Tool Utilities (`src/core/extensions/tool-utils.ts`)
 Tool definition helpers and utilities. Key exports:
-- `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `images`. Static constructors: `ok(output)`, `err(message)`, `from({...})`
+- `ToolResult` — structured result with `output`, `error`, `hint`, `metadata`, `success`, `images`. Static constructors: `ok(output)`, `err(message)`, `from({...})`
 - `toolDef(name, description, parameters)` — creates OpenAI function-calling schema
 - `param(typeName, description, extra)` — creates parameter definition with JSON Schema fields
-- `toolResult(result, toolName)` — resolves tool result to string
+- `toolResult(result, toolName)` — builds a tool-result PART (`ToolResultPart` in `context/wrappers.ts`), never text: the session's WireFormat shapes it at the wire
+- `formatToolResult(result, toolName, success, hint?)` — the executor's seam; duck-types `ToolResult.toApiContent()`, else builds the part
 - `truncateOutput(text, maxLines)` — truncates output
 - `generateDiff(oldText, newText, maxLines)` — simple unified diff
 - `parseToolInput(input)` — safer argument parsing returning null on failure
@@ -216,7 +222,7 @@ Message types and message log. Key exports:
 - `Message` — conversation message with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`, `images` (optional array of `{ type, mimeType, data }`)
 - Accepts both camelCase (API/JS) and snake_case (JSON/log files) field names
 - `contentToText()` — plain-text form of a content value; flattens part arrays (text/untrusted parts, wrapper parts rendered at rest, images dropped)
-- `context/wrappers.ts` — semantic wrapper parts (`file-include`, `system-notice`). `isWrapperPart()`, `renderWrapper(part, mangler)`: wrapper tag verbatim, fields mangled per the type's trust spec (file-include: path + content; system-notice: none). The wire serializer is the only mangle point; contentToText() renders the same shape unmangled. Wrapper parts are harness-generated only -- the bus queue flattens parts arrays arriving without harness provenance
+- `context/wrappers.ts` — semantic wrapper parts (`file-include`, `system-notice`, `tool-result`). `isWrapperPart()` / `isToolResultPart()`. Two render modes: `renderWrapperForWire(part, mangler, format)` (the wire serializer is the only render + mangle point: fields mangle per the type's trust spec -- file-include: path + content; system-notice: none; tool-result: every tool-authored field -- then the session's WireFormat emits the framing) and `renderWrapperAtRest(part)` (context, logs, hooks, UI: every wrapper passes through as JSON DATA; display consumers compose their own prose, see `utils/tool-content.ts`). Core ships NO markup: serializing any wrapper without a resolved WireFormat throws. Wrapper parts are harness-generated only -- the bus queue flattens parts arrays arriving without harness provenance
 
 ### Input (`src/core/context/input.ts`)
 Question/answer collection, decoupled from the question tool so each UI (CLI, web, etc.) provides its own implementation. Key exports:

@@ -5,6 +5,13 @@ import { describe, it, expect } from "bun:test";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { Message } from "@core/context/message.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "prov/gpt-4", temperature: null, contextLimit: 128000, tags: [], ...overrides };
@@ -12,7 +19,7 @@ function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
 
 describe("golden request: OpenAI protocol wire bytes", () => {
   it("pins the exact JSON body for a representative request", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 60, maxRetries: 3, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 60, maxRetries: 3, markerMangler: null });
     const messages = [
       new Message({ role: "system", source: "system", content: "You are helpful." }),
       new Message({ role: "user", source: "user", content: "Hello" }),
@@ -71,7 +78,7 @@ describe("golden request: OpenAI protocol wire bytes", () => {
   });
 
   it("omits optional fields when not set", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 60, maxRetries: 3, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 60, maxRetries: 3, markerMangler: null });
     const request = client.buildChatRequest(
       [new Message({ role: "user", content: "Hi" })],
       mc(),
@@ -90,7 +97,7 @@ describe("golden request: OpenAI protocol wire bytes", () => {
   });
 
   it("strips provider prefix from model name", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 60, maxRetries: 3, markerMangler: null });
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 60, maxRetries: 3, markerMangler: null });
     const request = client.buildChatRequest([], mc({ name: "anthropic/claude-sonnet-4" }), null, false);
     expect(request.model).toBe("claude-sonnet-4");
   });

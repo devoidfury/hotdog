@@ -95,7 +95,7 @@ async function handlePromptSubcommand(
     ...resolved,
     palette,
     thinkerFormat: resolved.thinkerFormat,
-    toolFormat: resolved.toolCallDisplayFormat,
+    toolCallDisplayFormat: resolved.toolCallDisplayFormat,
     toolOutputFmt: resolved.toolOutputFmt,
   });
 

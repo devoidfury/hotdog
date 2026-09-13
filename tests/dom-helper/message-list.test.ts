@@ -94,6 +94,16 @@ describe("streaming markdown", () => {
     expect(container.children).toHaveLength(0);
   });
 
+  it("finalize drops a whitespace-only thinking element but keeps one with content", () => {
+    ml.handleStreamingReasoningChunk({ content: "   " });
+    ml.finalizeAssistant();
+    expect(container.querySelectorAll(".thinking-block")).toHaveLength(0);
+
+    ml.handleStreamingReasoningChunk({ content: "kept" });
+    ml.finalizeAssistant();
+    expect(container.querySelectorAll(".thinking-block")).toHaveLength(1);
+  });
+
   it("tool calls then a new chunk start a fresh assistant element", () => {
     ml.handleStreamingChunk({ content: "before" });
     ml.handleToolCall({ name: "bash", args: "{}" });
@@ -297,6 +307,34 @@ describe("session log replay", () => {
     // extractToolName returns "tool"; no header matches, so the result is
     // silently dropped and the block keeps its original (absent) output.
     expect((container.querySelector(".tool-call-body") as HTMLElement).dataset.fullOutput).toBeUndefined();
+  });
+
+  it("a stored tool-result part names its own tool and flattens for display", () => {
+    ml.renderLogEntries([
+      { source: "llm", content: "", tool_calls: [{ id: "1", name: "read", args: { p: "a" } }] },
+      {
+        source: "tool_result",
+        content: [
+          { type: "text", text: "harness text is not the tool name" },
+          {
+            type: "tool-result",
+            tool: "read",
+            status: "failure",
+            meta: [["exit_code", "1"]],
+            error: "boom",
+            hint: "check the path",
+            output: "partial",
+          },
+        ],
+      },
+    ]);
+    // The entry carries no tool_name: the stored part names the tool, which
+    // matches the pending call. The body shows the flattened fields, not
+    // markup or at-rest JSON.
+    const body = container.querySelector(".tool-call-body") as HTMLElement;
+    expect(body.dataset.fullOutput).toBe(
+      'partial\nError: boom\nHINT: check the path\nMETA: {"exit_code":"1"}',
+    );
   });
 });
 

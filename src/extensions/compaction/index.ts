@@ -7,7 +7,7 @@ import { DropStrategy } from "./strategies/drop.ts";
 import { SummarizeShortStrategy } from "./strategies/summarize-short.ts";
 import { TokenAwareStrategy } from "./strategies/token-aware.ts";
 import { TrimStrategy } from "./strategies/trim.ts";
-import { shouldCompact } from "./utils.ts";
+import { shouldCompact, type WireRenderContext } from "./utils.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
 import { logger } from "@utils/logger.ts";
@@ -86,15 +86,36 @@ export function create(core: CoreContext): ExtensionInstance | null {
   }
 
   /**
+   * The session's wire-render context for compaction: the same mangler and
+   * WireFormat the main loop would use for these messages. Tolerant of
+   * duck-typed clients (test mocks); a missing format only matters if a
+   * tool-result part actually reaches the dump, where it then throws --
+   * exactly like the wire would.
+   */
+  function wireFor(agent: Agent, modelConfig: ModelConfig): WireRenderContext {
+    const client = agent.llmClient as
+      | { markerMangler?: WireRenderContext["mangler"]; resolveWireFormat?: (mc: ModelConfig) => WireRenderContext["wireFormat"] }
+      | null
+      | undefined;
+    return {
+      mangler: client?.markerMangler ?? null,
+      wireFormat: client?.resolveWireFormat?.(modelConfig) ?? null,
+    };
+  }
+
+  /**
    * Perform the actual compaction. Returns false when compaction is
    * declined or fails (including a strategy boundary that would orphan a
    * tool message) so the caller leaves the context untouched.
    */
   async function _performCompaction(agent: Agent, strategy: CompactionStrategy): Promise<boolean> {
-
     const messages = agent.context.getMessages(); // defensive copy — strategies expect Message[]
     const model = agent.model;
     const modelConfig = getModelConfig(agent.modelRegistry, model);
+
+    // Wire-render context: the dump speaks the session's presentation
+    // (genuine wrappers via the resolved WireFormat, payloads pre-mangled).
+    const wire = wireFor(agent, modelConfig);
 
     const llmChat = async (chatMessages: Array<{ role: string; content: string }>, _chatModel: string): Promise<string> => {
       const abortController = new AbortController();
@@ -112,14 +133,18 @@ export function create(core: CoreContext): ExtensionInstance | null {
         removeAbortForwarder = () => signal.removeEventListener("abort", onAbort);
       }
 
-      // Summarization call: the system prompt is trusted; the conversation
-      // dump in the user prompt is untrusted model/user content.
+      // Summarization call: the system prompt is trusted. The conversation
+      // dump arrives PRE-RENDERED by serializeConversation with the session's
+      // wire context: tool/user/model payloads are already mangled and the
+      // wrapper framing is genuine harness markup, so the message rides as
+      // harness content -- re-mangling it as untrusted would alias the genuine
+      // wrappers right back out of the dump.
       const wrapped = chatMessages.map(
         (m) =>
           new Message({
             role: m.role,
             content: m.content,
-            source: m.role === "system" ? "system" : "user",
+            source: m.role === "system" ? "system" : "harness",
           }),
       );
       const stream = agent.llmClient.chatStreamCancellable(
@@ -161,7 +186,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
     };
 
     try {
-      const result = await strategy.execute(messages, settings, llmChat, model);
+      const result = await strategy.execute(messages, settings, llmChat, model, wire);
       if (!result) return false;
 
       const compactedCount = result.messagesCompacted;
@@ -269,7 +294,10 @@ export function create(core: CoreContext): ExtensionInstance | null {
         if (nonSystemMessages.length <= settings.keepRecentMessages * 2) return;
 
         const modelConfig = getModelConfig(agent.modelRegistry, agent.model);
-        if (!shouldCompact(nonSystemMessages, modelConfig.contextLimit, settings.reserveTokens)) return;
+        if (
+          !shouldCompact(nonSystemMessages, modelConfig.contextLimit, settings.reserveTokens, wireFor(agent, modelConfig))
+        )
+          return;
 
         const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
         if (!strategy) return;

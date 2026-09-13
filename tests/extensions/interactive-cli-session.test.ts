@@ -6,6 +6,13 @@ import { HOOKS } from "@core/hooks.ts";
 import { HookSystem } from "@core/hooks.ts";
 import { createCompletionService } from "@core/completion.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 /** Poll a condition until true (deterministic replacement for fixed sleeps). */
 async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
@@ -76,7 +83,7 @@ describe("runInteractiveSession", () => {
         cleanup: async () => {},
       },
       createLlmClient: ((overrides?: Record<string, unknown>) =>
-        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+        new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
           chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
       completion: createCompletionService(),
     } as any;

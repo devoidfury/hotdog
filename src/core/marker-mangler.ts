@@ -3,17 +3,17 @@
 // Randomly aliases protected marker names before sending to the model,
 // and reverses the transformation on output.
 
-// Core-owned protected prefixes: markers no ToolFormat owns. Format-specific
-// element names (e.g. the XML format's tool/output/error) enter the union via
-// ToolFormat.markers, assembled at session entry points and passed to the
-// constructor or addPrefixes().
+// Core-owned protected prefixes: markers no WireFormat owns. Format-owned
+// element names (e.g. the XML format's tool/output/error/file-include/
+// system-notice) enter the union via WireFormat.markers, assembled at session
+// entry points and passed to the constructor or addPrefixes(). A wrapper
+// whose framing lives in a format has its protection travel with that format:
+// disable every format and nothing renders (or forges) those tags either.
 export const CORE_PROTECTED_PREFIXES = [
   "tool-call",
   "tool_call",
   "function",
   "skill",
-  "file-include",
-  "system-notice",
   "previous-context-summary",
   "thinking",
   "reasoning",
@@ -100,7 +100,7 @@ export class MarkerMangler {
   /**
    * @param prefixes - Protected marker prefixes to alias. Defaults to the
    *   core list (CORE_PROTECTED_PREFIXES) so existing call sites keep working;
-   *   session entry points pass the derived union (core + active ToolFormat
+   *   session entry points pass the derived union (core + active WireFormat
    *   markers + model/provider controlTokens).
    */
   constructor(prefixes: readonly string[] = CORE_PROTECTED_PREFIXES) {

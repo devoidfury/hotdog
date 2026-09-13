@@ -449,30 +449,29 @@ export class Agent implements AgentLike {
         skippedToolResults = skipped.map((tc) => ({
           toolName: tc.function?.name || "(unknown)",
           input: tc.function?.arguments || "{}",
-          result: `Skipped due to maxToolCallsPerIteration limit (${this.maxToolCallsPerIteration})`,
+          content: `Skipped due to maxToolCallsPerIteration limit (${this.maxToolCallsPerIteration})`,
           toolCallId: tc.id,
         }));
       }
 
-      // Resolve the ToolFormat for this iteration's model (model -> provider -> global chain)
-      // so tool results render in the active format.
+      // No WireFormat here: the executor stores tool-result PARTS and the
+      // LlmClient shapes them per model when the request is built.
       const { outcome, toolResults } = await this._executeTools(
         toolCallsToExecute,
-        this.llmClient.toolFormatFor(modelConfig).id,
         params.toolDefs.map((d) => d.function.name),
       );
 
       for (const sr of skippedToolResults) {
         this.addMessage(new Message({
           role: "tool",
-          content: sr.result,
+          content: sr.content,
           toolCallId: sr.toolCallId,
           source: "tool",
         }));
         this.emitOutput("tool_result", {
           toolName: sr.toolName,
           input: sr.input,
-          result: sr.result,
+          content: sr.content,
           toolCallId: sr.toolCallId,
         });
       }
@@ -546,17 +545,10 @@ export class Agent implements AgentLike {
     }, this.llmClient.markerMangler);
   }
 
-  private _executeTools(toolCalls: ToolCall[], toolFormatName?: string, availableToolNames?: string[]) {
-    // The session's registry is passed explicitly so format resolution never depends on
-    // process-global state (the active format depends on this session's model/provider config).
+  private _executeTools(toolCalls: ToolCall[], availableToolNames?: string[]) {
     // availableToolNames is the model-visible set from this iteration's request
     // (post PROVIDER_REQUEST), so availability never re-filters the registry.
-    return this.#toolExecutor.execute(
-      toolCalls,
-      toolFormatName,
-      this.llmClient.toolFormatRegistry,
-      availableToolNames,
-    );
+    return this.#toolExecutor.execute(toolCalls, availableToolNames);
   }
 
   /** Use instead of pushing to the message log directly; fires CONTEXT_MESSAGE for extensions. */

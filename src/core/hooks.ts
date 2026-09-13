@@ -407,7 +407,8 @@ export const EXTENSION_PROVIDES = {
   CLI_SUBCOMMANDS: "cli:subcommands",
   TOOLS: "tools",
   LLM_PROTOCOLS: "llm:protocols",
-  TOOL_FORMATS: "tool:formats",
+  WIRE_FORMATS: "wire:formats",
+  ROLE_MAPPINGS: "role:mappings",
 } as const;
 
 export function createHooks(): HookSystem {

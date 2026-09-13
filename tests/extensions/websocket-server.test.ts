@@ -14,6 +14,13 @@ import { Message } from "@core/context/message.ts";
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 type MockWs = ReturnType<typeof createWsMockWs>;
 
@@ -990,7 +997,7 @@ describe("replaySessionHistory", () => {
       toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
       extensions: { cleanup: async () => {} },
       createLlmClient: (overrides?: Record<string, unknown>) =>
-        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+        new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
           chatTimeoutSecs: 30, maxRetries: 3, ...overrides }),
     } as any;
 

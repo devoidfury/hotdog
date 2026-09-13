@@ -378,7 +378,7 @@ export async function runInteractiveSession(
     ...resolved,
     palette,
     thinkerFormat: resolved.thinkerFormat,
-    toolFormat: resolved.toolCallDisplayFormat,
+    toolCallDisplayFormat: resolved.toolCallDisplayFormat,
     toolOutputFmt: resolved.toolOutputFmt,
     hideUserMessage: true,
   });

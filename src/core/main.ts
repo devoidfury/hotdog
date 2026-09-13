@@ -25,11 +25,9 @@ import { ConfigRegistry } from "./extensions/config.ts";
 import { CliError } from "./error.ts";
 import { createSubcommandRegistry, type CliSubcommandRegistry } from "./extensions/registries.ts";
 import {
-  createToolFormatRegistry,
-  toolFormatForName,
-  TOOL_FORMAT_DEFAULT_NAME,
-} from "./extensions/tool-format.ts";
-import { xmlToolFormat } from "./extensions/tool-format-xml.ts";
+  createWireFormatRegistry,
+} from "./extensions/wire-format.ts";
+import { createRoleMappingRegistry } from "./extensions/role-mapping.ts";
 import { createLlmProtocolRegistry } from "./llm-client/protocol.ts";
 import { openaiProtocol } from "./llm-client/openai-protocol.ts";
 import { LlmClient, type LlmClientOptions } from "./llm-client/client.ts";
@@ -103,8 +101,8 @@ export function createCore(
 ): CoreInfrastructure {
   const hooks = options.hooks || createHooks();
   const toolRegistry = createToolRegistry();
-  const toolFormatRegistry = createToolFormatRegistry();
-  toolFormatRegistry.register(xmlToolFormat);
+  const wireFormatRegistry = createWireFormatRegistry();
+  const roleMappingRegistry = createRoleMappingRegistry();
   const llmProtocolRegistry = createLlmProtocolRegistry();
   llmProtocolRegistry.register(openaiProtocol);
   const services = createServiceRegistry();
@@ -130,21 +128,28 @@ export function createCore(
     config: coreConfig,
     cliSubcommandRegistry,
     configRegistry,
-    toolFormatRegistry,
+    wireFormatRegistry,
+    roleMappingRegistry,
     llmProtocolRegistry,
     service: (name: string) => services.get(name),
     buildConfig: options.buildConfig,
     createLlmClient(overrides?: Partial<LlmClientOptions>): LlmClient {
       const resolved = this.resolved;
-      // The global ToolFormat default comes from the *resolved* config (CLI >
-      // config > schema default) -- the raw file in this.config never carries
-      // CLI values. Seed the session mangler with that format's markers
-      // (per-model formats/controlTokens still grow the union via
-      // ensureManglerCovers on first use).
-      const modelToolFormat = (resolved?.modelToolFormat as string | undefined) ?? TOOL_FORMAT_DEFAULT_NAME;
-      // Unknown names throw LlmError("config") at the request boundary,
-      // mirroring unknown protocol/format ids (no silent fallback to xml).
-      const defaultToolFormat = toolFormatForName(modelToolFormat, this.toolFormatRegistry);
+      // The global WireFormat NAME comes from the resolved config (CLI >
+      // config > core.config.json default) -- core holds no default of its
+      // own. The SHAPE behind that name comes from whichever extension
+      // registers it (the autoloaded wire-format-xml for "xml"), so seed the
+      // session mangler with its markers only when the registry actually has
+      // it. A name nothing registers is not a client-creation error: it
+      // throws LlmError(config) ("Unknown wire format") on the first request
+      // (#requestWireFormat); a name that is simply unset throws at the wire
+      // only when a wrapper needs rendering. Per-model formats/controlTokens
+      // grow the union via ensureManglerCovers, called from every request.
+      const modelWireFormat =
+        (resolved?.modelWireFormat as string | undefined) ??
+        (getLayerDefault(CONFIG_SCHEMA.modelWireFormat) as string | undefined);
+      const seedMarkers =
+        (modelWireFormat !== undefined ? this.wireFormatRegistry.get(modelWireFormat)?.markers : undefined) ?? [];
       return new LlmClient({
         baseUrl: resolved?.baseUrl ?? null,
         apiKey: resolved?.apiKey ?? null,
@@ -155,10 +160,16 @@ export function createCore(
         // unset; ?? so an explicit 0 (no retries) survives.
         maxRetries: resolved?.maxRetries ?? (getLayerDefault(CONFIG_SCHEMA.maxRetries) as number),
         providers: (this.config.providers as ProviderDef[]) || [],
-        toolFormat: modelToolFormat,
-        toolFormatRegistry: this.toolFormatRegistry,
+        wireFormat: modelWireFormat ?? null,
+        wireFormatRegistry: this.wireFormatRegistry,
+        // Same doctrine for the role mapping: resolved config name, else the
+        // schema default ("system-first"); the extension supplies the mappings.
+        roleMapping:
+          (resolved?.modelRoleMapping as string | undefined) ??
+          (getLayerDefault(CONFIG_SCHEMA.modelRoleMapping) as string | undefined) ?? null,
+        roleMappingRegistry: this.roleMappingRegistry,
         llmProtocolRegistry: this.llmProtocolRegistry,
-        markerMangler: new MarkerMangler([...CORE_PROTECTED_PREFIXES, ...defaultToolFormat.markers]),
+        markerMangler: new MarkerMangler([...CORE_PROTECTED_PREFIXES, ...seedMarkers]),
         ...overrides,
       });
     },

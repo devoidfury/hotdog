@@ -58,7 +58,7 @@ function turnEndPayload(opts: {
   return {
     turnIndex: 0,
     message: "",
-    toolResults: [] as Array<{ toolName: string; input: string; result: string }>,
+    toolResults: [] as Array<{ toolName: string; input: string; content: string }>,
     stopped: opts.stopped ?? true,
     cancelled: opts.cancelled,
     reason: opts.reason,

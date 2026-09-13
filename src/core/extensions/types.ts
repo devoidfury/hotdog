@@ -15,7 +15,9 @@ import type { ToolRegistry, ToolDef, Tool, ToolMetadata } from "./tool-registry.
 import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { AgentCommandRegistry, CliSubcommandRegistry } from "./registries.ts";
-import type { ToolFormatRegistry } from "./tool-format.ts";
+import type { WireFormatRegistry } from "./wire-format.ts";
+import type { RoleMappingRegistry } from "./role-mapping.ts";
+import type { ToolResultContent } from "../context/wrappers.ts";
 import type { LlmProtocolRegistry } from "../llm-client/protocol.ts";
 import type { ConfigRegistry } from "./config.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
@@ -153,7 +155,7 @@ export interface HookPayloads {
   "turn:end": {
     turnIndex: number;
     message: string;
-    toolResults: Array<{ toolName: string; input: string; result: string }>;
+    toolResults: Array<{ toolName: string; input: string; content: ToolResultContent }>;
     stopped: boolean;
     cancelled?: boolean;
     reason?: "completion" | "tool_return" | "continue" | "cancelled" | "error" | "max_iterations";
@@ -178,7 +180,8 @@ export interface CoreContext {
   config: CoreConfigWithExtensions;
   cliSubcommandRegistry: CliSubcommandRegistry;
   configRegistry: ConfigRegistry;
-  toolFormatRegistry: ToolFormatRegistry;
+  wireFormatRegistry: WireFormatRegistry;
+  roleMappingRegistry: RoleMappingRegistry;
   llmProtocolRegistry: LlmProtocolRegistry;
 
   service(name: string): unknown;
@@ -226,8 +229,10 @@ export interface ResolvedConfig {
   thinkerFormat?: string;
   /** CLI display format for tool calls. */
   toolCallDisplayFormat?: string;
-  /** Global default ToolFormat registry name (CLI > config > "xml"). */
-  modelToolFormat?: string;
+  /** Global default WireFormat registry name (CLI > config > "xml"). */
+  modelWireFormat?: string;
+  /** Global default RoleMapping registry name (CLI > config > "system-first"). */
+  modelRoleMapping?: string;
   toolOutputFmt?: string;
   taskProfile?: string;
   taskDefaultRole?: string;

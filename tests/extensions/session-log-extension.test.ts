@@ -125,6 +125,45 @@ describe("session-log extension create()", () => {
     }
   });
 
+  it("CONTEXT_MESSAGE hook fills tool_name from the stored tool-result part", async () => {
+    const sessionId = `test-tool-name-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+
+      const part = {
+        type: "tool-result",
+        tool: "bash",
+        status: "success",
+        meta: [["exit_code", "0"]],
+        error: null,
+        hint: null,
+        output: "done",
+      };
+      await hook({
+        message: { sessionId, role: "tool", content: [part], toolCallId: "call_9", source: "tool" },
+        agent: { sessionId },
+      });
+      // Legacy string tool messages (and non-tool messages) keep no name.
+      await hook({
+        message: { sessionId, role: "tool", content: "old rendered text", toolCallId: "call_10", source: "tool" },
+        agent: { sessionId },
+      });
+      await hook({
+        message: { sessionId, role: "user", content: "hi" },
+        agent: { sessionId },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries[0]!.tool_name).toBe("bash");
+      // stripNulls drops the key entirely when there is no part to read from.
+      expect(entries[1]!.tool_name).toBeUndefined();
+      expect(entries[2]!.tool_name).toBeUndefined();
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
   it("CONTEXT_MESSAGE hook skips logging during restoration", async () => {
     const sessionId = `test-restoring-${Date.now()}`;
     try {

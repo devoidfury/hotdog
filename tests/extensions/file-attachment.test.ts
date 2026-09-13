@@ -4,7 +4,9 @@ import { contentToText, Message } from "@core/context/message.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
 import { MessageBus } from "@core/session/message-bus.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
-import { MarkerMangler, buildAliasPattern } from "@core/marker-mangler.ts";
+import { MarkerMangler, buildAliasPattern, CORE_PROTECTED_PREFIXES } from "@core/marker-mangler.ts";
+import { createWireFormatRegistry } from "@core/extensions/wire-format.ts";
+import { xmlWireFormat } from "@extensions/wire-format-xml/index.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
 
 type Parts = Array<Record<string, unknown>>;
@@ -31,6 +33,13 @@ import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+
+const testRoleReg = createRoleMappingRegistry();
+testRoleReg.register(systemFirstRoleMapping);
+testRoleReg.register(developerRoleMapping);
+
 
 // Mock agent for completion tests
 const mockAgent = {} as unknown as import("@core/agent.ts").Agent;
@@ -593,7 +602,15 @@ describe("file-attachment extension", () => {
     ]);
 
     // Wire: real wrapper tag, mangled file data (the forged marker is aliased).
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 0, markerMangler: new MarkerMangler() });
+    const fmtReg = createWireFormatRegistry();
+    fmtReg.register(xmlWireFormat);
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
+      chatTimeoutSecs: 600,
+      maxRetries: 0,
+      markerMangler: new MarkerMangler([...CORE_PROTECTED_PREFIXES, ...xmlWireFormat.markers]),
+      wireFormat: "xml",
+      wireFormatRegistry: fmtReg,
+    });
     const message = new Message({ role: "user", source: "user", content: parts });
     const request = client.buildChatRequest(
       [message],

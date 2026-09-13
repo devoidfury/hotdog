@@ -21,6 +21,7 @@ import {
 } from "@core/session/session-log.ts";
 import { AgentError, formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
+import { toolContentText } from "@utils/tool-content.ts";
 
 interface SessionMetadata {
   profile: string;
@@ -576,7 +577,9 @@ function replaySessionHistory(
               type: S2C.TOOL_RESULT,
               sessionId,
               name: matchedCall?.function?.name || "unknown",
-              output: msg.content || "",
+              // Parts (tool-result) flatten for this string-only transport;
+              // legacy entries are already plain text.
+              output: toolContentText(msg.content ?? ""),
             }),
           );
           break;

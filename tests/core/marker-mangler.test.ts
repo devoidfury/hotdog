@@ -88,7 +88,6 @@ describe("MarkerMangler", () => {
       "tool_call",
       "function",
       "skill",
-      "file-include",
       "previous-context-summary",
       "thinking",
       "reasoning",

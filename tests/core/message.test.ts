@@ -252,21 +252,19 @@ describe('contentToText', () => {
 
   // NOTE: wrapper tag names are assembled by concatenation so this file
   // stays free of literal protected markers.
-  it('renders wrapper parts at rest (no mangling)', () => {
-    const FILE_TAG = 'file-include';
-    const NOTICE_TAG = 'system-notice';
+  it('renders wrapper parts at rest as DATA -- no markup, no mangling', () => {
+    // Core ships no shape: at rest every wrapper part is JSON data. The
+    // model-facing framing comes from the session WireFormat at the wire.
+    const filePart = { type: 'file-include', path: 'note.md', content: 'hello' };
+    const noticePart = { type: 'system-notice', text: 'resumed' };
     expect(
       contentToText([
         { type: 'untrusted', text: 'read @note.md' },
-        { type: 'file-include', path: 'note.md', content: 'hello' },
-        { type: 'system-notice', text: 'resumed' },
+        filePart,
+        noticePart,
       ]),
     ).toBe(
-      [
-        'read @note.md',
-        `<${FILE_TAG}>\n<path>note.md</path>\n<contents>\nhello</contents>\n</${FILE_TAG}>`,
-        `<${NOTICE_TAG}>\nresumed\n</${NOTICE_TAG}>`,
-      ].join('\n'),
+      ['read @note.md', JSON.stringify(filePart), JSON.stringify(noticePart)].join('\n'),
     );
   });
 });

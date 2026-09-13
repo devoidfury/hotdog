@@ -62,6 +62,7 @@ Both render identically for the model: the WireFormat seam emits the hint as a s
 | `question` | `question-tool` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default`, `allow_other` |
 | `model` | `model-switch` | Switches to a different model mid-conversation | `name` |
 | `web_search` | `web-search` | Searches the web for information | `query` |
+| `string_length` | `string-length` | Measures a string in utf16, codepoints, bytes (UTF-8), and graphemes | `string` |
 | `review` | `ui-session-review-cli` | Lists recent sessions, gets a session summary (user input + final responses), reads an index range of entries, or gets tool call index. | `operation`, `session_id`, `limit`, `message_start`, `message_end` |
 | `handoff` | `handoff-tool` | Clears context and restarts the agent with a prepared plan for a new phase | `content`, `title`, `instructions`, `files` |
 

@@ -79,7 +79,7 @@ These are the top-level configuration keys available in `defaults.json`. Keys no
 - **Type:** `string`
 - **CLI flag:** `--model`
 - **Default:** none (required)
-- **Resolution:** CLI `--model` > profile > env `HOTDOG_MODEL`/`AI_MODEL` > config > provider's first model
+- **Resolution:** config-file profile model > CLI `--model` > active provider's first model > schema chain (CLI > merged profile > env `HOTDOG_MODEL`/`AI_MODEL` > config) > null
 
 The default AI model used when no other model is specified. Format: `providerName/modelName`.
 
@@ -407,6 +407,18 @@ Timeout in seconds for chat/API requests.
 
 ```json
 { "chatTimeoutSecs": 300 }
+```
+
+### `healthCheckTimeoutSecs`
+
+- **Type:** `number`
+- **Default:** `5`
+- **Resolution:** config > default
+
+Timeout in seconds for provider health-check requests (used by `info` connectivity checks).
+
+```json
+{ "healthCheckTimeoutSecs": 10 }
 ```
 
 ### `maxIterations`
@@ -923,7 +935,7 @@ access in the first place). So `workspace.deny` under bash means nothing; it bin
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
-| `maxBodyLength` | `number` | `8000` | Maximum number of characters to return before truncating responses. |
+| `maxBodyLength` | `number` | `20000` | Maximum number of characters to return before truncating responses. |
 | `fetchTimeoutMs` | `number` | `30000` | Timeout in milliseconds for requests (headers and body). Slow or dead hosts abort instead of hanging the agent. |
 | `allowedSchemes` | `string[]` | `["http", "https"]` | URL schemes the fetch tool may use. Blocks `file://` (local file reads) and other schemes by default. |
 | `allowPrivateHosts` | `boolean` | `false` | Allow hosts that are, or resolve to, private/reserved addresses (localhost, RFC1918, link-local/metadata, ULA, CGNAT). Default `false` blocks SSRF against local and cloud-internal services. |
@@ -1265,6 +1277,22 @@ CLI flag: `--shell-mode`.
 
 ```json
 { "webui": { "port": 8080, "apiKey": "your-key" } }
+```
+
+### Enabled-only extensions
+
+These extensions expose a single config knob, `{ "<key>": { "enabled": <boolean, default true> } }`, to turn them off:
+
+| Config key | Extension | Provides |
+|------------|-----------|----------|
+| `sessionLog` | `session-log` | JSONL session logging |
+| `stringLength` | `string-length` | `string_length` tool |
+| `uiInfoCli` | `ui-info-cli` | `info`, `show-prompt`, `profiles` subcommands |
+| `uiOneShot` | `ui-one-shot` | One-shot prompt mode (`-p` / `prompt`) |
+| `uiSessionReviewCli` | `ui-session-review-cli` | `sessions` subcommand + `review` tool |
+
+```json
+{ "sessionLog": { "enabled": false } }
 ```
 
 ---

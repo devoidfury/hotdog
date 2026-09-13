@@ -124,7 +124,6 @@ name: coder
 description: A coding-focused agent
 role: You are an AI coding assistant.
 aspects: ['proactive', 'coding', 'concise']
-preload-skills: []
 ---
 Profile body content goes here.
 ```
@@ -144,6 +143,7 @@ Profile body content goes here.
 - **MCP client** -- Connect to Model Context Protocol servers (HTTP + stdio)
 - **Subagent tasks** -- Delegate work to background task agents
 - **Handoff tool** -- Clear context and restart with a prepared plan for multi-phase tasks
+- **Tool-call approvals** -- Opt-in `userGate`: allow / deny / ask before a tool call runs (convenience triage, not an enforcement boundary)
 - **File attachments** -- Reference files inline with @filepath syntax in user input
 - **Session logging** -- JSONL session logs for debugging and auditing
 - **Streaming** -- Real-time streaming of LLM responses
@@ -179,7 +179,7 @@ hotdog webui                     # Start the web UI server
     --provider <name>        AI provider name
 -p, --prompt <text>          One-shot prompt
     --sandbox                Sandbox mode: only allow tools without side effects
-    --shell-mode             Execute shell commands directly in interactive mode
+    --shell-mode             Execute lines starting with a recognized system command directly in interactive mode
                                Tip: append | @ to send command output to the agent (e.g., "ls -la | @", "ls -la | @ show me the permissions")
 -l, --loud                   Print full JSON API responses
 --json                       Output as JSON

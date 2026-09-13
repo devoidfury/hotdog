@@ -20,7 +20,7 @@ Status markers: entries tagged **(planned)** are design intent -- nothing in the
 
 ## Context Enrichment
 
-- **Profile** — Defines a type of agent: system prompt + tools + configuration. The "what am I" of the system. Configured via profile name (CLI flag, config file, or default). Contains: role, body, tool whitelist/blacklist, model, aspects, preload skills. Profile selection priority: CLI > config file > default.
+- **Profile** — Defines a type of agent: system prompt + tools + configuration. The "what am I" of the system. Configured via profile name (CLI flag, config file, or default). Contains: role, body, tool whitelist/blacklist, model, aspects. Profile selection priority: CLI > config file > default.
 - **Aspect** — "Always on" system prompt snippet. Composable, flexible behavioral overlay. Configured in profile via `aspects` list. General behavioral rules. May contain workflows. Piecemeal building block.
 - **Skill** — Load-on-demand guide/workflow. Discoverable by name + description. Can reference external files and scripts. Transient, task-specific. Three states: **Unknown** (invisible to agent), **Available** (known, can be loaded), **Loaded** (body text inlined into context + additional files listed).
 - **Common goal** — Aspects and skills both end up in the same place (LLM context). The distinction is about ordering and composition: aspects for persistent signal, skills for on-demand signal. Reduce noise, adapt to task requirements.

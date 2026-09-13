@@ -7,7 +7,7 @@
 2. **Superficial -ing phrases.** "highlighting...", "ensuring...", "reflecting...", "showcasing...", "fostering...". Delete or expand with real sources.
 3. **Vague attributions.** "Experts believe", "Industry reports suggest", "Some critics argue". Name the source or delete.
 4. **Formulaic challenges.** "Despite challenges... continues to thrive." Replace with specific facts.
-5. **Overused AI vocabulary.** crucial, delve, enduring, enhance, fostering, garner, interplay, intricate, pivotal, showcase, tapestry (abstract), testament, underscore, vibrant. "Not just X, but Y."
+5. **Overused AI vocabulary.** crucial, delve, enduring, enhance, fostering, garner, interplay, intricate, honest, pivotal, showcase, tapestry (abstract), testament, underscore, vibrant. "Not just X, but Y."
 6. **Overused "—"** Avoid em dashes entirely. Use periods, commas, semicolons, parentheses, or when nothing else is appropriate a plain short dash "-". Em dashes are an AI tell.
 7. **Boldface overuse.** Don't bold every proper noun or acronym.
 8. **Inline-header lists.** The tell is a bold label and colon that restates the line: "**Performance:** Performance improved...". Convert those to prose. A bold lead-in that ends in a period, names the item, and is followed by genuinely new detail ("**Schema in TypeScript.** Tables live in one file.") is fine, not a tell.

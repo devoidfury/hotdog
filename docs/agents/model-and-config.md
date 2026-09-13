@@ -17,7 +17,7 @@
 ### Core Defaults
 All configurable defaults are defined in `src/core/core.config.json` as schema default layers.
 Each config key defines its own resolution layers. Common patterns:
-- **`defaultModel`**: CLI → profile → env → config → provider's first model (no built-in default; agent construction errors when nothing resolves)
+- **`defaultModel`**: schema chain CLI → profile → env → config (no built-in default); final selection then prefers config-file profile model, then CLI, then the provider's first model — see Model Resolution below (agent construction errors when nothing resolves)
 - **`role`**: CLI → config → profile → default
 - **`aiUrl`/`apiKey`**: provider → CLI → config → env → default (provider is the natural source)
 
@@ -79,11 +79,14 @@ In this example:
 - `--max-tool-difficulty 1` on the CLI would override both.
 
 ### Model Resolution
-Model names flow through `buildConfig()`:
-1. CLI `--model` → profile model → env (`HOTDOG_MODEL`/`AI_MODEL`) → provider's first model → config `defaultModel` → schema default
-2. If the name contains `/`, it's used as-is (already qualified)
-3. If a provider is active and the name matches a provider model, it's prefixed with the provider name
-4. Otherwise, the bare name is passed through (will error at validation if not in registry)
+Model names flow through `buildConfig()` → `resolveModel()`. Effective priority:
+1. Model of the active in-config profile (`profiles[profileName].model`)
+2. CLI `--model`
+3. First model of the active provider (when the provider defines a `models` array)
+4. Schema chain: `--model` → merged profile model (`.profile.md` file wins over in-config) → env `HOTDOG_MODEL`/`AI_MODEL` → config `defaultModel`
+5. Default: `null` — agent construction fails with `No model configured`; model-free subcommands (`profiles`, `sessions`) still work
+
+At each step, `resolveModelWithProvider()` qualifies the name: if it contains `/` it is used as-is; if it matches a model of the active provider it is prefixed `provider/`; otherwise the bare name passes through (errors at validation if not in the registry).
 
 ### Profiles
 Tool profiles control which tools are available to the agent. Profiles are defined in the config file under `profiles` and selected via `--profile` CLI flag or the `profile` config key.
@@ -91,7 +94,6 @@ Tool profiles control which tools are available to the agent. Profiles are defin
 - **`whitelist_tools`**: If specified, only these tools are available.
 - **`blacklist_tools`**: These tools are excluded. All other tools remain available.
 - **`model`**: Override the default model for this profile.
-- **`cwd_boundary`**: Directory boundary for file operations.
 - **`manager`**: When true, enables manager-specific tools before whitelist/blacklist filtering.
 - **`aspects`**: List of aspect names to include (loaded from `config/aspects/<name>.aspect.md`).
 

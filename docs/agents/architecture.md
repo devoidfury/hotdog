@@ -37,41 +37,9 @@ Split into sub-modules. The single source of truth is `src/core/core.config.json
 Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined in `extension.json` (configSchema and cli:flags), with defaults automatically extracted and registered by the extension loader.
 
 ### Hook System (`src/core/hooks.ts`)
-The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in `HOOKS` constant.
+The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in the `HOOKS` constant (session, tools, context, system prompt, commands, output, provider, turn, CLI, logging). Full per-hook reference — names, patterns, payloads, when each fires: `docs/hook-lifecycle.md`.
 
-**Hook trace:** Set `_trace = true` on the HookSystem instance (via `--hook-trace` CLI flag, `HOTDOG_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug`. See `docs/agents/debugging-hotdog-tools-visibility-flags.md` for details.
-
-**Session:** `SESSION_CREATE`, `SESSION_SWAP`, `SESSION_RESTORE_ACTIVE`
-
-**Tools:** `TOOLS_REGISTER`, `TOOL_METADATA`, `TOOL_BEFORE_EXECUTE`, `TOOL_AFTER_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_CALL`, `TOOL_RESULT`
-
-**Services:** `SERVICES_REGISTER` — fired synchronously during extension load; handler receives the ServiceRegistry
-
-**Messages:** `CONTEXT`, `CONTEXT_MESSAGE`, `CONTEXT_REPLACED`, `MESSAGES_AFTER_LLM`
-
-**System prompt:** `SYSTEM_PROMPT_BUILD`
-
-**Commands:** `COMMAND_DISPATCH`, `COMMANDS_REGISTER`
-
-**Output:** `OUTPUT_EVENT`
-
-**Shutdown:** `SHUTDOWN_CLEANUP`
-
-**CLI:** `CLI_SUBCOMMANDS_REGISTER`, `CLI_ARGS_PARSED`, `COMPLETION_REQUEST`
-
-**Model:** `MODEL_CHANGE`
-
-**Input:** `INPUT`
-
-**Provider:** `PROVIDER_REQUEST`, `PROVIDER_RESPONSE`
-
-**Turn:** `TURN_START`, `TURN_END`
-
-**Loop:** `LOOP_DETECTED`
-
-**Tool metrics:** `TOOL_METRICS`
-
-**Logging:** `LOG`
+**Hook trace:** Set `_trace = true` on the HookSystem instance (via `--hook-trace` CLI flag, `HOTDOG_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug`. See `docs/agents/debugging.md` for details.
 
 ### Extension Loader (`src/core/extensions/extensions.ts`)
 Discovers, loads, and manages extensions. Key exports:
@@ -314,6 +282,10 @@ Each extension has:
 | `web-search` | Web search tool — search the web for information |
 | `websocket` | WebSocket server for agent session management — core backend utility for UI extensions |
 | `webui` | Web UI for agent interaction — login, chat, session management |
+| `user-gate` | Tool-call approvals (`userGate` config, opt-in): `TOOL_CALL` gate handler — allow / deny / ask via the question input seam |
+| `wire-format-xml` | Registers the built-in `"xml"` WireFormat (harness wrapper markup) |
+| `role-mapping-default` | Registers the built-in `"system-first"` and `"developer"` RoleMappings (wire roles for the `harness` role) |
+| `string-length` | `string_length` tool — measure a string in utf16/codepoints/bytes/graphemes |
 
 ### Extension Load Order
 Extensions are loaded in order: REFRESH (0) → CORE_TOOLS (1) → CLI (2) → DEFAULT (10). CLI extensions are loaded early so their subcommand handlers are registered before dispatch. Core tools load before other extensions that depend on them.

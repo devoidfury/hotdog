@@ -167,8 +167,12 @@ describe.skipIf(!caps.landlockAvailable)("sysbox fence mode (real landlock)", ()
 
   // ...and the CONNECT_SEND_UDP side of the same pair: bash connects the UDP
   // socket, which needs no auto-bind, so this probe fails only if bit 3 is
-  // handled too.
-  bashIt("blocks UDP connect(2) (CONNECT_SEND_UDP side; abi here: " + caps.landlockAbi + ")", async () => {
+  // handled too. Gated on ABI v10 like its sendto sibling, NOT on bashIt
+  // (abi 4): on a kernel below v10 the UDP rights do not exist, so NOTHING
+  // denies the connect and rc=0 is correct behavior, not a hole (measured on
+  // an ABI-7 CI runner where the abi-4 gate let this sail into a false fail).
+  const udpBashIt = caps.landlockAbi >= 10 && Bun.which("bash") !== null ? it : it.skip;
+  udpBashIt("blocks UDP connect(2) (CONNECT_SEND_UDP side; abi here: " + caps.landlockAbi + ")", async () => {
     const port = 41000 + (process.pid % 20000);
     const r = await tool.execute({ command: `bash -c 'echo x > /dev/udp/127.0.0.1/${port}'; echo rc=$?` }, ctx);
     expect(r.output).toContain("Permission denied");

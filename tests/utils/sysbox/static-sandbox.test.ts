@@ -168,6 +168,14 @@ console.log(
     });
   });
 
+  it("rejects a config env beyond the TLV bound", () => {
+    const env: Record<string, string> = {};
+    for (let i = 0; i < 257; i++) env[`SBX_TEST_${i}`] = "v";
+    expect(() =>
+      spawnSandboxed({ command: "true", cwd: null, env }),
+    ).toThrow(/env exceeds 256/);
+  });
+
   it("rejects NUL bytes in the command", () => {
     expect(() =>
       spawnSandboxed({ command: "echo hi\0rm -rf /", cwd: null, env: {} }),

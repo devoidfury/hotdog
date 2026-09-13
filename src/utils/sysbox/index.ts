@@ -203,16 +203,16 @@ export const SBX_CGROUP_PIDS_MAX = 512;
 
 let cgroupSeq = 0;
 
-/** Create `<cgroupParentDir>/hotdog-sbx-<pid>-<seq>` with DoS limits. The
- * hosting dir is the nearest delegated ancestor of our own cgroup resolved
- * once by capability detection (findCgroupParentDir) -- our own cgroup is
- * usually a systemd leaf scope where no child can ever get limit files.
- * Returns the dir path (passed to the helper, which joins it) or null when
- * unavailable / failed (caller degrades). */
-function createSbxCgroupDir(seq: number): string | null {
+/** Create `<parent>/hotdog-sbx-<pid>-<seq>` with DoS limits. `parent` is the
+ * delegated hosting dir resolved once by capability detection
+ * (findCgroupParentDir) -- our own cgroup is usually a systemd leaf scope
+ * where no child can ever get limit files. Returns the dir path (passed to
+ * the helper, which joins it) or null when the create/limits fail (caller
+ * degrades). Parent + seq are parameters and the function is exported so
+ * tests can drive it with a fake parent of ordinary files (same precedent as
+ * buildMemoryKillNote); production passes the probed dir. */
+export function createSbxCgroupDir(parent: string, seq: number): string | null {
   try {
-    const parent = detectCapabilities().cgroupParentDir;
-    if (parent === null) return null;
     const dir = join(parent, `hotdog-sbx-${process.pid}-${seq}`);
     mkdirSync(dir);
     let limited = false;
@@ -253,8 +253,11 @@ function createSbxCgroupDir(seq: number): string | null {
  * rmdirSync, not rmSync: rmSync without `recursive` does not issue a plain
  * rmdir (on bun 1.3.14 it fails outright, measured), and with `recursive`
  * it would try to unlink the cgroup's virtual files (EPERM). rmdir(2) on a
- * process-empty cgroup is the only call the kernel accepts here. */
-function removeSbxCgroupDir(dir: string): void {
+ * process-empty cgroup is the only call the kernel accepts here.
+ *
+ * `retryDelayMs` is injectable so tests drive the retry/give-up loop without
+ * waiting out the real 10 s budget; production calls use the default. */
+export function removeSbxCgroupDir(dir: string, retryDelayMs = 500): void {
   let attempts = 0;
   const attempt = (): void => {
     try {
@@ -266,7 +269,7 @@ function removeSbxCgroupDir(dir: string): void {
         logger.debug(`[sysbox] cgroup ${dir} still busy after ${attempts} rmdir attempts; left in place`);
         return;
       }
-      const t = setTimeout(attempt, 500);
+      const t = setTimeout(attempt, retryDelayMs);
       t.unref?.();
     }
   };
@@ -311,6 +314,16 @@ export function buildMemoryKillNote(cgroupDir: string): string | null {
     `see docs/sysbox-sandbox.md "cgroups".`;
 }
 
+/** The exit-time cgroup chores for one spawn: read the OOM verdict into the
+ * WeakMap, then rmdir. Split out of buildHelperChild and exported so tests
+ * can drive it with a fake child and a fake cgroup dir of ordinary files.
+ * `child` only needs to be a stable WeakMap key. */
+export function cleanupSbxCgroup(child: ChildProcess, cgroupDir: string): void {
+  const note = buildMemoryKillNote(cgroupDir);
+  if (note) memoryKillNotes.set(child, note);
+  removeSbxCgroupDir(cgroupDir);
+}
+
 let launcherHashLogged = false;
 
 function logLauncherHashOnce(): void {
@@ -326,7 +339,9 @@ function logLauncherHashOnce(): void {
 
 function buildHelperChild(opts: SandboxSpawnOptions): ChildProcess {
   // cgroup seq is process-wide: every sandboxed spawn, any mode, gets its own limited cgroup when the host allows one.
-  const cgroup = detectCapabilities().cgroupAvailable ? createSbxCgroupDir(++cgroupSeq) : null;
+  const caps = detectCapabilities();
+  const cgParent = caps.cgroupAvailable ? caps.cgroupParentDir : null;
+  const cgroup = cgParent !== null ? createSbxCgroupDir(cgParent, ++cgroupSeq) : null;
   const cfg = JSON.stringify({
     exe: opts.exe ?? "/bin/sh",
     argv: ["sh", "-c", opts.command],
@@ -359,11 +374,7 @@ function buildHelperChild(opts: SandboxSpawnOptions): ChildProcess {
     // The OOM note must be read BEFORE the rmdir: memory.events dies with
     // the directory (exit fires before any caller-registered handler, so
     // the flag is set by the time a consumer sees "close").
-    child.on("exit", () => {
-      const note = buildMemoryKillNote(cgroup);
-      if (note) memoryKillNotes.set(child, note);
-      removeSbxCgroupDir(cgroup);
-    });
+    child.on("exit", () => cleanupSbxCgroup(child, cgroup));
   }
 
   const cfgStream = child.stdio[3] as import("node:stream").Writable | null;

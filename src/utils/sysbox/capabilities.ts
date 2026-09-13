@@ -44,46 +44,71 @@ let cached: SysboxCapabilities | null = null;
 
 export function detectCapabilities(): SysboxCapabilities {
   if (cached) return cached;
+  cached = probeCapabilities(process.platform, process.arch);
+  return cached;
+}
+
+/**
+ * Why this kernel cannot (or can) back the seccomp deny filter: null = OK.
+ * /proc/sys/kernel/seccomp/actions_avail lists the filter actions the kernel
+ * was built with. A kernel without CONFIG_SECCOMP_FILTER has no "errno"
+ * action; a missing procfs entry cannot be verified, so treat it as
+ * unavailable (fail closed). Path-injected and exported so the guards are
+ * pinned by tests on any host (no mock.module).
+ */
+export function seccompErrnoActionReason(actionsPath: string): string | null {
+  if (!existsSync(actionsPath)) {
+    return `${actionsPath} not readable; seccomp filter support unverifiable`;
+  }
+  let actions = "";
+  try {
+    actions = readFileSync(actionsPath, "utf8");
+  } catch {
+    actions = "";
+  }
+  if (!actions.includes("errno")) {
+    return "kernel seccomp lacks the SECCOMP_RET_ERRNO action";
+  }
+  return null;
+}
+
+/**
+ * The detection itself, parameterized over platform/arch/helper-path so the
+ * fail-closed guards are pinned without mock.module or another host; the
+ * cached detectCapabilities() above feeds it the real ones. Production must
+ * not call this directly (it bypasses the cache).
+ */
+export function probeCapabilities(
+  platform: string,
+  arch: string,
+  helperPath: string = sbHelperPath(),
+): SysboxCapabilities {
   const reasons: string[] = [];
   let ok = true;
 
-  if (process.platform !== "linux") {
+  if (platform !== "linux") {
     ok = false;
-    reasons.push(`platform is "${process.platform}", sysbox requires linux`);
+    reasons.push(`platform is "${platform}", sysbox requires linux`);
   }
-  if (process.arch !== "x64") {
+  if (arch !== "x64") {
     ok = false;
-    reasons.push(`arch is "${process.arch}", the deny table pins x86_64 syscall numbers`);
+    reasons.push(`arch is "${arch}", the deny table pins x86_64 syscall numbers`);
   }
 
-  // /proc/sys/kernel/seccomp/actions_avail lists the filter actions the
-  // kernel was built with. A kernel without CONFIG_SECCOMP_FILTER has no
-  // "errno" action; a missing procfs entry cannot be verified, so treat it
-  // as unavailable (fail closed).
   if (ok) {
     const ACTIONS = "/proc/sys/kernel/seccomp/actions_avail";
-    if (!existsSync(ACTIONS)) {
+    const seccompReason = seccompErrnoActionReason(ACTIONS);
+    if (seccompReason !== null) {
       ok = false;
-      reasons.push(`${ACTIONS} not readable; seccomp filter support unverifiable`);
-    } else {
-      let actions = "";
-      try {
-        actions = readFileSync(ACTIONS, "utf8");
-      } catch {
-        actions = "";
-      }
-      if (!actions.includes("errno")) {
-        ok = false;
-        reasons.push("kernel seccomp lacks the SECCOMP_RET_ERRNO action");
-      }
+      reasons.push(seccompReason);
     }
   }
 
   // The helper is shipped source; a broken install should fail here rather
   // than per-spawn.
-  if (ok && !existsSync(sbHelperPath())) {
+  if (ok && !existsSync(helperPath)) {
     ok = false;
-    reasons.push(`sbx-exec helper not found at ${sbHelperPath()}`);
+    reasons.push(`sbx-exec helper not found at ${helperPath}`);
   }
 
   // Landlock: probed in the helper child (keeps this process cc()-free).
@@ -93,7 +118,7 @@ export function detectCapabilities(): SysboxCapabilities {
   let landlockOk = false;
   let landlockAbi = 0;
   if (ok) {
-    const abi = probeLandlockAbi();
+    const abi = probeLandlockAbi(helperPath);
     if (abi > 0) {
       landlockOk = true;
       landlockAbi = abi;
@@ -110,7 +135,7 @@ export function detectCapabilities(): SysboxCapabilities {
   const cgParent = ok ? resolveCgroupParentDir() : null;
   const cg = cgParent !== null ? probeCgroupLimits(cgParent) : { pids: false, memory: false };
 
-  cached = {
+  return {
     staticAvailable: ok,
     landlockAvailable: landlockOk,
     landlockAbi,
@@ -120,7 +145,6 @@ export function detectCapabilities(): SysboxCapabilities {
     cgroupMemoryAvailable: cg.memory,
     reasons,
   };
-  return cached;
 }
 
 const CGROUP_MOUNT = "/sys/fs/cgroup";
@@ -242,8 +266,9 @@ export function parseMemoryEventsOomKill(text: string): number {
 // systemd reclaiming the dir) lands in the catch or the flag check. The
 // controller files only appear when the controller is actually enabled in
 // the parent's subtree, so existsSync is the delegation answer, per
-// controller.
-function probeCgroupLimits(parent: string): { pids: boolean; memory: boolean } {
+// controller. Exported for tests (a plain tmp dir drives the mkdir/catch
+// paths; the delegation answers only a real cgroupfs can give).
+export function probeCgroupLimits(parent: string): { pids: boolean; memory: boolean } {
   const none = { pids: false, memory: false };
   const dir = join(parent, `hotdog-sbx-probe-${process.pid}`);
   try {
@@ -266,10 +291,11 @@ function probeCgroupLimits(parent: string): { pids: boolean; memory: boolean } {
 }
 
 // Helper prints the Landlock ABI on stdout and exits 0; exit 3 = no
-// landlock. Returns the ABI (>0) or 0.
-function probeLandlockAbi(): number {
+// landlock. Returns the ABI (>0) or 0. Takes the helper path (probeCapabilities
+// passes its own) so tests can drive the failure branches with stand-in scripts.
+function probeLandlockAbi(helperPath: string): number {
   try {
-    const r = spawnSync(process.execPath, [sbHelperPath(), "--probe-fence"], {
+    const r = spawnSync(process.execPath, [helperPath, "--probe-fence"], {
       stdio: ["ignore", "pipe", "pipe"],
       env: {},
       timeout: 15000,

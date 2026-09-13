@@ -55,12 +55,10 @@ describe("sysbox capabilities", () => {
 });
 
 describe("capabilities paths and reset", () => {
-  // The fail-closed guards inside detectCapabilities (non-linux platform,
-  // non-x64 arch, unreadable actions_avail, missing helper file, probe
-  // spawn failure) are deliberately not unit-covered: reaching them needs
-  // mock.module (banned) or a different host. They are defensive branches
-  // whose only job is to refuse; the integration suites exercise the happy
-  // paths on every kernel where the modes are real.
+  // The fail-closed guards (non-linux platform, non-x64 arch, unreadable
+  // actions_avail, missing helper file, probe spawn failure) are pinned in
+  // cgroup-files.test.ts via the parameterized probeCapabilities /
+  // seccompErrnoActionReason seams -- no mock.module, no other host needed.
   it("ships the helper and launcher sources next to the module", () => {
     expect(existsSync(sbHelperPath())).toBe(true);
     expect(existsSync(launcherCPath())).toBe(true);

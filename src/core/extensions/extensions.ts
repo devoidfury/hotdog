@@ -288,55 +288,34 @@ export function resolveLoadOrder(
     }
   }
 
+  const byName = new Map(extensions.map((e) => [e.name, e]));
+
   const cmp = (a: ExtensionMetadata, b: ExtensionMetadata) =>
     a.loadOrder - b.loadOrder || a.name.localeCompare(b.name);
 
-  const queue = extensions.filter((e) => (inDegree.get(e.name) || 0) === 0).sort(cmp);
-
   const result: ExtensionMetadata[] = [];
-  const pending: ExtensionMetadata[] = [];
+  let ready = extensions.filter((e) => (inDegree.get(e.name) || 0) === 0).sort(cmp);
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    result.push(current);
-
-    for (const dependent of adjList.get(current.name) || []) {
-      inDegree.set(dependent, inDegree.get(dependent)! - 1);
-      if (inDegree.get(dependent) === 0) {
-        const depExt = extensions.find((e) => e.name === dependent);
-        if (depExt) {
-          pending.push(depExt);
-        }
-      }
-    }
-  }
-
-  const maxIterations = extensions.length * extensions.length + 1;
-  let iterationCount = 0;
-  while (pending.length > 0) {
-    iterationCount++;
-    if (iterationCount > maxIterations) {
-      const remaining = extensions.filter((e) => !result.find((r) => r.name === e.name));
-      throw ExtensionError.CircularDependency(remaining.map((e) => e.name));
-    }
-    const batch = [...pending].sort(cmp);
-    pending.length = 0;
+  while (ready.length > 0) {
+    const batch = ready;
+    ready = [];
     for (const ext of batch) {
       result.push(ext);
       for (const dependent of adjList.get(ext.name) || []) {
-        inDegree.set(dependent, inDegree.get(dependent)! - 1);
-        if (inDegree.get(dependent) === 0) {
-          const depExt = extensions.find((e) => e.name === dependent);
-          if (depExt) {
-            pending.push(depExt);
-          }
+        const left = inDegree.get(dependent)! - 1;
+        inDegree.set(dependent, left);
+        if (left === 0) {
+          const depExt = byName.get(dependent);
+          if (depExt) ready.push(depExt);
         }
       }
     }
+    ready.sort(cmp);
   }
 
   if (result.length !== extensions.length) {
-    const remaining = extensions.filter((e) => !result.find((r) => r.name === e.name));
+    const done = new Set(result.map((e) => e.name));
+    const remaining = extensions.filter((e) => !done.has(e.name));
     throw ExtensionError.CircularDependency(remaining.map((e) => e.name));
   }
 

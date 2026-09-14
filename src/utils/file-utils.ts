@@ -1,9 +1,12 @@
 import fsPromises from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
 import { logger } from "./logger.ts";
-import { ToolResult } from "@core/extensions/tool-utils.ts";
+import { ToolResult, parseToolInput } from "@core/extensions/tool-utils.ts";
+import { PathEscapeError } from "./workspace.ts";
+import type { Workspace } from "./workspace.ts";
+import type { ToolContext } from "@core/extensions/types.ts";
 
 export interface ParsedFrontMatter {
   frontMatter?: Record<string, unknown>;
@@ -93,6 +96,62 @@ export async function safeMkdir(dir: string): Promise<ToolResult | null> {
   } catch (e: unknown) {
     return ToolResult.err(`Error creating directory: ${(e as Error).message}`);
   }
+}
+
+/**
+ * Shared skeleton for the workspace write tools (append, overwrite):
+ * validate args, resolve within the workspace, create parent dirs, run the
+ * write, and shape the result. Error strings are byte-identical to what the
+ * tools returned before sharing this helper.
+ */
+export async function writeWithinWorkspace(
+  input: string | Record<string, unknown> | null,
+  ctx: ToolContext,
+  opts: {
+    writeFn: (path: string, content: string) => Promise<void>;
+    writeErrorLabel: string;
+    resultKey: string;
+  },
+): Promise<ToolResult> {
+  const rawArgs = parseToolInput(input);
+  if (!rawArgs || !rawArgs.path || rawArgs.content === undefined) {
+    return ToolResult.err(
+      "Error parsing arguments: expected a JSON object with required 'path' and 'content' strings",
+    );
+  }
+
+  const filePath = rawArgs.path as string;
+  const content = rawArgs.content as string;
+  const workspace = ctx.get("workspace") as Workspace;
+
+  let resolvedPath: string;
+  try {
+    resolvedPath = workspace.resolveSafe(filePath);
+  } catch (e: unknown) {
+    if (e instanceof PathEscapeError) {
+      return ToolResult.err(e.message);
+    }
+    return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
+  }
+
+  const dir = dirname(resolvedPath);
+  const mkdirError = await safeMkdir(dir);
+  if (mkdirError) {
+    return mkdirError;
+  }
+
+  try {
+    await opts.writeFn(resolvedPath, content);
+  } catch (e: unknown) {
+    return ToolResult.err(`${opts.writeErrorLabel}: ${(e as Error).message}`);
+  }
+
+  return ToolResult.ok(
+    JSON.stringify({
+      path: filePath,
+      [opts.resultKey]: Buffer.byteLength(content, "utf-8"),
+    }),
+  );
 }
 
 /** String transform on paths to fix common llm typos. */

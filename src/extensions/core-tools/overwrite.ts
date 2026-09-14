@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import {
   toolDef,
   param,
@@ -7,15 +6,8 @@ import {
   parseToolInput,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
-import { PathEscapeError } from "@utils/workspace.ts";
-import type { Workspace } from "@utils/workspace.ts";
-import { safeMkdir } from "@utils/file-utils.ts";
+import { writeWithinWorkspace } from "@utils/file-utils.ts";
 import { ToolContext } from "@core/extensions/types.ts";
-
-interface OverwriteArgs {
-  path: string;
-  content: string;
-}
 
 export class OverwriteTool {
   static readonly TOOL_NAME = "overwrite";
@@ -50,56 +42,10 @@ export class OverwriteTool {
     input: string | Record<string, unknown> | null,
     ctx: ToolContext,
   ): Promise<ToolResult> {
-    const rawArgs = parseToolInput(input);
-    if (!rawArgs || !rawArgs.path || rawArgs.content === undefined) {
-      return ToolResult.err(
-        "Error parsing arguments: expected a JSON object with required 'path' and 'content' strings",
-      );
-    }
-
-    const args: OverwriteArgs = {
-      path: rawArgs.path as string,
-      content: rawArgs.content as string,
-    };
-
-    const { path: filePath, content } = args;
-    const workspace = ctx.get("workspace") as Workspace;
-
-    let resolvedPath: string;
-    try {
-      resolvedPath = workspace.resolveSafe(filePath);
-    } catch (e: unknown) {
-      if (e instanceof PathEscapeError) {
-        return ToolResult.err(e.message);
-      }
-      return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
-    }
-
-    const dir = path.dirname(resolvedPath);
-    const mkdirError = await safeMkdir(dir);
-    if (mkdirError) {
-      return mkdirError;
-    }
-
-    const writeError = await safeWriteFile(resolvedPath, content);
-    if (writeError) {
-      return writeError;
-    }
-
-    return ToolResult.ok(
-      JSON.stringify({
-        path: filePath,
-        filesize_after: Buffer.byteLength(content, "utf-8"),
-      }),
-    );
-  }
-}
-
-async function safeWriteFile(path: string, content: string): Promise<ToolResult | null> {
-  try {
-    await fs.writeFile(path, content, "utf-8");
-    return null;
-  } catch (e: unknown) {
-    return ToolResult.err(`Error writing file: ${(e as Error).message}`);
+    return writeWithinWorkspace(input, ctx, {
+      writeFn: (path, content) => fs.writeFile(path, content, "utf-8"),
+      writeErrorLabel: "Error writing file",
+      resultKey: "filesize_after",
+    });
   }
 }

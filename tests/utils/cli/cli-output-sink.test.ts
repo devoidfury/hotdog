@@ -129,7 +129,7 @@ describe("CliOutputSink", () => {
         prompt: "Choose",
         key: "choice",
         options: ["a", "b"],
-        allow_other: true,
+        allowOther: true,
       }],
     });
     const allOutput = stdoutWrites.join("");
@@ -145,7 +145,7 @@ describe("CliOutputSink", () => {
         prompt: "Choose",
         key: "choice",
         options: ["a", "b"],
-        allow_other: false,
+        allowOther: false,
       }],
     });
     const allOutput = stdoutWrites.join("");

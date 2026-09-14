@@ -65,17 +65,17 @@ describe("AsyncInteractiveCliInput", () => {
     expect(answers2.color).toBe("blue");
   });
 
-  it("allows free text with allow_other (default)", async () => {
+  it("allows free text with allowOther (default)", async () => {
     const { rl } = createMockRl(["purple"]);
     const answers = await new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h))
-      .collectAnswers([{ key: "color", prompt: "Pick a color", options: ["red", "green", "blue"], allow_other: true }]);
+      .collectAnswers([{ key: "color", prompt: "Pick a color", options: ["red", "green", "blue"], allowOther: true }]);
     expect(answers.color).toBe("purple");
   });
 
-  it("rejects invalid option when allow_other is false", async () => {
+  it("rejects invalid option when allowOther is false", async () => {
     const { rl } = createMockRl(["purple", "2"]); // first rejected, second valid
     const answers = await new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h))
-      .collectAnswers([{ key: "color", prompt: "Pick a color", options: ["red", "green", "blue"], allow_other: false }]);
+      .collectAnswers([{ key: "color", prompt: "Pick a color", options: ["red", "green", "blue"], allowOther: false }]);
     expect(answers.color).toBe("green");
   });
 

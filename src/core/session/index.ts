@@ -12,15 +12,7 @@ import type { ProfileManager, SwitchProfile } from "../config/index.ts";
 import type { Message, ImageAttachment, MessageSource } from "../context/message.ts";
 import type { AgentRunResult, OutputSink } from "../agent.ts";
 import type { ModelConfig } from "../config/providers.ts";
-
-export interface QuestionOption {
-  key: string;
-  prompt: string;
-  options?: string[];
-  required?: boolean;
-  default?: string;
-  allow_other?: boolean;
-}
+import type { QuestionDef } from "../context/input.ts";
 
 export interface AgentLike {
   sessionId: string;
@@ -132,7 +124,7 @@ export class SessionManager {
   #taskManager: TaskManager | null;
   #llmClient: LlmClient | null;
   // QUESTION events emitted while no channels are connected, replayed on reconnect.
-  #questionBuffers: Map<string, QuestionOption[][]>;
+  #questionBuffers: Map<string, QuestionDef[][]>;
 
   static async create(options: SessionManagerOptions): Promise<SessionManager> {
     const instance = new SessionManager(options);
@@ -341,7 +333,7 @@ export class SessionManager {
   }
 
   /** Clears the buffer; callers replay the returned questions to newly connected channels. */
-  drainPendingQuestions(sessionId: string): QuestionOption[][] {
+  drainPendingQuestions(sessionId: string): QuestionDef[][] {
     const buffer = this.#questionBuffers.get(sessionId);
     if (!buffer || buffer.length === 0) return [];
     this.#questionBuffers.delete(sessionId);

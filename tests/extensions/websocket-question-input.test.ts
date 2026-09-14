@@ -138,7 +138,7 @@ describe("WebSocketQuestionBridge", () => {
     const out = WebSocketQuestionBridge.defaults([
       { key: "a", prompt: "A?", default: "x" },
       { key: "b", prompt: "B?" },
-      { key: "c", prompt: "C?", default: null as unknown },
+      { key: "c", prompt: "C?", default: null as unknown as string },
     ]);
     expect(out).toEqual({ a: "x", b: "", c: "" });
   });

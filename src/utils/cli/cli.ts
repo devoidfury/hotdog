@@ -330,7 +330,7 @@ export class CliOutputSink extends OutputSink {
         for (let i = 0; i < q.options.length; i++) {
           this._processContent(`    [${i + 1}] ${spoofSafe(q.options[i] ?? "")}\n`);
         }
-        if (q.allow_other) {
+        if (q.allowOther !== false) {
           this._processContent("[Other] Type your own answer\n");
         } else {
           this._processContent(

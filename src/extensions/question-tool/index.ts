@@ -152,9 +152,11 @@ export class QuestionTool {
         q.options = q.choices;
       }
 
-      if ("allow_other" in q && !("allowOther" in q)) {
+      // Normalize the legacy snake_case spelling from older format
+      if (q.allowOther === undefined) {
         q.allowOther = q.allow_other;
       }
+      delete q.allow_other;
 
       if (!q.prompt) {
         return ToolResult.err(`Question "${q.key}" is missing a prompt`);

@@ -1,3 +1,4 @@
+import type { QuestionDef } from "./input.ts";
 import type { ToolResultContent } from "./wrappers.ts";
 
 export const OUTPUT_EVENT = {
@@ -89,14 +90,7 @@ export interface CommandResultEvent {
 
 export interface QuestionEvent {
   type: typeof OUTPUT_EVENT.QUESTION;
-  questions: Array<{
-    key: string;
-    prompt: string;
-    options?: string[];
-    required?: boolean;
-    default?: string;
-    allow_other?: boolean;
-  }>;
+  questions: QuestionDef[];
 }
 
 export interface StreamingChunkEvent {

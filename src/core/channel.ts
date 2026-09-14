@@ -1,6 +1,6 @@
 import { parseCommand, Command, type ParsedCommand } from "./commands.ts";
 import { OUTPUT_EVENT, OutputEvent } from "./context/output.ts";
-import type { QuestionOption } from "./session/index.ts";
+import type { QuestionDef } from "./context/input.ts";
 
 // Handled locally by the Channel; never passed through to the agent.
 const ChannelCommand = {
@@ -33,7 +33,7 @@ export interface ChannelSessionManager {
     sessionId: string,
   ): { id: string; model?: string; profile?: string } | null;
   /** Replay on reconnect. */
-  drainPendingQuestions(sessionId: string): QuestionOption[][];
+  drainPendingQuestions(sessionId: string): QuestionDef[][];
 }
 
 export abstract class Channel {

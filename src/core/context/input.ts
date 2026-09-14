@@ -1,14 +1,17 @@
 // The Input interface decouples question/answer collection from the tool itself;
 // the UI (CLI, TUI, etc.) provides its own implementation.
 
+/**
+ * Canonical question shape, shared by the QUESTION output event, session replay buffers, and every Input implementation. 
+ * The question-tool is the sole producer and normalizes all legacy aliases (snake_case allow_other, question/choices) into this form before emitting.
+ */
 export interface QuestionDef {
   key: string;
-  prompt?: string;
+  prompt: string;
   options?: string[];
-  default?: unknown;
   required?: boolean;
+  default?: string;
   allowOther?: boolean;
-  allow_other?: boolean;
 }
 
 /**

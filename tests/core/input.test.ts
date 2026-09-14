@@ -10,9 +10,9 @@ describe("NoopInput", () => {
 
   it("collects default answers", () => {
     const answers = new NoopInput().collectAnswers([
-      { key: "name", default: "Anonymous" },
-      { key: "age", default: "25" },
-      { key: "notes" }, // no default
+      { key: "name", prompt: "Name?", default: "Anonymous" },
+      { key: "age", prompt: "Age?", default: "25" },
+      { key: "notes", prompt: "Notes?" }, // no default
     ]);
     expect(answers).toEqual({ name: "Anonymous", age: "25", notes: "" });
   });

@@ -5,6 +5,7 @@ import { CliOutputSink } from "@utils/cli/cli.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
 import { HOOKS } from "@core/hooks.ts";
+import type { QuestionDef } from "@core/context/input.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { Agent } from "@core/agent.ts";
@@ -194,16 +195,6 @@ export async function executeShellCommand(
   });
 }
 
-interface QuestionDef {
-  key: string;
-  prompt?: string;
-  options?: string[];
-  default?: string;
-  required?: boolean;
-  allowOther?: boolean;
-  allow_other?: boolean;
-}
-
 interface InputInterface {
   isInteractive(): boolean;
   collectAnswers(questions: QuestionDef[]): Promise<Record<string, string>>;
@@ -245,7 +236,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
         const options = q.options || [];
         const defaultValue = q.default ?? "";
         const required = q.required !== false;
-        const allowOther = (q.allowOther ?? q.allow_other) !== false;
+        const allowOther = q.allowOther !== false;
 
         // prompt, options and default are model-supplied. spoofSafe is idempotent, so double neutralization upstream is harmless.
         process.stdout.write(`\n  ? ${spoofSafe(promptText)}\n`);

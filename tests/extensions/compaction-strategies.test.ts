@@ -1,7 +1,7 @@
 // Tests for TokenAwareStrategy. The rendered prompts themselves are covered
 // behaviorally (via captured llmChat calls) in
 // compaction-strategy-summarize.test.ts.
-// DropStrategy and SummarizeStrategy/SummarizeShortStrategy are covered by
+// DropStrategy and SummarizeStrategy (full/short variants) are covered by
 // their dedicated files; TrimStrategy in compaction-trim.test.ts.
 
 import { describe, it, expect } from "bun:test";

@@ -2,9 +2,8 @@ import {
   CompactionStrategy,
   CompactionStrategyRegistry,
 } from "./strategies.ts";
-import { SummarizeStrategy } from "./strategies/summarize.ts";
+import { SummarizeStrategy, SUMMARIZE_SHORT_VARIANT } from "./strategies/summarize.ts";
 import { DropStrategy } from "./strategies/drop.ts";
-import { SummarizeShortStrategy } from "./strategies/summarize-short.ts";
 import { TokenAwareStrategy } from "./strategies/token-aware.ts";
 import { TrimStrategy } from "./strategies/trim.ts";
 import { shouldCompact, type WireRenderContext } from "./utils.ts";
@@ -56,7 +55,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
   const strategyRegistry = new CompactionStrategyRegistry();
   strategyRegistry.register(new SummarizeStrategy());
   strategyRegistry.register(new DropStrategy());
-  strategyRegistry.register(new SummarizeShortStrategy());
+  strategyRegistry.register(new SummarizeStrategy(SUMMARIZE_SHORT_VARIANT));
   strategyRegistry.register(new TokenAwareStrategy());
   strategyRegistry.register(new TrimStrategy());
 

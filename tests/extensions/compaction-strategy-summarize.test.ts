@@ -1,10 +1,9 @@
-// Tests for the LLM summarization strategies: SummarizeStrategy and
-// SummarizeShortStrategy. The two classes are identical except for the user
-// prompt template they use, so they are tested together in a single
-// parameterized suite against their respective templates.
+// Tests for the LLM summarization strategy: SummarizeStrategy. The full and
+// short variants are identical except for the user prompt template they use,
+// so they are tested together in a single parameterized suite against their
+// respective templates.
 import { describe, it, expect } from "bun:test";
-import { SummarizeStrategy } from "@extensions/compaction/strategies/summarize.ts";
-import { SummarizeShortStrategy } from "@extensions/compaction/strategies/summarize-short.ts";
+import { SummarizeStrategy, SUMMARIZE_SHORT_VARIANT } from "@extensions/compaction/strategies/summarize.ts";
 import { CompactionSettings } from "@extensions/compaction/strategies.ts";
 import { SUMMARIZATION_SYSTEM_PROMPT } from "@extensions/compaction/prompts.ts";
 import { Message } from "@core/context/message.ts";
@@ -17,13 +16,13 @@ function msg(role: string, content: string) {
 const strategies = [
   {
     name: "summarize",
-    Ctor: SummarizeStrategy,
+    make: () => new SummarizeStrategy(),
     descriptionMarker: "LLM-based summarization",
     userPromptMarker: "structured context checkpoint summary",
   },
   {
     name: "summarize-short",
-    Ctor: SummarizeShortStrategy,
+    make: () => new SummarizeStrategy(SUMMARIZE_SHORT_VARIANT),
     descriptionMarker: "Aggressive LLM summarization",
     userPromptMarker: "CONCISE structured summary",
   },
@@ -38,32 +37,32 @@ const defaultSettings: CompactionSettings = {
 for (const s of strategies) {
   describe(`${s.name} strategy`, () => {
     it("has correct name and description", () => {
-      const strategy = new s.Ctor();
+      const strategy = s.make();
       expect(strategy.name).toBe(s.name);
       expect(strategy.description).toContain(s.descriptionMarker);
     });
 
     it("canCompact returns false when not enough messages", () => {
       const messages = [msg("user", "hello"), msg("assistant", "hi")];
-      expect(new s.Ctor().canCompact(messages, defaultSettings)).toBe(false);
+      expect(s.make().canCompact(messages, defaultSettings)).toBe(false);
     });
 
     it("canCompact returns true when enough messages exist", () => {
       const messages = Array.from({ length: 10 }, (_, i) =>
         msg(i % 2 === 0 ? "user" : "assistant", "x"),
       );
-      expect(new s.Ctor().canCompact(messages, defaultSettings)).toBe(true);
+      expect(s.make().canCompact(messages, defaultSettings)).toBe(true);
     });
 
     it("returns null when nothing to compact", async () => {
       const messages = [msg("user", "hello"), msg("assistant", "hi")];
-      const result = await new s.Ctor().execute(messages, defaultSettings, async () => "summary", "model");
+      const result = await s.make().execute(messages, defaultSettings, async () => "summary", "model");
       expect(result).toBeNull();
     });
 
     it("returns null when keepRecentMessages is 0", async () => {
       const messages = [msg("user", "hello"), msg("assistant", "hi")];
-      const result = await new s.Ctor().execute(
+      const result = await s.make().execute(
         messages,
         { ...defaultSettings, keepRecentMessages: 0 },
         async () => "summary",
@@ -74,12 +73,12 @@ for (const s of strategies) {
 
     it("returns null when all messages are system messages", async () => {
       const messages = [msg("system", "prompt 1"), msg("system", "prompt 2")];
-      const result = await new s.Ctor().execute(messages, defaultSettings, async () => "summary", "model");
+      const result = await s.make().execute(messages, defaultSettings, async () => "summary", "model");
       expect(result).toBeNull();
     });
 
     it("returns null for an empty message list", async () => {
-      const result = await new s.Ctor().execute([], defaultSettings, async () => "summary", "model");
+      const result = await s.make().execute([], defaultSettings, async () => "summary", "model");
       expect(result).toBeNull();
     });
 
@@ -99,7 +98,7 @@ for (const s of strategies) {
         return "This is the summary";
       };
 
-      const result = await new s.Ctor().execute(messages, defaultSettings, mockLlmChat, "test-model");
+      const result = await s.make().execute(messages, defaultSettings, mockLlmChat, "test-model");
 
       expect(result).not.toBeNull();
       expect(result!.summary).toBe("This is the summary");
@@ -135,7 +134,7 @@ for (const s of strategies) {
         return "summary";
       };
 
-      await new s.Ctor().execute(messages, defaultSettings, mockLlmChat, "model");
+      await s.make().execute(messages, defaultSettings, mockLlmChat, "model");
 
       expect(capturedUserPrompt).toContain(s.userPromptMarker);
       // Compacted messages are included...
@@ -164,7 +163,7 @@ for (const s of strategies) {
         return "summary";
       };
 
-      await new s.Ctor().execute(messages, defaultSettings, mockLlmChat, "model");
+      await s.make().execute(messages, defaultSettings, mockLlmChat, "model");
 
       expect(capturedUserPrompt).toContain(marker);
     });
@@ -180,7 +179,7 @@ for (const s of strategies) {
         return "summary";
       };
 
-      await new s.Ctor().execute(messages, defaultSettings, mockLlmChat, "custom-model");
+      await s.make().execute(messages, defaultSettings, mockLlmChat, "custom-model");
 
       expect(capturedModel).toBe("custom-model");
     });
@@ -194,10 +193,10 @@ for (const s of strategies) {
       };
 
       await expect(
-        new s.Ctor().execute(messages, defaultSettings, mockLlmChat, "model"),
+        s.make().execute(messages, defaultSettings, mockLlmChat, "model"),
       ).rejects.toThrow(AgentError);
       await expect(
-        new s.Ctor().execute(messages, defaultSettings, mockLlmChat, "model"),
+        s.make().execute(messages, defaultSettings, mockLlmChat, "model"),
       ).rejects.toThrow("Summarization failed: Network error");
     });
 

@@ -378,7 +378,5 @@ export function create(core: CoreContext): ExtensionInstance {
         registry.register(WebSearchTool.TOOL_NAME, tool);
       },
     },
-
-    WebSearchTool,
   };
 }

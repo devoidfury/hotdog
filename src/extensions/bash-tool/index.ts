@@ -365,8 +365,5 @@ export function create(core: CoreContext): ExtensionInstance {
         registry.register(BashTool.TOOL_NAME, tool);
       },
     },
-
-    // Expose for external use
-    BashTool,
   };
 }

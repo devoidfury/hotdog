@@ -103,9 +103,5 @@ export function create(_core: CoreContext): ExtensionInstance {
         registry.register(StringLengthTool.TOOL_NAME, tool);
       },
     },
-
-    // Exposed for external use.
-    StringLengthTool,
-    measureString,
   };
 }

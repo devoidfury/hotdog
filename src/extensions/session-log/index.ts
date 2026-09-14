@@ -198,10 +198,6 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
       },
     },
 
-    // Expose for external use (sessionId is dynamic, determined per-request)
-    sessionId: null,
-    logPath: null,
-
     /**
      * Read all entries from the session log.
      * Uses the most recently observed session ID.

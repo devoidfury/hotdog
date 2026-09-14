@@ -1,5 +1,5 @@
 import fsPromises from "node:fs/promises";
-import { resolve as resolveAbs, isAbsolute, dirname } from "node:path";
+import { isAbsolute, dirname } from "node:path";
 import { cwd } from "node:process";
 import { logger } from "@utils/logger.ts";
 import { Workspace, PathEscapeError } from "@utils/workspace.ts";
@@ -32,32 +32,24 @@ export async function completion(ctx: CompletionContext) {
     let prefixToMatch: string;
 
     if (isAbsolute(pathPrefix)) {
-      if (workspace) {
-        try {
-          searchDir = workspace.resolveSafe(pathPrefix);
-        } catch (e: unknown) {
-          if (e instanceof PathEscapeError) return [];
-          throw e;
-        }
-      } else {
-        searchDir = pathPrefix;
+      try {
+        searchDir = workspace.resolveSafe(pathPrefix);
+      } catch (e: unknown) {
+        if (e instanceof PathEscapeError) return [];
+        throw e;
       }
       searchDir = dirname(searchDir);
       prefixToMatch = pathPrefix.slice(searchDir.length + 1);
     } else if (pathPrefix.includes("/")) {
       const lastSlash = pathPrefix.lastIndexOf("/");
       const relDir = pathPrefix.slice(0, lastSlash);
-      if (workspace) {
-        try {
-          searchDir = workspace.resolveSafe(relDir);
-        } catch (e: unknown) {
-          if (e instanceof PathEscapeError) {
-            return [];
-          }
-          throw e;
+      try {
+        searchDir = workspace.resolveSafe(relDir);
+      } catch (e: unknown) {
+        if (e instanceof PathEscapeError) {
+          return [];
         }
-      } else {
-        searchDir = resolveAbs(baseDir, relDir);
+        throw e;
       }
       prefixToMatch = pathPrefix.slice(lastSlash + 1);
     } else {

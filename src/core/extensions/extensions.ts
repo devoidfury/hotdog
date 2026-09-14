@@ -21,7 +21,7 @@ export function resolveExtensionPath(spec: string): string {
     return path.join(ROOT_DIR, "extensions");
   }
   if (spec === "builtins") {
-    throw new ConfigError("'builtins' is deprecated, use '@extensions' instead.")
+    throw new ConfigError("'builtins' is deprecated, use '@extensions' instead.");
   }
   if (path.isAbsolute(spec)) {
     return spec;
@@ -29,9 +29,7 @@ export function resolveExtensionPath(spec: string): string {
   return path.resolve(process.cwd(), spec);
 }
 
-export async function getExtensionConfigDefaults(
-  extensionPaths?: string[],
-): Promise<SchemaDefaultEntry[]> {
+export async function getExtensionConfigDefaults(extensionPaths?: string[]): Promise<SchemaDefaultEntry[]> {
   const params: SchemaDefaultEntry[] = [];
 
   for (const spec of extensionPaths || ["@extensions"]) {
@@ -48,7 +46,6 @@ export async function getExtensionConfigDefaults(
 
   return params;
 }
-
 
 export async function isExtensionDirectory(dirPath: string): Promise<boolean> {
   const metaPath = path.join(dirPath, "extension.json");
@@ -67,120 +64,130 @@ export async function isExtensionDirectory(dirPath: string): Promise<boolean> {
   return false;
 }
 
-async function readExtensionMetadata(
-  dirPath: string,
-): Promise<ExtensionMetadata> {
+function defaultExtensionMetadata(name: string, metaPath: string): ExtensionMetadata {
+  return {
+    name,
+    path: metaPath,
+    provides: [],
+    loadOrder: LOAD_ORDER.DEFAULT,
+    description: "",
+    dependsOn: [],
+    autoload: true,
+    configSchema: null,
+    cliSubcommands: [],
+    cliFlags: [],
+    services: {},
+    requires: {},
+  };
+}
+
+// Defaults plus a manifestError: fatal at getExtensionsToLoad() only if this extension would actually load (see readExtensionMetadata).
+function brokenMetadata(name: string, metaPath: string, message: string): ExtensionMetadata {
+  return { ...defaultExtensionMetadata(name, metaPath), manifestError: message };
+}
+
+// extension.json field narrowing. A field present but of the wrong type is warned about and ignored, not silently dropped.
+// a lost configSchema, provides, or services would let the extension load while quietly losing its config defaults and registrations.
+function fieldArray<T>(meta: Record<string, unknown>, field: string, metaPath: string): T[] {
+  const value = meta[field];
+  if (value == null) return [];
+  if (!Array.isArray(value)) {
+    logger.warn(`[extensions] "${field}" in ${metaPath} is not an array — ignoring it`);
+    return [];
+  }
+  return value as T[];
+}
+
+function fieldObject(
+  meta: Record<string, unknown>,
+  field: string,
+  metaPath: string,
+): Record<string, unknown> {
+  const value = meta[field];
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    logger.warn(`[extensions] "${field}" in ${metaPath} is not an object — ignoring it`);
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+// A manifest that exists but fails to read or parse does NOT abort discovery;
+// the error is recorded on the metadata as `manifestError` and
+// getExtensionsToLoad() turns it into a fatal error only for extensions that
+// would actually load. An extension excluded by config (enabled: false, or an
+// extensions list that omits it) may keep a broken manifest without bricking
+// the CLI. Fail-closed where it matters: autoload is read FROM the manifest,
+// so a manifest that cannot be parsed cannot disable itself.
+// A missing manifest stays a silent default (isExtensionDirectory already
+// requires the file, so that branch only covers a race).
+async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata> {
   const metaPath = path.join(dirPath, "extension.json");
   const name = path.basename(dirPath);
+
+  let content: string;
   try {
-    await fsPromises.access(metaPath);
-  } catch {
-    return {
-      name,
-      path: metaPath,
-      provides: [],
-      loadOrder: LOAD_ORDER.DEFAULT,
-      description: "",
-      dependsOn: [],
-      autoload: true,
-      configSchema: null,
-      cliSubcommands: [],
-      cliFlags: [],
-      services: {},
-      requires: {},
-    };
-  }
-  let meta: Record<string, unknown> | null = null;
-  try {
-    const content = await fsPromises.readFile(metaPath, "utf-8");
-    meta = JSON.parse(content) as Record<string, unknown>;
-
-    const provides = Array.isArray(meta.provides)
-      ? (meta.provides as string[])
-      : [];
-    const description =
-      typeof meta.description === "string" ? meta.description : "";
-    const dependsOn = Array.isArray(meta.dependsOn)
-      ? (meta.dependsOn as string[])
-      : [];
-    const autoload = (meta.autoload as boolean) !== false;
-    const configSchema =
-      meta.configSchema &&
-      typeof meta.configSchema === "object" &&
-      !Array.isArray(meta.configSchema)
-        ? (meta.configSchema as Record<string, unknown>)
-        : null;
-
-    const cliSubcommands = Array.isArray(meta["cli:subcommands"])
-      ? (meta["cli:subcommands"] as Array<Record<string, unknown>>).map(
-          (sc) => ({
-            name: (sc.name as string) || "",
-            description: (sc.description as string) || "",
-            options: Array.isArray(sc.options) ? (sc.options as unknown[]) : [],
-          }),
-        )
-      : [];
-
-    const cliFlags = Array.isArray(meta["cli:flags"])
-      ? (meta["cli:flags"] as Array<Record<string, unknown>>).map((flag) => ({
-          short: (flag.short as string) || null,
-          long: (flag.long as string) || "",
-          description: (flag.description as string) || "",
-          type: (flag.type as string) || "string",
-          default: flag.default !== undefined ? flag.default : null,
-          isSubcommand: flag.isSubcommand === true,
-        }))
-      : [];
-
-    const services =
-      meta.services &&
-      typeof meta.services === "object" &&
-      !Array.isArray(meta.services)
-        ? (meta.services as Record<string, unknown[]>)
-        : {};
-
-    const requires =
-      meta.requires &&
-      typeof meta.requires === "object" &&
-      !Array.isArray(meta.requires)
-        ? (meta.requires as Record<string, unknown[]>)
-        : {};
-
-    let loadOrder: number = LOAD_ORDER.DEFAULT;
-    if (meta.loadOrder !== undefined) {
-      loadOrder = meta.loadOrder as number;
-    } else if (provides.includes(EXTENSION_PROVIDES.CLI_SUBCOMMANDS)) {
-      loadOrder = LOAD_ORDER.CLI;
+    content = await fsPromises.readFile(metaPath, "utf-8");
+  } catch (e: unknown) {
+    if ((e as { code?: string }).code === "ENOENT") {
+      return defaultExtensionMetadata(name, metaPath);
     }
-
-    return {
-      name: meta.name ? `${meta.name}` : name,
-      provides,
-      loadOrder,
-      description,
-      dependsOn,
-      autoload,
-      configSchema,
-      cliSubcommands,
-      cliFlags,
-      services,
-      requires,
-    };
-  } catch {
-    return {
-      name: meta?.name ? `${meta.name}` : name,
-      provides: [],
-      loadOrder: LOAD_ORDER.DEFAULT,
-      description: "",
-      dependsOn: [],
-      autoload: true,
-      configSchema: null,
-      cliSubcommands: [],
-      cliFlags: [],
-      services: {},
-      requires: {},
-    };
+    return brokenMetadata(name, metaPath, `unreadable extension.json: ${(e as Error).message}`);
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (e: unknown) {
+    return brokenMetadata(name, metaPath, `invalid extension.json: ${(e as Error).message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return brokenMetadata(name, metaPath, "invalid extension.json: expected a JSON object");
+  }
+  const meta = parsed as Record<string, unknown>;
+
+  const provides = fieldArray<string>(meta, "provides", metaPath);
+
+  let loadOrder: number;
+  if (typeof meta.loadOrder === "number") {
+    loadOrder = meta.loadOrder;
+  } else {
+    if (meta.loadOrder !== undefined) {
+      logger.warn(`[extensions] "loadOrder" in ${metaPath} is not a number — ignoring it`);
+    }
+    loadOrder = provides.includes(EXTENSION_PROVIDES.CLI_SUBCOMMANDS) ? LOAD_ORDER.CLI : LOAD_ORDER.DEFAULT;
+  }
+
+  const configSchema = meta.configSchema == null ? null : fieldObject(meta, "configSchema", metaPath);
+
+  const cliSubcommands = fieldArray<Record<string, unknown>>(meta, "cli:subcommands", metaPath).map((sc) => ({
+    name: (sc?.name as string) || "",
+    description: (sc?.description as string) || "",
+    options: Array.isArray(sc?.options) ? (sc.options as unknown[]) : [],
+  }));
+
+  const cliFlags = fieldArray<Record<string, unknown>>(meta, "cli:flags", metaPath).map((flag) => ({
+    short: (flag?.short as string) || null,
+    long: (flag?.long as string) || "",
+    description: (flag?.description as string) || "",
+    type: (flag?.type as string) || "string",
+    default: flag?.default !== undefined ? flag.default : null,
+    isSubcommand: flag?.isSubcommand === true,
+  }));
+
+  return {
+    name: meta.name ? `${meta.name}` : name,
+    provides,
+    loadOrder,
+    description: typeof meta.description === "string" ? meta.description : "",
+    dependsOn: fieldArray<string>(meta, "dependsOn", metaPath),
+    autoload: meta.autoload !== false,
+    configSchema,
+    cliSubcommands,
+    cliFlags,
+    services: fieldObject(meta, "services", metaPath) as Record<string, unknown[]>,
+    requires: fieldObject(meta, "requires", metaPath) as Record<string, unknown[]>,
+  };
 }
 
 export interface DiscoveredExtension extends ExtensionMetadata {
@@ -188,9 +195,7 @@ export interface DiscoveredExtension extends ExtensionMetadata {
   dirPath: string;
 }
 
-export async function discoverExtensionsInDir(
-  dirPath: string,
-): Promise<DiscoveredExtension[]> {
+export async function discoverExtensionsInDir(dirPath: string): Promise<DiscoveredExtension[]> {
   const extensions: DiscoveredExtension[] = [];
 
   try {
@@ -202,10 +207,7 @@ export async function discoverExtensionsInDir(
     return extensions;
   }
 
-  async function scanDirectory(
-    currentDir: string,
-    relativeBase = "",
-  ): Promise<void> {
+  async function scanDirectory(currentDir: string, relativeBase = ""): Promise<void> {
     const entries = await fsPromises.readdir(currentDir, {
       withFileTypes: true,
     });
@@ -214,9 +216,7 @@ export async function discoverExtensionsInDir(
       if (!entry.isDirectory()) continue;
 
       const dirFull = path.join(currentDir, entry.name);
-      const relativePath = relativeBase
-        ? `${relativeBase}/${entry.name}`
-        : entry.name;
+      const relativePath = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
 
       if (await isExtensionDirectory(dirFull)) {
         const metadata = await readExtensionMetadata(dirFull);
@@ -291,9 +291,7 @@ export function resolveLoadOrder(
   const cmp = (a: ExtensionMetadata, b: ExtensionMetadata) =>
     a.loadOrder - b.loadOrder || a.name.localeCompare(b.name);
 
-  const queue = extensions
-    .filter((e) => (inDegree.get(e.name) || 0) === 0)
-    .sort(cmp);
+  const queue = extensions.filter((e) => (inDegree.get(e.name) || 0) === 0).sort(cmp);
 
   const result: ExtensionMetadata[] = [];
   const pending: ExtensionMetadata[] = [];
@@ -318,9 +316,7 @@ export function resolveLoadOrder(
   while (pending.length > 0) {
     iterationCount++;
     if (iterationCount > maxIterations) {
-      const remaining = extensions.filter(
-        (e) => !result.find((r) => r.name === e.name),
-      );
+      const remaining = extensions.filter((e) => !result.find((r) => r.name === e.name));
       throw ExtensionError.CircularDependency(remaining.map((e) => e.name));
     }
     const batch = [...pending].sort(cmp);
@@ -340,9 +336,7 @@ export function resolveLoadOrder(
   }
 
   if (result.length !== extensions.length) {
-    const remaining = extensions.filter(
-      (e) => !result.find((r) => r.name === e.name),
-    );
+    const remaining = extensions.filter((e) => !result.find((r) => r.name === e.name));
     throw ExtensionError.CircularDependency(remaining.map((e) => e.name));
   }
 
@@ -419,10 +413,7 @@ export async function discoverExtensions(
       if (spec === "@extensions") {
         basePath = `@extensions/${ext.path}/index.ts`;
       } else {
-        const relPath = path.relative(
-          ROOT_DIR,
-          path.join(resolved, ext.path, "index.ts"),
-        );
+        const relPath = path.relative(ROOT_DIR, path.join(resolved, ext.path, "index.ts"));
         basePath = relPath.startsWith("..") ? relPath : `./${relPath}`;
       }
 
@@ -439,6 +430,7 @@ export async function discoverExtensions(
         services: ext.services || {},
         requires: ext.requires || {},
         description: ext.description,
+        manifestError: ext.manifestError,
       });
     }
   }
@@ -494,28 +486,38 @@ export async function getExtensionsToLoad(
     : discovered;
 
   if (extensionAutoload) {
-    const autoloaded = enabledExtensions.filter(
-      (ext) => ext.autoload !== false,
-    );
-    return resolveExtensionDependencies(
-      autoloaded,
-      enabledExtensions,
-      serviceOverrides,
+    const autoloaded = enabledExtensions.filter((ext) => ext.autoload !== false);
+    return assertLoadable(
+      resolveExtensionDependencies(autoloaded, enabledExtensions, serviceOverrides),
     );
   }
 
   if (extensions && extensions.length > 0) {
-    const selected = enabledExtensions.filter((ext) =>
-      extensions.includes(ext.name),
-    );
-    return resolveExtensionDependencies(
-      selected,
-      enabledExtensions,
-      serviceOverrides,
+    const selected = enabledExtensions.filter((ext) => extensions.includes(ext.name));
+    return assertLoadable(
+      resolveExtensionDependencies(selected, enabledExtensions, serviceOverrides),
     );
   }
 
   return [];
+}
+
+/**
+ * A broken extension.json is fatal only when its extension is in the set that
+ * would actually load (post enabled/autoload/list filtering, post dependency
+ * resolution — a broken manifest dragged in as a dependency loads, so it is
+ * fatal too). Excluded extensions pass silently; see readExtensionMetadata.
+ */
+function assertLoadable(toLoad: ExtensionMetadata[]): ExtensionMetadata[] {
+  for (const ext of toLoad) {
+    if (ext.manifestError) {
+      throw new ConfigError(
+        `Cannot load extension "${ext.name}": ${ext.manifestError}. ` +
+          `Fix its extension.json, or exclude the extension (enabled: false in config, or omit it from the extensions list).`,
+      );
+    }
+  }
+  return toLoad;
 }
 
 export function resolveExtensionDependencies(
@@ -618,7 +620,8 @@ export async function registerExtensionMetadata(
       for (const sc of ext.cliSubcommands) {
         cliSubcommandRegistry.register(sc.name, {
           description: sc.description || "",
-          options: (sc.options?.length ? { items: sc.options } : undefined) as Record<string, unknown> | undefined,
+          options: (sc.options?.length ? { items: sc.options } : undefined) as
+            Record<string, unknown> | undefined,
           handler: undefined,
         });
       }
@@ -667,7 +670,8 @@ export class ExtensionLoader {
       extModule = entryPoint;
     }
 
-    const createFn = extModule.create as ((core: LoaderCore, opts: Record<string, unknown>) => Promise<ExtensionInstance>) | undefined;
+    const createFn = extModule.create as
+      ((core: LoaderCore, opts: Record<string, unknown>) => Promise<ExtensionInstance>) | undefined;
     const instance = createFn ? await createFn(this.#core, createOptions) : extModule;
     if (!instance) {
       return null;
@@ -699,30 +703,19 @@ export class ExtensionLoader {
       }
     }
 
-    if (
-      instanceHooks &&
-      instanceHooks[HOOKS.SERVICES_REGISTER]
-    ) {
+    if (instanceHooks?.[HOOKS.SERVICES_REGISTER]) {
       (instanceHooks[HOOKS.SERVICES_REGISTER] as (registry: ServiceRegistry) => unknown)(this.#core.services);
     }
 
-    const toolNamesBefore = new Set(
-      Array.from(
-        this.#core.toolRegistry.getAll().map(([n]) => n),
-      ),
-    );
+    const toolNamesBefore = new Set(Array.from(this.#core.toolRegistry.getAll().map(([n]) => n)));
 
     if (instanceHooks?.[HOOKS.TOOLS_REGISTER]) {
       await (instanceHooks[HOOKS.TOOLS_REGISTER] as (registry: ToolRegistry) => Promise<unknown>)(this.#core.toolRegistry);
-    } else if ((instance as Record<string, unknown>).registerTools) {
-      await ((instance as Record<string, unknown>).registerTools as (registry: ToolRegistry) => Promise<unknown>)(this.#core.toolRegistry);
+    } else if (instance.registerTools) {
+      await instance.registerTools(this.#core.toolRegistry);
     }
 
-    const toolNamesAfter = new Set(
-      Array.from(
-        this.#core.toolRegistry.getAll().map(([n]) => n),
-      ),
-    );
+    const toolNamesAfter = new Set(Array.from(this.#core.toolRegistry.getAll().map(([n]) => n)));
     const newlyRegistered: string[] = [];
     for (const n of toolNamesAfter) {
       if (!toolNamesBefore.has(n)) {
@@ -831,10 +824,7 @@ export function validateServiceContracts(
   loadedExtensions: ExtensionMetadata[],
   serviceRegistry: {
     has(name: string): boolean;
-    checkContract(
-      name: string,
-      methods: string[],
-    ): { valid: boolean; missing: string[] };
+    checkContract(name: string, methods: string[]): { valid: boolean; missing: string[] };
   },
 ): Array<{
   extension: string;
@@ -865,10 +855,7 @@ export function validateServiceContracts(
         continue;
       }
 
-      const { valid, missing } = serviceRegistry.checkContract(
-        serviceName,
-        expectedMethods as string[],
-      );
+      const { valid, missing } = serviceRegistry.checkContract(serviceName, expectedMethods as string[]);
       if (!valid) {
         errors.push({
           extension: ext.name,

@@ -258,3 +258,150 @@ describe("registerExtensionMetadata", async () => {
     expect(Object.keys(subcommandRegistry._subcommands).length).toBeGreaterThan(0);
   });
 });
+
+describe("extension.json manifest validation", async () => {
+  const fs = await import("node:fs/promises");
+  const os = await import("node:os");
+  const nodePath = await import("node:path");
+  const { discoverExtensionsInDir } = await import(
+    "@core/extensions/extensions.ts"
+  );
+
+  // Builds <tmp>/bad-ext with the given manifest content; discovery runs
+  // against tmp (the parent), so the extension is the scanned child.
+  async function makeTmpExt(manifest: string): Promise<string> {
+    const tmp = await fs.mkdtemp(nodePath.join(os.tmpdir(), "hotdog-ext-meta-"));
+    const extDir = nodePath.join(tmp, "bad-ext");
+    await fs.mkdir(extDir);
+    await fs.writeFile(nodePath.join(extDir, "extension.json"), manifest);
+    await fs.writeFile(nodePath.join(extDir, "index.ts"), "export default {};");
+    return tmp;
+  }
+
+  it("records manifestError on a malformed manifest instead of throwing or silently defaulting", async () => {
+    const tmp = await makeTmpExt("{ not valid json ");
+    try {
+      const result = await discoverExtensionsInDir(tmp);
+      expect(result.length).toBe(1);
+      expect(result[0]!.provides).toEqual([]); // defaults
+      expect(result[0]!.manifestError).toContain("invalid extension.json");
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("records manifestError when the manifest is valid JSON but not an object", async () => {
+    const tmp = await makeTmpExt('["provides"]');
+    try {
+      const result = await discoverExtensionsInDir(tmp);
+      expect(result[0]!.manifestError).toContain("expected a JSON object");
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("is fatal when a broken manifest would actually load (autoload)", async () => {
+    const { getExtensionsToLoad } = await import("@core/extensions/extensions.ts");
+    const tmp = await makeTmpExt("{ not valid json ");
+    try {
+      // Fail closed: a manifest that cannot be parsed cannot disable itself.
+      await expect(getExtensionsToLoad([tmp], true, [], undefined)).rejects.toThrow(
+        /Cannot load extension "bad-ext".*invalid extension\.json/s,
+      );
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("is fatal when a broken manifest is explicitly selected", async () => {
+    const { getExtensionsToLoad } = await import("@core/extensions/extensions.ts");
+    const tmp = await makeTmpExt("{ not valid json ");
+    try {
+      await expect(
+        getExtensionsToLoad([tmp], false, ["bad-ext"], undefined),
+      ).rejects.toThrow(/Cannot load extension "bad-ext"/);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("stays silent when config disables the broken extension", async () => {
+    const { getExtensionsToLoad } = await import("@core/extensions/extensions.ts");
+    const tmp = await makeTmpExt("{ not valid json ");
+    try {
+      const result = await getExtensionsToLoad(
+        [tmp],
+        true,
+        [],
+        { badExt: { enabled: false } } as never,
+      );
+      expect(result.map((e) => e.name)).not.toContain("bad-ext");
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("stays silent when the extensions list omits the broken extension", async () => {
+    const { getExtensionsToLoad } = await import("@core/extensions/extensions.ts");
+    const tmp = await makeTmpExt("{ not valid json ");
+    try {
+      const result = await getExtensionsToLoad(
+        [tmp],
+        false,
+        ["some-other-ext"],
+        undefined,
+      );
+      expect(result).toEqual([]);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores (but does not crash on) wrong-typed fields", async () => {
+    const tmp = await makeTmpExt(
+      JSON.stringify({
+        provides: "tools", // string, not array
+        services: 42, // number, not object
+        loadOrder: "first", // string, not number
+      }),
+    );
+    try {
+      const result = await discoverExtensionsInDir(tmp);
+      expect(result.length).toBe(1);
+      expect(result[0]!.provides).toEqual([]);
+      expect(result[0]!.services).toEqual({});
+      expect(result[0]!.loadOrder).toBe(10); // LOAD_ORDER.DEFAULT
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps parsing a valid manifest with all fields", async () => {
+    const tmp = await makeTmpExt(
+      JSON.stringify({
+        name: "renamed",
+        provides: ["cli:subcommands"],
+        loadOrder: 2,
+        autoload: false,
+        description: "a valid one",
+        dependsOn: ["core-tools"],
+        configSchema: { type: "object" },
+        services: { "x.y": ["do"] },
+      }),
+    );
+    try {
+      const result = await discoverExtensionsInDir(tmp);
+      expect(result.length).toBe(1);
+      expect(result[0]!.name).toBe("renamed");
+      expect(result[0]!.provides).toEqual(["cli:subcommands"]);
+      expect(result[0]!.loadOrder).toBe(2);
+      expect(result[0]!.autoload).toBe(false);
+      expect(result[0]!.description).toBe("a valid one");
+      expect(result[0]!.dependsOn).toEqual(["core-tools"]);
+      expect(result[0]!.configSchema).toEqual({ type: "object" });
+      expect(result[0]!.services).toEqual({ "x.y": ["do"] });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+});

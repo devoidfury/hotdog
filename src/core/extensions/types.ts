@@ -64,6 +64,14 @@ export interface ExtensionMetadata {
   }>;
   services: Record<string, unknown[]>;
   requires: Record<string, unknown[]>;
+  /**
+   * extension.json exists but could not be read or parsed; all fields above
+   * are then defaults. Fatal at getExtensionsToLoad() only if this extension
+   * would actually load; extensions excluded by config may keep a broken
+   * manifest. A broken manifest cannot disable itself (autoload is read from
+   * it, defaulting to true) — fail closed.
+   */
+  manifestError?: string;
 }
 
 // Payload shapes for every standard hook name. Pipeline return types are noted per entry.

@@ -1,4 +1,5 @@
 import { HOOKS } from "@core/hooks.ts";
+import { ACTIONS } from "@core/commands.ts";
 import { DEFAULT_CONFIG_FILENAME } from "@core/config/defaults.ts";
 import { CliArgv, getDefaultConfig, loadConfig, ProviderDef, resolveConfigDir } from "@core/config/index.ts";
 import { ProfileDef, ProfileManager } from "@core/config/profiles.ts";
@@ -533,6 +534,36 @@ async function checkFileExists(filePath: string): Promise<boolean> {
   }
 }
 
+// Renders the agent's system prompt + tool defs in the show-prompt format.
+// Shared by the CLI subcommand (throwaway agent) and the /show-prompt slash
+// command (live agent) so the two surfaces can never drift.
+async function renderPrompt(agent: Agent): Promise<string> {
+  await agent.ensureSystemPrompt();
+  const lines: string[] = [agent.context.getSystemPrompt() ?? ""];
+
+  const toolDefs = await agent.getToolDefs();
+  if (toolDefs.length > 0) {
+    lines.push("");
+    lines.push("# Tools");
+    lines.push("");
+    lines.push(
+      "Note: actual format of tools prompt may be different than this output depending on provider.",
+    );
+    lines.push("");
+    for (const def of toolDefs) {
+      const name = def.function?.name || "(unknown)";
+      const description = def.function?.description || "";
+      const params = def.function?.parameters || {};
+      lines.push(`## ${name}`);
+      lines.push(description);
+      lines.push("");
+      lines.push(JSON.stringify(params));
+      lines.push("");
+    }
+  }
+  return lines.join("\n");
+}
+
 // Builds a throwaway agent so we can render the real system prompt + tool defs.
 async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
   const { buildConfig } = core;
@@ -553,29 +584,7 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     systemPromptTemplate: resolved.systemPromptTemplate,
     config: resolved,
   });
-  await agent.ensureSystemPrompt();
-  console.log(agent.context.getSystemPrompt());
-
-  const toolDefs = await agent.getToolDefs();
-  if (toolDefs.length > 0) {
-    console.log();
-    console.log("# Tools");
-    console.log();
-    console.log(
-      "Note: actual format of tools prompt may be different than this output depending on provider.",
-    );
-    console.log();
-    for (const def of toolDefs) {
-      const name = def.function?.name || "(unknown)";
-      const description = def.function?.description || "";
-      const params = def.function?.parameters || {};
-      console.log(`## ${name}`);
-      console.log(description);
-      console.log();
-      console.log(JSON.stringify(params));
-      console.log();
-    }
-  }
+  console.log(await renderPrompt(agent));
   return 0;
 }
 
@@ -796,6 +805,17 @@ export function create(_core: CoreContext): ExtensionInstance {
         registry.register("profiles", {
           description: "List all available profiles with their roles and tool restrictions",
           handler: runProfileList,
+        });
+      },
+
+      [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
+        registry.register("show-prompt", {
+          description: "Show the rendered system prompt with tool definitions",
+          matches: (cmd: string) => cmd.trim() === "show-prompt",
+          handler: async (agent: Agent) => ({
+            action: ACTIONS.DISPLAY,
+            content: await renderPrompt(agent),
+          }),
         });
       },
     },

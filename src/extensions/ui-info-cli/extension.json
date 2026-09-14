@@ -2,7 +2,7 @@
   "name": "ui-info-cli",
   "provides": ["cli:subcommands"],
   "loadOrder": 10,
-  "description": "Provides info and show-prompt CLI subcommands",
+  "description": "Provides info and show-prompt CLI subcommands, plus the /show-prompt interactive slash command",
   "configSchema": {
     "uiInfoCli": {
       "type": "object",

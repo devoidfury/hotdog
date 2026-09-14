@@ -1,5 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { HOOKS } from "@core/hooks.ts";
+import { ACTIONS } from "@core/commands.ts";
+import { createCommandRegistry } from "@core/extensions/registries.ts";
 import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -346,6 +348,49 @@ describe("Info CLI - show-prompt subcommand", () => {
     expect(output.length).toBeGreaterThan(0);
   });
 
+});
+
+// ── /show-prompt slash command ──────────────────────────────────────────────
+
+describe("Info CLI - /show-prompt slash command", () => {
+  async function registerSlashCommands() {
+    const core = createMockCore() as unknown as CoreContext;
+    const { create } = await import("@extensions/ui-info-cli/index.ts");
+    const ext = create(core);
+    const registry = createCommandRegistry();
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry } as any);
+    return registry;
+  }
+
+  it("registers show-prompt on the agent command registry", async () => {
+    const registry = await registerSlashCommands();
+    expect(registry.has("show-prompt")).toBe(true);
+  });
+
+  it("matches only the bare command name", async () => {
+    const registry = await registerSlashCommands();
+    const def = registry.get("show-prompt")!;
+    expect(def.matches!("show-prompt")).toBe(true);
+    expect(def.matches!("show-prompt extra")).toBe(false);
+    expect(def.matches!("show")).toBe(false);
+  });
+
+  it("renders the live agent's system prompt as DISPLAY", async () => {
+    const registry = await registerSlashCommands();
+    const def = registry.get("show-prompt")!;
+    const agent = {
+      ensureSystemPrompt: async () => {},
+      context: { getSystemPrompt: () => "LIVE SYSTEM PROMPT" },
+      getToolDefs: async () => [
+        { function: { name: "bash", description: "run a command", parameters: { type: "object" } } },
+      ],
+    };
+    const result = await def.handler!(agent as any, null);
+    expect(result.action).toBe(ACTIONS.DISPLAY);
+    expect(result.content).toContain("LIVE SYSTEM PROMPT");
+    expect(result.content).toContain("# Tools");
+    expect(result.content).toContain("## bash");
+  });
 });
 
 // ── model tags in text output ───────────────────────────────────────────────

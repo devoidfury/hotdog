@@ -1,8 +1,17 @@
 # hotdog
 
-An AI agent harness with tool calling support. Connects to any OpenAI-compatible LLM API, manages conversation context, and executes tools -- all through an extensible hook-driven architecture.
+An AI agent harness with tool calling support. Connects to any OpenAI-compatible LLM API.
 
-Zero dependencies, just bring the bun.
+## Why? _You gonna eat that?_
+
+- Tiny core, extensions to build out the agent you want. Disable any feature you don't like, drop in your own extensions to add new functionality.
+- Minimize the context and system prompt the harness provides. Instead, you write and compose your own system prompts with tool-sets as profiles.
+- First-class support for local models and backends like llama-swap, llama.cpp, vllm, ds4.
+- Zero dependencies (just bring your own bun, see [Supply Chain](#supply-chain))
+
+## Requirements
+
+- **Bun** >= 1.3.1
 
 ## SAFETY DISCLAIMER
 
@@ -10,34 +19,23 @@ This hotdog comes with minimal guardrails. A dedicated host or a vm or at least 
 
 There is optionally the `--sandbox` mode which disables all potentially risky/destructive tools, and severely limits the agent's blast radius for mistakes.
 
-## Supply Chain
+## UI Modes
+- **One-shot CLI** -- Single prompt non-interactive session (`hotdog -p "your prompt"`). _(stable, ready for use)_
+- **Interactive CLI** -- Readline-based interactive session (`hotdog` or `hotdog cli`). _(stable, ready for use)_
+- **Web UI** -- Web interface with WebSocket support (`hotdog webui`). _(beta - ready for use)_
 
-hotdog ships as a source tree. There is no build step, no published artifact, and no install step that runs third-party code. You clone the repo and run it directly:
-
-```sh
-git clone https://github.com/devoidfury/hotdog.git
-cd hotdog
-bun bin/hotdog
-```
-
-Three properties follow, and each removes a step that supply-chain attacks need:
-
-- **Nothing is installed.** No `npm install`, no `node_modules`. There's no `postinstall`/`prepare` hook and no `optionalDependencies`. The whole class of payload that ships *inside* a package and detonates during install has nowhere to sit.
-- **Zero runtime dependencies.** `dependencies` is empty — no runtime dependencies, no transitive tree, so a compromised upstream package has no path in. The entire runtime is the TypeScript in `src/`, all in the repo, all readable. The repo does carry a `bun.lock`, but it pins only the single dev-time dependency (`@types/bun`) and its type-only peers — nothing it references is shipped or executed.
-- **Nothing is built by someone else's CI.** You're not running an artifact a third-party build runner produced. The failure mode where a poisoned build cache or a compromised release pipeline emits a "legitimate-looking" tarball (right version, right author, right signature) requires a build-and-publish step. hotdog has none in your install path; the source you run is the source in the repo, and it's small enough to read.
-
-Put together, the common vectors (install-time lifecycle execution, malicious transitive dependencies, and compromised build/CI pipelines producing poisoned published artifacts) have no foothold in how hotdog is distributed. An attacker would have to compromise the git repo you clone or the Bun runtime itself; both are things you can see, pin, and audit.
-
-**Boundaries to be aware of**
-
-- **The Bun runtime is a trust boundary.** Zero dependencies doesn't cover the runtime. Install Bun from an official source and pin the version. That binary is the one third-party build artifact in your path, and it isn't hotdog's to guarantee.
-- **Opt-in extensions are explicit trust boundaries.** The MCP client and skill scripts can load third-party code *you* choose to add. That's the customizability, and it's the one place hotdog runs code it didn't ship. It's off by default and deliberately opt-in.
-
-This is a different axis from the [Safety Disclaimer](#safety-disclaimer) above. That one is about what the *agent* can do to you; this one is about what could be *in the code* before it ever runs. hotdog keeps both surfaces as small as it can.
-
-## Requirements
-
-- **Bun** >= 1.3.1
+## Features
+- **Tool calling** -- File operations, bash, HTTP requests, web search, and more
+- **Extension architecture** -- All features are extensions; add your own via `extension.json` + `index.ts`
+- **Profiles** -- Composable agent configurations with roles, tools, and behavioral aspects
+- **Skills** -- Load-on-demand guides and workflows
+- **Compaction** -- Automatic context management when token budget is exceeded
+- **MCP client** -- Connect to Model Context Protocol servers (HTTP + stdio)
+- **Subagent tasks** -- Delegate work to background task agents
+- **Handoff tool** -- Clear context and restart with a prepared plan for multi-phase tasks
+- **Tool-call approvals** -- Opt-in `userGate`: allow / deny / ask before a tool call runs
+- **File attachments** -- Reference files inline with @filepath syntax in user input
+- **Session logging** -- JSONL session logs for debugging and auditing
 
 ## Installation
 
@@ -45,13 +43,11 @@ This is a different axis from the [Safety Disclaimer](#safety-disclaimer) above.
 git clone https://github.com/devoidfury/hotdog.git
 ```
 
-That's it. No `bun install` needed -- there are no dependencies. No build step, it runs right from the source.
+That's it. No separate build or install step, it runs right from the source.
 
 ## Quick Start
 
-I haven't tried it with any cloud service providers yet, just local (llama-swap, llama.cpp, vllm, ds4, ...), but it should work the same way with any openai / chat completions compatible endpoint given the right URL, an API key, and the right model config.
-
-_Note - I wrote this using linux and haven't really tried it on macos or windows. Happy to accept PRs adding support or fixing issues there, if you find any._
+_Notes: I haven't tried it with any cloud service providers, only local llms, but it should work the same way with any openai / chat completions compatible endpoint. This was written using linux and I haven't tried it on macos or windows. Happy to accept PRs adding support or fixing issues there, if you find any._
 
 ### 1. Configure Your LLM Backend
 
@@ -127,28 +123,6 @@ aspects: ['proactive', 'coding', 'concise']
 ---
 Profile body content goes here.
 ```
-
-## UI Modes
-- **One-shot CLI** -- Single prompt non-interactive session (`hotdog -p "your prompt"`). _(stable, ready for use)_
-- **Interactive CLI** -- Readline-based interactive session (`hotdog` or `hotdog cli`). _(stable, ready for use)_
-- **Web UI** -- Web interface with WebSocket support (`hotdog webui`). _(beta - ready for use)_
-
-## Features
-- **Tool calling** -- File operations, bash, HTTP requests, web search, and more
-- **Extension architecture** -- All features are extensions; add your own via `extension.json` + `index.ts`
-- **Hook system** -- Three hook patterns: notification, sequential pipeline, and gate/mutate
-- **Profiles** -- Composable agent configurations with roles, tools, and behavioral aspects
-- **Skills** -- Load-on-demand guides and workflows
-- **Compaction** -- Automatic context management when token budget is exceeded
-- **MCP client** -- Connect to Model Context Protocol servers (HTTP + stdio)
-- **Subagent tasks** -- Delegate work to background task agents
-- **Handoff tool** -- Clear context and restart with a prepared plan for multi-phase tasks
-- **Tool-call approvals** -- Opt-in `userGate`: allow / deny / ask before a tool call runs (convenience triage, not an enforcement boundary)
-- **File attachments** -- Reference files inline with @filepath syntax in user input
-- **Session logging** -- JSONL session logs for debugging and auditing
-- **Streaming** -- Real-time streaming of LLM responses
-- **Retry with backoff** -- Automatic retry for transient LLM errors
-- **Prompt injection protection** -- Marker mangling to prevent crafted input from triggering internal behavior
 
 ## Usage
 
@@ -226,6 +200,33 @@ Extensions register tools, CLI subcommands, and system prompt chunks via hooks. 
 > Extensions? For a hotdog? How long do you need the damn thing?
 >
 > — Some old guy
+
+## Supply Chain
+
+hotdog ships as a source tree. There is no build step, no published artifact, and no install step that runs third-party code. You clone the repo and run it directly:
+
+```sh
+git clone https://github.com/devoidfury/hotdog.git
+cd hotdog
+bun bin/hotdog
+```
+
+The versions are all tagged so you can check out any specific version you want to run, if you're worried about the churn on my main branch.
+
+Three properties follow, and each removes a step that supply-chain attacks need:
+
+- **Nothing is installed.** No `npm install`, no `node_modules`. There's no `postinstall`/`prepare` hook and no `optionalDependencies`. The whole class of payload that ships *inside* a package and detonates during install has nowhere to sit.
+- **Zero runtime dependencies.** `dependencies` is empty — no runtime dependencies, no transitive tree, so a compromised upstream package has no path in. The entire runtime is the TypeScript in `src/`, all in the repo, all readable. The repo does carry a `bun.lock`, but it pins only the single dev-time dependency (`@types/bun`) and its type-only peers — nothing it references is shipped or executed.
+- **Nothing is built by someone else's CI.** You're not running an artifact a third-party build runner produced. The failure mode where a poisoned build cache or a compromised release pipeline emits a "legitimate-looking" tarball (right version, right author, right signature) requires a build-and-publish step. hotdog has none in your install path; the source you run is the source in the repo, and it's small enough to read.
+
+Put together, the common vectors (install-time lifecycle execution, malicious transitive dependencies, and compromised build/CI pipelines producing poisoned published artifacts) have no foothold in how hotdog is distributed. An attacker would have to compromise the git repo you clone or the Bun runtime itself; both are things you can see, pin, and audit.
+
+**Boundaries to be aware of**
+
+- **The Bun runtime is a trust boundary.** Zero dependencies doesn't cover the runtime. Install Bun from an official source and pin the version. That binary is the one third-party build artifact in your path, and it isn't hotdog's to guarantee.
+- **Opt-in extensions are explicit trust boundaries.** The MCP client and skill scripts can load third-party code *you* choose to add. That's the customizability, and it's the one place hotdog runs code it didn't ship. It's off by default and deliberately opt-in.
+
+This is a different axis from the [Safety Disclaimer](#safety-disclaimer) above. That one is about what the *agent* can do to you; this one is about what could be *in the code* before it ever runs. hotdog keeps both surfaces as small as it can.
 
 ## Development
 

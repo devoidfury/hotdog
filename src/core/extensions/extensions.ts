@@ -223,7 +223,7 @@ export async function discoverExtensionsInDir(
         extensions.push({
           ...metadata,
           path: metadata.path || relativePath,
-          dirPath,
+          dirPath: dirFull,
         });
       }
 
@@ -413,13 +413,15 @@ export async function discoverExtensions(
     const discovered = await discoverExtensionsInDir(resolved);
 
     for (const ext of discovered) {
+      // ext.path is the scan-relative path (e.g. "group/foo" for extensions
+      // nested below the scan root); ext.name alone drops intermediate dirs.
       let basePath: string;
       if (spec === "@extensions") {
-        basePath = `@extensions/${ext.name}/index.ts`;
+        basePath = `@extensions/${ext.path}/index.ts`;
       } else {
         const relPath = path.relative(
           ROOT_DIR,
-          path.join(resolved, ext.name, "index.ts"),
+          path.join(resolved, ext.path, "index.ts"),
         );
         basePath = relPath.startsWith("..") ? relPath : `./${relPath}`;
       }

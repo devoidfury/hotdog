@@ -47,6 +47,35 @@ describe("discoverExtensionsInDir", async () => {
     );
     expect(result).toEqual([]);
   });
+
+  it("computes scan-relative path and dirPath for nested extensions", async () => {
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
+    const nodePath = await import("node:path");
+    const tmp = await fs.mkdtemp(nodePath.join(os.tmpdir(), "hotdog-ext-disc-"));
+    try {
+      const nested = nodePath.join(tmp, "group", "nested-ext");
+      await fs.mkdir(nested, { recursive: true });
+      await fs.writeFile(nodePath.join(nested, "extension.json"), "{}");
+      await fs.writeFile(nodePath.join(nested, "index.ts"), "export default {};");
+
+      const result = await discoverExtensionsInDir(tmp);
+      expect(result.length).toBe(1);
+      expect(result[0]!.name).toBe("nested-ext");
+      expect(result[0]!.path).toBe("group/nested-ext");
+      expect(result[0]!.dirPath).toBe(nested);
+
+      // Module specifier must keep the intermediate directory segment.
+      const { discoverExtensions } = await import("@core/extensions/extensions.ts");
+      const loaded = await discoverExtensions([tmp]);
+      expect(loaded.length).toBe(1);
+      expect(loaded[0]!.path!.endsWith(
+        nodePath.join("group", "nested-ext", "index.ts"),
+      )).toBe(true);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("getExtensionConfigDefaults", async () => {

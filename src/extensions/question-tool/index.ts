@@ -12,7 +12,6 @@ import {
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { NoopInput } from "@core/context/input.ts";
-import { isPromise } from "@utils/promise.ts";
 import { HOOKS } from "@core/hooks.ts";
 import {
   CoreContext,
@@ -37,12 +36,15 @@ interface QuestionAnswers {
 }
 
 interface InputInterface {
-  collectAnswers(questions: Question[]): Promise<QuestionAnswers> | QuestionAnswers;
+  /** `signal` is the run's abort: the input must bail out of its prompt loop and release readline when the run is cancelled. */
+  collectAnswers(questions: Question[], signal?: AbortSignal | null): Promise<QuestionAnswers> | QuestionAnswers;
   isInteractive(): boolean;
 }
 
 interface Agent {
   emitOutput(type: string, data: unknown): void;
+  /** Per-run abort (null between runs or for standalone callers without a run). */
+  runAbortController?: AbortController | null;
 }
 
 function ensureKey(question: Question, index: number): string {
@@ -164,17 +166,45 @@ export class QuestionTool {
     }
 
     const agent = ctx?.get("agent") as Agent | undefined;
+
+    // race the agent's run abort, exactly like user-gate's askUser(); sanity check before we render a question
+    const signal = agent?.runAbortController?.signal ?? null;
+    if (signal?.aborted) {
+      return ToolResult.err("Question cancelled: the run was interrupted");
+    }
+
     if (agent) {
       agent.emitOutput("question", { questions });
     }
 
     const inputInterface: InputInterface = (ctx?.get("input") as InputInterface) || new NoopInput();
 
-    let answers: QuestionAnswers = inputInterface.collectAnswers(questions) as QuestionAnswers;
-    if (isPromise(answers)) {
-      answers = (await answers) as QuestionAnswers;
+    // Wrapped in a microtask so a synchronous (NoopInput) result and a promise result take the same path; the race then works for both.
+    // The input gets the same signal: on abort it bails out of its prompt loop and re-attaches the main readline handler, so a line typed after
+    // cancel goes to the next turn, not into a dead question loop.
+    const collect = Promise.resolve().then(() => inputInterface.collectAnswers(questions, signal));
+    let onAbort: (() => void) | null = null;
+    const aborted = signal
+      ? new Promise<"aborted">((resolve) => {
+          onAbort = () => resolve("aborted");
+          signal.addEventListener("abort", onAbort, { once: true });
+        })
+      : null;
+
+    let outcome: unknown;
+    try {
+      outcome = await (aborted ? Promise.race([collect, aborted]) : collect);
+    } finally {
+      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+    }
+    if (outcome === "aborted") {
+      // The input resolves (partial answers, dropped here) rather than  rejecting on abort, so nothing dangles;
+      // the catch is a safety net for an input that fails for an unrelated reason.
+      collect.catch(() => {});
+      return ToolResult.err("Question cancelled: the run was interrupted");
     }
 
+    const answers = outcome as QuestionAnswers;
     const mode = inputInterface.isInteractive() ? "interactive" : "non-interactive";
 
     return ToolResult.ok(JSON.stringify(answers, null, 2)).withEntries({

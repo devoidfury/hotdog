@@ -197,7 +197,8 @@ export async function executeShellCommand(
 
 interface InputInterface {
   isInteractive(): boolean;
-  collectAnswers(questions: QuestionDef[]): Promise<Record<string, string>>;
+  /** `signal` is the run's abort */
+  collectAnswers(questions: QuestionDef[], signal?: AbortSignal | null): Promise<Record<string, string>>;
 }
 
 export class AsyncInteractiveCliInput implements InputInterface {
@@ -222,14 +223,28 @@ export class AsyncInteractiveCliInput implements InputInterface {
     return true;
   }
 
-  async collectAnswers(questions: QuestionDef[]): Promise<Record<string, string>> {
+  async collectAnswers(questions: QuestionDef[], signal?: AbortSignal | null): Promise<Record<string, string>> {
     const rl = this.#rl;
 
     // Take over readline for the duration of the prompt.
     rl.removeListener("line", this.#onLine);
 
     const answers: Record<string, string> = {};
+    let onAbort: (() => void) | null = null;
+    // Our pending one-shot "line" listener, the cancellable stand-in for rl.question:
+    // readline's question callback cannot be removed once pending, so a line typed after cancel would be fed into a dead loop.
+    // A plain listener we own can be detached in the finally block.
+    let pendingLine: ((line: string) => void) | null = null;
     try {
+      if (signal?.aborted) return answers;
+
+      const aborted = signal
+        ? new Promise<"aborted">((resolve) => {
+            onAbort = () => resolve("aborted");
+            signal.addEventListener("abort", onAbort, { once: true });
+          })
+        : null;
+
       for (const q of questions) {
         const key = q.key;
         const promptText = q.prompt || "";
@@ -256,11 +271,27 @@ export class AsyncInteractiveCliInput implements InputInterface {
 
         while (!valid) {
           const prompt = defaultValue !== "" ? ` [${defaultValue}] ` : " ";
-          const line = await new Promise<string>((resolve) => {
-            rl.question(prompt, (response: string) => {
-              resolve(response ?? "");
-            });
+          process.stdout.write(prompt);
+          const linePromise = new Promise<string>((resolve) => {
+            const onLine = (line: string) => {
+              pendingLine = null;
+              rl.removeListener("line", onLine);
+              resolve(line ?? "");
+            };
+            pendingLine = onLine;
+            rl.on("line", onLine);
           });
+
+          // Race the line against the run abort: a cancelled run must stop prompting and release readline, not keep owning it.
+          // We RESOLVE (partial answers, dropped by the caller) rather than reject, so the never-awaited promise can never go unhandled.
+          let line: string;
+          if (aborted) {
+            const outcome = await Promise.race([linePromise, aborted]);
+            if (outcome === "aborted") return answers;
+            line = outcome;
+          } else {
+            line = await linePromise;
+          }
 
           const trimmed = this.#normalize(line).trim();
 
@@ -295,6 +326,8 @@ export class AsyncInteractiveCliInput implements InputInterface {
         answers[key] = answer;
       }
     } finally {
+      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+      if (pendingLine) rl.removeListener("line", pendingLine);
       this.#addLineHandler(this.#onLine);
     }
 

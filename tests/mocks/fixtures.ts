@@ -161,9 +161,16 @@ export function createMockRl(responses: string[] = []): {
 } {
   let responseIndex = 0;
   const addedHandlers: unknown[] = [];
+  const lineListeners: Array<(...args: unknown[]) => void> = [];
 
   const mockRl = {
-    removeListener: function () {
+    removeListener: function (event: string, handler: unknown) {
+      if (event === "line") {
+        const i = lineListeners.indexOf(handler as (...args: unknown[]) => void);
+        if (i >= 0) lineListeners.splice(i, 1);
+        const j = addedHandlers.indexOf(handler);
+        if (j >= 0) addedHandlers.splice(j, 1);
+      }
       return mockRl;
     },
     question: function (_prompt: string, cb: (response: string) => void) {
@@ -175,7 +182,16 @@ export function createMockRl(responses: string[] = []): {
       return mockRl as any;
     },
     on: function (event: string, handler: (...args: unknown[]) => void) {
-      if (event === "line") addedHandlers.push(handler);
+      if (event !== "line") return mockRl;
+      lineListeners.push(handler);
+      addedHandlers.push(handler);
+      // Emulate readline: a queued response is delivered (synchronously, like
+      // the question callback used to be) to the just-registered line
+      // listener, the way a typed line reaches the active "line" handler.
+      if (responseIndex < responses.length) {
+        const r = responses[responseIndex++];
+        handler(r);
+      }
       return mockRl;
     },
     prompt: function () {

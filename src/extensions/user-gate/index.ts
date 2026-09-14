@@ -44,8 +44,10 @@ type ToolCallPayload = HookPayloads["tool:call"];
 /** The question-tool seam: the one route from an extension to the human. */
 interface InputLike {
   isInteractive(): boolean;
+  /** `signal` is the run's abort: the input bails out of its prompt loop and releases readline when the run is cancelled. */
   collectAnswers(
     questions: Record<string, unknown>[],
+    signal?: AbortSignal | null,
   ): Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 
@@ -141,7 +143,7 @@ async function askUser(
       allowOther: false,
     };
 
-    const collect = Promise.resolve().then(() => input.collectAnswers([question]));
+    const collect = Promise.resolve().then(() => input.collectAnswers([question], signal));
     // A prompt nobody will answer (run cancelled) must resolve toward deny
     // rather than dangle: race the agent's run abort.
     let onAbort: (() => void) | null = null;

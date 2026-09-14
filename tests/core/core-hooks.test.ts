@@ -3,6 +3,7 @@
 import {
   HookSystem,
   createHooks,
+  HOOKS,
   isGateActionBlock,
   isGateActionModify,
   isGateActionContinue,
@@ -12,7 +13,8 @@ import {
   type GateAction,
   type InputHookResult,
 } from "@core/hooks.ts";
-import { describe, it, expect } from "bun:test";
+import { initializeLogger, resetLoggerForTesting } from "@utils/logger.ts";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
 
 describe("HookSystem.on() / notifyHooks()", () => {
   it("should call registered handlers on notifyHooks", () => {
@@ -629,3 +631,68 @@ describe("hooksMap", () => {
   });
 });
 
+
+// ── on() unknown hook name warning ────────────────────────────────────────
+
+describe("HookSystem.on() — unknown hook name warning", () => {
+  const logHooks = createHooks();
+  const warnings: string[] = [];
+
+  beforeAll(() => {
+    logHooks.on("log", (data: { level: string; message: string }) => {
+      if (data.level === "warn") warnings.push(data.message);
+    });
+    resetLoggerForTesting();
+    initializeLogger({ hooks: logHooks, minLevel: "debug", target: "none" });
+    // Flush any warns buffered before initialization (earlier tests in this
+    // file) so only this describe's registrations are asserted.
+    warnings.length = 0;
+  });
+
+  afterAll(() => {
+    resetLoggerForTesting();
+  });
+
+  afterEach(() => {
+    warnings.length = 0;
+  });
+
+  it("warns when a handler is registered for a hook core does not fire", () => {
+    const hooks = createHooks();
+    hooks.on("systemprompt:build", () => {});
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("systemprompt:build");
+  });
+
+  it("names the source when one is provided", () => {
+    const hooks = createHooks();
+    hooks.on("foo:bar", () => {}, "my-ext");
+    expect(warnings[0]).toContain("my-ext");
+    expect(warnings[0]).toContain("foo:bar");
+  });
+
+  it("does not warn for known core hooks", () => {
+    const hooks = createHooks();
+    hooks.on(HOOKS.TURN_START, () => {});
+    hooks.on(HOOKS.TOOL_CALL, () => {});
+    hooks.on(HOOKS.LOG, () => {});
+    expect(warnings).toEqual([]);
+  });
+
+  it("warns once per unknown name, per registration", () => {
+    const hooks = createHooks();
+    hooks.on("a:b", () => {});
+    hooks.on("c:d", () => {});
+    expect(warnings.length).toBe(2);
+    expect(warnings.some((w) => w.includes("a:b"))).toBe(true);
+    expect(warnings.some((w) => w.includes("c:d"))).toBe(true);
+  });
+
+  it("still registers the handler (warning is a nudge, not a gate)", () => {
+    const hooks = createHooks();
+    const calls: unknown[] = [];
+    hooks.on("my-ext:custom", (data) => calls.push(data));
+    hooks.notifyHooks("my-ext:custom", { x: 1 });
+    expect(calls).toEqual([{ x: 1 }]);
+  });
+});

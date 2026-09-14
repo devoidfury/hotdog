@@ -153,6 +153,18 @@ export class HookSystem {
       priority = sourceOrOptions.priority ?? 0;
     }
 
+    // A name core never fires is almost always a typo, and the handler
+    // would be dead code. Warn, don't refuse: extensions may define their
+    // own cross-extension hooks that another extension fires by name (and
+    // tests register arbitrary names).
+    if (!KNOWN_HOOK_NAMES.has(hookName)) {
+      const who = source ? `"${source}" ` : "";
+      logger.warn(
+        `[hooks] ${who}registered a handler for unknown hook "${hookName}" — core will not fire it (typo?); ` +
+          `it only runs if a caller notifies that exact name`,
+      );
+    }
+
     if (!this.#hooks.has(hookName)) this.#hooks.set(hookName, []);
     const handlers = this.#hooks.get(hookName)!;
     const id = ++this.#handlerCounter;
@@ -402,6 +414,9 @@ export const HOOKS = {
 
   COMPLETION_REQUEST: "completion:request",
 } as const;
+
+// The names core can actually fire; used by on() to warn on unknown names.
+const KNOWN_HOOK_NAMES: ReadonlySet<string> = new Set(Object.values(HOOKS));
 
 export const EXTENSION_PROVIDES = {
   CLI_SUBCOMMANDS: "cli:subcommands",

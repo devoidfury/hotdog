@@ -66,5 +66,7 @@ All error catches must use `formatError()` from `src/core/error.ts`:
 | `docs/sysbox-sandbox.md` | Kernel-enforced bash sandbox (`bashTool.sandbox`: static/fence modes) |
 | `docs/agents/sandbox-direction.md` | Sandbox design notes, gate post-mortem, kernel facts appendix |
 | `docs/cli-subcommands.md` | CLI subcommand extension registration |
+| `docs/cli-reference.md` | User-facing CLI reference: subcommands, flags, slash commands |
+| `docs/supply-chain.md` | Supply-chain posture write-up (README carries the summary) |
 | `docs/config-reference.md` | Complete `defaults.json` config reference — all settings, extensions, providers |
 | `docs/hook-lifecycle.md` | Hook system lifecycle and extension registration patterns |

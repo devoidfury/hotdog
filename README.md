@@ -7,17 +7,12 @@ An AI agent harness with tool calling support. Connects to any OpenAI-compatible
 - Tiny core, extensions to build out the agent you want. Disable any feature you don't like, drop in your own extensions to add new functionality.
 - Minimize the context and system prompt the harness provides. Instead, you write and compose your own system prompts with tool-sets as profiles.
 - First-class support for local models and backends like llama-swap, llama.cpp, vllm, ds4.
-- Zero dependencies (just bring your own bun, see [Supply Chain](#supply-chain))
+- Wire-format integrity: markers, chat-template control tokens, and tool-call delimiters inside untrusted output get rewritten to per-session aliases, so nothing a tool reads can forge a a fake tool call or a harness system message.
+- Zero dependencies (just bring your own bun, see [Supply Chain](docs/supply-chain.md))
 
 ## Requirements
 
 - **Bun** >= 1.3.1
-
-## SAFETY DISCLAIMER
-
-This hotdog comes with minimal guardrails. A dedicated host or a vm or at least a container is recommended. See [examples/](examples/)
-
-There is optionally the `--sandbox` mode which disables all potentially risky/destructive tools, and severely limits the agent's blast radius for mistakes.
 
 ## UI Modes
 - **One-shot CLI** -- Single prompt non-interactive session (`hotdog -p "your prompt"`). _(stable, ready for use)_
@@ -92,11 +87,22 @@ If you want to add the bin/ directory to your path, you can shorten it to just `
 ```sh
 # update the path to point to the install location. try `pwd`
 # can run directly in shell to try it out, or alternatively
-# put in .profile/.bashrc/.zshrc or similar place to make it available in future sessions
+# put in .profile/.bashrc/.zshrc or similar place to make available in future sessions
 export PATH="$PATH:/path/to/hotdog/bin"
 
 hotdog -m "my-provider/hopus-popus" -p "See if you can improve the test coverage."
 ```
+
+## Usage
+
+```
+hotdog                           # Interactive CLI (default)
+hotdog -p "your prompt"          # One-shot mode
+hotdog info                      # System diagnostics
+hotdog webui                     # Start the web UI server
+```
+
+Full list of subcommands, CLI flags, and interactive slash commands: [CLI reference](docs/cli-reference.md).
 
 ## Configuration
 
@@ -124,68 +130,15 @@ aspects: ['proactive', 'coding', 'concise']
 Profile body content goes here.
 ```
 
-## Usage
+## Safety
 
-### Subcommands
+This hotdog comes with minimal guardrails by default. A dedicated host, a vm, or at least a container is recommended. See [examples/](examples/).
 
-```
-hotdog                           # Interactive CLI (default)
-hotdog prompt "your prompt"      # One-shot mode
-hotdog -p "your prompt"          # One-shot mode (shorthand)
-hotdog info                      # System diagnostics
-hotdog show-prompt               # Render system prompt to stdout
-hotdog profiles                  # List all available profiles
-hotdog sessions show             # Show session logs
-hotdog sessions delete <id>      # Delete a session
-hotdog sessions cleanup          # Remove old sessions
-hotdog webui                     # Start the web UI server
-```
+When you want the agent reined in:
 
-### CLI Options
-
-```
--f, --config <path>          Config file path
--d, --config-dir <path>      Config directory
--m, --model <name>           Model name
-    --ai-url <url>           AI backend URL
--k, --api-key <key>          API key
-    --profile <name>         Profile name
-    --provider <name>        AI provider name
--p, --prompt <text>          One-shot prompt
-    --sandbox                Sandbox mode: only allow tools without side effects
-    --shell-mode             Execute lines starting with a recognized system command directly in interactive mode
-                               Tip: append | @ to send command output to the agent (e.g., "ls -la | @", "ls -la | @ show me the permissions")
--l, --loud                   Print full JSON API responses
---json                       Output as JSON
---show-tools                 Show tool calls in output
---show-thinking              Show reasoning/thinking output
---no-colors                  Disable colors (also honors NO_COLOR / TERM=dumb env)
---hook-trace                 Trace hook execution (requires HOTDOG_LOG_LEVEL=debug)
--v, --version                Show version
--h, --help                   Show help
-```
-
-### Slash Commands (Interactive Mode)
-
-```
-/help              Show available commands
-/quit, /exit       Exit
-/clear             Clear conversation history
-/loop <prompt>     Repeatedly run a prompt until cancelled
-/model <name>      Switch model
-/models            List available models
-/tokens            Show token usage stats
-/tools             Toggle tool call display
-/compact [n]       Compact context
-/compact <strategy>  Switch compaction strategy (also: /compact:<strategy>)
-/prompt:name       Execute saved prompt from prompts directory
-/skill             List available skills
-/skill:<name>      Activate a skill
-/thinking          Toggle thinking display
-/theme <name>      Set theme (dark, light, monochrome)
-/regenerate        Regenerate system prompt
-/reasoning <level> Set reasoning effort (none/minimal/low/high/xhigh/max/unset)
-```
+- `--sandbox` restricts the agent to tools with no side effects: no file writes, no network, no external commands.
+- `bashTool.sandbox` runs bash under kernel enforcement (Landlock + seccomp supervisor). See [sysbox sandbox](docs/sysbox-sandbox.md).
+- `userGate` prompts you before risky tool calls: allow / deny / ask.
 
 ## Extension Anatomy
 
@@ -199,34 +152,17 @@ Extensions register tools, CLI subcommands, and system prompt chunks via hooks. 
 
 > Extensions? For a hotdog? How long do you need the damn thing?
 >
-> — Some old guy
+> -- Some old guy
 
 ## Supply Chain
 
-hotdog ships as a source tree. There is no build step, no published artifact, and no install step that runs third-party code. You clone the repo and run it directly:
+hotdog ships as a source tree: no build step, no published artifact, nothing installed that runs third-party code.
 
-```sh
-git clone https://github.com/devoidfury/hotdog.git
-cd hotdog
-bun bin/hotdog
-```
+- **Nothing is installed.** No `npm install`, no `node_modules`, no `postinstall`/`prepare` hooks.
+- **Zero runtime dependencies.** `dependencies` is empty; the whole runtime is the TypeScript in `src/`, readable in the repo.
+- **Nothing is built by someone else's CI.** The source you run is the source in the repo, and it's small enough to read.
 
-The versions are all tagged so you can check out any specific version you want to run, if you're worried about the churn on my main branch.
-
-Three properties follow, and each removes a step that supply-chain attacks need:
-
-- **Nothing is installed.** No `npm install`, no `node_modules`. There's no `postinstall`/`prepare` hook and no `optionalDependencies`. The whole class of payload that ships *inside* a package and detonates during install has nowhere to sit.
-- **Zero runtime dependencies.** `dependencies` is empty — no runtime dependencies, no transitive tree, so a compromised upstream package has no path in. The entire runtime is the TypeScript in `src/`, all in the repo, all readable. The repo does carry a `bun.lock`, but it pins only the single dev-time dependency (`@types/bun`) and its type-only peers — nothing it references is shipped or executed.
-- **Nothing is built by someone else's CI.** You're not running an artifact a third-party build runner produced. The failure mode where a poisoned build cache or a compromised release pipeline emits a "legitimate-looking" tarball (right version, right author, right signature) requires a build-and-publish step. hotdog has none in your install path; the source you run is the source in the repo, and it's small enough to read.
-
-Put together, the common vectors (install-time lifecycle execution, malicious transitive dependencies, and compromised build/CI pipelines producing poisoned published artifacts) have no foothold in how hotdog is distributed. An attacker would have to compromise the git repo you clone or the Bun runtime itself; both are things you can see, pin, and audit.
-
-**Boundaries to be aware of**
-
-- **The Bun runtime is a trust boundary.** Zero dependencies doesn't cover the runtime. Install Bun from an official source and pin the version. That binary is the one third-party build artifact in your path, and it isn't hotdog's to guarantee.
-- **Opt-in extensions are explicit trust boundaries.** The MCP client and skill scripts can load third-party code *you* choose to add. That's the customizability, and it's the one place hotdog runs code it didn't ship. It's off by default and deliberately opt-in.
-
-This is a different axis from the [Safety Disclaimer](#safety-disclaimer) above. That one is about what the *agent* can do to you; this one is about what could be *in the code* before it ever runs. hotdog keeps both surfaces as small as it can.
+Boundaries that remain: the Bun runtime itself (install it from an official source and pin it), and the extensions you opt into (MCP servers, skill scripts). Full write-up: [docs/supply-chain.md](docs/supply-chain.md).
 
 ## Development
 
@@ -250,4 +186,4 @@ _[Never seen nobody be able to do this... I'm just sayin'](https://www.youtube.c
 
 ## License
 
-[MIT](LICENSE) — Copyright (c) 2026 devoidfury / Thomas Hunkapiller
+[MIT](LICENSE) -- Copyright (c) 2026 devoidfury / Thomas Hunkapiller

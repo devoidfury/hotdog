@@ -111,8 +111,9 @@ export function formatTokenUsage(
   sessionCachedTokens: number,
   sessionCompletionTokens: number,
   sessionTotalTokens: number,
+  contextWindow: number,
 ): string {
-  return `(tokens cached:${sessionCachedTokens} prompt:${sessionPromptTokens} completion:${sessionCompletionTokens} total:${sessionTotalTokens})`;
+  return `Token usage: ${sessionCachedTokens} cached, ${sessionPromptTokens} processed, ${sessionCompletionTokens} generated. (${sessionTotalTokens}/${contextWindow})`;
 }
 
 /**
@@ -384,6 +385,7 @@ export class CliOutputSink extends OutputSink {
       event.cachedTokens,
       event.completionTokens,
       event.totalTokens,
+      event.contextWindow,
     );
     this._processContent(display);
   }

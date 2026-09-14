@@ -121,6 +121,8 @@ export interface TokenUsageEvent {
   cachedTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** The model's context window size, shown as total/contextWindow. */
+  contextWindow: number;
 }
 
 export interface CompactionResultEvent {

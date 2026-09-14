@@ -212,8 +212,9 @@ describe("CliOutputSink", () => {
       cachedTokens: 50,
       completionTokens: 200,
       totalTokens: 350,
+      contextWindow: 128000,
     });
-    expect(stderrWrites.some((w) => w.includes("tokens"))).toBe(true);
+    expect(stderrWrites.some((w) => w.includes("Token usage"))).toBe(true);
   });
 
   it("emitSessionState updates hideTools", () => {

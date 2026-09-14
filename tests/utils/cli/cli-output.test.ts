@@ -52,14 +52,14 @@ describe("formatToolResult", () => {
 
 describe("formatTokenUsage", () => {
   it("formats token usage correctly", () => {
-    expect(formatTokenUsage(100, 50, 200, 350)).toBe(
-      "(tokens cached:50 prompt:100 completion:200 total:350)",
+    expect(formatTokenUsage(100, 50, 200, 350, 1000)).toBe(
+      "Token usage: 50 cached, 100 processed, 200 generated. (350/1000)",
     );
   });
 
   it("handles large numbers", () => {
-    expect(formatTokenUsage(10000, 6000, 20000, 35000)).toBe(
-      "(tokens cached:6000 prompt:10000 completion:20000 total:35000)",
+    expect(formatTokenUsage(10000, 6000, 20000, 35000, 128000)).toBe(
+      "Token usage: 6000 cached, 10000 processed, 20000 generated. (35000/128000)",
     );
   });
 });

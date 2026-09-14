@@ -504,7 +504,9 @@ export class Agent implements AgentLike {
   }
 
   _emitTokenUsage(response: { usage?: RawUsage | null }): void {
-    this.context.recordUsage(response.usage, (usage) => { this.emitOutput("token_usage", usage) });
+    this.context.recordUsage(response.usage, (usage) => {
+      this.emitOutput("token_usage", { ...usage, contextWindow: this.contextLimit });
+    });
   }
 
   notifyCompletion(result: string): void {

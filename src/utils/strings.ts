@@ -27,3 +27,50 @@ const XML_ENTITIES: Record<string, string> = {
   '"': "&quot;",
   "'": "&apos;",
 };
+
+/** True when a and b differ by at most one edit (insert/delete/substitute). */
+function withinOneEdit(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [long, short] = a.length >= b.length ? [a, b] : [b, a];
+  if (long.length - short.length > 1) return false;
+  let i = 0;
+  while (i < short.length && long[i] === short[i]) i++;
+  if (i === short.length) return true; // remainder = one insert
+  if (long.length === short.length) {
+    return long.slice(i + 1) === short.slice(i + 1); // one substitution
+  }
+  return long.slice(i + 1) === short.slice(i); // one deletion
+}
+
+/**
+ * Fuzzy "did you mean" suggestions shared by every unknown-input path (CLI
+ * flags, tool names, subcommands): normalized exact match, then prefix/
+ * substring near-matches, then one-edit typos (a dropped char like "modl"
+ * for "model" defeats substring matching alone). The highest-confidence
+ * tier that yields anything wins, capped at `limit`.
+ *
+ * `normalize` maps the target and each candidate to a comparison key (e.g.
+ * lowercase, strip separators/flag dashes); candidates keep their given
+ * order in the result.
+ */
+export function suggestCandidates(
+  target: string,
+  candidates: string[],
+  options: { normalize?: (s: string) => string; limit?: number } = {},
+): string[] {
+  const normalize = options.normalize ?? ((s: string) => s);
+  const limit = options.limit ?? 5;
+  const t = normalize(target);
+  if (!t) return [];
+
+  const keys = candidates.map((c) => [c, normalize(c)] as const);
+
+  let matches = keys.filter(([, k]) => k === t);
+  if (matches.length === 0) {
+    matches = keys.filter(([, k]) => k.length > 2 && (k.includes(t) || t.includes(k)));
+  }
+  if (matches.length === 0) {
+    matches = keys.filter(([, k]) => withinOneEdit(k, t));
+  }
+  return matches.slice(0, limit).map(([c]) => c);
+}

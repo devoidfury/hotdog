@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "@utils/logger.ts";
+import { suggestCandidates } from "@utils/strings.ts";
 import { createToolRegistry } from "./extensions/tool-registry.ts";
 import {
   createExtensionLoader,
@@ -220,9 +221,9 @@ export async function main(): Promise<number> {
     if (e instanceof CliError && e.subcommand !== undefined) {
       const knownSubcommands = cliSubcommandRegistry.names();
       const posLower = e.subcommand.toLowerCase();
-      const similar = knownSubcommands.filter(
-        (sc) => sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
-      );
+      const similar = suggestCandidates(posLower, knownSubcommands, {
+        normalize: (s) => s.toLowerCase(),
+      });
       if (similar.length === 1) {
         logger.error(`Unknown subcommand: ${posLower}\n` + `Did you mean: ${similar[0]}?`);
       } else {

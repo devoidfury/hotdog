@@ -2,7 +2,7 @@
 // Only structural/meta flags are hardcoded here (--config, --model, --help, etc.).
 
 import { CliError } from "./error.ts";
-import { parseCliFlagKey } from "@utils/strings.ts";
+import { parseCliFlagKey, suggestCandidates } from "@utils/strings.ts";
 import type { ConfigRegistry } from "./extensions/config.ts";
 import type { CliFlagDef } from "./config/schema-types.ts";
 
@@ -50,42 +50,14 @@ const STRUCTURAL_FLAGS: CliFlagDef[] = [
   { short: "-h", long: "--help", type: "boolean", description: "Show help" },
 ];
 
-/** True when a and b differ by at most one edit (insert/delete/substitute). */
-function withinOneEdit(a: string, b: string): boolean {
-  if (a === b) return true;
-  const [long, short] = a.length >= b.length ? [a, b] : [b, a];
-  if (long.length - short.length > 1) return false;
-  let i = 0;
-  while (i < short.length && long[i] === short[i]) i++;
-  if (i === short.length) return true; // remainder = one insert
-  if (long.length === short.length) {
-    return long.slice(i + 1) === short.slice(i + 1); // one substitution
-  }
-  return long.slice(i + 1) === short.slice(i); // one deletion
-}
+// Comparison key for flag suggestions: strip dashes, lowercase, drop separators.
+const flagSuggestKey = (name: string): string =>
+  name.replace(/^-+/, "").toLowerCase().replace(/[-_]/g, "");
 
-/**
- * Suggest registered flags close to an unknown one: separator/case-insensitive
- * exact match, then prefix/substring near-matches, then one-edit typos
- * (a dropped char like --modl for --model defeats substring matching alone).
- * Long flags only.
- */
+/** Suggestions from registered long flags for an unknown one. */
 function suggestFlags(arg: string, flagMap: Map<string, FlagEntry>): string[] {
-  const key = (name: string) => name.replace(/^-+/, "").toLowerCase().replace(/[-_]/g, "");
-  const target = key(arg);
-  if (!target) return [];
-
   const names = Array.from(flagMap.keys()).filter((k) => k.startsWith("--"));
-  const exact = names.filter((n) => key(n) === target);
-  if (exact.length > 0) return exact.slice(0, 5);
-
-  const near = names.filter((n) => {
-    const k = key(n);
-    return k.length > 2 && (k.includes(target) || target.includes(k));
-  });
-  if (near.length > 0) return near.slice(0, 5);
-
-  return names.filter((n) => withinOneEdit(key(n), target)).slice(0, 5);
+  return suggestCandidates(arg, names, { normalize: flagSuggestKey });
 }
 
 export function parseArgs(

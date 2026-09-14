@@ -7,6 +7,7 @@ import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
 import { Workspace } from "@utils/workspace.ts";
+import { suggestCandidates } from "@utils/strings.ts";
 import type { ToolResultContent } from "./context/wrappers.ts";
 
 export interface ToolResult {
@@ -345,23 +346,15 @@ function toolNameKey(name: string): string {
  */
 export function unavailableToolMessage(toolName: string, available: Set<string>): string {
   const base = `Tool '${toolName}' is not available for this agent.`;
-  const target = toolNameKey(toolName);
-  if (!target) return base;
-
   const names = Array.from(available).sort();
-  const exact = names.filter((n) => toolNameKey(n) === target);
-  if (exact.length > 0) {
-    return `${base} Did you mean: ${exact.slice(0, 5).join(", ")}? (names differ only in case/separators)`;
-  }
+  const close = suggestCandidates(toolName, names, { normalize: toolNameKey });
+  if (close.length === 0) return base;
 
-  const close = names
-    .filter((n) => {
-      const k = toolNameKey(n);
-      return k.length > 2 && (k.includes(target) || target.includes(k));
-    })
-    .slice(0, 5);
-  if (close.length > 0) {
-    return `${base} Did you mean: ${close.join(", ")}?`;
-  }
-  return base;
+  // Only an exact-normalized hit deserves the case/separators note; when one
+  // exists the exact tier won, so checking the set is enough.
+  const caseOnly = names.some((n) => toolNameKey(n) === toolNameKey(toolName));
+  return (
+    `${base} Did you mean: ${close.join(", ")}?` +
+    (caseOnly ? " (names differ only in case/separators)" : "")
+  );
 }

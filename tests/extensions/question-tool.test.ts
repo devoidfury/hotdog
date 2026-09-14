@@ -1,6 +1,8 @@
-// Tests for the question tool — non-interactive mode only.
+// Tests for the question tool — no-input (non-interactive) path and the
+// mounted-input path (interactive semantics are covered by the
+// run-cancellation block below and by the UI input tests).
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { QuestionTool, create } from "@extensions/question-tool/index.ts";
 import type { CoreContext, ToolContext } from "@core/extensions/types.ts";
 
@@ -57,39 +59,29 @@ describe("QuestionTool", () => {
     });
   });
 
-  describe("execute - non-interactive (CI mode)", () => {
-    const originalCI = process.env.CI;
-
-    beforeEach(() => {
-      process.env.CI = "1";
+  describe("execute - no input mounted (one-shot / piped / CI)", () => {
+    const payload = JSON.stringify({
+      questions: [
+        { key: "name", prompt: "Name?", default: "Anonymous" },
+        { key: "notes", prompt: "Notes?", default: "None" },
+      ],
     });
 
-    afterEach(() => {
-      process.env.CI = originalCI;
+    it("fails with guidance instead of phantom defaults", async () => {
+      const result = await tool.execute(payload, null!);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("non-interactive");
+      expect(result.hint).toContain("sensible default");
     });
 
-    it("returns defaults for all questions", async () => {
-      const input = JSON.stringify({
-        questions: [
-          { key: "name", prompt: "Name?", default: "Anonymous" },
-          { key: "notes", prompt: "Notes?", default: "None" },
-        ],
-      });
-      const result = await tool.execute(input, null!);
-      expect(result.success).toBe(true);
-      const output = JSON.parse(result.output);
-      expect(output.name).toBe("Anonymous");
-      expect(output.notes).toBe("None");
-    });
-
-    it("returns empty string when no default", async () => {
-      const input = JSON.stringify({
-        questions: [{ key: "color", prompt: "Pick a color" }],
-      });
-      const result = await tool.execute(input, null!);
-      expect(result.success).toBe(true);
-      const output = JSON.parse(result.output);
-      expect(output.color).toBe("");
+    it("does not emit a QUESTION event for a question no UI can show", async () => {
+      const events: string[] = [];
+      const ctx = {
+        get: (key: string) =>
+          key === "agent" ? { emitOutput: (t: string) => events.push(t) } : undefined,
+      } as unknown as ToolContext;
+      await tool.execute(payload, ctx);
+      expect(events).not.toContain("question");
     });
 
     it("rejects empty questions array", async () => {
@@ -102,37 +94,6 @@ describe("QuestionTool", () => {
     it("rejects invalid JSON", async () => {
       const result = await tool.execute("not json", null!);
       expect(result.success).toBe(false);
-    });
-
-    it("handles field alias: question -> prompt", async () => {
-      const input = JSON.stringify({
-        questions: [
-          { key: "choice", question: "Which one?", choices: ["A", "B"] },
-        ],
-      });
-      const result = await tool.execute(input, null!);
-      expect(result.success).toBe(true);
-    });
-
-    it("generates key from prompt when missing", async () => {
-      const input = JSON.stringify({
-        questions: [{ prompt: "What is your name?" }],
-      });
-      const result = await tool.execute(input, null!);
-      expect(result.success).toBe(true);
-      const output = JSON.parse(result.output);
-      expect("what_is_your_name" in output).toBe(true);
-    });
-
-    it("includes metadata entries", async () => {
-      const input = JSON.stringify({
-        questions: [{ key: "a", prompt: "Q?" }],
-      });
-      const result = await tool.execute(input, null!);
-      expect(result.success).toBe(true);
-      expect(result.metadata!.get("mode")).toBe("non-interactive");
-      expect(result.metadata!.get("questions_asked")).toBe("1");
-      expect(result.metadata!.get("questions_answered")).toBe("1");
     });
 
     it("rejects empty key", async () => {
@@ -151,6 +112,82 @@ describe("QuestionTool", () => {
       const result = await tool.execute(input, null!);
       expect(result.success).toBe(false);
       expect(result.error).toContain("missing a prompt");
+    });
+  });
+
+  describe("execute - mounted input", () => {
+    function makeCtx(input: unknown, agent?: unknown): ToolContext {
+      const values: Record<string, unknown> = {};
+      if (input !== undefined) values.input = input;
+      if (agent !== undefined) values.agent = agent;
+      return { get: (key: string) => values[key] } as unknown as ToolContext;
+    }
+
+    it("handles field alias: question -> prompt", async () => {
+      const input = {
+        isInteractive: () => true,
+        collectAnswers: async () => ({ choice: "A" }),
+      };
+      const result = await tool.execute(
+        JSON.stringify({
+          questions: [{ key: "choice", question: "Which one?", choices: ["A", "B"] }],
+        }),
+        makeCtx(input),
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it("generates key from prompt when missing", async () => {
+      let seen: Array<Record<string, unknown>> = [];
+      const input = {
+        isInteractive: () => true,
+        collectAnswers: (qs: Array<Record<string, unknown>>) => {
+          seen = qs;
+          return Promise.resolve({ what_is_your_name: "Tom" });
+        },
+      };
+      const result = await tool.execute(
+        JSON.stringify({ questions: [{ prompt: "What is your name?" }] }),
+        makeCtx(input),
+      );
+      expect(result.success).toBe(true);
+      const output = JSON.parse(result.output);
+      expect("what_is_your_name" in output).toBe(true);
+      // Normalization happens before collection, not in the answers.
+      expect(seen[0]?.key).toBe("what_is_your_name");
+    });
+
+    it("includes metadata entries", async () => {
+      const input = {
+        isInteractive: () => true,
+        collectAnswers: async () => ({ a: "yes" }),
+      };
+      const result = await tool.execute(
+        JSON.stringify({ questions: [{ key: "a", prompt: "Q?" }] }),
+        makeCtx(input),
+      );
+      expect(result.success).toBe(true);
+      expect(result.metadata!.get("mode")).toBe("interactive");
+      expect(result.metadata!.get("questions_asked")).toBe("1");
+      expect(result.metadata!.get("questions_answered")).toBe("1");
+    });
+
+    it("defers to a mounted bridge even when it reports non-interactive", async () => {
+      // The websocket bridge reports isInteractive() from hasChannels() and
+      // owns the wait/timeout strategy: no channel connected right now still
+      // means "hold and wait", so a mounted input is never bounced.
+      const input = {
+        isInteractive: () => false,
+        collectAnswers: async () => ({ a: "bridge answer" }),
+      };
+      const result = await tool.execute(
+        JSON.stringify({ questions: [{ key: "a", prompt: "Q?" }] }),
+        makeCtx(input),
+      );
+      expect(result.success).toBe(true);
+      const output = JSON.parse(result.output);
+      expect(output.a).toBe("bridge answer");
+      expect(result.metadata!.get("mode")).toBe("non-interactive");
     });
   });
 });

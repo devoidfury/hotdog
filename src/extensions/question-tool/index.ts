@@ -11,7 +11,6 @@ import {
   defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
-import { NoopInput } from "@core/context/input.ts";
 import { HOOKS } from "@core/hooks.ts";
 import {
   CoreContext,
@@ -173,13 +172,23 @@ export class QuestionTool {
       return ToolResult.err("Question cancelled: the run was interrupted");
     }
 
+    // Nobody mounted an input seam (one-shot, piped, CI): a question could never reach a human.
+    // Resolving with defaults would read as a user reply, so fail with guidance instead.
+    // A MOUNTED input decides interactivity per call and owns its wait/timeout strategy, so it is never bounced here.
+    const inputInterface = ctx?.get("input") as InputInterface | undefined;
+    if (!inputInterface) {
+      return ToolResult.err(
+        "User is not connected (non-interactive mode); this session cannot answer questions.",
+      ).withHint(
+        "Do not call the question tool in this mode; proceed with a sensible default and state the assumption in your response.",
+      );
+    }
+
     if (agent) {
       agent.emitOutput("question", { questions });
     }
 
-    const inputInterface: InputInterface = (ctx?.get("input") as InputInterface) || new NoopInput();
-
-    // Wrapped in a microtask so a synchronous (NoopInput) result and a promise result take the same path; the race then works for both.
+    // Wrapped in a microtask so a synchronous result and a promise result take the same path; the race then works for both.
     // The input gets the same signal: on abort it bails out of its prompt loop and re-attaches the main readline handler, so a line typed after
     // cancel goes to the next turn, not into a dead question loop.
     const collect = Promise.resolve().then(() => inputInterface.collectAnswers(questions, signal));

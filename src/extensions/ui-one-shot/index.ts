@@ -6,6 +6,7 @@ import { CliOutputSink } from "@utils/cli/cli.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { createAgentFactory } from "@core/agent-factory.ts";
+import { restoreSessionIntoAgent } from "@core/session/session-log.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
 import type { CoreContext, ExtensionInstance, ResolvedConfig } from "@core/extensions/types.ts";
@@ -101,7 +102,17 @@ async function handlePromptSubcommand(
 
   const llmClient = core.createLlmClient();
 
-  const buildAgent = createAgentFactory(core, { resolved, config, llmClient });
+  const factory = createAgentFactory(core, { resolved, config, llmClient });
+
+  // `-s <id>` on a one-shot run means "continue that session": the factory
+  // adopts the id (initialConfig is the CLI argv), so replay the existing
+  // log into the fresh agent. Without this the run appends to a log the
+  // model never read. Same helper as the interactive CLI's resume.
+  const buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike> = async (agentConfig) => {
+    const agent = await factory(agentConfig);
+    await restoreSessionIntoAgent(agent, cli.sessionId as string | undefined);
+    return agent;
+  };
 
   return await runOneShot(
     cli,

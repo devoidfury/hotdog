@@ -6,7 +6,7 @@ import { join, resolve as resolveAbs, sep } from "node:path";
 import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
 import { MESSAGE_SOURCES, Message, type ToolCall, type ImageAttachment, type MessageSource } from "../context/message.ts";
 import { repairToolCalls } from "../context/repair.ts";
-import { AgentError, formatError } from "../error.ts";
+import { AgentError, CliError, formatError } from "../error.ts";
 import { logger } from "@utils/logger.ts";
 
 export const LOG_SOURCE = {
@@ -247,6 +247,57 @@ export async function deleteSessionLog(sessionId: string): Promise<boolean> {
 
 export interface AgentForReplay {
   addMessage(msg: Message): void;
+}
+
+/**
+ * Agent surface needed to restore a session by id: the message sink plus the
+ * isRestoring flag (which fires SESSION_RESTORE_ACTIVE so the session-log
+ * extension suppresses its own writes during the replay).
+ */
+interface AgentForRestore extends AgentForReplay {
+  sessionId: string;
+  isRestoring: boolean;
+}
+
+/**
+ * Replay an existing session log into a freshly built agent, when the agent
+ * actually adopted the caller's explicit session id (`-s <id>`). Returns the
+ * number of messages replayed (0 when the session exists but has nothing
+ * after its last RESET).
+ *
+ * Shared by every entry point that can resume by id (interactive CLI,
+ * one-shot). The log is append-only, so an adopted id with an existing log
+ * means "continue that conversation": without the replay the entry point
+ * would append to a log the model never read, and the transcript would lie
+ * about what the model knew.
+ *
+ * An adopted id with NO log at all is a caller mistake (typo, stale id),
+ * not a fresh session: an explicit `-s <id>` means "continue THIS
+ * conversation", so throw CliError instead of silently starting over (a
+ * silent start would surface later only as "why does the model not know X").
+ */
+export async function restoreSessionIntoAgent(
+  agent: AgentForRestore,
+  explicitSessionId: string | null | undefined,
+): Promise<number> {
+  // No explicit id, or the agent did not adopt it (e.g. a subagent built
+  // with its own id): never touch another session's log.
+  if (!explicitSessionId || agent.sessionId !== explicitSessionId) return 0;
+  if (!(await sessionExists(explicitSessionId))) {
+    throw new CliError(`Invalid session id: ${explicitSessionId} (no such session)`);
+  }
+  const entries = await readSessionEntries(explicitSessionId);
+
+  // Guard the replay with isRestoring so the session-log extension does not
+  // re-log the restored messages (duplicates would replay twice on the next
+  // resume). finally: a throw mid-replay must not leave the flag stuck
+  // true, which would silently stop all later logging.
+  agent.isRestoring = true;
+  try {
+    return replayEntriesIntoContext(agent, entries);
+  } finally {
+    agent.isRestoring = false;
+  }
 }
 
 /** Converts log entries to Messages in the agent's context; returns the count replayed. */

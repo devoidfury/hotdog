@@ -1,6 +1,11 @@
-import { describe, it, expect, spyOn } from "bun:test";
+import { describe, it, expect, spyOn, beforeAll, afterAll } from "bun:test";
 import readline from "node:readline";
+import { mkdtempSync, rmSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  AsyncInteractiveCliInput,
   isSystemCommand,
   SEND_TO_ASSISTANT_SUFFIX_RE,
   executeShellCommand,
@@ -943,7 +948,11 @@ describe("buildInteractiveAgent", () => {
     toolRetryDelay: 1,
   };
 
-  async function buildAgent(agentConfig: Record<string, unknown> = {}, core: Record<string, unknown> = {}) {
+  async function buildAgent(
+    agentConfig: Record<string, unknown> = {},
+    core: Record<string, unknown> = {},
+    cli: Record<string, unknown> = {},
+  ) {
     const { buildInteractiveAgent } = await import(
       "../../src/extensions/ui-interactive-cli/index.ts"
     );
@@ -962,7 +971,7 @@ describe("buildInteractiveAgent", () => {
       defaultResolved as never,
       { providers: [] },
       {} as never,
-      {},
+      cli,
     );
   }
 
@@ -994,6 +1003,190 @@ describe("buildInteractiveAgent", () => {
     });
 
     expect((notifyHooksCalls as [string, unknown][]).some((c) => c[0] === HOOKS.COMMANDS_REGISTER)).toBe(true);
+  });
+
+  // ── resume: replays an existing session log (shared with one-shot) ──────
+
+  describe("resume", () => {
+    // restoreSessionIntoAgent reads HOTDOG_SESSIONS_DIR on every call, so an
+    // isolated dir keeps tests away from the real ~/.cache.
+    const sessionsDir = mkdtempSync(join(tmpdir(), "hotdog-interactive-resume-"));
+    let originalEnv: string | undefined;
+
+    beforeAll(() => {
+      originalEnv = process.env.HOTDOG_SESSIONS_DIR;
+      process.env.HOTDOG_SESSIONS_DIR = sessionsDir;
+    });
+
+    afterAll(() => {
+      if (originalEnv === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
+      else process.env.HOTDOG_SESSIONS_DIR = originalEnv;
+      rmSync(sessionsDir, { recursive: true, force: true });
+    });
+
+    it("replays the log and prints the banner when the explicit id was adopted", async () => {
+      const { LOG_SOURCE } = await import("@core/session/session-log.ts");
+      const sessionId = "interactive-resume";
+      await writeFile(
+        join(sessionsDir, `${sessionId}.jsonl`),
+        [
+          { ts: "2024-01-01T00:00:00Z", session_id: sessionId, source: LOG_SOURCE.INPUT, content: "Earlier question" },
+          { ts: "2024-01-01T00:00:01Z", session_id: sessionId, source: LOG_SOURCE.LLM, content: "Earlier answer" },
+        ]
+          .map((e) => JSON.stringify(e))
+          .join("\n") + "\n",
+      );
+
+      const logs: string[] = [];
+      const logSpy = spyOn(console, "log").mockImplementation((msg: unknown) => {
+        logs.push(String(msg));
+      });
+      const agent = await buildAgent({ sessionId }, {}, { sessionId });
+
+      const messages = agent.getMessages();
+      expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+      expect(messages[0]!.content).toBe("Earlier question");
+      expect(agent.isRestoring).toBe(false);
+      // The banner stays interactive-only (one-shot prints nothing).
+      expect(logs).toContain(`Session restored: 2 messages replayed from ${sessionId}`);
+      logSpy.mockRestore();
+    });
+
+    it("does not replay or print the banner for a fresh session", async () => {
+      const logs: string[] = [];
+      const logSpy = spyOn(console, "log").mockImplementation((msg: unknown) => {
+        logs.push(String(msg));
+      });
+      const agent = await buildAgent({}, {});
+
+      expect(agent.getMessages().length).toBe(0);
+      expect(agent.isRestoring).toBe(false);
+      expect(logs.some((l) => l.includes("Session restored"))).toBe(false);
+      logSpy.mockRestore();
+    });
+
+    it("throws an invalid session id error when the explicit id has no log", async () => {
+      const id = "interactive-missing-id";
+      await expect(
+        buildAgent({ sessionId: id }, {}, { sessionId: id }),
+      ).rejects.toThrow("Invalid session id");
+    });
+  });
+});
+
+describe("AsyncInteractiveCliInput.collectAnswers - abort handling", () => {
+  /** Fake readline that tracks "line" listeners so tests can drive input. */
+  function makeFakeRl() {
+    const listeners: Array<(line: string) => void> = [];
+    return {
+      listeners,
+      on: (ev: string, cb: (line: string) => void) => {
+        if (ev === "line") listeners.push(cb);
+      },
+      removeListener: (ev: string, cb: (line: string) => void) => {
+        if (ev !== "line") return;
+        const i = listeners.indexOf(cb);
+        if (i >= 0) listeners.splice(i, 1);
+      },
+      emitLine: (line: string) => {
+        for (const cb of [...listeners]) cb(line);
+      },
+    };
+  }
+
+  function makeMainHandler() {
+    const lines: string[] = [];
+    return { handler: (line: string) => { lines.push(line); }, lines };
+  }
+
+  /** Wait until a "line" listener is registered (the prompt is pending). */
+  async function waitForLineListener(rl: ReturnType<typeof makeFakeRl>): Promise<void> {
+    const start = Date.now();
+    while (rl.listeners.length === 0) {
+      if (Date.now() - start > 2000) throw new Error("Timed out waiting for prompt listener");
+      await new Promise((r) => setTimeout(r, 1));
+    }
+  }
+
+  it("resolves answers, restores the main handler, and leaves no stray listeners", async () => {
+    const rl = makeFakeRl();
+    const main = makeMainHandler();
+    const input = new AsyncInteractiveCliInput(
+      rl as never,
+      main.handler,
+      (h) => rl.on("line", h),
+    );
+
+    const pending = runWithSuppressedStdout(() =>
+      input.collectAnswers([
+        { key: "a", prompt: "Q1?", required: true },
+        { key: "b", prompt: "Q2?", required: true },
+      ]),
+    );
+    // Answer each question once its prompt listener is registered (the
+    // previous question's listener is consumed on delivery, so a line typed
+    // before re-registration would be lost).
+    await waitForLineListener(rl);
+    rl.emitLine("yes");
+    await waitForLineListener(rl);
+    rl.emitLine("no");
+    const answers = await pending;
+
+    expect(answers).toEqual({ a: "yes", b: "no" });
+    // Main handler restored; our question listener consumed, not leaked.
+    expect(rl.listeners.length).toBe(1);
+    rl.emitLine("afterwards");
+    expect(main.lines).toEqual(["afterwards"]);
+  });
+
+  it("bails on abort: partial answers, own listener detached, main handler restored", async () => {
+    const rl = makeFakeRl();
+    const main = makeMainHandler();
+    const controller = new AbortController();
+    const input = new AsyncInteractiveCliInput(
+      rl as never,
+      main.handler,
+      (h) => rl.on("line", h),
+    );
+
+    const pending = runWithSuppressedStdout(() =>
+      input.collectAnswers(
+        [
+          { key: "a", prompt: "Q1?", required: true },
+          { key: "b", prompt: "Q2?", required: true },
+        ],
+        controller.signal,
+      ),
+    );
+    await waitForLineListener(rl);
+    expect(rl.listeners.length).toBe(1); // only our question listener
+    controller.abort();
+    const answers = await pending;
+
+    // Partial answers (nothing was typed), no throw (a reject here could go
+    // unhandled once the caller's race already decided "aborted").
+    expect(answers).toEqual({});
+    // Our listener is gone; the main handler is back. The next line the user
+    // types goes to the main loop, not into the dead question loop.
+    expect(rl.listeners.length).toBe(1);
+    rl.emitLine("next-turn-input");
+    expect(main.lines).toEqual(["next-turn-input"]);
+  });
+
+  it("returns immediately without prompting when the signal is already aborted", async () => {
+    const rl = makeFakeRl();
+    const main = makeMainHandler();
+    const controller = new AbortController();
+    controller.abort();
+    const input = new AsyncInteractiveCliInput(rl as never, main.handler, (h) => rl.on("line", h));
+
+    const answers = await runWithSuppressedStdout(() =>
+      input.collectAnswers([{ key: "a", prompt: "Q?", required: true }], controller.signal),
+    );
+
+    expect(answers).toEqual({});
+    // Never prompted: only the restored main handler remains.
+    expect(rl.listeners.length).toBe(1);
   });
 });
 

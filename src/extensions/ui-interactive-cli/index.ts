@@ -10,7 +10,7 @@ import type { LlmClient } from "@core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { Agent } from "@core/agent.ts";
 import { createAgentFactory } from "@core/agent-factory.ts";
-import { readSessionEntries, sessionExists, replayEntriesIntoContext } from "@core/session/session-log.ts";
+import { restoreSessionIntoAgent } from "@core/session/session-log.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { ExtensionError } from "@core/error.ts";
 import type { CliArgv } from "@core/config/index.ts";
@@ -363,21 +363,11 @@ export async function buildInteractiveAgent(
 ): Promise<Agent> {
   const factory = createAgentFactory(core, { resolved, config, llmClient });
   const agent = await factory(agentConfig);
-  const sessionId = agent.sessionId;
 
   const explicitSessionId = cli.sessionId as string | undefined;
-  if (explicitSessionId && sessionId === explicitSessionId) {
-    if (await sessionExists(explicitSessionId)) {
-      const entries = await readSessionEntries(explicitSessionId);
-      if (entries.length > 0) {
-        agent.isRestoring = true;
-        const replayed = replayEntriesIntoContext(agent, entries);
-        agent.isRestoring = false;
-        if (replayed > 0) {
-          console.log(`Session restored: ${replayed} messages replayed from ${explicitSessionId}`);
-        }
-      }
-    }
+  const replayed = await restoreSessionIntoAgent(agent, explicitSessionId);
+  if (replayed > 0) {
+    console.log(`Session restored: ${replayed} messages replayed from ${explicitSessionId}`);
   }
 
   return agent;

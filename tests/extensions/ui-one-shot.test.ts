@@ -1,13 +1,18 @@
 // Tests for ui-one-shot/index.ts — one-shot prompt mode extension.
 // Covers create(), hook handlers, handlePromptSubcommand(), and runOneShot().
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { HOOKS } from "@core/hooks.ts";
 import { HookSystem } from "@core/hooks.ts";
 import { CliSubcommandRegistryLike, SubcommandDefinition } from "@core/extensions/registries.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
 import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Message } from "@core/context/message.ts";
 
 const testRoleReg = createRoleMappingRegistry();
 testRoleReg.register(systemFirstRoleMapping);
@@ -617,6 +622,127 @@ describe("ui-one-shot extension", () => {
       );
 
       expect(exitCode).toBe(0);
+    });
+  });
+
+  // ── one-shot resume: `-s <existing-id>` must replay the log ──────────────
+
+  describe("one-shot session resume (-s <existing-id>)", () => {
+    // restoreSessionIntoAgent reads HOTDOG_SESSIONS_DIR on every call, so an
+    // isolated dir keeps tests away from the real ~/.cache.
+    const sessionsDir = mkdtempSync(join(tmpdir(), "hotdog-oneshot-resume-"));
+    let originalEnv: string | undefined;
+
+    beforeAll(() => {
+      originalEnv = process.env.HOTDOG_SESSIONS_DIR;
+      process.env.HOTDOG_SESSIONS_DIR = sessionsDir;
+    });
+
+    afterAll(() => {
+      if (originalEnv === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
+      else process.env.HOTDOG_SESSIONS_DIR = originalEnv;
+      rmSync(sessionsDir, { recursive: true, force: true });
+    });
+
+    /** Run the prompt subcommand with the given CLI argv and return the buildAgent
+     *  that SessionManager.create would call (the one-shot's wrapped factory). */
+    async function captureBuildAgent(cli: Record<string, unknown>) {
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
+      const core = createMockCore();
+      const ext = create(core);
+
+      let buildAgentFn: any = null;
+      (SessionManager as any).create = async (opts: any) => {
+        buildAgentFn = opts.buildAgent;
+        return {
+          sessionId: () => "capture-session",
+          getAgent: () => ({ sessionId: "capture-session" }),
+          getBus: () => ({ runUntilCancelled: async () => {} }),
+          getTaskManager: () => null,
+          enqueue: () => {},
+          executeCommand: async () => 0,
+          onSessionEvents: () => () => {},
+        };
+      };
+
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({
+        register: (name: string, def: SubcommandDefinition) => { registry[name] = def; },
+      } as CliSubcommandRegistryLike);
+
+      await (registry.prompt as any).handler(cli, core);
+      return buildAgentFn;
+    }
+
+    it("replays an existing session log into the one-shot agent", async () => {
+      const { LOG_SOURCE } = await import("@core/session/session-log.ts");
+      const sessionId = "oneshot-resume";
+      await writeFile(
+        join(sessionsDir, `${sessionId}.jsonl`),
+        [
+          { ts: "2024-01-01T00:00:00Z", session_id: sessionId, source: LOG_SOURCE.INPUT, content: "What is 2+2?" },
+          { ts: "2024-01-01T00:00:01Z", session_id: sessionId, source: LOG_SOURCE.LLM, content: "4" },
+        ]
+          .map((e) => JSON.stringify(e))
+          .join("\n") + "\n",
+      );
+
+      const cli = { prompt: "Now what is 3+3?", sessionId };
+      const buildAgentFn = await captureBuildAgent(cli);
+
+      // SessionManager.create calls buildAgent(initialConfig); initialConfig
+      // is the CLI argv, which carries the adopted sessionId.
+      const agent = await buildAgentFn(cli);
+
+      // The model must see the first half of the conversation, not only its
+      // own fresh prompt (the old bug: append to a log it never read).
+      const messages = agent.getMessages() as Message[];
+      expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+      expect(messages[0]!.content).toBe("What is 2+2?");
+      expect(messages[1]!.content).toBe("4");
+      // The restore guard must not be left stuck on.
+      expect(agent.isRestoring).toBe(false);
+    });
+
+    it("replays only from the last RESET marker", async () => {
+      const { LOG_SOURCE } = await import("@core/session/session-log.ts");
+      const sessionId = "oneshot-resume-reset";
+      await writeFile(
+        join(sessionsDir, `${sessionId}.jsonl`),
+        [
+          { ts: "2024-01-01T00:00:00Z", session_id: sessionId, source: LOG_SOURCE.INPUT, content: "Before reset" },
+          { ts: "2024-01-01T00:00:01Z", session_id: sessionId, source: LOG_SOURCE.RESET, content: "" },
+          { ts: "2024-01-01T00:00:02Z", session_id: sessionId, source: LOG_SOURCE.LLM, content: "After reset" },
+        ]
+          .map((e) => JSON.stringify(e))
+          .join("\n") + "\n",
+      );
+
+      const cli = { prompt: "continue", sessionId };
+      const buildAgentFn = await captureBuildAgent(cli);
+      const agent = await buildAgentFn(cli);
+
+      const messages = agent.getMessages() as Message[];
+      expect(messages.length).toBe(1);
+      expect(messages[0]!.content).toBe("After reset");
+    });
+
+    it("throws an invalid session id error when the adopted id has no log", async () => {
+      const cli = { prompt: "test", sessionId: "oneshot-missing-id" };
+      const buildAgentFn = await captureBuildAgent(cli);
+      // An explicit `-s <id>` means "continue THIS session"; an id with no
+      // log is a typo/stale id, so it must fail loudly instead of silently
+      // starting fresh.
+      await expect(buildAgentFn(cli)).rejects.toThrow("Invalid session id");
+    });
+
+    it("does not replay for a fresh session (no -s)", async () => {
+      const cli = { prompt: "test" };
+      const buildAgentFn = await captureBuildAgent(cli);
+      const agent = await buildAgentFn(cli);
+      // A fresh UUID can never match an existing log.
+      expect(agent.getMessages().length).toBe(0);
     });
   });
 });

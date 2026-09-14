@@ -1,16 +1,12 @@
+import { SUMMARIZATION_USER_PROMPT_TEMPLATE } from "../prompts.ts";
 import {
-  SUMMARIZATION_SYSTEM_PROMPT,
-  SUMMARIZATION_USER_PROMPT_TEMPLATE,
-} from "../prompts.ts";
-import {
-  serializeConversation,
+  runSummarization,
   estimateContextTokens,
   estimateMessageTokens,
   estimatorFor,
   type WireRenderContext,
 } from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult, requireContextLimit } from "../strategies.ts";
-import { AgentError } from "@core/error.ts";
 
 export class TokenAwareStrategy extends CompactionStrategy {
   override name = "token-aware";
@@ -61,20 +57,13 @@ export class TokenAwareStrategy extends CompactionStrategy {
     if (messagesToCompact === 0) return null;
 
     const messagesToSummarize = messages.slice(0, messagesToCompact).filter((m): m is Message => m != null);
-    const conversation = serializeConversation(messagesToSummarize, wire);
-    const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace("{conversation}", () => conversation);
-
-    const summaryMessages = [
-      { role: "system", content: SUMMARIZATION_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ];
-
-    let summary: string;
-    try {
-      summary = await llmChat(summaryMessages, model);
-    } catch (e: unknown) {
-      throw AgentError.SummarizationFailed((e as Error).message);
-    }
+    const summary = await runSummarization(
+      messagesToSummarize,
+      wire,
+      llmChat,
+      model,
+      SUMMARIZATION_USER_PROMPT_TEMPLATE,
+    );
 
     const tokensBefore = estimateContextTokens(messages.filter((m): m is Message => m != null), est);
     const summaryTokens = estimateMessageTokens({ role: "assistant", content: summary });

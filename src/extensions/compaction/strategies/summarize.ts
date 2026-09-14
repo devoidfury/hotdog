@@ -1,16 +1,12 @@
+import { SUMMARIZATION_USER_PROMPT_TEMPLATE } from "../prompts.ts";
 import {
-  SUMMARIZATION_SYSTEM_PROMPT,
-  SUMMARIZATION_USER_PROMPT_TEMPLATE,
-} from "../prompts.ts";
-import {
-  serializeConversation,
+  runSummarization,
   findFirstKeptIndex,
   estimateContextTokens,
   estimatorFor,
   type WireRenderContext,
 } from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
-import { AgentError } from "@core/error.ts";
 
 export class SummarizeStrategy extends CompactionStrategy {
   override name = "summarize";
@@ -34,21 +30,13 @@ export class SummarizeStrategy extends CompactionStrategy {
     const firstKept = findFirstKeptIndex(messages, settings.keepRecentMessages);
     if (firstKept === 0) return null;
 
-    const messagesToCompact = messages.slice(0, firstKept);
-    const conversation = serializeConversation(messagesToCompact, wire);
-    const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace("{conversation}", () => conversation);
-
-    const summaryMessages = [
-      { role: "system", content: SUMMARIZATION_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ];
-
-    let summary: string;
-    try {
-      summary = await llmChat(summaryMessages, model);
-    } catch (e: unknown) {
-      throw AgentError.SummarizationFailed((e as Error).message);
-    }
+    const summary = await runSummarization(
+      messages.slice(0, firstKept),
+      wire,
+      llmChat,
+      model,
+      SUMMARIZATION_USER_PROMPT_TEMPLATE,
+    );
 
     return {
       summary,

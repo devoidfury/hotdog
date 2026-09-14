@@ -6,10 +6,12 @@ import {
   type MessageLike as EstimatableMessageLike,
   type ToolResultEstimator,
 } from "@utils/token-estimate.ts";
-import { contentToText } from "@core/context/message.ts";
+import { contentToText, type Message } from "@core/context/message.ts";
 import { isWrapperPart, renderWrapperForWire } from "@core/context/wrappers.ts";
 import type { WireFormat } from "@core/extensions/wire-format.ts";
 import type { MarkerMangler } from "@core/marker-mangler.ts";
+import { AgentError } from "@core/error.ts";
+import { SUMMARIZATION_SYSTEM_PROMPT } from "./prompts.ts";
 
 export { estimateMessageTokens, estimateContextTokens };
 
@@ -175,4 +177,33 @@ export function serializeConversation(
   }
 
   return parts.join("\n\n");
+}
+
+// ── Summarization call ──────────────────────────────────────────────────────
+
+/**
+ * Shared LLM-summarization call for the summarize strategies: serialize the
+ * compacted conversation into the strategy's user prompt template, run the
+ * chat call, and wrap failures in AgentError.SummarizationFailed.
+ */
+export async function runSummarization(
+  messagesToSummarize: Message[],
+  wire: WireRenderContext | null | undefined,
+  llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
+  model: string,
+  userPromptTemplate: string,
+): Promise<string> {
+  const conversation = serializeConversation(messagesToSummarize, wire);
+  const userPrompt = userPromptTemplate.replace("{conversation}", () => conversation);
+
+  const summaryMessages = [
+    { role: "system", content: SUMMARIZATION_SYSTEM_PROMPT },
+    { role: "user", content: userPrompt },
+  ];
+
+  try {
+    return await llmChat(summaryMessages, model);
+  } catch (e: unknown) {
+    throw AgentError.SummarizationFailed((e as Error).message);
+  }
 }

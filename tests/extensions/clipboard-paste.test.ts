@@ -209,13 +209,31 @@ describe("ClipboardPasteInterceptor", () => {
     expect(rig.interceptor.normalize("x")).toBe("x");
   });
 
-  it("counts a lone newline paste as one line", () => {
+  it("ignores a paste of only newlines", () => {
     const rig = makeRig();
     lastRig = rig;
     feed(rig, `${PASTE_START}\n${PASTE_END}`);
+    expect(rig.forwarded).toHaveLength(0);
+    expect(rig.interceptor.normalize("x")).toBe("x");
+  });
+
+  it("trims surrounding newlines and inlines a short single-line paste", () => {
+    const rig = makeRig();
+    lastRig = rig;
+    feed(rig, `${PASTE_START}\nhello world\n\n${PASTE_END}`);
+    expect(forwardedText(rig)).toBe("hello world");
+    expect(rig.rl.line).toBe("hello world");
+    // nothing was recorded, so normalize is a no-op
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(rig.rl.line);
+  });
+
+  it("keeps the marker for a long single-line paste with a trailing newline", () => {
+    const rig = makeRig();
+    lastRig = rig;
+    feed(rig, `${PASTE_START}${L80}\n${PASTE_END}`);
     expect(forwardedText(rig)).toBe("[Paste #1 - 1 line]");
     rig.rl.line = "[Paste #1 - 1 line]";
-    expect(rig.interceptor.normalize(rig.rl.line)).toBe("\n");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(`${L80}\n`);
   });
 
   it("forwards surrounding text in the same chunk around a paste", () => {
@@ -257,9 +275,10 @@ describe("ClipboardPasteInterceptor", () => {
     feed(rig, "0~abc\n");
     expect(rig.forwarded).toHaveLength(0);
     feed(rig, PASTE_END);
-    expect(forwardedText(rig)).toBe("[Paste #1 - 1 line]");
-    rig.rl.line = "[Paste #1 - 1 line]";
-    expect(rig.interceptor.normalize(rig.rl.line)).toBe("abc\n");
+    // short single-line payload once the trailing newline is trimmed: inlined
+    expect(forwardedText(rig)).toBe("abc");
+    expect(rig.rl.line).toBe("abc");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(rig.rl.line);
   });
 
   it("forwards held escape bytes when they do not complete a paste START delimiter", () => {

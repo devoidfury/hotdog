@@ -10,6 +10,7 @@
   - **Config Migration**: a stale `wireFormat: "developer"` config fails on the first request with `Unknown wire format "developer"` -- rename the key to `roleMapping`/`role-mapping`.
 
 - added visual display protection from zero-width characters / bidi spoofing (which a malicious llm could use to hide a dangerous command in an innocent-looking `ask` prompt) by escaping these characters prior to rendering.
+- ui-interactive-cli: bracketed pastes whose content is a single line once surrounding newlines are trimmed no longer become a `[Paste #N]` marker -- the trimmed content is inserted inline (a pasted line with a trailing Enter behaves like typing it).
 - ~~added experimental sysbox layer for bash-tool~~ -- kernel enforced resource limits, syscall-level sandboxing (seccomp launcher C, Landlock fence, capability probes, cgroup DoS limits).
 - removed sysbox layer. Fun experiment but I was not confident enough shipping it. For real isolation run hotdog in a container or VM. More info at `docs/postmortems/sysbox.md`
 - approvals - `user-gate`, a **tool-call** approval layer, above the spawn boundary.

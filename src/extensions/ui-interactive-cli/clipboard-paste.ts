@@ -5,7 +5,8 @@
 //   - swallows bracketed paste payloads and inserts a `[Paste #N - M lines]`
 //     marker into the line buffer instead (the real content is kept in an
 //     index keyed by N and restored in `normalize()` at submit time), except
-//     for single-line pastes under 80 characters, which are inserted as-is,
+//     for single-line pastes under 80 characters (surrounding newlines
+//     trimmed), which are inserted as-is,
 //   - deletes an entire marker with one backspace or the Delete key when the
 //     cursor is on it,
 //   - forwards every other byte to readline untouched, so completion,
@@ -296,13 +297,19 @@ export class ClipboardPasteInterceptor {
 
     // Short single-line pastes are indistinguishable from typing and are
     // cheaper to show as-is; only multi-line or long pastes get a marker.
-    if (!content.includes("\n") && content.length < this.#markerMinChars) {
-      this.#forwardText(content);
-      return;
+    // Surrounding newlines (e.g. a paste that ends with Enter) don't
+    // disqualify a short paste: check length first, then trim and re-check,
+    // inlining the trimmed version.
+    if (content.length < this.#markerMinChars) {
+      const trimmed = content.replace(/^\n+|\n+$/g, "");
+      if (!trimmed.includes("\n")) {
+        this.#forwardText(trimmed);
+        return;
+      }
     }
 
-    const trimmed = content.endsWith("\n") ? content.slice(0, -1) : content;
-    const lines = trimmed.length === 0 && content.length > 0 ? 1 : trimmed.split("\n").length;
+    const tailTrimmed = content.endsWith("\n") ? content.slice(0, -1) : content;
+    const lines = tailTrimmed.length === 0 && content.length > 0 ? 1 : tailTrimmed.split("\n").length;
     this.#seq += 1;
     const token = `[Paste #${this.#seq} - ${lines} line${lines === 1 ? "" : "s"}]`;
     this.#index.set(this.#seq, { content, seen: false });

@@ -1,13 +1,12 @@
 # Post-mortem: sysbox, the kernel-enforced bash sandbox
 
+TL;DR: It never sandboxed as well as I wanted -- `cat .env` worked in every mode, the fence's ro mirrors admitted `/proc/kcore` and friends, and availability probes outnumbered what the modes actually enforced. Shipping it risked telling users something was "secure" when it was not, and it would turn into an endless pit of edge-cases and workarounds - so I called it there.
+
 Status: **removed**. What existed: `src/utils/sysbox/` (a seccomp launcher compiled at spawn time
 via `bun:ffi`'s TinyCC, a Landlock "fence" ruleset, capability probes, per-spawn cgroup v2 DoS limits),
 wired as `bashTool.sandbox: off | static | fence`, plus `hotdog info` diagnostics. An earlier third mode,
 `gate` (a per-syscall USER_NOTIF supervisor with human approvals), was deleted before this; its kernel facts
 are kept below because they cost real time and survive the code.
-
-TL;DR: It never sandboxed as well as I wanted -- `cat .env` worked in every mode, the fence's ro mirrors admitted `/proc/kcore` and friends, and availability probes outnumbered what the modes actually enforced. Shipping it risked telling users something was "secure" when it was not.
-
 
 ## Why it was removed
 
@@ -47,7 +46,7 @@ These came out of the deleted `docs/agents/sandbox-direction.md` and the "kernel
 - **Syscall deny-lists are a bottomless pit; prefer allowlisted views and cap-shaped kernel features** (Landlock, namespaces, cgroups).
   The kernel's feature APIs encode one enforcement point each; deny tables encode one per syscall per arch, and the fuzzers (kernel CVE trackers)
   have more time than any project here.
-- **Approvals are easier at a spawn-time.** Human policy ("may this command run, with what mounts, with net or without")
+- **Approvals are easier at spawn-time.** Human policy ("may this command run, with what mounts, with net or without")
   belongs above the process boundary. Welding approval UX to a syscall seam couples product reliability to kernel ABI drift.
   This is implemented: `user-gate` approves tool calls on `HOOKS.TOOL_CALL` -- its failure mode is a denied tool call,
   never a frozen task. It is triage, not enforcement.
@@ -65,10 +64,13 @@ Useful to anyone tempted to rebuild it:
 - Net denial works only per ABI: TCP bind/connect from ABI v4 (~6.7+), UDP bind/connect_send from ABI v10.
   Abstract unix sockets and signals (ABI v6 scope rights) need an allow-rule story for ordinary shell job control, so
   they were left unhandled -- meaning "handled" there is a policy choice, not coverage.
-- At Yama `ptrace_scope` 0, an ancestor's `/proc/<pid>/{mem,fd,...}` is readable by a spawned command.
-  Worth `cat /proc/sys/kernel/yama/ptrace_scope` on any host where sandboxed commands run beside harness-held secrets.
-- cgroup DoS limits are only as strong as what the host delegates, per controller, and leaving a cgroup is an ordinary write to `cgroup.procs`.
-  Disk-fill was never contained (cgroups cap pids and memory, not filesystem capacity).
+- At Yama `ptrace_scope` 0, an ancestor's `/proc/<pid>/{mem,fd,...}` is readable by a spawned command. Scope 1 -- the common
+  distro default, and the host these were measured on -- is what denies descendant→ancestor access in the first place, so this
+  one is host-dependent. Worth `cat /proc/sys/kernel/yama/ptrace_scope` on any host where sandboxed commands run beside
+  harness-held secrets.
+- cgroup DoS limits are only as strong as what the host delegates, per controller, and leaving a cgroup is an ordinary write to
+  `cgroup.procs` -- the cage holds accidents, not an adversary. Disk-fill was never contained (cgroups cap pids and memory,
+  not filesystem capacity).
 
 ### Kernel facts, dragged in off the street
 
@@ -96,8 +98,8 @@ seccomp-bpf filter construction:
 - A `RET_ERRNO`/`NOTIFY` belongs at the tail so default fallthrough lands on ALLOW; an argument predicate (`JSET` on open flags)
   must never sit on a fallthrough path -- `poll(timeout=200)` and `write(count=13)` share bits with an open-flags mask, so a
   misplaced predicate traps them and wedges the task.
-- A RET-jump off-by-one converts every trap into an ALLOW and the kernel accepts the program anyway.
-  (jump targets are validated, semantic intent is not). Only a behavior test -- install the real filter, prove the syscall is stopped -- catches it.
+- A RET-jump off-by-one converts every trap into an ALLOW and the kernel accepts the program anyway;
+  jump targets are validated, semantic intent is not. Only a behavior test -- install the filter, prove the syscall is stopped -- catches it.
 - A container's outer seccomp profile can advertise a feature in `/proc/sys/kernel/seccomp/actions_avail` yet EPERM its use:
   availability needs a real install probe, in a throwaway process (a filter installed in a test-runner thread is inherited by that
   thread's children, whose own installs then `EBUSY`).
@@ -122,7 +124,7 @@ Bun at the pin (1.3.14), spawn-process work generally:
 - `child.stdio[N]` is a Stream with no numeric `.fd` -- a child cannot announce anything to the parent over stdio synchronously;
   the config pipe was written by the parent onto fd 3 instead.
 - `rmSync` without `recursive` does not `rmdir` (cgroup cleanup needed plain `rmdir(2)`).
-- Bun `node:child_process` stdio mis-wires under full-suite fd pressur.
+- Bun `node:child_process` stdio mis-wires under full-suite fd pressure.
   (child fd1/fd2 on the same socketpair end; ~1/3 in single-process full-suite runs, clean with `--parallel`).
   Upstream flake -- don't run full suites single-process on this repo's CI.
 

@@ -1313,6 +1313,29 @@ describe('Agent — end-to-end loop', () => {
       expect(agent.context.getSystemPrompt()).toContain('Audit mode');
     });
 
+    it('seeds the context window from the model registry at construction', () => {
+      // llama-swap autoload: context_length arrives via fetchModels into the
+      // registry, but the resolved global contextLimit is what the factory
+      // passes to the Agent. The constructor must seed from the registry.
+      const { agent } = createFixture({
+        model: 'llamaswap/qwen',
+        contextLimit: 128000,
+        modelRegistry: {
+          'llamaswap/qwen': { name: 'qwen', contextLimit: 256000 },
+        },
+      });
+      expect(agent.contextLimit).toBe(256000);
+    });
+
+    it('falls back to the passed contextLimit when the registry has no entry', () => {
+      const { agent } = createFixture({
+        model: 'unknown/model',
+        contextLimit: 128000,
+        modelRegistry: { 'other/model': { name: 'model', contextLimit: 256000 } },
+      });
+      expect(agent.contextLimit).toBe(128000);
+    });
+
     it('switches the model via the model setter when the profile specifies one', () => {
       const { agent, hooks } = createFixture({
         model: 'prov/old-model',
@@ -1330,6 +1353,20 @@ describe('Agent — end-to-end loop', () => {
       expect(agent.model).toBe('prov/new-model');
       expect(agent.contextLimit).toBe(64000);
       expect(changes).toEqual([{ oldModel: 'prov/old-model', newModel: 'prov/new-model' }]);
+    });
+
+    it('resolves a bare model name to the provider-prefixed registry key in the setter', () => {
+      // Mirrors findModelEntry's suffix fallback used by resolveModelConfig.
+      const { agent } = createFixture({
+        model: 'prov/old-model',
+        contextLimit: 128000,
+        modelRegistry: {
+          'prov/old-model': { name: 'old-model', contextLimit: 128000 },
+          'prov/new-model': { name: 'new-model', contextLimit: 64000 },
+        },
+      });
+      agent.model = 'new-model';
+      expect(agent.contextLimit).toBe(64000);
     });
 
     it('keeps the current model when the profile has none (and does not fire MODEL_CHANGE)', () => {

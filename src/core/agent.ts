@@ -151,6 +151,15 @@ export class Agent implements AgentLike {
     this.hideThinking = options.hideThinking === true;
     this.sink = options.sink || null;
     this.modelRegistry = options.modelRegistry || {};
+    // Seed the window from the registry entry -- per-model context_limit from
+    // fetchModels (e.g. llama-swap autoload) only ever lands in the registry;
+    // options.contextLimit is the global resolved fallback. Registry entries
+    // are built with the same fallback, so this no-ops when the backend
+    // provided nothing. Must run after both #model and modelRegistry are set.
+    const initialEntry = this.#resolveModelEntry();
+    if (initialEntry?.contextLimit != null) {
+      this.contextLimit = initialEntry.contextLimit;
+    }
     this.profileName = options.profileName;
     this.config = options.config || null;
     this.sessionId = options.sessionId || crypto.randomUUID();
@@ -204,7 +213,9 @@ export class Agent implements AgentLike {
   set model(v: string) {
     const oldModel = this.#model;
     this.#model = v;
-    const entry = this.modelRegistry[v];
+    // Suffix-tolerant lookup (bare name -> "provider/name") matches
+    // resolveModelConfig's resolution, so the window tracks the same entry.
+    const entry = this.#resolveModelEntry();
     if (entry) {
       this.contextLimit = (entry.contextLimit as number) ?? this.contextLimit;
       // Reset to the new model's default; user can re-override via /reasoning.

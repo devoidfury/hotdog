@@ -13,7 +13,6 @@ Systematically identify high-complexity code, prioritize improvements by impact 
 - List all source files and their line counts
 - Measure cyclomatic complexity (CCN) (count `if`, `match`, `for`, `while`, `&&`, `||`, `?` decision points per function)
 - Flag functions above threshold (10–15 depending on language)
-- For example, using lizard with threshold 15 `/home/ubuntu/shared/python-tools-venv/bin/lizard -C 15 -w path/`
 - Cross-reference for duplicate code (same pattern in 2+ files)
 
 ### 2. Prioritize

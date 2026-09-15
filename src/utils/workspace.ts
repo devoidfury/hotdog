@@ -15,9 +15,8 @@ export type PathEscapeKind = "invalid" | "direct" | "symlink" | "denied";
 /**
  * True if `absolutePath` is at, or lexically under, `root`.
  *
- * The root filesystem (`"/"`) must not become `"//"`, and any root handed in
- * with a trailing separator must not become a doubled one -- no absolute path
- * starts with `"//"`, so a naive `root + sep` prefix test rejects everything
+ * The root filesystem (`"/"`) must not become `"//"`, and any root handed in with a trailing separator
+ * must not become a doubled one. No absolute path starts with `"//"`, so a naive `root + sep` prefix test rejects everything
  * and the whole workspace silently reads as an escape.
  */
 function within(absolutePath: string, root: string): boolean {
@@ -26,8 +25,7 @@ function within(absolutePath: string, root: string): boolean {
 }
 
 export class PathEscapeError extends ToolError {
-  /** Why the path was rejected. Consumers (e.g. the sysbox gate policy)
-   * branch on this instead of matching message prefixes. */
+  /** Why the path was rejected. Consumers branch on this instead of matching message prefixes. */
   readonly kind: PathEscapeKind;
 
   constructor(message: string, kind: PathEscapeKind = "direct") {

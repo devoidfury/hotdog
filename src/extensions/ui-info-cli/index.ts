@@ -21,9 +21,6 @@ import {
 import type { BuildAgentConfig, DefaultConfig } from "@core/config/index.ts";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { detectCapabilities, landlockNetPosture, launcherCPath } from "@utils/sysbox/capabilities.ts";
 
 interface ConnectivityResult {
   reachable: boolean;
@@ -107,44 +104,6 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
   return printInfoText(resolved, modelRegistry, providers, panels, connectivity, config);
 }
 
-// Sandbox diagnostics for `hotdog info` (docs/sysbox-sandbox.md invariant 5:
-// the launcher source hash must be visible alongside what is attainable).
-function sandboxInfo(): {
-  static_available: boolean;
-  fence_available: boolean;
-  landlock_abi: number;
-  /** Network posture of the fence ("net: tcp bind+connect denied +udp" on a
-   * v10 kernel, "net: unhandled" below v4). Derived, not probed. */
-  landlock_net: string;
-  cgroup_limits_available: boolean;
-  /** Which DoS controllers the probe actually found; delegation is
-   * per-controller, so "available" alone must not claim "pids/memory". */
-  cgroup_limits: string[];
-  reasons: string[];
-  launcher_sha256: string | null;
-} {
-  const caps = detectCapabilities();
-  let sha: string | null = null;
-  try {
-    sha = createHash("sha256").update(readFileSync(launcherCPath())).digest("hex");
-  } catch {
-    /* launcher.c unreadable -- reported as null, detection reasons cover it */
-  }
-  return {
-    static_available: caps.staticAvailable,
-    fence_available: caps.landlockAvailable,
-    landlock_abi: caps.landlockAbi,
-    landlock_net: landlockNetPosture(caps.landlockAbi),
-    cgroup_limits_available: caps.cgroupAvailable,
-    cgroup_limits: [
-      ...(caps.cgroupPidsAvailable ? ["pids"] : []),
-      ...(caps.cgroupMemoryAvailable ? ["memory"] : []),
-    ],
-    reasons: caps.reasons,
-    launcher_sha256: sha,
-  };
-}
-
 function printInfoText(
   resolved: BuildAgentConfig,
   modelRegistry: Record<string, unknown>,
@@ -209,28 +168,6 @@ function printInfoText(
       console.log(`  ${server.name}: ${transport} [${enabled}]`);
     }
   }
-
-  const sandbox = sandboxInfo();
-  console.log();
-  console.log("Sandbox (sysbox):");
-  console.log(
-    `  static: ${sandbox.static_available ? "available" : `unavailable (${sandbox.reasons.join("; ") || "unknown"})`}`,
-  );
-  console.log(
-    `  fence:  ${
-      sandbox.fence_available
-        ? `available (Landlock ABI ${sandbox.landlock_abi}, ${sandbox.landlock_net})`
-        : "unavailable"
-    }`,
-  );
-  console.log(
-    `  cgroups: ${
-      sandbox.cgroup_limits_available
-        ? `DoS limits (${sandbox.cgroup_limits.join("/")}) applied per spawn`
-        : "unavailable (no writable delegated cgroup v2 subtree)"
-    }`,
-  );
-  if (sandbox.launcher_sha256) console.log(`  launcher.c sha256: ${sandbox.launcher_sha256}`);
 
   console.log();
   console.log("Connectivity:");
@@ -329,7 +266,6 @@ function printInfoJson(
       url: s.url || null,
       command: s.command || null,
     })),
-    sandbox: sandboxInfo(),
     connectivity: {
       url: resolved.baseUrl,
       reachable: connectivity.reachable,

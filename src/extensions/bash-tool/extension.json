@@ -26,12 +26,6 @@
           "type": "number",
           "default": 600,
           "description": "Maximum number of output lines for tool results"
-        },
-        "sandbox": {
-          "type": "string",
-          "enum": ["off", "static", "fence"],
-          "default": "off",
-          "description": "Kernel sandbox for commands. \"static\": seccomp deny filter (io_uring, ptrace, mount/namespace, bpf, kexec, keyctl). \"fence\": static + a Landlock ruleset -- workspace roots and /tmp-style scratch read-write, system dirs plus the $PATH dirs read-only, everything else (including home dirs: `cat ~/.ssh/id_rsa` fails) unreachable, and every network action the kernel's Landlock ABI knows denied (TCP bind+connect from ABI v4, UDP bind/send from ABI v10; `hotdog info` prints which). Allowlist-only, so workspace.deny is NOT enforced by either sandboxed mode -- `cat .env` succeeds under `fence`; only the file tools bind the deny list. All policy is installed before exec: there is no per-operation mediation and no approval prompt mid-command. Linux x86_64 only; fails at startup when unavailable. Does not restrict network for \"static\". Comparison table: docs/config-reference.md."
         }
       },
       "additionalProperties": false,

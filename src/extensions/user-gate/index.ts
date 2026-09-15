@@ -1,24 +1,18 @@
 // user-gate: tool-call approvals, ABOVE the spawn boundary.
 //
 // One TOOL_CALL hook: decide -> (session memo) -> ask -> continue or block.
-// The kernel modes stay what they are -- `bashTool.sandbox` decides what a
-// running command can touch; this decides whether it runs at all, in every
-// mode including `off`. The two are independent, and this is NOT enforcement:
-// the bash triage it builds on has a documented bail list, and the answer to
-// "can a determined model get around this?" is yes. Enforcement is the fence.
+// This decides whether a call runs at all -- once a process is spawned there is no mediation inside it.
+// This is NOT enforcement: the bash triage it builds on has a documented bail list, and the answer to
+// "can a determined model get around this?" is yes.
 //
-// Fail-closed, exactly like the sandbox gate this replaces: no seam, a
-// non-interactive UI, a throwing/rejecting prompt, an abort, or an empty
-// answer all become an explicit block carrying the reason and the config line
-// that would have allowed it. The handler never throws (the TOOL_CALL
-// pipeline is failOnError, so a throw would surface as an execution error
-// instead of a clean denial).
+// Fail-closed: no seam, a non-interactive UI, a throwing/rejecting prompt, an abort, or an empty
+// answer all become an explicit block carrying the reason and the config line that would have allowed it.
+// The handler never throws (TOOL_CALL pipeline is failOnError, throwing would surface as an execution error instead of a clean denial).
 //
-// Prompts are queued one-at-a-time process-wide: parallel tool calls ask in
-// turn, so only one question is ever live in the UI.
+// Prompts are queued one-at-a-time process-wide: parallel tool calls ask in turn, so only one question is ever live in the UI.
 //
-// "Always allow" is a session memo (tool + required target values) plus a
-// printed config line. Nothing is ever written to config from here.
+// "Always allow" is a session memo (tool + required target values) plus a printed config line.
+// Nothing is ever written to config from here.
 
 import { HOOKS, type GateAction } from "@core/hooks.ts";
 import {

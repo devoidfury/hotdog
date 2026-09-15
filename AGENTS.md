@@ -63,8 +63,6 @@ All error catches must use `formatError()` from `src/core/error.ts`:
 | `docs/agents/model-and-config.md` | Model registry, config system, profiles |
 | `docs/agents/debugging.md` | Debugging patterns, one-shot mode |
 | `docs/agents/show-prompt.md` | show-prompt subcommand reference |
-| `docs/sysbox-sandbox.md` | Kernel-enforced bash sandbox (`bashTool.sandbox`: static/fence modes) |
-| `docs/agents/sandbox-direction.md` | Sandbox design notes, gate post-mortem, kernel facts appendix |
 | `docs/cli-subcommands.md` | CLI subcommand extension registration |
 | `docs/cli-reference.md` | User-facing CLI reference: subcommands, flags, slash commands |
 | `docs/supply-chain.md` | Supply-chain posture write-up (README carries the summary) |

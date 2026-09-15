@@ -18,8 +18,8 @@
 // prompts). A deny is never prompted and cannot be overridden from a prompt.
 //
 // This layer is convenience triage for honest mistakes. It is NOT an
-// enforcement boundary -- quoting tricks exist; the sysbox fence (or
-// nothing) is what enforces.
+// enforcement boundary -- quoting tricks exist, and nothing below it
+// enforces any more (see docs/postmortems/sysbox.md).
 
 import { ConfigError } from "@core/error.ts";
 import { pathMatchesRule } from "@utils/workspace.ts";

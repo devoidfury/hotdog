@@ -10,9 +10,8 @@
 //
 // WHAT THIS IS NOT: a security boundary. It is not a shell parser; it does not
 // model aliases, functions, PATH tricks or quoting games, and it never has to
-// be right -- when it is unsure it asks. Enforcement is the sysbox fence
-// (`bashTool.sandbox: "fence"`), which applies whether or not approvals are
-// on. See docs/config-reference.md "userGate".
+// be right -- when it is unsure it asks. Nothing below it enforces.
+// See docs/config-reference.md "userGate".
 
 import { resolve as resolveAbs } from "node:path";
 import type { Workspace } from "@utils/workspace.ts";

@@ -12,9 +12,6 @@ import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { AssistantRetryableError } from "@core/error.ts";
 import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig } from "@core/extensions/types.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
-import { spawnSandboxed, fenceConfigFor, sysboxMemoryKillNote } from "@utils/sysbox/index.ts";
-import { detectCapabilities, type SysboxCapabilities } from "@utils/sysbox/capabilities.ts";
-import { ConfigError, formatError } from "@core/error.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";
 
@@ -34,16 +31,11 @@ interface BashToolOptions {
   maxOutputLines: number;
   /** Hard cap on a model-requested timeoutMs (config: bashTool.maxTimeoutMs). */
   maxTimeoutMs?: number;
-  /** Kernel gate level (config: bashTool.sandbox). off | static | fence. */
-  sandbox?: SandboxMode;
 }
 
-export type SandboxMode = "off" | "static" | "fence";
-
 /**
- * Env for agent-spawned commands, shared by the plain and sandboxed paths so
- * the two cannot drift. Scrubbed base: the model-reachable child must not
- * carry hotdog's own secrets (see utils/env.ts).
+ * Env for agent-spawned commands. Scrubbed base: the model-reachable child
+ * must not carry hotdog's own secrets (see utils/env.ts).
  */
 export function agentSpawnEnv(): Record<string, string> {
   return {
@@ -94,13 +86,11 @@ export class BashTool {
   readonly timeoutMs: number;
   readonly maxOutputLines: number;
   readonly maxTimeoutMs?: number;
-  readonly sandbox: SandboxMode;
 
   constructor(options: BashToolOptions) {
     this.timeoutMs = options.timeoutMs;
     this.maxOutputLines = options.maxOutputLines;
     this.maxTimeoutMs = options.maxTimeoutMs;
-    this.sandbox = options.sandbox ?? "off";
   }
 
   toToolDef() {
@@ -146,42 +136,17 @@ export class BashTool {
       return ToolResult.err("Error: command is required");
     }
 
-    // Spawn per sandbox mode. The sysbox helper exec's sh after installing
-    // its filters, so in both sandboxed paths the pid is the command's
-    // process-group leader exactly like the plain detached spawn, and every
-    // handler below is shared.
-    let proc: ChildProcess;
-    if (this.sandbox === "fence") {
-      // Refuse rather than downgrade: fence roots come from the workspace, and
-      // a fence without roots is not a fence (fail-closed invariant).
-      if (!workspace) {
-        return ToolResult.err('bashTool.sandbox="fence" requires a workspace on the tool context; refusing to run');
-      }
-      try {
-        proc = spawnSandboxed({
-          command,
-          cwd: cwd ?? null,
-          env: agentSpawnEnv(),
-          fence: fenceConfigFor(workspace),
-        });
-      } catch (e) {
-        return ToolResult.err(`sysbox fence spawn failed (command did not run): ${formatError(e)}`);
-      }
-    } else if (this.sandbox === "static") {
-      proc = spawnSandboxed({ command, cwd: cwd ?? null, env: agentSpawnEnv() });
-    } else {
-      proc = spawn(command, [], {
-        shell: true,
-        // Primary workspace root (see execute); undefined inherits the
-        // process CWD, preserving the standalone-caller behavior.
-        cwd,
-        // Own process group on POSIX so timeouts can kill the entire tree (see utils/process-group.ts for the trade-off).
-        ...OWN_PROCESS_GROUP,
-        // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
-        stdio: ["ignore", "pipe", "pipe"],
-        env: agentSpawnEnv(),
-      });
-    }
+    const proc: ChildProcess = spawn(command, [], {
+      shell: true,
+      // Primary workspace root (see execute); undefined inherits the
+      // process CWD, preserving the standalone-caller behavior.
+      cwd,
+      // Own process group on POSIX so timeouts can kill the entire tree (see utils/process-group.ts for the trade-off).
+      ...OWN_PROCESS_GROUP,
+      // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
+      stdio: ["ignore", "pipe", "pipe"],
+      env: agentSpawnEnv(),
+    });
 
     return new Promise((resolve, reject) => {
 
@@ -286,13 +251,8 @@ export class BashTool {
         // arrives as a header attribute on the result element instead.
         const outputTruncated =
           stdoutTruncated || stderrTruncated || truncated !== output;
-        // An in-cgroup OOM kill is a kernel SIGKILL: the tool would otherwise
-        // report a bare dead exit code (null/137) with no why. The note is
-        // appended AFTER truncation so it survives an output wall.
-        const oomNote = sysboxMemoryKillNote(proc);
-        const finalOutput = oomNote ? (truncated ? `${truncated}\n${oomNote}` : oomNote) : truncated;
         finish(
-          ToolResult.ok(finalOutput).withEntries({
+          ToolResult.ok(truncated).withEntries({
             command: cmdFirstLine.length > 60 ? cmdFirstLine.slice(0, 60) + "…" : cmdFirstLine,
             exit_code: String(code),
             // Only when cut, like find/grep: an attribute that is absent is
@@ -313,55 +273,21 @@ export class BashTool {
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
 
-/**
- * Resolve bashTool.sandbox to a mode, fail-closed (docs/sysbox-sandbox.md
- * invariant 1): an unavailable mode is a startup error, never a silent
- * downgrade to plain spawn. Exported for direct testing.
- */
-export function resolveSandboxMode(
-  raw: string | undefined,
-  caps: SysboxCapabilities,
-): SandboxMode {
-  const mode = raw ?? "off";
-  if (mode !== "off" && mode !== "static" && mode !== "fence") {
-    throw new ConfigError(`bashTool.sandbox must be "off", "static", or "fence", got "${mode}"`);
-  }
-  if (mode === "static" && !caps.staticAvailable) {
-    throw new ConfigError(
-      `bashTool.sandbox="static" is not available on this host: ${caps.reasons.join("; ")}`,
-    );
-  }
-  if (mode === "fence" && !caps.landlockAvailable) {
-    throw new ConfigError(
-      `bashTool.sandbox="fence" is not available on this host: ${caps.reasons.join("; ")}`,
-    );
-  }
-  return mode;
-}
-
 export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema
   const config = getExtensionConfig<{
     bashTimeoutMs: number;
     maxToolOutputLines: number;
     maxTimeoutMs?: number;
-    sandbox?: string;
   }>(core, "bashTool");
   const timeoutMs = config.bashTimeoutMs;
   const maxOutputLines = config.maxToolOutputLines;
   const maxTimeoutMs = config.maxTimeoutMs;
-  // Capability probing spawnSyncs the helper (landlock probe).
-  // Skip it entirely when no sandbox is requested; anything other than
-  // off/undefined still resolves fail-closed through detectCapabilities().
-  const sandbox =
-    config.sandbox === undefined || config.sandbox === "off"
-      ? "off"
-      : resolveSandboxMode(config.sandbox, detectCapabilities());
 
   return {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        const tool = new BashTool({ timeoutMs, maxOutputLines, maxTimeoutMs, sandbox });
+        const tool = new BashTool({ timeoutMs, maxOutputLines, maxTimeoutMs });
         registry.register(BashTool.TOOL_NAME, tool);
       },
     },

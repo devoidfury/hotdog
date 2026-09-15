@@ -137,8 +137,8 @@ This hotdog comes with minimal guardrails by default. A dedicated host, a vm, or
 When you want the agent reined in:
 
 - `--sandbox` restricts the agent to tools with no side effects: no file writes, no network, no external commands.
-- `bashTool.sandbox` runs bash under kernel enforcement (Landlock + seccomp supervisor). See [sysbox sandbox](docs/sysbox-sandbox.md).
 - `userGate` prompts you before risky tool calls: allow / deny / ask.
+- Disable the `bash` tool - it runs with your own permissions and can do anything the user you run it as can do. Be careful what you give agents with `bash` access to.
 
 ## Extension Anatomy
 

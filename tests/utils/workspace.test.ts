@@ -53,8 +53,8 @@ describe("PathEscapeError", () => {
     expect(e.message).toBe("Symlink escape rejected: link");
   });
 
-  // The sysbox gate policy branches on .kind, not message text (a reword
-  // must not silently reclassify a deny-list ask as an out-of-root ask).
+  // Callers branch on .kind, not message text (a reword
+  // must not silently reclassify one deny reason as another).
   it("factories set the kind discriminant", () => {
     expect(new PathEscapeError("boom").kind).toBe("direct");
     expect(PathEscapeError.invalidInput("x").kind).toBe("invalid");

@@ -334,7 +334,12 @@ describe("Hook Integration", () => {
     expect((result as any)?.messages).toBeUndefined();
   });
 
-  it("should error when model not found in registry", async () => {
+  it("falls back to the agent's contextLimit when the model is not in the registry", async () => {
+    // Regression: an unregistered model used to throw "not found in
+    // registry" from the CONTEXT hook on every LLM call, spamming the log
+    // and silently disabling compaction. Unregistered models are a normal
+    // setup (--ai-url without a provider model list); the agent loop
+    // resolves them with its own contextLimit, and compaction must too.
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -344,12 +349,34 @@ describe("Hook Integration", () => {
 
     const context = makeMessages(100, "x".repeat(500));
     const agent = createMockAgent(context, "test-model", {}); // empty registry
+    agent.contextLimit = 8000; // the window the agent loop resolves to
     const messages = [{ role: "system", content: "" }, ...context];
 
-    // Should error when model is not found in registry
+    const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
+
+    expect(agent.log.length).toBeLessThan(context.length);
+    expect((result as any).messages).toBeDefined();
+  });
+
+  it("still fails loudly when no contextLimit resolves for an unregistered model", async () => {
+    // No registry entry AND no agent contextLimit: compaction cannot know
+    // the window, so it surfaces a config error and leaves the context
+    // untouched (no silent window guess).
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+    });
+    const ext = createCompactionExtension(core);
+
+    const context = makeMessages(100, "x".repeat(500));
+    const agent = createMockAgent(context, "test-model", {}); // empty registry, no contextLimit
+    const messages = [{ role: "system", content: "" }, ...context];
+
     await expect(
       (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
-    ).rejects.toThrow(/not found in registry/);
+    ).rejects.toThrow(/contextLimit/);
+    expect(agent.log.length).toBe(context.length);
   });
 
   it("should fail loudly when no contextLimit resolves (no silent window guess)", async () => {
@@ -971,7 +998,7 @@ describe("getModelConfig fallback lookup", () => {
     expect(result.error).toBeUndefined();
   });
 
-  it("errors when model not found at all", async () => {
+  it("compacts via the agent's contextLimit when the model is not in the registry", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -992,11 +1019,44 @@ describe("getModelConfig fallback lookup", () => {
     const compactCmd = commandRegistry.get("compact")!;
 
     const context = makeMessages(20, "x".repeat(100));
-    // Agent uses a model name not in the registry
+    // Agent uses a model name not in the registry; its contextLimit is the
+    // fallback window (same resolution as the agent loop).
+    const agent = createMockAgent(context, "unknown-model", registry);
+    agent.contextLimit = 400;
+
+    const result = await compactCmd.handler!(agent, "compact");
+    expect(result).toBeDefined();
+    expect(result.error).toBeUndefined();
+    expect((result as any).content).toContain("Context compacted");
+  });
+
+  it("errors when the model is not in the registry and no contextLimit resolves", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      strategy: "drop",
+    });
+    const registry = {
+      "other/model": {
+        name: "other/model",
+        temperature: null,
+        contextLimit: 64000,
+        tags: [],
+      },
+    };
+
+    const ext = createCompactionExtension(core);
+    const commandRegistry = new AgentCommandRegistry();
+    (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const compactCmd = commandRegistry.get("compact")!;
+
+    const context = makeMessages(20, "x".repeat(100));
+    // Agent uses a model name not in the registry, and has no contextLimit
+    // either: the window cannot be resolved, so /compact fails loudly
+    // (config error) instead of guessing.
     const agent = createMockAgent(context, "unknown-model", registry);
 
-    // getModelConfig is strict: an unresolvable model name is an error, not a fallback.
-    await expect(compactCmd.handler!(agent, "compact")).rejects.toThrow("not found in registry");
+    await expect(compactCmd.handler!(agent, "compact")).rejects.toThrow("contextLimit");
   });
 
   it("prefers direct lookup over fallback when model name contains '/'", async () => {

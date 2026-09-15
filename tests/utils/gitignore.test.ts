@@ -70,6 +70,16 @@ describe("compileGitignore", () => {
       expect(filter("a/b/node_modules/pkg")).toBe(false);
     });
 
+    it("treats a ** not adjacent to / as a greedy wildcard that crosses /", () => {
+      // "foo**bar" is NOT the `**/` rule; it compiles to foo.*bar -- it may
+      // cross directories, unlike a single *.
+      const filter = gitignore("foo**bar");
+      expect(filter("foobar")).toBe(false);
+      expect(filter("fooXbar")).toBe(false);
+      expect(filter("foo/x/bar")).toBe(false);
+      expect(filter("fooXbaz")).toBe(true);
+    });
+
     it("handles character classes", () => {
       const filter = gitignore("*.[oa]");
       // Pattern ".*[oa]" matches files with .o or .a extension

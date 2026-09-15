@@ -40,6 +40,32 @@ function sentTypes(ws: FakeWebSocket): string[] {
   return ws.sent.map((s) => (JSON.parse(s) as Sent).type as string);
 }
 
+// chat.ts schedules its reconnect with a real 3 s setTimeout; waiting it out
+// in real time costs this file ~6 s -- the wall-clock floor of the whole
+// parallel suite. These two tests swap in a setTimeout that captures long
+// waits (>= 1 s) so the test fires them synchronously, and passes short ones
+// (the tests' own `await setTimeout(0)` yields) to the real timer.
+const realSetTimeout = globalThis.setTimeout;
+function captureLongTimers() {
+  const captured: Array<() => void> = [];
+  let fakeId = 1000;
+  globalThis.setTimeout = ((cb: () => void, ms?: number, ...rest: unknown[]) => {
+    if (typeof ms === "number" && ms >= 1000) {
+      captured.push(cb);
+      return fakeId++;
+    }
+    return realSetTimeout(cb as never, ms, ...rest);
+  }) as unknown as typeof setTimeout;
+  return {
+    fireCaptured() {
+      for (const cb of captured.splice(0)) cb();
+    },
+    restore() {
+      globalThis.setTimeout = realSetTimeout;
+    },
+  };
+}
+
 // Module-level atoms in chat.ts (currentProfileAtom etc.) are shared across
 // createChat() calls by design (single-page app), so tests that mutate them
 // must restore their own changes; "default" is the module's initial value.
@@ -122,6 +148,7 @@ describe("handshake", () => {
 
   it("close with a reachable server schedules one reconnect", async () => {
     const originalFetch = globalThis.fetch;
+    const timers = captureLongTimers();
     // Not 401 (server may just be down or verify pending) -> reconnect anyway.
     globalThis.fetch = (async () => ({ status: 503 }) as Response) as unknown as typeof fetch;
     try {
@@ -130,16 +157,19 @@ describe("handshake", () => {
       ws.fireOpen();
       ws.onclose?.();
       expect(chat.connectedAtom()).toBe(false);
-      await new Promise((r) => setTimeout(r, 3100));
+      await new Promise((r) => realSetTimeout(r, 0)); // let the /verify settle
+      timers.fireCaptured(); // the 3 s reconnect timer, fired in zero time
       expect(FakeWebSocket.instances.length).toBe(n0 + 2);
       chat.disconnect(); // cancels any further reconnects
     } finally {
       globalThis.fetch = originalFetch;
+      timers.restore();
     }
   });
 
   it("network error during verify also schedules a reconnect", async () => {
     const originalFetch = globalThis.fetch;
+    const timers = captureLongTimers();
     globalThis.fetch = (async () => {
       throw new Error("down");
     }) as unknown as typeof fetch;
@@ -148,10 +178,12 @@ describe("handshake", () => {
       const { ws } = makeChat();
       ws.fireOpen();
       ws.onclose?.();
-      await new Promise((r) => setTimeout(r, 3100));
+      await new Promise((r) => realSetTimeout(r, 0)); // let the failed verify settle
+      timers.fireCaptured();
       expect(FakeWebSocket.instances.length).toBe(n0 + 2);
     } finally {
       globalThis.fetch = originalFetch;
+      timers.restore();
       chat?.disconnect();
     }
   });

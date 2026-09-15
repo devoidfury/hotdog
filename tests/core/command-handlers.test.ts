@@ -247,6 +247,19 @@ describe("CORE_COMMAND_HANDLERS", () => {
     expect(CORE_COMMAND_HANDLERS[Command.Reasoning]).toBeDefined();
   });
 
+  it("/reasoning completes the effort levels, prefix-filtered", () => {
+    const completion = CORE_COMMAND_HANDLERS[Command.Reasoning]!.completion!;
+    const ctx = (commandArg = "") =>
+      ({ line: "/reasoning " + commandArg, cursorPos: 0, command: "reasoning", commandArg, agent: {} }) as never;
+    const values = (arg?: string) =>
+      (completion(ctx(arg)) as Array<{ value: string }>).map((o) => o.value);
+    expect(values()).toEqual(["none", "minimal", "low", "medium", "high", "xhigh", "max", "unset"]);
+    // Filter is case-insensitive on the arg; levels keep their canonical order.
+    expect(values("M")).toEqual(["minimal", "medium", "max"]);
+    expect(values("x")).toEqual(["xhigh"]);
+    expect(values("z")).toEqual([]);
+  });
+
   it("quit and help are channel-level commands (no isUiCommand)", () => {
     const quitDef = CORE_COMMAND_HANDLERS[Command.Quit]! as unknown as Record<string, unknown>;
     const helpDef = CORE_COMMAND_HANDLERS[Command.Help]! as unknown as Record<string, unknown>;

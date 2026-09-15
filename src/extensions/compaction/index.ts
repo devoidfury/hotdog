@@ -1,7 +1,4 @@
-import {
-  CompactionStrategy,
-  CompactionStrategyRegistry,
-} from "./strategies.ts";
+import { CompactionStrategy, CompactionStrategyRegistry, requireContextLimit } from "./strategies.ts";
 import { SummarizeStrategy, SUMMARIZE_SHORT_VARIANT } from "./strategies/summarize.ts";
 import { DropStrategy } from "./strategies/drop.ts";
 import { TokenAwareStrategy } from "./strategies/token-aware.ts";
@@ -13,13 +10,8 @@ import { logger } from "@utils/logger.ts";
 import { LlmError, formatError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
 import type { Agent } from "@core/agent.ts";
-import {
-  CoreContext,
-  ExtensionInstance,
-  CommandsRegisterPayload,
-  getExtensionConfig,
-} from "@core/extensions/types.ts";
-import { findModelEntry, type ModelConfig } from "@core/config/providers.ts";
+import { CoreContext, ExtensionInstance, CommandsRegisterPayload, getExtensionConfig } from "@core/extensions/types.ts";
+import { resolveModelConfig, type ModelConfig } from "@core/config/providers.ts";
 import { matcher, completion } from "./completions.ts";
 
 interface CompactionSettings {
@@ -32,15 +24,20 @@ interface CompactionSettings {
   contextLimit?: number;
 }
 
-function getModelConfig(modelRegistry: Record<string, ModelConfig>, modelName: string): ModelConfig {
-  const entry = findModelEntry(modelName, modelRegistry);
-  if (!entry) {
-    throw new Error(`Model "${modelName}" not found in registry`);
-  }
-  if (typeof entry.contextLimit !== "number" || entry.contextLimit <= 0) {
-    throw new Error(`Model "${modelName}" missing contextLimit in registry`);
-  }
-  return entry;
+/**
+ * The model config compaction resolves using same resolution the agent's own loop uses (resolveModelConfig),
+ * so an unregistered model (common for --ai-url setups that publish no model list) falls back to the
+ * agent's contextLimit instead of erroring on every LLM call. A window that still does not resolve is a config error (requireContextLimit)
+ */
+function getModelConfig(agent: Agent): ModelConfig {
+  const modelConfig = resolveModelConfig(
+    agent.model,
+    agent.modelRegistry,
+    agent.contextLimit,
+    agent.reasoningEffort,
+  );
+  requireContextLimit(modelConfig.contextLimit);
+  return modelConfig;
 }
 
 export function create(core: CoreContext): ExtensionInstance | null {
@@ -110,7 +107,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
   async function _performCompaction(agent: Agent, strategy: CompactionStrategy): Promise<boolean> {
     const messages = agent.context.getMessages(); // defensive copy — strategies expect Message[]
     const model = agent.model;
-    const modelConfig = getModelConfig(agent.modelRegistry, model);
+    const modelConfig = getModelConfig(agent);
 
     // Wire-render context: the dump speaks the session's presentation
     // (genuine wrappers via the resolved WireFormat, payloads pre-mangled).
@@ -292,7 +289,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
         if (nonSystemMessages.length <= settings.keepRecentMessages * 2) return;
 
-        const modelConfig = getModelConfig(agent.modelRegistry, agent.model);
+        const modelConfig = getModelConfig(agent);
         if (
           !shouldCompact(nonSystemMessages, modelConfig.contextLimit, settings.reserveTokens, wireFor(agent, modelConfig))
         )

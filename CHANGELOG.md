@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.9.0...main
+
+## [v0.9.0] - 2026-09-15
+
 - **[BRK]** llm-client / config: the tool-result seam split into two independently-selected seams.
   - `WireFormat` owns the model-facing *markup shape* of harness wrappers (tool results, attached-file includes, system notices): `modelToolFormat`/`--model-tool-format` became `modelWireFormat`/`--model-wire-format` (default still `"xml"`, but the shape -- and the `file-include`/`system-notice` marker protection -- now come from the autoloaded `wire-format-xml` extension).
   - `RoleMapping` owns where the internal `harness` role rides on the wire: the provider/model entry `wireFormat: "system-first" | "developer"` moved to `roleMapping` with the same two ids, registered by the new autoloaded `role-mapping-default`.
@@ -21,11 +25,23 @@
   - Fails closed -- no seam, non-interactive UI, throwing prompt, aborted run or empty answer all block, with the reason; malformed rule is a startup error and keeps every call blocked until fixed.
   - **What it does NOT stop**: the command is not executed and the final operation isn't checked; nothing enforced at system level once the command is started.
   - Nothing is written to config from a prompt; a session allow is in-memory only, keyed on the tool plus every extracted value.
+- added `/show-prompt` command to see the active system prompt, as an interactive slash command and the `show-prompt` subcommand.
+- cli - token usage line reworked; now also shows the context window size.
+- workspace - now warns and continues when some configured roots are missing; errors only when **all** roots are missing. Also fix workspace handling when a root is `/`.
+- extensions - an invalid `extension.json` now throws at load instead of being silently skipped. Fix nested extension import.
+- sessions - resuming with an invalid session id now throws instead of silently starting a fresh session.
+- sessions - interrupted or missing tool results are healed on load, so a session killed mid tool-call no longer produces API errors on resume.
+- agent - fix per-model context-limit lookup; non-default models were falling back to the base limit.
+- compaction - an unrecognized model now resolves the default context limit instead of erroring and skipping compaction.
+- llm-client - connection errors now report the url being connected to.
+- question tool - more robust Ctrl-C handling; clearer error in one-shot mode when no user is connected to answer.
+- info - fix skills display.
 - internals
   - tool-executor - `toolCtx` is now built (and `AGENT_TOOL_CONTEXT` fires) BEFORE the `TOOL_CALL` gate pipeline, and the gate payload carries `toolCtx`
   - bash-tool - add `truncated="true"` result metadata info when output is truncated, same as find/grep/etc
+  - hooks - unrecognized hook name now logs a warning instead of being silently ignored.
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.8.0...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.8.0...v0.9.0
 
 # [v0.8.0] - 2026-09-06
 
@@ -427,8 +443,3 @@ Features that generally work but have rough edges:
 - Tool result formatting - should be configurable/swappable via extension system; a bit too simplistic right now; needs work with io escaping pipeline.
 
 **Full Changelog**: https://github.com/devoidfury/hotdog/releases/tag/v0.1.0
-- sysbox - follow-ups on the `gate` notify-fd handoff, from review of the above:
-  - **the supervisor now verifies the fd it imported is actually a seccomp notify fd** (`isSeccompNotifyFd`, `readlink("/proc/self/fd/N")` -> `anon_inode:seccomp notify`) before answering a single syscall with it, and refuses the spawn if it is not. The `SO_PEERCRED` check proves the connecting uid, not *which of that peer's fds* it chose to name: at `ptrace_scope` 0 a same-uid process that wins the accept can hand the supervisor one of **its own** notify fds from a different sandbox, and the import succeeds -- putting hotdog's decider in front of another supervisor's frozen tasks. A non-notify fd died on `NOTIF_RECV` (`EINVAL`) by accident; a foreign *notify* fd never would have
-  - **the import probe no longer blames the kernel for its own failures.** `--probe-import` exited 3 for everything, so the startup reason claimed "pidfd_getfd blocked by an outer seccomp policy" even when the real cause was a missing C compiler, an unreadable `/proc`, or a probe child that died on the way -- a misdiagnosis with no way to check it. Exit codes are now a contract (`3` only for `EPERM`/`EACCES` on a real parent->child import, `4` = probe could not run), and the helper's stderr is attached to the reason the user sees. Both codes still mean gate is unavailable; nothing is allowed that was not allowed before
-  - the `--probe-import` comment claimed the child's listener link reads `anon_inode:[seccomp]`; measured here it is `anon_inode:seccomp notify`, no brackets. The substring match was always right, the stated bytes were not
-  - tests: the exit-code contract and the notify-fd predicate are covered directly (the predicate pinned against a real listener fd, with pipe/regular-file/bogus-fd negatives), so neither depends on a host where `gate` happens to work

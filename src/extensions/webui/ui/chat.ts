@@ -187,6 +187,12 @@ interface SessionStateMessage {
   value: string | string[] | boolean | number;
 }
 
+interface SystemMessage {
+  type: "systemMessage";
+  content?: string;
+  detail?: string;
+}
+
 interface ProfilesMessage {
   type: "profiles";
   profiles: Record<string, { role: string; body: string; model: string | null; whitelistTools?: string[] | null; blacklistTools?: string[] }>;
@@ -230,6 +236,7 @@ type ServerMessage =
   | TokenUsageMessage
   | CompactionResultMessage
   | SessionStateMessage
+  | SystemMessage
   | ProfilesMessage
   | ProfileSwitchedMessage
   | ServerErrorMessage;
@@ -458,6 +465,9 @@ export function createChat({
         break;
       case "compactionResult":
         messageList.handleCompactionResult(data);
+        break;
+      case "systemMessage":
+        messageList.handleSystemMessage(data);
         break;
       case "sessionState":
         if (data.key === "working") {

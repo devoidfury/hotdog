@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- added `tool-call-repair` extension: recovers malformed tool calls that local backends often leak into plain text instead of structured `tool_calls`. When when it detects a dropped tool call, the response is rewritten in place and the agent's normal tool-execution path runs the calls.
+  - Config: `toolCallRepair.enabled` (default `true`), `toolCallRepair.maxRepairsPerTurn` (default `2`, `-1` = unlimited).
+
+- internals
+  - `PROVIDER_RESPONSE` became a real pipeline: handlers may return `{ response }` to replace the parsed response before the assistant message is built and tools execute.
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.9.0...main
 
 ## [v0.9.0] - 2026-09-15

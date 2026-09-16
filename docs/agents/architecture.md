@@ -283,6 +283,7 @@ Each extension has:
 | `websocket` | WebSocket server for agent session management — core backend utility for UI extensions |
 | `webui` | Web UI for agent interaction — login, chat, session management |
 | `user-gate` | Tool-call approvals (`userGate` config, opt-in): `TOOL_CALL` gate handler — allow / deny / ask via the question input seam |
+| `tool-call-repair` | Repairs malformed Hermes/ChatML tool calls leaked into text by local backends (`toolCallRepair` config): `PROVIDER_RESPONSE` pipeline handler — fail-closed grammar recovers the call and the agent loop executes it |
 | `wire-format-xml` | Registers the built-in `"xml"` WireFormat (harness wrapper markup) |
 | `role-mapping-default` | Registers the built-in `"system-first"` and `"developer"` RoleMappings (wire roles for the `harness` role) |
 | `string-length` | `string_length` tool — measure a string in utf16/codepoints/bytes/graphemes |

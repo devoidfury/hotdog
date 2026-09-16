@@ -1,0 +1,27 @@
+{
+  "name": "tool-call-repair",
+  "loadOrder": 10,
+  "description": "Repairs malformed tool calls leaked into text by local backends",
+  "configSchema": {
+    "toolCallRepair": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether malformed tool calls are repaired instead of stalling the turn"
+        },
+        "maxRepairsPerTurn": {
+          "type": "number",
+          "default": 2,
+          "description": "Max repairs per user turn (-1 = unlimited)"
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "toolCallRepair" },
+        { "default": {} }
+      ]
+    }
+  }
+}

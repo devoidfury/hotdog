@@ -1030,6 +1030,21 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 
+### `toolCallRepair`
+
+[Tool Call Repair](../src/extensions/tool-call-repair) — Recovers malformed Hermes/ChatML tool calls that local backends (llama.cpp / vLLM / Ollama) leak into plain text instead of emitting structured `tool_calls` (call token mid-sentence, missing block close, invoke-style tag synonyms, a leaked think token glued to the front). Runs on the `PROVIDER_RESPONSE` pipeline: when a response carries no structured calls, it scans content, then reasoning, for a leaked call block at the tail of the text, and if the grammar parses it, rewrites the response (forged call ids, stripped visible text) so the normal tool-execution path runs the calls.
+
+Parsing is fail-closed: the call block must run to the end of the text (prose after the last block means the model is showing markup, not calling a tool); a truncated block (missing closes) still repairs; stray fences, commas, and whitespace are tolerated; plain numbers and booleans in parameter values are coerced. Never repairs on the final iteration of a run.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable repair. Set `false` for strict structured-tool-call enforcement (a leaked call then strands in the turn's text). |
+| `maxRepairsPerTurn` | `number` | `2` | Max repairs per user turn (`-1` = unlimited). |
+
+```json
+{ "toolCallRepair": { "enabled": true, "maxRepairsPerTurn": 5 } }
+```
+
 ### `userGate`
 
 [User Gate](../src/extensions/user-gate) — Tool-call approvals: whether a tool call runs at all. Registers a `TOOL_CALL`

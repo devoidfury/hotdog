@@ -99,6 +99,10 @@ export class WebSocketChannel extends Channel {
       case OUTPUT_EVENT.QUESTION:
         msg.questions = event.questions;
         break;
+      case OUTPUT_EVENT.SYSTEM_MESSAGE:
+        msg.content = event.content;
+        if (event.detail !== undefined) msg.detail = event.detail;
+        break;
       case OUTPUT_EVENT.TASK_PROGRESS:
         msg.taskId = event.taskId;
         msg.status = event.status;

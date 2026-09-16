@@ -253,6 +253,24 @@ describe("WebSocketChannel - write()", () => {
         expect(msg.messagesCompacted).toBe(10);
       },
     },
+    {
+      name: "SYSTEM_MESSAGE",
+      event: { type: OUTPUT_EVENT.SYSTEM_MESSAGE, content: "notice", detail: "expanded detail" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.SYSTEM_MESSAGE);
+        expect(msg.content).toBe("notice");
+        expect(msg.detail).toBe("expanded detail");
+      },
+    },
+    {
+      name: "SYSTEM_MESSAGE without detail",
+      event: { type: OUTPUT_EVENT.SYSTEM_MESSAGE, content: "notice" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.SYSTEM_MESSAGE);
+        expect(msg.content).toBe("notice");
+        expect(msg.detail).toBeUndefined();
+      },
+    },
   ])("maps $name events to protocol", ({ event, expected }) => {
     const sm = createMockSessionManager({
       onSessionEvents: mock((_sessionId, handler) => {

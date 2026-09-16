@@ -127,6 +127,8 @@ export interface MessageListManager {
   clear: () => void;
   /** Append a system notice (e.g. profile switched). Input must be a trusted display name. */
   addSystemMessage: (text: string) => void;
+  /** Render a server system message (profile switched, tool-call repair notices, ...). */
+  handleSystemMessage: (data: { content?: string; detail?: string }) => void;
   /** Detach the container's scroll listener. The #message-list div outlives the chat across logins, so the owner must call this before dropping the manager. */
   destroy: () => void;
   /** Render a batch of session log entries (for viewing cold session logs). */
@@ -816,9 +818,14 @@ export function createMessageList(
 
   /** Append a system notice bubble (used for profile-switch confirmations). */
   function addSystemMessage(text: string): void {
+    handleSystemMessage({ content: `Switched to profile: ${text}` });
+  }
+
+  /** Append a system notice bubble from a server system message. */
+  function handleSystemMessage(data: { content?: string; detail?: string }): void {
     const el = document.createElement("div");
     el.className = "message system-message";
-    el.innerHTML = `<span class="message-role system-label">System</span><div class="message-content"><p>Switched to profile: ${sanitize(text)}</p></div>`;
+    el.innerHTML = `<span class="message-role system-label">System</span><div class="message-content"><p>${sanitize(data.content ?? "")}</p></div>`;
     container.appendChild(el);
     scrollBottom();
   }
@@ -848,6 +855,7 @@ export function createMessageList(
     finalizeAssistant,
     clear,
     addSystemMessage,
+    handleSystemMessage,
     destroy,
     renderLogEntries,
   };

@@ -145,8 +145,8 @@ This is the heart of the system — one iteration of the LLM-tools loop.
 │  7. LLM CALL ───────────────► HTTP request to provider   │
 │      (streaming, tool calls)                              │
 │                                                          │
-│  8. PROVIDER_RESPONSE ───────► async notify              │
-│      (response logging, metrics, cost tracking)          │
+│  8. PROVIDER_RESPONSE ───────► pipeline                  │
+│      (response logging, metrics, cost tracking, repair)  │
 │                                                          │
 │  9. MESSAGES_AFTER_LLM ─────► async notify              │
 │      (post-LLM analysis)                                 │
@@ -262,7 +262,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
 | `PROVIDER_REQUEST` | `provider:request` | pipeline | Before LLM HTTP request — modify messages/model/tools |
-| `PROVIDER_RESPONSE` | `provider:response` | async notify | After LLM response fully received |
+| `PROVIDER_RESPONSE` | `provider:response` | pipeline | After LLM response fully received — handler may return `{ response }` to replace it (e.g. tool-call-repair reconstructing tool calls a local backend leaked as text) |
 
 The `LlmProtocol` (selected by the `protocol` field on the model or provider entry, default `"openai"`) owns the wire format itself: request building, stream parsing, auth headers. The hooks above are the override hatch -- a hook can still replace the fully-built request or the parsed response without writing a new protocol. In short: **protocol = format, hooks = override**.
 
@@ -488,7 +488,7 @@ User Input
     │
     ▼ ─── LLM call ───────────► streaming response
     │
-    ▼ ─── PROVIDER_RESPONSE ───► logging, metrics
+    ▼ ─── PROVIDER_RESPONSE ───► logging, metrics, repair
     │
     ▼ ─── Tool calls? ────────► Yes → TOOL_CALL gate → execute → TOOL_RESULT
     │                           No  → final response, return

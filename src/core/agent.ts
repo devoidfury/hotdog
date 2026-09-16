@@ -433,7 +433,13 @@ export class Agent implements AgentLike {
     params: LlmRequestParams,
   ): Promise<string | { outcome: string; toolResults: ToolResult[] }> {
     const { modelConfig } = params;
-    this.hooks.notifyHooks(HOOKS.PROVIDER_RESPONSE, { response, modelConfig, agent: this });
+    // handlers may repair/replace the response before it becomes an assistant message and its tool calls execute 
+    // (e.g. tool-call-repair recovering markup the backend failed to parse into real tool calls).
+    const resResult = await this.hooks.runHookPipeline<{ response?: StreamResult }>(
+      HOOKS.PROVIDER_RESPONSE,
+      { response, modelConfig, agent: this },
+    );
+    if (resResult.lastResult?.response) response = resResult.lastResult.response;
     this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.context.getMessages(), agent: this });
 
     const assistantMsg = new Message({

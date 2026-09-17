@@ -363,6 +363,27 @@ describe("WebSearchTool Tavily parser", () => {
     expect(resultStr(result)).toContain("via Tavily");
     });
   });
+
+  it("reports the actual result count, not the number of output lines", async () => {
+    const mockResponse = {
+      results: [
+        { title: "A", url: "https://a.example", content: "desc a" },
+        { title: "B", url: "https://b.example", content: "desc b" },
+      ],
+    };
+
+    await withMockFetch(async () => jsonResponse(mockResponse), async () => {
+      const tool = new WebSearchTool({
+        ...defaultWebSearchOptions,
+        provider: "tavily",
+        tavilyApiKey: "test-key",
+      });
+      const result = await tool.execute(JSON.stringify({ query: "test" }));
+      expect(result.success).toBe(true);
+      // Two results (five output lines); the entry must count results.
+      expect(result.metadata?.get("results")).toBe("2");
+    });
+  });
 });
 
 describe("WebSearchTool SearXNG parser", () => {

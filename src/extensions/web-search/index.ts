@@ -49,7 +49,7 @@ interface ToolInput {
 // ── Provider Implementations ────────────────────────────────────────────────
 
 // No API key required; results are parsed from DDG's HTML endpoint.
-async function searchDuckDuckGo(query: string, maxResults: number, timeout: number): Promise<string> {
+async function searchDuckDuckGo(query: string, maxResults: number, timeout: number): Promise<SearchResult[]> {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const response = await hotdogFetch(url, {
     method: "GET",
@@ -91,13 +91,7 @@ async function searchDuckDuckGo(query: string, maxResults: number, timeout: numb
   // .blob() consumes the stream; the handlers above already collected the results
   await rewriter.transform(response).blob();
 
-  const trimmed = results.slice(0, maxResults);
-
-  if (trimmed.length === 0) {
-    return `No results found for: ${query}`;
-  }
-
-  return formatResults(trimmed, query, "DuckDuckGo");
+  return results.slice(0, maxResults);
 }
 
 /**
@@ -120,7 +114,7 @@ async function searchBrave(
   maxResults: number,
   timeout: number,
   apiKey: string,
-): Promise<string> {
+): Promise<SearchResult[]> {
   if (!apiKey) {
     throw new ToolError(
       "Brave API key not configured. Set webSearch.braveApiKey in config or BRAVE_API_KEY env var.",
@@ -144,17 +138,11 @@ async function searchBrave(
   };
   const webResults = json?.web?.results || [];
 
-  if (webResults.length === 0) {
-    return `No results found for: ${query}`;
-  }
-
-  const results: SearchResult[] = webResults.slice(0, maxResults).map((r) => ({
+  return webResults.slice(0, maxResults).map((r) => ({
     title: r.title || "No title",
     url: r.url || "",
     description: r.description || "",
   }));
-
-  return formatResults(results, query, "Brave");
 }
 
 async function searchTavily(
@@ -162,7 +150,7 @@ async function searchTavily(
   maxResults: number,
   timeout: number,
   apiKey: string,
-): Promise<string> {
+): Promise<SearchResult[]> {
   if (!apiKey) {
     throw new ToolError(
       "Tavily API key not configured. Set webSearch.tavilyApiKey in config or TAVILY_API_KEY env var.",
@@ -193,17 +181,11 @@ async function searchTavily(
   };
   const items = json?.results || [];
 
-  if (items.length === 0) {
-    return `No results found for: ${query}`;
-  }
-
-  const results: SearchResult[] = items.slice(0, maxResults).map((r) => ({
+  return items.slice(0, maxResults).map((r) => ({
     title: r.title || "No title",
     url: r.url || "",
     description: r.content || "",
   }));
-
-  return formatResults(results, query, "Tavily");
 }
 
 async function searchSearXNG(
@@ -211,7 +193,7 @@ async function searchSearXNG(
   maxResults: number,
   timeout: number,
   instanceUrl: string,
-): Promise<string> {
+): Promise<SearchResult[]> {
   if (!instanceUrl) {
     throw new ToolError("SearXNG instance URL not configured. Set webSearch.searxngInstanceUrl in config.");
   }
@@ -234,18 +216,20 @@ async function searchSearXNG(
   };
   const items = json?.results || [];
 
-  if (items.length === 0) {
-    return `No results found for: ${query}`;
-  }
-
-  const results: SearchResult[] = items.slice(0, maxResults).map((r) => ({
+  return items.slice(0, maxResults).map((r) => ({
     title: r.title || "No title",
     url: r.url || "",
     description: r.content || "",
   }));
-
-  return formatResults(results, query, "SearXNG");
 }
+
+/** Human-readable provider names for the result header (switch key -> label). */
+const PROVIDER_LABELS: Record<string, string> = {
+  duckduckgo: "DuckDuckGo",
+  brave: "Brave",
+  tavily: "Tavily",
+  searxng: "SearXNG",
+};
 
 // ── Result Formatting ───────────────────────────────────────────────────────
 
@@ -327,29 +311,32 @@ export class WebSearchTool {
     const provider = this.provider.toLowerCase().trim();
 
     try {
-      let result: string;
+      let results: SearchResult[];
       switch (provider) {
         case "duckduckgo":
-          result = await searchDuckDuckGo(query, this.maxResults, this.timeout);
+          results = await searchDuckDuckGo(query, this.maxResults, this.timeout);
           break;
         case "brave":
-          result = await searchBrave(query, this.maxResults, this.timeout, this.braveApiKey);
+          results = await searchBrave(query, this.maxResults, this.timeout, this.braveApiKey);
           break;
         case "tavily":
-          result = await searchTavily(query, this.maxResults, this.timeout, this.tavilyApiKey);
+          results = await searchTavily(query, this.maxResults, this.timeout, this.tavilyApiKey);
           break;
         case "searxng":
-          result = await searchSearXNG(query, this.maxResults, this.timeout, this.searxngInstanceUrl);
+          results = await searchSearXNG(query, this.maxResults, this.timeout, this.searxngInstanceUrl);
           break;
         default:
           return ToolResult.err(`Unknown search provider: ${provider}`);
       }
 
-      const truncated = truncateOutput(result, 600);
-      const lines = result.split("\n");
-      return ToolResult.ok(truncated).withEntries({
+      const label = PROVIDER_LABELS[provider] ?? provider;
+      const display =
+        results.length === 0
+          ? `No results found for: ${query}`
+          : formatResults(results, query, label);
+      return ToolResult.ok(truncateOutput(display, 600)).withEntries({
         provider,
-        results: String(lines.length - 1 > 0 ? lines.length - 1 : 0),
+        results: String(results.length),
       });
     } catch (err) {
       const msg = (err as Error).message;

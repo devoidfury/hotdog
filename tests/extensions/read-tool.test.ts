@@ -135,6 +135,43 @@ describe('ReadTool.execute — read lines', () => {
 
     expect(resultStr(result)).toBe('only line');
   });
+
+  // ── large-file streaming (above the 1MB whole-read threshold) ──
+
+  it('streams a large file: correct window, total, and showing', async () => {
+    const filePath = path.join(dir, 'big.log');
+    const lineCount = 150000;
+    // ~1.35MB, above STREAM_READ_THRESHOLD: must not slurp the whole file.
+    const content = Array.from({ length: lineCount }, () => 'xxxxxxxx').join('\n') + '\n';
+    fsSync.writeFileSync(filePath, content);
+
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
+    const result = await tool.execute(
+      { path: 'big.log', offset: 100, limit: 3 },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(resultStr(result)).toBe('xxxxxxxx\nxxxxxxxx\nxxxxxxxx');
+    // split("\n") semantics: the trailing newline yields one empty final line.
+    expect(result.metadata?.get('total_lines')).toBe(String(lineCount + 1));
+    expect(result.metadata?.get('showing')).toBe(`101-103 (of ${lineCount + 1} total)`);
+  });
+
+  it('streams a large file: offset beyond end reports the true total', async () => {
+    const filePath = path.join(dir, 'big.log');
+    const lineCount = 150000;
+    const content = Array.from({ length: lineCount }, () => 'xxxxxxxx').join('\n') + '\n';
+    fsSync.writeFileSync(filePath, content);
+
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
+    const result = await tool.execute(
+      { path: 'big.log', offset: lineCount + 1 },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(resultStr(result)).toContain(`offset ${lineCount + 1} is beyond end`);
+    expect(result.metadata?.get('total_lines')).toBe(String(lineCount + 1));
+  });
 });
 
 // ── execute: directory listing ──────────────────────────────────────────────

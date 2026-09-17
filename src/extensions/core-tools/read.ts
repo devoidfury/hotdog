@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import type { Stats } from "node:fs";
 import path from "node:path";
 import {
@@ -15,6 +16,12 @@ import type { Workspace } from "@utils/workspace.ts";
 import { AssistantRetryableError } from "@core/error.ts";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.ts";
 import { ToolContext } from "@core/extensions/types.ts";
+
+/**
+ * Files at or below this size are read whole; larger files go through the streaming reader
+ * so that a paginated read of a multi-GB log doesn't materialize the whole file in memory.
+ */
+const STREAM_READ_THRESHOLD = 1 * 1024 * 1024;
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -147,6 +154,11 @@ export class ReadTool {
       return await readImage(resolved, mimeType, filePath, this.maxImageSize, stat?.size ?? 0);
     }
 
+    // Large files stream: readLines() slurps the whole file, which is what a paginated read of a huge log would otherwise do on every call.
+    if ((stat?.size ?? 0) > STREAM_READ_THRESHOLD) {
+      return await readLinesStreamed(resolved, offset, limit);
+    }
+
     return await readLines(resolved, offset, limit);
   }
 }
@@ -208,6 +220,66 @@ async function readLines(filePath: string, offset: number, limit: number): Promi
       total_lines: String(totalLines),
       offset: String(offset),
       limit: String(limit),
+      showing: `${offset + 1}-${end} (of ${totalLines} total)`,
+    });
+  } catch (e: unknown) {
+    return ToolResult.err(`Failed to read file: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Single streaming pass for large files: counts every line (so `total_lines` and the offset-beyond-end message match readLines)
+ * but retains only the requested window in memory. Line accounting mirrors `content.split("\n")` - each "\n" ends a line,
+ * and whatever trails the last "\n" (even nothing, for a trailing newline) is a line.
+ */
+async function readLinesStreamed(filePath: string, offset: number, limit: number): Promise<ToolResult> {
+  try {
+    const decoder = new TextDecoder("utf-8");
+    let lineIndex = 0;
+    let totalLines = 0;
+    let cur = "";
+    const window: string[] = [];
+
+    const emitLine = (line: string) => {
+      totalLines++;
+      if (lineIndex >= offset && window.length < limit) {
+        window.push(line);
+      }
+      lineIndex++;
+    };
+
+    const stream = createReadStream(filePath);
+    for await (const chunk of stream) {
+      let text = decoder.decode(chunk, { stream: true });
+      let nl: number;
+      while ((nl = text.indexOf("\n")) !== -1) {
+        emitLine(cur + text.slice(0, nl));
+        cur = "";
+        text = text.slice(nl + 1);
+      }
+      cur += text;
+    }
+    // Trailing partial line (or the empty line after a final "\n").
+    emitLine(cur + decoder.decode());
+
+    const entries = {
+      path: filePath,
+      total_lines: String(totalLines),
+      offset: String(offset),
+      limit: String(limit),
+    };
+
+    if (offset >= totalLines) {
+      return ToolResult.ok(
+        `File has ${totalLines} lines, offset ${offset} is beyond end.\n[empty]`,
+      ).withEntries(entries);
+    }
+
+    const end = Math.min(offset + limit, totalLines);
+    const result = window.length === 0 ? "[empty]" : window.join("\n");
+
+    return ToolResult.ok(result).withEntries({
+      ...entries,
       showing: `${offset + 1}-${end} (of ${totalLines} total)`,
     });
   } catch (e: unknown) {

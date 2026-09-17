@@ -80,6 +80,12 @@ export interface MessageBusOptions {
 
 // Owns the agent run loop; no polling -- enqueue() resolves a per-iteration deferred.
 export class MessageBus {
+  // The active run loop's promise, or null. This is the single-consumer
+  // guard: a second run()/runUntilCancelled() joins the existing loop instead
+  // of starting a second consumer on one queue. Two consumers sharing the
+  // single-slot #waiter strand parked generators and let one queued message
+  // drive overlapping agent.run() calls (duplicate delivery).
+  #loopPromise: Promise<void> | null = null;
   #sessionManager: MessageBusSessionManager;
   #sink: Sink;
   #queue: BusQueueItem[];
@@ -123,6 +129,9 @@ export class MessageBus {
   /** Makes a cancelled bus usable again; the queue is preserved. */
   reset(): void {
     this.#abortController = new AbortController();
+    // No touch on #loopPromise: the cancelled loop unwinds asynchronously and
+    // its .finally releases the slot. Clearing it here would let a run() race
+    // a still-exiting old loop.
   }
 
   get isCancelled(): boolean {
@@ -178,18 +187,38 @@ export class MessageBus {
     this.#waiter = v;
   }
 
-  /** Blocks until cancelled. */
+  /** Blocks until cancelled. Idempotent: a second call joins the active loop. */
   async run(): Promise<void> {
-    for await (const item of this._messages(false)) {
-      await this._processMessage(item);
-    }
+    return this.#ensureLoop(false);
   }
 
   /** Like run(), but drains the queue after cancellation before exiting. */
   async runUntilCancelled(): Promise<void> {
-    for await (const item of this._messages(true)) {
-      await this._processMessage(item);
+    return this.#ensureLoop(true);
+  }
+
+  // Single-consumer run loop. The FIRST run()/runUntilCancelled() starts the
+  // loop and records its promise; any later call JOINS the same promise
+  // instead of spawning a second consumer. Two consumers on one #waiter is
+  // the root of the duplicate-delivery bug: the UI hosts
+  // (ui-interactive-cli, ui-one-shot) call run() after SessionManager
+  // already started the loop, so without this they race the manager's loop
+  // and a single queued message can drive two agent.run() calls (the loser
+  // then throws AlreadyRunning inside _processMessage).
+  #ensureLoop(drain: boolean): Promise<void> {
+    if (this.#loopPromise) {
+      return this.#loopPromise;
     }
+    const loop = (async () => {
+      for await (const item of this._messages(drain)) {
+        await this._processMessage(item);
+      }
+    })();
+    const tracked = loop.finally(() => {
+      if (this.#loopPromise === tracked) this.#loopPromise = null;
+    });
+    this.#loopPromise = tracked;
+    return tracked;
   }
 
   _wakeWaiter(): void {

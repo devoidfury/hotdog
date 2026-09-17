@@ -580,7 +580,10 @@ export async function runInteractiveSession(
 
   rl.prompt();
 
-  // Run the message bus — awaited so the process stays alive until the user quits.
+  // Keep the process alive until the bus ends. SessionManager.create already
+  // started the run loop; bus.run() is join-idempotent, so this JOINS that
+  // loop (it used to start a second consumer on the same queue — the
+  // duplicate-delivery bug; see MessageBus.#ensureLoop).
   const bus = sessionManager.getBus(sessionManager.sessionId()!);
   if (bus) {
     await bus.run();

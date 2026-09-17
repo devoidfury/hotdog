@@ -573,3 +573,116 @@ describe("MessageBus — cancel path repairs interrupted tool calls", () => {
     expect(sink._emitted.some((e: any) => e.type === OUTPUT_EVENT.COMMAND_RESULT)).toBe(true);
   });
 });
+
+describe("MessageBus single run-loop invariant (double-consumer regression)", () => {
+  // Regression: hosts (ui-interactive-cli, ui-one-shot) called bus.run()/
+  // runUntilCancelled() after SessionManager.create had already started the
+  // loop. Two consumers shared one #waiter, so a single queued message could
+  // drive two overlapping agent.run() calls (duplicate delivery). run() is
+  // now join-idempotent.
+  it("second run() joins the active loop instead of adding a consumer", async () => {
+    // run() is an async method, so the returned promise identity is not
+    // preserved across the async wrapper; assert the join BEHAVIOR instead:
+    // one queued message drives exactly one agent.run() even with two
+    // run() callers, and the second caller's promise settles with the first.
+    const runs: string[] = [];
+    const agent = createMockAgent({
+      run: async (c) => {
+        runs.push(String(c));
+      },
+    });
+    const bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink: createMockSink(),
+    });
+
+    const first = bus.run();
+    const second = bus.run();
+    bus.enqueue("solo");
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(runs).toEqual(["solo"]); // one consumer, not two
+
+    bus.cancel();
+    // Both callers' promises settle from the single loop (join, not race).
+    await Promise.all([first, second]);
+    expect(runs).toEqual(["solo"]);
+  });
+
+  it("each queued message is processed exactly once with two run() callers", async () => {
+    const runs: string[] = [];
+    const agent = createMockAgent({
+      run: async (c) => {
+        runs.push(String(c));
+      },
+    });
+    const bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink: createMockSink(),
+    });
+
+    const first = bus.run();
+    const second = bus.run(); // the host's "await bus.run()"
+    bus.enqueue("only once");
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(runs).toEqual(["only once"]);
+
+    bus.cancel();
+    await Promise.all([first, second]);
+    expect(runs).toEqual(["only once"]);
+  });
+
+  it("runUntilCancelled joins an active run() loop rather than racing it", async () => {
+    const runs: number[] = [];
+    const agent = createMockAgent({
+      run: async () => {
+        runs.push(1);
+      },
+    });
+    const bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink: createMockSink(),
+    });
+
+    const first = bus.run();
+    const joined = bus.runUntilCancelled();
+    // (async wrapper hides promise identity; join is proven behaviorally by
+    // each message running exactly once, below.)
+
+    bus.enqueue("a");
+    bus.enqueue("b");
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(runs.length).toBe(2); // two messages, two runs — not doubled
+
+    bus.cancel();
+    await Promise.all([first, joined]);
+  });
+
+  it("the loop slot is released on exit so a restarted loop processes again", async () => {
+    const runs: string[] = [];
+    const agent = createMockAgent({
+      run: async (c) => {
+        runs.push(String(c));
+      },
+    });
+    const bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink: createMockSink(),
+    });
+
+    bus.enqueue("first");
+    const loop1 = bus.run();
+    await new Promise((resolve) => setImmediate(resolve));
+    bus.cancel();
+    await loop1;
+
+    bus.reset();
+    bus.enqueue("second");
+    const loop2 = bus.run();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(runs).toEqual(["first", "second"]);
+    bus.cancel();
+    await loop2;
+  });
+});

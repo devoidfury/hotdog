@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fix bug causing some duplicate messages added to the core agent loop
+
 - **[BRK]** removed the profile-level `role` field. The only "role" concepts that remain are the message-format wire encoding (`Message.role`, role-mapping) and plain prose in user-supplied context files.
   - Profile files with `role:` frontmatter still parse -- the key is dropped and can never reach prompt assembly (covered by tests asserting a profile role can never leak into the system prompt).
   - Config keys `role` and `taskDefaultRole` and the `--role` flag are gone; the `{{ role }}` placeholder was removed from the default system prompt template. If you had a role line, fold it into the profile body.

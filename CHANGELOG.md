@@ -4,6 +4,14 @@
 
 - fix bug causing some duplicate messages added to the core agent loop
 
+- tools - a batch of core-tool and extension fixes found by auditing `src/extensions/`:
+  - `project_info`: the non-git file listing was computed relative to the process CWD instead of the requested directory, so listing a directory from another launch dir produced absolute/`../` paths.
+  - `web_search`: the `results` count entry reported the number of output lines instead of the number of results (e.g. 3 results with descriptions read as 9).
+  - `find`: `max_results: 0` was accepted and silently returned "No files found" even when matches exist; it now falls back to the default like any other sub-minimum value. The `file_type` tool schema now documents the empty-file filter (`"e"`) the code already supported.
+  - `read`: files above 1MB are now read with a single streaming pass (the whole-file read is kept for small files), so paginating a multi-GB log no longer materializes the entire file in memory per call.
+- config - removed two dead config keys: `coreTools.maxDiffSize` and `handoffTool.systemPrompt` (declared in schema and docs, read by no code). Added the missing `layers` block to the `loop` config schema, which had left `loop.*` settings outside the config resolution pipeline.
+- `question` tool: the schema no longer marks `key` as required — it was always auto-generated from the prompt when omitted.
+
 - hooks - `notifyHooks()` is now awaitable: handlers start immediately in registration order (async ones run in parallel). Core call sites now await it where later code depends on the effect: the tool pipeline (`TOOL_BEFORE_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_AFTER_EXECUTE`, `TOOL_METRICS`), turn boundaries (`TURN_START`/`TURN_END`), session create/swap, the bootstrap registration hooks, and `SHUTDOWN_CLEANUP`. Previously an async `AGENT_TOOL_CONTEXT` handler could complete its tool-context mount *after* the `TOOL_CALL` gate (e.g. the user-gate approval seam) had already run. Signature note: `notifyHooks()` returns `Promise<void>` (was `void`); unawaited call sites keep the old behavior.
 
 - **[BRK]** removed the profile-level `role` field. The only "role" concepts that remain are the message-format wire encoding (`Message.role`, role-mapping) and plain prose in user-supplied context files.

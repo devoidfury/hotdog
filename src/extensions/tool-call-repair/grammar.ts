@@ -22,10 +22,11 @@ import { ToolCall } from "@core/context/message.ts";
 const LT = "<";
 const GT = ">";
 
-/** Regex source for one special token (pipe escaped). Built here rather
- than literal so this file never contains a token the backend would eat. */
+/** Regex source for one special token. Matches BOTH the Hermes pipe-delimited
+ style and the bare XML style (antml / chatml-embedded), pipes optional. Built
+ here rather than literal so this file never contains a token the backend would eat. */
 function reTok(name: string): string {
-  return LT + "\\|" + name + "\\|";
+  return LT + "\\|?" + name + "\\|?";
 }
 
 /** Regex source matching any of the given tag-name variants. */
@@ -42,11 +43,20 @@ const THINK_ALT = altTok("think");
 
 const CALL_OPEN_RE = new RegExp(CALL_ALT + GT);
 const CALL_CLOSE_RE = new RegExp(CALL_CLOSE_ALT + GT);
-// NAME> -- the "=" is mandatory in Hermes grammar; tolerate its
-// omission (the model dropping it is a frequent miss).
-const FUNC_OPEN_RE = new RegExp(FUNC_ALT + GT + "\\s*=?\\s*([A-Za-z0-9_.:-]+)\\s*" + GT);
+// NAME -- the "=" is mandatory in Hermes grammar; tolerate its
+// omission (the model dropping it is a frequent miss). The optional pipe
+// before GT admits the XML-style close after a bare-name tag head; the
+// name may also ride inside the head (antml style), hence the second alt.
+// Function/param open. Two name slots:
+//  - legacy/Hermes: header token (pipes), then optional "=" and the name, then ">"
+//  - inside-header (antml/chatml XML, and Hermes where the name rides inside the bars):
+//    the name attaches to the header with "=", the tag then closes (stray bar tolerated)
+// reTok's optional bars admit the bare XML style and any half-dropped bar.
+const NAME_SRC = "([A-Za-z0-9_.:-]+)";
+const OPEN_TAIL = "(?:" + GT + "\\s*=?\\s*" + NAME_SRC + "|\\s*=\\s*" + NAME_SRC + "\\s*\\|?)";
+const FUNC_OPEN_RE = new RegExp(FUNC_ALT + OPEN_TAIL + GT);
 const FUNC_CLOSE_RE = new RegExp(altTok("/function", "/func") + GT);
-const PARAM_OPEN_RE = new RegExp(PARAM_ALT + GT + "\\s*=?\\s*([A-Za-z0-9_.:-]+)\\s*" + GT);
+const PARAM_OPEN_RE = new RegExp(PARAM_ALT + OPEN_TAIL + GT);
 const PARAM_CLOSE_RE = new RegExp(altTok("/parameter", "/param") + GT);
 
 export interface ParsedCall {
@@ -104,7 +114,7 @@ function parseParam(
   // Hermes wraps values with a leading and trailing newline; strip exactly
   // those (internal whitespace is data).
   const raw = rest.slice(0, close.index).replace(/^\n/, "").replace(/\n$/, "");
-  const name = open[1];
+  const name = open[1] ?? open[2];
   if (!name) return null;
   return { name, value: coerceScalar(raw), end: valueStart + close.index + close[0].length };
 }
@@ -149,15 +159,16 @@ function parseParams(text: string, from: number): { args: Record<string, unknown
 function parseOneCall(text: string, from: number): ParsedCall | null {
   const rest = text.slice(from);
   const fmap = FUNC_OPEN_RE.exec(rest);
+  const funcName = fmap ? (fmap[1] ?? fmap[2]) : undefined;
   // Only accept a function open at the block head (after whitespace/junk).
-  if (!fmap || !fmap[1] || !JUNK_ONLY.test(rest.slice(0, fmap.index))) return null;
+  if (!fmap || !funcName || !JUNK_ONLY.test(rest.slice(0, fmap.index))) return null;
   const parsed = parseParams(text, from + fmap.index + fmap[0].length);
   if (!parsed) return null;
   return {
     call: {
       id: newCallId(),
       type: "function",
-      function: { name: fmap[1] as string, arguments: JSON.stringify(parsed.args) },
+      function: { name: funcName as string, arguments: JSON.stringify(parsed.args) },
     },
     end: parsed.end,
   };

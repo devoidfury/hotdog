@@ -16,6 +16,24 @@ const LT = "<";
 const GT = ">";
 const T = (name: string): string => `${LT}|${name}|`;
 
+/** Assemble a chatml-embedded XML-style call block (antml-ish): bare tags,
+ name attaches inside the head with "=". */
+function xmlBlock(
+  fn: string,
+  params: Array<[string, string]>,
+  opts: { closeFunc?: boolean; closeCall?: boolean; paramOpen?: string } = {},
+): string {
+  const { closeFunc = true, closeCall = true, paramOpen = "parameter" } = opts;
+  let s = LT + "tool-call" + GT + "\n";
+  s += `${LT}function=${fn}${GT}\n`;
+  for (const [name, value] of params) {
+    s += `${LT}${paramOpen}=${name}${GT}\n${value}\n${LT}/parameter${GT}\n`;
+  }
+  if (closeFunc) s += `${LT}/function${GT}\n`;
+  if (closeCall) s += LT + "/tool-call" + GT;
+  return s;
+}
+
 /** Assemble a Hermes-format call block. */
 function hermes(
   fn: string,
@@ -194,6 +212,38 @@ describe("repairCallsInText", () => {
     const two = hermes("grep", [["pattern", "b"]]);
     const r = repairCallsInText(one + two);
     expect(r.repaired).toBe(false);
+  });
+
+  it("repairs a chatml XML-style block", () => {
+    const r = repairCallsInText(xmlBlock("bash", [["command", "ls -alh ./"]]));
+    expect(r.repaired).toBe(true);
+    expect(r.calls.length).toBe(1);
+    expect(r.calls[0]!.function.name).toBe("bash");
+    expect(JSON.parse(r.calls[0]!.function.arguments)).toEqual({ command: "ls -alh ./", });
+  });
+
+  it("repairs an XML-style block glued to prose with no newlines", () => {
+    const r = repairCallsInText("Sure, running it." + xmlBlock("bash", [["command", "ls"]]));
+    expect(r.repaired).toBe(true);
+    expect(r.text).toBe("Sure, running it.");
+  });
+
+  it("repairs an XML-style block with the call close omitted", () => {
+    const r = repairCallsInText("note" + xmlBlock("bash", [["command", "ls"]], { closeCall: false }));
+    expect(r.repaired).toBe(true);
+    expect(JSON.parse(r.calls[0]!.function.arguments)).toEqual({ command: "ls" });
+  });
+
+  it("repairs a half-piped block (bar dropped from one head)", () => {
+    // antml tags with a stray Hermes bar: name still inside the head.
+    const block =
+      LT + "|tool-call" + GT + "\n" +
+      LT + "function=bash|" + GT + "\n" +
+      LT + "param=command" + GT + "\nls\n" + LT + "/param" + GT + "\n" +
+      LT + "/function" + GT;
+    const r = repairCallsInText(block);
+    expect(r.repaired).toBe(true);
+    expect(r.calls[0]!.function.name).toBe("bash");
   });
 });
 

@@ -69,14 +69,14 @@ export class QuestionTool {
         properties: {
           questions: param(
             "array",
-            "List of questions to ask. Each question must have a 'key' (unique identifier) and 'prompt' (the question text). Optional fields: 'options' (array of allowed answers), 'required' (boolean, default true), 'default' (default value), 'allow_other' (boolean, default true — when false, enforces strict selection from options).",
+            "List of questions to ask. Each question must have a 'prompt' (the question text)",
             {
               items: {
                 type: "object",
                 properties: {
                   key: {
                     type: "string",
-                    description: "Unique identifier for this question. Answers are returned keyed by this value.",
+                    description: "Unique identifier for this question. Answers are returned keyed by this value. Optional, auto-generated from the prompt when omitted.",
                   },
                   prompt: {
                     type: "string",
@@ -100,7 +100,7 @@ export class QuestionTool {
                     description: "When false, enforces strict selection from options. Defaults to true (free text accepted alongside option selection).",
                   },
                 },
-                required: ["key", "prompt"],
+                required: ["prompt"],
               },
             },
           ),

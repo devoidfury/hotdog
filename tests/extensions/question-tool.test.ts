@@ -35,7 +35,8 @@ describe("QuestionTool", () => {
       expect(props.required).toEqual(expect.objectContaining({ type: "boolean" }));
       expect(props.default).toEqual(expect.objectContaining({ type: "string" }));
       expect(props.allow_other).toEqual(expect.objectContaining({ type: "boolean" }));
-      expect(questionsParam.items.required).toEqual(["key", "prompt"]);
+      // key is optional (auto-generated from the prompt); only prompt is required
+      expect(questionsParam.items.required).toEqual(["prompt"]);
     });
   });
 

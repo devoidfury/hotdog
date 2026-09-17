@@ -1,5 +1,6 @@
 {
   "name": "loop",
+  "provides": [],
   "loadOrder": 10,
   "description": "/loop slash command — repeatedly run a prompt until cancelled",
   "configSchema": {
@@ -17,7 +18,11 @@
           "description": "Maximum number of loops (-1 = unlimited)"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "loop" },
+        { "default": {} }
+      ]
     }
   }
 }

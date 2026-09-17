@@ -111,7 +111,6 @@ export class HandoffTool {
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
     enabled?: boolean;
-    systemPrompt?: boolean;
     autoIncludeFilesUnderBytes?: number;
   }>(core, "handoffTool");
 

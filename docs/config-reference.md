@@ -850,7 +850,6 @@ Extensions register their own configuration namespaces. Each extension's config 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
-| `systemPrompt` | `boolean` | `true` | Include handoff tool instructions in the system prompt. |
 | `autoIncludeFilesUnderBytes` | `number` | `24576` | Files in the handoff `files` list that exist and are this size or smaller (bytes) are inlined into the handoff message; larger and missing files are listed with their size. Default 24KB. Set to `0` to list files without inlining any. |
 
 ```json
@@ -917,7 +916,6 @@ Bash commands run with the user's own permissions -- nothing mediates a running 
 | `readToolLimit` | `number` | `500` | Max lines for the `read` tool. |
 | `findMaxResults` | `number` | `200` | Max results for the `find` tool. |
 | `grepMaxResults` | `number` | `100` | Max results for the `grep` tool. |
-| `maxDiffSize` | `number` | `8000` | Max diff size in characters. _(defined but not currently used)_ |
 | `maxEditInputSize` | `number` | `16000` | Max edit input size (oldString + newString) in characters. |
 | `maxToolOutputLines` | `number` | `600` | Max output lines for tool results. |
 

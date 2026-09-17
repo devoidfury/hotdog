@@ -27,11 +27,6 @@
           "default": 100,
           "description": "Maximum number of results for the grep tool"
         },
-        "maxDiffSize": {
-          "type": "number",
-          "default": 8000,
-          "description": "Maximum diff size in characters"
-        },
         "maxEditInputSize": {
           "type": "number",
           "default": 16000,

@@ -12,11 +12,6 @@
           "default": true,
           "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
         },
-        "systemPrompt": {
-          "type": "boolean",
-          "default": true,
-          "description": "Whether to include handoff tool instructions in the system prompt."
-        },
         "autoIncludeFilesUnderBytes": {
           "type": "integer",
           "minimum": 0,

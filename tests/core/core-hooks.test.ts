@@ -34,16 +34,18 @@ describe("HookSystem.on() / notifyHooks()", () => {
     expect(order).toEqual(["a", "b"]);
   });
 
-  it("should return undefined (fire-and-forget)", () => {
+  it("should return a promise (return values are discarded)", async () => {
     const hooks = createHooks();
     hooks.on("test:hook", () => "first");
     hooks.on("test:hook", () => "second");
-    expect(hooks.notifyHooks("test:hook", {})).toBeUndefined();
+    const result = hooks.notifyHooks("test:hook", {});
+    expect(result).toBeInstanceOf(Promise);
+    await result;
   });
 
-  it("returns undefined and does not throw for unregistered hook", () => {
+  it("resolves and does not throw for unregistered hook", async () => {
     const hooks = createHooks();
-    expect(hooks.notifyHooks("nonexistent:hook", {})).toBeUndefined();
+    await hooks.notifyHooks("nonexistent:hook", {});
   });
 });
 
@@ -223,6 +225,70 @@ describe("notifyHooks()", () => {
     await new Promise((r) => setTimeout(r, 50));
     // Async handlers were started in order
     expect(calls).toContain("second");
+  });
+});
+
+// ── notifyHooks() — awaited completion and parallel handlers ──────────────
+
+describe("notifyHooks() — awaited semantics", () => {
+  it("awaiting guarantees async handler side effects are complete", async () => {
+    const hooks = createHooks();
+    let mounted: unknown = null;
+    hooks.on("test:hook", async () => {
+      await new Promise((r) => setTimeout(r, 10));
+      mounted = "value";
+    });
+    await hooks.notifyHooks("test:hook", {});
+    expect(mounted).toBe("value");
+  });
+
+  it("runs async handlers in parallel (not sequentially)", async () => {
+    const hooks = createHooks();
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstDone = new Promise<void>((r) => (releaseFirst = r));
+    hooks.on("test", async () => {
+      order.push("first-start");
+      await firstDone;
+      order.push("first-end");
+    });
+    hooks.on("test", async () => {
+      order.push("second-start");
+      order.push("second-end");
+    });
+    const p = hooks.notifyHooks("test", {});
+    // The no-await handler completes while the first is still pending:
+    // sequential execution would show "second-start" only after "first-end".
+    expect(order).toEqual(["first-start", "second-start", "second-end"]);
+    releaseFirst();
+    await p;
+    expect(order).toEqual(["first-start", "second-start", "second-end", "first-end"]);
+  });
+
+  it("a failing async handler does not block the promise or other handlers", async () => {
+    const hooks = createHooks();
+    const calls: string[] = [];
+    hooks.on("test", async () => {
+      await new Promise((r) => setTimeout(r, 10));
+      throw new Error("boom");
+    });
+    hooks.on("test", async () => {
+      calls.push("ok");
+    });
+    await hooks.notifyHooks("test", {});
+    expect(calls).toEqual(["ok"]);
+  });
+
+  it("unawaited calls keep fire-and-forget behavior", () => {
+    const hooks = createHooks();
+    const calls: string[] = [];
+    hooks.on("test", () => calls.push("sync"));
+    hooks.on("test", async () => {
+      await new Promise((r) => setTimeout(r, 10));
+      calls.push("async");
+    });
+    hooks.notifyHooks("test", {}); // intentionally not awaited
+    expect(calls).toEqual(["sync"]);
   });
 });
 

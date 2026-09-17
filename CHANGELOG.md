@@ -4,6 +4,8 @@
 
 - fix bug causing some duplicate messages added to the core agent loop
 
+- hooks - `notifyHooks()` is now awaitable: handlers start immediately in registration order (async ones run in parallel). Core call sites now await it where later code depends on the effect: the tool pipeline (`TOOL_BEFORE_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_AFTER_EXECUTE`, `TOOL_METRICS`), turn boundaries (`TURN_START`/`TURN_END`), session create/swap, the bootstrap registration hooks, and `SHUTDOWN_CLEANUP`. Previously an async `AGENT_TOOL_CONTEXT` handler could complete its tool-context mount *after* the `TOOL_CALL` gate (e.g. the user-gate approval seam) had already run. Signature note: `notifyHooks()` returns `Promise<void>` (was `void`); unawaited call sites keep the old behavior.
+
 - **[BRK]** removed the profile-level `role` field. The only "role" concepts that remain are the message-format wire encoding (`Message.role`, role-mapping) and plain prose in user-supplied context files.
   - Profile files with `role:` frontmatter still parse -- the key is dropped and can never reach prompt assembly (covered by tests asserting a profile role can never leak into the system prompt).
   - Config keys `role` and `taskDefaultRole` and the `--role` flag are gone; the `{{ role }}` placeholder was removed from the default system prompt template. If you had a role line, fold it into the profile body.

@@ -315,37 +315,37 @@ export class Agent implements AgentLike {
         const result = await this._handleLlmResponse(response, params);
 
         if (typeof result === "string") {
-          this._emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
+          await this._emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
           turnEnded = true;
           return { type: 'completion', content: result };
         }
 
         const { outcome, toolResults } = result;
         if (outcome !== "continue") {
-          this._emitTurnEnd(iteration, response.fullText, toolResults, true, this.cancelled, "tool_return");
+          await this._emitTurnEnd(iteration, response.fullText, toolResults, true, this.cancelled, "tool_return");
           turnEnded = true;
           return { type: 'tool_return', outcome };
         }
 
-        this._emitTurnEnd(iteration, response.fullText, toolResults, false, this.cancelled, "continue");
+        await this._emitTurnEnd(iteration, response.fullText, toolResults, false, this.cancelled, "continue");
         turnEnded = true;
       }
 
       // Emit turn-end so listeners unblock before the throw.
-      this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, "max_iterations");
+      await this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, "max_iterations");
       turnEnded = true;
       throw AgentError.MaxIterations(this.maxIterations);
     } finally {
       this.#running = false;
       if (!turnEnded) {
         const reason: TurnEndReason = this.cancelled ? "cancelled" : "error";
-        this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, reason);
+        await this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, reason);
       }
     }
   }
 
   private async _prepareIteration(iteration: number): Promise<LlmRequestParams> {
-    this.hooks.notifyHooks(HOOKS.TURN_START, {
+    await this.hooks.notifyHooks(HOOKS.TURN_START, {
       turnIndex: iteration,
       timestamp: Date.now(),
       agent: this,
@@ -437,7 +437,7 @@ export class Agent implements AgentLike {
       { response, modelConfig, agent: this },
     );
     if (resResult.lastResult?.response) response = resResult.lastResult.response;
-    this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.context.getMessages(), agent: this });
+    await this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.context.getMessages(), agent: this });
 
     const assistantMsg = new Message({
       role: "assistant",
@@ -498,15 +498,15 @@ export class Agent implements AgentLike {
     }
   }
 
-  private _emitTurnEnd(
+  private async _emitTurnEnd(
     iteration: number,
     message: string,
     toolResults: Array<ToolResult>,
     stopped: boolean,
     cancelled = false,
     reason: TurnEndReason,
-  ) {
-    this.hooks.notifyHooks(HOOKS.TURN_END, {
+  ): Promise<void> {
+    await this.hooks.notifyHooks(HOOKS.TURN_END, {
       turnIndex: iteration,
       message,
       toolResults,

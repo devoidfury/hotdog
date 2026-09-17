@@ -1,5 +1,6 @@
-// Hook system. notifyHooks() is fire-and-forget; runHookPipeline() runs
-// handlers sequentially and accumulates their return values.
+// Hook system.
+// notifyHooks() fires all handlers (async ones run in parallel) settles once every handler has settled.
+// runHookPipeline() runs handlers sequentially and accumulates their return values.
 
 import { formatError } from "./error.ts";
 import { logger } from "@utils/logger.ts";
@@ -193,13 +194,15 @@ export class HookSystem {
     return false;
   }
 
-  // Fire-and-forget: handlers run in order, return values ignored. Async
-  // handlers are not awaited; their errors are caught and logged.
-  notifyHooks<H extends string>(
+  // handlers are started immediately in registration order. sync handlers run synchronously in order, async handlers run in PARALLEL.
+  // returned promise resolves once every handler has settled, so `await notifyHooks(...)` gives a deterministic point where
+  // side effects are complete (e.g. tool executor awaits AGENT_TOOL_CONTEXT so mounts are in place before the TOOL_CALL gate).
+  async notifyHooks<H extends string>(
     hookName: H,
     data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
-  ): void {
+  ): Promise<void> {
     const handlers = this.#hooks.get(hookName) || [];
+    const settled: Array<Promise<void>> = [];
 
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
@@ -210,12 +213,14 @@ export class HookSystem {
         const result = entry.handler(data);
 
         if (isPromise(result)) {
-          (result as Promise<unknown>).then(
-            () => this._logTrace(hookName, i, handlers.length, entry, t0),
-            (e: unknown) => {
-              this._logTrace(hookName, i, handlers.length, entry, t0, " — error");
-              logger.error(`[hook:${hookName}] ${formatError(e)}`);
-            },
+          settled.push(
+            (result as Promise<unknown>).then(
+              () => this._logTrace(hookName, i, handlers.length, entry, t0),
+              (e: unknown) => {
+                this._logTrace(hookName, i, handlers.length, entry, t0, " — error");
+                logger.error(`[hook:${hookName}] ${formatError(e)}`);
+              },
+            ),
           );
         } else {
           this._logTrace(hookName, i, handlers.length, entry, t0);
@@ -225,6 +230,8 @@ export class HookSystem {
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
+
+    await Promise.all(settled);
   }
 
   // Sequential pipeline: each handler sees prior transformations; returns all results.

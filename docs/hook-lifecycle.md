@@ -28,11 +28,11 @@ The hook system is the primary extension mechanism in hotdog. It decouples the c
 
 | Method | Pattern | Use Case |
 |--------|---------|----------|
-| `notifyHooks(name, data)` | Fire-and-forget (sync or async handlers) | Notifications, logging, tracing, side effects |
+| `notifyHooks(name, data)` | Awaitable notify — handlers start immediately in registration order (async ones run in parallel); returns a promise that settles once every handler has settled | Notifications, logging, tracing, side effects |
 | `runHookPipeline(name, data, opts)` | Sequential, returns results | Modifications that chain (e.g., context, tool call gate) |
 
 **Key distinction:**
-- **Fire-and-forget** — handlers run and their return values are discarded. Used for side-effect notifications.
+- **Notify (awaitable)** — handlers start immediately and their return values are discarded. The returned promise settles once every handler has completed, so core call sites `await` it whenever later code depends on the handlers' effects (e.g. the tool executor awaits `AGENT_TOOL_CONTEXT` so context mounts are complete before the `TOOL_CALL` gate). Unawaited call sites keep plain fire-and-forget behavior.
 - **Pipeline** — handlers run one at a time, each sees the accumulated state, and can return a result to stop or transform processing. Used for gates and transformations.
 
 ### Pipeline Options
@@ -85,8 +85,8 @@ Dispatch Subcommand ───────► Or start interactive session
 
 | Hook | When | Mechanism | Payload |
 |------|------|-----------|---------|
-| `cli:argsParsed` | After CLI args parsed | sync notify | `{ cli }` |
-| `cli:subcommandsRegister` | After extensions loaded | sync notify | `cliSubcommandRegistry` |
+| `cli:argsParsed` | After CLI args parsed | awaited notify | `{ cli }` |
+| `cli:subcommandsRegister` | After extensions loaded | awaited notify | `cliSubcommandRegistry` |
 
 ### 2. Session Lifecycle
 
@@ -103,9 +103,9 @@ Session Restore ────────────► "session:restoreActive"
 
 | Hook | When | Mechanism | Payload |
 |------|------|-----------|---------|
-| `session:create` | New agent created | async notify | `{ session, config }` |
-| `session:swap` | Agent swapped | async notify | `{ oldAgent, newAgent }` |
-| `session:restoreActive` | Restore flag changes | sync notify | `{ agent, isRestoring }` |
+| `session:create` | New agent created | awaited notify | `{ session, config }` |
+| `session:swap` | Agent swapped | awaited notify (sync `switchSession()` fires unawaited) | `{ oldAgent, newAgent }` |
+| `session:restoreActive` | Restore flag changes | notify (fire-and-forget) | `{ agent, isRestoring }` |
 
 ### 3. Agent Run Loop — Per-Iteration Lifecycle
 
@@ -115,7 +115,7 @@ This is the heart of the system — one iteration of the LLM-tools loop.
 ┌─────────────────────────────────────────────────────────┐
 │                  AGENT RUN LOOP (one iteration)         │
 │                                                          │
-│  1. TURN_START ───────────────► async notify             │
+│  1. TURN_START ───────────────► awaited notify           │
 │      (per-turn metrics, analytics)                       │
 │                                                          │
 │  2. INPUT ────────────────────► sequential pipeline      │
@@ -148,12 +148,12 @@ This is the heart of the system — one iteration of the LLM-tools loop.
 │  8. PROVIDER_RESPONSE ───────► pipeline                  │
 │      (response logging, metrics, cost tracking, repair)  │
 │                                                          │
-│  9. MESSAGES_AFTER_LLM ─────► async notify              │
+│  9. MESSAGES_AFTER_LLM ─────► awaited notify            │
 │      (post-LLM analysis)                                 │
 │                                                          │
 │ 10. TOOL EXECUTION ──────────► See tool pipeline below   │
 │                                                          │
-│ 11. TURN_END ───────────────► async notify               │
+│ 11. TURN_END ───────────────► awaited notify             │
 │      (per-turn analysis, audit, UI prompt control)       │
 │                                                          │
 └─────────────────────────────────────────────────────────┘
@@ -167,12 +167,14 @@ Each tool call goes through a dedicated sub-pipeline:
   LLM returns tool_calls
        │
        ▼
-  TOOL_BEFORE_EXECUTE ───────► async notify
+  TOOL_BEFORE_EXECUTE ───────► awaited notify
        │
        ▼
-  AGENT_TOOL_CONTEXT ─────────► async notify (build toolCtx, enrich it)
-       │                       Runs BEFORE the gate so a gate handler can
-       │                       reach the human through toolCtx.get("input")
+  AGENT_TOOL_CONTEXT ─────────► awaited notify (build toolCtx, enrich it)
+       │                       Awaited: mounts (even from async handlers)
+       │                       are complete BEFORE the gate, so a gate
+       │                       handler can reach the human through
+       │                       toolCtx.get("input")
        ▼
   TOOL_CALL (gate) ──────────► sequential pipeline (payload carries toolCtx)
        │                       Actions:
@@ -188,7 +190,7 @@ Each tool call goes through a dedicated sub-pipeline:
   Execute tool ──────────────► tool.execute(input, toolCtx)
        │
        ▼
-  TOOL_AFTER_EXECUTE ────────► async notify
+  TOOL_AFTER_EXECUTE ────────► awaited notify
        │
        ▼
   TOOL_RESULT ───────────────► sequential pipeline
@@ -199,14 +201,15 @@ Each tool call goes through a dedicated sub-pipeline:
   Format & write ────────────► XML-wrapped result → context
        │
        ▼
-  CONTEXT_MESSAGE ───────────► async notify (session log, etc.)
+  CONTEXT_MESSAGE ───────────► notify (fire-and-forget; session log, etc.)
 ```
 
 ### 4. Shutdown
 
 ```
-  SHUTDOWN_CLEANUP ──────────► async notify
-       │                       (close MCP connections, flush logs, etc.)
+  SHUTDOWN_CLEANUP ──────────► awaited notify
+       │                       (close MCP connections, flush logs, etc. —
+       │                        cleanup() resolves once they all settle)
 ```
 
 ---
@@ -217,17 +220,17 @@ Each tool call goes through a dedicated sub-pipeline:
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `SESSION_CREATE` | `session:create` | async notify | New agent created via SessionManager |
-| `SESSION_SWAP` | `session:swap` | async notify | Agent swapped in SessionManager |
-| `SESSION_RESTORE_ACTIVE` | `session:restoreActive` | sync notify | Restore flag changes on agent |
+| `SESSION_CREATE` | `session:create` | awaited notify | New agent created via SessionManager |
+| `SESSION_SWAP` | `session:swap` | awaited notify | Agent swapped (`swap()` awaits it; the sync `switchSession()` path fires it unawaited) |
+| `SESSION_RESTORE_ACTIVE` | `session:restoreActive` | notify (fire-and-forget) | Restore flag changes on agent (sync setter) |
 
 ### Message Flow
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `CONTEXT_MESSAGE` | `context:message` | async notify | A message added to agent context |
-| `CONTEXT_REPLACED` | `context:replaced` | async notify | Entire context replaced (compaction, reset) |
-| `MESSAGES_AFTER_LLM` | `messages:afterLLM` | async notify | After LLM response received |
+| `CONTEXT_MESSAGE` | `context:message` | notify (fire-and-forget) | A message added to agent context (sync call site) |
+| `CONTEXT_REPLACED` | `context:replaced` | notify (fire-and-forget) | Entire context replaced (compaction, reset) |
+| `MESSAGES_AFTER_LLM` | `messages:afterLLM` | awaited notify | After LLM response received |
 | `LOOP_DETECTED` | `loop:detected` | — | **Unimplemented** — defined in source but not yet emitted |
 
 ### Context / Prompt Building
@@ -242,20 +245,20 @@ Each tool call goes through a dedicated sub-pipeline:
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `TOOLS_REGISTER` | `tools:register` | sync notify | Register tools with the registry |
-| `TOOL_METADATA` | `tool:metadata` | async notify | After tools register — extensions can modify tool metadata |
-| `TOOL_BEFORE_EXECUTE` | `tool:beforeExecute` | async notify | Before a tool executes |
-| `TOOL_AFTER_EXECUTE` | `tool:afterExecute` | async notify | After a tool executes |
-| `TOOL_CALL` | `tool:call` | pipeline | Gate — block, modify, or allow tool calls. Payload: `toolCallId`, `toolName`, `input`, `agent`, `toolCtx` (built before this pipeline, so a handler can prompt through `toolCtx.get("input")`) |
+| `TOOLS_REGISTER` | `tools:register` | invoked by the loader | Register tools with the registry (the extension loader awaits it directly during `load()`) |
+| `TOOL_METADATA` | `tool:metadata` | awaited notify | After tools register — extensions can modify tool metadata |
+| `TOOL_BEFORE_EXECUTE` | `tool:beforeExecute` | awaited notify | Before a tool executes |
+| `TOOL_AFTER_EXECUTE` | `tool:afterExecute` | awaited notify | After a tool executes (settled before the `TOOL_RESULT` pipeline) |
+| `TOOL_CALL` | `tool:call` | pipeline | Gate — block, modify, or allow tool calls. Payload: `toolCallId`, `toolName`, `input`, `agent`, `toolCtx` (built and settled before this pipeline, so a handler can prompt through `toolCtx.get("input")`) |
 | `TOOL_RESULT` | `tool:result` | pipeline | Modify tool result before LLM sees it |
-| `AGENT_TOOL_CONTEXT` | `agent:toolContext` | async notify | Enrich shared tool context — fires before the `TOOL_CALL` gate, so handlers only mount services (idempotent); the same `toolCtx` instance reaches the gate payload and `tool.execute()` |
-| `TOOL_METRICS` | `tool:metrics` | async notify | After each individual tool execution — telemetry, profiling |
+| `AGENT_TOOL_CONTEXT` | `agent:toolContext` | awaited notify | Enrich shared tool context — awaited before the `TOOL_CALL` gate, so handler mounts (even from async handlers) are complete for the gate and `tool.execute()`; the same `toolCtx` instance reaches both |
+| `TOOL_METRICS` | `tool:metrics` | awaited notify | After each individual tool execution — telemetry, profiling |
 
 ### Services
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `SERVICES_REGISTER` | `services:register` | sync notify | Register abstract service implementations (fired during extension load) |
+| `SERVICES_REGISTER` | `services:register` | invoked by the loader | Register abstract service implementations (the extension loader invokes it synchronously during `load()`, so services are available to downstream extensions) |
 
 ### Provider Interaction
 
@@ -270,37 +273,37 @@ The `LlmProtocol` (selected by the `protocol` field on the model or provider ent
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `TURN_START` | `turn:start` | async notify | Beginning of each agent loop iteration |
-| `TURN_END` | `turn:end` | async notify | End of each agent loop iteration |
+| `TURN_START` | `turn:start` | awaited notify | Beginning of each agent loop iteration |
+| `TURN_END` | `turn:end` | awaited notify | End of each agent loop iteration (settled before the loop returns, advances, or throws) |
 
 ### Model / Config
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `MODEL_CHANGE` | `model:change` | sync notify | Agent model changed |
+| `MODEL_CHANGE` | `model:change` | notify (fire-and-forget) | Agent model changed (sync setter) |
 
 ### CLI / Commands
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `CLI_SUBCOMMANDS_REGISTER` | `cli:subcommandsRegister` | sync notify | Register CLI subcommand handlers |
-| `CLI_ARGS_PARSED` | `cli:argsParsed` | sync notify | After CLI args parsed. Notification only: it runs after the early exit for "no subcommand", so use `cli:flags[].isSubcommand` to select a subcommand |
-| `COMPLETION_REQUEST` | `completion:request` | async notify | UI requests tab completions |
+| `CLI_SUBCOMMANDS_REGISTER` | `cli:subcommandsRegister` | awaited notify | Register CLI subcommand handlers |
+| `CLI_ARGS_PARSED` | `cli:argsParsed` | awaited notify | After CLI args parsed. Notification only: it runs after the early exit for "no subcommand", so use `cli:flags[].isSubcommand` to select a subcommand |
+| `COMPLETION_REQUEST` | `completion:request` | — | **Unfired** — defined in source but never notified; tab completions go through `CompletionService.register()` instead |
 | `COMMAND_DISPATCH` | `command:dispatch` | pipeline | Dispatch a command — handlers can intercept |
-| `COMMANDS_REGISTER` | `commands:register` | sync notify | Register slash commands |
+| `COMMANDS_REGISTER` | `commands:register` | awaited notify | Register slash commands (agent factory awaits it before the agent is returned) |
 
 ### Output / Logging
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `OUTPUT_EVENT` | `output:event` | sync notify | Any output event (tool call, result, streaming, etc.) |
-| `LOG` | `log` | sync notify | Logger emits a log entry |
+| `OUTPUT_EVENT` | `output:event` | notify (fire-and-forget) | Any output event (tool call, result, streaming, etc.) |
+| `LOG` | `log` | notify (fire-and-forget) | Logger emits a log entry |
 
 ### Shutdown
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `SHUTDOWN_CLEANUP` | `shutdown:cleanup` | async notify | Application shutdown — cleanup handlers |
+| `SHUTDOWN_CLEANUP` | `shutdown:cleanup` | awaited notify | Application shutdown — cleanup handlers (all must settle before cleanup returns) |
 
 ---
 
@@ -308,9 +311,14 @@ The `LlmProtocol` (selected by the `protocol` field on the model or provider ent
 
 Extensions register handlers via the `create()` function, which receives the `core` object and returns an object with a `hooks` property. Each key is a hook name, each value is a handler function.
 
-### 1. Fire-and-Forget Notification
+### 1. Notification (side effects)
 
-Used for logging, metrics, side effects. Return value is ignored.
+Used for logging, metrics, side effects. Return value is ignored. Async
+handlers run in parallel; the core `await`s the `notifyHooks()` promise at
+ordering-critical sites (tool pipeline, turn boundaries, session lifecycle,
+shutdown), so by the time the awaited point passes, every handler has
+settled. Sync core call sites (message add, model change, output events)
+fire it unawaited — treat those as plain fire-and-forget.
 
 ```js
 // session-log extension

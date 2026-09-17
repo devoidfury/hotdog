@@ -71,7 +71,7 @@ async function loadExtensions(
   for (const [name, tool] of core.toolRegistry.getAll()) {
     toolMetadataMap.set(name, tool.metadata);
   }
-  core.hooks.notifyHooks(HOOKS.TOOL_METADATA, { tools: toolMetadataMap } as ToolMetadataPayload);
+  await core.hooks.notifyHooks(HOOKS.TOOL_METADATA, { tools: toolMetadataMap } as ToolMetadataPayload);
 
   // Only validate extensions that were actually loaded.
   const loadedExtensions = extensionsToLoad.filter((ext) => core.extensions.has(ext.name));
@@ -284,9 +284,9 @@ export async function main(): Promise<number> {
   await loadExtensions(core, { taskManager: null, config });
 
   // Metadata already came from extension.json; this hook lets extensions attach handler functions.
-  core.hooks.notifyHooks(HOOKS.CLI_SUBCOMMANDS_REGISTER, core.cliSubcommandRegistry);
+  await core.hooks.notifyHooks(HOOKS.CLI_SUBCOMMANDS_REGISTER, core.cliSubcommandRegistry);
 
-  core.hooks.notifyHooks(HOOKS.CLI_ARGS_PARSED, { cli });
+  await core.hooks.notifyHooks(HOOKS.CLI_ARGS_PARSED, { cli });
 
   if (cli.subcommand) {
     const subcommandDef = core.cliSubcommandRegistry.get(cli.subcommand);

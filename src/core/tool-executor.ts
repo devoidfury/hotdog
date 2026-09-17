@@ -124,7 +124,7 @@ export class ToolExecutor {
     }
 
     this.#deps.emitOutput("tool_call", { toolName, input, toolCallId });
-    hooks.notifyHooks(HOOKS.TOOL_BEFORE_EXECUTE, {
+    await hooks.notifyHooks(HOOKS.TOOL_BEFORE_EXECUTE, {
       toolCallId,
       toolName,
       input,
@@ -138,7 +138,7 @@ export class ToolExecutor {
     // handlers only mount services on toolCtx/agent, so running them earlier
     // is order-neutral for everything else.
     const toolCtx = this.#buildToolContext();
-    hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, { toolCtx, toolName, agent });
+    await hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, { toolCtx, toolName, agent });
 
     // failOnError: a gate handler that throws must not be treated as a
     // pass — the error propagates to execute()'s catch and becomes the tool
@@ -223,7 +223,7 @@ export class ToolExecutor {
       }
     }
 
-    hooks.notifyHooks(HOOKS.TOOL_AFTER_EXECUTE, {
+    await hooks.notifyHooks(HOOKS.TOOL_AFTER_EXECUTE, {
       toolCallId,
       toolName,
       result,
@@ -251,7 +251,7 @@ export class ToolExecutor {
     const content: ToolResultContent = [formatToolResult(result, toolName, success, hint)];
     const durationMs = Date.now() - t0;
     const resultSize = toolContentSize(content);
-    hooks.notifyHooks(HOOKS.TOOL_METRICS, {
+    await hooks.notifyHooks(HOOKS.TOOL_METRICS, {
       toolName,
       toolCallId,
       durationMs,

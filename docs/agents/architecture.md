@@ -37,7 +37,7 @@ Split into sub-modules. The single source of truth is `src/core/core.config.json
 Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined in `extension.json` (configSchema and cli:flags), with defaults automatically extracted and registered by the extension loader.
 
 ### Hook System (`src/core/hooks.ts`)
-The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in the `HOOKS` constant (session, tools, context, system prompt, commands, output, provider, turn, CLI, logging). Full per-hook reference — names, patterns, payloads, when each fires: `docs/hook-lifecycle.md`.
+The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in the `HOOKS` constant (session, tools, context, system prompt, commands, output, provider, turn, CLI, logging). `notifyHooks()` starts all handlers immediately (async ones in parallel) and returns a promise that settles once every handler has settled; core call sites await it wherever later code depends on handler side effects (tool pipeline, turn boundaries, session lifecycle, shutdown). Full per-hook reference — names, patterns, payloads, when each fires: `docs/hook-lifecycle.md`.
 
 **Hook trace:** Set `_trace = true` on the HookSystem instance (via `--hook-trace` CLI flag, `HOTDOG_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug`. See `docs/agents/debugging.md` for details.
 
@@ -161,7 +161,7 @@ Built-in command handler implementations for core commands. Extracted from `agen
 - Each handler is `(agent, value, cmd) => { content?, error? }`
 
 ### Tool Executor (`src/core/tool-executor.ts`)
-Runs the full tool call pipeline (TOOL_BEFORE_EXECUTE → AGENT_TOOL_CONTEXT → TOOL_CALL gate → validate → execute → TOOL_AFTER_EXECUTE → TOOL_RESULT → TOOL_METRICS); the gate payload carries the `toolCtx` so an approval-style handler can prompt through it. Extracted from Agent so tool execution is testable independently. Key exports:
+Runs the full tool call pipeline (TOOL_BEFORE_EXECUTE → AGENT_TOOL_CONTEXT → TOOL_CALL gate → validate → execute → TOOL_AFTER_EXECUTE → TOOL_RESULT → TOOL_METRICS); the notify hooks in this chain are awaited, so context mounts (even from async handlers) are complete before the gate runs and before `tool.execute()` — the gate payload carries the `toolCtx` so an approval-style handler can prompt through it. Extracted from Agent so tool execution is testable independently. Key exports:
 - `ToolExecutor` class — manages the tool execution pipeline
 - `createToolExecutor(deps)` — factory function
 - `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, emitOutput, workspaceRoots, maxRetries, toolRetryDelay, isRestoring, agent)

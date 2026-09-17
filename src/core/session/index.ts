@@ -180,7 +180,7 @@ export class SessionManager {
     const sessionId = this.#store.addAgent(agent);
     this.#currentSessionId = sessionId;
     this.#createSessionEntry(sessionId, agent, config);
-    this.#hooks.notifyHooks(HOOKS.SESSION_CREATE, {
+    await this.#hooks.notifyHooks(HOOKS.SESSION_CREATE, {
       session: this,
       sessionId: sessionId,
       config,
@@ -196,7 +196,7 @@ export class SessionManager {
     this.#store.addAgent(newAgent);
     this.#currentSessionId = newAgent.sessionId;
     this.#createSessionEntry(newAgent.sessionId, newAgent, config);
-    this.#hooks.notifyHooks(HOOKS.SESSION_SWAP, {
+    await this.#hooks.notifyHooks(HOOKS.SESSION_SWAP, {
       oldAgent: oldAgent ?? undefined,
       newAgent,
     });

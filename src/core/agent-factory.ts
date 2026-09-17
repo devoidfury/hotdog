@@ -81,7 +81,7 @@ export function createAgentFactory(
       toolWhitelist: (agentConfig.toolWhitelist as string[] | null | undefined) ?? profile?.whitelistTools ?? null,
     });
 
-    core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
+    await core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
       registry: agent.commandRegistry,
       agent,
     });

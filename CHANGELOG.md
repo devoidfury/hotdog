@@ -2,10 +2,13 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.9.2...main
+
+## [v0.9.2] - 2026-09-17
+
 - `tool-call-repair` - now handles both xml and chatml style tags, instead of just chatml style
 
-
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.9.1...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.9.1...v0.9.2
 
 ## [v0.9.1] - 2026-09-17
 

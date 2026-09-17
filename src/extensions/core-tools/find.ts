@@ -34,7 +34,8 @@ function parseArgs(input: string | Record<string, unknown> | null, defaultMaxRes
   if (!pattern || typeof pattern !== "string") return null;
 
   const file_type = typeof json.file_type === "string" ? json.file_type : null;
-  const max_results = typeof json.max_results === "number" && json.max_results >= 0 ? json.max_results : defaultMaxResults;
+  // require >= 1; 0 would silently return "No files found" even when matches exist.
+  const max_results = typeof json.max_results === "number" && json.max_results >= 1 ? json.max_results : defaultMaxResults;
   let path = typeof json.path === "string" ? json.path : undefined;
   [pattern, path] = correctCommonPathMistakes(pattern, path);
   return { pattern, file_type, max_results, path };
@@ -151,8 +152,8 @@ export class FindTool {
           ),
           file_type: param(
             "string",
-            'Filter by file type: "f" for files, "d" for directories.',
-            { enum: ["f", "d"] },
+            'Filter by file type: "f" for files, "d" for directories, "e" for empty files.',
+            { enum: ["f", "d", "e"] },
           ),
           max_results: param("integer", `Maximum number of results to return`, {
             minimum: 1,

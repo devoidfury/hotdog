@@ -178,6 +178,20 @@ describe("FindTool.execute — max_results", () => {
       .filter((l) => l.includes("default_file"));
     expect(lines.length).toBe(5);
   });
+
+  it("treats max_results 0 as the default instead of returning nothing", async () => {
+    fsSync.writeFileSync(path.join(dir, "zero_file.txt"), "content");
+
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
+    const result = await tool.execute(
+      { pattern: "zero_file.txt", path: dir, max_results: 0 },
+      toolCtx(),
+    );
+
+    // 0 is below the schema minimum; it must fall back to the default so
+    // a real match is not silently suppressed with "No files found".
+    expect(getDisplay(result)).toContain("zero_file.txt");
+  });
 });
 
 // ── execute: fd argument-injection guard ────────────────────────────────────

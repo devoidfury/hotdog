@@ -245,11 +245,18 @@ export class ProjectInfoTool {
 
   private async _listFilesRecursively(base: string, maxDepth: number, maxFiles: number): Promise<string[]> {
     const results: string[] = [];
-    await this._walkDir(base, 0, maxDepth, results, maxFiles);
+    await this._walkDir(base, base, 0, maxDepth, results, maxFiles);
     return results;
   }
 
-  private async _walkDir(dir: string, depth: number, maxDepth: number, results: string[], maxFiles: number): Promise<void> {
+  private async _walkDir(
+    dir: string,
+    base: string,
+    depth: number,
+    maxDepth: number,
+    results: string[],
+    maxFiles: number,
+  ): Promise<void> {
     if (depth > maxDepth || results.length >= maxFiles) return;
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -258,10 +265,10 @@ export class ProjectInfoTool {
         if (entry.name.startsWith(".")) continue;
         const fullPath = path.join(dir, entry.name);
         if (entry.isFile()) {
-          const relPath = path.relative(".", fullPath);
+          const relPath = path.relative(base, fullPath);
           results.push(relPath);
         } else if (entry.isDirectory()) {
-          await this._walkDir(fullPath, depth + 1, maxDepth, results, maxFiles);
+          await this._walkDir(fullPath, base, depth + 1, maxDepth, results, maxFiles);
         }
       }
     } catch {

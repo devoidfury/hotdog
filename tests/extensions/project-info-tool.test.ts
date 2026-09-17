@@ -206,6 +206,30 @@ describe('ProjectInfoTool > directory walking', () => {
     const fileLines = output.split('\n').filter(l => l.trim().endsWith('.ts'));
     expect(fileLines.length).toBe(3);
   });
+
+  it('lists files relative to the requested dir, not the process CWD', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'rel1.ts'), '');
+    fs.mkdirSync(path.join(tmpDir, 'subdir'));
+    fs.writeFileSync(path.join(tmpDir, 'subdir', 'rel2.ts'), '');
+
+    // Run the walk from a different process CWD: the listing must still be
+    // relative to tmpDir (previously it was relative to process.cwd(),
+    // producing absolute or "../.." paths).
+    const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-pinfo-cwd-'));
+    const prevCwd = process.cwd();
+    process.chdir(otherDir);
+    try {
+      const tool = new ProjectInfoTool();
+      const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
+      const output = resultStr(result);
+      expect(output).toContain('  rel1.ts');
+      expect(output).toContain('  subdir/rel2.ts');
+      expect(output).not.toContain('..');
+    } finally {
+      process.chdir(prevCwd);
+      fs.rmSync(otherDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // Test directory sizes through public API

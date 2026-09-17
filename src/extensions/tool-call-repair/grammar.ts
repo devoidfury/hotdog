@@ -79,10 +79,15 @@ function stripThinkTail(text: string): string {
 // Hermes values are raw text; tool schemas want numbers/booleans where the
 // model plainly meant them. Coerce only those -- parsing objects/quoted
 // strings would eat text a tool expects verbatim.
+// The round-trip check (String(Number(raw)) === raw) keeps id-like values
+// intact: leading-zero strings ("0123"), out-of-safe-integer ids, "-0", and
+// trailing-zero decimals ("1.50") stay strings rather than silently change.
 function coerceScalar(raw: string): string | number | boolean {
   if (raw === "true") return true;
   if (raw === "false") return false;
-  if (raw !== "" && /^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
+  if (raw !== "" && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw) && String(Number(raw)) === raw) {
+    return Number(raw);
+  }
   return raw;
 }
 

@@ -104,6 +104,23 @@ describe("repairCallsInText", () => {
     expect(JSON.parse(r.calls[0]!.function.arguments)).toEqual({ path: "x", limit: 50, raw: false });
   });
 
+  it("keeps id-like numeric strings intact", () => {
+    const args: Array<[string, string]> = [
+      ["zip", "0123"], // leading zero
+      ["snowflake", "9007199254740993"], // beyond 2^53, Number() would round
+      ["neg", "-0"],
+      ["decimal", "1.50"], // trailing zero is data
+    ];
+    const r = repairCallsInText(hermes("fetch", args));
+    expect(r.repaired).toBe(true);
+    expect(JSON.parse(r.calls[0]!.function.arguments)).toEqual({
+      zip: "0123",
+      snowflake: "9007199254740993",
+      neg: "-0",
+      decimal: "1.50",
+    });
+  });
+
   it("repairs a truncated block missing its closes", () => {
     const text = hermes("bash", [["command", "ls"]], { closeFunc: false, closeCall: false });
     const r = repairCallsInText(text);

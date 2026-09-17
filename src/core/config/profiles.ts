@@ -30,7 +30,6 @@ export function isValidProfileName(name: string | null | undefined): boolean {
 export interface ProfileDef {
   name: string;
   description: string;
-  role: string | null;
   body: string;
   model: string | null;
   blacklistTools: string[];
@@ -45,7 +44,6 @@ export interface ProfileDef {
 }
 
 export interface SwitchProfile {
-  role: string;
   body: string;
   model: string | null;
   whitelistTools: string[] | null;
@@ -85,12 +83,13 @@ export async function loadProfileFile(profilesPath: string, profileName: string)
     const content = await fsPromises.readFile(filePath, "utf-8");
     const parsed = parseFrontMatter(content);
     if (!parsed) return null;
-    const fm = normalizeConfigKeys(parsed.frontMatter) as Partial<ProfileDef>;
+    const normalized = normalizeConfigKeys(parsed.frontMatter) as Partial<ProfileDef>;
+    // profile no longer carries a role, drop legacy `role` key so doesn't leak into prompt assembly or UI views.
+    const { role: _ignoredRole, ...fm } = normalized;
     return {
       ...fm,
       name: fm.name || profileName,
       description: fm.description || "",
-      role: fm.role || null,
       body: parsed.body || "",
       model: fm.model || null,
       blacklistTools: fm.blacklistTools || [],
@@ -127,14 +126,15 @@ export async function loadProfileFiles(profilesPath: string): Promise<Record<str
     const parsed = parseFrontMatter(content);
     if (!parsed) continue;
 
-    const fm = normalizeConfigKeys(parsed.frontMatter) as Partial<ProfileDef>;
+    const normalized = normalizeConfigKeys(parsed.frontMatter) as Partial<ProfileDef>;
+    // drop legacy `role` keys
+    const { role: _ignoredRole, ...fm } = normalized;
     const fileStem = entry.name.replace(/\.profile\.md$/, "");
 
     result[fileStem] = {
       ...fm,
       name: fm.name || fileStem,
       description: fm.description || "",
-      role: fm.role || "",
       body: parsed.body || "",
       blacklistTools: fm.blacklistTools || [],
       whitelistTools: fm.whitelistTools || null,
@@ -171,12 +171,11 @@ function resolveSwitchProfile(
   fileProfile: Partial<ProfileDef> | null,
   configProfile: Partial<ProfileDef> | null,
 ): SwitchProfile {
-  const role = fileProfile?.role?.trim() || configProfile?.role || "";
   const body = fileProfile?.body || "";
   const model = configProfile?.model || null;
   const whitelistTools = fileProfile?.whitelistTools ?? configProfile?.whitelistTools ?? null;
   const blacklistTools = fileProfile?.blacklistTools || configProfile?.blacklistTools || [];
-  return { role, body, model, whitelistTools, blacklistTools };
+  return { body, model, whitelistTools, blacklistTools };
 }
 
 export interface AllProfilesOptions {
@@ -234,12 +233,11 @@ export class ProfileManager {
     const configP = this.#configProfiles[name] ?? null;
     if (!fileP && !configP) return null;
 
-    return {
+    const merged: Record<string, unknown> = {
       ...configP,
       ...fileP,
       name,
       description: fileP?.description || configP?.description || "",
-      role: fileP?.role || configP?.role || null,
       body: fileP?.body || "",
       model: fileP?.model || configP?.model || null,
       blacklistTools: fileP?.blacklistTools || configP?.blacklistTools || [],
@@ -247,6 +245,8 @@ export class ProfileManager {
       manager: fileP?.manager || configP?.manager || false,
       visibleWorker: fileP?.visibleWorker || configP?.visibleWorker || false,
     };
+    delete merged.role;
+    return merged as ProfileDef;
   }
 
   getAllNames(): string[] {

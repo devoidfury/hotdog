@@ -73,7 +73,6 @@ export interface TaskManagerRequiredOptions {
   buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
   maxIterations: number;
   taskProfile: string;
-  taskRole: string;
 }
 
 export class TaskManager {
@@ -83,7 +82,6 @@ export class TaskManager {
   #sessionManager: TaskManagerSessionManager | null;
   #maxIterations: number;
   #taskProfile: string;
-  #taskRole: string;
   // Terminal tasks keep a slim record (no agent) so a long-lived manager --
   // the webui TaskManager outlives every session -- does not pin each dead
   // task's full Agent/context forever. See _runTask for the release point.
@@ -104,7 +102,6 @@ export class TaskManager {
     this.#sessionManager = options.sessionManager || null;
     this.#maxIterations = options.maxIterations;
     this.#taskProfile = options.taskProfile;
-    this.#taskRole = options.taskRole;
     this.#tasks = new Map();
     this.#profileManager = options.profileManager;
   }
@@ -187,7 +184,6 @@ export class TaskManager {
       (this.#modelRegistry as { default?: string }).default ||
       "";
 
-    const resolvedRole = taskProfile?.role || this.#taskRole;
     const resolvedProfileBody = taskProfile?.body || "";
 
     const toolWhitelist = taskProfile?.whitelistTools || null;
@@ -204,7 +200,6 @@ export class TaskManager {
 
     const agentConfig: Record<string, unknown> = {
       model: resolvedModel,
-      role: resolvedRole,
       profileBody: resolvedProfileBody,
       sink,
       toolWhitelist,

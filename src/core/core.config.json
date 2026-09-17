@@ -262,34 +262,6 @@
       { "default": "dark" }
     ]
   },
-  "role": {
-    "type": "string",
-    "cliFlag": {
-      "long": "--role",
-      "type": "string",
-      "description": "System prompt role"
-    },
-    "layers": [
-      {
-        "source": "cli",
-        "key": "role",
-        "cast": "string"
-      },
-      {
-        "source": "config",
-        "key": "role",
-        "cast": "string"
-      },
-      {
-        "source": "profile",
-        "key": "role",
-        "cast": "string"
-      },
-      {
-        "default": "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user."
-      }
-    ]
-  },
   "defaultModel": {
     "type": "string",
     "layers": [
@@ -540,9 +512,5 @@
       { "source": "config", "key": "defaultProvider" },
       { "default": null }
     ]
-  },
-  "taskDefaultRole": {
-    "type": "string",
-    "layers": [{ "default": "A focused worker that executes tasks autonomously" }]
   }
 }

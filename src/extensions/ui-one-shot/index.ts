@@ -35,7 +35,6 @@ async function runOneShot(
     taskConfig: {
       maxIterations: resolved.maxIterations,
       taskProfile: resolved.taskProfile || "task-default",
-      taskRole: resolved.taskDefaultRole || "",
     },
     // Mirrors the interactive CLI: without it the TaskManager cannot resolve
     // worker profiles from the config directory.

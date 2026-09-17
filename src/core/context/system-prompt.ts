@@ -28,13 +28,12 @@ export function collectSystemPromptChunks(
 
 
 /**
- * Renders the template with role/body and extension-contributed chunks.
+ * Renders the template with body and extension-contributed chunks.
  * `template` is the loaded template TEXT; when omitted it is loaded from
  * the config dir (standalone callers only -- the agent pipeline always
  * passes the resolved template explicitly).
  */
 export async function buildSystemPrompt(
-  role: string,
   body: string,
   model: string,
   profileName: string,
@@ -44,7 +43,6 @@ export async function buildSystemPrompt(
   const tpl = template || (await initSystemPromptTemplate());
 
   const context = {
-    role: role || "",
     body: body || "",
     model: model || "",
     profile_name: profileName || "default",
@@ -55,7 +53,6 @@ export async function buildSystemPrompt(
 }
 
 export interface AgentConfigForPrompt {
-  role: string | undefined;
   profileBody: string | undefined;
   model: string;
   profileName: string | undefined;
@@ -103,7 +100,6 @@ export class SystemPromptBuilder {
     const chunks = collectSystemPromptChunks(results);
 
     this.#cachedPrompt = await buildSystemPrompt(
-      config.role || "",
       config.profileBody || "",
       config.model,
       config.profileName || "default",

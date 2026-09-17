@@ -20,7 +20,7 @@ bun bin/hotdog show-prompt --model qwen3.5-0.8b
 ## Output Format
 
 ```
-[rendered system prompt with {model}, {cwd}, {platform}, {date}, {role} placeholders filled]
+[rendered system prompt with {model}, {cwd}, {platform}, {date} placeholders filled]
 
 # Tools
 

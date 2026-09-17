@@ -23,7 +23,6 @@ const mockAgent: import("@core/session/index.ts").AgentLike = {
   getMessages: () => [],
   sink: null,
   toolWhitelist: null,
-  role: undefined,
   profileBody: undefined,
   enqueueCallback: null,
   serialize: () => ({}),

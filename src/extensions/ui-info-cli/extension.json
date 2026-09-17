@@ -42,7 +42,7 @@
     },
     {
       "name": "profiles",
-      "description": "List all available profiles with their roles and tool restrictions"
+      "description": "List all available profiles with their tool restrictions"
     }
   ]
 }

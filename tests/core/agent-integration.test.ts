@@ -69,7 +69,6 @@ function createAgentFixture(options: {
     sink: { emit: (event) => outputEvents.push(event) },
     sessionId: 'integration-test-session',
     maxIterations: options.maxIterations || 20,
-    role: 'Test integration agent',
   });
   return { ...fixture, outputEvents };
 }

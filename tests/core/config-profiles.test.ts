@@ -59,7 +59,7 @@ describe("loadProfileFile", () => {
   it("loads a profile from a .profile.md file", async () => {
     const content = `---
 name: test-profile
-role: Test role
+role: Legacy role (ignored)
 model: test-model
 blacklist-tools:
   - bash
@@ -77,7 +77,8 @@ Profile body content here`;
 
     expect(profile).not.toBeNull();
     expect(profile!.name).toBe("test-profile");
-    expect(profile!.role).toBe("Test role");
+    // `role` is no longer a profile field: a legacy line is ignored, not parsed.
+    expect(profile!.role).toBeUndefined();
     expect(profile!.model).toBe("test-model");
     expect(profile!.blacklistTools).toEqual(["bash"]);
     expect(profile!.whitelistTools).toEqual(["read", "overwrite"]);
@@ -106,7 +107,7 @@ Body`;
 
     const profile = await loadProfileFile(tmpDir, "my-profile");
     expect(profile!.name).toBe("my-profile");
-    expect(profile!.role).toBe("Some role");
+    expect(profile!.role).toBeUndefined();
   });
 
   it("handles snake_case front matter keys", async () => {
@@ -249,8 +250,11 @@ Body B`,
     const profiles = await loadProfileFiles(tmpDir);
 
     expect(Object.keys(profiles)).toHaveLength(2);
-    expect(profiles["profile-a"]!.role).toBe("Role A");
-    expect(profiles["profile-b"]!.role).toBe("Role B");
+    expect(profiles["profile-a"]!.body).toBe("Body A");
+    expect(profiles["profile-b"]!.body).toBe("Body B");
+    // Legacy `role` frontmatter keys are dropped on load.
+    expect(profiles["profile-a"]!.role).toBeUndefined();
+    expect(profiles["profile-b"]!.role).toBeUndefined();
   });
 
   it("ignores non-.profile.md files", async () => {
@@ -346,10 +350,10 @@ Body`,
 describe("allProfilesForSwitch", () => {
   it("merges file and config profiles", () => {
     const fileProfiles = {
-      file1: { role: "file role", body: "file body" },
+      file1: { body: "file body" },
     };
     const configProfiles = {
-      config1: { role: "config role" },
+      config1: {},
     };
 
     const result = allProfilesForSwitch({
@@ -358,11 +362,11 @@ describe("allProfilesForSwitch", () => {
     });
 
     expect(Object.keys(result)).toHaveLength(2);
-    expect(result["file1"]!.role).toBe("file role");
-    expect(result["config1"]!.role).toBe("config role");
+    expect(result["file1"]!.body).toBe("file body");
+    expect(result["config1"]).toBeDefined();
   });
 
-  it("file profile role wins over config role", () => {
+  it("ignores legacy role keys on both file and config profiles", () => {
     const fileProfiles = {
       shared: { role: "file role", body: "file body" },
     };
@@ -375,7 +379,8 @@ describe("allProfilesForSwitch", () => {
       configProfiles,
     });
 
-    expect(result["shared"]!.role).toBe("file role");
+    expect(result["shared"]!.body).toBe("file body");
+    expect(result["shared"]).not.toHaveProperty("role");
   });
 
   it("handles empty inputs", () => {
@@ -393,7 +398,7 @@ describe("allProfilesForSwitch", () => {
 
   it("includes model from config profile", () => {
     const configProfiles = {
-      withModel: { role: "role", model: "gpt-4" },
+      withModel: { model: "gpt-4" },
     };
 
     const result = allProfilesForSwitch({

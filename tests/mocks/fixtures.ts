@@ -46,7 +46,6 @@ export function createFixture(
     sink?: { emit: (event: OutputEvent) => void } | null;
     modelRegistry?: Record<string, unknown>;
     profileName?: string;
-    role?: string;
     profileBody?: string;
     config?: Record<string, unknown> | null;
     sessionId?: string;
@@ -77,7 +76,6 @@ export function createFixture(
     sink: options.sink || null,
     modelRegistry: (options.modelRegistry || {}) as ModelRegistry,
     profileName: options.profileName || "test",
-    role: options.role || "Test agent",
     profileBody: options.profileBody || "",
     // Agent requires resolved values for these keys (no runtime fallbacks).
     config: {
@@ -244,7 +242,6 @@ export function createMockCore(
     hideTools: false,
     hideThinking: false,
     showTokenUse: false,
-    role: "",
     profileBody: "",
     activeProvider: null,
     configDir: path.join(os.homedir(), ".config", "hotdog"),

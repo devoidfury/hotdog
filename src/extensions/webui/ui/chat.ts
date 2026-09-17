@@ -16,7 +16,6 @@ const logger = {
 };
 
 export type ProfileInfo = {
-  role: string;
   body: string;
   model: string | null;
 };
@@ -195,7 +194,7 @@ interface SystemMessage {
 
 interface ProfilesMessage {
   type: "profiles";
-  profiles: Record<string, { role: string; body: string; model: string | null; whitelistTools?: string[] | null; blacklistTools?: string[] }>;
+  profiles: Record<string, { body: string; model: string | null; whitelistTools?: string[] | null; blacklistTools?: string[] }>;
 }
 
 interface ProfileSwitchedMessage {

@@ -1,5 +1,3 @@
-{{ role }}
-
 {% if body -%}
 {{ body }}
 {% endif -%}

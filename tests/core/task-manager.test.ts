@@ -56,7 +56,6 @@ describe("TaskManager", () => {
       config: {} as any,
       maxIterations: 100,
       taskProfile: "default",
-      taskRole: "",
       ...options,
     });
   }
@@ -87,7 +86,6 @@ describe("TaskManager", () => {
         config: { profilesPath: "./config/profiles" } as any,
         maxIterations: 100,
         taskProfile: "default",
-        taskRole: "",
       });
 
       const handle = await manager.spawnTask("task-1", "Do something");
@@ -112,7 +110,6 @@ describe("TaskManager", () => {
         config: { profilesPath: "./config/profiles" } as any,
         maxIterations: 100,
         taskProfile: "default",
-        taskRole: "",
       });
 
       await manager.spawnTask("task-1", "Do something", { workerModel: "custom-model" });
@@ -138,7 +135,6 @@ describe("TaskManager", () => {
         config: { profilesPath: "./config/profiles", customKey: "customValue" } as any,
         maxIterations: 100,
         taskProfile: "default",
-        taskRole: "",
       });
 
       // Initially no tasks
@@ -468,7 +464,6 @@ describe("TaskManager", () => {
         config: { profilesPath: "./config/profiles" } as any,
         maxIterations: 100,
         taskProfile: "default",
-        taskRole: "",
       });
       manager.setSessionManager({
         getAgent: () => null,
@@ -499,7 +494,6 @@ describe("task registry release", () => {
       config: { profilesPath: "./config/profiles" } as any,
       maxIterations: 100,
       taskProfile: "default",
-      taskRole: "",
     });
   }
 

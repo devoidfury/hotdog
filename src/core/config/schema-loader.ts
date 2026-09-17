@@ -431,7 +431,6 @@ export interface CoreConfig {
   hideThinking?: boolean;
   useColors?: boolean;
   theme?: string;
-  role?: string;
   defaultModel?: string;
   maxIterations?: number;
   maxRetries?: number;
@@ -467,7 +466,6 @@ export interface CoreConfig {
   defaultSubcommand?: string;
   temperature?: number;
   defaultProvider?: string;
-  taskDefaultRole?: string;
 }
 
 // Adds an index signature for extension-specific keys.

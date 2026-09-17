@@ -14,7 +14,7 @@ export interface AgentFactoryOptions {
   llmClient: LlmClient;
   /**
    * Session-profile overlays keyed by profile name (websocket/webui pass
-   * their own map; CLI sites leave it unset and take role/body from resolved).
+   * their own map; CLI sites leave it unset and take body from resolved).
    */
   profiles?: Record<string, SwitchProfile> | null;
 }
@@ -59,7 +59,6 @@ export function createAgentFactory(
         resolved.modelRegistry ||
         {},
       profileName,
-      role: (agentConfig.role as string) || profile?.role || resolved.role,
       profileBody: (agentConfig.profileBody as string) || profile?.body || resolved.profileBody,
       // Loaded template text from buildConfig; the agent must never depend on
       // process-global template state (multi-session hosts resolve config

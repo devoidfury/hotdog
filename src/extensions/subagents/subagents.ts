@@ -158,7 +158,7 @@ export class DelegateTaskTool extends SubagentTool {
           ),
           profile: param(
             "string",
-            `Optional profile name to customize the worker agent\'s behavior (role, tools, model). Defaults to 'task-default'.${profileList}`,
+            `Optional profile name to customize the worker agent\'s behavior (tools, model). Defaults to 'task-default'.${profileList}`,
           ),
         },
         required: ["task_id", "description"],

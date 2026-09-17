@@ -226,7 +226,6 @@ export interface ResolvedConfig {
   profileName: string;
   profileDef?: ProfileDef;
   profileBody?: string;
-  role?: string;
   activeProvider?: string;
   configDir?: string;
 
@@ -243,7 +242,6 @@ export interface ResolvedConfig {
   modelRoleMapping?: string;
   toolOutputFmt?: string;
   taskProfile?: string;
-  taskDefaultRole?: string;
   profilesPath?: string;
 
   profileManager?: ProfileManager;

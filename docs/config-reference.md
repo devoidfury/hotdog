@@ -53,7 +53,7 @@ All three forms above are equivalent.
 Each config value is resolved by walking a priority chain **defined per key** in `src/core/core.config.json` (and each extension's `configSchema`). There is no single global order. Common patterns:
 
 - **Most keys:** CLI flag > `defaults.json` > schema default
-- **Profile-aware keys** (e.g., `defaultModel`, `role`): a profile layer sits in the chain, between CLI and config
+- **Profile-aware keys** (e.g., `defaultModel`): a profile layer sits in the chain, between CLI and config
 - **Env-aware keys:** an env layer is included where declared (see per-key entries)
 - **`aiUrl`/`apiKey`:** resolve from the active **provider first** (provider > CLI > config > env > default), since the provider's URL and API key are the natural source
 
@@ -64,7 +64,7 @@ Each config value is resolved by walking a priority chain **defined per key** in
 | **CLI** | `--flag` arguments | Set via the command line. |
 | **Config** | `defaults.json` | Your config file values. |
 | **Env** | Environment variables | Set via `export` or shell. |
-| **Profile** | Active profile | Values from the selected profile (role, model, tool restrictions). |
+| **Profile** | Active profile | Values from the selected profile (model, tool restrictions). |
 | **Provider** | Active provider | `aiUrl`/`apiKey` only: the provider's URL and API key. |
 | **Default** | Schema defaults | Fallbacks declared in `core.config.json` / extension schemas. |
 
@@ -138,19 +138,6 @@ Sampling temperature for the LLM. `null` uses the provider/model default.
 
 ```json
 { "temperature": 0.7 }
-```
-
-### `role`
-
-- **Type:** `string`
-- **CLI flag:** `--role`
-- **Default:** `"You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user."`
-- **Resolution:** CLI > config > profile > default
-
-The system prompt role. This top-level key (config layer) overrides the role of the active profile. Within the profile layer, a `.profile.md` file's `role` wins over a same-named profile in the in-config `profiles` section.
-
-```json
-{ "role": "You are a senior software engineer." }
 ```
 
 ### `thinker`
@@ -765,13 +752,12 @@ Extensions can register additional protocols (`EXTENSION_PROVIDES.LLM_PROTOCOLS`
 
 ## Profiles (in-config)
 
-The `profiles` key allows you to define profile configurations directly in `defaults.json`. These merge with `.profile.md` files in the profiles directory, with file profiles taking priority for `role`, `whitelistTools`, `blacklistTools`, and `manager`.
+The `profiles` key allows you to define profile configurations directly in `defaults.json`. These merge with `.profile.md` files in the profiles directory, with file profiles taking priority for `whitelistTools`, `blacklistTools`, and `manager`.
 
 ### Profile Object
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `role` | `string` | `""` | System prompt role for this profile. |
 | `model` | `string` | `null` | Model override for this profile (e.g. `"provider/model-name"`). |
 | `blacklistTools` | `array` | `[]` | Tool names to disable in this profile. |
 | `whitelistTools` | `array` | `null` | If set, only these tools are available. `null` means no restriction. |
@@ -806,7 +792,6 @@ When both a config profile and a `.profile.md` file profile exist for the same n
 
 | Field | Winner |
 |-------|--------|
-| `role` | `.profile.md` file |
 | `whitelistTools` | `.profile.md` file |
 | `blacklistTools` | `.profile.md` file |
 | `manager` | `.profile.md` file |

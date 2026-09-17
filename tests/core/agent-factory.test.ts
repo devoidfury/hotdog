@@ -29,7 +29,6 @@ const resolved = {
   maxIterations: 50,
   contextLimit: 128000,
   profileName: "resolved-profile",
-  role: "resolved-role",
   profileBody: "resolved-body",
   hideTools: true,
   hideThinking: false,
@@ -53,7 +52,6 @@ describe("createAgentFactory", () => {
     expect(agent.maxIterations).toBe(50);
     expect(agent.contextLimit).toBe(128000);
     expect(agent.profileName).toBe("resolved-profile");
-    expect(agent.role).toBe("resolved-role");
     expect(agent.profileBody).toBe("resolved-body");
     expect(agent.sessionId).toBeTruthy();
     expect(agent.sink).toBeNull();
@@ -94,12 +92,12 @@ describe("createAgentFactory", () => {
     // template caching (multi-session hosts resolve config per entry point).
     const { core } = makeCore();
     const factory = createAgentFactory(core, {
-      resolved: { ...resolved, systemPromptTemplate: "FACTORY: {{ role }}" } as never,
+      resolved: { ...resolved, systemPromptTemplate: "FACTORY: {{ body }}" } as never,
       llmClient: {} as never,
     });
     const agent = await factory();
     await agent.ensureSystemPrompt();
-    expect(agent.context.getSystemPrompt()).toContain("FACTORY: resolved-role");
+    expect(agent.context.getSystemPrompt()).toContain("FACTORY: resolved-body");
   });
 
   it("yields null workspaceDeny when unresolved (built-in defaults apply)", async () => {
@@ -121,7 +119,6 @@ describe("createAgentFactory", () => {
       maxIterations: 3,
       contextLimit: 999,
       profileName: "override-profile",
-      role: "override-role",
       profileBody: "override-body",
       hideTools: false,
       hideThinking: true,
@@ -134,7 +131,6 @@ describe("createAgentFactory", () => {
     expect(agent.maxIterations).toBe(3);
     expect(agent.contextLimit).toBe(999);
     expect(agent.profileName).toBe("override-profile");
-    expect(agent.role).toBe("override-role");
     expect(agent.profileBody).toBe("override-body");
     expect(agent.hideTools).toBe(false);
     expect(agent.hideThinking).toBe(true);
@@ -164,7 +160,6 @@ describe("createAgentFactory", () => {
       llmClient: {} as unknown as never,
       profiles: {
         worker: {
-          role: "worker-role",
           body: "worker-body",
           model: null,
           whitelistTools: ["read", "bash-tool"],
@@ -174,17 +169,15 @@ describe("createAgentFactory", () => {
     });
 
     const fromProfile = await factory({ profileName: "worker" });
-    expect(fromProfile.role).toBe("worker-role");
     expect(fromProfile.profileBody).toBe("worker-body");
     expect(fromProfile.toolWhitelist).toEqual(["read", "bash-tool"]);
 
-    const explicitRole = await factory({ profileName: "worker", role: "explicit-role" });
-    expect(explicitRole.role).toBe("explicit-role");
-    expect(explicitRole.profileBody).toBe("worker-body");
+    const explicitBody = await factory({ profileName: "worker", profileBody: "explicit-body" });
+    expect(explicitBody.profileBody).toBe("explicit-body");
 
     // Unknown profile name: resolved values apply, no whitelist
     const unknown = await factory({ profileName: "nope" });
-    expect(unknown.role).toBe("resolved-role");
+    expect(unknown.profileBody).toBe("resolved-body");
     expect(unknown.toolWhitelist).toBeNull();
   });
 

@@ -293,7 +293,7 @@ export class SessionRegistry {
 
   /**
    * Set the session's display title. Independent of the active profile: the
-   * profile keeps driving behavior (role, tools, model), while the title is
+   * profile keeps driving behavior (tools, model), while the title is
    * purely the label shown in the UI.
    */
   rename(sessionId: string, newName: string): boolean {

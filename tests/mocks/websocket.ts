@@ -29,7 +29,6 @@ function makeMockAgent(overrides: Partial<AgentLike> = {}): AgentLike {
     getMessages: () => [],
     sink: null,
     toolWhitelist: null,
-    role: undefined,
     profileBody: undefined,
     enqueueCallback: null,
     serialize: () => ({}),

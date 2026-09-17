@@ -356,7 +356,6 @@ async function printConfigDebug(
     Object.assign(profile, configProfile);
   }
   if (fileProfile) {
-    if (fileProfile.role) profile.role = fileProfile.role;
     if (fileProfile.whitelistTools != null) profile.whitelistTools = fileProfile.whitelistTools;
     if (fileProfile.blacklistTools?.length) profile.blacklistTools = fileProfile.blacklistTools;
     if (fileProfile.manager) profile.manager = true;
@@ -419,7 +418,6 @@ async function printConfigDebug(
     `  ${"profile.blacklistTools".padEnd(25)} → ${JSON.stringify((resolved.profileDef?.blacklistTools as string[]) || [])}`,
   );
   console.log(`  ${"profile.manager".padEnd(25)} → ${(resolved.profileDef?.manager as boolean) || false}`);
-  console.log(`  ${"profile.role".padEnd(25)} → ${resolved.profileDef?.role}`);
   console.log(
     `  ${"profile.body".padEnd(25)} → ${resolved.profileBody ? `(${(resolved.profileBody as string).length} chars)` : "(none)"}`,
   );
@@ -515,7 +513,6 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     maxIterations: resolved.maxIterations as number,
     contextLimit: resolved.contextLimit as number,
     profileName: resolved.profileName || "default",
-    role: resolved.role,
     profileBody: resolved.profileBody,
     systemPromptTemplate: resolved.systemPromptTemplate,
     config: resolved,
@@ -563,7 +560,6 @@ async function runProfileList(cli: CliArgv, core: CoreContext): Promise<number> 
 
 interface ProfileView {
   description: string | null;
-  role: string | null;
   model: string | null;
   aspects: string[];
   blacklistTools: string[];
@@ -596,7 +592,6 @@ function buildProfileView(
 
   return {
     description: fileProfile?.description || configProfile?.description || null,
-    role: fileProfile?.role || configProfile?.role || null,
     model: configProfile?.model || fileProfile?.model || null,
     aspects: fileProfile?.aspects || configProfile?.aspects || [],
     blacklistTools: fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist,
@@ -638,11 +633,6 @@ function printProfileListText(
 
     if (view.description) {
       console.log(`  Description: ${view.description}`);
-    }
-
-    if (view.role) {
-      const roleDisplay = view.role.length > 200 ? `${view.role.slice(0, 200)}...` : view.role;
-      console.log(`  Role: ${roleDisplay}`);
     }
 
     if (view.model) {
@@ -706,7 +696,6 @@ function printProfileListJson(
       name,
       current: name === currentProfile,
       description: view.description,
-      role: view.role,
       model: view.model,
       aspects: view.aspects.length > 0 ? view.aspects : null,
       blacklistTools: view.blacklistTools.length > 0 ? view.blacklistTools : null,
@@ -739,7 +728,7 @@ export function create(_core: CoreContext): ExtensionInstance {
         });
 
         registry.register("profiles", {
-          description: "List all available profiles with their roles and tool restrictions",
+          description: "List all available profiles with their tool restrictions",
           handler: runProfileList,
         });
       },

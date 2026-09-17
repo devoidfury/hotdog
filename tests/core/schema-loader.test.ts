@@ -258,22 +258,21 @@ describe("resolveLayerValue", () => {
   });
 
   it("resolves from profile source", () => {
-    const layer = { source: "profile", key: "role" };
+    const layer = { source: "profile", key: "model" };
     expect(
       resolveLayerValue(layer, {
         profile: {
           name: "test",
           description: "test",
-          role: "Profile role",
           body: "",
-          model: null,
+          model: "Profile model",
           blacklistTools: [],
           whitelistTools: null,
           manager: false,
           visibleWorker: false,
         },
       })
-    ).toBe("Profile role");
+    ).toBe("Profile model");
   });
 
   it("returns undefined for unknown source", () => {

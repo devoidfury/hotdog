@@ -20,7 +20,7 @@ export const DEFAULT_SYSTEM_PROMPT_FILENAME = "system_prompt.md";
 
 // Runtime fallback values (exempt from the "no DEFAULT_* in components" rule)
 export const DEFAULT_SYSTEM_PROMPT_TEMPLATE: string =
-  "{{ role }}\n\n{{ body }}\n{% for chunk in chunks %}{{ chunk.content }}{% endfor %}";
+  "{{ body }}\n{% for chunk in chunks %}{{ chunk.content }}{% endfor %}";
 
 export function resolveConfigDir(cliConfigDir?: string | null): string {
   if (cliConfigDir) {

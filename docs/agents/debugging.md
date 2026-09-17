@@ -35,7 +35,6 @@ bun bin/hotdog prompt "hello"
 - **`--config-debug`** — show config resolution details (sources and layers)
 - **`--preload-skills <names>`** — preload skills by name (comma-separated)
 - **`--max-iterations <n>`** — maximum agent loop iterations
-- **`--role <text>`** — override the system prompt role
 - **`--provider <name>`** — override the AI provider
 - **`--chat-timeout <secs>`** — timeout for chat/API requests
 - **`--system-prompt-template <path>`** — custom system prompt template file

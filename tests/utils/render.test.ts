@@ -122,7 +122,6 @@ describe('whitespace control (Tera-style dashes)', () => {
 
   it('renders the system prompt template layout', () => {
     const template = [
-      '{{ role }}',
       '{%- if body %}',
       '{{ body }}',
       '{%- endif %}',
@@ -137,12 +136,12 @@ describe('whitespace control (Tera-style dashes)', () => {
       { content: '\n# One\n' },
       { content: '\n# Two\n' },
     ];
-    expect(render(template, { role: 'R', body: 'B', chunks })).toBe(
-      'R\nB\nParallel tool calling enabled.\n\n\n# One\n\n# Two\n',
+    expect(render(template, { body: 'B', chunks })).toBe(
+      '\nB\nParallel tool calling enabled.\n\n\n# One\n\n# Two\n',
     );
     // empty body: the if block collapses without leaving blank lines behind
-    expect(render(template, { role: 'R', body: '', chunks })).toBe(
-      'R\nParallel tool calling enabled.\n\n\n# One\n\n# Two\n',
+    expect(render(template, { body: '', chunks })).toBe(
+      '\nParallel tool calling enabled.\n\n\n# One\n\n# Two\n',
     );
   });
 });

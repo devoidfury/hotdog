@@ -21,7 +21,6 @@ export interface AgentLike {
   hooks: HookSystem;
   sink: OutputSink | null;
   toolWhitelist: string[] | null;
-  role: string | undefined;
   profileBody: string | undefined;
   enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
   serialize(): Record<string, unknown>;
@@ -105,7 +104,6 @@ export interface SessionManagerOptions {
   taskConfig?: {
     maxIterations: number;
     taskProfile: string;
-    taskRole: string;
   } | null;
   extensions?: unknown;
   profileManager?: ProfileManager;
@@ -170,7 +168,6 @@ export class SessionManager {
         config: options.coreConfig || {},
         maxIterations: options.taskConfig.maxIterations,
         taskProfile: options.taskConfig.taskProfile,
-        taskRole: options.taskConfig.taskRole,
         profileManager: options.profileManager,
       });
 

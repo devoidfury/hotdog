@@ -363,7 +363,7 @@ describe('deleteSession cascades to subagent tasks', () => {
       buildAgent,
       llmClient: llmClient as any,
       modelRegistry: { 'test-model': {} } as any,
-      taskConfig: { maxIterations: 100, taskProfile: 'task-default', taskRole: '' },
+      taskConfig: { maxIterations: 100, taskProfile: 'task-default' },
     });
 
     const sessionA = await sm.create({ model: 'test-model' });

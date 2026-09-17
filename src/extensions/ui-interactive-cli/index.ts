@@ -429,7 +429,6 @@ export async function runInteractiveSession(
     taskConfig: {
       maxIterations: resolved.maxIterations,
       taskProfile: resolved.taskProfile || "task-default",
-      taskRole: resolved.taskDefaultRole || "",
     },
     profileManager: resolved.profileManager,
   });

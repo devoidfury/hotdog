@@ -75,7 +75,6 @@ export interface AgentOptions {
   profileName?: string;
   config?: AgentConfig;
   sessionId?: string;
-  role?: string;
   profileBody?: string;
   /**
    * Resolved system prompt template TEXT (buildConfig's
@@ -106,7 +105,6 @@ export class Agent implements AgentLike {
   profileName: string | undefined;
   config: AgentConfig | null;
   sessionId: string;
-  role: string | undefined;
   profileBody: string | undefined;
   stream: boolean;
   cancelled: boolean;
@@ -163,7 +161,6 @@ export class Agent implements AgentLike {
     this.profileName = options.profileName;
     this.config = options.config || null;
     this.sessionId = options.sessionId || crypto.randomUUID();
-    this.role = options.role;
     this.profileBody = options.profileBody;
     this.stream = options.stream !== false;
     this.cancelled = false;
@@ -537,7 +534,6 @@ export class Agent implements AgentLike {
 
   async ensureSystemPrompt(): Promise<void> {
     await this.context.ensureSystemPrompt(this.hooks, this, {
-      role: this.role,
       profileBody: this.profileBody,
       model: this.#model,
       profileName: this.profileName,
@@ -594,7 +590,7 @@ export class Agent implements AgentLike {
   /**
    * Switch this agent to a different profile at runtime.
    *
-   * Applies the profile's role, body, and tool whitelist, resets the tool
+   * Applies the profile's body and tool whitelist, resets the tool
    * blacklist to the profile's (an empty profile blacklist clears whatever
    * a top-level config carried), and switches the model via the model setter
    * when the profile specifies one (so per-model limits, reasoning effort,
@@ -606,7 +602,6 @@ export class Agent implements AgentLike {
    */
   applyProfile(name: string, profile: SwitchProfile): void {
     this.profileName = name;
-    this.role = profile.role || undefined;
     this.profileBody = profile.body || undefined;
     this.toolWhitelist = profile.whitelistTools;
     this.config = this.config || {};
@@ -616,7 +611,7 @@ export class Agent implements AgentLike {
     }
     // The model setter already invalidates both caches when it ran; repeat
     // unconditionally so a same-model switch still rebuilds with the new
-    // role/body (both operations are idempotent).
+    // body (both operations are idempotent).
     this.#toolRegistry.clearToolDefs();
     this.context.clearSystemPrompt();
   }

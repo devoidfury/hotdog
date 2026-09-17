@@ -53,8 +53,6 @@ describe("ui-one-shot extension", () => {
       profileName: "default",
       modelRegistry: { "test-model": { contextLimit: 128000 } },
       taskProfile: "task-default",
-      taskDefaultRole: "",
-      role: "Test agent",
       profileBody: "",
       theme: "dark",
     };

@@ -455,24 +455,23 @@ describe("resolveKey — edge cases", () => {
   it("resolveKey with profile source", () => {
     const schema = {
       layers: [
-        { source: "profile", key: "role" },
-        { default: "default role" },
+        { source: "profile", key: "model" },
+        { default: "default model" },
       ],
     };
     const result = resolveKey("test", schema, {
       profile: {
         name: "test",
         description: "test",
-        role: "Profile role",
         body: "",
-        model: null,
+        model: "Profile model",
         blacklistTools: [],
         whitelistTools: null,
         manager: false,
         visibleWorker: false,
       },
     });
-    expect(result).toBe("Profile role");
+    expect(result).toBe("Profile model");
   });
 
   it("resolveKey with providerDefault source", () => {

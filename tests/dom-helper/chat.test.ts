@@ -245,7 +245,7 @@ describe("session management messages", () => {
   it("profiles and profileSwitched update atoms", () => {
     const { ws, chat } = makeChat();
     ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
-    ws.fireMessage({ type: "profiles", profiles: { coder: { role: "r", body: "b", model: null } } });
+    ws.fireMessage({ type: "profiles", profiles: { coder: { body: "b", model: null } } });
     expect(chat.profilesAtom().coder).toBeDefined();
     ws.fireMessage({ type: "profileSwitched", sessionId: "s1", profile: "coder", success: true });
     expect(chat.currentProfileAtom()).toBe("coder");

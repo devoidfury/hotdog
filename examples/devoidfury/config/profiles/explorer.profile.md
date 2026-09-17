@@ -1,11 +1,12 @@
 ---
 name: explorer
 description: A codebase scout meant to do the legwork to gather up good context for the supervisor.
-role: You are a codebase explorer.
 aspects: ['concise']
 whitelist-tools: ["find", "project_info", "read", "grep", "load_skill"]
 visible-worker: true
 ---
+
+# Your job: codebase explorer.
 
 ## Explorer Directives
 

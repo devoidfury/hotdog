@@ -1247,7 +1247,6 @@ describe('Agent — end-to-end loop', () => {
   describe('applyProfile', () => {
     // SwitchProfile shape (see config/profiles.ts).
     const makeProfile = (overrides: Record<string, unknown> = {}) => ({
-      role: 'New role',
       body: 'New body',
       model: null as string | null,
       whitelistTools: null as string[] | null,
@@ -1255,19 +1254,17 @@ describe('Agent — end-to-end loop', () => {
       ...overrides,
     });
 
-    it('applies name, role, body, and whitelist', () => {
+    it('applies name, body, and whitelist', () => {
       const { agent } = createFixture({});
       agent.applyProfile('fresh', makeProfile({ whitelistTools: ['alpha'] }));
       expect(agent.profileName).toBe('fresh');
-      expect(agent.role).toBe('New role');
       expect(agent.profileBody).toBe('New body');
       expect(agent.toolWhitelist).toEqual(['alpha']);
     });
 
-    it('treats empty role/body as unset', () => {
+    it('treats empty body as unset', () => {
       const { agent } = createFixture({});
-      agent.applyProfile('empty', makeProfile({ role: '', body: '' }));
-      expect(agent.role).toBeUndefined();
+      agent.applyProfile('empty', makeProfile({ body: '' }));
       expect(agent.profileBody).toBeUndefined();
     });
 
@@ -1302,15 +1299,15 @@ describe('Agent — end-to-end loop', () => {
     });
 
     it('invalidates the cached system prompt and rebuilds with the new profile', async () => {
-      const { agent } = createFixture({});
+      const { agent } = createFixture({ profileBody: 'Original body' });
       await agent.ensureSystemPrompt();
-      expect(agent.context.getSystemPrompt()).toContain('Test agent');
+      expect(agent.context.getSystemPrompt()).toContain('Original body');
 
-      agent.applyProfile('other', makeProfile({ role: 'Audit mode' }));
+      agent.applyProfile('other', makeProfile({ body: 'Audit mode body' }));
       expect(agent.context.getSystemPrompt()).toBeNull();
 
       await agent.ensureSystemPrompt();
-      expect(agent.context.getSystemPrompt()).toContain('Audit mode');
+      expect(agent.context.getSystemPrompt()).toContain('Audit mode body');
     });
 
     it('seeds the context window from the model registry at construction', () => {

@@ -158,7 +158,7 @@ export function create(core) {
 |-----------|-----------|-------------|
 | `info` | `ui-info-cli` | Show system info and diagnostics |
 | `show-prompt` | `ui-info-cli` | Show rendered system prompt |
-| `profiles` | `ui-info-cli` | List all available profiles with roles and tool restrictions |
+| `profiles` | `ui-info-cli` | List all available profiles with their tool restrictions |
 | `sessions` | `ui-session-review-cli` | Manage session logs (show, delete, cleanup) |
 | `prompt` | `ui-one-shot` | One-shot prompt mode — run a single prompt and exit |
 | `cli` | `ui-interactive-cli` | Interactive CLI session (default when stdin is TTY) |

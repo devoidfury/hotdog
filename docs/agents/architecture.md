@@ -56,7 +56,7 @@ Discovers, loads, and manages extensions. Key exports:
 
 ### Agent (`src/core/agent.ts`)
 Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:
-- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `systemPromptTemplate` (loaded template text from the resolved config), `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`, `enqueueCallback`
+- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `profileBody`, `systemPromptTemplate` (loaded template text from the resolved config), `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`, `enqueueCallback`
 - `run(userInput)` — main iteration loop: add user message → build messages → LLM call → process stream → execute tools → repeat
 - `ensureSystemPrompt()` — builds system prompt via hooks (extensions contribute)
 - `_processStream(stream)` — processes streaming LLM response (content, reasoning, tool calls, usage)
@@ -143,7 +143,7 @@ Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filt
 
 ### System Prompt (`src/core/context/system-prompt.ts`)
 System prompt building. Key exports:
-- `buildSystemPrompt(role, body, model, profileName, chunks, template?)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook. `template` is the loaded template **text**; when omitted it is loaded from the config dir via `initSystemPromptTemplate()` (standalone callers only — the agent pipeline always passes the resolved template)
+- `buildSystemPrompt(body, model, profileName, chunks, template?)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook. `template` is the loaded template **text**; when omitted it is loaded from the config dir via `initSystemPromptTemplate()` (standalone callers only — the agent pipeline always passes the resolved template)
 - `collectSystemPromptChunks(results)` — collects and sorts system prompt chunks from hook results
 - `SystemPromptBuilder` class — manages system prompt lifecycle with caching (`build()`, `ensureBuilt()`, `getPrompt()`, `clear()`). Constructor takes the loaded template **text** (not a path); it is passed in from the resolved config
 - `createSystemPromptBuilder(template?)` — factory for SystemPromptBuilder

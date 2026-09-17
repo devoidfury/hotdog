@@ -193,11 +193,11 @@ describe("initSystemPromptTemplate", () => {
 
   it("loads template from explicit path", async () => {
     const tmpFile = path.join(tmpDir, "template.md");
-    writeFileSync(tmpFile, "This is a test template {{ role }}");
+    writeFileSync(tmpFile, "This is a test template {{ body }}");
 
     const template = await initSystemPromptTemplate(tmpFile);
     expect(template).toContain("This is a test template");
-    expect(template).toContain("{{ role }}");
+    expect(template).toContain("{{ body }}");
   });
 
   it("is a pure loader: re-reads the file on every call (no cache)", async () => {
@@ -214,7 +214,7 @@ describe("initSystemPromptTemplate", () => {
 
   it("falls back to default template when file not found", async () => {
     const template = await initSystemPromptTemplate("/nonexistent/path.md");
-    expect(template).toContain("{{ role }}");
+    expect(template).toContain("{{ body }}");
     expect(template).toContain("{{ body }}");
   });
 

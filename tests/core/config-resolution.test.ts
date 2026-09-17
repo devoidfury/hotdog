@@ -154,31 +154,6 @@ describe("Phase 2: Complex values", () => {
     });
   });
 
-  describe("role", () => {
-    it("defaults to fallback and resolves with trim", () => {
-      expect(resolveKey("role", CONFIG_KEYS.role, baseContext)).toContain("AI coding assistant");
-      expect(resolveKey("role", CONFIG_KEYS.role, { ...baseContext, cli: { role: "  Custom role  " } })).toBe("Custom role");
-    });
-
-    it("falls through config to profile", () => {
-      expect(resolveKey("role", CONFIG_KEYS.role, {
-        ...baseContext,
-        config: {},
-        profile: {
-          name: "test",
-          description: "test",
-          role: "Profile role.",
-          body: "",
-          model: null,
-          blacklistTools: [],
-          whitelistTools: null,
-          manager: false,
-          visibleWorker: false,
-        },
-      })).toBe("Profile role.");
-    });
-  });
-
   describe("noLog", () => {
     it("defaults to false and respects cli flag", () => {
       expect(resolveKey("noLog", CONFIG_KEYS.noLog, baseContext)).toBe(false);
@@ -248,7 +223,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
         sessionId: "test-session",
         compactDebug: true,
         theme: "  light  ",
-        role: "  CLI role  ",
         noLog: true,
         hideThinking: false,
         noColors: true,
@@ -265,7 +239,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
         hideTools: false,
         showTokenUse: false,
         theme: "nord",
-        role: "Config role",
         noLog: false,
         hideThinking: true,
         colors: { thinking: "cyan" },
@@ -274,7 +247,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
       profile: {
         name: "test",
         description: "test",
-        role: "Profile role",
         body: "",
         model: null,
         blacklistTools: [],
@@ -307,7 +279,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
 
     // Phase 2: Complex values
     expect(result.theme).toBe("light");
-    expect(result.role).toBe("CLI role");
     expect(result.noLog).toBe(true);
     expect(result.hideThinking).toBe(false);
     expect(result.useColors).toBe(false);
@@ -326,7 +297,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     const result = resolveAll(CONFIG_KEYS, context);
 
     expect(result.theme).toBe("dark");
-    expect(result.role).toContain("AI coding assistant");
     expect(result.noLog).toBe(false);
     expect(result.hideThinking).toBe(false);
     expect(result.useColors).toBe(true);

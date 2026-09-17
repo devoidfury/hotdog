@@ -18,7 +18,6 @@
 All configurable defaults are defined in `src/core/core.config.json` as schema default layers.
 Each config key defines its own resolution layers. Common patterns:
 - **`defaultModel`**: schema chain CLI → profile → env → config (no built-in default); final selection then prefers config-file profile model, then CLI, then the provider's first model — see Model Resolution below (agent construction errors when nothing resolves)
-- **`role`**: CLI → config → profile → default
 - **`aiUrl`/`apiKey`**: provider → CLI → config → env → default (provider is the natural source)
 
 Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive resolved values from callers
@@ -68,7 +67,6 @@ Models are declared inside providers. Each provider has `name`, `url`, optional 
   "thinker": "[Thinking: {}]",
   "toolCallDisplayFormat": "Tool [{}] {}",
   "tool_output_fmt": "  → {}",
-  "role": "You are an AI coding assistant.",
   "hide_tools": false
 }
 ```
@@ -106,7 +104,6 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 **Frontmatter fields**:
 - **`name`**: Profile identifier (falls back to filename)
 - **`description`**: Human-readable description
-- **`role`**: Role string that fills the `{role}` placeholder in the system prompt template
 - **`blacklist-tools`**: Tools to exclude
 - **`whitelist-tools`**: Tools to include
 - **`model`**: Override model
@@ -116,9 +113,7 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 
 **Markdown body**: Content that fills the `{body}` placeholder in the system prompt template.
 
-**Resolution chain for role**: CLI `--role` > config `role` > profile file `role` > core config schema default
-
-**Merge rules**: When both a config profile and a `.profile.md` file profile exist for the same name, the file profile wins for `role`, `whitelistTools`, `blacklistTools`, and `manager`. The config profile wins for `model` and all other fields.
+**Merge rules**: When both a config profile and a `.profile.md` file profile exist for the same name, the file profile wins for `whitelistTools`, `blacklistTools`, and `manager`. The config profile wins for `model` and all other fields.
 
 ### Config Registry (`src/core/extensions/config.ts`)
 

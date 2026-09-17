@@ -138,7 +138,7 @@ describe("SessionRegistry", () => {
   });
 
   describe("switchProfile", () => {
-    it("applies the full profile (role, model, whitelist, blacklist) and clears context", async () => {
+    it("applies the full profile (model, whitelist, blacklist) and clears context", async () => {
       const { agent, toolRegistry } = createFixture({
         model: "prov/old-model",
         modelRegistry: {
@@ -154,8 +154,7 @@ describe("SessionRegistry", () => {
         buildAgent: async () => agent,
         profiles: {
           coder: {
-            role: "Coder role",
-            body: "",
+            body: "coder body",
             model: "prov/new-model",
             whitelistTools: ["alpha"],
             blacklistTools: [],
@@ -168,7 +167,7 @@ describe("SessionRegistry", () => {
       expect(result.success).toBe(true);
 
       expect(agent.profileName).toBe("coder");
-      expect(agent.role).toBe("Coder role");
+      expect(agent.profileBody).toBe("coder body");
       expect(agent.model).toBe("prov/new-model");
       expect(wsRegistry.get(sessionId)!.metadata.model).toBe("prov/new-model");
       expect(agent.contextLimit).toBe(64000);
@@ -184,7 +183,7 @@ describe("SessionRegistry", () => {
       const { agent } = createFixture({});
       const wsRegistry = new SessionRegistry({
         buildAgent: async () => agent,
-        profiles: { coder: { role: "R", body: "", model: null, whitelistTools: null, blacklistTools: [] } },
+        profiles: { coder: { body: "", model: null, whitelistTools: null, blacklistTools: [] } },
       });
       const { sessionId } = await wsRegistry.create({});
       wsRegistry.incrementUserMessageCount(sessionId);
@@ -210,7 +209,7 @@ describe("SessionRegistry", () => {
       registry = new SessionRegistry({
         buildAgent: createWsMockAgentFactory(),
         profiles: {
-          coder: { role: "R", body: "", model: null, whitelistTools: null, blacklistTools: [] },
+          coder: { body: "", model: null, whitelistTools: null, blacklistTools: [] },
         },
       });
       const { sessionId } = await registry.create({});

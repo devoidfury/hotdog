@@ -22,7 +22,7 @@ An AI agent harness with tool calling support. Connects to any OpenAI-compatible
 ## Features
 - **Tool calling** -- File operations, bash, HTTP requests, web search, and more
 - **Extension architecture** -- All features are extensions; add your own via `extension.json` + `index.ts`
-- **Profiles** -- Composable agent configurations with roles, tools, and behavioral aspects
+- **Profiles** -- Composable agent configurations with tools and behavioral aspects
 - **Skills** -- Load-on-demand guides and workflows
 - **Compaction** -- Automatic context management when token budget is exceeded
 - **MCP client** -- Connect to Model Context Protocol servers (HTTP + stdio)
@@ -114,7 +114,7 @@ There are [example configurations](examples/) including the [developer's daily d
 
 ### Profiles
 
-Profiles define agent behavior: role, tools, aspects, and model. Create profile files in `<config-dir>/profiles/`.
+Profiles define agent behavior: tools, aspects, and model. Create profile files in `<config-dir>/profiles/`.
 
 See also the Profiles section in [config reference](docs/config-reference.md#profiles-in-config)
 
@@ -124,7 +124,6 @@ Example `coder.profile.md`, used with `--profile coder`:
 ---
 name: coder
 description: A coding-focused agent
-role: You are an AI coding assistant.
 aspects: ['proactive', 'coding', 'concise']
 ---
 Profile body content goes here.

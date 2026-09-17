@@ -1,15 +1,19 @@
 import { describe, it, expect } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   buildSystemPrompt,
   SystemPromptBuilder,
   createSystemPromptBuilder,
   collectSystemPromptChunks,
 } from "@core/context/system-prompt.ts";
+import { loadProfileFile } from "@core/config/profiles.ts";
+import { Message } from "@core/context/message.ts";
 
 describe("buildSystemPrompt", () => {
-  it("builds a system prompt with role and chunks", async () => {
+  it("builds a system prompt with body and chunks", async () => {
     const result = await buildSystemPrompt(
-      "You are a test assistant.",
       "Test body content",
       "qwen3.5-0.8b",
       "test",
@@ -22,14 +26,13 @@ describe("buildSystemPrompt", () => {
       ],
     );
     expect(typeof result).toBe("string");
-    expect(result).toContain("You are a test assistant.");
+    expect(result).toContain("Test body content");
     expect(result).toContain("Test content here");
   });
 
   it("renders chunks in the order provided", async () => {
     const result = await buildSystemPrompt(
       "test",
-      "",
       "test",
       "test",
       [
@@ -43,20 +46,13 @@ describe("buildSystemPrompt", () => {
   });
 
   it("handles empty chunks and inputs gracefully", async () => {
-    const result = await buildSystemPrompt(
-      "test",
-      "",
-      "test",
-      "test",
-      [],
-    );
+    const result = await buildSystemPrompt("test", "test", "test", []);
     expect(typeof result).toBe("string");
     expect(result).toContain("test");
   });
 
   it("includes body when provided", async () => {
     const result = await buildSystemPrompt(
-      "test",
       "Custom body text",
       "test",
       "test",
@@ -69,14 +65,13 @@ describe("buildSystemPrompt", () => {
 describe("buildSystemPrompt with explicit template", () => {
   it("renders the supplied template text without touching disk", async () => {
     const result = await buildSystemPrompt(
-      "Explicit role",
       "Explicit body",
       "model-x",
       "default",
       [],
-      "TEMPLATE: {{ role }} / {{ body }} / {{ model }}",
+      "TEMPLATE: {{ body }} / {{ model }} / {{ profile_name }}",
     );
-    expect(result).toBe("TEMPLATE: Explicit role / Explicit body / model-x");
+    expect(result).toBe("TEMPLATE: Explicit body / model-x / default");
   });
 });
 
@@ -134,7 +129,6 @@ describe("SystemPromptBuilder", () => {
   };
 
   const mockConfig = {
-    role: "Test role",
     profileBody: "Test body",
     model: "test-model",
     profileName: "test-profile",
@@ -150,7 +144,7 @@ describe("SystemPromptBuilder", () => {
     const builder = new SystemPromptBuilder();
     const prompt = await builder.build(mockHooks, {}, mockConfig);
     expect(typeof prompt).toBe("string");
-    expect(prompt).toContain("Test role");
+    expect(prompt).toContain("Test body");
     expect(builder.getPrompt()).toBe(prompt);
     expect(builder.isBuilt()).toBe(true);
   });
@@ -174,7 +168,6 @@ describe("SystemPromptBuilder", () => {
   it("uses default values for missing config fields", async () => {
     const builder = new SystemPromptBuilder();
     const prompt = await builder.build(mockHooks, {}, {
-      role: undefined,
       profileBody: undefined,
       model: "fallback-model",
       profileName: undefined,
@@ -183,9 +176,9 @@ describe("SystemPromptBuilder", () => {
   });
 
   it("uses the explicitly supplied template instead of config-dir resolution", async () => {
-    const builder = new SystemPromptBuilder("X: {{ role }}");
+    const builder = new SystemPromptBuilder("X: {{ profile_name }}");
     const prompt = await builder.build(mockHooks, {}, mockConfig);
-    expect(prompt).toContain("X: Test role");
+    expect(prompt).toContain("X: test-profile");
   });
 });
 
@@ -194,5 +187,73 @@ describe("createSystemPromptBuilder", () => {
     const builder = createSystemPromptBuilder();
     expect(builder).toBeInstanceOf(SystemPromptBuilder);
     expect(builder.getPrompt()).toBeNull();
+  });
+});
+
+// New invariant after the profile-`role` removal: a profile file that still
+// carries a legacy `role:` line must yield a system prompt with NO injected
+// role section, and the prompt pipeline must not crash on such input. The
+// message-role (wire/format) encoding is a separate, untouched concept and is
+// asserted here too, to prove the two never got conflated.
+describe("profile role input is ignored by prompt assembly", () => {
+  const mockHooks = {
+    runHookPipeline: async () => ({ results: [] }),
+  };
+
+  it("a legacy role line in a profile file never reaches the system prompt", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-roleless-"));
+    try {
+      fs.writeFileSync(
+        path.join(dir, "legacy.profile.md"),
+        [
+          "---",
+          "name: legacy",
+          "description: profile that still has a legacy role line",
+          "role: INJECTED ROLE MUST NOT APPEAR",
+          "---",
+          "Body of the profile.",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      // Parsing must not crash, and must drop the role field entirely.
+      const profile = await loadProfileFile(dir, "legacy");
+      expect(profile).not.toBeNull();
+      expect(profile!.body).toContain("Body of the profile.");
+      expect(profile!.role).toBeUndefined();
+
+      // Prompt assembly from that profile carries only the body: no role text.
+      const builder = new SystemPromptBuilder("PROMPT: {{ body }}|{{ role }}");
+      const prompt = await builder.build(mockHooks, {}, {
+        profileBody: profile!.body,
+        model: "m",
+        profileName: "legacy",
+      });
+      // `{{ role }}` is no longer in the render context: it renders empty.
+      expect(prompt).toBe(`PROMPT: ${profile!.body}|`);
+      expect(prompt).not.toContain("INJECTED ROLE");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a legacy role key in a config-defined profile is dropped by ProfileManager", async () => {
+    const { ProfileManager } = await import("@core/config/profiles.ts");
+    const manager = new ProfileManager("/nonexistent-profiles-dir", {
+      "cfg-profile": { name: "cfg-profile", role: "CONFIG ROLE" } as never,
+    });
+    const p = manager.getProfile("cfg-profile");
+    expect(p).not.toBeNull();
+    expect(p!.role).toBeUndefined();
+    expect(JSON.stringify(p)).not.toContain("CONFIG ROLE");
+  });
+
+  it("message-role encoding still round-trips untouched", () => {
+    for (const role of ["user", "assistant", "tool", "harness", "system"]) {
+      const msg = new Message({ role, content: `hello ${role}` });
+      const restored = Message.fromJSON(msg.toJSON());
+      expect(restored.role).toBe(role);
+    }
   });
 });

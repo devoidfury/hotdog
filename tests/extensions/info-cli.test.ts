@@ -423,7 +423,7 @@ describe("Info CLI - profiles subcommand", () => {
 
     const def = core.cliSubcommandRegistry.get("profiles")!;
     expect(def).toBeDefined();
-    expect(def.description).toBe("List all available profiles with their roles and tool restrictions");
+    expect(def.description).toBe("List all available profiles with their tool restrictions");
   });
 
   it("shows no profiles when directory is empty", async () => {
@@ -469,7 +469,10 @@ describe("Info CLI - profiles subcommand", () => {
       expect(output).toContain("Profile: default");
       expect(output).toContain("← current");
       expect(output).toContain("Coding specialist");
-      expect(output).toContain("You are a coding expert.");
+      // Legacy `role:` frontmatter lines are no longer displayed.
+      expect(output).not.toContain("You are a coding expert.");
+      expect(output).not.toContain("You are a helpful assistant.");
+      expect(output).not.toContain("Role:");
       expect(output).toContain("Blacklisted tools: browser");
       expect(output).toContain("Manager: yes");
       expect(output).toContain("Body: 12 chars");
@@ -540,7 +543,7 @@ describe("Info CLI - profiles subcommand", () => {
       expect(parsed[0].name).toBe("worker");
       expect(parsed[0].current).toBe(true);
       expect(parsed[0].description).toBe("A worker profile");
-      expect(parsed[0].role).toBe("Do work.");
+      expect(parsed[0]).not.toHaveProperty("role");
       expect(parsed[0].subagent).toBe(true);
       expect(parsed[0].aspects).toEqual(["guidelines"]);
       expect(parsed[0].sources).toEqual(["file"]);

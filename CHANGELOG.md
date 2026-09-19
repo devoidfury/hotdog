@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **[BRK]** removed the profile-level `role` field. The only "role" concepts that remain are the message-format wire encoding (`Message.role`, role-mapping) and plain prose in user-supplied context files.
+  - Profile files with `role:` frontmatter still parse -- the key is dropped and can never reach prompt assembly (covered by tests asserting a profile role can never leak into the system prompt).
+  - Config keys `role` and `taskDefaultRole` and the `--role` flag are gone; the `{{ role }}` placeholder was removed from the default system prompt template. If you had a role line, fold it into the profile body.
+
+- [BRK] internals / hooks - pipeline handlers now patch the payload. Whatever a handler returns is written onto the payload, field by field, so every later handler and core read one thing: the payload. This replaces reading "the last handler's whole return value" at each call site, which silently dropped earlier patches — a `provider:request` handler returning `{ modelConfig }` followed by one returning `{ messages }` used to lose the model. Same rule now covers `context` (`{ messages }`), `provider:request`, `provider:response`, `tool:result`, `tool:call`, `input`, and `command:dispatch`. Non-object returns (a bare array, a string) are not patches and are ignored. `runHookPipeline()` no longer returns a `lastResult` field; `results` (every return, in order) and `stopped` remain. The now-dead type-guard helpers (`isGateActionBlock/Modify/Continue/Handled`, `isInputTransform`, `isInputHandled`) are removed: call sites directly read the payload's `action`.
+
+- extensions - new opt-in tier: `@experimental` in `extension_paths` loads `src/experimental/` (the setting replaces the default, so use `["@extensions", "@experimental"]` to keep the built-ins). First entry: `file-watch`, cooperative-editing awareness for a shared working tree — it tracks the files a session reads and writes, notices when the bytes on disk stop matching what the session believes, rides that onto each request as a harness system-notice, and blocks an `overwrite` onto a file that changed underneath the session.
+
 - fix bug causing some duplicate messages added to the core agent loop
 
 - tools - a batch of core-tool and extension fixes found by auditing `src/extensions/`:
@@ -14,9 +22,6 @@
 
 - hooks - `notifyHooks()` is now awaitable: handlers start immediately in registration order (async ones run in parallel). Core call sites now await it where later code depends on the effect: the tool pipeline (`TOOL_BEFORE_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_AFTER_EXECUTE`, `TOOL_METRICS`), turn boundaries (`TURN_START`/`TURN_END`), session create/swap, the bootstrap registration hooks, and `SHUTDOWN_CLEANUP`. Previously an async `AGENT_TOOL_CONTEXT` handler could complete its tool-context mount *after* the `TOOL_CALL` gate (e.g. the user-gate approval seam) had already run. Signature note: `notifyHooks()` returns `Promise<void>` (was `void`); unawaited call sites keep the old behavior.
 
-- **[BRK]** removed the profile-level `role` field. The only "role" concepts that remain are the message-format wire encoding (`Message.role`, role-mapping) and plain prose in user-supplied context files.
-  - Profile files with `role:` frontmatter still parse -- the key is dropped and can never reach prompt assembly (covered by tests asserting a profile role can never leak into the system prompt).
-  - Config keys `role` and `taskDefaultRole` and the `--role` flag are gone; the `{{ role }}` placeholder was removed from the default system prompt template. If you had a role line, fold it into the profile body.
 
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.9.2...main
 

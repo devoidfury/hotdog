@@ -4,7 +4,7 @@
 // Note: Basic agent loop tests are in core-agent.test.ts to avoid duplication.
 
 import { describe, it, expect } from 'bun:test';
-import { HOOKS, GateAction, ContextHookResult } from '../../src/core/hooks.ts';
+import { HOOKS, GateAction } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
 import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
 import type { OutputEvent } from '../../src/core/context/output.ts';
@@ -310,17 +310,15 @@ describe('Agent — hook pipeline integration', () => {
 
     const fixture = createAgentFixture({ mockLLM });
 
-    // First hook mutates the messages array in place (pipeline pattern)
-    fixture.hooks.on(HOOKS.CONTEXT, ({ messages }) => {
-      messages.push(new Message({ role: 'user', content: 'Reminder 1' }));
-      return { messages } as ContextHookResult;
-    });
+    // Adoption: each handler's { messages } replaces the payload's array, so
+    // the next handler in the chain sees the previous one's additions.
+    fixture.hooks.on(HOOKS.CONTEXT, ({ messages }) => ({
+      messages: [...messages, new Message({ role: 'user', content: 'Reminder 1' })],
+    }));
 
-    // Second hook also mutates the same array (sees the first hook's additions)
-    fixture.hooks.on(HOOKS.CONTEXT, ({ messages }) => {
-      messages.push(new Message({ role: 'user', content: 'Reminder 2' }));
-      return { messages } as ContextHookResult;
-    });
+    fixture.hooks.on(HOOKS.CONTEXT, ({ messages }) => ({
+      messages: [...messages, new Message({ role: 'user', content: 'Reminder 2' })],
+    }));
 
     await fixture.agent.run('Test');
 

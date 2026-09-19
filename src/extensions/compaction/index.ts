@@ -304,9 +304,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         const compacted = await _performCompaction(agent, strategy);
         if (!compacted) return;
 
-        // The hook's `messages` input is stale after compaction.
-        const newMessages = agent.buildMessages();
-        return { messages: newMessages };
+        return { messages: agent.buildMessages() };
       },
 
       [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {

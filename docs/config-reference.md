@@ -571,10 +571,10 @@ Name of the active profile. Can reference either a profile defined in the `profi
 - **Default:** `["@extensions"]`
 - **Resolution:** config > default
 
-Paths to extension directories. `"@extensions"` loads built-in extensions. Add paths to load custom extensions.
+Paths to extension directories. `"@extensions"` loads built-in extensions, `"@experimental"` loads bundled-but-opt-in experimental extensions (`src/experimental/`); neither is loaded when overridden, so include both to keep the builtins: `["@extensions", "@experimental"]`. Add paths to load custom extensions.
 
 ```json
-{ "extensionPaths": ["@extensions", "./my-extensions"] }
+{ "extensionPaths": ["@extensions", "@experimental", "./my-extensions"] }
 ```
 
 ### `extensionAutoload`
@@ -841,6 +841,21 @@ Extensions register their own configuration namespaces. Each extension's config 
 
 ```json
 { "fileAttachment": { "maxFileSize": 204800, "maxFiles": 20 } }
+```
+
+### `fileWatch`
+
+[File Watch](../src/experimental/file-watch) — **Experimental**: not loaded by default; add `@experimental` to `extensionPaths` (keeping `@extensions` too — the setting replaces the default). Cooperative-editing awareness for a shared working tree. Tracks the files this session reads or writes and detects when the bytes on disk stop matching what the session believes (another agent session, your editor, or git). Unresolved changes ride each LLM request as a small harness system-notice until the session re-reads the file.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+| `notify` | `boolean` | `true` | Inject a system notice into LLM requests while tracked files have unresolved external changes. |
+| `writeGuard` | `boolean` | `true` | Block `overwrite` onto a file that changed externally since the session last read it, so foreign work is not silently clobbered. |
+| `ignore` | `string[]` | `["node_modules/", ".git/"]` | Patterns matched on path-segment boundaries against absolute paths — `dist/` matches any `dist` directory but not `mydist/`. Matching files are never tracked. |
+
+```json
+{ "fileWatch": { "writeGuard": false, "ignore": ["node_modules/", ".git/", "dist/"] } }
 ```
 
 ### `handoffTool`

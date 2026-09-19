@@ -261,7 +261,11 @@ describe("MessageBus — processing behavior", () => {
     const agent = createMockAgent({
       run: async (text, images, opts) => { runArgs.push(text, images, opts); },
       hooks: {
-        runHookPipeline: async () => ({ stopped: false, lastResult: { action: "transform", content: "expanded" } }),
+        runHookPipeline: async (_hook: string, data: unknown) => {
+          // What the real pipeline does with a handler's { action, content }.
+          Object.assign(data as object, { action: "transform", content: "expanded" });
+          return { stopped: false };
+        },
       },
     });
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
@@ -291,10 +295,10 @@ describe("MessageBus — processing behavior", () => {
     const agent = createMockAgent({
       run: async (text, images, opts) => { runArgs.push(text, images, opts); },
       hooks: {
-        runHookPipeline: async () => ({
-          stopped: false,
-          lastResult: { action: "transform", content },
-        }),
+        runHookPipeline: async (_hook: string, data: unknown) => {
+          Object.assign(data as object, { action: "transform", content });
+          return { stopped: false };
+        },
       },
     });
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
@@ -343,7 +347,7 @@ describe("MessageBus — processing behavior", () => {
       hooks: {
         runHookPipeline: async (_hook: string, data: unknown) => {
           inputPayload = data as Record<string, unknown>;
-          return { stopped: false, lastResult: null };
+          return { stopped: false };
         },
       },
     });

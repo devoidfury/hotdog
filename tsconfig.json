@@ -26,6 +26,7 @@
     "paths": {
       "@core/*": ["./src/core/*"],
       "@extensions/*": ["./src/extensions/*"],
+      "@experimental/*": ["./src/experimental/*"],
       "@utils/*": ["./src/utils/*"],
       "@package.json": ["./package.json"],
     },

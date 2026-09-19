@@ -24,7 +24,9 @@ JS project `hotdog` — an AI agent harness.
 - Never use mock.module in tests; footgun.
 
 ### Module Imports
-tsconfig path aliases defined: `@core/*`, `@extensions/*`, `@utils/*`, `@package.json`.
+tsconfig path aliases defined: `@core/*`, `@extensions/*`, `@experimental/*`, `@utils/*`, `@package.json`.
+`src/experimental/` holds opt-in extensions: never loaded unless the user's config adds
+`@experimental` to `extensionPaths` (which replaces, not appends to, the `@extensions` default).
 Within same alias scope, relative imports okay (e.g. `../error.ts` from `src/core/session/`).
 Across alias scopes, use alias instead of `../../core` or `../../utils` climbing paths
 (e.g. `@utils/logger.ts` from `src/core/`, `@core/hooks.ts` from `src/extensions/`).

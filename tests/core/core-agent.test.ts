@@ -289,6 +289,33 @@ describe('Agent — end-to-end loop', () => {
     expect(text(toolMsg!.content)).toContain('not available');
   });
 
+  it('applies every PROVIDER_REQUEST patch, not just the last handler', async () => {
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({ content: 'ok', usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 } }),
+      ],
+    });
+
+    const { agent, toolRegistry, hooks } = createFixture({ mockLLM });
+    toolRegistry.register('probe_tool', simpleTool('probe_tool', 'probe result'));
+
+    // Two handlers patching different fields: a last-whole-object-wins read
+    // used to drop the first one's toolDefs the moment the second returned.
+    hooks.on(HOOKS.PROVIDER_REQUEST, ({ toolDefs }) => ({
+      toolDefs: toolDefs.filter(d => d.function.name !== 'probe_tool'),
+    }));
+    hooks.on(HOOKS.PROVIDER_REQUEST, ({ messages }) => ({
+      messages: [...messages, new Message({ role: 'user', content: 'injected note' })],
+    }));
+
+    await agent.run('Hi');
+
+    const offered = (mockLLM.lastToolDefs || []).map(d => (d.function as { name: string }).name);
+    expect(offered).not.toContain('probe_tool');
+    const sent = (mockLLM.lastMessages || []) as Array<{ content?: string }>;
+    expect(sent.some(m => m.content === 'injected note')).toBe(true);
+  });
+
   it('should use the model-visible tool defs for availability (PROVIDER_REQUEST can narrow them)', async () => {
     const tool = simpleTool('secret_tool', 'secret result');
 
@@ -767,6 +794,24 @@ describe('Agent — end-to-end loop', () => {
       await agent.clearContext();
       expect(agent.context.log.getAll()).toEqual([]);
       expect(agent.iterationCount).toBe(0);
+    });
+
+    it('fires CONTEXT_REPLACED when clearing context', async () => {
+      const { agent, hooks } = createFixture({});
+      agent.addMessage(new Message({ role: 'user', content: 'old message' }));
+      agent.addMessage(new Message({ role: 'assistant', content: 'old response' }));
+
+      const hookCalls: Array<{ oldContext: Message[]; newContext: Message[] }> = [];
+      hooks.on(HOOKS.CONTEXT_REPLACED, (data: { oldContext: Message[]; newContext: Message[] }) => {
+        hookCalls.push({ oldContext: data.oldContext, newContext: data.newContext });
+      });
+
+      await agent.clearContext();
+
+      expect(hookCalls).toHaveLength(1);
+      expect(hookCalls[0]!.oldContext).toHaveLength(2);
+      expect(hookCalls[0]!.oldContext[0]!.content).toBe('old message');
+      expect(hookCalls[0]!.newContext).toEqual([]);
     });
   });
 

@@ -6,6 +6,7 @@ import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
+import type { HookPayloads } from "./extensions/types.ts";
 import { Workspace } from "@utils/workspace.ts";
 import { suggestCandidates } from "@utils/strings.ts";
 import type { ToolResultContent } from "./context/wrappers.ts";
@@ -143,22 +144,19 @@ export class ToolExecutor {
     // failOnError: a gate handler that throws must not be treated as a
     // pass — the error propagates to execute()'s catch and becomes the tool
     // result, so the tool never runs (fail closed).
-    const callResult = await hooks.runHookPipeline<GateAction>(HOOKS.TOOL_CALL, {
-      toolCallId,
-      toolName,
-      input,
-      agent,
-      toolCtx,
-    }, { failOnError: true });
-    if (callResult.lastResult?.action === "block") {
+    const gate: HookPayloads["tool:call"] = { toolCallId, toolName, input, agent, toolCtx };
+    await hooks.runHookPipeline<GateAction | undefined, "tool:call">(
+      HOOKS.TOOL_CALL,
+      gate,
+      { failOnError: true },
+    );
+    input = gate.input;
+    if (gate.action === "block") {
       // A blocked call still answers the model with a tool result (the wrapper
       // says status="error"), so the gate's message is part data like any
       // other result -- the request's WireFormat shapes it at the wire.
-      const blockedPart = formatToolResult(callResult.lastResult.result, toolName, false);
+      const blockedPart = formatToolResult(gate.result, toolName, false);
       return this.#writeToolResult(toolName, input, [blockedPart], toolCallId);
-    }
-    if (callResult.lastResult?.action === "modify" && callResult.lastResult.input !== undefined) {
-      input = callResult.lastResult.input;
     }
 
     const tool = this.#deps.toolRegistry.get(toolName);
@@ -232,17 +230,13 @@ export class ToolExecutor {
       success,
     });
 
-    const resultHook = await hooks.runHookPipeline<ToolResultHookResult>(HOOKS.TOOL_RESULT, {
-      toolCallId,
-      toolName,
-      result,
-      success,
-      input,
-      agent,
-    });
-    if (resultHook.lastResult?.result !== undefined) {
-      result = resultHook.lastResult.result;
-    }
+    const resultPayload = { toolCallId, toolName, result, success, input, agent };
+    await hooks.runHookPipeline<ToolResultHookResult | undefined, "tool:result">(
+      HOOKS.TOOL_RESULT,
+      resultPayload,
+    );
+    // A handler's { result } is adopted in place (undefined is never written).
+    result = resultPayload.result;
     const images = (result as { images?: unknown })?.images ?? null;
 
     // The tool's answer is stored as a PART, never as model-facing text: the

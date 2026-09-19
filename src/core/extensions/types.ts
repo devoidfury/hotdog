@@ -115,7 +115,14 @@ export interface HookPayloads {
   // Returns SystemPromptChunk or SystemPromptChunk[].
   "systemPrompt:build": { agent: Agent };
 
-  "command:dispatch": { command: ParsedCommand; agent: Agent };
+  "command:dispatch": {
+    command: ParsedCommand;
+    agent: Agent;
+    content?: string;
+    error?: string;
+    // Numeric bitflags (ACTIONS), not a GateAction string.
+    action?: number;
+  };
   "commands:register": CommandsRegisterPayload;
 
   "output:event": { type: string; data: unknown; agent: Agent };
@@ -125,14 +132,25 @@ export interface HookPayloads {
   "cli:subcommandsRegister": CliSubcommandRegistryLike;
   "cli:argsParsed": { cli: ParsedCliOptions };
 
-  // Returns InputHookResult. `origin` carries harness provenance (undefined for
-  // normal user input); `source: "interactive"` marks the channel, not provenance.
-  "input": { text: string; images?: ImageAttachment[]; source?: string; origin?: MessageSource; agent: Agent };
+  // Adopted from a handler's InputHookResult: `action` ("continue" / "transform" / "handled") plus the replacement `content`.
+  // `origin` carries harness provenance (undefined for normal user input);
+  // `source: "interactive"` marks the channel, not provenance.
+  "input": {
+    text: string;
+    images?: ImageAttachment[];
+    source?: string;
+    origin?: MessageSource;
+    agent: Agent;
+    action?: "continue" | "transform" | "handled";
+    content?: string | Array<Record<string, unknown>>;
+  };
 
-  // Returns ContextHookResult ({ messages } replaces the array).
+  // Adopted from a handler's ContextHookResult: a returned `messages` replaces
+  // the array for every later handler and for the caller, which reads it back
+  // off the payload. Undefined return means no change.
   "context": { messages: Message[]; agent: Agent };
 
-  // Returns GateAction (continue / modify input / block).
+  // Adopted from a handler's GateAction (continue / modify input / block).
   // `toolCtx` is built (and AGENT_TOOL_CONTEXT fired) BEFORE this pipeline
   // runs, so an approval-style gate handler can reach the human through the
   // context's `input` seam. Optional: standalone callers may omit it.
@@ -142,6 +160,8 @@ export interface HookPayloads {
     input: string;
     agent: Agent;
     toolCtx?: ToolContext;
+    action?: "continue" | "modify" | "block" | "handled";
+    result?: unknown;
   },
 
   // Returns ToolResultHookResult ({ result } replaces the result).
@@ -154,9 +174,10 @@ export interface HookPayloads {
     agent: Agent;
   };
 
-  // Returns ProviderRequestHookResult (any of messages/modelConfig/toolDefs replace).
+  // messages/modelConfig/toolDefs replace their payload field
   "provider:request": ProviderRequestPayload,
 
+  // A handler returns { response } to replace the streamed response.
   "provider:response": { response: StreamResult; modelConfig: ModelConfig; agent: Agent };
 
   "turn:start": { turnIndex: number; timestamp: number; agent: Agent };

@@ -17,8 +17,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "../../");
 
 export function resolveExtensionPath(spec: string): string {
-  if (spec === "@extensions") {
+  // core builtins
+  if (spec === "@extensions") { 
     return path.join(ROOT_DIR, "extensions");
+  }
+  // explicit opt-in experimental tier (src/experimental)
+  if (spec === "@experimental") {
+    return path.join(ROOT_DIR, "experimental");
   }
   if (spec === "builtins") {
     throw new ConfigError("'builtins' is deprecated, use '@extensions' instead.");
@@ -389,8 +394,8 @@ export async function discoverExtensions(
       // ext.path is the scan-relative path (e.g. "group/foo" for extensions
       // nested below the scan root); ext.name alone drops intermediate dirs.
       let basePath: string;
-      if (spec === "@extensions") {
-        basePath = `@extensions/${ext.path}/index.ts`;
+      if (spec === "@extensions" || spec === "@experimental") {
+        basePath = `${spec}/${ext.path}/index.ts`;
       } else {
         const relPath = path.relative(ROOT_DIR, path.join(resolved, ext.path, "index.ts"));
         basePath = relPath.startsWith("..") ? relPath : `./${relPath}`;

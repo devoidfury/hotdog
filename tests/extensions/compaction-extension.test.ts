@@ -207,8 +207,8 @@ describe("Hook Integration", () => {
     const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
 
     expect(agent.log.length).toBeLessThan(largeContext.length);
-    expect((result as any).messages).toBeDefined();
-    expect((result as any).messages.length).toBeLessThan(messages.length);
+    expect(result).toBeDefined();
+    expect((result as { messages: unknown[] }).messages.length).toBeLessThan(messages.length);
   });
 
   it("wraps the summary as a harness message with the raw summary in an untrusted part", async () => {
@@ -284,7 +284,7 @@ describe("Hook Integration", () => {
       const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
 
       expect(agent.log.length).toBeLessThan(largeContext.length);
-      expect((result as any).messages).toBeDefined();
+      expect(result).toBeDefined();
     });
   }
 
@@ -331,7 +331,7 @@ describe("Hook Integration", () => {
     // Compaction must be declined: the context stays intact (no summary
     // message, no dropped messages).
     expect(agent.log.length).toBe(context.length);
-    expect((result as any)?.messages).toBeUndefined();
+    expect(result).toBeUndefined();
   });
 
   it("falls back to the agent's contextLimit when the model is not in the registry", async () => {
@@ -355,7 +355,7 @@ describe("Hook Integration", () => {
     const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
 
     expect(agent.log.length).toBeLessThan(context.length);
-    expect((result as any).messages).toBeDefined();
+    expect(result).toBeDefined();
   });
 
   it("still fails loudly when no contextLimit resolves for an unregistered model", async () => {
@@ -582,8 +582,8 @@ describe("Edge Cases", () => {
 
     const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
 
-    // Should return undefined or empty result
-    expect(result === undefined || result.messages === undefined).toBe(true);
+    // No compaction: no replacement returned.
+    expect(result).toBeUndefined();
   });
 
   it("should handle messages with only system messages", async () => {

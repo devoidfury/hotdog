@@ -1,8 +1,7 @@
 import { ACTIONS } from "../commands.ts";
 import { HOOKS } from "../hooks.ts";
-import { isPromise } from "@utils/promise.ts";
 import { logger } from "@utils/logger.ts";
-import type { CoreContext } from "./types.ts";
+import type { CoreContext, HookPayloads } from "./types.ts";
 import type { CompletionHandler } from "../completion.ts";
 import type { Agent } from "../agent.ts";
 import type { HookSystem } from "../hooks.ts";
@@ -111,16 +110,13 @@ export class AgentCommandRegistry {
       if (result) return result;
     }
 
-    const pipelineResult = await hooks.runHookPipeline<CommandResult>(
+    const dispatch: HookPayloads["command:dispatch"] = { command: cmd, agent };
+    await hooks.runHookPipeline<CommandResult | undefined, "command:dispatch">(
       HOOKS.COMMAND_DISPATCH,
-      { command: cmd, agent },
+      dispatch,
     );
-    const lastResult = pipelineResult.lastResult;
-    if (isPromise(lastResult)) {
-      const awaited = await lastResult;
-      if (awaited) return awaited;
-    } else if (lastResult) {
-      return lastResult;
+    if (dispatch.content !== undefined || dispatch.error !== undefined || dispatch.action !== undefined) {
+      return { content: dispatch.content, error: dispatch.error, action: dispatch.action };
     }
 
     const registered = this.get(cmd.type);

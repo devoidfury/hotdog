@@ -59,11 +59,11 @@ async function run(
   for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
     hooks.on(name, handler as never, "user-gate");
   }
-  const res = await hooks.runHookPipeline<GateAction, "tool:call">(HOOKS.TOOL_CALL, p, {
+  await hooks.runHookPipeline<GateAction, "tool:call">(HOOKS.TOOL_CALL, p, {
     failOnError: true,
   });
-  const blocked = res.lastResult as { result?: unknown } | undefined;
-  return { action: res.lastResult?.action, result: String(blocked?.result ?? "") };
+  // The gate's action/result are adopted onto the payload.
+  return { action: p.action, result: String(p.result ?? "") };
 }
 
 describe("user-gate TOOL_CALL handler", () => {
@@ -164,7 +164,9 @@ describe("user-gate TOOL_CALL handler", () => {
         },
       };
       const make = () => payload({ inputOverride: input } as never);
-      expect((await hooks.runHookPipeline<GateAction, "tool:call">(HOOKS.TOOL_CALL, make(), { failOnError: true })).lastResult?.action).toBe("continue");
+      const p = make();
+      await hooks.runHookPipeline<GateAction, "tool:call">(HOOKS.TOOL_CALL, p, { failOnError: true });
+      expect(p.action).toBe("continue");
       await hooks.runHookPipeline<GateAction, "tool:call">(HOOKS.TOOL_CALL, make(), { failOnError: true });
       expect(asked).toBe(expectSecondPrompt ? 2 : 1);
     }
@@ -380,14 +382,16 @@ describe("prompt queue", () => {
         });
       },
     };
+    const gate1: ToolCallPayload = payload({ input: JSON.stringify({ command: "ls" }), inputOverride: input } as never);
+    const gate2: ToolCallPayload = payload({ input: JSON.stringify({ command: "pwd" }), inputOverride: input } as never);
     const p1 = hooks.runHookPipeline<GateAction, "tool:call">(
       HOOKS.TOOL_CALL,
-      payload({ input: JSON.stringify({ command: "ls" }), inputOverride: input } as never),
+      gate1,
       { failOnError: true },
     );
     const p2 = hooks.runHookPipeline<GateAction, "tool:call">(
       HOOKS.TOOL_CALL,
-      payload({ input: JSON.stringify({ command: "pwd" }), inputOverride: input } as never),
+      gate2,
       { failOnError: true },
     );
     await new Promise((r) => setTimeout(r, 20));
@@ -397,9 +401,9 @@ describe("prompt queue", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(release.length).toBe(2);
     release[1]!();
-    const [r1, r2] = await Promise.all([p1, p2]);
-    expect(r1.lastResult?.action).toBe("continue");
-    expect(r2.lastResult?.action).toBe("continue");
+    await Promise.all([p1, p2]);
+    expect(gate1.action).toBe("continue");
+    expect(gate2.action).toBe("continue");
     expect(maxInFlight).toBe(1);
   });
 });

@@ -4,14 +4,6 @@ import {
   HookSystem,
   createHooks,
   HOOKS,
-  isGateActionBlock,
-  isGateActionModify,
-  isGateActionContinue,
-  isGateActionHandled,
-  isInputTransform,
-  isInputHandled,
-  type GateAction,
-  type InputHookResult,
 } from "@core/hooks.ts";
 import { initializeLogger, resetLoggerForTesting } from "@utils/logger.ts";
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
@@ -306,16 +298,14 @@ describe("runHookPipeline()", () => {
       order.push("b");
       return { result: "b" };
     });
-    const { results, lastResult } = await hooks.runHookPipeline(
-      "test:hook",
-      {},
-    );
+    const { results, data } = await hooks.runHookPipeline("test:hook", {});
     expect(order).toEqual(["a", "b"]);
     expect(results).toEqual([
       { result: { result: "a" }, source: null },
       { result: { result: "b" }, source: null },
     ]);
-    expect(lastResult).toEqual({ result: "b" });
+    // Last patch of the same field wins, in the payload.
+    expect(data).toEqual({ result: "b" });
   });
 
   it("should stop early when shouldStop returns true", async () => {
@@ -363,30 +353,48 @@ describe("runHookPipeline()", () => {
     expect(result.stopped).toBe(false);
   });
 
-  it("lastResult is the last handler's return value", async () => {
+  it("returned fields are adopted into the payload, in place", async () => {
     const hooks = createHooks();
-    hooks.on("test", () => "first");
-    hooks.on("test", () => "second");
-    const result = await hooks.runHookPipeline("test", {});
-    expect(result.lastResult).toBe("second");
+    hooks.on("test", () => ({ modelConfig: "m1" }));
+    hooks.on("test", () => ({ messages: ["a"] }));
+    const payload: Record<string, unknown> = { modelConfig: "m0", messages: [] };
+    const { data } = await hooks.runHookPipeline("test", payload);
+    // Two handlers patching different fields keep both patches.
+    expect(data).toBe(payload);
+    expect(payload).toEqual({ modelConfig: "m1", messages: ["a"] });
   });
 
-  it("lastResult is undefined when no handlers return values", async () => {
+  it("a field left undefined in the patch keeps the payload's value", async () => {
+    const hooks = createHooks();
+    hooks.on("test", () => ({ messages: undefined, modelConfig: "m1" }));
+    const payload = { messages: ["keep"], modelConfig: "m0" };
+    await hooks.runHookPipeline("test", payload);
+    expect(payload).toEqual({ messages: ["keep"], modelConfig: "m1" });
+  });
+
+  it("a bare array is not a patch and leaves the payload alone", async () => {
+    const hooks = createHooks();
+    hooks.on("test", () => ["not", "a", "patch"]);
+    const payload = { messages: ["orig"] };
+    await hooks.runHookPipeline("test", payload);
+    expect(payload).toEqual({ messages: ["orig"] });
+  });
+
+  it("payload is unchanged when no handler returns a value", async () => {
     const hooks = createHooks();
     hooks.on("test", () => {});
     hooks.on("test", () => {});
-    const result = await hooks.runHookPipeline("test", {});
-    expect(result.lastResult).toBeUndefined();
+    const { data } = await hooks.runHookPipeline("test", { key: "value" });
+    expect(data).toEqual({ key: "value" });
   });
 
   it("returns empty results when no handlers", async () => {
     const hooks = createHooks();
-    const { results, lastResult } = await hooks.runHookPipeline(
+    const { results } = await hooks.runHookPipeline(
       "nonexistent:hook",
       { value: 1 },
     );
     expect(results).toEqual([]);
-    expect(lastResult).toBeUndefined();
   });
 
   it("handles handler that throws — continues", async () => {
@@ -395,8 +403,8 @@ describe("runHookPipeline()", () => {
       throw new Error("handler error");
     });
     hooks.on("test:hook", () => ({ action: "continue" }));
-    const { lastResult } = await hooks.runHookPipeline("test:hook", {});
-    expect(lastResult).toEqual({ action: "continue" });
+    const { data } = await hooks.runHookPipeline("test:hook", {});
+    expect(data).toEqual({ action: "continue" });
   });
 
   it("failOnError: true rethrows the handler error", async () => {
@@ -431,13 +439,13 @@ describe("runHookPipeline()", () => {
     const hooks = createHooks();
     hooks.on("gate:hook", () => ({ action: "continue" }));
     hooks.on("gate:hook", () => ({ action: "block", result: "denied" }));
-    const { stopped, lastResult } = await hooks.runHookPipeline(
+    const { stopped, data } = await hooks.runHookPipeline(
       "gate:hook",
       {},
       { failOnError: true },
     );
     expect(stopped).toBe(false);
-    expect(lastResult).toEqual({ action: "block", result: "denied" });
+    expect(data).toEqual({ action: "block", result: "denied" });
   });
 
   it("handles async handlers in pipeline", async () => {
@@ -467,12 +475,11 @@ describe("runHookPipeline()", () => {
 
   it("empty pipeline returns empty results", async () => {
     const hooks = createHooks();
-    const { results, lastResult, stopped, data } = await hooks.runHookPipeline(
+    const { results, stopped, data } = await hooks.runHookPipeline(
       "empty",
       { key: "value" },
     );
     expect(results).toEqual([]);
-    expect(lastResult).toBeUndefined();
     expect(stopped).toBe(false);
     expect(data).toEqual({ key: "value" });
   });
@@ -622,60 +629,6 @@ describe("HookSystem — Priority", () => {
     remove();
     hooks.notifyHooks("test:hook", {});
     expect(order).toEqual(["high", "low"]);
-  });
-});
-
-// ── Type guard functions ─────────────────────────────────────────────────
-
-describe("GateAction type guards", () => {
-  const actions = [
-    { name: "block", guard: isGateActionBlock, value: { action: "block" as const, result: "denied" } },
-    { name: "modify", guard: isGateActionModify, value: { action: "modify" as const, input: "new" } },
-    { name: "continue", guard: isGateActionContinue, value: { action: "continue" as const } },
-    { name: "handled", guard: isGateActionHandled, value: { action: "handled" as const } },
-  ];
-
-  it.each(actions)("correctly identifies $name action", ({ guard, value }) => {
-    expect(guard(value)).toBe(true);
-  });
-
-  it.each(actions)("rejects other action types for $name", ({ guard, name }) => {
-    for (const other of actions) {
-      if (other.name !== name) expect(guard(other.value)).toBe(false);
-    }
-  });
-
-  it("rejects null/undefined/non-object input", () => {
-    for (const val of [null, undefined, 42, "block", {}] as unknown[]) {
-      expect(isGateActionBlock(val as GateAction | null | undefined)).toBe(false);
-      expect(isGateActionModify(val as GateAction | null | undefined)).toBe(false);
-      expect(isGateActionContinue(val as GateAction | null | undefined)).toBe(false);
-      expect(isGateActionHandled(val as GateAction | null | undefined)).toBe(false);
-    }
-  });
-});
-
-describe("InputHookResult type guards", () => {
-  const results = [
-    { name: "transform", guard: isInputTransform, value: { action: "transform" as const, content: "modified" } },
-    { name: "handled", guard: isInputHandled, value: { action: "handled" as const } },
-  ];
-
-  it.each(results)("correctly identifies $name result", ({ guard, value }) => {
-    expect(guard(value)).toBe(true);
-  });
-
-  it.each(results)("rejects other result types for $name", ({ guard, name }) => {
-    for (const other of results) {
-      if (other.name !== name) expect(guard(other.value)).toBe(false);
-    }
-  });
-
-  it("rejects null/undefined/non-object input", () => {
-    for (const val of [null, undefined, 42, "block", {}] as unknown[]) {
-      expect(isInputTransform(val as InputHookResult | null | undefined)).toBe(false);
-      expect(isInputHandled(val as InputHookResult | null | undefined)).toBe(false);
-    }
   });
 });
 

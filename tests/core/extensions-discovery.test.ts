@@ -78,6 +78,42 @@ describe("discoverExtensionsInDir", async () => {
   });
 });
 
+describe("@experimental token", async () => {
+  it("resolves to the bundled src/experimental directory", async () => {
+    const nodePath = await import("node:path");
+    const { resolveExtensionPath } = await import("@core/extensions/extensions.ts");
+    const resolved = resolveExtensionPath("@experimental");
+    expect(resolved.endsWith(nodePath.join("src", "experimental"))).toBe(true);
+  });
+
+  it("discovers the bundled experimental extensions", async () => {
+    const { resolveExtensionPath, discoverExtensionsInDir } = await import("@core/extensions/extensions.ts");
+    const result = await discoverExtensionsInDir(resolveExtensionPath("@experimental"));
+    expect(result.map((ext) => ext.name)).toContain("file-watch");
+  });
+
+  it("emits token import specifiers so Bun resolves them via the tsconfig alias", async () => {
+    const { discoverExtensions } = await import("@core/extensions/extensions.ts");
+    const loaded = await discoverExtensions(["@experimental"]);
+    const fileWatch = loaded.find((ext) => ext.name === "file-watch");
+    expect(fileWatch).toBeDefined();
+    // Must be the alias specifier, not a ROOT_DIR-relative path — Bun only
+    // resolves "@experimental/..." through the tsconfig paths mapping.
+    expect(fileWatch!.path).toBe("@experimental/file-watch/index.ts");
+  });
+
+  it("does not treat unknown @tokens as aliases (bad config surfaces, not a silent scan)", async () => {
+    const nodePath = await import("node:path");
+    const { resolveExtensionPath } = await import("@core/extensions/extensions.ts");
+    // Unknown tokens fall through to plain cwd-relative resolution...
+    expect(resolveExtensionPath("@bogus")).toBe(nodePath.resolve(process.cwd(), "@bogus"));
+    // ...which discovers nothing instead of silently scanning an extension tier.
+    const { discoverExtensionsInDir } = await import("@core/extensions/extensions.ts");
+    const result = await discoverExtensionsInDir(resolveExtensionPath("@bogus"));
+    expect(result).toEqual([]);
+  });
+});
+
 describe("getExtensionConfigDefaults", async () => {
   let getExtensionConfigDefaults: typeof import("@core/extensions/extensions.ts").getExtensionConfigDefaults;
 

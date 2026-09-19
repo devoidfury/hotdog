@@ -361,13 +361,11 @@ export class Agent implements AgentLike {
     }
 
     let messages = this.buildMessages();
-    const contextResult = await this.hooks.runHookPipeline<ContextHookResult>(HOOKS.CONTEXT, {
-      messages,
-      agent: this,
-    });
-    if (contextResult.lastResult?.messages) {
-      messages = contextResult.lastResult.messages;
-    }
+    const contextResult = await this.hooks.runHookPipeline<ContextHookResult | undefined, "context">(
+      HOOKS.CONTEXT,
+      { messages, agent: this },
+    );
+    messages = contextResult.data.messages;
 
     let toolDefs = await this.getToolDefs();
     let modelConfig = resolveModelConfig(
@@ -377,15 +375,16 @@ export class Agent implements AgentLike {
       this.reasoningEffort,
     );
 
-    const reqResult = await this.hooks.runHookPipeline<ProviderRequestHookResult>(
+    const reqPayload = { messages, modelConfig, toolDefs, agent: this };
+    await this.hooks.runHookPipeline<ProviderRequestHookResult | undefined, "provider:request">(
       HOOKS.PROVIDER_REQUEST,
-      { messages, modelConfig, toolDefs, agent: this },
+      reqPayload,
     );
-    if (reqResult.lastResult?.messages) messages = reqResult.lastResult.messages;
-    if (reqResult.lastResult?.modelConfig) modelConfig = reqResult.lastResult.modelConfig;
-    if (reqResult.lastResult?.toolDefs) toolDefs = reqResult.lastResult.toolDefs;
-
-    return { messages, modelConfig, toolDefs };
+    return {
+      messages: reqPayload.messages,
+      modelConfig: reqPayload.modelConfig,
+      toolDefs: reqPayload.toolDefs,
+    };
   }
 
   private async _performLlmCall(params: LlmRequestParams): Promise<StreamResult> {
@@ -432,11 +431,12 @@ export class Agent implements AgentLike {
     const { modelConfig } = params;
     // handlers may repair/replace the response before it becomes an assistant message and its tool calls execute 
     // (e.g. tool-call-repair recovering markup the backend failed to parse into real tool calls).
-    const resResult = await this.hooks.runHookPipeline<{ response?: StreamResult }>(
+    const resPayload = { response, modelConfig, agent: this };
+    await this.hooks.runHookPipeline<{ response?: StreamResult }, "provider:response">(
       HOOKS.PROVIDER_RESPONSE,
-      { response, modelConfig, agent: this },
+      resPayload,
     );
-    if (resResult.lastResult?.response) response = resResult.lastResult.response;
+    response = resPayload.response;
     await this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.context.getMessages(), agent: this });
 
     const assistantMsg = new Message({
@@ -616,10 +616,13 @@ export class Agent implements AgentLike {
     this.context.clearSystemPrompt();
   }
 
+  /** Clear the entire context; fires CONTEXT_REPLACED */
   async clearContext(): Promise<void> {
+    const oldContext = this.context.getMessages();
     this.context.clear();
     this.iterationCount = 0;
     this.#toolRegistry.clearToolDefs();
+    await this.hooks.notifyHooks(HOOKS.CONTEXT_REPLACED, { agent: this, oldContext, newContext: [] });
   }
 
   cancel(): void {

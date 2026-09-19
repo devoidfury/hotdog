@@ -1,0 +1,39 @@
+{
+  "name": "file-watch",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "Cross-process file awareness: notices when files this session touched change outside its tool calls",
+  "configSchema": {
+    "fileWatch": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled"
+        },
+        "notify": {
+          "type": "boolean",
+          "default": true,
+          "description": "Inject a system notice into LLM requests while tracked files have unresolved external changes"
+        },
+        "writeGuard": {
+          "type": "boolean",
+          "default": true,
+          "description": "Block 'overwrite' when the target changed externally since the session last read it, so foreign work is not silently clobbered"
+        },
+        "ignore": {
+          "type": "array",
+          "default": ["node_modules/", ".git/"],
+          "items": { "type": "string" },
+          "description": "Patterns matched on path-segment boundaries against absolute paths (dist/ matches any dist directory, not mydist/); matching files are never tracked"
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "fileWatch" },
+        { "default": {} }
+      ]
+    }
+  }
+}

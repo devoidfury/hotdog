@@ -29,11 +29,11 @@ The hook system is the primary extension mechanism in hotdog. It decouples the c
 | Method | Pattern | Use Case |
 |--------|---------|----------|
 | `notifyHooks(name, data)` | Awaitable notify — handlers start immediately in registration order (async ones run in parallel); returns a promise that settles once every handler has settled | Notifications, logging, tracing, side effects |
-| `runHookPipeline(name, data, opts)` | Sequential, returns results | Modifications that chain (e.g., context, tool call gate) |
+| `runHookPipeline(name, data, opts)` | Sequential, adopts returns into the payload | Modifications that chain (e.g., context, tool call gate) |
 
 **Key distinction:**
 - **Notify (awaitable)** — handlers start immediately and their return values are discarded. The returned promise settles once every handler has completed, so core call sites `await` it whenever later code depends on the handlers' effects (e.g. the tool executor awaits `AGENT_TOOL_CONTEXT` so context mounts are complete before the `TOOL_CALL` gate). Unawaited call sites keep plain fire-and-forget behavior.
-- **Pipeline** — handlers run one at a time, each sees the accumulated state, and can return a result to stop or transform processing. Used for gates and transformations.
+- **Pipeline** — handlers run one at a time. Whatever a handler returns is a patch: its fields are written onto the payload (see §Pipeline — Transformation), so each later handler sees the accumulated state and core reads the final payload back. `shouldStop` may end the chain early.
 
 ### Pipeline Options
 
@@ -238,7 +238,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
 | `SYSTEM_PROMPT_BUILD` | `systemPrompt:build` | pipeline | Building system prompt — handlers return chunks |
-| `CONTEXT` | `context` | pipeline | Before each LLM call — modify messages array |
+| `CONTEXT` | `context` | pipeline | Before each LLM call — return `{ messages }` to replace messages (see §Pipeline) |
 | `INPUT` | `input` | pipeline | Preprocess user input — transform or short-circuit |
 
 ### Tool Execution
@@ -365,15 +365,23 @@ built-in handler of this kind — tool-call approvals on top of `toolCtx.get("in
 
 ### 4. Pipeline — Transformation
 
-The `context`, `provider:request`, and `tool:result` hooks transform data sequentially. Each handler sees the output of the previous handler.
+The `context`, `provider:request`, `provider:response`, `tool:call`, `tool:result`, `input`, and `command:dispatch` hooks transform data sequentially, all by the same rule: **a handler's return value is a partial patch of the payload.** Each defined field it returns is written onto the payload, so every later handler — and core, which reads the payload back — sees the transformation. Returning nothing, or leaving a field undefined, leaves that field alone.
+
+```
+{ messages }        on context            replaces the array
+{ modelConfig }     on provider:request   replaces the model only
+{ result }          on tool:result        replaces the tool's answer
+{ action, input }   on tool:call          gates and rewrites the call
+```
+
+Two handlers patching *different* fields both take effect — `{ modelConfig }` followed by `{ messages }` keeps both. Two patching the *same* field: the last one wins. A bare array is not a patch and is ignored (only objects are adopted), so `[...messages]` silently does nothing.
 
 ```js
 // compaction extension — checks token budget, compacts if needed
 [HOOKS.CONTEXT]: async ({ messages, agent }) => {
   if (!settings.enabled) return;
   // ... check token budget, perform compaction
-  const newMessages = agent.buildMessages();
-  return { messages: newMessages };
+  return { messages: agent.buildMessages() };
 }
 ```
 

@@ -1,6 +1,7 @@
 // Hook system.
 // notifyHooks() fires all handlers (async ones run in parallel) settles once every handler has settled.
-// runHookPipeline() runs handlers sequentially and accumulates their return values.
+// runHookPipeline() runs handlers sequentially; whatever a handler returns is adopted into the payload (see adoptIntoPayload),
+// so the payload is the single thing later handlers and the caller read.
 
 import { formatError } from "./error.ts";
 import { logger } from "@utils/logger.ts";
@@ -16,22 +17,8 @@ export type GateAction =
   | { action: "block"; result: unknown }
   | { action: "handled" };
 
-export function isGateActionBlock(action: GateAction | undefined | null): action is Extract<GateAction, { action: "block" }> {
-  return action?.action === "block";
-}
-
-export function isGateActionModify(action: GateAction | undefined | null): action is Extract<GateAction, { action: "modify" }> {
-  return action?.action === "modify";
-}
-
-export function isGateActionContinue(action: GateAction | undefined | null): action is Extract<GateAction, { action: "continue" }> {
-  return action?.action === "continue";
-}
-
-export function isGateActionHandled(action: GateAction | undefined | null): action is Extract<GateAction, { action: "handled" }> {
-  return action?.action === "handled";
-}
-
+/** CONTEXT hook: a returned `messages` replaces the payload's array for the
+ * rest of the chain and for the caller. */
 export type ContextHookResult = { messages: Message[] };
 
 export type ProviderRequestHookResult = {
@@ -54,14 +41,6 @@ export type InputHookResult =
   | { action: "continue" }
   | { action: "transform"; content: string | Array<Record<string, unknown>>; images?: ImageAttachment[] }
   | { action: "handled" };
-
-export function isInputTransform(result: InputHookResult | undefined | null): result is Extract<InputHookResult, { action: "transform" }> {
-  return result?.action === "transform";
-}
-
-export function isInputHandled(result: InputHookResult | undefined | null): result is Extract<InputHookResult, { action: "handled" }> {
-  return result?.action === "handled";
-}
 
 export type SystemPromptChunk = {
   name: string;
@@ -115,10 +94,31 @@ export interface HookPipelineOptions {
 }
 
 export interface HookPipelineResult<R = unknown, D = unknown> {
+  /** Every handler's return in order (used by chunk pipelines and tracing). */
   results: Array<{ result: R; source: string | null }>;
-  lastResult: R | undefined;
   stopped: boolean;
+  /** The payload with every adopted field — the pipeline's actual output. */
   data: D;
+}
+
+/**
+ * A pipeline handler's return value is a partial patch of the payload: each defined
+ * own field is written onto it, so later handlers see the transformation.
+ * Nothing returned, or a field left undefined, leaves the payload alone.
+ *
+ * One rule for every pipeline: `{ messages }` on `context` replaces the array
+ * exactly as `{ modelConfig }` on `provider:request` replaces the model, and
+ * the two no longer clobber each other the way a last-whole-object-wins read
+ * did. Arrays are NOT patches — `Object.assign` would smear indices onto the
+ * payload — so a bare array (or any non-object) return is ignored.
+ */
+function adoptIntoPayload(data: unknown, patch: unknown): void {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return;
+  const target = data as Record<string, unknown>;
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) target[key] = value;
+  }
 }
 
 export interface HookTraceOptions {
@@ -234,7 +234,7 @@ export class HookSystem {
     await Promise.all(settled);
   }
 
-  // Sequential pipeline: each handler sees prior transformations; returns all results.
+  // Sequential pipeline: each handler sees prior transformation; returns every handler's result and the payload.
   async runHookPipeline<R = unknown, H extends string = keyof HookPayloads>(
     hookName: H,
     data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
@@ -242,7 +242,6 @@ export class HookSystem {
   ): Promise<HookPipelineResult<R, typeof data>> {
     const handlers = this.#hooks.get(hookName) || [];
     const results: Array<{ result: R; source: string | null }> = [];
-    let lastResult: R | undefined;
     let stopped = false;
 
     for (let i = 0; i < handlers.length; i++) {
@@ -255,7 +254,7 @@ export class HookSystem {
         const resolved = (isPromise(result) ? await result : result) as R;
         if (resolved !== undefined) {
           results.push({ result: resolved, source: entry.source || null });
-          lastResult = resolved;
+          adoptIntoPayload(data, resolved);
         }
         // action (which summarizes the result) is only built when tracing is
         // on — pipelines run on every tool call and the hot path stays lean.
@@ -265,7 +264,7 @@ export class HookSystem {
             : " no return"
           : "";
         this._logTrace(hookName, i, handlers.length, entry, t0, action);
-        if (opts.shouldStop && resolved && opts.shouldStop(resolved)) {
+        if (opts.shouldStop && resolved && typeof resolved === "object" && opts.shouldStop(resolved)) {
           stopped = true;
           if (doTrace && !this._isTraceDisabled(entry.source)) {
             logger.debug(
@@ -280,7 +279,7 @@ export class HookSystem {
         if (opts.failOnError) throw e;
       }
     }
-    return { results, lastResult, stopped, data };
+    return { results, stopped, data };
   }
 
   // Clear one hook, or all hooks if no name given.
@@ -395,7 +394,7 @@ export const HOOKS = {
   // Pipeline; stops on "handled".
   INPUT: "input",
 
-  // Pipeline run before each LLM call; handlers can replace { messages }.
+  // Pipeline run before each LLM call; a handler returns { messages } to replace the array - adopted into the payload for the rest of the chain.
   CONTEXT: "context",
 
   // Gate pipeline: continue / modify input / block with a provided result.

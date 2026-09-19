@@ -12,7 +12,6 @@ function makeCore(overrides: Record<string, unknown> = {}) {
       on: () => () => {},
       runHookPipeline: async () => ({
         results: [],
-        lastResult: undefined,
         stopped: false,
         data: {},
       }),

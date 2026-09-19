@@ -2,9 +2,14 @@ import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { contentToText, type Message, type MessageSource } from "../context/message.ts";
 import { repairToolCalls } from "../context/repair.ts";
-import { HOOKS, isInputTransform, type InputHookResult } from "../hooks.ts";
+import { HOOKS } from "../hooks.ts";
+import type { HookPayloads } from "../extensions/types.ts";
 import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 import type { CommandResult } from "../extensions/registries.ts";
+
+/** INPUT pipeline payload: core's shape with the bus's minimal agent. The
+ * pipeline adopts a handler's InputHookResult fields onto it. */
+type InputPipelineData = Omit<HookPayloads["input"], "agent"> & { agent: MessageBusAgent };
 
 export interface MessageBusSessionManager {
   getAgent(): MessageBusAgent | undefined;
@@ -323,20 +328,23 @@ export class MessageBus {
     // Reset before processing so a leftover cancel from an interrupt can't swallow this run.
     agent.resetCancel();
 
-    // Hooks see flattened text; the structured content (with its trust
-    // parts) is what reaches the agent.
-    const inputData = { text: contentToText(content), source: "interactive", origin: source, agent };
+    // Hooks see flattened text; the structured content (with its trust parts) is what reaches the agent.
+    // The pipeline adopts a handler's InputHookResult fields (action/content) onto this payload.
+    const inputData: InputPipelineData = {
+      text: contentToText(content),
+      source: "interactive",
+      origin: source,
+      agent,
+    };
     let inputHandled = false;
     if (agent?.hooks) {
-      const inputResult = await agent.hooks.runHookPipeline(
+      const inputResult = (await agent.hooks.runHookPipeline(
         HOOKS.INPUT,
         inputData,
         { shouldStop: (result: unknown) => (result as { action?: string })?.action === "handled" },
-      );
-      if ((inputResult as { stopped?: boolean }).stopped) inputHandled = true;
-      const lastResult = (inputResult as { lastResult?: unknown }).lastResult;
-      const transformed = lastResult as InputHookResult | undefined;
-      if (isInputTransform(transformed)) {
+      )) as { stopped?: boolean };
+      if (inputResult.stopped) inputHandled = true;
+      if (inputData.action === "transform" && inputData.content !== undefined) {
         // A transform replaces the content. Structured results pass through
         // with the hook's own parts (INPUT-hook output is trusted code; the
         // wire applies each part type's trust spec). A string result of
@@ -344,9 +352,9 @@ export class MessageBus {
         // exemption: the flattening lost the per-part marking, so wrap it
         // as an untrusted part and let the wire mangle it.
         content =
-          typeof transformed.content === "string" && Array.isArray(content)
-            ? [{ type: "untrusted", text: transformed.content }]
-            : transformed.content;
+          typeof inputData.content === "string" && Array.isArray(content)
+            ? [{ type: "untrusted", text: inputData.content }]
+            : inputData.content;
       }
     }
 

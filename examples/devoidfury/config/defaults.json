@@ -6,7 +6,7 @@
   "tool_call_display_format": " 🔧 {} {}",
   "hide_tools": true,
   "show_token_use": true,
-  "extension_paths": ["@extensions"],
+  "extension_paths": ["@extensions", "@experimental"],
   "default_subcommand": "cli",
   "chat_timeout_secs": 1200,
   "workspace": {

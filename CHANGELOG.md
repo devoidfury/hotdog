@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.10.0...main
+
+## [v0.10.0] - 2026-09-19
+
 - **[BRK]** removed the profile-level `role` field. The only "role" concepts that remain are the message-format wire encoding (`Message.role`, role-mapping) and plain prose in user-supplied context files.
   - Profile files with `role:` frontmatter still parse -- the key is dropped and can never reach prompt assembly (covered by tests asserting a profile role can never leak into the system prompt).
   - Config keys `role` and `taskDefaultRole` and the `--role` flag are gone; the `{{ role }}` placeholder was removed from the default system prompt template. If you had a role line, fold it into the profile body.
@@ -10,7 +14,7 @@
 
 - extensions - new opt-in tier: `@experimental` in `extension_paths` loads `src/experimental/` (the setting replaces the default, so use `["@extensions", "@experimental"]` to keep the built-ins). First entry: `file-watch`, cooperative-editing awareness for a shared working tree — it tracks the files a session reads and writes, notices when the bytes on disk stop matching what the session believes, rides that onto each request as a harness system-notice, and blocks an `overwrite` onto a file that changed underneath the session.
 
-- fix bug causing some duplicate messages added to the core agent loop
+- fix - duplicate message delivery in the core agent loop: a UI host calling `run()` after `SessionManager` had already started the loop spawned a second consumer on the same queue, so one queued message could drive two `agent.run()` calls (the loser threw `AlreadyRunning`). `run()`/`runUntilCancelled()` are now idempotent -- a later call joins the active loop instead of racing it.
 
 - tools - a batch of core-tool and extension fixes found by auditing `src/extensions/`:
   - `project_info`: the non-git file listing was computed relative to the process CWD instead of the requested directory, so listing a directory from another launch dir produced absolute/`../` paths.
@@ -23,7 +27,7 @@
 - hooks - `notifyHooks()` is now awaitable: handlers start immediately in registration order (async ones run in parallel). Core call sites now await it where later code depends on the effect: the tool pipeline (`TOOL_BEFORE_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_AFTER_EXECUTE`, `TOOL_METRICS`), turn boundaries (`TURN_START`/`TURN_END`), session create/swap, the bootstrap registration hooks, and `SHUTDOWN_CLEANUP`. Previously an async `AGENT_TOOL_CONTEXT` handler could complete its tool-context mount *after* the `TOOL_CALL` gate (e.g. the user-gate approval seam) had already run. Signature note: `notifyHooks()` returns `Promise<void>` (was `void`); unawaited call sites keep the old behavior.
 
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.9.2...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.9.2...v0.10.0
 
 ## [v0.9.2] - 2026-09-17
 

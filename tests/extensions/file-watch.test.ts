@@ -451,7 +451,7 @@ describe("file-watch extension", () => {
       expect(await runContext(h, agent)).toBeUndefined();
     });
 
-    it("is a no-op for non-bash tools and unknown sessions", async () => {
+    it("is a no-op for non-window tools and unknown sessions", async () => {
       const h = handlers(createFileWatch(makeCore()));
       const agent = makeAgent();
       await track(h, "read", file, agent);
@@ -466,6 +466,133 @@ describe("file-watch extension", () => {
       expect(noticeOf(await runContext(h, agent))).not.toBeNull();
       // No manifest for this session: must not throw.
       await beforeBash(h, makeAgent("never-tracked"));
+    });
+  });
+
+  describe("write windows (edit/append)", () => {
+    async function beforeWrite(
+      h: Handlers,
+      toolName: "edit" | "append",
+      path: string,
+      agent: any,
+    ): Promise<void> {
+      await h[HOOKS.TOOL_BEFORE_EXECUTE]({
+        toolCallId: "tc",
+        toolName,
+        input: JSON.stringify({ path }),
+        agent,
+      });
+    }
+
+    async function bashWindow(h: Handlers, agent: any): Promise<void> {
+      const input = JSON.stringify({ command: "true" });
+      await h[HOOKS.TOOL_BEFORE_EXECUTE]({ toolCallId: "tc", toolName: "bash", input, agent });
+      await h[HOOKS.TOOL_AFTER_EXECUTE]({
+        toolCallId: "tc",
+        toolName: "bash",
+        input,
+        agent,
+        result: "",
+        success: true,
+      });
+    }
+
+    it("keeps pre-edit external changes visible after the post-edit rebaseline", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await track(h, "read", file, agent);
+
+      // External change lands in a region the session's edit does not touch.
+      // Without the pre-write freeze the post-edit rebaseline swallows it --
+      // notice gone, write guard disarmed, stale belief intact.
+      await writeFile(file, "one\n// another agent added this\n");
+      await beforeWrite(h, "edit", file, agent);
+      // The edit's own write (inside the window) is absorbed as self-caused.
+      await writeFile(file, "one\n// another agent added this\n+ session edit\n");
+      await track(h, "edit", file, agent);
+
+      const notice = noticeOf(await runContext(h, agent));
+      expect(notice).not.toBeNull();
+      expect(notice!.text).toContain("foo.ts");
+      expect(notice!.text).toContain("modified");
+    });
+
+    it("keeps pre-append external changes visible after the post-append rebaseline", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await track(h, "read", file, agent);
+
+      await writeFile(file, "one\n// another agent edited the middle\n");
+      await beforeWrite(h, "append", file, agent);
+      await writeFile(file, "one\n// another agent edited the middle\n+ session append\n");
+      await track(h, "append", file, agent);
+
+      const notice = noticeOf(await runContext(h, agent));
+      expect(notice).not.toBeNull();
+      expect(notice!.text).toContain("modified");
+    });
+
+    it("a clean edit or append does not flag its own write", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await track(h, "read", file, agent);
+
+      await beforeWrite(h, "edit", file, agent);
+      await writeFile(file, "one\n+ session edit\n");
+      await track(h, "edit", file, agent);
+      expect(await runContext(h, agent)).toBeUndefined();
+
+      await beforeWrite(h, "append", file, agent);
+      await writeFile(file, "one\n+ session edit\n+ session append\n");
+      await track(h, "append", file, agent);
+      expect(await runContext(h, agent)).toBeUndefined();
+    });
+
+    it("the write guard stays armed across an edit rebaseline", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await track(h, "read", file, agent);
+      await writeFile(file, "one\n// foreign edit\n");
+      await beforeWrite(h, "edit", file, agent);
+      await writeFile(file, "one\n// foreign edit\n+ session edit\n");
+      await track(h, "edit", file, agent);
+
+      const gate = await h[HOOKS.TOOL_CALL]({
+        toolCallId: "tc",
+        toolName: "overwrite",
+        input: JSON.stringify({ path: file, content: "clobber" }),
+        agent,
+      });
+      expect(gate?.action).toBe("block");
+
+      // A successful read finally resolves it and releases the guard.
+      await track(h, "read", file, agent);
+      const after = await h[HOOKS.TOOL_CALL]({
+        toolCallId: "tc",
+        toolName: "overwrite",
+        input: JSON.stringify({ path: file, content: "fresh" }),
+        agent,
+      });
+      expect(after).toBeUndefined();
+    });
+
+    it("a failed edit still freezes pre-edit motion", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await track(h, "read", file, agent);
+      await writeFile(file, "external change\n");
+
+      // The edit fails (its oldString no longer matches -- exactly because of
+      // that external motion). No rebaseline on failure, but the freeze must
+      // still survive a later window's rebuild.
+      await beforeWrite(h, "edit", file, agent);
+      await track(h, "edit", file, agent, false);
+
+      await bashWindow(h, agent);
+
+      const notice = noticeOf(await runContext(h, agent));
+      expect(notice).not.toBeNull();
+      expect(notice!.text).toContain("modified");
     });
   });
 

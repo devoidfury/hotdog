@@ -13,15 +13,20 @@
 //  - Detection is lazy (checked before each LLM request, stat fast path then
 //    content hash), not via filesystem watchers: an interest set is small,
 //    and lazy checks survive any editor/VCS behavior.
-//  - Self-writes rebaseline silently: tracked tool writes (edit/overwrite/
-//    append) refresh their own path; a `bash` run uses a two-phase window:
-//    before it executes, any divergence between disk and the baseline is
-//    frozen into `pending` (motion that happened before the window, which
-//    rebaselining must not swallow), then the index is rebuilt on top; after
-//    it executes the index is rebuilt again, so the window's own writes
-//    (sed/git) are adopted as self-caused. Changes inside the window itself
-//    cannot be attributed and are adopted -- that is the irreducible blind
-//    spot of this design.
+//  - Self-writes rebaseline silently: a successful tracked tool write
+//    (edit/overwrite/append) refreshes its own path. That rebuild would
+//    adopt ANYTHING on disk as self-caused, so the writes it covers use a
+//    two-phase window: before the write executes (bash, edit, append), any
+//    divergence between disk and the baseline is frozen into `pending`
+//    (motion that predates the write, which rebaselining must not swallow),
+//    then the index is rebuilt on top, so the window's own writes (sed/git,
+//    the edit/append payload) are adopted as self-caused. The freeze must
+//    run BEFORE the write -- a post-run freeze would flag the session's own
+//    successful write as external motion. `overwrite` is exempt: it makes
+//    belief and disk identical by construction and a successful one clears
+//    its pending entry. Changes inside the window itself cannot be
+//    attributed and are adopted -- that is the irreducible blind spot of
+//    this design.
 //  - `pending` notices are orthogonal to baselines: the baseline tracks the
 //    disk, pending tracks the session's stale belief. Only going and looking
 //    resolves it -- a successful read, a read attempt that found the file
@@ -84,6 +89,14 @@ function isNotFound(e: unknown): boolean {
 // Tools whose input carries a `path` and whose success means the session now
 // has (or rewrote) a grip on the file's contents.
 const TRACKED_TOOLS = new Set(["read", "edit", "overwrite", "append"]);
+
+// Tools whose successful run rebaselines and which therefore get the
+// pre-run freeze (window phase 1): `bash` can write anything; `edit`/
+// `append` write part of a file and observe none of the rest. `overwrite`
+// rewrites the whole file -- belief and disk become identical by
+// construction and a successful one clears its pending entry -- so it is
+// exempt.
+const WINDOW_TOOLS = new Set(["bash", "edit", "append"]);
 
 // Larger files are skipped rather than hashed repeatedly per request; a
 // session reading multi-MB files is not the cooperative-editing case.
@@ -276,12 +289,13 @@ export function create(core: CoreContext): ExtensionInstance {
 
   return {
     hooks: {
-      // Bash window, phase 1: before it runs, freeze any divergence between
-      // disk and the baseline as pending notices, then rebuild the index on
-      // top. Without this, the post-run rebuild would silently swallow
-      // external motion that landed before the window even opened.
+      // Window phase 1: before bash/edit/append execute, freeze any
+      // divergence between disk and the baseline as pending notices, then
+      // rebuild the index on top. Without this, the post-run rebaseline
+      // would silently swallow external motion that landed before the window
+      // even opened.
       [HOOKS.TOOL_BEFORE_EXECUTE]: async ({ toolName, agent }) => {
-        if (toolName !== "bash" || !agent) return;
+        if (!WINDOW_TOOLS.has(toolName) || !agent) return;
         try {
           const manifest = getManifest(agent, false);
           if (!manifest || manifest.size === 0) return;
@@ -297,15 +311,15 @@ export function create(core: CoreContext): ExtensionInstance {
           }
           await rebaseline(manifest);
         } catch (e: unknown) {
-          logger.debug(`file-watch: bash pre-window diff failed: ${formatError(e)}`);
+          logger.debug(`file-watch: pre-window diff failed: ${formatError(e)}`);
         }
       },
 
       // Track self-CAUSED state: after read/edit/overwrite/append the file's
       // current bytes are what the session believes (or just wrote), so the
-      // baseline is refreshed. Bash phase 2: rebuild again -- writes inside
-      // the window are this session's own, regardless of exit code; motion
-      // flagged in phase 1 lives on in `pending`.
+      // baseline is refreshed. Window phase 2 (bash/edit/append): rebuild
+      // again -- writes inside the window are this session's own, regardless
+      // of exit code; motion frozen in phase 1 lives on in `pending`.
       [HOOKS.TOOL_AFTER_EXECUTE]: async ({ toolName, input, agent, success }) => {
         try {
           if (!agent) return;
@@ -427,9 +441,13 @@ export function create(core: CoreContext): ExtensionInstance {
       // on its own (oldString no longer matches) and append cannot clobber,
       // so only overwrite needs the guard.
       //
-      // A gate handler with no opinion returns NOTHING: the pipeline keeps
-      // the last non-undefined result, so a `{ action: "continue" }` here
-      // would clobber a downstream gate's block (e.g. a user-gate approval).
+      // A gate handler with no opinion returns NOTHING. A no-op
+      // `{ action: "continue" }` is still adopted onto the payload, so this
+      // handler would own a field another gate may need to set -- and,
+      // running after a gate that blocked (e.g. a user-gate approval), its
+      // "continue" would disarm that block. Returning nothing leaves the
+      // payload exactly as the previous handler left it, whatever the
+      // registration order.
       [HOOKS.TOOL_CALL]: async ({ toolName, input, agent }) => {
         if (!config.writeGuard || toolName !== "overwrite" || !agent) return;
         try {

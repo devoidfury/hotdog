@@ -17,16 +17,13 @@
       "blacklist-tools": ["explore"]
     },
     "explorer": {
-      "model": "ai365/lfm2.5-8b-a1b"
-    },
-    "generate": {
-      "model": "ai365/qwen3.6-35b:general"
-    },
-    "fixer": {
       "model": "ai365/qwen3.8-27b:instruct"
     },
+    "fixer": {
+      "model": "ai365/qwen3.8-27b:medium"
+    },
     "test": {
-      "model": "ai365/qwen3.5-4b:coder"
+      "model": "ai365/lfm2.5-8b-a1b"
     }
   },
   "ui-interactive-cli": {

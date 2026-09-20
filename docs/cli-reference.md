@@ -50,6 +50,8 @@ hotdog webui                     # Start the web UI server
 /loop <prompt>     Repeatedly run a prompt until cancelled
 /model <name>      Switch model
 /models            List available models
+/profile           List profiles (current marked)
+/profile <name>    Switch profile (also: /profile:<name>)
 /tokens            Show token usage stats
 /tools             Toggle tool call display
 /compact [n]       Compact context

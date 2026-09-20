@@ -1023,6 +1023,14 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 { "modelSwitch": { "toolEnabled": true } }
 ```
 
+### `profileSwitch`
+
+[Profile Switch](../src/extensions/profile-switch) — `/profile` lists profiles and `/profile <name>` (or `/profile:<name>`) switches the session's profile at runtime. The switch preserves the conversation; use `/clear` for a fresh start.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+
 ### `loop`
 
 [Loop](../src/extensions/loop) — `/loop` slash command for repeatedly running a prompt until cancelled.

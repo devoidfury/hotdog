@@ -223,12 +223,9 @@ export function create(core: CoreContext): ExtensionInstance {
 
   // Interest set per session, keyed by sessionId: a shared tool/hook
   // instance serves all sessions, so state must be namespaced (same
-  // reasoning as the loop extension).
-  // TODO: entries are never reclaimed -- core has no session-teardown hook
-  // (no SESSION_END) to hang cleanup on. Entries are small (a hash + two
-  // numbers per tracked file), but in a long-lived server process with many
-  // ephemeral sessions these maps grow for the process lifetime. Revisit if
-  // a session lifecycle hook is ever added to core.
+  // reasoning as the loop extension). Entries are reclaimed on
+  // HOOKS.SESSION_END -- fired when a session is deleted or a task agent
+  // finishes -- so these maps stay bounded in a long-lived server process.
   const manifests = new Map<string, Map<string, Baseline>>();
 
   // Unresolved external motion per session: path -> kind, frozen at the
@@ -434,6 +431,14 @@ export function create(core: CoreContext): ExtensionInstance {
         const key = sessionKey(agent);
         manifests.delete(key);
         pendingMaps.delete(key);
+      },
+
+      // Session teardown (session deleted, or a task agent released): the
+      // same wholesale drop as CONTEXT_REPLACED, keyed directly -- the
+      // payload carries no agent, the session is gone.
+      [HOOKS.SESSION_END]: ({ sessionId }) => {
+        manifests.delete(sessionId);
+        pendingMaps.delete(sessionId);
       },
 
       // The one collision that destroys work silently: overwriting a file

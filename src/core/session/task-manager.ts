@@ -1,4 +1,5 @@
 import { logger } from "@utils/logger.ts";
+import { HOOKS } from "../hooks.ts";
 import { Message, type MessageSource } from "../context/message.ts";
 import { LlmError, formatError } from "../error.ts";
 import { loadProfileFile, ProfileManager } from "../config/profiles.ts";
@@ -286,6 +287,11 @@ export class TaskManager {
     // line runs.
     const entry = this.#tasks.get(taskId);
     if (entry) entry.agent = null;
+
+    // The task agent's lifecycle ends here -- announce it through the
+    // agent's own (shared) hook system so per-session extension state is
+    // reclaimed. Test fakes may carry no hooks, hence the optional chain.
+    agent.hooks?.notifyHooks(HOOKS.SESSION_END, { sessionId: agent.sessionId });
 
     return result;
   }

@@ -357,6 +357,7 @@ export class HookSystem {
 // Standard hook names. Payload and return shapes live in HookPayloads (extensions/types.ts).
 export const HOOKS = {
   SESSION_CREATE: "session:create",
+  SESSION_END: "session:end",
   SESSION_SWAP: "session:swap",
   SESSION_RESTORE_ACTIVE: "session:restoreActive",
 

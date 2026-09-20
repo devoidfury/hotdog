@@ -511,6 +511,25 @@ describe("task registry release", () => {
     expect(manager.sendFollowUp("task-1", "late message")).toBe(false);
   });
 
+  it("fires session:end through the finished agent's own hooks", async () => {
+    const ended: Array<{ hook: string; sessionId: string }> = [];
+    const agent = {
+      sessionId: "task-agent-9",
+      hooks: {
+        notifyHooks: (hook: string, data: { sessionId: string }) => {
+          ended.push({ hook, sessionId: data.sessionId });
+          return Promise.resolve();
+        },
+      },
+      run: async () => ({ type: "completion", content: "done" }),
+      notifyCompletion: () => {},
+    };
+    const manager = makeManager(async () => agent);
+    await manager.spawnTask("task-1", "Do it");
+    await settle(() => ended.length > 0, "session:end");
+    expect(ended).toEqual([{ hook: "session:end", sessionId: "task-agent-9" }]);
+  });
+
   it("releases the agent reference when a task fails", async () => {
     const manager = makeManager(async () => ({
       run: async () => {

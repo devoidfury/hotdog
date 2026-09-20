@@ -293,6 +293,24 @@ describe('SessionManager', () => {
       const deleted = sessionManager.deleteSession('non-existent');
       expect(deleted).toBe(false);
     });
+
+    it('should fire session:end with the deleted sessionId', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      const seen: string[] = [];
+      hooks.on('session:end', (data: unknown) => {
+        seen.push((data as { sessionId: string }).sessionId);
+      });
+
+      sessionManager.deleteSession(sessionId);
+      expect(seen).toEqual([sessionId]);
+    });
+
+    it('should not fire session:end for a non-existent session', () => {
+      let fired = false;
+      hooks.on('session:end', () => { fired = true; });
+      sessionManager.deleteSession('non-existent');
+      expect(fired).toBe(false);
+    });
   });
 
   describe('getStore', () => {

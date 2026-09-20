@@ -77,6 +77,7 @@ export interface ExtensionMetadata {
 // Payload shapes for every standard hook name. Pipeline return types are noted per entry.
 export interface HookPayloads {
   "session:create": { session: SessionManager; sessionId: string; config: Record<string, unknown> };
+  "session:end": { sessionId: string };
   "session:swap": { oldAgent?: AgentLike; newAgent: AgentLike };
   "session:restoreActive": { agent: Agent; isRestoring: boolean };
 

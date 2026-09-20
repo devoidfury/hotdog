@@ -99,11 +99,13 @@ Agent Run Loop ────────────► See Phase 3
     ▼
 Session Swap ──────────────► "session:swap"
 Session Restore ────────────► "session:restoreActive"
+Session Delete ────────────► "session:end"
 ```
 
 | Hook | When | Mechanism | Payload |
 |------|------|-----------|---------|
 | `session:create` | New agent created | awaited notify | `{ session, config }` |
+| `session:end` | Session deleted (or task agent released) | notify (fire-and-forget) | `{ sessionId }` |
 | `session:swap` | Agent swapped | awaited notify (sync `switchSession()` fires unawaited) | `{ oldAgent, newAgent }` |
 | `session:restoreActive` | Restore flag changes | notify (fire-and-forget) | `{ agent, isRestoring }` |
 
@@ -221,6 +223,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
 | `SESSION_CREATE` | `session:create` | awaited notify | New agent created via SessionManager |
+| `SESSION_END` | `session:end` | notify (fire-and-forget) | Session deleted (`SessionManager.deleteSession`) or task agent released (`TaskManager._runTask`, fired on the agent's own hooks) |
 | `SESSION_SWAP` | `session:swap` | awaited notify | Agent swapped (`swap()` awaits it; the sync `switchSession()` path fires it unawaited) |
 | `SESSION_RESTORE_ACTIVE` | `session:restoreActive` | notify (fire-and-forget) | Restore flag changes on agent (sync setter) |
 

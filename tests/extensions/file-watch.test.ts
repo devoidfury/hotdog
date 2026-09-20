@@ -851,4 +851,34 @@ describe("file-watch extension", () => {
       expect(noticeOf(await runContext(h, b))).not.toBeNull();
     });
   });
+
+  describe("session teardown", () => {
+    it("session:end reclaims the session's manifest and pending maps", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const a = makeAgent("gone");
+      const b = makeAgent("alive");
+      await track(h, "read", file, a);
+      await track(h, "read", file, b);
+      await writeFile(file, "changed while neither looked\n");
+
+      await h[HOOKS.SESSION_END]({ sessionId: "gone" });
+      expect(await runContext(h, a)).toBeUndefined();
+      expect(noticeOf(await runContext(h, b))).not.toBeNull();
+    });
+
+    it("session:end releases the write guard for the dead session only", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const a = makeAgent("gone");
+      const b = makeAgent("alive");
+      await track(h, "read", file, a);
+      await track(h, "read", file, b);
+      await writeFile(file, "changed while neither looked\n");
+
+      await h[HOOKS.SESSION_END]({ sessionId: "gone" });
+      const input = JSON.stringify({ path: file, content: "clobber" });
+      expect(await h[HOOKS.TOOL_CALL]({ toolCallId: "tc", toolName: "overwrite", input, agent: a })).toBeUndefined();
+      const blocked = await h[HOOKS.TOOL_CALL]({ toolCallId: "tc", toolName: "overwrite", input, agent: b });
+      expect((blocked as any)?.action).toBe("block");
+    });
+  });
 });

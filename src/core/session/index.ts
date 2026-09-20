@@ -219,6 +219,8 @@ export class SessionManager {
   }
 
   deleteSession(sessionId: string): boolean {
+    const existed = this.#sessions.has(sessionId) || this.#store.getAgent(sessionId) !== undefined;
+
     const entry = this.#sessions.get(sessionId);
     if (entry) {
       entry.bus.cancel();
@@ -233,6 +235,11 @@ export class SessionManager {
 
     this.#eventHandlers.delete(sessionId);
     this.#questionBuffers.delete(sessionId);
+
+    // Teardown notice for extensions, fire-and-forget
+    if (existed) {
+      this.#hooks.notifyHooks(HOOKS.SESSION_END, { sessionId });
+    }
 
     return this.#store.removeAgent(sessionId);
   }

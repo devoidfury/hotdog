@@ -603,3 +603,53 @@ describe('EditTool.execute — snake_case aliases', () => {
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('goodbye world');
   });
 });
+
+// ── BOM/CRLF fidelity ────────────────────────────────────────────────────────
+
+describe("EditTool.execute — BOM/CRLF fidelity", () => {
+  it("preserves CRLF line endings on a direct single-line match", async () => {
+    const filePath = path.join(dir, "crlf-direct.txt");
+    fsSync.writeFileSync(filePath, "one\r\ntwo\r\n");
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await tool.execute(
+      { path: "crlf-direct.txt", oldString: "two", newString: "2" },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(fsSync.readFileSync(filePath, "utf-8")).toBe("one\r\n2\r\n");
+  });
+
+  it("replaces a trimmed-fallback block without mixing line endings", async () => {
+    const filePath = path.join(dir, "crlf-fallback.txt");
+    fsSync.writeFileSync(filePath, "f(){\r\n    foo();\r\n    baz();\r\n}\r\n");
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    // Indentation mismatch forces the trimmed-line fallback; the LF-only
+    // old/new strings must not leak bare \n into a CRLF file.
+    await tool.execute(
+      { path: "crlf-fallback.txt", oldString: "  foo();\n  baz();", newString: "x();\ny();" },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    const written = fsSync.readFileSync(filePath, "utf-8");
+    // Only the first replacement line re-indents (existing fallback rule).
+    expect(written).toBe("f(){\r\n    x();\r\ny();\r\n}\r\n");
+    expect(written).not.toMatch(/(^|[^\r])\n/);
+  });
+
+  it("keeps a leading BOM when the first line is replaced", async () => {
+    const filePath = path.join(dir, "bom-edit.txt");
+    fsSync.writeFileSync(filePath, Buffer.from("\uFEFFhello world"));
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await tool.execute(
+      { path: "bom-edit.txt", oldString: "hello world", newString: "goodbye" },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    const buf = fsSync.readFileSync(filePath);
+    expect([buf[0], buf[1], buf[2]]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(buf.toString("utf-8")).toBe("\uFEFFgoodbye");
+  });
+});

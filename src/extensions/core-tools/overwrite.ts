@@ -6,7 +6,7 @@ import {
   parseToolInput,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
-import { writeWithinWorkspace } from "@utils/file-utils.ts";
+import { writeWithinWorkspace, detectFileStyleAt, applyFileStyle } from "@utils/file-utils.ts";
 import { ToolContext } from "@core/extensions/types.ts";
 
 export class OverwriteTool {
@@ -46,6 +46,12 @@ export class OverwriteTool {
       writeFn: (path, content) => fs.writeFile(path, content, "utf-8"),
       writeErrorLabel: "Error writing file",
       resultKey: "filesize_after",
+      // A rewrite must not silently change the file's line endings or drop
+      // its BOM; new files (no style to detect) keep exactly what was given.
+      prepareContent: async (path, content) => {
+        const style = await detectFileStyleAt(path);
+        return style ? applyFileStyle(content, style) : content;
+      },
     });
   }
 }

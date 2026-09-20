@@ -111,6 +111,8 @@ export async function writeWithinWorkspace(
     writeFn: (path: string, content: string) => Promise<void>;
     writeErrorLabel: string;
     resultKey: string;
+    /** Rewrite the content before writing (e.g. re-apply the file's EOL/BOM). */
+    prepareContent?: (path: string, content: string) => Promise<string>;
   },
 ): Promise<ToolResult> {
   const rawArgs = parseToolInput(input);
@@ -140,8 +142,12 @@ export async function writeWithinWorkspace(
     return mkdirError;
   }
 
+  const finalContent = opts.prepareContent
+    ? await opts.prepareContent(resolvedPath, content)
+    : content;
+
   try {
-    await opts.writeFn(resolvedPath, content);
+    await opts.writeFn(resolvedPath, finalContent);
   } catch (e: unknown) {
     return ToolResult.err(`${opts.writeErrorLabel}: ${(e as Error).message}`);
   }
@@ -149,7 +155,7 @@ export async function writeWithinWorkspace(
   return ToolResult.ok(
     JSON.stringify({
       path: filePath,
-      [opts.resultKey]: Buffer.byteLength(content, "utf-8"),
+      [opts.resultKey]: Buffer.byteLength(finalContent, "utf-8"),
     }),
   );
 }
@@ -168,4 +174,54 @@ export function correctCommonPathMistakes(strPath: string, dirPath?: string): [s
   }
 
   return [strPath, dirPath];
+}
+
+// ── BOM / line-ending fidelity ───────────────────────────────────────────────
+// Model-facing text is LF, BOM-free. Detect the file's real style before
+// matching and re-apply it on write, or one edit to a CRLF/BOM file silently
+// rewrites the whole file (Windows consumers also treat a lost BOM as an
+// encoding change).
+
+export interface FileStyle {
+  bom: boolean;
+  eol: "\r\n" | "\n";
+}
+
+export function detectFileStyle(content: string): FileStyle {
+  return {
+    bom: content.charCodeAt(0) === 0xfeff,
+    eol: content.includes("\r\n") ? "\r\n" : "\n",
+  };
+}
+
+/** Normalize to LF, BOM-free text for matching/editing. */
+export function stripFileStyle(content: string): string {
+  if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
+  return content.replaceAll("\r\n", "\n");
+}
+
+export function applyFileStyle(content: string, style: FileStyle): string {
+  if (style.eol === "\r\n") {
+    content = content.replaceAll("\r\n", "\n").replaceAll("\n", "\r\n");
+  }
+  return style.bom ? `\uFEFF${content}` : content;
+}
+
+/**
+ * Style of an existing file, read from its first 64 KB (BOM is at the front;
+ * leading EOLs represent the file for our purposes). Null when the file does
+ * not exist. The boundary cannot split a \r\n pair (both single-byte).
+ */
+export async function detectFileStyleAt(path: string): Promise<FileStyle | null> {
+  let handle: Awaited<ReturnType<typeof fsPromises.open>> | null = null;
+  try {
+    handle = await fsPromises.open(path, "r");
+    const buf = Buffer.alloc(65536);
+    const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
+    return detectFileStyle(buf.toString("utf-8", 0, bytesRead));
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
+  }
 }

@@ -345,3 +345,57 @@ describe('AppendTool.execute — error cases', () => {
     }
   });
 });
+
+// ── BOM/CRLF fidelity ────────────────────────────────────────────────────────
+
+describe("BOM/CRLF fidelity", () => {
+  it("append matches the existing file's CRLF line endings", async () => {
+    const filePath = path.join(dir, "crlf-append.txt");
+    fsSync.writeFileSync(filePath, "one\r\ntwo\r\n");
+
+    const tool = new AppendTool();
+    await tool.execute(
+      { path: "crlf-append.txt", content: "three\nfour\n" },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(fsSync.readFileSync(filePath, "utf-8")).toBe("one\r\ntwo\r\nthree\r\nfour\r\n");
+  });
+
+  it("append to an LF file leaves LF alone", async () => {
+    const filePath = path.join(dir, "lf-append.txt");
+    fsSync.writeFileSync(filePath, "one\n");
+
+    const tool = new AppendTool();
+    await tool.execute(
+      { path: "lf-append.txt", content: "two\n" },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(fsSync.readFileSync(filePath, "utf-8")).toBe("one\ntwo\n");
+  });
+
+  it("overwrite re-applies the existing file's CRLF and BOM", async () => {
+    const filePath = path.join(dir, "bom-overwrite.txt");
+    fsSync.writeFileSync(filePath, Buffer.from("\uFEFFa\r\nb\r\n"));
+
+    const tool = new OverwriteTool();
+    await tool.execute(
+      { path: "bom-overwrite.txt", content: "x\ny\n" },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    const buf = fsSync.readFileSync(filePath);
+    expect([buf[0], buf[1], buf[2]]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(buf.toString("utf-8")).toBe("\uFEFFx\r\ny\r\n");
+  });
+
+  it("overwrite of a new file writes exactly what was given", async () => {
+    const tool = new OverwriteTool();
+    await tool.execute(
+      { path: "plain-new.txt", content: "x\r\ny\n" },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+    expect(fsSync.readFileSync(path.join(dir, "plain-new.txt"), "utf-8")).toBe("x\r\ny\n");
+  });
+});

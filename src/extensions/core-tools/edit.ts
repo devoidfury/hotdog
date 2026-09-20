@@ -11,6 +11,7 @@ import { PathEscapeError } from "@utils/workspace.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { AssistantRetryableError } from "@core/error.ts";
 import { ToolContext } from "@core/extensions/types.ts";
+import { detectFileStyle, stripFileStyle, applyFileStyle } from "@utils/file-utils.ts";
 
 interface EditToolOptions {
   maxEditInputSize: number;
@@ -118,7 +119,18 @@ export class EditTool {
       return ToolResult.err(`Failed to read file '${filePath}': ${(e as Error).message}`);
     }
 
-    const result = findAndReplace(sourceContent, oldString, newString, replaceAll || false);
+    // Match in LF/BOM-free space, re-apply the file's real style on write:
+    // a CRLF file edited with LF oldString/newString (what every reader and
+    // the model speak) must stay CRLF, and a BOM must survive its first line
+    // being replaced.
+    const style = detectFileStyle(sourceContent);
+    const content = stripFileStyle(sourceContent);
+    const result = findAndReplace(
+      content,
+      stripFileStyle(oldString),
+      stripFileStyle(newString),
+      replaceAll || false,
+    );
     if (result.error) {
       return ToolResult.err(`Edit failed: ${result.error}`);
     }
@@ -126,7 +138,7 @@ export class EditTool {
     const { newContent, matchInfo } = result;
 
     try {
-      await fs.writeFile(resolvedPath, newContent!, "utf-8");
+      await fs.writeFile(resolvedPath, applyFileStyle(newContent!, style), "utf-8");
     } catch (e: unknown) {
       return ToolResult.err(`Error writing file: ${(e as Error).message}`);
     }

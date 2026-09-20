@@ -6,7 +6,7 @@ import {
   parseToolInput,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
-import { writeWithinWorkspace } from "@utils/file-utils.ts";
+import { writeWithinWorkspace, detectFileStyleAt, applyFileStyle } from "@utils/file-utils.ts";
 import { ToolContext } from "@core/extensions/types.ts";
 
 export class AppendTool {
@@ -46,6 +46,11 @@ export class AppendTool {
       writeFn: (path, content) => fs.appendFile(path, content, "utf-8"),
       writeErrorLabel: "Error appending to file",
       resultKey: "bytes_appended",
+      // Match the existing file's line endings (never re-add a BOM mid-file).
+      prepareContent: async (path, content) => {
+        const style = await detectFileStyleAt(path);
+        return style ? applyFileStyle(content, { ...style, bom: false }) : content;
+      },
     });
   }
 }

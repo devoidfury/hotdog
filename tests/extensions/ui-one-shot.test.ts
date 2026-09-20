@@ -1,7 +1,7 @@
 // Tests for ui-one-shot/index.ts — one-shot prompt mode extension.
 // Covers create(), hook handlers, handlePromptSubcommand(), and runOneShot().
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, spyOn } from "bun:test";
 import { HOOKS } from "@core/hooks.ts";
 import { HookSystem } from "@core/hooks.ts";
 import { CliSubcommandRegistryLike, SubcommandDefinition } from "@core/extensions/registries.ts";
@@ -741,6 +741,123 @@ describe("ui-one-shot extension", () => {
       const agent = await buildAgentFn(cli);
       // A fresh UUID can never match an existing log.
       expect(agent.getMessages().length).toBe(0);
+    });
+  });
+
+  // ── --json-schema structured output ────────────────────────────────────────
+
+  describe("handlePromptSubcommand — --json-schema", () => {
+    const SCHEMA = { type: "object", properties: { answer: { type: "string" } }, required: ["answer"] };
+    const MAIN_ID = "structured-session";
+
+    async function setupStructured() {
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
+      const core = createMockCore();
+
+      const registered: { name: string; tool: any }[] = [];
+      core.toolRegistry.register = (name: string, tool: any) => { registered.push({ name, tool }); };
+
+      let resolveLoop: () => void = () => {};
+      const loopDone = new Promise<void>((r) => { resolveLoop = r; });
+
+      (SessionManager as any).create = async () => ({
+        sessionId: () => MAIN_ID,
+        getAgent: () => ({ sessionId: MAIN_ID }),
+        getBus: () => ({ runUntilCancelled: () => loopDone }),
+        getTaskManager: () => null,
+        enqueue: () => {},
+        executeCommand: async () => 0,
+        onSessionEvents: () => () => {},
+        cancel: () => { resolveLoop(); },
+      });
+
+      const ext = create(core);
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (n: string, d: SubcommandDefinition) => { registry[n] = d; } } as CliSubcommandRegistryLike);
+      return { core, registry, registered, loopDone };
+    }
+
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+
+    it("registers the structured_output tool and prints the payload as bare JSON", async () => {
+      const { core, registry, registered } = await setupStructured();
+
+      const logs: string[] = [];
+      const spy = spyOn(console, "log").mockImplementation(((...args: unknown[]) => { logs.push(args.join(" ")); }) as never);
+      try {
+        const handlerP = (registry.prompt as any).handler(
+          { prompt: "x", jsonSchema: JSON.stringify(SCHEMA) }, core,
+        );
+        await tick();
+
+        expect(registered.length).toBe(1);
+        expect(registered[0]!.name).toBe("structured_output");
+        await registered[0]!.tool.execute({ answer: "hi" });
+
+        core.hooks.notifyHooks(HOOKS.TURN_END, { stopped: true, agent: { sessionId: MAIN_ID } });
+        const exitCode = await handlerP;
+
+        expect(exitCode).toBe(0);
+        expect(logs).toContain(JSON.stringify({ answer: "hi" }));
+        // The Session:/newline chatter must not pollute structured stdout.
+        expect(logs.some((l) => l.includes("Session:"))).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("exits non-zero when the model never calls the tool", async () => {
+      const { core, registry } = await setupStructured();
+      const errSpy = spyOn(console, "error").mockImplementation(((..._args: unknown[]) => {}) as never);
+      try {
+        const handlerP = (registry.prompt as any).handler(
+          { prompt: "x", jsonSchema: JSON.stringify(SCHEMA) }, core,
+        );
+        await tick();
+        core.hooks.notifyHooks(HOOKS.TURN_END, { stopped: true, agent: { sessionId: MAIN_ID } });
+        const exitCode = await handlerP;
+        expect(exitCode).toBe(1);
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    it("a subagent TURN_END does not end the run", async () => {
+      const { core, registry } = await setupStructured();
+      const handlerP = (registry.prompt as any).handler(
+        { prompt: "x", jsonSchema: JSON.stringify(SCHEMA) }, core,
+      );
+      await tick();
+
+      core.hooks.notifyHooks(HOOKS.TURN_END, { stopped: true, agent: { sessionId: "some-worker-session" } });
+      const settled = await Promise.race([
+        handlerP.then(() => "settled"),
+        tick().then(() => "pending"),
+      ]);
+      expect(settled).toBe("pending");
+
+      // Finish it properly so the test process isn't left with a live promise.
+      core.hooks.notifyHooks(HOOKS.TURN_END, { stopped: true, agent: { sessionId: MAIN_ID } });
+      await handlerP;
+    });
+
+    it("an invalid schema argument fails before the session is created", async () => {
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const core = createMockCore();
+      const ext = create(core);
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (n: string, d: SubcommandDefinition) => { registry[n] = d; } } as CliSubcommandRegistryLike);
+
+      const errSpy = spyOn(console, "error").mockImplementation(((..._args: unknown[]) => {}) as never);
+      try {
+        const exitCode = await (registry.prompt as any).handler(
+          { prompt: "x", jsonSchema: "{ not json" }, core,
+        );
+        expect(exitCode).toBe(1);
+      } finally {
+        errSpy.mockRestore();
+      }
     });
   });
 });

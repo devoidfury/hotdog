@@ -33,6 +33,7 @@ hotdog webui                     # Start the web UI server
                                Tip: append | @ to send command output to the agent (e.g., "ls -la | @", "ls -la | @ show me the permissions")
 -l, --loud                   Print full JSON API responses
 --json                       Output as JSON
+    --json-schema <json|path>  One-shot structured output: a JSON Schema (inline or file path); the run ends when the model returns a valid payload, printed as bare JSON
 --show-tools                 Show tool calls in output
 --show-thinking              Show reasoning/thinking output
 --no-colors                  Disable colors (also honors NO_COLOR / TERM=dumb env)

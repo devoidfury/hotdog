@@ -17,6 +17,7 @@ bun bin/hotdog prompt "hello"
 - **`--config-dir <path>`** (`-d`) — config directory
 - **`--loud`** (`-l`) — verbose stderr logging for LLM requests/responses
 - **`--no-stream`** — batch mode: text appears after full generation (no streaming)
+- **`--json-schema <json|path>`** — one-shot structured output. Passes a JSON Schema (inline or a file path) to a synthetic `structured_output` tool; the first call whose arguments validate ends the run and the payload is printed to stdout as bare JSON (pipeable into `jq`). Exits non-zero if the model finishes without a valid call.
 - **`--compact-debug`** — write compaction details to `compaction.out.json` (in the sessions dir)
 - **`--hook-trace`** — trace hook execution (see below)
 - **`--no-log`** — disable JSONL session logging

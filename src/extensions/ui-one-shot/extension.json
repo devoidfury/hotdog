@@ -27,6 +27,11 @@
       "description": "One-shot prompt — run a single prompt and exit",
       "type": "string",
       "isSubcommand": true
+    },
+    {
+      "long": "--json-schema",
+      "description": "Structured one-shot output: JSON schema (inline or file path); the run ends when the model returns a valid payload",
+      "type": "string"
     }
   ],
   "cli:subcommands": [

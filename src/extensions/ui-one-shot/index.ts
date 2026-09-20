@@ -9,10 +9,16 @@ import { createAgentFactory } from "@core/agent-factory.ts";
 import { restoreSessionIntoAgent } from "@core/session/session-log.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
+import { StructuredOutputTool, resolveOutputSchema, STRUCTURED_OUTPUT_TOOL_NAME } from "./structured-output.ts";
 import type { CoreContext, ExtensionInstance, ResolvedConfig } from "@core/extensions/types.ts";
 import type { PaletteOptions } from "@utils/cli/colors.ts";
 import type { CoreConfigWithExtensions, CliArgv } from "@core/config/index.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
+
+/** Per-run capture for `--json-schema` mode. */
+interface StructuredRun {
+  payload: Record<string, unknown> | null;
+}
 
 async function runOneShot(
   cli: CliArgv,
@@ -20,9 +26,10 @@ async function runOneShot(
   resolved: ResolvedConfig,
   config: CoreConfigWithExtensions,
   modelRegistry: Record<string, ModelConfig>,
-  sink: CliOutputSink,
+  sink: CliOutputSink | null,
   buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike>,
   llmClient: LlmClient,
+  structured: StructuredRun | null,
 ): Promise<number> {
   const sessionManager = await SessionManager.create({
     hooks: core.hooks,
@@ -45,12 +52,27 @@ async function runOneShot(
   // (and their tools) were loaded before this session existed.
   registerTaskManagerService(core, sessionManager.getTaskManager());
 
-  // Constructed for its side effect: attach() subscribes the sink to session events.
-  new OneShotChannel({
-    sessionManager,
-    sessionId: sessionManager.sessionId()!,
-    sink,
-  });
+  // --json-schema: one turn is the whole contract. The bus loop otherwise only ends on cancel(),
+  // so end the main session's first stopped turn by cancelling the bus; that resolves runUntilCancelled deterministically
+  // rather than relying on event-loop drain so the payload print below always runs. Subagent TURN_ENDs are filtered by session id.
+  if (structured) {
+    const mainSessionId = sessionManager.sessionId();
+    core.hooks.on(HOOKS.TURN_END, ({ stopped, agent }: { stopped: boolean; agent?: { sessionId?: string } }) => {
+      if (!stopped || !mainSessionId) return;
+      if (agent?.sessionId && agent.sessionId !== mainSessionId) return;
+      sessionManager.cancel(mainSessionId);
+    });
+  }
+
+  // Constructed for side-effect: attach() subscribes the sink to session events.
+  // In --json schema mode there is no sink(structured), raw JSON is printed at the end instead, so skip the channel and all normal stdout.
+  if (sink) {
+    new OneShotChannel({
+      sessionManager,
+      sessionId: sessionManager.sessionId()!,
+      sink,
+    });
+  }
 
   const promptText = cli.prompt || (Array.isArray(cli.args) ? cli.args.join(" ") : "");
   sessionManager.enqueue(sessionManager.sessionId()!, promptText);
@@ -61,16 +83,29 @@ async function runOneShot(
     if (bus) {
       await bus.runUntilCancelled();
     }
-    console.log("\n");
+    if (!structured) console.log("\n");
   } catch (e: unknown) {
     logger.error(formatError(e));
     exitCode = (e as { exitCode?: number }).exitCode ?? 1;
   } finally {
-    const oneShotSessionId = sessionManager.sessionId();
-    if (oneShotSessionId) {
-      console.log(`Session: ${oneShotSessionId}`);
+    if (!structured) {
+      const oneShotSessionId = sessionManager.sessionId();
+      if (oneShotSessionId) {
+        console.log(`Session: ${oneShotSessionId}`);
+      }
     }
     await core.extensions.cleanup();
+  }
+
+  if (structured) {
+    if (structured.payload === null) {
+      logger.error(
+        "run ended without a valid " + STRUCTURED_OUTPUT_TOOL_NAME + " tool call",
+      );
+      exitCode = exitCode || 1;
+    } else {
+      console.log(JSON.stringify(structured.payload));
+    }
   }
 
   return exitCode;
@@ -85,19 +120,38 @@ async function handlePromptSubcommand(
 
   const modelRegistry = resolved.modelRegistry;
 
-  const palette = await CliOutputSink.resolve(
-    cli.colors !== false,
-    (cli.theme || config.theme || "dark") as string,
-    (config.colors as PaletteOptions) || null,
-  );
+  // --json-schema: register the synthetic terminal tool and capture its payload. When present, the normal CLI sink is dropped so stdout carries only the bare JSON.
+  let structured: StructuredRun | null = null;
+  const schemaArg = (cli as Record<string, unknown>).jsonSchema;
+  if (typeof schemaArg === "string" && schemaArg.trim().length > 0) {
+    const { schema, error } = await resolveOutputSchema(schemaArg);
+    if (!schema) {
+      console.error(`--json-schema: ${error}`);
+      return 1;
+    }
+    structured = { payload: null };
+    const capture = structured;
+    const tool = new StructuredOutputTool(schema, (payload) => {
+      capture.payload = payload;
+    });
+    core.toolRegistry.register(STRUCTURED_OUTPUT_TOOL_NAME, tool);
+  }
 
-  const sink = new CliOutputSink({
-    ...resolved,
-    palette,
-    thinkerFormat: resolved.thinkerFormat,
-    toolCallDisplayFormat: resolved.toolCallDisplayFormat,
-    toolOutputFmt: resolved.toolOutputFmt,
-  });
+  let sink: CliOutputSink | null = null;
+  if (!structured) {
+    const palette = await CliOutputSink.resolve(
+      cli.colors !== false,
+      (cli.theme || config.theme || "dark") as string,
+      (config.colors as PaletteOptions) || null,
+    );
+    sink = new CliOutputSink({
+      ...resolved,
+      palette,
+      thinkerFormat: resolved.thinkerFormat,
+      toolCallDisplayFormat: resolved.toolCallDisplayFormat,
+      toolOutputFmt: resolved.toolOutputFmt,
+    });
+  }
 
   const llmClient = core.createLlmClient();
 
@@ -122,6 +176,7 @@ async function handlePromptSubcommand(
     sink,
     buildAgent,
     llmClient,
+    structured,
   );
 }
 

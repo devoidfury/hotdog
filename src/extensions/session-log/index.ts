@@ -84,7 +84,10 @@ function messageToLogEntry(
  * Create the session log extension.
  * Uses the current agent's session ID (from the hook context) for the log file.
  */
-export async function create(_core: CoreContext): Promise<ExtensionInstance> {
+export async function create(core: CoreContext): Promise<ExtensionInstance> {
+  // `--no-log` / HOTDOG_NO_LOG / noLog config
+  if (core.resolved?.noLog) return {};
+
   // Canonical sessions dir (respects HOTDOG_SESSIONS_DIR for tests).
   const cacheDir = sessionsDir();
   await mkdir(cacheDir, { recursive: true });

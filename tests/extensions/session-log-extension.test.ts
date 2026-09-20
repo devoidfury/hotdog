@@ -314,6 +314,31 @@ describe("session-log extension create()", () => {
     }
   });
 
+  it("noLog: true disables logging entirely", async () => {
+    const sessionId = `test-nolog-${Date.now()}`;
+    const logFile = join(SESSIONS_DIR, `${sessionId}.jsonl`);
+    try {
+      const ext = await create(
+        createMockCore({ resolved: { noLog: true } }) as any,
+      ) as any;
+
+      // Calling the message hook with the instance built from a noLog
+      // config must not create a session file.
+      const hook = ext.hooks?.[HOOKS.CONTEXT_MESSAGE];
+      if (hook) {
+        await hook({
+          message: { sessionId, role: "user", content: "Should never be logged" },
+          agent: { sessionId },
+        });
+      }
+
+      expect(() => readFileSync(logFile)).toThrow();
+      expect(await readSessionEntries(sessionId)).toEqual([]);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
   it("OUTPUT_EVENT compaction hook rejects traversal session ids without writing", async () => {
     const ext = await create(createMockCore() as any) as any;
     const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;

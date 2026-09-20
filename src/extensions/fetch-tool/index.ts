@@ -409,7 +409,9 @@ export function isPrivateAddress(ip: string): boolean {
       (a === 100 && b >= 64 && b <= 127) || // CGNAT
       (a === 172 && b >= 16 && b <= 31) || // RFC1918
       (a === 169 && b === 254) || // link-local (cloud metadata lives here)
+      (a === 192 && b === 0 && c === 0) || // IETF Protocol Assignments (RFC 6890)
       (a === 192 && b === 0 && c === 2) || // TEST-NET-1 (documentation)
+      (a === 192 && b === 88 && c === 99) || // 6to4 anycast relay (RFC 7526; deprecated, unassigned)
       (a === 192 && b === 168) || // RFC1918
       (a === 198 && (b === 18 || b === 19)) || // benchmarking (RFC2544)
       (a === 198 && b === 51 && c === 100) || // TEST-NET-2 (documentation)

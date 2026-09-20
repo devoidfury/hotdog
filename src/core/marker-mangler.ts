@@ -72,7 +72,7 @@ function escapeRegex(str: string): string {
 // the exact rule, `<name-something>` falls through to the prefix rule.
 //
 // Rules are compiled ONCE per name pair (escape() runs per wire message per
-// request; rebuilding ~6 regexes per prefix per call was a hot path). All
+// request; rebuilding ~8 regexes per prefix per call was a hot path). All
 // patterns are /g; String.replace resets lastIndex after each global pass,
 // so a shared compiled regex is safe to reuse.
 function buildRules(from: string, to: string): ManglerRule[] {
@@ -88,6 +88,10 @@ function buildRules(from: string, to: string): ManglerRule[] {
     // Prefix match: <name-something> (e.g. <m_abc123-extra>)
     { re: new RegExp(`(<)(${escaped})(-[^>\\s]*)([>\\s/])`, "g"), repl: `$1${to}$3$4` },
     { re: new RegExp(`(</)(${escaped})(-[^>\\s]*)([>\\s/])`, "g"), repl: `$1${to}$3$4` },
+    // Prefix match at end: <name-something or </name-something (the exact
+    // EOF rules above cannot reach these -- the dash run blocks `$`).
+    { re: new RegExp(`(<)(${escaped})(-[^>\\s]*)$`, "gm"), repl: `$1${to}$3` },
+    { re: new RegExp(`(</)(${escaped})(-[^>\\s]*)$`, "gm"), repl: `$1${to}$3` },
   ];
 }
 

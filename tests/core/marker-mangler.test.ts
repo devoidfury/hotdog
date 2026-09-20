@@ -28,6 +28,17 @@ describe("MarkerMangler", () => {
     expect(escaped).not.toContain(`<${TOOL_CALL_TAG}`);
   });
 
+  it("escapes dashed-prefix markers at end of string (no terminator)", () => {
+    const mangler = createMangler();
+    for (const slash of ["", "/"]) {
+      const input = `stray <${slash}${TOOL_CALL_TAG}-draft`;
+      const escaped = mangler.escape(input) as string;
+      expect(escaped).not.toContain(`<${slash}${TOOL_CALL_TAG}`);
+      expect(escaped).toContain("-draft");
+      expect(mangler.unescape(escaped)).toBe(input);
+    }
+  });
+
   it("leaves non-protected markers untouched", () => {
     const mangler = createMangler();
     const input = "<div>hello</div>";

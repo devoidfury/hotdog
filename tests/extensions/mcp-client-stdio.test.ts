@@ -465,6 +465,32 @@ describe("StdioTransport", () => {
     expect(receivedLines).toEqual(["before", "after"]);
   });
 
+  it("a dead stdin pipe surfaces as a handled stream error, not an uncaught exception", async () => {
+    // Regression: child.stdin had no 'error' listener. A write that hits a
+    // closed pipe raises EPIPE as an unhandled stream error -- an uncaught
+    // exception that takes down the whole process (Bun throws even with the
+    // error surfaced nowhere else) instead of failing one tool call.
+    // The child closes its own stdin but stays alive: a child that fully
+    // exited gets writes silently swallowed by Bun, which would not
+    // reproduce the crash path.
+    const uncaught: unknown[] = [];
+    const onUncaught = (e: unknown) => { uncaught.push(e); };
+    process.on("uncaughtException", onUncaught);
+    try {
+      const transport = new StdioTransport("bash", ["-c", "exec 0<&-; sleep 5"]);
+      await new Promise((r) => setTimeout(r, 150));
+      // Must exceed the stream's internal buffer: a small write sits in the
+      // buffer and Bun drops the flush error, never reaching the crash path.
+      // A large write flushes synchronously and raises EPIPE.
+      transport.sendNotification("x".repeat(1 << 20));
+      await new Promise((r) => setTimeout(r, 250));
+      expect(uncaught).toHaveLength(0);
+      await transport.destroy();
+    } finally {
+      process.off("uncaughtException", onUncaught);
+    }
+  });
+
   it("caps stderr accumulation at the transport buffer limit", async () => {
     // 2.5MB of stderr (cap is MAX_TRANSPORT_BUFFER_CHARS of 2_000_000) must
     // stop accumulating once the cap is hit.

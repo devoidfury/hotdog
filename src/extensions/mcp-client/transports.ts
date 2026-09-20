@@ -74,6 +74,13 @@ export class StdioTransport implements McpTransport {
     this.#readStream = this.#child.stdout;
     this.#stderr = this.#child.stderr;
 
+    // Without a listener, a write to a closed pipe (server died mid-session, large message flushes synchronously) raises EPIPE as an unhandled stream error
+    this.#writeStream?.on("error", (e: Error) => {
+      if (!this.#destroyed) {
+        logger.error(`MCP stdio write stream error: ${formatError(e)}`);
+      }
+    });
+
     this.#startReader();
     this.#startStderrReader();
   }

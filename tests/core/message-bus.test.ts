@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { MessageBus } from "@core/session/message-bus.ts";
+import { HOOKS } from "@core/hooks.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { LlmError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
@@ -80,6 +81,94 @@ describe("MessageBus.enqueue() with content parts", () => {
     expect(bus.isIdle()).toBe(false);
     // Flattened text form (parts joined with newlines), never the structure.
     expect(bus.queue).toEqual(["[Task t1 completed]\n\nraw result"]);
+  });
+});
+
+describe("MessageBus steering (enqueue with steering: true)", () => {
+  it("queues like a normal message when no run is in progress", () => {
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
+    bus.enqueue("idle steer", { steering: true });
+    expect(bus.queue).toEqual(["idle steer"]);
+  });
+
+  it("injects into the agent's steering queue mid-run, bypassing the bus queue", async () => {
+    const steered: string[] = [];
+    const agent = { ...createMockAgent(), steer: (c: string) => steered.push(c) };
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    bus.isRunning = true;
+    bus.enqueue("mid-run", { steering: true });
+    await bus.steeringPending;
+    expect(steered).toEqual(["mid-run"]);
+    expect(bus.queue).toEqual([]);
+  });
+
+  it("falls back to the queue when the agent cannot be steered", () => {
+    const agent = createMockAgent();
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    bus.isRunning = true;
+    bus.enqueue("nope", { steering: true });
+    expect(bus.queue).toEqual(["nope"]);
+  });
+
+  it("runs steering through the INPUT pipeline, like any other input", async () => {
+    const steered: unknown[] = [];
+    const seenHooks: string[] = [];
+    const agent = {
+      ...createMockAgent({
+        hooks: {
+          runHookPipeline: async (hook: string, data: unknown) => {
+            seenHooks.push(hook);
+            const d = data as { action?: string; content?: string; text?: string };
+            d.action = "transform";
+            d.content = `[wrapped] ${d.text}`;
+            return {};
+          },
+        },
+      }),
+      steer: (c: unknown) => steered.push(c),
+    };
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    bus.isRunning = true;
+    bus.enqueue("go", { steering: true });
+    await bus.steeringPending;
+    expect(seenHooks).toEqual([HOOKS.INPUT]);
+    expect(steered).toEqual(["[wrapped] go"]);
+  });
+
+  it("drops steering that the INPUT pipeline handles", async () => {
+    const steered: unknown[] = [];
+    const agent = {
+      ...createMockAgent({ hooks: { runHookPipeline: async () => ({ stopped: true }) } }),
+      steer: (c: unknown) => steered.push(c),
+    };
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    bus.isRunning = true;
+    bus.enqueue("mine", { steering: true });
+    await bus.steeringPending;
+    expect(steered).toEqual([]);
+    expect(bus.queue).toEqual([]);
+  });
+
+  it("preserves steering submission order across slow pipelines", async () => {
+    const steered: string[] = [];
+    const agent = {
+      ...createMockAgent({
+        hooks: {
+          runHookPipeline: async (_hook: string, data: unknown) => {
+            const d = data as { text?: string };
+            if (d.text === "slow") await new Promise((r) => setTimeout(r, 10));
+            return {};
+          },
+        },
+      }),
+      steer: (c: string) => steered.push(c),
+    };
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    bus.isRunning = true;
+    bus.enqueue("slow", { steering: true });
+    bus.enqueue("fast", { steering: true });
+    await bus.steeringPending;
+    expect(steered).toEqual(["slow", "fast"]);
   });
 });
 

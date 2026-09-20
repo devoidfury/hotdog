@@ -63,9 +63,10 @@ Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key 
 - `_executeTools(toolCalls)` — executes tool calls via the ToolExecutor
 - `executeCommand(cmd)` — executes commands
 - `cancel()` — cancels the running agent loop
-- Properties: `model` (setter emits `MODEL_CHANGE`, clears tool defs and system prompt cache), `context` (`ContextManager`), `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `llmClient`, `reasoningEffort`, `followQueue`, `commandRegistry`, `enqueueCallback`
-- Task agent support: `abortSignal`, `toolWhitelist`, `followQueue`
+- Properties: `model` (setter emits `MODEL_CHANGE`, clears tool defs and system prompt cache), `context` (`ContextManager`), `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `llmClient`, `reasoningEffort`, `steeringQueue`, `commandRegistry`, `enqueueCallback`
+- Task agent support: `abortSignal`, `toolWhitelist`, `steeringQueue`
 - `enqueue(text)` — enqueue a message on the owning MessageBus
+- `steer(content)` — in-core steering seam: queue a steering message, drained as a user message before every LLM call (mid-turn injection). User submission goes through `MessageBus.enqueue(..., { steering: true })`, which runs the INPUT pipeline first; task follow-ups use this seam directly
 
 ### Commands (`src/core/commands.ts`)
 Command parsing — commands are the abstract concept, slash commands (/cmd) are one UI implementation. Key exports:
@@ -215,7 +216,7 @@ Tab-completion service. Completion providers register matchers + handlers; when 
 ### Session (`src/core/session/`)
 - `session-log.ts` — Session log reading/replaying (JSONL format). Key exports: `readSessionEntries()`, `readAllSessions()`, `sessionExists()`, `replayEntriesIntoContext()`, `sessionsDir()`, `sessionPath()`, `LOG_SOURCE` constants (session dir overridable via `HOTDOG_SESSIONS_DIR`)
 - `task-manager.ts` — `TaskManager` manages background task agents. Key exports: `TASK_STATUS` (RUNNING, COMPLETED, FAILED, CANCELLED), `TaskHandle` (status, interrupt), `TaskManager` (spawnTask, taskStatus, sendFollowUp, interruptTask, activeTasks, taskCounts, progressMessage). Task agents get a silent inline sink (no UI output) and report results via `onTaskComplete`.
-- `message-bus.ts` — `MessageBus` owns the agent run loop. Drains messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook. Queue-boundary rule: parts arrays enqueued without harness provenance are flattened to plain text (wrapper parts render with real tags at the wire, so only harness producers may carry parts). Key exports: `MessageBus` (enqueue, cancel, isIdle, run, runUntilCancelled, executeCommand)
+- `message-bus.ts` — `MessageBus` owns the agent run loop. Drains messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook (shared by the run loop and mid-run steering delivery). Queue-boundary rule: parts arrays enqueued without harness provenance are flattened to plain text (wrapper parts render with real tags at the wire, so only harness producers may carry parts). Key exports: `MessageBus` (enqueue, cancel, isIdle, run, runUntilCancelled, executeCommand). `enqueue(content, { source, steering })` is the single submission point: a `steering` item during an active run passes the INPUT pipeline then hands to the agent's steering queue (reaches the model before the next LLM call, never between a tool call and its results); when idle it falls through to the normal queue
 
 ### Marker Mangler (`src/core/marker-mangler.ts`)
 Randomly aliases protected marker names (tool call actions, internal markers) to per-session aliases so crafted input cannot trigger special behavior (prompt injection defense). Mangling is applied at the wire: `escape()` before serialization in `src/core/llm-client/serialize.ts`. `unescape()` runs once on the **assembled** response (not per SSE delta, since an alias can straddle a delta boundary): `StreamProcessor.process()` for the agent stream and the compaction extension for its summary. Stream events carry raw wire content. Key exports: `CORE_PROTECTED_PREFIXES` constant and `MarkerMangler` class with `escape()`, `unescape()`, `addPrefixes()`, `protectedPrefixes()`.

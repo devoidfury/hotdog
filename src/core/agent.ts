@@ -115,7 +115,8 @@ export class Agent implements AgentLike {
   #running: boolean;
   abortSignal: AbortSignal | null;
   toolWhitelist: string[] | null;
-  followQueue: string[];
+  /** Steering messages (see steer()): injected between LLM calls by _prepareIteration. */
+  steeringQueue: Array<string | Array<Record<string, unknown>>>;
   runAbortController: AbortController | null;
   commandRegistry: AgentCommandRegistry;
   #toolExecutor: ToolExecutor;
@@ -174,7 +175,7 @@ export class Agent implements AgentLike {
     this.#running = false;
     this.abortSignal = options.abortSignal || null;
     this.toolWhitelist = options.toolWhitelist || null;
-    this.followQueue = [];
+    this.steeringQueue = [];
     // Per-iteration AbortController, aborted on cancel() so the HTTP client terminates fetch().
     this.runAbortController = null;
     this.#streamProcessor = createStreamProcessor();
@@ -258,6 +259,17 @@ export class Agent implements AgentLike {
 
   enqueue(content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }): void {
     this.enqueueCallback?.(content, opts);
+  }
+
+  /**
+   * Queue a steering message: immediate notice for a running (or about-to-run) agent.
+   * Drained before every LLM call in _prepareIteration, so it reaches the model mid-turn without landing
+   * between an assistant(tool_calls) message and its tool results. This is the in-core append seam (the sibling
+   * of the tool-result/system-notice appends); user submission goes through MessageBus.enqueue(..., { steering: true }),
+   * which runs the INPUT pipeline first. Task follow-ups use this seam directly (task agents have no bus).
+   */
+  steer(content: string | Array<Record<string, unknown>>): void {
+    this.steeringQueue.push(content);
   }
 
   // ── Run Loop ──────────────────────────────────────────────────────────────
@@ -354,10 +366,10 @@ export class Agent implements AgentLike {
     if (this.cancelled) throw LlmError.Cancelled("Agent cancelled");
     if (this.abortSignal?.aborted) throw LlmError.Cancelled("Agent aborted");
 
-    while (this.followQueue.length > 0) {
-      const followUp = this.followQueue.shift()!;
-      this.addMessage(new Message({ role: "user", content: followUp, source: "user" }));
-      this.emitOutput("user_message", { content: followUp });
+    while (this.steeringQueue.length > 0) {
+      const steering = this.steeringQueue.shift()!;
+      this.addMessage(new Message({ role: "user", content: steering, source: "user" }));
+      this.emitOutput("user_message", { content: contentToText(steering) });
     }
 
     let messages = this.buildMessages();

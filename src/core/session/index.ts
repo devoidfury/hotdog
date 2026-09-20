@@ -38,7 +38,8 @@ export interface AgentLike {
   getMessages(): Message[];
   abortSignal?: AbortSignal | null;
   notifyCompletion?(result: string): void;
-  followQueue?: string[];
+  /** Inject a steering message (drained between LLM calls). See Agent.steer. */
+  steer?(content: string): void;
   commandRegistry?: CommandRegistryLike | null;
   modelRegistry?: Record<string, ModelConfig> | null;
   config?: Record<string, unknown> | null;
@@ -265,10 +266,10 @@ export class SessionManager {
     return this.#currentSessionId;
   }
 
-  enqueue(sessionId: string, text: string): void {
+  enqueue(sessionId: string, text: string, opts?: { steering?: boolean }): void {
     const entry = this.#sessions.get(sessionId);
     if (entry) {
-      entry.bus.enqueue(text);
+      entry.bus.enqueue(text, opts);
     }
   }
 

@@ -846,7 +846,11 @@ async function routeMessage(
       if (msg.sessionId && msg.content) {
         registry.touch(msg.sessionId as string);
         registry.incrementUserMessageCount(msg.sessionId as string);
-        sessionManager.enqueue(msg.sessionId as string, msg.content as string);
+        sessionManager.enqueue(
+          msg.sessionId as string,
+          msg.content as string,
+          msg.steering === true ? { steering: true } : undefined,
+        );
       }
       break;
     }

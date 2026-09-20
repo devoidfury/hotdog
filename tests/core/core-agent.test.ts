@@ -771,7 +771,7 @@ describe('Agent — end-to-end loop', () => {
     toolRegistry.register('worker', tool);
 
     // Queue a follow-up before running
-    agent.followQueue.push('Follow-up message');
+    agent.steer('Follow-up message');
 
     const result = await agent.run('Do work');
 

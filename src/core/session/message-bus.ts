@@ -32,6 +32,12 @@ export interface MessageBusAgent {
   resetCancel(): void;
   cancel(): void;
   /**
+   * Steering seam: in-core append drained between LLM calls. Present on the
+   * real Agent; optional so test fakes can stay minimal. Submission goes
+   * through enqueue(..., { steering: true }), not this method directly.
+   */
+  steer?(content: string | Array<Record<string, unknown>>): void;
+  /**
    * Tool-call repair seam: present on the real Agent, optional so test fakes
    * can stay minimal. Used to heal interrupted tool calls after a cancelled
    * turn (an assistant message whose calls never got results is a guaranteed
@@ -98,6 +104,9 @@ export class MessageBus {
   #abortController: AbortController;
   #waiter: { resolve: () => void } | null;
   #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;
+  // Serializes mid-run steering delivery: pipelines are async, so per-item
+  // fire-and-forget would let a later submission overtake an earlier one.
+  #steerChain: Promise<void> = Promise.resolve();
 
   constructor({ sessionManager, sink, broadcastCallback }: MessageBusOptions) {
     this.#sessionManager = sessionManager;
@@ -110,8 +119,20 @@ export class MessageBus {
     this.#waiter = null;
   }
 
-  enqueue(content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }): void {
-    this.#queue.push({ content: sanitizeQueuedContent(content, opts?.source), source: opts?.source });
+  enqueue(
+    content: string | Array<Record<string, unknown>>,
+    opts?: { source?: MessageSource; steering?: boolean },
+  ): void {
+    const clean = sanitizeQueuedContent(content, opts?.source);
+    const agent = this.#sessionManager.getAgent();
+    if (opts?.steering && this.#isRunning && agent?.steer) {
+      // Same processing as any other message only the delivery slot differs:
+      // the agent's steering queue, drained before the next LLM call, instead of waiting for a run-loop slot.
+      // The chain preserves submission order across async pipelines.
+      this.#steerChain = this.#steerChain.then(() => this.#deliverSteering(agent, clean, opts?.source));
+      return;
+    }
+    this.#queue.push({ content: clean, source: opts?.source });
     this._wakeWaiter();
   }
 
@@ -177,6 +198,11 @@ export class MessageBus {
   }
   set isRunning(v: boolean) {
     this.#isRunning = v;
+  }
+
+  /** @internal Pending mid-run steering delivery chain (for testing). */
+  get steeringPending(): Promise<void> {
+    return this.#steerChain;
   }
 
   /** @internal */
@@ -307,6 +333,63 @@ export class MessageBus {
     });
   }
 
+  /**
+   * INPUT hook pipeline, shared by the run loop and steering delivery.
+   * Hooks see flattened text; the structured content (with its trust parts) is what reaches the agent.
+   * The pipeline adopts a handler's InputHookResult fields (action/content) onto this payload.
+   */
+  async #runInputPipeline(
+    agent: MessageBusAgent,
+    content: string | Array<Record<string, unknown>>,
+    source: MessageSource | undefined,
+  ): Promise<{ content: string | Array<Record<string, unknown>>; handled: boolean }> {
+    if (!agent.hooks) return { content, handled: false };
+
+    const inputData: InputPipelineData = {
+      text: contentToText(content),
+      source: "interactive",
+      origin: source,
+      agent,
+    };
+    const inputResult = (await agent.hooks.runHookPipeline(
+      HOOKS.INPUT,
+      inputData,
+      { shouldStop: (result: unknown) => (result as { action?: string })?.action === "handled" },
+    )) as { stopped?: boolean };
+    if (inputResult.stopped) return { content, handled: true };
+
+    if (inputData.action === "transform" && inputData.content !== undefined) {
+      // A transform replaces the content. Structured results pass through with the hook's own parts (INPUT-hook output
+      // is trusted code; the wire applies each part type's trust spec)
+      return {
+        content:
+          typeof inputData.content === "string" && Array.isArray(content)
+            ? [{ type: "untrusted", text: inputData.content }]
+            : inputData.content,
+        handled: false,
+      };
+    }
+    return { content, handled: false };
+  }
+
+  /** Steering delivery: INPUT pipeline, then the agent's steering seam. */
+  async #deliverSteering(
+    agent: MessageBusAgent,
+    content: string | Array<Record<string, unknown>>,
+    source: MessageSource | undefined,
+  ): Promise<void> {
+    try {
+      const piped = await this.#runInputPipeline(agent, content, source);
+      if (piped.handled) return;
+      agent.steer!(piped.content);
+    } catch (e: unknown) {
+      this.#sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content: isExpectedError(e) ? (e as Error).message : formatError(e),
+      });
+    }
+  }
+
   /** Runs the input hook pipeline, then hands off to the agent. */
   async _processMessage(item: string | BusQueueItem): Promise<void> {
     // Accept a bare string (tests / simple callers) or a full queue item.
@@ -328,41 +411,13 @@ export class MessageBus {
     // Reset before processing so a leftover cancel from an interrupt can't swallow this run.
     agent.resetCancel();
 
-    // Hooks see flattened text; the structured content (with its trust parts) is what reaches the agent.
-    // The pipeline adopts a handler's InputHookResult fields (action/content) onto this payload.
-    const inputData: InputPipelineData = {
-      text: contentToText(content),
-      source: "interactive",
-      origin: source,
-      agent,
-    };
-    let inputHandled = false;
-    if (agent?.hooks) {
-      const inputResult = (await agent.hooks.runHookPipeline(
-        HOOKS.INPUT,
-        inputData,
-        { shouldStop: (result: unknown) => (result as { action?: string })?.action === "handled" },
-      )) as { stopped?: boolean };
-      if (inputResult.stopped) inputHandled = true;
-      if (inputData.action === "transform" && inputData.content !== undefined) {
-        // A transform replaces the content. Structured results pass through
-        // with the hook's own parts (INPUT-hook output is trusted code; the
-        // wire applies each part type's trust spec). A string result of
-        // STRUCTURED (harness) content must not inherit the harness
-        // exemption: the flattening lost the per-part marking, so wrap it
-        // as an untrusted part and let the wire mangle it.
-        content =
-          typeof inputData.content === "string" && Array.isArray(content)
-            ? [{ type: "untrusted", text: inputData.content }]
-            : inputData.content;
-      }
-    }
-
-    if (inputHandled) {
+    const piped = await this.#runInputPipeline(agent, content, source);
+    if (piped.handled) {
       this.#isRunning = false;
       this.#emitSessionState("working", false, agentSid);
       return;
     }
+    content = piped.content;
 
     try {
       await agent.run(content, undefined, source ? { source } : undefined);

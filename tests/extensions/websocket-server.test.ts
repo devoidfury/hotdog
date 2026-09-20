@@ -450,6 +450,31 @@ describe("createWsServer", () => {
     }
   });
 
+  it("handles SEND with steering by passing the steering flag to the session", async () => {
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
+
+    const enqueued: Array<{ sid: string; content: string; opts?: { steering?: boolean } }> = [];
+    const sessionManager = wsServer.sessionRegistry.getSessionManager();
+    const originalEnqueue = sessionManager.enqueue;
+    sessionManager.enqueue = (sid: string, content: string, opts?: { steering?: boolean }) => {
+      enqueued.push({ sid, content, opts });
+    };
+
+    try {
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.SEND, sessionId, content: "Steer!", steering: true }));
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.SEND, sessionId, content: "Normal" }));
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.SEND, content: "Steer!", steering: true }));
+      // Only fully-addressed messages are enqueued; steering is a flag on send.
+      expect(enqueued).toEqual([
+        { sid: sessionId, content: "Steer!", opts: { steering: true } },
+        { sid: sessionId, content: "Normal", opts: undefined },
+      ]);
+    } finally {
+      sessionManager.enqueue = originalEnqueue;
+    }
+  });
+
   it("handles CANCEL message by interrupting the session", async () => {
     const ws = await connectWithSession();
     const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;

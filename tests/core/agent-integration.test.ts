@@ -658,7 +658,7 @@ describe('Agent — lifecycle and state', () => {
     await expect(agent.run('second')).rejects.toThrow(/cancelled|abort/i);
   });
 
-  it('should process followQueue messages before LLM call', async () => {
+  it('should process steering messages before LLM call', async () => {
     const mockLLM = new MockLLMClient({
       responseSequences: [
         buildStreamResponse({
@@ -670,9 +670,10 @@ describe('Agent — lifecycle and state', () => {
 
     const { agent } = createAgentFixture({ mockLLM });
 
-    // Add follow-up messages to the queue (normally done by extensions)
-    agent.followQueue.push('Follow-up 1');
-    agent.followQueue.push('Follow-up 2');
+    // Steer before the run (normally done via MessageBus.enqueue(..., { steering: true })
+    // or task follow-ups)
+    agent.steer('Follow-up 1');
+    agent.steer('Follow-up 2');
 
     await agent.run('Initial message');
 
@@ -685,7 +686,7 @@ describe('Agent — lifecycle and state', () => {
     expect((userMessages[2]?.content as string)).toBe('Follow-up 2');
   });
 
-  it('should emit output events for followQueue messages', async () => {
+  it('should emit output events for steering messages', async () => {
     const mockLLM = new MockLLMClient({
       responseSequences: [
         buildStreamResponse({
@@ -697,7 +698,7 @@ describe('Agent — lifecycle and state', () => {
 
     const { agent, outputEvents } = createAgentFixture({ mockLLM });
 
-    agent.followQueue.push('Queued message');
+    agent.steer('Queued message');
 
     await agent.run('Initial');
 

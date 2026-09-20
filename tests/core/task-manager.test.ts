@@ -72,6 +72,64 @@ describe("TaskManager", () => {
     });
   });
 
+  describe("sendFollowUp (steering only)", () => {
+    // Fake task agent whose run hangs until released, keeping the task RUNNING.
+    function makeHangingAgent(extra: Record<string, unknown> = {}) {
+      let releaseRun!: () => void;
+      const agent = {
+        run: () => new Promise<void>((resolve) => { releaseRun = resolve; }),
+        notifyCompletion: () => {},
+        ...extra,
+      };
+      return { agent, releaseRun: () => releaseRun() };
+    }
+
+    function managerFor(agent: Record<string, unknown>) {
+      return new TaskManager({
+        buildAgent: async () => agent as any,
+        modelRegistry: {} as any,
+        config: {} as any,
+        maxIterations: 100,
+        taskProfile: "default",
+      });
+    }
+
+    it("steers the running task agent via its steering queue", async () => {
+      const steered: string[] = [];
+      const added: unknown[] = [];
+      const { agent, releaseRun } = makeHangingAgent({
+        steer: (m: string) => steered.push(m),
+        addMessage: (m: unknown) => added.push(m),
+      });
+      const manager = managerFor(agent);
+
+      await manager.spawnTask("task-1", "Do it");
+      expect(manager.sendFollowUp("task-1", "steer me")).toBe(true);
+      expect(steered).toEqual(["steer me"]);
+      // No direct context append -- that could land between an
+      // assistant(tool_calls) message and its tool results.
+      expect(added).toHaveLength(0);
+
+      releaseRun();
+      await settle(() => manager.taskStatus("task-1") === TASK_STATUS.COMPLETED, "completion");
+    });
+
+    it("returns false when the agent cannot be steered (no addMessage back door)", async () => {
+      const added: unknown[] = [];
+      const { agent, releaseRun } = makeHangingAgent({
+        addMessage: (m: unknown) => added.push(m),
+      });
+      const manager = managerFor(agent);
+
+      await manager.spawnTask("task-1", "Do it");
+      expect(manager.sendFollowUp("task-1", "back door")).toBe(false);
+      expect(added).toHaveLength(0);
+
+      releaseRun();
+      await settle(() => manager.taskStatus("task-1") === TASK_STATUS.COMPLETED, "completion");
+    });
+  });
+
   describe("spawnTask", () => {
     it("creates a task handle", async () => {
       const buildAgent = async (_config: Record<string, unknown>) => ({

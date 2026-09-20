@@ -317,14 +317,11 @@ export class TaskManager {
     // the status becomes terminal.
     const agent = task.agent!;
 
-    // followQueue is drained between LLM calls.
-    if (agent.followQueue) {
-      agent.followQueue.push(message);
+    if (typeof agent.steer === "function") {
+      agent.steer(message);
       return true;
     }
-
-    agent.addMessage(new Message({ role: "user", content: message, source: "user" }));
-    return true;
+    return false;
   }
 
   interruptTask(taskId: string): boolean {

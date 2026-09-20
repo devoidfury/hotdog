@@ -310,7 +310,7 @@ Sets a default maximum tool difficulty for all models. Tools with a higher diffi
 - **Default:** `false`
 - **Resolution:** CLI > config > default
 
-Write compaction output to `compaction.out.json` for debugging.
+Write compaction output to `compaction.out.json` in the sessions dir for debugging. Applies to manual `/compact` runs (the `/compact --compact-debug` flag works independently of this setting).
 
 ```json
 { "compactDebug": true }

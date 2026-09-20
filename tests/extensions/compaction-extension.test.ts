@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
 import { AgentCommandRegistry } from "@core/extensions/registries.ts";
 import { MessageLog } from "@core/context/message-log.ts";
@@ -9,6 +9,9 @@ import {
   completion as compactCompletion,
 } from "@extensions/compaction/completions.ts";
 import { ToolRegistry } from "@core/extensions/tool-registry.ts";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import os from "node:os";
+import { join } from "node:path";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -574,26 +577,85 @@ describe("COMMANDS_REGISTER Hook", () => {
     expect((result as any).content).toContain("Not enough messages");
   });
 
-  it("compact command with debug flag includes debug info", async () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 2,
-      reserveTokens: 100,
-    });
-    const ext = createCompactionExtension(core)!;
-    const commandRegistry = await registerCompactCmd(ext);
-    const compactCmd = commandRegistry.get("compact")!;
+});
 
-    // Create agent with large context
-    const context = makeMessages(100, "x".repeat(500));
-    const agent = createMockAgent(context);
+// ── Debug dump (compaction.out.json) ─────────────────────────────────────────
 
+describe("compact debug dump", () => {
+  const TMP = mkdtempSync(join(os.tmpdir(), "hotdog-compact-dbg-"));
+  const DUMP = join(TMP, "compaction.out.json");
+
+  beforeAll(() => {
+    process.env.HOTDOG_SESSIONS_DIR = TMP;
+  });
+  afterAll(() => {
+    delete process.env.HOTDOG_SESSIONS_DIR;
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  function bigAgent() {
+    const agent = createMockAgent(makeMessages(100, "x".repeat(500)));
     agent.modelRegistry = {
-            "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
+    return agent;
+  }
 
-    const result = await (compactCmd!.handler as any)(agent, "compact --compact-debug");
+  async function compactCmdFor(core: any) {
+    const ext = createCompactionExtension(core)!;
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext.hooks as any)![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    return commandRegistry.get("compact")!;
+  }
+
+  it("/compact --compact-debug writes compaction.out.json with settings and counts", async () => {
+    rmSync(DUMP, { force: true });
+    const core = createMockCore({ enabled: true, keepRecentMessages: 2, reserveTokens: 100 });
+    const cmd = await compactCmdFor(core);
+
+    const result = await cmd.handler!(bigAgent(), "compact --compact-debug");
     expect((result as any).content).toContain("Debug mode");
+    expect(existsSync(DUMP)).toBe(true);
+
+    const dump = JSON.parse(readFileSync(DUMP, "utf-8"));
+    expect(dump.mode).toBe("strategy");
+    expect(dump.strategy).toBe("summarize");
+    expect(dump.session_id).toBe("test-session");
+    expect(dump.settings.enabled).toBe(true);
+    expect(dump.messages.before).toBe(100);
+    expect(dump.messages.after).toBeLessThan(100);
+  });
+
+  it("/compact <n> --compact-debug dumps the keep path", async () => {
+    rmSync(DUMP, { force: true });
+    const cmd = await compactCmdFor(createMockCore());
+    const agent = createMockAgent(makeMessages(6));
+
+    await cmd.handler!(agent, "compact 3 --compact-debug");
+    const dump = JSON.parse(readFileSync(DUMP, "utf-8"));
+    expect(dump.mode).toBe("keep");
+    expect(dump.keep_requested).toBe(3);
+    expect(dump.messages.before).toBe(6);
+    expect(dump.messages.after).toBeGreaterThanOrEqual(3);
+  });
+
+  it("compactDebug config enables the dump without the flag", async () => {
+    rmSync(DUMP, { force: true });
+    const core = { ...createMockCore({ enabled: true, keepRecentMessages: 2, reserveTokens: 100 }), resolved: { compactDebug: true } };
+    const cmd = await compactCmdFor(core);
+
+    const result = await cmd.handler!(bigAgent(), "compact");
+    expect((result as any).content).toContain("Debug mode");
+    expect(existsSync(DUMP)).toBe(true);
+  });
+
+  it("no dump file without debug", async () => {
+    rmSync(DUMP, { force: true });
+    const cmd = await compactCmdFor(createMockCore());
+    const agent = createMockAgent(makeMessages(6));
+
+    await cmd.handler!(agent, "compact 2");
+    expect(existsSync(DUMP)).toBe(false);
   });
 });
 

@@ -9,10 +9,13 @@ import { ACTIONS } from "@core/commands.ts";
 import { logger } from "@utils/logger.ts";
 import { LlmError, formatError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
+import { sessionsDir } from "@core/session/session-log.ts";
 import type { Agent } from "@core/agent.ts";
 import { CoreContext, ExtensionInstance, CommandsRegisterPayload, getExtensionConfig } from "@core/extensions/types.ts";
 import { resolveModelConfig, type ModelConfig } from "@core/config/providers.ts";
 import { matcher, completion } from "./completions.ts";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 interface CompactionSettings {
   enabled: boolean;
@@ -238,8 +241,27 @@ export function create(core: CoreContext): ExtensionInstance | null {
     }
   }
 
+  /**
+   * `--compact-debug` / `compactDebug` config: dump settings and message
+   * counts to compaction.out.json. Lives in the sessions dir so
+   * HOTDOG_SESSIONS_DIR keeps test writes out of the user cache. Returns
+   * false when the write failed -- the reply must not claim a file exists.
+   */
+  async function writeCompactionDump(data: Record<string, unknown>): Promise<boolean> {
+    const dir = sessionsDir();
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "compaction.out.json"), JSON.stringify(data, null, 2) + "\n");
+      return true;
+    } catch (err) {
+      logger.warn(`[compaction] debug dump failed: ${formatError(err)}`);
+      return false;
+    }
+  }
+
   async function _handleCompactCommand(agent: Agent, opts: { keep: number | null; debug: boolean }): Promise<Record<string, unknown>> {
     const nonSystemMessages = agent.context.getNonSystem();
+    const debug = opts.debug || core.resolved?.compactDebug === true;
 
     if (nonSystemMessages.length <= 2) {
       return { action: ACTIONS.DISPLAY, content: "Not enough messages to compact." };
@@ -257,7 +279,22 @@ export function create(core: CoreContext): ExtensionInstance | null {
       while (start > 0 && nonSystemMessages[start]!.role === "tool") start--;
       const keptMessages = nonSystemMessages.slice(start);
       agent.replaceContext(ensureUserTurnGuard([...systemMessages, ...keptMessages]));
-      return { action: ACTIONS.DISPLAY, content: `Context compacted to ${keptMessages.length} messages.` };
+      const keepContent = `Context compacted to ${keptMessages.length} messages.`;
+      if (debug) {
+        const written = await writeCompactionDump({
+          ts: new Date().toISOString(),
+          session_id: agent.sessionId ?? null,
+          mode: "keep",
+          keep_requested: opts.keep,
+          strategy: null,
+          settings: { ...settings },
+          messages: { before: nonSystemMessages.length, after: keptMessages.length },
+        });
+        if (written) {
+          return { action: ACTIONS.DISPLAY, content: keepContent + "\n(Debug mode: debug file written.)" };
+        }
+      }
+      return { action: ACTIONS.DISPLAY, content: keepContent };
     }
 
     const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
@@ -272,8 +309,23 @@ export function create(core: CoreContext): ExtensionInstance | null {
     await _performCompaction(agent, strategy);
 
     const resultContent = `Context compacted using '${settings.strategy}' strategy.`;
-    if (opts.debug) {
-      return { action: ACTIONS.DISPLAY, content: resultContent + "\n(Debug mode: debug file written.)" };
+    if (debug) {
+      const written = await writeCompactionDump({
+        ts: new Date().toISOString(),
+        session_id: agent.sessionId ?? null,
+        mode: "strategy",
+        keep_requested: null,
+        strategy: settings.strategy,
+        settings: { ...settings },
+        messages: {
+          before: nonSystemMessages.length,
+          after: agent.context.getNonSystem().length,
+        },
+      });
+      if (written) {
+        return { action: ACTIONS.DISPLAY, content: resultContent + "\n(Debug mode: debug file written.)" };
+      }
+      return { action: ACTIONS.DISPLAY, content: resultContent + "\n(Debug dump failed; see logs.)" };
     }
     return { action: ACTIONS.DISPLAY, content: resultContent };
   }

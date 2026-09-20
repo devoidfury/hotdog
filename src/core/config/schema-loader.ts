@@ -443,7 +443,6 @@ export interface CoreConfig {
   /** Config-file default for max tool difficulty. Overridden by CLI and model config. */
   defaultMaxToolDifficulty?: number | null;
   prompt?: string;
-  exitCommands?: string[];
   taskProfile?: string;
   coreTools?: Record<string, unknown>;
   compaction?: Record<string, unknown>;

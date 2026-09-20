@@ -350,10 +350,6 @@
     "type": "string",
     "layers": [{ "default": "> " }]
   },
-  "exitCommands": {
-    "type": "array",
-    "layers": [{ "default": ["exit", "quit"] }]
-  },
   "taskProfile": {
     "type": "string",
     "layers": [{ "default": "task-default" }]

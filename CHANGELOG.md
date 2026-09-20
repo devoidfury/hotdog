@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **`--json-schema` structured output for one-shot mode.** can be a file path or inline JSON object. Docs: cli-reference.md
+
+- **`/profile` command added** (list + switch). New extension `src/extensions/profile-switch/` adds: `/profile` lists profiles marking current; `/profile <name>` and `/profile:<name>` to switch.
+
+- `exitCommands` unused config key deleted
+
+- **`hotdog info`** added an `Extensions` section: every extension discovered in the scan paths, shows `(disabled)` if `enabled: false` in config (incl. schema defaults like user-gate's off-by-default), `(not loaded)` if enabled but excluded (autoload off, list selection, or `create()` returning null -- e.g. subagents on non-manager profiles).
+
+- security
+  - env scrubber - widen to redact *_PWD and add extra list in config
+  - fetch-tool - widen blocklist for reserved addrs
+  - session-log - validate session id before writing
+  - marker-mangler - escape dashed-prefixed markers without terminator at end of string
+
+- fixes
+  - /compact N - no longer leaves orphaned tool messages, which can cause errors on some backends
+  - mcp-client - handle write/stdin errors without full hotdog crash
+  - avoid orphaning tool messages when interrupted (ctrl+C, or stop button)
+  - fix `--no-log`, was writing log files anyway due to a regression during JS->TS rewrite
+  - fix regression with `--compact-debug` - The flag/config promised `compaction.out.json` but nothing was ever written. `_handleCompactCommand` now dumps `{ts, session_id, mode, keep_requested, strategy, settings, messages:{before,after}}` to `compaction.out.json` in the sessions dir
+  - file-tools **BOM/CRLF fidelity in the write tools.** silent-corruption bug - bun keeps `\uFEFF`/`\r\n` in utf-8 strings, so the edit trimmed-line fallback mixed bare LF into CRLF files and could drop the BOM when the first line was replaced; append/overwrite wrote model LF into CRLF files and overwrite always dropped the BOM. Fix = detect-on-read, re-apply-on-write
+
+- internals
+  - add session teardown hook
+  - steering queue refactor (followQueue->steer)
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.10.0...main
 
 ## [v0.10.0] - 2026-09-19

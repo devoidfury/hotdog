@@ -1,7 +1,8 @@
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
 import { DEFAULT_CONFIG_FILENAME } from "@core/config/defaults.ts";
-import { CliArgv, getDefaultConfig, loadConfig, ProviderDef, resolveConfigDir } from "@core/config/index.ts";
+import { CliArgv, CoreConfigWithExtensions, getDefaultConfig, loadConfig, ProviderDef, resolveConfigDir } from "@core/config/index.ts";
+import { discoverExtensions, isExtensionEnabled } from "@core/extensions/extensions.ts";
 import { ProfileDef, ProfileManager } from "@core/config/profiles.ts";
 import {
   CONFIG_SCHEMA as CONFIG_KEYS,
@@ -97,11 +98,43 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
   // counts; nothing here knows how any single extension computes them).
   const panels = collectInfoPanels(core.extensions);
 
+  const extensionStatus = await getExtensionStatuses(config, core.extensions);
+
   if (cli.wantsJson) {
-    return printInfoJson(resolved, modelRegistry, providers, panels, connectivity, config);
+    return printInfoJson(resolved, modelRegistry, providers, panels, connectivity, config, extensionStatus);
   }
 
-  return printInfoText(resolved, modelRegistry, providers, panels, connectivity, config);
+  return printInfoText(resolved, modelRegistry, providers, panels, connectivity, config, extensionStatus);
+}
+
+interface ExtensionStatus {
+  name: string;
+  loaded: boolean;
+  enabled: boolean;
+}
+
+/**
+ * Per-discovered-extension view for the Extensions section: loaded into this
+ * session, and enabled per config. An enabled-but-not-loaded extension was
+ * excluded by `extensions` list selection or `extensionAutoload: false`.
+ */
+async function getExtensionStatuses(
+  config: Record<string, unknown>,
+  loader: { all(): Iterable<[string, unknown]> } | null | undefined,
+): Promise<ExtensionStatus[]> {
+  const extensionPaths = (config?.extensionPaths as string[]) || ["@extensions"];
+  const serviceOverrides = (config?.services as Record<string, string>) || {};
+  const discovered = await discoverExtensions(extensionPaths, serviceOverrides);
+  const loaded = new Set<string>();
+  for (const [name] of loader?.all() ?? []) loaded.add(name);
+
+  const statuses = discovered.map((ext) => ({
+    name: ext.name,
+    loaded: loaded.has(ext.name),
+    enabled: isExtensionEnabled(ext.name, config as CoreConfigWithExtensions),
+  }));
+  statuses.sort((a, b) => a.name.localeCompare(b.name));
+  return statuses;
 }
 
 function printInfoText(
@@ -111,6 +144,7 @@ function printInfoText(
   panels: ExtensionInfoPanel[],
   connectivity: ConnectivityResult,
   config: Record<string, unknown>,
+  extensionStatus: ExtensionStatus[],
 ): number {
   console.log("=== Agent Harness Info ===");
   console.log();
@@ -127,6 +161,8 @@ function printInfoText(
   if ((resolved.profileDef?.blacklistTools as string[])?.length > 0) {
     console.log(`  Blacklist Tools: ${(resolved.profileDef!.blacklistTools as string[]).join(", ")}`);
   }
+
+  printExtensionsSection(extensionStatus);
 
   if (providers.length > 0) {
     console.log();
@@ -177,6 +213,21 @@ function printInfoText(
     console.log(`  ${resolved.baseUrl} - unreachable: ${connectivity.error}`);
   }
   return 0;
+}
+
+// Extensions section: what the scan found, which instances are live in this
+// session, and which are switched off (`(disabled)` in config) or excluded by
+// `extensionAutoload: false` / `extensions` list selection (`(not loaded)`).
+function printExtensionsSection(status: ExtensionStatus[]): void {
+  if (status.length === 0) return;
+  const loaded = status.filter((s) => s.loaded).length;
+  const disabled = status.filter((s) => !s.enabled).length;
+  console.log();
+  console.log(`Extensions (${loaded} loaded, ${disabled} disabled):`);
+  for (const s of status) {
+    const mark = s.loaded ? "" : !s.enabled ? " (disabled)" : " (not loaded)";
+    console.log(`  ${s.name}${mark}`);
+  }
 }
 
 // Renders extension-contributed status panels. Nothing here knows what any
@@ -236,6 +287,7 @@ function printInfoJson(
   panels: ExtensionInfoPanel[],
   connectivity: ConnectivityResult,
   config: Record<string, unknown>,
+  extensionStatus: ExtensionStatus[],
 ): number {
   const json = {
     config: {
@@ -260,6 +312,7 @@ function printInfoJson(
       return { name, tags: (m.tags as string[]) || [] };
     }),
     extensions: infoPanelsToJson(panels),
+    extension_status: extensionStatus,
     mcp_servers: ((config?.mcpServers as McpServerDef[]) || []).map((s) => ({
       name: s.name,
       enabled: s.enabled !== false,

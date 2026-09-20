@@ -243,6 +243,50 @@ describe("Info CLI - printInfoJson branches", () => {
   });
 });
 
+// ── Extensions section ───────────────────────────────────────────────────────
+
+describe("Info CLI - Extensions section", () => {
+  it("lists discovered extensions with loaded and disabled markers", async () => {
+    const run = await infoCliRunner({
+      coreConfig: { fetchTool: { enabled: false } },
+      extensionInstances: [["compaction", {}]],
+    });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Extensions (");
+    expect(output).toContain("1 disabled");
+    // Loaded instance shows unmarked; disabled-by-config shows marked.
+    expect(output).toMatch(/^ {2}compaction$/m);
+    expect(output).toContain("fetch-tool (disabled)");
+    // Extensions section sits right after Configuration, before Providers.
+    expect(output.indexOf("Extensions (")).toBeLessThan(output.indexOf("Providers:") >= 0 ? output.indexOf("Providers:") : output.length);
+  });
+
+  it("marks enabled-but-not-loaded extensions", async () => {
+    const run = await infoCliRunner({
+      coreConfig: { extensionAutoload: false, extensions: [] },
+    });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toMatch(/^ {2}compaction \(not loaded\)$/m);
+  });
+
+  it("includes extension_status in JSON output", async () => {
+    const run = await infoCliRunner({
+      coreConfig: { fetchTool: { enabled: false } },
+      extensionInstances: [["compaction", {}]],
+    }, { wantsJson: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+
+    const parsed = JSON.parse(output.trim());
+    const fetchTool = parsed.extension_status.find((e: { name: string }) => e.name === "fetch-tool");
+    expect(fetchTool).toEqual({ name: "fetch-tool", loaded: false, enabled: false });
+    const compaction = parsed.extension_status.find((e: { name: string }) => e.name === "compaction");
+    expect(compaction).toEqual({ name: "compaction", loaded: true, enabled: true });
+  });
+});
+
 // ── configDebug ────────────────────────────────────────────────────────────
 
 describe("Info CLI - configDebug", () => {

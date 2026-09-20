@@ -30,8 +30,14 @@ export class McpConnectionHandle {
 
 /** A managed MCP connection with tool discovery. */
 export class McpConnection {
-  static async connectStdio(serverName: string, command: string, args: string[] = [], env: Record<string, string> = {}): Promise<McpConnection> {
-    const client = await McpClient.forStdio(command, args, env);
+  static async connectStdio(
+    serverName: string,
+    command: string,
+    args: string[] = [],
+    env: Record<string, string> = {},
+    extraScrubKeys?: readonly string[],
+  ): Promise<McpConnection> {
+    const client = await McpClient.forStdio(command, args, env, extraScrubKeys);
     const conn = new McpConnection(client, serverName);
     await conn._initialize();
     return conn;

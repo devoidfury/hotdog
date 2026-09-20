@@ -503,6 +503,22 @@ Denylist of sensitive paths rejected by `resolveSafe` (and therefore by all file
 { "workspace": { "paths": ["."], "deny": [".ssh", ".env*", "!.env.example"] } }
 ```
 
+### `envScrub`
+
+Env-var scrubbing for subprocesses spawned on the agent's behalf (bash tool, MCP stdio servers).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `extra` | `string[]` | `[]` | Additional env var **names** to strip from spawned processes, exact match (case-insensitive). Closes the case where an operator-known secret name carries none of the heuristic trigger tokens (see below). |
+
+The built-in filter is a substring denylist (`KEY`, `SECRET`, `TOKE`, `PASS`, `_AUTH`, `_PWD`, ...) — a heuristic that can under-filter. Names it misses (e.g. `ACME_SSO_COOKIE2`) can be listed here:
+
+```json
+{ "envScrub": { "extra": ["ACME_SSO_COOKIE2"] } }
+```
+
+This is a leak heuristic, not a boundary. Caller-supplied env (`mcpServers[].env`) is user-trusted and never scrubbed.
+
 ### `skillsPath` (top-level, backward compatible)
 
 - **Type:** `string`

@@ -11,7 +11,7 @@ import { HOOKS } from "@core/hooks.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { AssistantRetryableError } from "@core/error.ts";
 import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig } from "@core/extensions/types.ts";
-import { copyScrubbedEnv } from "@utils/env.ts";
+import { copyScrubbedEnv, envScrubExtraKeys } from "@utils/env.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";
 
@@ -31,15 +31,17 @@ interface BashToolOptions {
   maxOutputLines: number;
   /** Hard cap on a model-requested timeoutMs (config: bashTool.maxTimeoutMs). */
   maxTimeoutMs?: number;
+  /** Extra env keys to scrub (config: envScrub.extra). */
+  envScrubExtra?: readonly string[];
 }
 
 /**
  * Env for agent-spawned commands. Scrubbed base: the model-reachable child
  * must not carry hotdog's own secrets (see utils/env.ts).
  */
-export function agentSpawnEnv(): Record<string, string> {
+export function agentSpawnEnv(extraScrubKeys?: readonly string[]): Record<string, string> {
   return {
-    ...copyScrubbedEnv(process.env),
+    ...copyScrubbedEnv(process.env, extraScrubKeys),
     // enable agent-friendly test output in bun test, maybe others
     AGENT: "hotdog",
     HOTDOG: "1",
@@ -86,11 +88,13 @@ export class BashTool {
   readonly timeoutMs: number;
   readonly maxOutputLines: number;
   readonly maxTimeoutMs?: number;
+  readonly envScrubExtra?: readonly string[];
 
   constructor(options: BashToolOptions) {
     this.timeoutMs = options.timeoutMs;
     this.maxOutputLines = options.maxOutputLines;
     this.maxTimeoutMs = options.maxTimeoutMs;
+    this.envScrubExtra = options.envScrubExtra;
   }
 
   toToolDef() {
@@ -145,7 +149,7 @@ export class BashTool {
       ...OWN_PROCESS_GROUP,
       // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
       stdio: ["ignore", "pipe", "pipe"],
-      env: agentSpawnEnv(),
+      env: agentSpawnEnv(this.envScrubExtra),
     });
 
     return new Promise((resolve, reject) => {
@@ -283,11 +287,12 @@ export function create(core: CoreContext): ExtensionInstance {
   const timeoutMs = config.bashTimeoutMs;
   const maxOutputLines = config.maxToolOutputLines;
   const maxTimeoutMs = config.maxTimeoutMs;
+  const envScrubExtra = envScrubExtraKeys(core.config);
 
   return {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        const tool = new BashTool({ timeoutMs, maxOutputLines, maxTimeoutMs });
+        const tool = new BashTool({ timeoutMs, maxOutputLines, maxTimeoutMs, envScrubExtra });
         registry.register(BashTool.TOOL_NAME, tool);
       },
     },

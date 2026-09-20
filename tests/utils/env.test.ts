@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { isSensitiveEnvVar, copyScrubbedEnv } from "@utils/env.ts";
+import { isSensitiveEnvVar, copyScrubbedEnv, envScrubExtraKeys } from "@utils/env.ts";
 
 describe("isSensitiveEnvVar", () => {
   it("flags keys containing sensitive substrings", () => {
@@ -12,6 +12,8 @@ describe("isSensitiveEnvVar", () => {
     expect(isSensitiveEnvVar("API_URL")).toBe(true);
     expect(isSensitiveEnvVar("MODEL_SEED")).toBe(true);
     expect(isSensitiveEnvVar("SOME_HASH")).toBe(true);
+    expect(isSensitiveEnvVar("MYSQL_PWD")).toBe(true);
+    expect(isSensitiveEnvVar("ORACLE_PWD")).toBe(true);
   });
 
   it("is case-insensitive", () => {
@@ -25,6 +27,9 @@ describe("isSensitiveEnvVar", () => {
     expect(isSensitiveEnvVar("HOME")).toBe(false);
     expect(isSensitiveEnvVar("LANG")).toBe(false);
     expect(isSensitiveEnvVar("TERM")).toBe(false);
+    // The _PWD pattern requires the underscore: cwd vars must survive.
+    expect(isSensitiveEnvVar("PWD")).toBe(false);
+    expect(isSensitiveEnvVar("OLDPWD")).toBe(false);
   });
 });
 
@@ -51,5 +56,41 @@ describe("copyScrubbedEnv", () => {
 
   it("returns an empty object for an empty source", () => {
     expect(copyScrubbedEnv({})).toEqual({});
+  });
+
+  it("drops extra operator-configured keys (case-insensitive exact match)", () => {
+    const source = {
+      PATH: "/usr/bin",
+      ACME_SSO_COOKIE2: "s", // no trigger token in the name
+      acme_widget_fh: "s",
+      UNRELATED: "keep",
+    };
+    // Premise: without extra, the heuristic misses both.
+    expect(copyScrubbedEnv(source)).toEqual(source);
+    expect(copyScrubbedEnv(source, ["acme_sso_cookie2", "ACME_WIDGET_FH"])).toEqual({
+      PATH: "/usr/bin",
+      UNRELATED: "keep",
+    });
+  });
+
+  it("extra keys of undefined or empty behave like no extra", () => {
+    const source = { PATH: "/usr/bin" };
+    expect(copyScrubbedEnv(source, undefined)).toEqual({ PATH: "/usr/bin" });
+    expect(copyScrubbedEnv(source, [])).toEqual({ PATH: "/usr/bin" });
+  });
+});
+
+describe("envScrubExtraKeys", () => {
+  it("reads envScrub.extra from config", () => {
+    expect(envScrubExtraKeys({ envScrub: { extra: ["A", "B"] } })).toEqual(["A", "B"]);
+  });
+
+  it("tolerates missing or malformed config", () => {
+    expect(envScrubExtraKeys(undefined)).toEqual([]);
+    expect(envScrubExtraKeys(null)).toEqual([]);
+    expect(envScrubExtraKeys({})).toEqual([]);
+    expect(envScrubExtraKeys({ envScrub: {} })).toEqual([]);
+    expect(envScrubExtraKeys({ envScrub: { extra: "A" } })).toEqual([]);
+    expect(envScrubExtraKeys({ envScrub: { extra: ["A", 7] } })).toEqual(["A"]);
   });
 });

@@ -6,6 +6,8 @@ import fs from "node:fs";
 import os from "node:os";
 import {
   normalizeConfigKeys,
+  interpolateEnvVars,
+  loadConfig,
   buildAgentConfig,
   buildConfig,
 } from "@core/config/index.ts";
@@ -46,6 +48,21 @@ describe("normalizeConfigKeys", () => {
     expect(normalizeConfigKeys(true)).toBe(true);
     expect(normalizeConfigKeys(null)).toBeNull();
     expect(normalizeConfigKeys(undefined)).toBeUndefined();
+  });
+
+  it("leaves env-object property names untouched (env var names must not be mangled)", () => {
+    const result = normalizeConfigKeys({
+      bash_tool: { bash_timeout_ms: 100, env: { http_proxy: "http://p", aws_secret_key: "s" } },
+      mcp_servers: [{ name: "s", env: { some_token: "t", "MY-FLAG": "f" } }],
+    }) as Record<string, unknown>;
+
+    expect((result.bashTool as Record<string, unknown>).bashTimeoutMs).toBe(100);
+    const bashEnv = (result.bashTool as Record<string, unknown>).env as Record<string, unknown>;
+    expect(bashEnv.http_proxy).toBe("http://p");
+    expect(bashEnv.aws_secret_key).toBe("s");
+    const mcpEnv = ((result.mcpServers as Record<string, unknown>[])[0]!.env) as Record<string, unknown>;
+    expect(mcpEnv.some_token).toBe("t");
+    expect(mcpEnv["MY-FLAG"]).toBe("f");
   });
 
   it("handles empty object and arrays", () => {

@@ -80,6 +80,14 @@ export function normalizeConfigKeys(obj: unknown): unknown {
 
   const normalized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    // `env` objects (mcpServers[].env, bashTool.env) map environment variable
+    // NAMES to values; camelCasing their properties would rename the
+    // variables themselves (http_proxy -> httpProxy), so they pass through
+    // verbatim.
+    if (key === "env" && typeof value === "object" && value !== null) {
+      normalized[key] = value;
+      continue;
+    }
     normalized[camelCase(key)] = normalizeConfigKeys(value);
   }
   return normalized;
@@ -104,6 +112,45 @@ export function getDefaultConfig(
   };
 
   return castAs<DefaultConfig>(mergeExtensionConfigDefaults(baseConfig, extParams));
+}
+
+// A config value that is EXACTLY "$VAR" or "${VAR}" resolves from the
+// environment at load. Whole-string only: embedded interpolation would
+// collide with legitimate `$` in prompts, display formats, and prices,
+// and there is deliberately no escape syntax.
+const ENV_REF_REGEX = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/;
+
+/**
+ * Replace whole-string `$VAR` / `${VAR}` config values with environment
+ * values (recursing through objects and arrays). An unset variable is a
+ * ConfigError, not a silent literal -- a typo'd key reference must not be
+ * sent to a provider as the API key.
+ */
+export function interpolateEnvVars(
+  value: unknown,
+  env: Record<string, string | undefined> = process.env,
+): unknown {
+  if (typeof value === "string") {
+    const match = ENV_REF_REGEX.exec(value);
+    if (!match) return value;
+    const name = match[1] ?? match[2]!;
+    const resolved = env[name];
+    if (resolved === undefined) {
+      throw new ConfigError(
+        `Config value "${value}" references unset environment variable "${name}"`,
+      );
+    }
+    return resolved;
+  }
+  if (Array.isArray(value)) return value.map((item) => interpolateEnvVars(item, env));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = interpolateEnvVars(item, env);
+    }
+    return out;
+  }
+  return value;
 }
 
 export async function loadConfig(
@@ -142,7 +189,7 @@ export async function loadConfig(
     const raw = JSON.parse(content);
     return deepMerge(
       getDefaultConfig(extParams),
-      normalizeConfigKeys(raw) as object,
+      normalizeConfigKeys(interpolateEnvVars(raw)) as object,
     ) as DefaultConfig;
   } catch (e) {
     if (e instanceof ConfigError) throw e;

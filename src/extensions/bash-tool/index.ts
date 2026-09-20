@@ -33,13 +33,20 @@ interface BashToolOptions {
   maxTimeoutMs?: number;
   /** Extra env keys to scrub (config: envScrub.extra). */
   envScrubExtra?: readonly string[];
+  /** Extra environment variables for spawned shells (config: bashTool.env). */
+  env?: Record<string, string>;
 }
 
 /**
  * Env for agent-spawned commands. Scrubbed base: the model-reachable child
- * must not carry hotdog's own secrets (see utils/env.ts).
+ * must not carry hotdog's own secrets (see utils/env.ts). `extraVars` are the
+ * user's bashTool.env config vars, merged last over the agent defaults (same
+ * trust model as mcpServers[].env: user config is trusted).
  */
-export function agentSpawnEnv(extraScrubKeys?: readonly string[]): Record<string, string> {
+export function agentSpawnEnv(
+  extraScrubKeys?: readonly string[],
+  extraVars?: Record<string, string>,
+): Record<string, string> {
   return {
     ...copyScrubbedEnv(process.env, extraScrubKeys),
     // enable agent-friendly test output in bun test, maybe others
@@ -59,6 +66,7 @@ export function agentSpawnEnv(extraScrubKeys?: readonly string[]): Record<string
     // this is only here because it changes some behavior in programs like bun test to be more desirable.
     // https://bun.com/docs/test#ai-agent-integration
     CLAUDECODE: "1",
+    ...(extraVars ?? {}),
   } as Record<string, string>;
 }
 
@@ -89,12 +97,20 @@ export class BashTool {
   readonly maxOutputLines: number;
   readonly maxTimeoutMs?: number;
   readonly envScrubExtra?: readonly string[];
+  readonly env?: Record<string, string>;
 
   constructor(options: BashToolOptions) {
     this.timeoutMs = options.timeoutMs;
     this.maxOutputLines = options.maxOutputLines;
     this.maxTimeoutMs = options.maxTimeoutMs;
     this.envScrubExtra = options.envScrubExtra;
+    // Only string values make it into the shell (the schema says string;
+    // anything else is a config typo, not a variable).
+    const env: Record<string, string> = {};
+    for (const [name, value] of Object.entries(options.env ?? {})) {
+      if (typeof value === "string") env[name] = value;
+    }
+    this.env = env;
   }
 
   toToolDef() {
@@ -149,7 +165,7 @@ export class BashTool {
       ...OWN_PROCESS_GROUP,
       // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
       stdio: ["ignore", "pipe", "pipe"],
-      env: agentSpawnEnv(this.envScrubExtra),
+      env: agentSpawnEnv(this.envScrubExtra, this.env),
     });
 
     return new Promise((resolve, reject) => {
@@ -283,6 +299,7 @@ export function create(core: CoreContext): ExtensionInstance {
     bashTimeoutMs: number;
     maxToolOutputLines: number;
     maxTimeoutMs?: number;
+    env?: Record<string, unknown>;
   }>(core, "bashTool");
   const timeoutMs = config.bashTimeoutMs;
   const maxOutputLines = config.maxToolOutputLines;
@@ -292,7 +309,13 @@ export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        const tool = new BashTool({ timeoutMs, maxOutputLines, maxTimeoutMs, envScrubExtra });
+        const tool = new BashTool({
+          timeoutMs,
+          maxOutputLines,
+          maxTimeoutMs,
+          envScrubExtra,
+          env: config.env as Record<string, string> | undefined,
+        });
         registry.register(BashTool.TOOL_NAME, tool);
       },
     },

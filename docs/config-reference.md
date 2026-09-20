@@ -897,9 +897,10 @@ Extensions register their own configuration namespaces. Each extension's config 
 | `bashTimeoutMs` | `number` | `60000` | Timeout for bash commands (ms). |
 | `maxTimeoutMs` | `number` | `600000` | Hard cap on a model-requested `timeoutMs` (ms). Model-supplied timeouts above this are clamped; invalid values fall back to `bashTimeoutMs`. |
 | `maxToolOutputLines` | `number` | `600` | Max output lines for tool results. When a command's output is cut, the result element carries `truncated="true"` so the model sees the cut in the header instead of only in the marker after the kept lines. |
+| `env` | `object` | `{}` | Extra environment variables for commands the model runs. Variable names are preserved verbatim (not camel-cased); values must be strings. Merged over the scrubbed base env and the agent's own defaults, so they can override e.g. `CI`. |
 
 ```json
-{ "bashTool": { "bashTimeoutMs": 30000 } }
+{ "bashTool": { "bashTimeoutMs": 30000, "env": { "http_proxy": "http://proxy:3128" } } }
 ```
 
 Bash commands run with the user's own permissions -- nothing mediates a running command. Consequences: `workspace.deny` binds nothing under bash (`cat .env` succeeds; it binds only the **file tools** -- `read`/`grep`/`explore`), and no external isolation exists at the spawn boundary. For real isolation run hotdog itself in a container or VM (see `examples/`).

@@ -26,6 +26,13 @@
           "type": "number",
           "default": 600,
           "description": "Maximum number of output lines for tool results"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Extra environment variables for commands the model runs (variable names are preserved verbatim)"
         }
       },
       "additionalProperties": false,

@@ -68,7 +68,8 @@ export class ToolExecutor {
       availableToolNames ?? (await this.#deps.agent.getToolDefs()).map((d) => d.function.name),
     );
 
-    for (const tc of toolCalls) {
+    for (let i = 0; i < toolCalls.length; i++) {
+      const tc = toolCalls[i]!;
       let result: ToolResult;
       try {
         result = await this.executeSingle(tc, available);
@@ -83,6 +84,20 @@ export class ToolExecutor {
       toolResults.push(result);
 
       if (result.stopLoop) {
+        // The assistant message already carries all N tool_calls, so every
+        // remaining call must still be answered: a stranded call 400s the next
+        // request on strict backends -- the same hole the truncation path in
+        // agent.ts closes by synthesizing results for the skipped calls.
+        for (const skipped of toolCalls.slice(i + 1)) {
+          toolResults.push(
+            await this.#writeToolResult(
+              skipped.function?.name || "(unknown)",
+              skipped.function?.arguments || "{}",
+              "[skipped: loop stop requested]",
+              skipped.id || "",
+            ),
+          );
+        }
         return { outcome: "return", toolResults };
       }
     }

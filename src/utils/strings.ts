@@ -66,7 +66,11 @@ export function suggestCandidates(
   const keys = candidates.map((c) => [c, normalize(c)] as const);
 
   let matches = keys.filter(([, k]) => k === t);
-  if (matches.length === 0) {
+  // The substring tier needs >2 chars on BOTH sides: a 1-2 char target ("o")
+  // is a substring of nearly every name, so without the target guard tier 2
+  // returns `limit` near-arbitrary candidates. Tiny targets fall through to
+  // the one-edit tier, which still catches e.g. "ca" -> "cat".
+  if (matches.length === 0 && t.length > 2) {
     matches = keys.filter(([, k]) => k.length > 2 && (k.includes(t) || t.includes(k)));
   }
   if (matches.length === 0) {

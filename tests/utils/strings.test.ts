@@ -74,6 +74,14 @@ describe("suggestCandidates", () => {
       .toEqual(["info"]);
   });
 
+  it("skips the substring tier for tiny targets", () => {
+    // A 1-char typo must not yield near-arbitrary candidates ("o" is a
+    // substring of almost every flag name).
+    expect(suggestCandidates("o", ["config", "model", "loud", "json"], { normalize: norm })).toEqual([]);
+    // Such targets still get one-edit matches ("ca" is one deletion from "cat").
+    expect(suggestCandidates("ca", ["cat", "config"], { normalize: norm })).toEqual(["cat"]);
+  });
+
   it("prefers the substring tier when both tiers could match", () => {
     // "profil" is a substring of both AND one edit from "profile"; substring wins by tier.
     const out = suggestCandidates("profil", ["profile", "profiles", "prompt"], { normalize: norm });

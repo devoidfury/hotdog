@@ -396,6 +396,40 @@ describe('ToolExecutor', () => {
       expect(result.toolResults[0]?.stopLoop).toBe(true);
     });
 
+    it('answers every remaining call with a synthesized result when a tool stops the loop mid-batch', async () => {
+      // Invariant: every tool_call gets exactly one result. The assistant
+      // message (with all N calls) is already in context when execute()
+      // starts, so a mid-batch stop must still answer the rest or the next
+      // request 400s on strict backends (same reason the
+      // maxToolCallsPerIteration truncation synthesizes results).
+      const { ToolResult } = await import('../../src/core/extensions/tool-utils.ts');
+      const deps = createMockDeps();
+      let afterStopExecuted = false;
+      deps.toolRegistry.register('stopper', makeTestTool('stopper', async () => ToolResult.stop('halting')));
+      deps.toolRegistry.register('after', makeTestTool('after', async () => {
+        afterStopExecuted = true;
+        return 'nope';
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([
+        { id: 'call-1', type: 'function', function: { name: 'stopper', arguments: '{}' } },
+        { id: 'call-2', type: 'function', function: { name: 'after', arguments: '{}' } },
+        { id: 'call-3', type: 'function', function: { name: 'after', arguments: '{}' } },
+      ]);
+
+      expect(result.outcome).toBe('return');
+      expect(afterStopExecuted).toBe(false);
+      expect(result.toolResults).toHaveLength(3);
+      expect(result.toolResults[1]!.toolCallId).toBe('call-2');
+      expect(toolContentText(result.toolResults[1]!.content)).toContain('skipped');
+      expect(result.toolResults[2]!.toolCallId).toBe('call-3');
+      // Only the actual stopping tool carries stopLoop.
+      expect(result.toolResults.map((r) => r.stopLoop === true)).toEqual([true, false, false]);
+      // Each synthesized result is recorded as a tool message like any other.
+      expect(deps.addedMessages.map((m) => m.toolCallId)).toEqual(['call-1', 'call-2', 'call-3']);
+    });
+
     it('should continue when tool returns ToolResult.ok()', async () => {
       const { ToolResult } = await import('../../src/core/extensions/tool-utils.ts');
       const deps = createMockDeps();

@@ -247,7 +247,15 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
     if (opts.keep !== null) {
       const systemMessages = agent.context.getSystem();
-      const keptMessages = nonSystemMessages.slice(-opts.keep);
+      // keep=0 keeps everything, as the old slice(-0) did (pinned behavior).
+      const requested = opts.keep === 0 ? nonSystemMessages.length : opts.keep;
+      // Back the boundary up over tool results so the kept window never
+      // starts on a tool message whose parent assistant tool_calls was
+      // dropped -- strict OpenAI-compatible backends reject that. Same rule
+      // findFirstKeptIndex enforces for the strategies.
+      let start = Math.max(0, nonSystemMessages.length - requested);
+      while (start > 0 && nonSystemMessages[start]!.role === "tool") start--;
+      const keptMessages = nonSystemMessages.slice(start);
       agent.replaceContext(ensureUserTurnGuard([...systemMessages, ...keptMessages]));
       return { action: ACTIONS.DISPLAY, content: `Context compacted to ${keptMessages.length} messages.` };
     }

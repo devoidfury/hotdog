@@ -536,6 +536,33 @@ describe("COMMANDS_REGISTER Hook", () => {
     expect(agent.log.length).toBe(6); // 5 kept + user turn guard
   });
 
+  it("compact <keep> backs the boundary up off an orphaned tool message", async () => {
+    // After an ordinary completion turn the tail is [tool, assistant(final)]:
+    // a naive slice(-2) would keep a tool result whose parent
+    // assistant(tool_calls) was dropped -- a guaranteed 400 on strict
+    // backends. The boundary must back up over tool results (as
+    // findFirstKeptIndex and the strategy paths do).
+    const ext = createCompactionExtension(createMockCore())!;
+    const commandRegistry = await registerCompactCmd(ext);
+    const compactCmd = commandRegistry.get("compact")!;
+
+    const context = [
+      new Message({ role: "user", content: "go" }),
+      new Message({ role: "assistant", content: null, toolCalls: [{ id: 't1', type: 'function', function: { name: 'bash', arguments: '{}' } }] }),
+      new Message({ role: "tool", content: "result 1", toolCallId: "t1" }),
+      new Message({ role: "assistant", content: "done" }),
+    ];
+    const agent = createMockAgent(context);
+
+    await (compactCmd.handler as any)(agent, "compact 2");
+
+    const kept = agent.log.getAll();
+    // The first kept non-system message must not be a tool result.
+    const firstKept = kept.find((m: any) => m.role !== "system")!;
+    expect(firstKept.role).toBe("assistant");
+    expect(firstKept.toolCalls).toBeDefined();
+  });
+
   it("compact returns a message when there are too few messages", async () => {
     const ext = createCompactionExtension(createMockCore())!;
     const commandRegistry = await registerCompactCmd(ext);

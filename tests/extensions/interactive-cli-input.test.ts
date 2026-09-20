@@ -79,6 +79,25 @@ describe("AsyncInteractiveCliInput", () => {
     expect(answers.color).toBe("green");
   });
 
+  it("strict options reject an out-of-range number", async () => {
+    const { rl } = createMockRl(["9", "1"]); // "9" is neither an index nor an option
+    const answers = await new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h))
+      .collectAnswers([{ key: "color", prompt: "Pick a color", options: ["red", "green"], allowOther: false }]);
+    expect(answers.color).toBe("red");
+  });
+
+  it("strict options still resolve a valid index and option text", async () => {
+    const { rl: rl1 } = createMockRl(["2"]);
+    const a1 = await new AsyncInteractiveCliInput(rl1, lineHandler, (h) => rl1.on("line", h))
+      .collectAnswers([{ key: "c", prompt: "Pick", options: ["red", "green"], allowOther: false }]);
+    expect(a1.c).toBe("green");
+
+    const { rl: rl2 } = createMockRl(["red"]);
+    const a2 = await new AsyncInteractiveCliInput(rl2, lineHandler, (h) => rl2.on("line", h))
+      .collectAnswers([{ key: "c", prompt: "Pick", options: ["red", "green"], allowOther: false }]);
+    expect(a2.c).toBe("red");
+  });
+
   it("requires answer when required is true", async () => {
     const { rl } = createMockRl(["", "Alice"]); // first empty rejected, second valid
     const answers = await new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h))

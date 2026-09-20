@@ -2,6 +2,7 @@ import pkg from "@package.json" with { type: "json" };
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { CliOutputSink } from "@utils/cli/cli.ts";
+import { resolveQuestionAnswer } from "@utils/question-answer.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
 import { HOOKS } from "@core/hooks.ts";
@@ -250,8 +251,6 @@ export class AsyncInteractiveCliInput implements InputInterface {
         const promptText = q.prompt || "";
         const options = q.options || [];
         const defaultValue = q.default ?? "";
-        const required = q.required !== false;
-        const allowOther = q.allowOther !== false;
 
         // prompt, options and default are model-supplied. spoofSafe is idempotent, so double neutralization upstream is harmless.
         process.stdout.write(`\n  ? ${spoofSafe(promptText)}\n`);
@@ -295,31 +294,29 @@ export class AsyncInteractiveCliInput implements InputInterface {
 
           const trimmed = this.#normalize(line).trim();
 
-          if (trimmed === "") {
-            answer = defaultValue;
-          } else if (options.length > 0) {
+          // The CLI renders options as a numbered menu, so index ("2") and
+          // exact option-text input become a selection; anything else stays
+          // free text for the shared resolver to judge.
+          let text = trimmed;
+          let selectedOption: string | null = null;
+          if (trimmed !== "" && options.length > 0) {
             const idx = parseInt(trimmed, 10);
             if (!isNaN(idx) && idx >= 1 && idx <= options.length) {
-              answer = options[idx - 1] ?? "";
+              selectedOption = options[idx - 1] ?? "";
+              text = "";
             } else if (options.includes(trimmed)) {
-              answer = trimmed;
-            } else if (allowOther) {
-              answer = trimmed;
-            } else {
-              process.stderr.write(
-                `  Invalid option. Please enter a number 1-${options.length} or one of: ${spoofSafe(JSON.stringify(options))}\n`,
-              );
-              continue;
+              selectedOption = trimmed;
+              text = "";
             }
-          } else {
-            answer = trimmed;
           }
 
-          if (required && answer === "") {
-            process.stderr.write("  This question is required. Please enter a value.\n");
+          const resolvedAnswer = resolveQuestionAnswer(q, { text, selectedOption });
+          if (resolvedAnswer.error) {
+            process.stderr.write(`  ${spoofSafe(resolvedAnswer.error)}\n`);
             continue;
           }
 
+          answer = resolvedAnswer.value;
           valid = true;
         }
 

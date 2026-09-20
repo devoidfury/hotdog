@@ -46,6 +46,14 @@ The config file is standard JSON. Keys may be written in either **snake_case** o
 
 All three forms above are equivalent.
 
+**Environment interpolation.** A string value that is *exactly* `$VAR` or `${VAR}` is replaced with that environment variable's value at load. This is how keys get into config without a wrapper script:
+
+```json
+{ "api_key": "$MY_API_TOKEN" }
+```
+
+Rules: whole-string only (`"http://$HOST"` and `"cost $5"` are left alone); an unset variable is a hard config error at startup, not a silent literal. No escape syntax -- there is no way to write a literal value that is exactly `$SOMETHING`. `env` objects (`bashTool.env`, `mcpServers[].env`) are exempt from key normalization and keep variable names verbatim (`http_proxy`, not `httpProxy`).
+
 ---
 
 ## Resolution Layers

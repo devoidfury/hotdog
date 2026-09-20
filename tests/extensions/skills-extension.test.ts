@@ -830,6 +830,114 @@ Content.
     expect(matches("skillful")).toBe(false);
   });
 
+  it("getCombinedToolPatterns includes allowed-tools", async () => {
+    await createTempSkill("allowed-tools-skill", `---
+name: Allowed Tools Skill
+description: Allowed tools pattern test
+allowed-tools: ["bash", "Grep"]
+---
+
+Content.
+`);
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    expect(ext.getCombinedToolPatterns().size).toBe(0);
+
+    ext.loader.activateSkill("Allowed Tools Skill");
+    const patterns = ext.getCombinedToolPatterns();
+    expect(patterns.has("bash")).toBe(true);
+    expect(patterns.has("grep")).toBe(true);
+    expect(ext.isToolAllowed("bash")).toBe(true);
+    expect(ext.isToolAllowed("grep")).toBe(true);
+    expect(ext.isToolAllowed("read")).toBe(false);
+  });
+
+  it("skill command injects skill content as a harness message mid-conversation", async () => {
+    await createTempSkill("inject-skill", `---
+name: Inject Skill
+description: For injection
+---
+
+Inject body text.
+`);
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    const registry: any = {
+      register: mock((_name: string, opts: any) => { registry.registeredCmd = opts; }),
+      registeredCmd: null,
+    };
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]({ registry, agent: {} });
+
+    const added: any[] = [];
+    const agent = {
+      context: { getMessages: () => [{ role: "user", content: "earlier turn" }] },
+      addMessage: (m: any) => added.push(m),
+    };
+
+    const result = await registry.registeredCmd.handler(agent, "skill:Inject Skill");
+    expect(result.content).toContain("activated");
+
+    expect(added).toHaveLength(1);
+    expect(added[0].role).toBe("harness");
+    expect(added[0].source).toBe("harness");
+    expect(added[0].content).toContain("Inject body text");
+  });
+
+  it("skill command skips injection when the conversation has no turns", async () => {
+    await createTempSkill("quiet-skill", `---
+name: Quiet Skill
+description: No turns
+---
+
+Quiet body.
+`);
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    const registry: any = {
+      register: mock((_name: string, opts: any) => { registry.registeredCmd = opts; }),
+      registeredCmd: null,
+    };
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]({ registry, agent: {} });
+
+    const added: any[] = [];
+    const agent = {
+      context: { getMessages: () => [{ role: "system", content: "prompt" }] },
+      addMessage: (m: any) => added.push(m),
+    };
+
+    const result = await registry.registeredCmd.handler(agent, "skill:Quiet Skill");
+    expect(result.content).toContain("activated");
+    expect(added).toHaveLength(0);
+    expect(ext.loader.getSkill("Quiet Skill")!.loaded).toBe(true);
+  });
+
+  it("skill command with unknown name injects nothing but still responds", async () => {
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    const registry: any = {
+      register: mock((_name: string, opts: any) => { registry.registeredCmd = opts; }),
+      registeredCmd: null,
+    };
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]({ registry, agent: {} });
+
+    const added: any[] = [];
+    const agent = {
+      context: { getMessages: () => [{ role: "user", content: "hi" }] },
+      addMessage: (m: any) => added.push(m),
+    };
+
+    const result = await registry.registeredCmd.handler(agent, "skill:Nope");
+    expect(result.action).toBe(ACTIONS.DISPLAY);
+    expect(added).toHaveLength(0);
+  });
+
   it("SYSTEM_PROMPT_BUILD hook returns preamble with visible skills", async () => {
     await createTempSkill("preamble-skill", `---
 name: Preamble Skill

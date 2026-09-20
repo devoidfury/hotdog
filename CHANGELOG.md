@@ -10,6 +10,8 @@
 
 - **`hotdog info`** added an `Extensions` section: every extension discovered in the scan paths, shows `(disabled)` if `enabled: false` in config (incl. schema defaults like user-gate's off-by-default), `(not loaded)` if enabled but excluded (autoload off, list selection, or `create()` returning null -- e.g. subagents on non-manager profiles).
 
+- **`$VAR` interpolation in config files.** a string that is *exactly* `$VAR` or `${VAR}` resolves from `process.env`. Whole-string only -- `"http://$HOST"` / `"cost $5"` untouched.
+
 - security
   - env scrubber - widen to redact *_PWD and add extra list in config
   - fetch-tool - widen blocklist for reserved addrs

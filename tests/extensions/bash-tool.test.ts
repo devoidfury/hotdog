@@ -36,6 +36,42 @@ describe('BashTool', () => {
     expect(resultStr(result)).toContain('hello');
   });
 
+  it('adds config-supplied env vars to the spawned shell', async () => {
+    const tool = new BashTool({
+      timeoutMs: 30000,
+      maxOutputLines: 100,
+      env: { HOTDOG_TEST_EXTRA_VAR: "extra-value" },
+    });
+    const result = await tool.execute(
+      JSON.stringify({ command: 'echo "$HOTDOG_TEST_EXTRA_VAR"' }),
+      {} as any,
+    );
+    expect(resultStr(result).trim()).toBe("extra-value");
+  });
+
+  it('config env vars override agent-set defaults', async () => {
+    const tool = new BashTool({
+      timeoutMs: 30000,
+      maxOutputLines: 100,
+      env: { CI: "false" },
+    });
+    const result = await tool.execute(JSON.stringify({ command: 'echo "$CI"' }), {} as any);
+    expect(resultStr(result).trim()).toBe("false");
+  });
+
+  it('ignores non-string env values', async () => {
+    const tool = new BashTool({
+      timeoutMs: 30000,
+      maxOutputLines: 100,
+      env: { HOTDOG_TEST_BAD_VAR: 42 as unknown as string, HOTDOG_TEST_OK_VAR: "ok" },
+    });
+    const result = await tool.execute(
+      JSON.stringify({ command: 'echo "${HOTDOG_TEST_BAD_VAR:-MISSING} $HOTDOG_TEST_OK_VAR"' }),
+      {} as any,
+    );
+    expect(resultStr(result).trim()).toBe("MISSING ok");
+  });
+
   it('runs from the primary workspace root, not the process CWD', async () => {
     // Regression: spawn inherited the process CWD, so with workspace.paths
     // pointing elsewhere commands executed outside every declared root

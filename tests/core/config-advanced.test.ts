@@ -14,6 +14,73 @@ import {
 import type { CoreConfigWithExtensions } from "@core/config/schema-loader.ts";
 import { ConfigError } from "@core/error.ts";
 
+// ── interpolateEnvVars ($VAR in config files) ───────────────────────────────
+
+describe("interpolateEnvVars", () => {
+  it("resolves whole-string $VAR and ${VAR} from the env", () => {
+    const env = { MY_TOKEN: "sekret" };
+    const result = interpolateEnvVars(
+      {
+        apiKey: "$MY_TOKEN",
+        url: "${MY_TOKEN}",
+        partial: "http://x/$MY_TOKEN",
+        literal: "cost $5",
+        notVar: "$9LIVES",
+        nested: { deep: ["$MY_TOKEN", 42, null] },
+      },
+      env,
+    ) as Record<string, unknown>;
+    expect(result.apiKey).toBe("sekret");
+    expect(result.url).toBe("sekret");
+    expect(result.partial).toBe("http://x/$MY_TOKEN");
+    expect(result.literal).toBe("cost $5");
+    expect(result.notVar).toBe("$9LIVES");
+    const nested = result.nested as Record<string, unknown>;
+    expect((nested.deep as unknown[])[0]).toBe("sekret");
+    expect((nested.deep as unknown[])[1]).toBe(42);
+    expect((nested.deep as unknown[])[2]).toBeNull();
+  });
+
+  it("throws ConfigError naming an unset variable", () => {
+    expect(() => interpolateEnvVars({ apiKey: "$NOPE_MISSING" }, {})).toThrow(ConfigError);
+    expect(() => interpolateEnvVars({ apiKey: "${NOPE_MISSING}" }, {})).toThrow(/NOPE_MISSING/);
+  });
+
+  it("loadConfig interpolates config-file values from process.env", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-envvar-cfg-"));
+    try {
+      fs.writeFileSync(
+        path.join(dir, "defaults.json"),
+        JSON.stringify({ api_key: "$HOTDOG_TEST_INTERP", default_model: "m-$HOTDOG_TEST_INTERP" }),
+      );
+      process.env.HOTDOG_TEST_INTERP = "from-env";
+      try {
+        const cfg = await loadConfig(path.join(dir, "defaults.json"));
+        expect(cfg.apiKey).toBe("from-env");
+        // Not a whole-string reference -- left alone.
+        expect(cfg.model).toBeUndefined();
+      } finally {
+        delete process.env.HOTDOG_TEST_INTERP;
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loadConfig fails loudly on an unset variable", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-envvar-missing-"));
+    try {
+      fs.writeFileSync(
+        path.join(dir, "defaults.json"),
+        JSON.stringify({ api_key: "$HOTDOG_TEST_UNSET_VAR" }),
+      );
+      await expect(loadConfig(path.join(dir, "defaults.json"))).rejects.toThrow(/HOTDOG_TEST_UNSET_VAR/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("normalizeConfigKeys", () => {
   it("converts snake_case keys to camelCase", () => {
     const result = normalizeConfigKeys({

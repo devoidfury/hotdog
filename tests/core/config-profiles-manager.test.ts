@@ -170,4 +170,47 @@ describe("ProfileManager", () => {
       expect(forAgent["worker"]!.blacklistTools).toEqual([]);
     });
   });
+
+  describe("getProfilesForSwitch / getProfilesForUser", () => {
+    it("covers the union of file and config profiles, not just visible workers", async () => {
+      writeProfile("worker", "visible-worker: true", "worker body");
+      writeProfile("hidden", "description: not visible", "hidden body");
+
+      const manager = await ProfileManager.create(tmpDir, {
+        cfgonly: cfgProfile({ model: "cfg-model", blacklistTools: ["bash"] }),
+      });
+
+      const forSwitch = manager.getProfilesForSwitch();
+      expect(Object.keys(forSwitch)).toEqual(["cfgonly", "hidden", "worker"]);
+      expect(forSwitch["hidden"]!.body).toBe("hidden body");
+      expect(forSwitch["cfgonly"]!.body).toBe("");
+      expect(forSwitch["cfgonly"]!.model).toBe("cfg-model");
+      expect(forSwitch["cfgonly"]!.blacklistTools).toEqual(["bash"]);
+    });
+
+    it("getProfilesForUser returns the same view as getProfilesForSwitch", async () => {
+      writeProfile("alpha", "description: a", "alpha body");
+      const manager = await ProfileManager.create(tmpDir, {
+        beta: cfgProfile({ model: "m-beta" }),
+      });
+      expect(manager.getProfilesForUser()).toEqual(manager.getProfilesForSwitch());
+    });
+  });
+
+  describe("raw profile getters", () => {
+    it("getFileProfiles / getConfigProfiles return the unmerged layers as copies", async () => {
+      writeProfile("onfile", "description: from file");
+      const manager = await ProfileManager.create(tmpDir, {
+        onconfig: cfgProfile({ model: "cfg-model" }),
+      });
+
+      expect(Object.keys(manager.getFileProfiles())).toEqual(["onfile"]);
+      expect(Object.keys(manager.getConfigProfiles())).toEqual(["onconfig"]);
+
+      // Mutating the returned object must not change the manager's state.
+      manager.getFileProfiles()["injected"] = cfgProfile();
+      manager.getConfigProfiles()["injected"] = cfgProfile();
+      expect(manager.getProfile("injected")).toBeNull();
+    });
+  });
 });

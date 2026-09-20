@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- file-watch - notices are no longer injected into every LLM request: each external change is logged **once** as a persistent harness message in the session (quiet until the file is re-read or overwritten). Bash looks count as reads: a successful `cat`, `grep`, print-mode `sed`, or `git diff`/`git status` naming a tracked path resolves its stale flag and write guard.
+
 - **`--json-schema` structured output for one-shot mode.** can be a file path or inline JSON object. Docs: cli-reference.md
 
 - **`/profile` command added** (list + switch). New extension `src/extensions/profile-switch/` adds: `/profile` lists profiles marking current; `/profile <name>` and `/profile:<name>` to switch.

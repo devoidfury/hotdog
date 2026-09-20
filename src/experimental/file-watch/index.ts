@@ -3,9 +3,9 @@
 //
 // Tracks the files this session reads or writes (its "interest set"), each baselined with a content hash,
 // and detects when the bytes on disk stop matching what the session believes -- changed or deleted by another agent
-// session, the user's editor, or git. Unresolved changes ride every LLM request as one small harness system-notice
-// until the session re-reads the file; with writeGuard, an `overwrite` onto a stale target is blocked before
-// it clobbers foreign work.
+// session, the user's editor, or git. Each unresolved change is logged ONCE into the persisted context as a
+// harness system-notice (the `notified` set suppresses repeats until the path resolves); with writeGuard, an
+// `overwrite` onto a stale target is blocked before it clobbers foreign work.
 //
 // Design notes:
 //  - In-memory only. The manifest encodes what THIS session believes; after
@@ -29,16 +29,24 @@
 //    this design.
 //  - `pending` notices are orthogonal to baselines: the baseline tracks the
 //    disk, pending tracks the session's stale belief. Only going and looking
-//    resolves it -- a successful read, a read attempt that found the file
+//    resolves it -- a successful read, a successful bash look (cat, grep,
+//    print-sed, `git diff`/`git status` naming the path: the output shows the
+//    session what is there now), a read attempt that found the file
 //    gone (absence is an observation too; a failed read of an existing file,
 //    e.g. a permission error, taught the session nothing and must not disarm
 //    the guard), or an overwrite (which makes belief and disk identical by
 //    construction).
+//  - Notices are one-shot: each unresolved change produces exactly one
+//    persisted harness message per session (also appended to the current
+//    request so it lands immediately), tracked in `notified`. The message
+//    stays in conversation history, so repeating it every round is spam;
+//    re-notification only happens after the path resolves and diverges again.
 //  - A context replacement (compaction, session load/rewind) resets the
 //    session's beliefs wholesale: agent.replaceContext() fires CONTEXT_REPLACED
-//    and the manifest and pending maps are dropped. The verbatim file contents
-//    the baselines encode are gone from the conversation, and so are the
-//    stale notices riding on them; "do not write from memory" has no memory to
+//    and the manifest, pending, and notified maps are dropped. The verbatim
+//    file contents the baselines encode are gone from the conversation, and so
+//    are the notices logged about them (replaced wholesale, or folded into a
+//    summary); "do not write from memory" has no memory to
 //    defend, so the write guard releases too. Maps rebuild from subsequent
 //    reads. This also dissolves any dependence on handler order relative to
 //    compaction in the CONTEXT pipeline.
@@ -173,6 +181,39 @@ function parsePathInput(input: unknown): string | null {
   }
 }
 
+/** Parse a bash tool's JSON input for its `command`; null when unusable. */
+function parseCommandInput(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  try {
+    const parsed = JSON.parse(input) as { command?: unknown };
+    return typeof parsed.command === "string" && parsed.command.length > 0 ? parsed.command : null;
+  } catch {
+    return null;
+  }
+}
+
+// Read-only commands whose output shows the session what is on disk now:
+// running one on a path counts as going and looking, like the `read` tool.
+// Deliberately conservative (a courtesy feature): commands not listed here
+// never resolve a flag.
+const READ_BASH_COMMANDS = new Set(["cat", "grep", "sed"]);
+const READ_GIT_SUBCOMMANDS = new Set(["diff", "status"]);
+
+function baseName(p: string): string {
+  const i = p.lastIndexOf("/");
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
+/** Split a bash command into segments and tokens on shell separators and
+ * whitespace, stripping quotes. Rough by design -- this spots paths named
+ * after a read-only command, it does not parse the shell. */
+function shellTokens(command: string): string[][] {
+  return command
+    .split(/[;&|\n]+/)
+    .map((segment) => segment.split(/\s+/).filter(Boolean).map((t) => t.replace(/^["']+|["']+$/g, "")))
+    .filter((tokens) => tokens.length > 0);
+}
+
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<FileWatchConfig>(core, "fileWatch");
 
@@ -232,6 +273,10 @@ export function create(core: CoreContext): ExtensionInstance {
   // moment it was observed. Survives baseline rebuilds; see header notes.
   const pendingMaps = new Map<string, Map<string, ChangeKind>>();
 
+  // Paths whose change notice has already been logged this episode; suppressed
+  // until the path resolves (see the one-shot notice design note).
+  const notifiedMaps = new Map<string, Set<string>>();
+
   function sessionKey(agent: Agent | undefined): string {
     return agent?.sessionId || "default";
   }
@@ -254,6 +299,45 @@ export function create(core: CoreContext): ExtensionInstance {
       pendingMaps.set(key, pending);
     }
     return pending;
+  }
+
+  function getNotified(agent: Agent | undefined, createIfMissing: boolean): Set<string> | undefined {
+    const key = sessionKey(agent);
+    let notified = notifiedMaps.get(key);
+    if (!notified && createIfMissing) {
+      notified = new Set();
+      notifiedMaps.set(key, notified);
+    }
+    return notified;
+  }
+
+  /** Resolve a path's pending/notified state for paths named after a
+   * read-only command in a (successful) bash command. The manifest was just
+   * rebaselined by the window, so a cleared flag means fully caught up. */
+  function resolveBashReads(agent: Agent, command: string): void {
+    const pending = getPending(agent, false);
+    const notified = getNotified(agent, false);
+    if (!pending && !notified) return;
+    for (const tokens of shellTokens(command)) {
+      const head = baseName(tokens[0]!);
+      let args: string[];
+      if (head === "git") {
+        if (tokens.length < 2 || !READ_GIT_SUBCOMMANDS.has(tokens[1]!)) continue;
+        args = tokens.slice(2);
+      } else if (READ_BASH_COMMANDS.has(head)) {
+        // In-place sed writes; it does not show the session what is on disk.
+        if (head === "sed" && tokens.some((t) => /^-[a-zA-Z]*i/.test(t) || t === "--in-place")) continue;
+        args = tokens.slice(1);
+      } else {
+        continue;
+      }
+      for (const arg of args) {
+        if (arg.startsWith("-")) continue;
+        const abs = resolvePath(arg);
+        pending?.delete(abs);
+        notified?.delete(abs);
+      }
+    }
   }
 
   /** Silently adopt current disk state as the session's new belief. */
@@ -324,6 +408,12 @@ export function create(core: CoreContext): ExtensionInstance {
           if (toolName === "bash") {
             const manifest = getManifest(agent, false);
             if (manifest) await rebaseline(manifest);
+            // A successful bash look (cat/grep/print-sed/git diff|status on a
+            // path) is going and looking; a failed run may have read nothing.
+            if (success) {
+              const command = parseCommandInput(input);
+              if (command) resolveBashReads(agent, command);
+            }
             return;
           }
 
@@ -347,6 +437,7 @@ export function create(core: CoreContext): ExtensionInstance {
           if (toolName === "read") {
             if (success || (await fileGone(abs))) {
               getPending(agent, false)?.delete(abs);
+              getNotified(agent, false)?.delete(abs);
               if (!success) getManifest(agent, false)?.delete(abs);
             }
           }
@@ -359,30 +450,36 @@ export function create(core: CoreContext): ExtensionInstance {
           else manifest.set(abs, snap);
 
           // Overwrite makes belief and disk identical by construction.
-          if (toolName === "overwrite") getPending(agent, false)?.delete(abs);
+          if (toolName === "overwrite") {
+            getPending(agent, false)?.delete(abs);
+            getNotified(agent, false)?.delete(abs);
+          }
         } catch (e: unknown) {
           logger.debug(`file-watch: tracking failed: ${formatError(e)}`);
         }
       },
 
-      // Motion in the peripheral view: while any tracked file diverges from
-      // the session's belief, or unresolved motion is pending, one harness
-      // system-notice rides each request. Ephemeral (CONTEXT output shapes
-      // the request, not the stored context): it disappears the moment the
-      // session re-reads the file.
+      // Motion in the peripheral view: when a tracked file diverges from the
+      // session's belief, the notice is logged into the persisted context via
+      // agent.addMessage() -- once per path per unresolved episode, never
+      // repeated (the `notified` set; see header notes). It is also appended
+      // to the current request so it lands immediately; later requests carry
+      // it as ordinary conversation history.
       [HOOKS.CONTEXT]: async ({ messages, agent }) => {
-        if (!config.notify) return;
+        if (!config.notify || !agent) return;
         try {
-          if (agent?.isRestoring) return;
+          if (agent.isRestoring) return;
           const manifest = getManifest(agent, false);
           const pending = getPending(agent, false);
           if (!manifest && !pending) return;
 
+          const notified = getNotified(agent, false);
           const changes: Array<{ path: string; kind: ChangeKind }> = [];
           const seen = new Set<string>();
           let overflow = 0;
           const push = (abs: string, kind: ChangeKind) => {
-            if (changes.length < MAX_NOTICE_LINES) changes.push({ path: displayPath(abs), kind });
+            if (notified?.has(abs)) return;
+            if (changes.length < MAX_NOTICE_LINES) changes.push({ path: abs, kind });
             else overflow++;
           };
 
@@ -406,13 +503,27 @@ export function create(core: CoreContext): ExtensionInstance {
           const notice = new Message({
             role: "harness",
             source: "harness",
-            content: [{ type: "system-notice", text: buildNotice(changes, overflow) }],
+            content: [
+              {
+                type: "system-notice",
+                text: buildNotice(
+                  changes.map(({ path, kind }) => ({ path: displayPath(path), kind })),
+                  overflow,
+                ),
+              },
+            ],
           });
-          // The pipeline adopts the returned { messages } into the payload: if
-          // compaction ran earlier in the chain, `messages` here is already
-          // its rebuilt array. If it runs after us, its own rebuild replaces
-          // our notice for this request -- and replaceContext() fires
-          // CONTEXT_REPLACED, which clears our maps for the next one.
+          // Persist so the notice survives as part of the conversation (the
+          // session log records it via CONTEXT_MESSAGE). Mark `notified` only
+          // after the add succeeds -- a throw must leave the change pending
+          // for a retry next round. `messages` is the pre-hook snapshot, so
+          // appending the same object shows it on this request exactly once;
+          // later requests read it from the context.
+          agent.addMessage(notice);
+          for (const { path } of changes) getNotified(agent, true)!.add(path);
+          // If compaction runs later in the chain and replaces the context,
+          // its replaceContext() fires CONTEXT_REPLACED, which clears our
+          // maps for the next request.
           return { messages: [...messages, notice] };
         } catch (e: unknown) {
           logger.debug(`file-watch: notice pass failed: ${formatError(e)}`);
@@ -431,6 +542,7 @@ export function create(core: CoreContext): ExtensionInstance {
         const key = sessionKey(agent);
         manifests.delete(key);
         pendingMaps.delete(key);
+        notifiedMaps.delete(key);
       },
 
       // Session teardown (session deleted, or a task agent released): the
@@ -439,6 +551,7 @@ export function create(core: CoreContext): ExtensionInstance {
       [HOOKS.SESSION_END]: ({ sessionId }) => {
         manifests.delete(sessionId);
         pendingMaps.delete(sessionId);
+        notifiedMaps.delete(sessionId);
       },
 
       // The one collision that destroys work silently: overwriting a file

@@ -869,12 +869,12 @@ Extensions register their own configuration namespaces. Each extension's config 
 
 ### `fileWatch`
 
-[File Watch](../src/experimental/file-watch) — **Experimental**: not loaded by default; add `@experimental` to `extensionPaths` (keeping `@extensions` too — the setting replaces the default). Cooperative-editing awareness for a shared working tree. Tracks the files this session reads or writes and detects when the bytes on disk stop matching what the session believes (another agent session, your editor, or git). Unresolved changes ride each LLM request as a small harness system-notice until the session re-reads the file.
+[File Watch](../src/experimental/file-watch) — **Experimental**: not loaded by default; add `@experimental` to `extensionPaths` (keeping `@extensions` too — the setting replaces the default). Cooperative-editing awareness for a shared working tree. Tracks the files this session reads or writes and detects when the bytes on disk stop matching what the session believes (another agent session, your editor, or git). Each unresolved change is logged once as a persistent harness system-notice in the session — no repeat until the file is re-read or overwritten. A successful bash look (`cat`, `grep`, print-mode `sed`, `git diff`/`git status` naming the path) counts as re-reading.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
-| `notify` | `boolean` | `true` | Inject a system notice into LLM requests while tracked files have unresolved external changes. |
+| `notify` | `boolean` | `true` | Log one persistent harness system-notice per file with an unresolved external change, instead of repeating a notice every request. |
 | `writeGuard` | `boolean` | `true` | Block `overwrite` onto a file that changed externally since the session last read it, so foreign work is not silently clobbered. |
 | `ignore` | `string[]` | `["node_modules/", ".git/"]` | Patterns matched on path-segment boundaries against absolute paths — `dist/` matches any `dist` directory but not `mydist/`. Matching files are never tracked. |
 

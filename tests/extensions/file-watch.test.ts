@@ -16,7 +16,10 @@ function makeCore(fileWatchOverrides: Record<string, unknown> = {}) {
 }
 
 function makeAgent(sessionId = "s1") {
-  return { sessionId, isRestoring: false } as any;
+  // addMessage records what the extension persists into the session context
+  // (the real Agent fires CONTEXT_MESSAGE so the session log writes it too).
+  const logged: any[] = [];
+  return { sessionId, isRestoring: false, logged, addMessage: (msg: any) => logged.push(msg) } as any;
 }
 
 type Handlers = any;
@@ -95,6 +98,12 @@ describe("file-watch extension", () => {
       expect(notice!.message.source).toBe("harness");
       expect(notice!.text).toContain("foo.ts");
       expect(notice!.text).toContain("modified");
+      // The notice is persisted into the session, not just shaped onto the
+      // request, and it is never repeated for the same unresolved change.
+      expect(agent.logged.length).toBe(1);
+      expect(agent.logged[0]).toBe(result.messages[result.messages.length - 1]);
+      expect(await runContext(h, agent)).toBeUndefined();
+      expect(agent.logged.length).toBe(1);
     });
 
     it("appends the notice without touching existing messages", async () => {
@@ -213,7 +222,15 @@ describe("file-watch extension", () => {
       expect(noticeOf(await runContext(h, agent))).not.toBeNull();
 
       await track(h, "read", file, agent, false);
-      expect(noticeOf(await runContext(h, agent))).not.toBeNull();
+      // The one-shot notice is already spent, but the flag survives:
+      // the write guard is still armed.
+      const gate = await h[HOOKS.TOOL_CALL]({
+        toolCallId: "tc",
+        toolName: "overwrite",
+        input: JSON.stringify({ path: file, content: "clobber" }),
+        agent,
+      });
+      expect(gate?.action).toBe("block");
     });
 
     it("does not flag touch without content change", async () => {
@@ -258,6 +275,55 @@ describe("file-watch extension", () => {
         success: true,
       });
       expect(await runContext(h, agent)).toBeUndefined();
+    });
+
+    it("re-notifies after a resolve and a fresh external change", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await track(h, "read", file, agent);
+      await writeFile(file, "changed\n");
+      expect(noticeOf(await runContext(h, agent))).not.toBeNull();
+
+      await track(h, "read", file, agent);
+      expect(await runContext(h, agent)).toBeUndefined();
+
+      await writeFile(file, "changed again\n");
+      const notice = noticeOf(await runContext(h, agent));
+      expect(notice).not.toBeNull();
+      expect(agent.logged.length).toBe(2);
+    });
+
+    it("one message covers all changed files; a later lone change gets its own", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      const other = join(dir, "bar.ts");
+      await writeFile(other, "b\n");
+      await track(h, "read", file, agent);
+      await track(h, "read", other, agent);
+
+      await writeFile(file, "changed\n");
+      await writeFile(other, "changed\n");
+      const notice = noticeOf(await runContext(h, agent));
+      expect(notice).not.toBeNull();
+      expect(notice!.text).toContain("foo.ts");
+      expect(notice!.text).toContain("bar.ts");
+      expect(agent.logged.length).toBe(1);
+
+      // Both notified; while unresolved they stay quiet even if touched
+      // again -- the session already has a persisted notice about them.
+      await writeFile(other, "changed again\n");
+      expect(await runContext(h, agent)).toBeUndefined();
+      expect(agent.logged.length).toBe(1);
+
+      // Resolve bar by re-reading; a fresh change then gets its own notice.
+      await track(h, "read", other, agent);
+      expect(await runContext(h, agent)).toBeUndefined();
+      await writeFile(other, "changed once more\n");
+      const second = noticeOf(await runContext(h, agent));
+      expect(second).not.toBeNull();
+      expect(second!.text).toContain("bar.ts");
+      expect(second!.text).not.toContain("foo.ts");
+      expect(agent.logged.length).toBe(2);
     });
   });
 
@@ -362,11 +428,9 @@ describe("file-watch extension", () => {
       expect(noticeOf(await runContext(h, agent))).not.toBeNull();
 
       // Failed read (permission/IO), but the file is still there: the session
-      // learned nothing, so the pending notice must survive.
+      // learned nothing, so the flag survives. The one-shot notice is already
+      // spent -- the guard is the observable proof.
       await track(h, "read", file, agent, false);
-      expect(noticeOf(await runContext(h, agent))).not.toBeNull();
-
-      // The write guard stays armed too.
       const gate = await h[HOOKS.TOOL_CALL]({
         toolCallId: "tc",
         toolName: "overwrite",
@@ -466,6 +530,124 @@ describe("file-watch extension", () => {
       expect(noticeOf(await runContext(h, agent))).not.toBeNull();
       // No manifest for this session: must not throw.
       await beforeBash(h, makeAgent("never-tracked"));
+    });
+  });
+
+  describe("bash reads", () => {
+    let changeCount = 0;
+    async function stalePending(h: Handlers, agent: any): Promise<void> {
+      // Freeze external motion into `pending` with a bash window, then spend
+      // the one-shot notice so only the guard/flag state is observable.
+      await track(h, "read", file, agent);
+      // Unique payload per call: a repeat of identical bytes would not flag.
+      await writeFile(file, `external change ${++changeCount}\n`);
+      const input = JSON.stringify({ command: "true" });
+      await h[HOOKS.TOOL_BEFORE_EXECUTE]({ toolCallId: "tc", toolName: "bash", input, agent });
+      await h[HOOKS.TOOL_AFTER_EXECUTE]({
+        toolCallId: "tc",
+        toolName: "bash",
+        input,
+        agent,
+        result: "",
+        success: true,
+      });
+      expect(noticeOf(await runContext(h, agent))).not.toBeNull();
+    }
+
+    async function bash(h: Handlers, agent: any, command: string, success = true): Promise<void> {
+      const input = JSON.stringify({ command });
+      await h[HOOKS.TOOL_BEFORE_EXECUTE]({ toolCallId: "tc", toolName: "bash", input, agent });
+      await h[HOOKS.TOOL_AFTER_EXECUTE]({
+        toolCallId: "tc",
+        toolName: "bash",
+        input,
+        agent,
+        result: "",
+        success,
+      });
+    }
+
+    async function guardAction(h: Handlers, agent: any): Promise<string | undefined> {
+      const gate = await h[HOOKS.TOOL_CALL]({
+        toolCallId: "tc",
+        toolName: "overwrite",
+        input: JSON.stringify({ path: file, content: "clobber" }),
+        agent,
+      });
+      return (gate as any)?.action;
+    }
+
+    it("cat of a stale tracked path counts as going and looking", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await stalePending(h, agent);
+
+      await bash(h, agent, `cat ${file}`);
+      expect(await guardAction(h, agent)).toBeUndefined();
+      expect(await runContext(h, agent)).toBeUndefined();
+
+      // Tracked and re-baselined: a fresh change surfaces with a new notice.
+      await writeFile(file, "changed again\n");
+      expect(noticeOf(await runContext(h, agent))).not.toBeNull();
+    });
+
+    it("grep counts", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await stalePending(h, agent);
+      await bash(h, agent, `grep -n TODO ${file}`);
+      expect(await guardAction(h, agent)).toBeUndefined();
+    });
+
+    it("print-sed counts, in-place sed does not", async () => {
+      const print = handlers(createFileWatch(makeCore()));
+      const a = makeAgent();
+      await stalePending(print, a);
+      await bash(print, a, `sed -n '1,10p' ${file}`);
+      expect(await guardAction(print, a)).toBeUndefined();
+
+      const inplace = handlers(createFileWatch(makeCore()));
+      const b = makeAgent();
+      await stalePending(inplace, b);
+      await bash(inplace, b, `sed -i 's/one/1/' ${file}`);
+      expect(await guardAction(inplace, b)).toBe("block");
+    });
+
+    it("git diff/status naming the path counts; a bare git diff does not", async () => {
+      const withPath = handlers(createFileWatch(makeCore()));
+      const a = makeAgent();
+      await stalePending(withPath, a);
+      await bash(withPath, a, `git diff ${file}`);
+      expect(await guardAction(withPath, a)).toBeUndefined();
+
+      const status = handlers(createFileWatch(makeCore()));
+      const b = makeAgent();
+      await stalePending(status, b);
+      await bash(status, b, `git status ${file}`);
+      expect(await guardAction(status, b)).toBeUndefined();
+
+      const bare = handlers(createFileWatch(makeCore()));
+      const c = makeAgent();
+      await stalePending(bare, c);
+      await bash(bare, c, `git diff`);
+      expect(await guardAction(bare, c)).toBe("block");
+    });
+
+    it("a failed bash does not count as a read", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await stalePending(h, agent);
+      await bash(h, agent, `cat ${file}`, false);
+      expect(await guardAction(h, agent)).toBe("block");
+    });
+
+    it("reads of untracked files are a no-op", async () => {
+      const h = handlers(createFileWatch(makeCore()));
+      const agent = makeAgent();
+      await bash(h, agent, `cat ${join(dir, "never-tracked.ts")}`);
+      expect(await runContext(h, agent)).toBeUndefined();
+      await track(h, "read", file, agent);
+      expect(await guardAction(h, agent)).toBeUndefined();
     });
   });
 

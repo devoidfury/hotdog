@@ -15,7 +15,7 @@
         "notify": {
           "type": "boolean",
           "default": true,
-          "description": "Inject a system notice into LLM requests while tracked files have unresolved external changes"
+          "description": "Log a persistent harness notice into the session once per unresolved external change (no repeat until the file is re-read or overwritten)"
         },
         "writeGuard": {
           "type": "boolean",

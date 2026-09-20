@@ -9,7 +9,7 @@ import { create } from "@extensions/session-log/index.ts";
 import { readSessionEntries, LOG_SOURCE } from "@core/session/session-log.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 
@@ -295,6 +295,40 @@ describe("session-log extension create()", () => {
       expect(logPath).toContain(".jsonl");
     } finally {
       cleanupTestFile(sessionId);
+    }
+  });
+
+  it("CONTEXT_MESSAGE hook rejects traversal session ids without writing or throwing", async () => {
+    const ext = await create(createMockCore() as any) as any;
+    const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+    const badId = "../evil-" + Date.now();
+    const outsideFile = join(SESSIONS_DIR, "..", `${badId.slice(3)}.jsonl`);
+
+    try {
+      // Must swallow (warn) rather than throw: a hook failure would break the agent loop.
+      await expect(hook({ message: { sessionId: badId, role: "user", content: "x" }, agent: { sessionId: badId } })).resolves.toBeUndefined();
+      expect(() => readFileSync(outsideFile)).toThrow();
+      expect(ext.getLogPath()).toBeNull(); // nothing tracked for a rejected id
+    } finally {
+      try { rmSync(outsideFile, { force: true }); } catch {}
+    }
+  });
+
+  it("OUTPUT_EVENT compaction hook rejects traversal session ids without writing", async () => {
+    const ext = await create(createMockCore() as any) as any;
+    const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
+    const badId = "../evil-compact-" + Date.now();
+    const outsideFile = join(SESSIONS_DIR, "..", `${badId.slice(3)}.jsonl`);
+
+    try {
+      await expect(hook({
+        type: "compaction_result",
+        data: { summary: "s", messagesCompacted: 1 },
+        agent: { sessionId: badId },
+      })).resolves.toBeUndefined();
+      expect(() => readFileSync(outsideFile)).toThrow();
+    } finally {
+      try { rmSync(outsideFile, { force: true }); } catch {}
     }
   });
 });

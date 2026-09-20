@@ -1,14 +1,15 @@
 // Session Log Extension
 // Append-only JSONL audit trail for observability.
 
-import { join } from "node:path";
 import { appendFile, readFile, access, mkdir } from "node:fs/promises";
 import { HOOKS } from "@core/hooks.ts";
 import { stripNulls } from "@utils/objects.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { isWrapperPart, isToolResultPart } from "@core/context/wrappers.ts";
+import { formatError } from "@core/error.ts";
+import { logger } from "@utils/logger.ts";
 
-import { LOG_SOURCE, sessionsDir, type LogEntry } from "@core/session/session-log.ts";
+import { LOG_SOURCE, sessionPath, sessionsDir, type LogEntry } from "@core/session/session-log.ts";
 
 interface SessionLogMessage {
   sessionId?: string;
@@ -119,8 +120,16 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
         if (isRestoring) return;
 
         const sessionId = agent.sessionId || "unknown";
+        // Validate through sessionPath before writing: never bypass the
+        // traversal checks the read side already enforces.
+        let logPath: string;
+        try {
+          logPath = sessionPath(sessionId);
+        } catch (err) {
+          logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
+          return;
+        }
         lastSessionId = sessionId;
-        const logPath = join(cacheDir, `${sessionId}.jsonl`);
 
         // Map message role to the correct log source type
         let source: string;
@@ -170,8 +179,14 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
           const compactionData = data as { summary?: string; messagesCompacted?: number };
           if (compactionData?.summary) {
             const sessionId = agent.sessionId || "unknown";
+            let logPath: string;
+            try {
+              logPath = sessionPath(sessionId);
+            } catch (err) {
+              logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
+              return;
+            }
             lastSessionId = sessionId;
-            const logPath = join(cacheDir, `${sessionId}.jsonl`);
             // Log the message exactly as it enters the context: harness
             // structure with the real wrapper tag parts around the RAW
             // model-generated summary (`untrusted` part, mangled only at the
@@ -204,7 +219,8 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
      */
     async readEntries(): Promise<Record<string, LogEntry>[]> {
       if (!lastSessionId) return [];
-      const logPath = join(cacheDir, `${lastSessionId}.jsonl`);
+      // lastSessionId is only set after a successful sessionPath() validation.
+      const logPath = sessionPath(lastSessionId);
       try {
         await access(logPath);
       } catch {
@@ -223,7 +239,7 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
      */
     getLogPath(): string | null {
       if (!lastSessionId) return null;
-      return join(cacheDir, `${lastSessionId}.jsonl`);
+      return sessionPath(lastSessionId);
     },
   };
 }

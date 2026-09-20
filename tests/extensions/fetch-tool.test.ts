@@ -668,6 +668,34 @@ describe("FetchTool integration", () => {
     });
   });
 
+  describe("content negotiation (Accept)", () => {
+    it("prefers markdown over html by default", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+      const result = await tool.execute(JSON.stringify({ url: `${BASE_URL}/headers` }));
+      const accept: string = JSON.parse(result.output)["accept"];
+      expect(accept).toBeDefined();
+      expect(accept.indexOf("text/markdown")).toBeLessThan(accept.indexOf("text/html"));
+      expect(accept).toContain("*/*");
+    });
+
+    it("prefers html when showOriginal is true", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+      const result = await tool.execute(
+        JSON.stringify({ url: `${BASE_URL}/headers`, showOriginal: true }),
+      );
+      const accept: string = JSON.parse(result.output)["accept"];
+      expect(accept.indexOf("text/html")).toBeLessThan(accept.indexOf("text/markdown"));
+    });
+
+    it("does not override a caller-supplied Accept header", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+      const result = await tool.execute(
+        JSON.stringify({ url: `${BASE_URL}/headers`, headers: { accept: "application/xml" } }),
+      );
+      expect(JSON.parse(result.output)["accept"]).toBe("application/xml");
+    });
+  });
+
   describe("status codes", () => {
     it("handles 200 OK", async () => {
       const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });

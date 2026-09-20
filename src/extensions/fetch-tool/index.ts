@@ -23,6 +23,26 @@ import {
 
 const DEFAULT_ALLOWED_SCHEMES = ["http", "https"];
 
+/**
+ * Content negotiation: hotdog converts HTML to markdown, but servers that
+ * already speak markdown (GitHub, docs sites, raw endpoints) should send it
+ * directly instead of making us parse far more bytes than we need. The
+ * caller's own Accept header always wins (see withDefaultAccept).
+ */
+const ACCEPT_MARKDOWN_FIRST = "text/markdown, text/html;q=0.9, text/plain;q=0.8, */*;q=0.1";
+const ACCEPT_HTML_FIRST = "text/html, text/markdown;q=0.9, text/plain;q=0.8, */*;q=0.1";
+
+/** Add the negotiation Accept header unless the caller supplied one (any case). */
+export function withDefaultAccept(
+  headers: Record<string, string>,
+  showOriginal: boolean,
+): Record<string, string> {
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === "accept") return headers;
+  }
+  return { Accept: showOriginal ? ACCEPT_HTML_FIRST : ACCEPT_MARKDOWN_FIRST, ...headers };
+}
+
 /** 3xx statuses with a Location header we may follow (after re-validation). */
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
@@ -83,7 +103,7 @@ export class FetchTool {
       .join(" ");
     return toolDef(
       FetchTool.TOOL_NAME,
-      `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without markdown conversion. ${restrictions}`,
+      `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without markdown conversion. Sends an Accept header preferring markdown (HTML when showOriginal is set); a caller-supplied Accept header overrides it. ${restrictions}`,
       {
         properties: {
           url: param("string", "The URL to fetch"),
@@ -119,6 +139,7 @@ export class FetchTool {
     }
 
     const { url, method, showOriginal, host } = args;
+    const fetchArgs = { ...args, headers: withDefaultAccept(args.headers, showOriginal) };
 
     if (!this.allowPrivateHosts && host) {
       const hostError = await assertPublicHost(host);
@@ -132,8 +153,8 @@ export class FetchTool {
       // to a private one would bypass the private-host gate. With protection
       // on, follow redirects manually and re-validate every hop.
       const resp = this.allowPrivateHosts
-        ? await hotdogFetch(url, args, this.timeoutMs)
-        : await fetchWithSafeRedirects(url, args, this.timeoutMs, {
+        ? await hotdogFetch(url, fetchArgs, this.timeoutMs)
+        : await fetchWithSafeRedirects(url, fetchArgs, this.timeoutMs, {
             allowedSchemes: this.allowedSchemes,
             checkHost: assertPublicHost,
           });

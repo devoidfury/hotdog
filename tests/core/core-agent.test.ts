@@ -1622,3 +1622,160 @@ describe('rewindContext / clearContext fire CONTEXT_REWOUND', () => {
     expect(payload[0]).toEqual([]);
   });
 });
+
+describe('empty response after tool results — nudge', () => {
+  function toolCallSeq(name: string, id: string) {
+    return buildStreamResponse({
+      content: 'Working.',
+      toolCalls: [{ index: 0, name, arguments: '{}', id }],
+      usage: { total_tokens: 10 },
+    });
+  }
+  const emptySeq = () => buildStreamResponse({ usage: { total_tokens: 5 } });
+
+  function nudges(agent: Agent): Message[] {
+    return agent.context.log.getAll().filter(
+      (m) =>
+        m.role === 'harness' &&
+        Array.isArray(m.content) &&
+        (m.content[0] as Record<string, unknown>)?.type === 'system-notice',
+    );
+  }
+
+  it('nudges once after an empty after-tools turn, then completes on the retry', async () => {
+    const tool = simpleTool('worker', 'work result');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        toolCallSeq('worker', 'call_1'),
+        emptySeq(), // model returns no content and no tool calls
+        buildStreamResponse({ content: 'Recovered.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const { agent, toolRegistry } = createFixture({ mockLLM });
+    toolRegistry.register('worker', tool);
+
+    const result = await agent.run('Do work');
+
+    expect(expectCompletion(result).content).toBe('Recovered.');
+    expect(mockLLM.callCount).toBe(3);
+
+    const nudgeMsgs = nudges(agent);
+    expect(nudgeMsgs).toHaveLength(1);
+    expect(nudgeMsgs[0]!.source).toBe('harness');
+    expect(String((nudgeMsgs[0]!.content as Array<Record<string, unknown>>)[0]!.text)).toContain('empty');
+
+    // Order: the empty assistant message stays, the nudge follows it.
+    const roles = agent.context.log.getAll().map((m) => m.role);
+    expect(roles).toEqual(['user', 'assistant', 'tool', 'assistant', 'harness', 'assistant']);
+    expect(agent.context.log.getAll().at(-3)!.content).toBe('');
+  });
+
+  it('treats whitespace-only content as empty', async () => {
+    const tool = simpleTool('worker', 'work result');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        toolCallSeq('worker', 'call_1'),
+        buildStreamResponse({ content: '   \n ', usage: { total_tokens: 5 } }),
+        buildStreamResponse({ content: 'Recovered.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const { agent, toolRegistry } = createFixture({ mockLLM });
+    toolRegistry.register('worker', tool);
+
+    const result = await agent.run('Do work');
+
+    expect(expectCompletion(result).content).toBe('Recovered.');
+    expect(nudges(agent)).toHaveLength(1);
+  });
+
+  it('does not nudge when the after-tools turn has content', async () => {
+    const tool = simpleTool('worker', 'work result');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        toolCallSeq('worker', 'call_1'),
+        buildStreamResponse({ content: 'Done.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const { agent, toolRegistry } = createFixture({ mockLLM });
+    toolRegistry.register('worker', tool);
+
+    const result = await agent.run('Do work');
+
+    expect(expectCompletion(result).content).toBe('Done.');
+    expect(mockLLM.callCount).toBe(2);
+    expect(nudges(agent)).toHaveLength(0);
+  });
+
+  it('does not nudge an empty turn that did not follow tool results', async () => {
+    const mockLLM = new MockLLMClient({ responseSequences: [emptySeq()] });
+    const { agent } = createFixture({ mockLLM });
+
+    const result = await agent.run('Hi');
+
+    expect(expectCompletion(result).content).toBe('');
+    expect(mockLLM.callCount).toBe(1);
+    expect(nudges(agent)).toHaveLength(0);
+  });
+
+  it('nudges at most once per tool episode; a second empty turn completes', async () => {
+    const tool = simpleTool('worker', 'work result');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        toolCallSeq('worker', 'call_1'),
+        emptySeq(),
+        emptySeq(), // still empty after the nudge -- complete, do not loop
+      ],
+    });
+    const { agent, toolRegistry } = createFixture({ mockLLM });
+    toolRegistry.register('worker', tool);
+
+    const result = await agent.run('Do work');
+
+    expect(expectCompletion(result).content).toBe('');
+    expect(mockLLM.callCount).toBe(3);
+    expect(nudges(agent)).toHaveLength(1);
+  });
+
+  it('a fresh empty-after-tools episode after real tool work nudges again', async () => {
+    const tool = simpleTool('worker', 'work result');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        toolCallSeq('worker', 'call_1'),
+        emptySeq(),           // nudged
+        toolCallSeq('worker', 'call_2'), // model recovered by calling a tool
+        emptySeq(),           // empty again after new tool results -- nudged again
+        buildStreamResponse({ content: 'Finally.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const { agent, toolRegistry } = createFixture({ mockLLM });
+    toolRegistry.register('worker', tool);
+
+    const result = await agent.run('Do work');
+
+    expect(expectCompletion(result).content).toBe('Finally.');
+    expect(nudges(agent)).toHaveLength(2);
+  });
+
+  it('the nudged turn ends with TURN_END stopped=false reason=continue', async () => {
+    const tool = simpleTool('worker', 'work result');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        toolCallSeq('worker', 'call_1'),
+        emptySeq(),
+        buildStreamResponse({ content: 'Done.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const { agent, hooks, toolRegistry } = createFixture({ mockLLM });
+    toolRegistry.register('worker', tool);
+
+    const turnEnds: Array<{ stopped: boolean; reason?: string }> = [];
+    hooks.on(HOOKS.TURN_END, (p: { stopped: boolean; reason?: string }) => {
+      turnEnds.push({ stopped: p.stopped, reason: p.reason });
+    });
+
+    await agent.run('Do work');
+
+    expect(turnEnds.map((t) => t.reason)).toEqual(['continue', 'continue', 'completion']);
+    expect(turnEnds[1]!.stopped).toBe(false);
+  });
+});

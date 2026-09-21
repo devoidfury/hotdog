@@ -99,7 +99,14 @@ export interface HookPayloads {
     agent: Agent;
     success: boolean;
   };
-  "loop:detected": { agent: Agent };
+  "loop:detected": {
+    agent: Agent;
+    toolName: string;
+    kind: "repeat" | "ping_pong";
+    streak: number;
+    /** 1 = nudge injected, 2 = stronger nudge, 3 = run cancelled. */
+    level: number;
+  };
   "tool:metrics": {
     toolName: string;
     toolCallId: string;

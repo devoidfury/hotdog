@@ -1,0 +1,31 @@
+{
+  "name": "loop-detect",
+  "loadOrder": 30,
+  "description": "Detects stuck tool-call loops (identical repeats, ping-pong) and escalates: nudge, stronger nudge, stop the run",
+  "configSchema": {
+    "loopDetect": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Watch tool calls for loop patterns. Silent unless a loop is detected."
+        },
+        "repeatThreshold": {
+          "type": "number",
+          "default": 3,
+          "minimum": 2,
+          "description": "Consecutive identical tool calls (same name + canonicalized arguments) before the first nudge. A stronger nudge follows at 2x, the run stops at 3x."
+        },
+        "pingPongThreshold": {
+          "type": "number",
+          "default": 4,
+          "minimum": 4,
+          "description": "Strictly alternating calls (A,B,A,B,...) before the first nudge. Stronger nudge at 2x, stop at 3x."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [{ "source": "config", "key": "loopDetect" }, { "default": {} }]
+    }
+  }
+}

@@ -26,7 +26,7 @@ export interface ModelRegistry {
 export type TurnEndReason =
   | "completion"      // model returned final text
   | "tool_return"     // a tool signaled stopLoop
-  | "continue"        // tool calls ran; the loop advances to the next iteration
+  | "continue"        // tool calls ran (or an empty turn after tools was nudged); the loop advances
   | "cancelled"       // run was cancelled
   | "error"           // an unexpected exception aborted the turn
   | "max_iterations"; // iteration cap reached
@@ -34,6 +34,17 @@ export type TurnEndReason =
 export type AgentRunResult =
   | { type: 'completion'; content: string }
   | { type: 'tool_return'; outcome: string };
+
+/**
+ * Nudge for the empty-response-after-tools stall: the model returned neither
+ * text nor tool calls after tool results (a common local-model failure). The
+ * notice lands after the empty assistant message, so the context tail is no
+ * longer a tool result and a second consecutive empty turn completes
+ * normally -- one nudge per tool episode, no state needed.
+ */
+const EMPTY_TURN_NUDGE_TEXT =
+  "Your last response was empty: no text and no tool calls after the tool results. " +
+  "Continue the task now -- make the next tool call or respond to the user.";
 
 interface LlmRequestParams {
   messages: Message[];
@@ -357,9 +368,23 @@ export class Agent implements AgentLike {
           if (!errPayload.retry) throw err;
           response = await this._performLlmCall(params);
         }
+        // Snapshot the context tail before the assistant message lands: the
+        // empty-turn nudge fires only when this request ended on tool results.
+        const afterToolResults = this.context.getMessages().at(-1)?.role === "tool";
         const result = await this._handleLlmResponse(response, params);
 
         if (typeof result === "string") {
+          if (afterToolResults && !this.cancelled && !result.trim()) {
+            // Harness notice: persisted via addMessage so the session log records the retry.
+            this.addMessage(new Message({
+              role: "harness",
+              source: "harness",
+              content: [{ type: "system-notice", text: EMPTY_TURN_NUDGE_TEXT }],
+            }));
+            await this._emitTurnEnd(iteration, response.fullText, [], false, this.cancelled, "continue");
+            turnEnded = true;
+            continue;
+          }
           await this._emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
           turnEnded = true;
           return { type: 'completion', content: result };

@@ -239,7 +239,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | `CONTEXT_MESSAGE` | `context:message` | notify (fire-and-forget) | A message added to agent context (sync call site) |
 | `CONTEXT_REPLACED` | `context:replaced` | notify (fire-and-forget) | Entire context replaced (compaction, reset) |
 | `MESSAGES_AFTER_LLM` | `messages:afterLLM` | awaited notify | After LLM response received |
-| `LOOP_DETECTED` | `loop:detected` | — | **Unimplemented** — defined in source but not yet emitted |
+| `LOOP_DETECTED` | `loop:detected` | notify (fire-and-forget) | Emitted by the `loop-detect` extension on each escalation level (1 nudge, 2 stronger nudge, 3 run cancelled) when a tool-call loop is detected |
 
 ### Context / Prompt Building
 

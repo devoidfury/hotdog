@@ -343,6 +343,34 @@ describe("fail-closed matrix", () => {
     expect(asked).toHaveLength(0);
   });
 
+  it("blocks valid JSON that is not an object (array, null, scalar)", async () => {
+    // `[{"command": "git status"}]` parses, and a naive extract would read
+    // targets out of it; `typeof null === "object"` too. None of these are
+    // argument objects, so each must bail -- never treated as a call whose
+    // targets could be matched against rules.
+    for (const input of ['[{"command": "git status"}]', "null", "42", '"git status"']) {
+      const r = await run({ enabled: true }, payload({ input } as never));
+      expect(r.action).toBe("block");
+      expect(r.result).toContain("not a JSON object");
+    }
+  });
+
+  it("blocks rather than throwing when the handler itself blows up", async () => {
+    // Belt and braces: the TOOL_CALL pipeline is failOnError, so a throw
+    // here surfaces as a tool crash instead of a clean denial.
+    const p = payload({
+      toolCtx: {
+        get: () => {
+          throw new Error("ctx exploded");
+        },
+      },
+    } as never);
+    const r = await run({ enabled: true }, p);
+    expect(r.action).toBe("block");
+    expect(r.result).toContain("the approvals layer failed");
+    expect(r.result).toContain("ctx exploded");
+  });
+
   it("forces an ask for unparseable arguments, even under default allow", async () => {
     const { input } = answerWith("allow once");
     const r = await run(

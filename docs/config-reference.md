@@ -1053,6 +1053,20 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 { "loop": { "maxLoops": 10 } }
 ```
 
+### `loopDetect`
+
+[Loop Detect](../src/extensions/loop-detect) — watches tool calls for stuck-loop patterns (consecutive identical calls, strict A/B ping-pong) and escalates: a system-notice nudge, then a stronger nudge, then stops the run.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable loop detection. |
+| `repeatThreshold` | `number` | `3` | Consecutive identical tool calls before the first nudge. Stronger nudge at 2x, run stops at 3x. |
+| `pingPongThreshold` | `number` | `4` | Strictly alternating calls (A,B,A,B,...) before the first nudge. Stronger nudge at 2x, stop at 3x. |
+
+```json
+{ "loopDetect": { "repeatThreshold": 5 } }
+```
+
 ### `questionTool`
 
 [Question Tool](../src/extensions/question-tool) — Ask the user questions.

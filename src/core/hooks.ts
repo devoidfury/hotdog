@@ -373,6 +373,7 @@ export const HOOKS = {
   // Fired synchronously during extension load so services are available to downstream extensions.
   SERVICES_REGISTER: "services:register",
   TOOL_AFTER_EXECUTE: "tool:afterExecute",
+  // Emitted by the loop-detect extension (not core) on each escalation level.
   LOOP_DETECTED: "loop:detected",
 
   CONTEXT_MESSAGE: "context:message",

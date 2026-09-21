@@ -16,6 +16,10 @@
 
 - **`$VAR` interpolation in config files.** a string that is *exactly* `$VAR` or `${VAR}` resolves from `process.env`. Whole-string only -- `"http://$HOST"` / `"cost $5"` untouched.
 
+- **webui - tab completion in chat input** -- Tab opens the popup, Tab/Shift+Tab/arrows cycle, Enter accepts (Escape first to submit raw), Esc/blur/edit dismiss, mousedown accepts without caret loss, invalidation token so a late reply can't reopen a dismissed menu.
+
+- **tab completion for bare filepaths** -- file-attachment completion matcher/handler now also trigger on bare path-looking words (`./x`, `/x`, anything containing `/`) in addition to `@`-prefixed attachments; values are returned without the `@` in that case (prefix preserved, e.g. `./te` -> `./test.txt`). Plain prose like `test.txt` won't trigger (no `/`, no leading `.`); slash-containing prose like `and/or` does trip the matcher but the handler yields no matches and thus an empty list (readdir of the nonexistent `and` dir hits the catch-all), so it should be harmless in practice. 
+
 - security
   - env scrubber - widen to redact *_PWD and add extra list in config
   - fetch-tool - widen blocklist for reserved addrs
@@ -30,6 +34,7 @@
   - fix regression with `--compact-debug` - The flag/config promised `compaction.out.json` but nothing was ever written. `_handleCompactCommand` now dumps `{ts, session_id, mode, keep_requested, strategy, settings, messages:{before,after}}` to `compaction.out.json` in the sessions dir
   - file-tools **BOM/CRLF fidelity in the write tools.** silent-corruption bug - bun keeps `\uFEFF`/`\r\n` in utf-8 strings, so the edit trimmed-line fallback mixed bare LF into CRLF files and could drop the BOM when the first line was replaced; append/overwrite wrote model LF into CRLF files and overwrite always dropped the BOM. Fix = detect-on-read, re-apply-on-write
   - /loop + handoff - handoff now supercedes loop deterministically
+  - interactive cli - mid-string tab completion clobbered input -- fixed completing `@pac` in `/loop review this software, including @pac<TAB>` replaced everything with `@package.json`
 
 - internals
   - add session teardown hook

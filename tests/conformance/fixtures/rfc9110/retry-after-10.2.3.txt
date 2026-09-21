@@ -1,0 +1,33 @@
+# _conformance-provenance
+# source: spec
+# url: https://www.rfc-editor.org/rfc/rfc9110.txt
+# retrieved: 2026-09-21
+# sha256: 0a0dcfabe0befae2264fe51b16fb5480f413f401e6103b9bb19c53b68ee0aa11
+# note: Section 10.2.3 Retry-After, verbatim from the plaintext RFC (lines 4799-4825 of rfc9110.txt)
+---
+10.2.3.  Retry-After
+
+   Servers send the "Retry-After" header field to indicate how long the
+   user agent ought to wait before making a follow-up request.  When
+   sent with a 503 (Service Unavailable) response, Retry-After indicates
+   how long the service is expected to be unavailable to the client.
+   When sent with any 3xx (Redirection) response, Retry-After indicates
+   the minimum time that the user agent is asked to wait before issuing
+   the redirected request.
+
+   The Retry-After field value can be either an HTTP-date or a number of
+   seconds to delay after receiving the response.
+
+     Retry-After = HTTP-date / delay-seconds
+
+   A delay-seconds value is a non-negative decimal integer, representing
+   time in seconds.
+
+     delay-seconds  = 1*DIGIT
+
+   Two examples of its use are
+
+   Retry-After: Fri, 31 Dec 1999 23:59:59 GMT
+   Retry-After: 120
+
+   In the latter example, the delay is 2 minutes.

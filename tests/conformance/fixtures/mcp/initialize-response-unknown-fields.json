@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "source": "derived",
+    "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle",
+    "retrieved": "2026-09-21",
+    "sha256": "70787c3e50595899ec36e8496c401d421fa44fc48f8b0294fb6b04e76748b291",
+    "note": "initialize-response.json plus hypothetical unknown members (forward-compat probe)"
+  },
+  "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"result\": {\n    \"protocolVersion\": \"2025-11-25\",\n    \"capabilities\": {\n      \"logging\": {},\n      \"prompts\": {\n        \"listChanged\": true\n      },\n      \"resources\": {\n        \"subscribe\": true,\n        \"listChanged\": true\n      },\n      \"tools\": {\n        \"listChanged\": true\n      },\n      \"tasks\": {\n        \"list\": {},\n        \"cancel\": {},\n        \"requests\": {\n          \"tools\": {\n            \"call\": {}\n          }\n        }\n      }\n    },\n    \"serverInfo\": {\n      \"name\": \"ExampleServer\",\n      \"title\": \"Example Server Display Name\",\n      \"version\": \"1.0.0\",\n      \"description\": \"An example MCP server providing tools and resources\",\n      \"icons\": [\n        {\n          \"src\": \"https://example.com/server-icon.svg\",\n          \"mimeType\": \"image/svg+xml\",\n          \"sizes\": [\n            \"any\"\n          ]\n        }\n      ],\n      \"websiteUrl\": \"https://example.com/server\",\n      \"_futureField\": 42\n    },\n    \"instructions\": \"Optional instructions for the client\",\n    \"_futureCapability\": {\n      \"enabled\": true\n    }\n  }\n}"
+}

@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://www.jsonrpc.org/specification",
+    "retrieved": "2026-09-21",
+    "sha256": "8fd3cdc49d51d8060d9a31aead258ff4407eeae67d3d824e1fd71149fe4d2e40",
+    "note": "Section 7 Examples: a Notification (no id member)"
+  },
+  "raw": "{\"jsonrpc\": \"2.0\", \"method\": \"foobar\"}"
+}

@@ -1,0 +1,9 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle",
+    "retrieved": "2026-09-21",
+    "sha256": "244717175de0a541c56691a782bc1615ffc39dedc94bcc1c2a0639a975963f74"
+  },
+  "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-11-25\",\n    \"capabilities\": {\n      \"roots\": {\n        \"listChanged\": true\n      },\n      \"sampling\": {},\n      \"elicitation\": {\n        \"form\": {},\n        \"url\": {}\n      },\n      \"tasks\": {\n        \"requests\": {\n          \"elicitation\": {\n            \"create\": {}\n          },\n          \"sampling\": {\n            \"createMessage\": {}\n          }\n        }\n      }\n    },\n    \"clientInfo\": {\n      \"name\": \"ExampleClient\",\n      \"title\": \"Example Client Display Name\",\n      \"version\": \"1.0.0\",\n      \"description\": \"An example MCP client application\",\n      \"icons\": [\n        {\n          \"src\": \"https://example.com/icon.png\",\n          \"mimeType\": \"image/png\",\n          \"sizes\": [\"48x48\"]\n        }\n      ],\n      \"websiteUrl\": \"https://example.com\"\n    }\n  }\n}"
+}

@@ -1,0 +1,15 @@
+# _conformance-provenance
+# source: official-example
+# url: https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml
+# retrieved: 2026-09-21
+# sha256: 2c1bbb051fa5b1dfff9b3440e8664870cb8d97e030c4b841aac7540555f9b892
+# note: chat/completions streaming example chunks (verbatim JSON objects); 'data: ' framing + blank-line separators + [DONE] terminator added per the OpenAI streaming-docs convention
+---
+data: {"id": "chatcmpl-123", "object": "chat.completion.chunk", "created": 1694268190, "model": "gpt-6-astra", "system_fingerprint": "fp_44709d6fcb", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "logprobs": null, "finish_reason": null}], "obfuscation": "r4N7vQ2m"}
+
+data: {"id": "chatcmpl-123", "object": "chat.completion.chunk", "created": 1694268190, "model": "gpt-6-astra", "system_fingerprint": "fp_44709d6fcb", "choices": [{"index": 0, "delta": {"content": "Hello"}, "logprobs": null, "finish_reason": null}], "obfuscation": "p9K3xT6w"}
+
+data: {"id": "chatcmpl-123", "object": "chat.completion.chunk", "created": 1694268190, "model": "gpt-6-astra", "system_fingerprint": "fp_44709d6fcb", "choices": [{"index": 0, "delta": {}, "logprobs": null, "finish_reason": "stop"}], "obfuscation": ""}
+
+data: [DONE]
+

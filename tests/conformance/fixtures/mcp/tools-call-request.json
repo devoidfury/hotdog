@@ -1,0 +1,9 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+    "retrieved": "2026-09-21",
+    "sha256": "fad951ba6c04d59d3e3c785358aaa41457db52bba1786dd246871e7cc77313d8"
+  },
+  "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_weather\",\n    \"arguments\": {\n      \"location\": \"New York\"\n    }\n  }\n}"
+}

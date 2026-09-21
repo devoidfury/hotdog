@@ -1,0 +1,142 @@
+{
+  "_provenance": {
+    "source": "derived",
+    "url": "https://html.spec.whatwg.org/multipage/server-sent-events.html",
+    "retrieved": "2026-09-21",
+    "note": "Streams mechanically built from the normative rules quoted in whatwg-9.2.6-normative.txt; official-yhoo-example is verbatim from the example",
+    "sha256": "08a010c53fb110b2c0cd74b3aec8056d00b6c61c3d60cd7377614db831cd7414"
+  },
+  "cases": [
+    {
+      "name": "bom",
+      "cite": "WHATWG 9.2.6: 'The UTF-8 decode algorithm strips one leading UTF-8 Byte Order Mark (BOM), if any.'",
+      "stream": "﻿data: {\"n\":1}\n\n",
+      "expect": [
+        {
+          "n": 1
+        }
+      ]
+    },
+    {
+      "name": "crlf-terminators",
+      "cite": "WHATWG 9.2.6: CRLF character pair is a line terminator",
+      "stream": "data: {\"n\":1}\r\ndata: {\"n\":2}\r\n\r\n",
+      "expect": [
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        }
+      ]
+    },
+    {
+      "name": "cr-only-terminators",
+      "cite": "WHATWG 9.2.6: a single CR not followed by LF is a line terminator",
+      "stream": "data: {\"n\":1}\rdata: {\"n\":2}\r\r",
+      "expect": [
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        }
+      ]
+    },
+    {
+      "name": "comment-lines",
+      "cite": "WHATWG 9.2.6: 'If the line starts with a U+003A COLON character (:) Ignore the line.'",
+      "stream": ": keep-alive\ndata: {\"n\":1}\n: : nested colon\n\n",
+      "expect": [
+        {
+          "n": 1
+        }
+      ]
+    },
+    {
+      "name": "field-value-no-space",
+      "cite": "WHATWG 9.2.6: 'If value starts with a U+0020 SPACE character, remove it' -- removal is optional-on",
+      "stream": "data:{\"n\":1}\n\n",
+      "expect": [
+        {
+          "n": 1
+        }
+      ]
+    },
+    {
+      "name": "field-value-single-space-only",
+      "cite": "WHATWG 9.2.6: only ONE leading space is removed (JSON tolerates the remainder)",
+      "stream": "data:  {\"n\":1}\n\n",
+      "expect": [
+        {
+          "n": 1
+        }
+      ]
+    },
+    {
+      "name": "unknown-field-ignored",
+      "cite": "WHATWG 9.2.6 process field: 'Otherwise: The field is ignored.'",
+      "stream": "foo: bar\ndata: {\"n\":1}\n\n",
+      "expect": [
+        {
+          "n": 1
+        }
+      ]
+    },
+    {
+      "name": "event-field-not-message",
+      "cite": "WHATWG 9.2.6 dispatch step 5: non-empty event type buffer dispatches a CUSTOM event, not 'message'",
+      "stream": "event: ping\ndata: {\"n\":1}\n\n",
+      "expect": []
+    },
+    {
+      "name": "event-field-scoped-to-one-event",
+      "cite": "WHATWG 9.2.6 dispatch step 7: 'Set the data buffer and the event type buffer to the empty string'",
+      "stream": "event: ping\ndata: {\"n\":1}\n\ndata: {\"n\":2}\n\n",
+      "expect": [
+        {
+          "n": 2
+        }
+      ]
+    },
+    {
+      "name": "empty-data-buffer-not-dispatched",
+      "cite": "WHATWG 9.2.6 dispatch step 2: 'If the data buffer is an empty string, ... return'",
+      "stream": "data:\ndata:\n\n",
+      "expect": []
+    },
+    {
+      "name": "official-yhoo-example",
+      "cite": "WHATWG 9.2.6 example stream (data: YHOO / data: +2 / data: 10)",
+      "stream": "data: YHOO\ndata: +2\ndata: 10\n\n",
+      "expect": []
+    },
+    {
+      "name": "incomplete-event-at-eof",
+      "cite": "WHATWG 9.2.6: 'If the file ends in the middle of an event, before the final empty line, the incomplete event is not dispatched.' DEVIATION (see README): hotdog dispatches a complete JSON payload as soon as its data LINE ends -- line granularity, no final blank line required",
+      "stream": "data: {\"n\":1}\n",
+      "expect": [
+        {
+          "n": 1
+        }
+      ],
+      "deviation": true
+    },
+    {
+      "name": "truncated-json-at-eof",
+      "cite": "WHATWG 9.2.6: incomplete event at EOF is discarded",
+      "stream": "data: {\"n\":",
+      "expect": []
+    },
+    {
+      "name": "multi-line-data-json",
+      "cite": "WHATWG 9.2.6: 'Append the field value to the data buffer, then append a single LF' -- for a JSON payload split across data lines the LF joins tokens; JSON is whitespace-insensitive between tokens, so hotdog's newline-less concat parses identically",
+      "stream": "data: {\"n\"\ndata: :1}\n\n",
+      "expect": [
+        {
+          "n": 1
+        }
+      ]
+    }
+  ]
+}

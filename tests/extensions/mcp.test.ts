@@ -118,14 +118,35 @@ describe("parseMcpContentBlock", () => {
     expect(result).toEqual({ type: "image", data: "base64data", mimeType: "image/png" });
   });
 
-  it("parses resource block with text", () => {
-    const result = parseMcpContentBlock({ type: "resource", uri: "file:///test.txt", mimeType: "text/plain", text: "content" });
+  it("parses resource block with text (fields nested under block.resource, per spec)", () => {
+    const result = parseMcpContentBlock({
+      type: "resource",
+      resource: { uri: "file:///test.txt", mimeType: "text/plain", text: "content" },
+    });
     expect(result).toMatchObject({ type: "resource", uri: "file:///test.txt", text: "content" });
   });
 
   it("parses resource block with blob", () => {
-    const result = parseMcpContentBlock({ type: "resource", uri: "file:///test.bin", mimeType: "application/octet-stream", blob: "binarydata" });
+    const result = parseMcpContentBlock({
+      type: "resource",
+      resource: { uri: "file:///test.bin", mimeType: "application/octet-stream", blob: "binarydata" },
+    });
     expect(result.blob).toBe("binarydata");
+  });
+
+  it("parses audio block", () => {
+    const result = parseMcpContentBlock({ type: "audio", data: "aud", mimeType: "audio/wav" });
+    expect(result).toEqual({ type: "audio", data: "aud", mimeType: "audio/wav" });
+  });
+
+  it("parses resource_link block", () => {
+    const result = parseMcpContentBlock({
+      type: "resource_link",
+      uri: "file:///a.rs",
+      name: "a.rs",
+      mimeType: "text/x-rust",
+    });
+    expect(result).toMatchObject({ type: "resource_link", uri: "file:///a.rs", name: "a.rs" });
   });
 
   it("maps null, empty, and unknown blocks to type unknown", () => {
@@ -162,6 +183,21 @@ describe("contentBlocksToString", () => {
 
   it("renders unknown blocks as a placeholder", () => {
     expect(contentBlocksToString([{ type: "weird" }])).toBe("[Unknown content block]");
+  });
+
+  it("renders audio blocks with mime type and byte count", () => {
+    expect(contentBlocksToString([{ type: "audio", data: "abcd", mimeType: "audio/wav" }]))
+      .toBe("[Audio: audio/wav (4 bytes)]");
+  });
+
+  it("renders resource_link blocks with name and uri", () => {
+    expect(contentBlocksToString([{ type: "resource_link", uri: "file:///a.rs", name: "a.rs" }]))
+      .toBe("[Resource link: a.rs file:///a.rs]");
+  });
+
+  it("renders blob-only resource blocks as a placeholder with size", () => {
+    expect(contentBlocksToString([{ type: "resource", uri: "file:///b.bin", blob: "12345" }]))
+      .toBe("[Resource: file:///b.bin (5 bytes blob)]");
   });
 
   it("handles empty blocks array", () => {

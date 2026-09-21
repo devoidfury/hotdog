@@ -1,0 +1,9 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle",
+    "retrieved": "2026-09-21",
+    "sha256": "7d0af0de7a40e3f9fd9e5f8fbb22184ff5ecfd5406422da9e6b1695f6de07912"
+  },
+  "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"notifications/initialized\"\n}"
+}

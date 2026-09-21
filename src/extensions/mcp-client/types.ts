@@ -12,9 +12,12 @@ export function jsonRpcNotification(method: string, params?: unknown): Record<st
   return { jsonrpc: "2.0", method, ...(params != null ? { params } : {}) };
 }
 
+/** The MCP protocol version this client implements and requires. */
+export const MCP_PROTOCOL_VERSION = "2025-11-25";
+
 export function mcpInitializeRequest(): Record<string, unknown> {
   return {
-    protocolVersion: "2025-11-25",
+    protocolVersion: MCP_PROTOCOL_VERSION,
     capabilities: {
       roots: { listChanged: false },
       sampling: {},
@@ -121,6 +124,7 @@ export interface McpContentBlock {
   data?: string;
   mimeType?: string;
   uri?: string;
+  name?: string;
   blob?: string;
 }
 
@@ -146,14 +150,31 @@ export function parseMcpContentBlock(block: Record<string, unknown> | null): Mcp
         data: (block.data as string) || "",
         mimeType: (block.mimeType as string) || "",
       };
-    case "resource":
+    case "audio":
+      return {
+        type: "audio",
+        data: (block.data as string) || "",
+        mimeType: (block.mimeType as string) || "",
+      };
+    case "resource_link":
+      return {
+        type: "resource_link",
+        uri: (block.uri as string) || "",
+        name: (block.name as string) || "",
+        mimeType: (block.mimeType as string) || "",
+      };
+    case "resource": {
+      // MCP server/tools "Embedded Resources": the fields ride NESTED under
+      // block.resource, e.g. {"type":"resource","resource":{uri,text|blob}}.
+      const res = (block.resource as Record<string, unknown>) || {};
       return {
         type: "resource",
-        uri: (block.uri as string) || "",
-        mimeType: (block.mimeType as string) || "",
-        text: (block.text as string) || undefined,
-        blob: (block.blob as string) || undefined,
+        uri: (res.uri as string) || "",
+        mimeType: (res.mimeType as string) || "",
+        text: (res.text as string) || undefined,
+        blob: (res.blob as string) || undefined,
       };
+    }
     default:
       return { type: "unknown" };
   }

@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://www.jsonrpc.org/specification",
+    "retrieved": "2026-09-21",
+    "sha256": "f75666e90be2eed71e3d075295273f6b7b365ae5a3f7ed1c2301c5b2b8be1103",
+    "note": "Section 7 Examples: rpc call of non-existent method (response side)"
+  },
+  "raw": "{\"jsonrpc\": \"2.0\", \"error\": {\"code\": -32601, \"message\": \"Method not found\"}, \"id\": \"1\"}"
+}

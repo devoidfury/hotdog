@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "source": "derived",
+    "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+    "retrieved": "2026-09-21",
+    "sha256": "d550eff3d566de7e0dd8922bcadbd376d9139fa84b86b1fe56f467e94a1144a3",
+    "note": "The five verbatim content-block examples from 'Tool Result' collected into one array (mechanical assembly)"
+  },
+  "raw": "[\n  {\n    \"type\": \"text\",\n    \"text\": \"Tool result text\"\n  },\n  {\n    \"type\": \"image\",\n    \"data\": \"base64-encoded-data\",\n    \"mimeType\": \"image/png\",\n    \"annotations\": {\n      \"audience\": [\"user\"],\n      \"priority\": 0.9\n    }\n  },\n  {\n    \"type\": \"audio\",\n    \"data\": \"base64-encoded-audio-data\",\n    \"mimeType\": \"audio/wav\"\n  },\n  {\n    \"type\": \"resource_link\",\n    \"uri\": \"file:///project/src/main.rs\",\n    \"name\": \"main.rs\",\n    \"description\": \"Primary application entry point\",\n    \"mimeType\": \"text/x-rust\"\n  },\n  {\n    \"type\": \"resource\",\n    \"resource\": {\n      \"uri\": \"file:///project/src/main.rs\",\n      \"mimeType\": \"text/x-rust\",\n      \"text\": \"fn main() {\\n    println!(\\\"Hello world!\\\");\\n}\",\n      \"annotations\": {\n        \"audience\": [\"user\", \"assistant\"],\n        \"priority\": 0.7,\n        \"lastModified\": \"2025-05-03T14:30:00Z\"\n      }\n    }\n  }\n]"
+}

@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+    "retrieved": "2026-09-21",
+    "sha256": "90fe928d3eafd36fdbc0bf82ca22672fba4baf106d732b2bfa04de219fff8990",
+    "note": "chat/completions 'Functions' example curl -d body (openai-openapi repo, archived official spec); dedented"
+  },
+  "raw": "{\n                  \"model\": \"gpt-6-astra\",\n                  \"messages\": [\n                    {\n                      \"role\": \"user\",\n                      \"content\": \"What is the weather like in Boston today?\"\n                    }\n                  ],\n                  \"tools\": [\n                    {\n                      \"type\": \"function\",\n                      \"function\": {\n                        \"name\": \"get_current_weather\",\n                        \"description\": \"Get the current weather in a given location\",\n                        \"parameters\": {\n                          \"type\": \"object\",\n                          \"properties\": {\n                            \"location\": {\n                              \"type\": \"string\",\n                              \"description\": \"The city and state, e.g. San Francisco, CA\"\n                            },\n                            \"unit\": {\n                              \"type\": \"string\",\n                              \"enum\": [\"celsius\", \"fahrenheit\"]\n                            }\n                          },\n                          \"required\": [\"location\"]\n                        }\n                      }\n                    }\n                  ],\n                  \"tool_choice\": \"auto\"\n}"
+}

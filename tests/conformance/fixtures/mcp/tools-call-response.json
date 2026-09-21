@@ -1,0 +1,9 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+    "retrieved": "2026-09-21",
+    "sha256": "eb19dc4e3f7cde6ab9092df4bb234782dd22b99abf0bd5f4fb5f68a6101676b2"
+  },
+  "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"result\": {\n    \"content\": [\n      {\n        \"type\": \"text\",\n        \"text\": \"Current weather in New York:\\nTemperature: 72\\u00b0F\\nConditions: Partly cloudy\"\n      }\n    ],\n    \"isError\": false\n  }\n}"
+}

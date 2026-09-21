@@ -109,9 +109,21 @@ export function contentBlocksToString(blocks: McpContentBlock[]): string {
       case "image":
         parts.push(`[Image: ${block.mimeType || "image"} (${(block.data || "").length} bytes)]`);
         break;
+      case "audio":
+        parts.push(`[Audio: ${block.mimeType || "audio"} (${(block.data || "").length} bytes)]`);
+        break;
+      case "resource_link":
+        parts.push(
+          `[Resource link: ${block.name ? `${block.name} ` : ""}${block.uri || ""}]`,
+        );
+        break;
       case "resource":
         if (block.text) {
           parts.push(`[Resource: ${block.uri || ""}]\n${block.text}`);
+        } else {
+          parts.push(
+            `[Resource: ${block.uri || ""}${block.blob ? ` (${block.blob.length} bytes blob)` : ""}]`,
+          );
         }
         break;
       default:

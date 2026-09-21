@@ -9,6 +9,13 @@ export interface SseParserOptions {
 
 const DEFAULT_MAX_JSON_BUFFER = 500_000;
 
+/** The parser's contract yields JSON objects; scalars/arrays are protocol
+ * noise on an SSE stream and must not leak to consumers (WHATWG SSE itself
+ * treats data as an opaque string -- the JSON filter is hotdog's contract). */
+function isObjectData(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 /** Parse an SSE stream into JSON objects; reassembles payloads split across chunks. */
 export async function* parseSse(
   stream: ReadableStream<Uint8Array>,
@@ -39,8 +46,11 @@ export class SseParser {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        // WHATWG HTML 9.2.6: lines end with CRLF, a lone LF, or a lone CR.
+        // A CR at the buffer tail is held one read: it may be the first half
+        // of a CRLF split across chunks (the split consumes it otherwise).
+        const lines = buffer.split(/\r\n|\r|\n/);
+        buffer = (buffer.endsWith("\r") ? "\r" : "") + (lines.pop() || "");
 
         for (const line of lines) {
           const trimmed = line.trim();
@@ -65,7 +75,7 @@ export class SseParser {
             if (jsonBuffer) {
               try {
                 const data = JSON.parse(jsonBuffer);
-                yield data;
+                if (isObjectData(data)) yield data;
               } catch {
                 this.#onWarning(
                   `[sse] malformed JSON on [DONE] flush (${jsonBuffer.length} chars)`,
@@ -77,12 +87,16 @@ export class SseParser {
           }
           try {
             const data = JSON.parse(payload);
-            yield data;
+            if (isObjectData(data)) yield data;
+            else
+              this.#onWarning(
+                `[sse] non-object JSON data payload ignored: ${payload.slice(0, 80)}`,
+              );
           } catch {
             jsonBuffer += payload;
             try {
               const data = JSON.parse(jsonBuffer);
-              yield data;
+              if (isObjectData(data)) yield data;
               jsonBuffer = "";
             } catch {
               if (jsonBuffer.length > this.#maxJsonBuffer) {
@@ -99,7 +113,7 @@ export class SseParser {
       if (jsonBuffer) {
         try {
           const data = JSON.parse(jsonBuffer);
-          yield data;
+          if (isObjectData(data)) yield data;
         } catch {
           this.#onWarning(
             `[sse] truncated JSON at EOF (${jsonBuffer.length} chars)`,

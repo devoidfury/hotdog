@@ -1,0 +1,9 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+    "retrieved": "2026-09-21",
+    "sha256": "a03ae553ba687a5b7668ebcaedb16051eafb10fc869da94854f98af44ea2fad8"
+  },
+  "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"result\": {\n    \"tools\": [\n      {\n        \"name\": \"get_weather\",\n        \"title\": \"Weather Information Provider\",\n        \"description\": \"Get current weather information for a location\",\n        \"inputSchema\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"location\": {\n              \"type\": \"string\",\n              \"description\": \"City name or zip code\"\n            }\n          },\n          \"required\": [\"location\"]\n        },\n        \"icons\": [\n          {\n            \"src\": \"https://example.com/weather-icon.png\",\n            \"mimeType\": \"image/png\",\n            \"sizes\": [\"48x48\"]\n          }\n        ],\n        \"execution\": {\n          \"taskSupport\": \"optional\"\n        }\n      }\n    ],\n    \"nextCursor\": \"next-page-cursor\"\n  }\n}"
+}

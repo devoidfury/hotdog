@@ -34,6 +34,13 @@ export interface McpTransport {
   /** Send a notification (fire-and-forget). */
   sendNotification(serialized: string): void;
 
+  /**
+   * Set the negotiated MCP protocol version after a successful initialize.
+   * HTTP transports must send it as the MCP-Protocol-Version header on all
+   * subsequent requests (transports spec, 2025-06-18+); no-op elsewhere.
+   */
+  setProtocolVersion?(version: string): void;
+
   destroy(): Promise<void>;
 
   /** True for streaming transports (stdio): responses arrive via onMessage. HTTP returns results from send() instead. */
@@ -251,6 +258,7 @@ export class HttpTransport implements McpTransport {
   readonly #url: string;
   readonly #headers: Record<string, string>;
   readonly #timeoutMs: number;
+  #protocolVersion: string | null = null;
   #closeHandlers: TransportCloseHandler[] = [];
   #destroyed: boolean = false;
 
@@ -269,6 +277,10 @@ export class HttpTransport implements McpTransport {
   /** @internal Exposed for testing. */
   get timeoutMs(): number { return this.#timeoutMs; }
 
+  setProtocolVersion(version: string): void {
+    this.#protocolVersion = version;
+  }
+
   async send(serialized: string): Promise<unknown> {
     if (this.#destroyed) {
       throw new McpError("Transport is destroyed");
@@ -279,6 +291,14 @@ export class HttpTransport implements McpTransport {
       "Accept": "application/json, text/event-stream",
       ...this.#headers,
     };
+    // MCP transports spec (2025-06-18+): after initialization the client MUST
+    // send MCP-Protocol-Version: <negotiated> on every subsequent HTTP
+    // request; a strict server answers 400 without it. Set by McpClient once
+    // initialize() succeeds -- the initialize request itself carries the
+    // version in its params, not a header.
+    if (this.#protocolVersion) {
+      headers["MCP-Protocol-Version"] = this.#protocolVersion;
+    }
 
     let response: Response;
     try {

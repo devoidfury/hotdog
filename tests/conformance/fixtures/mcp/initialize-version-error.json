@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle",
+    "retrieved": "2026-09-21",
+    "sha256": "4ee4befba15c01fa4c697fd7f3fed12f15c5727d9506fd68f48430aefde3738d",
+    "note": "Server-side error example for protocol version mismatch (Error Handling section)"
+  },
+  "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"error\": {\n    \"code\": -32602,\n    \"message\": \"Unsupported protocol version\",\n    \"data\": {\n      \"supported\": [\"2024-11-05\"],\n      \"requested\": \"1.0.0\"\n    }\n  }\n}"
+}

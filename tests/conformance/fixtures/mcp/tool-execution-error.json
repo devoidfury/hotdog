@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "source": "official-example",
+    "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+    "retrieved": "2026-09-21",
+    "sha256": "1def48b83d00756dcb741cd2a9c9fcb7d4430f9e9a2ba7841d7a29de91286bc2",
+    "note": "Tool execution error: isError true inside a JSON-RPC result (Error Handling section)"
+  },
+  "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"result\": {\n    \"content\": [\n      {\n        \"type\": \"text\",\n        \"text\": \"Invalid departure date: must be in the future. Current date is 08/08/2025.\"\n      }\n    ],\n    \"isError\": true\n  }\n}"
+}

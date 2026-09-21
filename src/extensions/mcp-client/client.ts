@@ -6,8 +6,10 @@ import {
   jsonRpcNotification,
   mcpToolCallRequest,
   mcpInitializeRequest,
+  MCP_PROTOCOL_VERSION,
   McpError,
 } from "./types.ts";
+import { logger } from "@utils/logger.ts";
 import { McpTransport, StdioTransport, HttpTransport, DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
 
 class PendingRequest {
@@ -211,6 +213,21 @@ export class McpClient {
   async initialize(): Promise<unknown> {
     const result = await this._sendRequest("initialize", mcpInitializeRequest());
     const response = parseMcpInitializeResponse(result as Record<string, unknown>);
+
+    // MCP lifecycle "Version Negotiation": a client that does not support the
+    // version in the server's response SHOULD disconnect. Decision (owner,
+    // 2026-09-21): warn-and-continue -- real-world servers frequently echo a
+    // wrong or missing version, and hard-failing breaks them. The mismatch is
+    // never silent.
+    if (response.protocolVersion !== MCP_PROTOCOL_VERSION) {
+      logger.warn(
+        `[mcp] server protocol version "${response.protocolVersion ?? "none"}" does not match client "${MCP_PROTOCOL_VERSION}"; continuing anyway`,
+      );
+    }
+
+    // MCP transports spec: once the version is negotiated, HTTP transports
+    // must stamp it on every subsequent request. (No-op for stdio.)
+    this.#transport.setProtocolVersion?.(response.protocolVersion ?? MCP_PROTOCOL_VERSION);
 
     this.#serverCapabilities = response.capabilities;
     this.#serverInfo = response.serverInfo;

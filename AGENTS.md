@@ -11,6 +11,7 @@ JS project `hotdog` — an AI agent harness.
   - `bun bin/hotdog info` — system info and diagnostics
   - `bun bin/hotdog show-prompt` — render system prompt to stdout
   - `bun bin/hotdog profiles` — list all available profiles
+  - `bun bin/hotdog rescue` — diagnose config files (paths, resolution chain, JSON syntax, unknown keys); `rescue fix` repairs comments/trailing commas
   - `bun bin/hotdog prompt "text"` — one-shot mode
 - Run Tests: `bun run test` (expected runtime < 10 seconds)
   - with Coverage report: `bun run coverage`

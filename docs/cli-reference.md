@@ -14,6 +14,8 @@ hotdog profiles                  # List all available profiles
 hotdog sessions show             # Show session logs
 hotdog sessions delete <id>      # Delete a session
 hotdog sessions cleanup          # Remove old sessions
+hotdog rescue                    # Diagnose config files (paths, syntax, unknown keys)
+hotdog rescue fix                # ...and repair comments/trailing commas (.bak kept)
 hotdog webui                     # Start the web UI server
 ```
 

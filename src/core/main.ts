@@ -16,14 +16,15 @@ import { createCompletionService } from "./completion.ts";
 import type { CoreContext, ExtensionInstance, ToolMetadataPayload } from "./extensions/types.ts";
 import type { ToolMetadata } from "./extensions/tool-registry.ts";
 import { parseArgs, generateHelpText } from "./cli.ts";
-import { loadConfig, buildConfig, type CliArgv } from "./config/index.ts";
+import { loadConfig, buildConfig, getDefaultConfig, type CliArgv } from "./config/index.ts";
+import { runRescue } from "./config/rescue.ts";
 import type { ProfileDef } from "./config/profiles.ts";
 import type { ResolvedConfig } from "./extensions/types.ts";
 import type { ProviderDef } from "./config/providers.ts";
 import { getLayerDefault } from "./config/schema-loader.ts";
 import { cliFlagsFromSchema, CONFIG_SCHEMA, type CoreConfigWithExtensions } from "./config/schema-loader.ts";
 import { ConfigRegistry } from "./extensions/config.ts";
-import { CliError } from "./error.ts";
+import { CliError, formatError } from "./error.ts";
 import { createSubcommandRegistry, type CliSubcommandRegistry } from "./extensions/registries.ts";
 import {
   createWireFormatRegistry,
@@ -205,9 +206,33 @@ export async function main(): Promise<number> {
   // Defaults-only config, needed early to read extension.json metadata
   // (CLI flags, subcommands, config params) without loading extension code --
   // this is what makes `--help` and subcommand discovery work pre-parse.
-  const minimalConfig = await loadConfig(undefined);
+  // A broken defaults.json must not kill this path: keep the error and keep
+  // going on built-in defaults so `rescue` can reach the user.
+  let earlyConfigError: unknown = null;
+  let minimalConfig;
+  try {
+    minimalConfig = await loadConfig(undefined);
+  } catch (e) {
+    earlyConfigError = e;
+    minimalConfig = getDefaultConfig();
+  }
 
   const cliSubcommandRegistry = createSubcommandRegistry();
+  // Core diagnostic subcommand, registered directly (not via extension.json):
+  // when the config is broken no extension handler ever loads, so rescue must
+  // live above the config layer. Dispatched below before buildConfig().
+  const rescueHandler = (cliArgs: CliArgv) =>
+    runRescue({
+      configDirArg: cliArgs.configDir ?? null,
+      configFileArg: cliArgs.config ?? null,
+      fix: Array.isArray(cliArgs.args) && (cliArgs.args as string[]).includes("fix"),
+      configParams: configRegistry.getConfigParams(),
+    });
+  cliSubcommandRegistry.register("rescue", {
+    description:
+      "Diagnose config files: paths, resolution chain, syntax. 'fix' repairs comments/trailing commas",
+    handler: rescueHandler,
+  });
   await registerExtensionMetadata(
     minimalConfig as CoreConfigWithExtensions,
     configRegistry,
@@ -252,7 +277,29 @@ export async function main(): Promise<number> {
     return 0;
   }
 
-  const { resolved, config } = await buildConfig(cli as CliArgv, configRegistry);
+  // rescue runs before anything that reads the config it is diagnosing.
+  if (cli.subcommand === "rescue") {
+    return await rescueHandler(cli as CliArgv);
+  }
+
+  if (earlyConfigError) {
+    logger.error(formatError(earlyConfigError));
+    console.log(
+      "The config file is broken, so nothing else can start. Run `hotdog rescue` for the exact line,\n" +
+        "or `hotdog rescue fix` to automatically repair comments and trailing commas (keeps a .bak).",
+    );
+    return 1;
+  }
+
+  let built;
+  try {
+    built = await buildConfig(cli as CliArgv, configRegistry);
+  } catch (e) {
+    logger.error(formatError(e));
+    console.log("Run `hotdog rescue` for config diagnostics (paths, syntax, unknown keys).");
+    return 1;
+  }
+  const { resolved, config } = built;
 
   if (!resolved.baseUrl) {
     logger.warn(

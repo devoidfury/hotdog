@@ -211,6 +211,7 @@ Usage: hotdog                                  Interactive CLI (needs a terminal
        hotdog sessions show [--session-id <id>] [--json] [--tool-index]
        hotdog sessions delete <id>
        hotdog sessions cleanup [--older-than <days>]
+       hotdog rescue [fix]                     Diagnose (and repair) config files
        hotdog prompt "One-shot prompt"         Same as -p
 
 A bare prompt is not a subcommand: use -p/--prompt or the "prompt" subcommand.

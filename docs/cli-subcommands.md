@@ -163,3 +163,4 @@ export function create(core) {
 | `prompt` | `ui-one-shot` | One-shot prompt mode — run a single prompt and exit |
 | `cli` | `ui-interactive-cli` | Interactive CLI session (default when stdin is TTY) |
 | `webui` | `webui` | Start the WebUI server (HTTP + WebSocket + frontend) |
+| `rescue` | *(core)* | Config diagnostics; registered in `main()` and dispatched **before** `buildConfig()`, so it works when the config itself is broken (an extension-registered handler could never load in that state) |

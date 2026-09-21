@@ -183,3 +183,112 @@ export class CompletionService {
 export function createCompletionService(): CompletionService {
   return new CompletionService();
 }
+
+// ── Shared input parsing ─────────────────────────────────────────────────────
+// Used by every UI that wires completions so replacement semantics stay identical.
+
+function lastWord(text: string): string {
+  const ws = Math.max(text.lastIndexOf(" "), text.lastIndexOf("\t"));
+  return text.slice(ws + 1);
+}
+
+/** Parse input text into a CompletionContext: slash command name + argument. */
+export function parseCompletionContext(
+  line: string,
+  cursorPos: number,
+  agent: AgentLike,
+): CompletionContext {
+  const text = line.slice(0, cursorPos).trimStart();
+
+  let command: string | undefined;
+  let commandArg: string | undefined;
+
+  if (text.startsWith("/")) {
+    const afterSlash = text.slice(1);
+    const spaceIdx = afterSlash.indexOf(" ");
+    if (spaceIdx === -1) {
+      command = afterSlash.trim();
+      commandArg = "";
+    } else {
+      command = afterSlash.slice(0, spaceIdx).trim();
+      commandArg = afterSlash.slice(spaceIdx + 1).trimStart();
+    }
+  }
+
+  return { line, cursorPos, command, commandArg, agent };
+}
+
+/**
+ * The text a completion should replace only the word under the cursor, not the whole line.
+ * For "/cmd" (no space) it is the command word itself, including the leading slash;
+ * for "/prompt:name" it is what follows the colon.
+ * A completion mid-sentence must not clobber the preceding text.
+ */
+export function completionPrefix(line: string, cursorPos: number): string {
+  const text = line.slice(0, cursorPos).trimStart();
+  if (!text.startsWith("/")) return lastWord(line.slice(0, cursorPos));
+
+  const afterSlash = text.slice(1);
+  const spaceIdx = afterSlash.indexOf(" ");
+  if (spaceIdx === -1) {
+    const colonIdx = afterSlash.indexOf(":");
+    if (colonIdx !== -1) return afterSlash.slice(colonIdx + 1);
+    return "/" + afterSlash;
+  }
+  return lastWord(afterSlash.slice(spaceIdx + 1));
+}
+
+// ── Shared registration helpers ──────────────────────────────────────────────
+
+/**
+ * Register the generic slash command name completion: /<tab> -> list all commands.
+ * Command-specific argument completions are registered via registerCommandCompletions from COMMANDS_REGISTER hook.
+ */
+export function registerSlashCommandNameCompletion(
+  completionService: CompletionService,
+): void {
+  completionService.register(
+    (ctx) => {
+      const text = ctx.line.slice(0, ctx.cursorPos).trimStart();
+      return text.startsWith("/") && !text.slice(1).includes(" ");
+    },
+    (ctx) => {
+      const agent = ctx.agent;
+      const afterSlash = ctx.line.slice(0, ctx.cursorPos).trimStart().slice(1);
+      const prefix = afterSlash.toLowerCase();
+
+      const commandNames = agent.commandRegistry?.names() || [];
+      return commandNames
+        .filter((name) => name.toLowerCase().startsWith(prefix))
+        .map((name) => ({ value: `/${name}` }));
+    },
+    "core:slash-commands",
+  );
+}
+
+/**
+ * Register completion handlers from command definitions (COMMANDS_REGISTER). `seen`, when provided,
+ * dedupes across repeated hook fires (multi-session UIs fire COMMANDS_REGISTER once per agent build with the same names).
+ */
+export function registerCommandCompletions(
+  completionService: CompletionService,
+  registry: { all: () => Map<string, { completion?: CompletionHandler }> },
+  source: string,
+  seen?: Set<string>,
+): void {
+  for (const [name, def] of registry.all()) {
+    if (!def.completion) continue;
+    if (seen) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+    }
+
+    const matcher = (ctx: CompletionContext): boolean => {
+      const cmd = ctx.command;
+      if (!cmd) return false;
+      return cmd === name || cmd.startsWith(`${name}:`);
+    };
+
+    completionService.register(matcher, def.completion, `${source}:${name}`);
+  }
+}

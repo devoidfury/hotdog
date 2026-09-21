@@ -94,6 +94,21 @@ describe("file-attachment completion matcher", () => {
     const ctx = { line: "Read @/etc/passwd", cursorPos: 17, agent: mockAgent } as any;
     expect(matcher(ctx)).toBe(true);
   });
+
+  it("matches bare relative path starting with ./", () => {
+    const ctx = { line: "see ./te", cursorPos: 8, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(true);
+  });
+
+  it("matches bare path containing a slash", () => {
+    const ctx = { line: "see src/ma", cursorPos: 10, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(true);
+  });
+
+  it("does not match plain word without slash or dot prefix", () => {
+    const ctx = { line: "see tea", cursorPos: 7, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(false);
+  });
 });
 
 describe("file-attachment completion handler", () => {
@@ -179,10 +194,44 @@ describe("file-attachment completion handler", () => {
     expect(values).toContain("@src/core/agent.ts");
   });
 
+  it("completes bare ./ path without @ prefix", async () => {
+    const ctx = { line: "see ./te", cursorPos: 8, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    const values = results.map((r) => r.value);
+    expect(values).toContain("./test.txt");
+    expect(values).toContain("./test2.txt");
+    expect(values).not.toContain("@./test.txt");
+    expect(values).not.toContain("./README.md");
+  });
+
+  it("completes bare subdirectory path without @ prefix", async () => {
+    const ctx = { line: "see src/ma", cursorPos: 10, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    const values = results.map((r) => r.value);
+    expect(values).toContain("src/main.ts");
+  });
+
   it("returns empty array when no matches", async () => {
     const ctx = { line: "Read @zzzzz", cursorPos: 12, agent: mockAgent } as any;
     const results = await completion(ctx);
     expect(results).toEqual([]);
+  });
+
+  it("returns empty array when a relative path escapes the workspace", async () => {
+    const ctx = { line: "Read @../outside/secre", cursorPos: 23, agent: mockAgent } as any;
+    expect(await completion(ctx)).toEqual([]);
+  });
+
+  it("returns empty array for an escaping bare path without @", async () => {
+    const ctx = { line: "see ../../etc/passwd", cursorPos: 20, agent: mockAgent } as any;
+    expect(await completion(ctx)).toEqual([]);
+  });
+
+  it("returns empty array when the directory does not exist (readdir catch-all)", async () => {
+    const ctx = { line: "Read @no-such-dir/file", cursorPos: 21, agent: mockAgent } as any;
+    expect(await completion(ctx)).toEqual([]);
   });
 
   it("returns empty array when not starting with @", async () => {

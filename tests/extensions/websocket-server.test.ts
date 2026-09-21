@@ -15,6 +15,9 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { createCompletionService } from "@core/completion.ts";
+import { create } from "@extensions/websocket/index.ts";
 import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
 
 const testRoleReg = createRoleMappingRegistry();
@@ -1291,5 +1294,122 @@ describe("question tool integration (bridge)", () => {
     await expect(p).resolves.toEqual({ q1: "" });
     // The session manager's interrupt was called; no crash, session intact.
     expect(wsServer.sessionRegistry.get(sessionId)).not.toBeNull();
+  });
+});
+
+// ── COMPLETE message ─────────────────────────────────────────────────────
+
+describe("createWsServer - COMPLETE", () => {
+  let wsServer: ReturnType<typeof createWsServer>;
+
+  afterEach(() => {
+    wsServer?.stopCleanupLoop();
+  });
+
+  async function connectWithCompletion(
+    register?: (completion: ReturnType<typeof createCompletionService>) => void,
+  ): Promise<{ ws: MockWs; sessionId: string }> {
+    const core = createWsMockCore();
+    register?.(core.completion);
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    return { ws, sessionId: created.sessionId };
+  }
+
+  it("returns completions with the replacement prefix", async () => {
+    const { ws, sessionId } = await connectWithCompletion((completion) => {
+      completion.register(
+        (ctx) => ctx.line.slice(0, ctx.cursorPos).endsWith("@sr"),
+        () => [{ value: "@src/core/" }],
+        "test:paths",
+      );
+    });
+
+    wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: C2S.COMPLETE, sessionId, requestId: 7, line: "review @sr", cursorPos: 10 }),
+    );
+
+    const msg = await waitForMessage(ws, S2C.COMPLETIONS);
+    expect(msg.requestId).toBe(7);
+    expect(msg.sessionId).toBe(sessionId);
+    expect(msg.prefix).toBe("@sr");
+    expect(msg.options).toEqual([{ value: "@src/core/", display: "@src/core/" }]);
+  });
+
+  it("parses slash command context and keeps the slash in the prefix", async () => {
+    const { ws, sessionId } = await connectWithCompletion((completion) => {
+      completion.register(
+        (ctx) => ctx.command === "mo",
+        () => [{ value: "/model", display: "/model" }],
+        "test:cmds",
+      );
+    });
+
+    wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: C2S.COMPLETE, sessionId, requestId: 1, line: "/mo", cursorPos: 3 }),
+    );
+
+    const msg = await waitForMessage(ws, S2C.COMPLETIONS);
+    expect(msg.prefix).toBe("/mo");
+    expect(msg.options).toEqual([{ value: "/model", display: "/model" }]);
+  });
+
+  it("does not answer for an unknown session", async () => {
+    const { ws } = await connectWithCompletion();
+    const before = ws.messages.length;
+
+    wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: C2S.COMPLETE, sessionId: "no-such-session", line: "/mo", cursorPos: 3 }),
+    );
+    await new Promise((r) => setTimeout(r, 25));
+
+    expect(ws.messages.length).toBe(before);
+  });
+
+  it("answers malformed input with empty options instead of crashing", async () => {
+    const { ws, sessionId } = await connectWithCompletion();
+
+    wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: C2S.COMPLETE, sessionId, requestId: 2, cursorPos: "bad" }),
+    );
+
+    const msg = await waitForMessage(ws, S2C.COMPLETIONS);
+    expect(msg.requestId).toBe(2);
+    expect(msg.prefix).toBe("");
+    expect(msg.options).toEqual([]);
+  });
+});
+
+// ── Extension create(): completion registration ────────────────────────────
+
+describe("websocket extension create()", () => {
+  it("registers slash-name completion and deduped command-arg completions", () => {
+    const core = createWsMockCore();
+    create(core);
+
+    const handlers = core._registeredHooks[HOOKS.COMMANDS_REGISTER];
+    expect(handlers?.length).toBe(1);
+    // Slash-name completion is registered up front, before any agent build.
+    expect(core.completion.handlerCount()).toBe(1);
+
+    const registry = {
+      all: () =>
+        new Map<string, { completion?: () => [] }>([
+          ["reasoning", { completion: () => [] }],
+          ["nocmp", {}],
+        ]),
+    };
+    handlers[0]!({ registry });
+    expect(core.completion.handlerCount()).toBe(2);
+
+    // A second COMMANDS_REGISTER (another session's agent build) adds nothing.
+    handlers[0]!({ registry });
+    expect(core.completion.handlerCount()).toBe(2);
   });
 });

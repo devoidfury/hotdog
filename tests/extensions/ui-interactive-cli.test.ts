@@ -200,7 +200,7 @@ describe("registerSlashCommandNameCompletion", () => {
 
     registerSlashCommandNameCompletion(mockCompletionService);
 
-    expect(registeredProviders).toContain("ui-interactive-cli:slash-commands");
+    expect(registeredProviders).toContain("core:slash-commands");
   });
 
   it("matcher and handler complete command names only before the first space", () => {
@@ -470,7 +470,7 @@ describe("buildReadlineCompleter", () => {
 
   it("handles no agent available", async () => {
     const mockSessionManager = { getAgent: () => null } as never;
-    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never, false);
+    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never);
 
     await expect(invokeCompleter(completer, "test-line")).resolves.toEqual([[], "test-line"]);
   });
@@ -478,7 +478,7 @@ describe("buildReadlineCompleter", () => {
   it("handles slash command name completion", async () => {
     const mockSessionManager = { getAgent: () => mockAgent } as never;
     const coreWithResults = { completion: { request: async () => [{ value: "/help" }] } };
-    const completer = buildReadlineCompleter(mockSessionManager, coreWithResults as never, false);
+    const completer = buildReadlineCompleter(mockSessionManager, coreWithResults as never);
 
     const [matches, prefix] = await invokeCompleter(completer, "/hel");
     expect(prefix).toBe("/hel");
@@ -487,23 +487,44 @@ describe("buildReadlineCompleter", () => {
 
   it("handles command argument prefix after a space", async () => {
     const mockSessionManager = { getAgent: () => mockAgent } as never;
-    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never, false);
+    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never);
 
     const [, prefix] = await invokeCompleter(completer, "/model prov/a");
     expect(prefix).toBe("prov/a");
   });
 
+  it("uses only the last word as prefix for mid-string slash-command attachments", async () => {
+    const mockSessionManager = { getAgent: () => mockAgent } as never;
+    const coreWithResults = { completion: { request: async () => [{ value: "@package.json" }] } };
+    const completer = buildReadlineCompleter(mockSessionManager, coreWithResults as never);
+
+    const line = "/loop I want you to review this software, including @pac";
+    const [matches, prefix] = await invokeCompleter(completer, line);
+    expect(prefix).toBe("@pac");
+    expect(matches).toEqual(["@package.json"]);
+  });
+
+  it("uses only the last word as prefix for non-slash input", async () => {
+    const mockSessionManager = { getAgent: () => mockAgent } as never;
+    const coreWithResults = { completion: { request: async () => [{ value: "@readme.md" }] } };
+    const completer = buildReadlineCompleter(mockSessionManager, coreWithResults as never);
+
+    const [matches, prefix] = await invokeCompleter(completer, "see the docs in @read");
+    expect(prefix).toBe("@read");
+    expect(matches).toEqual(["@readme.md"]);
+  });
+
   it("handles colon syntax prefix", async () => {
     const mockSessionManager = { getAgent: () => mockAgent } as never;
-    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never, false);
+    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never);
 
     const [, prefix] = await invokeCompleter(completer, "/prompt:dep");
     expect(prefix).toBe("dep");
   });
 
-  it("handles shell mode prefix", async () => {
+  it("handles plain-text shell-mode prefix (last word)", async () => {
     const mockSessionManager = { getAgent: () => mockAgent } as never;
-    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never, true);
+    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never);
 
     const [, prefix] = await invokeCompleter(completer, "ls fil");
     expect(prefix).toBe("fil");
@@ -512,7 +533,7 @@ describe("buildReadlineCompleter", () => {
   it("handles completion request error gracefully", async () => {
     const mockSessionManager = { getAgent: () => mockAgent } as never;
     const failingCore = { completion: { request: async () => { throw new Error("fail"); } } };
-    const completer = buildReadlineCompleter(mockSessionManager, failingCore as never, false);
+    const completer = buildReadlineCompleter(mockSessionManager, failingCore as never);
 
     await expect(invokeCompleter(completer, "/test")).resolves.toEqual([[], "/test"]);
   });

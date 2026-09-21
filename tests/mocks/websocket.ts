@@ -5,6 +5,7 @@ import type { AgentLike } from "@core/session/index.ts";
 import type { HookSystem } from "@core/hooks.ts";
 import type { HotdogServerSocket } from "@extensions/websocket/server.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
+import { createCompletionService } from "@core/completion.ts";
 import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
 import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
 
@@ -61,6 +62,7 @@ export function createWsMockCore(): any {
     },
     _registeredHooks: registeredHooks,
     config: {},
+    completion: createCompletionService(),
     resolved: {
       baseUrl: "http://localhost:8000",
       apiKey: "test-key",

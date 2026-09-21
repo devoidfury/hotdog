@@ -290,3 +290,33 @@ describe("CompletionService — context access", () => {
     expect(receivedCtx?.cursorPos).toBe(7);
   });
 });
+
+// ── completionPrefix ──────────────────────────────────────────────────────
+
+import { completionPrefix } from "@core/completion.ts";
+
+describe("completionPrefix", () => {
+  it("returns the whole slash command word including the slash", () => {
+    expect(completionPrefix("/mod", 4)).toBe("/mod");
+    expect(completionPrefix("/", 1)).toBe("/");
+  });
+
+  it("returns what follows the colon for colon-syntax commands", () => {
+    expect(completionPrefix("/prompt:na", 10)).toBe("na");
+  });
+
+  it("returns only the last word of a command argument", () => {
+    expect(completionPrefix("/loop review this, including @pac", 33)).toBe("@pac");
+    expect(completionPrefix("/model foo ", 11)).toBe("");
+  });
+
+  it("returns only the last word for plain text, even mid-line", () => {
+    expect(completionPrefix("review @wo please", 10)).toBe("@wo");
+    expect(completionPrefix("see ./sr", 8)).toBe("./sr");
+    expect(completionPrefix("hello world", 11)).toBe("world");
+  });
+
+  it("ignores leading whitespace when detecting a slash command", () => {
+    expect(completionPrefix("  /mod", 6)).toBe("/mod");
+  });
+});

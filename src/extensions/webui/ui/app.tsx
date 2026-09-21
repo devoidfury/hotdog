@@ -5,7 +5,7 @@
 
 import { mount, type Mounted, type Ref, type DomNode } from "@utils/jsx";
 import { reactiveState, effect, shortId } from "./utils.ts";
-import { createChat, type ChatController } from "./chat.ts";
+import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
 import {
   LoginScreen,
   focusLoginInput,
@@ -22,6 +22,25 @@ const sessionsAtom = reactiveState<SessionInfo[]>([]);
 const logsAtom = reactiveState<LogInfo[]>([]);
 const activeLogIdAtom = reactiveState<string | null>(null);
 const contextMenuAtom = reactiveState<ContextMenuState | null>(null);
+
+// Tab-completion popup for the composer (server-driven, see C2S.COMPLETE).
+interface CompletionMenu {
+  options: CompletionItem[];
+  /** Text before the caret that a chosen option replaces. */
+  prefix: string;
+  index: number;
+}
+const completionAtom = reactiveState<CompletionMenu | null>(null);
+
+// Bumped whenever the app stops caring about a pending completion response
+// (escape, blur, edit, apply), so a late reply cannot reopen the menu;
+// chat.ts separately drops stale responses by request id.
+let completionToken = 0;
+
+function dismissCompletion(): void {
+  completionToken++;
+  if (completionAtom()) completionAtom(null);
+}
 
 let token: string | null = null;
 let chat: ChatController | null = null;
@@ -306,6 +325,7 @@ function onChatSubmit(e: Event): void {
   if (!text) return;
   el.value = "";
   autoResize(el);
+  dismissCompletion();
 
   if (text.startsWith("/")) {
     chat?.sendSlashCommand(text);
@@ -314,11 +334,69 @@ function onChatSubmit(e: Event): void {
   }
 }
 
+function requestCompletions(el: HTMLTextAreaElement): void {
+  const cursor = el.selectionStart ?? el.value.length;
+  const token = ++completionToken;
+  chat?.requestCompletions(el.value, cursor, (options, prefix) => {
+    // Results are for the line as it was at request time; any edit, escape,
+    // or blur since then bumped the token, so a late reply is dropped.
+    if (token !== completionToken) return;
+    if (options.length === 0) {
+      completionAtom(null);
+      return;
+    }
+    completionAtom({ options, prefix, index: 0 });
+  });
+}
+
+function applyCompletion(el: HTMLTextAreaElement, menu: CompletionMenu, item: CompletionItem): void {
+  const cursor = el.selectionStart ?? el.value.length;
+  const start = Math.max(0, cursor - menu.prefix.length);
+  el.value = el.value.slice(0, start) + item.value + el.value.slice(cursor);
+  const pos = start + item.value.length;
+  el.setSelectionRange(pos, pos);
+  el.focus();
+  dismissCompletion();
+  autoResize(el);
+}
+
 function onChatKeydown(e: KeyboardEvent): void {
+  const el = e.currentTarget as HTMLTextAreaElement;
+  const menu = completionAtom();
+
+  if (menu) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      dismissCompletion();
+      return;
+    }
+    if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
+      e.preventDefault();
+      completionAtom({ ...menu, index: (menu.index + 1) % menu.options.length });
+      return;
+    }
+    if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
+      e.preventDefault();
+      const n = menu.options.length;
+      completionAtom({ ...menu, index: (menu.index - 1 + n) % n });
+      return;
+    }
+    if (e.key === "Enter" && !e.ctrlKey && !e.altKey) {
+      // Accept instead of submit; Escape first to send the raw text.
+      e.preventDefault();
+      applyCompletion(el, menu, menu.options[menu.index]!);
+      return;
+    }
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    requestCompletions(el);
+    return;
+  }
+
   // Enter submits, Shift+Enter inserts a newline.
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    (e.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
+    el.form?.requestSubmit();
   }
 }
 
@@ -361,6 +439,7 @@ function App() {
   const sessionId = chat?.sessionIdAtom() ?? null;
   const title = chat?.sessionTitleAtom() ?? null;
   const menu = contextMenuAtom();
+  const completionMenu = completionAtom();
 
   return (
     <>
@@ -420,6 +499,24 @@ function App() {
 
           <div id="input-area" className={activeLogId ? "read-only" : undefined}>
             <form id="chat-form" onSubmit={onChatSubmit}>
+              {completionMenu ? (
+                <div id="completion-menu">
+                  {completionMenu.options.map((o, i) => (
+                    <div
+                      key={o.value}
+                      className={`completion-item${i === completionMenu.index ? " active" : ""}`}
+                      // mousedown + preventDefault: accept without the
+                      // blur-then-click losing the caret position.
+                      onMousedown={(e: MouseEvent) => {
+                        e.preventDefault();
+                        if (chatInputEl) applyCompletion(chatInputEl, completionMenu, o);
+                      }}
+                    >
+                      {o.display ?? o.value}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 id="chat-input"
                 placeholder="Type a message..."
@@ -429,7 +526,9 @@ function App() {
                 ref={chatInputRef}
                 onInput={() => {
                   if (chatInputEl) autoResize(chatInputEl);
+                  dismissCompletion();
                 }}
+                onBlur={dismissCompletion}
                 onKeydown={onChatKeydown}
               />
               <div id="composer-actions">
@@ -480,6 +579,7 @@ async function init(): Promise<void> {
     logsAtom,
     activeLogIdAtom,
     contextMenuAtom,
+    completionAtom,
   ]);
 
   document.addEventListener("keydown", (e: KeyboardEvent) => {

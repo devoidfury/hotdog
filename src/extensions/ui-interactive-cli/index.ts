@@ -450,7 +450,7 @@ export async function runInteractiveSession(
     input: process.stdin,
     output: process.stdout,
     prompt: `(${resolved.model})> `,
-    completer: buildReadlineCompleter(sessionManager, core, !!shellMode),
+    completer: buildReadlineCompleter(sessionManager, core),
   });
 
   // Intercept bracketed paste before readline: pasted payloads become inline

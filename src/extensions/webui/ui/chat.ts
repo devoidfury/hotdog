@@ -210,6 +210,19 @@ interface ServerErrorMessage {
   message: string;
 }
 
+export interface CompletionItem {
+  value: string;
+  display?: string;
+}
+
+interface CompletionsMessage {
+  type: "completions";
+  sessionId?: string;
+  requestId?: number | null;
+  prefix?: string;
+  options?: CompletionItem[];
+}
+
 type ServerMessage =
   | SessionCreatedMessage
   | SessionDeletedMessage
@@ -238,7 +251,8 @@ type ServerMessage =
   | SystemMessage
   | ProfilesMessage
   | ProfileSwitchedMessage
-  | ServerErrorMessage;
+  | ServerErrorMessage
+  | CompletionsMessage;
 
 interface ChatConfig {
   token: string | null;
@@ -271,6 +285,11 @@ export interface ChatController {
   deleteLog: (logId: string) => void;
   sendCommand: (command: string) => void;
   sendQuestionAnswer: (answers: Record<string, string>) => void;
+  requestCompletions: (
+    line: string,
+    cursorPos: number,
+    onResult: (options: CompletionItem[], prefix: string) => void,
+  ) => void;
   setSession: (sessionId: string) => void;
   listProfiles: () => void;
   switchProfile: (profileName: string, force?: boolean) => void;
@@ -319,6 +338,13 @@ export function createChat({
 
   // Per-session working state; kept across switches so the sidebar stays accurate.
   const sessionWorkingMap = new Map<string, boolean>();
+
+  // One in-flight completion request at a time: each new request supersedes
+  // the previous, whose (now stale) response is dropped by id mismatch.
+  let completionReqId = 0;
+  let completionCallback:
+    | ((options: CompletionItem[], prefix: string) => void)
+    | null = null;
 
   function handleServerMessage(data: ServerMessage): void {
     // Session-management messages are handled even before messageList is ready.
@@ -405,6 +431,13 @@ export function createChat({
         // drives the rest.
         connectedAtom(true);
         listLogs();
+        return;
+      case "completions":
+        if (data.requestId === completionReqId && completionCallback) {
+          const cb = completionCallback;
+          completionCallback = null;
+          cb(data.options || [], typeof data.prefix === "string" ? data.prefix : "");
+        }
         return;
     }
 
@@ -672,6 +705,23 @@ export function createChat({
     send({ type: "questionAnswer", sessionId: sessionIdAtom(), answers });
   }
 
+  function requestCompletions(
+    line: string,
+    cursorPos: number,
+    onResult: (options: CompletionItem[], prefix: string) => void,
+  ): void {
+    if (!sessionIdAtom()) return;
+    completionReqId++;
+    completionCallback = onResult;
+    send({
+      type: "complete",
+      sessionId: sessionIdAtom(),
+      requestId: completionReqId,
+      line,
+      cursorPos,
+    });
+  }
+
   function setSession(sessionId: string): void {
     const container = getMessageListContainer();
     if (!container) {
@@ -746,6 +796,7 @@ export function createChat({
     deleteLog,
     sendCommand,
     sendQuestionAnswer,
+    requestCompletions,
     setSession,
     listProfiles,
     switchProfile,

@@ -20,6 +20,11 @@ import {
   deleteSessionLog,
 } from "@core/session/session-log.ts";
 import { AgentError, formatError } from "@core/error.ts";
+import {
+  completionPrefix,
+  parseCompletionContext,
+  type CompletionService,
+} from "@core/completion.ts";
 import { logger } from "@utils/logger.ts";
 import { toolContentText } from "@utils/tool-content.ts";
 
@@ -103,6 +108,9 @@ export type HotdogServerSocket<T = undefined> = Bun.ServerWebSocket<T> & {
 // loop closes it. Comfortably longer than a legit AUTH round-trip (first
 // message after open), short enough that anonymous sockets do not pile up.
 const PENDING_AUTH_TIMEOUT_MS = 30_000;
+
+// Cap for client-supplied completion input; nothing legit needs more.
+const MAX_COMPLETE_LINE = 10_000;
 
 export class SessionRegistry {
   #sessionManager: SessionManager;
@@ -623,6 +631,7 @@ async function routeMessage(
   registry: SessionRegistry,
   authMiddleware: AuthMiddleware | undefined,
   bridge: WebSocketQuestionBridge,
+  completion: CompletionService | undefined,
 ): Promise<void> {
   // Auth gate: when auth is enabled, only the AUTH handshake itself may
   // pass without a validated token. The token is established either at
@@ -897,6 +906,36 @@ async function routeMessage(
         }
         sessionManager.executeCommand(msg.sessionId as string, cmdText);
       }
+      break;
+    }
+
+    case C2S.COMPLETE: {
+      // Same core completion system the interactive CLI uses; the client
+      // renders the list and replaces `prefix` at its own caret.
+      if (!completion || !msg.sessionId) break;
+      const session = registry.get(msg.sessionId as string);
+      const agent = session?.agent;
+      if (!agent) break;
+
+      const line =
+        (typeof msg.line === "string" ? msg.line : "").slice(0, MAX_COMPLETE_LINE);
+      let cursorPos = Number.isFinite(msg.cursorPos)
+        ? Math.trunc(msg.cursorPos as number)
+        : line.length;
+      cursorPos = Math.max(0, Math.min(cursorPos, line.length));
+
+      const ctx = parseCompletionContext(line, cursorPos, agent);
+      const options = await completion.request(ctx, 200);
+      SessionRegistry.sendSafe(ws, {
+        type: S2C.COMPLETIONS,
+        sessionId: msg.sessionId,
+        requestId: msg.requestId ?? null,
+        prefix: completionPrefix(line, cursorPos),
+        options: options.map((o) => ({
+          value: o.value,
+          display: o.display ?? o.value,
+        })),
+      });
       break;
     }
 
@@ -1237,7 +1276,7 @@ export function createWsServer(
     }
 
     try {
-      await routeMessage(ws, msg, registry, auth, bridge!);
+      await routeMessage(ws, msg, registry, auth, bridge!, core.completion);
     } catch (err: unknown) {
       // Don't let errors from dropped connections kill the server.
       const typedErr = err as Error;

@@ -5,18 +5,27 @@ import { logger } from "@utils/logger.ts";
 import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 import type { CompletionContext } from "@core/completion.ts";
 
-export function matcher(ctx: CompletionContext) {
+function currentWord(ctx: CompletionContext): string {
   const text = ctx.line.slice(0, ctx.cursorPos);
   const lastSpace = text.lastIndexOf(" ");
-  const currentWord = text.slice(lastSpace + 1);
-  return currentWord.startsWith("@");
+  return text.slice(lastSpace + 1);
+}
+
+// Bare-path trigger: words that unambiguously look like a path ("./x", "/x",
+// "dir/x") so plain prose like "test.txt" never triggers file completion.
+function isBarePath(word: string): boolean {
+  return word.startsWith(".") || word.startsWith("/") || word.includes("/");
+}
+
+export function matcher(ctx: CompletionContext) {
+  const currentWordText = currentWord(ctx);
+  return currentWordText.startsWith("@") || isBarePath(currentWordText);
 }
 
 export async function completion(ctx: CompletionContext) {
-  const text = ctx.line.slice(0, ctx.cursorPos);
-  const lastSpace = text.lastIndexOf(" ");
-  const currentWord = text.slice(lastSpace + 1);
-  if (!currentWord.startsWith("@")) return [];
+  const word = currentWord(ctx);
+  const isAttachment = word.startsWith("@");
+  if (!isAttachment && !isBarePath(word)) return [];
 
   const roots =
     (ctx.agent?.config?.workspaceRoots as string[] | undefined) ?? [cwd()];
@@ -25,7 +34,7 @@ export async function completion(ctx: CompletionContext) {
   const workspace = deny != null ? new Workspace(roots, deny) : new Workspace(roots);
   let baseDir = workspace.root;
 
-  const pathPrefix = currentWord.slice(1);
+  const pathPrefix = isAttachment ? word.slice(1) : word;
 
   try {
     let searchDir: string;
@@ -78,7 +87,7 @@ export async function completion(ctx: CompletionContext) {
               "/" +
               name
             : name;
-        return { value: "@" + fullPath };
+        return { value: (isAttachment ? "@" : "") + fullPath };
       });
 
     return matches;

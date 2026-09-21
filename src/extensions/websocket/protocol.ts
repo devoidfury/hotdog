@@ -13,6 +13,7 @@ export const C2S = {
   CANCEL: "cancel",
   QUESTION_ANSWER: "questionAnswer",
   COMMAND: "command",
+  COMPLETE: "complete",
   // Cold session log management
   LIST_LOGS: "listLogs",
   LOAD_LOG: "loadLog",
@@ -51,6 +52,7 @@ export const S2C = {
   TOOL_RESULT: "toolResult",
   COMPACTING: "compacting",
   COMMAND_RESULT: "commandResult",
+  COMPLETIONS: "completions",
   QUESTION: "question",
   STREAMING_CHUNK: "streamingChunk",
   STREAMING_REASONING_CHUNK: "streamingReasoningChunk",

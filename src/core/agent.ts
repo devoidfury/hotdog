@@ -323,7 +323,20 @@ export class Agent implements AgentLike {
         turnEnded = false;
 
         const params = await this._prepareIteration(iteration);
-        const response = await this._performLlmCall(params);
+        let response: StreamResult;
+        try {
+          response = await this._performLlmCall(params);
+        } catch (err) {
+          // PROVIDER_ERROR pipeline: a handler (e.g. tool-call-repair dropping a corrupt stored tool call the backend will never accept) can repair the
+          // history/params and set retry. Exactly one retry; a second failure propagates.
+          const errPayload = { error: err, params, agent: this, retry: false };
+          await this.hooks.runHookPipeline<{ retry?: boolean }, "provider:error">(
+            HOOKS.PROVIDER_ERROR,
+            errPayload,
+          );
+          if (!errPayload.retry) throw err;
+          response = await this._performLlmCall(params);
+        }
         const result = await this._handleLlmResponse(response, params);
 
         if (typeof result === "string") {

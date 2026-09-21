@@ -146,6 +146,11 @@ This is the heart of the system — one iteration of the LLM-tools loop.
 │                                                          │
 │  7. LLM CALL ───────────────► HTTP request to provider   │
 │      (streaming, tool calls)                              │
+│      │ throws                                             │
+│      ▼                                                    │
+│  7b. PROVIDER_ERROR ────────► sequential pipeline         │
+│      (recover corrupt history; { retry: true } retries    │
+│       the call exactly once, else the error propagates)   │
 │                                                          │
 │  8. PROVIDER_RESPONSE ───────► pipeline                  │
 │      (response logging, metrics, cost tracking, repair)  │
@@ -269,6 +274,7 @@ Each tool call goes through a dedicated sub-pipeline:
 |---------------|------|---------|------|
 | `PROVIDER_REQUEST` | `provider:request` | pipeline | Before LLM HTTP request — modify messages/model/tools |
 | `PROVIDER_RESPONSE` | `provider:response` | pipeline | After LLM response fully received — handler may return `{ response }` to replace it (e.g. tool-call-repair reconstructing tool calls a local backend leaked as text) |
+| `PROVIDER_ERROR` | `provider:error` | pipeline | After an LLM call throws — payload carries the failed call's `params`; a handler that repairs request/context state may return `{ retry: true }` to retry the call exactly once (e.g. tool-call-repair dropping a stored tool call with truncated JSON arguments a llama.cpp-style backend rejects on every request) |
 
 The `LlmProtocol` (selected by the `protocol` field on the model or provider entry, default `"openai"`) owns the wire format itself: request building, stream parsing, auth headers. The hooks above are the override hatch -- a hook can still replace the fully-built request or the parsed response without writing a new protocol. In short: **protocol = format, hooks = override**.
 
@@ -368,7 +374,7 @@ built-in handler of this kind — tool-call approvals on top of `toolCtx.get("in
 
 ### 4. Pipeline — Transformation
 
-The `context`, `provider:request`, `provider:response`, `tool:call`, `tool:result`, `input`, and `command:dispatch` hooks transform data sequentially, all by the same rule: **a handler's return value is a partial patch of the payload.** Each defined field it returns is written onto the payload, so every later handler — and core, which reads the payload back — sees the transformation. Returning nothing, or leaving a field undefined, leaves that field alone.
+The `context`, `provider:request`, `provider:response`, `provider:error`, `tool:call`, `tool:result`, `input`, and `command:dispatch` hooks transform data sequentially, all by the same rule: **a handler's return value is a partial patch of the payload.** Each defined field it returns is written onto the payload, so every later handler — and core, which reads the payload back — sees the transformation. Returning nothing, or leaving a field undefined, leaves that field alone.
 
 ```
 { messages }        on context            replaces the array
@@ -506,6 +512,9 @@ User Input
     ▼ ─── PROVIDER_REQUEST ────► modify messages/model/tools
     │
     ▼ ─── LLM call ───────────► streaming response
+    │        │ throws
+    │        ▼
+    │    PROVIDER_ERROR ──────► repair + { retry: true } → retry once, else propagate
     │
     ▼ ─── PROVIDER_RESPONSE ───► logging, metrics, repair
     │

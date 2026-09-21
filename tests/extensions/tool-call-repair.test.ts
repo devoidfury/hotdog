@@ -1,7 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import { repairCallsInText } from "@extensions/tool-call-repair/grammar.ts";
-import { create as createRepairExtension } from "@extensions/tool-call-repair/index.ts";
+import { create as createRepairExtension, stripCorruptToolCalls } from "@extensions/tool-call-repair/index.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { Message } from "@core/context/message.ts";
 import { createFixture, MockLLMClient, buildStreamResponse, simpleTool } from "../helpers.ts";
 import { expectCompletion } from "../test-helpers.ts";
 import { toolContentText } from "@utils/tool-content.ts";
@@ -449,5 +450,277 @@ describe("tool-call-repair in the agent loop", () => {
     const completion = expectCompletion(await agent.run("check f.txt"));
     expect(mockLLM.callCount).toBe(1); // no repair, no tool call, loop stopped
     expect(completion.content).toContain("|"); // raw markup stranded in the turn
+  });
+});
+
+// ── PROVIDER_ERROR: bricked-history recovery ────────────────────────────────
+
+const PARSE_ERROR_MSG =
+  'HTTP 500: {"error":{"code":500,"message":"Failed to parse tool call arguments as JSON: ' +
+  '[json.exception.parse_error.101] parse error at line 1, column 130: syntax error while parsing value ' +
+  '- invalid string: missing closing quote; last read: \'\\"cd /workspace; bun test 2>&1 | tail -\'"}}';
+
+const corruptCall = (id: string) => ({
+  id,
+  type: "function",
+  function: { name: "bash", arguments: '{"command": "cd /workspace; bun test 2>&1 | tail -' },
+});
+const validCall = (id: string) => ({
+  id,
+  type: "function",
+  function: { name: "read", arguments: '{"path": "a.ts"}' },
+});
+
+describe("stripCorruptToolCalls", () => {
+  it("drops corrupt calls and keeps valid calls in the same message", () => {
+    const msg = new Message({ role: "assistant", toolCalls: [validCall("ok"), corruptCall("bad")] });
+    const { corruptIds, droppedCalls, kept } = stripCorruptToolCalls([msg]);
+    expect(droppedCalls).toBe(1);
+    expect(corruptIds.has("bad")).toBe(true);
+    expect(msg.toolCalls).toHaveLength(1);
+    expect(msg.toolCalls![0]!.id).toBe("ok");
+    expect(kept).toHaveLength(1);
+  });
+
+  it("nulls toolCalls when every call in a message is corrupt", () => {
+    const msg = new Message({ role: "assistant", toolCalls: [corruptCall("b1"), corruptCall("b2")] });
+    const { droppedCalls } = stripCorruptToolCalls([msg]);
+    expect(droppedCalls).toBe(2);
+    expect(msg.toolCalls).toBeNull();
+  });
+
+  it("prunes orphaned tool results pointing at dropped calls", () => {
+    const bad = new Message({ role: "assistant", toolCalls: [corruptCall("bad")] });
+    const orphan = new Message({ role: "tool", toolCallId: "bad", content: "stale" });
+    const okResult = new Message({ role: "tool", toolCallId: "ok", content: "fine" });
+    const { kept } = stripCorruptToolCalls([bad, orphan, okResult]);
+    expect(kept).toHaveLength(2);
+    expect(kept).not.toContain(orphan);
+  });
+
+  it("treats empty or blank arguments as valid no-arg calls", () => {
+    const msg = new Message({
+      role: "assistant",
+      toolCalls: [
+        { id: "e", type: "function", function: { name: "t", arguments: "" } },
+        { id: "b", type: "function", function: { name: "t", arguments: "  " } },
+      ],
+    });
+    const { droppedCalls, corruptIds } = stripCorruptToolCalls([msg]);
+    expect(droppedCalls).toBe(0);
+    expect(corruptIds.size).toBe(0);
+    expect(msg.toolCalls).toHaveLength(2);
+  });
+
+  it("returns the same list untouched when nothing is corrupt", () => {
+    const user = new Message({ role: "user", content: "hi" });
+    const asst = new Message({ role: "assistant", toolCalls: [validCall("ok")] });
+    const { kept, droppedCalls } = stripCorruptToolCalls([user, asst]);
+    expect(droppedCalls).toBe(0);
+    expect(kept).toHaveLength(2);
+  });
+});
+
+function loadErrorHook(config: Record<string, unknown> = {}) {
+  const core = mockCore({ toolCallRepair: { enabled: true, maxRepairsPerTurn: 2, ...config } });
+  const ext = createRepairExtension(core);
+  return ((ext.hooks as any) ?? {})[HOOKS.PROVIDER_ERROR] as (p: any) => unknown;
+}
+
+function fakeHistoryAgent(messages: Message[]) {
+  const replaced: Message[][] = [];
+  const events: Array<{ type: number; content: string }> = [];
+  const agent = {
+    sessionId: "s",
+    cancelled: false,
+    getMessages: () => messages,
+    replaceContext: (m: Message[]) => replaced.push(m),
+    sink: { emit: (e: { type: number; content: string }) => events.push(e) },
+  } as any;
+  return { agent, replaced, events };
+}
+
+describe("PROVIDER_ERROR handler", () => {
+  it("ignores an unrelated error", () => {
+    const hook = loadErrorHook();
+    const { agent, replaced } = fakeHistoryAgent([
+      new Message({ role: "assistant", toolCalls: [corruptCall("bad")] }),
+    ]);
+    const payload = {
+      error: new Error("Connection refused"),
+      params: { messages: [], modelConfig: {}, toolDefs: [] },
+      agent,
+      retry: false,
+    };
+    expect(hook(payload)).toBeUndefined();
+    expect(payload.retry).toBe(false);
+    expect(replaced).toHaveLength(0);
+  });
+
+  it("does not retry when the history holds no corrupt calls", () => {
+    const hook = loadErrorHook();
+    const { agent, replaced } = fakeHistoryAgent([
+      new Message({ role: "assistant", toolCalls: [validCall("ok")] }),
+    ]);
+    const payload = {
+      error: new Error(PARSE_ERROR_MSG),
+      params: { messages: [], modelConfig: {}, toolDefs: [] },
+      agent,
+      retry: false,
+    };
+    expect(hook(payload)).toBeUndefined();
+    expect(replaced).toHaveLength(0);
+  });
+
+  it("skips a cancelled agent", () => {
+    const hook = loadErrorHook();
+    const { agent } = fakeHistoryAgent([
+      new Message({ role: "assistant", toolCalls: [corruptCall("bad")] }),
+    ]);
+    agent.cancelled = true;
+    const payload = {
+      error: new Error(PARSE_ERROR_MSG),
+      params: { messages: [], modelConfig: {}, toolDefs: [] },
+      agent,
+      retry: false,
+    };
+    expect(hook(payload)).toBeUndefined();
+  });
+
+  it("strips corrupt calls, prunes orphans, and requests a retry", () => {
+    const hook = loadErrorHook();
+    const bad = new Message({ role: "assistant", toolCalls: [corruptCall("bad"), validCall("ok")] });
+    const orphan = new Message({ role: "tool", toolCallId: "bad", content: "stale" });
+    const { agent, replaced, events } = fakeHistoryAgent([bad, orphan]);
+
+    // params.messages is a separate array (as built by the agent); include the
+    // orphan so the filter can be observed.
+    const paramsMessages = [bad, orphan];
+    const payload = {
+      error: new Error(PARSE_ERROR_MSG),
+      params: { messages: paramsMessages, modelConfig: {}, toolDefs: [] },
+      agent,
+      retry: false,
+    };
+
+    expect(hook(payload)).toEqual({ retry: true });
+    expect(bad.toolCalls).toHaveLength(1);
+    expect(bad.toolCalls![0]!.id).toBe("ok");
+    expect(replaced).toHaveLength(1);
+    expect(replaced[0]).toHaveLength(1); // orphan dropped
+    expect(payload.params.messages).toHaveLength(1);
+    expect(payload.params.messages[0]).toBe(bad);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe(OUTPUT_EVENT.SYSTEM_MESSAGE);
+    expect(events[0]!.content).toContain("Dropped 1 tool call");
+  });
+});
+
+// ── Agent loop integration ──────────────────────────────────────────────────
+
+class FlakyLLMClient extends MockLLMClient {
+  failuresLeft: number;
+  requests: unknown[][] = [];
+
+  constructor(opts: {
+    responseSequences?: Record<string, unknown>[][];
+    failuresLeft: number;
+  }) {
+    super({ responseSequences: opts.responseSequences });
+    this.failuresLeft = opts.failuresLeft;
+  }
+
+  override chatStreamCancellable(
+    messages: unknown[],
+    modelConfig: Record<string, unknown>,
+    toolDefs: Record<string, unknown>[],
+    cancelSignal: AbortSignal | null | undefined,
+  ) {
+    this.requests.push(messages);
+    this.callCount++;
+    if (this.failuresLeft > 0) {
+      this.failuresLeft--;
+      throw new Error(PARSE_ERROR_MSG);
+    }
+    return super.chatStreamCancellable(messages, modelConfig, toolDefs, cancelSignal);
+  }
+}
+
+function attachAllRepairHooks(hooks: HookSystem, config: Record<string, unknown> = {}) {
+  const core = mockCore({ toolCallRepair: { enabled: true, maxRepairsPerTurn: 2, ...config } });
+  const ext = createRepairExtension(core);
+  for (const [name, handler] of Object.entries(ext.hooks ?? {})) {
+    hooks.on(name, handler as any, "tool-call-repair");
+  }
+}
+
+describe("PROVIDER_ERROR recovery in the agent loop", () => {
+  it("drops the corrupt call and its orphan, retries once, and completes", async () => {
+    const mockLLM = new FlakyLLMClient({
+      responseSequences: [buildStreamResponse({ content: "recovered" })],
+      failuresLeft: 1,
+    });
+    const sinkEvents: Array<{ type: number; content?: string }> = [];
+    const { agent, hooks } = createFixture({
+      mockLLM,
+      sink: { emit: (e) => sinkEvents.push(e as unknown as { type: number; content?: string }) },
+    });
+    attachAllRepairHooks(hooks);
+
+    // Seed the bricked history: truncated tool call plus its orphaned result.
+    agent.addMessage(
+      new Message({
+        role: "assistant",
+        toolCalls: [corruptCall("call_bad")],
+        source: "model",
+      }),
+    );
+    agent.addMessage(
+      new Message({ role: "tool", toolCallId: "call_bad", content: "stale", source: "tool" }),
+    );
+
+    const completion = expectCompletion(await agent.run("continue"));
+    expect(completion.content).toBe("recovered");
+
+    // History no longer carries the corrupt call or the orphan.
+    const log = agent.context.log.getAll();
+    expect(log.find((m) => m.toolCalls && m.toolCalls.length > 0)).toBeUndefined();
+    expect(log.find((m) => m.role === "tool" && m.toolCallId === "call_bad")).toBeUndefined();
+
+    // The retry request must not resend the orphan either.
+    expect(mockLLM.requests).toHaveLength(2);
+    const retry = mockLLM.requests[1]!;
+    expect(retry.some((m) => (m as Message).role === "tool" && (m as Message).toolCallId === "call_bad")).toBe(false);
+
+    const sys = sinkEvents.find((e) => e.type === OUTPUT_EVENT.SYSTEM_MESSAGE);
+    expect(sys).toBeTruthy();
+    expect(sys!.content).toContain("Dropped 1 tool call");
+  });
+
+  it("retries exactly once -- a second failure propagates", async () => {
+    const mockLLM = new FlakyLLMClient({ failuresLeft: 5 });
+    const { agent, hooks } = createFixture({ mockLLM });
+    attachAllRepairHooks(hooks);
+    agent.addMessage(
+      new Message({ role: "assistant", toolCalls: [corruptCall("call_bad")], source: "model" }),
+    );
+
+    await expect(agent.run("continue")).rejects.toThrow("Failed to parse tool call arguments");
+    expect(mockLLM.requests).toHaveLength(2);
+    // The corrupt call was still dropped from history on the first pass.
+    const log = agent.context.log.getAll();
+    expect(log.find((m) => m.toolCalls && m.toolCalls.length > 0)).toBeUndefined();
+  });
+
+  it("without the extension, the parse error propagates untouched", async () => {
+    const mockLLM = new FlakyLLMClient({ failuresLeft: 1 });
+    const { agent } = createFixture({ mockLLM });
+    agent.addMessage(
+      new Message({ role: "assistant", toolCalls: [corruptCall("call_bad")], source: "model" }),
+    );
+
+    await expect(agent.run("continue")).rejects.toThrow("Failed to parse tool call arguments");
+    expect(mockLLM.requests).toHaveLength(1);
   });
 });

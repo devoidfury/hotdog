@@ -409,6 +409,10 @@ export const HOOKS = {
 
   PROVIDER_RESPONSE: "provider:response",
 
+  // Pipeline run when an LLM call throws; the failed call's params ride along.
+  // A handler that repairs request/context state may return { retry: true } to make the loop retry once; a second failure propagates.
+  PROVIDER_ERROR: "provider:error",
+
   TURN_START: "turn:start",
 
   // Emitted at the end of every agent loop iteration, and always with stopped: true

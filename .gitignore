@@ -5,6 +5,9 @@ AGENTS.local.md
 ./config/
 *secret-sauce*
 
+# raw workspace document for looping
+TASKS.md
+
 # dependencies
 node_modules
 

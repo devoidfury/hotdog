@@ -58,9 +58,14 @@ export class MockTool implements Tool {
 /**
  * Create a simple mock tool that returns a fixed result.
  */
-export function simpleTool(name: string, result: unknown = 'done'): MockTool {
+export function simpleTool(
+  name: string,
+  result: unknown = 'done',
+  metadata?: ToolMetadata,
+): MockTool {
   return new MockTool({
     name,
+    metadata,
     execute: async () => result,
     toToolDef: () => ({
       type: 'function',

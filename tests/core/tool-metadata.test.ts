@@ -232,5 +232,20 @@ describe("ToolRegistry.filterByMetadata", () => {
     expect(filtered.has("unsafe-easy")).toBe(true);
     expect(filtered.has("unsafe-hard")).toBe(true);
   });
+
+  it("drops managerOnly tools when managerToolsEnabled is false", () => {
+    registry.register("delegator", new TestTool("delegator", { sideEffects: true, difficulty: 3, managerOnly: true }));
+
+    const off = registry.filterByMetadata({ managerToolsEnabled: false });
+    expect(off.has("delegator")).toBe(false);
+    expect(off.has("safe-easy")).toBe(true);
+
+    const on = registry.filterByMetadata({ managerToolsEnabled: true });
+    expect(on.has("delegator")).toBe(true);
+
+    // Undefined means "not filtering on this dimension".
+    const unset = registry.filterByMetadata();
+    expect(unset.has("delegator")).toBe(true);
+  });
 });
 

@@ -1321,6 +1321,7 @@ describe('Agent — end-to-end loop', () => {
       model: null as string | null,
       whitelistTools: null as string[] | null,
       blacklistTools: [] as string[],
+      manager: false,
       ...overrides,
     });
 
@@ -1351,6 +1352,27 @@ describe('Agent — end-to-end loop', () => {
       agent.applyProfile('open', makeProfile({ blacklistTools: ['alpha'] }));
       names = (await agent.getToolDefs()).map((d) => d.function.name);
       expect(names).toEqual(['beta']);
+    });
+
+    it('toggling the manager flag re-gates managerOnly tool defs', async () => {
+      // The /profile meta bug: manager tools (subagents) must appear and
+      // disappear with the active profile, like sandbox/difficulty filters.
+      const { agent, toolRegistry } = createFixture({});
+      toolRegistry.register('alpha', simpleTool('alpha'));
+      toolRegistry.register('delegator', simpleTool('delegator', 'done', { sideEffects: true, difficulty: 3, managerOnly: true }));
+
+      let names = (await agent.getToolDefs()).map((d) => d.function.name);
+      expect(names).toEqual(['alpha']);
+
+      agent.applyProfile('meta', makeProfile({ manager: true }));
+      expect(agent.managerProfile).toBe(true);
+      names = (await agent.getToolDefs()).map((d) => d.function.name);
+      expect(names).toEqual(['alpha', 'delegator']);
+
+      // Switching away hides them again.
+      agent.applyProfile('plain', makeProfile());
+      names = (await agent.getToolDefs()).map((d) => d.function.name);
+      expect(names).toEqual(['alpha']);
     });
 
     it('a profile without a blacklist clears a top-level config blacklist', async () => {

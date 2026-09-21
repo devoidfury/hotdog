@@ -92,7 +92,7 @@ Tool profiles control which tools are available to the agent. Profiles are defin
 - **`whitelist_tools`**: If specified, only these tools are available.
 - **`blacklist_tools`**: These tools are excluded. All other tools remain available.
 - **`model`**: Override the default model for this profile.
-- **`manager`**: When true, enables manager-specific tools before whitelist/blacklist filtering.
+- **`manager`**: When true, enables manager-specific tools (`metadata.managerOnly` filtering, applied per-request before whitelist/blacklist).
 - **`aspects`**: List of aspect names to include (loaded from `config/aspects/<name>.aspect.md`).
 
 **Profile Selection Priority**: `--profile` CLI flag > config `profile` > `"default"`

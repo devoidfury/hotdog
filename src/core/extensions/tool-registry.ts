@@ -14,6 +14,8 @@ export interface ToolMetadata {
   sideEffects: boolean;
   /** Difficulty score 1-5: how hard this tool is to use correctly. */
   difficulty: number;
+  /** True if the tool is only available when the active profile is a manager. */
+  managerOnly?: boolean;
 }
 
 export interface ToolDef {
@@ -201,11 +203,7 @@ export class ToolRegistry {
     this.#allToolDefsCache = null;
   }
 
-  filter(
-    whitelist?: string[] | null,
-    blacklist?: string[] | null,
-    _managerToolsEnabled = false,
-  ): ToolRegistry {
+  filter(whitelist?: string[] | null, blacklist?: string[] | null): ToolRegistry {
     const result = new ToolRegistry();
     for (const [name, tool] of this.tools) {
       if (blacklist && blacklist.includes(name)) continue;
@@ -238,10 +236,22 @@ export class ToolRegistry {
     return result;
   }
 
+  /** Drops managerOnly tools unless the active profile is a manager. */
+  filterByManagerTools(managerToolsEnabled: boolean): ToolRegistry {
+    const result = new ToolRegistry();
+    for (const [name, tool] of this.tools) {
+      if (managerToolsEnabled || !tool.metadata.managerOnly) {
+        result.register(name, tool);
+      }
+    }
+    return result;
+  }
+
   /** Always returns a new registry (never `this`), even when no filtering is applied. */
   filterByMetadata(options?: {
     maxDifficulty?: number;
     allowSideEffects?: boolean;
+    managerToolsEnabled?: boolean;
   }): ToolRegistry {
     let result: ToolRegistry;
     if (options?.maxDifficulty !== undefined) {
@@ -254,6 +264,9 @@ export class ToolRegistry {
     }
     if (options?.allowSideEffects === false) {
       result = result.filterBySideEffects(false);
+    }
+    if (options?.managerToolsEnabled === false) {
+      result = result.filterByManagerTools(false);
     }
     return result;
   }

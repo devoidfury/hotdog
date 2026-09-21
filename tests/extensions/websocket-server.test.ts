@@ -161,6 +161,7 @@ describe("SessionRegistry", () => {
             model: "prov/new-model",
             whitelistTools: ["alpha"],
             blacklistTools: [],
+            manager: false,
           },
         },
       });
@@ -186,7 +187,7 @@ describe("SessionRegistry", () => {
       const { agent } = createFixture({});
       const wsRegistry = new SessionRegistry({
         buildAgent: async () => agent,
-        profiles: { coder: { body: "", model: null, whitelistTools: null, blacklistTools: [] } },
+        profiles: { coder: { body: "", model: null, whitelistTools: null, blacklistTools: [], manager: false } },
       });
       const { sessionId } = await wsRegistry.create({});
       wsRegistry.incrementUserMessageCount(sessionId);
@@ -212,7 +213,7 @@ describe("SessionRegistry", () => {
       registry = new SessionRegistry({
         buildAgent: createWsMockAgentFactory(),
         profiles: {
-          coder: { body: "", model: null, whitelistTools: null, blacklistTools: [] },
+          coder: { body: "", model: null, whitelistTools: null, blacklistTools: [], manager: false },
         },
       });
       const { sessionId } = await registry.create({});

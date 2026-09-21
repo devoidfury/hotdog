@@ -98,7 +98,7 @@ Filtering runs via the `PROVIDER_REQUEST` hook before each LLM call, so it respe
 
 ### Subagent Tools *(disabled by default, enabled in manager profile)*
 
-Provided by the `subagents` extension. Registered when `profile.manager: true`.
+Provided by the `subagents` extension. Always registered; hidden from non-manager profiles via `metadata.managerOnly` in the same per-request metadata filter as sandbox mode and difficulty (`Agent.getToolDefs()`), so switching profiles with `/profile` shows or hides them without a restart.
 
 The `TaskManager` is resolved **lazily**: extensions load in `main()` before any session exists, so the tools look the manager up at use time via the `taskManager` service (`TASK_MANAGER_SERVICE` in `src/extensions/subagents/index.ts`). The UI entry points call `registerTaskManagerService(core, sessionManager.getTaskManager())` right after `SessionManager.create()`. An eager `taskManager` option to `create()` takes precedence and is used by tests and custom hosts.
 

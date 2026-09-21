@@ -24,40 +24,24 @@ function makeMockTM(overrides: Partial<Record<string, any>> = {}): any {
 }
 
 describe("subagents extension create()", () => {
-  it("returns null when the profile is not a manager (even without a taskManager)", () => {
+  it("returns an extension instance regardless of profile (managerOnly filtering is per-request)", () => {
     const core = createMockCore();
     const result = create(core);
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result.hooks).toBeDefined();
   });
 
-  it("returns null when taskManager is provided but profile is not a manager", () => {
-    const core = createMockCore({
-      coreConfig: {
-        profileDef: {},
-      },
-    });
-    const result = create(core, { taskManager: makeMockTM() });
-    expect(result).toBeNull();
-  });
-
-  it("returns null when profile.manager is false", () => {
+  it("returns an extension instance when profile.manager is false", () => {
     const core = createMockCore({
       coreConfig: {
         profileDef: { manager: false },
       },
     });
     const result = create(core, { taskManager: makeMockTM() });
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
   });
 
-  it("returns null when profile is undefined", () => {
-    const core = createMockCore();
-    // core.config.profileDef is undefined by default
-    const result = create(core, { taskManager: makeMockTM() });
-    expect(result).toBeNull();
-  });
-
-  it("returns extension instance when taskManager and manager profile are provided", () => {
+  it("returns an extension instance when taskManager and manager profile are provided", () => {
     const core = createMockCore({
       coreConfig: {
         profileDef: { manager: true },
@@ -65,7 +49,7 @@ describe("subagents extension create()", () => {
     });
     const result = create(core, { taskManager: makeMockTM() });
     expect(result).not.toBeNull();
-    expect(result!.hooks).toBeDefined();
+    expect(result.hooks).toBeDefined();
   });
 
   it("AGENT_TOOL_CONTEXT hook sets taskManager on toolCtx", async () => {
@@ -288,6 +272,7 @@ describe("subagents production wiring (main.ts load order)", () => {
       toolRegistry: core.toolRegistry,
       mockLLM,
       sink: { emit: () => {} },
+      managerProfile: true,
     });
 
     const result = await agent.run("Build the feature");
@@ -302,12 +287,24 @@ describe("subagents production wiring (main.ts load order)", () => {
     expect(toolNames).toContain("plan_status");
   });
 
-  it("delegate_task is NOT registered for non-manager profiles", async () => {
+  it("delegate_task is registered but hidden from non-manager agents", async () => {
     const core = createMockCore({
       coreConfig: { profileDef: {} },
     }) as any;
     const ext = create(core);
-    expect(ext).toBeNull();
-    expect(core.toolRegistry.has("delegate_task")).toBe(false);
+    expect(ext).not.toBeNull();
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!(core.toolRegistry as any);
+    // Registered in the shared registry...
+    expect(core.toolRegistry.has("delegate_task")).toBe(true);
+    // ...but the per-request managerOnly filter keeps it out of a
+    // non-manager agent's advertised defs.
+    const { agent } = createFixture({ toolRegistry: core.toolRegistry });
+    const toolNames = (await agent.getToolDefs()).map((d: any) => d.function.name);
+    expect(toolNames).not.toContain("delegate_task");
+
+    // A /profile switch to a manager profile surfaces it.
+    agent.applyProfile("meta", { body: "", model: null, whitelistTools: null, blacklistTools: [], manager: true });
+    const afterSwitch = (await agent.getToolDefs()).map((d: any) => d.function.name);
+    expect(afterSwitch).toContain("delegate_task");
   });
 });

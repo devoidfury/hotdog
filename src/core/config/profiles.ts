@@ -48,6 +48,7 @@ export interface SwitchProfile {
   model: string | null;
   whitelistTools: string[] | null;
   blacklistTools: string[];
+  manager: boolean;
 }
 
 export function resolveProfilesPath(
@@ -175,7 +176,8 @@ function resolveSwitchProfile(
   const model = configProfile?.model || null;
   const whitelistTools = fileProfile?.whitelistTools ?? configProfile?.whitelistTools ?? null;
   const blacklistTools = fileProfile?.blacklistTools || configProfile?.blacklistTools || [];
-  return { body, model, whitelistTools, blacklistTools };
+  const manager = !!(fileProfile?.manager || configProfile?.manager);
+  return { body, model, whitelistTools, blacklistTools, manager };
 }
 
 export interface AllProfilesOptions {

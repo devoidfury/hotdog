@@ -85,6 +85,8 @@ export interface AgentOptions {
   stream?: boolean;
   abortSignal?: AbortSignal | null;
   toolWhitelist?: string[] | null;
+  /** True when the active profile is a manager (controls managerOnly tools). */
+  managerProfile?: boolean;
   commandRegistry?: AgentCommandRegistry;
   // Set by the owning MessageBus after construction; lets the agent (and extensions via hooks) queue messages.
   enqueueCallback?: (content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void;
@@ -115,6 +117,8 @@ export class Agent implements AgentLike {
   #running: boolean;
   abortSignal: AbortSignal | null;
   toolWhitelist: string[] | null;
+  /** True when the active profile is a manager (controls managerOnly tools). */
+  managerProfile: boolean;
   /** Steering messages (see steer()): injected between LLM calls by _prepareIteration. */
   steeringQueue: Array<string | Array<Record<string, unknown>>>;
   runAbortController: AbortController | null;
@@ -175,6 +179,7 @@ export class Agent implements AgentLike {
     this.#running = false;
     this.abortSignal = options.abortSignal || null;
     this.toolWhitelist = options.toolWhitelist || null;
+    this.managerProfile = options.managerProfile === true;
     this.steeringQueue = [];
     // Per-iteration AbortController, aborted on cancel() so the HTTP client terminates fetch().
     this.runAbortController = null;
@@ -627,10 +632,12 @@ export class Agent implements AgentLike {
    *
    * Applies the profile's body and tool whitelist, resets the tool
    * blacklist to the profile's (an empty profile blacklist clears whatever
-   * a top-level config carried), and switches the model via the model setter
-   * when the profile specifies one (so per-model limits, reasoning effort,
-   * and MODEL_CHANGE all update). Invalidates the cached system prompt and
-   * tool defs so the next turn rebuilds them from the new profile.
+   * a top-level config carried), updates the manager-profile flag (which
+   * gates managerOnly tools like the subagent tools), and switches the
+   * model via the model setter when the profile specifies one (so per-model
+   * limits, reasoning effort, and MODEL_CHANGE all update). Invalidates the
+   * cached system prompt and tool defs so the next turn rebuilds them from
+   * the new profile.
    *
    * Does NOT clear the message log -- callers that want a wipe (e.g. the
    * webui, which asks the user first) call clearContext() separately.
@@ -639,6 +646,7 @@ export class Agent implements AgentLike {
     this.profileName = name;
     this.profileBody = profile.body || undefined;
     this.toolWhitelist = profile.whitelistTools;
+    this.managerProfile = profile.manager === true;
     this.config = this.config || {};
     this.config.blacklistTools = profile.blacklistTools;
     if (profile.model && profile.model !== this.#model) {
@@ -684,10 +692,11 @@ export class Agent implements AgentLike {
       undefined;
 
     let registry = this.#toolRegistry;
-    if (config?.sandboxMode || effectiveMaxDifficulty != null) {
+    if (config?.sandboxMode || effectiveMaxDifficulty != null || !this.managerProfile) {
       registry = registry.filterByMetadata({
         maxDifficulty: effectiveMaxDifficulty,
         allowSideEffects: !config?.sandboxMode,
+        managerToolsEnabled: this.managerProfile,
       });
     }
 

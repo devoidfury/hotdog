@@ -1,6 +1,8 @@
 // Subagents Extension
 // Registers subagent tools (delegate_task, task_status, etc.) via tools:register hook.
-// Only activates for manager profiles (profile.manager: true).
+// Tools carry metadata.managerOnly and are filtered per-request in
+// Agent.getToolDefs() alongside sandbox/difficulty, so they appear and
+// disappear with the active profile -- including on /profile switch.
 //
 // The TaskManager is resolved lazily: extensions load in main() BEFORE the
 // SessionManager (and its TaskManager) exists, so tools look the manager up
@@ -51,20 +53,13 @@ export function registerTaskManagerService(
 /**
  * Create the subagents extension.
  *
- * Active for manager profiles only. The TaskManager may be provided eagerly
- * (tests, custom hosts) or resolved lazily from the TASK_MANAGER_SERVICE
- * at tool-use time (normal CLI flow, where sessions are created after
- * extensions load).
+ * Always active; managerOnly filtering happens in Agent.getToolDefs(). The
+ * TaskManager may be provided eagerly (tests, custom hosts) or resolved
+ * lazily from the TASK_MANAGER_SERVICE at tool-use time (normal CLI flow,
+ * where sessions are created after extensions load).
  */
-export function create(core: CoreContext, options: SubagentOptions = {}): ExtensionInstance | null {
+export function create(core: CoreContext, options: SubagentOptions = {}): ExtensionInstance {
   const { taskManager, sessionCore } = options;
-
-  // Subagent tools only for manager profiles.
-  const profile = core.config.profileDef;
-  const isManager = profile?.manager === true;
-  if (!isManager) {
-    return null;
-  }
 
   // Lazy fallback for the normal flow: extensions load before the
   // SessionManager builds its TaskManager.

@@ -163,6 +163,7 @@ describe("createAgentFactory", () => {
           model: null,
           whitelistTools: ["read", "bash-tool"],
           blacklistTools: [],
+          manager: false,
         },
       },
     });

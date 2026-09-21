@@ -79,6 +79,12 @@ export function createAgentFactory(
       sessionId: (agentConfig.sessionId as string) || crypto.randomUUID(),
       abortSignal: (agentConfig.abortSignal as AbortSignal | null | undefined) ?? null,
       toolWhitelist: (agentConfig.toolWhitelist as string[] | null | undefined) ?? profile?.whitelistTools ?? null,
+      // Precedence: explicit override > profile overlay > resolved profileDef
+      // (the profile the config resolution chain picked at startup).
+      managerProfile: pickBoolean(
+        agentConfig.managerProfile,
+        profile?.manager ?? (resolved.profileDef?.manager === true),
+      ),
     });
 
     await core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {

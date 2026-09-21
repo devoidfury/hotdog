@@ -51,6 +51,7 @@ export function createFixture(
     sessionId?: string;
     abortSignal?: AbortSignal | null;
     toolWhitelist?: string[] | null;
+    managerProfile?: boolean;
   } = {},
 ): {
   hooks: HookSystem;
@@ -87,6 +88,7 @@ export function createFixture(
     sessionId: options.sessionId || "test-session",
     abortSignal: options.abortSignal || null,
     toolWhitelist: options.toolWhitelist || null,
+    managerProfile: options.managerProfile === true,
   });
 
   return { hooks, toolRegistry, mockLLM, agent };

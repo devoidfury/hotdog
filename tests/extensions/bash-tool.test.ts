@@ -36,6 +36,21 @@ describe('BashTool', () => {
     expect(resultStr(result)).toContain('hello');
   });
 
+  it('runs commands under bash, not /bin/sh, so brace expansion works', async () => {
+    const dir = tmpDir('bash-tool-brace-');
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    const result = await tool.execute(
+      JSON.stringify({ command: `mkdir -p ${dir}/{mcp,openai,sse}` }),
+      {} as any,
+    );
+    expect(resultStr(result)).toBe('');
+    expect(fs.existsSync(dir + '/mcp')).toBe(true);
+    expect(fs.existsSync(dir + '/openai')).toBe(true);
+    expect(fs.existsSync(dir + '/sse')).toBe(true);
+    expect(fs.existsSync(dir + '/{mcp,openai,sse}')).toBe(false);
+    cleanupDir(dir);
+  });
+
   it('adds config-supplied env vars to the spawned shell', async () => {
     const tool = new BashTool({
       timeoutMs: 30000,

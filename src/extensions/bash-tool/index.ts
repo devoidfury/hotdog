@@ -156,10 +156,10 @@ export class BashTool {
       return ToolResult.err("Error: command is required");
     }
 
+    // Explicit bash, not shell:true (which uses /bin/sh -- dash on Debian-ish systems, where brace expansion and other bashisms silently break).
     const proc: ChildProcess = spawn(command, [], {
-      shell: true,
-      // Primary workspace root (see execute); undefined inherits the
-      // process CWD, preserving the standalone-caller behavior.
+      shell: "bash",
+      // Primary workspace root (see execute); undefined inherits the process CWD, preserving the standalone-caller behavior.
       cwd,
       // Own process group on POSIX so timeouts can kill the entire tree (see utils/process-group.ts for the trade-off).
       ...OWN_PROCESS_GROUP,

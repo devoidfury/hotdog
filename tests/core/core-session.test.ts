@@ -12,6 +12,7 @@ import { createSubcommandRegistry } from '../../src/core/extensions/registries.t
 import { createCompletionService } from '../../src/core/completion.ts';
 import { TASK_STATUS } from '../../src/core/session/task-manager.ts';
 import { describe, it, expect, beforeEach } from 'bun:test';
+import { ACTIONS } from '../../src/core/commands.ts';
 import { MockLLMClient } from '../helpers.ts';
 
 // Poll until a condition holds (fails loudly on timeout) instead of a
@@ -238,6 +239,45 @@ describe('SessionManager', () => {
 
     it('should be no-op for non-existent session', () => {
       expect(() => sessionManager.interrupt('non-existent')).not.toThrow();
+    });
+  });
+
+  describe('enqueue', () => {
+    it('should enqueue text onto the session bus', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      sessionManager.enqueue(sessionId, 'hello');
+      expect(sessionManager.getBus(sessionId)!.isIdle()).toBe(false);
+      // The mock LLM run starts immediately; drain it so nothing lingers.
+      sessionManager.interrupt(sessionId);
+      await settle(() => sessionManager.getBus(sessionId)!.isIdle(), 'bus to idle');
+    });
+
+    it('should be no-op for non-existent session', () => {
+      expect(() => sessionManager.enqueue('non-existent', 'hi')).not.toThrow();
+    });
+  });
+
+  describe('executeCommand', () => {
+    it('should dispatch a registered command and return its action', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      const agent = sessionManager.getAgentBySessionId(sessionId)! as any;
+      let handlerCalls = 0;
+      agent.commandRegistry.register('cov-test', {
+        description: 'coverage test command',
+        matches: (cmd: string) => cmd === 'cov-test',
+        handler: async () => {
+          handlerCalls++;
+          return { action: ACTIONS.DISPLAY, content: 'ok' };
+        },
+      });
+
+      const action = await sessionManager.executeCommand(sessionId, 'cov-test');
+      expect(handlerCalls).toBe(1);
+      expect(action).toBe(ACTIONS.DISPLAY);
+    });
+
+    it('should return undefined for non-existent session', async () => {
+      expect(await sessionManager.executeCommand('non-existent', '/anything')).toBeUndefined();
     });
   });
 

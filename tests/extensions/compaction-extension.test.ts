@@ -9,7 +9,7 @@ import {
   completion as compactCompletion,
 } from "@extensions/compaction/completions.ts";
 import { ToolRegistry } from "@core/extensions/tool-registry.ts";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 
@@ -656,6 +656,62 @@ describe("compact debug dump", () => {
 
     await cmd.handler!(agent, "compact 2");
     expect(existsSync(DUMP)).toBe(false);
+  });
+
+  it("reports a failed debug dump instead of claiming a file exists", async () => {
+    // Point the sessions dir under a regular file: mkdir fails (ENOTDIR).
+    const blocker = join(TMP, "blocker");
+    writeFileSync(blocker, "not a directory");
+    process.env.HOTDOG_SESSIONS_DIR = join(blocker, "sessions");
+    try {
+      const core = createMockCore({ enabled: true, keepRecentMessages: 2, reserveTokens: 100 });
+      const cmd = await compactCmdFor(core);
+
+      const strategyResult = await cmd.handler!(bigAgent(), "compact --compact-debug");
+      expect((strategyResult as any).content).toContain("Debug dump failed");
+      expect((strategyResult as any).content).not.toContain("Debug file written");
+
+      const keepResult = await cmd.handler!(createMockAgent(makeMessages(6)), "compact 3 --compact-debug");
+      expect((keepResult as any).content).not.toContain("Debug file written");
+    } finally {
+      process.env.HOTDOG_SESSIONS_DIR = TMP;
+      rmSync(blocker, { force: true });
+    }
+  });
+});
+
+describe("compact summary stream reset", () => {
+  it("drops the failed attempt's partial output when the stream resets", async () => {
+    const llmClient = {
+      chatStreamCancellable: () =>
+        (async function* () {
+          yield { type: "content", content: "PARTIAL " };
+          yield { type: "reset" };
+          yield { type: "content", content: "FINAL" };
+        })(),
+    };
+
+    const core = createMockCore({ enabled: true, keepRecentMessages: 2, reserveTokens: 100 });
+    const ext = createCompactionExtension(core)!;
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext.hooks as any)![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const cmd = commandRegistry.get("compact")!;
+
+    const agent = createMockAgent(makeMessages(100, "x".repeat(500)), "test-model", {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+    }, llmClient);
+
+    const result = await cmd.handler!(agent, "compact");
+    expect((result as any).content).toContain("compacted");
+
+    const all = agent.log.getAll().map((m: any) => {
+      const c = m.content;
+      if (typeof c === "string") return c;
+      if (Array.isArray(c)) return c.map((p: any) => p?.text ?? "").join("");
+      return "";
+    }).join("\n");
+    expect(all).toContain("FINAL");
+    expect(all).not.toContain("PARTIAL");
   });
 });
 

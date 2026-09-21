@@ -181,6 +181,16 @@ export interface HookPayloads {
   // A handler returns { response } to replace the streamed response.
   "provider:response": { response: StreamResult; modelConfig: ModelConfig; agent: Agent };
 
+  // Fired when an LLM call throws. `params` is the failed call's request, passed
+  // through so a handler can mutate it before a retry (the retry reads params back).
+  // Returning { retry: true } retries the call exactly once; the second failure propagates.
+  "provider:error": {
+    error: unknown;
+    params: { messages: Message[]; modelConfig: ModelConfig; toolDefs: ToolDef[] };
+    agent: Agent;
+    retry: boolean;
+  };
+
   "turn:start": { turnIndex: number; timestamp: number; agent: Agent };
   "turn:end": {
     turnIndex: number;

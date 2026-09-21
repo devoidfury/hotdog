@@ -224,6 +224,16 @@ describe("LlmClient uses the protocol's request path", () => {
     expect(() => reg.register(null as never)).toThrow("non-empty id");
     expect(() => reg.register({ ...openaiProtocol, id: "" })).toThrow("non-empty id");
     expect(reg.has("")).toBe(false);
+    expect(reg.names()).toEqual([]);
+  });
+
+  it("registry stores, finds, and lists protocols by id", () => {
+    const reg = createLlmProtocolRegistry();
+    reg.register(openaiProtocol);
+    expect(reg.has("openai")).toBe(true);
+    expect(reg.get("openai")).toBe(openaiProtocol);
+    expect(reg.get("nope")).toBeUndefined();
+    expect(reg.names()).toEqual(["openai"]);
   });
 
   it("a custom protocol's buildRequest path is used verbatim", async () => {

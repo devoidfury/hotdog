@@ -2,13 +2,15 @@
 
 ## Unreleased
 
-- file-watch - notices are no longer injected into every LLM request: each external change is logged **once** as a persistent harness message in the session (quiet until the file is re-read or overwritten). Bash looks count as reads: a successful `cat`, `grep`, print-mode `sed`, or `git diff`/`git status` naming a tracked path resolves its stale flag and write guard.
+- tool-call-repair - handle a second kind of problem, when the JSON can end up malformed - interrupting a hung stream could leave an assistant message with truncated tool-call arguments (invalid JSON) in history; a llama.cpp-style backend then throws error 500 every subsequent request ("Failed to parse tool call arguments as JSON ..."), bricking the session. Now removes broken tool calls and retries.
 
-- **`--json-schema` structured output for one-shot mode.** can be a file path or inline JSON object. Docs: cli-reference.md
+- **`--json-schema` structured output for one-shot mode.** can be a file path or inline JSON object.
 
 - **`/profile` command added** (list + switch). New extension `src/extensions/profile-switch/` adds: `/profile` lists profiles marking current; `/profile <name>` and `/profile:<name>` to switch.
 
-- `exitCommands` unused config key deleted
+- **rescue subcommand - config diagnostics that survive a broken config** -- a syntax error in defaults.json (the most common breakage: JSONC comments, trailing commas) would throw inside the early so every subcommand died with a one-line parse error and there was no way in. New core subcommand `hotdog rescue [fix]`: prints the config-dir resolution chain, diagnoses defaults.json along the chain (explicit `-f` overrides), and for broken files shows the parse error with an engine-independent line/column caret locator, repairs BOM/line-and-block-comments/trailing-commas, and with `fix` rewrites the file keeping a `.bak` (never clobbers an existing backup); non-fixable breakage gets the marked position. When JSON parses it also warns on unknown top-level keys ("did you mean" via shared `suggestCandidates`), silently-won duplicates, and core+extension schema violations (`validateConfig` against raw normalized file + registry schemas), plus system_prompt.md/profiles-dir presence.
+
+- [BRK?] **bash-tool brace expansion fix** -- `BashTool.execute` was previously spawned with `shell: true`, which uses `/bin/sh` (dash on Debian-ish systems, where was run); dash has no brace expansion, so `mkdir -p x/{mcp,openai,sse}` created one literal `{mcp,openai,sse}` directory. Now uses 'bash' explicitly. Slight chance of breakage if you were using this in a slim container with `sh` but without `bash`.
 
 - **`hotdog info`** added an `Extensions` section: every extension discovered in the scan paths, shows `(disabled)` if `enabled: false` in config (incl. schema defaults like user-gate's off-by-default), `(not loaded)` if enabled but excluded (autoload off, list selection, or `create()` returning null -- e.g. subagents on non-manager profiles).
 
@@ -27,10 +29,15 @@
   - fix `--no-log`, was writing log files anyway due to a regression during JS->TS rewrite
   - fix regression with `--compact-debug` - The flag/config promised `compaction.out.json` but nothing was ever written. `_handleCompactCommand` now dumps `{ts, session_id, mode, keep_requested, strategy, settings, messages:{before,after}}` to `compaction.out.json` in the sessions dir
   - file-tools **BOM/CRLF fidelity in the write tools.** silent-corruption bug - bun keeps `\uFEFF`/`\r\n` in utf-8 strings, so the edit trimmed-line fallback mixed bare LF into CRLF files and could drop the BOM when the first line was replaced; append/overwrite wrote model LF into CRLF files and overwrite always dropped the BOM. Fix = detect-on-read, re-apply-on-write
+  - /loop + handoff - handoff now supercedes loop deterministically
 
 - internals
   - add session teardown hook
   - steering queue refactor (followQueue->steer)
+  - `exitCommands` unused config key deleted
+  - hook priority system to enable that loop/handoff fix
+
+- experimental/file-watch - notices are no longer injected into every LLM request: each external change is logged **once** as a persistent harness message in the session (quiet until the file is re-read or overwritten). Bash looks count as reads: a successful `cat`, `grep`, print-mode `sed`, or `git diff`/`git status` naming a tracked path resolves its stale flag and write guard.
 
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.10.0...main
 

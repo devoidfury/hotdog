@@ -9,7 +9,8 @@ Status markers: entries tagged **(planned)** are design intent -- nothing in the
 - **Application** — One `hotdog` process. Manages zero or more agents.
 - **Agent** — The core runtime unit: receives messages, calls LLM, executes tools, manages context. An application manages agent instances (potentially switching between them).
 - **Task Agent** — A sub-agent spawned from a parent agent for delegation. Runs in a background task with its own MessageLog and LLM loop. Controlled via TaskManager.
-- **Session** — One uninterrupted chat from start to finish (no reset/clearing). Complete capture of everything: messages, config, token usage, everything from user and model server. Resumable. Session fork (planned): go back N turns and branch with new input.
+- **Session** — One uninterrupted chat from start to finish (no reset/clearing). Complete capture of everything: messages, config, token usage, everything from user and model server. Resumable. Session fork: go back N turns and branch with new input (`/fork [N] [prompt]`) — the fork is a new session seeded with the copied context; the source is untouched.
+- **Rewind** — Dropping whole turns from the tail of a session (`/undo` = one turn, `/rewind [N]`). A turn is a user message plus everything after it until the next user message, so tool-call chains never split. Rewinds are persisted: the session log gets a reset marker followed by the surviving messages (append-only -- the undone history stays above the marker for audit), and replay reads from the last reset.
 
 ## Context Layer
 
@@ -99,7 +100,7 @@ Status markers: entries tagged **(planned)** are design intent -- nothing in the
 
 - **Commands** — User-triggered operations. Never LLM-triggered. Commands are the abstract concept; how they are invoked is a UI implementation detail.
 - **Slash Commands** — The interactive CLI implements commands using `/` prefix syntax (e.g., `/quit`, `/compact`). This is one UI implementation for invoking commands.
-- **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `reasoning`, `sessions`, `attach`, `detach`, `switch`, `unknown`.
+- **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `reasoning`, `sessions`, `attach`, `detach`, `switch`, `undo`, `rewind`, `fork`, `unknown`.
 - **Custom commands** — Extensions register commands via `CommandRegistry` using the `COMMANDS_REGISTER` hook (e.g., `compact`, `model`, `skill`).
 - **Channel-level commands** — `quit`, `help`, `sessions`, `attach`, `detach`, `switch` are handled locally by the `Channel` (UI connection abstraction) and never reach the agent. All other commands are routed to the current session's agent.
 

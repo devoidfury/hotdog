@@ -50,6 +50,11 @@ hotdog webui                     # Start the web UI server
 /help              Show available commands
 /quit, /exit       Exit
 /clear             Clear conversation history
+/undo              Undo the last turn (user message + everything after it)
+/rewind [N]        Rewind the last N turns (default 1)
+/fork [N] [prompt] Branch a new session from N turns back; optionally send a prompt there
+                     Fork auto-switches to the new session; the original stays
+                     attached (interactive/switch-capable UIs)
 /loop <prompt>     Repeatedly run a prompt until cancelled
 /model <name>      Switch model
 /models            List available models

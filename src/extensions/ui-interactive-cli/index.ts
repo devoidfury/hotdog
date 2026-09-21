@@ -5,6 +5,7 @@ import { CliOutputSink } from "@utils/cli/cli.ts";
 import { resolveQuestionAnswer } from "@utils/question-answer.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
+import { parseForkArg } from "@core/command-handlers.ts";
 import { HOOKS } from "@core/hooks.ts";
 import type { QuestionDef } from "@core/context/input.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
@@ -39,6 +40,9 @@ Commands:
   /quit, /exit  - Exit
   /help         - Show help
   /clear        - Clear context
+  /undo         - Undo the last turn
+  /rewind [N]   - Rewind the last N turns (default 1)
+  /fork [N] [prompt] - Branch a new session from N turns back; optionally send prompt there
   /loop <prompt> - Repeatedly run prompt until cancelled
   /model <name> - Switch model
   /models       - List available models
@@ -590,7 +594,7 @@ export async function runInteractiveSession(
 export function handleSlashCommand(
   cmdText: string,
   sessionManager: SessionManager,
-  _channel: CliChannel,
+  channel: CliChannel,
   rl: readline.Interface,
 ): void {
   const cmd = parseCommand(cmdText);
@@ -611,6 +615,22 @@ export function handleSlashCommand(
 
   sessionManager.executeCommand(sessionManager.sessionId()!, cmdText).then(
     (action: number | undefined) => {
+      if (cmd.type === Command.Fork) {
+        // Successful fork only (a running-session rejection or failure returns ERROR and
+        // current still points at the source). The manager switched to the fork; retarget
+        // this channel's input and event subscription onto it -- THEN enqueue the optional
+        // prompt, so no fork output fires before anyone is listening.
+        // The source session stays attached, reachable via /switch back.
+        const forkedSessionId = sessionManager.sessionId();
+        if (forkedSessionId && action !== undefined && !(action & ACTIONS.ERROR)) {
+          channel.attach(forkedSessionId);
+          channel.switchSession(forkedSessionId);
+          const { prompt } = parseForkArg(cmd.value ?? "");
+          if (prompt) {
+            sessionManager.enqueue(forkedSessionId, prompt);
+          }
+        }
+      }
       if (!action || !(action & ACTIONS.PROMPT)) {
         console.log("");
         rl.prompt();

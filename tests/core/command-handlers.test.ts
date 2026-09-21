@@ -1,5 +1,5 @@
 import { describe, it, expect, mock } from "bun:test";
-import { Command } from "@core/commands.ts";
+import { Command, ACTIONS } from "@core/commands.ts";
 import {
   handleClear,
   handleQuit,
@@ -9,6 +9,10 @@ import {
   handleThinking,
   handleRegenerate,
   handleReasoning,
+  handleUndo,
+  handleRewind,
+  handleFork,
+  parseForkArg,
   CORE_COMMAND_HANDLERS,
 } from "@core/command-handlers.ts";
 
@@ -272,5 +276,176 @@ describe("CORE_COMMAND_HANDLERS", () => {
       expect(entry.description).toBeDefined();
       expect(typeof entry.description).toBe("string");
     }
+  });
+});
+
+// ── Undo / Rewind ─────────────────────────────────────────────────────
+
+function convoMessages() {
+  return [
+    { role: "user", content: "u1" },
+    { role: "assistant", content: "a1" },
+    { role: "user", content: "u2" },
+    { role: "assistant", content: "a2" },
+  ];
+}
+
+describe("handleUndo / handleRewind", () => {
+  function makeRewindAgent() {
+    const rewindContext = mock((kept: Array<{ content: unknown }>) => {
+      void kept;
+    });
+    const agent = makeMockAgent({
+      getMessages: () => convoMessages(),
+      rewindContext,
+    }) as never;
+    return { agent, rewindContext };
+  }
+
+  it("handleUndo drops the last turn", async () => {
+    const { agent, rewindContext } = makeRewindAgent();
+    const result = await handleUndo(agent);
+    expect(result.action).toBe(ACTIONS.DISPLAY);
+    expect(result.content).toContain("Rewound 1 turn (1 turn remains)");
+    expect(rewindContext).toHaveBeenCalledTimes(1);
+    expect(rewindContext.mock.calls[0]![0].map((m) => m.content)).toEqual(["u1", "a1"]);
+  });
+
+  it("bare /rewind defaults to one turn", async () => {
+    const { agent, rewindContext } = makeRewindAgent();
+    await handleRewind(agent, null);
+    expect(rewindContext.mock.calls[0]![0].map((m) => m.content)).toEqual(["u1", "a1"]);
+  });
+
+  it("/rewind N drops N turns", async () => {
+    const { agent, rewindContext } = makeRewindAgent();
+    const result = await handleRewind(agent, "2");
+    expect(rewindContext.mock.calls[0]![0]).toHaveLength(0);
+    expect(result.content).toContain("Rewound 2 turns");
+  });
+
+  it("clamps N larger than the turn count", async () => {
+    const { agent } = makeRewindAgent();
+    const result = await handleRewind(agent, "99");
+    expect(result.content).toContain("Rewound 2 turns");
+  });
+
+  it("rejects a non-numeric argument", async () => {
+    const { agent, rewindContext } = makeRewindAgent();
+    const result = await handleRewind(agent, "lots");
+    expect(result.action).toBe(ACTIONS.ERROR);
+    expect(result.error).toContain("Invalid turn count");
+    expect(rewindContext).not.toHaveBeenCalled();
+  });
+
+  it("rejects zero", async () => {
+    const { agent, rewindContext } = makeRewindAgent();
+    const result = await handleRewind(agent, "0");
+    expect(result.action).toBe(ACTIONS.ERROR);
+    expect(rewindContext).not.toHaveBeenCalled();
+  });
+
+  it("reports nothing to rewind when no user turns exist", async () => {
+    const rewindContext = mock(() => {});
+    const agent = makeMockAgent({
+      getMessages: () => [{ role: "assistant", content: "a1" }],
+      rewindContext,
+    }) as never;
+    const result = await handleUndo(agent);
+    expect(result.action).toBe(ACTIONS.DISPLAY);
+    expect(result.content).toContain("Nothing to rewind");
+    expect(rewindContext).not.toHaveBeenCalled();
+  });
+});
+
+// ── Fork ──────────────────────────────────────────────────────────────
+
+describe("handleFork", () => {
+  function makeForkAgent(forkSession: unknown) {
+    return makeMockAgent({
+      forkSession,
+      sessionId: "src-session",
+    }) as never;
+  }
+
+  it("errors when no fork seam is wired", async () => {
+    const result = await handleFork(makeMockAgent() as never, "hello");
+    expect(result.action).toBe(ACTIONS.ERROR);
+    expect(result.error).toContain("not available");
+  });
+
+  it("parses a leading turns count plus prompt", async () => {
+    const forkSession = mock(async () => ({ sessionId: "new-session", droppedTurns: 2 }));
+    const result = await handleFork(makeForkAgent(forkSession), "2   try this thing");
+    expect(forkSession).toHaveBeenCalledWith({ turnsBack: 2 });
+    expect(result.content).toContain("src-session → new-session");
+    expect(result.content).toContain("dropped 2 turns");
+    expect(result.content).toContain("Prompt sent");
+  });
+
+  it("reports the actual (clamped) drop count, not the requested one", async () => {
+    const forkSession = mock(async () => ({ sessionId: "new-session", droppedTurns: 2 }));
+    const result = await handleFork(makeForkAgent(forkSession), "99");
+    expect(forkSession).toHaveBeenCalledWith({ turnsBack: 99 });
+    expect(result.content).toContain("dropped 2 turns");
+    expect(result.content).not.toContain("dropped 99");
+  });
+
+  it("treats a non-numeric first token as the prompt", async () => {
+    const forkSession = mock(async () => ({ sessionId: "new-session", droppedTurns: 0 }));
+    await handleFork(makeForkAgent(forkSession), "go deeper 2");
+    expect(forkSession).toHaveBeenCalledWith({ turnsBack: 0 });
+  });
+
+  it("supports a bare fork (full copy, no prompt)", async () => {
+    const forkSession = mock(async () => ({ sessionId: "new-session", droppedTurns: 0 }));
+    const result = await handleFork(makeForkAgent(forkSession), null);
+    expect(forkSession).toHaveBeenCalledWith({ turnsBack: 0 });
+    expect(result.content).not.toContain("Prompt sent");
+  });
+
+  it("turns count alone is not treated as a prompt", async () => {
+    const forkSession = mock(async () => ({ sessionId: "new-session", droppedTurns: 0 }));
+    await handleFork(makeForkAgent(forkSession), "3");
+    expect(forkSession).toHaveBeenCalledWith({ turnsBack: 3 });
+  });
+
+  it("surfaces fork failures as command errors", async () => {
+    const forkSession = mock(async () => {
+      throw new Error("boom");
+    });
+    const result = await handleFork(makeForkAgent(forkSession), "");
+    expect(result.action).toBe(ACTIONS.ERROR);
+    expect(result.error).toContain("boom");
+  });
+});
+
+describe("CORE_COMMAND_HANDLERS registration", () => {
+  it("registers undo, rewind and fork", () => {
+    expect(CORE_COMMAND_HANDLERS[Command.Undo]?.handler).toBe(handleUndo);
+    expect(CORE_COMMAND_HANDLERS[Command.Rewind]?.handler).toBe(handleRewind);
+    expect(CORE_COMMAND_HANDLERS[Command.Fork]?.handler).toBe(handleFork);
+  });
+});
+
+describe("parseForkArg", () => {
+  it("splits a leading turn count from the prompt", () => {
+    expect(parseForkArg("2 try this")).toEqual({ turnsBack: 2, prompt: "try this" });
+  });
+
+  it("treats a bare count as turns with no prompt", () => {
+    expect(parseForkArg("3")).toEqual({ turnsBack: 3, prompt: undefined });
+  });
+
+  it("defaults turnsBack to 0 for a prompt-only arg", () => {
+    expect(parseForkArg("go deeper 2")).toEqual({ turnsBack: 0, prompt: "go deeper 2" });
+  });
+
+  it("empty arg yields no turns and no prompt", () => {
+    expect(parseForkArg("   ")).toEqual({ turnsBack: 0, prompt: undefined });
+  });
+
+  it("keeps multi-line prompts verbatim (trimmed)", () => {
+    expect(parseForkArg("1  do a\n b").prompt).toBe("do a\n b");
   });
 });

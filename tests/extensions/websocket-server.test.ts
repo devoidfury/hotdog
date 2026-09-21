@@ -295,6 +295,38 @@ describe("SessionRegistry", () => {
     expect(registry.createChannel("non-existent", createWsMockWs())).toBeUndefined();
   });
 
+  describe("fork", () => {
+    it("registers UI metadata for the fork and lists both sessions", async () => {
+      const { sessionId } = await registry.create({ profile: "coder" });
+
+      const { sessionId: forkId } = await registry.fork(sessionId, { turnsBack: 0 });
+
+      expect(forkId).not.toBe(sessionId);
+      const forked = registry.get(forkId)!;
+      expect(forked).toBeDefined();
+      expect(forked.metadata.profile).toBe("coder");
+      expect(forked.metadata.title).toBeNull();
+      expect(forked.metadata.connectedClients).toBe(0);
+      expect(registry.list()).toHaveLength(2);
+      // Source survives.
+      expect(registry.get(sessionId)).toBeDefined();
+    });
+
+    it("rejects an unknown source session", async () => {
+      await expect(registry.fork("nope", { turnsBack: 0 })).rejects.toThrow(
+        "Cannot fork unknown session",
+      );
+    });
+
+    it("rejects while the source session is running", async () => {
+      const { sessionId } = await registry.create();
+      registry.getSessionManager().getBus(sessionId)!.isRunning = true;
+      await expect(registry.fork(sessionId, { turnsBack: 1 })).rejects.toThrow(
+        "while the session is running",
+      );
+    });
+  });
+
   it("cleans up idle sessions with 0 connected clients", async () => {
     const result = await registry.create();
     const meta = registry._test_metadata.get(result.sessionId);
@@ -515,6 +547,25 @@ describe("createWsServer", () => {
     } finally {
       sessionManager.executeCommand = originalExecuteCommand;
     }
+  });
+
+  it("intercepts COMMAND /fork: announces sessionCreated and re-targets the socket", async () => {
+    const ws = await connectWithSession();
+    const sourceId = (ws as unknown as HotdogServerSocket).activeSessionId!;
+    const sendCount = ws.messages.length;
+
+    wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: C2S.COMMAND, sessionId: sourceId, command: "/fork 1 branch prompt" }),
+    );
+
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED, { after: sendCount });
+    expect(created.sessionId).not.toBe(sourceId);
+    // The requesting socket now talks to the fork.
+    expect((ws as unknown as HotdogServerSocket).activeSessionId).toBe(created.sessionId);
+    expect((ws as unknown as HotdogServerSocket).activeChannel).toBeDefined();
+    // The registry knows the fork (sidebar will list it).
+    expect(wsServer.sessionRegistry.get(created.sessionId)).toBeDefined();
   });
 
   it("handles QUESTION_ANSWER message (no pending question → error)", async () => {

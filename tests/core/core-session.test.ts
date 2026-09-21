@@ -3,7 +3,8 @@
 import { SessionManager, SessionStore } from '../../src/core/session/index.ts';
 import { Agent } from '../../src/core/agent.ts';
 import type { AgentLike } from '../../src/core/session/index.ts';
-import { createHooks, HookSystem } from '../../src/core/hooks.ts';
+import { createHooks, HookSystem, HOOKS } from '../../src/core/hooks.ts';
+import { Message } from '../../src/core/context/message.ts';
 import { ExtensionLoader } from '../../src/core/extensions/extensions.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createServiceRegistry } from '../../src/core/extensions/service-registry.ts';
@@ -447,3 +448,131 @@ describe('deleteSession cascades to subagent tasks', () => {
 });
 
 // SessionStore tests moved to session-store.test.ts
+
+describe('SessionManager.forkSession', () => {
+  let hooks: HookSystem;
+  let extensions: ExtensionLoader;
+  let toolRegistry: any;
+  let seenConfigs: Array<Record<string, unknown>>;
+  let buildAgent: (config: Record<string, unknown>) => Promise<any>;
+
+  beforeEach(() => {
+    hooks = createHooks();
+    toolRegistry = createToolRegistry();
+    extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: new ConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry(), completion: createCompletionService() });
+
+    seenConfigs = [];
+    buildAgent = async (config: Record<string, unknown>) => {
+      seenConfigs.push(config);
+      return createMockAgent({
+        model: (config as any).model || 'test-model',
+        hooks,
+        toolRegistry,
+        sessionId: config.sessionId as string | undefined,
+      });
+    };
+  });
+
+  async function createSourceSession() {
+    const sm = await SessionManager.create({
+      hooks: hooks as any,
+      extensions,
+      buildAgent,
+      initialConfig: { model: 'test-model', sessionId: 'fork-src' },
+    });
+    const src = sm.getAgent()!;
+    src.addMessage(new Message({ role: 'user', content: 'u1' }));
+    src.addMessage(new Message({ role: 'assistant', content: 'a1' }));
+    src.addMessage(new Message({ role: 'user', content: 'u2' }));
+    src.addMessage(new Message({ role: 'assistant', content: 'a2' }));
+    return { sm, src };
+  }
+
+  it('branches a new session N turns back and switches to it', async () => {
+    const { sm, src } = await createSourceSession();
+
+    const { sessionId: newId } = await sm.forkSession('fork-src', { turnsBack: 1 });
+
+    expect(newId).not.toBe('fork-src');
+    expect(sm.sessionId()).toBe(newId);
+    const forked = sm.getAgentBySessionId(newId)!;
+    expect(forked).toBeDefined();
+    expect(forked.getMessages().map((m) => m.content)).toEqual(['u1', 'a1']);
+    // Source untouched.
+    expect(src.sessionId).toBe('fork-src');
+    expect(src.getMessages()).toHaveLength(4);
+    expect(sm.sessionCount()).toBe(2);
+  });
+
+  it('strips sessionId from the build config so the fork gets a fresh id', async () => {
+    const { sm } = await createSourceSession();
+    await sm.forkSession('fork-src', { turnsBack: 0 });
+    const forkConfig = seenConfigs[seenConfigs.length - 1]!;
+    expect(forkConfig.sessionId).toBeUndefined();
+  });
+
+  it('drops every turn when turnsBack exceeds the turn count', async () => {
+    const { sm } = await createSourceSession();
+    const { sessionId: newId, droppedTurns } = await sm.forkSession('fork-src', { turnsBack: 99 });
+    const forked = sm.getAgentBySessionId(newId)!;
+    expect(forked.getMessages()).toHaveLength(0);
+    // Clamped to the source's real turn count for honest /fork reporting.
+    expect(droppedTurns).toBe(2);
+  });
+
+  it('the injected fork seam forks through the manager (chainable)', async () => {
+    const { sm, src } = await createSourceSession();
+    expect(typeof src.forkSession).toBe('function');
+
+    const { sessionId: firstId } = await src.forkSession!({ turnsBack: 1 });
+    const first = sm.getAgentBySessionId(firstId)!;
+    expect(first.getMessages().map((m) => m.content)).toEqual(['u1', 'a1']);
+
+    // Fork the fork: one turn back removes its only turn.
+    const { sessionId: secondId } = await first.forkSession!({ turnsBack: 1 });
+    expect(sm.getAgentBySessionId(secondId)!.getMessages()).toHaveLength(0);
+  });
+
+  it('rejects an unknown source session', async () => {
+    const { sm } = await createSourceSession();
+    await expect(sm.forkSession('nope', { turnsBack: 0 })).rejects.toThrow(
+      'Cannot fork unknown session',
+    );
+  });
+
+  it('rejects while the source session is running (direct-call guard)', async () => {
+    // UI servers (webui ws layer) fork around the command bus, so the bus's
+    // SESSION_MUTATING_COMMANDS guard never runs; forkSession guards itself.
+    const { sm } = await createSourceSession();
+    sm.getBus('fork-src')!.isRunning = true;
+    await expect(
+      sm.forkSession('fork-src', { turnsBack: 0 }),
+    ).rejects.toThrow('while the session is running');
+  });
+
+  it('SESSION_CREATE sees the fork as the current session (mirrors create)', async () => {
+    const { sm } = await createSourceSession();
+    const seen: Array<string | null> = [];
+    hooks.on(HOOKS.SESSION_CREATE, () => {
+      seen.push(sm.sessionId());
+    });
+
+    const { sessionId: newId } = await sm.forkSession('fork-src', { turnsBack: 0 });
+    expect(seen).toEqual([newId]);
+  });
+
+  it('fires SESSION_SWAP with the source as oldAgent', async () => {
+    const { sm, src } = await createSourceSession();
+    const swaps: Array<{ oldAgent?: AgentLike; newAgent?: AgentLike }> = [];
+    hooks.on(HOOKS.SESSION_SWAP, (p: { oldAgent?: AgentLike; newAgent?: AgentLike }) => {
+      swaps.push(p);
+    });
+
+    const { sessionId: newId } = await sm.forkSession('fork-src', { turnsBack: 0 });
+    // Swap notify is fire-and-forget; let it settle.
+    await settle(() => swaps.length > 0, 'SESSION_SWAP to fire');
+    expect(swaps).toHaveLength(1);
+    expect(swaps[0]!.oldAgent).toBe(src);
+    expect(swaps[0]!.newAgent!.sessionId).toBe(newId);
+  });
+});

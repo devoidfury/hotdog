@@ -105,3 +105,94 @@ describe("handleSlashCommand", () => {
     expect(prompted).toBe(false);
   });
 });
+
+describe("handleSlashCommand — fork re-attach", () => {
+  it("retargets the channel onto the forked session, then enqueues the prompt there", async () => {
+    const { rl } = createMockRl();
+    let current = "old-session";
+    const order: string[] = [];
+    const mockSessionManager = {
+      sessionId: () => current,
+      executeCommand: async () => {
+        current = "new-session"; // the manager switched during command execution
+        order.push("execute");
+        return ACTIONS.DISPLAY;
+      },
+      enqueue: (id: string, text: string) => {
+        order.push(`enqueue:${id}:${text}`);
+      },
+    } as any;
+    const mockChannel = {
+      attach: (id: string) => order.push(`attach:${id}`),
+      switchSession: (id: string) => order.push(`switch:${id}`),
+    } as any;
+
+    handleSlashCommand("fork 1 go", mockSessionManager, mockChannel, rl as any);
+    await new Promise((r) => setTimeout(r, 10));
+
+    // The prompt must be enqueued only AFTER the channel is retargeted, or the fork's
+    // first output (user echo, stream) fires before anyone is subscribed.
+    expect(order).toEqual(["execute", "attach:new-session", "switch:new-session", "enqueue:new-session:go"]);
+  });
+
+  it("does not enqueue a prompt when the fork failed (ERROR action)", async () => {
+    const { rl } = createMockRl();
+    const enqueued: string[] = [];
+    const touched: string[] = [];
+    const mockSessionManager = {
+      sessionId: () => "old-session", // no switch: the fork never happened
+      executeCommand: async () => ACTIONS.ERROR,
+      enqueue: (id: string) => enqueued.push(id),
+    } as any;
+    const mockChannel = {
+      attach: (id: string) => touched.push(`attach:${id}`),
+      switchSession: (id: string) => touched.push(`switch:${id}`),
+    } as any;
+
+    handleSlashCommand("fork 1 go", mockSessionManager, mockChannel, rl as any);
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Otherwise a rejected /fork (running guard) would leak its prompt into the source session.
+    expect(touched).toEqual([]);
+    expect(enqueued).toEqual([]);
+  });
+
+  it("fork without a prompt enqueues nothing", async () => {
+    const { rl } = createMockRl();
+    let current = "old-session";
+    const enqueued: string[] = [];
+    const mockSessionManager = {
+      sessionId: () => {
+        current = "new-session";
+        return current;
+      },
+      executeCommand: async () => ACTIONS.DISPLAY,
+      enqueue: (id: string) => enqueued.push(id),
+    } as any;
+    const mockChannel = {
+      attach: (id: string) => void id,
+      switchSession: (id: string) => void id,
+    } as any;
+
+    handleSlashCommand("fork", mockSessionManager, mockChannel, rl as any);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(enqueued).toEqual([]);
+  });
+
+  it("does not re-attach for non-fork commands", async () => {
+    const { rl } = createMockRl();
+    const mockSessionManager = {
+      sessionId: () => "same-session",
+      executeCommand: async () => ACTIONS.DISPLAY,
+    } as any;
+    let touched = 0;
+    const mockChannel = {
+      attach: () => touched++,
+      switchSession: () => touched++,
+    } as any;
+
+    handleSlashCommand("undo", mockSessionManager, mockChannel, rl as any);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(touched).toBe(0);
+  });
+});

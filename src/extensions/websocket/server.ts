@@ -20,6 +20,7 @@ import {
   deleteSessionLog,
 } from "@core/session/session-log.ts";
 import { AgentError, formatError } from "@core/error.ts";
+import { parseForkArg } from "@core/command-handlers.ts";
 import {
   completionPrefix,
   parseCompletionContext,
@@ -223,11 +224,54 @@ export class SessionRegistry {
     });
 
     this.#sessionManager.registerAgent(agent, {
-      profile: profile || "default",
+      // Build-config shape (profileName, not profile): forkSession reuses this entry
+      // metadata as the fork's buildAgent config, so the keys must match what #buildAgent reads.
+      profileName: profile || "default",
       model,
     });
 
     return { sessionId: actualSessionId, agent };
+  }
+
+  /**
+   * Branch a registry session (webui `/fork`): SessionManager.forkSession plus UI-side metadata
+   * for the new session. No prompt here on purpose -- the caller enqueues it after re-targeting
+   * the requesting socket, so the prompt's user message echoes live exactly once and the history
+   * replay snapshot never races it.
+   */
+  async fork(
+    sourceSessionId: string,
+    opts: { turnsBack: number },
+  ): Promise<{ sessionId: string; agent: AgentLike }> {
+    const meta = this.#metadata.get(sourceSessionId);
+    if (!meta) {
+      throw new AgentError(`Cannot fork unknown session: ${sourceSessionId}`);
+    }
+
+    const { sessionId: newSessionId } = await this.#sessionManager.forkSession(
+      sourceSessionId,
+      opts,
+    );
+    const agent = this.#sessionManager.getAgentBySessionId(newSessionId);
+    if (!agent) {
+      throw new AgentError(`Forked session vanished: ${newSessionId}`);
+    }
+
+    this.#metadata.set(newSessionId, {
+      profile: meta.profile,
+      title: null,
+      model: agent.model || meta.model,
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+      connectedClients: 0,
+      questionStrategy: meta.questionStrategy,
+      questionTimeoutSecs: meta.questionTimeoutSecs,
+      userMessageCount: agent
+        .getMessages()
+        .filter((m) => m.role === "user").length,
+    });
+
+    return { sessionId: newSessionId, agent };
   }
 
   get(
@@ -904,6 +948,49 @@ async function routeMessage(
         if (cmdText.startsWith("/")) {
           cmdText = cmdText.slice(1).trim();
         }
+
+        // /fork is intercepted rather than dispatched to the bus: the registry must
+        // register the new session's UI metadata and re-target the requesting socket,
+        // or the tab stays on the source and the fork is unreachable in the webui.
+        if (cmdText === "fork" || cmdText.startsWith("fork ")) {
+          const { turnsBack, prompt } = parseForkArg(cmdText.slice("fork".length));
+          registry
+            .fork(msg.sessionId as string, { turnsBack })
+            .then(({ sessionId: newSessionId, agent }) => {
+              if (ws.activeSessionId && ws.activeChannel) {
+                registry.removeChannel(ws.activeSessionId, ws.activeChannel);
+              }
+              ws.activeSessionId = newSessionId;
+              ws.activeChannel = registry.createChannel(newSessionId, ws);
+
+              const sessionCreatedMsg = {
+                type: S2C.SESSION_CREATED,
+                sessionId: newSessionId,
+                profile: agent.profileName || "default",
+                // Fresh session (branch): no explicit title yet, display follows profile.
+                title: null,
+                currentModel: agent.model,
+                models: Object.keys(agent.modelRegistry || {}),
+              };
+              SessionRegistry.sendSafe(ws, sessionCreatedMsg);
+              registry.broadcast(sessionCreatedMsg);
+
+              // After the fork's sessionCreated lands (the client clears its list and
+              // re-targets), replay the copied history, then start the optional prompt.
+              replaySessionHistory(newSessionId, agent, ws);
+              if (prompt) {
+                sessionManager.enqueue(newSessionId, prompt);
+              }
+            })
+            .catch((err: unknown) => {
+              SessionRegistry.sendSafe(ws, {
+                type: S2C.ERROR,
+                message: err instanceof Error ? err.message : String(err),
+              });
+            });
+          break;
+        }
+
         sessionManager.executeCommand(msg.sessionId as string, cmdText);
       }
       break;

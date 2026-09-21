@@ -1,6 +1,8 @@
 // Extracted from agent.ts so that agent.ts only does generic dispatch.
 
 import { Command, ACTIONS } from "./commands.ts";
+import { trimTurns } from "./context/rewind.ts";
+import { formatError } from "./error.ts";
 import type { CommandHandler, CommandResult } from "./extensions/registries.ts";
 import type { CompletionContext, CompletionOption } from "./completion.ts";
 import type { Agent } from "./agent.ts";
@@ -110,6 +112,93 @@ export async function handleRegenerate(
   return { action: ACTIONS.DISPLAY, content: "System prompt regenerated." };
 }
 
+/**
+ * Shared implementation for /undo (turns=1) and /rewind [N]: drop the last N turns via rewindContext,
+ * which also fires CONTEXT_REWOUND so the session-log extension checkpoints the log.
+ */
+async function rewindTurns(agent: Agent, turns: number): Promise<CommandResult> {
+  const messages = agent.getMessages();
+  const { kept, droppedTurns, totalTurns } = trimTurns(messages, turns);
+  if (droppedTurns === 0) {
+    return {
+      action: ACTIONS.DISPLAY,
+      content: "Nothing to rewind (no user turns in context).",
+    };
+  }
+  await agent.rewindContext(kept);
+  const remaining = totalTurns - droppedTurns;
+  return {
+    action: ACTIONS.DISPLAY,
+    content:
+      `Rewound ${droppedTurns} turn${droppedTurns === 1 ? "" : "s"}` +
+      ` (${remaining} ${remaining === 1 ? "turn remains" : "turns remain"}).`,
+  };
+}
+
+export async function handleUndo(agent: Agent): Promise<CommandResult> {
+  return rewindTurns(agent, 1);
+}
+
+export async function handleRewind(agent: Agent, value?: string | null): Promise<CommandResult> {
+  // Bare /rewind defaults to one turn (same as /undo).
+  let turns = 1;
+  if (value) {
+    if (!/^\d+$/.test(value)) {
+      return {
+        action: ACTIONS.ERROR,
+        error: `Invalid turn count: '${value}'. Usage: /rewind [N]`,
+      };
+    }
+    turns = parseInt(value, 10);
+    if (turns < 1) {
+      return { action: ACTIONS.ERROR, error: "N must be at least 1." };
+    }
+  }
+  return rewindTurns(agent, turns);
+}
+
+/**
+ * Parse the `/fork` argument: an optional leading integer = turns to drop back, the rest = prompt.
+ * Exported for UIs (webui ws layer) that route fork around the command bus.
+ */
+export function parseForkArg(value: string): { turnsBack: number; prompt?: string } {
+  const arg = value.trim();
+  const match = arg.match(/^(\d+)(?:\s+([\s\S]*))?$/);
+  if (match) {
+    return { turnsBack: parseInt(match[1]!, 10), prompt: match[2]?.trim() || undefined };
+  }
+  return { turnsBack: 0, prompt: arg || undefined };
+}
+
+export async function handleFork(
+  agent: Agent,
+  value?: string | null,
+): Promise<CommandResult> {
+  if (typeof agent.forkSession !== "function") {
+    return {
+      action: ACTIONS.ERROR,
+      error: "Fork is not available in this harness (no session manager).",
+    };
+  }
+
+  const { turnsBack, prompt } = parseForkArg(value || "");
+
+  try {
+    // Note: prompt is parsed for reporting only -- the hosting UI enqueues it after
+    // re-targeting its channel onto the fork (see SessionManager.forkSession doc).
+    const { sessionId: newSessionId, droppedTurns } = await agent.forkSession({ turnsBack });
+    return {
+      action: ACTIONS.DISPLAY,
+      content:
+        `Forked session ${agent.sessionId} → ${newSessionId}` +
+        ` (dropped ${droppedTurns} turn${droppedTurns === 1 ? "" : "s"}).` +
+        (prompt ? "\nPrompt sent to the forked session." : ""),
+    };
+  } catch (err) {
+    return { action: ACTIONS.ERROR, error: formatError(err) };
+  }
+}
+
 export function handleReasoning(
   agent: Agent,
   value?: string | null,
@@ -161,6 +250,18 @@ export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
   [Command.Regenerate]: {
     handler: handleRegenerate,
     description: "Regenerate system prompt",
+  },
+  [Command.Undo]: {
+    handler: handleUndo,
+    description: "Undo the last turn",
+  },
+  [Command.Rewind]: {
+    handler: handleRewind,
+    description: "Rewind the last N turns",
+  },
+  [Command.Fork]: {
+    handler: handleFork,
+    description: "Branch a new session from N turns back with an optional prompt",
   },
   [Command.Reasoning]: {
     handler: handleReasoning,

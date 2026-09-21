@@ -97,6 +97,73 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // Track the most recent session ID so readEntries/getLogPath work correctly.
   let lastSessionId: string | null = null;
 
+  // Serialize writes per session file. Hook handlers fire independently (addMessage
+  // does not await notifyHooks), so floating appendFile calls can land out of dispatch
+  // order -- e.g. a /fork's first prompt entry written below the copied history it
+  // should follow. Chaining keeps file order equal to hook dispatch order, which holds
+  // because handlers enqueue synchronously (async handlers run to their first await
+  // before the next dispatch).
+  const writeQueues = new Map<string, Promise<void>>();
+  const queuedAppend = (logPath: string, line: string): Promise<void> => {
+    const prev = writeQueues.get(logPath) ?? Promise.resolve();
+    // Chain on either outcome: one failed write must not poison the queue.
+    const next = prev.then(
+      () => appendFile(logPath, line),
+      () => appendFile(logPath, line),
+    );
+    writeQueues.set(logPath, next);
+    return next;
+  };
+
+  /** Map message role to the correct log source type. */
+  const logSourceForRole = (role: string | undefined): string => {
+    switch (role) {
+      case "assistant":
+        return LOG_SOURCE.LLM;
+      case "tool":
+        return LOG_SOURCE.TOOL_RESULT;
+      case "user":
+      case "system":
+      case "harness":
+      default:
+        // Non-initial system messages (e.g. task completion) should be logged as user messages with wrapper --
+        // but at this point they're already wrapped as user messages by the caller. If a bare system message
+        // somehow makes it here, log it as a user input to avoid mislabeling it as the initial system prompt.
+        // Harness-injected messages replay via their "harness" origin.
+        return LOG_SOURCE.INPUT;
+    }
+  };
+
+  /** Append one message to the agent's session log (validated path). */
+  const appendMessageEntry = async (
+    agent: { sessionId?: string },
+    message: SessionLogMessage,
+  ): Promise<void> => {
+    const sessionId = agent.sessionId || "unknown";
+    let logPath: string;
+    try {
+      logPath = sessionPath(sessionId);
+    } catch (err) {
+      logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
+      return;
+    }
+    lastSessionId = sessionId;
+
+    const entry = messageToLogEntry(
+      {
+        sessionId: agent.sessionId,
+        role: message.role,
+        content: logContent(message),
+        reasoningContent: message.reasoningContent,
+        toolCalls: message.toolCalls,
+        toolCallId: message.toolCallId,
+        source: message.source,
+      },
+      logSourceForRole(message.role),
+    );
+    await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+  };
+
   return {
     hooks: {
       /**
@@ -118,13 +185,32 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       [HOOKS.CONTEXT_MESSAGE]: async ({
         message,
         agent,
+      }: {
+        message: SessionLogMessage;
+        agent: { sessionId?: string };
       }) => {
         // Skip logging during session restoration to avoid duplicate entries
         if (isRestoring) return;
+        await appendMessageEntry(agent, message);
+      },
+
+      /**
+       * Checkpoint the log on a deliberate rewind (/undo, /rewind, /clear): append a reset entry, then re-append the kept messages.
+       * Replay slices from the last reset, so resume (and any fork of this session) sees exactly the rewound context while the
+       * log stays append-only (the undone history remains above the marker for audit).
+       *
+       * System-role messages are skipped: the system prompt is regenerated on replay, so writing it would resurface it as a user message.
+       */
+      [HOOKS.CONTEXT_REWOUND]: async ({
+        agent,
+        newContext,
+      }: {
+        agent: { sessionId?: string };
+        newContext: SessionLogMessage[];
+      }) => {
+        if (isRestoring) return;
 
         const sessionId = agent.sessionId || "unknown";
-        // Validate through sessionPath before writing: never bypass the
-        // traversal checks the read side already enforces.
         let logPath: string;
         try {
           logPath = sessionPath(sessionId);
@@ -134,44 +220,23 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         }
         lastSessionId = sessionId;
 
-        // Map message role to the correct log source type
-        let source: string;
-        switch (message.role) {
-          case "user":
-            source = LOG_SOURCE.INPUT;
-            break;
-          case "assistant":
-            source = LOG_SOURCE.LLM;
-            break;
-          case "tool":
-            source = LOG_SOURCE.TOOL_RESULT;
-            break;
-          case "system":
-            // Non-initial system messages (e.g. task completion) should be
-            // logged as user messages with wrapper — but at this point they're
-            // already wrapped as user messages by the caller. If a bare system
-            // message somehow makes it here, log it as a user input to avoid
-            // mislabeling it as the initial system prompt.
-            source = LOG_SOURCE.INPUT;
-            break;
-          case "harness":
-            // Harness-injected message; replayed via its "harness" origin.
-            source = LOG_SOURCE.INPUT;
-            break;
-          default:
-            source = LOG_SOURCE.INPUT;
-        }
+        const resetEntry = stripNulls({
+          ts: new Date().toISOString(),
+          session_id: sessionId,
+          source: LOG_SOURCE.RESET,
+          content: "",
+        });
 
-        const entry = messageToLogEntry({
-          sessionId: agent.sessionId,
-          role: message.role,
-          content: logContent(message),
-          reasoningContent: message.reasoningContent,
-          toolCalls: message.toolCalls,
-          toolCallId: message.toolCallId,
-          source: message.source,
-        }, source);
-        await appendFile(logPath, JSON.stringify(entry) + "\n");
+        // Enqueue the whole checkpoint synchronously (no await in between): the
+        // block must be atomic in queue order, or a message dispatched mid-checkpoint
+        // would replay between the reset marker and the kept history.
+        let done = queuedAppend(logPath, JSON.stringify(resetEntry) + "\n");
+        for (const message of newContext || []) {
+          if (message.role === "system") continue;
+          // appendMessageEntry queues synchronously before its first await.
+          done = appendMessageEntry(agent, message);
+        }
+        await done;
       },
 
       /**
@@ -210,7 +275,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
               // Compaction summaries are harness-generated content.
               origin: "harness",
             });
-            await appendFile(logPath, JSON.stringify(entry) + "\n");
+            await queuedAppend(logPath, JSON.stringify(entry) + "\n");
           }
         }
       },
@@ -224,6 +289,14 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       if (!lastSessionId) return [];
       // lastSessionId is only set after a successful sessionPath() validation.
       const logPath = sessionPath(lastSessionId);
+      // Drain the write queue: entries dispatched but not yet flushed (floating
+      // hook writes) must be on disk before the read.
+      const pending = writeQueues.get(logPath);
+      if (pending) {
+        try {
+          await pending;
+        } catch {}
+      }
       try {
         await access(logPath);
       } catch {

@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { MessageBus } from "@core/session/message-bus.ts";
+import { ACTIONS } from "@core/commands.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { LlmError } from "@core/error.ts";
@@ -777,5 +778,72 @@ describe("MessageBus single run-loop invariant (double-consumer regression)", ()
     expect(runs).toEqual(["first", "second"]);
     bus.cancel();
     await loop2;
+  });
+});
+
+describe("MessageBus.executeCommand — session-mutating guard", () => {
+  // undo/rewind/fork/clear rewrite or branch the context; mid-run they would
+  // corrupt the in-flight turn, so the bus rejects them before dispatch.
+  const mutatingCmds = ["clear", "undo", "rewind 2", "fork 1 hello"];
+
+  for (const cmdText of mutatingCmds) {
+    it(`rejects /${cmdText.split(" ")[0]} while a run is active`, async () => {
+      let dispatched = false;
+      const agent = createMockAgent({
+        executeCommand: async () => {
+          dispatched = true;
+          return null;
+        },
+      });
+      const sink = createMockSink();
+      const bus = new MessageBus({
+        sessionManager: createMockSessionManager(() => agent),
+        sink,
+      });
+      bus.isRunning = true;
+
+      const action = await bus.executeCommand(cmdText);
+      expect(action).toBe(ACTIONS.ERROR);
+      expect(dispatched).toBe(false);
+      const emitted = sink._emitted as Array<{ type: unknown; content?: string }>;
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]!.content).toContain("not available while the session is running");
+    });
+  }
+
+  it("dispatches undo when idle", async () => {
+    let dispatched = false;
+    const agent = createMockAgent({
+      executeCommand: async () => {
+        dispatched = true;
+        return { action: ACTIONS.DISPLAY, content: "Rewound 1 turn" };
+      },
+    });
+    const sink = createMockSink();
+    const bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink,
+    });
+
+    await bus.executeCommand("undo");
+    expect(dispatched).toBe(true);
+  });
+
+  it("leaves non-mutating commands alone while running", async () => {
+    let dispatched = false;
+    const agent = createMockAgent({
+      executeCommand: async () => {
+        dispatched = true;
+        return null;
+      },
+    });
+    const bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink: createMockSink(),
+    });
+    bus.isRunning = true;
+
+    await bus.executeCommand("tokens");
+    expect(dispatched).toBe(true);
   });
 });

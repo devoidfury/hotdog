@@ -358,3 +358,176 @@ describe("session-log extension create()", () => {
   });
 });
 
+
+describe("CONTEXT_REWOUND checkpointing", () => {
+  it("writes a reset entry then re-appends the kept messages; replay sees only the kept set", async () => {
+    const sessionId = `test-rewind-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const rewindHook = ext.hooks[HOOKS.CONTEXT_REWOUND] as (ctx: any) => Promise<void>;
+
+      // Four entries before the rewind.
+      for (const m of [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "u2" },
+        { role: "assistant", content: "a2" },
+      ]) {
+        await msgHook({ message: m, agent: { sessionId } });
+      }
+
+      // Rewind keeps turn 1; the system-role message must not resurface as user input.
+      await rewindHook({
+        agent: { sessionId },
+        newContext: [
+          { role: "system", content: "sys prompt" },
+          { role: "user", content: "u1" },
+          { role: "assistant", content: "a1" },
+        ],
+      });
+
+      // Replay (readSessionEntries) slices from the last reset.
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(2);
+      expect(entries[0]!.source).toBe(LOG_SOURCE.INPUT);
+      expect(entries[0]!.content).toBe("u1");
+      expect(entries[1]!.source).toBe(LOG_SOURCE.LLM);
+      expect(entries[1]!.content).toBe("a1");
+
+      // Raw log stays append-only: 4 original + 1 reset + 2 re-appended, with the
+      // undone history still present above the marker.
+      const raw = readFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), "utf-8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      expect(raw).toHaveLength(7);
+      expect(raw[4]!.source).toBe("reset");
+      expect(raw.map((e) => e.content)).toContain("u2");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("rewind to empty (clear) checkpoints a bare reset — replay yields nothing", async () => {
+    const sessionId = `test-clear-checkpoint-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const rewindHook = ext.hooks[HOOKS.CONTEXT_REWOUND] as (ctx: any) => Promise<void>;
+
+      await msgHook({ message: { role: "user", content: "u1" }, agent: { sessionId } });
+      await rewindHook({ agent: { sessionId }, newContext: [] });
+
+      expect(await readSessionEntries(sessionId)).toHaveLength(0);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("suppresses checkpointing while a session restore is active", async () => {
+    const sessionId = `test-rewind-restore-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const restoreHook = ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE] as (ctx: any) => void;
+      const rewindHook = ext.hooks[HOOKS.CONTEXT_REWOUND] as (ctx: any) => Promise<void>;
+
+      restoreHook({ isRestoring: true });
+      await rewindHook({ agent: { sessionId }, newContext: [{ role: "user", content: "u1" }] });
+      restoreHook({ isRestoring: false });
+
+      // Nothing was written at all.
+      const { existsSync } = await import("node:fs");
+      expect(existsSync(join(SESSIONS_DIR, `${sessionId}.jsonl`))).toBe(false);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+});
+
+describe("write ordering serialization", () => {
+  it("floating hook writes land on disk in dispatch order", async () => {
+    // addMessage fire-and-forgets notifyHooks, so a /fork's copy loop dispatches
+    // many CONTEXT_MESSAGE hooks without awaiting them, then the fork's first
+    // prompt enqueues behind them. File order must equal dispatch order, or a
+    // resumed fork restores its context scrambled.
+    const sessionId = `test-order-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+
+      const floats: Promise<void>[] = [];
+      for (let i = 1; i <= 12; i++) {
+        floats.push(msgHook({ message: { role: i % 2 ? "user" : "assistant", content: `m${i}` }, agent: { sessionId } }));
+      }
+      await Promise.all(floats);
+
+      const raw = readFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), "utf-8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      expect(raw.map((e) => e.content)).toEqual(
+        Array.from({ length: 12 }, (_, i) => `m${i + 1}`),
+      );
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("checkpoint enqueues atomically: a message dispatched mid-rewind lands after the kept history", async () => {
+    // rewindHook (floating) then msgHook in the same tick. Without the atomic
+    // sync-enqueue, the interleaved message replays between the reset marker
+    // and the kept history -- deterministically wrong order, not a timing fluke.
+    const sessionId = `test-order-atomic-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const rewindHook = ext.hooks[HOOKS.CONTEXT_REWOUND] as (ctx: any) => Promise<void>;
+
+      const floats = [
+        rewindHook({
+          agent: { sessionId },
+          newContext: [
+            { role: "user", content: "k1" },
+            { role: "assistant", content: "k2" },
+          ],
+        }),
+        msgHook({ message: { role: "user", content: "x" }, agent: { sessionId } }),
+      ];
+      await Promise.all(floats);
+
+      const raw = readFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), "utf-8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      // The reset entry carries empty content.
+      expect(raw.map((e) => e.content)).toEqual(["", "k1", "k2", "x"]);
+
+      // Replay slices from the reset and sees kept history first, then x.
+      const entries = await readSessionEntries(sessionId);
+      expect(entries.map((e) => e.content)).toEqual(["k1", "k2", "x"]);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("readEntries() drains pending writes before reading", async () => {
+    const sessionId = `test-order-drain-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+
+      // Dispatch without awaiting, then read through the extension immediately.
+      const floats: Promise<void>[] = [];
+      for (let i = 1; i <= 4; i++) {
+        floats.push(msgHook({ message: { role: "user", content: `d${i}` }, agent: { sessionId } }));
+      }
+
+      const entries = await ext.readEntries();
+      expect(entries.map((e: any) => e.content)).toEqual(["d1", "d2", "d3", "d4"]);
+      await Promise.all(floats);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+});

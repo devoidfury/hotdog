@@ -4,7 +4,7 @@ import { contentToText, type Message, type MessageSource } from "../context/mess
 import { repairToolCalls } from "../context/repair.ts";
 import { HOOKS } from "../hooks.ts";
 import type { HookPayloads } from "../extensions/types.ts";
-import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
+import { parseCommand, ACTIONS, SESSION_MUTATING_COMMANDS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 import type { CommandResult } from "../extensions/registries.ts";
 
 /** INPUT pipeline payload: core's shape with the bus's minimal agent. The
@@ -453,6 +453,18 @@ export class MessageBus {
         content: "No agent available.",
       });
       return;
+    }
+
+    // Rewriting/branching the context mid-turn could corrupt both histories: in-flight loop would append to the array being undone,
+    // or a fork would snapshot an agent whose turn is still writing.
+    if (this.#isRunning && SESSION_MUTATING_COMMANDS.has(cmd.type)) {
+      this.#sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content:
+          `/${cmd.type} is not available while the session is running — ` +
+          `wait for it to finish or interrupt (Ctrl-C) first.`,
+      });
+      return ACTIONS.ERROR;
     }
 
     const result = await agent.executeCommand(cmd);

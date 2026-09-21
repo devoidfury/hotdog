@@ -377,6 +377,10 @@ export const HOOKS = {
 
   CONTEXT_MESSAGE: "context:message",
   CONTEXT_REPLACED: "context:replaced",
+  // Fires after CONTEXT_REPLACED when the replacement is a deliberate rewind (/undo, /rewind, /clear).
+  // Session persistence uses it to checkpoint the log (reset + re-append kept entries);
+  // ordinary replacements (interrupted tool-call repair, compaction write-back) must NOT checkpoint.
+  CONTEXT_REWOUND: "context:rewound",
 
   SYSTEM_PROMPT_BUILD: "systemPrompt:build",
 

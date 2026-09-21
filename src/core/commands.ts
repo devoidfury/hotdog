@@ -19,12 +19,25 @@ export const Command = {
   Attach: "attach",
   Detach: "detach",
   Switch: "switch",
+  Undo: "undo",
+  Rewind: "rewind",
+  Fork: "fork",
   Unknown: "unknown",
 } as const;
 
 /**
- * Action constants — returned by command handlers to tell the core
- * how to proceed after executing a command.
+ * Commands that rewrite the session's context (or branch it). Rejected while a run is active:
+ * replacing context mid-turn lets the in-flight loop append to the just-undone array, silently corrupting both histories.
+ */
+export const SESSION_MUTATING_COMMANDS: ReadonlySet<string> = new Set([
+  Command.Clear,
+  Command.Undo,
+  Command.Rewind,
+  Command.Fork,
+]);
+
+/**
+ * Action constants — returned by command handlers to tell the core how to proceed after executing a command.
  *
  *   DISPLAY — show the result content as a command response (default)
  *   PROMPT  — enqueue the content as a user message for LLM processing
@@ -97,6 +110,20 @@ export function parseCommand(
 
   if (cmd === "regenerate") {
     return { type: Command.Regenerate, value: null };
+  }
+
+  if (cmd === "undo") {
+    return { type: Command.Undo, value: null };
+  }
+
+  if (cmd === "rewind" || cmd.startsWith("rewind ")) {
+    const arg = cmd.slice("rewind".length).trim();
+    return { type: Command.Rewind, value: arg || null };
+  }
+
+  if (cmd === "fork" || cmd.startsWith("fork ")) {
+    const arg = cmd.slice("fork".length).trim();
+    return { type: Command.Fork, value: arg || null };
   }
 
   if (cmd === "reasoning" || cmd.startsWith("reasoning ")) {

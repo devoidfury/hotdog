@@ -46,6 +46,18 @@ export interface OutputSink {
   onTaskComplete?: (result: string) => void;
 }
 
+/**
+ * Branch this session into a new one (the /fork command). Set by the owning SessionManager after construction.
+ * left null by sessionless harnesses, where /fork errors.
+ */
+export interface ForkSessionResult {
+  sessionId: string;
+  /** Turns actually dropped (clamped to the source's turn count), for honest reporting. */
+  droppedTurns: number;
+}
+
+export type ForkSessionFn = (opts: { turnsBack: number }) => Promise<ForkSessionResult>;
+
 // Subset of config keys read by Agent; extensions read the rest via core.config.
 export interface AgentConfig {
   workspaceRoots?: string[] | null;
@@ -126,6 +138,8 @@ export class Agent implements AgentLike {
   #toolExecutor: ToolExecutor;
   #streamProcessor: StreamProcessor;
   enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
+  /** See ForkSessionFn. Injected by SessionManager; null when no session hosts this agent. */
+  forkSession: ForkSessionFn | null;
 
   constructor(options: AgentOptions) {
     if (options.maxIterations == null) {
@@ -206,6 +220,7 @@ export class Agent implements AgentLike {
       agent: this,
     });
     this.enqueueCallback = options.enqueueCallback || null;
+    this.forkSession = null;
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -619,6 +634,15 @@ export class Agent implements AgentLike {
     this.hooks.notifyHooks(HOOKS.CONTEXT_REPLACED, { agent: this, oldContext, newContext });
   }
 
+  /**
+   * rewind (undo/rewind/clear): replaces the context and also fires CONTEXT_REWOUND so session persistence checkpoints the log.
+   * Awaitable: settling means the checkpoint writes are done, so the next message can never race its append past the rewound-context re-appends.
+   */
+  rewindContext(newContext: Message[]): Promise<void> {
+    this.replaceContext(newContext);
+    return this.hooks.notifyHooks(HOOKS.CONTEXT_REWOUND, { agent: this, newContext });
+  }
+
   emitOutput(type: EventName, data: Record<string, unknown>): void {
     const eventType = EVENT_NAME_MAP[type];
     if (this.sink && eventType) {
@@ -659,13 +683,14 @@ export class Agent implements AgentLike {
     this.context.clearSystemPrompt();
   }
 
-  /** Clear the entire context; fires CONTEXT_REPLACED */
+  /** Clear the entire context; fires CONTEXT_REPLACED and CONTEXT_REWOUND */
   async clearContext(): Promise<void> {
     const oldContext = this.context.getMessages();
     this.context.clear();
     this.iterationCount = 0;
     this.#toolRegistry.clearToolDefs();
     await this.hooks.notifyHooks(HOOKS.CONTEXT_REPLACED, { agent: this, oldContext, newContext: [] });
+    await this.hooks.notifyHooks(HOOKS.CONTEXT_REWOUND, { agent: this, newContext: [] });
   }
 
   cancel(): void {

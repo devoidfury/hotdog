@@ -83,3 +83,26 @@ describe('parseCommand with registry', () => {
     expect(result.value).toBe('prompt:my-prompt some args');
   });
 });
+
+describe('parseCommand — undo / rewind / fork', () => {
+  it('parses undo without a value', () => {
+    expect(parseCommand('undo')).toEqual({ type: Command.Undo, value: null });
+  });
+
+  it('parses rewind with an optional argument', () => {
+    expect(parseCommand('rewind')).toEqual({ type: Command.Rewind, value: null });
+    expect(parseCommand('rewind 3')).toEqual({ type: Command.Rewind, value: '3' });
+    expect(parseCommand('rewind ')).toEqual({ type: Command.Rewind, value: null });
+  });
+
+  it('parses fork with an optional turns count and prompt', () => {
+    expect(parseCommand('fork')).toEqual({ type: Command.Fork, value: null });
+    expect(parseCommand('fork 2')).toEqual({ type: Command.Fork, value: '2' });
+    expect(parseCommand('fork try this')).toEqual({ type: Command.Fork, value: 'try this' });
+    expect(parseCommand('fork 2 try this')).toEqual({ type: Command.Fork, value: '2 try this' });
+  });
+
+  it('undo with an argument is not a core command', () => {
+    expect(parseCommand('undo 2').type).toBe(Command.Unknown);
+  });
+});

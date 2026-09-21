@@ -112,6 +112,7 @@ export interface HookPayloads {
 
   "context:message": { message: Message; agent: Agent };
   "context:replaced": { agent: Agent; oldContext: Message[]; newContext: Message[] };
+  "context:rewound": { agent: Agent; newContext: Message[] };
 
   // Returns SystemPromptChunk or SystemPromptChunk[].
   "systemPrompt:build": { agent: Agent };

@@ -3,14 +3,15 @@ import { HOOKS, HookSystem } from "../hooks.ts";
 import { MessageBus } from "./message-bus.ts";
 import { TaskManager } from "./task-manager.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
-import { formatError } from "../error.ts";
+import { trimTurns } from "../context/rewind.ts";
+import { AgentError, formatError } from "../error.ts";
 import { logger } from "@utils/logger.ts";
 import type { CommandRegistryLike, ParsedCommand } from "../commands.ts";
 import type { LlmClient } from "../llm-client/client.ts";
 import type { CommandResult } from "../extensions/registries.ts";
 import type { ProfileManager, SwitchProfile } from "../config/index.ts";
 import type { Message, ImageAttachment, MessageSource } from "../context/message.ts";
-import type { AgentRunResult, OutputSink } from "../agent.ts";
+import type { AgentRunResult, ForkSessionFn, ForkSessionResult, OutputSink } from "../agent.ts";
 import type { ModelConfig } from "../config/providers.ts";
 import type { QuestionDef } from "../context/input.ts";
 
@@ -23,6 +24,8 @@ export interface AgentLike {
   toolWhitelist: string[] | null;
   profileBody: string | undefined;
   enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
+  /** Branch this session (/fork). Set by the owning SessionManager; absent on sessionless agents. */
+  forkSession?: ForkSessionFn | null;
   serialize(): Record<string, unknown>;
   applyProfile(name: string, profile: SwitchProfile): void;
   run(
@@ -206,6 +209,70 @@ export class SessionManager {
 
   getAgent(): AgentLike | undefined {
     return this.#store.getAgent(this.#currentSessionId!);
+  }
+
+  /**
+   * Branch a session (/fork command): build a new agent from the source's original build config,
+   * copy its non-system messages minus the last `turnsBack` turns, and switch this manager to the new session.
+   *
+   * Kept messages ride `addMessage` (not replaceContext) so CONTEXT_MESSAGE fires and the session-log extension
+   * writes the new session's log live -- persistence stays in the extension, so `--no-log` is honored and no core
+   * JSONL writer is needed. The source session is untouched.
+   *
+   * `sessionId` is stripped from the metadata config: it may carry the `--session` id of a resumed run,
+   * and an adopted id would make the fork append to the source's log.
+   *
+   * The optional `/fork` prompt is NOT enqueued here: each UI enqueues it after re-targeting its
+   * channel/socket onto the fork (interactive CLI `.then()`, webui after sessionCreated + replay),
+   * so the fork's first output can never fire before anyone is listening. `parseForkArg` is shared.
+   */
+  async forkSession(
+    sourceSessionId: string,
+    opts: { turnsBack: number },
+  ): Promise<ForkSessionResult> {
+    const entry = this.#sessions.get(sourceSessionId);
+    if (!entry) {
+      throw new AgentError(`Cannot fork unknown session: ${sourceSessionId}`);
+    }
+    // UI servers (e.g. the webui ws layer) may call this directly, bypassing the bus's
+    // SESSION_MUTATING_COMMANDS guard; the same invariant applies mid-turn.
+    if (entry.bus.isRunning) {
+      throw new AgentError(
+        `Cannot fork ${sourceSessionId} while the session is running.`,
+      );
+    }
+
+    const nonSystem = entry.agent.getMessages().filter((m) => m.role !== "system");
+    const { kept, droppedTurns } = trimTurns(nonSystem, opts.turnsBack);
+
+    // The fork's own metadata: stripped and copied, so the stored entry never aliases the
+    // source's object or carries its sessionId into SESSION_CREATE / later re-forks.
+    const forkMeta = { ...entry.metadata, sessionId: undefined };
+
+    // Captured before the swap below so SESSION_SWAP keeps its contract ("who was current
+    // before this switch") even though current already points at the fork when it fires.
+    const oldAgent = this.#currentSessionId
+      ? this.#store.getAgent(this.#currentSessionId)
+      : undefined;
+
+    const newAgent = await this.#buildAgent(forkMeta);
+    this.#store.addAgent(newAgent);
+    this.#createSessionEntry(newAgent.sessionId, newAgent, forkMeta);
+    // Mirror create(): current points at the new session before SESSION_CREATE fires.
+    this.#currentSessionId = newAgent.sessionId;
+    await this.#hooks.notifyHooks(HOOKS.SESSION_CREATE, {
+      session: this,
+      sessionId: newAgent.sessionId,
+      config: forkMeta,
+    });
+
+    for (const msg of kept) {
+      newAgent.addMessage(msg);
+    }
+
+    // The swap switchSession() would have performed, fired the same fire-and-forget way.
+    this.#hooks.notifyHooks(HOOKS.SESSION_SWAP, { oldAgent, newAgent });
+    return { sessionId: newAgent.sessionId, droppedTurns };
   }
 
   getAgentBySessionId(sessionId: string): AgentLike | undefined {
@@ -407,6 +474,7 @@ export class SessionManager {
     }
 
     agent.enqueueCallback = (text, opts) => bus.enqueue(text, opts);
+    agent.forkSession = (opts) => this.forkSession(sessionId, opts);
 
     const runLoop = bus.run().catch((err: Error) => {
       logger.error(`[session ${sessionId}] bus error: ${formatError(err)}`);

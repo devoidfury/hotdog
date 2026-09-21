@@ -1574,3 +1574,51 @@ describe('Agent — run() re-entrancy guard', () => {
     expect(expectCompletion(result).content).toBe('recovered');
   });
 });
+
+describe('rewindContext / clearContext fire CONTEXT_REWOUND', () => {
+  it('rewindContext fires CONTEXT_REPLACED then CONTEXT_REWOUND with the kept context', async () => {
+    const { agent, hooks } = createFixture({});
+    const events: string[] = [];
+    const payloads: Array<{ newContext: Message[] }> = [];
+    hooks.on(HOOKS.CONTEXT_REPLACED, () => { events.push('replaced'); });
+    hooks.on(HOOKS.CONTEXT_REWOUND, (p: { newContext: Message[] }) => {
+      events.push('rewound');
+      payloads.push(p);
+    });
+
+    agent.addMessage(new Message({ role: 'user', content: 'u1' }));
+    agent.addMessage(new Message({ role: 'assistant', content: 'a1' }));
+    agent.addMessage(new Message({ role: 'user', content: 'u2' }));
+
+    await agent.rewindContext(agent.getMessages().slice(0, 2));
+
+    // Hook notifications are fire-and-forget; settle via the queue.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(events).toEqual(['replaced', 'rewound']);
+    expect(payloads[0]!.newContext.map((m) => m.content)).toEqual(['u1', 'a1']);
+    expect(agent.getMessages().map((m) => m.content)).toEqual(['u1', 'a1']);
+  });
+
+  it('plain replaceContext does NOT fire CONTEXT_REWOUND', async () => {
+    const { agent, hooks } = createFixture({});
+    let rewound = 0;
+    hooks.on(HOOKS.CONTEXT_REWOUND, () => { rewound++; });
+
+    agent.replaceContext([new Message({ role: 'user', content: 'u1' })]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(rewound).toBe(0);
+  });
+
+  it('clearContext fires CONTEXT_REWOUND with an empty context', async () => {
+    const { agent, hooks } = createFixture({});
+    const payload: Array<Message[]> = [];
+    hooks.on(HOOKS.CONTEXT_REWOUND, (p: { newContext: Message[] }) => payload.push(p.newContext));
+
+    agent.addMessage(new Message({ role: 'user', content: 'u1' }));
+    await agent.clearContext();
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(payload).toHaveLength(1);
+    expect(payload[0]).toEqual([]);
+  });
+});

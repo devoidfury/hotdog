@@ -57,6 +57,28 @@ describe('ExtensionLoader', () => {
       expect(hookCalled).toEqual([{ value: 1 }]);
     });
 
+    it('should register declarative hooks with hookPriorities ordering', async () => {
+      const order: string[] = [];
+      await loader.load('low', {
+        create: () => ({
+          hooks: { 'test:hook': () => order.push('low') },
+          hookPriorities: { 'test:hook': -5 },
+        }),
+      });
+      await loader.load('high', {
+        create: () => ({
+          hooks: { 'test:hook': () => order.push('high') },
+          hookPriorities: { 'test:hook': 5 },
+        }),
+      });
+      await loader.load('plain', {
+        create: () => ({ hooks: { 'test:hook': () => order.push('default') } }),
+      });
+
+      core.hooks.notifyHooks('test:hook', {});
+      expect(order).toEqual(['high', 'default', 'low']);
+    });
+
     it('should register tools via registerTools callback', async () => {
       let registryRef: any = null;
       const extModule = {

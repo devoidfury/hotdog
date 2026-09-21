@@ -283,7 +283,7 @@ The `LlmProtocol` (selected by the `protocol` field on the model or provider ent
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
 | `TURN_START` | `turn:start` | awaited notify | Beginning of each agent loop iteration |
-| `TURN_END` | `turn:end` | awaited notify | End of each agent loop iteration (settled before the loop returns, advances, or throws) |
+| `TURN_END` | `turn:end` | awaited notify | End of each agent loop iteration (settled before the loop returns, advances, or throws). Payload carries `claimTurn()`: first caller wins and owns the turn's continuation — handlers that enqueue the next input (loop re-fire, handoff plan) claim first; a failed claim must not enqueue. Claim synchronously and register above continuation followers via `hookPriorities`. |
 
 ### Model / Config
 
@@ -318,7 +318,13 @@ The `LlmProtocol` (selected by the `protocol` field on the model or provider ent
 
 ## Extension Hook Registration Patterns
 
-Extensions register handlers via the `create()` function, which receives the `core` object and returns an object with a `hooks` property. Each key is a hook name, each value is a handler function.
+Extensions register handlers via the `create()` function, which receives the
+`core` object and returns an object with a `hooks` property. Each key is a hook
+name, each value is a handler function. Optional `hookPriorities` (keyed the
+same way) orders a handler among same-hook peers: higher priority runs first,
+default 0, ties keep load order. Example: handoff claims the turn
+(`claimTurn()`, see Turn Lifecycle) before the loop extension checks, via
+`hookPriorities: { [HOOKS.TURN_END]: 10 }`.
 
 ### 1. Notification (side effects)
 

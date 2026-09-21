@@ -238,12 +238,14 @@ export function create(core: CoreContext): ExtensionInstance {
   }
 
   return {
+    // Claim the turn before default-priority continuation handlers (loop).
+    hookPriorities: { [HOOKS.TURN_END]: 10 },
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         registry.register("handoff", handoffTool);
       },
 
-      [HOOKS.TURN_END]: async ({ stopped, cancelled, agent, toolResults }) => {
+      [HOOKS.TURN_END]: async ({ stopped, cancelled, agent, toolResults, claimTurn }) => {
         if (!agent) {
           return;
         }
@@ -264,6 +266,13 @@ export function create(core: CoreContext): ExtensionInstance {
 
         const handoffCalled = toolResults?.some((tr) => tr.toolName === "handoff");
         if (!handoffCalled) {
+          return;
+        }
+
+        // Own this turn's continuation before any await (the claim must be
+        // visible to handlers notified after us). Pending stays: a later
+        // handoff call can still claim.
+        if (claimTurn && !claimTurn()) {
           return;
         }
 

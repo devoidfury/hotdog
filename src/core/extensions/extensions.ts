@@ -678,11 +678,15 @@ export class ExtensionLoader {
     this.#handlerRemovers.set(name, removers);
 
     const instanceHooks = (instance as Record<string, unknown>).hooks as Record<string, unknown> | undefined;
+    const hookPriorities = (instance.hookPriorities ?? {}) as Record<string, number>;
     if (instanceHooks) {
       for (const [hookName, handler] of Object.entries(instanceHooks)) {
         if (hookName === HOOKS.TOOLS_REGISTER) continue;
         if (hookName === HOOKS.SERVICES_REGISTER) continue;
-        const remove = this.#core.hooks.on(hookName, handler as HookHandlerAny, name);
+        const remove = this.#core.hooks.on(hookName, handler as HookHandlerAny, {
+          source: name,
+          priority: hookPriorities[hookName] ?? 0,
+        });
         removers.push(remove);
       }
     }

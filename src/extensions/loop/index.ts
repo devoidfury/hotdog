@@ -77,7 +77,7 @@ export function create(core: CoreContext): ExtensionInstance {
         });
       },
 
-      [HOOKS.TURN_END]: async ({ stopped, cancelled, agent, reason }) => {
+      [HOOKS.TURN_END]: async ({ stopped, cancelled, agent, reason, claimTurn }) => {
         if (!stopped || !agent) return;
 
         const loop = loops.get(agent.sessionId);
@@ -92,6 +92,16 @@ export function create(core: CoreContext): ExtensionInstance {
         // without re-enqueuing so we don't loop on a broken run.
         if (reason === "error" || reason === "max_iterations") {
           stopLoop(agent, false);
+          return;
+        }
+
+        // Only one extension may enqueue a turn's continuation. A failed
+        // claim means another handler (e.g. a handoff plan) owns this turn;
+        // enqueueing on top of it would run both and bury the plan. The loop
+        // stays active and resumes on that run's TURN_END (a deferred turn
+        // does not consume maxLoops budget — the loop prompt never ran).
+        if (claimTurn && !claimTurn()) {
+          emit(agent, "Another extension owns this turn — loop resumes after its run.");
           return;
         }
 

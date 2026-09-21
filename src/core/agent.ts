@@ -531,6 +531,15 @@ export class Agent implements AgentLike {
     cancelled = false,
     reason: TurnEndReason,
   ): Promise<void> {
+    // One continuation owner per turn end. Handlers that enqueue the next
+    // input (loop re-fires, handoff plans) claim first; a failed claim means
+    // another handler owns this turn and enqueuing would double up.
+    let claimed = false;
+    const claimTurn = (): boolean => {
+      if (claimed) return false;
+      claimed = true;
+      return true;
+    };
     await this.hooks.notifyHooks(HOOKS.TURN_END, {
       turnIndex: iteration,
       message,
@@ -539,6 +548,7 @@ export class Agent implements AgentLike {
       cancelled,
       reason,
       agent: this,
+      claimTurn,
     });
   }
 

@@ -1213,6 +1213,31 @@ describe('Agent — end-to-end loop', () => {
       expect(turnEnds[1]!.turnIndex).toBe(turnEnds[0]!.turnIndex + 1);
     });
 
+    it('gives each TURN_END a fresh first-come-first-served claimTurn', async () => {
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({ content: 'Done.', usage: { total_tokens: 10 } }),
+        ],
+      });
+
+      const { agent, hooks } = createFixture({ mockLLM });
+
+      const claims: Array<{ first: boolean; second: boolean }> = [];
+      // Handlers run in registration order; both see the same payload.
+      hooks.on(HOOKS.TURN_END, (d: { claimTurn?: () => boolean }) => {
+        const first = d.claimTurn!();
+        claims.push({ first, second: false });
+      });
+      hooks.on(HOOKS.TURN_END, (d: { claimTurn?: () => boolean }) => {
+        claims[claims.length - 1]!.second = d.claimTurn!();
+      });
+
+      await agent.run('Test');
+
+      expect(claims).toHaveLength(1);
+      expect(claims[0]).toEqual({ first: true, second: false });
+    });
+
     it('emits honest max_iterations turn-end without double-emit', async () => {
       const tool = simpleTool('looper', 'looped');
       const mockLLM = new MockLLMClient({

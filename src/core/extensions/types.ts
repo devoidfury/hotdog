@@ -190,6 +190,14 @@ export interface HookPayloads {
     cancelled?: boolean;
     reason?: "completion" | "tool_return" | "continue" | "cancelled" | "error" | "max_iterations";
     agent: Agent;
+    /**
+     * Claim the right to enqueue this turn's continuation. First caller wins;
+     * a handler whose claim fails must not enqueue (it would double up with
+     * the owner). Handlers that clear context + enqueue on TURN_END claim
+     * synchronously, before their first await, and register at a priority
+     * above continuation followers (see declarative hook priorities).
+     */
+    claimTurn?: () => boolean;
   };
 
   "log": { level: string; message: string; metadata?: Record<string, unknown> };
@@ -285,6 +293,13 @@ export type ExtensionInstance = {
   hooks?: {
     [K in keyof HookPayloads]?: (payload: HookPayloads[K]) => void | Promise<void> | unknown;
   };
+
+  /**
+   * Ordering for declarative hooks above: higher priority runs first
+   * (default 0, ties keep load order). Used where a handler must act before
+   * same-hook peers — e.g. handoff claims the turn before the loop checks.
+   */
+  hookPriorities?: Partial<Record<keyof HookPayloads, number>>;
 
   shutdown?: () => Promise<void>;
 

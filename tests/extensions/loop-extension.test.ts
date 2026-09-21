@@ -1,11 +1,24 @@
 import { describe, it, expect } from "bun:test";
 import { create as createLoopExtension } from "@extensions/loop/index.ts";
+import { create as createHandoffExtension, HandoffTool } from "@extensions/handoff-tool/index.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
 import { createCommandRegistry } from "@core/extensions/registries.ts";
+import { ToolContext } from "@core/extensions/tool-context.ts";
 import { ACTIONS } from "@core/commands.ts";
 import type { Agent } from "@core/agent.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+// Mirrors the per-notify claim closure core builds in _emitTurnEnd: first
+// caller wins, later callers lose.
+function makeClaimTurn(): () => boolean {
+  let claimed = false;
+  return () => {
+    if (claimed) return false;
+    claimed = true;
+    return true;
+  };
+}
 
 function createMockCore(config: Record<string, unknown> = {}) {
   return {
@@ -54,15 +67,18 @@ function turnEndPayload(opts: {
   cancelled?: boolean;
   agent?: any;
   reason?: "completion" | "tool_return" | "continue" | "cancelled" | "error" | "max_iterations";
+  toolResults?: Array<{ toolName: string; input: string; content: string }>;
+  claimTurn?: () => boolean;
 } = {}) {
   return {
     turnIndex: 0,
     message: "",
-    toolResults: [] as Array<{ toolName: string; input: string; content: string }>,
+    toolResults: opts.toolResults ?? [] as Array<{ toolName: string; input: string; content: string }>,
     stopped: opts.stopped ?? true,
     cancelled: opts.cancelled,
     reason: opts.reason,
     agent: opts.agent,
+    claimTurn: opts.claimTurn,
   };
 }
 
@@ -533,6 +549,213 @@ describe("Loop extension", () => {
       // Only the latest prompt is active.
       expect(agent.getEnqueued().filter((t: string) => t === "second")).toHaveLength(2);
       expect(agent.getEnqueued().filter((t: string) => t === "first")).toHaveLength(1);
+    });
+  });
+
+  describe("TURN_END hook — turn claim takes priority", () => {
+    it("defers the re-enqueue when another handler claimed the turn", async () => {
+      const core = createMockCore();
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agent = createMockAgent();
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agent as unknown as Agent, "loop test");
+
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+      // Simulate another handler (e.g. handoff) claiming first.
+      const claimTurn = makeClaimTurn();
+      expect(claimTurn()).toBe(true);
+      await turnEndHook(
+        turnEndPayload({
+          stopped: true,
+          reason: "tool_return",
+          toolResults: [{ toolName: "handoff", input: "{}", content: "Handoff prepared." }],
+          claimTurn,
+          agent: agent as any,
+        }),
+      );
+
+      // The loop prompt must not pile on top of the claimer's own enqueue.
+      expect(agent.getEnqueued()).toHaveLength(1); // only the initial /loop prompt
+      // The claiming handler owns the context clear for this turn.
+      expect(agent.wasContextCleared()).toBe(false);
+
+      const emitted = agent.getEmitted();
+      expect(emitted.find((e: any) => e.content?.includes("resumes after its run"))).toBeDefined();
+      expect(emitted.find((e: any) => e.content?.includes("==== Loop 1 ===="))).toBeUndefined();
+    });
+
+    it("claims the turn when it re-enqueues", async () => {
+      const core = createMockCore();
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agent = createMockAgent();
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agent as unknown as Agent, "loop test");
+
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+      const claimTurn = makeClaimTurn();
+      await turnEndHook(turnEndPayload({ stopped: true, reason: "completion", claimTurn, agent: agent as any }));
+
+      expect(agent.getEnqueued()).toHaveLength(2); // initial + Loop 1
+      // The loop took the claim — a later handler loses.
+      expect(claimTurn()).toBe(false);
+    });
+
+    it("resumes the loop after the claimed run completes", async () => {
+      const core = createMockCore();
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agent = createMockAgent();
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agent as unknown as Agent, "loop test");
+
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+      const firstClaim = makeClaimTurn();
+      firstClaim(); // another handler owns this turn
+      await turnEndHook(
+        turnEndPayload({ stopped: true, reason: "tool_return", claimTurn: firstClaim, agent: agent as any }),
+      );
+      // The other run finishes — a normal turn end, unclaimed.
+      await turnEndHook(
+        turnEndPayload({ stopped: true, reason: "completion", claimTurn: makeClaimTurn(), agent: agent as any }),
+      );
+
+      expect(agent.getEnqueued().filter((t: string) => t === "test")).toHaveLength(2); // initial + resume
+      const emitted = agent.getEmitted();
+      expect(emitted.find((e: any) => e.content?.includes("==== Loop 1 ===="))).toBeDefined();
+    });
+
+    it("does not count the claimed turn against maxLoops", async () => {
+      const core = createMockCore({ coreConfig: { loop: { maxLoops: 1 } } });
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agent = createMockAgent();
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agent as unknown as Agent, "loop test");
+
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+      // Claimed turn: deferred, budget untouched.
+      const firstClaim = makeClaimTurn();
+      firstClaim();
+      await turnEndHook(
+        turnEndPayload({ stopped: true, reason: "tool_return", claimTurn: firstClaim, agent: agent as any }),
+      );
+      // The claimer's run's turn end: consumes the single allowed iteration.
+      await turnEndHook(
+        turnEndPayload({ stopped: true, reason: "completion", claimTurn: makeClaimTurn(), agent: agent as any }),
+      );
+      // Next turn end: max reached, loop stops.
+      await turnEndHook(
+        turnEndPayload({ stopped: true, reason: "completion", claimTurn: makeClaimTurn(), agent: agent as any }),
+      );
+
+      expect(agent.getEnqueued().filter((t: string) => t === "test")).toHaveLength(2); // initial + one iteration
+      const emitted = agent.getEmitted();
+      expect(emitted.find((e: any) => e.content?.includes("Max loops (1) reached"))).toBeDefined();
+    });
+
+    it("still stops on cancellation even when the turn is claimed", async () => {
+      const core = createMockCore();
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agent = createMockAgent();
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agent as unknown as Agent, "loop test");
+
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+      const claimTurn = makeClaimTurn();
+      claimTurn();
+      await turnEndHook(
+        turnEndPayload({ stopped: true, cancelled: true, claimTurn, agent: agent as any }),
+      );
+
+      const emitted = agent.getEmitted();
+      expect(emitted.find((e: any) => e.content?.includes("Loop ended"))).toBeDefined();
+      expect(agent.getEnqueued()).toHaveLength(1); // only the initial prompt
+    });
+  });
+
+  describe("loop + handoff extensions together", () => {
+    it("handoff enqueues its plan exactly once; the loop resumes after the handoff run", async () => {
+      const core = createMockCore({
+        coreConfig: { handoffTool: { autoIncludeFilesUnderBytes: 24576 } },
+      });
+      const loopExt = createLoopExtension(core);
+      const handoffExt = createHandoffExtension(core);
+
+      const hooks = core.hooks as HookSystem;
+      hooks.on(HOOKS.TURN_END, loopExt.hooks![HOOKS.TURN_END]! as any);
+      // Registered the way the loader does it: handoff declares a higher
+      // hookPriorities entry so it claims before the loop checks.
+      hooks.on(HOOKS.TURN_END, handoffExt.hooks![HOOKS.TURN_END]! as any, {
+        source: "handoff",
+        priority: handoffExt.hookPriorities?.[HOOKS.TURN_END] ?? 0,
+      });
+
+      const registry = createCommandRegistry();
+      await loopExt.hooks![HOOKS.COMMANDS_REGISTER]!({ registry } as any);
+      const registeredTools: Array<[string, HandoffTool]> = [];
+      await (handoffExt.hooks![HOOKS.TOOLS_REGISTER] as Function)({
+        register: (name: string, tool: HandoffTool) => registeredTools.push([name, tool]),
+      });
+
+      const agent = createMockAgent("session-a");
+      (agent as any).config = {};
+
+      // /loop starts, then mid-run the agent calls the handoff tool.
+      await registry.get("loop")!.handler!(agent as unknown as Agent, "loop tick");
+      const ctx = new ToolContext();
+      ctx.set("agent", agent);
+      await registeredTools[0]![1].execute(JSON.stringify({ content: "the plan" }), ctx);
+
+      const basePayload = {
+        turnIndex: 0,
+        message: "",
+        stopped: true,
+        agent,
+      };
+      await hooks.notifyHooks(HOOKS.TURN_END, {
+        ...basePayload,
+        reason: "tool_return",
+        toolResults: [{ toolName: "handoff", input: "{}", content: "Handoff prepared." }],
+        claimTurn: makeClaimTurn(),
+      } as any);
+
+      // Queue so far: the initial /loop prompt (the turn being interrupted
+      // by the handoff). Only the handoff plan is added on top — no second
+      // loop prompt.
+      const enqueued = agent.getEnqueued();
+      expect(enqueued).toHaveLength(2);
+      expect(enqueued[0]).toBe("tick");
+      expect(enqueued[1]).toContain("the plan");
+
+      // The handoff run completes: the loop re-enqueues its prompt.
+      await hooks.notifyHooks(HOOKS.TURN_END, {
+        ...basePayload,
+        reason: "completion",
+        toolResults: [],
+        claimTurn: makeClaimTurn(),
+      } as any);
+
+      const afterResume = agent.getEnqueued();
+      expect(afterResume).toHaveLength(3);
+      expect(afterResume[2]).toBe("tick");
     });
   });
 });

@@ -290,6 +290,53 @@ describe("handoff-tool create() extension", () => {
     expect(message).toContain("started from a handoff");
   });
 
+  it("TURN_END hook takes the turn claim and defers (keeping pending) when it is lost", async () => {
+    const ext = create({
+      config: { handoffTool: { autoIncludeFilesUnderBytes: 24576 } },
+    } as unknown as CoreContext);
+    const hooks = ext.hooks! as Record<string, unknown>;
+
+    const registered: Array<[string, unknown]> = [];
+    const registry = {
+      register: (name: string, tool: unknown) => registered.push([name, tool]),
+      getAll: () => [],
+    };
+    await (hooks[HOOKS.TOOLS_REGISTER] as Function)(registry);
+    const handoffTool = registered[0]![1] as HandoffTool;
+    await handoffTool.execute(JSON.stringify({ content: "the plan" }), null!);
+
+    const enqueuedMessages: string[] = [];
+    const mockAgent = {
+      clearContext: vi.fn().mockResolvedValue(undefined),
+      ensureSystemPrompt: vi.fn().mockResolvedValue(undefined),
+      enqueue: (text: string) => enqueuedMessages.push(text),
+      emitOutput: vi.fn(),
+    };
+    const base = {
+      stopped: true,
+      cancelled: false,
+      agent: mockAgent,
+      toolResults: [{ toolName: "handoff", input: "{}", result: "ok" }],
+    };
+
+    // Another handler claimed first: no clear, no enqueue, pending survives.
+    await (hooks[HOOKS.TURN_END] as Function)({ ...base, claimTurn: () => false });
+    expect(enqueuedMessages).toHaveLength(0);
+    expect(mockAgent.clearContext).not.toHaveBeenCalled();
+
+    // A later turn end with the claim free: the pending handoff fires, and
+    // handoff takes the claim itself (subsequent claimers lose).
+    let claimed = false;
+    const claimTurn = () => {
+      if (claimed) return false;
+      claimed = true;
+      return true;
+    };
+    await (hooks[HOOKS.TURN_END] as Function)({ ...base, claimTurn });
+    expect(enqueuedMessages).toHaveLength(1);
+    expect(claimTurn()).toBe(false);
+  });
+
   it("TURN_END hook consumes only the matching session's pending handoff", async () => {
     const ext = create({
       config: { handoffTool: { autoIncludeFilesUnderBytes: 24576 } },

@@ -282,7 +282,11 @@ export class LlmClient {
     }
     if (!url) {
       throw new LlmError(
-        "No AI URL configured. Set a URL via --ai-url, aiUrl in config, or provider.url.",
+        "No AI URL configured. Set one via:\n" +
+          "  --ai-url <url>              (CLI flag)\n" +
+          "  HOTDOG_AI_URL=<url>         (env var)\n" +
+          "  aiUrl in ./config/defaults.json\n" +
+          "  or provider.url in your config.",
         "config",
       );
     }

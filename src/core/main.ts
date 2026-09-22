@@ -331,8 +331,19 @@ export async function main(): Promise<number> {
 
   if (!resolved.baseUrl) {
     logger.warn(
-      "No AI URL configured. Set a URL via --ai-url, aiUrl in config, provider.url, or HOTDOG_AI_URL environment variable. " +
-        "LLM calls will fail until a URL is provided.",
+      "No AI URL configured. LLM calls will fail until one is provided.\n" +
+        "Set one via:\n" +
+        "  --ai-url <url>              (CLI flag)\n" +
+        "  HOTDOG_AI_URL=<url>         (env var)\n" +
+        "  aiUrl in ./config/defaults.json\n" +
+        "  or provider.url in your config.",
+    );
+  } else if (!resolved.apiKey) {
+    logger.warn(
+      "No API key configured for the AI endpoint. Unauthenticated inference endpoints are a " +
+        "free API for anything that can reach them and an open prompt-injection surface -- " +
+        "prefer HOTDOG_API_KEY plus a key requirement on the server (llama.cpp / vllm --api-key, " +
+        "llama-swap api_key).",
     );
   }
 

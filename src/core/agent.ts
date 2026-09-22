@@ -187,7 +187,11 @@ export class Agent implements AgentLike {
       // agent construction -- keeps model-free subcommands (profiles,
       // sessions) usable with an incomplete config.
       throw new ConfigError(
-        "No model configured. Set default_model in your config file, pass --model, or set the HOTDOG_MODEL env var.",
+        "No model configured. Set one via:\n" +
+          "  --model <provider>/<name>     (CLI flag)\n" +
+          "  HOTDOG_MODEL=<provider>/<name> (env var)\n" +
+          "  default_model in ./config/defaults.json\n" +
+          "  or a model in your active provider's models array.",
       );
     }
     this.hooks = options.hooks;

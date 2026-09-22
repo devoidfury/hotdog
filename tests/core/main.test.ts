@@ -213,6 +213,28 @@ describe("main -- subcommand dispatch", () => {
     expect(stdout).toContain("webui");
   });
 });
+
+describe("main -- unauthenticated endpoint nudge", () => {
+  it("warns when an AI URL is configured without an API key", async () => {
+    const { stderr } = await runMain(["info", "--ai-url", "http://localhost:9"], {
+      AI_URL: "",
+      HOTDOG_AI_URL: "",
+      HOTDOG_API_KEY: "",
+      AI_API_KEY: "",
+    });
+    expect(stderr).toContain("No API key configured for the AI endpoint");
+  });
+
+  it("does not warn when an API key is configured", async () => {
+    const { stderr } = await runMain(["info", "--ai-url", "http://localhost:9"], {
+      AI_URL: "",
+      HOTDOG_AI_URL: "",
+      HOTDOG_API_KEY: "test-key",
+      AI_API_KEY: "",
+    });
+    expect(stderr).not.toContain("No API key configured for the AI endpoint");
+  });
+});
 describe("main -- no subcommand fallback", () => {
   it("prints 'No subcommand provided' when no subcommand given and stdin is not TTY", async () => {
     // Force stdin.isTTY to false so we skip the default_subcommand path.

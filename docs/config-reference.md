@@ -457,6 +457,21 @@ Maximum number of tool calls allowed per LLM turn.
 { "maxToolCallsPerIteration": 5 }
 ```
 
+### `maxEmptyRetries`
+
+- **Type:** `number`
+- **Default:** `1`
+- **Resolution:** config > default
+
+How many times the loop re-issues the request when a completion arrives with
+neither text nor tool calls (a common local-model stall) before ending the run
+with the `empty_response` stop reason. The after-tools nudge counts against
+this budget; 0 disables re-invoke entirely.
+
+```json
+{ "maxEmptyRetries": 2 }
+```
+
 ### `contextLimit`
 
 - **Type:** `number`
@@ -1103,6 +1118,21 @@ Parsing is fail-closed: the call block must run to the end of the text (prose af
 
 ```json
 { "toolCallRepair": { "enabled": true, "maxRepairsPerTurn": 5 } }
+```
+
+### `toolPager`
+
+[Tool Pager](../src/extensions/tool-pager) — tool-result size hygiene on the `tool:result` pipeline: oversized outputs are written whole to `<sessionsDir>/<sessionId>/tool-results/` and replaced in context by a preview plus a one-line note with the file path and the sha256 of the full output (head-keep for reads, tail-keep for `bash`); byte-identical repeat results are stubbed from the 2nd occurrence on; model-facing error bodies are capped at 2048 chars.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the pager. |
+| `maxLines` | `number` | `600` | Spill when the output exceeds this many lines (lines OR bytes). |
+| `maxBytes` | `number` | `50000` | Spill when the output exceeds this many bytes (lines OR bytes). |
+| `previewChars` | `number` | `2000` | Characters kept in context next to the file reference. |
+
+```json
+{ "toolPager": { "maxBytes": 100000 } }
 ```
 
 ### `userGate`

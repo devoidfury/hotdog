@@ -13,6 +13,8 @@ import {
 } from "@core/config/index.ts";
 import type { CoreConfigWithExtensions } from "@core/config/schema-loader.ts";
 import { ConfigError } from "@core/error.ts";
+import { createHooks } from "@core/hooks.ts";
+import { initializeLogger, resetLoggerForTesting, type LogEvent } from "@utils/logger.ts";
 
 // ── interpolateEnvVars ($VAR in config files) ───────────────────────────────
 
@@ -41,9 +43,29 @@ describe("interpolateEnvVars", () => {
     expect((nested.deep as unknown[])[2]).toBeNull();
   });
 
-  it("throws ConfigError naming an unset variable", () => {
-    expect(() => interpolateEnvVars({ apiKey: "$NOPE_MISSING" }, {})).toThrow(ConfigError);
-    expect(() => interpolateEnvVars({ apiKey: "${NOPE_MISSING}" }, {})).toThrow(/NOPE_MISSING/);
+  it("warns and resolves unset variables to empty string", () => {
+    expect(interpolateEnvVars({ apiKey: "$NOPE_MISSING" }, {})).toEqual({ apiKey: "" });
+    expect(interpolateEnvVars({ url: "${NOPE_MISSING}" }, {})).toEqual({ url: "" });
+    expect(() => interpolateEnvVars([{ a: "$NOPE_MISSING" }], {})).not.toThrow();
+  });
+
+  it("warns once per unset variable across repeated load passes", () => {
+    // Capture logger output via the "log" hook (no mock.module).
+    resetLoggerForTesting();
+    const hooks = createHooks();
+    const lines: string[] = [];
+    hooks.on("log", (data) => {
+      const ev = data as LogEvent;
+      if (ev.level === "warn") lines.push(ev.message);
+    });
+    initializeLogger({ hooks, minLevel: "warn", target: "none" });
+    try {
+      expect(interpolateEnvVars({ apiKey: "$DEDUPE_TEST_MISSING" }, {})).toEqual({ apiKey: "" });
+      expect(interpolateEnvVars({ apiKey: "$DEDUPE_TEST_MISSING" }, {})).toEqual({ apiKey: "" });
+      expect(lines.filter((l) => l.includes("DEDUPE_TEST_MISSING"))).toHaveLength(1);
+    } finally {
+      resetLoggerForTesting();
+    }
   });
 
   it("loadConfig interpolates config-file values from process.env", async () => {
@@ -67,14 +89,15 @@ describe("interpolateEnvVars", () => {
     }
   });
 
-  it("loadConfig fails loudly on an unset variable", async () => {
+  it("loadConfig continues with an empty value for an unset variable", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-envvar-missing-"));
     try {
       fs.writeFileSync(
         path.join(dir, "defaults.json"),
         JSON.stringify({ api_key: "$HOTDOG_TEST_UNSET_VAR" }),
       );
-      await expect(loadConfig(path.join(dir, "defaults.json"))).rejects.toThrow(/HOTDOG_TEST_UNSET_VAR/);
+      const cfg = await loadConfig(path.join(dir, "defaults.json"));
+      expect(cfg.apiKey).toBe("");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

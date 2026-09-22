@@ -1,6 +1,7 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { ConfigError } from "../error.ts";
+import { logger } from "@utils/logger.ts";
 import { deepMerge } from "@utils/objects.ts";
 import { render } from "@utils/render.ts";
 import { validate as validateSchema, castAs } from "@utils/json-schema.ts";
@@ -120,11 +121,18 @@ export function getDefaultConfig(
 // and there is deliberately no escape syntax.
 const ENV_REF_REGEX = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/;
 
+// Interpolation runs on every config-load pass; repeating the same warning
+// per pass dilutes the signal, so each variable name warns once per process.
+const envRefWarned = new Set<string>();
+
 /**
  * Replace whole-string `$VAR` / `${VAR}` config values with environment
- * values (recursing through objects and arrays). An unset variable is a
- * ConfigError, not a silent literal -- a typo'd key reference must not be
- * sent to a provider as the API key.
+ * values (recursing through objects and arrays). An unset variable warns and
+ * resolves to the empty string instead of aborting startup: optional
+ * providers keyed to env vars that aren't exported in every shell shouldn't
+ * brick the whole config. The warning names the variable so a typo is
+ * findable; the empty value is falsy, so downstream guards (no baseUrl, etc.)
+ * behave as if the setting were absent.
  */
 export function interpolateEnvVars(
   value: unknown,
@@ -136,9 +144,14 @@ export function interpolateEnvVars(
     const name = match[1] ?? match[2]!;
     const resolved = env[name];
     if (resolved === undefined) {
-      throw new ConfigError(
-        `Config value "${value}" references unset environment variable "${name}"`,
-      );
+      if (!envRefWarned.has(name)) {
+        envRefWarned.add(name);
+        logger.warn(
+          `Config value "${value}" references unset environment variable "${name}"; ` +
+            `resolved to empty string. Export ${name} or remove the reference.`,
+        );
+      }
+      return "";
     }
     return resolved;
   }

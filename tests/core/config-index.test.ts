@@ -204,7 +204,7 @@ describe("failOnInvalidConfig", () => {
 describe("loadConfig", () => {
   it("loads config from explicit path", async () => {
     const { fileURLToPath } = await import("node:url");
-    const configPath = path.join(fileURLToPath(import.meta.url), "../../../examples/devoidfury/config/defaults.json");
+    const configPath = path.join(fileURLToPath(import.meta.url), "../../../examples/minimal-config/config/defaults.json");
     const config = await loadConfig(configPath);
     expect(config.defaultModel).toBeDefined();
     expect(config.defaultModel).not.toBe("");

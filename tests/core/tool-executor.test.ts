@@ -564,7 +564,7 @@ describe('ToolExecutor', () => {
       });
       const second = await executor.execute(call);
       expect(executed).toBe(1);
-      expect(toolContentText(second.toolResults[0]?.content)).toContain('blocked by userGate');
+      expect(toolContentText(second.toolResults[0]?.content)).toContain('Tool call blocked');
     });
 
     it('still builds the tool context when the TOOL_CALL gate blocks', async () => {

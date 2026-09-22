@@ -1,6 +1,4 @@
-# Agent Harness
-
-JS project `hotdog` — an AI agent harness.
+# hotdog, an AI agent harness
 
 ## Quick CLI Reference
 
@@ -38,11 +36,10 @@ Never write one to a file or edit based on it. Verify real bytes via the HEX col
 
 ### Centralized Defaults
 The source of truth for all configurable values in core is `src/core/core.config.json`.
-Defaults are exported from `src/core/config/defaults.ts` for use by the config resolution
-layer (`getDefaultConfig()`). Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive
-resolved values from callers — do not import `DEFAULT_*` constants in components.
-Static path constants (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_CONFIG_FILENAME`,
-`DEFAULT_SYSTEM_PROMPT_FILENAME`)
+Defaults are exported from `src/core/config/defaults.ts` for use by the config resolution layer (`getDefaultConfig()`).
+Keys in user's `defaults.json` are camelCased, supports camelCased, kebab-cased, snake_cased.
+Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive resolved values from callers -- do not import `DEFAULT_*` constants in components.
+Static path constants (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_CONFIG_FILENAME`, `DEFAULT_SYSTEM_PROMPT_FILENAME`)
 and runtime fallbacks (`DEFAULT_SYSTEM_PROMPT_TEMPLATE`) are exempt from this rule.
 
 Extensions may also define configSchema in the same way via `src/extensions/*/extension.json` file.

@@ -5,7 +5,7 @@ import { HOOKS, createHooks } from '../../src/core/hooks.ts';
 import { ACTIONS } from '../../src/core/commands.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { Message } from '../../src/core/context/message.ts';
-import { AgentError, ConfigError } from '../../src/core/error.ts';
+import { AgentError, ConfigError, LlmError } from '../../src/core/error.ts';
 import type { LlmClient } from '../../src/core/llm-client/client.ts';
 import type { OutputEvent } from '../../src/core/context/output.ts';
 import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
@@ -742,8 +742,13 @@ describe('Agent — end-to-end loop', () => {
     });
     toolRegistry.register('looper', tool);
 
+    // The capped run gets one extra tools-off wrap-up call (4th); its
+    // response carries no text, so the graceful finish declines and the run
+    // still fails with MaxIterations.
     await expect(agent.run('Loop')).rejects.toThrow('Max iterations');
-    expect(mockLLM.callCount).toBe(3);
+    expect(mockLLM.callCount).toBe(4);
+    // The wrap-up response's tool calls are never executed.
+    expect(tool.executeCount).toBe(3);
   });
 
   // ── Follow-up queue draining ─────────────────────────────────────────────
@@ -907,7 +912,7 @@ describe('Agent — end-to-end loop', () => {
         model: 'test-model',
         maxIterations: 100,
         contextLimit: 128000,
-        config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 },
+        config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1, maxEmptyRetries: 1 },
       });
       freshAgent.deserialize(serialized);
 
@@ -1000,12 +1005,18 @@ describe('Agent — end-to-end loop', () => {
       );
     });
 
+    it('throws ConfigError when maxEmptyRetries is missing', () => {
+      expect(() =>
+        buildAgent({ maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 }),
+      ).toThrow("Missing required configuration: 'maxEmptyRetries'");
+    });
+
     it('throws ConfigError when no config is provided', () => {
       expect(() => buildAgent(undefined)).toThrow(ConfigError);
     });
 
     it('accepts an agent built with all keys present', () => {
-      const agent = buildAgent({ maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 });
+      const agent = buildAgent({ maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1, maxEmptyRetries: 1 });
       expect(agent.maxToolCallsPerIteration).toBe(10);
     });
   });
@@ -1019,7 +1030,7 @@ describe('Agent — end-to-end loop', () => {
         model: model as string,
         maxIterations: 10,
         contextLimit: 128000,
-        config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 },
+        config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1, maxEmptyRetries: 1 },
       });
     }
 
@@ -1258,12 +1269,106 @@ describe('Agent — end-to-end loop', () => {
 
       await expect(agent.run('Loop')).rejects.toThrow('Max iterations');
 
-      // 3 continue + 1 honest max_iterations — no double-emit
+      // 3 continue + 1 honest max_iterations — no double-emit. The wrap-up
+      // attempt (call 4) has no canned sequence, so it comes back empty and
+      // the capped finish declines to a summary.
       expect(turnEnds).toHaveLength(4);
       expect(turnEnds.filter((e) => e.reason === 'continue')).toHaveLength(3);
       const last = turnEnds[3]!;
       expect(last.reason).toBe('max_iterations');
       expect(last.stopped).toBe(true);
+    });
+
+    it('capped run ends with a tools-off wrap-up summary instead of an error', async () => {
+      const tool = simpleTool('looper', 'looped');
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'looper', arguments: '{}', id: 'call_1' }], usage: { total_tokens: 10 } }),
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'looper', arguments: '{}', id: 'call_2' }], usage: { total_tokens: 20 } }),
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'looper', arguments: '{}', id: 'call_3' }], usage: { total_tokens: 30 } }),
+          buildStreamResponse({ content: 'I completed steps 1-3; step 4 remains.', usage: { total_tokens: 40 } }),
+        ],
+      });
+
+      const { agent, toolRegistry, hooks } = createFixture({ mockLLM, maxIterations: 3 });
+      toolRegistry.register('looper', tool);
+
+      const turnEnds: Array<{ stopped: boolean; reason?: string; message?: string }> = [];
+      hooks.on(HOOKS.TURN_END, (d: { stopped: boolean; reason?: string; message?: string }) => {
+        turnEnds.push({ stopped: d.stopped, reason: d.reason, message: d.message });
+      });
+
+      const result = await agent.run('Loop');
+
+      expect(expectCompletion(result).content).toBe('I completed steps 1-3; step 4 remains.');
+      expect(mockLLM.callCount).toBe(4);
+      // The wrap-up call goes out with no tools.
+      expect(mockLLM.lastToolDefs).toHaveLength(0);
+
+      // The summary lands in context, preceded by the harness notice.
+      const roles = agent.context.log.getAll().map((m) => m.role);
+      expect(roles.slice(-2)).toEqual(['harness', 'assistant']);
+      expect(agent.getMessages().at(-1)!.content).toBe('I completed steps 1-3; step 4 remains.');
+
+      // Still one honest max_iterations turn-end, now carrying the summary.
+      const last = turnEnds.at(-1)!;
+      expect(last.reason).toBe('max_iterations');
+      expect(last.stopped).toBe(true);
+      expect(last.message).toBe('I completed steps 1-3; step 4 remains.');
+      expect(turnEnds.filter((e) => e.reason === 'max_iterations')).toHaveLength(1);
+    });
+
+    it('skips the wrap-up call when the run is cancelled into the cap', async () => {
+      // Cancel only on the THIRD tool execution so the loop reaches the cap
+      // with cancelled=true (an earlier cancel aborts the loop, not the cap path).
+      const tool = new MockTool({
+        name: 'looper',
+        execute: async () => 'looped',
+      });
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'looper', arguments: '{}', id: 'call_1' }], usage: { total_tokens: 10 } }),
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'looper', arguments: '{}', id: 'call_2' }], usage: { total_tokens: 20 } }),
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'looper', arguments: '{}', id: 'call_3' }], usage: { total_tokens: 30 } }),
+        ],
+      });
+      const { agent, toolRegistry } = createFixture({ mockLLM, maxIterations: 3 });
+      toolRegistry.register('looper', tool);
+      const originalExecute = tool.execute.bind(tool);
+      tool.execute = async (input, ctx) => {
+        const out = await originalExecute(input, ctx);
+        if (tool.executeCount >= 3) agent.cancel();
+        return out;
+      };
+
+      await expect(agent.run('Loop')).rejects.toThrow('Max iterations');
+      // No +1 call: the cancelled capped finish does not ask the model.
+      expect(mockLLM.callCount).toBe(3);
+    });
+
+    it('a cancel during the wrap-up call surfaces as cancellation, not MaxIterations', async () => {
+      const client: any = {
+        markerMangler: null,
+        calls: 0,
+        chatStreamCancellable() {
+          client.calls++;
+          const n = client.calls;
+          return (async function* () {
+            if (n === 1) {
+              yield { type: 'toolName', index: 0, name: 'looper', toolCallId: 'c1' };
+              yield { type: 'toolArgument', index: 0, arguments: '{}' };
+              return;
+            }
+            throw LlmError.Cancelled('aborted during wrap-up');
+          })();
+        },
+      };
+      const tool = simpleTool('looper', 'looped');
+      const { agent, toolRegistry } = createFixture({ mockLLM: client, maxIterations: 1 });
+      toolRegistry.register('looper', tool);
+
+      await expect(agent.run('Loop')).rejects.toThrow(/during wrap-up/);
+      expect(client.calls).toBe(2);
     });
 
     it('emits cancelled turn-end when cancelled mid-stream', async () => {
@@ -1706,34 +1811,68 @@ describe('empty response after tool results — nudge', () => {
     expect(nudges(agent)).toHaveLength(0);
   });
 
-  it('does not nudge an empty turn that did not follow tool results', async () => {
-    const mockLLM = new MockLLMClient({ responseSequences: [emptySeq()] });
+  it('re-invokes an empty turn that did not follow tool results, without a nudge', async () => {
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        emptySeq(),
+        buildStreamResponse({ content: 'Back.', usage: { total_tokens: 5 } }),
+      ],
+    });
     const { agent } = createFixture({ mockLLM });
 
     const result = await agent.run('Hi');
 
-    expect(expectCompletion(result).content).toBe('');
-    expect(mockLLM.callCount).toBe(1);
+    expect(expectCompletion(result).content).toBe('Back.');
+    expect(mockLLM.callCount).toBe(2);
     expect(nudges(agent)).toHaveLength(0);
   });
 
-  it('nudges at most once per tool episode; a second empty turn completes', async () => {
+  it('stops with empty_response once the re-invoke budget is spent', async () => {
     const tool = simpleTool('worker', 'work result');
     const mockLLM = new MockLLMClient({
       responseSequences: [
         toolCallSeq('worker', 'call_1'),
         emptySeq(),
-        emptySeq(), // still empty after the nudge -- complete, do not loop
+        emptySeq(), // still empty after the nudge -- terminal stop, not an empty completion
       ],
     });
-    const { agent, toolRegistry } = createFixture({ mockLLM });
+    const { agent, toolRegistry, hooks } = createFixture({ mockLLM });
+    toolRegistry.register('worker', tool);
+
+    const turnEnds: Array<{ stopped: boolean; reason?: string }> = [];
+    hooks.on(HOOKS.TURN_END, (p: { stopped: boolean; reason?: string }) => {
+      turnEnds.push({ stopped: p.stopped, reason: p.reason });
+    });
+
+    const result = await agent.run('Do work');
+
+    expect(result).toEqual({ type: 'empty_response' });
+    expect(mockLLM.callCount).toBe(3);
+    expect(nudges(agent)).toHaveLength(1);
+    const last = turnEnds.at(-1)!;
+    expect(last.reason).toBe('empty_response');
+    expect(last.stopped).toBe(true);
+  });
+
+  it('the empty budget is configurable and resets on tool work', async () => {
+    const tool = simpleTool('worker', 'work result');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        emptySeq(),
+        emptySeq(),
+        toolCallSeq('worker', 'call_1'), // real work resets the streak
+        emptySeq(),
+        emptySeq(),
+        buildStreamResponse({ content: 'Done.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const { agent, toolRegistry } = createFixture({ mockLLM, config: { maxEmptyRetries: 2 } });
     toolRegistry.register('worker', tool);
 
     const result = await agent.run('Do work');
 
-    expect(expectCompletion(result).content).toBe('');
-    expect(mockLLM.callCount).toBe(3);
-    expect(nudges(agent)).toHaveLength(1);
+    expect(expectCompletion(result).content).toBe('Done.');
+    expect(mockLLM.callCount).toBe(6);
   });
 
   it('a fresh empty-after-tools episode after real tool work nudges again', async () => {

@@ -321,6 +321,13 @@
     "type": "number",
     "layers": [{ "default": 1 }]
   },
+  "maxEmptyRetries": {
+    "type": "number",
+    "layers": [
+      { "source": "config", "key": "maxEmptyRetries", "cast": "number" },
+      { "default": 1 }
+    ]
+  },
   "sandboxMode": {
     "type": "boolean",
     "cliFlag": {

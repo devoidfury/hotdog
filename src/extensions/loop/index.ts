@@ -88,9 +88,10 @@ export function create(core: CoreContext): ExtensionInstance {
           return;
         }
 
-        // Errors and iteration-cap blowouts are not completed turns — stop
-        // without re-enqueuing so we don't loop on a broken run.
-        if (reason === "error" || reason === "max_iterations") {
+        // Errors, iteration-cap blowouts, and spent empty-completion budgets
+        // are not completed turns — stop without re-enqueuing so we don't
+        // loop on a broken run.
+        if (reason === "error" || reason === "max_iterations" || reason === "empty_response") {
           stopLoop(agent, false);
           return;
         }

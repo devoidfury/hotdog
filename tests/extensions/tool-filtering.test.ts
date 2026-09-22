@@ -57,6 +57,7 @@ describe("Tool Filtering (Agent.getToolDefs)", () => {
         maxToolCallsPerIteration: 10,
         maxRetries: 5,
         toolRetryDelay: 1,
+        maxEmptyRetries: 1,
         ...core.config,
         ...configOverrides,
       } as any,

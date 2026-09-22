@@ -1,7 +1,7 @@
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
 import { DEFAULT_CONFIG_FILENAME } from "@core/config/defaults.ts";
-import { CliArgv, CoreConfigWithExtensions, getDefaultConfig, loadConfig, ProviderDef, resolveConfigDir } from "@core/config/index.ts";
+import { CliArgv, CoreConfigWithExtensions, getDefaultConfig, getLayerDefault, CONFIG_SCHEMA, loadConfig, ProviderDef, resolveConfigDir } from "@core/config/index.ts";
 import { discoverExtensions, isExtensionEnabled } from "@core/extensions/extensions.ts";
 import { ProfileDef, ProfileManager } from "@core/config/profiles.ts";
 import {
@@ -568,7 +568,13 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     profileName: resolved.profileName || "default",
     profileBody: resolved.profileBody,
     systemPromptTemplate: resolved.systemPromptTemplate,
-    config: resolved,
+    // Schema-default fallback: keep a minimal resolved bag working instead of dying on one missing key.
+    config: {
+      ...resolved,
+      maxEmptyRetries:
+        (resolved.maxEmptyRetries as number) ??
+        (getLayerDefault(CONFIG_SCHEMA.maxEmptyRetries) as number),
+    },
   });
   console.log(await renderPrompt(agent));
   return 0;

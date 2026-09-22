@@ -5,13 +5,14 @@ import type { SwitchProfile } from "./config/profiles.ts";
 import { Message, contentToText, type ImageAttachment, type ToolCall, type MessageSource } from "./context/message.ts";
 import { OUTPUT_EVENT, OutputEvent, EVENT_NAME_MAP, type EventName } from "./context/output.ts";
 import { createContextManager, type ContextManager } from "./context/context-manager.ts";
-import { AgentError, ConfigError, LlmError } from "./error.ts";
+import { AgentError, ConfigError, formatError, LlmError } from "./error.ts";
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
 import { createStreamProcessor, StreamProcessor, type StreamResult } from "./llm-client/stream-processor.ts";
 import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from "./extensions/registries.ts";
 import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { type RawUsage } from "./token-tracker.ts";
+import { logger } from "@utils/logger.ts";
 import { ToolExecutor, createToolExecutor, type ToolResult } from "./tool-executor.ts";
 import type { AgentLike } from "./session/index.ts";
 
@@ -26,21 +27,25 @@ export interface ModelRegistry {
 export type TurnEndReason =
   | "completion"      // model returned final text
   | "tool_return"     // a tool signaled stopLoop
-  | "continue"        // tool calls ran (or an empty turn after tools was nudged); the loop advances
+  | "continue"        // tool calls ran (or an empty turn was re-invoked); the loop advances
   | "cancelled"       // run was cancelled
   | "error"           // an unexpected exception aborted the turn
-  | "max_iterations"; // iteration cap reached
+  | "max_iterations"  // iteration cap reached
+  | "empty_response"; // every re-invoke after an empty completion came back empty again
 
 export type AgentRunResult =
   | { type: 'completion'; content: string }
-  | { type: 'tool_return'; outcome: string };
+  | { type: 'tool_return'; outcome: string }
+  /** Empty-completion budget spent; the run did not complete normally. */
+  | { type: 'empty_response' };
 
 /**
  * Nudge for the empty-response-after-tools stall: the model returned neither
  * text nor tool calls after tool results (a common local-model failure). The
  * notice lands after the empty assistant message, so the context tail is no
- * longer a tool result and a second consecutive empty turn completes
- * normally -- one nudge per tool episode, no state needed.
+ * longer a tool result. Empty turns are budgeted by maxEmptyRetries; once the
+ * budget is spent the run stops with the empty_response reason instead of
+ * completing empty.
  */
 const EMPTY_TURN_NUDGE_TEXT =
   "Your last response was empty: no text and no tool calls after the tool results. " +
@@ -76,6 +81,8 @@ export interface AgentConfig {
   maxToolCallsPerIteration?: number;
   maxRetries?: number;
   toolRetryDelay?: number;
+  /** Re-invokes allowed after a completion with neither text nor tool calls. */
+  maxEmptyRetries?: number;
   maxToolDifficulty?: number | null;
   defaultMaxToolDifficulty?: number | null;
   sandboxMode?: boolean;
@@ -135,6 +142,7 @@ export class Agent implements AgentLike {
   cancelled: boolean;
   iterationCount: number;
   maxToolCallsPerIteration: number;
+  maxEmptyRetries: number;
   reasoningEffort: string | undefined;
   #isRestoring: boolean;
   #running: boolean;
@@ -219,6 +227,10 @@ export class Agent implements AgentLike {
     if (options.config?.toolRetryDelay == null) {
       throw ConfigError.MissingConfig("toolRetryDelay");
     }
+    if (options.config?.maxEmptyRetries == null) {
+      throw ConfigError.MissingConfig("maxEmptyRetries");
+    }
+    this.maxEmptyRetries = options.config.maxEmptyRetries;
     this.#toolExecutor = createToolExecutor({
       toolRegistry: options.toolRegistry,
       hooks: options.hooks,
@@ -348,6 +360,10 @@ export class Agent implements AgentLike {
       this.emitOutput("user_message", { content: contentToText(userInput) });
 
       let iteration = 0;
+      // Consecutive empty completions (no text, no tool calls) this run.
+      // Any text or tool work resets it, so the budget bounds one stall
+      // episode, not the whole run.
+      let emptyStreak = 0;
       while (iteration < this.maxIterations) {
         iteration++;
         this.iterationCount = iteration;
@@ -374,22 +390,35 @@ export class Agent implements AgentLike {
         const result = await this._handleLlmResponse(response, params);
 
         if (typeof result === "string") {
-          if (afterToolResults && !this.cancelled && !result.trim()) {
-            // Harness notice: persisted via addMessage so the session log records the retry.
-            this.addMessage(new Message({
-              role: "harness",
-              source: "harness",
-              content: [{ type: "system-notice", text: EMPTY_TURN_NUDGE_TEXT }],
-            }));
-            await this._emitTurnEnd(iteration, response.fullText, [], false, this.cancelled, "continue");
+          if (!this.cancelled && !result.trim()) {
+            emptyStreak++;
+            if (emptyStreak <= this.maxEmptyRetries) {
+              if (afterToolResults) {
+                // Harness notice: persisted via addMessage so the session log records the retry.
+                // Only the after-tools variant needs a message: it also breaks the
+                // tool-result context tail that some strict chat templates reject.
+                this.addMessage(new Message({
+                  role: "harness",
+                  source: "harness",
+                  content: [{ type: "system-notice", text: EMPTY_TURN_NUDGE_TEXT }],
+                }));
+              }
+              await this._emitTurnEnd(iteration, response.fullText, [], false, false, "continue");
+              turnEnded = true;
+              continue;
+            }
+            // Re-invoke budget spent: stop honestly instead of completing empty.
+            await this._emitTurnEnd(iteration, response.fullText, [], true, false, "empty_response");
             turnEnded = true;
-            continue;
+            return { type: "empty_response" };
           }
+          emptyStreak = 0;
           await this._emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
           turnEnded = true;
           return { type: 'completion', content: result };
         }
 
+        emptyStreak = 0;
         const { outcome, toolResults } = result;
         if (outcome !== "continue") {
           await this._emitTurnEnd(iteration, response.fullText, toolResults, true, this.cancelled, "tool_return");
@@ -401,9 +430,21 @@ export class Agent implements AgentLike {
         turnEnded = true;
       }
 
-      // Emit turn-end so listeners unblock before the throw.
-      await this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, "max_iterations");
+      // Graceful capped finish: one tools-off wrap-up call so the model
+      // summarizes the partial work instead of the run dying mid-thought
+      // (zeroclaw finish_after_max_iterations / opencode max-steps prompt).
+      // Costs +1 LLM call, but only on capped runs.
+      let capSummary: string | null = null;
+      if (!this.cancelled && !this.abortSignal?.aborted && this.iterationCount > 0) {
+        capSummary = await this._wrapUpAfterCap();
+      }
+
+      // Emit turn-end so listeners unblock before the return/throw.
+      await this._emitTurnEnd(this.iterationCount, capSummary ?? "", [], true, this.cancelled, "max_iterations");
       turnEnded = true;
+      if (capSummary !== null) {
+        return { type: "completion", content: capSummary };
+      }
       throw AgentError.MaxIterations(this.maxIterations);
     } finally {
       this.#running = false;
@@ -411,6 +452,57 @@ export class Agent implements AgentLike {
         const reason: TurnEndReason = this.cancelled ? "cancelled" : "error";
         await this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, reason);
       }
+    }
+  }
+
+  /**
+   * One tools-off wrap-up call after the iteration cap (see the capped-finish
+   * block in run()). Appends a harness notice so the model knows why, builds
+   * params through the usual pipelines (compaction and steering still apply),
+   * then strips the tool defs so the summary call cannot smuggle in more work.
+   * Returns null on any failure -- the caller keeps the MaxIterations error,
+   * so a broken wrap-up never masks the cap. No PROVIDER_ERROR retry here:
+   * the best-effort call gets exactly one attempt.
+   */
+  private async _wrapUpAfterCap(): Promise<string | null> {
+    this.addMessage(new Message({
+      role: "harness",
+      source: "harness",
+      content: [{
+        type: "system-notice",
+        text:
+          `Iteration limit (${this.maxIterations}) reached; this is the final turn and tools are disabled. ` +
+          "Write a concise wrap-up for the user: what you completed, the current state, and what remains.",
+      }],
+    }));
+    this.sink?.emit({
+      type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+      content: `Iteration cap (${this.maxIterations}) reached; making one tools-off wrap-up call for a final summary.`,
+    });
+
+    try {
+      const params = await this._prepareIteration(this.iterationCount + 1);
+      params.toolDefs = [];
+      const response = await this._performLlmCall(params);
+      if (!response.fullText.trim()) return null;
+
+      // Deliberately not _handleLlmResponse: tool-call-repair could forge
+      // calls into the summary, and an assistant tool_calls message without
+      // results would poison the wire for strict backends.
+      this.addMessage(new Message({
+        role: "assistant",
+        content: response.fullText,
+        reasoningContent: response.fullReasoning,
+        source: "model",
+      }));
+      this._emitTokenUsage(response);
+      return response.fullText;
+    } catch (e: unknown) {
+      // Honest cancellation: a user abort during the wrap-up call cancels
+      // the run; it must not be reported as a plain MaxIterations blowout.
+      if (LlmError.isCancelled(e)) throw e;
+      logger.warn(`[agent] max-iteration wrap-up call failed: ${formatError(e)}`);
+      return null;
     }
   }
 

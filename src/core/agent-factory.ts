@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Agent, type ModelRegistry, type OutputSink } from "./agent.ts";
 import type { LlmClient } from "./llm-client/client.ts";
 import { HOOKS } from "./hooks.ts";
+import { getLayerDefault, CONFIG_SCHEMA } from "./config/schema-loader.ts";
 import type { CoreContext, ResolvedConfig } from "./extensions/types.ts";
 import type { SwitchProfile } from "./config/profiles.ts";
 
@@ -70,6 +71,11 @@ export function createAgentFactory(
         maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
         maxRetries: resolved.maxRetries as number,
         toolRetryDelay: resolved.toolRetryDelay as number,
+        // Schema-default fallback like main.ts's createLlmClient maxRetries:
+        // hand-built resolved bags (tests, embedded hosts) stay valid.
+        maxEmptyRetries:
+          (resolved.maxEmptyRetries as number) ??
+          (getLayerDefault(CONFIG_SCHEMA.maxEmptyRetries) as number),
         workspaceRoots: (resolved.workspaceRoots as string[]) || [process.cwd()],
         // Carry the resolved deny list through verbatim, including an
         // explicit [] (denylist disabled by config). null means unresolved

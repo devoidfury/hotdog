@@ -379,7 +379,7 @@ describe("Agent model setter clears tool def cache", () => {
       },
       maxIterations: 100,
       contextLimit: 128000,
-      config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 },
+      config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1, maxEmptyRetries: 1 },
     });
 
     // Prime the cache by getting tool defs

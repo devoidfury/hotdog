@@ -83,6 +83,7 @@ export function createFixture(
       maxToolCallsPerIteration: 10,
       maxRetries: 5,
       toolRetryDelay: 1,
+      maxEmptyRetries: 1,
       ...(options.config as Record<string, unknown> | undefined),
     } as AgentConfig,
     sessionId: options.sessionId || "test-session",

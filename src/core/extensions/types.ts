@@ -206,7 +206,7 @@ export interface HookPayloads {
     toolResults: Array<{ toolName: string; input: string; content: ToolResultContent }>;
     stopped: boolean;
     cancelled?: boolean;
-    reason?: "completion" | "tool_return" | "continue" | "cancelled" | "error" | "max_iterations";
+    reason?: "completion" | "tool_return" | "continue" | "cancelled" | "error" | "max_iterations" | "empty_response";
     agent: Agent;
     /**
      * Claim the right to enqueue this turn's continuation. First caller wins;

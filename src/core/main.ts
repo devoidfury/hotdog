@@ -183,6 +183,29 @@ export function createCore(
   return core;
 }
 
+/**
+ * Best-effort extract config-location flags from raw argv before parseArgs can run and metadata registers.
+ * The early metadata load must read the same config the real parse will resolve; otherwise a broken host default
+ * aborts the run even when the user pointed --config-dir at a good one.
+ */
+export function peekConfigFlags(argv: readonly string[]): {
+  config: string | null;
+  configDir: string | null;
+} {
+  let config: string | null = null;
+  let configDir: string | null = null;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (i + 1 >= argv.length) break;
+    if (arg === "-d" || arg === "--config-dir") {
+      configDir = argv[++i]!;
+    } else if (arg === "-f" || arg === "--config") {
+      config = argv[++i]!;
+    }
+  }
+  return { config, configDir };
+}
+
 export async function main(): Promise<number> {
   // Hooks + logger must exist before any error output can happen.
   const hooks = createHooks();
@@ -211,8 +234,12 @@ export async function main(): Promise<number> {
   // going on built-in defaults so `rescue` can reach the user.
   let earlyConfigError: unknown = null;
   let minimalConfig;
+  const earlyConfigFlags = peekConfigFlags(process.argv.slice(2));
   try {
-    minimalConfig = await loadConfig(undefined);
+    // Same flag layer parseArgs will apply (flag > env > cwd/etc): a broken
+    // host config must not abort a run whose --config/-config-dir points
+    // somewhere valid.
+    minimalConfig = await loadConfig(earlyConfigFlags.config, earlyConfigFlags.configDir);
   } catch (e) {
     earlyConfigError = e;
     minimalConfig = getDefaultConfig();

@@ -69,6 +69,11 @@ export interface LlmClientOptions {
   retryBaseDelayMs?: number;
   /** Health-check (ping) timeout in seconds (default: 5). */
   healthCheckTimeoutSecs?: number;
+  /**
+   * SSE inactivity watchdog, in seconds (default: 240; <= 0 disables).
+   * Resolved from core config (streamIdleTimeout); see _withIdleWatchdog.
+   */
+  streamIdleTimeoutSecs?: number;
 }
 
 export interface LlmClientRequiredOptions {
@@ -116,6 +121,7 @@ export class LlmClient {
   loud: boolean;
   chatTimeoutSecs: number;
   healthCheckTimeoutSecs: number;
+  streamIdleTimeoutSecs: number;
   maxRetries: number;
   stream: boolean;
   providers: ProviderDef[];
@@ -134,6 +140,7 @@ export class LlmClient {
     this.loud = options.loud || false;
     this.chatTimeoutSecs = options.chatTimeoutSecs;
     this.healthCheckTimeoutSecs = options.healthCheckTimeoutSecs ?? 5;
+    this.streamIdleTimeoutSecs = options.streamIdleTimeoutSecs ?? 240;
     this.maxRetries = options.maxRetries;
     this.stream = options.stream !== false;
     this.retryBaseDelayMs = options.retryBaseDelayMs;
@@ -401,7 +408,10 @@ export class LlmClient {
         }
 
         try {
-          yield* this._processSSE(response, modelConfig, url, apiKey, effectiveSessionId);
+          yield* this._withIdleWatchdog(
+            this._processSSE(response, modelConfig, url, apiKey, effectiveSessionId),
+            this.streamIdleTimeoutSecs * 1000,
+          );
           return; // stream consumed to completion: success
         } catch (e: unknown) {
           // Release the half-read body before the next attempt reuses the
@@ -557,6 +567,61 @@ export class LlmClient {
       throw err;
     }
     return resp;
+  }
+
+  /**
+   * SSE inactivity watchdog. A wedged local backend (llama.cpp/vLLM/Ollama)
+   * can hold a 200 response with a silent body; without this, the failure only
+   * surfaces when the per-attempt chat timeout (600s by default) finally fires.
+   * No StreamEvent for `idleMs` aborts the attempt with a retryable timeout
+   * LlmError, which the caller's stream-error path turns into the usual
+   * reset-and-reissue. `<= 0` disables. The lifetime cap needs no second knob:
+   * hotdogFetch's AbortSignal.timeout(chatTimeout) already spans body reads, so
+   * a drip-fed stream that keeps resetting this watchdog still dies at the chat
+   * timeout (deliberate simplification: one idle knob, not two).
+   */
+  async *_withIdleWatchdog(
+    source: AsyncGenerator<StreamEvent>,
+    idleMs: number,
+  ): AsyncGenerator<StreamEvent> {
+    if (!(idleMs > 0)) {
+      yield* source;
+      return;
+    }
+    const it = source[Symbol.asyncIterator]();
+    try {
+      for (;;) {
+        const next = it.next();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const idle = new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                LlmError.Timeout(
+                  `No stream data for ${Math.round(idleMs / 1000)}s; aborting stalled response stream`,
+                ),
+              ),
+            idleMs,
+          );
+        });
+        let step: IteratorResult<StreamEvent>;
+        try {
+          step = await Promise.race([next, idle]);
+        } catch (e) {
+          // The orphaned next() settles when the caller cancels the body;
+          // swallow it so it is never an unhandled rejection.
+          next.catch(() => {});
+          throw e;
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+        if (step.done) return;
+        yield step.value;
+      }
+    } finally {
+      // Consumer abandoned the stream early (cancel, throw): release upstream.
+      it.return?.(undefined).catch(() => {});
+    }
   }
 
   async *_processSSE(

@@ -158,6 +158,7 @@ export function createCore(
         stream: resolved ? resolved.stream !== false : true,
         chatTimeoutSecs: resolved?.chatTimeout || 30,
         healthCheckTimeoutSecs: resolved?.healthCheckTimeout || 5,
+        streamIdleTimeoutSecs: resolved?.streamIdleTimeout as number | undefined,
         // Schema default (core.config.json) as fallback when resolved is
         // unset; ?? so an explicit 0 (no retries) survives.
         maxRetries: resolved?.maxRetries ?? (getLayerDefault(CONFIG_SCHEMA.maxRetries) as number),

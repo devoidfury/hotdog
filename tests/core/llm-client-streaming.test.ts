@@ -832,3 +832,101 @@ function sseMultiResponse(frames: string[]): {
     },
   };
 }
+
+describe("LlmClient.chatStreamCancellable — SSE idle watchdog", () => {
+  function makeMsg(role: string, content: string) {
+    return new Message({ role, content });
+  }
+
+  const fakeResponse = () =>
+    ({ headers: new Map(), get: () => "", body: null } as unknown as Response);
+
+  it("aborts a stalled SSE body with a retryable timeout", async () => {
+    const registry = createLlmProtocolRegistry();
+    registry.register({
+      id: "stall",
+      buildRequest: () => ({ path: "/v1/chat/completions", body: {} }),
+      buildHeaders: () => ({}),
+      parseStream: async function* () {
+        yield { type: "content", content: "first" };
+        await new Promise(() => {}); // wedged stream: never yields again
+      },
+    } as LlmProtocol);
+
+    const client = new LlmClient({
+      roleMapping: "system-first",
+      roleMappingRegistry: testRoleReg,
+      chatTimeoutSecs: 30,
+      maxRetries: 0,
+      baseUrl: "http://test.com",
+      markerMangler: null,
+      llmProtocolRegistry: registry,
+      streamIdleTimeoutSecs: 0.05,
+    });
+    client._doRequest = async (): Promise<Response> => fakeResponse();
+
+    const events: unknown[] = [];
+    let caught: unknown;
+    try {
+      for await (const event of client.chatStreamCancellable(
+        [makeMsg("user", "Hi")],
+        mc({ name: "test-model", protocol: "stall" }),
+      )) {
+        events.push(event);
+      }
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(LlmError);
+    expect((caught as LlmError).type).toBe("timeout");
+    expect((caught as LlmError).message).toContain("No stream data");
+    // The pre-stall chunk reached the consumer before the abort.
+    expect(events).toHaveLength(1);
+  });
+
+  it("a stalled attempt resets and re-issues the request", async () => {
+    let attempts = 0;
+    const registry = createLlmProtocolRegistry();
+    registry.register({
+      id: "stall-then-ok",
+      buildRequest: () => ({ path: "/v1/chat/completions", body: {} }),
+      buildHeaders: () => ({}),
+      parseStream: async function* () {
+        attempts++;
+        if (attempts === 1) {
+          yield { type: "content", content: "partial" };
+          await new Promise(() => {}); // wedge on purpose
+        }
+        yield { type: "content", content: "clean" };
+      },
+    } as LlmProtocol);
+
+    const client = new LlmClient({
+      roleMapping: "system-first",
+      roleMappingRegistry: testRoleReg,
+      chatTimeoutSecs: 30,
+      maxRetries: 1,
+      baseUrl: "http://test.com",
+      markerMangler: null,
+      llmProtocolRegistry: registry,
+      streamIdleTimeoutSecs: 0.05,
+      retryBaseDelayMs: 1,
+    });
+    client._doRequest = async (): Promise<Response> => fakeResponse();
+
+    const events: Array<{ type: string; content?: string }> = [];
+    for await (const event of client.chatStreamCancellable(
+      [makeMsg("user", "Hi")],
+      mc({ name: "test-model", protocol: "stall-then-ok" }),
+    )) {
+      events.push(event as { type: string; content?: string });
+    }
+
+    expect(attempts).toBe(2);
+    // Failed attempt's partial output is discarded via the reset event.
+    expect(events.map((e) => e.type)).toEqual(["content", "reset", "content"]);
+    expect(events[0]!.content).toBe("partial");
+    expect(events[2]!.content).toBe("clean");
+  });
+});

@@ -108,6 +108,13 @@
       { "default": 5 }
     ]
   },
+  "streamIdleTimeout": {
+    "type": "number",
+    "layers": [
+      { "source": "config", "key": "streamIdleTimeoutSecs" },
+      { "default": 240 }
+    ]
+  },
   "sessionId": {
     "type": "string",
     "cliFlag": {

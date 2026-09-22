@@ -416,6 +416,21 @@ Timeout in seconds for provider health-check requests (used by `info` connectivi
 { "healthCheckTimeoutSecs": 10 }
 ```
 
+### `streamIdleTimeoutSecs`
+
+- **Type:** `number`
+- **Default:** `240`
+- **Resolution:** config > default
+
+Inactivity watchdog for streaming chat responses: a stream that yields no
+event for this many seconds is aborted and re-issued through the normal
+retry path (a wedged local backend fails in minutes, not at `chatTimeoutSecs`).
+Set to 0 to disable.
+
+```json
+{ "streamIdleTimeoutSecs": 120 }
+```
+
 ### `maxIterations`
 
 - **Type:** `number`

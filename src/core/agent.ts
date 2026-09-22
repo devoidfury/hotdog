@@ -39,6 +39,20 @@ export type AgentRunResult =
   /** Empty-completion budget spent; the run did not complete normally. */
   | { type: 'empty_response' };
 
+/** True when finish_reason says the response was cut off by the token limit. */
+function isLengthStop(reason: string | null): boolean {
+  return reason === "length" || reason === "max_tokens";
+}
+
+/**
+ * Tool-result body for calls that arrive on a length-stopped response.
+ * Streaming accumulates arguments verbatim; a call cut off mid-JSON is unparseable or silently short, executing it is worse than failing.
+ */
+const TRUNCATED_STOP_TOOL_TEXT =
+  "This response hit the output token limit (finish_reason=length), so its tool " +
+  "calls were NOT executed -- their arguments may be truncated mid-stream. " +
+  "Re-issue the intended tool call now with complete arguments.";
+
 /**
  * Nudge for the empty-response-after-tools stall: the model returned neither
  * text nor tool calls after tool results (a common local-model failure). The
@@ -617,7 +631,17 @@ export class Agent implements AgentLike {
       let toolCallsToExecute = response.finalToolCalls;
       let skippedToolResults: ToolResult[] = [];
 
-      if (toolCallsToExecute.length > this.maxToolCallsPerIteration) {
+      if (isLengthStop(response.finishReason)) {
+        // Streamed arguments may be silently truncated; nothing from this response is safe to run.
+        // Fail every call with a re-issue instruction so the wire stays valid (paired tool call & result).
+        toolCallsToExecute = [];
+        skippedToolResults = response.finalToolCalls.map((tc) => ({
+          toolName: tc.function?.name || "(unknown)",
+          input: tc.function?.arguments || "{}",
+          content: TRUNCATED_STOP_TOOL_TEXT,
+          toolCallId: tc.id,
+        }));
+      } else if (toolCallsToExecute.length > this.maxToolCallsPerIteration) {
         const truncated = toolCallsToExecute.slice(0, this.maxToolCallsPerIteration);
         const skipped = toolCallsToExecute.slice(this.maxToolCallsPerIteration);
 

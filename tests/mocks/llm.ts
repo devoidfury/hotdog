@@ -24,11 +24,13 @@ export function buildStreamResponse({
   reasoning = null,
   toolCalls = null,
   usage = { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+  finishReason = null,
 }: {
   content?: string;
   reasoning?: string | null;
   toolCalls?: Array<{ index: number; name: string; arguments: string; id?: string }> | null;
   usage?: Record<string, unknown>;
+  finishReason?: string | null;
 }): Record<string, unknown>[] {
   const events: Record<string, unknown>[] = [];
 
@@ -44,6 +46,10 @@ export function buildStreamResponse({
     for (const tc of toolCalls) {
       events.push(...buildToolCallEvents(tc));
     }
+  }
+
+  if (finishReason) {
+    events.push({ type: 'finish', reason: finishReason });
   }
 
   events.push({ type: 'usage', data: usage });

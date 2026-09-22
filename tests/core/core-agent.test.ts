@@ -1918,3 +1918,59 @@ describe('empty response after tool results — nudge', () => {
     expect(turnEnds[1]!.stopped).toBe(false);
   });
 });
+
+describe('length-stop tool-call guard', () => {
+  const truncatedSeq = (id: string, finishReason: string) =>
+    buildStreamResponse({
+      // Args cut off mid-JSON, exactly what a length-truncated stream yields.
+      toolCalls: [{ index: 0, name: 'worker', arguments: '{"path": "/tmp/trun', id }],
+      finishReason,
+      usage: { total_tokens: 5 },
+    });
+
+  for (const finishReason of ['length', 'max_tokens']) {
+    it(`fails all tool calls without executing when finish_reason is ${finishReason}`, async () => {
+      const tool = simpleTool('worker', 'should not run');
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          truncatedSeq('call_1', finishReason),
+          buildStreamResponse({ content: 'Re-issued cleanly.', usage: { total_tokens: 5 } }),
+        ],
+      });
+      const { agent, toolRegistry } = createFixture({ mockLLM });
+      toolRegistry.register('worker', tool);
+
+      const result = await agent.run('Do work');
+
+      expect(expectCompletion(result).content).toBe('Re-issued cleanly.');
+      expect(tool.executeCount).toBe(0);
+
+      // Wire validity: the assistant tool_call still gets a result, carrying the re-issue instruction.
+      const toolMsgs = agent.context.log.getAll().filter((m) => m.role === 'tool');
+      expect(toolMsgs).toHaveLength(1);
+      expect(toolMsgs[0]!.toolCallId).toBe('call_1');
+      expect(text(toolMsgs[0]!.content)).toContain('NOT executed');
+      expect(text(toolMsgs[0]!.content)).toContain('Re-issue');
+    });
+  }
+
+  it('executes tool calls normally when the stop is not a length stop', async () => {
+    const tool = simpleTool('worker', 'ran');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          toolCalls: [{ index: 0, name: 'worker', arguments: '{}', id: 'call_1' }],
+          finishReason: 'tool_calls',
+          usage: { total_tokens: 5 },
+        }),
+        buildStreamResponse({ content: 'Done.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const { agent, toolRegistry } = createFixture({ mockLLM });
+    toolRegistry.register('worker', tool);
+
+    await agent.run('Do work');
+
+    expect(tool.executeCount).toBe(1);
+  });
+});

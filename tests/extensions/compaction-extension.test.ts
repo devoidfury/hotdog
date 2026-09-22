@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { LlmError } from "@core/error.ts";
 import { AgentCommandRegistry } from "@core/extensions/registries.ts";
 import { MessageLog } from "@core/context/message-log.ts";
 import { Message } from "@core/context/message.ts";
@@ -1279,5 +1280,103 @@ describe("compaction completions", () => {
 
   it("returns no options when agent has no compaction registry", () => {
     expect(compactCompletion(makeCtx("compact", "", {}))).toEqual([]);
+  });
+});
+
+// ── Context-overflow rescue (provider:error) ────────────────────────────────
+
+describe("Compaction Extension — context-overflow rescue", () => {
+  function makeAgent(reserveTokens: number) {
+    // 40 messages, ~25 tokens each (100 chars / 4): over a 1000-token window.
+    const agent = createMockAgent(makeMessages(40), "test-model", {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 1000 },
+    });
+    agent.cancelled = false;
+    return { agent, core: { ...createMockCore({ reserveTokens }), resolved: { contextLimit: 1000 } } };
+  }
+
+  const overflowError = () =>
+    LlmError.Api(
+      'HTTP 500 (body: {"error":"the request exceeds the available context size, try increasing it"})',
+      500,
+    );
+
+  it("compacts and asks for the one retry on an overflow error", async () => {
+    const { agent, core } = makeAgent(0);
+    const ext = createCompactionExtension(core) as any;
+    const systemMessages: string[] = [];
+    agent.sink = { emit: (e: { type: number; content?: string }) => {
+      if (e.type === 15 /* SYSTEM_MESSAGE */) systemMessages.push(e.content!);
+    } };
+
+    const params = { messages: [...agent.log.getAll()], modelConfig: {}, toolDefs: [] };
+    const result = await ext.hooks[HOOKS.PROVIDER_ERROR]({
+      error: overflowError(),
+      params,
+      agent,
+      retry: false,
+    });
+
+    expect(result).toEqual({ retry: true });
+    expect(agent.log.getAll().length).toBeLessThan(40);
+    // The retry carries the compacted context, not the captured oversized one.
+    expect(params.messages).not.toHaveLength(40);
+    expect(params.messages.length).toBe(agent.buildMessages().length);
+    expect(systemMessages).toHaveLength(1);
+    expect(systemMessages[0]).toContain("Context overflow");
+  });
+
+  it("does not fire for non-overflow errors", async () => {
+    const { agent, core } = makeAgent(0);
+    const ext = createCompactionExtension(core) as any;
+    const params = { messages: [...agent.log.getAll()], modelConfig: {}, toolDefs: [] };
+
+    const err = LlmError.Api("HTTP 500 (body: internal error)", 500);
+    const result = await ext.hooks[HOOKS.PROVIDER_ERROR]({ error: err, params, agent, retry: false });
+
+    expect(result).toBeUndefined();
+    expect(agent.log.getAll().length).toBe(40);
+  });
+
+  it("does not fire for a cancelled agent", async () => {
+    const { agent, core } = makeAgent(0);
+    agent.cancelled = true;
+    const ext = createCompactionExtension(core) as any;
+    const result = await ext.hooks[HOOKS.PROVIDER_ERROR]({
+      error: overflowError(),
+      params: { messages: [], modelConfig: {}, toolDefs: [] },
+      agent,
+      retry: false,
+    });
+    expect(result).toBeUndefined();
+  });
+
+  it("does not rewrite a young comfortably-fitting session (drop gate vs misclassification)", async () => {
+    // A generic error body that merely QUOTES an overflow phrase (e.g. echoes
+    // prompt text) still classifies as overflow; the drop fallback must not
+    // silently destroy history from a session that is nowhere near compactable.
+    const agent = createMockAgent(makeMessages(6, "short message"), "test-model", {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 32000 },
+    });
+    const core = {
+      ...createMockCore({ reserveTokens: 0 }),
+      resolved: { contextLimit: 32000 },
+    };
+    const ext = createCompactionExtension(core) as any;
+    const params = { messages: [...agent.log.getAll()], modelConfig: {}, toolDefs: [] };
+
+    const result = await ext.hooks[HOOKS.PROVIDER_ERROR]({
+      error: LlmError.Api(
+        'HTTP 400 (body: invalid request, echoed text: "this model\'s maximum context length is 32000")',
+        400,
+      ),
+      params,
+      agent,
+      retry: false,
+    });
+
+    expect(result).toBeUndefined();
+    expect(agent.log.getAll().length).toBe(6);
+    expect(params.messages).toHaveLength(6);
   });
 });

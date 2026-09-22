@@ -6,6 +6,7 @@ import {
   isRetryableHttpStatus,
   parseRetryAfterMs,
   resolveRetryDelayMs,
+  isContextOverflowError,
   MAX_RETRY_AFTER_MS,
 } from "@core/llm-client/retry.ts";
 import { LlmError } from "@core/error.ts";
@@ -268,5 +269,48 @@ describe("isRetryableHttpStatus", () => {
   it("does not retry on 2xx or 1xx", () => {
     expect(isRetryableHttpStatus(200)).toBe(false);
     expect(isRetryableHttpStatus(201)).toBe(false);
+  });
+});
+
+describe("isContextOverflowError", () => {
+  const api = (msg: string) => LlmError.Api(msg, 400);
+
+  it("matches the local-backend overflow wordings", () => {
+    // llama.cpp server
+    expect(
+      isContextOverflowError(api('HTTP 501 (body: {"error":"the request exceeds the available context size, try increasing it"})')),
+    ).toBe(true);
+    // vLLM / OpenRouter
+    expect(
+      isContextOverflowError(api("HTTP 400 (body: This model's maximum context length is 8192 tokens. However, you requested 9123 tokens.)")),
+    ).toBe(true);
+    // Ollama explicit overflow
+    expect(
+      isContextOverflowError(api("HTTP 400 (body: prompt too long; exceeded max context length by 1234 tokens)")),
+    ).toBe(true);
+    // LM Studio
+    expect(
+      isContextOverflowError(api("HTTP 400 (body: tokens to keep from the initial prompt is greater than the context length)")),
+    ).toBe(true);
+    // OpenAI
+    expect(
+      isContextOverflowError(api('HTTP 400 (body: {"error":{"message":"Your input exceeds the context window of this model"}})')),
+    ).toBe(true);
+    // Together / newer vLLM wording
+    expect(
+      isContextOverflowError(api("HTTP 400 (body: The input (265330 tokens) is longer than the model's context length (262144 tokens).)")),
+    ).toBe(true);
+  });
+
+  it("does not match unrelated errors or non-api failures", () => {
+    expect(isContextOverflowError(api("HTTP 400 (body: bad request)"))).toBe(false);
+    expect(isContextOverflowError(LlmError.Timeout("Chat request timed out after 600s"))).toBe(false);
+    // Raw errors are the caller's to classify first; never string-matched.
+    expect(isContextOverflowError(new Error("maximum context length is 8 tokens"))).toBe(false);
+  });
+
+  it("never burns transport retries on an overflow (even a 5xx-shaped one)", () => {
+    const e = LlmError.Api('HTTP 500 (body: {"error":"the request exceeds the available context size, try increasing it"})', 500);
+    expect(shouldRetryLlmError(e, 1, 5)).toBe(false);
   });
 });

@@ -6,6 +6,8 @@ import { TrimStrategy } from "./strategies/trim.ts";
 import { shouldCompact, type WireRenderContext } from "./utils.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { isContextOverflowError } from "@core/llm-client/retry.ts";
 import { logger } from "@utils/logger.ts";
 import { LlmError, formatError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
@@ -365,6 +367,53 @@ export function create(core: CoreContext): ExtensionInstance | null {
         if (!compacted) return;
 
         return { messages: agent.buildMessages() };
+      },
+
+      // Error-driven compaction (context-overflow rescue): llama.cpp/Ollama/
+      // LM Studio/vLLM reject an oversized prompt with a 4xx/5xx. That is not
+      // fatal -- compact once and let core's exactly-once provider:error
+      // retry re-issue the request with the trimmed context.
+      [HOOKS.PROVIDER_ERROR]: async ({ error, params, agent }) => {
+        if (!agent || agent.cancelled) return;
+        if (!isContextOverflowError(error)) return;
+
+        // The rescue is LLM-free on purpose: the backend just rejected a
+        // roughly conversation-sized request, so a summarize pass (same size,
+        // same window) would likely fail too. trim drops the minimum number of
+        // oldest messages; when its local estimate claims the context already
+        // fits (that estimate is exactly what lost the race), fall back to the
+        // blunt drop. A second overflow propagates -- the core provider:error
+        // seam retries once and the retry is not itself re-caught.
+        let rescued = false;
+        const trim = strategyRegistry.get("trim");
+        if (trim) rescued = await _performCompaction(agent, trim);
+        if (!rescued) {
+          const drop = strategyRegistry.get("drop");
+          // Gate the blunt fallback: drop.execute has no fit check of its own,
+          // so on a misclassified overflow (a generic error body quoting an
+          // overflow phrase) it would silently lose real history from a young,
+          // comfortably-fitting session. Same count gate the CONTEXT hook
+          // uses; a genuine estimate-race overflow is conversation-sized and
+          // passes it.
+          if (drop && drop.canCompact(agent.context.getMessages(), settings)) {
+            rescued = await _performCompaction(agent, drop);
+          }
+        }
+        if (!rescued) {
+          logger.warn(
+            `[compaction] context overflow but no strategy could compact session ${agent.sessionId}; surfacing the error`,
+          );
+          return;
+        }
+
+        // The retry must send the compacted context, not the messages captured
+        // before the overflow (same params-mutation pattern as tool-call-repair).
+        params.messages = agent.buildMessages();
+        agent.sink?.emit({
+          type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+          content: "Context overflow: compacted the conversation and retrying the request once.",
+        });
+        return { retry: true };
       },
 
       [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {

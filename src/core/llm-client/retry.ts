@@ -23,6 +23,36 @@ export function isRetryableHttpStatus(status: number): boolean {
 }
 
 /**
+ * Message patterns for provider errors that mean "the prompt exceeds the
+ * context window". Focused on the OpenAI-compatible local backends hotdog
+ * targets (llama.cpp server, Ollama, LM Studio, vLLM) plus the common
+ * OpenAI/proxy wordings; deliberately narrower than a full provider table --
+ * a missed exotic backend just surfaces as a plain error, the status quo.
+ */
+const CONTEXT_OVERFLOW_PATTERNS: readonly RegExp[] = [
+  /prompt (?:is )?too long/i, // Anthropic-style, Ollama ("prompt too long; exceeded max context length...")
+  /exceeds the context window/i, // OpenAI
+  /maximum context length/i, // vLLM, OpenRouter, LiteLLM and other OpenAI-compatible proxies
+  /is longer than the model'?s context length/i, // Together, newer vLLM wording
+  /exceeds the available context size/i, // llama.cpp server
+  /greater than the context length/i, // LM Studio
+  /context_length_exceeded/i, // OpenAI-style structured code carried in the body
+];
+
+/**
+ * True when an api-type LlmError is a backend rejecting the request for
+ * context overflow (as opposed to a transient failure). Detection drives both
+ * "never retry" in the retry layer and the compaction extension's one-shot
+ * compact-and-retry on provider:error. Non-LlmError values are never
+ * classified (callers classify raw errors first, like shouldRetryLlmError).
+ */
+export function isContextOverflowError(e: unknown): boolean {
+  if (!(e instanceof LlmError)) return false;
+  if (e.type !== "api") return false;
+  return CONTEXT_OVERFLOW_PATTERNS.some((p) => p.test(e.message));
+}
+
+/**
  * Decide whether a failed attempt should be retried. `attempt` is the
  * 1-based index of the attempt that just failed; maxRetries counts retries
  * AFTER the initial attempt, so the final attempt (1 + maxRetries) is never
@@ -32,6 +62,10 @@ export function isRetryableHttpStatus(status: number): boolean {
  */
 export function shouldRetryLlmError(e: unknown, attempt: number, maxRetries: number): boolean {
   if (LlmError.isCancelled(e)) return false;
+  // Context overflow never heals on its own; re-issuing the same oversized
+  // request just burns attempts. The provider:error pipeline (compaction
+  // rescue) is the way out.
+  if (isContextOverflowError(e)) return false;
   if (attempt >= 1 + Math.max(0, maxRetries)) return false;
 
   if (e instanceof LlmError) {

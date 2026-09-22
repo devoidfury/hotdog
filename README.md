@@ -17,7 +17,7 @@ export HOTDOG_API_KEY="api-key-here"
 bun bin/hotdog
 ```
 
-No installer step, nothing compiled -- the source you run is the source in the repo. Set `HOTDOG_API_KEY` even for a local server: an unauthenticated inference endpoint on your network is a free API for anyone nearby and an open prompt-injection surface. llama.cpp, llama-swap, and vllm all support requiring one.
+Set `HOTDOG_API_KEY` even for a local server: an unauthenticated inference endpoint on your network is a free API for anyone nearby and an open prompt-injection surface. llama.cpp, llama-swap, and vllm all support requiring one.
 
 One-shot mode, and pinning a specific model (`-m`, or env `HOTDOG_MODEL`):
 

@@ -6,6 +6,7 @@ import {
   isRetryableHttpStatus,
   parseRetryAfterMs,
   resolveRetryDelayMs,
+  hasQuotaSignal,
   isContextOverflowError,
   MAX_RETRY_AFTER_MS,
 } from "@core/llm-client/retry.ts";
@@ -269,6 +270,47 @@ describe("isRetryableHttpStatus", () => {
   it("does not retry on 2xx or 1xx", () => {
     expect(isRetryableHttpStatus(200)).toBe(false);
     expect(isRetryableHttpStatus(201)).toBe(false);
+  });
+});
+
+describe("hasQuotaSignal", () => {
+  it("matches documented codes in error.code / error.type", () => {
+    expect(hasQuotaSignal(429, '{"error":{"code":"insufficient_quota","message":"Quota exceeded"}}')).toBe(true);
+    expect(hasQuotaSignal(403, '{"error":{"type":"quota_exceeded"}}')).toBe(true);
+    expect(hasQuotaSignal(429, '{"error":{"code":"INSUFFICIENT-QUOTA"}}')).toBe(true);
+    expect(hasQuotaSignal(429, '{"error":{"code":"gpt-model:billing_quota_exceeded"}}')).toBe(true);
+  });
+
+  it("matches top-level code / type fields", () => {
+    expect(hasQuotaSignal(403, '{"code":"quota_limit_reached"}')).toBe(true);
+    expect(hasQuotaSignal(429, '{"type":"resource-exhausted"}')).toBe(true);
+  });
+
+  it("does not match a quota phrase outside the structured fields", () => {
+    // The whole point: an ambiguous 429/403 is never falsely labeled.
+    expect(hasQuotaSignal(429, '{"error":{"message":"your quota was exceeded, come back later"}}')).toBe(false);
+    expect(hasQuotaSignal(429, "slow down insufficient_quota")).toBe(false);
+  });
+
+  it("only qualifies 429 and 403", () => {
+    expect(hasQuotaSignal(400, '{"error":{"code":"insufficient_quota"}}')).toBe(false);
+    expect(hasQuotaSignal(503, '{"error":{"code":"insufficient_quota"}}')).toBe(false);
+  });
+});
+
+describe("shouldRetryLlmError — quota-exhausted", () => {
+  it("never retries a quota-flagged 429 or 403", () => {
+    const e429 = LlmError.Api("HTTP 429 (body: ...)", 429);
+    e429.quotaExhausted = true;
+    expect(shouldRetryLlmError(e429, 1, 5)).toBe(false);
+
+    const e403 = LlmError.Api("HTTP 403 (body: ...)", 403);
+    e403.quotaExhausted = true;
+    expect(shouldRetryLlmError(e403, 1, 5)).toBe(false);
+  });
+
+  it("still retries a bare 429 throttle", () => {
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 429 (body: slow down)", 429), 1, 5)).toBe(true);
   });
 });
 

@@ -499,6 +499,38 @@ describe("LlmClient._doRequest", () => {
     }
   });
 
+  it("flags structured quota codes in a 429/403 body as quotaExhausted", async () => {
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+
+    globalThis.fetch = (async () =>
+      new Response('{"error":{"code":"insufficient_quota","message":"quota exhausted"}}', { status: 429 })) as unknown as typeof fetch;
+
+    let caught: unknown;
+    try {
+      await client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(LlmError);
+    expect((caught as LlmError).quotaExhausted).toBe(true);
+  });
+
+  it("leaves quotaExhausted unset for a plain 429 throttle", async () => {
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+
+    globalThis.fetch = (async () =>
+      new Response('{"error":{"type":"rate_limit_exceeded","message":"quota mention in message only"}}', { status: 429 })) as unknown as typeof fetch;
+
+    let caught: unknown;
+    try {
+      await client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(LlmError);
+    expect((caught as LlmError).quotaExhausted).toBeUndefined();
+  });
+
   it("caps oversized error bodies and keeps the status prefix", async () => {
     const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 

@@ -1,4 +1,4 @@
-import { retryDelay, resolveRetryDelayMs, parseRetryAfterMs, shouldRetryLlmError } from "./retry.ts";
+import { retryDelay, resolveRetryDelayMs, parseRetryAfterMs, shouldRetryLlmError, hasQuotaSignal } from "./retry.ts";
 import { MarkerMangler } from "../marker-mangler.ts";
 import type { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
@@ -557,6 +557,8 @@ export class LlmClient {
       const truncNote =
         truncated || body.length > MAX_ERROR_BODY_QUOTE_CHARS ? " [truncated]" : "";
       const err = LlmError.Api(`HTTP ${resp.status} (body: ${quote}${truncNote})`, resp.status);
+      // when quota-exhausted, the retry layer must not treat as transient.
+      if (hasQuotaSignal(resp.status, body)) err.quotaExhausted = true;
       // Carry a server Retry-After hint (429/503) to the retry scheduler.
       // The `?.` guards cover test doubles that stub the Response without
       // headers.

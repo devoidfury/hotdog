@@ -23,6 +23,45 @@ export function isRetryableHttpStatus(status: number): boolean {
 }
 
 /**
+ * Bounded set of documented code/type fragments meaning "quota exhausted". Matched case-insensitively against
+ * code/type fields of an error body ONLY -- never arbitrary response text -- so an ambiguous 429/403 is not falsely labeled.
+ */
+const QUOTA_SIGNALS = [
+  "insufficient_quota",
+  "insufficient-quota",
+  "quota_exceeded",
+  "quota-exceeded",
+  "quota_exhausted",
+  "quota-exhausted",
+  "resource_exhausted",
+  "resource-exhausted",
+  "billing_quota_exceeded",
+  "quota_limit_reached",
+  "quota_limit_exceeded",
+];
+
+/**
+ * True when a 403/429 JSON error body carries a documented quota signal in its code/type (or error.code/error.type) field.
+ * A bare 429 (throttling) or a bare 403 (auth) does NOT qualify.
+ */
+export function hasQuotaSignal(status: number, bodyText: string): boolean {
+  if (status !== 429 && status !== 403) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return false;
+  }
+  const obj = parsed as Record<string, unknown> | null;
+  if (!obj || typeof obj !== "object") return false;
+  const errObj = obj.error as Record<string, unknown> | undefined;
+  const fields = [obj.code, obj.type, errObj?.code, errObj?.type]
+    .filter((f): f is string => typeof f === "string")
+    .map((f) => f.toLowerCase());
+  return fields.some((f) => QUOTA_SIGNALS.some((s) => f.includes(s)));
+}
+
+/**
  * Message patterns for provider errors that mean "the prompt exceeds the
  * context window". Focused on the OpenAI-compatible local backends hotdog
  * targets (llama.cpp server, Ollama, LM Studio, vLLM) plus the common
@@ -69,6 +108,8 @@ export function shouldRetryLlmError(e: unknown, attempt: number, maxRetries: num
   if (attempt >= 1 + Math.max(0, maxRetries)) return false;
 
   if (e instanceof LlmError) {
+    // Exhausted quota can carry a 429 but is NOT transient; check before the status-based retry to avoid burning retries.
+    if (e.quotaExhausted) return false;
     if (e.type === "http" || e.type === "timeout") {
       // Network errors and timeouts are always transient
       return true;

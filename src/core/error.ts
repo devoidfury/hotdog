@@ -226,6 +226,8 @@ export class ParseError extends AppError {
 export class LlmError extends AppError {
   /** HTTP status when the error originated from an HTTP response (type "api"). */
   status?: number;
+  /** True when a 429/403 response body carried a structured quota code (insufficient_quota, quota_exceeded, ...) */
+  quotaExhausted?: boolean;
   /**
    * Server-provided Retry-After hint in ms (type "api"), already parsed and
    * capped (see parseRetryAfterMs). Retry scheduling prefers this over the

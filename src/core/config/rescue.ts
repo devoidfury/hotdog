@@ -10,7 +10,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveConfigDirChain, DEFAULT_CONFIG_FILENAME, DEFAULT_SYSTEM_PROMPT_FILENAME } from "./defaults.ts";
 import { normalizeConfigKeys, validateConfig } from "./index.ts";
-import { CONFIG_SCHEMA } from "./schema-loader.ts";
+import { CONFIG_SCHEMA, extractConfigLayerKeys } from "./schema-loader.ts";
 import { suggestCandidates } from "@utils/strings.ts";
 import type { ConfigParamDef } from "@core/extensions/config.ts";
 
@@ -556,6 +556,7 @@ async function checkKeys(
   let problems = 0;
   const allowed = [
     ...Object.keys(CONFIG_SCHEMA),
+    ...extractConfigLayerKeys(CONFIG_SCHEMA),
     ...EXTRA_KNOWN_KEYS,
     ...configParams.map((p) => p.key),
   ];

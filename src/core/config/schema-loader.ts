@@ -547,3 +547,28 @@ export function resolveModel(
 }
 
 export const CONFIG_SCHEMA: ConfigSchema = buildConfigSchema();
+
+/**
+ * Collect every key name that a config-file layer can read from the user's
+ * defaults.json. Walks the full schema including nested properties so that
+ * keys like "workspace.deny" are included alongside top-level ones.
+ * rescue.ts uses this to avoid flagging legitimate config keys as unknown.
+ */
+export function extractConfigLayerKeys(
+  schema: ConfigSchema,
+  prefix?: string,
+): string[] {
+  const keys: string[] = [];
+  for (const [_name, prop] of Object.entries(schema)) {
+    const fullKey = prefix ? `${prefix}.${_name}` : _name;
+    for (const layer of prop.layers ?? []) {
+      if (layer.source === "config" && layer.key) {
+        keys.push(layer.key);
+      }
+    }
+    if (prop.properties) {
+      keys.push(...extractConfigLayerKeys(prop.properties, fullKey));
+    }
+  }
+  return keys;
+}

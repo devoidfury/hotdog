@@ -6,7 +6,7 @@ import { describe, it, expect } from "bun:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { main } from "@core/main.ts";
+import { main, peekConfigFlags } from "@core/main.ts";
 import { resetLoggerForTesting } from "@utils/logger.ts";
 import {
   stripJsonc,
@@ -212,6 +212,53 @@ describe("resolveConfigDirChain", () => {
   });
 });
 
+// ── peekConfigFlags (early config-location flags) ────────────────────────────
+
+describe("peekConfigFlags", () => {
+  it("extracts -d/--config-dir and -f/--config values", () => {
+    expect(peekConfigFlags(["-d", "/a", "info"])).toEqual({ config: null, configDir: "/a" });
+    expect(peekConfigFlags(["--config-dir", "/a", "info"])).toEqual({
+      config: null,
+      configDir: "/a",
+    });
+    expect(peekConfigFlags(["-f", "/a.json", "info"])).toEqual({ config: "/a.json", configDir: null });
+    expect(peekConfigFlags(["--config", "/a.json", "info"])).toEqual({
+      config: "/a.json",
+      configDir: null,
+    });
+  });
+
+  it("returns nulls for empty or flagless argv, and a dangling flag without its value", () => {
+    expect(peekConfigFlags([])).toEqual({ config: null, configDir: null });
+    expect(peekConfigFlags(["prompt", "hello"])).toEqual({ config: null, configDir: null });
+    expect(peekConfigFlags(["--config-dir"])).toEqual({ config: null, configDir: null });
+  });
+
+  it("later occurrence wins (matches parseArgs overwrite behavior)", () => {
+    expect(peekConfigFlags(["-d", "/a", "-d", "/b"])).toEqual({ config: null, configDir: "/b" });
+  });
+});
+
+describe("early config load respects the config-location flags", () => {
+  it("a valid --config-dir overrides a broken HOTDOG_CONFIG_DIR", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-override-"));
+    try {
+      await fs.writeFile(path.join(dir, "defaults.json"), "{ broken\n");
+      // Env carries a broken config (simulating a broken host default); the
+      // flag points at the checked-in minimal config. Before the peek, the
+      // early loadConfig ignored the flag and aborted the whole run.
+      const { exitCode, stdout } = await runMain(
+        ["--config-dir", "examples/minimal-config/config", "info"],
+        { HOTDOG_CONFIG_DIR: dir },
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("Agent Harness Info");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ── main() integration ───────────────────────────────────────────────────────
 
 async function runMain(
@@ -264,9 +311,7 @@ describe("main rescue subcommand", () => {
       const broken = '{\n  // oops\n  "maxIterations": 30,\n}\n';
       await fs.writeFile(cfg, broken);
 
-      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"], {
-        HOTDOG_CONFIG_DIR: "",
-      });
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"]);
       expect(exitCode).toBe(1);
       expect(stdout).toContain("BROKEN");
       expect(stdout).toContain("line 2");
@@ -288,16 +333,13 @@ describe("main rescue subcommand", () => {
 
       const { exitCode, stdout } = await runMain(
         ["--config-dir", dir, "rescue", "fix"],
-        { HOTDOG_CONFIG_DIR: "" },
       );
       expect(exitCode).toBe(0);
       expect(stdout).toContain("FIXED");
       expect(JSON.parse(await fs.readFile(cfg, "utf-8"))).toEqual({ maxIterations: 30 });
       expect(await fs.readFile(cfg + ".bak", "utf-8")).toBe(broken);
 
-      const again = await runMain(["--config-dir", dir, "rescue"], {
-        HOTDOG_CONFIG_DIR: "",
-      });
+      const again = await runMain(["--config-dir", dir, "rescue"]);
       expect(again.exitCode).toBe(0);
       expect(again.stdout).toContain("No problems found.");
     } finally {
@@ -312,9 +354,7 @@ describe("main rescue subcommand", () => {
         path.join(dir, "defaults.json"),
         '{\n  "defailt_provider": "x",\n  "maxIterations": 2,\n  "maxIterations": 3\n}\n',
       );
-      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"], {
-        HOTDOG_CONFIG_DIR: "",
-      });
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"]);
       expect(exitCode).toBe(1);
       expect(stdout).toContain('UNKNOWN key: "defailt_provider"');
       expect(stdout).toContain("did you mean");
@@ -328,9 +368,7 @@ describe("main rescue subcommand", () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-schema-"));
     try {
       await fs.writeFile(path.join(dir, "defaults.json"), '{ "maxIterations": "lots" }\n');
-      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"], {
-        HOTDOG_CONFIG_DIR: "",
-      });
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"]);
       expect(exitCode).toBe(1);
       expect(stdout).toContain("SCHEMA");
     } finally {
@@ -344,7 +382,6 @@ describe("main rescue subcommand", () => {
       await fs.writeFile(path.join(dir, "defaults.json"), "{ broken\n");
       const { exitCode, stdout, stderr } = await runMain(
         ["--config-dir", dir, "prompt", "hi"],
-        { HOTDOG_CONFIG_DIR: "" },
       );
       expect(exitCode).toBe(1);
       expect(stderr).toContain("Error loading config");
@@ -358,9 +395,7 @@ describe("main rescue subcommand", () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-trunc-"));
     try {
       await fs.writeFile(path.join(dir, "defaults.json"), '{ "model": "x"\n');
-      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"], {
-        HOTDOG_CONFIG_DIR: "",
-      });
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"]);
       expect(exitCode).toBe(1);
       expect(stdout).toContain("NOT auto-fixable");
       expect(stdout).toContain("looks truncated");
@@ -370,7 +405,24 @@ describe("main rescue subcommand", () => {
   });
 
   it("advertises rescue in --help", async () => {
-    const { stdout } = await runMain(["--help"], { HOTDOG_CONFIG_DIR: "" });
+    const { stdout } = await runMain(["--help"]);
     expect(stdout).toContain("rescue");
+  });
+
+  it("recognizes layer key names that differ from schema property names", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-layers-"));
+    try {
+      // chatTimeoutSecs is the config-layer key; chatTimeout is the schema key.
+      // healthCheckTimeoutSecs and streamIdleTimeoutSecs are similar cases.
+      await fs.writeFile(
+        path.join(dir, "defaults.json"),
+        '{\n  "chatTimeoutSecs": 300,\n  "healthCheckTimeoutSecs": 10,\n  "streamIdleTimeoutSecs": 300\n}\n',
+      );
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"]);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("No problems found.");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

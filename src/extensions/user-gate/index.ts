@@ -172,8 +172,9 @@ async function askUser(
 
 function blockText(reasons: string[], hint: string | null): string {
   return [
-    `Tool call blocked by userGate: ${reasons.join("; ")}`,
+    `Tool call blocked: ${reasons.join("; ")}`,
     ...(hint ? [hint] : []),
+    "Do not re-attempt it. Tell the user what you were trying to do and let them decide.",
   ].join("\n");
 }
 

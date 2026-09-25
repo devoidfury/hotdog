@@ -851,3 +851,163 @@ describe("run-dir ownership", () => {
     expect(r.err.join("\n")).toContain("Owner: pid 4242 on 'somewhere'");
   });
 });
+
+// ---------------------------------------------------------------------------
+// extension-internal seams: taskManagerProvider, runHost, CLI subcommand
+// ---------------------------------------------------------------------------
+
+describe("extension wiring: provider, runHost, CLI subcommand", () => {
+  function stubCore2(workflowsPath: string, opts: { resolved?: boolean } = {}) {
+    const core: Record<string, unknown> = {
+      config: { workflows: { path: workflowsPath } },
+      services: { has: () => false, get: () => undefined },
+      createLlmClient: () => ({}),
+    };
+    if (opts.resolved !== false) {
+      core.resolved = {
+        modelRegistry: {},
+        maxIterations: 3,
+        taskProfile: "task-default",
+      };
+    }
+    return core as never;
+  }
+
+  type Handler = (cli: { args?: string[] }) => Promise<number>;
+  async function cliHandler(ext: Awaited<ReturnType<typeof create>>): Promise<Handler> {
+    let handler: Handler | null = null;
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({
+      register: (_n: string, def: { handler: Handler }) => {
+        handler = def.handler;
+      },
+    } as never);
+    return handler!;
+  }
+
+  async function withQuietConsole(fn: () => Promise<number>): Promise<{ code: number; out: string[]; err: string[] }> {
+    const origLog = console.log;
+    const origErr = console.error;
+    const out: string[] = [];
+    const err: string[] = [];
+    console.log = ((l?: unknown) => out.push(String(l))) as never;
+    console.error = ((l?: unknown) => err.push(String(l))) as never;
+    try {
+      return { code: await fn(), out, err };
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+    }
+  }
+
+  it("CLI subcommand runs through runHost; the resume guard fails it without building agents", async () => {
+    const root = freshDir();
+    const file = join(root, "wf.yaml");
+    writeFileSync(file, WORKFLOW_TEXT);
+    // The extension roots runs under <workflows.path>/runs.
+    seedRun(join(root, "runs"), "r-clash"); // records workflow "demo"
+
+    const ext = await create(stubCore2(root));
+    const handler = await cliHandler(ext);
+    const r1 = await withQuietConsole(() => handler({ args: ["run", file, "--id", "r-clash"] }));
+    expect(r1.code).toBe(1);
+    expect(r1.err.join("\n")).toContain("holds workflow 'demo'");
+
+    // Second call hits runHost's cached-host branch.
+    const r2 = await withQuietConsole(() => handler({ args: ["run", file, "--id", "r-clash"] }));
+    expect(r2.code).toBe(1);
+  });
+
+  it("runHost without a resolved config reports the session-capable error", async () => {
+    const root = freshDir();
+    const file = join(root, "wf.yaml");
+    writeFileSync(file, WORKFLOW_TEXT);
+    const ext = await create(stubCore2(root, { resolved: false }));
+    const handler = await cliHandler(ext);
+    const r = await withQuietConsole(() => handler({ args: ["run", file] }));
+    expect(r.code).toBe(1);
+    expect(r.err.join("\n")).toContain("session-capable");
+  });
+
+  it("extension tools resolve the TaskManager through the taskManager service", async () => {
+    // No service registered: provider returns null, dispatch fails loud.
+    const bare = await create(stubCore(freshDir(), null));
+    const tools1 = new Map<string, { execute: (a: never, c?: never) => Promise<{ error: string | null }> }>();
+    await bare.hooks![HOOKS.TOOLS_REGISTER]!({
+      register: (n: string, t: never) => tools1.set(n, t as never),
+    } as never);
+    expect((await tools1.get("workflow_dispatch")!.execute({ yaml: WORKFLOW_TEXT } as never)).error).not.toBeNull();
+
+    // Service registered: provider hands the tool the TaskManager verbatim.
+    const root = freshDir();
+    const fake = makeFakeAgents();
+    const ext = await create(stubCore(root, fake.tasks));
+    const tools2 = new Map<string, { execute: (a: never, c?: never) => Promise<{ error: string | null }> }>();
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!({
+      register: (n: string, t: never) => tools2.set(n, t as never),
+    } as never);
+    const r = await tools2.get("workflow_dispatch")!.execute({ yaml: WORKFLOW_TEXT } as never);
+    expect(r.error).toBeNull();
+    const m = (ext.runs as RunRegistry).active()[0]!;
+    await settle(() => m.finished !== null || m.error !== null, "service-backed dispatch to finish");
+    expect(m.finished!.outcome).toBe("succeeded");
+  });
+
+  it("/workflow cancel explains unknown, finished, and crashed runs", async () => {
+    const ext = await create(stubCore(freshDir(), null));
+    const cmds = new Map<string, { handler: (a: never, v: string | null) => Promise<{ content?: string; error?: string }> }>();
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({
+      registry: { register: (n: string, d: never) => cmds.set(n, d as never) },
+    } as never);
+    const wfCmd = cmds.get("workflow")!.handler;
+
+    // Unknown id on an empty registry: the "(none)" ownership hint.
+    const unknown = await wfCmd({} as never, "workflow cancel nope");
+    expect(unknown.error).toContain("Unknown run 'nope'");
+    expect(unknown.error).toContain("(none)");
+
+    // Unknown id with a run owned here: the id shows up in the ownership list.
+    const workflow = parseWorkflow(WORKFLOW_TEXT).workflow!;
+    const run = new WorkflowRun({ workflow, runId: "rr1", runDir: "/tmp/unused-rr2", tasks: stubPort() });
+    (ext.runs as RunRegistry).add({ runId: "rr1", workflow: "runnable", runDir: "/tmp/unused-rr2", startedAt: 0, run, finished: null, error: null });
+    const unknown2 = await wfCmd({} as never, "workflow cancel nope");
+    expect(unknown2.error).toContain("rr1");
+
+    // Finished and crashed runs are idempotent no-ops.
+    const done = new WorkflowRun({ workflow, runId: "done1", runDir: "/tmp/unused-rr3", tasks: stubPort() });
+    (ext.runs as RunRegistry).add({ runId: "done1", workflow: "runnable", runDir: "/tmp/unused-rr3", startedAt: 0, run: done, finished: { outcome: "succeeded", states: {} } as never, error: null });
+    expect((await wfCmd({} as never, "workflow cancel done1")).content).toContain("already succeeded");
+
+    const crashed = new WorkflowRun({ workflow, runId: "bad1", runDir: "/tmp/unused-rr4", tasks: stubPort() });
+    (ext.runs as RunRegistry).add({ runId: "bad1", workflow: "runnable", runDir: "/tmp/unused-rr4", startedAt: 0, run: crashed, finished: null, error: "boom" });
+    expect((await wfCmd({} as never, "workflow cancel bad1")).content).toContain("already crashed");
+  });
+
+  it("/followup refuses to guess between multiple active runs", async () => {
+    const ext = await create(stubCore(freshDir(), null));
+    const cmds = new Map<string, { handler: (a: never, v: string | null) => Promise<{ content?: string; error?: string }> }>();
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({
+      registry: { register: (n: string, d: never) => cmds.set(n, d as never) },
+    } as never);
+    const follow = cmds.get("followup")!.handler;
+
+    const workflow = parseWorkflow(WORKFLOW_TEXT).workflow!;
+    for (const id of ["ra", "rb"]) {
+      const run = new WorkflowRun({ workflow, runId: id, runDir: `/tmp/unused-${id}`, tasks: stubPort() });
+      (ext.runs as RunRegistry).add({ runId: id, workflow: "runnable", runDir: "/tmp", startedAt: 0, run, finished: null, error: null });
+    }
+    const r = await follow({} as never, "followup a keep going");
+    expect(r.error).toContain("Multiple active runs");
+    expect(r.error).toContain("ra");
+    expect(r.error).toContain("rb");
+
+    // An explicit run id still steers despite the ambiguity.
+    let steered: string | null = null;
+    (ext.runs as RunRegistry).get("rb")!.run.steer = ((nodeId: string, message: string) => {
+      steered = `${nodeId}:${message}`;
+      return true;
+    }) as never;
+    const ok = await follow({} as never, "followup rb a go on");
+    expect(ok.content).toContain("Steering sent");
+    expect(steered as string | null).toBe("a:go on");
+  });
+});

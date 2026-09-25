@@ -32,6 +32,8 @@ export async function createExclusive(path: string, contents: string): Promise<b
       throw e;
     }
   } finally {
-    await rm(tmp, { force: true }).catch(() => {});
+    // force already ignores cleanup errors on the common paths; the try/catch
+    // keeps exotic ones (rm rejecting at all) from masking the create result.
+    try { await rm(tmp, { force: true }); } catch {}
   }
 }

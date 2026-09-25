@@ -240,7 +240,7 @@ describe("buildModelRegistry with fetchModels", () => {
         json: async () => ({
           data: [
             { id: "remote-model-1", context_length: 8192 },
-            { id: "remote-model-2", context_length: 16384, capabilities: { vision: true } },
+            { id: "remote-model-2", context_length: 16384, capabilities: { vision: true, function_calling: true } },
           ],
         }),
       } as Response),
@@ -256,8 +256,10 @@ describe("buildModelRegistry with fetchModels", () => {
     const registry = await buildModelRegistry(config, 32000);
     expect(registry["remote/remote-model-1"]!.name).toBe("remote/remote-model-1");
     expect(registry["remote/remote-model-1"]!.contextLimit).toBe(8192);
+    expect(registry["remote/remote-model-1"]!.capabilities?.toolCalling).toBeUndefined();
     expect(registry["remote/remote-model-2"]!.name).toBe("remote/remote-model-2");
     expect(registry["remote/remote-model-2"]!.capabilities?.vision).toBe(true);
+    expect(registry["remote/remote-model-2"]!.capabilities?.toolCalling).toBe(true);
   });
 
   it("preserves path-prefixed base URLs when building the models URL", async () => {

@@ -4,26 +4,19 @@
   "default_model": "ai365/qwen3.8-27b",
   "thinker": " 🧠 ... {}",
   "tool_call_display_format": " 🔧 {} {}",
-  "hide_tools": true,
-  "show_token_use": true,
-  "extension_paths": ["@extensions", "@experimental"],
-  "default_subcommand": "cli",
-  "chat_timeout_secs": 1200,
+  "show-token-use": true,
+  "extension-paths": ["@extensions", "@experimental"],
+  "default-subcommand": "cli",
+  "chat-timeout-secs": 1200,
   "workspace": {
     "paths": [".", "/skills", "/data", "/tmp", "/etc/hotdog"]
   },
+  "model-groups": {
+    "coders": ["qwen3.8-flash-next", "qwen3.8-27b", "cyber-tiel-coder-35b", "kat-coder-2.5-dev"]
+  },
   "profiles": {
-    "default": {
-      "blacklist-tools": ["explore"]
-    },
-    "explorer": {
-      "model": "ai365/qwen3.8-27b:instruct"
-    },
-    "fixer": {
-      "model": "ai365/qwen3.8-27b:medium"
-    },
     "test": {
-      "model": "ai365/lfm2.5-8b-a1b"
+      "model": "lfm2.5-8b-a1b"
     }
   },
   "ui-interactive-cli": {
@@ -56,31 +49,18 @@
   "providers": [
     {
       "name": "ai365",
-      "fetchModels": true,
-      "models": []
+      "fetch-models": true
     },
-
+    {
+      "name": "mf-ai",
+      "fetch-models": true,
+      "apiKey": "$HOTDOG_ALT_KEY",
+      "url": "$HOTDOG_ALT_URL"
+    },
     {
       "name": "home",
       "url": "http://mini.home:9292",
-      "models": [
-        {
-          "name": "qwen3.6-27b",
-          "context-limit": 120000
-        },
-        {
-          "name": "ornith-9b",
-          "context-limit": 262144
-        },
-        {
-          "name": "ornith-35b",
-          "context-limit": 262144
-        },
-        {
-          "name": "gemma-4-12b",
-          "context-limit": 262144
-        }
-      ]
+      "fetch-models": true
     }
   ]
 }

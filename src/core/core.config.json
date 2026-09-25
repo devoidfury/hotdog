@@ -368,6 +368,27 @@
     "type": "string",
     "layers": [{ "default": "task-default" }]
   },
+  "taskLanesPerProvider": {
+    "type": "number",
+    "layers": [
+      { "source": "config", "key": "taskLanesPerProvider", "cast": "number" },
+      { "default": 1 }
+    ]
+  },
+  "modelGroups": {
+    "type": "object",
+    "layers": [
+      { "source": "config", "key": "modelGroups" },
+      { "default": {} }
+    ]
+  },
+  "taskLanesDir": {
+    "type": "string",
+    "layers": [
+      { "source": "config", "key": "taskLanesDir" },
+      { "compute": "joinConfigDir:task-lanes" }
+    ]
+  },
   "coreTools": {
     "type": "object",
     "layers": [

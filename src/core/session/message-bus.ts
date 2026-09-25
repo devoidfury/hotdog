@@ -6,6 +6,7 @@ import { HOOKS } from "../hooks.ts";
 import type { HookPayloads } from "../extensions/types.ts";
 import { parseCommand, ACTIONS, SESSION_MUTATING_COMMANDS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 import type { CommandResult } from "../extensions/registries.ts";
+import type { TurnLanes } from "./turn-lanes.ts";
 
 /** INPUT pipeline payload: core's shape with the bus's minimal agent. The
  * pipeline adopts a handler's InputHookResult fields onto it. */
@@ -46,6 +47,8 @@ export interface MessageBusAgent {
   getMessages?(): Message[];
   replaceContext?(messages: Message[]): void;
   commandRegistry?: CommandRegistryLike | null;
+  /** Current model string ("provider/model" or bare). Read at acquire time to pick the provider lane (see turn-lanes.ts); an absent model lands on the bare-name lane. */
+  model?: string;
   executeCommand(cmd: ParsedCommand): Promise<CommandResult | null>;
 }
 
@@ -87,6 +90,13 @@ export interface MessageBusOptions {
   sink: Sink;
   /** Optional callback to broadcast events to all connected clients. */
   broadcastCallback?: (msg: Record<string, unknown>) => void;
+  /**
+   * Provider-lane coordinator for top-level session turns (see turn-lanes.ts).
+   * SessionManager builds one from the resolved task-lane config and passes it
+   * to every bus it owns; buses constructed directly (extensions, tests) omit
+   * it and run uncoordinated.
+   */
+  lanes?: TurnLanes;
 }
 
 // Owns the agent run loop; no polling -- enqueue() resolves a per-iteration deferred.
@@ -107,11 +117,19 @@ export class MessageBus {
   // Serializes mid-run steering delivery: pipelines are async, so per-item
   // fire-and-forget would let a later submission overtake an earlier one.
   #steerChain: Promise<void> = Promise.resolve();
+  readonly #lanes: TurnLanes | null;
+  // Active lane wait (null when not waiting). cancel()/interrupt() abort it so
+  // a lane-blocked turn unwinds without leaking the slot it might land on.
+  #laneWaitAbort: AbortController | null = null;
+  // True while the active loop was started with runUntilCancelled (drain): a
+  // cancelled bus may still START queued turns, so those lane waits stand.
+  #drainActive = false;
 
-  constructor({ sessionManager, sink, broadcastCallback }: MessageBusOptions) {
+  constructor({ sessionManager, sink, broadcastCallback, lanes }: MessageBusOptions) {
     this.#sessionManager = sessionManager;
     this.#sink = sink;
     this.#broadcastCallback = broadcastCallback;
+    this.#lanes = lanes ?? null;
     this.#queue = [];
     this.#isRunning = false;
     // cancel() aborts it; interrupt() does NOT -- the bus keeps waiting for input.
@@ -139,6 +157,9 @@ export class MessageBus {
   /** Ends the run loop; the bus is unusable afterwards unless reset(). */
   cancel(): void {
     this.#abortController.abort();
+    // A turn parked on a full provider lane must not sit in its retry loop:
+    // abort the wait (the coordinator releases a slot that lands mid-abort).
+    this.#laneWaitAbort?.abort();
     const agent = this.#sessionManager.getAgent();
     if (agent) agent.cancel();
     this._wakeWaiter();
@@ -148,6 +169,9 @@ export class MessageBus {
   interrupt(): void {
     const agent = this.#sessionManager.getAgent();
     if (agent) agent.cancel();
+    // Same abort as cancel(): the dequeued message parked on a lane is dropped
+    // (the queue is cleared), but the run loop stays alive.
+    this.#laneWaitAbort?.abort();
     this.#queue = [];
     this._wakeWaiter();
   }
@@ -240,6 +264,7 @@ export class MessageBus {
     if (this.#loopPromise) {
       return this.#loopPromise;
     }
+    this.#drainActive = drain;
     const loop = (async () => {
       for await (const item of this._messages(drain)) {
         await this._processMessage(item);
@@ -419,6 +444,19 @@ export class MessageBus {
     }
     content = piped.content;
 
+    // Provider-lane gate: take a slot on the agent's CURRENT model lane before
+    // the turn runs (see turn-lanes.ts). The lane is decided here, not at bus
+    // construction, so /model or profile swaps between turns retarget it; a
+    // mid-turn model change keeps holding the original slot until release.
+    // While the lane is full the message parks here with a visible status
+    // event; cancel/interrupt abort the wait and this turn simply unwinds.
+    const releaseLane = await this.#acquireLane(agent);
+    if (!releaseLane) {
+      this.#isRunning = false;
+      this.#emitSessionState("working", false, agentSid);
+      return;
+    }
+
     try {
       await agent.run(content, undefined, source ? { source } : undefined);
     } catch (e: unknown) {
@@ -437,10 +475,42 @@ export class MessageBus {
       } else {
         this.#repairInterruptedToolCalls(agent);
       }
+    } finally {
+      // Release on every settle path: success, error, or cancel.
+      await releaseLane();
     }
 
     this.#isRunning = false;
     this.#emitSessionState("working", false, agentSid);
+  }
+
+  /**
+   * Wait for a provider-lane slot for this turn. Resolves to the release
+   * callback (a no-op when no coordinator is wired), or null when
+   * cancel()/interrupt() aborted the wait, in which case the turn must not
+   * run and a slot that landed mid-abort was already handed back.
+   */
+  async #acquireLane(agent: MessageBusAgent): Promise<(() => Promise<void>) | null> {
+    if (!this.#lanes) return async () => {};
+    // A cancel that landed before we got here (during the input pipeline, say)
+    // must not park a turn the loop will never see finish: outside drain mode
+    // the loop unwinds right after this message, so skip the wait entirely.
+    if (this.#abortController.signal.aborted && !this.#drainActive) return null;
+    const ctrl = new AbortController();
+    this.#laneWaitAbort = ctrl;
+    try {
+      return await this.#lanes.acquireTurn(agent.model ?? "", {
+        signal: ctrl.signal,
+        onWaiting: (lane) => {
+          this.#sink.emit({
+            type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+            content: `Waiting for provider lane '${lane === "" ? "_" : lane}'...`,
+          });
+        },
+      });
+    } finally {
+      this.#laneWaitAbort = null;
+    }
   }
 
   async executeCommand(cmdText: string): Promise<number | undefined> {

@@ -154,7 +154,7 @@ export class DelegateTaskTool extends SubagentTool {
           ),
           worker_model: param(
             "string",
-            "Optional model name for the worker agent (e.g. 'ai365/qwen3.5-4b'). If omitted, uses the manager's model.",
+            "Optional model for the worker: 'provider/model' pins that machine, a bare name fans out across providers hosting it, and 'group:<name>' spreads work over a declared model group (config modelGroups). Omitted = your default model, fanned out across providers.",
           ),
           profile: param(
             "string",
@@ -194,9 +194,14 @@ export class TaskStatusTool extends SubagentTool {
     if (status === null) {
       return ToolResult.err(`Task ${args.task_id} not found`);
     }
-    return ToolResult.ok(`Task ${args.task_id}: ${status}`).withEntries({
+    const lane = (backend.value as TaskManager).taskLane?.(args.task_id as string) ?? null;
+    return ToolResult.ok(
+      `Task ${args.task_id}: ${status}${lane ? ` (model ${lane.model})` : ""}`,
+    ).withEntries({
       task_id: args.task_id,
       status,
+      // provider is null while a fanout task waits unplaced; intent shows via model.
+      ...(lane ? { model: lane.model, ...(lane.provider ? { provider: lane.provider } : {}) } : {}),
     });
   }
 

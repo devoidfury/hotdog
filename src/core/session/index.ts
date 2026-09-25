@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { HOOKS, HookSystem } from "../hooks.ts";
 import { MessageBus } from "./message-bus.ts";
+import { createTurnLanes, type TurnLanes } from "./turn-lanes.ts";
 import { TaskManager } from "./task-manager.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { trimTurns } from "../context/rewind.ts";
@@ -12,7 +13,7 @@ import type { CommandResult } from "../extensions/registries.ts";
 import type { ProfileManager, SwitchProfile } from "../config/index.ts";
 import type { Message, ImageAttachment, MessageSource } from "../context/message.ts";
 import type { AgentRunResult, ForkSessionFn, ForkSessionResult, OutputSink } from "../agent.ts";
-import type { ModelConfig } from "../config/providers.ts";
+import type { ModelConfig, ProviderDef } from "../config/providers.ts";
 import type { QuestionDef } from "../context/input.ts";
 
 export interface AgentLike {
@@ -108,6 +109,9 @@ export interface SessionManagerOptions {
   taskConfig?: {
     maxIterations: number;
     taskProfile: string;
+    lanesPerProvider?: number;
+    /** Cross-process lane ledger dir (resolved config: taskLanesDir). */
+    lanesDir?: string | null;
   } | null;
   extensions?: unknown;
   profileManager?: ProfileManager;
@@ -124,6 +128,10 @@ export class SessionManager {
   #sessions: Map<string, SessionEntry>;
   #eventHandlers: Map<string, SessionEventHandler[]>;
   #taskManager: TaskManager | null;
+  // Provider-lane coordinator shared by every session bus this manager owns
+  // (same taskLanesDir / taskLanesPerProvider as the TaskManager). Null when
+  // no taskConfig was given: session turns then run uncoordinated.
+  #turnLanes: TurnLanes | null;
   #llmClient: LlmClient | null;
   // QUESTION events emitted while no channels are connected, replayed on reconnect.
   #questionBuffers: Map<string, QuestionDef[][]>;
@@ -150,6 +158,7 @@ export class SessionManager {
     this.#sessions = new Map();
     this.#eventHandlers = new Map();
     this.#taskManager = null;
+    this.#turnLanes = null;
     this.#llmClient = options.llmClient || null;
     this.#questionBuffers = new Map();
 
@@ -165,6 +174,19 @@ export class SessionManager {
       return rawBuildAgent(enrichedConfig);
     };
 
+    if (options.taskConfig) {
+      // Top-level session turns share the machine-wide lane ledger with task
+      // agents: one slot per active turn, resolved model's lane, same caps.
+      this.#turnLanes = createTurnLanes({
+        lanesDir: options.taskConfig.lanesDir,
+        lanesPerProvider: options.taskConfig.lanesPerProvider,
+        providerDefs:
+          ((options.coreConfig as Record<string, unknown> | undefined)?.providers as
+            | ProviderDef[]
+            | undefined) ?? [],
+      });
+    }
+
     if (options.taskConfig && options.llmClient && options.modelRegistry) {
       this.#taskManager = new TaskManager({
         buildAgent: this.#buildAgent,
@@ -172,6 +194,8 @@ export class SessionManager {
         config: options.coreConfig || {},
         maxIterations: options.taskConfig.maxIterations,
         taskProfile: options.taskConfig.taskProfile,
+        lanesPerProvider: options.taskConfig.lanesPerProvider,
+        lanesDir: options.taskConfig.lanesDir,
         profileManager: options.profileManager,
       });
 
@@ -467,6 +491,7 @@ export class SessionManager {
         getAgent: () => agent,
       },
       sink: internalSink,
+      lanes: this.#turnLanes ?? undefined,
     });
 
     if (agent.sink === null || agent.sink === undefined) {

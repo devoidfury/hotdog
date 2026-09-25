@@ -32,6 +32,7 @@ compaction.out.json
 .eslintcache
 .cache
 *.tsbuildinfo
+task-lanes/
 
 # temp dirs used by tests
 tests/.test-*
@@ -50,6 +51,7 @@ dist
 /target
 tmp/
 *.log
+runs/
 
 # conf file backups created by automatic tools
 *.bak

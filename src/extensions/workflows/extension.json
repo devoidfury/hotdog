@@ -1,0 +1,40 @@
+{
+  "name": "workflows",
+  "provides": ["cli:subcommands"],
+  "description": "Multi-agent workflow (DAG) artifacts: validate/render/run .workflow.yaml graphs, run list/status/reconcile/cancel, manager tools (workflow_validate/save/dispatch/status), /workflow + /followup",
+  "configSchema": {
+    "workflows": {
+      "type": "object",
+      "properties": {
+        "maxNodes": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "description": "Soft cap on nodes per workflow graph (exceeding it warns; validation refuses above the hard ceiling of 32). A workflow's own limits.maxNodes overrides."
+        },
+        "maxRuntimeMins": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Default per-node wall-clock cap in minutes (a node's maxRuntimeMins overrides). When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried."
+        },
+        "path": {
+          "type": "string",
+          "description": "Directory holding *.workflow.yaml graphs; runs live under <path>/runs",
+          "layers": [
+            { "source": "config", "key": "workflows.path" },
+            { "compute": "joinConfigDir:workflows" }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "layers": [{ "source": "config", "key": "workflows" }, { "default": {} }]
+    }
+  },
+  "cli:subcommands": [
+    {
+      "name": "workflow",
+      "description": "Workflows: 'workflow validate|render <file>' | 'workflow run <file>' | 'workflow list' | 'workflow status|reconcile|cancel <run-id>'"
+    }
+  ]
+}

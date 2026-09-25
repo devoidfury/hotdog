@@ -496,6 +496,54 @@ Profile used for spawned task agents (subagents).
 { "taskProfile": "task-default" }
 ```
 
+### `taskLanesPerProvider`
+
+- **Type:** `number`
+- **Default:** `1`
+- **Resolution:** config > default
+
+Concurrent turns allowed per provider lane -- both task agents (subagents) **and top-level session turns** (interactive or one-shot). The lane key is the provider part of the resolved `provider/model` string; bare model names share one conservative lane. Tasks beyond the cap wait in a `queued` state and start automatically when a lane frees; `task_status` reports `queued`, and interrupting a queued task cancels it without building the agent. llama.cpp backends evict KV caches when models swap, so a cap of 1 per node keeps worker traffic from thrashing warm caches; raise it on nodes whose llama-swap matrix explicitly allows co-residency. Values below 1 are treated as unlimited. With multiple providers, undelegated model names fan out across the copies on your fleet (see `modelGroups`) instead of serializing behind one lane; a first hit on a cold copy costs one model swap -- that is the price of parallelism, not a regression.
+
+A top-level session holds its slot only while a turn is running: idle time at the prompt reserves nothing, so an open chat never blocks the fleet. A mid-turn wait (the `question` tool awaiting your answer) *does* hold the slot -- the turn is live and releasing it would let another model swap in and thrash the cache you are about to return to. When your model's lane is full, the message stays queued, the session prints a `Waiting for provider lane '<provider>'...` status line, and the acquire retries on a timer; Ctrl-C or cancel drops the wait cleanly (a slot landing mid-abort is handed straight back). The lane is chosen at turn start from the agent's current model, so `/model` or a profile switch between turns retargets it.
+
+This is the fleet-wide default: a provider's own `taskLanes` overrides it for that machine (e.g. cap 2 on a roomy `-np 2` node, cap 1 on the cheap one). The bare-name lane has no provider def to override, so it always uses this value.
+
+**The cap is machine-wide, not per process.** With the ledger dir configured (see `taskLanesDir`), every task-agent turn and every top-level session turn takes a numbered slot file under `<taskLanesDir>/<provider>/` when it starts and releases it on completion, so an interactive session, a foreground `hotdog workflow run`, and any other hotdog process on the box share one capacity. A slot whose owner died (same-host pid no longer alive) is reclaimed by the next acquirer; a slot marked by another host is counted as busy (its liveness is unknowable from here -- if you share the ledger dir over NFS and a machine crashes mid-task, delete its slot file by hand). All processes sharing a lane must agree on that lane's cap: numbering follows the acquirer's cap, so mismatched caps make the effective limit the smallest one currently in play. With `taskLanesDir` unset, or a lane capped below 1 (unlimited), there is no coordination and the cap applies to the single process only.
+
+```json
+{ "taskLanesPerProvider": 1 }
+```
+
+### `taskLanesDir`
+
+- **Type:** `string`
+- **Default:** `<configDir>/task-lanes`
+- **Resolution:** config > compute
+
+Directory holding the cross-process lane slot ledger: one subdir per provider lane (`_` for the bare-name lane), each holding up to `taskLanesPerProvider` / `taskLanes` numbered slot files. Slot files are ephemeral bookkeeping -- live turns (task agents and top-level session turns) hold them, crashed ones are reclaimed by pid-liveness -- so the dir is safe to delete when nothing is running, and it should not be synced or backed up.
+
+```json
+{ "taskLanesDir": "/var/tmp/hotdog-lanes" }
+```
+
+### `modelGroups`
+
+- **Type:** `object`
+- **Default:** `{}`
+
+Named pools of interchangeable models for delegated work. Keys are group names (kebab-case); values list members as bare model names (expanded to every catalog provider holding that model -- copies) or `provider/model` strings (pinned to that machine). Reference a group with `worker_model: "group:<name>"` in `delegate_task`, or `group: <name>` on a workflow node.
+
+Placement semantics: a task waits for the first member with a free provider lane, preferring a provider that already has the model loaded (llama-swap `/running` peek), then group declaration order. When every lane of every member is busy, the task queues -- work never runs on a provider marked `noSpread` unless a member names it outright or a pin points at it. Copies of a single model (the implicit group formed by the default model's bare name) never degrade to another model; declared groups may use any member.
+
+```json
+{
+  "modelGroups": {
+    "mid-level": ["qwen3.8-flash-next", "llama-3.3-70b"],
+    "frontier": ["vendor-x/big-model"]
+  }
+}
+```
+
 ### `workspace`
 
 - **Type:** `object`
@@ -728,6 +776,8 @@ The `providers` array defines available AI providers and their models. Each prov
 | `temperature` | `number` | no | — | Default temperature for all models in this provider. |
 | `contextLimit` | `number` | no | 128000 | Context window size limit for all models in this provider (triggers compaction when exceeded). |
 | `roleMapping` | `string` | no | global `modelRoleMapping` (default `"system-first"`) | RoleMapping registry name for this provider's models: where the internal `harness` role rides on the wire (`"user"` under `"system-first"`, `"developer"` under `"developer"`). Both built-ins come from the autoloaded `role-mapping-default` extension; an unregistered name is a config error at request build. Overridable per model. |
+| `noSpread` | `boolean` | no | `false` | Keep task-agent work off this provider when placement is implicit (the default-model/bare-name copy fanout). Explicit choices still land: pins, and model-group members that name this provider outright. Use it for paid-API copies of a model you also serve locally. |
+| `taskLanes` | `number` | no | global `taskLanesPerProvider` (default `1`) | Concurrent turns (task agents and top-level session turns) allowed on this provider's lane, overriding the global default for this machine only (enforced across every hotdog process through the `taskLanesDir` slot ledger; all processes on the box must agree on the cap). Set it to the backend's real co-residency (`-np`) capacity: `2` on a roomy llama.cpp node, `1` where swaps thrash KV caches. Values below `1` mean unlimited on this lane (and skip ledger coordination). |
 | `protocol` | `string` | no | `"openai"` | LlmProtocol registry name for this provider's models. The built-in `"openai"` protocol speaks the OpenAI chat-completions wire (Bearer auth, `data:` SSE). Extensions can register additional protocols under `EXTENSION_PROVIDES.LLM_PROTOCOLS`. Overridable per model. |
 | `wireFormat` | `string` | no | global `modelWireFormat` (default `"xml"`) | WireFormat registry name for this provider's models: the markup shape of harness wrappers (tool results, file includes, system notices). Falls back to the global `modelWireFormat` (default `"xml"`, from the core config; the shape is registered by the autoloaded `wire-format-xml` extension, and an unregistered name is a config error at request build rather than falling back). Overridable per model. |
 | `controlTokens` | `array` | no | `[]` | Server chat-template control tokens (e.g. reasoning-block delimiters, end-of-turn literals) to mangle in message content at the wire. Prevents untrusted tool output from forging template tokens. Overridable per model. |
@@ -1095,6 +1145,20 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 
 ```json
 { "loopDetect": { "repeatThreshold": 5 } }
+```
+
+### `workflows`
+
+[Workflows](../src/extensions/workflows) — multi-agent workflow (DAG) artifacts: `hotdog workflow validate|render|run|list|status|reconcile|cancel`, the manager tools `workflow_validate` / `workflow_save` / `workflow_dispatch` / `workflow_status` (managerOnly), and the `/workflow` + `/followup` slash commands. `workflow_save` persists manager-designed graphs under `path` (same-name save updates in place) so managers can author workflows without any file-write tool.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `maxNodes` | `number` | `8` | Soft cap on nodes per workflow graph (exceeding it warns; validation refuses above the hard ceiling of 32). A workflow's own `limits.maxNodes` overrides. |
+| `maxRuntimeMins` | `number` | `30` | Default per-node wall-clock cap in minutes (a node's `maxRuntimeMins` overrides). When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried. |
+| `path` | `string` | `<configDir>/workflows` | Directory holding `*.workflow.yaml` graphs; run dirs live under `<path>/runs`. |
+
+```json
+{ "workflows": { "maxNodes": 12, "maxRuntimeMins": 45 } }
 ```
 
 ### `questionTool`

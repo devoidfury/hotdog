@@ -17,6 +17,18 @@ hotdog sessions cleanup          # Remove old sessions
 hotdog rescue                    # Diagnose config files (paths, syntax, unknown keys)
 hotdog rescue fix                # ...and repair comments/trailing commas (.bak kept)
 hotdog webui                     # Start the web UI server
+hotdog workflow validate <f>     # Validate a .workflow.yaml graph (errors + warnings, exit code)
+hotdog workflow render <f>       # Deterministic topological rendering of a workflow
+hotdog workflow run <f> [--id <run-id>]
+                                 # Execute a workflow graph (foreground; Ctrl-C cancels gracefully).
+                                 # --id re-runs a previous run dir, reusing filesystem-verified nodes
+                                 # (refused while another live process owns that run dir)
+hotdog workflow list             # List runs under <workflows.path>/runs
+hotdog workflow status <run-id>  # Node states from a run's run.jsonl (works cross-process)
+hotdog workflow reconcile <run-id>
+                                 # Check completed claims against the filesystem (resume planning)
+hotdog workflow cancel <run-id>  # Finished runs: idempotent report; live runs owned by another
+                                 # process must be stopped there (Ctrl-C / '/workflow cancel')
 ```
 
 ## CLI Options

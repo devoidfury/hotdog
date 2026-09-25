@@ -290,6 +290,12 @@ export interface ResolvedConfig {
   modelRoleMapping?: string;
   toolOutputFmt?: string;
   taskProfile?: string;
+  /** Concurrent task agents allowed per provider lane. */
+  taskLanesPerProvider?: number;
+  /** Directory for the cross-process lane slot ledger (taskLanesPerProvider is machine-wide when set). */
+  taskLanesDir?: string;
+  /** Named model groups for fanout delegation: name -> model members (bare or provider/qualified). */
+  modelGroups?: Record<string, string[]>;
   profilesPath?: string;
 
   profileManager?: ProfileManager;

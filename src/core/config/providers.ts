@@ -67,6 +67,10 @@ export interface ProviderDef {
   contextLimit?: number;
   /** RoleMapping registry name (e.g. "system-first", "developer"); provider -> global default. */
   roleMapping?: string;
+  /** Exclude this provider from implicit model-copy fanout (group members that name it explicitly, and pins, still reach it). */
+  noSpread?: boolean;
+  /** Concurrent task agents allowed on this provider's lane; overrides global taskLanesPerProvider. Below 1 = unlimited. */
+  taskLanes?: number;
   protocol?: string;
   wireFormat?: string;
   controlTokens?: string[];
@@ -84,6 +88,7 @@ interface LlamaSwapModel {
   };
   capabilities?: {
     vision?: boolean;
+    function_calling?: boolean;
   };
   meta?: {
     tags?: string[];
@@ -105,12 +110,15 @@ function parseModelsResponse(json: LlamaSwapModelsResponse): ProviderModelEntry[
 
   for (const m of json.data || []) {
     const hasVision = m.capabilities?.vision === true || m.architecture?.input_modalities?.includes("image");
+    const capabilities: { vision?: boolean; toolCalling?: boolean } = {};
+    if (hasVision) capabilities.vision = true;
+    if (m.capabilities?.function_calling === true) capabilities.toolCalling = true;
 
     const baseEntry: ProviderModelEntry = {
       name: m.id,
       contextLimit: m.context_length,
       tags: [...(m.meta?.tags ?? m.meta?.llamaswap?.tags ?? [])],
-      capabilities: hasVision ? { vision: true } : undefined,
+      capabilities: Object.keys(capabilities).length > 0 ? capabilities : undefined,
       maxToolDifficulty: m.meta?.max_tool_difficulty ?? m.meta?.llamaswap?.max_tool_difficulty,
     };
 

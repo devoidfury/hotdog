@@ -57,7 +57,10 @@ export const openaiProtocol: LlmProtocol = {
       "User-Agent": `hotdog/${pkg.version}`,
     };
     if (ctx.apiKey) headers["Authorization"] = `Bearer ${ctx.apiKey}`;
-    if (ctx.sessionId) headers["x-session-affinity"] = ctx.sessionId;
+    if (ctx.sessionId) {
+      headers["x-session-affinity"] = ctx.sessionId;
+      headers["x-session-id"] = ctx.sessionId;
+    }
     headers["Connection"] = "keep-alive";
     return headers;
   },

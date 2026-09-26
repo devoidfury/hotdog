@@ -1670,6 +1670,49 @@ describe("placement fanout (cross-provider)", () => {
     manager.interruptTask("t2");
   });
 
+  it("no catalog default: the parent session's model drives the chain and fans out", async () => {
+    // The real-world shape: buildModelRegistry sets no `.default`, so without
+    // a parent the chain collapses to "" (the old bare-name-lane bug). The
+    // delegating manager's own model (qualified n2/qwen) supplies it instead,
+    // and the same bare name fans across every provider that carries it.
+    const { manager, built } = makeFanoutManager({
+      modelRegistry: {
+        "n1/qwen": cfgEntry("n1/qwen"),
+        "n2/qwen": cfgEntry("n2/qwen"),
+        "n3/other": cfgEntry("n3/other"),
+      } as never,
+    });
+    manager.setSessionManager({
+      getAgent: () => undefined,
+      getAgentBySessionId: (id) =>
+        id === "mgr" ? ({ sessionId: "mgr", model: "n2/qwen" } as never) : undefined,
+    });
+    await manager.spawnTask("t1", "a", { managerAgent: { sessionId: "mgr" } });
+    await settle(() => built.length === 1, "placed");
+    // n2 is the parent's provider but neither copy is warm, so the tie-break
+    // is provider order (n1 < n2) -- what matters is that it fanned to a
+    // real catalog provider lane, NOT the bare-name "" lane.
+    expect(built[0]!.model).toBe("n1/qwen");
+    expect(manager.taskLane("t1")!.provider).toBe("n1");
+    manager.interruptTask("t1");
+  });
+
+  it("parent model with no catalog copies stays a single qualified candidate", async () => {
+    const { manager, built } = makeFanoutManager({
+      modelRegistry: { "n9/solo": cfgEntry("n9/solo") } as never,
+    });
+    manager.setSessionManager({
+      getAgent: () => undefined,
+      getAgentBySessionId: (id) =>
+        id === "mgr" ? ({ sessionId: "mgr", model: "n9/solo" } as never) : undefined,
+    });
+    await manager.spawnTask("t1", "a", { managerAgent: { sessionId: "mgr" } });
+    await settle(() => built.length === 1, "placed");
+    expect(built[0]!.model).toBe("n9/solo");
+    expect(manager.taskLane("t1")!.provider).toBe("n9");
+    manager.interruptTask("t1");
+  });
+
   it("prefers the warm node when both lanes are free", async () => {
     const { manager, built } = makeFanoutManager({
       runningPeek: async (p: string) => (p === "n2" ? new Set(["qwen"]) : new Set<string>()),
@@ -1729,6 +1772,63 @@ describe("placement fanout (cross-provider)", () => {
     manager.interruptTask("t1");
     manager.interruptTask("t2");
     manager.interruptTask("t3");
+  });
+
+  const profileMgr = (profiles: Record<string, Record<string, unknown>>) =>
+    ({
+      getProfile: (name: string) => (profiles[name] ? ({ name, ...profiles[name] } as never) : null),
+    }) as never;
+
+  it("profile group binds fanout without worker_model", async () => {
+    const { manager, built } = makeFanoutManager({
+      profileManager: profileMgr({ farm: { group: "mid" } }),
+    });
+    await manager.spawnTask("t1", "a", {} as never);
+    await manager.spawnTask("t2", "b", {} as never);
+    await settle(() => built.length === 2, "qwen fleet busy");
+    await manager.spawnTask("t3", "c", { profile: "farm" } as never);
+    await settle(() => built.length === 3, "profile-group task ran the spare member");
+    expect(built[2]!.model).toBe("n3/other");
+    manager.interruptTask("t1");
+    manager.interruptTask("t2");
+    manager.interruptTask("t3");
+  });
+
+  it("explicit worker_model overrides the profile group (no degrade to members)", async () => {
+    const { manager, built } = makeFanoutManager({
+      profileManager: profileMgr({ farm: { group: "mid" } }),
+    });
+    await manager.spawnTask("t1", "a", {} as never);
+    await manager.spawnTask("t2", "b", {} as never);
+    await settle(() => built.length === 2, "qwen fleet busy");
+    await manager.spawnTask("t3", "c", { profile: "farm", workerModel: "qwen" } as never);
+    // Bare-name expansion never degrades to another model: t3 queues on the
+    // qwen copies rather than taking the group's spare member.
+    expect(manager.taskStatus("t3")).toBe("queued");
+    expect(manager.taskLane("t3")!.model).toBe("qwen"); // not "group:mid"
+    manager.interruptTask("t1");
+    await settle(() => built.length === 3, "t3 placed on a freed qwen copy");
+    expect(built[2]!.model).toContain("qwen");
+    manager.interruptTask("t2");
+    manager.interruptTask("t3");
+  });
+
+  it("unknown profile group fails loud at spawn", async () => {
+    const { manager } = makeFanoutManager({
+      profileManager: profileMgr({ ghostly: { group: "ghost" } }),
+    });
+    await expect(manager.spawnTask("t1", "a", { profile: "ghostly" } as never)).rejects.toThrow(
+      /unknown model group 'ghost'/,
+    );
+  });
+
+  it("profile model spelled as group:... fails with a pointed error", async () => {
+    const { manager } = makeFanoutManager({
+      profileManager: profileMgr({ legacy: { model: "group:mid" } }),
+    });
+    await expect(manager.spawnTask("t1", "a", { profile: "legacy" } as never)).rejects.toThrow(
+      /looks like a group reference; declare it with the profile 'group' field/,
+    );
   });
 
   it("strict pin waits on its provider instead of using a copy", async () => {

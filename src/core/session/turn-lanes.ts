@@ -100,7 +100,13 @@ export function createTurnLanes(options: TurnLanesOptions): TurnLanes {
     async acquireTurn(model: string, wait: LaneWait): Promise<(() => Promise<void>) | null> {
       const lane = laneKeyOf(model);
       const cap = caps.capOf(lane);
-      if (!ledger || !Number.isFinite(cap)) return noopRelease; // unlimited or no ledger: never touch the fs
+      if (!ledger || !Number.isFinite(cap)) {
+        logger.debug(
+          `[lanes] turn on '${model}' uncoordinated (lane '${lane || "_"}' cap ${cap === Number.POSITIVE_INFINITY ? "unlimited" : cap}, ledger ${ledger ? "on" : "off"})`,
+        );
+        return noopRelease; // unlimited or no ledger: never touch the fs
+      }
+      logger.debug(`[lanes] turn acquiring lane '${lane || "_"}' (cap ${cap}) for '${model}'`);
       let announced = false;
       for (;;) {
         if (wait.signal.aborted) return null;
@@ -120,10 +126,15 @@ export function createTurnLanes(options: TurnLanesOptions): TurnLanes {
             await releaseSafe(lease);
             return null;
           }
-          return () => releaseSafe(lease);
+          logger.debug(`[lanes] turn holds lane '${lane || "_"}' slot=${lease.path}`);
+          return async () => {
+            logger.debug(`[lanes] turn releases lane '${lane || "_"}' slot=${lease.path}`);
+            await releaseSafe(lease);
+          };
         }
         if (!announced) {
           announced = true;
+          logger.debug(`[lanes] turn parked: lane '${lane || "_"}' full (cap ${cap})`);
           wait.onWaiting?.(lane);
         }
         await sleepOrAbort(retryMs, wait.signal);

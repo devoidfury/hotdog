@@ -111,6 +111,8 @@ export interface TaskResultBus {
 /** Minimal session-manager surface the TaskManager needs for result delivery. */
 export interface TaskManagerSessionManager {
   getAgent: () => AgentLike | undefined;
+  /** Look up a specific session's agent (chain-default model for delegated spawns). */
+  getAgentBySessionId?: (sessionId: string) => AgentLike | undefined;
   /** Look up a session's bus by id; used to route task results to the right session. */
   getBus?: (sessionId: string) => TaskResultBus | undefined;
 }
@@ -128,8 +130,9 @@ export interface SpawnTaskOptions {
   requires?: ModelRequirements;
   /**
    * Declared model-group fanout (config modelGroups; "group:<name>" through
-   * worker_model also lands here). Members are interchangeable: placement
-   * takes any member with a free lane. Mutually exclusive with pin.
+   * worker_model and the worker profile's `group` field also land here).
+   * Members are interchangeable: placement takes any member with a free lane.
+   * Mutually exclusive with pin.
    */
   group?: string;
   /**
@@ -193,6 +196,8 @@ export interface TaskManagerRequiredOptions {
 
 
 interface TaskEntry {
+  /** Spawn id, for diagnostics. */
+  taskId: string;
   agent: AgentLike | null;
   abortController: AbortController;
   statusRef: { value: TaskStatus };
@@ -306,6 +311,16 @@ export class TaskManager {
         .map((p) => p.name),
     );
     this.#lanes = options.lanesDir ? new LaneLedger({ dir: options.lanesDir }) : null;
+    logger.debug(
+      `[lanes] TaskManager placement: lanesPerProvider=${options.lanesPerProvider ?? "unset(=unlimited)"} ` +
+        `lanesDir=${options.lanesDir ?? "unset(=process-local caps only)"} ` +
+        `providerOverrides=${
+          providerDefs
+            .filter((p) => typeof (p as { taskLanes?: unknown }).taskLanes === "number")
+            .map((p) => `${p.name}=${(p as { taskLanes?: number }).taskLanes}`)
+            .join(",") || "none"
+        }`,
+    );
     this.#lanesRetryMs =
       typeof options.lanesRetryMs === "number" && options.lanesRetryMs >= 1
         ? options.lanesRetryMs
@@ -418,6 +433,7 @@ export class TaskManager {
       settleFn = resolve;
     });
     const entry: TaskEntry = {
+      taskId,
       agent: null,
       abortController,
       statusRef,
@@ -545,6 +561,17 @@ export class TaskManager {
   }
 
   /**
+   * The delegating session's current model, when the spawn names a manager
+   * agent (delegate_task path). The chain default for a bare spawn: same
+   * model as the parent, then copy-expanded across providers by the caller.
+   */
+  #parentModel(managerAgent: SpawnTaskOptions["managerAgent"]): string | undefined {
+    if (!managerAgent) return undefined;
+    const model = this.#sessionManager?.getAgentBySessionId?.(managerAgent.sessionId)?.model;
+    return typeof model === "string" && model.length > 0 ? model : undefined;
+  }
+
+  /**
    * Profile load + model admission for spawnTask, kept in its own async
    * method so the collision check -> id reservation sequence in spawnTask
    * contains no await. Plan failures throw loud, like pin misses; the
@@ -560,10 +587,39 @@ export class TaskManager {
     // the catalog and fail loud before registration; the legacy chain expands
     // bare values and the registry default into cross-provider copies (cold,
     // never errors), while a provider-qualified explicit value stays strict.
-    const groupRef = options.group ?? parseGroupRef(options.workerModel);
+    // A worker profile may bind fanout itself via its `group` field; an
+    // explicit worker_model wins over it, same precedence as over profile model.
+    const profileGroup = taskProfile?.group || undefined;
+    if (
+      !options.workerModel &&
+      typeof taskProfile?.model === "string" &&
+      taskProfile.model.startsWith("group:")
+    ) {
+      // Otherwise this lands in the legacy expand branch, finds no catalog
+      // copies for the pseudo-name, and launches with the literal string
+      // "group:..." as the model -- a runtime API error, not a config error.
+      throw new Error(
+        `[task ${taskId}] profile '${profileName}' model '${taskProfile.model}' looks like a group reference; declare it with the profile 'group' field instead`,
+      );
+    }
+    const groupRef =
+      options.group ??
+      parseGroupRef(options.workerModel) ??
+      (options.workerModel ? undefined : profileGroup);
     if (options.pin && groupRef) {
       throw new Error(`[task ${taskId}] pin and group are mutually exclusive`);
     }
+    if (groupRef && groupRef === profileGroup && taskProfile?.model) {
+      logger.warn(
+        `[task ${taskId}] profile '${profileName}' declares both 'group' and 'model'; group wins for placement`,
+      );
+    }
+    logger.debug(
+      `[task ${taskId}] plan inputs: profile='${profileName}' profile.group=${profileGroup ?? "-"} ` +
+        `worker_model=${options.workerModel ?? "-"} pin=${options.pin?.model ?? options.pin?.provider ?? "-"} ` +
+        `requires=${options.requires ? JSON.stringify(options.requires) : "-"} ` +
+        `parent=${options.managerAgent ? this.#parentModel(options.managerAgent) ?? "?" : "-"} registrySize=${Object.keys(this.#modelRegistry).length}`,
+    );
     let candidates: SpawnCandidate[] | null = null;
     let modelLabel: string;
     let headKey: string;
@@ -588,11 +644,21 @@ export class TaskManager {
     } else {
       const registryDefault = (this.#modelRegistry as { default?: string }).default || "";
       const explicit = options.workerModel || (taskProfile?.model ?? undefined) || undefined;
-      // Explicit qualified values honor their provider; bare values and the
-      // default are placement-eligible anywhere the name exists.
+      // Chain default: the delegating (parent) session's model, then the
+      // catalog's `default` key (vestigial in practice: buildModelRegistry
+      // never sets one). Explicit qualified values honor their provider;
+      // bare values and the chain default are placement-eligible anywhere
+      // the name exists.
+      const parentModel = this.#parentModel(options.managerAgent);
+      const chainDefault = parentModel || registryDefault;
       const expandable = !explicit || explicit === registryDefault || !explicit.includes("/");
-      modelLabel = explicit || registryDefault;
+      modelLabel = explicit || chainDefault;
       headKey = modelLabel;
+      if (!modelLabel) {
+        logger.warn(
+          `[task ${taskId}] no model resolved (no worker_model, profile model, parent session model, or catalog default); the build default will run the task, unplaced on the bare-name lane`,
+        );
+      }
       if (modelLabel && expandable) {
         const plan = await planSpawn({
           registry: this.#modelRegistry,
@@ -606,6 +672,13 @@ export class TaskManager {
         }
       }
     }
+    logger.debug(
+      `[task ${taskId}] plan '${modelLabel}' -> ${
+        candidates
+          ? `fanout [${candidates.map((c) => `${c.key}(${c.provider})`).join(", ")}]`
+          : `${headKey} (locked, no fanout)`
+      }`,
+    );
     return { taskProfile, candidates, modelLabel, headKey };
   }
 
@@ -699,6 +772,10 @@ export class TaskManager {
         if (n < this.#laneCap(task.provider)) {
           used.set(task.provider, (used.get(task.provider) ?? 0) + 1);
           void this.#tryStart(task);
+        } else {
+          logger.debug(
+            `[task ${task.taskId}] locked lane '${task.provider}' in-process full (${n}/${this.#laneCap(task.provider)}); queued`,
+          );
         }
         continue;
       }
@@ -709,7 +786,14 @@ export class TaskManager {
       const eligible = task.candidates.filter(
         (c) => (used.get(c.provider) ?? 0) < this.#laneCap(c.provider),
       );
-      if (eligible.length === 0) continue; // whole copy-set/group saturated
+      if (eligible.length === 0) {
+        logger.debug(
+          `[task ${task.taskId}] every candidate lane in-process full (${task.candidates
+            .map((c) => `${c.provider}:${used.get(c.provider) ?? 0}/${this.#laneCap(c.provider)}`)
+            .join(", ")}); queued`,
+        );
+        continue; // whole copy-set/group saturated
+      }
       if (eligible.length === 1 && task.candidates.length === 1) {
         this.#place(task, eligible[0]!);
         task.candidates = null;
@@ -769,9 +853,17 @@ export class TaskManager {
       this.#admit();
       return;
     }
+    logger.debug(
+      `[task ${task.taskId}] warm placement: ${warm.map((c) => c.key).join(" > ")}`,
+    );
     const used = this.#laneOccupancy(task);
     for (const c of warm) {
-      if ((used.get(c.provider) ?? 0) >= this.#laneCap(c.provider)) continue;
+      if ((used.get(c.provider) ?? 0) >= this.#laneCap(c.provider)) {
+        logger.debug(
+          `[task ${task.taskId}] skip '${c.provider}': in-process full (${used.get(c.provider)}/${this.#laneCap(c.provider)})`,
+        );
+        continue;
+      }
       const got = await this.#acquireSlotSafe(c.provider);
       if (task.statusRef.value !== TASK_STATUS.QUEUED || !task.start) {
         // Cancelled while awaiting the slot: hand it straight back.
@@ -779,10 +871,16 @@ export class TaskManager {
         this.#admit();
         return;
       }
-      if (!got.ok) continue; // this lane is fleet-wide busy; try the next home
+      if (!got.ok) {
+        logger.debug(`[task ${task.taskId}] skip '${c.provider}': ledger full (fleet-wide)`);
+        continue; // this lane is fleet-wide busy; try the next home
+      }
       if (c.provider !== task.provider || c.key !== task.model) this.#place(task, c);
       task.candidates = null;
       task.lease = got.lease;
+      logger.debug(
+        `[task ${task.taskId}] placed on '${c.provider}' (${c.key})${got.lease ? ` slot=${got.lease.path}` : " (no ledger)"}`,
+      );
       task.start!();
       this.#admit();
       return;
@@ -790,6 +888,7 @@ export class TaskManager {
     // No lane has room anymore: release the reservation and wait. The
     // abandoned candidate key must not linger in the view: while unplaced,
     // model shows the intent (taskLane's documented contract).
+    logger.debug(`[task ${task.taskId}] no placement home left; queued for retry`);
     task.provider = "";
     task.model = task.intent;
     if (this.#lanes) {
@@ -831,6 +930,9 @@ export class TaskManager {
   async #tryStart(task: TaskEntry): Promise<void> {
     const cap = this.#laneCap(task.provider);
     if (!this.#lanes || !Number.isFinite(cap)) {
+      logger.debug(
+        `[task ${task.taskId}] start on '${task.provider}' uncoordinated (lane cap ${cap === Number.POSITIVE_INFINITY ? "unlimited" : cap}, ledger ${this.#lanes ? "on" : "off"})`,
+      );
       if (task.statusRef.value === TASK_STATUS.QUEUED && task.start) task.start();
       return;
     }
@@ -838,6 +940,7 @@ export class TaskManager {
     const got = await this.#acquireSlotSafe(task.provider);
     task.acquiring = false;
     if (!got.ok) {
+      logger.debug(`[task ${task.taskId}] lane '${task.provider}' ledger full; blocked`);
       task.blocked = true;
       this.#armLanesRetry();
       return;
@@ -847,6 +950,9 @@ export class TaskManager {
       return;
     }
     task.lease = got.lease;
+    logger.debug(
+      `[task ${task.taskId}] start on '${task.provider}'${got.lease ? ` slot=${got.lease.path}` : ""}`,
+    );
     task.start();
   }
 
@@ -867,6 +973,9 @@ export class TaskManager {
     }
     const got = await this.#acquireSlotSafe(task.provider);
     if (!got.ok) {
+      logger.debug(
+        `[task ${task.taskId}] warm turn still waiting: lane '${task.provider}' ledger full`,
+      );
       if (task.turnGranted && !task.turnPending) {
         task.turnGranted = false;
         task.turnPending = true;

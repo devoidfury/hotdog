@@ -804,7 +804,9 @@ export class Agent implements AgentLike {
    * a top-level config carried), updates the manager-profile flag (which
    * gates managerOnly tools like the subagent tools), and switches the
    * model via the model setter when the profile specifies one (so per-model
-   * limits, reasoning effort, and MODEL_CHANGE all update). Invalidates the
+   * limits, reasoning effort, and MODEL_CHANGE all update). A profile that
+   * declares a model `group` instead leaves the session model alone (with a
+   * warning) -- groups place task workers, not session turns. Invalidates the
    * cached system prompt and tool defs so the next turn rebuilds them from
    * the new profile.
    *
@@ -818,7 +820,13 @@ export class Agent implements AgentLike {
     this.managerProfile = profile.manager === true;
     this.config = this.config || {};
     this.config.blacklistTools = profile.blacklistTools;
-    if (profile.model && profile.model !== this.#model) {
+    if (profile.group) {
+      // Model groups are placed at task spawn (provider-lane admission); a
+      // session turn has no placement machinery, so keep the current model.
+      logger.warn(
+        `[profile ${name}] declares model group '${profile.group}'; groups place task workers only -- keeping session model ${this.#model}`,
+      );
+    } else if (profile.model && profile.model !== this.#model) {
       this.model = profile.model;
     }
     // The model setter already invalidates both caches when it ran; repeat

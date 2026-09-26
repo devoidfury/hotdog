@@ -101,7 +101,7 @@ export interface PlanInput {
   /** Model-group name (no prefix); members come from modelGroups. */
   group?: string;
   requires?: ModelRequirements;
-  /** Legacy chain (workerModel / profile model / registry default). Used when neither pin, group, nor requires is given; never validated. */
+  /** Legacy chain (workerModel / profile model / delegating parent session model / registry default). Used when neither pin, group, nor requires is given; never validated. */
   fallback?: string;
   /**
    * Copy-expand a chain winner's bare name across catalog providers.

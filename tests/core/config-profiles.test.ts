@@ -87,6 +87,28 @@ Profile body content here`;
     expect(profile!.body).toBe("Profile body content here");
   });
 
+  it("parses the group field (worker-group fanout binding)", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "groupy.profile.md"),
+      `---
+model: some-model
+group: mid-level
+---
+Body`,
+    );
+    const profile = await loadProfileFile(tmpDir, "groupy");
+    expect(profile!.group).toBe("mid-level");
+  });
+
+  it("group normalizes to null when absent or empty", async () => {
+    fs.writeFileSync(path.join(tmpDir, "nogroup.profile.md"), `---
+name: nogroup
+---
+Body`);
+    const profile = await loadProfileFile(tmpDir, "nogroup");
+    expect(profile!.group).toBeNull();
+  });
+
   it("returns null for non-existent profile", async () => {
     const profile = await loadProfileFile(tmpDir, "nonexistent");
     expect(profile).toBeNull();

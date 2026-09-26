@@ -1438,6 +1438,16 @@ describe('Agent — end-to-end loop', () => {
       expect(agent.toolWhitelist).toEqual(['alpha']);
     });
 
+    it('a profile declaring a model group keeps the session model', () => {
+      // Groups place task workers (provider-lane admission); a session turn
+      // has no placement, so the current model must survive the switch.
+      const { agent } = createFixture({ model: 'n1/qwen' });
+      const before = agent.model;
+      agent.applyProfile('farm', makeProfile({ group: 'mid-level' }));
+      expect(agent.model).toBe(before);
+      expect(agent.profileName).toBe('farm');
+    });
+
     it('treats empty body as unset', () => {
       const { agent } = createFixture({});
       agent.applyProfile('empty', makeProfile({ body: '' }));

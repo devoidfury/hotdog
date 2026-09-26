@@ -508,7 +508,7 @@ A top-level session holds its slot only while a turn is running: idle time at th
 
 This is the fleet-wide default: a provider's own `taskLanes` overrides it for that machine (e.g. cap 2 on a roomy `-np 2` node, cap 1 on the cheap one). The bare-name lane has no provider def to override, so it always uses this value.
 
-**The cap is machine-wide, not per process.** With the ledger dir configured (see `taskLanesDir`), every task-agent turn and every top-level session turn takes a numbered slot file under `<taskLanesDir>/<provider>/` when it starts and releases it on completion, so an interactive session, a foreground `hotdog workflow run`, and any other hotdog process on the box share one capacity. A slot whose owner died (same-host pid no longer alive) is reclaimed by the next acquirer; a slot marked by another host is counted as busy (its liveness is unknowable from here -- if you share the ledger dir over NFS and a machine crashes mid-task, delete its slot file by hand). All processes sharing a lane must agree on that lane's cap: numbering follows the acquirer's cap, so mismatched caps make the effective limit the smallest one currently in play. With `taskLanesDir` unset, or a lane capped below 1 (unlimited), there is no coordination and the cap applies to the single process only.
+**The cap is machine-wide, not per process.** With the ledger dir configured (see `taskLanesDir`), every task-agent turn and every top-level session turn takes a numbered slot file under `<taskLanesDir>/<provider>/` when it starts and releases it on completion, so an interactive session, a foreground `hotdog workflow run`, and any other hotdog process on the box share one capacity. Slots are **heartbeat leases**: while a turn holds one, it refreshes the slot file's mtime every 15 seconds, and a slot quiet for 2 minutes has no live holder -- the next acquirer reclaims it whatever the marker inside says. A process killed on the same host frees its slot immediately (pid-liveness short-circuits the wait); a foreign-host, suspended, or lease-leaked slot clears itself within two minutes. No manual delete. A fresh heartbeat from a host this process cannot introspect still counts as busy (under-admission is the safe failure while the owner is demonstrably alive), so the ledger dir must not be synced or snapshotted: a restored marker with a fresh-looking timestamp blocks its slot until its lease expires. All processes sharing a lane must agree on that lane's cap: numbering follows the acquirer's cap, so mismatched caps make the effective limit the smallest one currently in play. With `taskLanesDir` unset, or a lane capped below 1 (unlimited), there is no coordination and the cap applies to the single process only.
 
 ```json
 { "taskLanesPerProvider": 1 }
@@ -520,7 +520,7 @@ This is the fleet-wide default: a provider's own `taskLanes` overrides it for th
 - **Default:** `<configDir>/task-lanes`
 - **Resolution:** config > compute
 
-Directory holding the cross-process lane slot ledger: one subdir per provider lane (`_` for the bare-name lane), each holding up to `taskLanesPerProvider` / `taskLanes` numbered slot files. Slot files are ephemeral bookkeeping -- live turns (task agents and top-level session turns) hold them, crashed ones are reclaimed by pid-liveness -- so the dir is safe to delete when nothing is running, and it should not be synced or backed up.
+Directory holding the cross-process lane slot ledger: one subdir per provider lane (`_` for the bare-name lane), each holding up to `taskLanesPerProvider` / `taskLanes` numbered slot files. Slot files are ephemeral bookkeeping -- live turns (task agents and top-level session turns) hold them and refresh their mtime every 15s, and quiet ones are reclaimed automatically -- so the dir is safe to delete when nothing is running, and it should not be synced or backed up. Sharing it between machines (NFS) or between container instances of a mounted config dir works precisely because of the heartbeat: host identity and pid numbering are not trustworthy across either boundary.
 
 ```json
 { "taskLanesDir": "/var/tmp/hotdog-lanes" }
@@ -531,7 +531,7 @@ Directory holding the cross-process lane slot ledger: one subdir per provider la
 - **Type:** `object`
 - **Default:** `{}`
 
-Named pools of interchangeable models for delegated work. Keys are group names (kebab-case); values list members as bare model names (expanded to every catalog provider holding that model -- copies) or `provider/model` strings (pinned to that machine). Reference a group with `worker_model: "group:<name>"` in `delegate_task`, or `group: <name>` on a workflow node.
+Named pools of interchangeable models for delegated work. Keys are group names (kebab-case); values list members as bare model names (expanded to every catalog provider holding that model -- copies) or `provider/model` strings (pinned to that machine). Reference a group with `worker_model: "group:<name>"` in `delegate_task`, `group: <name>` on a workflow node, or a profile's `group` field (`model:` frontmatter/property) so every worker spawned into that profile fans out without the manager naming a group. Declared groups are listed in the `delegate_task` tool description.
 
 Placement semantics: a task waits for the first member with a free provider lane, preferring a provider that already has the model loaded (llama-swap `/running` peek), then group declaration order. When every lane of every member is busy, the task queues -- work never runs on a provider marked `noSpread` unless a member names it outright or a pin points at it. Copies of a single model (the implicit group formed by the default model's bare name) never degrade to another model; declared groups may use any member.
 
@@ -863,6 +863,7 @@ The `profiles` key allows you to define profile configurations directly in `defa
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `model` | `string` | `null` | Model override for this profile (e.g. `"provider/model-name"`). |
+| `group` | `string` | `null` | Model-group name (see [`modelGroups`](#modelgroups)) binding task-worker placement to group fanout. Mutually exclusive with `model` (group wins, warned at spawn); worker-only -- session turns ignore it with a warning. |
 | `blacklistTools` | `array` | `[]` | Tool names to disable in this profile. |
 | `whitelistTools` | `array` | `null` | If set, only these tools are available. `null` means no restriction. |
 | `manager` | `boolean` | `false` | Whether this profile enables subagent management. |
@@ -900,6 +901,7 @@ When both a config profile and a `.profile.md` file profile exist for the same n
 | `blacklistTools` | `.profile.md` file |
 | `manager` | `.profile.md` file |
 | `model` | Config file (`defaults.json`) |
+| `group` | Config file (`defaults.json`) |
 | All other fields | Config file |
 
 ---

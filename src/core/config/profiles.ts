@@ -32,6 +32,12 @@ export interface ProfileDef {
   description: string;
   body: string;
   model: string | null;
+  /**
+   * Model-group name (config modelGroups) binding task-worker placement to
+   * group fanout. Mutually exclusive with `model` (group wins, with a warning
+   * at spawn). Session turns ignore it -- placement is a task concept.
+   */
+  group?: string | null;
   blacklistTools: string[];
   whitelistTools: string[] | null;
   /** Snake_case alias for blacklistTools (from JSON config). */
@@ -46,6 +52,8 @@ export interface ProfileDef {
 export interface SwitchProfile {
   body: string;
   model: string | null;
+  /** Declared model group; task workers only (applyProfile warns and keeps the model). */
+  group?: string | null;
   whitelistTools: string[] | null;
   blacklistTools: string[];
   manager: boolean;
@@ -93,6 +101,7 @@ export async function loadProfileFile(profilesPath: string, profileName: string)
       description: fm.description || "",
       body: parsed.body || "",
       model: fm.model || null,
+      group: fm.group || null,
       blacklistTools: fm.blacklistTools || [],
       whitelistTools: fm.whitelistTools || null,
       manager: !!fm.manager,
@@ -140,6 +149,7 @@ export async function loadProfileFiles(profilesPath: string): Promise<Record<str
       blacklistTools: fm.blacklistTools || [],
       whitelistTools: fm.whitelistTools || null,
       model: fm.model || null,
+      group: fm.group || null,
       manager: !!fm.manager,
       visibleWorker: !!fm.visibleWorker,
     };
@@ -174,10 +184,11 @@ function resolveSwitchProfile(
 ): SwitchProfile {
   const body = fileProfile?.body || "";
   const model = configProfile?.model || null;
+  const group = fileProfile?.group || configProfile?.group || null;
   const whitelistTools = fileProfile?.whitelistTools ?? configProfile?.whitelistTools ?? null;
   const blacklistTools = fileProfile?.blacklistTools || configProfile?.blacklistTools || [];
   const manager = !!(fileProfile?.manager || configProfile?.manager);
-  return { body, model, whitelistTools, blacklistTools, manager };
+  return { body, model, group, whitelistTools, blacklistTools, manager };
 }
 
 export interface AllProfilesOptions {
@@ -242,6 +253,7 @@ export class ProfileManager {
       description: fileP?.description || configP?.description || "",
       body: fileP?.body || "",
       model: fileP?.model || configP?.model || null,
+      group: fileP?.group || configP?.group || null,
       blacklistTools: fileP?.blacklistTools || configP?.blacklistTools || [],
       whitelistTools: fileP?.whitelistTools ?? configP?.whitelistTools ?? null,
       manager: fileP?.manager || configP?.manager || false,

@@ -92,6 +92,7 @@ Tool profiles control which tools are available to the agent. Profiles are defin
 - **`whitelist_tools`**: If specified, only these tools are available.
 - **`blacklist_tools`**: These tools are excluded. All other tools remain available.
 - **`model`**: Override the default model for this profile.
+- **`group`**: Model-group name (config `modelGroups`) binding task-worker placement to group fanout. Mutually exclusive with `model` (group wins, warned at spawn). Worker-only: session turns ignore it with a warning.
 - **`manager`**: When true, enables manager-specific tools (`metadata.managerOnly` filtering, applied per-request before whitelist/blacklist).
 - **`aspects`**: List of aspect names to include (loaded from `config/aspects/<name>.aspect.md`).
 
@@ -107,6 +108,7 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 - **`blacklist-tools`**: Tools to exclude
 - **`whitelist-tools`**: Tools to include
 - **`model`**: Override model
+- **`group`**: Model-group name for task-worker fanout (mutually exclusive with `model`; worker-only)
 - **`aspects`**: List of aspect names
 - **`manager`**: Enable manager tools
 - **`visible-worker`**: Mark as visible worker profile

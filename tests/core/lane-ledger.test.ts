@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { LaneLedger, processSlotCount } from "@core/session/lane-ledger.ts";
@@ -11,7 +11,7 @@ async function freshDir(): Promise<string> {
 
 /** Marker content shaped like the ledger's own, for fabricating holders. */
 function marker(pid: number, host: string, token: string): string {
-  return `${JSON.stringify({ pid, host, token, since: new Date().toISOString() })}\n`;
+  return `${JSON.stringify({ pid, host, token })}\n`;
 }
 
 describe("LaneLedger", () => {
@@ -224,6 +224,123 @@ describe("LaneLedger", () => {
     await writeFile(lease!.path, marker(process.pid + 1, "localhost", "someone-else"));
     await led.release(lease!);
     expect(await Bun.file(lease!.path).exists()).toBe(true);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Heartbeat leases: a foreign-host marker is only trusted while it keeps
+  // beating. Backdate it past the lease and it is reclaimable -- this is the
+  // wedge where a container-mounted ledger dir carries markers from a
+  // previous container id (hostname changes, so pid-liveness can never apply).
+  it("a quiet foreign-host marker is reclaimed; a beating one still blocks", async () => {
+    const dir = await freshDir();
+    const laneDir = join(dir, "prov");
+    await mkdir(laneDir, { recursive: true });
+    const slotPath = join(laneDir, "slot-0");
+    const led = new LaneLedger({ dir, leaseMs: 5_000, pidAlive: () => true });
+
+    await writeFile(slotPath, marker(999999, "otherhost", "fresh-beat"));
+    expect(await led.acquire("prov", 1)).toBeNull(); // fresh mtime: still held
+
+    const dead = new Date(Date.now() - 60_000);
+    await utimes(slotPath, dead, dead);
+    const took = await led.acquire("prov", 1);
+    expect(took).not.toBeNull();
+    const m = JSON.parse(await readFile(slotPath, "utf8"));
+    expect(m.token).toBe(took!.token);
+    await led.release(took!);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Same on this host: a live pid whose beat went quiet is a wedged holder
+  // (SIGSTOP, a release that never ran in a process we cannot introspect),
+  // and the lane must not be stranded behind it forever.
+  it("a quiet marker with a live same-host pid is reclaimed", async () => {
+    const dir = await freshDir();
+    const laneDir = join(dir, "prov");
+    await mkdir(laneDir, { recursive: true });
+    const slotPath = join(laneDir, "slot-0");
+    await writeFile(slotPath, marker(4242, hostname(), "wedged"));
+    await utimes(slotPath, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+    const led = new LaneLedger({ dir, pidAlive: () => true, leaseMs: 5_000 });
+    expect(await led.acquire("prov", 1)).not.toBeNull();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("a held slot keeps its mtime fresh, and stops once released", async () => {
+    const dir = await freshDir();
+    const led = new LaneLedger({ dir, heartbeatMs: 15, leaseMs: 600_000 });
+    const lease = await led.acquire("prov", 1);
+    expect(lease).not.toBeNull();
+    const back = new Date(Date.now() - 30_000);
+    await utimes(lease!.path, back, back);
+    await new Promise((r) => setTimeout(r, 60));
+    expect((await stat(lease!.path)).mtimeMs).toBeGreaterThan(back.getTime());
+
+    await led.release(lease!);
+    // Re-created by hand to check nothing keeps touching it after release.
+    await writeFile(lease!.path, marker(4242, hostname(), "after"));
+    await utimes(lease!.path, back, back);
+    await new Promise((r) => setTimeout(r, 60));
+    expect((await stat(lease!.path)).mtimeMs).toBe(back.getTime());
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // A slot reclaimed from under us must stop beating: renewing someone else's
+  // marker would make a live holder un-reclaimable from the outside forever.
+  it("beats stop when the slot is taken over", async () => {
+    const dir = await freshDir();
+    const led = new LaneLedger({ dir, heartbeatMs: 15, leaseMs: 600_000 });
+    const mine = await led.acquire("prov", 1);
+    expect(mine).not.toBeNull();
+    await writeFile(mine!.path, marker(4242, hostname(), "hijack"));
+    const back = new Date(Date.now() - 30_000);
+    await utimes(mine!.path, back, back);
+    await new Promise((r) => setTimeout(r, 60));
+    expect((await stat(mine!.path)).mtimeMs).toBe(back.getTime());
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Our own live lease is never reclaimed for staleness, even if a beat was
+  // missed: double-booking ourselves is pure downside, and `#beat` is what
+  // gives up a slot we lost -- not the clock.
+  it("a quiet marker for our own live lease still blocks us", async () => {
+    const dir = await freshDir();
+    const led = new LaneLedger({ dir, leaseMs: 1 });
+    const mine = await led.acquire("prov", 1);
+    expect(mine).not.toBeNull();
+    const back = new Date(Date.now() - 60_000);
+    await utimes(mine!.path, back, back);
+    expect(await led.acquire("prov", 1)).toBeNull();
+    await led.release(mine!);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // The two liveness mechanisms have to agree: a lease dropped without a
+  // release must stop renewing its own mtime, or a foreign host -- which cannot
+  // see the WeakRef table -- would find the slot forever fresh and unreclaimable.
+  it("a dropped lease stops beating and goes reclaimable from another host", async () => {
+    const dir = await freshDir();
+    const led = new LaneLedger({ dir, heartbeatMs: 20, leaseMs: 50 });
+    let lost = await led.acquire("prov", 1);
+    expect(lost).not.toBeNull();
+    const slotPath = lost!.path;
+    lost = null;
+    // Collecting the lease is what stops the renewal; GC timing is not an
+    // event, so poll for the slot going quiet rather than sleeping a guess.
+    const quietBy = Date.now() + 2_000;
+    let quiet = false;
+    while (!quiet && Date.now() < quietBy) {
+      Bun.gc(true);
+      await new Promise((r) => setTimeout(r, 20));
+      Bun.gc(true);
+      quiet = Date.now() - (await stat(slotPath)).mtimeMs > 50;
+    }
+    expect(quiet).toBe(true);
+    const foreign = new LaneLedger({ dir, host: "otherhost", heartbeatMs: 20, leaseMs: 50 });
+    const took = await foreign.acquire("prov", 1);
+    expect(took).not.toBeNull();
+    expect(JSON.parse(await readFile(slotPath, "utf8")).token).toBe(took!.token);
+    await foreign.release(took!);
     await rm(dir, { recursive: true, force: true });
   });
 

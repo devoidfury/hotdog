@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { LaneLedger } from "@core/session/lane-ledger.ts";
+import { LaneLedger, processSlotCount } from "@core/session/lane-ledger.ts";
 
 async function freshDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "lane-ledger-"));
@@ -46,9 +46,40 @@ describe("LaneLedger", () => {
   it("cap 2: two live owners fit, a third queues", async () => {
     const dir = await freshDir();
     const led = new LaneLedger({ dir });
-    expect(await led.acquire("prov", 2)).not.toBeNull();
-    expect(await led.acquire("prov", 2)).not.toBeNull();
+    // The leases must stay referenced: an unreferenced lease is exactly what
+    // the missed-release watchdog reclaims (see the GC test below).
+    const a = await led.acquire("prov", 2);
+    const b = await led.acquire("prov", 2);
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
     expect(await led.acquire("prov", 2)).toBeNull();
+    await led.release(a!);
+    expect(await led.acquire("prov", 2)).not.toBeNull();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Missed-release watchdog: a marker naming OUR live pid would otherwise
+  // never be reclaimed, so a dropped lease (or a release() whose unlink
+  // failed) would deadlock the lane for every later acquirer -- including
+  // this very process. The WeakRef lease table makes the orphan reclaimable:
+  // no owner object in the only process that could release it => free.
+  it("watchdog reclaims a slot whose lease object was dropped, once GC runs", async () => {
+    const dir = await freshDir();
+    const led = new LaneLedger({ dir });
+    let lost = await led.acquire("prov", 1);
+    expect(lost).not.toBeNull();
+    const slotPath = lost!.path;
+    const led2 = new LaneLedger({ dir });
+    // Lease object still alive: the lane is genuinely occupied.
+    expect(await led2.acquire("prov", 1)).toBeNull();
+
+    lost = null;
+    Bun.gc(true);
+    const took = await led2.acquire("prov", 1);
+    expect(took).not.toBeNull(); // the ghost slot came back
+    const m = JSON.parse(await readFile(slotPath, "utf8"));
+    expect(m.token).toBe(took!.token);
+    await led2.release(took!);
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -204,5 +235,26 @@ describe("LaneLedger", () => {
     const bare = await led.acquire("", 1);
     expect(bare!.path).toBe(join(dir, "_", "slot-0"));
     await rm(dir, { recursive: true, force: true });
+  });
+
+  // A mid-loop throw must unregister too: callers swallow ledger errors into
+  // a fail-open retry, so a lingering registration per failed acquire would
+  // grow `processSlots` one entry per retry tick against a broken state dir.
+  it("an acquire that throws mid-loop leaves no watchdog registration", async () => {
+    if (typeof process.getuid === "function" && process.getuid() === 0) return; // chmod is toothless as root
+    const dir = await freshDir();
+    const led = new LaneLedger({ dir });
+    const base = processSlotCount();
+    try {
+      // createExclusive's sibling temp write lands in the lane dir: EACCES
+      // throws inside acquire, after the token was registered.
+      await mkdir(join(dir, "prov"), { recursive: true });
+      await chmod(join(dir, "prov"), 0o555);
+      await expect(led.acquire("prov", 1)).rejects.toThrow();
+      expect(processSlotCount()).toBe(base);
+    } finally {
+      await chmod(join(dir, "prov"), 0o755);
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

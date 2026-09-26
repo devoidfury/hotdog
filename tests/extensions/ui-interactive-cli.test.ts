@@ -573,6 +573,35 @@ describe("buildOnQuitHandler", () => {
     expect(exitCalled).toBe(true);
   });
 
+  it("includes how to resume the session (--session-id is the documented resume flag)", () => {
+    const { logCalls } = runQuitHandler("resume-me-42");
+    expect(logCalls.some((c) => c.includes("--session-id resume-me-42"))).toBe(true);
+  });
+
+  it("prints and exits exactly once when invoked twice (slash-quit + rl close race)", () => {
+    const logCalls: string[] = [];
+    const restoreLog = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logCalls.push(args.map(String).join(" "));
+    });
+    const originalExit = process.exit;
+    let exitCount = 0;
+    process.exit = (() => { exitCount += 1; }) as never;
+    try {
+      const handler = buildOnQuitHandler(
+        { sessionId: () => "dup-session" } as never,
+        { cleanup: () => {} } as never,
+      );
+      handler();
+      handler();
+    } finally {
+      restoreLog.mockRestore();
+      process.exit = originalExit;
+    }
+    expect(logCalls.filter((c) => c.includes("Goodbye")).length).toBe(1);
+    expect(logCalls.filter((c) => c.includes("dup-session")).length).toBe(1);
+    expect(exitCount).toBe(1);
+  });
+
   it("handles null session ID gracefully", () => {
     const { logCalls, exitCalled } = runQuitHandler(null);
     expect(logCalls.some((c) => c.includes("Goodbye"))).toBe(true);
@@ -758,6 +787,38 @@ describe("runInteractiveSession integration", () => {
     expect(get("SIGINT")).toHaveLength(1);
     sigint!();
     expect(customSigintCalled).toBe(true);
+  });
+
+  it("prints the session id when readline closes (Ctrl+D / EOF exit path)", async () => {
+    const { rl, get } = captureRl();
+    const logCalls: string[] = [];
+    let exitCalled = false;
+    const originalExit = process.exit;
+
+    await withMockSessionManager(
+      async () => createMockSessionManager(mockAgent, true),
+      async () => {
+        await runInteractiveSession({}, createMockCore(), {
+          createReadline: () => rl,
+          setupInput: () => {},
+        });
+
+        const restoreLog = spyOn(console, "log").mockImplementation((msg: string) => {
+          logCalls.push(msg);
+        });
+        process.exit = (() => { exitCalled = true; }) as never;
+        try {
+          for (const handler of get("close")) handler();
+        } finally {
+          restoreLog.mockRestore();
+          process.exit = originalExit;
+        }
+      },
+    );
+
+    expect(logCalls.some((c) => c.includes("Session: test-session"))).toBe(true);
+    expect(logCalls.some((c) => c.includes("--session-id test-session"))).toBe(true);
+    expect(exitCalled).toBe(true);
   });
 
   it("uses default SIGINT handler when not provided", async () => {
@@ -1224,7 +1285,7 @@ describe("handleSlashCommand error handling", () => {
       executeCommand: () => Promise.reject(new Error("command failed")),
     } as never;
 
-    handleSlashCommand("bad-command", mockSessionManager, {} as never, mockRl);
+    handleSlashCommand("bad-command", mockSessionManager, {} as never, mockRl, () => {});
     // The rejection lands in the .then handler one microtask later.
     await Promise.resolve();
 

@@ -339,15 +339,21 @@ export class AsyncInteractiveCliInput implements InputInterface {
 // Shared with the question tool via AGENT_TOOL_CONTEXT.
 let currentInput: InputInterface | null = null;
 
+/**
+ * Build the shared shutdown handler. Idempotent, every exit path invokes it, and the notice must print exactly once.
+ */
 export function buildOnQuitHandler(
   sessionManager: SessionManager,
   extensions: CoreContext["extensions"],
 ): () => void {
+  let quitStarted = false;
   return () => {
+    if (quitStarted) return;
+    quitStarted = true;
     console.log("\nGoodbye!");
     const interactiveSessionId = sessionManager.sessionId();
     if (interactiveSessionId) {
-      console.log(`Session: ${interactiveSessionId}`);
+      console.log(`Session: ${interactiveSessionId} (resume with: hotdog --session-id ${interactiveSessionId})`);
     }
     extensions.cleanup();
     process.exit(0);
@@ -468,12 +474,13 @@ export async function runInteractiveSession(
     pasteMarkerMinChars: uiCli.pasteMarkerMinChars as number,
   });
 
+  const onQuit = buildOnQuitHandler(sessionManager, core.extensions);
   const channel = new CliChannel({
     sessionManager,
     sessionId: sessionManager.sessionId()!,
     sink,
     rl,
-    onQuit: buildOnQuitHandler(sessionManager, core.extensions),
+    onQuit,
   });
 
   // Define the line handler
@@ -546,7 +553,7 @@ export async function runInteractiveSession(
 
     if (trimmed.startsWith("/")) {
       const cmdText = trimmed.slice(1).trim();
-      handleSlashCommand(cmdText, sessionManager, channel, rl);
+      handleSlashCommand(cmdText, sessionManager, channel, rl, onQuit);
       return;
     }
 
@@ -581,6 +588,10 @@ export async function runInteractiveSession(
 
   rl.on("SIGINT", handleSigint);
 
+  // Ctrl+D (EOF) closes readline: shut down through the shared handler so the session id still prints.
+  // options.onClose overrides (tests).
+  rl.on("close", options.onClose || onQuit);
+
   rl.prompt();
 
   // Keep the process alive until the bus ends. SessionManager.create already
@@ -598,6 +609,7 @@ export function handleSlashCommand(
   sessionManager: SessionManager,
   channel: CliChannel,
   rl: readline.Interface,
+  onQuit: () => void,
 ): void {
   const cmd = parseCommand(cmdText);
 
@@ -609,9 +621,8 @@ export function handleSlashCommand(
       return;
 
     case Command.Quit:
-      console.log("Goodbye!");
       rl.close();
-      process.exit(0);
+      onQuit();
       return;
   }
 

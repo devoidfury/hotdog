@@ -14,16 +14,14 @@ import { createMockRl } from "../helpers.ts";
 
 describe("handleSlashCommand", () => {
   let originalExit: typeof process.exit;
-  let exitCalledWith: number | null = null;
   let capturedOutput = "";
   let originalLog: typeof console.log;
 
   beforeEach(() => {
     originalExit = process.exit;
     originalLog = console.log;
-    exitCalledWith = null;
     capturedOutput = "";
-    process.exit = ((code: number) => { exitCalledWith = code; }) as never;
+    process.exit = (() => { throw new Error("unexpected process.exit in handleSlashCommand test"); }) as never;
     console.log = (...args) => { capturedOutput += args.join(" "); };
   });
 
@@ -41,14 +39,15 @@ describe("handleSlashCommand", () => {
     } as any;
     const mockChannel = {} as any;
 
-    handleSlashCommand("help", mockSessionManager, mockChannel, rl as any);
+    handleSlashCommand("help", mockSessionManager, mockChannel, rl as any, () => {});
     expect(capturedOutput).toContain("Commands:");
   });
 
-  it("handles /quit and /exit commands", () => {
+  it("handles /quit and /exit by closing readline and invoking the shared quit handler", () => {
     const { rl } = createMockRl();
     let closed = false;
     (rl as any).close = () => { closed = true; };
+    let quitCalls = 0;
 
     const mockSessionManager = {
       sessionId: () => "test-session",
@@ -58,12 +57,12 @@ describe("handleSlashCommand", () => {
 
     for (const cmd of ["quit", "exit"]) {
       closed = false;
-      exitCalledWith = null;
-      capturedOutput = "";
-      handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any);
+      quitCalls = 0;
+      handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any, () => { quitCalls += 1; });
       expect(closed).toBe(true);
-      expect(exitCalledWith as unknown as number).toBe(0);
-      expect(capturedOutput).toContain("Goodbye!");
+      // Shutdown printing lives in the shared onQuit handler (buildOnQuitHandler)
+      // so every exit path prints the session id exactly once.
+      expect(quitCalls).toBe(1);
     }
   });
 
@@ -78,7 +77,7 @@ describe("handleSlashCommand", () => {
 
     for (const cmd of ["clear", "tokens", "tools", "thinking", "regenerate",
       "reasoning high", "compact", "prompt:explainer"]) {
-      handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any);
+      handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any, () => {});
     }
 
     // executeCommand is called synchronously by handleSlashCommand, and the
@@ -99,7 +98,7 @@ describe("handleSlashCommand", () => {
     } as unknown as SessionManager;
     const mockChannel = {} as any;
 
-    handleSlashCommand("prompt:explainer", mockSessionManager, mockChannel, rl as any);
+    handleSlashCommand("prompt:explainer", mockSessionManager, mockChannel, rl as any, () => {});
     // The PROMPT action is resolved through the .then handler (one microtask).
     await Promise.resolve();
     expect(prompted).toBe(false);
@@ -127,7 +126,7 @@ describe("handleSlashCommand — fork re-attach", () => {
       switchSession: (id: string) => order.push(`switch:${id}`),
     } as any;
 
-    handleSlashCommand("fork 1 go", mockSessionManager, mockChannel, rl as any);
+    handleSlashCommand("fork 1 go", mockSessionManager, mockChannel, rl as any, () => {});
     await new Promise((r) => setTimeout(r, 10));
 
     // The prompt must be enqueued only AFTER the channel is retargeted, or the fork's
@@ -149,7 +148,7 @@ describe("handleSlashCommand — fork re-attach", () => {
       switchSession: (id: string) => touched.push(`switch:${id}`),
     } as any;
 
-    handleSlashCommand("fork 1 go", mockSessionManager, mockChannel, rl as any);
+    handleSlashCommand("fork 1 go", mockSessionManager, mockChannel, rl as any, () => {});
     await new Promise((r) => setTimeout(r, 10));
 
     // Otherwise a rejected /fork (running guard) would leak its prompt into the source session.
@@ -174,7 +173,7 @@ describe("handleSlashCommand — fork re-attach", () => {
       switchSession: (id: string) => void id,
     } as any;
 
-    handleSlashCommand("fork", mockSessionManager, mockChannel, rl as any);
+    handleSlashCommand("fork", mockSessionManager, mockChannel, rl as any, () => {});
     await new Promise((r) => setTimeout(r, 10));
     expect(enqueued).toEqual([]);
   });
@@ -191,7 +190,7 @@ describe("handleSlashCommand — fork re-attach", () => {
       switchSession: () => touched++,
     } as any;
 
-    handleSlashCommand("undo", mockSessionManager, mockChannel, rl as any);
+    handleSlashCommand("undo", mockSessionManager, mockChannel, rl as any, () => {});
     await new Promise((r) => setTimeout(r, 10));
     expect(touched).toBe(0);
   });

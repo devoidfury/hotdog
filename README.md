@@ -37,7 +37,7 @@ hotdog -m "qwen3.8-flash-next" -p "See if you can improve the test coverage. @pa
 ## Why? _You gonna eat that?_
 
 - **Local first.** Built and tested daily against local backends (llama-swap, llama.cpp, vllm, ds4), not retrofitted onto them after the cloud path.
-- **Zero supply chain.** `dependencies` is empty. Nothing to install means nothing to compromise. Pin a git tag and you know exactly what you're running.
+- **Short supply chain.** `dependencies` is empty. Just Bun. No packages to install means nothing to compromise. Pin a git tag and you know exactly what you're running.
 - **Wire-format integrity.** Markers, chat-template control tokens, and tool-call delimiters inside untrusted output get rewritten to per-session aliases, so nothing a tool reads can forge a fake tool call or a harness system message.
 - **Small harness footprint.** Minimal context and system prompt injected by the harness itself. Instead, you write and compose your own system prompts with tool-sets as profiles.
 - **Tiny core, extensions to build out the agent you want.** Disable any feature you don't like, drop in your own extensions to add new functionality.

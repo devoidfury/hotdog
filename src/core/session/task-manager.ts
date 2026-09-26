@@ -9,6 +9,7 @@ import {
   laneKeyOf,
   makeLaneCaps,
   makeRunningPeeker,
+  modelInCatalog,
   parseGroupRef,
   planSpawn,
   warmSortCandidates,
@@ -644,6 +645,10 @@ export class TaskManager {
     } else {
       const registryDefault = (this.#modelRegistry as { default?: string }).default || "";
       const explicit = options.workerModel || (taskProfile?.model ?? undefined) || undefined;
+      if (explicit && !modelInCatalog(this.#modelRegistry, explicit)) {
+        // A bogus explicit pin is a caller error: fail at dispatch, not as an HTTP 404 from the gateway
+        throw new Error(`[task ${taskId}] worker model '${explicit}' is not in the model catalog`);
+      }
       // Chain default: the delegating (parent) session's model, then the
       // catalog's `default` key (vestigial in practice: buildModelRegistry
       // never sets one). Explicit qualified values honor their provider;

@@ -1083,8 +1083,43 @@ describe("pinned spawn (resolver integration)", () => {
     expect(built).toHaveLength(0);
   });
 
-  it("legacy workerModel path bypasses the resolver (unvalidated)", async () => {
+  it("unknown bare worker_model rejects spawnTask before the task is registered", async () => {
     const { manager, built } = makeResolvedManager();
+    await expect(manager.spawnTask("t1", "do it", { workerModel: "cl100k" } as never)).rejects
+      .toThrow(/worker model 'cl100k' is not in the model catalog/);
+    expect(built).toHaveLength(0);
+    expect(manager.taskStatus("t1")).toBeNull();
+  });
+
+  it("unknown qualified worker_model rejects spawnTask before the task is registered", async () => {
+    const { manager, built } = makeResolvedManager();
+    await expect(manager.spawnTask("t1", "do it", { workerModel: "whatever/not-here" } as never)).rejects
+      .toThrow(/worker model 'whatever\/not-here' is not in the model catalog/);
+    expect(built).toHaveLength(0);
+    expect(manager.taskStatus("t1")).toBeNull();
+  });
+
+  it("worker_model naming a catalog model still spawns (bare name resolves across providers)", async () => {
+    const { manager, built } = makeResolvedManager();
+    await manager.spawnTask("t1", "do it", { workerModel: "mid" } as never);
+    // Single copy: legacy head label stays the bare name (unchanged behavior);
+    // the point is the spawn is accepted, not rejected.
+    expect(built[0]!.model).toBe("mid");
+    manager.interruptTask("t1");
+  });
+
+  it("worker_model with no catalog at all stays an unvalidated passthrough (bare baseUrl setups)", async () => {
+    const built: Array<Record<string, unknown>> = [];
+    const manager = new TaskManager({
+      buildAgent: async (cfg) => {
+        built.push(cfg);
+        return { run: () => new Promise<void>(() => {}), notifyCompletion: () => {} } as never;
+      },
+      modelRegistry: { default: "some-default" } as never,
+      config: {} as never,
+      maxIterations: 100,
+      taskProfile: "default",
+    });
     await manager.spawnTask("t1", "do it", { workerModel: "whatever/not-here" } as never);
     expect(built[0]!.model).toBe("whatever/not-here");
     manager.interruptTask("t1");

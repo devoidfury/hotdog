@@ -86,6 +86,21 @@ export function parseGroupRef(value?: string | null): string | undefined {
   return v.slice(6).trim() || undefined;
 }
 
+/**
+ * Whether an explicit model value resolves to a catalog entry: exact registry key when provider-qualified,
+ * any provider's copy when bare. An empty or default-pseudo-key-only registry means "no catalog": everything resolves.
+ */
+export function modelInCatalog(
+  registry: Record<string, ModelConfig>,
+  value: string,
+): boolean {
+  const entries = Object.keys(registry).filter((k) => typeof registry[k] === "object");
+  if (entries.length === 0) return true;
+  if (value.includes("/")) return entries.includes(value);
+  const suffix = `/${value}`;
+  return entries.some((k) => k === value || k.endsWith(suffix));
+}
+
 export interface SpawnCandidate {
   /** Registry-key form to build the agent with ("provider/model"). */
   key: string;

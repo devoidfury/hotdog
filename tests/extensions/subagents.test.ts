@@ -13,6 +13,7 @@ import {
   SUBAGENT_TOOL_CONSTRUCTORS,
 } from "@extensions/subagents/subagents.ts";
 import { ToolContext } from "@core/extensions/tool-context.ts";
+import { TaskManager } from "@core/session/task-manager.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -80,8 +81,26 @@ describe("DelegateTaskTool", () => {
     expect(result.metadata!.get("task_id")).toBe("t1");
   });
 
-  it("passes worker_model option", async () => {
-    let capturedOpts: Record<string, unknown> | null = null;
+  it("rejects an unknown worker_model at the tool boundary and creates no task", async () => {
+    // Real TaskManager, catalog with one entry: a bogus pin must fail fast
+    // at dispatch, not surface later as a gateway 404 from the worker.
+    const tm = new TaskManager({
+      buildAgent: async () => {
+        throw new Error("buildAgent must not run for a rejected delegation");
+      },
+      modelRegistry: { "p1/m": { name: "p1/m" } } as never,
+      config: {} as never,
+      maxIterations: 10,
+      taskProfile: "default",
+    });
+    const tool = new DelegateTaskTool({ taskManager: tm });
+    await expect(
+      tool.execute(JSON.stringify({ task_id: "t1", description: "x", worker_model: "cl100k" })),
+    ).rejects.toThrow(/cl100k/);
+    expect(tm.taskStatus("t1")).toBeNull();
+  });
+
+  it("passes worker_model option", async () => {    let capturedOpts: Record<string, unknown> | null = null;
     const mockBackend = makeMockTM({
       spawnTask: async (_taskId: string, _desc: string, opts: Record<string, unknown>) => {
         capturedOpts = opts;

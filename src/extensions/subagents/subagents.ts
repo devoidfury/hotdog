@@ -132,19 +132,10 @@ export class DelegateTaskTool extends SubagentTool {
   }
 
   override toToolDef() {
-    // Resolve lazily: the manager may register its service after the def cache is built.
-    const backend = this._resolveBackend();
-    const profileManager = backend.type === "taskManager" ? backend.value.profileManager : null;
-    let profileList = "";
-    if (profileManager) {
-      const profiles = profileManager.getVisibleWorkerProfiles();
-      if (profiles.length > 0) {
-        profileList = `\n\nAvailable worker profiles (visible-worker: true): ${profiles.join(", ")}.`;
-      }
-    }
+    // The available model groups and worker profiles are in the system-prompt chunk
     return toolDef(
       "delegate_task",
-      `Spawn a background task agent to perform work. The task runs concurrently and its result is appended to the manager\'s context when complete. IMPORTANT: Task agents are expensive — only delegate substantial autonomous work (build features, fix bugs, implement plans, audit code). Do NOT delegate trivial operations like creating a single file, running a command, or reading a file — do those directly with your tools. Batch related changes into a single task.${profileList}`,
+      `Spawn a background task agent to perform work. The task runs concurrently and its result is appended to the manager\'s context when complete. IMPORTANT: Task agents are expensive -- only delegate substantial autonomous work (build features, fix bugs, implement plans, audit code). Do NOT delegate trivial operations like creating a single file, running a command, or reading a file--do those directly with your tools. Batch related changes into a single task.`,
       {
         properties: {
           task_id: param("string", "Unique identifier for this task"),
@@ -154,11 +145,11 @@ export class DelegateTaskTool extends SubagentTool {
           ),
           worker_model: param(
             "string",
-            "Optional model for the worker: 'provider/model' pins that machine, a bare name fans out across providers hosting it, and 'group:<name>' spreads work over a declared model group (config modelGroups). Omitted = your default model, fanned out across providers.",
+            "Optional model for the worker: 'provider/model' pins that machine, a bare name fans out across providers hosting it, and 'group:<name>' spreads work over a declared model group (config modelGroups). Omitted = the profile's own model/group if it declares one, else your default model, fanned out across providers.",
           ),
           profile: param(
             "string",
-            `Optional profile name to customize the worker agent\'s behavior (tools, model). Defaults to 'task-default'.${profileList}`,
+            "Optional profile name to customize the worker agent's behavior (tools, model). Defaults to 'task-default'.",
           ),
         },
         required: ["task_id", "description"],

@@ -193,6 +193,48 @@ describe("subagents lazy taskManager resolution", () => {
     expect(spawned).toEqual(["t1"]);
   });
 
+  it("delegation chunk lists model groups and worker profile descriptions", async () => {
+    const core = managerCore();
+    const ext = create(core)!;
+    registerTaskManagerService(
+      core,
+      makeMockTM({
+        config: { modelGroups: { "mid-level": ["a", "b"], frontier: ["c"] } },
+        profileManager: {
+          getVisibleWorkerProfiles: () => ["frontier", "mid-level"],
+          getProfile: (name: string) => ({
+            name,
+            description:
+              name === "frontier"
+                ? "Builds and ships features end to end."
+                : "Assists with focused subtasks.",
+          }),
+        },
+      }),
+    );
+
+    const chunk = (await ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!({
+      agent: { managerProfile: true },
+    } as any)) as { content: string };
+    expect(chunk).toBeDefined();
+    // model groups
+    expect(chunk.content).toContain("frontier");
+    expect(chunk.content).toContain("mid-level");
+    // worker profile descriptions
+    expect(chunk.content).toContain("Builds and ships features end to end.");
+    expect(chunk.content).toContain("Assists with focused subtasks.");
+  });
+
+  it("skips the delegation chunk for non-manager agents", async () => {
+    const core = managerCore();
+    const ext = create(core)!;
+
+    const chunk = await ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!({
+      agent: { managerProfile: false },
+    } as any);
+    expect(chunk).toBeUndefined();
+  });
+
   it("eager taskManager takes precedence over the service", async () => {
     const core = managerCore();
     const eager = makeMockTM();
@@ -224,7 +266,7 @@ describe("subagents lazy taskManager resolution", () => {
     expect(core.services.has(TASK_MANAGER_SERVICE)).toBe(false);
   });
 
-  it("registerTaskManagerService registers and clears the tool def cache", () => {
+  it("registerTaskManagerService registers the service", () => {
     const core = managerCore();
     const mockTM = makeMockTM();
     registerTaskManagerService(core, mockTM);

@@ -44,10 +44,48 @@ export function registerTaskManagerService(
 ): void {
   if (!taskManager) return;
   core.services.register(TASK_MANAGER_SERVICE, taskManager);
-  // Tool defs may have been cached before the manager existed (e.g. by the
-  // info subcommand); drop the cache so the refreshed delegate_task
-  // description (worker profile list) can be built on next use.
-  core.toolRegistry.clearToolDefs();
+  // The delegate_task tool schema is now static; the available model groups
+  // and worker profiles ride the per-request delegation system-prompt chunk
+  // (built from this live TaskManager), so no tool-def cache refresh is needed.
+}
+
+/** System prompt instructions on delegation. */
+function buildDelegateChunk(taskManager: TaskManager | null): string {
+  const groups = Object.keys(
+    ((taskManager?.config as { modelGroups?: Record<string, unknown> })?.modelGroups) ?? {},
+  ).sort();
+
+  const profiles = taskManager?.profileManager
+    ? taskManager.profileManager.getVisibleWorkerProfiles()
+    : [];
+
+  const parts = [
+    "## Task delegation options",
+  ];
+
+  if (groups.length > 0) {
+    parts.push(
+      "",
+      `Available model groups (spread a task across one with \`group:<name>\` in \`worker_model\`): ${groups.join(", ")}.`,
+    );
+  }
+
+  if (profiles.length > 0) {
+    const profileManager = taskManager?.profileManager;
+    const profileLines = profiles
+      .map((name) => {
+        const desc = profileManager?.getProfile(name)?.description ?? "";
+        return desc ? `- \`${name}\`: ${desc}` : `- \`${name}\``;
+      })
+      .join("\n");
+    parts.push(
+      "",
+      `Available worker profiles (visible-worker: true; set via \`profile\`):`,
+      profileLines,
+    );
+  }
+
+  return parts.join("\n");
 }
 
 /**
@@ -82,6 +120,18 @@ export function create(core: CoreContext, options: SubagentOptions = {}): Extens
       [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
         toolCtx.set("taskManager", resolveTaskManager());
         toolCtx.set("sessionCore", sessionCore || null);
+      },
+
+      /**
+       * Delegation guidance for the manager prompt. The available model groups
+       * and worker profiles (each with its description) are moved here (one
+       * copy in the prompt) instead of being repeated in the delegate_task
+       * tool schema per request. Resolved against the live TaskManager.
+       */
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }) => {
+        if (!agent?.managerProfile) return;
+        const content = buildDelegateChunk(resolveTaskManager());
+        return { name: "delegation", priority: 250, content };
       },
 
       /**

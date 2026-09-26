@@ -1,25 +1,27 @@
-// Tool-call approval rules -- the pure decision layer behind the user-gate
-// extension (docs/config-reference.md "userGate").
+// Tool-call approval rules -- decision layer behind user-gate extension
+// @see docs/config/reference.md "userGate"
 //
-// Grammar: `tool` or `tool.param=glob`. `*` works in the tool part
-// (`mcp__*`). The param part names a target as the extractor produces it:
-// `cmd` for a bash command basename, `path` for a bash path argument,
-// `paths` for the file tools' path params, and the tool's own param name
-// otherwise (`url`, `query`).
+// Grammar: `tool` or `tool.param=glob`. `*` works in the tool part (`mcp__*`).
+// The param part names a target as the extractor produces it:
+// - `cmd` for a bash command basename, 
+// - `path` for a bash path argument,
+// - `paths` for the file tools' path params,
+// - and the tool's own param name otherwise (`url`, `query`, etc).
 //
-// Path-shaped values are matched with Workspace's own rule matcher (the
-// `workspace.deny` dialect -- component sequences matched at any depth,
-// `*`/`?` within a component) against BOTH the resolved absolute path and
-// the workspace-relative form. Everything else matches as a plain `*`/`?`
-// glob over the value. There is deliberately no second glob dialect.
+// Path-shaped values are matched with Workspace's rule matcher (`workspace.deny` dialect --
+// component sequences matched at any depth, `*`/`?` within a component) against BOTH the
+// resolved absolute path and the workspace-relative form. Everything else matches
+// as a plain`*` / `?` glob over the value.
 //
-// Precedence: deny > allow > userGate.default, where default is "ask"
-// (interactive), "allow" (permissive) or "deny" (allowlist-only, never
-// prompts). A deny is never prompted and cannot be overridden from a prompt.
+// Precedence: deny rules > allow rules > userGate.default, where default is:
+// - "ask" (interactive mode),
+// - "allow" (permissive),
+// - "deny" (allowlist-only).
 //
-// This layer is convenience triage for honest mistakes. It is NOT an
-// enforcement boundary -- quoting tricks exist, and nothing below it
-// enforces any more (see docs/postmortems/sysbox.md).
+// A deny is never prompted and cannot be overridden from a prompt.
+//
+// This layer is convenience triage for honest mistakes. It is NOT an enforcement boundary --
+// quoting tricks exist, and nothing below it enforces any more (see docs/postmortems/sysbox.md).
 
 import { ConfigError } from "@core/error.ts";
 import { pathMatchesRule } from "@utils/workspace.ts";
@@ -64,9 +66,8 @@ export type ApprovalDefault = "ask" | "allow" | "deny";
 
 export interface ApprovalRules {
   /**
-   * What an unmatched call does. `deny` is the allowlist-only mode: nothing
-   * prompts, so it is the shape that works headless (one-shot, CI) -- and the
-   * shape where a forgotten tool is a failed call rather than a question.
+   * What an unmatched call does. `deny` is the allowlist-only mode: nothing prompts,
+   * so it is the shape that works headless (one-shot, CI).
    */
   default: ApprovalDefault;
   /** userGate.tools: extra recognized tools + which of their params are targets. */
@@ -113,8 +114,8 @@ function globToRegExp(glob: string): RegExp {
 
 /**
  * Parse one `tool` | `tool.param=glob` entry.
- * @throws ConfigError on anything else -- a malformed rule must fail at load,
- *   never be silently ignored (a silently dropped deny is worse than a crash).
+ * @throws ConfigError on anything else.
+ * Malformed rule must fail at load, never be silently ignored (a silently dropped deny is worse than a crash).
  */
 export function parseRule(entry: string): ApprovalRule {
   if (typeof entry !== "string" || entry.trim() === "") {
@@ -126,8 +127,7 @@ export function parseRule(entry: string): ApprovalRule {
   }
   const eq = raw.indexOf("=");
   if (eq === -1) {
-    // A dotted name with no `=glob` is a truncated `tool.param=glob` -- the
-    // kind of typo that would otherwise sit there matching nothing.
+    // A dotted name with no `=glob` is a truncated `tool.param=glob` -- the kind of typo that would otherwise sit there matching nothing.
     if (raw.includes(".")) {
       throw new ConfigError(`userGate rule must be 'tool' or 'tool.param=glob', got: '${raw}'`);
     }
@@ -168,7 +168,7 @@ export function compileApprovalRules(cfg: UserGateConfig | undefined | null): Ap
       if (!Array.isArray(params) || params.some((p) => typeof p !== "string" || p.trim() === "")) {
         throw new ConfigError(`userGate.tools['${glob}'] must be an array of non-empty param names`);
       }
-      tools.push({ glob: glob.trim(), params: (params as string[]).map((p) => p.trim()) });
+      tools.push({ glob: glob.trim(), params: params.map((p) => p.trim()) });
     }
   }
 
@@ -199,12 +199,10 @@ function uniq(values: string[]): string[] {
  *
  * - a tool-level deny (`deny: ["bash"]`) blocks the whole call, no parse needed;
  * - a param deny that matches any target blocks, whatever else matches;
- * - a tool-level allow (`allow: ["bash"]`) allows the whole call, even a command
- *   the parser refused to analyze (the human said yes to the tool);
- * - otherwise every non-denyOnly target needs an allow; leftovers fall to
- *   `userGate.default` -- ask, allow, or (allowlist mode) deny. A bail or an
- *   unrecognized tool denies under "deny" instead of asking: unverifiable is
- *   not allowed.
+ * - a tool-level allow (`allow: ["bash"]`) allows the whole call, even a command the parser refused 
+ *   to analyze (the human said yes to the tool);
+ * - otherwise every non-denyOnly target needs an allow; leftovers fall to `userGate.default` -- ask, allow,
+ *   or (allowlist mode) deny. A bail or an unrecognized tool denies under "deny" instead of asking: unverifiable is not allowed.
  */
 export function decide(call: ApprovalCall, rules: ApprovalRules): ApprovalDecision {
   const forTool = (list: ApprovalRule[]) => list.filter((r) => globToRegExp(r.toolGlob).test(call.tool));
@@ -271,8 +269,8 @@ export function decide(call: ApprovalCall, rules: ApprovalRules): ApprovalDecisi
     };
   }
 
-  // Either nothing needed covering (no targets at all) or something was left
-  // over: unrecognized tools always ask, recognized ones fall to the default.
+  // Either nothing needed covering (no targets at all) or something was left over:
+  // unrecognized tools always ask, recognized ones fall to the default.
   const naming = unmatched.length > 0 ? unmatched.map((t) => `${t.param} '${t.value}'`).join(", ") : `'${call.tool}'`;
   if (!call.recognized) {
     // Unrecognized + default deny: the tool was never allowlisted, which under

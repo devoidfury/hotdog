@@ -1,17 +1,13 @@
 // Best-effort bash command-line triage for the tool-call approvals layer.
 //
-// WHAT THIS IS: a convenience filter so an honest `git push` can be allowed
-// without prompting. It segments on `;` `&&` `||` `|` `&` and newlines (every
-// segment must pass), tracks `cd` so later segments resolve against the right
-// directory, and gives up -- BAIL, which means ASK -- the moment the command
-// contains anything that could hide an effect: expansions, substitutions,
-// groups, globs, heredocs, or the interpreters/utilities whose arguments are
-// programs rather than data.
+// WHAT THIS IS: a convenience filter so `git status` and other commands can be allowed without prompting.
+// It segments on `;` `&&` `||` `|` `&` and newlines (every segment must pass), tracks `cd` so later segments
+// resolve against the right directory, and gives up (BAIL, which means ask or deny depending on config)
+// the moment the command contains anything that could hide an effect: expansions, substitutions, groups, globs, heredocs,
+// or the interpreters / utilities whose arguments are programs rather than data.
 //
-// WHAT THIS IS NOT: a security boundary. It is not a shell parser; it does not
-// model aliases, functions, PATH tricks or quoting games, and it never has to
-// be right -- when it is unsure it asks. Nothing below it enforces.
-// See docs/config-reference.md "userGate".
+// WHAT THIS IS NOT: a security boundary. It is not a shell parser; it does not model aliases, functions,
+// PATH tricks or quoting games -- when it is unsure it asks. Nothing below it enforces any boundaries. See docs/config-reference.md "userGate".
 
 import { resolve as resolveAbs } from "node:path";
 import type { Workspace } from "@utils/workspace.ts";
@@ -193,14 +189,11 @@ function isDigits(text: string): boolean {
 }
 
 /**
- * Extract approval targets from a bash command line, or explain why the
- * command cannot be analyzed (the caller turns that into an ASK).
+ * Extract approval targets from a bash command line, or explain why the command cannot be analyzed.
  *
  * - `cmd`: each segment's command basename -- must be allowed.
- * - `path`: path-shaped arguments and redirection targets, resolved against
- *   the segment's directory (after `cd`) -- must be allowed. A bare filename
- *   with no `/` is NOT treated as a path (it would demand a rule for every
- *   `git checkout main`); it lands in `arg`.
+ * - `path`: path-shaped arguments and redirection targets, resolved against the segment's directory (after `cd`) -- must be allowed.
+ *           A bare filename with no `/` is NOT treated as a path (it would demand a rule for every `git checkout main`); it lands in `arg`.
  * - `arg`: flags and non-path words -- opaque, deny-matchable only.
  */
 export function parseCommandline(command: string, workspace: Workspace): BashParse {

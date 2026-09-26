@@ -2,14 +2,11 @@
 //
 // `extractTargets` knows three things and nothing else:
 //   1. bash, whose command line goes through ./bash.ts (triage, not parsing);
-//   2. a handful of hotdog tools whose interesting argument has a name
-//      (`fetch.url`, `web_search.query`);
-//   3. the path-shaped-parameter heuristic -- any tool with a `path`, `paths`,
-//      `file_path`, `filePath`, `dir` or `directory` argument is a file tool,
-//      which is what makes MCP/extension file tools recognized too.
+//   2. a handful of hotdog tools whose interesting argument has a name (`fetch.url`, `web_search.query`);
+//   3. the path-shaped-parameter heuristic -- any tool with `path`, `paths`, `file_path`, `filePath`, `dir` or `directory` argument is a file tool,
+//      makes some MCP/extension file tools recognized too.
 //
-// A call none of that covers is UNRECOGNIZED, which rules.ts turns into an
-// ask unless an allow entry names the tool.
+// A call none of that covers is UNRECOGNIZED, which rules.ts turns into an ask unless an allow entry names the tool.
 //
 // Like the rest of this layer: convenience triage, not enforcement.
 
@@ -105,12 +102,11 @@ export function extractTargets(
     }
   };
 
-  // Recognized path parameters normalise to `paths` (so one rule shape covers
-  // read/write/edit/append and any MCP file tool).
+  // Recognized path parameters normalise to `paths` (so one rule covers read/write/edit/append and others).
   for (const name of heuristicPaths) push(pathTargets(workspace, args[name], "paths"));
 
-  // userGate.tools params keep the name the user wrote -- that is the name they
-  // will write in a rule. Path-shaped ones still match with path semantics.
+  // userGate.tools params keep the name the user wrote -- that is the name they will write in a rule.
+  // Path - shaped ones still match with path semantics.
   for (const name of declared) {
     if (isPathLikeParam(name)) continue; // the heuristic already covers it
     const value = args[name];
@@ -128,11 +124,7 @@ export function extractTargets(
   return { tool: toolName, recognized, targets };
 }
 
-/**
- * The config line that would have prevented the ask, for the prompt hint and
- * the denial text. Nothing here is ever written to config -- the human copies
- * it if they want the change to outlive the session.
- */
+/** The config line that would have prevented the ask, for the prompt hint and the denial text. */
 export function suggestRuleLine(call: ApprovalCall): string {
   const entries: string[] = [];
   const required = call.targets.filter((t) => !t.denyOnly);

@@ -1,6 +1,6 @@
 ---
 name: explorer
-description: A codebase scout meant to do the legwork to gather up good context for the supervisor.
+description: A codebase scout meant to do the legwork to gather up good context for the supervisor. READ-ONLY, cannot write files.
 aspects: ['concise']
 whitelist-tools: ["find", "project_info", "read", "grep", "load_skill"]
 visible-worker: true

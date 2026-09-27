@@ -1,0 +1,28 @@
+{
+  "name": "show-me",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "/show-me command and show_me tool: generate images through an image-output model",
+  "configSchema": {
+    "showMe": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled"
+        },
+        "imageModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model used for image generation (registry key or bare name); must declare outputModalities including \"image\". Empty = auto-select the first registry model declaring text input and image output"
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "showMe" },
+        { "default": {} }
+      ]
+    }
+  }
+}

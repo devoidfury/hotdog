@@ -230,6 +230,8 @@ export async function discoverExtensionsInDir(dirPath: string): Promise<Discover
           path: metadata.path || relativePath,
           dirPath: dirFull,
         });
+        // Once we find an extension, do not descend into it; extensions inside extensions not supported.
+        continue;
       }
 
       await scanDirectory(dirFull, relativePath);

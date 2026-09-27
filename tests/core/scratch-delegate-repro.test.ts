@@ -80,7 +80,7 @@ describe("delegate repro (single provider, cap 1)", () => {
       resetCancel: () => {},
       cancel: () => {},
     };
-    const finishTurn = () => gates.shift!()();
+    const finishTurn = () => gates.shift()!();
 
     const bus = new MessageBus({
       sessionManager: { getAgent: () => agent },

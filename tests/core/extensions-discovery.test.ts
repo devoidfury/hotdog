@@ -76,6 +76,29 @@ describe("discoverExtensionsInDir", async () => {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
+
+  it("does not descend into a directory already recognized as an extension", async () => {
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
+    const nodePath = await import("node:path");
+    const tmp = await fs.mkdtemp(nodePath.join(os.tmpdir(), "hotdog-ext-norec-"));
+    try {
+      // outer-ext is a valid extension; inside it sits a directory that
+      // also looks like an extension. Discovery must stop at outer-ext.
+      const outer = nodePath.join(tmp, "outer-ext");
+      const inner = nodePath.join(outer, "inner-ext");
+      await fs.mkdir(inner, { recursive: true });
+      await fs.writeFile(nodePath.join(outer, "extension.json"), "{}");
+      await fs.writeFile(nodePath.join(outer, "index.ts"), "export default {};");
+      await fs.writeFile(nodePath.join(inner, "extension.json"), "{}");
+      await fs.writeFile(nodePath.join(inner, "index.ts"), "export default {};");
+
+      const result = await discoverExtensionsInDir(tmp);
+      expect(result.map((ext) => ext.name)).toEqual(["outer-ext"]);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("@experimental token", async () => {

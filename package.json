@@ -22,6 +22,8 @@
     "coverage": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --coverage",
     "check": "bun x tsc --noEmit"
   },
+  "files": ["bin", "src", "examples", "tsconfig.json"],
+  "publishConfig": { "access": "public", "provenance": true },
   "type": "module",
   "license": "MIT"
 }

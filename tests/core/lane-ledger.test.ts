@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { LaneLedger, processSlotCount } from "@core/session/lane-ledger.ts";
+import { LaneLedger, processSlotCount, type LaneLease } from "@core/session/lane-ledger.ts";
 
 async function freshDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "lane-ledger-"));
@@ -375,3 +375,44 @@ describe("LaneLedger", () => {
     }
   });
 });
+
+  // Churn regression behind the 2026-09-27 ENOENT incident: many simultaneous
+  // acquirers across several ledger instances, with releases landing while
+  // others are mid-acquire (the "released while we were looking" retry path).
+  // acquire must never throw, and the cap must never be exceeded by
+  // simultaneously-legitimate holders.
+  it("stress: concurrent fanout with release churn holds the cap and never throws", async () => {
+    const dir = await freshDir();
+    const CAP = 3;
+    const WORKERS = 16;
+    const PER_WORKER = 2;
+    const ledgers = Array.from({ length: 4 }, () => new LaneLedger({ dir }));
+    let live = 0;
+    let maxLive = 0;
+    const deadline = Date.now() + 20_000;
+    const workers = Array.from({ length: WORKERS }, async (_, w) => {
+      const led = ledgers[w % ledgers.length]!;
+      for (let k = 0; k < PER_WORKER; k++) {
+        let lease: LaneLease | null = null;
+        while (!lease) {
+          if (Date.now() > deadline) throw new Error("stress: lane starved");
+          lease = await led.acquire("prov", CAP); // a throw here fails the test
+          if (!lease) await Bun.sleep(1);
+        }
+        live++;
+        maxLive = Math.max(maxLive, live);
+        // Keep the marker alive against the watchdog even under heavy churn.
+        await Bun.sleep(Math.random() * 3);
+        await led.release(lease);
+        live--;
+      }
+    });
+    await Promise.all(workers);
+    expect(maxLive).toBeGreaterThan(0);
+    expect(maxLive).toBeLessThanOrEqual(CAP);
+    // Every slot handed back: a fresh acquire fills the cap exactly.
+    const filled: (LaneLease | null)[] = [];
+    for (let i = 0; i < CAP + 1; i++) filled.push(await ledgers[0]!.acquire("prov", CAP));
+    expect(filled.filter((l) => l !== null).length).toBe(CAP);
+    await rm(dir, { recursive: true, force: true });
+  });

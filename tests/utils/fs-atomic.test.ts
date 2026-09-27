@@ -1,5 +1,6 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createExclusive } from "@utils/fs-atomic.ts";
@@ -52,5 +53,87 @@ describe("createExclusive", () => {
     const missing = join(freshDir(), "no-such-dir", "claim");
     await expect(createExclusive(missing, "x")).rejects.toThrow();
     expect(existsSync(join(missing, "..", "claim"))).toBe(false);
+  });
+});
+
+/**
+ * Regression for the 2026-09-27 live incident: something outside the
+ * protocol deleted the `.new-*` temp sibling (litter sweep) or the parent
+ * directory (operator error / remount) between the temp write and the
+ * link(2), so link failed ENOENT and the caller lost a lane slot to the
+ * fail-open path. createExclusive must classify what vanished, repair it,
+ * and retry once -- without weakening link(2) exclusivity.
+ */
+describe("createExclusive vs external deletion", () => {
+  /** Foreign "litter sweep": unlinks the first `.new-*` sibling it sees, once. */
+  const unlinkTempOnce = async (dir: string, maxPolls = 500): Promise<void> => {
+    for (let i = 0; i < maxPolls; i++) {
+      let litter: string[];
+      try {
+        litter = (await readdir(dir)).filter((f) => f.includes(".new-"));
+      } catch {
+        return; // dir vanished underneath the sweeper; nothing left to sweep
+      }
+      const [victim] = litter;
+      if (victim !== undefined) {
+        await rm(join(dir, victim), { force: true });
+        return;
+      }
+      await Bun.sleep(0);
+    }
+  };
+
+  /** Foreign "cleaner": recursively removes the dir once it sees content. */
+  const removeDirOnce = async (dir: string, maxPolls = 500): Promise<void> => {
+    for (let i = 0; i < maxPolls; i++) {
+      try {
+        if ((await readdir(dir)).length > 0) {
+          await rm(dir, { recursive: true, force: true });
+          return;
+        }
+      } catch {
+        return;
+      }
+      await Bun.sleep(0);
+    }
+  };
+
+  const rounds = 60;
+  const creators = 4;
+
+  it("survives a foreign unlink of the temp sibling mid-create", async () => {
+    for (let round = 0; round < rounds; round++) {
+      const dir = freshDir();
+      const sweeper = unlinkTempOnce(dir);
+      const results = await Promise.all([
+        ...Array.from({ length: creators }, (_, n) =>
+          createExclusive(join(dir, `claim-${n}`), `payload-${n}`).catch((e: unknown) => e),
+        ),
+        sweeper,
+      ]);
+      for (let n = 0; n < creators; n++) {
+        // Pre-fix, a sweep landing between write and link surfaced ENOENT here.
+        expect(results[n]).toBe(true);
+        expect(readFileSync(join(dir, `claim-${n}`), "utf8")).toBe(`payload-${n}`);
+      }
+    }
+  });
+
+  it("survives a foreign rmdir of the parent mid-create", async () => {
+    // One creator per round: the sweeper only fires once the temp sibling is
+    // visible, so the write itself has landed and the anomaly can only strike
+    // at the link -- the exact production signature. A sweep that lands AFTER
+    // a successful create merely removes the finished claim (external damage
+    // no protocol can prevent), so existence is asserted only when it stands.
+    for (let round = 0; round < rounds * 2; round++) {
+      const dir = freshDir();
+      const path = join(dir, "claim");
+      const sweeper = removeDirOnce(dir);
+      const result = await createExclusive(path, "payload").catch((e: unknown) => e);
+      await sweeper;
+      // Pre-fix, a sweep landing between write and link surfaced ENOENT here.
+      expect(result).toBe(true);
+      if (existsSync(path)) expect(readFileSync(path, "utf8")).toBe("payload");
+    }
   });
 });

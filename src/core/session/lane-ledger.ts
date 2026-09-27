@@ -48,16 +48,17 @@
  * release). Reclaim lands on a GC tick, not the instant of the leak. Other
  * processes see the same marker as live only while its heartbeat stays fresh.
  *
- * Residual race (deliberate): two reclaimers that judged the *same* stale
- * marker can both rename onto the slot; ordering decides, and a read-back
- * that lands before a rival's rename misreports a win, stranding one phantom
- * lease on a slot whose prior holder was already dead. That is strictly
- * narrower than the momentary-absence window it replaces, and a phantom's
- * release is token-checked, so it cannot evict the true holder.
+ * Residual race (deliberate): the pre-rename re-verification shrinks the takeover window to a fs roundtrip,
+ * but a rename that lands between a reclaimer's re-verify and its rename still supersedes it;
+ * two reclaimers of the same stale marker can both rename onto the slot, and a read-back that
+ * lands before a rival's rename misreports a win, stranding one phantom lease on a slot whose
+ * prior holder was already dead. That is strictly narrower than the momentary-absence window it replaces,
+ * and a phantom's release is token-checked, so it cannot evict the true holder. 
+ * (Without the re-verify, a release + fresh same-pid claim landing inside the judge->reclaim await
+ * chain let a reclaimer rename OVER a live marker)
  *
- * Filesystem errors THROW to the caller, which fails open: an unusable state
- * dir must not deadlock every task. Occupied is not an error -- acquire
- * returns null and the caller queues.
+ * Filesystem errors THROW to the caller, which fails open: an unusable state dir must not deadlock every task.
+ * Occupied is not an error -- acquire returns null and the caller queues.
  */
 
 import { mkdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
@@ -230,7 +231,7 @@ export class LaneLedger {
         // Corrupt, dead on this host, or heartbeat gone: take the slot over
         // without ever letting it look free. Our marker is renamed onto the old
         // one atomically.
-        if (await this.#reclaimInPlace(path, marker, token)) {
+        if (await this.#reclaimInPlace(path, marker, token, raw)) {
           logger.debug(
             `[lanes] reclaimed ${quiet ? "quiet" : "dead/leaked"} slot ${path}` +
               (cur ? ` (was pid ${cur.pid}@${cur.host})` : ""),
@@ -429,20 +430,30 @@ export class LaneLedger {
   }
 
   /**
-   * Take over a slot whose present marker we judged free (corrupt, dead
-   * same-host pid, or heartbeat quiet). Our marker is written to a sibling
-   * temp file and renamed
-   * ONTO the slot: rename(2) replaces the target atomically, so the slot path
-   * is never momentarily absent -- no window for a third acquirer to create
-   * beside a holder. Verify by read-back: our token in place means the
-   * takeover stands; a rival's token means we lost and give the slot up
-   * without touching it. A filesystem error is thrown so the caller fails
-   * open, like every other ledger fs failure.
+   * Take over a slot whose present marker we judged free (corrupt, dead same-host pid, or heartbeat quiet).
+   * Our marker is written to a sibling temp file and renamed ONTO the slot: rename(2) replaces the target
+   * atomically, so the slot path is never momentarily absent -- no window for a third acquirer to create
+   * beside a holder. The judged bytes are re-verified against the slot right before the rename: rename
+   * replaces UNCONDITIONALLY, and the judgment was made an or more awaits ago, during which the judged
+   * holder may have released and a fresh one claimed the slot. Markers are never rewritten in place,
+   * so byte equality means the same marker still stands; anything else means re-judge on a later pass.
+   * Verify by read-back: our token in place means the takeover stands; a rival's token means we lost and
+   *  give the slot up without touching it. A filesystem error is thrown so the caller fails open.
    */
-  async #reclaimInPlace(path: string, marker: string, token: string): Promise<boolean> {
+  async #reclaimInPlace(
+    path: string,
+    marker: string,
+    token: string,
+    judgedRaw: string,
+  ): Promise<boolean> {
     const tmp = `${path.slice(0, path.lastIndexOf("/") + 1)}.slot.claiming-${this.#pid}-${token}`;
     try {
       await writeFile(tmp, marker);
+      if ((await this.#readSafe(path)) !== judgedRaw) {
+        // Slot changed hands (or vanished) after our judgment: stand down.
+        await rm(tmp, { force: true }).catch(() => {});
+        return false;
+      }
       await rename(tmp, path);
     } catch (e: unknown) {
       await rm(tmp, { force: true }).catch(() => {});

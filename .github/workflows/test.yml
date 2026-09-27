@@ -41,4 +41,4 @@ jobs:
         run: bun run coverage
 
       - name: "Run type check"
-        run: bun run check
+        run: bun i --no-save && bun run check

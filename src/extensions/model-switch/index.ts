@@ -8,6 +8,7 @@ import {
 } from "@core/extensions/types.ts";
 import { type Agent } from "@core/agent.ts";
 import { matcher, completion } from "./completions.ts";
+import { selectableModelKeys, isTextGenerative } from "@core/config/providers.ts";
 
 interface ModelSwitchExtConfig {
   toolEnabled?: boolean;
@@ -19,7 +20,7 @@ const MODEL_CMD_NAME = "model";
 const LIST_CMD_NAME = "models";
 
 function listModels(agent: Agent) {
-  const models = Object.keys(agent.modelRegistry);
+  const models = selectableModelKeys(agent.modelRegistry);
   if (models.length === 0) {
     return {
       action: ACTIONS.DISPLAY,
@@ -75,6 +76,12 @@ export function create(core: CoreContext): ExtensionInstance {
               return {
                 action: ACTIONS.DISPLAY,
                 content: `Error: model "${modelName}" not found in registry. Use /models to see available models.`,
+              };
+            }
+            if (!isTextGenerative(agent.modelRegistry[modelName])) {
+              return {
+                action: ACTIONS.DISPLAY,
+                content: `Error: model "${modelName}" is not text-in/text-out and cannot be used as the main model.`,
               };
             }
 

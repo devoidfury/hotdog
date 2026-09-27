@@ -8,6 +8,7 @@ import {
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import type { ModelRegistry } from "@core/agent.ts";
 import { ToolContext } from "@core/extensions/tool-context.ts";
+import { selectableModelKeys, isTextGenerative } from "@core/config/providers.ts";
 
 interface OnSwitchModel {
   (name: string): Promise<void>;
@@ -24,7 +25,9 @@ export class ModelTool {
   }
 
   toToolDef() {
-    const models = Object.keys(this.modelRegistry).sort();
+    // Main-model selection requires text in / text out; image-gen and audio
+    // models are hidden when the catalog declares modalities.
+    const models = selectableModelKeys(this.modelRegistry).sort();
     const description =
       models.length > 0
         ? `Switch to a different model. Use the \`model\` tool to switch between available models during a conversation. The new model will be used for subsequent messages in this conversation. Available models: ${models.join(", ")}.`
@@ -59,7 +62,7 @@ export class ModelTool {
     const name = args.name;
 
     if (name === "list") {
-      const models = Object.keys(this.modelRegistry);
+      const models = selectableModelKeys(this.modelRegistry);
       return ToolResult.ok(
         models.length > 0 ? models.join("\n") : "No models registered.",
       ).withEntries({
@@ -69,9 +72,14 @@ export class ModelTool {
 
     // Validate model exists
     if (!this.modelRegistry[name]) {
-      const available = Object.keys(this.modelRegistry);
+      const available = selectableModelKeys(this.modelRegistry);
       return ToolResult.err(
         `Unknown model '${name}'. Available models: ${available.join(", ")}`,
+      );
+    }
+    if (!isTextGenerative(this.modelRegistry[name])) {
+      return ToolResult.err(
+        `Model '${name}' is not text-in/text-out and cannot be used as the main model.`,
       );
     }
 

@@ -155,3 +155,38 @@ describe('ModelTool', () => {
     expect(models).toEqual(['alpha-model', 'beta-model', 'zebra-model']);
   });
 });
+
+describe('ModelTool main-model filtering', () => {
+  function mkModalityRegistry() {
+    return {
+      'p/chat': { name: 'p/chat', temperature: 0.7, contextLimit: 128000, tags: [], capabilities: {}, inputModalities: ['text', 'image'], outputModalities: ['text'] },
+      'p/image-gen': { name: 'p/image-gen', temperature: 0.7, contextLimit: 4096, tags: [], capabilities: {}, inputModalities: ['text'], outputModalities: ['image'] },
+      'p/tts': { name: 'p/tts', temperature: 0.7, contextLimit: 4096, tags: [], capabilities: {}, outputModalities: ['audio'] },
+      'p/unknown-caps': { name: 'p/unknown-caps', temperature: 0.7, contextLimit: 128000, tags: [], capabilities: {} },
+    };
+  }
+
+  it('excludes non-text models from the tool definition enum', () => {
+    const tool = new ModelTool(mkModalityRegistry());
+    const def = tool.toToolDef();
+    const props = def.function.parameters.properties as Record<string, unknown>;
+    expect((props.name as Record<string, unknown>).enum).toEqual(['p/chat', 'p/unknown-caps']);
+    expect(def.function.description).not.toContain('p/image-gen');
+  });
+
+  it('excludes non-text models from the list command', async () => {
+    const tool = new ModelTool(mkModalityRegistry());
+    const result = await tool.execute(JSON.stringify({ name: 'list' }));
+    const out = resultStr(result);
+    expect(out).toContain('p/chat');
+    expect(out).toContain('p/unknown-caps');
+    expect(out).not.toContain('p/image-gen');
+    expect(out).not.toContain('p/tts');
+  });
+
+  it('rejects switching to a non-text model', async () => {
+    const tool = new ModelTool(mkModalityRegistry());
+    const result = await tool.execute(JSON.stringify({ name: 'p/image-gen' }));
+    expect(resultStr(result)).toContain('not text-in/text-out');
+  });
+});

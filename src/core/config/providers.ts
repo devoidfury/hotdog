@@ -27,6 +27,10 @@ export interface ModelConfig {
     vision?: boolean;
     [key: string]: boolean | undefined;
   };
+  /** Declared input modalities (e.g. ["text","image"]); absent = unknown. */
+  inputModalities?: string[];
+  /** Declared output modalities (e.g. ["image"]); absent = unknown. */
+  outputModalities?: string[];
   /**
    * Maximum tool difficulty for this model.
    * When set, only tools with difficulty <= this value are exposed.
@@ -52,6 +56,10 @@ export interface ProviderModelEntry {
     vision?: boolean;
     [key: string]: boolean | undefined;
   };
+  /** Declared input modalities (e.g. ["text","image"]); absent = unknown. */
+  inputModalities?: string[];
+  /** Declared output modalities (e.g. ["image"]); absent = unknown. */
+  outputModalities?: string[];
   /** Maximum tool difficulty for this model (1-5). */
   maxToolDifficulty?: number;
 }
@@ -85,6 +93,7 @@ interface LlamaSwapModel {
   context_length?: number;
   architecture?: {
     input_modalities?: string[];
+    output_modalities?: string[];
   };
   capabilities?: {
     vision?: boolean;
@@ -119,6 +128,8 @@ function parseModelsResponse(json: LlamaSwapModelsResponse): ProviderModelEntry[
       contextLimit: m.context_length,
       tags: [...(m.meta?.tags ?? m.meta?.llamaswap?.tags ?? [])],
       capabilities: Object.keys(capabilities).length > 0 ? capabilities : undefined,
+      inputModalities: m.architecture?.input_modalities,
+      outputModalities: m.architecture?.output_modalities,
       maxToolDifficulty: m.meta?.max_tool_difficulty ?? m.meta?.llamaswap?.max_tool_difficulty,
     };
 
@@ -216,6 +227,8 @@ export async function buildModelRegistry(
         controlTokens: modelEntry.controlTokens ?? provider.controlTokens,
         tags: modelEntry.tags || [],
         capabilities: modelEntry.capabilities || {},
+        inputModalities: modelEntry.inputModalities,
+        outputModalities: modelEntry.outputModalities,
         maxToolDifficulty: modelEntry.maxToolDifficulty,
       };
     }
@@ -267,6 +280,31 @@ export function findModelEntry<T extends Partial<ModelConfig>>(
     }
   }
   return entry;
+}
+
+/**
+ * Whether a catalog entry can serve as the session's main model: when modalities
+ * are declared, they must include text in AND text out. Progressive enhancement:
+ * entries with no modality data pass (unknown caps never exclude).
+ */
+export function isTextGenerative(
+  entry?: { inputModalities?: string[]; outputModalities?: string[] },
+): boolean {
+  if (!entry) return true;
+  const inMods = entry.inputModalities;
+  const outMods = entry.outputModalities;
+  if (!inMods?.length && !outMods?.length) return true;
+  return (inMods ? inMods.includes("text") : true) &&
+    (outMods ? outMods.includes("text") : true);
+}
+
+/** Registry keys eligible as the session's main model (text in, text out). */
+export function selectableModelKeys(registry: Record<string, unknown>): string[] {
+  return Object.keys(registry).filter((k) =>
+    isTextGenerative(
+      registry[k] as { inputModalities?: string[]; outputModalities?: string[] } | undefined,
+    ),
+  );
 }
 
 export function resolveModelConfig(

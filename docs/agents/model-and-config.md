@@ -7,6 +7,7 @@
 - **ModelEntry** — `{ name, temperature, contextLimit, reasoningEffort, tags, maxToolDifficulty }` per model in registry
 - Model names use `provider/model` format (e.g., `ai365/qwen3.5-4b`) when a provider is active
 - **`maxToolDifficulty`** on a model entry limits which tools are exposed to that model (1–5 scale). See [Tool Filtering](tools-and-skills.md#tool-filtering).
+- **Modalities** — `inputModalities`/`outputModalities` are captured from `/v1/models` `architecture.*_modalities` when the provider reports them. Main-model selection surfaces (`/models`, `/model`, the `model` tool) hide entries that don't declare text in AND text out (`selectableModelKeys()` in `providers.ts`); entries without modality data always pass. The registry itself keeps every model, so pins and task placement are unaffected.
 
 ### Model Switching
 - **By name**: `agent.model = "provider/model-name"` (setter emits `MODEL_CHANGE` hook)

@@ -5,6 +5,8 @@ import {
   buildModelRegistry,
   resolveProvider,
   initSystemPromptTemplate,
+  isTextGenerative,
+  selectableModelKeys,
   type ProviderDef,
 } from "@core/config/providers.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -518,5 +520,74 @@ describe("resolveModelConfig fallback lookup", () => {
       "openai/gpt-4": { name: "openai/gpt-4", temperature: null, contextLimit: 32000, tags: [] },
     };
     expect(resolveModelConfig("openai/gpt-4", registry, 128000, undefined).roleMapping).toBeUndefined();
+  });
+});
+
+// ── modality capture & main-model selection ─────────────────────────────────
+
+describe("modality capture from /v1/models", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("captures input/output modalities from architecture", async () => {
+    globalThis.fetch = Object.assign(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: "chat-model",
+              architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+            },
+            {
+              id: "image-gen",
+              architecture: { input_modalities: ["text"], output_modalities: ["image"] },
+            },
+            { id: "no-arch" },
+          ],
+        }),
+      } as Response),
+      { preconnect: async () => {} },
+    );
+
+    const registry = await buildModelRegistry(
+      { providers: [{ name: "p", url: "http://test.com", fetchModels: true, models: [] }] },
+      32000,
+    );
+    expect(registry["p/chat-model"]!.inputModalities).toEqual(["text", "image"]);
+    expect(registry["p/chat-model"]!.outputModalities).toEqual(["text"]);
+    expect(registry["p/image-gen"]!.outputModalities).toEqual(["image"]);
+    expect(registry["p/no-arch"]!.inputModalities).toBeUndefined();
+  });
+});
+
+describe("isTextGenerative / selectableModelKeys", () => {
+  it("passes entries with no modality data (progressive enhancement)", () => {
+    expect(isTextGenerative({})).toBe(true);
+    expect(isTextGenerative({ inputModalities: [] })).toBe(true);
+    expect(isTextGenerative(undefined)).toBe(true);
+  });
+
+  it("requires text in AND text out when declared", () => {
+    expect(isTextGenerative({ inputModalities: ["text"], outputModalities: ["text"] })).toBe(true);
+    expect(isTextGenerative({ inputModalities: ["text", "image"], outputModalities: ["text"] })).toBe(true);
+    expect(isTextGenerative({ outputModalities: ["text"] })).toBe(true);
+    expect(isTextGenerative({ inputModalities: ["text"] })).toBe(true);
+    expect(isTextGenerative({ inputModalities: ["text"], outputModalities: ["image"] })).toBe(false);
+    expect(isTextGenerative({ inputModalities: ["text"], outputModalities: ["audio"] })).toBe(false);
+    expect(isTextGenerative({ inputModalities: ["audio"], outputModalities: ["text"] })).toBe(false);
+    expect(isTextGenerative({ inputModalities: ["image"], outputModalities: ["text"] })).toBe(false);
+  });
+
+  it("selectableModelKeys filters the registry", () => {
+    const registry = {
+      "p/chat": { name: "p/chat" },
+      "p/image-gen": { name: "p/image-gen", outputModalities: ["image"] },
+      "p/tts": { name: "p/tts", inputModalities: ["text"], outputModalities: ["audio"] },
+    };
+    expect(selectableModelKeys(registry)).toEqual(["p/chat"]);
   });
 });

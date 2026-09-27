@@ -39,3 +39,6 @@ jobs:
 
       - name: "Run tests with coverage"
         run: bun run coverage
+
+      - name: "Run type check"
+        run: bun run check

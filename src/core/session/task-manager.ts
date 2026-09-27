@@ -880,6 +880,17 @@ export class TaskManager {
         logger.debug(`[task ${task.taskId}] skip '${c.provider}': ledger full (fleet-wide)`);
         continue; // this lane is fleet-wide busy; try the next home
       }
+      // The `used` snapshot above is one await stale: this entry's reservation was dropped at the top,
+      // so a sibling placement could have committed to this lane while we awaited the slot (both saw it free).
+      // Without the re-check two tasks can double-book a capped lane.
+      const usedNow = this.#laneOccupancy(task).get(c.provider) ?? 0;
+      if (usedNow >= this.#laneCap(c.provider)) {
+        logger.debug(
+          `[task ${task.taskId}] skip '${c.provider}': filled during slot acquire (${usedNow}/${this.#laneCap(c.provider)})`,
+        );
+        if (got.ok && got.lease) await this.#releaseLease(got.lease);
+        continue;
+      }
       if (c.provider !== task.provider || c.key !== task.model) this.#place(task, c);
       task.candidates = null;
       task.lease = got.lease;

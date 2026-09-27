@@ -80,6 +80,11 @@ function makeFake(
   let active = 0;
   let maxActive = 0;
   const manager = new TaskManager({
+    // Sync profile resolution: without it every spawn awaits a real
+    // `readFile` in #planForSpawn, and out-of-order fs completions can flip
+    // the initial lane order (the "warm retry killed" test deadlocks if a
+    // later node wins the lane before node a's first turn).
+    profileManager: { getProfile: () => null } as never,
     buildAgent: async () => {
       builds++;
       const agent: Record<string, unknown> = {

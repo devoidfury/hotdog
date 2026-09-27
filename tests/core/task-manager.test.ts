@@ -325,6 +325,49 @@ describe("TaskManager", () => {
     });
   });
 
+  describe("fan-out placement", () => {
+    it("two simultaneous group spawns never double-book a capped lane", async () => {
+      // Regression: #warmPlace dropped the `placing` reservation before its
+      // slot await and committed on a stale occupancy snapshot, so two
+      // sibling placements that resumed inside each other's window both saw
+      // the lane free and started on it (cap 1 -> two concurrent turns on one
+      // provider). The sync profileManager removes the profile-read fs await
+      // from #planForSpawn, pinning the spawn continuations into that
+      // worst-case microtask interleaving.
+      let arrived = 0;
+      let bothHere!: () => void;
+      const gate = new Promise<void>((res) => (bothHere = res));
+      const manager = new TaskManager({
+        profileManager: { getProfile: () => null } as never,
+        buildAgent: async () => ({
+          run: async () => {
+            arrived++;
+            if (arrived === 2) bothHere();
+            // Escape hatch: with a serialization bug the two workers still
+            // arrive together; the assertion below catches it. Never hang.
+            await Promise.race([gate, new Promise((r) => setTimeout(r, 1500))]);
+            return { type: "completion", content: "done" };
+          },
+        } as never),
+        modelRegistry: {
+          "p1/q": { name: "q", temperature: null, contextLimit: 131072, tags: [] },
+          "p2/q": { name: "q", temperature: null, contextLimit: 131072, tags: [] },
+        } as never,
+        config: { modelGroups: { pair: ["q"] } } as never,
+        maxIterations: 1,
+        taskProfile: "default",
+        lanesPerProvider: 1,
+      });
+      const [ha, hb] = await Promise.all([
+        manager.spawnTask("t1", "go", { group: "pair" }),
+        manager.spawnTask("t2", "go", { group: "pair" }),
+      ]);
+      await Promise.all([ha.done, hb.done]);
+      const lanes = [manager.taskLane("t1")?.provider, manager.taskLane("t2")?.provider].sort();
+      expect(lanes).toEqual(["p1", "p2"]);
+    });
+  });
+
   describe("interruptTasksForSession", () => {
     // Agent whose run() stays pending until its abortSignal fires --
     // #driveTurn assigns agent.abortSignal before calling run(), so the mock

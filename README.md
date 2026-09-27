@@ -54,7 +54,7 @@ hotdog -m "qwen3.8-flash-next" -p "See if you can improve the test coverage. @pa
 - **Skills** -- Load-on-demand guides and workflows
 - **Compaction** -- Automatic context management when token budget is exceeded
 - **MCP client** -- Connect to Model Context Protocol servers (HTTP + stdio)
-- **Subagent tasks** -- Delegate work to background task agents
+- **Subagents and Workflow graphs** -- Delegate work to background task agents, workflows for long-horizon tasks with reviewed steps
 - **Handoff tool** -- Clear context and restart with a prepared plan for multi-phase tasks
 - **Tool-call approvals** -- Opt-in `userGate`: allow / deny / ask before a tool call runs
 - **File attachments** -- Reference files inline with @filepath syntax in user input

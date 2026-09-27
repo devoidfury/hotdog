@@ -6,11 +6,22 @@ import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, truncateSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { TaskManager } from "@core/session/task-manager.ts";
+import { TASK_STATUS, TaskHandle, TaskManager } from "@core/session/task-manager.ts";
+import type {
+  SpawnTaskOptions,
+  TaskCompletion,
+  TurnPrompt,
+  TurnResult,
+} from "@core/session/task-manager.ts";
 import { LlmError } from "@core/error.ts";
 import { contentToText } from "@core/context/message.ts";
 import { parseWorkflow, type Workflow } from "@extensions/workflows/workflow.ts";
-import { NODE_STATE, reconcileRun, WorkflowRun } from "@extensions/workflows/engine.ts";
+import {
+  NODE_STATE,
+  reconcileRun,
+  WorkflowRun,
+  type EngineTaskPort,
+} from "@extensions/workflows/engine.ts";
 
 const tmpDirs: string[] = [];
 function freshDir(): string {
@@ -149,6 +160,88 @@ function good(extraFiles: Record<string, string> = {}): WorkerSpec {
     }
     writeFile(dir, `${id}.verdict`, "pass");
   };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Hand-driven EngineTaskPort for clock-sensitive runtime-cap tests: the test
+ * fires the spawn callbacks (onTurnStart / onTurn) by hand, so a lane-queue
+ * wait (no onTurnStart) can outlast the cap without the worker running.
+ */
+function makeManualPort() {
+  interface Manual {
+    opts: SpawnTaskOptions;
+    taskTurns: number;
+    interrupts: number;
+    startTurn(): void;
+    endTurn(result: TurnResult): void;
+  }
+  interface Live {
+    opts: SpawnTaskOptions;
+    pending: ((r: TurnResult) => void) | null;
+    resolveDone: ((c: TaskCompletion) => void) | null;
+    manual: Manual;
+  }
+  const byId = new Map<string, Live>();
+  const spawned: Manual[] = [];
+  const fire = (e: Live, r: TurnResult): void => {
+    const pending = e.pending;
+    e.pending = null;
+    e.opts.onTurn?.(r); // the engine's gate delivery path
+    pending?.(r); // the engine's taskTurn promise path (delivers once via gate)
+  };
+  const live = (taskId: string): Live => {
+    const e = byId.get(taskId);
+    if (!e) throw new Error(`manual port: unknown task '${taskId}'`);
+    return e;
+  };
+  const port: EngineTaskPort = {
+    spawnTask: async (taskId: string, _prompt: TurnPrompt, opts: SpawnTaskOptions) => {
+      let resolveDone!: (c: TaskCompletion) => void;
+      const done = new Promise<TaskCompletion>((res) => {
+        resolveDone = res;
+      });
+      const manual: Manual = {
+        opts,
+        taskTurns: 0,
+        interrupts: 0,
+        startTurn: () => opts.onTurnStart?.(),
+        endTurn: (r) => fire(live(taskId), r),
+      };
+      byId.set(taskId, { opts, pending: null, resolveDone, manual });
+      spawned.push(manual);
+      return new TaskHandle(
+        taskId,
+        { value: TASK_STATUS.QUEUED },
+        new AbortController(),
+        () => {
+          manual.interrupts++;
+          fire(byId.get(taskId)!, { status: "cancelled", result: "Task aborted" });
+          return true;
+        },
+        done,
+      );
+    },
+    taskTurn: (taskId: string) =>
+      new Promise<TurnResult>((resolve) => {
+        const e = live(taskId);
+        e.manual.taskTurns++;
+        e.pending = resolve;
+      }),
+    completeTask: (taskId: string) => {
+      live(taskId).resolveDone?.({ status: TASK_STATUS.COMPLETED, result: "" });
+      return true;
+    },
+    interruptTask: (taskId: string) => {
+      const e = live(taskId);
+      e.manual.interrupts++;
+      fire(e, { status: "cancelled", result: "Task aborted" });
+      return true;
+    },
+    sendFollowUp: () => false,
+  };
+  return { port, spawned };
 }
 
 function readLog(dir: string): Array<Record<string, unknown>> {
@@ -531,6 +624,70 @@ describe("engine: state machine & gates", () => {
       "max_runtime",
     );
     expect(fake.turns["a"]).toBe(1); // runtime kill is terminal, not retried
+  });
+
+  it("max_runtime excludes the lane-queue wait before a turn starts", async () => {
+    const dir = freshDir();
+    const { port, spawned } = makeManualPort();
+    const workflow = wf(`
+      version: 1
+      name: queued
+      description: lane-queue wait must not burn the cap
+      nodes:
+        - id: a
+    `);
+    const runP = new WorkflowRun({
+      workflow,
+      runId: "r",
+      runDir: dir,
+      tasks: port,
+      maxRuntimeMsOverride: 80,
+    }).run();
+    await settle(() => spawned.length === 1, "spawn");
+    // The provider lane is saturated: the task queues ~2x the cap without the
+    // worker ever running. Under queue-counting semantics this kills the node.
+    await sleep(150);
+    spawned[0]!.startTurn(); // finally acquires the lane
+    writeFile(dir, "a.verdict", "pass");
+    spawned[0]!.endTurn({ status: "completed", result: "a pointer-summary" });
+    const summary = await runP;
+    expect(summary.outcome).toBe("succeeded");
+    expect(summary.states.a).toBe("succeeded");
+  });
+
+  it("max_runtime accumulates run time across warm turns and kills the over-cap turn", async () => {
+    const dir = freshDir();
+    const { port, spawned } = makeManualPort();
+    const workflow = wf(`
+      version: 1
+      name: accum
+      description: only run time counts, across turns
+      nodes:
+        - id: a
+          accept:
+            maxAttempts: 3
+    `);
+    const runP = new WorkflowRun({
+      workflow,
+      runId: "r",
+      runDir: dir,
+      tasks: port,
+      maxRuntimeMsOverride: 80,
+    }).run();
+    await settle(() => spawned.length === 1, "spawn");
+    const t = spawned[0]!;
+    t.startTurn();
+    await sleep(50); // ~60% of the cap spent running
+    t.endTurn({ status: "completed", result: "a pointer-summary" }); // no verdict: gate fails
+    await settle(() => t.taskTurns === 1, "warm retry");
+    t.startTurn(); // turn 2 begins with ~30ms of cap left
+    await settle(() => t.interrupts >= 1, "runtime kill of the second turn");
+    expect(t.taskTurns).toBe(1); // killed mid-turn-2, not retried further
+    const summary = await runP;
+    expect(summary.states.a).toBe("failed");
+    expect(String(readLog(dir).find((e) => e.id === "a" && e.state === "failed")!.detail)).toContain(
+      "max_runtime exceeded",
+    );
   });
 
   it("capability requirements resolve through the model resolver at admission", async () => {

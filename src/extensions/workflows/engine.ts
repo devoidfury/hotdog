@@ -147,7 +147,10 @@ interface NodeRun {
   /** Live (running, queued or parked) task backing the current attempt chain. */
   task: string | null;
   gate: TurnGate | null;
-  startedAt: number | null;
+  /** Wall-clock ms the worker actually spent running (runtime cap source). */
+  runtimeUsedMs: number;
+  /** Set while a worker turn is running; null while queued or parked-idle. */
+  runtimeRunningSince: number | null;
   deadlineTimer: ReturnType<typeof setTimeout> | null;
   runtimeKilled: boolean;
   detail: string | null;
@@ -223,7 +226,8 @@ export class WorkflowRun {
         attempt: 0,
         task: null,
         gate: null,
-        startedAt: null,
+        runtimeUsedMs: 0,
+        runtimeRunningSince: null,
         deadlineTimer: null,
         runtimeKilled: false,
         detail: null,
@@ -373,7 +377,6 @@ export class WorkflowRun {
     const accept = n.accept;
     let task: { id: string; handle: TaskHandle } | null = null;
     let critique: PromptPart[] | null = null;
-    nr.startedAt ??= Date.now();
 
     while (true) {
       if (this.#cancelRequested) {
@@ -401,7 +404,11 @@ export class WorkflowRun {
             requires: liveRequires(n),
             profile: n.profile,
             park: true,
-            onTurn: (t) => nr.gate?.deliver(t),
+            onTurn: (t) => {
+              this.#turnEnded(nr);
+              nr.gate?.deliver(t);
+            },
+            onTurnStart: () => this.#turnStarted(nr),
           });
           task = { id: taskId, handle };
           nr.task = taskId;
@@ -414,7 +421,6 @@ export class WorkflowRun {
           critique = null;
           continue;
         }
-        this.#armRuntime(nr);
         // Engine-side state: awaiting this attempt's turn. The underlying
         // taskStatus (queued vs running) shows through in status() views.
         nr.state = NODE_STATE.RUNNING;
@@ -422,7 +428,6 @@ export class WorkflowRun {
       } else {
         // Warm follow-up: same session, lane still held.
         nr.state = NODE_STATE.RUNNING;
-        this.#armRuntime(nr);
         this.#log({ ev: "node", id: n.id, state: "retry-warm", attempt: nr.attempt + 1, task: task.id });
         this.#cfg.tasks
           .taskTurn(task.id, this.#composeRetry(nr, critique))
@@ -551,7 +556,6 @@ export class WorkflowRun {
   ): Promise<{ kind: "pass" | "fail" | "reject" | "blocked" | "cancel"; note?: string; detail?: string }> {
     const jnr = this.#runs.get(owner.node.accept.judge!)!;
     const jn = jnr.node;
-    jnr.startedAt ??= Date.now();
     // The judge's attempt budget is per judging (once per producer attempt);
     // total judge work stays bounded by the owner's maxAttempts.
     jnr.attempt = 0;
@@ -610,7 +614,11 @@ export class WorkflowRun {
           requires: liveRequires(jn),
           profile: jn.profile,
           park: true,
-          onTurn: (t) => jnr.gate?.deliver(t),
+          onTurn: (t) => {
+            this.#turnEnded(jnr);
+            jnr.gate?.deliver(t);
+          },
+          onTurnStart: () => this.#turnStarted(jnr),
         });
         jnr.task = taskId;
       } catch (e: unknown) {
@@ -625,7 +633,6 @@ export class WorkflowRun {
         });
         continue;
       }
-      this.#armRuntime(jnr);
       jnr.state = NODE_STATE.RUNNING;
       this.#log({ ev: "node", id: jn.id, state: "running", attempt: jnr.attempt + 1, task: taskId });
       const turn = await gate.promise;
@@ -810,6 +817,10 @@ export class WorkflowRun {
   }
 
   // -- runtime cap -------------------------------------------------------------
+  //
+  // Accumulated worker-run time, not wall clock since queueing: the deadline
+  // is armed when a turn actually starts (onTurnStart) and banked when the
+  // turn ends, so waiting for a provider-lane slot never burns the cap.
 
   #runtimeMs(n: WorkflowNode): number {
     if (this.#cfg.maxRuntimeMsOverride !== undefined) return this.#cfg.maxRuntimeMsOverride;
@@ -821,18 +832,32 @@ export class WorkflowRun {
   }
 
   #runtimeElapsed(nr: NodeRun): boolean {
-    return nr.startedAt !== null && Date.now() >= nr.startedAt + this.#runtimeMs(nr.node);
+    const live = nr.runtimeRunningSince === null ? 0 : Date.now() - nr.runtimeRunningSince;
+    return nr.runtimeUsedMs + live >= this.#runtimeMs(nr.node);
   }
 
-  #armRuntime(nr: NodeRun): void {
-    if (nr.deadlineTimer !== null || nr.startedAt === null) return;
-    const remaining = nr.startedAt + this.#runtimeMs(nr.node) - Date.now();
+  /** onTurnStart: the worker began running; arm the deadline for the cap left. */
+  #turnStarted(nr: NodeRun): void {
+    if (nr.deadlineTimer !== null) clearTimeout(nr.deadlineTimer);
+    nr.runtimeRunningSince = Date.now();
+    const remaining = this.#runtimeMs(nr.node) - nr.runtimeUsedMs;
     nr.deadlineTimer = setTimeout(() => {
       nr.deadlineTimer = null;
       if (TERMINAL.has(nr.state)) return;
       nr.runtimeKilled = true;
       if (nr.task) this.#cfg.tasks.interruptTask(nr.task);
     }, Math.max(remaining, 1));
+  }
+
+  /** onTurn: the worker stopped running; bank the elapsed turn and disarm. */
+  #turnEnded(nr: NodeRun): void {
+    if (nr.runtimeRunningSince === null) return;
+    nr.runtimeUsedMs += Date.now() - nr.runtimeRunningSince;
+    nr.runtimeRunningSince = null;
+    if (nr.deadlineTimer !== null) {
+      clearTimeout(nr.deadlineTimer);
+      nr.deadlineTimer = null;
+    }
   }
 
   /** Free a parked task if it is still holding its lane; no-op when terminal. */

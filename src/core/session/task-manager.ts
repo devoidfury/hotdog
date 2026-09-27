@@ -205,6 +205,14 @@ export interface SpawnTaskOptions {
    * already delivered).
    */
   onTurn?: (turn: TurnResult) => void;
+  /**
+   * Fires when an agent turn for this task actually begins executing: on the
+   * cold start (after the lane slot is in hand) and on each warm taskTurn
+   * once it re-acquires the lane -- NOT while the task queues for a slot.
+   * Lets consumers (the workflow engine's runtime cap) count only real
+   * worker run time.
+   */
+  onTurnStart?: () => void;
 }
 
 export interface TaskManagerOptions {
@@ -295,6 +303,8 @@ interface TaskEntry {
   /** Set by completeTask(); finalizes the task after the in-flight turn ends. */
   releaseRequested: boolean;
   onTurn?: (turn: TurnResult) => void;
+  /** Fires at the start of every agent turn (see SpawnTaskOptions.onTurnStart). */
+  onTurnStart?: () => void;
   /** Result of the most recent turn (completeTask on a parked-idle task reports it). */
   lastResult: string | undefined;
   /** True once `settle` has resolved the handle's `done` promise. */
@@ -571,6 +581,7 @@ export class TaskManager {
       turnWaiters: [],
       releaseRequested: false,
       onTurn: undefined,
+      onTurnStart: undefined,
       lastResult: undefined,
       settled: false,
       settle: (status, result) => {
@@ -651,6 +662,7 @@ export class TaskManager {
     entry.agentConfig = agentConfig;
     entry.parked = parked;
     entry.onTurn = options.onTurn;
+    entry.onTurnStart = options.onTurnStart;
     entry.start = () => {
       entry.start = null;
       this.#setStatus(entry, TASK_STATUS.RUNNING);
@@ -1380,6 +1392,13 @@ export class TaskManager {
     prompt: TurnPrompt,
   ): Promise<TurnResult> {
     entry.inRun = true;
+    // Turn-start signal (runtime-cap accounting): the lane is in hand and the
+    // agent turn begins here. A faulty callback must not disturb the turn.
+    try {
+      entry.onTurnStart?.();
+    } catch (e: unknown) {
+      logger.error(`[task ${taskId}] onTurnStart threw: ${formatError(e)}`);
+    }
     let turn: TurnResult;
     try {
       agent.abortSignal = entry.abortController.signal;

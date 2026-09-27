@@ -165,6 +165,18 @@ export class FetchTool {
       // response cannot exhaust memory before the display cap applies.
       const { text: rawBody, truncated: readTruncated } = await readCappedBody(resp, MAX_RESPONSE_CHARS);
 
+      const reason = resp.statusText || "Unknown";
+
+      if (method === 'HEAD') {
+        const respHeaders = Array.from(resp.headers.entries()).map(([name, val]) => `${name}: ${val}`).join("\n");
+        return ToolResult.ok(`Headers:\n${respHeaders}`).withEntries({
+          url,
+          method,
+          status: String(resp.status),
+          status_text: reason,
+        });
+      }
+
       let respBody = rawBody;
       if (isJson) {
         try {
@@ -175,7 +187,6 @@ export class FetchTool {
       }
 
       let bodyLength = respBody.length;
-      const reason = resp.statusText || "Unknown";
 
       let truncated = readTruncated || bodyLength > this.maxBodyLength;
 

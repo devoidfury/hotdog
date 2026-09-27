@@ -17,6 +17,9 @@ interface SkillsLoaderConfig {
   preloadSkills?: string[];
 }
 
+/** Tool name the skills extension registers; the preamble gate keys off it. */
+const LOAD_SKILL_TOOL_NAME = "load_skill";
+
 /** Create the skills extension. Config defaults come from extension.json configSchema. */
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // Config defaults come from extension.json configSchema
@@ -66,7 +69,12 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   } = {
     hooks: {
       /** Build skills preamble for system prompt. */
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }) => {
+        // The preamble shows the model how to use load_skill. Only emit it when load_skill tool is present.
+        const toolDefs = await agent.getToolDefs();
+        if (!toolDefs.some((def) => def.function.name === LOAD_SKILL_TOOL_NAME)) {
+          return;
+        }
         const preamble = await loader.buildSkillsPreamble();
         if (preamble) {
           return { name: "preamble", priority: 400, content: preamble };
@@ -84,7 +92,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       /** Register tool: load_skill */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         const tool = new LoadSkillTool({ loader });
-        registry.register("load_skill", tool);
+        registry.register(LOAD_SKILL_TOOL_NAME, tool);
       },
 
       /** Register command: /skills */

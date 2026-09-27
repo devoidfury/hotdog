@@ -6,6 +6,7 @@ import { SkillsLoader, patternMatches } from "@extensions/skills/loader.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
 import { createCompletionService } from "@core/completion.ts";
+import { createFixture, simpleTool } from "../helpers.ts";
 import fs from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
@@ -938,7 +939,19 @@ Quiet body.
     expect(added).toHaveLength(0);
   });
 
-  it("SYSTEM_PROMPT_BUILD hook returns preamble with visible skills", async () => {
+  // The handler gates on the agent's effective tool set (whitelist/blacklist/
+  // profile), so tests pass an agent stand-in exposing getToolDefs.
+  function agentWithTools(toolNames: string[]) {
+    return {
+      getToolDefs: async () =>
+        toolNames.map((name) => ({
+          type: "function",
+          function: { name, description: "", parameters: {} },
+        })),
+    };
+  }
+
+  it("SYSTEM_PROMPT_BUILD hook returns preamble when load_skill is in the agent's tools", async () => {
     await createTempSkill("preamble-skill", `---
 name: Preamble Skill
 description: For preamble
@@ -953,7 +966,7 @@ This is the skill content.
     const ext = (await create(core)) as any;
 
     const hook = ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD];
-    const result = await hook({ agent: {} });
+    const result = await hook({ agent: agentWithTools(["read", "load_skill"]) });
 
     expect(result).toBeDefined();
     expect(result.name).toBe("preamble");
@@ -966,7 +979,27 @@ This is the skill content.
     const ext = (await create(core)) as any;
 
     const hook = ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD];
-    const result = await hook({ agent: {} });
+    const result = await hook({ agent: agentWithTools(["read", "load_skill"]) });
+
+    expect(result).toBeUndefined();
+  });
+
+  it("SYSTEM_PROMPT_BUILD hook omits the preamble when load_skill is not in the agent's effective tools", async () => {
+    // Regression: a profile whose toolWhitelist excludes load_skill still
+    // got the "Use the load_skill tool" preamble, advertising an uncallsable tool.
+    await createTempSkill("gated-skill", `---
+name: Gated Skill
+description: For gating
+---
+
+Content.
+`);
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    const hook = ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD];
+    const result = await hook({ agent: agentWithTools(["read", "bash"]) });
 
     expect(result).toBeUndefined();
   });
@@ -1157,5 +1190,113 @@ Content.
     expect(ext.getActiveSkills()).toHaveLength(0);
     const loaded = ext.infoPanel().sections[0].fields.find((f: { key: string }) => f.key === "loaded");
     expect(loaded.value).toBe(1);
+  });
+});
+
+// ── Preamble gating against a live agent's tool set ────────────────────────
+
+describe("Skills preamble gating against a live agent's tool set", () => {
+  let tempDir: string;
+
+  async function createTempSkill(name: string, content: string): Promise<void> {
+    const skillDir = join(tempDir, name);
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(join(skillDir, "SKILL.md"), content);
+  }
+
+  function createMockCore(config: Record<string, unknown> = {}) {
+    return {
+      config: {
+        skills: {
+          path: tempDir,
+          preloadSkills: [],
+          ...config,
+        },
+      },
+      completion: createCompletionService(),
+    } as any;
+  }
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(join(os.tmpdir(), "hotdog-skill-gate-test-"));
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  it("drops the preamble after a profile switch removes load_skill from the tool set", async () => {
+    // Regression: the SystemPromptBuilder cache is per-agent, but a stale
+    // build must never survive a tool-set change. applyProfile clears the
+    // cache; the rebuild must reflect the new effective tools, so a prompt
+    // built with load_skill available cannot leak into a restricted one.
+    await createTempSkill("cache-skill", `---
+name: Cache Skill
+description: For cache
+---
+
+Content.
+`);
+
+    const { hooks, toolRegistry, agent } = createFixture({});
+    toolRegistry.register("load_skill", simpleTool("load_skill"));
+    toolRegistry.register("read", simpleTool("read"));
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+    hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD], { source: "skills" });
+
+    await agent.ensureSystemPrompt();
+    expect(agent.context.getSystemPrompt()).toContain("# Available Skills");
+
+    // A meta-style profile whose whitelist excludes load_skill.
+    agent.applyProfile("meta", {
+      body: "Meta profile body",
+      model: null,
+      whitelistTools: ["read"],
+      blacklistTools: [],
+      manager: false,
+    });
+    expect(agent.context.getSystemPrompt()).toBeNull();
+
+    await agent.ensureSystemPrompt();
+    const prompt = agent.context.getSystemPrompt()!;
+    expect(prompt).toContain("Meta profile body");
+    expect(prompt).not.toContain("# Available Skills");
+  });
+
+  it("keeps the preamble when the profile switch keeps load_skill in the tool set", async () => {
+    await createTempSkill("kept-skill", `---
+name: Kept Skill
+description: For cache
+---
+
+Content.
+`);
+
+    const { hooks, toolRegistry, agent } = createFixture({});
+    toolRegistry.register("load_skill", simpleTool("load_skill"));
+    toolRegistry.register("read", simpleTool("read"));
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+    hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD], { source: "skills" });
+
+    agent.applyProfile("meta", {
+      body: "Meta profile body",
+      model: null,
+      whitelistTools: ["read", "load_skill"],
+      blacklistTools: [],
+      manager: false,
+    });
+
+    await agent.ensureSystemPrompt();
+    const prompt = agent.context.getSystemPrompt()!;
+    expect(prompt).toContain("# Available Skills");
+    expect(prompt).toContain("Kept Skill");
   });
 });

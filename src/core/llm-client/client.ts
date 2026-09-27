@@ -380,6 +380,10 @@ export class LlmClient {
     // The shared abortController is exclusively for user cancellation.
     let response: Response | null = null;
     let delayMs = this.retryBaseDelayMs ?? 1000;
+    // Per-attempt teardown controller + its user-cancel forwarder,
+    // hoisted so the generator's finally can abort whatever attempt is in flight.
+    let attemptController: AbortController | null = null;
+    let removeAttemptForwarder: (() => void) | null = null;
 
     try {
       const effectiveSessionId = sessionId || this.sessionId;
@@ -389,13 +393,26 @@ export class LlmClient {
         if (abortController.signal.aborted) {
           throw LlmError.Cancelled("request was cancelled");
         }
+        removeAttemptForwarder?.();
+
+        // A stalled attempt cannot be torn down via response.body.cancel(): while the SSE parser
+        // has a pending read, the body is locked and cancel() rejects with "Cannot cancel a locked ReadableStream".
+        // The socket then stays open, the backend keeps generating into the void, and the retry's
+        // new request OVERLAPS the ghost on the same runner/session. An attempt-scoped fetch abort
+        // tears the connection down regardless of the locked body. It stays separate from the shared
+        // abortController so a torn-down attempt never poisons the next one.
+        attemptController = new AbortController();
+        const onUserAbort = () => attemptController?.abort();
+        abortController.signal.addEventListener("abort", onUserAbort, { once: true });
+        removeAttemptForwarder = () =>
+          abortController.signal.removeEventListener("abort", onUserAbort);
 
         try {
           response = await this._doRequest(
             url,
             apiKey,
             request,
-            abortController.signal,
+            attemptController.signal,
             modelConfig,
             path,
             effectiveSessionId,
@@ -418,12 +435,10 @@ export class LlmClient {
           );
           return; // stream consumed to completion: success
         } catch (e: unknown) {
-          // Release the half-read body before the next attempt reuses the
-          // connection pool, then classify the raw failure the same way the
-          // request phase does (see classifyStreamError).
-          const failed = response;
+          // Abort the attempt's socket first -- body.cancel() cannot reach it here (locked by the SSE reader, see above).
+          // Then classify the raw failure the same way the request phase does (see classifyStreamError).
           response = null;
-          failed.body?.cancel().catch(() => {});
+          attemptController.abort();
           const err = LlmClient.classifyStreamError(
             e,
             abortController.signal,
@@ -442,10 +457,11 @@ export class LlmClient {
         }
       }
     } finally {
-      // Release the connection if the consumer abandons the stream mid-way
-      // (cancellation, early return); an already-drained body makes
-      // cancel() a no-op on the normal path.
+      // Release the connection if the consumer abandons the stream mid-way (cancellation, early return):
+      // abort the in-flight attempt, then cancel any already-drained body.
+      attemptController?.abort();
       response?.body?.cancel().catch(() => {});
+      removeAttemptForwarder?.();
       removeCancelListener?.();
     }
   }

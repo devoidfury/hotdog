@@ -732,6 +732,113 @@ describe("LlmClient.chatStreamCancellable — mid-stream failures", () => {
   });
 });
 
+describe("LlmClient.chatStreamCancellable — stalled attempt teardown (locked body)", () => {
+  // Regression: the mid-stream retry path released the half-read stream with
+  // response.body.cancel(), which rejects "Cannot cancel a locked
+  // ReadableStream" while the SSE parser has a pending read (swallowed by
+  // .catch). The stalled socket stayed OPEN -- a ghost request still
+  // generating on the runner -- and the retry dialed a SECOND concurrent
+  // request for the same session id. On a single-slot llama.cpp/llama-swap
+  // backend the two requests stomp on each other until the user cancels.
+  // Fix: abort an attempt-scoped AbortController (kills the fetch/socket
+  // regardless of the locked body) before re-issuing.
+  it("aborts a stalled attempt's socket before re-issuing (never two in flight)", async () => {
+    function makeMsg(role: string, content: string) {
+      return new Message({ role, content });
+    }
+
+    let requests = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let firstCancelledResolve: (() => void) | null = null;
+    const firstCancelled = new Promise<void>((r) => {
+      firstCancelledResolve = r;
+    });
+
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        requests++;
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        const headers = { "content-type": "text/event-stream" };
+        if (requests === 1) {
+          // Wedged backend (the incident's shape): headers + one SSE comment
+          // out (Bun.serve flushes headers only once the stream produces
+          // bytes; parseSse ignores comment lines), then silence forever.
+          return new Response(
+            new ReadableStream({
+              start(ctrl) {
+                ctrl.enqueue(": ping\n\n");
+              },
+              pull() {},
+              cancel() {
+                inFlight--;
+                firstCancelledResolve?.();
+              },
+            }),
+            { headers },
+          );
+        }
+        // The retry: stream a delta, [DONE], close.
+        return new Response(
+          new ReadableStream({
+            start(ctrl) {
+              ctrl.enqueue(contentFrame("recovered"));
+              ctrl.enqueue("data: [DONE]\n\n");
+              ctrl.close();
+              inFlight--;
+            },
+          }),
+          { headers },
+        );
+      },
+    });
+
+    const client = new LlmClient({
+      roleMapping: "system-first",
+      roleMappingRegistry: testRoleReg,
+      baseUrl: `http://localhost:${server.port}`,
+      markerMangler: null,
+      chatTimeoutSecs: 30,
+      maxRetries: 2,
+      streamIdleTimeoutSecs: 0.5,
+      retryBaseDelayMs: 50,
+    });
+
+    try {
+      const events: Array<{ type: string; content?: string }> = [];
+      let error: unknown;
+      try {
+        for await (const event of client.chatStreamCancellable(
+          [makeMsg("user", "Hi")],
+          mc(),
+        )) {
+          events.push(event);
+        }
+      } catch (e) {
+        error = e;
+      }
+
+      expect(error).toBeUndefined();
+      expect(requests).toBe(2);
+      expect(events.some((e) => e.type === "reset")).toBe(true);
+      expect(events.some((e) => e.type === "content" && e.content === "recovered")).toBe(true);
+      // The stalled attempt is torn down at the socket level before the
+      // retry arrives: never two concurrent requests for one session.
+      expect(maxInFlight).toBe(1);
+      // The server must actually have seen the first request cancelled.
+      const cancelledSeen = await Promise.race([
+        firstCancelled.then(() => true),
+        new Promise<boolean>((r) => setTimeout(() => r(false), 250)),
+      ]);
+      expect(cancelledSeen).toBe(true);
+    } finally {
+      server.stop(true);
+    }
+  });
+});
+
 describe("LlmClient streaming — mangler unescape on assembly (e2e)", () => {
   // Regression: a protected marker whose mangler alias is split across two
   // SSE deltas must come back real in the assembled StreamResult. This is the

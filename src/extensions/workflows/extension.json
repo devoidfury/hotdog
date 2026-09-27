@@ -14,7 +14,7 @@
         },
         "maxRuntimeMins": {
           "type": "number",
-          "default": 30,
+          "default": 60,
           "minimum": 1,
           "description": "Default per-node cap in minutes on actual worker run time (a node's maxRuntimeMins overrides); time queued waiting for a provider-lane slot does not count. When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried."
         },

@@ -348,7 +348,7 @@ describe("renderWorkflow", () => {
       [
         "workflow render-me (v1)",
         "  renders deterministically",
-        "  limits: maxNodes 8, maxRuntime default 30m",
+        "  limits: maxNodes 8, maxRuntime default 60m",
         "",
         "nodes (execution order):",
         "  1. plan",

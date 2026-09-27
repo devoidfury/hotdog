@@ -1156,7 +1156,7 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `maxNodes` | `number` | `8` | Soft cap on nodes per workflow graph (exceeding it warns; validation refuses above the hard ceiling of 32). A workflow's own `limits.maxNodes` overrides. |
-| `maxRuntimeMins` | `number` | `30` | Default per-node wall-clock cap in minutes (a node's `maxRuntimeMins` overrides). When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried. |
+| `maxRuntimeMins` | `number` | `60` | Default per-node cap in minutes on actual worker run time (a node's `maxRuntimeMins` overrides); time queued waiting for a provider-lane slot does not count. When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried. |
 | `path` | `string` | `<configDir>/workflows` | Directory holding `*.workflow.yaml` graphs; run dirs live under `<path>/runs`. |
 
 ```json

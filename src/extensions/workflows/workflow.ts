@@ -16,7 +16,7 @@ export const DEFAULT_WORKFLOW_LIMITS = {
   maxNodes: 8,
   hardMaxNodes: 32,
   maxAttempts: 3,
-  maxRuntimeMins: 30,
+  maxRuntimeMins: 60,
 };
 
 export const WORKFLOW_SCHEMA_VERSION = 1;

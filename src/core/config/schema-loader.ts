@@ -1,13 +1,7 @@
 import { join } from "node:path";
 import { getNested } from "@utils/objects.ts";
 import configSchema from "../core.config.json" with { type: "json" };
-import type {
-  CastFn,
-  ComputeFn,
-  SchemaProperty,
-  SchemaLayer,
-  ConfigSchema,
-} from "./schema-types.ts";
+import type { CastFn, ComputeFn, SchemaProperty, SchemaLayer, ConfigSchema } from "./schema-types.ts";
 
 import type { ProviderDef } from "./providers.ts";
 import { ProfileDef } from "./profiles.ts";
@@ -51,14 +45,10 @@ const CAST_BUILTINS: Record<string, CastFn> = {
 
   any: (v: unknown): unknown => v,
 
-  array: (v: unknown): unknown[] | undefined =>
-    Array.isArray(v) ? v : undefined,
+  array: (v: unknown): unknown[] | undefined => (Array.isArray(v) ? v : undefined),
 };
 
-const COMPUTE_BUILTINS: Record<
-  string,
-  (arg: unknown, ctx: unknown) => unknown
-> = {
+const COMPUTE_BUILTINS: Record<string, (arg: unknown, ctx: unknown) => unknown> = {
   joinConfigDir: (arg: unknown, ctx: unknown): string => {
     const subPath = arg as string;
     const configDir = (ctx as { configDir?: string }).configDir;
@@ -143,9 +133,7 @@ function compileNestedPropertyLayers(
     compiled[propName] = compilePropertyLayers(prop);
 
     if (prop.type === "object" && prop.properties) {
-      compiled[propName].properties = compileNestedPropertyLayers(
-        prop.properties,
-      );
+      compiled[propName].properties = compileNestedPropertyLayers(prop.properties);
     }
   }
   return compiled;
@@ -192,9 +180,7 @@ export function buildConfigSchema(): ConfigSchema {
   return schema;
 }
 
-export function getLayerDefault(
-  schemaKey: SchemaProperty | undefined | null,
-): unknown {
+export function getLayerDefault(schemaKey: SchemaProperty | undefined | null): unknown {
   if (!schemaKey || !schemaKey.layers) return undefined;
 
   for (const layer of schemaKey.layers) {
@@ -224,17 +210,13 @@ export function schemaDefaults(schema: ConfigSchema): Record<string, unknown> {
   return defaults;
 }
 
-export function loadExtensionSchemas(
-  extensions: Array<{ configSchema?: unknown }>,
-): ConfigSchema {
+export function loadExtensionSchemas(extensions: Array<{ configSchema?: unknown }>): ConfigSchema {
   const extensionKeys: ConfigSchema = {};
 
   for (const ext of extensions) {
     if (!ext.configSchema || typeof ext.configSchema !== "object") continue;
 
-    for (const [keyName, keySchema] of Object.entries(
-      ext.configSchema as Record<string, SchemaProperty>,
-    )) {
+    for (const [keyName, keySchema] of Object.entries(ext.configSchema as Record<string, SchemaProperty>)) {
       if (keySchema.layers) {
         extensionKeys[keyName] = compileSchemaKey({
           type: keySchema.type,
@@ -248,9 +230,7 @@ export function loadExtensionSchemas(
   return extensionKeys;
 }
 
-export function buildUnifiedSchema(
-  extensions?: Array<{ configSchema?: unknown }>,
-): ConfigSchema {
+export function buildUnifiedSchema(extensions?: Array<{ configSchema?: unknown }>): ConfigSchema {
   const coreSchema = buildConfigSchema();
   const extensionSchema = extensions ? loadExtensionSchemas(extensions) : {};
 
@@ -284,14 +264,9 @@ export interface ResolutionContext {
   profilesPath?: string;
 }
 
-export function resolveLayerValue(
-  layer: SchemaLayer,
-  context: ResolutionContext,
-): unknown {
+export function resolveLayerValue(layer: SchemaLayer, context: ResolutionContext): unknown {
   if ("default" in layer) {
-    return typeof layer.default === "function"
-      ? (layer.default as ComputeFn)(context)
-      : layer.default;
+    return typeof layer.default === "function" ? (layer.default as ComputeFn)(context) : layer.default;
   }
 
   switch (layer.source) {
@@ -329,9 +304,7 @@ function resolveNestedProperties(
   }
 
   // Don't spread arrays — preserve them as-is
-  const result = Array.isArray(parentValue)
-    ? [...parentValue]
-    : { ...parentValue };
+  const result = Array.isArray(parentValue) ? [...parentValue] : { ...parentValue };
 
   for (const [propName, propSchema] of Object.entries(properties)) {
     const fullKey = `${parentKey}.${propName}`;
@@ -342,11 +315,7 @@ function resolveNestedProperties(
         config: context.config || {},
       };
 
-      const propValue = resolveKey(
-        fullKey,
-        { ...propSchema, layers: propSchema.layers },
-        propContext,
-      );
+      const propValue = resolveKey(fullKey, { ...propSchema, layers: propSchema.layers }, propContext);
 
       if (propValue !== undefined) {
         (result as Record<string, unknown>)[propName] = propValue;
@@ -371,12 +340,7 @@ export function resolveKey(
     if ("default" in layer) {
       const value = resolveLayerValue(layer, context);
       if (properties && typeof value === "object" && value !== null) {
-        return resolveNestedProperties(
-          keyName,
-          value as Record<string, unknown>,
-          properties,
-          context,
-        );
+        return resolveNestedProperties(keyName, value as Record<string, unknown>, properties, context);
       }
       return value;
     }
@@ -395,12 +359,7 @@ export function resolveKey(
     }
 
     if (properties && typeof resolved === "object" && resolved !== null) {
-      return resolveNestedProperties(
-        keyName,
-        resolved as Record<string, unknown>,
-        properties,
-        context,
-      );
+      return resolveNestedProperties(keyName, resolved as Record<string, unknown>, properties, context);
     }
     return resolved;
   }
@@ -470,16 +429,11 @@ export interface CoreConfig {
 // Adds an index signature for extension-specific keys.
 export type CoreConfigWithExtensions = CoreConfig & Record<string, unknown>;
 
-export function resolveAll(
-  schema: ConfigSchema,
-  context: ResolutionContext,
-): CoreConfigWithExtensions {
+export function resolveAll(schema: ConfigSchema, context: ResolutionContext): CoreConfigWithExtensions {
   const result: Record<string, unknown> = {};
-
   for (const [keyName, keySchema] of Object.entries(schema)) {
     result[keyName] = resolveKey(keyName, keySchema, context);
   }
-
   return result as CoreConfigWithExtensions;
 }
 
@@ -514,10 +468,7 @@ export function resolveExtensionConfig(
   return result;
 }
 
-export function resolveModelWithProvider(
-  name: string,
-  provider?: ProviderDef | null,
-): string {
+export function resolveModelWithProvider(name: string, provider?: ProviderDef | null): string {
   if (!name) return name;
   if (name.includes("/")) return name;
   if (provider?.models) {
@@ -528,9 +479,8 @@ export function resolveModelWithProvider(
 }
 
 // Priority: profile → CLI → provider default → config → default.
-// Returns null when nothing in the chain supplies a model; agent
-// construction is where that becomes a hard error (model-free subcommands
-// like `profiles` and `sessions` must keep working without one).
+// Returns null when nothing in the chain supplies a model; agent construction is where that becomes a hard error
+// (subcommands like `profiles` and `sessions` should keep working without one).
 export function resolveModel(
   cliModel: string | undefined,
   profileModel: string | null | undefined,
@@ -540,8 +490,7 @@ export function resolveModel(
 ): string | null {
   if (profileModel) return resolveModelWithProvider(profileModel, provider);
   if (cliModel) return resolveModelWithProvider(cliModel, provider);
-  if (provider?.models?.length)
-    return resolveModelWithProvider(provider.models[0]!.name, provider);
+  if (provider?.models?.length) return resolveModelWithProvider(provider.models[0]!.name, provider);
   if (configModel) return resolveModelWithProvider(configModel, provider);
   return defaultModel;
 }
@@ -549,18 +498,14 @@ export function resolveModel(
 export const CONFIG_SCHEMA: ConfigSchema = buildConfigSchema();
 
 /**
- * Collect every key name that a config-file layer can read from the user's
- * defaults.json. Walks the full schema including nested properties so that
- * keys like "workspace.deny" are included alongside top-level ones.
+ * Collect every key name that a config-file layer can read from the user's defaults.json.
+ * Walks the full schema including nested properties so that keys like "workspace.deny" are included alongside top-level ones.
  * rescue.ts uses this to avoid flagging legitimate config keys as unknown.
  */
-export function extractConfigLayerKeys(
-  schema: ConfigSchema,
-  prefix?: string,
-): string[] {
+export function extractConfigLayerKeys(schema: ConfigSchema, prefix?: string): string[] {
   const keys: string[] = [];
-  for (const [_name, prop] of Object.entries(schema)) {
-    const fullKey = prefix ? `${prefix}.${_name}` : _name;
+  for (const [name, prop] of Object.entries(schema)) {
+    const fullKey = prefix ? `${prefix}.${name}` : name;
     for (const layer of prop.layers ?? []) {
       if (layer.source === "config" && layer.key) {
         keys.push(layer.key);

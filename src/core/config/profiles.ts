@@ -9,11 +9,9 @@ import { normalizeConfigKeys } from "./index.ts";
 /**
  * Validate a profile name before it is used to build a file path.
  *
- * Profile names come from multiple sources — the CLI flag, the config file,
- * and the LLM via the delegate_task `profile` argument — so a name must
- * never be able to escape the profiles directory (e.g. `../../etc/passwd`).
- * Allowlist mirrors SESSION_ID_RE in session-log.ts: starts alphanumeric,
- * then alphanumerics, dots, underscores, and hyphens only.
+ * Profile names come from multiple sources: the CLI flag, the config file, the LLM via the delegate_task `profile` argument;
+ * sanitize the name to prevent escaping the profiles directory (e.g. `../../etc/passwd`).
+ * Allowlist mirrors SESSION_ID_RE in session-log.ts: starts alphanumeric, then alphanumerics, dots, underscores, and hyphens only.
  */
 const PROFILE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const PROFILE_NAME_MAX_LEN = 64;
@@ -33,9 +31,9 @@ export interface ProfileDef {
   body: string;
   model: string | null;
   /**
-   * Model-group name (config modelGroups) binding task-worker placement to
-   * group fanout. Mutually exclusive with `model` (group wins, with a warning
-   * at spawn). Session turns ignore it -- placement is a task concept.
+   * Model-group name (config modelGroups) binding task-worker placement to group fanout.
+   * Mutually exclusive with `model` (group wins, with a warning at spawn).
+   * Session turns ignore it -- placement is a task concept.
    */
   group?: string | null;
   blacklistTools: string[];
@@ -78,8 +76,7 @@ export function resolveProfilesPath(
 
 export async function loadProfileFile(profilesPath: string, profileName: string): Promise<ProfileDef | null> {
   if (!isValidProfileName(profileName)) {
-    // Reject before touching the filesystem: names like `../../etc/passwd`
-    // must mean "no profile", never "read that file".
+    // Reject before touching the filesystem: names like `../../etc/passwd` must mean "no profile", not "read that file".
     logger.warn(
       `[profiles] rejected invalid profile name: ${JSON.stringify(String(profileName).slice(0, 80))}`,
     );
@@ -309,16 +306,12 @@ export class ProfileManager {
     return this.getProfilesForSwitch();
   }
 
-  /**
-   * Get the raw file-loaded profiles (before config merge).
-   */
+  /** Get the raw file-loaded profiles before config merge (before file merge) */
   getFileProfiles(): Record<string, ProfileDef> {
     return { ...this.#fileProfiles };
   }
 
-  /**
-   * Get the raw config-defined profiles (before file merge).
-   */
+  /** Get the raw config-defined profiles (before file merge) */
   getConfigProfiles(): Record<string, Partial<ProfileDef>> {
     return { ...this.#configProfiles };
   }

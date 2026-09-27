@@ -1,6 +1,4 @@
-/**
- * Shared schema types used by both core config and extension config.
- */
+/** Shared schema types used by both core config and extension config. */
 
 export type CastFn = (v: unknown, ctx?: unknown) => unknown;
 export type ComputeFn = (ctx: unknown) => unknown;

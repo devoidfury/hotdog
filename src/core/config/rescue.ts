@@ -1,9 +1,8 @@
 /**
- * `hotdog rescue` -- config diagnostics that must never depend on the config
- * working: main() dispatches to runRescue() before buildConfig() or extension
- * loading. Detects broken JSON (with line/column context), repairs what it can
- * (BOM, line and block comments, trailing commas), reports the config-dir
- * resolution chain, unknown/duplicate top-level keys, and schema violations.
+ * `hotdog rescue` -- config diagnostics that don't depend on the config working.
+ * 
+ * Detects broken JSON, repairs what it can, reports the config-dir resolution chain, unknown/duplicate top-level keys, and schema violations.
+ * main() dispatches to runRescue() before buildConfig() or extension loading.
  */
 
 import fs from "node:fs/promises";

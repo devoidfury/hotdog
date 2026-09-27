@@ -147,9 +147,8 @@ async function fetchRemoteModels(
   if (!baseUrl) return [];
 
   try {
-    // String concat, not new URL(): URL resolution drops path-prefixed bases
-    // (new URL("v1/models", "http://h:8080/api") -> "http://h:8080/v1/models"),
-    // and the chat request path is built the same concat way in llm-client.
+    // string concat instead of `new URL()` - URL resolution drops path-prefixed bases
+    // (new URL("v1/models", "http://h:8080/api") -> "http://h:8080/v1/models")
     const url = `${baseUrl.replace(/\/+$/, "")}/v1/models`;
 
     const headers: Record<string, string> = {};
@@ -188,7 +187,7 @@ export async function buildModelRegistry(
 
     if (provider.fetchModels) {
       const remoteModels = await fetchRemoteModels(provider, config.baseUrl, config.apiKey);
-      // Deep merge remote models with local ones: local takes priority, but remote fills in missing fields
+      // Deep merge remote models with local ones. Local takes priority, but remote fills in missing fields
       const localByName = new Map(models.map((m) => [m.name, m]));
       for (const rm of remoteModels) {
         const local = localByName.get(rm.name);
@@ -250,10 +249,9 @@ export function resolveProvider(
 }
 
 /**
- * Look up a model entry in the registry by exact key, falling back to a
- * suffix match ("provider/modelName") when the name has no "/".
- * Handles models fetched remotely (fetchModels: true) where the resolved
- * name is bare but the registry key is provider/modelName.
+ * Look up a model entry in the registry by exact key, falling back to a suffix match ("provider/modelName")
+ * when the name has no "/". Handles models fetched remotely (fetchModels: true) where the resolved name
+ * is bare but the registry key is provider/modelName.
  */
 export function findModelEntry<T extends Partial<ModelConfig>>(
   modelName: string,
@@ -320,18 +318,12 @@ export function resolveModelConfig(
   return fromRegistry;
 }
 
-// ── System Prompt Template ─────────────────────────────────────────────
-
-// Pure loader — no process-wide cache. buildConfig() calls it once and hands
-// the result to agents explicitly (AgentOptions.systemPromptTemplate), so
-// template state never lingers across sessions or config changes.
 export async function initSystemPromptTemplate(
   templatePath?: string,
   configDir?: string,
 ): Promise<string> {
   const templateFile =
-    templatePath ??
-    path.join(configDir ?? resolveConfigDir(), DEFAULT_SYSTEM_PROMPT_FILENAME);
+    templatePath ?? path.join(configDir ?? resolveConfigDir(), DEFAULT_SYSTEM_PROMPT_FILENAME);
 
   try {
     return await fsPromises.readFile(templateFile, "utf-8");

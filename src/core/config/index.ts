@@ -13,11 +13,7 @@ export * from "./schema-loader.ts";
 export * from "./profiles.ts";
 export * from "./providers.ts";
 
-export {
-  validate,
-  validateParams,
-  formatValidationErrors,
-} from "@utils/json-schema.ts";
+export { validate, validateParams, formatValidationErrors } from "@utils/json-schema.ts";
 
 import { DEFAULT_CONFIG_FILENAME, resolveConfigDir } from "./defaults.ts";
 import {
@@ -34,17 +30,8 @@ import {
   resolveExtensionConfig,
 } from "./schema-loader.ts";
 import type { ConfigRegistry } from "../extensions/config.ts";
-import {
-  ProfileManager,
-  type ProfileDef,
-  type SwitchProfile,
-} from "./profiles.ts";
-import {
-  buildModelRegistry,
-  initSystemPromptTemplate,
-  ProviderDef,
-  type ModelConfig,
-} from "./providers.ts";
+import { ProfileManager, type ProfileDef, type SwitchProfile } from "./profiles.ts";
+import { buildModelRegistry, initSystemPromptTemplate, ProviderDef, type ModelConfig } from "./providers.ts";
 
 export function mergeExtensionConfigDefaults(
   defaultConfig: Record<string, unknown>,
@@ -65,10 +52,7 @@ export function mergeExtensionConfigDefaults(
       typeof param.defaults === "object" &&
       param.defaults !== null
     ) {
-      merged[param.key] = deepMerge(
-        merged[param.key] as object,
-        param.defaults as object,
-      );
+      merged[param.key] = deepMerge(merged[param.key] as object, param.defaults as object);
     }
   }
 
@@ -94,17 +78,15 @@ export function normalizeConfigKeys(obj: unknown): unknown {
   return normalized;
 }
 
-// Loaded (non-resolved) config: schema keys with literal defaults
-// (schemaDefaults), plus raw config-file passthrough keys that are not
-// schema keys (providers, colors palette). profileDef is set at runtime.
+// Loaded (non-resolved) config: schema keys with literal defaults (schemaDefaults),
+// plus raw config-file passthrough keys that are not schema keys (providers, colors palette).
+// profileDef is set at runtime.
 export type DefaultConfig = CoreConfigWithExtensions & {
   providers: ProviderDef[] | null;
   colors: unknown;
 };
 
-export function getDefaultConfig(
-  extParams?: Array<{ key: string; defaults: unknown }>,
-): DefaultConfig {
+export function getDefaultConfig(extParams?: Array<{ key: string; defaults: unknown }>): DefaultConfig {
   const baseConfig: Record<string, unknown> = {
     ...schemaDefaults(CONFIG_SCHEMA),
     providers: [],
@@ -115,24 +97,16 @@ export function getDefaultConfig(
   return castAs<DefaultConfig>(mergeExtensionConfigDefaults(baseConfig, extParams));
 }
 
-// A config value that is EXACTLY "$VAR" or "${VAR}" resolves from the
-// environment at load. Whole-string only: embedded interpolation would
-// collide with legitimate `$` in prompts, display formats, and prices,
-// and there is deliberately no escape syntax.
+// A config value that is EXACTLY "$VAR" or "${VAR}" resolves from the environment at load.
+// Whole-string only: embedded interpolation would collide with legitimate `$` in prompts, display formats, and prices.
 const ENV_REF_REGEX = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/;
 
-// Interpolation runs on every config-load pass; repeating the same warning
-// per pass dilutes the signal, so each variable name warns once per process.
+// Interpolation runs on every config-load pass; variable name warns once per process.
 const envRefWarned = new Set<string>();
 
 /**
- * Replace whole-string `$VAR` / `${VAR}` config values with environment
- * values (recursing through objects and arrays). An unset variable warns and
- * resolves to the empty string instead of aborting startup: optional
- * providers keyed to env vars that aren't exported in every shell shouldn't
- * brick the whole config. The warning names the variable so a typo is
- * findable; the empty value is falsy, so downstream guards (no baseUrl, etc.)
- * behave as if the setting were absent.
+ * Replace whole-string `$VAR` / `${VAR}` config values with environment values (recursing through objects and arrays).
+ * An unset variable warns and resolves to the empty string instead of aborting startup.
  */
 export function interpolateEnvVars(
   value: unknown,
@@ -190,10 +164,7 @@ export async function loadConfig(
     try {
       await fsPromises.access(configPathToUse);
     } catch {
-      throw ConfigError.LoadFailed(
-        configPathToUse,
-        "Config file does not exist or is not readable",
-      );
+      throw ConfigError.LoadFailed(configPathToUse, "Config file does not exist or is not readable");
     }
   }
 
@@ -287,10 +258,9 @@ export interface BuildAgentConfigExtra {
 // Not to be confused with Agent.AgentConfig, the runtime config the Agent class reads.
 export type BuildAgentConfig = CoreConfigWithExtensions & BuildAgentConfigExtra;
 
-// Single config build pipeline: load config (with extension defaults) ->
-// buildAgentConfig -> model registry -> resolve + validate extension config.
-// Pass a ConfigRegistry to include extension config resolution/validation;
-// without one this is the core-only pipeline.
+// Single config build pipeline:
+// load config with extension defaults -> buildAgentConfig -> model registry -> resolve + validate extension config.
+// Pass a ConfigRegistry to include extension config resolution/validation; without one this is the core-only pipeline.
 export async function buildConfig(
   cliArgv: CliArgv,
   configRegistry?: ConfigRegistry,
@@ -303,11 +273,7 @@ export async function buildConfig(
   const extParams = configRegistry?.getConfigParams();
   const configDir = resolveConfigDir(cliArgv.configDir ?? undefined);
 
-  const config = await loadConfig(
-    cliArgv.config ?? undefined,
-    cliArgv.configDir ?? undefined,
-    extParams,
-  );
+  const config = await loadConfig(cliArgv.config ?? undefined, cliArgv.configDir ?? undefined, extParams);
 
   const resolved = await buildAgentConfig({
     cli: cliArgv,
@@ -339,12 +305,8 @@ export async function buildConfig(
     const resolvedExtConfig = resolveExtensionConfig(extParams, extContext);
     Object.assign(config as Record<string, unknown>, resolvedExtConfig);
 
-    const extensionSchemas = extParams
-      .filter((p) => p.schema)
-      .map((p) => ({ key: p.key, schema: p.schema }));
-    failOnInvalidConfig(
-      validateConfig(config as CoreConfigWithExtensions, extensionSchemas),
-    );
+    const extensionSchemas = extParams.filter((p) => p.schema).map((p) => ({ key: p.key, schema: p.schema }));
+    failOnInvalidConfig(validateConfig(config as CoreConfigWithExtensions, extensionSchemas));
   }
 
   return {
@@ -376,27 +338,16 @@ export async function buildAgentConfig(options: {
     configDir,
   };
 
-  const profileName = castAs<string>(
-    resolveKey("profileName", CONFIG_SCHEMA.profileName, context),
-  );
+  const profileName = castAs<string>(resolveKey("profileName", CONFIG_SCHEMA.profileName, context));
   // Resolve profilesPath through schema layers (cli -> config -> compute joinConfigDir)
-  const profilesPath = castAs<string>(
-    resolveKey("profilesPath", CONFIG_SCHEMA.profilesPath, context),
-  );
+  const profilesPath = castAs<string>(resolveKey("profilesPath", CONFIG_SCHEMA.profilesPath, context));
 
-  const profileManager = await ProfileManager.create(
-    profilesPath,
-    config.profiles || {},
-  );
+  const profileManager = await ProfileManager.create(profilesPath, config.profiles || {});
   const configProfile = config.profiles?.[profileName] ?? null;
   const fileProfile = profileManager.getFileProfiles()[profileName] || null;
 
-  const providerName = castAs<string | undefined>(
-    resolveKey("provider", CONFIG_SCHEMA.provider, context),
-  );
-  const provider = providerName
-    ? providers.find((p) => p.name === providerName)
-    : null;
+  const providerName = castAs<string | undefined>(resolveKey("provider", CONFIG_SCHEMA.provider, context));
+  const provider = providerName ? providers.find((p) => p.name === providerName) : null;
 
   let profile: ProfileDef = {
     ...configProfile,
@@ -411,9 +362,8 @@ export async function buildAgentConfig(options: {
   };
   const resolved = resolveAll(CONFIG_SCHEMA, resolvedContext);
 
-  // resolved.defaultModel is the full schema chain (CLI > profile > env >
-  // config > default), so the HOTDOG_MODEL/AI_MODEL env layers reach the
-  // final model; the raw config.defaultModel would bypass the env vars.
+  // resolved.defaultModel is the full schema chain (CLI > profile > env > config > default), so
+  // the HOTDOG_MODEL / AI_MODEL env layers reach the final model; the raw config.defaultModel would bypass the env vars.
   const model = resolveModel(
     cli.model ?? undefined,
     configProfile?.model,
@@ -456,10 +406,8 @@ export async function buildAgentConfig(options: {
     ((resolved.workspace?.paths as readonly string[] | undefined) ??
       (legacyRoot ? [legacyRoot] : ["."])) as readonly string[],
   );
-  // workspace.deny resolves through the schema (default in
-  // core.config.json); the ?? only guards non-schema resolution paths.
-  const workspaceDeny =
-    (resolved.workspace?.deny as string[] | undefined) ?? DEFAULT_DENY_PATTERNS;
+  // workspace.deny resolves through the schema (default in core.config.json); the ?? only guards non-schema resolution paths.
+  const workspaceDeny = (resolved.workspace?.deny as string[] | undefined) ?? DEFAULT_DENY_PATTERNS;
 
   return castAs<BuildAgentConfig>({
     ...resolved,

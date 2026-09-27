@@ -183,6 +183,28 @@ describe("misc message kinds", () => {
     expect(container.querySelector(".system-message")!.textContent).toContain("coder");
   });
 
+  it("renders system message attachments as a collapsible box, content escaped", () => {
+    ml.handleSystemMessage({
+      content: "- file attached: evil.txt",
+      files: [{ path: "evil.txt", content: "<script>alert(1)</script>" }],
+    });
+    const box = container.querySelector(".attachment-box")!;
+    expect(box.tagName.toLowerCase()).toBe("details");
+    expect(box.querySelector("summary")!.textContent).toContain("evil.txt");
+    expect(box.querySelector(".attachment-content")!.textContent).toContain("<script>alert(1)</script>");
+    // Escaped, never injected, and never shown as a JSON object in chat.
+    expect(container.innerHTML).not.toContain("<script>alert");
+    expect(container.innerHTML).not.toContain('{"path"');
+    // The prose content line is replaced by the box, not duplicated.
+    expect(container.querySelector(".system-message p")).toBeNull();
+  });
+
+  it("plain system messages still render as a paragraph", () => {
+    ml.handleSystemMessage({ content: "a quiet notice" });
+    expect(container.querySelector(".system-message p")!.textContent).toBe("a quiet notice");
+    expect(container.querySelector(".attachment-box")).toBeNull();
+  });
+
   it("errors finalize streaming and render an error bubble", () => {
     ml.handleStreamingChunk({ content: "half a" });
     ml.handleError({ message: "kaboom" });
@@ -378,5 +400,71 @@ describe("scroll follow and lifecycle", () => {
     c.scrollTop = 100;
     container.dispatchEvent(new Event("scroll"));
     expect(c.scrollTop).toBe(100); // listener removed: follow state unchanged
+  });
+});
+
+describe("images in messages", () => {
+  const PNG_B64 = "iVBORw0KGgoAAAANSUhEUg==";
+
+  it("renders a tool-result image as a data-URL <img> with escaped markup", () => {
+    ml.handleToolCall({ name: "read", args: '{"path":"photo.png"}' });
+    ml.handleToolResult({
+      name: "read",
+      output: "Image: photo.png (image/png, 1.0KB)",
+      images: [{ mimeType: "image/png", data: PNG_B64 }],
+    });
+    const img = container.querySelector(".tool-call-block .message-images img")!;
+    expect(img.getAttribute("src")).toBe(`data:image/png;base64,${PNG_B64}`);
+    // innerHTML serializes attributes escaped: no raw quote injection.
+    expect(container.innerHTML).toContain(`src="data:image/png;base64,${PNG_B64}"`);
+    expect(container.innerHTML).not.toContain("<script");
+  });
+
+  it("click toggles full size on a thumbnail", () => {
+    ml.handleToolCall({ name: "read", args: "{}" });
+    ml.handleToolResult({ name: "read", output: "ok", images: [{ mimeType: "image/png", data: PNG_B64 }] });
+    const img = container.querySelector("img.message-image") as HTMLElement;
+    img.click();
+    expect(img.classList.contains("fullsize")).toBe(true);
+    img.click();
+    expect(img.classList.contains("fullsize")).toBe(false);
+  });
+
+  it("renders images attached to a user message", () => {
+    ml.handleUserMessage({ content: "look at this", images: [{ mimeType: "image/webp", data: "AAA" }] });
+    const img = container.querySelector(".message.user img")!;
+    expect(img.getAttribute("src")).toBe("data:image/webp;base64,AAA");
+  });
+
+  it("skipped (oversized) images render a note, never an <img>", () => {
+    ml.handleToolCall({ name: "read", args: "{}" });
+    ml.handleToolResult({
+      name: "read",
+      output: "ok",
+      images: [{ mimeType: "image/png", skipped: true, note: "image too large to display (9.0MB base64 > 8MB cap)" }],
+    });
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector(".image-skipped")!.textContent).toContain("too large");
+  });
+
+  it("rejects non-image mimeTypes on the wire", () => {
+    ml.handleUserMessage({ content: "hi", images: [{ mimeType: "text/html", data: "PHNjcmlwdD4=" }] });
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.innerHTML).not.toContain("<script");
+    expect(container.querySelector(".image-skipped")!.textContent).toContain("unsupported");
+  });
+
+  it("log replay renders entry images", () => {
+    ml.renderLogEntries([
+      { source: "tool_result", tool_name: "read", content: "Image: x.png", images: [{ mimeType: "image/png", data: PNG_B64 }] },
+    ] as any);
+    // No preceding tool call block: images only attach to a matched block,
+    // so nothing renders (matches existing no-match behavior).
+    expect(container.querySelector("img")).toBeNull();
+    ml.renderLogEntries([
+      { source: "llm", content: "", tool_calls: [{ id: "t1", name: "read", arguments: "{}" }] },
+      { source: "tool_result", tool_name: "read", content: "Image: x.png", images: [{ mimeType: "image/png", data: PNG_B64 }] },
+    ] as any);
+    expect(container.querySelector("img")!.getAttribute("src")).toBe(`data:image/png;base64,${PNG_B64}`);
   });
 });

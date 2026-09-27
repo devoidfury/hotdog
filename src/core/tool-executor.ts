@@ -313,7 +313,13 @@ export class ToolExecutor {
   ): Promise<ToolResult> {
     // Content goes out as-is: UI handlers decide how (or whether) to show a
     // tool result; core prescribes no rendering for them.
-    this.#deps.emitOutput("tool_result", { toolName, input, content, toolCallId });
+    this.#deps.emitOutput("tool_result", {
+      toolName,
+      input,
+      content,
+      toolCallId,
+      ...(images && images.length > 0 ? { images } : {}),
+    });
     const msg = new Message({
       role: "tool",
       content: content as string | Array<unknown>,

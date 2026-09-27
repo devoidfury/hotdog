@@ -1094,6 +1094,32 @@ body {
     display: none;
 }
 
+.attachment-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    padding: 6px 12px;
+    margin: 4px 0;
+    font-size: 0.85rem;
+}
+
+.attachment-box summary {
+    cursor: pointer;
+    color: var(--accent);
+}
+
+.attachment-box .attachment-content {
+    margin: 8px 0 4px;
+    padding: 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
 .message.question {
     align-self: flex-start;
 }
@@ -1546,4 +1572,302 @@ body {
 
 .context-menu-item-danger:hover {
     background: var(--error-soft);
+}
+
+/* ── Images in messages (read-tool output, file attachments) ─────────────── */
+.message-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.message-image {
+    max-width: 240px;
+    max-height: 180px;
+    border-radius: var(--radius, 8px);
+    border: 1px solid var(--border);
+    cursor: zoom-in;
+    object-fit: contain;
+}
+
+.message-image.fullsize {
+    max-width: 100%;
+    max-height: none;
+    cursor: zoom-out;
+}
+
+.image-skipped {
+    font-size: 0.8rem;
+    font-style: italic;
+    color: var(--text-secondary, #888);
+}
+
+/* ── Composer file uploads ────────────────────────────────────────────────── */
+#attachment-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+#attachment-chips:empty {
+    display: none;
+}
+
+.attachment-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-secondary, #2a2a2a);
+    font-size: 0.8rem;
+    max-width: 240px;
+}
+
+.attachment-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.attachment-size {
+    color: var(--text-secondary, #888);
+    flex-shrink: 0;
+}
+
+.attachment-remove {
+    border: none;
+    background: none;
+    color: var(--text-secondary, #888);
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.attachment-remove:hover {
+    color: var(--error, #e55);
+}
+
+#attach-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    background: var(--bg-secondary, #2a2a2a);
+    color: var(--text, inherit);
+    cursor: pointer;
+}
+
+#attach-btn:hover:not(:disabled) {
+    background: var(--bg-active, #3a3a3a);
+}
+
+#attach-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ── Subagents strip + overlay panels ────────────────────────────────────── */
+
+#subagents-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-primary);
+}
+
+.subagents-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-right: 4px;
+}
+
+.subagent-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 420px;
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.subagent-chip:hover {
+    background: var(--bg-hover);
+}
+
+.subagent-chip.open {
+    border-color: var(--accent);
+}
+
+.subagent-chip .subagent-id {
+    font-family: var(--font-mono);
+    color: var(--accent);
+}
+
+.subagent-chip .subagent-desc {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+}
+
+.subagent-status {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+}
+
+.status-running .subagent-status,
+.subagent-chip.status-running .subagent-status {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.status-completed .subagent-status,
+.subagent-chip.status-completed .subagent-status {
+    background: var(--success-soft);
+    color: var(--success);
+}
+
+.status-failed .subagent-status,
+.subagent-chip.status-failed .subagent-status {
+    background: var(--error-soft);
+    color: var(--error);
+}
+
+.status-cancelled .subagent-status,
+.subagent-chip.status-cancelled .subagent-status {
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+}
+
+.subagent-elapsed {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.task-overlay {
+    position: fixed;
+    top: 12%;
+    right: 4%;
+    width: min(620px, 88vw);
+    max-height: 74vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+}
+
+.task-overlay-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.task-overlay-title {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.task-overlay-elapsed {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.task-overlay-close {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.task-overlay-close:hover {
+    color: var(--text-primary);
+}
+
+.task-overlay-desc {
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.task-overlay-body {
+    overflow-y: auto;
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.task-act {
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.task-act-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.task-act-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.task-act-name {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    margin-bottom: 2px;
+}
+
+.task-act-result.error .task-act-name {
+    color: var(--error);
+}
+
+.task-act-pre {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 160px;
+    overflow-y: auto;
+    color: var(--text-secondary);
 }

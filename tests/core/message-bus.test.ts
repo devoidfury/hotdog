@@ -847,3 +847,63 @@ describe("MessageBus.executeCommand — session-mutating guard", () => {
     expect(dispatched).toBe(true);
   });
 });
+
+describe("MessageBus — webui upload seam", () => {
+  it("survives the queue boundary as file-include parts and rides agent.run images", async () => {
+    const runArgs: Array<unknown> = [];
+    const agent = createMockAgent({
+      run: async (text, images, opts) => { runArgs.push(text, images, opts); },
+    });
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    const images = [{ type: "image_url" as const, mimeType: "image/png", data: "QUJD" }];
+    const parts = [
+      { type: "untrusted", text: "look at this" },
+      { type: "file-include", path: "notes.md", content: "# hi" },
+    ];
+    // Exactly what the websocket server enqueues for an upload: harness
+    // provenance (so sanitizeQueuedContent keeps the parts) plus images.
+    bus.enqueue(parts, { source: "harness", images });
+    expect(bus.queueItems[0]!.content).toEqual(parts);
+    expect(bus.queueItems[0]!.images).toEqual(images);
+
+    await bus._processMessage(bus.queueItems[0]!);
+    expect(runArgs).toEqual([parts, images, { source: "harness" }]);
+  });
+
+  it("an INPUT transform's images override queued upload images", async () => {
+    const runArgs: Array<unknown> = [];
+    const hookImages = [{ type: "image_url" as const, mimeType: "image/gif", data: "R0lG" }];
+    const agent = createMockAgent({
+      run: async (text, images, opts) => { runArgs.push(text, images, opts); },
+      hooks: {
+        runHookPipeline: async (_hook: string, data: unknown) => {
+          Object.assign(data as object, { action: "transform", content: "transformed", images: hookImages });
+          return { stopped: false };
+        },
+      },
+    });
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    bus.enqueue("text", {
+      source: "harness",
+      images: [{ type: "image_url", mimeType: "image/png", data: "QUJD" }],
+    });
+    await bus._processMessage(bus.queueItems[0]!);
+    expect(runArgs[1]).toEqual(hookImages);
+  });
+
+  it("items carrying images skip the steering shortcut (no images seam there)", async () => {
+    let steerCalls = 0;
+    const agent = createMockAgent({});
+    (agent as { steer?: () => void }).steer = () => { steerCalls++; };
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    bus.isRunning = true;
+    bus.enqueue([{ type: "file-include", path: "a.md", content: "x" }], {
+      steering: true,
+      source: "harness",
+      images: [{ type: "image_url", mimeType: "image/png", data: "QUJD" }],
+    });
+    expect(steerCalls).toBe(0);
+    expect(bus.queueItems).toHaveLength(1);
+    bus.isRunning = false;
+  });
+});

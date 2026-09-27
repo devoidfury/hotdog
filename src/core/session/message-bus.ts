@@ -1,6 +1,6 @@
 import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
-import { contentToText, type Message, type MessageSource } from "../context/message.ts";
+import { contentToText, type ImageAttachment, type Message, type MessageSource } from "../context/message.ts";
 import { repairToolCalls } from "../context/repair.ts";
 import { HOOKS } from "../hooks.ts";
 import type { HookPayloads } from "../extensions/types.ts";
@@ -55,11 +55,13 @@ export interface MessageBusAgent {
 /**
  * A queued bus message. `content` is plain text or content parts (so harness
  * messages can carry `untrusted` parts, mangled only at the wire); `source`
- * carries provenance to the agent.
+ * carries provenance to the agent. `images` ride Agent.run's images field
+ * (webui uploads; INPUT-transform images override them).
  */
 export interface BusQueueItem {
   content: string | Array<Record<string, unknown>>;
   source?: MessageSource;
+  images?: ImageAttachment[];
 }
 
 export interface Sink {
@@ -139,18 +141,20 @@ export class MessageBus {
 
   enqueue(
     content: string | Array<Record<string, unknown>>,
-    opts?: { source?: MessageSource; steering?: boolean },
+    opts?: { source?: MessageSource; steering?: boolean; images?: ImageAttachment[] },
   ): void {
     const clean = sanitizeQueuedContent(content, opts?.source);
     const agent = this.#sessionManager.getAgent();
-    if (opts?.steering && this.#isRunning && agent?.steer) {
+    if (opts?.steering && !opts?.images && this.#isRunning && agent?.steer) {
       // Same processing as any other message only the delivery slot differs:
       // the agent's steering queue, drained before the next LLM call, instead of waiting for a run-loop slot.
       // The chain preserves submission order across async pipelines.
+      // Items carrying images never take this path: steering has no images
+      // seam, so they queue and ride the next Agent.run instead of being dropped.
       this.#steerChain = this.#steerChain.then(() => this.#deliverSteering(agent, clean, opts?.source));
       return;
     }
-    this.#queue.push({ content: clean, source: opts?.source });
+    this.#queue.push({ content: clean, source: opts?.source, images: opts?.images });
     this._wakeWaiter();
   }
 
@@ -367,7 +371,7 @@ export class MessageBus {
     agent: MessageBusAgent,
     content: string | Array<Record<string, unknown>>,
     source: MessageSource | undefined,
-  ): Promise<{ content: string | Array<Record<string, unknown>>; handled: boolean }> {
+  ): Promise<{ content: string | Array<Record<string, unknown>>; images?: ImageAttachment[]; handled: boolean }> {
     if (!agent.hooks) return { content, handled: false };
 
     const inputData: InputPipelineData = {
@@ -391,13 +395,16 @@ export class MessageBus {
           typeof inputData.content === "string" && Array.isArray(content)
             ? [{ type: "untrusted", text: inputData.content }]
             : inputData.content,
+        // Images adopted from the hook ride the message's `images` (see Agent.run); not inlined into content parts.
+        images: inputData.images,
         handled: false,
       };
     }
     return { content, handled: false };
   }
 
-  /** Steering delivery: INPUT pipeline, then the agent's steering seam. */
+  /** Steering delivery: INPUT pipeline, then the agent's steering seam.
+   * Steering has no images seam; a transform's images are dropped here. */
   async #deliverSteering(
     agent: MessageBusAgent,
     content: string | Array<Record<string, unknown>>,
@@ -443,6 +450,9 @@ export class MessageBus {
       return;
     }
     content = piped.content;
+    // Images adopted from an INPUT transform ride Agent.run's images field;
+    // queue-item images (webui uploads) fill in when no transform adopted any.
+    const images = piped.images ?? (typeof item === "string" ? undefined : item.images);
 
     // Provider-lane gate: take a slot on the agent's CURRENT model lane before
     // the turn runs (see turn-lanes.ts). The lane is decided here, not at bus
@@ -458,7 +468,7 @@ export class MessageBus {
     }
 
     try {
-      await agent.run(content, undefined, source ? { source } : undefined);
+      await agent.run(content, images, source ? { source } : undefined);
     } catch (e: unknown) {
       // Suppress cancellation errors on interrupt — the UI already
       // prints an "Interrupted" message, so the full error is noise.

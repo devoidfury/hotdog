@@ -283,6 +283,21 @@ export function findModelEntry<T extends Partial<ModelConfig>>(
 }
 
 /**
+ * Whether a model accepts image input. Unknown model (no registry entry) fails closed:
+ * sending images to a text-only model is a guaranteed API error.
+ * Shared by file-attachment (@refs) and the webui upload path.
+ */
+export function modelAcceptsImages(
+  modelName: string | undefined | null,
+  modelRegistry: Record<string, ModelConfig> | undefined | null,
+): boolean {
+  if (!modelName || !modelRegistry) return false;
+  const entry = findModelEntry(modelName, modelRegistry);
+  if (!entry) return false;
+  return entry.capabilities?.vision === true || (entry.inputModalities?.includes("image") ?? false);
+}
+
+/**
  * Whether a catalog entry can serve as the session's main model: when modalities
  * are declared, they must include text in AND text out. Progressive enhancement:
  * entries with no modality data pass (unknown caps never exclude).

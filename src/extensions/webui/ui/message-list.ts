@@ -43,12 +43,22 @@ function dbgTree(label: string, tree: MdDocument): void {
   console.log(`[streaming #${_debugSeq++}] ${label}  blocks=${tree.children.length}  ${summary}`);
 }
 
-interface UserMessage { content: string; }
+// Image payload on the wire (see wireImages in @extensions/websocket/
+// protocol.ts): base64 without data: prefix; oversized images arrive as
+// { skipped, note } with no data.
+export interface UiImage {
+  mimeType: string;
+  data?: string;
+  skipped?: boolean;
+  note?: string;
+}
+
+interface UserMessage { content: string; images?: UiImage[]; }
 interface AssistantMessage { content: string; }
 interface StreamingChunk { content: string; }
 interface ThinkingMessage { content: string; }
 interface ToolCallMessage { name: string; args: string; }
-interface ToolResultMessage { name: string; output?: string; error?: string; }
+interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
 
@@ -57,7 +67,7 @@ interface CommandResultMessage { content: string; }
 interface LogEntry {
   source: string;
   content: string | Array<Record<string, unknown>>;
-  images?: Array<{ url: string }>;
+  images?: UiImage[];
   reasoning_content?: string | null;
   tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> | null;
   tool_call_id?: string | null;
@@ -128,7 +138,7 @@ export interface MessageListManager {
   /** Append a system notice (e.g. profile switched). Input must be a trusted display name. */
   addSystemMessage: (text: string) => void;
   /** Render a server system message (profile switched, tool-call repair notices, ...). */
-  handleSystemMessage: (data: { content?: string; detail?: string }) => void;
+  handleSystemMessage: (data: { content?: string; files?: Array<{ path: string; content: string }> }) => void;
   /** Detach the container's scroll listener. The #message-list div outlives the chat across logins, so the owner must call this before dropping the manager. */
   destroy: () => void;
   /** Render a batch of session log entries (for viewing cold session logs). */
@@ -247,8 +257,44 @@ export function createMessageList(
     dbg("updateMdDom done", { removed, rendered, finalBlockCount: totalBlocks });
   }
 
+  // ── Images ────────────────────────────────────────────────────────────────
+  /**
+   * Append image payloads to a message block as data-URL thumbnails (click
+   * toggles full size). Built with createElement + setAttribute, never
+   * innerHTML, so no markup ever comes from the wire; mimeTypes that are not
+   * images are rejected outright (a data: URL is still a URL).
+   */
+  function appendImages(parent: HTMLElement, images?: UiImage[]): void {
+    if (!images || images.length === 0) return;
+    const wrap = document.createElement("div");
+    wrap.className = "message-images";
+    for (const img of images) {
+      if (img.skipped || !img.data) {
+        const note = document.createElement("div");
+        note.className = "image-skipped";
+        note.textContent = img.note || "image not displayed";
+        wrap.appendChild(note);
+        continue;
+      }
+      if (!img.mimeType.startsWith("image/")) {
+        const note = document.createElement("div");
+        note.className = "image-skipped";
+        note.textContent = `unsupported image type: ${img.mimeType}`;
+        wrap.appendChild(note);
+        continue;
+      }
+      const el = document.createElement("img");
+      el.className = "message-image";
+      el.setAttribute("src", `data:${img.mimeType};base64,${img.data}`);
+      el.setAttribute("loading", "lazy");
+      el.addEventListener("click", () => el.classList.toggle("fullsize"));
+      wrap.appendChild(el);
+    }
+    parent.appendChild(wrap);
+  }
+
   // ── Message Handlers ──────────────────────────────────────────────────────
-  function handleUserMessage({ content }: UserMessage): void {
+  function handleUserMessage({ content, images }: UserMessage): void {
     // Close any in-flight assistant/thinking element first in case an interruption occurred;
     // without this the next turn's streaming chunks resume the stale element above this message.
     finalizeAssistant();
@@ -262,6 +308,7 @@ export function createMessageList(
     contentEl.className = "content";
     contentEl.textContent = content;
     bubble.appendChild(contentEl);
+    appendImages(bubble, images);
     el.appendChild(bubble);
 
     container.appendChild(el);
@@ -363,7 +410,7 @@ export function createMessageList(
     scrollBottom();
   }
 
-  function handleToolResult({ name, output, error }: ToolResultMessage): void {
+  function handleToolResult({ name, output, error, images }: ToolResultMessage): void {
     // Attach the result to the most recent matching tool call block.
     const blocks = container.querySelectorAll<HTMLDivElement>(".tool-call-block");
     let target: HTMLDivElement | null = null;
@@ -388,6 +435,9 @@ export function createMessageList(
           output.slice(0, 2000) + "\n\n<click to show full response>";
       else if (error) body.textContent = `Error: ${error}`;
     }
+    // Thumbnails live under the block (outside the collapsed body) so they
+    // stay visible; images never render as raw markup (see appendImages).
+    if (images && images.length > 0) appendImages(target, images);
     scrollBottom();
   }
 
@@ -778,7 +828,7 @@ export function createMessageList(
       switch (entry.source) {
         case "input":
         case "prompt":
-          handleUserMessage({ content });
+          handleUserMessage({ content, images: entry.images });
           break;
         case "llm": {
           if (entry.reasoning_content?.trim()) {
@@ -806,6 +856,7 @@ export function createMessageList(
             name:
               (entry as { tool_name?: string | null }).tool_name || extractToolNameFromEntry(entry),
             output: content,
+            images: entry.images,
           });
           break;
         case "compaction":
@@ -822,10 +873,25 @@ export function createMessageList(
   }
 
   /** Append a system notice bubble from a server system message. */
-  function handleSystemMessage(data: { content?: string; detail?: string }): void {
+  function handleSystemMessage(data: {
+    content?: string;
+    files?: Array<{ path: string; content: string }>;
+  }): void {
     const el = document.createElement("div");
     el.className = "message system-message";
-    el.innerHTML = `<span class="message-role system-label">System</span><div class="message-content"><p>${sanitize(data.content ?? "")}</p></div>`;
+    const files = Array.isArray(data.files) ? data.files : [];
+    // Attachments render as a collapsible box (path summary, escaped content
+    // inside); the prose content line would only duplicate the path summary.
+    const body = files.length > 0
+      ? files
+          .map(
+            (f) =>
+              `<details class="attachment-box"><summary>file attached: ${sanitize(f.path)}</summary>` +
+              `<pre class="attachment-content">${sanitize(f.content)}</pre></details>`,
+          )
+          .join("")
+      : `<p>${sanitize(data.content ?? "")}</p>`;
+    el.innerHTML = `<span class="message-role system-label">System</span><div class="message-content">${body}</div>`;
     container.appendChild(el);
     scrollBottom();
   }

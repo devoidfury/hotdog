@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { WebSocketChannel } from "@extensions/websocket/websocket-channel.ts";
 import { ChannelSessionManager } from "@core/channel.ts";
 import { OUTPUT_EVENT, OutputEvent } from "@core/context/output.ts";
-import { S2C } from "@extensions/websocket/protocol.ts";
+import { S2C, MAX_WIRE_IMAGE_BASE64_BYTES, wireImages } from "@extensions/websocket/protocol.ts";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -259,16 +259,30 @@ describe("WebSocketChannel - write()", () => {
       expected: (msg: any) => {
         expect(msg.type).toBe(S2C.SYSTEM_MESSAGE);
         expect(msg.content).toBe("notice");
-        expect(msg.detail).toBe("expanded detail");
+        // detail is gone from the wire: unknown fields are dropped.
+        expect(msg.detail).toBeUndefined();
       },
     },
     {
-      name: "SYSTEM_MESSAGE without detail",
+      name: "SYSTEM_MESSAGE with file attachments",
+      event: {
+        type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+        content: "- file attached: src/a.ts",
+        files: [{ path: "src/a.ts", content: "export const a = 1;" }],
+      },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.SYSTEM_MESSAGE);
+        expect(msg.content).toBe("- file attached: src/a.ts");
+        expect(msg.files).toEqual([{ path: "src/a.ts", content: "export const a = 1;" }]);
+      },
+    },
+    {
+      name: "SYSTEM_MESSAGE without attachments",
       event: { type: OUTPUT_EVENT.SYSTEM_MESSAGE, content: "notice" },
       expected: (msg: any) => {
         expect(msg.type).toBe(S2C.SYSTEM_MESSAGE);
         expect(msg.content).toBe("notice");
-        expect(msg.detail).toBeUndefined();
+        expect(msg.files).toBeUndefined();
       },
     },
   ])("maps $name events to protocol", ({ event, expected }) => {
@@ -560,5 +574,100 @@ describe("WebSocketChannel - TASK_PROGRESS without message", () => {
     expect(msg.taskId).toBe("task-1");
     expect(msg.status).toBe("done");
     expect(msg.message).toBeUndefined();
+  });
+});
+
+// ── Images on the wire ──────────────────────────────────────────────────────
+
+describe("WebSocketChannel - image payloads", () => {
+  function sendEvent(event: Record<string, unknown>): any {
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, handler) => {
+        handler(event as any);
+        return () => {};
+      }),
+    });
+    const ws = createMockWs();
+    new WebSocketChannel({ sessionManager: sm, ws, sessionId: "session-1" });
+    const sent = (ws as any)._sentMessages;
+    return sent.length > 0 ? JSON.parse(sent[0]) : undefined;
+  }
+
+  it("serializes toolResult images as { mimeType, data }", () => {
+    const msg = sendEvent({
+      type: OUTPUT_EVENT.TOOL_RESULT,
+      toolName: "read",
+      content: "Image: photo.png (image/png, 1.0KB)",
+      toolCallId: "tc-1",
+      images: [{ type: "image_url", mimeType: "image/png", data: "aGVsbG8=" }],
+    });
+    expect(msg.type).toBe(S2C.TOOL_RESULT);
+    expect(msg.images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+  });
+
+  it("serializes userMessage images (file-attachment)", () => {
+    const msg = sendEvent({
+      type: OUTPUT_EVENT.USER_MESSAGE,
+      content: "look at @pic.jpg",
+      images: [{ type: "image_url", mimeType: "image/jpeg", data: "aW1hZ2U=" }],
+    });
+    expect(msg.type).toBe(S2C.USER_MESSAGE);
+    expect(msg.images).toEqual([{ mimeType: "image/jpeg", data: "aW1hZ2U=" }]);
+  });
+
+  it("omits the images field when there are no images", () => {
+    const msg = sendEvent({
+      type: OUTPUT_EVENT.TOOL_RESULT,
+      toolName: "bash",
+      content: "ok",
+      toolCallId: "tc-2",
+    });
+    expect(msg.images).toBeUndefined();
+  });
+
+  it("caps oversized base64 with a placeholder note instead of the payload", () => {
+    const huge = "A".repeat(MAX_WIRE_IMAGE_BASE64_BYTES + 1);
+    const msg = sendEvent({
+      type: OUTPUT_EVENT.TOOL_RESULT,
+      toolName: "read",
+      content: "Image: big.png",
+      toolCallId: "tc-3",
+      images: [{ type: "image_url", mimeType: "image/png", data: huge }],
+    });
+    expect(msg.images).toHaveLength(1);
+    expect(msg.images[0].skipped).toBe(true);
+    expect(msg.images[0].data).toBeUndefined();
+    expect(msg.images[0].note).toContain("too large");
+  });
+});
+
+describe("wireImages()", () => {
+  it("passes well-formed ImageAttachments through (type field dropped)", () => {
+    expect(
+      wireImages([{ type: "image_url", mimeType: "image/webp", data: "eA==" }]),
+    ).toEqual([{ mimeType: "image/webp", data: "eA==" }]);
+  });
+
+  it("normalizes the legacy data-URL form", () => {
+    expect(wireImages([{ url: "data:image/gif;base64,R0lGOD" }])).toEqual([
+      { mimeType: "image/gif", data: "R0lGOD" },
+    ]);
+  });
+
+  it("defaults a missing mimeType to image/png and drops entries without data", () => {
+    expect(wireImages([{ type: "image_url", data: "YQ==" }])).toEqual([
+      { mimeType: "image/png", data: "YQ==" },
+    ]);
+    expect(wireImages([{ type: "image_url", mimeType: "image/png" }])).toBeUndefined();
+    expect(wireImages([])).toBeUndefined();
+    expect(wireImages(undefined)).toBeUndefined();
+    expect(wireImages("nonsense")).toBeUndefined();
+  });
+
+  it("skips images over the cap with a note", () => {
+    const out = wireImages([{ mimeType: "image/png", data: "x".repeat(100) }], 50);
+    expect(out).toEqual([
+      { mimeType: "image/png", skipped: true, note: expect.stringContaining("too large") },
+    ]);
   });
 });

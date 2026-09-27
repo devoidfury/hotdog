@@ -9,9 +9,27 @@ import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@c
 import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 
 import { matcher, completion } from "./completions.ts";
+import { modelAcceptsImages } from "@core/config/providers.ts";
+import type { ImageAttachment } from "@core/context/message.ts";
 
 // Lookbehind so "tom@furycodes.com" doesn't match; only bare @path refs do.
 const FILE_REF_RE = /(?<!\w)@([a-zA-Z0-9._\/\+-]+)\b/g;
+
+/** Image refs ride the Message `images` field instead of inlining (utf-8 would corrupt them).
+ * Extension doubles as the MIME guess; content sniffing deliberately skipped. */
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+
+function imageMimeType(filePath: string): string | null {
+  const dot = filePath.lastIndexOf(".");
+  if (dot < 0) return null;
+  return IMAGE_MIME[filePath.slice(dot + 1).toLowerCase()] ?? null;
+}
 
 /**
  * Returns null when the path is rejected by the workspace boundary, or when
@@ -39,11 +57,16 @@ export function resolveFilePath(filePath: string, workspace: Workspace | null): 
   return resolveAbs(cwd(), filePath);
 }
 
+/** A text file's content, or an image encoded for the Message images field. */
+type AttachedFile =
+  | { kind: "text"; path: string; content: string }
+  | { kind: "image"; path: string; image: ImageAttachment };
+
 async function readFileContent(
   resolvedPath: string,
   requestedPath: string,
   maxFileSize: number,
-): Promise<{ content: string; path: string } | null> {
+): Promise<AttachedFile | null> {
   try {
     const stats = await fsPromises.stat(resolvedPath);
 
@@ -57,10 +80,21 @@ async function readFileContent(
       return null;
     }
 
+    const mimeType = imageMimeType(resolvedPath);
+    if (mimeType) {
+      // Binary: base64, never utf-8 (decoding binary as text corrupts it).
+      const buf = await fsPromises.readFile(resolvedPath);
+      return {
+        kind: "image",
+        path: requestedPath,
+        image: { type: "image_url", mimeType, data: buf.toString("base64") },
+      };
+    }
+
     const content = await fsPromises.readFile(resolvedPath, "utf-8");
-    return { content, path: requestedPath };
+    return { kind: "text", path: requestedPath, content };
   } catch (e) {
-    logger.debug(`file-attachment: failed to read '${requestedPath}': ${(e as Error).message}`);
+    logger.debug(`file-attachment: failed to read '${requestedPath}': ${formatError(e)}`);
     return null;
   }
 }
@@ -70,11 +104,13 @@ async function expandFileReferences(
   workspace: Workspace | null,
   maxFileSize: number,
   maxFiles: number,
+  vision: boolean,
 ): Promise<{
   content: Array<Record<string, unknown>>;
-  attachedFiles: Array<{ content: string; path: string }>;
+  attachedFiles: AttachedFile[];
 } | null> {
-  const attachedFiles: Array<{ content: string; path: string }> = [];
+  const attachedFiles: AttachedFile[] = [];
+  const skippedImages: string[] = [];
 
   // Reset regex lastIndex before using it (global regex maintains state)
   FILE_REF_RE.lastIndex = 0;
@@ -90,9 +126,20 @@ async function expandFileReferences(
   let boundaryRejections = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = FILE_REF_RE.exec(text)) !== null && attachedFiles.length + errors.length < maxFiles) {
+  while (
+    (match = FILE_REF_RE.exec(text)) !== null &&
+    attachedFiles.length + skippedImages.length + errors.length < maxFiles
+  ) {
     const requestedPath = match[1];
     if (!requestedPath) continue;
+
+    // Vision gate before any read: a non-vision model never gets image bytes.
+    if (imageMimeType(requestedPath) !== null && !vision) {
+      logger.debug(`file-attachment: '${requestedPath}' is an image but the model has no vision, skipping`);
+      skippedImages.push(requestedPath);
+      continue;
+    }
+
     const resolvedPath = resolveFilePath(requestedPath, workspace);
 
     if (resolvedPath === null) {
@@ -110,9 +157,9 @@ async function expandFileReferences(
   }
 
   // If no files were found and nothing was rejected, return the input
-  // unchanged. Boundary rejections are the exception: they always get a
-  // note, even when nothing attached.
-  if (attachedFiles.length === 0 && boundaryRejections === 0) {
+  // unchanged. Boundary rejections and vision-skipped images are the
+  // exception: they always get a note, even when nothing attached.
+  if (attachedFiles.length === 0 && boundaryRejections === 0 && skippedImages.length === 0) {
     return null;
   }
 
@@ -123,12 +170,20 @@ async function expandFileReferences(
   // harness text: a plain part, mangled only where the message says so.
   const content: Array<Record<string, unknown>> = [{ type: "untrusted", text }];
   for (const file of attachedFiles) {
+    // Images ride the transform's `images` field, never a content part.
+    if (file.kind === "image") continue;
     content.push({ type: "file-include", path: file.path, content: file.content });
   }
   if (errors.length > 0) {
     content.push({
       type: "text",
       text: `[File attachment note: could not read the following files: ${errors.join(", ")}]`,
+    });
+  }
+  if (skippedImages.length > 0) {
+    content.push({
+      type: "text",
+      text: `[File attachment note: skipped image attachments (current model does not accept image input): ${skippedImages.join(", ")}]`,
     });
   }
 
@@ -163,18 +218,35 @@ export function create(core: CoreContext): ExtensionInstance {
         const deny = agent?.config?.workspaceDeny as readonly string[] | null | undefined;
         const workspace = deny != null ? new Workspace(roots, deny) : new Workspace(roots);
 
-        const result = await expandFileReferences(text, workspace, maxFileSize, maxFiles);
+        const result = await expandFileReferences(
+          text,
+          workspace,
+          maxFileSize,
+          maxFiles,
+          // agent is optional here (same as agent?.config above); an unknown
+          // model fails closed -- no images to a model we can't verify.
+          modelAcceptsImages(agent?.model, agent?.modelRegistry),
+        );
 
         if (result) {
           const sink = agent?.sink;
           for (const file of result.attachedFiles) {
+            // Images: list the path only -- base64 must never be dumped into a UI.
+            const content = file.kind === "image" ? "" : file.content;
             sink?.emit({
               type: OUTPUT_EVENT.SYSTEM_MESSAGE,
               content: `- file attached: ${file.path}`,
-              detail: file.content,
+              files: [{ path: file.path, content }],
             });
           }
-          return { action: "transform", content: result.content };
+          const images = result.attachedFiles
+            .filter((f): f is Extract<AttachedFile, { kind: "image" }> => f.kind === "image")
+            .map((f) => f.image);
+          return {
+            action: "transform",
+            content: result.content,
+            ...(images.length > 0 ? { images } : {}),
+          };
         }
 
         return { action: "continue" };

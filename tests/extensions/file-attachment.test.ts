@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { create, resolveFilePath } from "@extensions/file-attachment/index.ts";
 import { contentToText, Message } from "@core/context/message.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { MessageBus } from "@core/session/message-bus.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { MarkerMangler, buildAliasPattern, CORE_PROTECTED_PREFIXES } from "@core/marker-mangler.ts";
@@ -615,6 +616,26 @@ describe("file-attachment extension", () => {
     ]);
   });
 
+  it("emits SYSTEM_MESSAGE with a typed files field, not prose+detail", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "typed.txt"), "TYPED-CONTENT");
+
+    const emitted: Array<Record<string, unknown>> = [];
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const hook = create(core).hooks![HOOKS.INPUT]!;
+    const result = await hook({
+      text: "look at @typed.txt",
+      agent: { sink: { emit: (e: Record<string, unknown>) => emitted.push(e) } },
+    } as any);
+
+    expect((result as { action: string }).action).toBe("transform");
+    const sys = emitted.find((e) => e.type === OUTPUT_EVENT.SYSTEM_MESSAGE);
+    expect(sys).toBeDefined();
+    expect(sys!.content).toBe("- file attached: typed.txt");
+    expect(sys!.files).toEqual([{ path: "typed.txt", content: "TYPED-CONTENT" }]);
+    // The old prose+detail channel is gone: raw content never rides as detail.
+    expect(sys!.detail).toBeUndefined();
+  });
+
   // End-to-end across the three layers the wrapper design spans: hook ->
   // bus -> wire. This is where the security property actually holds: the
   // file data reaches the model mangled, the wrapper tag reaches it real.
@@ -677,6 +698,213 @@ describe("file-attachment extension", () => {
     expect(xml.match(buildAliasPattern())).not.toBeNull();
   });
 
+});
+
+// 1x1 transparent PNG.
+const TINY_PNG_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+function visionRegistry(kind: "capabilities" | "modalities" | "none"): Record<string, unknown> {
+  if (kind === "capabilities") return { "prov/m": { capabilities: { vision: true } } };
+  if (kind === "modalities") return { "prov/m": { inputModalities: ["text", "image"] } };
+  return { "prov/m": { capabilities: {}, inputModalities: ["text"] } };
+}
+
+describe("file-attachment image refs (vision)", () => {
+  let tmpDir: string;
+  let originalCwd: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-attach-image-"));
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+  });
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } }, completion: createCompletionService() } as any;
+
+  it("attaches a PNG ref as an images-field image, not a text part", async () => {
+    const bytes = Buffer.from(TINY_PNG_B64, "base64");
+    await fsPromises.writeFile(path.join(tmpDir, "pixel.png"), bytes);
+
+    const hook = create(core).hooks![HOOKS.INPUT]!;
+    const result = (await hook({
+      text: "what is in @pixel.png",
+      agent: { model: "prov/m", modelRegistry: visionRegistry("capabilities") },
+    } as any)) as { action: string; content: Parts; images?: Array<Record<string, unknown>> };
+
+    expect(result.action).toBe("transform");
+    // Binary survives intact: base64 round-trips to the exact file bytes.
+    expect(result.images).toEqual([
+      { type: "image_url", mimeType: "image/png", data: TINY_PNG_B64 },
+    ]);
+    expect(Buffer.from(result.images![0]!.data as string, "base64").equals(bytes)).toBe(true);
+    // No file-include part and no utf-8 mojibake in the content parts.
+    expect(fileIncludeParts(result.content)).toEqual([]);
+    expect(result.content[0]).toEqual({ type: "untrusted", text: "what is in @pixel.png" });
+  });
+
+  it("accepts vision via inputModalities too, and maps jpeg/webp/gif MIME types", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "a.jpg"), Buffer.from(TINY_PNG_B64, "base64"));
+    await fsPromises.writeFile(path.join(tmpDir, "b.webp"), Buffer.from("webpbytes"));
+    await fsPromises.writeFile(path.join(tmpDir, "c.GIF"), Buffer.from("gifbytes"));
+
+    const hook = create(core).hooks![HOOKS.INPUT]!;
+    const result = (await hook({
+      text: "@a.jpg @b.webp @c.GIF",
+      agent: { model: "prov/m", modelRegistry: visionRegistry("modalities") },
+    } as any)) as { images: Array<Record<string, unknown>> };
+
+    expect(result.images.map((i) => i.mimeType)).toEqual(["image/jpeg", "image/webp", "image/gif"]);
+    expect(result.images[1]!.data).toBe(Buffer.from("webpbytes").toString("base64"));
+  });
+
+  it("skips images with a note when the model has no vision", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "pixel.png"), Buffer.from(TINY_PNG_B64, "base64"));
+
+    const hook = create(core).hooks![HOOKS.INPUT]!;
+    const result = (await hook({
+      text: "what is in @pixel.png",
+      agent: { model: "prov/m", modelRegistry: visionRegistry("none") },
+    } as any)) as { action: string; content: Parts; images?: unknown };
+
+    expect(result.action).toBe("transform");
+    expect(result.images).toBeUndefined();
+    const note = result.content.find((p) => p.type === "text") as { text: string };
+    expect(note.text).toContain("File attachment note");
+    expect(note.text).toContain("does not accept image input");
+    expect(note.text).toContain("pixel.png");
+    // No base64 anywhere in the harness note either.
+    expect(JSON.stringify(result.content)).not.toContain(TINY_PNG_B64);
+  });
+
+  it("fails closed when the model is unknown to the registry", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "pixel.png"), Buffer.from(TINY_PNG_B64, "base64"));
+
+    const hook = create(core).hooks![HOOKS.INPUT]!;
+    const result = (await hook({
+      text: "@pixel.png",
+      agent: { model: "prov/unknown", modelRegistry: visionRegistry("none") },
+    } as any)) as { content: Parts; images?: unknown };
+
+    expect(result.images).toBeUndefined();
+    const note = result.content.find((p) => p.type === "text") as { text: string };
+    expect(note.text).toContain("does not accept image input");
+  });
+
+  it("skips an oversized image via the maxFileSize cap", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "big.png"), Buffer.from(TINY_PNG_B64, "base64"));
+    await fsPromises.writeFile(path.join(tmpDir, "ok.txt"), "OK");
+
+    const smallCore = { config: { fileAttachment: { maxFileSize: 8, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const hook = create(smallCore).hooks![HOOKS.INPUT]!;
+    const result = (await hook({
+      text: "@ok.txt @big.png",
+      agent: { model: "prov/m", modelRegistry: visionRegistry("capabilities") },
+    } as any)) as { content: Parts; images?: unknown };
+
+    expect(result.images).toBeUndefined();
+    const note = result.content.find((p) => p.type === "text") as { text: string };
+    expect(note.text).toContain("could not read");
+    expect(note.text).toContain("big.png");
+    // Alone, an oversized ref is skipped silently, exactly like a text file.
+    const alone = (await hook({
+      text: "@big.png",
+      agent: { model: "prov/m", modelRegistry: visionRegistry("capabilities") },
+    } as any)) as { action: string };
+    expect(alone.action).toBe("continue");
+  });
+
+  it("mixed text and image refs: text rides file-include, image rides images", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "note.txt"), "TEXT-CONTENT");
+    await fsPromises.writeFile(path.join(tmpDir, "pixel.png"), Buffer.from(TINY_PNG_B64, "base64"));
+
+    const hook = create(core).hooks![HOOKS.INPUT]!;
+    const result = (await hook({
+      text: "compare @note.txt and @pixel.png",
+      agent: { model: "prov/m", modelRegistry: visionRegistry("capabilities") },
+    } as any)) as { content: Parts; images?: unknown };
+
+    expect(fileIncludeParts(result.content)).toEqual([
+      { type: "file-include", path: "note.txt", content: "TEXT-CONTENT" },
+    ]);
+    expect(result.images).toEqual([
+      { type: "image_url", mimeType: "image/png", data: TINY_PNG_B64 },
+    ]);
+  });
+
+  it("text-only refs behave exactly as before (no images field)", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "plain.txt"), "PLAIN");
+
+    const hook = create(core).hooks![HOOKS.INPUT]!;
+    const result = (await hook({
+      text: "read @plain.txt",
+      agent: { model: "prov/m", modelRegistry: visionRegistry("capabilities") },
+    } as any)) as { action: string; content: Parts; images?: unknown };
+
+    expect(result.action).toBe("transform");
+    expect(result.images).toBeUndefined();
+    expect(fileIncludeParts(result.content)).toEqual([
+      { type: "file-include", path: "plain.txt", content: "PLAIN" },
+    ]);
+  });
+
+  it("SYSTEM_MESSAGE lists the image path without dumping base64", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "pixel.png"), Buffer.from(TINY_PNG_B64, "base64"));
+
+    const emitted: Array<Record<string, unknown>> = [];
+    const hook = create(core).hooks![HOOKS.INPUT]!;
+    await hook({
+      text: "@pixel.png",
+      agent: {
+        model: "prov/m",
+        modelRegistry: visionRegistry("capabilities"),
+        sink: { emit: (e: Record<string, unknown>) => emitted.push(e) },
+      },
+    } as any);
+
+    const sys = emitted.find((e) => e.type === OUTPUT_EVENT.SYSTEM_MESSAGE);
+    expect(sys).toBeDefined();
+    expect(sys!.content).toBe("- file attached: pixel.png");
+    expect(sys!.files).toEqual([{ path: "pixel.png", content: "" }]);
+    expect(JSON.stringify(sys)).not.toContain(TINY_PNG_B64);
+  });
+
+  it("bus end-to-end: hook images reach agent.run's images argument", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "pixel.png"), Buffer.from(TINY_PNG_B64, "base64"));
+
+    const ext = create(core);
+    const hooks = new HookSystem();
+    hooks.on(HOOKS.INPUT, (data: unknown) => ext.hooks![HOOKS.INPUT]!(data as any), "file-attachment");
+
+    let ranImages: unknown;
+    const agent = {
+      hooks,
+      run: async (_content: unknown, images?: unknown) => { ranImages = images; },
+      resetCancel: () => {},
+      cancel: () => {},
+    } as any;
+    const bus = new MessageBus({
+      sessionManager: { getAgent: () => agent },
+      sink: { emit: () => {} },
+    });
+
+    agent.model = "prov/m";
+    agent.modelRegistry = visionRegistry("capabilities");
+    await bus._processMessage("look @pixel.png");
+    expect(ranImages).toEqual([
+      { type: "image_url", mimeType: "image/png", data: TINY_PNG_B64 },
+    ]);
+
+    // Non-vision model: nothing rides the images argument.
+    ranImages = undefined;
+    agent.modelRegistry = visionRegistry("none");
+    await bus._processMessage("look @pixel.png");
+    expect(ranImages).toBeUndefined();
+  });
 });
 
 describe("file-attachment workspace boundary (escape rejection)", () => {

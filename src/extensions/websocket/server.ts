@@ -3,13 +3,15 @@ import { HOOKS, createHooks } from "@core/hooks.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
-import { C2S, S2C, C2SMessage } from "./protocol.ts";
-import {
-  WebSocketQuestionBridge,
-  type QuestionStrategy,
-} from "./question-input.ts";
+import { C2S, S2C, C2SMessage, wireImages, taskActivityMessage } from "./protocol.ts";
+import { parseUploadedFiles } from "./uploads.ts";
+import { modelAcceptsImages } from "@core/config/providers.ts";
+import { TaskManager, type TaskObserverEvent } from "@core/session/task-manager.ts";
+import { registerTaskManagerService } from "../subagents/index.ts";
+import { WebSocketQuestionBridge, type QuestionStrategy } from "./question-input.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
+import { getExtensionConfig } from "@core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import { Agent } from "@core/agent.ts";
 import { createAgentFactory } from "@core/agent-factory.ts";
@@ -21,11 +23,7 @@ import {
 } from "@core/session/session-log.ts";
 import { AgentError, formatError } from "@core/error.ts";
 import { parseForkArg } from "@core/command-handlers.ts";
-import {
-  completionPrefix,
-  parseCompletionContext,
-  type CompletionService,
-} from "@core/completion.ts";
+import { completionPrefix, parseCompletionContext } from "@core/completion.ts";
 import { logger } from "@utils/logger.ts";
 import { toolContentText } from "@utils/tool-content.ts";
 
@@ -134,6 +132,23 @@ export class SessionRegistry {
   #channels: Map<string, Set<WebSocketChannel>>;
   #profiles: Record<string, SwitchProfile>;
   #onSessionDeleted: ((sessionId: string) => void) | null;
+  #taskManager: TaskManager | null = null;
+  /** Publish the TaskManager whose observer feeds the webui subagents panel. */
+  setTaskManager(taskManager: TaskManager | null): void {
+    this.#taskManager = taskManager;
+  }
+
+  getTaskManager(): TaskManager | null {
+    return this.#taskManager;
+  }
+
+  /** Current subagent task snapshot for one socket (sent on fresh auth). */
+  sendTaskSnapshot(ws: HotdogServerSocket<unknown>): void {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.TASK_LIST,
+      tasks: this.#taskManager ? this.#taskManager.listTasks() : [],
+    });
+  }
 
   constructor({
     buildAgent,
@@ -561,6 +576,7 @@ function replaySessionHistory(
     for (const msg of messages) {
       switch (msg.role) {
         case "user": {
+          const userImgs = wireImages((msg as { images?: unknown }).images);
           ws.send(
             JSON.stringify({
               type: S2C.USER_MESSAGE,
@@ -569,6 +585,7 @@ function replaySessionHistory(
                 typeof msg.getTextContent === "function"
                   ? msg.getTextContent()
                   : msg.content || "",
+              ...(userImgs ? { images: userImgs } : {}),
             }),
           );
           break;
@@ -624,6 +641,7 @@ function replaySessionHistory(
           const matchedCall = pendingToolCalls.find(
             (tc) => tc.id === msg.toolCallId,
           );
+          const toolImgs = wireImages((msg as { images?: unknown }).images);
           ws.send(
             JSON.stringify({
               type: S2C.TOOL_RESULT,
@@ -632,6 +650,7 @@ function replaySessionHistory(
               // Parts (tool-result) flatten for this string-only transport;
               // legacy entries are already plain text.
               output: toolContentText(msg.content ?? ""),
+              ...(toolImgs ? { images: toolImgs } : {}),
             }),
           );
           break;
@@ -669,14 +688,31 @@ function replaySessionHistory(
   }
 }
 
+/**
+ * Upload size limits, reused from the fileAttachment extension config
+ * (its schema defaults: 100KB per file, 10 files per message). No new
+ * config surface -- uploads and @refs share one ceiling.
+ */
+function uploadLimits(core: CoreContext): { maxFileSize: number; maxFiles: number } {
+  const cfg = getExtensionConfig<{ maxFileSize?: number; maxFiles?: number }>(
+    core,
+    "fileAttachment",
+  );
+  return {
+    maxFileSize: typeof cfg.maxFileSize === "number" ? cfg.maxFileSize : 102400,
+    maxFiles: typeof cfg.maxFiles === "number" ? cfg.maxFiles : 10,
+  };
+}
+
 async function routeMessage(
   ws: HotdogServerSocket<unknown>,
   msg: C2SMessage,
   registry: SessionRegistry,
   authMiddleware: AuthMiddleware | undefined,
   bridge: WebSocketQuestionBridge,
-  completion: CompletionService | undefined,
+  core: CoreContext,
 ): Promise<void> {
+  const completion = core.completion;
   // Auth gate: when auth is enabled, only the AUTH handshake itself may
   // pass without a validated token. The token is established either at
   // upgrade (URL ?token=) or by a successful AUTH message. This makes the
@@ -704,6 +740,8 @@ async function routeMessage(
             // registered via a token upgrade).
             registry.registerConnection(ws);
             ws.send(JSON.stringify({ type: S2C.AUTH_OK }));
+            // Late joiner: seed the subagents panel with what already ran.
+            registry.sendTaskSnapshot(ws);
             if (!ws.activeSessionId) {
               if (registry.size > 0) {
                 attachToMostRecentSession(ws, registry);
@@ -896,12 +934,48 @@ async function routeMessage(
     }
 
     case C2S.SEND: {
-      if (msg.sessionId && msg.content) {
-        registry.touch(msg.sessionId as string);
-        registry.incrementUserMessageCount(msg.sessionId as string);
+      const sid = msg.sessionId as string | undefined;
+      const text = typeof msg.content === "string" ? msg.content : "";
+      const files = msg.files;
+      if (!sid) break;
+
+      if (Array.isArray(files) && files.length > 0) {
+        // Webui upload: base64 files on the send message.
+        // Validation is all-or-nothing so nothing is ever silently dropped.
+        // Provenance: the parse happened server-side, so this enqueue is harness-authoritative --
+        // the only way file-include parts survive the bus queue boundary (sanitizeQueuedContent).
+        const agent = sessionManager.getAgentBySessionId(sid);
+        const limits = uploadLimits(core);
+        const parsed = parseUploadedFiles(files, {
+          ...limits,
+          vision: modelAcceptsImages(agent?.model, (agent as { modelRegistry?: Record<string, never> } | undefined)?.modelRegistry),
+        });
+        if (parsed.errors.length > 0) {
+          SessionRegistry.sendSafe(ws, {
+            type: S2C.ERROR,
+            message: `Upload rejected: ${parsed.errors.join("; ")}`,
+          });
+          break;
+        }
+        const content: Array<Record<string, unknown>> = [];
+        if (text) content.push({ type: "untrusted", text });
+        content.push(...parsed.parts);
+        if (content.length === 0 && parsed.images.length === 0) break;
+        registry.touch(sid);
+        registry.incrementUserMessageCount(sid);
+        sessionManager.enqueue(sid, content, {
+          source: "harness",
+          ...(parsed.images.length > 0 ? { images: parsed.images } : {}),
+        });
+        break;
+      }
+
+      if (text) {
+        registry.touch(sid);
+        registry.incrementUserMessageCount(sid);
         sessionManager.enqueue(
-          msg.sessionId as string,
-          msg.content as string,
+          sid,
+          text,
           msg.steering === true ? { steering: true } : undefined,
         );
       }
@@ -1086,10 +1160,16 @@ async function routeMessage(
       if (msg.logId) {
         readSessionEntries(msg.logId as string)
           .then((entries) => {
+            // Log entries carry raw images; put them through the same wire cap so a huge base64 can't flood the socket.
+            const capped = entries.map((entry) => {
+              const imgs = wireImages(entry.images);
+              if (!entry.images) return entry;
+              return { ...entry, images: imgs };
+            });
             SessionRegistry.sendSafe(ws, {
               type: S2C.LOG_VIEWED,
               logId: msg.logId,
-              entries,
+              entries: capped,
             });
           })
           .catch((err: unknown) => {
@@ -1266,6 +1346,37 @@ export function createWsServer(
     onSessionDeleted: (sid) => bridge?.dropSession(sid),
   });
 
+  // Subagent tasks for webui/ws sessions: the registry's SessionManager is built without taskConfig,
+  // so the TaskManager lives here. Publishing it as the taskManager service lets delegate_task
+  // resolve lazily; the observer relays spawn/status/activity to every connected client --
+  // the webui subagents panel consumes it, and nothing reaches the main chat transcript.
+  const resolvedCore = core.resolved;
+  if (resolvedCore?.modelRegistry) {
+    const taskManager = new TaskManager({
+      buildAgent: buildAgent as (config: Record<string, unknown>) => Promise<AgentLike>,
+      modelRegistry: resolvedCore.modelRegistry,
+      config: core.config,
+      maxIterations: resolvedCore.maxIterations,
+      taskProfile: resolvedCore.taskProfile || "task-default",
+      lanesPerProvider: resolvedCore.taskLanesPerProvider,
+      lanesDir: resolvedCore.taskLanesDir ?? null,
+      profileManager: resolvedCore.profileManager,
+      sessionManager: registry.getSessionManager(),
+    });
+    // Hand-built mock cores (tests, embedded hosts) may carry no service
+    // registry; the relay still works, only delegate_task lookup is skipped.
+    if (core.services) registerTaskManagerService(core, taskManager);
+    registry.setTaskManager(taskManager);
+    taskManager.setObserver((ev: TaskObserverEvent) => {
+      if (ev.kind === "task") {
+        registry.broadcast({ type: S2C.TASK_UPDATE, task: ev.task });
+        return;
+      }
+      const activityMsg = taskActivityMessage(ev.taskId, ev.event);
+      if (activityMsg) registry.broadcast(activityMsg);
+    });
+  }
+
   bridge = new WebSocketQuestionBridge({
     getPolicy: (sid) => {
       const meta = registry.get(sid)?.metadata;
@@ -1317,6 +1428,7 @@ export function createWsServer(
       }
       ws.authToken = token;
       registry.registerConnection(ws);
+      registry.sendTaskSnapshot(ws);
     } else if (auth && !token) {
       // Socket stays open so the client can still authenticate via a
       // protocol AUTH message; routeMessage() gates everything else.
@@ -1327,6 +1439,7 @@ export function createWsServer(
       return;
     } else {
       registry.registerConnection(ws);
+      registry.sendTaskSnapshot(ws);
     }
 
     const existingCount = registry.size;
@@ -1363,7 +1476,7 @@ export function createWsServer(
     }
 
     try {
-      await routeMessage(ws, msg, registry, auth, bridge!, core.completion);
+      await routeMessage(ws, msg, registry, auth, bridge!, core);
     } catch (err: unknown) {
       // Don't let errors from dropped connections kill the server.
       const typedErr = err as Error;

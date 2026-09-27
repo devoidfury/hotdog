@@ -375,7 +375,10 @@ export class Agent implements AgentLike {
         source: opts?.source ?? "user",
       });
       this.addMessage(userMsg);
-      this.emitOutput("user_message", { content: contentToText(userInput) });
+      this.emitOutput("user_message", {
+        content: contentToText(userInput),
+        ...(images && images.length > 0 ? { images } : {}),
+      });
 
       let iteration = 0;
       // Consecutive empty completions (no text, no tool calls) this run.

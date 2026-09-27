@@ -3,7 +3,16 @@
 
 import { reactiveState, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
+import type { UiImage } from "./message-list.ts";
 import type { SessionInfo } from "./sessions.tsx";
+import type {
+  UploadFileWire,
+  TaskInfoWire,
+  TaskActivityWire,
+} from "@extensions/websocket/protocol.ts";
+
+export type { UploadFileWire };
+export type { TaskInfoWire };
 
 // The core logger touches process.*, which doesn't exist in the browser.
 const logger = {
@@ -21,6 +30,77 @@ export type ProfileInfo = {
 };
 const profilesAtom = reactiveState<Record<string, ProfileInfo>>({});
 const currentProfileAtom = reactiveState<string>("default");
+
+// ── Subagent tasks (strip + overlay panels; see ./subagents.tsx) ───────────
+// Broadcast feed (S2C taskList/taskUpdate/taskActivity), deliberately kept
+// outside the chat transcript: task-agent output never enters message-list.
+const tasksAtom = reactiveState<TaskInfoWire[]>([]);
+// Bumped on every activity item; panel bodies read the blocks from the map
+// below, so render only needs the version flip.
+const activityVersionAtom = reactiveState<number>(0);
+
+/** Accumulated display blocks: consecutive text deltas merge into one block. */
+export type TaskActivityBlock =
+  | { kind: "text"; text: string }
+  | { kind: "tool_call"; name: string; args: string }
+  | { kind: "tool_result"; name: string; output: string; error?: string };
+
+const MAX_ACTIVITY_BLOCKS = 200;
+const MAX_TRACKED_TASKS = 50;
+const taskActivity = new Map<string, TaskActivityBlock[]>();
+
+function upsertTask(info: TaskInfoWire): void {
+  const tasks = tasksAtom().slice();
+  const i = tasks.findIndex((t) => t.taskId === info.taskId);
+  if (i >= 0) tasks[i] = info;
+  else tasks.push(info);
+  tasksAtom(tasks);
+}
+
+function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
+  let blocks = taskActivity.get(taskId);
+  if (!blocks) {
+    blocks = [];
+    taskActivity.set(taskId, blocks);
+    // Map is insertion-ordered: evict the oldest task's transcript so a
+    // long-lived server session does not grow unbounded.
+    while (taskActivity.size > MAX_TRACKED_TASKS) {
+      const oldest = taskActivity.keys().next().value as string;
+      taskActivity.delete(oldest);
+    }
+  }
+  const last = blocks[blocks.length - 1];
+  if (activity.kind === "text") {
+    if (last && last.kind === "text") {
+      blocks[blocks.length - 1] = { kind: "text", text: last.text + activity.content };
+    } else {
+      blocks.push({ kind: "text", text: activity.content });
+    }
+  } else if (activity.kind === "tool_call") {
+    blocks.push({ kind: "tool_call", name: activity.name, args: activity.args });
+  } else {
+    blocks.push({
+      kind: "tool_result",
+      name: activity.name,
+      output: activity.output,
+      ...(activity.error !== undefined ? { error: activity.error } : {}),
+    });
+  }
+  if (blocks.length > MAX_ACTIVITY_BLOCKS) {
+    blocks.splice(0, blocks.length - MAX_ACTIVITY_BLOCKS);
+  }
+  activityVersionAtom(activityVersionAtom() + 1);
+}
+
+function getTaskActivity(taskId: string): TaskActivityBlock[] {
+  return taskActivity.get(taskId) ?? [];
+}
+
+function clearTasks(): void {
+  tasksAtom([]);
+  taskActivity.clear();
+  activityVersionAtom(0);
+}
 // Explicit session name for the active session; null = show the short id.
 const sessionTitleAtom = reactiveState<string | null>(null);
 // >0 means switching profiles will clear context, so confirm first.
@@ -56,10 +136,14 @@ interface LogsListedMessage {
   logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number }>;
 }
 
+// Image payload type (UiImage) is defined in message-list.ts; the server
+// sends it via wireImages (../websocket/protocol.ts): base64 without data:
+// prefix; oversized images arrive as { skipped, note } instead of data.
+
 interface LogEntry {
   source: string;
   content: string;
-  images?: Array<{ url: string }>;
+  images?: UiImage[];
   reasoning_content?: string | null;
   tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> | null;
   tool_call_id?: string | null;
@@ -95,6 +179,7 @@ interface AuthErrorMessage {
 interface UserMessage {
   type: "userMessage";
   content: string;
+  images?: UiImage[];
 }
 
 interface AssistantMessage {
@@ -118,6 +203,7 @@ interface ToolResultMessage {
   name: string;
   output?: string;
   error?: string;
+  images?: UiImage[];
 }
 
 interface CompactingMessage {
@@ -147,6 +233,22 @@ interface QuestionAnsweredMessage {
   type: "questionAnswered";
   sessionId?: string;
   answers: Record<string, string>;
+}
+
+interface TaskListMessage {
+  type: "taskList";
+  tasks: TaskInfoWire[];
+}
+
+interface TaskUpdateMessage {
+  type: "taskUpdate";
+  task: TaskInfoWire;
+}
+
+interface TaskActivityMessage {
+  type: "taskActivity";
+  taskId: string;
+  activity: TaskActivityWire;
 }
 
 interface StreamingChunkMessage {
@@ -189,7 +291,7 @@ interface SessionStateMessage {
 interface SystemMessage {
   type: "systemMessage";
   content?: string;
-  detail?: string;
+  files?: Array<{ path: string; content: string }>;
 }
 
 interface ProfilesMessage {
@@ -242,6 +344,9 @@ type ServerMessage =
   | CommandResultMessage
   | QuestionMessage
   | QuestionAnsweredMessage
+  | TaskListMessage
+  | TaskUpdateMessage
+  | TaskActivityMessage
   | StreamingChunkMessage
   | StreamingReasoningChunkMessage
   | TaskProgressMessage
@@ -271,7 +376,7 @@ interface ChatConfig {
 export interface ChatController {
   connect: () => void;
   disconnect: () => void;
-  sendMessage: (content: string) => void;
+  sendMessage: (content: string, files?: UploadFileWire[]) => void;
   sendSlashCommand: (command: string) => void;
   cancel: () => void;
   createSession: (opts?: Record<string, unknown>) => void;
@@ -310,6 +415,11 @@ export interface ChatController {
   sessionWorkingMap: Map<string, boolean>;
   messageListAtom: () => MessageListManager | null;
   getCurrentProfile: () => string;
+  // Subagent strip/panels state (broadcast feed; not tied to the active session).
+  tasksAtom: Atom<TaskInfoWire[]>;
+  activityVersionAtom: Atom<number>;
+  getTaskActivity: (taskId: string) => TaskActivityBlock[];
+  clearTasks: () => void;
 }
 
 export function createChat({
@@ -438,6 +548,17 @@ export function createChat({
           completionCallback = null;
           cb(data.options || [], typeof data.prefix === "string" ? data.prefix : "");
         }
+        return;
+      // Subagent feed is server-global (not per active session), so it is
+      // handled before the message-list/session guards below.
+      case "taskList":
+        tasksAtom(data.tasks.slice());
+        return;
+      case "taskUpdate":
+        upsertTask(data.task);
+        return;
+      case "taskActivity":
+        appendTaskActivity(data.taskId, data.activity);
         return;
     }
 
@@ -644,13 +765,18 @@ export function createChat({
     }
   }
 
-  function sendMessage(content: string): void {
+  function sendMessage(content: string, files?: UploadFileWire[]): void {
     if (!sessionIdAtom()) {
       console.warn("[chat] No active session");
       return;
     }
     workingAtom(true);
-    send({ type: "send", sessionId: sessionIdAtom(), content });
+    send({
+      type: "send",
+      sessionId: sessionIdAtom(),
+      content,
+      ...(files && files.length > 0 ? { files } : {}),
+    });
   }
 
   function sendSlashCommand(command: string): void {
@@ -814,5 +940,9 @@ export function createChat({
     getUserMessageCount,
     sessionWorkingMap,
     messageListAtom: () => messageList,
+    tasksAtom,
+    activityVersionAtom,
+    getTaskActivity,
+    clearTasks,
   };
 }

@@ -357,10 +357,14 @@ export class SessionManager {
     return this.#currentSessionId;
   }
 
-  enqueue(sessionId: string, text: string, opts?: { steering?: boolean }): void {
+  enqueue(
+    sessionId: string,
+    content: string | Array<Record<string, unknown>>,
+    opts?: { steering?: boolean; source?: MessageSource; images?: ImageAttachment[] },
+  ): void {
     const entry = this.#sessions.get(sessionId);
     if (entry) {
-      entry.bus.enqueue(text, opts);
+      entry.bus.enqueue(content, opts);
     }
   }
 

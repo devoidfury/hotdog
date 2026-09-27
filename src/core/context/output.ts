@@ -1,3 +1,4 @@
+import type { ImageAttachment } from "./message.ts";
 import type { QuestionDef } from "./input.ts";
 import type { ToolResultContent } from "./wrappers.ts";
 
@@ -45,6 +46,8 @@ export type EventName = keyof typeof EVENT_NAME_MAP;
 export interface UserMessageEvent {
   type: typeof OUTPUT_EVENT.USER_MESSAGE;
   content: string;
+  /** Image attachments riding the user message (e.g. file-attachment). */
+  images?: ImageAttachment[];
 }
 
 export interface AssistantMessageEvent {
@@ -76,6 +79,8 @@ export interface ToolResultEvent {
   content: ToolResultContent;
   toolCallId: string;
   error?: string;
+  /** Images returned by the tool (read-tool output); sinks decide display. */
+  images?: ImageAttachment[];
 }
 
 export interface CompactingEvent {
@@ -141,11 +146,20 @@ export interface SessionStateEvent {
   sessionId?: string;
 }
 
+/** A file attachment riding on a system message (e.g. file-attachment notices). */
+export interface SystemMessageAttachment {
+  path: string;
+  content: string;
+}
+
 export interface SystemMessageEvent {
   type: typeof OUTPUT_EVENT.SYSTEM_MESSAGE;
   content: string;
-  /** Optional expandable detail (e.g., full file contents for a file attachment notice). */
-  detail?: string;
+  /**
+   * Structured file attachments. Sinks decide presentation: the CLI renders only the content line,
+   * the webui a collapsible box per file. Content should not be dumped as raw JSON into a chat surface.
+   */
+  files?: SystemMessageAttachment[];
 }
 
 export type OutputEvent =

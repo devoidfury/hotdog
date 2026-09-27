@@ -14,6 +14,7 @@ import {
   loginAtoms,
 } from "./login.tsx";
 import { Sidebar, ContextMenu, type ContextMenuState, type SessionInfo, type LogInfo } from "./sessions.tsx";
+import { SubagentsStrip, TaskPanel } from "./subagents.tsx";
 
 type Screen = "login" | "main";
 
@@ -23,6 +24,33 @@ const logsAtom = reactiveState<LogInfo[]>([]);
 const activeLogIdAtom = reactiveState<string | null>(null);
 const contextMenuAtom = reactiveState<ContextMenuState | null>(null);
 
+// Subagent overlay panels: task ids with an open panel, bottom-first; the
+// last entry renders above the others. nowAtom ticks once per second while a
+// task is live so elapsed times refresh.
+const openTasksAtom = reactiveState<string[]>([]);
+const nowAtom = reactiveState<number>(Date.now());
+let taskTickTimer: ReturnType<typeof setInterval> | null = null;
+
+function syncTaskTick(): void {
+  const tasks = chat?.tasksAtom() ?? [];
+  const hasActive = tasks.some((t) => t.status === "running" || t.status === "queued");
+  if (hasActive && taskTickTimer === null) {
+    taskTickTimer = setInterval(() => nowAtom(Date.now()), 1000);
+  } else if (!hasActive && taskTickTimer !== null) {
+    clearInterval(taskTickTimer);
+    taskTickTimer = null;
+  }
+}
+
+function openTask(taskId: string): void {
+  // Re-opening brings the panel to the front instead of duplicating it.
+  openTasksAtom([...openTasksAtom().filter((id) => id !== taskId), taskId]);
+}
+
+function closeTask(taskId: string): void {
+  openTasksAtom(openTasksAtom().filter((id) => id !== taskId));
+}
+
 // Tab-completion popup for the composer (server-driven, see C2S.COMPLETE).
 interface CompletionMenu {
   options: CompletionItem[];
@@ -31,6 +59,19 @@ interface CompletionMenu {
   index: number;
 }
 const completionAtom = reactiveState<CompletionMenu | null>(null);
+
+// Composer file attachments (upload button): base64 payloads staged client-
+// side, sent with the next message as C2S `send` files (see protocol.ts
+// UploadFileWire). Size/vision limits are enforced server-side; rejections
+// surface as visible chat errors.
+interface PendingAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  data: string; // base64, no data: prefix
+}
+const attachmentsAtom = reactiveState<PendingAttachment[]>([]);
 
 // Bumped whenever the app stops caring about a pending completion response
 // (escape, blur, edit, apply), so a late reply cannot reopen the menu;
@@ -59,6 +100,7 @@ let profileSelectEl: HTMLSelectElement | null = null;
 let modelSelectEl: HTMLSelectElement | null = null;
 let messageListEl: HTMLElement | null = null;
 let contextMenuEl: HTMLDivElement | null = null;
+let fileInputEl: HTMLInputElement | null = null;
 
 // Stable ref identities. Inline closures would be new every render, making
 // patch() detach (null) and re-attach every ref on every render.
@@ -76,6 +118,9 @@ const messageListRef = domRef<HTMLElement>((el) => {
 });
 const contextMenuRef = domRef<HTMLDivElement>((el) => {
   contextMenuEl = el;
+});
+const fileInputRef = domRef<HTMLInputElement>((el) => {
+  fileInputEl = el;
 });
 
 // Several atoms usually flip within one WS message (e.g. sessionInfo sets
@@ -119,9 +164,15 @@ function handleAuthFailure(): void {
     // so detach the manager's scroll listener before dropping it; otherwise
     // each login cycle stacks another listener on the same element.
     chat.messageListAtom()?.destroy();
+    chat.clearTasks();
     chat.disconnect();
     chat = null;
   }
+  if (taskTickTimer !== null) {
+    clearInterval(taskTickTimer);
+    taskTickTimer = null;
+  }
+  openTasksAtom([]);
   // The message-list div persists across login screens (main-ui is only
   // class-hidden), and each new chat attaches a fresh MessageListManager.
   // Clear the container so stale messages from the old chat do not pile up.
@@ -295,6 +346,8 @@ function startChat(): void {
     chat.currentModelAtom,
     chat.profilesAtom,
     chat.currentProfileAtom,
+    chat.tasksAtom,
+    chat.activityVersionAtom,
   ]);
   const stopModelRefresh = chat.currentModelAtom.effect(() => {
     chat?.listSessions();
@@ -302,11 +355,15 @@ function startChat(): void {
   const stopProfilesRefresh = chat.connectedAtom.effect(() => {
     if (chat?.connectedAtom()) chat.listProfiles();
   });
+  // Elapsed-time tick only while a task is live (idle sessions burn nothing).
+  const stopTaskTick = chat.tasksAtom.effect(syncTaskTick);
+  syncTaskTick();
   const prevStop = stopChatEffects;
   stopChatEffects = () => {
     prevStop();
     stopModelRefresh();
     stopProfilesRefresh();
+    stopTaskTick();
   };
 }
 
@@ -322,16 +379,77 @@ function onChatSubmit(e: Event): void {
   const el = chatInputEl;
   if (!el) return;
   const text = el.value.trim();
-  if (!text) return;
+  const attachments = attachmentsAtom();
+  if (!text && attachments.length === 0) return;
   el.value = "";
   autoResize(el);
   dismissCompletion();
 
-  if (text.startsWith("/")) {
+  const files =
+    attachments.length > 0
+      ? attachments.map(({ name, mimeType, data }) => ({ name, mimeType, data }))
+      : undefined;
+  if (files) {
+    attachmentsAtom([]);
+    if (fileInputEl) fileInputEl.value = "";
+  }
+
+  if (text.startsWith("/") && !files) {
     chat?.sendSlashCommand(text);
   } else {
-    chat?.sendMessage(text);
+    chat?.sendMessage(text, files);
   }
+}
+
+// ── File uploads ────────────────────────────────────────────────────────────
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Read one File as base64 (data-URL payload with the prefix stripped). */
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+let attachmentSeq = 0;
+
+async function onFilesPicked(e: Event): Promise<void> {
+  const input = e.currentTarget as HTMLInputElement;
+  const picked = Array.from(input.files ?? []);
+  input.value = ""; // Allow re-picking the same file after a removal.
+  if (picked.length === 0) return;
+
+  const added: PendingAttachment[] = [];
+  for (const file of picked) {
+    if (file.size === 0) continue;
+    try {
+      added.push({
+        id: `att-${++attachmentSeq}`,
+        name: file.name,
+        mimeType: file.type || "application/octet-stream",
+        size: file.size,
+        data: await readFileAsBase64(file),
+      });
+    } catch {
+      console.warn("[upload] failed to read", file.name);
+    }
+  }
+  if (added.length > 0) attachmentsAtom([...attachmentsAtom(), ...added]);
+}
+
+function removeAttachment(id: string): void {
+  attachmentsAtom(attachmentsAtom().filter((a) => a.id !== id));
 }
 
 function requestCompletions(el: HTMLTextAreaElement): void {
@@ -440,6 +558,9 @@ function App() {
   const title = chat?.sessionTitleAtom() ?? null;
   const menu = contextMenuAtom();
   const completionMenu = completionAtom();
+  const attachments = attachmentsAtom();
+  const tasks = chat ? chat.tasksAtom() : [];
+  const openTasks = openTasksAtom();
 
   return (
     <>
@@ -487,6 +608,14 @@ function App() {
           {/* Imperatively managed by MessageListManager via ref (streaming markdown). */}
           <div id="message-list" ref={messageListRef}></div>
 
+          {/* Live background task agents; clicking a chip opens its overlay. */}
+          <SubagentsStrip
+            tasks={tasks}
+            now={nowAtom()}
+            openTaskIds={openTasks}
+            onOpen={openTask}
+          />
+
           {working ? (
             <div id="working-indicator">
               <span className="spinner"></span>
@@ -517,6 +646,22 @@ function App() {
                   ))}
                 </div>
               ) : null}
+              <div id="attachment-chips">
+                {attachments.map((a) => (
+                  <span key={a.id} className="attachment-chip" title={a.name}>
+                    <span className="attachment-name">{a.name}</span>
+                    <span className="attachment-size">{formatSize(a.size)}</span>
+                    <button
+                      type="button"
+                      className="attachment-remove"
+                      title="Remove attachment"
+                      onClick={() => removeAttachment(a.id)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
               <textarea
                 id="chat-input"
                 placeholder="Type a message..."
@@ -532,6 +677,23 @@ function App() {
                 onKeydown={onChatKeydown}
               />
               <div id="composer-actions">
+                <input
+                  type="file"
+                  id="file-input"
+                  multiple
+                  hidden
+                  ref={fileInputRef}
+                  onChange={onFilesPicked}
+                />
+                <button
+                  type="button"
+                  id="attach-btn"
+                  title="Attach files to the next message"
+                  disabled={activeLogId !== null}
+                  onClick={() => fileInputEl?.click()}
+                >
+                  Attach
+                </button>
                 <label id="profile-selector">
                   Profile:{" "}
                   <select id="profile-select" ref={profileSelectRef} onChange={onProfileChange}>
@@ -559,6 +721,22 @@ function App() {
             </form>
           </div>
         </main>
+
+        {/* Stacked task overlays; the most recently opened sits on top. */}
+        {openTasks.map((id, i) => {
+          const task = tasks.find((t) => t.taskId === id);
+          if (!task || !chat) return null;
+          return (
+            <TaskPanel
+              key={id}
+              task={task}
+              activity={chat.getTaskActivity(id)}
+              now={nowAtom()}
+              zBase={100 + i}
+              onClose={closeTask}
+            />
+          );
+        })}
       </div>
 
       {menu ? <ContextMenu menu={menu} rootRef={contextMenuRef} /> : null}
@@ -580,6 +758,9 @@ async function init(): Promise<void> {
     activeLogIdAtom,
     contextMenuAtom,
     completionAtom,
+    attachmentsAtom,
+    openTasksAtom,
+    nowAtom,
   ]);
 
   document.addEventListener("keydown", (e: KeyboardEvent) => {

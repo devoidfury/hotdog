@@ -229,6 +229,17 @@ describe("CliOutputSink", () => {
     expect(sink.hideThinking).toBe(true);
   });
 
+  it("emitSystemMessage renders the summary line but never attachment content", () => {
+    sink.emit({
+      type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+      content: "- file attached: src/a.ts",
+      files: [{ path: "src/a.ts", content: "SECRET-FILE-CONTENT\nline two" }],
+    });
+    const out = stdoutWrites.join("") + stderrWrites.join("");
+    expect(out).toContain("file attached: src/a.ts");
+    expect(out).not.toContain("SECRET-FILE-CONTENT");
+  });
+
   it("reset writes reset code to stdout", () => {
     sink.reset();
     expect(stdoutWrites.some((w) => w.includes("\x1b[0m"))).toBe(true);

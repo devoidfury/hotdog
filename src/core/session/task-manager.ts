@@ -1,6 +1,7 @@
 import { logger } from "@utils/logger.ts";
 import { HOOKS } from "../hooks.ts";
 import { Message, type MessageSource } from "../context/message.ts";
+import type { OutputEvent } from "../context/output.ts";
 import { LlmError, formatError } from "../error.ts";
 import { loadProfileFile, ProfileManager, type ProfileDef } from "../config/profiles.ts";
 import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
@@ -32,6 +33,49 @@ export const TASK_STATUS = {
 } as const;
 
 export type TaskStatus = (typeof TASK_STATUS)[keyof typeof TASK_STATUS];
+
+/** Display-oriented snapshot of one task (webui subagents panel, diagnostics). */
+export interface TaskInfo {
+  taskId: string;
+  /** Spawn description, whitespace-flattened and truncated. */
+  description: string;
+  status: TaskStatus;
+  createdAt: number;
+  /** Set when the task first enters RUNNING; null while queued. */
+  startedAt: number | null;
+  /** Set on the terminal transition; null until then. */
+  endedAt: number | null;
+}
+
+/**
+ * Observation stream for external consumers (the websocket/webui relay).
+ * `task` fires once at spawn and on every status change with a fresh snapshot;
+ * `activity` forwards every OutputEvent the task agent's sink receives, tagged with the task id.
+ * Task output never reaches the main chat transcript through this path.
+ */
+export type TaskObserverEvent =
+  | { kind: "task"; task: TaskInfo }
+  | { kind: "activity"; taskId: string; event: OutputEvent };
+
+export type TaskObserver = (event: TaskObserverEvent) => void;
+
+/** Single-line task description for displays; flatten whitespace, cap length. */
+function describeTask(prompt: TurnPrompt): string {
+  const MAX = 140;
+  let text = "";
+  if (typeof prompt === "string") {
+    text = prompt;
+  } else {
+    text = prompt
+      .map((p) => {
+        const part = p as { type?: unknown; text?: unknown };
+        return part && part.type === "text" && typeof part.text === "string" ? part.text : "";
+      })
+      .join(" ");
+  }
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > MAX ? `${flat.slice(0, MAX - 1)}…` : flat;
+}
 
 /** One agent turn's outcome (a task may run several turns when parked). */
 export interface TurnResult {
@@ -199,6 +243,11 @@ export interface TaskManagerRequiredOptions {
 interface TaskEntry {
   /** Spawn id, for diagnostics. */
   taskId: string;
+  /** Display metadata for observers (webui subagents panel). */
+  description: string;
+  createdAt: number;
+  startedAt: number | null;
+  endedAt: number | null;
   agent: AgentLike | null;
   abortController: AbortController;
   statusRef: { value: TaskStatus };
@@ -283,6 +332,8 @@ export class TaskManager {
   // task's full Agent/context forever. See #finalizeTurn for the release point.
   #tasks: Map<string, TaskEntry>;
   #profileManager: ProfileManager | undefined;
+  /** External observer (websocket/webui relay); null = task agents stay silent. */
+  #observer: TaskObserver | null = null;
 
   constructor(options: TaskManagerOptions & TaskManagerRequiredOptions) {
     this.#buildAgent = options.buildAgent;
@@ -333,6 +384,63 @@ export class TaskManager {
 
   setSessionManager(sessionManager: TaskManagerSessionManager): void {
     this.#sessionManager = sessionManager;
+  }
+
+  /**
+   * Attach (or detach with null) the per-task observer. Late attaches receive nothing retroactively;
+   * callers wanting history use listTasks().
+   */
+  setObserver(observer: TaskObserver | null): void {
+    this.#observer = observer;
+  }
+
+  #notify(event: TaskObserverEvent): void {
+    const observer = this.#observer;
+    if (!observer) return;
+    try {
+      observer(event);
+    } catch (e: unknown) {
+      // A faulty relay (e.g. a closed socket serializer) must not disturb
+      // task execution.
+      const id = event.kind === "task" ? event.task.taskId : event.taskId;
+      logger.error(`[task ${id}] task observer threw: ${formatError(e)}`);
+    }
+  }
+
+  #infoOf(entry: TaskEntry): TaskInfo {
+    return {
+      taskId: entry.taskId,
+      description: entry.description,
+      status: entry.statusRef.value,
+      createdAt: entry.createdAt,
+      startedAt: entry.startedAt,
+      endedAt: entry.endedAt,
+    };
+  }
+
+  /**
+   * The single status write point: records started/ended timestamps and notifies
+   * the observer on every change. Direct `statusRef.value =` is a bug -- it skips both.
+   */
+  #setStatus(entry: TaskEntry, status: TaskStatus): void {
+    if (entry.statusRef.value === status) return;
+    entry.statusRef.value = status;
+    const now = Date.now();
+    if (status === TASK_STATUS.RUNNING) {
+      if (entry.startedAt === null) entry.startedAt = now;
+    } else if (
+      status === TASK_STATUS.COMPLETED ||
+      status === TASK_STATUS.FAILED ||
+      status === TASK_STATUS.CANCELLED
+    ) {
+      entry.endedAt = now;
+    }
+    this.#notify({ kind: "task", task: this.#infoOf(entry) });
+  }
+
+  /** Snapshot of every task the registry still holds (terminal ones included). */
+  listTasks(): TaskInfo[] {
+    return Array.from(this.#tasks.values(), (entry) => this.#infoOf(entry));
   }
 
   /** Exposed for extensions. */
@@ -435,6 +543,10 @@ export class TaskManager {
     });
     const entry: TaskEntry = {
       taskId,
+      description: describeTask(taskDescription),
+      createdAt: Date.now(),
+      startedAt: null,
+      endedAt: null,
       agent: null,
       abortController,
       statusRef,
@@ -505,9 +617,13 @@ export class TaskManager {
     // would duplicate every result into a session context.
     const parked = options.park === true;
 
-    // Task agents are silent to the UI; only onTaskComplete matters.
+    // Task agents are silent to the UI; only onTaskComplete matters -- unless an observer is attached
+    // (websocket/webui relay), in which case every agent OutputEvent is forwarded tagged with the task id.
+    // Nothing here reaches the main chat transcript either way.
     const sink = {
-      emit: (_event: unknown) => {},
+      emit: (event: unknown) => {
+        this.#notify({ kind: "activity", taskId, event: event as OutputEvent });
+      },
       onTaskComplete: (result: string) => {
         if (parked) return;
         this.deliverTaskCompletion(taskId, result, delivery);
@@ -537,7 +653,7 @@ export class TaskManager {
     entry.onTurn = options.onTurn;
     entry.start = () => {
       entry.start = null;
-      statusRef.value = TASK_STATUS.RUNNING;
+      this.#setStatus(entry, TASK_STATUS.RUNNING);
       // Last-resort net: a residual throw inside #launch (a throwing
       // consumer onTurn, bus enqueue, or notifyCompletion) would otherwise
       // be an unhandled rejection -- which kills the process -- and the
@@ -548,6 +664,8 @@ export class TaskManager {
     };
     // The entry is startable now: admit may schedule it.
     entry.planning = false;
+    // Announce the spawn (status QUEUED) before admit can flip it to RUNNING.
+    this.#notify({ kind: "task", task: this.#infoOf(entry) });
     // Starts immediately when the provider lane is free; otherwise the task
     // sits QUEUED until a terminal transition re-runs the admit scan.
     this.#admit();
@@ -1071,7 +1189,7 @@ export class TaskManager {
       // Build failures used to throw out of spawnTask into the delegating
       // tool; queued tasks make that impossible, so they are reported the
       // same way run failures are.
-      entry.statusRef.value = TASK_STATUS.FAILED;
+      this.#setStatus(entry, TASK_STATUS.FAILED);
       logger.error(`[task ${taskId}] ${formatError(err)}`);
       const result = `Task failed: ${err instanceof Error ? err.message : String(err)}`;
       notify(result);
@@ -1098,7 +1216,7 @@ export class TaskManager {
       return;
     }
     if (entry.abortController.signal.aborted) {
-      entry.statusRef.value = TASK_STATUS.CANCELLED;
+      this.#setStatus(entry, TASK_STATUS.CANCELLED);
       notify("Task aborted");
       entry.onTurn?.({ status: "cancelled", result: "Task aborted" });
       // Discarded fresh agent (turn never ran): same reclaim as above,
@@ -1123,7 +1241,7 @@ export class TaskManager {
   #recoverTask(taskId: string, entry: TaskEntry, e: unknown): void {
     logger.error(`[task ${taskId}] unhandled task fault: ${formatError(e)}`);
     if (!entry.settled) {
-      entry.statusRef.value = TASK_STATUS.FAILED;
+      this.#setStatus(entry, TASK_STATUS.FAILED);
       const agent = entry.agent;
       entry.agent = null;
       this.#releaseSlot(entry);
@@ -1312,12 +1430,12 @@ export class TaskManager {
   #finalizeTurn(entry: TaskEntry, agent: AgentLike, turn: TurnResult): void {
     if (turn.status === "completed") {
       if (entry.statusRef.value === TASK_STATUS.RUNNING) {
-        entry.statusRef.value = TASK_STATUS.COMPLETED;
+        this.#setStatus(entry, TASK_STATUS.COMPLETED);
       }
     } else if (turn.status === "cancelled") {
-      entry.statusRef.value = TASK_STATUS.CANCELLED;
+      this.#setStatus(entry, TASK_STATUS.CANCELLED);
     } else {
-      entry.statusRef.value = TASK_STATUS.FAILED;
+      this.#setStatus(entry, TASK_STATUS.FAILED);
     }
 
     // For parked tasks the sink drops this (the engine consumed the turn already).
@@ -1392,7 +1510,7 @@ export class TaskManager {
       entry.candidates = null;
       entry.provider = "";
       entry.model = entry.intent;
-      entry.statusRef.value = TASK_STATUS.CANCELLED;
+      this.#setStatus(entry, TASK_STATUS.CANCELLED);
       entry.onTurn?.({ status: "cancelled", result: "Task aborted" });
       entry.settle(TASK_STATUS.CANCELLED, "Task aborted");
       this.#admit();
@@ -1403,7 +1521,7 @@ export class TaskManager {
       // Nothing in flight to abort; terminate directly and free the lane
       // (a task parked before its first turn completed still holds its slot).
       const agent = entry.agent;
-      entry.statusRef.value = TASK_STATUS.CANCELLED;
+      this.#setStatus(entry, TASK_STATUS.CANCELLED);
       entry.agent = null;
       this.#wakeTurnWaiters(entry);
       this.#releaseSlot(entry);

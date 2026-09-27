@@ -1,13 +1,9 @@
 // Maps OutputEvent → S2C wire protocol and sends JSON over WS.
 
 import { Channel, ChannelSessionManager } from "@core/channel.ts";
-import {
-  OUTPUT_EVENT,
-  OutputEvent,
-  OutputEventType,
-} from "@core/context/output.ts";
+import { OUTPUT_EVENT, OutputEvent, OutputEventType } from "@core/context/output.ts";
 import { toolContentText } from "@utils/tool-content.ts";
-import { S2C, S2CType } from "./protocol.ts";
+import { S2C, S2CType, wireImages } from "./protocol.ts";
 import type { HotdogServerSocket } from "./server.ts";
 
 // ── OUTPUT_EVENT → S2C mapping ──────────────────────────────────────────────
@@ -75,6 +71,10 @@ export class WebSocketChannel extends Channel {
       case OUTPUT_EVENT.STREAMING_CHUNK:
       case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
         msg.content = event.content;
+        if (event.type === OUTPUT_EVENT.USER_MESSAGE) {
+          const userImgs = wireImages(event.images);
+          if (userImgs) msg.images = userImgs;
+        }
         break;
       case OUTPUT_EVENT.THINKING:
         msg.content = event.content;
@@ -89,6 +89,10 @@ export class WebSocketChannel extends Channel {
         // part renderer, so flatten the fields here (display, not a format).
         msg.output = toolContentText(event.content);
         if (event.error !== undefined) msg.error = event.error;
+        {
+          const imgs = wireImages(event.images);
+          if (imgs) msg.images = imgs;
+        }
         break;
       case OUTPUT_EVENT.COMPACTING:
         msg.message = event.message;
@@ -101,7 +105,7 @@ export class WebSocketChannel extends Channel {
         break;
       case OUTPUT_EVENT.SYSTEM_MESSAGE:
         msg.content = event.content;
-        if (event.detail !== undefined) msg.detail = event.detail;
+        if (event.files !== undefined) msg.files = event.files;
         break;
       case OUTPUT_EVENT.TASK_PROGRESS:
         msg.taskId = event.taskId;

@@ -63,6 +63,8 @@ describe("manager + workflow lane scenario (2 providers, cap 1)", () => {
     const lanesDir = await mkdtemp(join(tmpdir(), "lanes-scenario-"));
     const runsRoot = join(lanesDir, "runs");
     await mkdir(runsRoot, { recursive: true });
+    const graphFile = join(lanesDir, "fanout.workflow.yaml");
+    await writeFile(graphFile, YAML);
 
     const turns = new Set<WorkerTurn>();
     const doneTurns: WorkerTurn[] = [];
@@ -117,7 +119,7 @@ describe("manager + workflow lane scenario (2 providers, cap 1)", () => {
     const tool = new WorkflowDispatchTool({
       taskManagerProvider: () => tasks,
       getRunsRoot: () => runsRoot,
-      getWorkflowsDir: () => null,
+      getWorkflowsDir: () => lanesDir,
       limits: {},
       registry: new RunRegistry(),
     });
@@ -135,7 +137,7 @@ describe("manager + workflow lane scenario (2 providers, cap 1)", () => {
         if (turnCount === 1) {
           // Dispatch WHILE holding the pA turn slot.
           try {
-            await tool.execute({ yaml: YAML, run_id: "fanout-1" }, ctx as never);
+            await tool.execute({ file: graphFile, run_id: "fanout-1" }, ctx as never);
           } catch (e) {
             dispatchError = e;
           }

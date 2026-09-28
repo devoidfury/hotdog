@@ -318,6 +318,116 @@ describe("parseWorkflow: accept + limits", () => {
   });
 });
 
+describe("parseWorkflow: params", () => {
+  const withParams = (body: string) =>
+    `version: 1\nname: g\ndescription: d\n${body}`;
+
+  it("substitutes declared defaults into string values", () => {
+    const wf = parseOk(`
+      version: 1
+      name: g
+      description: build {{params.target}}
+      params:
+        target: src/foo.ts
+      nodes:
+        - id: a
+          accept:
+            files: ["{{params.target}}"]
+    `);
+    expect(wf.description).toBe("build src/foo.ts");
+    expect(wf.nodes[0]!.accept.files).toEqual(["src/foo.ts"]);
+  });
+
+  it("caller params override declared defaults", () => {
+    const wf = parseOk(
+      `
+      version: 1
+      name: g
+      description: d
+      params:
+        target: default.txt
+      nodes:
+        - id: a
+          accept:
+            files: ["{{params.target}}"]
+    `,
+      { params: { target: "chosen.txt" } },
+    );
+    expect(wf.nodes[0]!.accept.files).toEqual(["chosen.txt"]);
+  });
+
+  it("lenient mode keeps unresolved refs as literal text", () => {
+    const wf = parseOk(`
+      version: 1
+      name: g
+      description: d
+      params:
+        target:
+      nodes:
+        - id: a
+          description: "go: {{params.target}}"
+    `);
+    expect(wf.nodes[0]!.description).toBe("go: {{params.target}}");
+  });
+
+  it("refs to undeclared ids error in both modes", () => {
+    for (const opts of [undefined, {}]) {
+      const errors = expectErrors(
+        `
+        version: 1
+        name: g
+        description: d
+        nodes:
+          - id: a
+            description: "{{params.ghost}}"
+      `,
+        opts,
+      );
+      expect(errors.some((e) => e.includes("unknown param 'ghost'"))).toBe(true);
+    }
+  });
+
+  it("strict mode errors on a required param with no value", () => {
+    const errors = expectErrors(
+      `
+      version: 1
+      name: g
+      description: d
+      params:
+        target:
+      nodes:
+        - id: a
+          description: "{{params.target}}"
+    `,
+      { params: {} },
+    );
+    expect(errors.some((e) => e.includes("param 'target' has no value"))).toBe(true);
+  });
+
+  it("strict mode errors on args for undeclared params", () => {
+    const errors = expectErrors(
+      `version: 1\nname: g\ndescription: d\nnodes:\n  - id: a`,
+      { params: { extra: "x" } },
+    );
+    expect(errors.some((e) => e.includes("args: 'extra' is not a declared param"))).toBe(true);
+  });
+
+  it("validates the params block shape", () => {
+    expect(expectErrors(withParams("params: not-a-mapping\nnodes:\n  - id: a")).some((e) => e.includes("'params' must be a mapping"))).toBe(true);
+    expect(expectErrors(withParams("params:\n  Bad Id: x\nnodes:\n  - id: a")).some((e) => e.includes("key 'Bad Id'"))).toBe(true);
+    expect(expectErrors(withParams("params:\n  n: 12\nnodes:\n  - id: a")).some((e) => e.includes("'n' must be a string or null"))).toBe(true);
+  });
+
+  it("never substitutes inside mapping keys", () => {
+    // A key that looks like a ref stays verbatim (and is rejected as a bad
+    // input key), proving substitution only touches string values.
+    const errors = expectErrors(
+      `version: 1\nname: g\ndescription: d\nparams:\n  k: v\nnodes:\n  - id: a\n    inputs:\n      "{{params.k}}": nodes.a`,
+    );
+    expect(errors.some((e) => e.includes(`key '{{params.k}}' must match`))).toBe(true);
+  });
+});
+
 describe("renderWorkflow", () => {
   it("renders a stable snapshot (declaration order != execution order)", () => {
     const wf = parseOk(`

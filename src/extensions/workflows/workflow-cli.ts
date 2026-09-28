@@ -14,6 +14,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { formatError } from "@core/error.ts";
 import {
+  ID_RE,
   parseWorkflow,
   renderWorkflow,
   type ParseResult,
@@ -37,8 +38,8 @@ export interface CommandOutcome {
 }
 
 const USAGE = [
-  "usage: hotdog workflow validate|render <file.workflow.yaml>",
-  "   or: hotdog workflow run <file.workflow.yaml> [--id <run-id>]",
+  "usage: hotdog workflow validate|render <file.workflow.yaml> [--param key=value]...",
+  "   or: hotdog workflow run <file.workflow.yaml> [--id <run-id>] [--param key=value]...",
   "   or: hotdog workflow list",
   "   or: hotdog workflow status|reconcile|cancel <run-id>",
 ].join("\n");
@@ -62,14 +63,36 @@ function invalidWorkflowOutcome(file: string, result: ParseResult): CommandOutco
   };
 }
 
-/** Pure half: run validate|render over a loaded file's text. */
+/** Extract repeatable `--param key=value` flags from `rest` (mutated).
+ *  Last occurrence of a key wins. */
+function takeParams(rest: string[]): { params: Record<string, string>; error?: string } {
+  const params: Record<string, string> = {};
+  for (let i = rest.length - 1; i >= 0; i--) {
+    if (rest[i] !== "--param") continue;
+    const kv = rest[i + 1] ?? "";
+    const eq = kv.indexOf("=");
+    if (eq === -1) return { params, error: "--param requires key=value" };
+    const key = kv.slice(0, eq);
+    if (!ID_RE.test(key)) {
+      return { params, error: `invalid param key '${key}' (must match ${ID_RE})` };
+    }
+    if (!(key in params)) params[key] = kv.slice(eq + 1);
+    rest.splice(i, 2);
+  }
+  return { params };
+}
+
+/** Pure half: run validate|render over a loaded file's text. `params`
+ *  undefined keeps `{{params.x}}` refs lenient (literal text); passing a map
+ *  activates strict substitution (what `run` and workflow_dispatch use). */
 export function runWorkflowCommandOnText(
   verb: string,
   file: string,
   text: string,
   limits?: Partial<WorkflowLimits>,
+  params?: Record<string, string>,
 ): CommandOutcome {
-  const result = parseWorkflow(text, { limits });
+  const result = parseWorkflow(text, { limits, params });
   const warnings = result.warnings.map((w) => `warning: ${w}`);
 
   if (!result.workflow) return invalidWorkflowOutcome(file, result);
@@ -107,6 +130,8 @@ function needRunsRoot(deps: WorkflowCliDeps): CommandOutcome | null {
 
 async function cmdRun(args: string[], deps: WorkflowCliDeps): Promise<CommandOutcome> {
   const rest = [...args];
+  const { params, error: paramError } = takeParams(rest);
+  if (paramError) return { code: 1, out: [], err: [paramError] };
   let forcedId: string | null = null;
   const idAt = rest.indexOf("--id");
   if (idAt !== -1) {
@@ -130,7 +155,9 @@ async function cmdRun(args: string[], deps: WorkflowCliDeps): Promise<CommandOut
 
   const { outcome, text } = await readWorkflowFile(file);
   if (outcome) return outcome;
-  const result = parseWorkflow(text!, { limits: deps.limits });
+  // STRICT param mode: an undecided required param fails the run even with
+  // zero --param flags (params is always at least an empty object here).
+  const result = parseWorkflow(text!, { limits: deps.limits, params });
   if (!result.workflow) return invalidWorkflowOutcome(file, result);
   const workflow = result.workflow;
 
@@ -261,11 +288,21 @@ export async function runWorkflowCommand(
   switch (verb) {
     case "validate":
     case "render": {
+      const rest = [...args.slice(1)];
+      const { params, error: paramError } = takeParams(rest);
+      if (paramError) return { code: 1, out: [], err: [paramError] };
       const file = rest[0];
       if (!file) return { code: 1, out: [], err: [USAGE] };
       const { outcome, text } = await readWorkflowFile(file);
       if (outcome) return outcome;
-      return runWorkflowCommandOnText(verb, file, text!, deps.limits);
+      // No --param flags keeps validate/render lenient (unresolved refs stay literal text)
+      return runWorkflowCommandOnText(
+        verb,
+        file,
+        text!,
+        deps.limits,
+        Object.keys(params).length > 0 ? params : undefined,
+      );
     }
     case "run":
       return cmdRun(rest, deps);

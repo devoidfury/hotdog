@@ -1,17 +1,15 @@
 /**
- * Manager-only workflow tools (subagents precedent: managerOnly metadata +
- * lazy TaskManager lookup via the "taskManager" service, since sessions are
- * created after extensions load).
+ * Manager-only workflow tools.
  *
  * The repair loop for manager-designed graphs IS the tool error:
- * workflow_validate runs the exact same parseWorkflow as hand-authored
- * config/workflows files. Orchestrator profile: these three plus the
- * delegation tools, no bash/edit/file-write (profile tool allowlists
- * enforce; hermes anti-temptation pattern).
+ * workflow_validate runs the exact same parseWorkflow as hand-authored config/workflows files,
+ * and a valid design is saved as a graph file on the spot.
+ * Orchestrator profile: these three plus the delegation tools, no bash/edit/file-write
+ * (profile tool allowlists enforce; hermes anti-temptation pattern).
  */
 
 import { mkdir, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import {
   toolDef,
   param,
@@ -197,7 +195,7 @@ export function workflowsPreamble(list: WorkflowListing[]): string {
     "## Available workflows",
     "",
     "Saved multi-agent workflow graphs (validated DAGs of worker nodes).",
-    "Run one as-is with `hotdog workflow run <file>`, or reproduce its YAML and dispatch with `workflow_dispatch`.",
+    "Run one with `workflow_dispatch(file=\"<name>\")` (optionally with `args` for graphs that declare `params`)",
     "",
     ...list.map((w) => `- ${w.name}: ${w.description} (${w.file})`),
   ].join("\n");
@@ -217,6 +215,31 @@ export interface WorkflowToolOptions {
   /** Soft limits from resolved config (workflows.maxNodes, workflows.maxRuntimeMins). */
   limits: Partial<WorkflowLimits>;
   registry: RunRegistry;
+}
+
+/** Resolve a model-supplied file reference inside the workflows dir and read
+ *  it: a bare name (with or without the conventional `.workflow.yaml` suffix)
+ *  or an absolute path the dir itself contains. Anything that resolves outside
+ *  the dir is refused outright -- these tools must not become a general
+ *  file-read primitive for profiles deliberately built without file tools. */
+async function readWorkflowFileRef(
+  fileRef: string,
+  dir: string | null,
+): Promise<{ text: string; path: string } | { error: string }> {
+  if (!dir) return { error: "Error: workflows.path is not configured" };
+  const root = resolve(dir);
+  const base = resolve(root, fileRef);
+  if (base !== root && !base.startsWith(root + sep)) {
+    return { error: `Error: file must be inside the workflows dir (${root})` };
+  }
+  for (const cand of [base, `${base}.workflow.yaml`]) {
+    try {
+      return { text: await Bun.file(cand).text(), path: cand };
+    } catch {
+      // try the next candidate
+    }
+  }
+  return { error: `no workflow file found; tried: ${base}, ${base}.workflow.yaml` };
 }
 
 abstract class WorkflowTool {
@@ -250,91 +273,79 @@ abstract class WorkflowTool {
 
 export class WorkflowValidateTool extends WorkflowTool {
   static readonly TOOL_NAME = "workflow_validate";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, managerOnly: true };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 1, managerOnly: true };
 
   async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolInput(input) ?? {};
     const yaml = (args.yaml as string | undefined)?.trim();
-    if (!yaml) return ToolResult.err("Error: yaml is required");
+    const file = (args.file as string | undefined)?.trim();
+    if (yaml && file) return ToolResult.err("Error: provide either yaml or file, not both");
+    if (!yaml && !file) return ToolResult.err("Error: yaml or file is required");
 
+    // file mode: re-validate an existing graph, mirroring the CLI verbatim.
+    if (file) {
+      const ref = await readWorkflowFileRef(file, this.opts.getWorkflowsDir());
+      if ("error" in ref) return ToolResult.err(ref.error);
+      const r = runWorkflowCommandOnText("validate", ref.path, ref.text, this.opts.limits);
+      if (r.code !== 0) return ToolResult.err([...r.err, ...r.out].join("\n"));
+      return ToolResult.ok(r.out.join("\n"));
+    }
+
+    // yaml mode: validate, then persist — validation IS the save step.
     // The identical entry point `hotdog workflow validate` uses — designs
     // face the same validator as hand-authored files.
-    const r = runWorkflowCommandOnText("validate", "designed workflow", yaml, this.opts.limits);
+    const r = runWorkflowCommandOnText("validate", "designed workflow", yaml!, this.opts.limits);
     if (r.code !== 0) return ToolResult.err([...r.err, ...r.out].join("\n"));
-    return ToolResult.ok([...r.out, "Valid. Call workflow_dispatch with this yaml to run it."].join("\n"));
-  }
-
-  toToolDef(): ToolDef {
-    return toolDef(
-      "workflow_validate",
-      [
-        "Validate a workflow graph (YAML) against the workflow schema — the exact validator hand-authored config/workflows files face. Errors are collected and repair-worthy: fix the yaml and call again.",
-        "Schema: version: 1; name, description; nodes[] with id, optional description/profile/group (a declared model group to fan out across)/dependsOn/inputs ('{{nodes.<id>}}' data refs imply ordering)/accept. accept.files are paths inside the run dir each node must create; acceptance is machine-checked via those files plus a '<node-id>.verdict' file whose first line is pass|fail|reject. accept.judge names a judge node gating that producer; accept.retryOn/maxAttempts bound retries (ceiling 3). Hard node cap; unknown keys are refused — never invent fields.",
-      ].join(" "),
-      {
-        properties: {
-          yaml: param("string", "The full workflow YAML document"),
-        },
-        required: ["yaml"],
-      },
-    );
-  }
-}
-
-// ── workflow_save ───────────────────────────────────────────────────────────
-
-export class WorkflowSaveTool extends WorkflowTool {
-  static readonly TOOL_NAME = "workflow_save";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 2, managerOnly: true };
-
-  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolInput(input) ?? {};
-    const yaml = (args.yaml as string | undefined)?.trim();
-    if (!yaml) return ToolResult.err("Error: yaml is required");
-
-    // Only validated graphs hit the filesystem: a saved graph is trusted
-    // input for future dispatches and for every manager's availability list.
-    const r = runWorkflowCommandOnText("validate", "designed workflow", yaml, this.opts.limits);
-    if (r.code !== 0) return ToolResult.err([...r.err, ...r.out].join("\n"));
-    const wf = parseWorkflow(yaml, { limits: this.opts.limits }).workflow!; // validated above
+    const wf = parseWorkflow(yaml!, { limits: this.opts.limits }).workflow!; // validated above
 
     const dir = this.opts.getWorkflowsDir();
     if (!dir) return ToolResult.err("Error: workflows.path is not configured");
 
     // Name-derived filename: the validator's id rule keeps the path traversal-free.
-    const file = join(dir, `${wf.name}.workflow.yaml`);
+    const target = join(dir, `${wf.name}.workflow.yaml`);
     // The availability listing keys by name, so two files claiming one name
     // would shadow each other; refuse instead of creating the second author.
     for (const w of await listWorkflows(dir, this.opts.limits)) {
-      if (w.name === wf.name && w.file !== file) {
+      if (w.name === wf.name && w.file !== target) {
         return ToolResult.err(
           `workflow name '${wf.name}' is already defined by '${w.file}'; save over that graph or rename this one`,
         );
       }
     }
 
-    const updating = await Bun.file(file).exists();
+    const updating = await Bun.file(target).exists();
     await mkdir(dir, { recursive: true });
-    await Bun.write(file, `${yaml}\n`);
+    await Bun.write(target, `${yaml}\n`);
     const warnings = r.out.filter((l) => l.startsWith("warning:"));
     return ToolResult.ok(
-      [...warnings, `${updating ? "updated" : "saved"} ${file}`].join("\n"),
-    ).withEntries({ file });
+      [
+        ...warnings,
+        `${updating ? "updated" : "saved"} ${target}`,
+        `Call workflow_dispatch with file='${target}' to run it.`,
+      ].join("\n"),
+    ).withEntries({ file: target });
   }
 
   toToolDef(): ToolDef {
     return toolDef(
-      "workflow_save",
+      "workflow_validate",
       [
-        "Save a workflow graph (YAML) into the workflows directory as <name>.workflow.yaml — the only way to persist or update a workflow; you have no file-write tools. Same name updates the existing graph in place.",
-        "The yaml faces the same validator as workflow_validate before anything is written (errors are your repair list). A name already claimed by a different file is refused — availability keys by name.",
+        "Validate a YAML workflow graph against the workflow schema.",
+        "A valid graph is SAVED into the workflows directory as <name>.workflow.yaml and the saved path is returned:",
+        "that is the only way to persist or update a workflow (same name updates in place).",
         "Saved graphs appear in managers' 'Available workflows' lists without a restart.",
+        "Alternatively pass file (instead of yaml) to validate an existing graph in place: nothing is written.",
+        "Schema: version: 1; name, description; optional params (id -> default string, null = required with no default; reference values as '{{params.<id>}}' inside any string so the saved graph is a reusable template);",
+        "nodes[] with id, optional description / profile / group (a declared model group to fan out across) / dependsOn / inputs ('{{nodes.<id>}}' data refs imply ordering) / accept.",
+        "accept.files are paths inside the run dir each node must create; acceptance is machine-checked via those files plus a '<node-id>.verdict' file whose first line is pass|fail|reject.",
+        "accept.judge names a judge node gating that producer; accept.retryOn / maxAttempts bound retries (ceiling 3). Hard node cap; unknown keys are refused: never invent fields.",
       ].join(" "),
       {
         properties: {
-          yaml: param("string", "The full workflow YAML document (must pass validation)"),
+          yaml: param("string", "The full workflow YAML document to validate and save"),
+          file: param("string", "An existing workflow file to re-validate instead"),
         },
-        required: ["yaml"],
+        required: [],
       },
     );
   }
@@ -351,13 +362,39 @@ export class WorkflowDispatchTool extends WorkflowTool {
     ctx?: ToolContext,
   ): Promise<ToolResult> {
     const args = parseToolInput(input) ?? {};
-    const yaml = (args.yaml as string | undefined)?.trim();
-    if (!yaml) return ToolResult.err("Error: yaml is required");
+    const fileRef = (args.file as string | undefined)?.trim();
+    if (!fileRef) {
+      return ToolResult.err("Error: file is required (the path workflow_validate returned)");
+    }
 
-    const parsed = parseWorkflow(yaml, { limits: this.opts.limits });
+    let params: Record<string, string> | undefined;
+    if (args.args !== undefined) {
+      if (typeof args.args !== "object" || args.args === null || Array.isArray(args.args)) {
+        return ToolResult.err("Error: args must be an object of param id -> string value");
+      }
+      params = {};
+      for (const [k, v] of Object.entries(args.args as Record<string, unknown>)) {
+        if (typeof v !== "string") {
+          return ToolResult.err(`Error: args.'${k}' must be a string value`);
+        }
+        params[k] = v;
+      }
+    }
+
+    // Resolve inside the workflows dir (see readWorkflowFileRef): bare name or
+    // contained path; outside references are refused, not read.
+    const ref = await readWorkflowFileRef(fileRef, this.opts.getWorkflowsDir());
+    if ("error" in ref) return ToolResult.err(ref.error);
+
+    // STRICT param mode: params is always at least an empty object, so a graph with an
+    // undecided required param fails here, not mid-run.
+    const parsed = parseWorkflow(ref.text, {
+      limits: this.opts.limits,
+      params: params ?? {},
+    });
     if (!parsed.workflow) {
       return ToolResult.err([
-        "invalid workflow — run workflow_validate for the full report:",
+        `invalid workflow: ${ref.path}`,
         ...parsed.errors.map((e) => `  - ${e}`),
       ].join("\n"));
     }
@@ -461,18 +498,28 @@ export class WorkflowDispatchTool extends WorkflowTool {
     return toolDef(
       "workflow_dispatch",
       [
-        "Dispatch a validated workflow graph for execution: nodes run as parked task agents on provider lanes (concurrency per provider is capped; node pins/requirements resolve against the model catalog). Each node is machine-gated (declared output files + verdict); failed attempts retry with critique, exhausted attempts fail the node and block its descendants.",
-        "Call workflow_validate first — invalid yaml fails here too. run_id optionally resumes a previous run dir (filesystem-verified completed nodes are reused). The run completes asynchronously with a completion message; use workflow_status to inspect, and do NOT redesign the graph just to change an output — reconcile/resume instead.",
+        "Dispatch a saved workflow graph for execution: nodes run as parked task agents on provider lanes.",
+        "Each node is machine-gated (declared output files + verdict); failed attempts retry with critique, exhausted attempts fail the node and block its descendants.",
+        "file is the path workflow_validate returned, or a saved graph's name, resolved against the workflows dir.",
+        "args optionally supplies values for the graph's declared params (id->string), making saved graphs reusable templates.",
+        "Call workflow_validate first.",
+        "run_id optionally resumes a previous run dir (filesystem-verified completed nodes are reused).",
+        "The run completes asynchronously with a completion message; use workflow_status to inspect, and do NOT redesign the graph just to change an output: reconcile / resume with args instead.",
       ].join(" "),
       {
         properties: {
-          yaml: param("string", "The workflow YAML document (must pass workflow_validate)"),
+          file: param("string", "The workflow file to run (path returned by workflow_validate, or a saved graph's name)"),
           run_id: param(
             "string",
             "Optional explicit run id; passing a previous run's id resumes it (only filesystem-verified completed nodes are reused)",
           ),
+          args: param(
+            "object",
+            "Optional values for the graph's declared params (param id -> string); every required param must receive a value or default",
+            { additionalProperties: { type: "string" } },
+          ),
         },
-        required: ["yaml"],
+        required: ["file"],
       },
     );
   }
@@ -550,7 +597,6 @@ export const WORKFLOW_TOOL_CONSTRUCTORS: Record<
   (opts: WorkflowToolOptions) => WorkflowTool
 > = {
   workflow_validate: (opts) => new WorkflowValidateTool(opts),
-  workflow_save: (opts) => new WorkflowSaveTool(opts),
   workflow_dispatch: (opts) => new WorkflowDispatchTool(opts),
   workflow_status: (opts) => new WorkflowStatusTool(opts),
 };

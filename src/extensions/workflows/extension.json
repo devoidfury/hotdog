@@ -1,7 +1,7 @@
 {
   "name": "workflows",
   "provides": ["cli:subcommands"],
-  "description": "Multi-agent workflow (DAG) artifacts: validate/render/run .workflow.yaml graphs, run list/status/reconcile/cancel, manager tools (workflow_validate/save/dispatch/status), /workflow + /followup",
+  "description": "Multi-agent workflow (DAG) artifacts: validate/render/run .workflow.yaml graphs, run list/status/reconcile/cancel, manager tools (workflow_validate/dispatch/status), /workflow + /followup",
   "configSchema": {
     "workflows": {
       "type": "object",

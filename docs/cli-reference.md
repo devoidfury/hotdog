@@ -17,9 +17,13 @@ hotdog sessions cleanup          # Remove old sessions
 hotdog rescue                    # Diagnose config files (paths, syntax, unknown keys)
 hotdog rescue fix                # ...and repair comments/trailing commas (.bak kept)
 hotdog webui                     # Start the web UI server
-hotdog workflow validate <f>     # Validate a .workflow.yaml graph (errors + warnings, exit code)
-hotdog workflow render <f>       # Deterministic topological rendering of a workflow
-hotdog workflow run <f> [--id <run-id>]
+hotdog workflow validate <f> [--param key=value]...
+                                 # Validate a .workflow.yaml graph (errors + warnings, exit code).
+                                 # --param values resolve {{params.x}} refs
+                                 # (validate/render lenient, run is strict: required params without a value fail)
+hotdog workflow render <f> [--param key=value]...
+                                 # Deterministic topological rendering of a workflow
+hotdog workflow run <f> [--id <run-id>] [--param key=value]...
                                  # Execute a workflow graph (foreground; Ctrl-C cancels gracefully).
                                  # --id re-runs a previous run dir, reusing filesystem-verified nodes
                                  # (refused while another live process owns that run dir)

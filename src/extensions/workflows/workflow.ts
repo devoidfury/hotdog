@@ -78,12 +78,14 @@ export interface ParseResult {
   warnings: string[];
 }
 
-const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+export const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 // "nodes.<id>" or "nodes.<id>.<field.path>" — a pure reference, no prose.
 const DATA_REF_RE = /^nodes\.([a-z0-9][a-z0-9-]*)((?:\.[A-Za-z0-9_-]+)*)$/;
+// "{{params.<id>}}" — a param reference inside any string value.
+export const PARAM_REF_RE = /\{\{params\.([a-z0-9][a-z0-9-]*)\}\}/g;
 const RETRY_ON = new Set(["fail", "reject"]);
 
-const TOP_KEYS = new Set(["version", "name", "description", "limits", "nodes"]);
+const TOP_KEYS = new Set(["version", "name", "description", "limits", "nodes", "params"]);
 const NODE_KEYS = new Set([
   "id", "description", "profile", "requires", "pin", "group",
   "dependsOn", "inputs", "accept", "maxRuntimeMins",
@@ -535,10 +537,71 @@ function ancestorsOf(start: string, upstream: Map<string, Set<string>>): Set<str
   return seen;
 }
 
-/** Parse and validate a `.workflow.yaml` document. Never throws on bad input. */
+/** Parse a declared `params:` block into id -> default (null = required, no default) */
+function declaredParams(raw: unknown, errors: string[]): Map<string, string | null> {
+  const declared = new Map<string, string | null>();
+  if (raw === undefined) return declared;
+  if (!isObj(raw)) {
+    errors.push("workflow: 'params' must be a mapping");
+    return declared;
+  }
+  for (const [k, v] of Object.entries(raw)) {
+    if (!ID_RE.test(k)) {
+      errors.push(`workflow.params: key '${k}' must match ${ID_RE}`);
+    } else if (v === null || v === undefined) {
+      declared.set(k, null);
+    } else if (typeof v === "string") {
+      declared.set(k, v);
+    } else {
+      errors.push(`workflow.params: '${k}' must be a string or null (required)`);
+    }
+  }
+  return declared;
+}
+
+/**
+ * Replace `{{params.<id>}}` refs in every string VALUE (keys are never touched), returning copies.
+ * Refs to undeclared ids throws (typo catch); declared-but-valueless refs keep their literal text in
+ * lenient mode and error in strict mode.
+ */
+function substituteParams(
+  v: unknown,
+  declared: Map<string, string | null>,
+  values: Map<string, string>,
+  strict: boolean,
+  errors: string[],
+): unknown {
+  if (typeof v === "string") {
+    return v.replace(PARAM_REF_RE, (whole: string, id: string) => {
+      if (!declared.has(id)) {
+        errors.push(`unknown param '${id}'`);
+        return whole;
+      }
+      const val = values.get(id);
+      if (val !== undefined) return val;
+      if (strict) errors.push(`param '${id}' has no value`);
+      return whole;
+    });
+  }
+  if (Array.isArray(v)) return v.map((x) => substituteParams(x, declared, values, strict, errors));
+  if (isObj(v)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) out[k] = substituteParams(val, declared, values, strict, errors);
+    return out;
+  }
+  return v;
+}
+
+/**
+ * Parse and validate a `.workflow.yaml` document. Never throws on bad input.
+ * `opts.params` (a caller-supplied id -> value map) activates STRICT param substitution:
+ * every referenced param must have a value and every supplied key must be declared.
+ * Without it (validate/render/listing) substitution is lenient: unresolved refs keep their literal text.
+ * Substitution runs on the YAML-parsed tree; values can not inject YAML structure.
+ */
 export function parseWorkflow(
   text: string,
-  opts: { limits?: Partial<WorkflowLimits> } = {},
+  opts: { limits?: Partial<WorkflowLimits>; params?: Record<string, string> } = {},
 ): ParseResult {
   const limits: WorkflowLimits = { ...DEFAULT_WORKFLOW_LIMITS, ...opts.limits };
   let parsed: unknown;
@@ -550,7 +613,27 @@ export function parseWorkflow(
   if (!isObj(parsed)) {
     return { workflow: null, errors: ["workflow: document must be a mapping"], warnings: [] };
   }
-  return parseWorkflowObject(parsed, limits);
+
+  const strict = opts.params !== undefined;
+  const paramErrors: string[] = [];
+  const declared = declaredParams(parsed.params, paramErrors);
+  const values = new Map<string, string>();
+  for (const [k, v] of declared) if (v !== null) values.set(k, v);
+  if (strict) {
+    for (const [k, v] of Object.entries(opts.params!)) {
+      if (!declared.has(k)) {
+        paramErrors.push(`args: '${k}' is not a declared param`);
+      } else {
+        values.set(k, v);
+      }
+    }
+  }
+  const tree = substituteParams(parsed, declared, values, strict, paramErrors);
+  const r = parseWorkflowObject(tree as Record<string, unknown>, limits);
+  if (paramErrors.length > 0) {
+    return { workflow: null, errors: [...paramErrors, ...r.errors], warnings: r.warnings };
+  }
+  return r;
 }
 
 /** Combined ordering deps of a node: dependsOn + every data-reference upstream (declaration order). */

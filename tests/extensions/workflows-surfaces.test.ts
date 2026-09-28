@@ -19,7 +19,7 @@ import { HOOKS } from "@core/hooks.ts";
 import { contentToText } from "@core/context/message.ts";
 import { TaskManager } from "@core/session/task-manager.ts";
 import { create } from "@extensions/workflows/index.ts";
-import { runWorkflowCommand } from "@extensions/workflows/workflow-cli.ts";
+import { runWorkflowCommand, runWorkflowCommandOnText } from "@extensions/workflows/workflow-cli.ts";
 import { parseWorkflow } from "@extensions/workflows/workflow.ts";
 import {
   claimRunDir,
@@ -30,7 +30,6 @@ import {
 import {
   RunRegistry,
   WorkflowDispatchTool,
-  WorkflowSaveTool,
   WorkflowStatusTool,
   WorkflowValidateTool,
   createWorkflowScanner,
@@ -319,6 +318,77 @@ describe("cli: run", () => {
   });
 });
 
+describe("cli: --param", () => {
+  const PARAM_GRAPH = `
+version: 1
+name: paramed
+description: hello {{params.target}}
+params:
+  target:
+nodes:
+  - id: a
+    accept:
+      files: [a.out]
+`;
+
+  function paramFile(root: string, text = PARAM_GRAPH): string {
+    const file = join(root, "p.yaml");
+    writeFileSync(file, text);
+    return file;
+  }
+
+  it("validate stays lenient without flags, substitutes with them", async () => {
+    const root = freshDir();
+    const file = paramFile(root);
+    const lenient = await runWorkflowCommandOnText("validate", file, PARAM_GRAPH);
+    expect(lenient.code).toBe(0);
+    const r = await runWorkflowCommand(["validate", file]);
+    expect(r.code).toBe(0); // unresolved required param is fine for validate
+
+    const resolved = await runWorkflowCommand(["render", file, "--param", "target=world"]);
+    expect(resolved.code).toBe(0);
+    expect(resolved.out.join("\n")).toContain("hello world");
+  });
+
+  it("run is strict: an unresolved required param fails with zero flags", async () => {
+    const root = freshDir();
+    const file = paramFile(root);
+    const fail = await runWorkflowCommand(["run", file], {
+      runsRoot: root,
+      runHost: () => ({ tasks: makeFakeAgents().tasks }),
+    });
+    expect(fail.code).toBe(1);
+    expect(fail.err.join("\n")).toContain("param 'target' has no value");
+
+    const ok = await runWorkflowCommand(["run", file, "--param", "target=world"], {
+      runsRoot: root,
+      runHost: () => ({ tasks: makeFakeAgents().tasks }),
+    });
+    expect(ok.code).toBe(0);
+  });
+
+  it("--param syntax and undeclared keys fail loud", async () => {
+    const root = freshDir();
+    const file = paramFile(root);
+    const noeq = await runWorkflowCommand(["validate", file, "--param", "target"]);
+    expect(noeq.err.join("\n")).toContain("--param requires key=value");
+    const badkey = await runWorkflowCommand(["validate", file, "--param", "Bad Key=1"]);
+    expect(badkey.err.join("\n")).toContain("invalid param key");
+    const ghost = await runWorkflowCommand(["validate", file, "--param", "ghost=1"]);
+    expect(ghost.err.join("\n")).toContain("'ghost' is not a declared param");
+  });
+
+  it("--param flags are stripped before positional handling", async () => {
+    const root = freshDir();
+    const file = paramFile(root);
+    const r = await runWorkflowCommand(["run", "--param", "target=world", file], {
+      runsRoot: root,
+      runHost: () => ({ tasks: makeFakeAgents().tasks }),
+    });
+    expect(r.code).toBe(0);
+  });
+});
+
 describe("manager tools", () => {
   const toolOpts = (tasks: TaskManager | null, runsRoot: string | null, workflowsDir: string | null = null) => ({
     taskManagerProvider: () => tasks,
@@ -328,38 +398,22 @@ describe("manager tools", () => {
     registry: new RunRegistry(),
   });
 
-  it("all four are managerOnly", () => {
+  it("all three are managerOnly", () => {
     const o = toolOpts(null, null);
     expect(new WorkflowValidateTool(o).metadata.managerOnly).toBe(true);
-    expect(new WorkflowSaveTool(o).metadata.managerOnly).toBe(true);
     expect(new WorkflowDispatchTool(o).metadata.managerOnly).toBe(true);
     expect(new WorkflowStatusTool(o).metadata.managerOnly).toBe(true);
   });
 
-  it("workflow_validate mirrors the CLI validate verbatim", async () => {
-    const t = new WorkflowValidateTool(toolOpts(null, null));
-    const ok = await t.execute({ yaml: WORKFLOW_TEXT });
-    expect(ok.error).toBeNull();
-    expect(ok.output).toContain("valid: runnable (2 nodes)");
+  it("workflow_validate yaml mode validates then writes the graph file", async () => {
+    const root = freshDir();
+    const wfDir = join(root, "defs");
+    const t = new WorkflowValidateTool(toolOpts(null, null, wfDir));
 
+    // Invalid designs never touch the filesystem and report like the CLI.
     const bad = await t.execute({ yaml: "version: 9\nnodes: nope\n" });
     expect(bad.error).not.toBeNull();
     expect(bad.error).toContain("invalid workflow: designed workflow");
-    expect(bad.error).toContain("version must be 1");
-  });
-
-  it("workflow_validate requires yaml", async () => {
-    const t = new WorkflowValidateTool(toolOpts(null, null));
-    expect((await t.execute({})).error).not.toBeNull();
-  });
-
-  it("workflow_save writes validated graphs, updates in place, refuses clashes", async () => {
-    const root = freshDir();
-    const wfDir = join(root, "defs");
-    const t = new WorkflowSaveTool(toolOpts(null, null, wfDir));
-
-    // Invalid designs never touch the filesystem.
-    const bad = await t.execute({ yaml: "version: 9\n" });
     expect(bad.error).toContain("version must be 1");
     expect(existsSync(join(wfDir, "runnable.workflow.yaml"))).toBe(false);
 
@@ -367,7 +421,8 @@ describe("manager tools", () => {
     expect(saved.error).toBeNull();
     const file = join(wfDir, "runnable.workflow.yaml");
     expect(readFileSync(file, "utf8")).toContain("name: runnable");
-    expect(saved.output).toContain("saved");
+    expect(saved.output).toContain(`saved ${file}`);
+    expect(saved.output).toContain(`workflow_dispatch with file='${file}'`);
 
     // Same name updates the same file.
     const updated = await t.execute({ yaml: WORKFLOW_TEXT.replace("cli run smoke", "v2 rubric") });
@@ -385,24 +440,71 @@ describe("manager tools", () => {
     expect(listing.some((w) => w.file === file && w.name === "runnable")).toBe(true);
   });
 
-  it("workflow_save without workflows.path fails loud", async () => {
-    const r = await new WorkflowSaveTool(toolOpts(null, null)).execute({ yaml: WORKFLOW_TEXT });
+  it("workflow_validate file mode mirrors the CLI validate verbatim", async () => {
+    const root = freshDir();
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    const file = join(wfDir, "wf.workflow.yaml");
+    writeFileSync(file, WORKFLOW_TEXT);
+    const t = new WorkflowValidateTool(toolOpts(null, null, wfDir));
+
+    const ok = await t.execute({ file });
+    expect(ok.error).toBeNull();
+    expect(ok.output).toContain("valid: runnable (2 nodes)");
+    // Bare name resolves inside the workflows dir too.
+    expect((await t.execute({ file: "wf" })).output).toContain("valid: runnable (2 nodes)");
+
+    const bad = await t.execute({ yaml: WORKFLOW_TEXT, file });
+    expect(bad.error).toContain("not both");
+
+    const missing = await t.execute({ file: join(wfDir, "ghost.yaml") });
+    expect(missing.error).toContain("no workflow file found");
+  });
+
+  it("workflow_validate file mode cannot read outside the workflows dir", async () => {
+    const root = freshDir();
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    writeFileSync(join(root, "secret.yaml"), "api_key: peekme\nversion: 9\n");
+    const t = new WorkflowValidateTool(toolOpts(null, null, wfDir));
+
+    for (const ref of [join(root, "secret.yaml"), "../secret.yaml", join(wfDir, "..", "secret.yaml")]) {
+      const r = await t.execute({ file: ref });
+      expect(r.error).toContain("inside the workflows dir");
+      expect(r.error).not.toContain("peekme");
+    }
+  });
+
+  it("workflow_validate requires yaml or file", async () => {
+    const t = new WorkflowValidateTool(toolOpts(null, null));
+    expect((await t.execute({})).error).not.toBeNull();
+  });
+
+  it("workflow_validate yaml mode without workflows.path fails loud", async () => {
+    const r = await new WorkflowValidateTool(toolOpts(null, null)).execute({ yaml: WORKFLOW_TEXT });
     expect(r.error).toContain("workflows.path");
   });
 
   it("dispatch runs the graph, registers it, and status reports states", async () => {
     const root = freshDir();
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    writeFileSync(join(wfDir, "runnable.workflow.yaml"), WORKFLOW_TEXT);
     const fake = makeFakeAgents();
-    const opts = toolOpts(fake.tasks, root);
+    const opts = toolOpts(fake.tasks, join(root, "runs"), wfDir);
     const dispatch = new WorkflowDispatchTool(opts);
     const status = new WorkflowStatusTool(opts);
 
-    const badDesign = await dispatch.execute({ yaml: "version: 42\n" });
-    expect(badDesign.error).not.toBeNull();
-    expect(badDesign.error).toContain("workflow_validate");
+    const badDesign = await dispatch.execute({ file: "ghost" });
+    expect(badDesign.error).toContain("no workflow file found");
+
+    writeFileSync(join(wfDir, "broken.workflow.yaml"), "version: 42\n");
+    const invalid = await dispatch.execute({ file: "broken" });
+    expect(invalid.error).toContain("invalid workflow");
 
     const ctx = { get: () => ({ sessionId: "mgr-session" }) };
-    const r = await dispatch.execute({ yaml: WORKFLOW_TEXT }, ctx as never);
+    // Bare name resolves against the workflows dir: <name>, then <name>.workflow.yaml.
+    const r = await dispatch.execute({ file: "runnable" }, ctx as never);
     expect(r.error).toBeNull();
     const m = opts.registry.active()[0]!;
     expect(m.runId).toMatch(/-runnable$/);
@@ -415,9 +517,89 @@ describe("manager tools", () => {
     expect(s2.output).toContain("  b: succeeded");
   });
 
+  it("workflow_dispatch cannot run files outside the workflows dir", async () => {
+    const root = freshDir();
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    // A valid graph parked OUTSIDE the workflows dir (dropped by another
+    // process, say) must not be dispatchable by the manager.
+    writeFileSync(join(root, "rogue.workflow.yaml"), WORKFLOW_TEXT);
+    const fake = makeFakeAgents();
+    const opts = toolOpts(fake.tasks, join(root, "runs"), wfDir);
+    const dispatch = new WorkflowDispatchTool(opts);
+    for (const ref of [join(root, "rogue.workflow.yaml"), join(wfDir, "..", "rogue")]) {
+      const r = await dispatch.execute({ file: ref });
+      expect(r.error).toContain("inside the workflows dir");
+    }
+    expect(opts.registry.active()).toHaveLength(0);
+  });
+
+  it("dispatch args reach the graph's params", async () => {
+    const root = freshDir();
+    const file = join(root, "templated.workflow.yaml");
+    writeFileSync(
+      file,
+      `
+version: 1
+name: templated
+description: parameterised smoke
+params:
+  target: a
+nodes:
+  - id: a
+    accept:
+      files: ["{{params.target}}.out"]
+`,
+    );
+    const fake = makeFakeAgents();
+    const opts = toolOpts(fake.tasks, join(root, "runs"), root);
+    const dispatch = new WorkflowDispatchTool(opts);
+
+    // Default (target: a) satisfies the accept gate: the fake writes a.out.
+    const byDefault = await dispatch.execute({ file: "templated" });
+    expect(byDefault.error).toBeNull();
+
+    // Strict mode: required ref with no value, and undeclared args both fail.
+    writeFileSync(
+      join(root, "required.workflow.yaml"),
+      `
+version: 1
+name: required
+description: required param
+params:
+  target:
+nodes:
+  - id: a
+    accept:
+      files: ["{{params.target}}.out"]
+`,
+    );
+    const missing = await dispatch.execute({ file: "required" });
+    expect(missing.error).toContain("param 'target' has no value");
+    const undeclared = await dispatch.execute({ file: "required", args: { ghost: "x" } });
+    expect(undeclared.error).toContain("'ghost' is not a declared param");
+
+    // args override the default; the substituted path is what gets gated.
+    const overridden = await dispatch.execute({ file: "templated", args: { target: "a" } });
+    expect(overridden.error).toBeNull();
+    const m = opts.registry.get(overridden.metadata!.get("run_id")!)!;
+    await settle(() => m.finished !== null || m.error !== null, "overridden run to finish");
+    expect(m.finished!.outcome).toBe("succeeded");
+    statSync(join(m.runDir, "a.out"));
+
+    expect((await dispatch.execute({ file: "templated", args: "nope" })).error).toContain(
+      "args must be an object",
+    );
+  });
+
   it("dispatch without a task manager or runs root fails loud", async () => {
-    expect((await new WorkflowDispatchTool(toolOpts(null, "/x")).execute({ yaml: WORKFLOW_TEXT })).error).not.toBeNull();
-    expect((await new WorkflowDispatchTool(toolOpts({} as TaskManager, null)).execute({ yaml: WORKFLOW_TEXT })).error).not.toBeNull();
+    const root = freshDir();
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    writeFileSync(join(wfDir, "wf.yaml"), WORKFLOW_TEXT);
+    const file = join(wfDir, "wf.yaml");
+    expect((await new WorkflowDispatchTool(toolOpts(null, "/x", wfDir)).execute({ file })).error).not.toBeNull();
+    expect((await new WorkflowDispatchTool(toolOpts({} as TaskManager, null, wfDir)).execute({ file })).error).not.toBeNull();
   });
 
   it("status falls back to the run log for runs owned elsewhere", async () => {
@@ -431,11 +613,15 @@ describe("manager tools", () => {
 
   it("dispatch refuses a run_id already active in-process", async () => {
     const root = freshDir();
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    const file = join(wfDir, "wf.yaml");
+    writeFileSync(file, WORKFLOW_TEXT);
     const fake = makeFakeAgents();
-    const opts = toolOpts(fake.tasks, root);
+    const opts = toolOpts(fake.tasks, root, wfDir);
     const dispatch = new WorkflowDispatchTool(opts);
-    await dispatch.execute({ yaml: WORKFLOW_TEXT, run_id: "fixed-id" });
-    const again = await dispatch.execute({ yaml: WORKFLOW_TEXT, run_id: "fixed-id" });
+    await dispatch.execute({ file, run_id: "fixed-id" });
+    const again = await dispatch.execute({ file, run_id: "fixed-id" });
     expect(again.error).not.toBeNull();
     expect(again.error).toContain("already known");
   });
@@ -446,15 +632,19 @@ describe("manager tools", () => {
     // different workflow) must deliver one too, or the manager waits forever.
     const root = freshDir();
     seedRun(root, "r-clash"); // records workflow "demo"; WORKFLOW_TEXT is "runnable"
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
     const fake = makeFakeAgents();
     const delivered: Array<{ taskId: string | null; result: string }> = [];
     fake.tasks.deliverTaskCompletion = (taskId, result) => {
       delivered.push({ taskId, result });
     };
-    const opts = toolOpts(fake.tasks, root);
+    const opts = toolOpts(fake.tasks, root, wfDir);
     const dispatch = new WorkflowDispatchTool(opts);
     const ctx = { get: () => ({ sessionId: "mgr-session" }) };
-    const r = await dispatch.execute({ yaml: WORKFLOW_TEXT, run_id: "r-clash" }, ctx as never);
+    const file = join(wfDir, "wf.yaml");
+    writeFileSync(file, WORKFLOW_TEXT);
+    const r = await dispatch.execute({ file, run_id: "r-clash" }, ctx as never);
     expect(r.error).toBeNull(); // dispatched first; the crash surfaces through the notification
 
     const m = opts.registry.get("r-clash")!;
@@ -468,10 +658,14 @@ describe("manager tools", () => {
 
   it("model-supplied run_id cannot escape the runs root", async () => {
     const root = freshDir();
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    const file = join(wfDir, "wf.yaml");
+    writeFileSync(file, WORKFLOW_TEXT);
     const fake = makeFakeAgents();
-    const dispatch = new WorkflowDispatchTool(toolOpts(fake.tasks, root));
+    const dispatch = new WorkflowDispatchTool(toolOpts(fake.tasks, root, wfDir));
     for (const bad of ["../evil", "..", "/abs/path", "a/b", "'])"]) {
-      const r = await dispatch.execute({ yaml: WORKFLOW_TEXT, run_id: bad });
+      const r = await dispatch.execute({ file, run_id: bad });
       expect(r.error).not.toBeNull();
       expect(r.error).toContain("invalid run_id");
     }
@@ -598,7 +792,6 @@ describe("extension surfaces", () => {
     await ext.hooks![HOOKS.TOOLS_REGISTER]!({ register: (n: string) => tools.push(n) } as never);
     expect(tools).toEqual([
       "workflow_validate",
-      "workflow_save",
       "workflow_dispatch",
       "workflow_status",
     ]);
@@ -828,15 +1021,17 @@ describe("run-dir ownership", () => {
     // Real liveness check against the init pid: alive on any Linux host, so
     // the claim must be refused without any seam.
     seedOwner(join(root, "resume-me"), { pid: 1, host: hostname() });
+    const file = join(root, "wf.yaml");
+    writeFileSync(file, WORKFLOW_TEXT);
     const opts = {
       taskManagerProvider: () => makeFakeAgents().tasks,
       getRunsRoot: () => root,
-      getWorkflowsDir: () => null,
+      getWorkflowsDir: () => root,
       limits: {},
       registry: new RunRegistry(),
     };
     const res = await new WorkflowDispatchTool(opts).execute({
-      yaml: WORKFLOW_TEXT,
+      file,
       run_id: "resume-me",
     });
     expect(res.error).toContain("owned by live process 1");
@@ -930,22 +1125,25 @@ describe("extension wiring: provider, runHost, CLI subcommand", () => {
 
   it("extension tools resolve the TaskManager through the taskManager service", async () => {
     // No service registered: provider returns null, dispatch fails loud.
-    const bare = await create(stubCore(freshDir(), null));
+    const bareDir = freshDir();
+    writeFileSync(join(bareDir, "runnable.workflow.yaml"), WORKFLOW_TEXT);
+    const bare = await create(stubCore(bareDir, null));
     const tools1 = new Map<string, { execute: (a: never, c?: never) => Promise<{ error: string | null }> }>();
     await bare.hooks![HOOKS.TOOLS_REGISTER]!({
       register: (n: string, t: never) => tools1.set(n, t as never),
     } as never);
-    expect((await tools1.get("workflow_dispatch")!.execute({ yaml: WORKFLOW_TEXT } as never)).error).not.toBeNull();
+    expect((await tools1.get("workflow_dispatch")!.execute({ file: "runnable" } as never)).error).not.toBeNull();
 
     // Service registered: provider hands the tool the TaskManager verbatim.
     const root = freshDir();
+    writeFileSync(join(root, "runnable.workflow.yaml"), WORKFLOW_TEXT);
     const fake = makeFakeAgents();
     const ext = await create(stubCore(root, fake.tasks));
     const tools2 = new Map<string, { execute: (a: never, c?: never) => Promise<{ error: string | null }> }>();
     await ext.hooks![HOOKS.TOOLS_REGISTER]!({
       register: (n: string, t: never) => tools2.set(n, t as never),
     } as never);
-    const r = await tools2.get("workflow_dispatch")!.execute({ yaml: WORKFLOW_TEXT } as never);
+    const r = await tools2.get("workflow_dispatch")!.execute({ file: "runnable" } as never);
     expect(r.error).toBeNull();
     const m = (ext.runs as RunRegistry).active()[0]!;
     await settle(() => m.finished !== null || m.error !== null, "service-backed dispatch to finish");

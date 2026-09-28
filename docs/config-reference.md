@@ -1151,7 +1151,7 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 
 ### `workflows`
 
-[Workflows](../src/extensions/workflows) — multi-agent workflow (DAG) artifacts: `hotdog workflow validate|render|run|list|status|reconcile|cancel`, the manager tools `workflow_validate` / `workflow_save` / `workflow_dispatch` / `workflow_status` (managerOnly), and the `/workflow` + `/followup` slash commands. `workflow_save` persists manager-designed graphs under `path` (same-name save updates in place) so managers can author workflows without any file-write tool.
+[Workflows](../src/extensions/workflows) — multi-agent workflow (DAG) artifacts: `hotdog workflow validate|render|run|list|status|reconcile|cancel` (`--param key=value` supplies values for graphs that declare `params`), the manager tools `workflow_validate` / `workflow_dispatch` / `workflow_status` (managerOnly), and the `/workflow` + `/followup` slash commands. `workflow_validate` persists a manager-designed graph under `path` on the spot (same-name validate updates in place) and returns its file; `workflow_dispatch(file=...)` runs a saved graph (the file reference only resolves inside the workflows dir), optionally with `args` filling the graph's declared `params` so saved graphs double as reusable templates.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

@@ -520,7 +520,7 @@ This is the fleet-wide default: a provider's own `taskLanes` overrides it for th
 - **Default:** `<configDir>/task-lanes`
 - **Resolution:** config > compute
 
-Directory holding the cross-process lane slot ledger: one subdir per provider lane (`_` for the bare-name lane), each holding up to `taskLanesPerProvider` / `taskLanes` numbered slot files. Slot files are ephemeral bookkeeping -- live turns (task agents and top-level session turns) hold them and refresh their mtime every 15s, and quiet ones are reclaimed automatically -- so the dir is safe to delete when nothing is running, and it should not be synced or backed up. Sharing it between machines (NFS) or between container instances of a mounted config dir works precisely because of the heartbeat: host identity and pid numbering are not trustworthy across either boundary.
+Directory holding the cross-process lane slot ledger: one subdir per provider lane (`_` for the bare-name lane), each holding up to `taskLanesPerProvider` / `taskLanes` numbered slot files. Slot files are ephemeral bookkeeping -- live turns (task agents and top-level session turns) hold them and refresh their mtime every 15s, and quiet ones are reclaimed automatically -- so the dir is safe to delete when nothing is running, and it should not be synced or backed up. The ledger dir is swept at startup and hourly, and any file quiet for 60 minutes is deleted, so leftovers from killed or upgraded processes cannot accumulate. Sharing it between machines (NFS) or between container instances of a mounted config dir works precisely because of the heartbeat: host identity and pid numbering are not trustworthy across either boundary.
 
 ```json
 { "taskLanesDir": "/var/tmp/hotdog-lanes" }

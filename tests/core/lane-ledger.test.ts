@@ -3,7 +3,12 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { LaneLedger, processSlotCount, type LaneLease } from "@core/session/lane-ledger.ts";
+import {
+  DEFAULT_LANE_STALE_MS,
+  LaneLedger,
+  processSlotCount,
+  type LaneLease,
+} from "@core/session/lane-ledger.ts";
 
 async function freshDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "lane-ledger-"));
@@ -373,6 +378,69 @@ describe("LaneLedger", () => {
       await chmod(join(dir, "prov"), 0o755);
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  // Sweeper: the acquire path only ever looks at slot-0..cap-1, so abandoned slots and orphaned
+  // `.slot.claiming-*` temps persist forever unless sweepStale removes them.
+  it("sweep deletes stale slot files and claiming temps, keeps the dirs", async () => {
+    const dir = await freshDir();
+    const laneDir = join(dir, "someprovider");
+    await mkdir(laneDir, { recursive: true });
+    const slotPath = join(laneDir, "slot-0");
+    const tmpPath = join(laneDir, ".slot.claiming-1-abc");
+    await writeFile(slotPath, marker(4242, hostname(), "abandoned"));
+    await writeFile(tmpPath, marker(4242, hostname(), "orphan"));
+    const back = new Date(Date.now() - (DEFAULT_LANE_STALE_MS + 10_000));
+    await utimes(slotPath, back, back);
+    await utimes(tmpPath, back, back);
+    const led = new LaneLedger({ dir, sweepIntervalMs: 0 }); // manual sweeps only
+    expect(await led.sweepStale()).toBe(2);
+    expect(await Bun.file(slotPath).exists()).toBe(false);
+    expect(await Bun.file(tmpPath).exists()).toBe(false);
+    expect(existsSync(laneDir)).toBe(true); // dirs are never deleted
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("sweep keeps fresh files; a held slot survives and still releases", async () => {
+    const dir = await freshDir();
+    const led = new LaneLedger({ dir, sweepIntervalMs: 0, staleMs: 50 });
+    const lease = await led.acquire("prov", 1);
+    expect(lease).not.toBeNull();
+    expect(await led.sweepStale()).toBe(0);
+    expect(await Bun.file(lease!.path).exists()).toBe(true);
+    await led.release(lease!);
+    expect(await Bun.file(lease!.path).exists()).toBe(false);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("sweep keeps files under the staleMs threshold", async () => {
+    const dir = await freshDir();
+    await mkdir(join(dir, "prov"), { recursive: true });
+    const p = join(dir, "prov", "slot-0");
+    await writeFile(p, marker(4242, hostname(), "young"));
+    // 2s under the seam: comfortably kept whatever sub-second timing does.
+    const back = new Date(Date.now() - 58_000);
+    await utimes(p, back, back);
+    const led = new LaneLedger({ dir, sweepIntervalMs: 0, staleMs: 60_000 });
+    expect(await led.sweepStale()).toBe(0);
+    expect(await Bun.file(p).exists()).toBe(true);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Construction fires one sweep immediately (and the timer follows): litter left by killed or
+  // upgraded processes goes without any caller having to know the sweeper exists.
+  it("startup sweep deletes a pre-existing stale file with no manual call", async () => {
+    const dir = await freshDir();
+    const stray = join(dir, "leftover-slot-9"); // a stray loose file is swept too
+    await writeFile(stray, "junk");
+    const back = new Date(Date.now() - 50);
+    await utimes(stray, back, back);
+    new LaneLedger({ dir, sweepIntervalMs: 20, staleMs: 1 });
+    // Fire-and-forget: poll for the file to disappear.
+    const until = Date.now() + 1_000;
+    while (existsSync(stray) && Date.now() < until) await Bun.sleep(10);
+    expect(existsSync(stray)).toBe(false);
+    await rm(dir, { recursive: true, force: true });
   });
 });
 

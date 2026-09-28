@@ -59,9 +59,14 @@
  *
  * Filesystem errors THROW to the caller, which fails open: an unusable state dir must not deadlock every task.
  * Occupied is not an error -- acquire returns null and the caller queues.
+ *
+ * Stale-file sweeper (`sweepStale`): acquire only ever looks at slot-0..cap-1, so slot files abandoned by a formerly-larger
+ * cap and `.slot.claiming-*` temps orphaned by a reclaimer that died mid-reclaim are never touched by the protocol again.
+ * A sweep at construction and then on an hourly timer deletes any file under the ledger dir quiet for `DEFAULT_LANE_STALE_MS`, so
+ * such litter cannot accumulate forever (a retry storm once left ~7GB of it on devoid's laptop).
  */
 
-import { mkdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { createExclusive } from "@utils/fs-atomic.ts";
@@ -77,6 +82,16 @@ export const DEFAULT_LANE_HEARTBEAT_MS = 15_000;
  * by the holder's clock and compared against ours).
  */
 export const DEFAULT_LANE_LEASE_MS = 120_000;
+/** How often the stale-file sweep runs (once at construction, then on this timer). */
+export const DEFAULT_LANE_SWEEP_INTERVAL_MS = 3_600_000;
+/**
+ * A file under the ledger dir untouched for this long is deleted by the sweep.
+ * Held slots refresh their mtime every `DEFAULT_LANE_HEARTBEAT_MS` (15s), and any slot quiet for `leaseMs` (2 min)
+ * is already reclaimable by anyone, so a file quiet for 60 minutes provably has no live holder. The margin also keeps
+ * the sweep well clear of a suspended-but-alive process's slots before they could matter: by then their leases expired long ago,
+ * and deleting them matches what a reclaim would already conclude.
+ */
+export const DEFAULT_LANE_STALE_MS = 3_600_000;
 
 /**
  * Holders must keep the EXACT object `acquire()` returned for as long as the
@@ -99,6 +114,12 @@ export interface LaneLedgerOptions {
   /** Test seams: heartbeat cadence and the quiet-period after which a slot is dead. */
   heartbeatMs?: number;
   leaseMs?: number;
+  /**
+   * Test seams: stale-file sweep cadence and cutoff. sweepIntervalMs 0 disables the sweep
+   * entirely (startup fire and timer alike); sweepStale() remains callable by hand.
+   */
+  sweepIntervalMs?: number;
+  staleMs?: number;
 }
 
 /**
@@ -152,10 +173,13 @@ export class LaneLedger {
   #pidAlive: (pid: number) => boolean;
   #heartbeatMs: number;
   #leaseMs: number;
+  #staleMs: number;
+  #sweepIntervalMs: number;
   /** Held slots to heartbeat, by token. Timer runs only while non-empty. */
   #held = new Map<string, string>();
   #hb: ReturnType<typeof setInterval> | null = null;
   #beating = false;
+  #sweep: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: LaneLedgerOptions) {
     this.#dir = opts.dir;
@@ -168,6 +192,20 @@ export class LaneLedger {
         : DEFAULT_LANE_HEARTBEAT_MS;
     this.#leaseMs =
       typeof opts.leaseMs === "number" && opts.leaseMs >= 1 ? opts.leaseMs : DEFAULT_LANE_LEASE_MS;
+    // sweepIntervalMs also accepts 0: "no auto sweep, manual sweepStale() only".
+    this.#sweepIntervalMs =
+      typeof opts.sweepIntervalMs === "number" && opts.sweepIntervalMs >= 0
+        ? opts.sweepIntervalMs
+        : DEFAULT_LANE_SWEEP_INTERVAL_MS;
+    this.#staleMs =
+      typeof opts.staleMs === "number" && opts.staleMs >= 1 ? opts.staleMs : DEFAULT_LANE_STALE_MS;
+    if (this.#sweepIntervalMs >= 1 && this.#sweep === null) {
+      // Unref'd on the heartbeat timer's rationale: bookkeeping must not be the reason a process stays alive.
+      const timer = setInterval(() => void this.sweepStale(), this.#sweepIntervalMs);
+      timer.unref();
+      this.#sweep = timer;
+      void this.sweepStale();
+    }
   }
 
   /** Lane "" (bare model names) gets a literal "_" dir; names are percent-encoded. */
@@ -285,6 +323,75 @@ export class LaneLedger {
       await rm(lease.path, { force: true });
     } finally {
       processSlots.delete(lease.token);
+    }
+  }
+
+  /**
+   * Delete files under the ledger dir that no acquire path touches anymore.
+   * A candidate is a file (in a lane subdir) whose mtime is older than `staleMs`.
+   * See DEFAULT_LANE_STALE_MS for why that provably means no live holder. Directories survive.
+   *
+   * Fail-open; nothing here may reject or throw, a broken fs must not take down a session, and every miss self-heals on the next sweep.
+   * Returns the number of files deleted.
+   */
+  async sweepStale(): Promise<number> {
+    let deleted = 0;
+    try {
+      let entries;
+      try {
+        entries = await readdir(this.#dir, { withFileTypes: true });
+      } catch (e: unknown) {
+        // Missing or unreadable ledger dir: nothing to sweep.
+        logger.debug(`[lanes] stale sweep skipped: ${formatError(e)}`);
+        return 0;
+      }
+      const candidates: string[] = [];
+      for (const ent of entries) {
+        if (ent.isDirectory()) {
+          let kids;
+          try {
+            kids = await readdir(join(this.#dir, ent.name), { withFileTypes: true });
+          } catch (e: unknown) {
+            logger.debug(`[lanes] stale sweep skipped dir '${ent.name}': ${formatError(e)}`);
+            continue;
+          }
+          for (const kid of kids) {
+            if (kid.isFile()) candidates.push(join(this.#dir, ent.name, kid.name));
+          }
+        } else if (ent.isFile()) {
+          candidates.push(join(this.#dir, ent.name));
+        }
+      }
+      for (const path of candidates) {
+        let st;
+        try {
+          st = await stat(path);
+        } catch {
+          continue; // vanished or unstatable: not evidence to delete on
+        }
+        if (Date.now() - st.mtimeMs <= this.#staleMs) continue;
+        // a held slot beats every 15s and can only be stale here if the fs is lying. do not sweep a path this process currently holds.
+        if ([...this.#held.values()].includes(path)) continue;
+        // Re-stat immediately before the rm. This does not close the race, a re-acquirer can rename a fresh marker onto a stale slot between
+        // this stat and the rm -- but deleting a slot whose lease already expired is exactly what the reclaim protocol concludes anyway.
+        try {
+          st = await stat(path);
+        } catch {
+          continue;
+        }
+        if (Date.now() - st.mtimeMs <= this.#staleMs) continue;
+        try {
+          await rm(path, { force: true });
+          deleted++;
+          logger.debug(`[lanes] swept stale file ${path}`);
+        } catch (e: unknown) {
+          logger.debug(`[lanes] stale delete failed: ${formatError(e)}`);
+        }
+      }
+      return deleted;
+    } catch (e: unknown) {
+      logger.debug(`[lanes] stale sweep failed: ${formatError(e)}`);
+      return deleted;
     }
   }
 

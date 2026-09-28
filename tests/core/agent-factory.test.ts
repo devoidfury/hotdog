@@ -196,3 +196,74 @@ describe("createAgentFactory", () => {
     expect(agent).toBeDefined();
   });
 });
+
+describe("createAgentFactory startup profile filters (regression: --profile ran unfiltered)", () => {
+  const withProfileDef = {
+    ...resolved,
+    profileName: "meta",
+    profileDef: {
+      whitelistTools: ["read", "delegate_task"],
+      blacklistTools: ["overwrite"],
+      manager: true,
+    },
+  };
+
+  it("applies resolved profileDef whitelist when no overlay is passed (CLI shape)", async () => {
+    const { core } = makeCore();
+    const factory = createAgentFactory(core, {
+      resolved: withProfileDef as never,
+      llmClient: {} as never,
+    });
+    const agent = await factory();
+    expect(agent.toolWhitelist).toEqual(["read", "delegate_task"]);
+    expect((agent.config as Record<string, unknown>).blacklistTools).toEqual(["overwrite"]);
+    expect(agent.managerProfile).toBe(true);
+  });
+
+  it("an explicit toolWhitelist null (task worker) does NOT inherit the session whitelist", async () => {
+    const { core } = makeCore();
+    const factory = createAgentFactory(core, {
+      resolved: withProfileDef as never,
+      llmClient: {} as never,
+    });
+    const worker = await factory({ toolWhitelist: null, blacklistTools: null });
+    expect(worker.toolWhitelist).toBeNull();
+    expect((worker.config as Record<string, unknown>).blacklistTools ?? null).toBeNull();
+  });
+
+  it("an explicitly requested profile never inherits startup profileDef filters", async () => {
+    const { core } = makeCore();
+    const factory = createAgentFactory(core, {
+      resolved: withProfileDef as never,
+      llmClient: {} as never,
+    });
+    const agent = await factory({ profileName: "other" });
+    expect(agent.toolWhitelist).toBeNull();
+    expect(agent.managerProfile).toBe(false);
+  });
+
+  it("profile overlay wins over profileDef and a null overlay whitelist stays null", async () => {
+    const { core } = makeCore();
+    const factory = createAgentFactory(core, {
+      resolved: withProfileDef as never,
+      llmClient: {} as never,
+      profiles: {
+        meta: { body: "", model: null, whitelistTools: null, blacklistTools: [], manager: false },
+        auditor: {
+          body: "",
+          model: null,
+          whitelistTools: ["read"],
+          blacklistTools: ["bash"],
+          manager: false,
+        },
+      },
+    });
+    const switched = await factory({ profileName: "meta" });
+    expect(switched.toolWhitelist).toBeNull();
+    expect(switched.managerProfile).toBe(false);
+
+    const auditor = await factory({ profileName: "auditor" });
+    expect(auditor.toolWhitelist).toEqual(["read"]);
+    expect((auditor.config as Record<string, unknown>).blacklistTools).toEqual(["bash"]);
+  });
+});

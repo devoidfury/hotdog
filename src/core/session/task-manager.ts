@@ -621,6 +621,7 @@ export class TaskManager {
     const resolvedProfileBody = taskProfile?.body || "";
 
     const toolWhitelist = taskProfile?.whitelistTools || null;
+    const toolBlacklist = taskProfile?.blacklistTools || null;
 
     // Capture the delegating agent up front so completion is delivered to
     // ITS session's bus, even if other sessions are created in the meantime.
@@ -648,6 +649,7 @@ export class TaskManager {
       profileBody: resolvedProfileBody,
       sink,
       toolWhitelist,
+      blacklistTools: toolBlacklist,
       hideTools: true,
       hideThinking: true,
       showTokenUse: false,

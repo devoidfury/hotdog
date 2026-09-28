@@ -43,6 +43,24 @@ export function createAgentFactory(
     const resolved = (options.resolved ?? core.resolved ?? {}) as ResolvedConfig;
     const profileName = (agentConfig.profileName as string) || resolved.profileName || "default";
     const profile = options.profiles?.[profileName] || null;
+    // The startup profile picked by the config chain (CLI --profile / config.profile).
+    // CLI entry points pass no profiles overlay, so its tool filters live only on profileDef --
+    // without this fallback a `--profile X` session runs unfiltered.
+    // Only inherited when the requested name IS the resolved one, so an explicitly
+    // requested profile never drags the startup profile's filters along.
+    const startupProfile =
+      profile ?? (profileName === resolved.profileName ? (resolved.profileDef ?? null) : null);
+    const toolWhitelist =
+      agentConfig.toolWhitelist !== undefined
+        ? (agentConfig.toolWhitelist as string[] | null)
+        : (startupProfile?.whitelistTools ?? null);
+    const baseConfig = { ...(options.config ?? core.config) } as Record<string, unknown>;
+    const toolBlacklist =
+      agentConfig.blacklistTools !== undefined
+        ? (agentConfig.blacklistTools as string[] | null)
+        : startupProfile?.blacklistTools?.length
+          ? startupProfile.blacklistTools
+          : ((baseConfig.blacklistTools as string[] | null | undefined) ?? null);
 
     const agent = new Agent({
       hooks: core.hooks,
@@ -67,7 +85,8 @@ export function createAgentFactory(
       systemPromptTemplate: resolved.systemPromptTemplate,
       stream: pickBoolean(agentConfig.stream, resolved.stream),
       config: {
-        ...(options.config ?? core.config),
+        ...baseConfig,
+        blacklistTools: toolBlacklist ?? undefined,
         maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
         maxRetries: resolved.maxRetries as number,
         toolRetryDelay: resolved.toolRetryDelay as number,
@@ -84,12 +103,12 @@ export function createAgentFactory(
       },
       sessionId: (agentConfig.sessionId as string) || crypto.randomUUID(),
       abortSignal: (agentConfig.abortSignal as AbortSignal | null | undefined) ?? null,
-      toolWhitelist: (agentConfig.toolWhitelist as string[] | null | undefined) ?? profile?.whitelistTools ?? null,
+      toolWhitelist,
       // Precedence: explicit override > profile overlay > resolved profileDef
       // (the profile the config resolution chain picked at startup).
       managerProfile: pickBoolean(
         agentConfig.managerProfile,
-        profile?.manager ?? (resolved.profileDef?.manager === true),
+        profile?.manager ?? (startupProfile?.manager === true),
       ),
     });
 

@@ -2,7 +2,13 @@
 
 ## Unreleased
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.0...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.1...main
+
+## [v0.11.1] - 2026-09-28
+
+Small but important fix to solve an issue causing hangs when using task-lanes (lanesRetryTimer storm)
+
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.0...v0.11.1
 
 ## [v0.11.0] - 2026-09-27
 

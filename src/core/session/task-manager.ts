@@ -336,7 +336,9 @@ export class TaskManager {
   /** Cross-process lane slot ledger (null when lanesDir is unset: caps apply to this process only). */
   #lanes: LaneLedger | null;
   #lanesRetryMs: number;
-  #lanesRetryTimer: ReturnType<typeof setInterval> | null;
+  #lanesRetryTimer: ReturnType<typeof setTimeout> | null;
+  /** Cumulative retry timers actually created (regression witness: must stay ~1 per lanesRetryMs window, never multiply). */
+  #lanesRetryTicks = 0;
   // Terminal tasks keep a slim record (no agent) so a long-lived manager --
   // the webui TaskManager outlives every session -- does not pin each dead
   // task's full Agent/context forever. See #finalizeTurn for the release point.
@@ -1174,15 +1176,20 @@ export class TaskManager {
     });
   }
 
-  /** One shared retry tick while ANY entry waits on a fleet-full lane. */
+  /**
+   * One shared retry tick while ANY entry waits on a fleet-full lane.
+   * Deliberately a one-shot setTimeout, the callback clears the tracked handle before re-admitting,
+   * and every still-failing pass re-arms through here, so the slot guard admits at most one pending tick.
+   */
   #armLanesRetry(): void {
     if (this.#lanesRetryTimer) return;
-    const timer = setInterval(() => {
+    this.#lanesRetryTicks++;
+    const timer = setTimeout(() => {
       this.#lanesRetryTimer = null;
       for (const task of this.#tasks.values()) task.blocked = false;
       this.#admit();
     }, this.#lanesRetryMs);
-    (timer as { unref?: () => void }).unref?.();
+    timer.unref?.();
     this.#lanesRetryTimer = timer;
   }
 
@@ -1484,6 +1491,11 @@ export class TaskManager {
   /** @internal Test-only view of the task registry. */
   get _test_tasks(): ReadonlyMap<string, { agent: AgentLike | null }> {
     return this.#tasks;
+  }
+
+  /** @internal Cumulative retry timers created (witness for the setInterval multiplication regression). */
+  get _test_retryTicks(): number {
+    return this.#lanesRetryTicks;
   }
 
   taskStatus(taskId: string): TaskStatus | null {

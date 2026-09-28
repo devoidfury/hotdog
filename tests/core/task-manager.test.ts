@@ -2038,6 +2038,51 @@ describe("cross-process lane ledger (two TaskManagers, one lanesDir)", () => {
     await import("node:fs/promises").then((fs) => fs.rm(lanesDir, { recursive: true, force: true }));
   });
 
+  it("full-lane retries do not multiply timers (one pending retry tick at a time)", async () => {
+    // Regression: #armLanesRetry used a setInterval whose callback nulled the
+    // tracked handle before re-admitting; each re-arm then created a SECOND
+    // live interval that nothing ever cleared, so blocked lanes escalated
+    // into a retry storm (hundreds of full ledger scans per second froze the
+    // machine). The timer must be a chained one-shot: at most one per window.
+    const lanesDir = await freshLanesDir();
+    const aG = gatedAgent();
+    const mkMgr = () => ({
+      buildAgent: async () => aG.agent,
+      modelRegistry: {} as any,
+      config: {} as any,
+      maxIterations: 10,
+      taskProfile: "default",
+      lanesPerProvider: 1,
+      lanesDir,
+      lanesRetryMs: 20,
+    });
+    const mA = new TaskManager(mkMgr());
+    const mB = new TaskManager(mkMgr());
+
+    const hA = await mA.spawnTask("holder", "work", { workerModel: "prov/ma" } as never);
+    await settle(() => mA.taskStatus("holder") === "running", "holder runs");
+
+    // Three managers-blocked spawns on the same lane: every pass lands
+    // "ledger full", each failure re-arms through #armLanesRetry.
+    for (const id of ["b1", "b2", "b3"]) {
+      await mB.spawnTask(id, "work", { workerModel: "prov/mb" } as never);
+    }
+    await settle(() => mB._test_retryTicks > 0, "mB arms a retry");
+
+    const window = 200;
+    await new Promise((r) => setTimeout(r, window));
+    const ticks = mB._test_retryTicks;
+    // One chained timer => ~window/20 = 10 ticks (slack for timer jitter).
+    // The old setInterval code grew one live interval per window: 1+2+...+10
+    // >= 55 ticks in this span -- well clear of the bound.
+    expect(ticks).toBeLessThanOrEqual(20);
+    expect(mA._test_retryTicks).toBe(0); // mA never waits: never arms
+
+    aG.finishTurn("done");
+    await hA.done;
+    await import("node:fs/promises").then((fs) => fs.rm(lanesDir, { recursive: true, force: true }));
+  });
+
   it("a parked task yields its cross-process slot between turns and takes it back for a warm turn", async () => {
     const lanesDir = await freshLanesDir();
     const { rm } = await import("node:fs/promises");

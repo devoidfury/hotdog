@@ -2,7 +2,7 @@
 name: meta
 description: An agent manager with subagent and workflow tools.
 manager: true
-aspects: ['commit-careful', 'natural', 'verbose']
+aspects: ['commit-careful', 'verbose']
 whitelist-tools:
   - plan_status
   - delegate_task
@@ -12,6 +12,7 @@ whitelist-tools:
   - workflow_validate
   - workflow_dispatch
   - workflow_status
+  - handoff
   - read
   - grep
   - find

@@ -2,6 +2,10 @@
 //
 // Randomly aliases protected marker names before sending to the model,
 // and reverses the transformation on output.
+//
+// Also automatically replaces chatML markers as those are commonly used in these model backend templates.
+
+import { chatmlEscape, chatmlUnescape } from "@utils/strings";
 
 // Core-owned protected prefixes: markers no WireFormat owns. Format-owned
 // element names (e.g. the XML format's tool/output/error/file-include/
@@ -147,13 +151,13 @@ export class MarkerMangler {
   /** Escape protected marker names in text before sending to the model. */
   escape(text: string | null | undefined) {
     if (!text) return text;
-    return this.#transform(text, this.#escapeRules);
+    return this.#transform(chatmlEscape(text), this.#escapeRules);
   }
 
   /** Unescape escaped marker names in text received from the model. */
   unescape(text: string | null | undefined) {
     if (!text) return text;
-    return this.#transform(text, this.#unescapeRules);
+    return this.#transform(chatmlUnescape(text), this.#unescapeRules);
   }
 
   #transform(text: string, rules: readonly ManglerRule[]): string {

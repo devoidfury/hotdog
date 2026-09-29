@@ -78,3 +78,15 @@ export function suggestCandidates(
   }
   return matches.slice(0, limit).map(([c]) => c);
 }
+
+const CHATML_TOKENS = /<\|([^|>]+)\|>/g;
+const UNCHAT_TOKENS = /<::8\|([^|>]+)\|8::>/g;
+
+export function chatmlEscape(text: string) {
+  return text.replace(CHATML_TOKENS, (_, tag) => `<::8|${tag}|8::>`)
+}
+
+export function chatmlUnescape(text: string) {
+  const end = '|>';
+  return text.replace(UNCHAT_TOKENS, (_, tag) => `<|${tag}${end}`)
+}

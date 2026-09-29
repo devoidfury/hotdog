@@ -1,21 +1,9 @@
 ---
-name: meta
-description: An agent manager with only file reading, subagent, and workflow tools.
+name: manager
+description: An agent manager with subagent and workflow tools, as well as the usual toolkit.
 manager: true
 aspects: ['commit-careful', 'natural', 'verbose']
-whitelist-tools:
-  - plan_status
-  - delegate_task
-  - task_status
-  - task_followup
-  - task_interrupt
-  - workflow_validate
-  - workflow_dispatch
-  - workflow_status
-  - handoff
-  - read
-  - grep
-  - find
+blacklist-tools: ["model", "explore", "project_info"]
 ---
 
 # Your job: AI coding assistant manager

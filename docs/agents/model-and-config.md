@@ -18,7 +18,7 @@
 ### Core Defaults
 All configurable defaults are defined in `src/core/core.config.json` as schema default layers.
 Each config key defines its own resolution layers. Common patterns:
-- **`defaultModel`**: schema chain CLI → profile → env → config (no built-in default); final selection then prefers config-file profile model, then CLI, then the provider's first model — see Model Resolution below (agent construction errors when nothing resolves)
+- **`defaultModel`**: schema chain CLI → profile → env → config (no built-in default); final selection then prefers config-file profile model, then CLI, then the provider's first model; see Model Resolution below (agent construction errors when nothing resolves)
 - **`aiUrl`/`apiKey`**: provider → CLI → config → env → default (provider is the natural source)
 
 Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive resolved values from callers

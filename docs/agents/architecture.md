@@ -311,21 +311,15 @@ Parent agent calls delegate_task()
   → TaskManager.spawnTask(taskId, description, options)
   → Load task profile
   → Create Agent instance with:
-    - sink = silent no-op sink (task agents emit nothing to the UI;
-      onTaskComplete routes the final result)
+    - sink = silent no-op sink (task agents emit nothing to the UI; onTaskComplete routes the final result)
     - toolWhitelist from profile
     - hideTools/hideThinking: true
   → Run agent.run(description) in background
-  → On completion: enqueue result on the MessageBus of the session that owns
-    the delegating agent (captured at spawn time as managerAgent, so results
-    never land in a different session that was created later). The bus run
-    loop appends it to the manager's context via agent.run(), so it is
-    injected exactly once. When no delegating session was captured (or the
-    session manager exposes no getBus — sessionless harnesses), the result
-    falls back to a direct context add. If the delegating
-    session no longer has a bus at completion time (deleted, or the delegator
-    owns no session entry), the result is dropped with a warning rather than
-    misdelivered to an unrelated session.
+  → On completion: enqueue result on the MessageBus of the session that owns the delegating agent.
+    The bus run loop appends it to the manager's context via agent.run(), so it is injected exactly once.
+    When no delegating session was captured (or the session manager exposes no getBus, sessionless harnesses),
+    the result falls back to a direct context add. If the delegating session no longer has a bus at completion
+    time (deleted, or the delegator owns no session entry), the result is dropped with a warning.
 ```
 
 ### Subcommand Dispatch

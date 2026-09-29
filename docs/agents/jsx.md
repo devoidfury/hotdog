@@ -1,37 +1,43 @@
-# JSX Runtime (`src/utils/jsx/`)
+# JSX Runtime (`src/utils/jsx/` AKA `@utils/jsx`)
 
-Zero-dependency JSX for hotdog: an element factory, a server-side `renderToString`, and a client `mount` with a minimal keyed DOM diff. No React, no DOM lib types. The webui (`src/extensions/webui/ui/`) is the consumer; nothing in core uses it.
+Zero-dependency JSX for hotdog: an element factory, server-side `renderToString`, and a client `mount` with a minimal keyed DOM diff. No React, no DOM lib types.
 
-## Setup
+*Why would you do such a thing?* It's not as scary as it looks, I promise. The real trick is in the bun built-in TS compiler that supports the JSX transform.
 
-`.tsx`/`.jsx` compile via the automatic transform configured in `tsconfig.json`:
+## How it works
+
+`.tsx`/`.jsx` compilation works via the automatic transform configured in `tsconfig.json`:
 
 ```json
 "jsx": "react-jsx",
 "jsxImportSource": "@utils/jsx"
 ```
 
-The transform emits calls into `src/utils/jsx/jsx-runtime.ts` (prod) and `jsx-dev-runtime.ts` (dev). Those files are fixed-path entrypoints Bun requires; application code never imports them directly. Import from the package root instead:
+This transform changes jsx calls into function calls into into `src/utils/jsx/jsx-runtime.ts` (prod) and `jsx-dev-runtime.ts` (dev).
+Those files are fixed-path entrypoints Bun requires; application code never imports them directly.
+
+## API
+
+Import from the package root:
 
 ```ts
 import { renderToString, mount, Fragment } from "@utils/jsx";
 ```
 
-## API
-
-Exported from `src/utils/jsx/index.ts`:
+Exported from `@utils/jsx`:
 
 | Export | Purpose |
 |---|---|
 | `renderToString(node)` | Render a JSX tree (or bare value) to an HTML string |
 | `mount(node, container)` | Render into a live DOM node; returns `{ render(next), unmount() }` |
 | `Fragment` | Groups children without a host element. A `Symbol.for` identity shared across both runtime entrypoints |
-| `Ref` | Callback-ref type: `(el: DomElement | null) => void` (used via the `ref` prop on host elements) |
+| `Ref` | Callback-ref type `(el: DomElement \| null) => void` (used via the `ref` prop on host elements) |
 | `createNode(type, props?, key?)` | Build an element by hand (same shape the transform emits) |
 | `Component`, `ComponentProps`, `JsxChild`, `JsxNode` | Element-model types |
 | `Mounted`, `DomDocument`, `DomElement`, `DomNode`, `DomText` | Client/DOM types |
 
-A `Component` is `(props) => JsxChild`; there is no class-component or lifecycle concept. `JsxChild` covers nodes, arrays (nested arbitrarily), strings, numbers, booleans, and nullish values.
+A `Component` is `(props) => JsxChild`; there is no class-component or lifecycle concept.
+`JsxChild` covers nodes, arrays (nested arbitrarily), strings, numbers, booleans, and nullish values.
 
 ## SSR semantics (`renderToString`, core.ts)
 
@@ -64,13 +70,13 @@ app.unmount();
 ```
 
 - Re-renders are explicit (`app.render`). Compose with `reactiveState` from `@utils/reactive-state` for automatic updates: `count.effect(() => app.render(<View count={count()} />))`.
-- The container must be empty at mount; mount throws otherwise (foreign children confuse ordering). `unmount()` removes everything the mount created but keeps the container.
+- The container must be empty at mount; `mount` throws otherwise (foreign children confuse ordering). `unmount()` removes everything the mount created but keeps the container.
 - Before diffing, the tree is flattened so each unit (host element, text, placeholder) maps to exactly one DOM node. Components are called during flattening — they hold no state; only their DOM output is diffed.
 - Falsy children (`{cond && <x/>}`) become comment placeholders so positional diffing keeps siblings aligned across renders.
 - Child matching: by `key` when present, otherwise by position. A keyless unit can only consume an unkeyed old entry, so it cannot hijack a keyed node. Duplicate keys warn (once per parent per key).
 - Events: `onClick` → `click` (suffix lowercased); `onDoubleClick` → `dblclick`. Listeners are keyed by DOM event type, so `onClick` and `onclick` share a slot (last wins) instead of both firing. Changing the function rebinds the listener.
-- `ref` on a host element is a callback ref: called with the node when the element first enters the tree (on the create path the callback runs before its children are appended and before it is inserted into the parent, so treat it as a node handle, not a mounted subtree; a ref swap during patch hands over the already-live node), with `null` when the node is removed or the ref identity changes. This is the escape hatch for imperative DOM work — the webui hands the message-list `<div>` to the streaming markdown renderer this way. A host element with **no `children` prop** has no child slots in the diff, so imperatively appended children inside it are never touched. Refs are never rendered as attributes (SSR ignores them like handlers).
-- `dangerouslySetInnerHTML` is ignored by mount (warns once); it is SSR-only.
+- `ref` on a host element is a callback ref: called with the node when the element first enters the tree, with `null` when the node is removed or the ref identity changes. This is the escape hatch for imperative DOM work: the webui hands the message-list `<div>` to the streaming markdown renderer this way. A host element with **no `children` prop** has no child slots in the diff, so imperatively appended children inside it are never touched. Refs are never rendered as attributes.
+- `dangerouslySetInnerHTML` is ignored by `mount` (warns once); it is SSR-only.
 - Each warning fires at most once per node so static warnings do not repeat every render.
 - The DOM is touched only through the minimal structural interfaces `DomNode`/`DomText`/`DomElement`/`DomDocument` — the file typechecks without the DOM lib, and tests run mount against a fake DOM under Bun. Real browser nodes satisfy the interfaces structurally.
 
@@ -81,7 +87,3 @@ app.unmount();
 - `data:` URLs are dropped on `<picture><source>` and `<input type="image">` (only `<img>` is excepted).
 - Style object numbers get no unit (`width: 10` → `width:10`, not `10px`).
 - SSR counts `[false]` (array of only-falsy entries) as children for the void-element / raw-HTML checks.
-
-## Tests
-
-`tests/utils/jsx/` — `element.test.ts` (factory + Fragment identity), `render.test.tsx` (real JSX through the Bun transform: escaping, URL scheme sanitization, boolean attrs, void warnings), `mount.test.tsx` (diffing against a hand-rolled fake DOM; no `mock.module`, per project rules).

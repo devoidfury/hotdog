@@ -8,13 +8,15 @@ When adding new functionality:
 4. Register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER` (or via `core.cliSubcommandRegistry`)
 5. **Define config options in `configSchema` in `extension.json`** (single source of truth)
 6. **Define CLI flags in `cli:flags` in `extension.json`**
-7. Contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`
+
+See [Hook Lifecycle](../hook-lifecycle.md) for additional hooks.
 
 When adding new subcommands, create a new extension in `src/extensions/` and register via `CliSubcommandRegistry`.
 
 ### Extension.json Schema
 
-Every extension directory must contain an `extension.json` metadata file. This is the **primary discovery signal** — the extension loader uses `extension.json` presence to identify valid extensions; loading the extension requires an `index.ts` entry point.
+Every extension directory must contain an `extension.json` metadata file. This is the **primary discovery signal**,
+extension loader uses `extension.json` presence to identify valid extensions; loading the extension requires an `index.ts` entry point.
 
 ```json
 {

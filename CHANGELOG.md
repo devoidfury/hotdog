@@ -2,9 +2,21 @@
 
 ## Unreleased
 
-- **Workflows: validate-is-save, file dispatch, and graph params.** Manager tool surface: `workflow_save` is gone -- `workflow_validate` now saves a valid design on the spot (as `<name>.workflow.yaml`, returning the path) and also accepts `file` to re-validate an existing graph; `workflow_dispatch` takes `file` (path or bare name resolved against the workflows dir) instead of pasted `yaml`, closing the loop so validation is a required step and designs never round-trip through the transcript. Graphs can declare a top-level `params` block (id -> default, empty = required) and reference values as `{{params.x}}` in any string; `workflow_dispatch(args={...})` and the CLI's repeatable `--param key=value` (`validate`/`render` lenient, `run` strict) fill them, making saved graphs reusable templates. Substitution runs on the parsed YAML tree, so values can never inject graph structure.
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.2...main
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.1...main
+## [v0.11.2] - 2026-09-29
+
+- **Workflows: validate-is-save, file dispatch, and graph params.** Manager tool `workflow_save` is gone. `workflow_validate` now saves a valid design on the spot (as `<name>.workflow.yaml`, returning the path) and also accepts `file` to re-validate an existing graph. `workflow_dispatch` takes `file` (path or bare name resolved against the workflows dir) instead of pasted `yaml`, closing the loop so validation is a required step and designs avoid round-trip through the transcript. Graphs can declare a top-level `params` block (id -> default, empty = required) and reference values as `{{params.x}}` in any string; `workflow_dispatch(args={...})` and the CLI's repeatable `--param key=value` fill them, making saved graphs reusable templates. Substitution runs on the parsed YAML tree, so values can't inject graph structure.
+
+- fix regression in startup `--profile` tool filtering, causing tools to be loaded based on the default profile regardless
+
+- task-lanes - fix address issue causing cap+1 lanes on providers
+
+- fix frontmatter-only (empty body) task agent profile
+
+- updates to example profiles (meta updates, new manager)
+
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.1...v0.11.2
 
 ## [v0.11.1] - 2026-09-28
 

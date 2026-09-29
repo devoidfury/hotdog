@@ -14,7 +14,7 @@ Needs exactly one thing: [Bun](https://bun.sh) >= 1.3.1.
 git clone https://github.com/devoidfury/hotdog.git && cd hotdog
 # initialize your own config directory by copying minimal config.
 # copy to ~/.config/hotdog or /etc/hotdog instead if you want it to work from anywhere.
-cp -r examples/minimal-config/config .config
+cp -r examples/minimal-config/config config
 # alternatively configure "providers" in the config
 export HOTDOG_AI_URL="http://localhost:8080"   # your llama.cpp / llama-swap / vllm server
 export HOTDOG_API_KEY="api-key-here"

@@ -26,31 +26,5 @@
       "url": "https://example.com/mcp"
     }
   ],
-  "providers": [
-    {
-      "name": "provider1",
-      "url": "http://provider1.localnetwork:9292",
-      "models": [
-        {
-          "name": "mystic-navel",
-          "context-limit": 262144
-        },
-        {
-          "name": "hopus-popus",
-          "context-limit": 262144
-        }
-      ]
-    },
-
-    {
-      "name": "provider2",
-      "url": "http://example.com",
-      "models": [
-        {
-          "name": "g-p-p-d-t",
-          "context-limit": 120000
-        }
-      ]
-    }
-  ]
+  "providers": []
 }

@@ -44,6 +44,7 @@ async function runOneShot(
       taskProfile: resolved.taskProfile || "task-default",
       lanesPerProvider: resolved.taskLanesPerProvider,
       lanesDir: resolved.taskLanesDir,
+      defaultModel: resolved.model ?? null,
     },
     // Mirrors the interactive CLI: without it the TaskManager cannot resolve
     // worker profiles from the config directory.

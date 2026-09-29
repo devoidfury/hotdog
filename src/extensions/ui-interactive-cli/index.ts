@@ -438,6 +438,7 @@ export async function runInteractiveSession(
       taskProfile: resolved.taskProfile || "task-default",
       lanesPerProvider: resolved.taskLanesPerProvider,
       lanesDir: resolved.taskLanesDir,
+      defaultModel: resolved.model ?? null,
     },
     profileManager: resolved.profileManager,
   });

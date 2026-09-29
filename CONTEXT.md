@@ -106,7 +106,7 @@ Status markers: entries tagged **(planned)** are design intent -- nothing in the
 
 ## Configuration
 
-- `config/defaults.json` — User-editable global defaults. Config dir resolution: CLI `--config-dir` > `HOTDOG_CONFIG_DIR` env > `./config` (CWD) > `/etc/hotdog` > `~/.config/hotdog` (XDG).
+- `config/defaults.json` — User-editable global defaults. Config dir resolution: CLI `--config-dir` > `HOTDOG_CONFIG_DIR` env > `./config` (CWD) > `/etc/hotdog` > `~/.config/hotdog` (XDG) > bundled `examples/minimal-config/config` (last resort when nothing else exists, warned).
 - `config/profiles/*.profile.md` — Named profile overlays (body, tools, aspects).
 - `config/system_prompt.md` — System prompt template.
 - `config/prompts/*.prompt.md` — Named prompt templates.

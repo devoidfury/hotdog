@@ -84,6 +84,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         taskProfile: resolved.taskProfile || "task-default",
         lanesPerProvider: resolved.taskLanesPerProvider,
         lanesDir: resolved.taskLanesDir,
+        defaultModel: resolved.model ?? null,
         profileManager: resolved.profileManager,
       }),
     };

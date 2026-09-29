@@ -12,12 +12,10 @@
     "paths": [".", "/skills", "/data", "/tmp", "/etc/hotdog"]
   },
   "model-groups": {
-    "coders": ["qwen3.8-flash-next", "qwen3.8-27b", "cyber-tiel-coder-35b", "kat-coder-2.5-dev"],
-    "reviewers": ["cyber-tiel-coder-35b", "kat-coder-2.5-dev"]
+    "coders": ["qwen3.8-flash-next"]
   },
   "profiles": {
     "explorer": {
-      "group": "reviewers"
     },
     "test": {
       "model": "lfm2.5-8b-a1b"
@@ -60,11 +58,6 @@
       "fetch-models": true,
       "apiKey": "$HOTDOG_ALT_KEY",
       "url": "$HOTDOG_ALT_URL"
-    },
-    {
-      "name": "home",
-      "url": "http://mini.home:9292",
-      "fetch-models": true
     }
   ]
 }

@@ -25,10 +25,13 @@ The config directory is resolved in the following priority order:
 | 1 | CLI flag `--config-dir` | `hotdog --config-dir /custom/config` |
 | 2 | `HOTDOG_CONFIG_DIR` env var | `export HOTDOG_CONFIG_DIR=~/.hotdog` |
 | 3 | `./config` (CWD-relative) | `<project>/config/defaults.json` |
-| 4 | `/etc/hotdog` | `/etc/hotdog/defaults.json` |
-| 5 | XDG: `~/.config/hotdog` | `~/.config/hotdog/defaults.json` |
+| 4 | `/etc/hotdog` (system-wide) | `/etc/hotdog/defaults.json` |
+| 5 | XDG: `~/.config/hotdog` (user-specific, recommended) | `~/.config/hotdog/defaults.json` |
+| 6 | Bundled example fallback: `examples/minimal-config/config` (shipped with hotdog) | `<hotdog>/examples/minimal-config/config/defaults.json` |
 
 The config file itself is always named `defaults.json`.
+
+Copy the bundled `examples/minimal-config/config` to `~/.config/hotdog` or `/etc/hotdog` to persist your config, or use `HOTDOG_CONFIG_DIR`/`--config-dir` to keep this folder wherever you want it.
 
 ---
 

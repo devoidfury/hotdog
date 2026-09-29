@@ -53,6 +53,12 @@ export interface LaneCaps {
  * and top-level session turns): `globalCap` (taskLanesPerProvider) is the
  * fleet default, a provider def's numeric `taskLanes` overrides it for that
  * lane alone. Values below 1 normalize to unlimited, on either knob.
+ *
+ * The bare-name lane "" is special: it is not a provider, it is the phantom lane unplaced/bare-keyed
+ * traffic lands on while the requests still hit SOME real backend.
+ * An unlimited fallback there would silently bypass every per-provider cap
+ * (placed task on a capped provider + unplaced task = 2 concurrent against a cap-1 backend).
+ * So "" is capped conservatively by the tightest finite per-provider override, never exceeding the global cap.
  */
 export function makeLaneCaps(
   globalCap: number | undefined,
@@ -66,7 +72,16 @@ export function makeLaneCaps(
   );
   const fallback =
     typeof globalCap === "number" ? normalize(globalCap) : Number.POSITIVE_INFINITY;
-  return { capOf: (lane: string) => overrides.get(lane) ?? fallback };
+  // Conservative ceiling for the phantom bare-name lane: min over the finite overrides, bounded by the global cap.
+  // With no caps at all it stays the fallback, exactly as before.
+  let bareLaneCap = fallback;
+  for (const cap of overrides.values()) {
+    if (cap < bareLaneCap) bareLaneCap = cap;
+  }
+  return {
+    capOf: (lane: string) =>
+      lane === "" ? bareLaneCap : overrides.get(lane) ?? fallback,
+  };
 }
 
 /** The bare model-name part of a registry key (bare keys pass through). */

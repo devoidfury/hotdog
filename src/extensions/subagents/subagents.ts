@@ -107,12 +107,20 @@ export class DelegateTaskTool extends SubagentTool {
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
 
-    // The calling agent — completion results are delivered to this agent's
-    // session bus, not to whichever session was created last.
-    const callingAgent = ctx?.get("agent") as { sessionId?: string } | null | undefined;
+    // Completion results are delivered to this agent's session bus, not to whichever session was created last.
+    // Its model is handed over too: the store lookup inside #parentModel can miss (hosts without a wired SessionManager, unregistered agents),
+    // and a missed chain default used to land the task on the uncapped bare-name lane.
+    const callingAgent = ctx?.get("agent") as
+      | { sessionId?: string; model?: string }
+      | null
+      | undefined;
     const managerAgent = callingAgent?.sessionId != null
       ? { sessionId: callingAgent.sessionId }
       : null;
+    const parentModel =
+      typeof callingAgent?.model === "string" && callingAgent.model.trim()
+        ? callingAgent.model.trim()
+        : undefined;
 
     const handle = await (backend.value as TaskManager).spawnTask(
       args.task_id as string,
@@ -121,6 +129,7 @@ export class DelegateTaskTool extends SubagentTool {
         workerModel: args.worker_model as string || undefined,
         profile: args.profile as string || undefined,
         managerAgent,
+        parentModel,
       },
     );
     return ToolResult.ok(

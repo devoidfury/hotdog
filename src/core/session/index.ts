@@ -112,6 +112,8 @@ export interface SessionManagerOptions {
     lanesPerProvider?: number;
     /** Cross-process lane ledger dir (resolved config: taskLanesDir). */
     lanesDir?: string | null;
+    /** Resolved default model (resolved config: model): last chain link for task placement. */
+    defaultModel?: string | null;
   } | null;
   extensions?: unknown;
   profileManager?: ProfileManager;
@@ -196,6 +198,7 @@ export class SessionManager {
         taskProfile: options.taskConfig.taskProfile,
         lanesPerProvider: options.taskConfig.lanesPerProvider,
         lanesDir: options.taskConfig.lanesDir,
+        defaultModel: options.taskConfig.defaultModel ?? null,
         profileManager: options.profileManager,
       });
 

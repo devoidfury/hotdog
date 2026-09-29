@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "bun:test";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { main, peekConfigFlags } from "@core/main.ts";
@@ -194,6 +195,67 @@ describe("resolveConfigDirChain", () => {
       expect(chain[0]!.chosen).toBe(true);
       expect(chain.filter((c) => c.chosen)).toHaveLength(1);
       expect(resolveConfigDir(null)).toBe(path.resolve(os.tmpdir()));
+    } finally {
+      restore();
+    }
+  });
+
+  it("implicit chain falls back to the bundled examples config when nothing else exists", () => {
+    // Isolate every implicit candidate: HOME -> temp (no ~/.config/hotdog),
+    // CWD -> temp (no ./config), and /etc/hotdog mocked absent via the
+    // fs.accessSync the dirExists helper calls (it exists on dev hosts).
+    // Bun's os.homedir() ignores runtime HOME changes, so patch it directly.
+    const savedEnv = process.env.HOTDOG_CONFIG_DIR;
+    const savedCwd = process.cwd();
+    const tmpHome = fsSync.mkdtempSync(path.join(os.tmpdir(), "hotdog-home-"));
+    const tmpCwd = fsSync.mkdtempSync(path.join(os.tmpdir(), "hotdog-cwd-"));
+    const realHomedir = os.homedir;
+    const realAccessSync = fsSync.accessSync;
+    try {
+      delete process.env.HOTDOG_CONFIG_DIR;
+      (os as { homedir: typeof os.homedir }).homedir = () => tmpHome;
+      (fsSync as { accessSync: typeof fsSync.accessSync }).accessSync = ((
+        p: fsSync.PathLike,
+        ...rest: unknown[]
+      ) => {
+        if (String(p) === "/etc/hotdog") throw new Error("absent (mocked)");
+        return (realAccessSync as (...args: unknown[]) => void).call(fsSync, p, ...rest);
+      }) as typeof fsSync.accessSync;
+      process.chdir(tmpCwd);
+
+      const chain = resolveConfigDirChain(null);
+      expect(chain.map((c) => c.source)).toEqual([
+        "./config",
+        "/etc/hotdog",
+        "fallback ~/.config/hotdog",
+        "bundled example fallback",
+      ]);
+      expect(chain.filter((c) => c.exists)).toHaveLength(1); // the bundled dir
+      const chosen = chain.filter((c) => c.chosen);
+      expect(chosen).toHaveLength(1);
+      expect(chosen[0]!.source).toBe("bundled example fallback");
+      expect(chosen[0]!.exists).toBe(true);
+      expect(resolveConfigDir(null)).toBe(chosen[0]!.path);
+      expect(fsSync.existsSync(path.join(chosen[0]!.path, "defaults.json"))).toBe(true);
+    } finally {
+      (os as { homedir: typeof os.homedir }).homedir = realHomedir;
+      (fsSync as { accessSync: typeof fsSync.accessSync }).accessSync = realAccessSync;
+      process.chdir(savedCwd);
+      if (savedEnv === undefined) delete process.env.HOTDOG_CONFIG_DIR;
+      else process.env.HOTDOG_CONFIG_DIR = savedEnv;
+      fsSync.rmSync(tmpHome, { recursive: true, force: true });
+      fsSync.rmSync(tmpCwd, { recursive: true, force: true });
+    }
+  });
+
+  it("env still wins over the bundled fallback in the same empty environment", () => {
+    // Flag/env resolution must be untouched by the new last-resort fallback.
+    try {
+      process.env.HOTDOG_CONFIG_DIR = os.tmpdir();
+      const chain = resolveConfigDirChain(null);
+      expect(chain).toHaveLength(1);
+      expect(chain[0]!.source).toContain("HOTDOG_CONFIG_DIR");
+      expect(chain[0]!.chosen).toBe(true);
     } finally {
       restore();
     }

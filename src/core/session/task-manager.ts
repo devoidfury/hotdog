@@ -187,6 +187,14 @@ export interface SpawnTaskOptions {
    */
   managerAgent?: { sessionId: string } | null;
   /**
+   * Chain-default model hint: the delegating session's model, captured at
+   * call time. Used by spawn paths the session store cannot resolve (the
+   * workflow engine's parked nodes; hosts without a wired sessionManager),
+   * so the task is placed on the parent's model lane instead of falling onto
+   * the bare-name lane. Takes precedence over the managerAgent store lookup.
+   */
+  parentModel?: string;
+  /**
    * Park between turns (workflow-engine only): after each agent turn the task
    * stays RUNNING with its warm session; it holds its provider-lane slot
    * through turns but yields it while idle, so queued spawns and other nodes
@@ -245,6 +253,15 @@ export interface TaskManagerRequiredOptions {
    * blocks nodes that must run against it (e.g. a judge for the parked producer).
    */
   lanesPerProvider?: number;
+  /**
+   * The process's resolved default model (resolved config: model) -- exactly
+   * what the agent factory falls back to when a spawn leaves the model empty.
+   * Last link in the spawn chain default (after parent model and catalog
+   * default), so the task is PLACED on the provider its traffic actually hits
+   * instead of running unplaced on the phantom bare-name lane, where its
+   * provider cap and ledger slot would never apply.
+   */
+  defaultModel?: string | null;
 }
 
 
@@ -330,6 +347,8 @@ export class TaskManager {
   #taskProfile: string;
   /** Per-lane caps: global taskLanesPerProvider default + provider taskLanes overrides (shared resolution with session turns). */
   #laneCaps: LaneCaps;
+  /** Resolved process default model (agent-factory's own fallback); last chain link for spawn placement. */
+  #buildDefaultModel: string;
   #peekLoaded: (provider: string) => Promise<Set<string>>;
   #modelGroups: Record<string, string[]>;
   #noSpread: Set<string>;
@@ -369,6 +388,8 @@ export class TaskManager {
     // fleet default; a numeric provider taskLanes overrides it for that lane
     // only. Both normalize below 1 to unlimited (shared with session turns).
     this.#laneCaps = makeLaneCaps(options.lanesPerProvider, providerDefs);
+    this.#buildDefaultModel =
+      typeof options.defaultModel === "string" ? options.defaultModel.trim() : "";
     this.#noSpread = new Set(
       providerDefs
         .filter((p) => (p as { noSpread?: boolean }).noSpread === true)
@@ -696,13 +717,18 @@ export class TaskManager {
   }
 
   /**
-   * The delegating session's current model, when the spawn names a manager
-   * agent (delegate_task path). The chain default for a bare spawn: same
-   * model as the parent, then copy-expanded across providers by the caller.
+   * The chain-default model of the delegating side: the explicit parentModel hint captured at call time (workflow engine, delegate_task),
+   * else the manager agent's model via the session store (plain delegate_task path).
+   * A parent the store cannot resolve (unregistered session, host without a SessionManager) returns undefined;
+   * the caller then falls to the catalog default and finally the process build default, instead of placing the
+   * task on the uncapped phantom lane.
    */
-  #parentModel(managerAgent: SpawnTaskOptions["managerAgent"]): string | undefined {
-    if (!managerAgent) return undefined;
-    const model = this.#sessionManager?.getAgentBySessionId?.(managerAgent.sessionId)?.model;
+  #parentModel(options: SpawnTaskOptions): string | undefined {
+    const hint =
+      typeof options.parentModel === "string" ? options.parentModel.trim() : "";
+    if (hint) return hint;
+    if (!options.managerAgent) return undefined;
+    const model = this.#sessionManager?.getAgentBySessionId?.(options.managerAgent.sessionId)?.model;
     return typeof model === "string" && model.length > 0 ? model : undefined;
   }
 
@@ -753,7 +779,7 @@ export class TaskManager {
       `[task ${taskId}] plan inputs: profile='${profileName}' profile.group=${profileGroup ?? "-"} ` +
         `worker_model=${options.workerModel ?? "-"} pin=${options.pin?.model ?? options.pin?.provider ?? "-"} ` +
         `requires=${options.requires ? JSON.stringify(options.requires) : "-"} ` +
-        `parent=${options.managerAgent ? this.#parentModel(options.managerAgent) ?? "?" : "-"} registrySize=${Object.keys(this.#modelRegistry).length}`,
+        `parent=${this.#parentModel(options) ?? "-"} registrySize=${Object.keys(this.#modelRegistry).length}`,
     );
     let candidates: SpawnCandidate[] | null = null;
     let modelLabel: string;
@@ -783,19 +809,20 @@ export class TaskManager {
         // A bogus explicit pin is a caller error: fail at dispatch, not as an HTTP 404 from the gateway
         throw new Error(`[task ${taskId}] worker model '${explicit}' is not in the model catalog`);
       }
-      // Chain default: the delegating (parent) session's model, then the
-      // catalog's `default` key (vestigial in practice: buildModelRegistry
-      // never sets one). Explicit qualified values honor their provider;
-      // bare values and the chain default are placement-eligible anywhere
-      // the name exists.
-      const parentModel = this.#parentModel(options.managerAgent);
-      const chainDefault = parentModel || registryDefault;
+      // Chain default: the delegating session's model (call-time hint or session-store lookup),
+      // then the catalog's `default` key (vestigial in practice: buildModelRegistry never sets one),
+      // then the process's resolved default model -- the exact value agent-factory runs on an empty model string.
+      // Naming it here keeps the task PLACED on that provider's lane (cap + ledger slot apply) instead of running
+      // unlocked on the phantom bare-name lane.
+      // Explicit qualified values honor their provider; bare values and the chain default can go anywhere the name exists.
+      const parentModel = this.#parentModel(options);
+      const chainDefault = parentModel || registryDefault || this.#buildDefaultModel;
       const expandable = !explicit || explicit === registryDefault || !explicit.includes("/");
       modelLabel = explicit || chainDefault;
       headKey = modelLabel;
       if (!modelLabel) {
         logger.warn(
-          `[task ${taskId}] no model resolved (no worker_model, profile model, parent session model, or catalog default); the build default will run the task, unplaced on the bare-name lane`,
+          `[task ${taskId}] no model resolved (no worker_model, profile model, parent session model, catalog default, or build default model); the agent build default will run the task, unplaced on the bare-name lane`,
         );
       }
       if (modelLabel && expandable) {

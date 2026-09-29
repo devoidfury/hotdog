@@ -439,12 +439,24 @@ export class WorkflowDispatchTool extends WorkflowTool {
       }
     }
 
+    // The delegating agent: sessionId routes the completion message back to its bus;
+    // model is the default for nodes without an explicit one.
+    const callingAgent = ctx?.get("agent") as
+      | { sessionId?: string; model?: string }
+      | undefined;
+    const callingSessionId = callingAgent?.sessionId ?? null;
+    const parentModel =
+      typeof callingAgent?.model === "string" && callingAgent.model.trim()
+        ? callingAgent.model.trim()
+        : undefined;
+
     const run = new WorkflowRun({
       workflow,
       runId,
       runDir,
       tasks,
       limits: this.opts.limits,
+      ...(parentModel ? { parentModel } : {}),
     });
     const managed: ManagedRun = {
       runId,
@@ -460,8 +472,6 @@ export class WorkflowDispatchTool extends WorkflowTool {
     // Completion rides the delegating session's bus as a trusted harness
     // message (the task-completion delivery path) — a background run must
     // not require the manager to poll.
-    const callingSessionId =
-      (ctx?.get("agent") as { sessionId?: string } | undefined)?.sessionId ?? null;
     void run
       .run()
       .then((summary) => {

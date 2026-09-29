@@ -85,6 +85,12 @@ export interface RunConfig {
   /** Absolute path; created when missing. A dir already holding run.jsonl resumes. */
   runDir: string;
   tasks: EngineTaskPort;
+  /**
+   * The dispatching session's model, captured at dispatch time: chain
+   * default for nodes/judges that carry no pin/group/profile model, so they
+   * place on a real provider lane instead of the uncapped bare-name lane.
+   */
+  parentModel?: string;
   limits?: Partial<WorkflowLimits>;
   /** Test seam for the wall-clock node cap (default: workflow/config minutes). */
   maxRuntimeMsOverride?: number;
@@ -403,6 +409,7 @@ export class WorkflowRun {
             group: n.group,
             requires: liveRequires(n),
             profile: n.profile,
+            parentModel: this.#cfg.parentModel,
             park: true,
             onTurn: (t) => {
               this.#turnEnded(nr);
@@ -613,6 +620,7 @@ export class WorkflowRun {
           group: jn.group,
           requires: liveRequires(jn),
           profile: jn.profile,
+          parentModel: this.#cfg.parentModel,
           park: true,
           onTurn: (t) => {
             this.#turnEnded(jnr);

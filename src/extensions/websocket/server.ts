@@ -1360,6 +1360,7 @@ export function createWsServer(
       taskProfile: resolvedCore.taskProfile || "task-default",
       lanesPerProvider: resolvedCore.taskLanesPerProvider,
       lanesDir: resolvedCore.taskLanesDir ?? null,
+      defaultModel: resolvedCore.model ?? null,
       profileManager: resolvedCore.profileManager,
       sessionManager: registry.getSessionManager(),
     });

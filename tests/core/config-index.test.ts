@@ -28,13 +28,13 @@ describe("resolveConfigDir", () => {
     delete process.env.HOTDOG_CONFIG_DIR;
     try {
       const result = resolveConfigDir();
-      // The fallback chain is: CWD config/ -> /etc/hotdog -> ~/.config/hotdog.
-      // Which one wins depends on the host, so assert the contract, not the
-      // winner.
+      // fallback chain: CWD config/ -> /etc/hotdog -> ~/.config/hotdog,
+      // with the bundled examples dir as last resort when all of those are absent.
       const candidates = [
         path.resolve(process.cwd(), "config"),
         "/etc/hotdog",
         path.join(os.homedir(), ".config", "hotdog"),
+        path.resolve(new URL("../../examples/minimal-config/config", import.meta.url).pathname),
       ];
       expect(candidates).toContain(result);
     } finally {

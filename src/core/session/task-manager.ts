@@ -332,6 +332,8 @@ interface TaskEntry {
 
 /** Profile + placement plan produced by #planForSpawn before an entry starts. */
 interface SpawnPlan {
+  /** Resolved worker profile name (options.profile || task-profile default). */
+  profileName: string;
   taskProfile: ProfileDef | null;
   candidates: SpawnCandidate[] | null;
   modelLabel: string;
@@ -624,7 +626,7 @@ export class TaskManager {
       if (this.#tasks.get(taskId) === entry) this.#tasks.delete(taskId);
       throw e;
     }
-    const { taskProfile, candidates, modelLabel, headKey } = plan;
+    const { profileName, taskProfile, candidates, modelLabel, headKey } = plan;
 
     // A cancel during the planning window (interruptTask by id, or the
     // delegating session deleted) already made the placeholder terminal and
@@ -639,7 +641,10 @@ export class TaskManager {
       );
     }
 
-    const resolvedProfileBody = taskProfile?.body || "";
+    // A found-but-frontmatter-only profile has body "" -- that must reach the
+    // factory as an explicit empty string, never fall through to the session
+    // profile's body (which leaked e.g. the meta manager prompt into workers).
+    const resolvedProfileBody = taskProfile ? taskProfile.body : undefined;
 
     const toolWhitelist = taskProfile?.whitelistTools || null;
     const toolBlacklist = taskProfile?.blacklistTools || null;
@@ -667,6 +672,11 @@ export class TaskManager {
 
     const agentConfig: Record<string, unknown> = {
       model: headKey,
+      // Name the worker profile explicitly; without it the factory resolves
+      // the *session* profile name, which re-enables manager gating and
+      // grafts the session profile's overlays onto the worker.
+      profileName,
+      ...(taskProfile ? { managerProfile: taskProfile.manager } : {}),
       profileBody: resolvedProfileBody,
       sink,
       toolWhitelist,
@@ -845,7 +855,7 @@ export class TaskManager {
           : `${headKey} (locked, no fanout)`
       }`,
     );
-    return { taskProfile, candidates, modelLabel, headKey };
+    return { profileName, taskProfile, candidates, modelLabel, headKey };
   }
 
   /**

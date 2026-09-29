@@ -152,6 +152,15 @@ describe("createAgentFactory", () => {
     expect(completed).toBe("task result");
   });
 
+  it("an explicit empty profileBody stays empty (frontmatter-only worker profile)", async () => {
+    // Regression: `||` fallthrough grafted the session profile's body onto
+    // workers whose profile declared no body (meta prompt in a task-default worker).
+    const { core } = makeCore();
+    const factory = createAgentFactory(core, { resolved: resolved as never, llmClient: {} as never });
+    const agent = await factory({ profileName: "task-default", profileBody: "" });
+    expect(agent.profileBody).toBe("");
+  });
+
   it("profile overlays apply under agentConfig overrides, over resolved", async () => {
     const { core } = makeCore();
     const factory = createAgentFactory(core, {

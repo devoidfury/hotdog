@@ -21,15 +21,19 @@ export function isValidAspectName(name: unknown): boolean {
   );
 }
 
-async function resolveAspectNames(core: CoreContext): Promise<string[]> {
+async function resolveAspectNames(
+  core: CoreContext,
+  agentProfileName?: string,
+): Promise<string[]> {
+  // Prefer the agent's own profile: worker agents built by TaskManager carry their worker profile name,
+  // and must not inherit the session profile's aspects (e.g. a meta-manager session spawning a task-default worker).
+  const profileName = agentProfileName || core.resolved?.profileName || "default";
   const profileManager = core.resolved?.profileManager;
   if (profileManager) {
-    const profileName = core.resolved?.profileName || "default";
     const profile = profileManager.getProfile(profileName);
     return profile?.aspects || [];
   }
   // Fallback: read profile file directly (for tests/backward compat)
-  const profileName = core.resolved?.profileName || "default";
   const profilesPath = core.resolved?.profilesPath;
   if (!profilesPath) return [];
 
@@ -88,10 +92,11 @@ async function buildAspectsChunk(aspectNames: string[], configDir: string): Prom
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async (data) => {
         const configDir = core.resolved?.configDir;
         if (!configDir) throw new Error("configDir not resolved");
-        const content = await buildAspectsChunk(await resolveAspectNames(core), configDir);
+        const agentName = (data?.agent as { profileName?: string } | undefined)?.profileName;
+        const content = await buildAspectsChunk(await resolveAspectNames(core, agentName), configDir);
         return { name: "guidelines", priority: 200, content };
       },
     },

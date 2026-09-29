@@ -78,7 +78,12 @@ export function createAgentFactory(
         resolved.modelRegistry ||
         {},
       profileName,
-      profileBody: (agentConfig.profileBody as string) || profile?.body || resolved.profileBody,
+      //  TaskManager passes an explicit "" for a frontmatter-only worker profile;
+      // falsy-fallthrough would graft the session profile's body onto the worker's system prompt.
+      profileBody:
+        agentConfig.profileBody !== undefined
+          ? (agentConfig.profileBody as string)
+          : profile?.body || resolved.profileBody,
       // Loaded template text from buildConfig; the agent must never depend on
       // process-global template state (multi-session hosts resolve config
       // per entry point).

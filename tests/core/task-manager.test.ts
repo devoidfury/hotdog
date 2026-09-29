@@ -269,6 +269,38 @@ describe("TaskManager", () => {
       expect((agentConfig as any)?.model).toBe("custom-model");
     });
 
+    it("names the worker profile and pins its manager flag in agentConfig (meta-leak regression)", async () => {
+      // Session runs the meta manager profile; a delegate_task without an
+      // explicit profile must build the worker as task-default with
+      // managerProfile false, not fall through to the session profile.
+      let agentConfig: Record<string, unknown> | null = null;
+      const buildAgent = async (config: Record<string, unknown>) => {
+        agentConfig = config;
+        return { context: [], run: async () => "result", notifyCompletion: () => {} } as any;
+      };
+
+      const manager = new TaskManager({
+        buildAgent,
+        modelRegistry: { default: "default-model" } as any,
+        config: { profilesPath: "./config/profiles" } as any,
+        maxIterations: 100,
+        taskProfile: "task-default",
+        profileManager: {
+          // Frontmatter-only profile: body is "" -- must reach the factory
+          // as "" (explicit), never dropped for the session profile's body.
+          getProfile: (name: string) =>
+            name === "task-default"
+              ? { body: "", model: undefined, group: undefined, whitelistTools: undefined, blacklistTools: undefined, manager: false, aspects: [] }
+              : null,
+        } as any,
+      });
+
+      await manager.spawnTask("task-leak", "Do something");
+      expect((agentConfig as any)?.profileName).toBe("task-default");
+      expect((agentConfig as any)?.managerProfile).toBe(false);
+      expect((agentConfig as any)?.profileBody).toBe("");
+    });
+
     it("tracks active tasks and provides task counts", async () => {
       let resolveRun1: () => void;
       let resolveRun2: () => void;

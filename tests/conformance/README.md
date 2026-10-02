@@ -40,6 +40,7 @@ unit suites under `tests/`, which answer "behavior-preserved"; these answer
 | `mcp-conformance` | Model Context Protocol | 2025-11-25 | https://modelcontextprotocol.io/specification/2025-11-25 |
 | `mcp-conformance` | JSON-RPC 2.0 | 2010-03-26 | https://www.jsonrpc.org/specification |
 | `openai-wire-conformance` | OpenAI Chat Completions wire shape | captured 2026-09 (unversioned API; assert stable-required fields only) | https://platform.openai.com/docs/api-reference/chat |
+| `subprocess-wire-conformance` | same as above, transport level: real `bin/hotdog -p` vs a loopback scripted-wire server | same vendored fixtures | https://platform.openai.com/docs/api-reference/chat |
 | `sse-conformance` | WHATWG HTML, "Interpreting a text/event-stream" | living standard, captured 2026-09 | https://html.spec.whatwg.org/multipage/server-sent-events.html |
 | `retry-after-conformance` | RFC 9110 §10.2.3 `Retry-After` | Sep 2022 | https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3 |
 | `json-schema-suite` | JSON-Schema-Test-Suite (draft 2020-12 subset) | phase 3, TBD | https://github.com/json-schema-org/JSON-Schema-Test-Suite |
@@ -66,3 +67,20 @@ EventSource. Where WHATWG HTML 9.2.6 and hotdog deliberately differ:
 
 Also hotdog-specific, no spec claim: the `[DONE]` sentinel, JSON fragmentation
 across data lines (LF-less concat), and the `maxJsonBuffer` cap.
+
+## Subprocess tier
+
+`subprocess-wire-conformance.test.ts` spawns the real binary against a
+loopback `Bun.serve` and asserts what reaches the provider (path, headers,
+body shape, tool round-trip). Scripted provider responses follow the same
+oracle rule as fixtures: sealed fixture text or mechanical derivation.
+The request path always streams: `chatStreamCancellable` hardcodes
+`stream: true`, so the provider always sees
+`stream:true` + `stream_options.include_usage` (pinned in-test). The former
+`--no-stream` flag was removed 2026-10-02: it gated only display, and
+display has no non-streaming fallback, so it silently swallowed the
+answer. A one-shot `--no-stream` run now fails fast as an unknown flag.
+
+Careful when scripting: chat failures retry with exponential backoff
+(`maxRetries` default 5), so an under-provisioned response script surfaces as
+a beforeAll timeout, not a fast assert.

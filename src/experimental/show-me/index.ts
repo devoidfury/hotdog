@@ -5,18 +5,21 @@
 //
 // Backend model must declare at least "text" input and "image" output.
 //
+// Transport is the OpenAI Images API: POST {provider-url}/v1/images/generations
+// with response_format=b64_json. Chat completions is never used for generation;
+// diffusion backends do not mount image models there (they 404).
+//
 // The generation model can be specified in config file (showMe.imageModel).
 // When omitted (empty), AUTO mode scans the model registry for the first entry
 // with declared modalities satisfying text-in / image-out.
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, extname, join, resolve as resolveAbs } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join, resolve as resolveAbs } from "node:path";
 
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
 import { ToolError, formatError } from "@core/error.ts";
 import { findModelEntry, resolveModelConfig, type ModelConfig } from "@core/config/providers.ts";
-import { Message, type ImageAttachment } from "@core/context/message.ts";
 import {
   defaultCallDisplay,
   param,
@@ -25,10 +28,6 @@ import {
   toolDef,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolDef, ToolMetadata } from "@core/extensions/tool-registry.ts";
-import type { LlmProtocol } from "@core/llm-client/protocol.ts";
-import type { WireFormat } from "@core/extensions/wire-format.ts";
-import type { RoleMapping } from "@core/extensions/role-mapping.ts";
-import type { MarkerMangler } from "@core/marker-mangler.ts";
 import type { ToolContext } from "@core/extensions/tool-context.ts";
 import { getExtensionConfig, type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
 import { logger } from "@utils/logger.ts";
@@ -111,8 +110,7 @@ export interface PickedImageModel {
 
 /**
  * Resolve the generation model. A non-empty imageModel resolves explicitly;
- * empty means AUTO: scan the registry for an entry declaring "text" input and "image" output
- * (plus "image" input when requireImageInput, so input_image never lands on a text-input-only model).
+ * empty means AUTO: scan the registry for an entry declaring "text" input and "image" output.
  *
  * Unlike isTextGenerative's progressive-enhancement leniency, entries with ABSENT modality data are never auto-picked:
  * unknown capabilities must not hijack generation. Deterministic when several match: the first in registry
@@ -121,7 +119,6 @@ export interface PickedImageModel {
 export function pickImageModel(
   registry: Record<string, unknown>,
   modelName: string,
-  requireImageInput: boolean,
 ): PickedImageModel {
   if (modelName) {
     const entry = selectImageModelEntry(registry, modelName);
@@ -134,17 +131,13 @@ export function pickImageModel(
     if (!entry || typeof entry !== "object") continue;
     if (!entry.inputModalities?.includes("text")) continue;
     if (!entry.outputModalities?.includes("image")) continue;
-    if (requireImageInput && !entry.inputModalities.includes("image")) continue;
     const name = entry.name ?? key;
     logger.debug(`show-me: auto-selected image model "${name}"`);
     return { key, name, entry, auto: true };
   }
 
-  const need = requireImageInput
-    ? 'inputModalities include "text" and "image" AND outputModalities include "image"'
-    : 'outputModalities include "image"';
   throw new ToolError(
-    `show-me: no image model configured and no model in the registry declares ${need}. ` +
+    `show-me: no image model configured and no model in the registry declares outputModalities include "image". ` +
       `Set showMe.imageModel in your config to an image-output model.`,
   );
 }
@@ -172,61 +165,34 @@ function decodeDataUrl(url: string): GeneratedImage | null {
   return decodeBase64Payload(m[2] ?? "", m[1] || "image/png");
 }
 
-/** One image-bearing part of a chat response: url object, inline url part, or b64 field. */
-function decodeImagePart(part: unknown): GeneratedImage | null {
-  if (typeof part === "string") return decodeDataUrl(part.trim());
-  if (!part || typeof part !== "object") return null;
-  const rec = part as Record<string, unknown>;
+/** One image entry of an Images API response: b64_json wins; a url must be a base64 data URL. */
+function decodeImageItem(item: unknown): GeneratedImage | null {
+  if (!item || typeof item !== "object") return null;
+  const rec = item as Record<string, unknown>;
 
-  const imageUrl = rec.image_url ?? rec.imageUrl;
-  const url =
-    typeof imageUrl === "string"
-      ? imageUrl
-      : typeof (imageUrl as Record<string, unknown> | undefined)?.url === "string"
-        ? ((imageUrl as Record<string, unknown>).url as string)
-        : null;
-  if (url) {
-    const img = decodeDataUrl(url.trim());
+  const b64 = rec.b64_json;
+  if (typeof b64 === "string") {
+    const img = decodeBase64Payload(b64, "image/png");
     if (img) return img;
   }
-
-  const b64 = rec.b64_json ?? rec.b64JSON;
-  if (typeof b64 === "string") {
-    const mime = typeof rec.mime_type === "string" ? rec.mime_type : "image/png";
-    return decodeBase64Payload(b64, mime);
-  }
+  if (typeof rec.url === "string") return decodeDataUrl(rec.url.trim());
   return null;
 }
 
 /**
- * Pull the first decodable image out of a chat-completion JSON payload.
- * Shapes handled (defensively, backends disagree):
- *   - choices[].message.images[] with image_url.url (data URL) or b64_json
- *   - choices[].message.content[] parts of type "image_url"
- *   - choices[].message.content as a bare data:image/...;base64, string
- * Text-only responses yield null -- the caller turns that into a clear error.
+ * Pull the first decodable image out of an OpenAI Images API JSON payload:
+ *   { created, data: [{ b64_json | url }, ...] }
+ * Remote http(s) urls are not fetched: we always request response_format=b64_json,
+ * so a backend that only returns hosted urls is a misconfiguration, not a silent download.
+ * Payloads without a decodable entry yield null -- the caller turns that into a clear error.
  */
 export function extractGeneratedImage(payload: unknown): GeneratedImage | null {
-  const choices = (payload as Record<string, unknown> | null)?.choices;
-  if (!Array.isArray(choices)) return null;
+  const data = (payload as Record<string, unknown> | null)?.data;
+  if (!Array.isArray(data)) return null;
 
-  for (const choice of choices) {
-    const message = (choice as Record<string, unknown> | null)?.message as
-      Record<string, unknown> | null | undefined;
-    if (!message) continue;
-
-    const candidates: unknown[] = [];
-    if (Array.isArray(message.images)) candidates.push(...message.images);
-    const content = message.content;
-    if (Array.isArray(content)) candidates.push(...content);
-    else if (typeof content === "string" && /^data:image\//i.test(content.trim())) {
-      candidates.push(content);
-    }
-
-    for (const candidate of candidates) {
-      const img = decodeImagePart(candidate);
-      if (img) return img;
-    }
+  for (const item of data) {
+    const img = decodeImageItem(item);
+    if (img) return img;
   }
   return null;
 }
@@ -245,24 +211,6 @@ function extensionForMime(mimeType: string): string {
   );
 }
 
-const INPUT_MIME_BY_EXT: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-};
-
-function mimeForInputImage(path: string): string {
-  const mime = INPUT_MIME_BY_EXT[extname(path).toLowerCase()];
-  if (!mime) {
-    throw new ToolError(
-      `show-me: cannot infer the image type of input_image "${path}" (supported: png, jpg, webp, gif).`,
-    );
-  }
-  return mime;
-}
-
 /** Timestamped default output path under ./generated/ (relative to cwd). */
 export function defaultOutputPath(now: Date, mimeType: string): string {
   const stamp = now.toISOString().replace(/[:.]/g, "-");
@@ -271,18 +219,15 @@ export function defaultOutputPath(now: Date, mimeType: string): string {
 
 // ── LlmClient Call ──────────────────────────────────────────────────────────
 
+/** The Images API endpoint every generation request is posted to. */
+export const IMAGES_API_PATH = "/v1/images/generations";
+
 /**
  * The slice of LlmClient this extension uses, declared structurally so tests can pass a duck-typed fake.
- * `_doRequest` is the client's transport: it resolves the protocol headers, applies timeouts, and
- *  classifies failures into LlmErrors.
+ * `_doRequest` is the client's transport: it resolves the protocol headers (Bearer auth),
+ * applies timeouts, and classifies failures into LlmErrors.
  */
 export interface ImageChatClient {
-  sessionId?: string;
-  markerMangler?: MarkerMangler | null;
-  ensureManglerCovers?(modelConfig: ModelConfig): void;
-  protocolFor(modelConfig: ModelConfig): LlmProtocol;
-  resolveWireFormat?(modelConfig: ModelConfig): WireFormat | null;
-  resolveRoleMapping?(modelConfig: ModelConfig): RoleMapping | null;
   resolveProviderSettings(name: string): {
     url: string;
     apiKey: string | null;
@@ -299,36 +244,23 @@ export interface ImageChatClient {
 }
 
 /**
- * One non-streaming chat request through the session's LlmProtocol; returns the parsed JSON payload.
+ * One non-streaming POST to the provider's Images API; returns the parsed JSON payload.
  * JSON parse failures propagate to the caller's catch.
  */
-export async function requestImageJson(
+export async function requestImageGeneration(
   client: ImageChatClient,
   modelConfig: ModelConfig,
-  message: Message,
+  request: Record<string, unknown>,
   signal: AbortSignal | null,
 ): Promise<unknown> {
-  const protocol = client.protocolFor(modelConfig);
   const { url, apiKey } = client.resolveProviderSettings(modelConfig.name);
-  client.ensureManglerCovers?.(modelConfig);
-
-  const ctx: Parameters<LlmProtocol["buildRequest"]>[4] = {
-    mangler: client.markerMangler ?? null,
-    wireFormat: client.resolveWireFormat?.(modelConfig) ?? null,
-    roleMapping: client.resolveRoleMapping?.(modelConfig) ?? null,
-    baseUrl: url,
-    apiKey,
-    sessionId: client.sessionId ?? "",
-  };
-
-  const { path, body } = protocol.buildRequest([message], modelConfig, null, false, ctx);
   const response = await client._doRequest(
     url,
     apiKey,
-    body as Record<string, unknown>,
+    request,
     signal,
     modelConfig,
-    path,
+    IMAGES_API_PATH,
   );
   return (await response.json()) as unknown;
 }
@@ -343,37 +275,15 @@ export interface GenerateImageParams {
   prompt: string;
   size: string;
   outputPath?: string | null;
-  inputImage?: string | null;
   signal?: AbortSignal | null;
   emit?: (line: string) => void;
 }
 
 /** Generate an image and write it to disk. Returns the written path. */
 export async function generateImage(p: GenerateImageParams): Promise<string> {
-  const { key: modelKey, name: modelName, entry, auto } = pickImageModel(
-    p.modelRegistry,
-    p.imageModel,
-    Boolean(p.inputImage),
-  );
+  const { key: modelKey, name: modelName, auto } = pickImageModel(p.modelRegistry, p.imageModel);
   // Auto mode tells the user which model was picked (command output + tool emit).
   if (auto) p.emit?.(`Using image model: ${modelName}`);
-
-  let images: ImageAttachment[] | undefined;
-  if (p.inputImage) {
-    if (!entry.inputModalities?.includes("image")) {
-      throw new ToolError(
-        `show-me: model "${modelName}" does not accept image input (inputModalities: ${entry.inputModalities?.length ? entry.inputModalities.join(", ") : "none"}); input_image cannot be used.`,
-      );
-    }
-    const mimeType = mimeForInputImage(p.inputImage);
-    let bytes: Buffer;
-    try {
-      bytes = await readFile(p.inputImage);
-    } catch {
-      throw ToolError.NotReadable(p.inputImage);
-    }
-    images = [{ type: "image_url", mimeType, data: bytes.toString("base64") }];
-  }
 
   const modelConfig = resolveModelConfig(
     modelKey,
@@ -382,11 +292,19 @@ export async function generateImage(p: GenerateImageParams): Promise<string> {
     undefined,
   );
 
-  // The chat protocol has no size field; the request body is protocol-owned, so the requested dimensions ride in the prompt text.
-  const content = `${p.prompt}\n\n[Image size: ${p.size}]`;
-  const message = new Message({ role: "user", source: "user", content, images });
-
-  const payload = await requestImageJson(p.client, modelConfig, message, p.signal ?? null);
+  // Images API request: the wire model name is the registry key without its provider prefix,
+  // matching how the chat protocol addresses models. b64_json keeps bytes in-band; no download step.
+  const payload = await requestImageGeneration(
+    p.client,
+    modelConfig,
+    {
+      model: modelConfig.name.split("/").pop() || modelConfig.name,
+      prompt: p.prompt,
+      size: p.size,
+      response_format: "b64_json",
+    },
+    p.signal ?? null,
+  );
   const image = extractGeneratedImage(payload);
   if (!image) {
     throw new ToolError(
@@ -411,7 +329,6 @@ interface ShowMeToolInput {
   description?: string;
   size?: string;
   output_path?: string;
-  input_image?: string;
   [key: string]: unknown;
 }
 
@@ -428,7 +345,7 @@ class ShowMeTool {
   toToolDef(): ToolDef {
     return toolDef(
       ShowMeTool.TOOL_NAME,
-      "Generate an image from a text description using the configured image-output model. Optionally condition on an input image (only if the model accepts image input) and choose the output size or file path.",
+      "Generate an image from a text description using the configured image-output model. Optionally choose the output size or file path.",
       {
         properties: {
           description: param("string", "Text description of the image to generate."),
@@ -436,10 +353,6 @@ class ShowMeTool {
           output_path: param(
             "string",
             "Optional file path for the generated image; defaults to a timestamped file under ./generated/.",
-          ),
-          input_image: param(
-            "string",
-            "Optional path to an input image to condition on; requires the selected model to declare image input.",
           ),
         },
         required: ["description"],
@@ -474,7 +387,6 @@ class ShowMeTool {
         prompt: description,
         size: normalizeSize(args.size),
         outputPath: typeof args.output_path === "string" ? args.output_path : null,
-        inputImage: typeof args.input_image === "string" ? args.input_image : null,
         signal: agent.abortSignal ?? null,
         emit: (line) => agent.emitOutput("command_result", { content: line }),
       });

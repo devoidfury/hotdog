@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,6 +17,7 @@ import {
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
 import { ToolError } from "@core/error.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -43,44 +44,29 @@ const REGISTRY: Record<string, unknown> = {
 };
 
 interface Captured {
-  messages?: unknown[];
-  modelConfig?: Record<string, unknown>;
-  stream?: boolean;
   requests?: Record<string, unknown>[];
+  paths?: string[];
+  modelConfigs?: Record<string, unknown>[];
 }
 
 /**
- * Faked protocol + client pair (duck-typed, never mock.module): the protocol
- * records what the extension asked to send, the client answers with a canned
- * JSON Response. No network involved.
+ * Faked client (duck-typed, never mock.module): records what the extension
+ * asked to send and answers with a canned JSON Response. No network involved.
  */
 function makeFakeClient(payload: unknown, captured: Captured) {
-  const protocol = {
-    id: "fake-image",
-    buildRequest(
-      messages: unknown[],
-      modelConfig: Record<string, unknown>,
-      _toolDefs: unknown,
-      stream: boolean,
-    ) {
-      captured.messages = messages;
-      captured.modelConfig = modelConfig;
-      captured.stream = stream;
-      return { path: "/v1/chat/completions", body: { model: modelConfig.name, stream } };
-    },
-    buildHeaders: () => ({}),
-    parseStream: async function* () {},
-  };
-
   const client = {
-    sessionId: "sess-1",
-    markerMangler: null,
-    protocolFor: () => protocol,
-    resolveWireFormat: () => null,
-    resolveRoleMapping: () => null,
     resolveProviderSettings: () => ({ url: "http://fake.test", apiKey: "k", provider: null }),
-    _doRequest: async (_url: string, _key: string | null, request: Record<string, unknown>) => {
+    _doRequest: async (
+      _url: string,
+      _key: string | null,
+      request: Record<string, unknown>,
+      _signal: AbortSignal | null,
+      modelConfig: ModelConfig,
+      path: string,
+    ) => {
       (captured.requests ??= []).push(request);
+      (captured.paths ??= []).push(path);
+      (captured.modelConfigs ??= []).push(modelConfig as unknown as Record<string, unknown>);
       return new Response(JSON.stringify(payload), {
         headers: { "content-type": "application/json" },
       });
@@ -89,8 +75,8 @@ function makeFakeClient(payload: unknown, captured: Captured) {
   return client as unknown as ImageChatClient;
 }
 
-function imagePayload(url: string) {
-  return { choices: [{ message: { role: "assistant", images: [{ image_url: { url } }] } }] };
+function imagePayload(b64: string = PNG_B64) {
+  return { created: 1700000000, data: [{ b64_json: b64 }] };
 }
 
 function makeCore(showMe: Record<string, unknown> = {}) {
@@ -194,7 +180,7 @@ describe("selectImageModelEntry", () => {
 
 describe("pickImageModel (auto mode)", () => {
   it("auto-selects the declared text->image entry when no model is configured", () => {
-    const picked = pickImageModel(REGISTRY, "", false);
+    const picked = pickImageModel(REGISTRY, "");
     expect(picked.auto).toBe(true);
     expect(picked.key).toBe("picgen/draw-1");
     expect(picked.name).toBe("picgen/draw-1");
@@ -207,7 +193,7 @@ describe("pickImageModel (auto mode)", () => {
       "chat/chatty": REGISTRY["chat/chatty"],
       "picgen/draw-1": REGISTRY["picgen/draw-1"],
     };
-    expect(pickImageModel(registry, "", false).key).toBe("picgen/draw-1");
+    expect(pickImageModel(registry, "").key).toBe("picgen/draw-1");
   });
 
   it("is deterministic across runs (first in registry iteration order wins)", () => {
@@ -215,29 +201,15 @@ describe("pickImageModel (auto mode)", () => {
       "picgen/draw-1": REGISTRY["picgen/draw-1"],
       "picgen/draw-vision": REGISTRY["picgen/draw-vision"],
     };
-    const first = pickImageModel(registry, "", false).key;
+    const first = pickImageModel(registry, "").key;
     for (let i = 0; i < 5; i++) {
-      expect(pickImageModel({ ...registry }, "", false).key).toBe(first);
+      expect(pickImageModel({ ...registry }, "").key).toBe(first);
     }
     expect(first).toBe("picgen/draw-1");
   });
 
-  it("with input_image, restricts candidates to image-input-capable models", () => {
-    expect(pickImageModel(REGISTRY, "", true).key).toBe("picgen/draw-vision");
-  });
-
-  it("with input_image, errors when no candidate accepts image input", () => {
-    const registry = {
-      "picgen/draw-1": REGISTRY["picgen/draw-1"], // text-in only
-      "mystery/box": { name: "mystery/box" },
-    };
-    expect(() => pickImageModel(registry, "", true)).toThrow(
-      /no model in the registry declares .*inputModalities include "text" and "image".*showMe\.imageModel/,
-    );
-  });
-
   it("errors helpfully on an empty registry, without crashing", () => {
-    expect(() => pickImageModel({}, "", false)).toThrow(
+    expect(() => pickImageModel({}, "")).toThrow(
       /no image model configured and no model in the registry declares .*outputModalities include "image".*showMe\.imageModel/,
     );
   });
@@ -246,62 +218,40 @@ describe("pickImageModel (auto mode)", () => {
 // ── Response Decoding ───────────────────────────────────────────────────────
 
 describe("extractGeneratedImage", () => {
-  it("decodes a data-URL image in message.images", () => {
-    const img = extractGeneratedImage(imagePayload(`data:image/png;base64,${PNG_B64}`));
+  it("decodes a b64_json entry (defaults to png)", () => {
+    const img = extractGeneratedImage(imagePayload());
     expect(img).not.toBeNull();
     expect(img!.mimeType).toBe("image/png");
     expect(img!.data.equals(PNG_BYTES)).toBe(true);
   });
 
-  it("decodes image_url parts in a content array", () => {
-    const payload = {
-      choices: [
-        {
-          message: {
-            content: [
-              { type: "text", text: "sure!" },
-              { type: "image_url", image_url: { url: `data:image/png;base64,${PNG_B64}` } },
-            ],
-          },
-        },
-      ],
-    };
-    const img = extractGeneratedImage(payload);
-    expect(img!.data.equals(PNG_BYTES)).toBe(true);
-  });
-
-  it("decodes a raw b64_json field with its mime type", () => {
-    const payload = {
-      choices: [{ message: { images: [{ b64_json: PNG_B64, mime_type: "image/webp" }] } }],
-    };
-    const img = extractGeneratedImage(payload);
-    expect(img!.mimeType).toBe("image/webp");
-    expect(img!.data.equals(PNG_BYTES)).toBe(true);
-  });
-
-  it("decodes a bare data-URL string content", () => {
-    const payload = {
-      choices: [{ message: { content: `data:image/jpeg;base64,${PNG_B64}` } }],
-    };
-    const img = extractGeneratedImage(payload);
+  it("decodes a base64 data URL in a url entry", () => {
+    const img = extractGeneratedImage({ created: 1, data: [{ url: `data:image/jpeg;base64,${PNG_B64}` }] });
     expect(img!.mimeType).toBe("image/jpeg");
+    expect(img!.data.equals(PNG_BYTES)).toBe(true);
+  });
+
+  it("takes the first decodable entry", () => {
+    const payload = { data: [{ revised_prompt: "safer" }, { b64_json: PNG_B64 }] };
+    expect(extractGeneratedImage(payload)!.data.equals(PNG_BYTES)).toBe(true);
   });
 
   it("tolerates whitespace and newlines inside base64", () => {
     const split = `${PNG_B64.slice(0, 4)}\n${PNG_B64.slice(4)}`;
-    const img = extractGeneratedImage(imagePayload(`data:image/png;base64,${split}`));
+    const img = extractGeneratedImage(imagePayload(split));
     expect(img!.data.equals(PNG_BYTES)).toBe(true);
   });
 
-  it("returns null for text-only responses", () => {
-    expect(extractGeneratedImage({ choices: [{ message: { content: "no pic here" } }] })).toBeNull();
+  it("returns null for payloads without image bytes", () => {
+    expect(extractGeneratedImage({ data: [] })).toBeNull();
+    expect(extractGeneratedImage({ data: [{ revised_prompt: "safer" }] })).toBeNull();
     expect(extractGeneratedImage({})).toBeNull();
     expect(extractGeneratedImage(null)).toBeNull();
   });
 
-  it("returns null for invalid base64 and non-data URLs", () => {
-    expect(extractGeneratedImage(imagePayload("data:image/png;base64,!!!!"))).toBeNull();
-    expect(extractGeneratedImage(imagePayload("https://example.com/cat.png"))).toBeNull();
+  it("returns null for invalid base64 and remote (non-data) URLs", () => {
+    expect(extractGeneratedImage(imagePayload("!!!!"))).toBeNull();
+    expect(extractGeneratedImage({ data: [{ url: "https://example.com/cat.png" }] })).toBeNull();
   });
 });
 
@@ -313,7 +263,7 @@ describe("generateImage", () => {
     try {
       const outPath = join(dir, "deep", "kitten.png");
       const captured: Captured = {};
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), captured);
+      const client = makeFakeClient(imagePayload(), captured);
       const emitted: string[] = [];
 
       const written = await generateImage({
@@ -331,13 +281,15 @@ describe("generateImage", () => {
       expect((await readFile(outPath)).equals(PNG_BYTES)).toBe(true);
       expect(emitted).toEqual([`Image saved: ${outPath}`]);
 
-      // Request shape: non-streaming, size folded into the prompt, model from the registry.
-      expect(captured.stream).toBe(false);
-      expect(captured.modelConfig!.name).toBe("picgen/draw-1");
-      const message = captured.messages![0] as { role: string; content: string };
-      expect(message.role).toBe("user");
-      expect(message.content).toContain("A kitten falling into a puddle");
-      expect(message.content).toContain("[Image size: 1024x768]");
+      // Request shape: Images API path, provider prefix stripped, size as its own field.
+      expect(captured.paths).toEqual(["/v1/images/generations"]);
+      expect(captured.modelConfigs![0]!.name).toBe("picgen/draw-1");
+      expect(captured.requests![0]).toEqual({
+        model: "draw-1",
+        prompt: "A kitten falling into a puddle",
+        size: "1024x768",
+        response_format: "b64_json",
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -347,7 +299,7 @@ describe("generateImage", () => {
     const dir = await mkdtemp(join(tmpdir(), "show-me-"));
     try {
       const outPath = join(dir, "none.png");
-      const client = makeFakeClient({ choices: [{ message: { content: "I cannot draw" } }] }, {});
+      const client = makeFakeClient({ data: [{ revised_prompt: "no pic for you" }] }, {});
 
       await expect(
         generateImage({
@@ -366,38 +318,12 @@ describe("generateImage", () => {
     }
   });
 
-  it("refuses input_image when the model does not accept image input", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "show-me-"));
-    try {
-      const input = join(dir, "seed.png");
-      await writeFile(input, PNG_BYTES);
-      const outPath = join(dir, "out.png");
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), {});
-
-      await expect(
-        generateImage({
-          client,
-          modelRegistry: REGISTRY,
-          imageModel: "picgen/draw-1", // text input only
-          contextLimit: 4096,
-          prompt: "remix",
-          size: "1024x1024",
-          outputPath: outPath,
-          inputImage: input,
-        }),
-      ).rejects.toThrow(/does not accept image input/);
-      expect(existsSync(outPath)).toBe(false);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
   it("auto mode (empty imageModel) generates with the picked model and announces it", async () => {
     const dir = await mkdtemp(join(tmpdir(), "show-me-"));
     try {
       const outPath = join(dir, "auto.png");
       const captured: Captured = {};
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), captured);
+      const client = makeFakeClient(imagePayload(), captured);
       const emitted: string[] = [];
 
       await generateImage({
@@ -412,95 +338,9 @@ describe("generateImage", () => {
       });
 
       expect((await readFile(outPath)).equals(PNG_BYTES)).toBe(true);
-      expect(captured.modelConfig!.name).toBe("picgen/draw-1");
+      expect(captured.modelConfigs![0]!.name).toBe("picgen/draw-1");
       expect(emitted[0]).toBe("Using image model: picgen/draw-1");
       expect(emitted[1]).toBe(`Image saved: ${outPath}`);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("auto mode with input_image picks an image-input-capable model even if listed later", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "show-me-"));
-    try {
-      const input = join(dir, "seed.png");
-      await writeFile(input, PNG_BYTES);
-      const captured: Captured = {};
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), captured);
-
-      await generateImage({
-        client,
-        modelRegistry: REGISTRY,
-        imageModel: "",
-        contextLimit: 4096,
-        prompt: "remix",
-        size: "1024x1024",
-        outputPath: join(dir, "out.png"),
-        inputImage: input,
-      });
-
-      expect(captured.modelConfig!.name).toBe("picgen/draw-vision");
-      const message = captured.messages![0] as { images?: unknown[] };
-      expect(message.images).toHaveLength(1);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("auto mode with input_image errors without writing when no model accepts image input", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "show-me-"));
-    try {
-      const input = join(dir, "seed.png");
-      await writeFile(input, PNG_BYTES);
-      const outPath = join(dir, "out.png");
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), {});
-
-      await expect(
-        generateImage({
-          client,
-          modelRegistry: { "picgen/draw-1": REGISTRY["picgen/draw-1"] },
-          imageModel: "",
-          contextLimit: 4096,
-          prompt: "remix",
-          size: "1024x1024",
-          outputPath: outPath,
-          inputImage: input,
-        }),
-      ).rejects.toThrow(/no model in the registry declares/);
-      expect(existsSync(outPath)).toBe(false);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("attaches input_image as image content when the model accepts it", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "show-me-"));
-    try {
-      const input = join(dir, "seed.png");
-      await writeFile(input, PNG_BYTES);
-      const captured: Captured = {};
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), captured);
-
-      await generateImage({
-        client,
-        modelRegistry: REGISTRY,
-        imageModel: "picgen/draw-vision",
-        contextLimit: 4096,
-        prompt: "remix this",
-        size: "1024x1024",
-        outputPath: join(dir, "out.png"),
-        inputImage: input,
-      });
-
-      const message = captured.messages![0] as {
-        images?: Array<{ type: string; mimeType: string; data: string }>;
-      };
-      expect(message.images).toHaveLength(1);
-      expect(message.images![0]).toEqual({
-        type: "image_url",
-        mimeType: "image/png",
-        data: PNG_B64,
-      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -511,7 +351,7 @@ describe("generateImage", () => {
     const prevCwd = process.cwd();
     process.chdir(dir);
     try {
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), {});
+      const client = makeFakeClient(imagePayload(), {});
       const written = await generateImage({
         client,
         modelRegistry: REGISTRY,
@@ -554,7 +394,6 @@ describe("show-me extension", () => {
       "description",
       "size",
       "output_path",
-      "input_image",
     ]);
     expect(tool.metadata.sideEffects).toBe(true);
   });
@@ -564,7 +403,7 @@ describe("show-me extension", () => {
     try {
       const outPath = join(dir, "tool.png");
       const captured: Captured = {};
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), captured);
+      const client = makeFakeClient(imagePayload(), captured);
       const { agent, emitted } = makeAgent(client);
 
       const inst = createShowMe(makeCore());
@@ -591,7 +430,7 @@ describe("show-me extension", () => {
     const dir = await mkdtemp(join(tmpdir(), "show-me-"));
     try {
       const outPath = join(dir, "bare.png");
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), {});
+      const client = makeFakeClient(imagePayload(), {});
       const { agent } = makeAgent(client);
 
       const inst = createShowMe({ config: { showMe: { enabled: true } } } as any);
@@ -615,7 +454,7 @@ describe("show-me extension", () => {
     const dir = await mkdtemp(join(tmpdir(), "show-me-"));
     try {
       const outPath = join(dir, "auto-tool.png");
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), {});
+      const client = makeFakeClient(imagePayload(), {});
       const { agent, emitted } = makeAgent(client);
 
       const inst = createShowMe(makeCore({ imageModel: "" }));
@@ -638,7 +477,7 @@ describe("show-me extension", () => {
   });
 
   it("auto mode with no candidate: tool returns a helpful error, no crash", async () => {
-    const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), {});
+    const client = makeFakeClient(imagePayload(), {});
     const { agent } = makeAgent(client, { "chat/chatty": REGISTRY["chat/chatty"] });
 
     const inst = createShowMe(makeCore({ imageModel: "" }));
@@ -657,7 +496,7 @@ describe("show-me extension", () => {
   });
 
   it("auto mode with an empty registry: /show-me surfaces an ERROR action", async () => {
-    const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), {});
+    const client = makeFakeClient(imagePayload(), {});
     const { agent } = makeAgent(client, {});
 
     const inst = createShowMe(makeCore({ imageModel: "" }));
@@ -679,7 +518,7 @@ describe("show-me extension", () => {
     process.chdir(dir);
     try {
       const captured: Captured = {};
-      const client = makeFakeClient(imagePayload(`data:image/png;base64,${PNG_B64}`), captured);
+      const client = makeFakeClient(imagePayload(), captured);
       const { agent, emitted } = makeAgent(client);
 
       const inst = createShowMe(makeCore());
@@ -703,8 +542,11 @@ describe("show-me extension", () => {
         "show-me 1024x768 A kitten falling into a puddle, it's glassy reflection smirking back at it, abstract",
       );
       expect(result.action).toBe(ACTIONS.DISPLAY);
-      expect(captured.messages![0]).toBeDefined();
-      expect((captured.messages![0] as { content: string }).content).toContain("[Image size: 1024x768]");
+      expect(captured.paths).toEqual(["/v1/images/generations"]);
+      expect((captured.requests![0] as { size: string; prompt: string }).size).toBe("1024x768");
+      expect((captured.requests![0] as { prompt: string }).prompt).toContain(
+        "A kitten falling into a puddle",
+      );
       expect(emitted).toHaveLength(1);
       const [type, data] = emitted[0]!;
       expect(type).toBe("command_result");

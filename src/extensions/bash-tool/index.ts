@@ -310,7 +310,7 @@ export function create(core: CoreContext): ExtensionInstance {
   const maxOutputLines = config.maxToolOutputLines;
   const maxTimeoutMs = config.maxTimeoutMs;
   const envScrubExtra = envScrubExtraKeys(core.config);
-  const envScrubbing = core.config.envScrubbing !== false;
+  const envScrubbing = core.resolved?.envScrubbing !== false;
 
   return {
     hooks: {

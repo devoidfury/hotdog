@@ -303,6 +303,25 @@ describe('BashTool', () => {
     expect(registeredTool).toBeInstanceOf(BashTool);
   });
 
+  it('create() reads envScrubbing from core.resolved, not core.config', async () => {
+    // Regression: --disable-env-scrubbing resolves into core.resolved; reading
+    // the raw core.config kept scrubbing on even with the flag passed.
+    let registeredTool: any = null;
+    const registry = { register: (_name: string, tool: any) => { registeredTool = tool; }, getAll: () => [] };
+    const mockCore = {
+      config: { bashTool: { bashTimeoutMs: 5000, maxToolOutputLines: 100 } },
+      resolved: { envScrubbing: false },
+    } as any;
+    const ext = create(mockCore);
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
+    expect(registeredTool.envScrubbing).toBe(false);
+
+    // No resolved (standalone callers): scrubbing stays on.
+    const ext2 = create({ config: {} } as any);
+    await ext2.hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
+    expect(registeredTool.envScrubbing).toBe(true);
+  });
+
   it('create() passes maxTimeoutMs from config to the tool', async () => {
     let registeredTool: any = null;
     const registry = { register: (_name: string, tool: any) => { registeredTool = tool; }, getAll: () => [] };

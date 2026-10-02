@@ -45,7 +45,7 @@ export function create(core: CoreContext, options: { Connection?: typeof McpConn
   const clientConfig = getExtensionConfig<{ httpTimeoutSecs?: number }>(core, "mcpClient");
   const httpTimeoutMs = Math.round(resolveHttpTimeoutSecs(clientConfig.httpTimeoutSecs) * 1000);
   const envScrubExtra = envScrubExtraKeys(core.config);
-  const envScrubbing = core.config.envScrubbing !== false;
+  const envScrubbing = core.resolved?.envScrubbing !== false;
 
   const connections: McpConnection[] = [];
 

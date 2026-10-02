@@ -341,6 +341,18 @@
       { "default": false }
     ]
   },
+  "envScrubbing": {
+    "type": "boolean",
+    "cliFlag": {
+      "long": "--disable-env-scrubbing",
+      "type": "boolean",
+      "description": "Pass the full environment to subprocesses (bash tool, MCP stdio) without secret scrubbing"
+    },
+    "layers": [
+      { "source": "cli", "key": "disableEnvScrubbing", "cast": "falsy" },
+      { "default": true }
+    ]
+  },
   "maxToolDifficulty": {
     "type": "number",
     "cliFlag": {

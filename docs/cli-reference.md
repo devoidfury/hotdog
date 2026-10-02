@@ -47,6 +47,7 @@ hotdog workflow cancel <run-id>  # Finished runs: idempotent report; live runs o
     --provider <name>        AI provider name
 -p, --prompt <text>          One-shot prompt
     --sandbox                Sandbox mode: only allow tools without side effects
+    --disable-env-scrubbing  Pass the full environment to subprocesses (bash tool, MCP stdio) without secret scrubbing.
     --shell-mode             Execute lines starting with a recognized system command directly in interactive mode
                                Tip: append | @ to send command output to the agent (e.g., "ls -la | @", "ls -la | @ show me the permissions")
 -l, --loud                   Print full JSON API responses

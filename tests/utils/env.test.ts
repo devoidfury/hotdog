@@ -78,6 +78,15 @@ describe("copyScrubbedEnv", () => {
     expect(copyScrubbedEnv(source, undefined)).toEqual({ PATH: "/usr/bin" });
     expect(copyScrubbedEnv(source, [])).toEqual({ PATH: "/usr/bin" });
   });
+
+  it("keeps everything when scrubbing is disabled, but still copies", () => {
+    const source = { PATH: "/usr/bin", MY_API_KEY: "secret" };
+    const copy = copyScrubbedEnv(source, undefined, false);
+    expect(copy).toEqual(source);
+    expect(copy).not.toBe(source);
+    // Sanity: enabled is the default.
+    expect(copyScrubbedEnv(source)).toEqual({ PATH: "/usr/bin" });
+  });
 });
 
 describe("envScrubExtraKeys", () => {

@@ -63,6 +63,13 @@ describe("CONFIG_KEYS schema", () => {
     expect(resolveKey("stream", CONFIG_KEYS.stream, baseContext)).toBe(true);
   });
 
+  it("envScrubbing defaults true and inverts with the disable flag", () => {
+    expect(resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, baseContext)).toBe(true);
+    expect(
+      resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, { ...baseContext, cli: { disableEnvScrubbing: true } }),
+    ).toBe(false);
+  });
+
   it("hideTools respects cli and config flags", () => {
     // --show-tools sets showTools=true -> cast falsy -> hideTools=false
     expect(resolveKey("hideTools", CONFIG_KEYS.hideTools, { ...baseContext, cli: { showTools: true } })).toBe(false);

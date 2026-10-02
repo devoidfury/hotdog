@@ -64,7 +64,7 @@ export class StdioTransport implements McpTransport {
   #stderrTruncated: boolean = false;
   #destroyed: boolean = false;
 
-  constructor(command: string, args: string[] = [], env: Record<string, string> = {}, extraScrubKeys?: readonly string[]) {
+  constructor(command: string, args: string[] = [], env: Record<string, string> = {}, extraScrubKeys?: readonly string[], envScrubbing: boolean = true) {
     this.#command = command;
     this.#args = args;
     this.#env = env;
@@ -74,7 +74,7 @@ export class StdioTransport implements McpTransport {
     this.#child = spawn(command, args, {
       ...OWN_PROCESS_GROUP,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...copyScrubbedEnv(process.env, extraScrubKeys), ...env },
+      env: { ...copyScrubbedEnv(process.env, extraScrubKeys, envScrubbing), ...env },
     });
 
     this.#writeStream = this.#child.stdin;

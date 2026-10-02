@@ -5,7 +5,8 @@
 // into those processes, where a prompt-injected model could read them back out.
 //
 // The filter is a substring denylist -- a heuristic, not a boundary. It can over-filter and under-filter.
-// Operators can extend it exactly (case-insensitive) via config `envScrub.extra` (see envScrubExtraKeys).
+// Operators can extend it exactly (case-insensitive) via config `envScrub.extra` (see envScrubExtraKeys),
+// or turn it off entirely with `--disable-env-scrubbing` (resolved config key `envScrubbing`).
 // Caller-supplied env(e.g.mcpServers[].env in config) is user-trusted and NOT scrubbed; merge it over the result.
 
 /** Heuristic: does this env var key look like a secret? */
@@ -41,8 +42,15 @@ export function envScrubExtraKeys(config: Record<string, unknown> | undefined | 
  * Copy the source env with sensitive keys dropped. Use when spawning LLM-reachable subprocesses.
  * `extraKeys` extends the denylist with operator-known secret names the substring
  * heuristics miss (case-insensitive exact match); pass envScrubExtraKeys(config).
+ * `enabled=false` (CLI: --disable-env-scrubbing) skips filtering entirely -- a copy is
+ * still returned so callers never hand out the live process.env object.
  */
-export function copyScrubbedEnv(source: NodeJS.ProcessEnv, extraKeys?: readonly string[]): NodeJS.ProcessEnv {
+export function copyScrubbedEnv(
+  source: NodeJS.ProcessEnv,
+  extraKeys?: readonly string[],
+  enabled: boolean = true,
+): NodeJS.ProcessEnv {
+  if (!enabled) return { ...source };
   const extra = extraKeys?.length ? new Set(extraKeys.map((k) => k.toUpperCase())) : null;
   return Object.fromEntries(
     Object.entries(source).filter(

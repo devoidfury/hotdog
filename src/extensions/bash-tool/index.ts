@@ -33,6 +33,8 @@ interface BashToolOptions {
   maxTimeoutMs?: number;
   /** Extra env keys to scrub (config: envScrub.extra). */
   envScrubExtra?: readonly string[];
+  /** Env scrubbing on/off (CLI: --disable-env-scrubbing). Defaults to true. */
+  envScrubbing?: boolean;
   /** Extra environment variables for spawned shells (config: bashTool.env). */
   env?: Record<string, string>;
 }
@@ -46,9 +48,10 @@ interface BashToolOptions {
 export function agentSpawnEnv(
   extraScrubKeys?: readonly string[],
   extraVars?: Record<string, string>,
+  envScrubbing: boolean = true,
 ): Record<string, string> {
   return {
-    ...copyScrubbedEnv(process.env, extraScrubKeys),
+    ...copyScrubbedEnv(process.env, extraScrubKeys, envScrubbing),
     // enable agent-friendly test output in bun test, maybe others
     AGENT: "hotdog",
     HOTDOG: "1",
@@ -97,6 +100,7 @@ export class BashTool {
   readonly maxOutputLines: number;
   readonly maxTimeoutMs?: number;
   readonly envScrubExtra?: readonly string[];
+  readonly envScrubbing: boolean;
   readonly env?: Record<string, string>;
 
   constructor(options: BashToolOptions) {
@@ -104,6 +108,7 @@ export class BashTool {
     this.maxOutputLines = options.maxOutputLines;
     this.maxTimeoutMs = options.maxTimeoutMs;
     this.envScrubExtra = options.envScrubExtra;
+    this.envScrubbing = options.envScrubbing ?? true;
     // Only string values make it into the shell (the schema says string;
     // anything else is a config typo, not a variable).
     const env: Record<string, string> = {};
@@ -165,7 +170,7 @@ export class BashTool {
       ...OWN_PROCESS_GROUP,
       // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
       stdio: ["ignore", "pipe", "pipe"],
-      env: agentSpawnEnv(this.envScrubExtra, this.env),
+      env: agentSpawnEnv(this.envScrubExtra, this.env, this.envScrubbing),
     });
 
     return new Promise((resolve, reject) => {
@@ -305,6 +310,7 @@ export function create(core: CoreContext): ExtensionInstance {
   const maxOutputLines = config.maxToolOutputLines;
   const maxTimeoutMs = config.maxTimeoutMs;
   const envScrubExtra = envScrubExtraKeys(core.config);
+  const envScrubbing = core.config.envScrubbing !== false;
 
   return {
     hooks: {
@@ -314,6 +320,7 @@ export function create(core: CoreContext): ExtensionInstance {
           maxOutputLines,
           maxTimeoutMs,
           envScrubExtra,
+          envScrubbing,
           env: config.env as Record<string, string> | undefined,
         });
         registry.register(BashTool.TOOL_NAME, tool);

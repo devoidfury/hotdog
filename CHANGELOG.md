@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`--disable-env-scrubbing`** CLI flag: turns off env-var scrubbing for agent-spawned subprocesses (bash tool, MCP stdio) entirely; children then inherit the full environment. Default stays scrubbed.
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.2...main
 
 ## [v0.11.2] - 2026-09-29

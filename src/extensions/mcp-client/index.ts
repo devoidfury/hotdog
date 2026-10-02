@@ -45,6 +45,7 @@ export function create(core: CoreContext, options: { Connection?: typeof McpConn
   const clientConfig = getExtensionConfig<{ httpTimeoutSecs?: number }>(core, "mcpClient");
   const httpTimeoutMs = Math.round(resolveHttpTimeoutSecs(clientConfig.httpTimeoutSecs) * 1000);
   const envScrubExtra = envScrubExtraKeys(core.config);
+  const envScrubbing = core.config.envScrubbing !== false;
 
   const connections: McpConnection[] = [];
 
@@ -53,7 +54,7 @@ export function create(core: CoreContext, options: { Connection?: typeof McpConn
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         for (const server of enabledServers) {
           try {
-            const conn = await _connectServer(server, Connection, httpTimeoutMs, envScrubExtra);
+            const conn = await _connectServer(server, Connection, httpTimeoutMs, envScrubExtra, envScrubbing);
             if (!conn) continue;
             connections.push(conn);
 
@@ -93,12 +94,13 @@ async function _connectServer(
   Connection: typeof McpConnection,
   httpTimeoutMs: number,
   envScrubExtra?: readonly string[],
+  envScrubbing: boolean = true,
 ): Promise<McpConnection | null> {
   try {
     if (server.url) {
       return await Connection.connectHttp(server.name, server.url, server.headers || {}, httpTimeoutMs);
     } else if (server.command) {
-      return await Connection.connectStdio(server.name, server.command, server.args || [], server.env || {}, envScrubExtra);
+      return await Connection.connectStdio(server.name, server.command, server.args || [], server.env || {}, envScrubExtra, envScrubbing);
     }
     return null;
   } catch (e: unknown) {

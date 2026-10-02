@@ -397,6 +397,8 @@ export interface CoreConfig {
   /** Base context window size in tokens; fallback for models without a per-model override. */
   contextLimit?: number;
   sandboxMode?: boolean;
+  /** Env scrubbing for agent-spawned subprocesses (default true; --disable-env-scrubbing). */
+  envScrubbing?: boolean;
   /** CLI override for max tool difficulty. Highest priority. */
   maxToolDifficulty?: number | null;
   /** Config-file default for max tool difficulty. Overridden by CLI and model config. */

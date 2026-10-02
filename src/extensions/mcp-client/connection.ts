@@ -36,8 +36,9 @@ export class McpConnection {
     args: string[] = [],
     env: Record<string, string> = {},
     extraScrubKeys?: readonly string[],
+    envScrubbing: boolean = true,
   ): Promise<McpConnection> {
-    const client = await McpClient.forStdio(command, args, env, extraScrubKeys);
+    const client = await McpClient.forStdio(command, args, env, extraScrubKeys, envScrubbing);
     const conn = new McpConnection(client, serverName);
     await conn._initialize();
     return conn;

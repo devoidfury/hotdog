@@ -608,6 +608,8 @@ The built-in filter is a substring denylist (`KEY`, `SECRET`, `TOKE`, `PASS`, `_
 
 This is a leak heuristic, not a boundary. Caller-supplied env (`mcpServers[].env`) is user-trusted and never scrubbed.
 
+Scrubbing can be turned off entirely with the `--disable-env-scrubbing` CLI flag — spawned processes then inherit hotdog's full environment, including its own API keys. Only use it when a subprocess genuinely needs a variable the heuristic strips.
+
 ### `skillsPath` (top-level, backward compatible)
 
 - **Type:** `string`

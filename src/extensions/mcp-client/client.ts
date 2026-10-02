@@ -57,8 +57,9 @@ export class McpClient {
     args: string[] = [],
     env: Record<string, string> = {},
     extraScrubKeys?: readonly string[],
+    envScrubbing: boolean = true,
   ): Promise<McpClient> {
-    const transport = new StdioTransport(command, args, env, extraScrubKeys);
+    const transport = new StdioTransport(command, args, env, extraScrubKeys, envScrubbing);
 
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(

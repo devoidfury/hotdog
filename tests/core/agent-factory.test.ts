@@ -32,7 +32,6 @@ const resolved = {
   hideTools: true,
   hideThinking: false,
   showTokenUse: true,
-  stream: true,
   modelRegistry: {},
   maxToolCallsPerIteration: 10,
   maxRetries: 5,
@@ -121,7 +120,6 @@ describe("createAgentFactory", () => {
       profileBody: "override-body",
       hideTools: false,
       hideThinking: true,
-      stream: false,
       sessionId: "fixed-session",
       toolWhitelist: ["read"],
     });
@@ -133,7 +131,6 @@ describe("createAgentFactory", () => {
     expect(agent.profileBody).toBe("override-body");
     expect(agent.hideTools).toBe(false);
     expect(agent.hideThinking).toBe(true);
-    expect(agent.stream).toBe(false);
     expect(agent.sessionId).toBe("fixed-session");
     expect(agent.toolWhitelist).toEqual(["read"]);
   });

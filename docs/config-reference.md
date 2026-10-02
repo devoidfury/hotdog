@@ -368,19 +368,6 @@ disabled when the `NO_COLOR` environment variable is set to a non-empty value or
 { "colors": true }
 ```
 
-### `stream`
-
-- **Type:** `boolean`
-- **CLI flag:** `--no-stream`
-- **Default:** `true`
-- **Resolution:** CLI > default
-
-Enable streaming output. `--no-stream` disables streaming (text appears after full generation).
-
-```json
-{ "stream": true }
-```
-
 ### `sessionId`
 
 - **Type:** `string`

@@ -385,7 +385,6 @@ export interface CoreConfig {
   compactDebug?: boolean;
   noLog?: boolean;
   showTokenUse?: boolean;
-  stream?: boolean;
   hideTools?: boolean;
   hideThinking?: boolean;
   useColors?: boolean;

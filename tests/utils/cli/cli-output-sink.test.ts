@@ -165,26 +165,17 @@ describe("CliOutputSink", () => {
     expect(allOutput).toContain("default: Alice");
   });
 
-  it("emitStreamingChunk writes when stream is enabled", () => {
-    sink.stream = true;
+  it("emitStreamingChunk writes to stdout", () => {
     sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" });
     expect(stdoutWrites.some((w) => w.includes("chunk"))).toBe(true);
   });
 
-  it("emitStreamingChunk is suppressed when stream is disabled", () => {
-    sink.stream = false;
-    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" });
-    expect(stdoutWrites).toHaveLength(0);
-  });
-
-  it("emitStreamingReasoningChunk writes to stderr when stream enabled", () => {
-    sink.stream = true;
+  it("emitStreamingReasoningChunk writes to stderr", () => {
     sink.emit({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "reasoning" });
     expect(stderrWrites.some((w) => w.includes("reasoning"))).toBe(true);
   });
 
   it("emitStreamingReasoningChunk suppressed when hideThinking true", () => {
-    sink.stream = true;
     sink.hideThinking = true;
     sink.emit({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "reasoning" });
     expect(stderrWrites).toHaveLength(0);

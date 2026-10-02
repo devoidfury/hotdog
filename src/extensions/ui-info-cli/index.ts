@@ -84,7 +84,7 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
     return await printConfigDebug(cli, await loadConfig(cli.config, configDir), providers, resolved);
   }
 
-  const client = core.createLlmClient({ stream: false });
+  const client = core.createLlmClient();
 
   let connectivity: ConnectivityResult;
   try {

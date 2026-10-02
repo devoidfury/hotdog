@@ -155,7 +155,6 @@ export function createCore(
       return new LlmClient({
         baseUrl: resolved?.baseUrl ?? null,
         apiKey: resolved?.apiKey ?? null,
-        stream: resolved ? resolved.stream !== false : true,
         chatTimeoutSecs: resolved?.chatTimeout || 30,
         healthCheckTimeoutSecs: resolved?.healthCheckTimeout || 5,
         streamIdleTimeoutSecs: resolved?.streamIdleTimeout as number | undefined,

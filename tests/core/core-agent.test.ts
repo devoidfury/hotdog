@@ -1112,7 +1112,7 @@ describe('Agent — end-to-end loop', () => {
           { type: 'usage', data: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } },
         ]],
       });
-      const { agent } = createFixture({ mockLLM, stream: true, sink });
+      const { agent } = createFixture({ mockLLM, sink });
 
       await agent.run('test');
 

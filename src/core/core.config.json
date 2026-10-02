@@ -178,18 +178,6 @@
       { "default": true }
     ]
   },
-  "stream": {
-    "type": "boolean",
-    "cliFlag": {
-      "long": "--no-stream",
-      "type": "boolean",
-      "description": "Disable streaming"
-    },
-    "layers": [
-      { "source": "cli", "key": "noStream", "cast": "falsy" },
-      { "default": true }
-    ]
-  },
   "hideTools": {
     "type": "boolean",
     "cliFlag": {

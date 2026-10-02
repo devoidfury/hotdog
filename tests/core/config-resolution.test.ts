@@ -57,12 +57,6 @@ describe("CONFIG_KEYS schema", () => {
     }
   });
 
-  it("stream inverts noStream cli flag", () => {
-    expect(resolveKey("stream", CONFIG_KEYS.stream, { ...baseContext, cli: { noStream: true } })).toBe(false);
-    expect(resolveKey("stream", CONFIG_KEYS.stream, { ...baseContext, cli: { noStream: false } })).toBe(true);
-    expect(resolveKey("stream", CONFIG_KEYS.stream, baseContext)).toBe(true);
-  });
-
   it("envScrubbing defaults true and inverts with the disable flag", () => {
     expect(resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, baseContext)).toBe(true);
     expect(
@@ -223,7 +217,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
         url: "http://cli-url",
         apiKey: "cli-key",
         thinker: "custom",
-        noStream: false,
         hideTools: false,
         tokens: true,
         chatTimeout: 300,
@@ -272,7 +265,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     expect(result.apiKey).toBe("provider-key");
 
     // CLI wins for flags
-    expect(result.stream).toBe(true);
     expect(result.hideTools).toBe(false);
     expect(result.showTokenUse).toBe(true);
     expect(result.compactDebug).toBe(true);

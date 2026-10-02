@@ -22,7 +22,6 @@ describe("LlmClient constructor", () => {
       chatTimeoutSecs: 600,
       maxRetries: 12,
     });
-    expect(client.stream).toBe(true);
     expect(client.chatTimeoutSecs).toBe(600);
     expect(client.maxRetries).toBe(12);
     expect(client.sessionId).toBe("");
@@ -32,14 +31,12 @@ describe("LlmClient constructor", () => {
     const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       baseUrl: "http://custom.com",
       apiKey: "test-key",
-      stream: false,
       chatTimeoutSecs: 30,
       maxRetries: 5,
       sessionId: "session-123",
     });
     expect(client.baseUrl).toBe("http://custom.com");
     expect(client.apiKey).toBe("test-key");
-    expect(client.stream).toBe(false);
     expect(client.chatTimeoutSecs).toBe(30);
     expect(client.maxRetries).toBe(5);
     expect(client.sessionId).toBe("session-123");

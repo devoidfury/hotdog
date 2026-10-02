@@ -683,7 +683,7 @@ function createMockCore(overrides: Record<string, unknown> = {}): never {
       request: async () => [],
     },
     createLlmClient: (o?: Record<string, unknown>) =>
-      new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://test", apiKey: "test-key", stream: true,
+      new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://test", apiKey: "test-key",
         chatTimeoutSecs: 60, maxRetries: 3, ...o }),
     ...rest,
   } as never;

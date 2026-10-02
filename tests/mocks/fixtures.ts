@@ -42,7 +42,6 @@ export function createFixture(
     hideTools?: boolean;
     hideThinking?: boolean;
     showTokenUse?: boolean;
-    stream?: boolean;
     sink?: { emit: (event: OutputEvent) => void } | null;
     modelRegistry?: Record<string, unknown>;
     profileName?: string;
@@ -73,7 +72,6 @@ export function createFixture(
     hideTools: options.hideTools ?? true,
     hideThinking: options.hideThinking ?? false,
     showTokenUse: options.showTokenUse ?? false,
-    stream: options.stream ?? false,
     sink: options.sink || null,
     modelRegistry: (options.modelRegistry || {}) as ModelRegistry,
     profileName: options.profileName || "test",
@@ -233,7 +231,6 @@ export function createMockCore(
     baseUrl: "http://localhost:8080",
     apiKey: "test-key",
     model: "test-model",
-    stream: false,
     chatTimeout: 30,
     maxRetries: 3,
     maxIterations: 100,
@@ -285,7 +282,6 @@ export function createMockCore(
       new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
         baseUrl: "http://localhost:8080",
         apiKey: "test-key",
-        stream: false,
         chatTimeoutSecs: 30,
         maxRetries: 3,
         ...overrides,

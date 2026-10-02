@@ -88,7 +88,6 @@ export function createAgentFactory(
       // process-global template state (multi-session hosts resolve config
       // per entry point).
       systemPromptTemplate: resolved.systemPromptTemplate,
-      stream: pickBoolean(agentConfig.stream, resolved.stream),
       config: {
         ...baseConfig,
         blacklistTools: toolBlacklist ?? undefined,

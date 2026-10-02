@@ -79,7 +79,6 @@ export interface CliOutputSinkOptions {
   hideThinking?: boolean;
   hideUserMessage?: boolean;
   showTokenUse?: boolean;
-  stream?: boolean;
 }
 
 /**
@@ -160,7 +159,7 @@ export class CliOutputSink extends OutputSink {
   altStream: NodeJS.WriteStream;
 
   constructor(options: CliOutputSinkOptions = {}) {
-    super(options);
+    super();
     this.thinkerFormat = options.thinkerFormat || "[Thinking: {}]";
     this.toolCallDisplayFormat = options.toolCallDisplayFormat;
     this.toolOutputFmt = options.toolOutputFmt;
@@ -348,25 +347,21 @@ export class CliOutputSink extends OutputSink {
   }
 
   override emitStreamingChunk(event: StreamingChunkEvent): void {
-    if (this.stream) {
-      // Detect transition from reasoning → normal
-      if (this.#outputMode !== Modes.Default) {
-        this._transitionTo(Modes.Default);
-      }
-      this._processContent(event.content);
+    // Detect transition from reasoning → normal
+    if (this.#outputMode !== Modes.Default) {
+      this._transitionTo(Modes.Default);
     }
+    this._processContent(event.content);
   }
 
   override emitStreamingReasoningChunk(event: StreamingReasoningChunkEvent): void {
     if (this.hideThinking) return;
     // Thinking is streamed to stderr
-    if (this.stream) {
-      // Detect transition from normal → reasoning
-      if (this.#outputMode !== Modes.Thinking) {
-        this._transitionTo(Modes.Thinking);
-      }
-      this._processContent(event.content);
+    // Detect transition from normal → reasoning
+    if (this.#outputMode !== Modes.Thinking) {
+      this._transitionTo(Modes.Thinking);
     }
+    this._processContent(event.content);
   }
 
   override emitTaskProgress(event: TaskProgressEvent): void {

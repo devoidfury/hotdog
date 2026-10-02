@@ -126,7 +126,6 @@ export interface AgentOptions {
    * the prompt builder then falls back to config-dir resolution.
    */
   systemPromptTemplate?: string;
-  stream?: boolean;
   abortSignal?: AbortSignal | null;
   toolWhitelist?: string[] | null;
   /** True when the active profile is a manager (controls managerOnly tools). */
@@ -152,7 +151,6 @@ export class Agent implements AgentLike {
   config: AgentConfig | null;
   sessionId: string;
   profileBody: string | undefined;
-  stream: boolean;
   cancelled: boolean;
   iterationCount: number;
   maxToolCallsPerIteration: number;
@@ -218,7 +216,6 @@ export class Agent implements AgentLike {
     this.config = options.config || null;
     this.sessionId = options.sessionId || crypto.randomUUID();
     this.profileBody = options.profileBody;
-    this.stream = options.stream !== false;
     this.cancelled = false;
     this.iterationCount = 0;
     if (options.config?.maxToolCallsPerIteration == null) {
@@ -749,16 +746,8 @@ export class Agent implements AgentLike {
     // split across deltas). onChunk/onReasoning below get per-chunk
     // unescaping for display only.
     return this.#streamProcessor.process(stream, {
-      onChunk: (content) => {
-        if (this.stream) {
-          this.emitOutput("streaming_chunk", { content });
-        }
-      },
-      onReasoning: (content) => {
-        if (this.stream) {
-          this.emitOutput("streaming_reasoning_chunk", { content });
-        }
-      },
+      onChunk: (content) => this.emitOutput("streaming_chunk", { content }),
+      onReasoning: (content) => this.emitOutput("streaming_reasoning_chunk", { content }),
       shouldCancel: () => this.cancelled,
     }, this.llmClient.markerMangler);
   }

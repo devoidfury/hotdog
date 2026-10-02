@@ -34,7 +34,7 @@ function createMockCore(config: Record<string, unknown> = {}) {
       toolRetryDelay: 1,
     },
     createLlmClient: ((overrides?: Record<string, unknown>) =>
-        new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+        new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://localhost:8000", apiKey: "test-key",
           chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
   }) as any;
 }

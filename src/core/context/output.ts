@@ -181,12 +181,6 @@ export type OutputEvent =
 
 /** Base sink; the Agent only depends on this interface, never on a specific UI. */
 export class OutputSink {
-  stream: boolean;
-
-  constructor(options: { stream?: boolean } = {}) {
-    this.stream = options.stream !== false;
-  }
-
   emit(event: OutputEvent): void {
     switch (event.type) {
       case OUTPUT_EVENT.USER_MESSAGE:
@@ -268,15 +262,11 @@ export class OutputSink {
   emitQuestion(_event: QuestionEvent): void {}
 
   emitStreamingChunk(event: StreamingChunkEvent): void {
-    if (this.stream) {
-      process.stdout.write(event.content);
-    }
+    process.stdout.write(event.content);
   }
 
   emitStreamingReasoningChunk(event: StreamingReasoningChunkEvent): void {
-    if (this.stream) {
-      process.stderr.write(event.content);
-    }
+    process.stderr.write(event.content);
   }
 
   emitTaskProgress(_event: TaskProgressEvent): void {}

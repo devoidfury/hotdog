@@ -17,19 +17,9 @@ describe("OutputSink", () => {
     capturedStderr.length = 0;
   });
 
-  describe("constructor", () => {
-    it("defaults stream to true", () => {
-      expect(new OutputSink().stream).toBe(true);
-    });
-
-    it("respects stream option", () => {
-      expect(new OutputSink({ stream: false }).stream).toBe(false);
-    });
-  });
-
   describe("emit", () => {
     it("dispatches events to correct handlers", () => {
-      const sink = new OutputSink({ stream: false });
+      const sink = new OutputSink();
       let callCount = 0;
       sink.emitAssistantMessage = () => { callCount++; };
 
@@ -58,7 +48,7 @@ describe("OutputSink", () => {
       process.stdout.write = (data) => { capturedStdout.push(data as string); return true; };
 
       try {
-        const sink = new OutputSink({ stream: false });
+        const sink = new OutputSink();
         sink.emitAssistantMessage({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "Hello" });
         expect(capturedStdout).toContain("Hello");
       } finally {
@@ -73,7 +63,7 @@ describe("OutputSink", () => {
       process.stderr.write = (data) => { capturedStderr.push(data as string); return true; };
 
       try {
-        const sink = new OutputSink({ stream: false });
+        const sink = new OutputSink();
         sink.emitThinking({ type: OUTPUT_EVENT.THINKING, content: "Thinking..." });
         expect(capturedStderr).toContain("Thinking...");
       } finally {
@@ -88,7 +78,7 @@ describe("OutputSink", () => {
       process.stdout.write = (data) => { capturedStdout.push(data as string); return true; };
 
       try {
-        const sink = new OutputSink({ stream: false });
+        const sink = new OutputSink();
         sink.emitCommandResult({ type: OUTPUT_EVENT.COMMAND_RESULT, content: "Result" });
         expect(capturedStdout).toContain("Result\n");
       } finally {
@@ -98,28 +88,14 @@ describe("OutputSink", () => {
   });
 
   describe("emitStreamingChunk", () => {
-    it("writes content when stream is true", () => {
+    it("writes content to stdout", () => {
       const origWrite = process.stdout.write;
       process.stdout.write = (data) => { capturedStdout.push(data as string); return true; };
 
       try {
-        const sink = new OutputSink({ stream: true });
+        const sink = new OutputSink();
         sink.emitStreamingChunk({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" });
         expect(capturedStdout).toContain("chunk");
-      } finally {
-        process.stdout.write = origWrite;
-      }
-    });
-
-    it("does not write when stream is false", () => {
-      const origWrite = process.stdout.write;
-      let writeCalled = false;
-      process.stdout.write = () => { writeCalled = true; return true; };
-
-      try {
-        const sink = new OutputSink({ stream: false });
-        sink.emitStreamingChunk({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" });
-        expect(writeCalled).toBe(false);
       } finally {
         process.stdout.write = origWrite;
       }
@@ -127,12 +103,12 @@ describe("OutputSink", () => {
   });
 
   describe("emitStreamingReasoningChunk", () => {
-    it("writes content to stderr when stream is true", () => {
+    it("writes content to stderr", () => {
       const origWrite = process.stderr.write;
       process.stderr.write = (data) => { capturedStderr.push(data as string); return true; };
 
       try {
-        const sink = new OutputSink({ stream: true });
+        const sink = new OutputSink();
         sink.emitStreamingReasoningChunk({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "reasoning" });
         expect(capturedStderr).toContain("reasoning");
       } finally {
@@ -170,7 +146,7 @@ describe("OutputSink", () => {
       process.stderr.write = (data) => { capturedStderr.push(data as string); return true; };
 
       try {
-        const sink = new OutputSink({ stream: false });
+        const sink = new OutputSink();
         sink.emitSystemMessage({ type: OUTPUT_EVENT.SYSTEM_MESSAGE, content: "System note" });
         expect(capturedStderr).toContain("System note\n");
       } finally {

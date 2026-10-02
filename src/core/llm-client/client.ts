@@ -44,7 +44,6 @@ export interface LlmClientOptions {
   apiKey?: string | null;
   sessionId?: string;
   loud?: boolean;
-  stream?: boolean;
   providers?: ProviderDef[];
   markerMangler?: MarkerMangler | null;
   /** Global wireFormat default (core config); provider/model entries override. */
@@ -123,7 +122,6 @@ export class LlmClient {
   healthCheckTimeoutSecs: number;
   streamIdleTimeoutSecs: number;
   maxRetries: number;
-  stream: boolean;
   providers: ProviderDef[];
   defaultWireFormat?: string;
   defaultRoleMapping?: string;
@@ -142,7 +140,6 @@ export class LlmClient {
     this.healthCheckTimeoutSecs = options.healthCheckTimeoutSecs ?? 5;
     this.streamIdleTimeoutSecs = options.streamIdleTimeoutSecs ?? 240;
     this.maxRetries = options.maxRetries;
-    this.stream = options.stream !== false;
     this.retryBaseDelayMs = options.retryBaseDelayMs;
     this.providers = options.providers || [];
     this.defaultWireFormat = options.wireFormat || undefined;
@@ -321,7 +318,7 @@ export class LlmClient {
     messages: Message[],
     modelConfig: ModelConfig,
     tools: Array<ToolDef> | null | undefined,
-    stream: boolean = this.stream,
+    stream: boolean = true,
   ): Record<string, unknown> {
     return this.#buildRequest(messages, modelConfig, tools || null, stream).body;
   }

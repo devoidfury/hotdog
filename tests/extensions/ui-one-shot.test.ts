@@ -1,5 +1,7 @@
 // Tests for ui-one-shot/index.ts — one-shot prompt mode extension.
 // Covers create(), hook handlers, handlePromptSubcommand(), and runOneShot().
+// The real subprocess `-p` path (argv -> wire) is covered by
+// tests/conformance/subprocess-wire-conformance.test.ts, not these mocks.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, spyOn } from "bun:test";
 import { HOOKS } from "@core/hooks.ts";
@@ -77,7 +79,7 @@ describe("ui-one-shot extension", () => {
         cleanup: async () => {},
       },
       createLlmClient: ((overrides?: Record<string, unknown>) =>
-        new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+        new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://localhost:8000", apiKey: "test-key",
           chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
     } as any;
   }

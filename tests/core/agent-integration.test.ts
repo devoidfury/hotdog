@@ -59,7 +59,6 @@ function createAgentFixture(options: {
   model?: string;
   maxIterations?: number;
   contextLimit?: number;
-  stream?: boolean;
   toolWhitelist?: string[] | null;
   abortSignal?: AbortSignal | null;
 } = {}) {
@@ -444,12 +443,12 @@ describe('Agent — lifecycle and state', () => {
   });
 
   it('should expose currentStreamingContent getter', () => {
-    const { agent } = createAgentFixture({ stream: true });
+    const { agent } = createAgentFixture({});
     expect(agent.currentStreamingContent).toBe('');
   });
 
   it('should expose currentStreamingReasoning getter', () => {
-    const { agent } = createAgentFixture({ stream: true });
+    const { agent } = createAgentFixture({});
     expect(agent.currentStreamingReasoning).toBe('');
   });
 
@@ -463,7 +462,7 @@ describe('Agent — lifecycle and state', () => {
 
     const mockLLM = new CustomStreamLLMClient(slowStream);
 
-    const { agent } = createAgentFixture({ mockLLM, stream: true });
+    const { agent } = createAgentFixture({ mockLLM });
     const runPromise = agent.run('Test streaming');
 
     // Wait for the first chunk to flush (poll instead of a fixed sleep).
@@ -566,7 +565,7 @@ describe('Agent — lifecycle and state', () => {
 
     const mockLLM = new CustomStreamLLMClient(slowStream);
 
-    const { agent } = createAgentFixture({ mockLLM, stream: true, abortSignal: controller.signal });
+    const { agent } = createAgentFixture({ mockLLM, abortSignal: controller.signal });
 
     const runPromise = agent.run('Test abort mid-stream');
 

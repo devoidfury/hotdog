@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Removed `--no-stream` / `stream` config (breaking).** The flag gated only display (`streaming_chunk` emission); the request path always streamed, and no display path had a non-streaming fallback, so `--no-stream` runs silently dropped the answer. Providers always saw `stream: true` + `stream_options.include_usage` either way. Output is now always streamed to the sink; `--no-stream` fails fast as an unknown flag, and `"stream"` in `defaults.json` surfaces as an unknown key in `hotdog rescue`.
+
 - **fetch tool returns images.** When the fetched resource is an image the model can consume (PNG/JPEG/WebP/GIF), the response attaches to the tool result as a base64 `image_url`, exactly like the `read` tool -- a vision model can look at a chart, screenshot, or diagram straight from a URL. Gated by `modelAcceptsImages` before any bytes are read (fail-closed on text-only/unknown models, mirroring @-refs); the body is capped at the shared 10MB image limit with a byte-level streaming cap (endless streams get cancelled, not buffered). Unsupported `image/*` types (e.g. svg) keep the existing text path, and `HEAD` still returns headers only.
 
 - **`@`-ref image attachments now respect a separate size budget.** `fileAttachment.maxFileSize` (100KB) gated text and images alike, so screenshots/photos over 100KB were silently dropped from @-refs even on a vision model -- while the `read` tool saw them fine under its 10MB cap. Images now use a new `fileAttachment.maxImageSize` (default 10MB, matching `read`); the text budget is unchanged.

@@ -11,3 +11,11 @@ For an AI host I've got a dedicated AMD strix halo 128GB mini-pc running linux, 
 I run [llama-swap](https://github.com/mostlygeek/llama-swap) with a version of the [llama-swap-config.yaml](./llama-swap-config.yaml) -- make sure to set an API key if you use this!
 
 None of those will auto-download -- my workflow is to download these images manually and then write the config by hand -- but it should give a good idea of decent settings for each of these on this box. Most of these filenames are unchanged so if you search for those you'll likely find the same copies.
+
+
+## Experiments
+
+### hotdog agent study
+
+Tasking a manager with graph workflows to perform deep code review across the top ~100 open source agents, picked from a curated list:  
+https://github.com/devoidfury/hotdog-agent-study

@@ -1,14 +1,14 @@
 # hotdog
 
-**The agent harness built for local, open-weight models.** Point it at llama.cpp, llama-swap, vllm, or any OpenAI-compatible endpoint and run your entire agent stack on your own hardware. No cloud required, no API bills, no telemetry.
+**agent harness built for local, open-weight models.** Point it at llama.cpp, llama-swap, vllm, or any OpenAI-compatible endpoint and run your entire agent stack on your own hardware. No cloud, no API bills, no telemetry or data harvesting.
 
-**Zero dependencies, by construction.** No `npm install`, no `node_modules`, no build step, no postinstall hooks. The whole runtime is the TypeScript in this repo -- bring your own [Bun](https://bun.sh). Full write-up: [Supply Chain](docs/supply-chain.md).
-
-It is daily-driven by its author on a 128 GB Strix Halo running CachyOS, serving open-weight models through llama.cpp and llama-swap.
+**Zero dependencies** - bring your own [Bun](https://bun.sh) and hotdog will run from source code. No `npm install`, no `node_modules`, no build step, no postinstall hooks. The whole runtime is the TypeScript in this repo.  
+*More info @ [supply chain rationale](docs/supply-chain.md).*
 
 ## Quick Start
 
-Needs exactly one thing: [Bun](https://bun.sh) >= 1.3.1.
+First, get your bun ready - you can snag one here if you don't have one already: [Bun](https://bun.sh)  
+(make sure it's version >= 1.3.1)
 
 ```sh
 git clone https://github.com/devoidfury/hotdog.git && cd hotdog
@@ -22,9 +22,7 @@ export HOTDOG_API_KEY="api-key-here"
 bun bin/hotdog
 ```
 
-Set `HOTDOG_API_KEY` even for a local server: an unauthenticated inference endpoint on your network is a free API for anyone nearby and an open prompt-injection surface. llama.cpp, llama-swap, and vllm all support requiring one.
-
-One-shot mode, and pinning a specific model (`-m`, or env `HOTDOG_MODEL`):
+One-shot mode, with pinning a specific model (`-m`, or env `HOTDOG_MODEL`):
 
 ```sh
 bun bin/hotdog -m "qwen3.8-flash-next" -p "What files are in this project?"
@@ -39,24 +37,27 @@ export PATH="$PATH:/path/to/hotdog/bin"
 hotdog -m "qwen3.8-flash-next" -p "See if you can improve the test coverage. @package.json"
 ```
 
+> [!CAUTION]
+> No API key means your inference server is vulnerable to misuse by anything on the network. Always configure local inference servers to require an API key. llama.cpp, llama-swap, vllm, and others support API key configuration.
+
 ## Why? _You gonna eat that?_
 
-- **Local first.** Built and tested daily against local backends (llama-swap, llama.cpp, vllm, ds4), not retrofitted onto them after the cloud path.
+- **Local first.** Built and tested daily against local backends (llama-swap, llama.cpp, vllm, ds4).
 - **Short supply chain.** `dependencies` is empty. Just Bun. No packages to install means nothing to compromise. Pin a git tag and you know exactly what you're running.
-- **Wire-format integrity.** Markers, chat-template control tokens, and tool-call delimiters inside untrusted output get rewritten to per-session aliases, so nothing a tool reads can forge a fake tool call or a harness system message.
+- **Wire-format integrity.** Markers, chat-template control tokens, and tool-call delimiters inside untrusted output get rewritten to per-session aliases, so nothing a tool reads can forge a fake turn or system message.
 - **Small harness footprint.** Minimal context and system prompt injected by the harness itself. Instead, you write and compose your own system prompts with tool-sets as profiles.
 - **Tiny core, extensions to build out the agent you want.** Disable any feature you don't like, drop in your own extensions to add new functionality.
 
-## UI Modes
-- **One-shot CLI** -- Single prompt non-interactive session (`hotdog -p "your prompt"`). _(stable, ready for use)_
-- **Interactive CLI** -- Readline-based interactive session (`hotdog` or `hotdog cli`). _(stable, ready for use)_
-- **Web UI** -- Web interface with WebSocket support (`hotdog webui`). _(beta - ready for use)_
+### UI Modes
+- **One-shot CLI** -- non-interactive single prompt (`hotdog -p "your prompt"`). _(stable)_
+- **Interactive CLI** -- readline-based interactive session (`hotdog` or `hotdog cli`). _(stable)_
+- **Web UI** -- webserver mode (`hotdog webui`). _(beta)_
 
-## Features
+### Features
 - **Tool calling** -- File operations, bash, HTTP requests, web search, and more
 - **Extension architecture** -- All features are extensions; add your own via `extension.json` + `index.ts`
-- **Profiles** -- Composable agent configurations with tools and behavioral aspects
-- **Skills** -- Load-on-demand guides and workflows
+- **Profiles** -- Composable agent configurations, tools and behavioral aspects
+- **Skills** -- Load-on-demand context and resources
 - **Compaction** -- Automatic context management when token budget is exceeded
 - **MCP client** -- Connect to Model Context Protocol servers (HTTP + stdio)
 - **Subagents and Workflow graphs** -- Delegate work to background task agents, workflows for long-horizon tasks with reviewed steps. Automatic fan out to all configured providers.
@@ -65,7 +66,7 @@ hotdog -m "qwen3.8-flash-next" -p "See if you can improve the test coverage. @pa
 - **File attachments** -- Reference files inline with @filepath syntax in user input
 - **Session logging** -- JSONL session logs for debugging and auditing
 
-## Configure In Depth
+## Configuration
 
 Copy [the minimal config example](./examples/minimal-config/config) directory to `~/.config/hotdog` (user-wide) or `/etc/hotdog` (system-wide). For project-local config, copy it to `./config` and run hotdog from that directory. Edit `<config-dir>/defaults.json` with your AI provider settings:
 
@@ -85,7 +86,8 @@ Copy [the minimal config example](./examples/minimal-config/config) directory to
 
 Config values are resolved through a priority chain defined **per key**: most keys resolve **CLI flag > config file > built-in default**, while some insert provider, profile, or environment layers at deliberate positions (e.g. `default_model` resolves env `HOTDOG_MODEL` *above* the config file, `apiKey` resolves it below). There is no single global order; the exact chain for every key is listed in the [config reference](docs/config-reference.md).
 
-There are [example configurations](examples/) including the [developer's daily driver](examples/devoidfury/).
+> [!TIP]
+> There are [example configurations](examples/) including the [developer's daily driver](examples/devoidfury/).
 
 ### Profiles
 

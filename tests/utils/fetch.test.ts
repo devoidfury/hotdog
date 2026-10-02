@@ -168,6 +168,20 @@ describe("readCappedBody", () => {
     expect(text).toBe("abc");
     expect(truncated).toBe(true);
   });
+
+  it("survives a cancel() that rejects", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("y".repeat(200))); // endless
+      },
+      cancel() {
+        throw new Error("kaboom");
+      },
+    });
+    const { text, truncated } = await readCappedBody(new Response(stream), 10);
+    expect(truncated).toBe(true);
+    expect(text.length).toBe(10);
+  });
 });
 
 // ── readCappedBytes ─────────────────────────────────────────────────────────
@@ -208,8 +222,31 @@ describe("readCappedBytes", () => {
     expect(cancelled).toBe(true);
   });
 
+  // new Response("") still carries a (non-null) body stream; the fallback
+  // needs resp.body === null. No production caller can hit it (fetch
+  // responses always have .body), so it is covered here, stub-style, like
+  // the readCappedBody fallback test.
   it("handles a bodyless response via arrayBuffer", async () => {
-    const { bytes } = await readCappedBytes(new Response(""), 10);
+    const { bytes } = await readCappedBytes(new Response(null), 10);
     expect(bytes!.length).toBe(0);
+  });
+
+  it("bodyless response over the cap returns null", async () => {
+    const resp = { arrayBuffer: async () => new Uint8Array(20) } as unknown as Response;
+    const { bytes } = await readCappedBytes(resp, 10);
+    expect(bytes).toBeNull();
+  });
+
+  it("survives a cancel() that rejects", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(64).fill(9)); // endless
+      },
+      cancel() {
+        throw new Error("kaboom");
+      },
+    });
+    const { bytes } = await readCappedBytes(new Response(stream), 100);
+    expect(bytes).toBeNull();
   });
 });

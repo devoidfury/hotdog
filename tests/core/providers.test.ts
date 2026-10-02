@@ -426,6 +426,129 @@ describe("buildModelRegistry with fetchModels", () => {
     expect(registry["test/alias-1"]!.name).toBe("test/alias-1");
     expect(registry["test/alias-2"]!.name).toBe("test/alias-2");
   });
+
+  // ── llama.cpp (plain, not llama-swap) ──────────────────────────────────────
+
+  it("parses llama.cpp /v1/models: meta.n_ctx, ollama-style multimodal caps, top-level aliases", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = Object.assign(async (url: string | URL | RequestInfo) => {
+      urls.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({
+          models: [
+            { name: "qwen2.5-vl", model: "qwen2.5-vl", capabilities: ["completion", "multimodal"] },
+          ],
+          object: "list",
+          data: [
+            {
+              id: "qwen2.5-vl",
+              aliases: ["qwen-vl"],
+              owned_by: "llamacpp",
+              meta: { n_ctx: 32768, n_vocab: 151936 },
+            },
+          ],
+        }),
+      } as Response;
+    }, { preconnect: async () => {} }) as typeof fetch;
+
+    const config = {
+      providers: [{ name: "home", url: "http://localhost:8080", fetchModels: true, models: [] }],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    // Context comes from meta.n_ctx
+    expect(registry["home/qwen2.5-vl"]!.contextLimit).toBe(32768);
+    // "multimodal" in the ollama-style caps means vision
+    expect(registry["home/qwen2.5-vl"]!.capabilities?.vision).toBe(true);
+    // ...materialized as a modality list too (show-me reads only those)
+    expect(registry["home/qwen2.5-vl"]!.inputModalities).toEqual(["text", "image"]);
+    // Top-level aliases expand like llama-swap aliases
+    expect(registry["home/qwen-vl"]!.capabilities?.vision).toBe(true);
+    // models[] already conveyed the modality data; no /props probe needed
+    expect(urls).toEqual(["http://localhost:8080/v1/models"]);
+  });
+
+  it("probes /props for llama.cpp servers whose /v1/models lacks modality data", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = Object.assign(async (url: string | URL | RequestInfo) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.endsWith("/props")) {
+        return {
+          ok: true,
+          json: async () => ({
+            model_alias: "gemma3",
+            modalities: { vision: true, video: false, audio: false },
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          object: "list",
+          data: [{ id: "gemma3", owned_by: "llamacpp", meta: { n_ctx: 8192 } }],
+        }),
+      } as Response;
+    }, { preconnect: async () => {} }) as typeof fetch;
+
+    const config = {
+      providers: [{ name: "home", url: "http://localhost:8080/", fetchModels: true, models: [] }],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["home/gemma3"]!.capabilities?.vision).toBe(true);
+    expect(registry["home/gemma3"]!.inputModalities).toEqual(["text", "image"]);
+    expect(urls).toEqual([
+      "http://localhost:8080/v1/models",
+      "http://localhost:8080/props",
+    ]);
+  });
+
+  it("supports older llama.cpp /props capabilities array", async () => {
+    globalThis.fetch = Object.assign(async (url: string | URL | RequestInfo) => {
+      if (String(url).endsWith("/props")) {
+        return {
+          ok: true,
+          json: async () => ({ capabilities: ["completion", "multimodal"] }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          object: "list",
+          data: [{ id: "old-llama", owned_by: "llamacpp" }],
+        }),
+      } as Response;
+    }, { preconnect: async () => {} }) as typeof fetch;
+
+    const config = {
+      providers: [{ name: "home", url: "http://localhost:8080", fetchModels: true, models: [] }],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["home/old-llama"]!.capabilities?.vision).toBe(true);
+  });
+
+  it("leaves non-vision llama.cpp models without vision and survives /props failure", async () => {
+    globalThis.fetch = Object.assign(async (url: string | URL | RequestInfo) => {
+      if (String(url).endsWith("/props")) {
+        return { ok: false, status: 404 } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          models: [{ name: "tinyllama", capabilities: ["completion"] }],
+          object: "list",
+          data: [{ id: "tinyllama", owned_by: "llamacpp", meta: { n_ctx: 2048 } }],
+        }),
+      } as Response;
+    }, { preconnect: async () => {} }) as typeof fetch;
+
+    const config = {
+      providers: [{ name: "home", url: "http://localhost:8080", fetchModels: true, models: [] }],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["home/tinyllama"]!.contextLimit).toBe(2048);
+    expect(registry["home/tinyllama"]!.capabilities?.vision).toBeUndefined();
+  });
 });
 
 // ── resolveModelConfig fallback ──────────────────────────────────────────────

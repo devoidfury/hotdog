@@ -795,17 +795,41 @@ describe("file-attachment image refs (vision)", () => {
     expect(note.text).toContain("does not accept image input");
   });
 
-  it("skips an oversized image via the maxFileSize cap", async () => {
-    await fsPromises.writeFile(path.join(tmpDir, "big.png"), Buffer.from(TINY_PNG_B64, "base64"));
+  it("image size cap is maxImageSize, not the text maxFileSize", async () => {
+    // A ~150KB image fits the 10MB default but not the 100KB text budget.
+    // Regression: @refs silently dropped screenshots/photos because images
+    // shared the text cap, while the read tool (10MB) saw them fine.
+    const bigBytes = Buffer.concat([
+      Buffer.from("89504e470d0a1a0a", "hex"),
+      Buffer.alloc(150_000, 7),
+    ]);
+    await fsPromises.writeFile(path.join(tmpDir, "big.png"), bigBytes);
+
+    const hook = create(core).hooks![HOOKS.INPUT]!;
+    const result = (await hook({
+      text: "@big.png",
+      agent: { model: "prov/m", modelRegistry: visionRegistry("capabilities") },
+    } as any)) as { action: string; images?: Array<Record<string, unknown>> };
+    expect(result.action).toBe("transform");
+    expect(result.images).toHaveLength(1);
+    expect(result.images![0]!.mimeType).toBe("image/png");
+  });
+
+  it("respects maxImageSize: oversized images are capped independently of text", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "big.png"), Buffer.alloc(500, 9));
     await fsPromises.writeFile(path.join(tmpDir, "ok.txt"), "OK");
 
-    const smallCore = { config: { fileAttachment: { maxFileSize: 8, maxFiles: 10 } }, completion: createCompletionService() } as any;
-    const hook = create(smallCore).hooks![HOOKS.INPUT]!;
+    const capped = {
+      config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 100, maxFiles: 10 } },
+      completion: createCompletionService(),
+    } as any;
+    const hook = create(capped).hooks![HOOKS.INPUT]!;
     const result = (await hook({
       text: "@ok.txt @big.png",
       agent: { model: "prov/m", modelRegistry: visionRegistry("capabilities") },
     } as any)) as { content: Parts; images?: unknown };
 
+    // Text attaches (under text cap); image is capped by maxImageSize.
     expect(result.images).toBeUndefined();
     const note = result.content.find((p) => p.type === "text") as { text: string };
     expect(note.text).toContain("could not read");

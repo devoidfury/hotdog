@@ -15,7 +15,12 @@
         "maxFileSize": {
           "type": "integer",
           "default": 102400,
-          "description": "Maximum file size in bytes to expand (default: 100KB)"
+          "description": "Maximum file size in bytes to expand for text files (default: 100KB)"
+        },
+        "maxImageSize": {
+          "type": "integer",
+          "default": 10485760,
+          "description": "Maximum image size in bytes to attach on @refs (default: 10MB, matching the read tool's image cap)"
         },
         "maxFiles": {
           "type": "integer",

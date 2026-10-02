@@ -86,10 +86,12 @@ export interface ProviderDef {
 }
 
 /**
- * LlamaSwap /v1/models response format.
+ * LlamaSwap /v1/models response format. Plain llama.cpp servers answer the same
+ * endpoint with a different shape (see LlamaCompatModel); this parser handles both.
  */
 interface LlamaSwapModel {
   id: string;
+  owned_by?: string;
   context_length?: number;
   architecture?: {
     input_modalities?: string[];
@@ -99,9 +101,13 @@ interface LlamaSwapModel {
     vision?: boolean;
     function_calling?: boolean;
   };
+  /** llama.cpp top-level aliases on the model card. */
+  aliases?: string[];
   meta?: {
     tags?: string[];
     max_tool_difficulty?: number;
+    /** llama.cpp reports the slot context as meta.n_ctx (not context_length). */
+    n_ctx?: number;
     llamaswap?: {
       aliases?: string[];
       tags?: string[];
@@ -110,25 +116,66 @@ interface LlamaSwapModel {
   };
 }
 
+/**
+ * llama.cpp mirrors Ollama metadata alongside `data` in its /v1/models response:
+ * `models[].capabilities` lists "completion" plus "multimodal" when an mtmd projector is loaded.
+ */
+interface LlamaCompatModel {
+  name?: string;
+  model?: string;
+  capabilities?: string[];
+}
+
+/** llama.cpp /props subset used for modality detection. */
+interface LlamaCppProps {
+  model_alias?: string;
+  modalities?: {
+    vision?: boolean;
+    video?: boolean;
+    audio?: boolean;
+  };
+  /** Older llama.cpp builds listed ["completion","multimodal"] here instead of `modalities`. */
+  capabilities?: string[];
+}
+
 interface LlamaSwapModelsResponse {
   data: LlamaSwapModel[];
+  models?: LlamaCompatModel[];
 }
 
 function parseModelsResponse(json: LlamaSwapModelsResponse): ProviderModelEntry[] {
   const entries: ProviderModelEntry[] = [];
 
+  // llama.cpp: ollama-style `models[]` keyed by model name, carrying "multimodal" when vision is on
+  const compatCaps = new Map<string, string[]>();
+  for (const om of json.models ?? []) {
+    const key = om.name ?? om.model;
+    if (key) compatCaps.set(key, om.capabilities ?? []);
+  }
+
   for (const m of json.data || []) {
-    const hasVision = m.capabilities?.vision === true || m.architecture?.input_modalities?.includes("image");
+    const llamaCaps = compatCaps.get(m.id) ?? [];
+    const hasVision =
+      m.capabilities?.vision === true ||
+      m.architecture?.input_modalities?.includes("image") ||
+      llamaCaps.includes("multimodal");
     const capabilities: { vision?: boolean; toolCalling?: boolean } = {};
     if (hasVision) capabilities.vision = true;
     if (m.capabilities?.function_calling === true) capabilities.toolCalling = true;
 
+    // llama.cpp "multimodal" = mtmd projector loaded, i.e. image input. Materialize it as a
+    // modality list too: capabilities.vision covers modelAcceptsImages, but strict consumers
+    // (show-me) read only inputModalities.
+    const inputModalities =
+      m.architecture?.input_modalities ??
+      (llamaCaps.includes("multimodal") ? ["text", "image"] : undefined);
+
     const baseEntry: ProviderModelEntry = {
       name: m.id,
-      contextLimit: m.context_length,
+      contextLimit: m.context_length ?? m.meta?.n_ctx,
       tags: [...(m.meta?.tags ?? m.meta?.llamaswap?.tags ?? [])],
       capabilities: Object.keys(capabilities).length > 0 ? capabilities : undefined,
-      inputModalities: m.architecture?.input_modalities,
+      inputModalities,
       outputModalities: m.architecture?.output_modalities,
       maxToolDifficulty: m.meta?.max_tool_difficulty ?? m.meta?.llamaswap?.max_tool_difficulty,
     };
@@ -136,17 +183,48 @@ function parseModelsResponse(json: LlamaSwapModelsResponse): ProviderModelEntry[
     entries.push(baseEntry);
 
     // Add aliases as separate model entries
-    if (m.meta?.llamaswap?.aliases) {
-      for (const alias of m.meta.llamaswap.aliases) {
-        entries.push({
-          ...baseEntry,
-          name: alias,
-        });
-      }
+    for (const alias of [...(m.meta?.llamaswap?.aliases ?? []), ...(m.aliases ?? [])]) {
+      entries.push({
+        ...baseEntry,
+        name: alias,
+      });
     }
   }
 
   return entries;
+}
+
+/**
+ * Probe llama.cpp /props for modality data. One server serves one model, so the
+ * answer applies to every entry that arrived without declared modalities.
+ */
+function applyLlamaCppProps(entries: ProviderModelEntry[], props: LlamaCppProps): void {
+  const vision = props.modalities?.vision === true || props.capabilities?.includes("multimodal") === true;
+  if (!vision) return;
+  for (const entry of entries) {
+    if (entry.inputModalities === undefined) {
+      entry.inputModalities = ["text", "image"];
+    }
+    entry.capabilities = { ...entry.capabilities, vision: true };
+  }
+}
+
+async function fetchLlamaCppProps(
+  baseUrl: string,
+  apiKey: string | undefined,
+  signal: AbortSignal,
+): Promise<LlamaCppProps | null> {
+  try {
+    const headers: Record<string, string> = {};
+    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+    const response = await hotdogFetch(`${baseUrl.replace(/\/+$/, "")}/props`, { headers, signal });
+    if (!response.ok) return null;
+    return (await response.json()) as LlamaCppProps;
+  } catch (e) {
+    // Modality detection is progressive enhancement; a missing/failed /props is not fatal.
+    logger.debug(`llama.cpp /props probe failed for ${baseUrl}: ${formatError(e)}`);
+    return null;
+  }
 }
 
 async function fetchRemoteModels(
@@ -175,7 +253,20 @@ async function fetchRemoteModels(
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      return parseModelsResponse((await response.json()) as LlamaSwapModelsResponse);
+      const raw = (await response.json()) as LlamaSwapModelsResponse;
+      const entries = parseModelsResponse(raw);
+
+      // llama.cpp with a vision model may expose it only on /props (modalities.vision);
+      // probe when the models payload looks like llama.cpp but declared no modalities.
+      const looksLikeLlamaCpp =
+        raw.models !== undefined || (raw.data ?? []).some((d) => d.owned_by === "llamacpp");
+      if (looksLikeLlamaCpp && entries.length > 0 &&
+          entries.every((e) => e.inputModalities === undefined && e.capabilities?.vision !== true)) {
+        const props = await fetchLlamaCppProps(baseUrl, apiKey, controller.signal);
+        if (props) applyLlamaCppProps(entries, props);
+      }
+
+      return entries;
     } finally {
       clearTimeout(timeoutId);
     }

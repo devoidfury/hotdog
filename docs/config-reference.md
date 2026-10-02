@@ -947,11 +947,12 @@ Extensions register their own configuration namespaces. Each extension's config 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
-| `maxFileSize` | `number` | `102400` | Maximum file size in bytes to expand (default: 100KB). |
+| `maxFileSize` | `number` | `102400` | Maximum size in bytes for inlined **text** files (default: 100KB). |
+| `maxImageSize` | `number` | `10485760` | Maximum size in bytes for image refs on a vision model (default: 10MB, matching the `read` tool). |
 | `maxFiles` | `number` | `10` | Maximum number of files to expand per input. |
 
 ```json
-{ "fileAttachment": { "maxFileSize": 204800, "maxFiles": 20 } }
+{ "fileAttachment": { "maxFileSize": 204800, "maxImageSize": 4194304, "maxFiles": 20 } }
 ```
 
 ### `fileWatch`

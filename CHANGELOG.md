@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`@`-ref image attachments now respect a separate size budget.** `fileAttachment.maxFileSize` (100KB) gated text and images alike, so screenshots/photos over 100KB were silently dropped from @-refs even on a vision model -- while the `read` tool saw them fine under its 10MB cap. Images now use a new `fileAttachment.maxImageSize` (default 10MB, matching `read`); the text budget is unchanged.
+
+- **llama.cpp model-modality detection.** `fetchModels` now understands plain llama.cpp's `/v1/models` shape, not just llama-swap: context window from `data[].meta.n_ctx`, vision from the ollama-style `models[].capabilities` ("multimodal", also materialized as `inputModalities: ["text","image"]`), and top-level `data[].aliases` expand like llama-swap aliases. When the models payload carries no modality data at all, the fetcher falls back to the server's `/props` (`modalities.vision`, or the older `capabilities: [...,"multimodal"]` list) and annotates the catalog accordingly. Vision models on bare llama.cpp servers now report `inputModalities: ["text","image"]` / `vision` without hand-editing provider config; non-llama.cpp providers see no extra requests.
+
 - **`--disable-env-scrubbing`** CLI flag: turns off env-var scrubbing for agent-spawned subprocesses (bash tool, MCP stdio) entirely; children then inherit the full environment. Default stays scrubbed.
 
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.2...main

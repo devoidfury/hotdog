@@ -10,6 +10,9 @@ import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 
 import { matcher, completion } from "./completions.ts";
 import { modelAcceptsImages } from "@core/config/providers.ts";
+// Same 10MB image cap as the read tool: keeping one constant means @refs and
+// read never disagree on which images are attachable.
+import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import type { ImageAttachment } from "@core/context/message.ts";
 
 // Lookbehind so "tom@furycodes.com" doesn't match; only bare @path refs do.
@@ -66,6 +69,7 @@ async function readFileContent(
   resolvedPath: string,
   requestedPath: string,
   maxFileSize: number,
+  maxImageSize: number,
 ): Promise<AttachedFile | null> {
   try {
     const stats = await fsPromises.stat(resolvedPath);
@@ -75,12 +79,15 @@ async function readFileContent(
       return null;
     }
 
-    if (stats.size > maxFileSize) {
-      logger.debug(`file-attachment: '${requestedPath}' is too large (${stats.size} bytes), skipping`);
+    // The image/text budgets are separate: images ride base64 to a vision
+    // model (read's 10MB cap), text is inlined into the prompt (100KB cap).
+    const mimeType = imageMimeType(resolvedPath);
+    const sizeCap = mimeType ? maxImageSize : maxFileSize;
+    if (stats.size > sizeCap) {
+      logger.debug(`file-attachment: '${requestedPath}' is too large (${stats.size} bytes > ${sizeCap}), skipping`);
       return null;
     }
 
-    const mimeType = imageMimeType(resolvedPath);
     if (mimeType) {
       // Binary: base64, never utf-8 (decoding binary as text corrupts it).
       const buf = await fsPromises.readFile(resolvedPath);
@@ -103,6 +110,7 @@ async function expandFileReferences(
   text: string,
   workspace: Workspace | null,
   maxFileSize: number,
+  maxImageSize: number,
   maxFiles: number,
   vision: boolean,
 ): Promise<{
@@ -148,7 +156,7 @@ async function expandFileReferences(
       continue;
     }
 
-    const result = await readFileContent(resolvedPath, requestedPath, maxFileSize);
+    const result = await readFileContent(resolvedPath, requestedPath, maxFileSize, maxImageSize);
     if (result) {
       attachedFiles.push(result);
     } else {
@@ -193,9 +201,13 @@ async function expandFileReferences(
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
     maxFileSize: number;
+    maxImageSize?: number;
     maxFiles: number;
   }>(core, "fileAttachment");
   const maxFileSize = config.maxFileSize;
+  // Config resolution fills the schema default; the ?? covers standalone
+  // callers (tests) that hand create() a bare core without resolution.
+  const maxImageSize = config.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
   const maxFiles = config.maxFiles;
 
   core.completion.register(matcher, completion, "file-attachment:path-completion");
@@ -222,6 +234,7 @@ export function create(core: CoreContext): ExtensionInstance {
           text,
           workspace,
           maxFileSize,
+          maxImageSize,
           maxFiles,
           // agent is optional here (same as agent?.config above); an unknown
           // model fails closed -- no images to a model we can't verify.

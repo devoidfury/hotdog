@@ -145,12 +145,20 @@ function startTestServer(): void {
       }
 
       // /image-huge — exceeds the 10MB image cap (without allocating 10MB:
-      // a hand-rolled stream the tool must stop reading and cancel)
+      // one shared 64KB chunk pulled 170x, then closed; the byte cap must bail out)
       if (url.pathname === "/image-huge") {
         const chunk = new Uint8Array(64 * 1024).fill(7);
+        let pulls = 0;
         const stream = new ReadableStream<Uint8Array>({
           pull(controller) {
-            controller.enqueue(chunk); // never ends; the byte cap must bail out
+            // Finite on purpose: an endless stream deadlocks bun <=1.3.x servers
+            // (oven-sh/bun#32469 — Bun.serve ignores backpressure, pull floods
+            // the event loop and the client fetch never resolves).
+            if (++pulls > 170) {
+              controller.close(); // 170 * 64KB = 10.6MB > 10MB cap
+              return;
+            }
+            controller.enqueue(chunk);
           },
         });
         return new Response(stream, { headers: { "Content-Type": "image/png" } });

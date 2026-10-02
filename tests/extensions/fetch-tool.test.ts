@@ -121,6 +121,41 @@ function startTestServer(): void {
         });
       }
 
+      // 1x1 transparent PNG, reused by the image-response tests.
+      const TINY_PNG = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      );
+
+      // /image.png — a real PNG served as image/png (image attachment tests)
+      if (url.pathname === "/image.png") {
+        return new Response(TINY_PNG, { headers: { "Content-Type": "image/png" } });
+      }
+
+      // /image-params — jpeg content-type with a charset parameter
+      if (url.pathname === "/image-params") {
+        return new Response(TINY_PNG, {
+          headers: { "Content-Type": "image/jpeg; charset=binary" },
+        });
+      }
+
+      // /image-unsupported — image type outside the supported set
+      if (url.pathname === "/image-unsupported") {
+        return new Response("<svg/>", { headers: { "Content-Type": "image/svg+xml" } });
+      }
+
+      // /image-huge — exceeds the 10MB image cap (without allocating 10MB:
+      // a hand-rolled stream the tool must stop reading and cancel)
+      if (url.pathname === "/image-huge") {
+        const chunk = new Uint8Array(64 * 1024).fill(7);
+        const stream = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.enqueue(chunk); // never ends; the byte cap must bail out
+          },
+        });
+        return new Response(stream, { headers: { "Content-Type": "image/png" } });
+      }
+
       // /redirect/* — redirect endpoints for SSRF redirect-protection tests
       if (url.pathname === "/redirect/ok") {
         return new Response(null, { status: 302, headers: { Location: "/json" } });
@@ -947,5 +982,107 @@ describe("FetchTool integration", () => {
       });
       expect(openTool.toToolDef().function.description).not.toContain("redirect targets");
     });
+  });
+});
+
+// ── Image responses ─────────────────────────────────────────────────────────
+
+import { ToolContext } from "@core/extensions/tool-context.ts";
+import { imageMimeFor } from "@extensions/fetch-tool/index.ts";
+
+function imageCtx(vision: boolean): ToolContext {
+  const registry = vision
+    ? { "prov/m": { capabilities: { vision: true } } }
+    : { "prov/m": { capabilities: {} } };
+  return new ToolContext().set("agent", { model: "prov/m", modelRegistry: registry });
+}
+
+describe("imageMimeFor", () => {
+  it("normalizes supported image types, params and case included", () => {
+    expect(imageMimeFor("image/png")).toBe("image/png");
+    expect(imageMimeFor("IMAGE/GIF; charset=binary")).toBe("image/gif");
+    expect(imageMimeFor("image/webp")).toBe("image/webp");
+    expect(imageMimeFor("image/jpeg")).toBe("image/jpeg");
+  });
+
+  it("rejects non-images and images outside the supported set", () => {
+    expect(imageMimeFor("text/html")).toBeNull();
+    expect(imageMimeFor("application/json")).toBeNull();
+    expect(imageMimeFor("image/svg+xml")).toBeNull();
+    expect(imageMimeFor("")).toBeNull();
+  });
+});
+
+describe("FetchTool image responses", () => {
+  it("attaches a PNG response as an image the model can see", async () => {
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+    const result = await tool.execute(JSON.stringify({ url: `${BASE_URL}/image.png` }), imageCtx(true));
+
+    expect(result.success).toBe(true);
+    expect(result.images).toHaveLength(1);
+    const img = result.images![0] as Record<string, unknown>;
+    expect(img.type).toBe("image_url");
+    expect(img.mimeType).toBe("image/png");
+    // Bytes survive intact: base64 round-trips through the tool result.
+    const fetched = Buffer.from(img.data as string, "base64");
+    expect(fetched.subarray(1, 4).toString()).toBe("PNG");
+    expect(result.output).toContain("Image:");
+    expect(result.metadata?.get("content_type")).toBe("image/png");
+    expect(result.metadata?.get("status")).toBe("200");
+  });
+
+  it("normalizes image content types with parameters", async () => {
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+    const result = await tool.execute(
+      JSON.stringify({ url: `${BASE_URL}/image-params` }),
+      imageCtx(true),
+    );
+    expect(result.images).toHaveLength(1);
+    expect((result.images![0] as Record<string, unknown>).mimeType).toBe("image/jpeg");
+  });
+
+  it("fails closed for a non-vision model: error, no image, no bytes read", async () => {
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+    const result = await tool.execute(JSON.stringify({ url: `${BASE_URL}/image.png` }), imageCtx(false));
+
+    expect(result.success).toBe(false);
+    expect(result.images ?? null).toBeNull();
+    expect(result.error).toContain("does not accept image input");
+    expect(result.metadata?.get("content_type")).toBe("image/png");
+  });
+
+  it("no tool context = unknown model = fail closed", async () => {
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+    const result = await tool.execute(JSON.stringify({ url: `${BASE_URL}/image.png` }));
+    expect(result.success).toBe(false);
+    expect(result.images ?? null).toBeNull();
+  });
+
+  it("rejects an endless image stream at the byte cap", async () => {
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+    const result = await tool.execute(JSON.stringify({ url: `${BASE_URL}/image-huge` }), imageCtx(true));
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("too large");
+    expect(result.images ?? null).toBeNull();
+  });
+
+  it("unsupported image types keep the old text path", async () => {
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+    const result = await tool.execute(
+      JSON.stringify({ url: `${BASE_URL}/image-unsupported` }),
+      imageCtx(true),
+    );
+    expect(result.images ?? null).toBeNull();
+    expect(result.metadata?.get("content_type")).toContain("image/svg+xml");
+  });
+
+  it("HEAD on an image URL still returns headers, not an image", async () => {
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+    const result = await tool.execute(
+      JSON.stringify({ url: `${BASE_URL}/image.png`, method: "HEAD" }),
+      imageCtx(true),
+    );
+    expect(result.images ?? null).toBeNull();
+    expect(result.output).toContain("Headers:");
   });
 });

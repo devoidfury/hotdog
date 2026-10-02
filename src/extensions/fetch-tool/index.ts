@@ -2,7 +2,7 @@
 
 import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
-import { hotdogFetch, readCappedBody, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
+import { hotdogFetch, readCappedBody, readCappedBytes, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
 import {
   toolDef,
   param,
@@ -11,6 +11,8 @@ import {
   defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { modelAcceptsImages } from "@core/config/providers.ts";
+import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import { htmlToMarkdown } from "@utils/html-to-markdown.ts";
 import { TransientError } from "@core/error.ts";
 import { HOOKS } from "@core/hooks.ts";
@@ -103,7 +105,7 @@ export class FetchTool {
       .join(" ");
     return toolDef(
       FetchTool.TOOL_NAME,
-      `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without markdown conversion. Sends an Accept header preferring markdown (HTML when showOriginal is set); a caller-supplied Accept header overrides it. ${restrictions}`,
+      `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without markdown conversion. Sends an Accept header preferring markdown (HTML when showOriginal is set); a caller-supplied Accept header overrides it. Image responses (PNG, JPEG, WebP, GIF) are returned as image attachments the model can see. ${restrictions}`,
       {
         properties: {
           url: param("string", "The URL to fetch"),
@@ -132,7 +134,7 @@ export class FetchTool {
     });
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx?: ToolContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
     const { args, error } = parseArgs(input, this.allowedSchemes);
     if (!args) {
       return ToolResult.err(error);
@@ -160,11 +162,6 @@ export class FetchTool {
           });
       const contentType = resp.headers.get("content-type") || "";
       const isJson = contentType.includes("application/json");
-
-      // Hard cap on what we read off the wire so a huge or never-ending
-      // response cannot exhaust memory before the display cap applies.
-      const { text: rawBody, truncated: readTruncated } = await readCappedBody(resp, MAX_RESPONSE_CHARS);
-
       const reason = resp.statusText || "Unknown";
 
       if (method === 'HEAD') {
@@ -176,6 +173,15 @@ export class FetchTool {
           status_text: reason,
         });
       }
+
+      // Must run before readCappedBody (utf-8 decoding corrupts binary) and before any bytes are read the vision gate rejects
+      const imageMime = imageMimeFor(contentType);
+      if (imageMime) {
+        return await readImageResponse(resp, imageMime, url, method, reason, ctx);
+      }
+
+      // Hard cap on what we read, so a huge or never-ending response cannot exhaust memory before the display cap applies.
+      const { text: rawBody, truncated: readTruncated } = await readCappedBody(resp, MAX_RESPONSE_CHARS);
 
       let respBody = rawBody;
       if (isJson) {
@@ -320,6 +326,61 @@ async function discardBody(resp: Response): Promise<void> {
   } catch {
     // connection already gone
   }
+}
+
+/** Image types the harness can hand to a vision model (same set as @-refs / read). */
+const SUPPORTED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
+/**
+ * Normalize a content-type ("image/jpeg; charset=binary") to the attachable image MIME,
+ * or null when the type isn't one vision models accept as input.
+ * @internal Exported for testing.
+ */
+export function imageMimeFor(contentType: string): string | null {
+  const base = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return SUPPORTED_IMAGE_MIME.has(base) ? base : null;
+}
+
+/**
+ * Turn an image response into a tool result carrying the base64 image attachment.
+ * The vision gate runs before reading. Too-large images are rejected outright.
+ */
+async function readImageResponse(
+  resp: Response,
+  mimeType: string,
+  url: string,
+  method: string,
+  reason: string,
+  ctx?: ToolContext,
+): Promise<ToolResult> {
+  const baseEntries = {
+    url,
+    method,
+    status: String(resp.status),
+    status_text: reason,
+    content_type: mimeType,
+  };
+
+  const agent = ctx?.get?.("agent") as
+    | { model?: string; modelRegistry?: Record<string, never> }
+    | undefined;
+  if (!modelAcceptsImages(agent?.model, agent?.modelRegistry ?? null)) {
+    await discardBody(resp);
+    return ToolResult.err(
+      `Response is an image (${mimeType}) but the current model does not accept image input.`,
+    ).withEntries(baseEntries);
+  }
+
+  const { bytes } = await readCappedBytes(resp, DEFAULT_MAX_IMAGE_SIZE);
+  if (!bytes) {
+    return ToolResult.err(
+      `Image response too large (max ${Math.round(DEFAULT_MAX_IMAGE_SIZE / 1024 / 1024)}MB): ${url}`,
+    ).withEntries(baseEntries);
+  }
+
+  return ToolResult.ok(`Image: ${url} (${mimeType}, ${(bytes.length / 1024).toFixed(1)}KB)`)
+    .withImages([{ type: "image_url", mimeType, data: Buffer.from(bytes).toString("base64") }])
+    .withEntries({ ...baseEntries, body_length: String(bytes.length) });
 }
 
 /** Parse and validate fetch tool arguments. */

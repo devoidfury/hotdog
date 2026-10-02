@@ -169,3 +169,47 @@ describe("readCappedBody", () => {
     expect(truncated).toBe(true);
   });
 });
+
+// ── readCappedBytes ─────────────────────────────────────────────────────────
+
+import { readCappedBytes } from "@utils/fetch.ts";
+
+describe("readCappedBytes", () => {
+  it("reads a small streamed body byte-exact", async () => {
+    const resp = new Response(new Uint8Array([1, 2, 3, 250]));
+    const { bytes } = await readCappedBytes(resp, 10);
+    expect(Array.from(bytes!)).toEqual([1, 2, 3, 250]);
+  });
+
+  it("reassembles multi-chunk streams in order", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2]));
+        controller.enqueue(new Uint8Array([3, 4]));
+        controller.close();
+      },
+    });
+    const { bytes } = await readCappedBytes(new Response(stream), 10);
+    expect(Array.from(bytes!)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("returns null (and cancels) once over the cap", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(64).fill(9)); // endless
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const { bytes } = await readCappedBytes(new Response(stream), 100);
+    expect(bytes).toBeNull();
+    expect(cancelled).toBe(true);
+  });
+
+  it("handles a bodyless response via arrayBuffer", async () => {
+    const { bytes } = await readCappedBytes(new Response(""), 10);
+    expect(bytes!.length).toBe(0);
+  });
+});

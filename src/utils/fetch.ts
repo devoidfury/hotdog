@@ -75,3 +75,38 @@ export async function readCappedBody(
   }
   return { text: text.slice(0, maxChars), truncated };
 }
+
+/**
+ * Byte twin of readCappedBody(): binary-safe (no utf-8 decoding), returns null once the stream
+ * is over the cap so callers can reject instead of buffering (a truncated image is garbage anyway).
+ */
+export async function readCappedBytes(
+  resp: Response,
+  maxBytes: number,
+): Promise<{ bytes: Uint8Array | null }> {
+  const body = resp.body;
+  if (!body) {
+    const buf = new Uint8Array(await resp.arrayBuffer());
+    return { bytes: buf.length > maxBytes ? null : buf };
+  }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return { bytes: null };
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return { bytes: out };
+}

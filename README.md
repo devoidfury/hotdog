@@ -72,19 +72,19 @@ Copy [the minimal config example](./examples/minimal-config/config) directory to
 
 ```json
 {
-  "default_model": "my-provider/qwen3.8-flash-next",
+  "defaultModel": "my-provider/qwen3.8-flash-next",
   "providers": [
     {
       "name": "my-provider",
       "url": "http://provider.hostname:8080",
-      "api_key": "your-api-key",
+      "apiKey": "your-api-key",
       "fetchModels": true
     }
   ]
 }
 ```
 
-Config values are resolved through a priority chain defined **per key**: most keys resolve **CLI flag > config file > built-in default**, while some insert provider, profile, or environment layers at deliberate positions (e.g. `default_model` resolves env `HOTDOG_MODEL` *above* the config file, `apiKey` resolves it below). There is no single global order; the exact chain for every key is listed in the [config reference](docs/config-reference.md).
+Config values are resolved through a priority chain defined **per key**: most keys resolve **CLI flag > config file > built-in default**, while some insert provider, profile, or environment layers at deliberate positions. The exact chain for every key is listed in the [config reference](docs/config-reference.md).
 
 > [!TIP]
 > There are [example configurations](examples/) including the [developer's daily driver](examples/devoidfury/).

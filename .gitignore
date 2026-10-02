@@ -4,6 +4,9 @@ AGENTS.local.md
 # local configuration
 ./config/
 *secret-sauce*
+**/config/workflows/
+
+experiments/
 
 # raw workspace document for looping
 TASKS.md

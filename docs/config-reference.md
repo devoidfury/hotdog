@@ -18,7 +18,7 @@ The `defaults.json` file is the main configuration file for hotdog. It lives in 
 
 ## Config Directory Resolution
 
-The config directory is resolved in the following priority order:
+The config directory is resolved in the following order:
 
 | Priority | Source | Example |
 |----------|--------|---------|
@@ -37,13 +37,13 @@ Copy the bundled `examples/minimal-config/config` to `~/.config/hotdog` or `/etc
 
 ## File Format & Key Normalization
 
-The config file is standard JSON. Keys may be written in either **snake_case** or **camelCase** — the loader normalizes all keys to camelCase internally:
+The config file is standard JSON. Keys may be written in `camelCase`, `kebab-case` or `snake_case`, internally normalized to `camelCased`:
 
 ```json
 {
   "default_model": "provider/model-name",
   "hideTools": true,
-  "chat_timeout_secs": 600
+  "chat-timeout-secs": 600
 }
 ```
 
@@ -1382,7 +1382,7 @@ CLI flag: `--shell-mode`.
 
 ### `websocket`
 
-[WebSocket](../src/extensions/websocket) — WebSocket server for agent session management.
+[WebSocket](../src/extensions/websocket) — WebSocket-based server for agent session management.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

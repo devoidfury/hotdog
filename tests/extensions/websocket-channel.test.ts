@@ -264,15 +264,15 @@ describe("WebSocketChannel - write()", () => {
       },
     },
     {
-      name: "SYSTEM_MESSAGE with file attachments",
+      name: "USER_MESSAGE with file attachments",
       event: {
-        type: OUTPUT_EVENT.SYSTEM_MESSAGE,
-        content: "- file attached: src/a.ts",
+        type: OUTPUT_EVENT.USER_MESSAGE,
+        content: "look at this",
         files: [{ path: "src/a.ts", content: "export const a = 1;" }],
       },
       expected: (msg: any) => {
-        expect(msg.type).toBe(S2C.SYSTEM_MESSAGE);
-        expect(msg.content).toBe("- file attached: src/a.ts");
+        expect(msg.type).toBe(S2C.USER_MESSAGE);
+        expect(msg.content).toBe("look at this");
         expect(msg.files).toEqual([{ path: "src/a.ts", content: "export const a = 1;" }]);
       },
     },

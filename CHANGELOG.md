@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Webui attachments render inline in the message, not as a side system message.** @-ref uploads were echoed as an extra `SYSTEM_MESSAGE` per file (typed `files[]`) while the user bubble itself carried the file-include part's at-rest JSON. The per-file system message is gone: the user-message event now carries the text minus file-include parts plus a `files[]` view of them, and the webui renders each as a collapsible box inside the user bubble -- live, session replay, and cold log replay alike. `SystemMessageEvent` loses its `files` field.
+
 - **Removed `--no-stream` / `stream` config (breaking).** The flag gated only display (`streaming_chunk` emission); the request path always streamed, and no display path had a non-streaming fallback, so `--no-stream` runs silently dropped the answer. Providers always saw `stream: true` + `stream_options.include_usage` either way. Output is now always streamed to the sink; `--no-stream` fails fast as an unknown flag, and `"stream"` in `defaults.json` surfaces as an unknown key in `hotdog rescue`.
 
 - **fetch tool returns images.** When the fetched resource is an image the model can consume (PNG/JPEG/WebP/GIF), the response attaches to the tool result as a base64 `image_url`, exactly like the `read` tool -- a vision model can look at a chart, screenshot, or diagram straight from a URL. Gated by `modelAcceptsImages` before any bytes are read (fail-closed on text-only/unknown models, mirroring @-refs); the body is capped at the shared 10MB image limit with a byte-level streaming cap (endless streams get cancelled, not buffered). Unsupported `image/*` types (e.g. svg) keep the existing text path, and `HEAD` still returns headers only.

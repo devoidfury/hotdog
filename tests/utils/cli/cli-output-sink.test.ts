@@ -220,14 +220,14 @@ describe("CliOutputSink", () => {
     expect(sink.hideThinking).toBe(true);
   });
 
-  it("emitSystemMessage renders the summary line but never attachment content", () => {
+  it("emitUserMessage renders content but never attachment file bodies", () => {
     sink.emit({
-      type: OUTPUT_EVENT.SYSTEM_MESSAGE,
-      content: "- file attached: src/a.ts",
+      type: OUTPUT_EVENT.USER_MESSAGE,
+      content: "look at this",
       files: [{ path: "src/a.ts", content: "SECRET-FILE-CONTENT\nline two" }],
     });
     const out = stdoutWrites.join("") + stderrWrites.join("");
-    expect(out).toContain("file attached: src/a.ts");
+    expect(out).toContain("look at this");
     expect(out).not.toContain("SECRET-FILE-CONTENT");
   });
 

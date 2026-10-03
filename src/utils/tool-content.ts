@@ -52,3 +52,24 @@ export function wrapperContentText(content: string | Array<unknown> | null | und
   }
   return lines.join("\n");
 }
+
+/**
+ * Display view of user-message content split around file-include parts:
+ * text with those parts removed (so file content never reaches a chat surface as raw JSON),
+ * plus {path, content} views of them for a sink that renders attachments (eg webui).
+ */
+export function splitFileIncludes(
+  content: string | Array<unknown> | null | undefined,
+): { text: string; files: Array<{ path: string; content: string }> } {
+  const files: Array<{ path: string; content: string }> = [];
+  if (!Array.isArray(content)) return { text: wrapperContentText(content), files };
+  const rest: unknown[] = [];
+  for (const part of content) {
+    if (isWrapperPart(part) && part.type === "file-include") {
+      files.push({ path: part.path, content: part.content });
+    } else {
+      rest.push(part);
+    }
+  }
+  return { text: wrapperContentText(rest), files };
+}

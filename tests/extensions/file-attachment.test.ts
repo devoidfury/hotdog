@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { create, resolveFilePath } from "@extensions/file-attachment/index.ts";
 import { contentToText, Message } from "@core/context/message.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
-import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { MessageBus } from "@core/session/message-bus.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { MarkerMangler, buildAliasPattern, CORE_PROTECTED_PREFIXES } from "@core/marker-mangler.ts";
@@ -616,7 +615,7 @@ describe("file-attachment extension", () => {
     ]);
   });
 
-  it("emits SYSTEM_MESSAGE with a typed files field, not prose+detail", async () => {
+  it("emits no SYSTEM_MESSAGE; attachments ride the transformed content", async () => {
     await fsPromises.writeFile(path.join(tmpDir, "typed.txt"), "TYPED-CONTENT");
 
     const emitted: Array<Record<string, unknown>> = [];
@@ -628,12 +627,12 @@ describe("file-attachment extension", () => {
     } as any);
 
     expect((result as { action: string }).action).toBe("transform");
-    const sys = emitted.find((e) => e.type === OUTPUT_EVENT.SYSTEM_MESSAGE);
-    expect(sys).toBeDefined();
-    expect(sys!.content).toBe("- file attached: typed.txt");
-    expect(sys!.files).toEqual([{ path: "typed.txt", content: "TYPED-CONTENT" }]);
-    // The old prose+detail channel is gone: raw content never rides as detail.
-    expect(sys!.detail).toBeUndefined();
+    // The extra per-file SYSTEM_MESSAGE is gone: the file-include part in
+    // the transformed content is the single representation sinks render.
+    expect(emitted).toEqual([]);
+    expect(fileIncludeParts(transformedContent(result))).toEqual([
+      { type: "file-include", path: "typed.txt", content: "TYPED-CONTENT" },
+    ]);
   });
 
   // End-to-end across the three layers the wrapper design spans: hook ->
@@ -876,25 +875,26 @@ describe("file-attachment image refs (vision)", () => {
     ]);
   });
 
-  it("SYSTEM_MESSAGE lists the image path without dumping base64", async () => {
+  it("no SYSTEM_MESSAGE for image refs; base64 rides only the images field", async () => {
     await fsPromises.writeFile(path.join(tmpDir, "pixel.png"), Buffer.from(TINY_PNG_B64, "base64"));
 
     const emitted: Array<Record<string, unknown>> = [];
     const hook = create(core).hooks![HOOKS.INPUT]!;
-    await hook({
+    const result = (await hook({
       text: "@pixel.png",
       agent: {
         model: "prov/m",
         modelRegistry: visionRegistry("capabilities"),
         sink: { emit: (e: Record<string, unknown>) => emitted.push(e) },
       },
-    } as any);
+    } as any)) as { action: string; content: Parts; images?: Array<{ data: string }> };
 
-    const sys = emitted.find((e) => e.type === OUTPUT_EVENT.SYSTEM_MESSAGE);
-    expect(sys).toBeDefined();
-    expect(sys!.content).toBe("- file attached: pixel.png");
-    expect(sys!.files).toEqual([{ path: "pixel.png", content: "" }]);
-    expect(JSON.stringify(sys)).not.toContain(TINY_PNG_B64);
+    // No side-channel notice for attachments anymore; nothing is emitted.
+    expect(emitted).toEqual([]);
+    expect(result.images).toHaveLength(1);
+    // No file-include part for the image, and no base64 anywhere in content.
+    expect(fileIncludeParts(result.content)).toEqual([]);
+    expect(JSON.stringify(result.content)).not.toContain(TINY_PNG_B64);
   });
 
   it("bus end-to-end: hook images reach agent.run's images argument", async () => {

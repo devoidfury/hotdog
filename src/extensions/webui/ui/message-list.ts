@@ -11,7 +11,7 @@ import {
   type FeedResult,
   type MdDocument,
 } from "@utils/md-parser.ts";
-import { toolContentText, wrapperContentText } from "@utils/tool-content.ts";
+import { toolContentText, wrapperContentText, splitFileIncludes } from "@utils/tool-content.ts";
 
 // Debug instrumentation, enabled with ?debug=1 in the URL.
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
@@ -53,7 +53,7 @@ export interface UiImage {
   note?: string;
 }
 
-interface UserMessage { content: string; images?: UiImage[]; }
+interface UserMessage { content: string; images?: UiImage[]; files?: Array<{ path: string; content: string }>; }
 interface AssistantMessage { content: string; }
 interface StreamingChunk { content: string; }
 interface ThinkingMessage { content: string; }
@@ -294,7 +294,7 @@ export function createMessageList(
   }
 
   // ── Message Handlers ──────────────────────────────────────────────────────
-  function handleUserMessage({ content, images }: UserMessage): void {
+  function handleUserMessage({ content, images, files }: UserMessage): void {
     // Close any in-flight assistant/thinking element first in case an interruption occurred;
     // without this the next turn's streaming chunks resume the stale element above this message.
     finalizeAssistant();
@@ -309,10 +309,24 @@ export function createMessageList(
     contentEl.textContent = content;
     bubble.appendChild(contentEl);
     appendImages(bubble, images);
+    appendAttachments(bubble, files);
     el.appendChild(bubble);
 
     container.appendChild(el);
     scrollBottom();
+  }
+
+  /** One collapsible box per attached file: path as summary, escaped content inside. */
+  function appendAttachments(bubble: HTMLElement, files?: Array<{ path: string; content: string }>): void {
+    if (!files || files.length === 0) return;
+    for (const f of files) {
+      const box = document.createElement("details");
+      box.className = "attachment-box";
+      box.innerHTML =
+        `<summary>${sanitize(f.path)}</summary>` +
+        `<pre class="attachment-content">${sanitize(f.content)}</pre>`;
+      bubble.appendChild(box);
+    }
   }
 
   function handleAssistantMessage({ content }: AssistantMessage): void {
@@ -827,9 +841,17 @@ export function createMessageList(
               : wrapperContentText(entry.content);
       switch (entry.source) {
         case "input":
-        case "prompt":
-          handleUserMessage({ content, images: entry.images });
+        case "prompt": {
+          // Attachments render inline: split the file-include parts out of
+          // the text so the bubble gets prose + collapsible boxes, not JSON.
+          const split = Array.isArray(entry.content) ? splitFileIncludes(entry.content) : null;
+          handleUserMessage({
+            content: split ? split.text : content,
+            images: entry.images,
+            ...(split && split.files.length > 0 ? { files: split.files } : {}),
+          });
           break;
+        }
         case "llm": {
           if (entry.reasoning_content?.trim()) {
             handleThinking({ content: entry.reasoning_content });
@@ -873,25 +895,10 @@ export function createMessageList(
   }
 
   /** Append a system notice bubble from a server system message. */
-  function handleSystemMessage(data: {
-    content?: string;
-    files?: Array<{ path: string; content: string }>;
-  }): void {
+  function handleSystemMessage(data: { content?: string }): void {
     const el = document.createElement("div");
     el.className = "message system-message";
-    const files = Array.isArray(data.files) ? data.files : [];
-    // Attachments render as a collapsible box (path summary, escaped content
-    // inside); the prose content line would only duplicate the path summary.
-    const body = files.length > 0
-      ? files
-          .map(
-            (f) =>
-              `<details class="attachment-box"><summary>file attached: ${sanitize(f.path)}</summary>` +
-              `<pre class="attachment-content">${sanitize(f.content)}</pre></details>`,
-          )
-          .join("")
-      : `<p>${sanitize(data.content ?? "")}</p>`;
-    el.innerHTML = `<span class="message-role system-label">System</span><div class="message-content">${body}</div>`;
+    el.innerHTML = `<span class="message-role system-label">System</span><div class="message-content"><p>${sanitize(data.content ?? "")}</p></div>`;
     container.appendChild(el);
     scrollBottom();
   }

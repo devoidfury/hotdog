@@ -5,6 +5,7 @@ import type { SwitchProfile } from "@core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
 import { C2S, S2C, C2SMessage, wireImages, taskActivityMessage } from "./protocol.ts";
 import { parseUploadedFiles } from "./uploads.ts";
+import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import { modelAcceptsImages } from "@core/config/providers.ts";
 import { TaskManager, type TaskObserverEvent } from "@core/session/task-manager.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
@@ -25,7 +26,7 @@ import { AgentError, formatError } from "@core/error.ts";
 import { parseForkArg } from "@core/command-handlers.ts";
 import { completionPrefix, parseCompletionContext } from "@core/completion.ts";
 import { logger } from "@utils/logger.ts";
-import { toolContentText } from "@utils/tool-content.ts";
+import { splitFileIncludes, toolContentText } from "@utils/tool-content.ts";
 
 interface SessionMetadata {
   profile: string;
@@ -577,14 +578,14 @@ function replaySessionHistory(
       switch (msg.role) {
         case "user": {
           const userImgs = wireImages((msg as { images?: unknown }).images);
+          // Attachments in `files`; the text excludes file-include parts.
+          const display = splitFileIncludes(msg.content);
           ws.send(
             JSON.stringify({
               type: S2C.USER_MESSAGE,
               sessionId,
-              content:
-                typeof msg.getTextContent === "function"
-                  ? msg.getTextContent()
-                  : msg.content || "",
+              content: display.text,
+              ...(display.files.length > 0 ? { files: display.files } : {}),
               ...(userImgs ? { images: userImgs } : {}),
             }),
           );
@@ -690,16 +691,18 @@ function replaySessionHistory(
 
 /**
  * Upload size limits, reused from the fileAttachment extension config
- * (its schema defaults: 100KB per file, 10 files per message). No new
- * config surface -- uploads and @refs share one ceiling.
+ * (its schema defaults: 100KB per text file, 10MB per image, 10 files per message).
+ * uploads and @refs share one ceiling, including the separate image budget (fileAttachment.maxImageSize).
  */
-function uploadLimits(core: CoreContext): { maxFileSize: number; maxFiles: number } {
-  const cfg = getExtensionConfig<{ maxFileSize?: number; maxFiles?: number }>(
+function uploadLimits(core: CoreContext): { maxFileSize: number; maxImageSize: number; maxFiles: number } {
+  const cfg = getExtensionConfig<{ maxFileSize?: number; maxImageSize?: number; maxFiles?: number }>(
     core,
     "fileAttachment",
   );
+
   return {
     maxFileSize: typeof cfg.maxFileSize === "number" ? cfg.maxFileSize : 102400,
+    maxImageSize: typeof cfg.maxImageSize === "number" ? cfg.maxImageSize : DEFAULT_MAX_IMAGE_SIZE,
     maxFiles: typeof cfg.maxFiles === "number" ? cfg.maxFiles : 10,
   };
 }

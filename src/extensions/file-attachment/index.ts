@@ -2,7 +2,6 @@ import fsPromises from "node:fs/promises";
 import { resolve as resolveAbs, isAbsolute } from "node:path";
 import { cwd } from "node:process";
 import { HOOKS } from "@core/hooks.ts";
-import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { logger } from "@utils/logger.ts";
 import { formatError } from "@core/error.ts";
 import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
@@ -242,16 +241,6 @@ export function create(core: CoreContext): ExtensionInstance {
         );
 
         if (result) {
-          const sink = agent?.sink;
-          for (const file of result.attachedFiles) {
-            // Images: list the path only -- base64 must never be dumped into a UI.
-            const content = file.kind === "image" ? "" : file.content;
-            sink?.emit({
-              type: OUTPUT_EVENT.SYSTEM_MESSAGE,
-              content: `- file attached: ${file.path}`,
-              files: [{ path: file.path, content }],
-            });
-          }
           const images = result.attachedFiles
             .filter((f): f is Extract<AttachedFile, { kind: "image" }> => f.kind === "image")
             .map((f) => f.image);

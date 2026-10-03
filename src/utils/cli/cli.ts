@@ -397,7 +397,6 @@ export class CliOutputSink extends OutputSink {
   }
 
   override emitSystemMessage(event: SystemMessageEvent): void {
-    // Attachments ride the typed `files` field; the CLI stays compact and renders only the summary line.
     this._transitionTo(Modes.System);
     this._processContent(`${applyCompacting(event.content, this.palette)}\n`);
   }

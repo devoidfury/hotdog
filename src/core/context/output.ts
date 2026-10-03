@@ -48,6 +48,19 @@ export interface UserMessageEvent {
   content: string;
   /** Image attachments riding the user message (e.g. file-attachment). */
   images?: ImageAttachment[];
+  /**
+   * file-include parts of the message. Sinks decide presentation:
+   * webui: collapsible box per file inline.
+   * CLI: ignores them (user typed the file refs).
+   * Content excludes these files so raw JSON never reaches a chat surface.
+   */
+  files?: FileAttachmentView[];
+}
+
+/** A file attached to a user message (a file-include part), for display sinks. */
+export interface FileAttachmentView {
+  path: string;
+  content: string;
 }
 
 export interface AssistantMessageEvent {
@@ -146,20 +159,9 @@ export interface SessionStateEvent {
   sessionId?: string;
 }
 
-/** A file attachment riding on a system message (e.g. file-attachment notices). */
-export interface SystemMessageAttachment {
-  path: string;
-  content: string;
-}
-
 export interface SystemMessageEvent {
   type: typeof OUTPUT_EVENT.SYSTEM_MESSAGE;
   content: string;
-  /**
-   * Structured file attachments. Sinks decide presentation: the CLI renders only the content line,
-   * the webui a collapsible box per file. Content should not be dumped as raw JSON into a chat surface.
-   */
-  files?: SystemMessageAttachment[];
 }
 
 export type OutputEvent =

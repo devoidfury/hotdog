@@ -30,6 +30,26 @@ describe("user / assistant messages", () => {
     expect(container.innerHTML).not.toContain("<script>alert");
   });
 
+  it("renders user-message attachments as collapsible boxes inline, content escaped", () => {
+    ml.handleUserMessage({
+      content: "look at this",
+      files: [
+        { path: "evil.txt", content: "<script>alert(1)</script>" },
+        { path: "ok.md", content: "# heading" },
+      ],
+    });
+    const bubble = container.querySelector(".message.user .bubble")!;
+    expect(bubble.querySelector(".content")!.textContent).toBe("look at this");
+    const boxes = bubble.querySelectorAll(".attachment-box");
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0]!.tagName.toLowerCase()).toBe("details");
+    expect(boxes[0]!.querySelector("summary")!.textContent).toBe("evil.txt");
+    expect(boxes[0]!.querySelector(".attachment-content")!.textContent).toContain("<script>alert(1)</script>");
+    // Escaped, never injected, and never shown as a JSON object in chat.
+    expect(container.innerHTML).not.toContain("<script>alert");
+    expect(container.innerHTML).not.toContain('{"path"');
+  });
+
   it("renders assistant markdown", () => {
     ml.handleAssistantMessage({ content: "# Title\n\nSome **bold** text" });
     const el = container.querySelector(".message.assistant .content")!;
@@ -183,23 +203,7 @@ describe("misc message kinds", () => {
     expect(container.querySelector(".system-message")!.textContent).toContain("coder");
   });
 
-  it("renders system message attachments as a collapsible box, content escaped", () => {
-    ml.handleSystemMessage({
-      content: "- file attached: evil.txt",
-      files: [{ path: "evil.txt", content: "<script>alert(1)</script>" }],
-    });
-    const box = container.querySelector(".attachment-box")!;
-    expect(box.tagName.toLowerCase()).toBe("details");
-    expect(box.querySelector("summary")!.textContent).toContain("evil.txt");
-    expect(box.querySelector(".attachment-content")!.textContent).toContain("<script>alert(1)</script>");
-    // Escaped, never injected, and never shown as a JSON object in chat.
-    expect(container.innerHTML).not.toContain("<script>alert");
-    expect(container.innerHTML).not.toContain('{"path"');
-    // The prose content line is replaced by the box, not duplicated.
-    expect(container.querySelector(".system-message p")).toBeNull();
-  });
-
-  it("plain system messages still render as a paragraph", () => {
+  it("plain system messages render as a paragraph, never an attachment box", () => {
     ml.handleSystemMessage({ content: "a quiet notice" });
     expect(container.querySelector(".system-message p")!.textContent).toBe("a quiet notice");
     expect(container.querySelector(".attachment-box")).toBeNull();
@@ -319,6 +323,25 @@ describe("session log replay", () => {
       { source: "input", content: null as unknown as string },
     ]);
     expect(container.querySelector(".message.user .content")!.textContent).toBe("part one\npart two");
+  });
+
+  it("log replay renders stored file-include parts as inline attachment boxes", () => {
+    ml.renderLogEntries([
+      {
+        source: "input",
+        content: [
+          { type: "untrusted", text: "look" },
+          { type: "file-include", path: "note.md", content: "BODY" },
+        ],
+      },
+    ]);
+    const bubble = container.querySelector(".message.user .bubble")!;
+    expect(bubble.querySelector(".content")!.textContent).toBe("look");
+    const box = bubble.querySelector(".attachment-box")!;
+    expect(box.querySelector("summary")!.textContent).toBe("note.md");
+    expect(box.querySelector(".attachment-content")!.textContent).toBe("BODY");
+    // The at-rest JSON never reaches the chat surface.
+    expect(container.innerHTML).not.toContain('{"type":"file-include"');
   });
 
   it("extractToolName falls back to prefix then 'tool'", () => {

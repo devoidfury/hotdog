@@ -180,6 +180,8 @@ interface UserMessage {
   type: "userMessage";
   content: string;
   images?: UiImage[];
+  /** file-include parts of the message; rendered as collapsible boxes inline. */
+  files?: Array<{ path: string; content: string }>;
 }
 
 interface AssistantMessage {
@@ -291,7 +293,6 @@ interface SessionStateMessage {
 interface SystemMessage {
   type: "systemMessage";
   content?: string;
-  files?: Array<{ path: string; content: string }>;
 }
 
 interface ProfilesMessage {

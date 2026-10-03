@@ -13,6 +13,7 @@ import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { type RawUsage } from "./token-tracker.ts";
 import { logger } from "@utils/logger.ts";
+import { splitFileIncludes } from "@utils/tool-content.ts";
 import { ToolExecutor, createToolExecutor, type ToolResult } from "./tool-executor.ts";
 import type { AgentLike } from "./session/index.ts";
 
@@ -372,8 +373,10 @@ export class Agent implements AgentLike {
         source: opts?.source ?? "user",
       });
       this.addMessage(userMsg);
+      const display = splitFileIncludes(userInput);
       this.emitOutput("user_message", {
-        content: contentToText(userInput),
+        content: display.text,
+        ...(display.files.length > 0 ? { files: display.files } : {}),
         ...(images && images.length > 0 ? { images } : {}),
       });
 
@@ -537,7 +540,11 @@ export class Agent implements AgentLike {
     while (this.steeringQueue.length > 0) {
       const steering = this.steeringQueue.shift()!;
       this.addMessage(new Message({ role: "user", content: steering, source: "user" }));
-      this.emitOutput("user_message", { content: contentToText(steering) });
+      const display = splitFileIncludes(steering);
+      this.emitOutput("user_message", {
+        content: display.text,
+        ...(display.files.length > 0 ? { files: display.files } : {}),
+      });
     }
 
     let messages = this.buildMessages();

@@ -74,6 +74,7 @@ export class WebSocketChannel extends Channel {
         if (event.type === OUTPUT_EVENT.USER_MESSAGE) {
           const userImgs = wireImages(event.images);
           if (userImgs) msg.images = userImgs;
+          if (event.files !== undefined) msg.files = event.files;
         }
         break;
       case OUTPUT_EVENT.THINKING:
@@ -105,7 +106,6 @@ export class WebSocketChannel extends Channel {
         break;
       case OUTPUT_EVENT.SYSTEM_MESSAGE:
         msg.content = event.content;
-        if (event.files !== undefined) msg.files = event.files;
         break;
       case OUTPUT_EVENT.TASK_PROGRESS:
         msg.taskId = event.taskId;

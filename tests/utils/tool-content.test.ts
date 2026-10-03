@@ -2,7 +2,7 @@
 // (CLI, websocket bridge, web log view). Display, not a wire format.
 
 import { describe, it, expect } from 'bun:test';
-import { toolContentText, wrapperContentText } from '@utils/tool-content.ts';
+import { toolContentText, wrapperContentText, splitFileIncludes } from '@utils/tool-content.ts';
 import type { ToolResultPart } from '@core/context/wrappers.ts';
 
 const part = (over: Partial<ToolResultPart> = {}): ToolResultPart => ({
@@ -85,5 +85,34 @@ describe("wrapperContentText (display flattener)", () => {
     expect(wrapperContentText("plain")).toBe("plain");
     expect(wrapperContentText(null)).toBe("");
     expect(wrapperContentText(undefined)).toBe("");
+  });
+});
+
+describe("splitFileIncludes (attachment splitter)", () => {
+  it("splits file-include parts out of the text", () => {
+    const { text, files } = splitFileIncludes([
+      { type: "untrusted", text: "look at this" },
+      { type: "file-include", path: "a.txt", content: "AAA" },
+      { type: "file-include", path: "b.txt", content: "BBB" },
+    ]);
+    expect(text).toBe("look at this");
+    expect(files).toEqual([
+      { path: "a.txt", content: "AAA" },
+      { path: "b.txt", content: "BBB" },
+    ]);
+  });
+
+  it("keeps other parts in the text", () => {
+    const { text, files } = splitFileIncludes([
+      { type: "untrusted", text: "hi" },
+      { type: "system-notice", text: "noted" },
+    ]);
+    expect(text).toBe("hi\n[notice] noted");
+    expect(files).toEqual([]);
+  });
+
+  it("passes strings through with no files", () => {
+    expect(splitFileIncludes("plain")).toEqual({ text: "plain", files: [] });
+    expect(splitFileIncludes(null)).toEqual({ text: "", files: [] });
   });
 });

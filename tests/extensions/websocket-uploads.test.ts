@@ -20,7 +20,7 @@ const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64");
 // ── parseUploadedFiles (unit) ───────────────────────────────────────────────
 
 describe("parseUploadedFiles", () => {
-  const limits = { maxFileSize: 1024, maxFiles: 3, vision: true };
+  const limits = { maxFileSize: 1024, maxImageSize: 4096, maxFiles: 3, vision: true };
 
   it("turns a text file into a file-include part", () => {
     const { parts, images, errors } = parseUploadedFiles(
@@ -87,6 +87,30 @@ describe("parseUploadedFiles", () => {
     expect(parts).toEqual([]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("too large");
+  });
+
+  it("sizes images against maxImageSize, not the text maxFileSize", () => {
+    // 2000-byte image: over maxFileSize (1024), under maxImageSize (4096).
+    const data = "A".repeat(Math.ceil((2000 * 4) / 3));
+    const { images, errors } = parseUploadedFiles(
+      [{ name: "shot.png", mimeType: "image/png", data }],
+      limits,
+    );
+    expect(errors).toEqual([]);
+    expect(images).toHaveLength(1);
+  });
+
+  it("rejects an image that decodes over maxImageSize", () => {
+    // 5000-byte image: over both caps; the error must quote maxImageSize.
+    const data = "A".repeat(Math.ceil((5000 * 4) / 3));
+    const { images, errors } = parseUploadedFiles(
+      [{ name: "shot.png", mimeType: "image/png", data }],
+      limits,
+    );
+    expect(images).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("too large");
+    expect(errors[0]).toContain(`> ${limits.maxImageSize} limit`);
   });
 
   it("rejects more files than maxFiles without parsing any", () => {
@@ -284,6 +308,29 @@ describe("C2S SEND with uploads", () => {
     expect(errors[0]!.message).toContain("Upload rejected");
     expect(errors[0]!.message).toContain("huge.txt");
     expect(errors[0]!.message).toContain("too large");
+  });
+
+  it("accepts an image over maxFileSize but under maxImageSize", async () => {
+    const core = createWsMockCore();
+    core.config.fileAttachment = { maxFileSize: 64, maxImageSize: 4096, maxFiles: 2 };
+    const ws = await connect({ core, buildAgent: visionAgent() });
+    const sessionId = ws.activeSessionId!;
+    const calls = spyOnEnqueue();
+
+    // 500-byte image: over the text cap (64), under the image cap (4096).
+    const data = "A".repeat(Math.ceil((500 * 4) / 3));
+    wsServer!.onMessage(ws, JSON.stringify({
+      type: C2S.SEND,
+      sessionId,
+      content: "screenshot",
+      files: [{ name: "shot.png", mimeType: "image/png", data }],
+    }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(calls).toHaveLength(1);
+    const opts = calls[0]!.opts as { images: Array<{ mimeType: string }> };
+    expect(opts.images).toHaveLength(1);
+    expect(opts.images[0]!.mimeType).toBe("image/png");
   });
 
   it("honors the fileAttachment maxFiles limit", async () => {

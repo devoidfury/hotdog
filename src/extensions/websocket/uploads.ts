@@ -12,8 +12,10 @@ import type { ImageAttachment } from "@core/context/message.ts";
 import type { UploadFileWire } from "./protocol.ts";
 
 export interface UploadLimits {
-  /** Per-file byte ceiling (after base64 decode). */
+  /** Per-file byte ceiling for non-image files (after base64 decode). */
   maxFileSize: number;
+  /** Per-file byte ceiling for images, mirroring file-attachment @refs. */
+  maxImageSize: number;
   /** Max files per message. */
   maxFiles: number;
   /** Whether the session's current model accepts image input. */
@@ -36,7 +38,7 @@ export interface ParsedUploads {
  */
 export function parseUploadedFiles(
   files: unknown,
-  { maxFileSize, maxFiles, vision }: UploadLimits,
+  { maxFileSize, maxImageSize, maxFiles, vision }: UploadLimits,
 ): ParsedUploads {
   const parts: Array<Record<string, unknown>> = [];
   const images: ImageAttachment[] = [];
@@ -57,10 +59,16 @@ export function parseUploadedFiles(
       errors.push("each upload needs a name and base64 data");
       continue;
     }
+    const rawMime = file?.mimeType;
+    const mimeType =
+      typeof rawMime === "string" && rawMime ? rawMime : "application/octet-stream";
+    // Images get their own budget (maxImageSize), mirroring file-attachment.
+    const isImage = mimeType.startsWith("image/");
+    const cap = isImage ? maxImageSize : maxFileSize;
     // Cheap ceiling on the base64 TEXT length before decoding, so an
     // oversized blob never pays (or amplifies) a decode.
-    if (data.length > 4 * Math.ceil(maxFileSize / 3)) {
-      errors.push(`'${name}' is too large (${estimateBytes(data.length)} bytes > ${maxFileSize} limit)`);
+    if (data.length > 4 * Math.ceil(cap / 3)) {
+      errors.push(`'${name}' is too large (${estimateBytes(data.length)} bytes > ${cap} limit)`);
       continue;
     }
     const buf = Buffer.from(data, "base64");
@@ -68,14 +76,11 @@ export function parseUploadedFiles(
       errors.push(`'${name}' is not valid base64`);
       continue;
     }
-    if (buf.byteLength > maxFileSize) {
-      errors.push(`'${name}' is too large (${buf.byteLength} bytes > ${maxFileSize} limit)`);
+    if (buf.byteLength > cap) {
+      errors.push(`'${name}' is too large (${buf.byteLength} bytes > ${cap} limit)`);
       continue;
     }
-    const rawMime = file?.mimeType;
-    const mimeType =
-      typeof rawMime === "string" && rawMime ? rawMime : "application/octet-stream";
-    if (mimeType.startsWith("image/")) {
+    if (isImage) {
       // Vision gate mirrors file-attachment: a non-vision model never gets image bytes.
       if (!vision) {
         errors.push(`'${name}' is an image but the current model does not accept image input`);

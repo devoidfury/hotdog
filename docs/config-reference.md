@@ -934,8 +934,8 @@ Extensions register their own configuration namespaces. Each extension's config 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
-| `maxFileSize` | `number` | `102400` | Maximum size in bytes for inlined **text** files (default: 100KB). |
-| `maxImageSize` | `number` | `10485760` | Maximum size in bytes for image refs on a vision model (default: 10MB, matching the `read` tool). |
+| `maxFileSize` | `number` | `102400` | Maximum size in bytes for inlined **text** files (@-refs and webui uploads; default: 100KB). |
+| `maxImageSize` | `number` | `10485760` | Maximum size in bytes for images on a vision model (@-refs and webui uploads; default: 10MB, matching the `read` tool). |
 | `maxFiles` | `number` | `10` | Maximum number of files to expand per input. |
 
 ```json

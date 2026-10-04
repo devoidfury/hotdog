@@ -6,7 +6,7 @@ import { baseRoBinds, bwrapArgv, bwrapAvailable, findBwrap, hiddenRepoPaths } fr
 import { expandArgv, parseHarnessSpec, runHarness, safeWorkspacePath } from "../../evals/lib/harness.ts";
 import { formatJudgePrompt, parseVerdict, runCheck } from "../../evals/lib/score.ts";
 import { buildMatrix, parseSeries, parseTask, loadSeries } from "../../evals/lib/series.ts";
-import { resultsDirName, summarize } from "../../evals/lib/format.ts";
+import { fmtErr, formatDryRun, formatSummary, resultsDirName, summarize } from "../../evals/lib/format.ts";
 import type { RunRecord, TaskSpec } from "../../evals/lib/types.ts";
 
 const baseTask: TaskSpec = {
@@ -178,6 +178,59 @@ describe("format helpers", () => {
     const name = resultsDirName("kielbasa-1", new Date("2026-10-04T07:08:09Z"));
     expect(name).toBe("kielbasa-1-20261004-070809");
   });
+  it("fmtErr unwraps Errors and stringifies the rest", () => {
+    expect(fmtErr(new Error("boom"))).toBe("boom");
+    expect(fmtErr("plain string")).toBe("plain string");
+  });
+
+  it("formatSummary handles empty runs", () => {
+    const out = formatSummary("s", "/res", []);
+    expect(out).toContain("Series: s -> /res");
+    expect(out).toContain("runs: 0  passed: 0  failed: 0");
+    expect(out).not.toContain("sandbox:");
+  });
+
+  it("formatSummary rows, sandbox states, and failure reasons", () => {
+    const mk = (over: Partial<RunRecord>): RunRecord => ({
+      run_id: "r", series: "s", task: "t", harness: "hotdog", model: "m1", repeat: 1,
+      started_at: "", duration_ms: 2000, exit_code: 0, timed_out: false,
+      stdout_tail: "", stderr_tail: "", checks: [], pass: true, sandboxed: true, ...over,
+    });
+    const rows = (recs: RunRecord[]) => formatSummary("s", "/res", recs);
+
+    expect(rows([mk({})])).toContain("sandbox: bwrap");
+    expect(rows([mk({ sandboxed: false })])).toContain("sandbox: off");
+    expect(rows([mk({}), mk({ sandboxed: false })])).toContain("sandbox: MIXED");
+
+    const out = rows([
+      mk({ run_id: "ok", model: "m1", duration_ms: 1000 }),
+      mk({ run_id: "ok2", model: "m1", duration_ms: 3000 }),
+      mk({
+        run_id: "bad", model: "m2",
+        checks: [
+          { name: "judge", pass: false, detail: "rubric not met\nsecond line noise" },
+          { name: "exit_code", pass: true, detail: "" },
+        ],
+        pass: false,
+      }),
+      mk({ run_id: "empty", harness: "other", checks: [], pass: false }),
+    ]);
+    expect(out).toContain("runs: 4  passed: 2  failed: 2");
+    expect(out).toMatch(/hotdog@m1\s+2\/2\s+2\.0/);
+    expect(out).toMatch(/other@m1\s+0\/1/);
+    expect(out).toContain("bad: judge (rubric not met)");
+    expect(out).not.toContain("second line noise");
+    expect(out).toContain("empty: no checks recorded");
+  });
+
+  it("formatDryRun lists planned run ids", () => {
+    const cell = { runId: "t1__h1__m1__r1", task: baseTask, harnessId: "h1", model: "m1", repeatIdx: 1 };
+    const out = formatDryRun([cell, { ...cell, runId: "t1__h1__m1__r2", repeatIdx: 2 }]);
+    expect(out).toContain("planned runs: 2");
+    expect(out).toContain("t1__h1__m1__r1");
+    expect(out).toContain("t1__h1__m1__r2");
+  });
+
   it("summarize aggregates per harness@model", () => {
     const mk = (model: string, pass: boolean): RunRecord =>
       ({ run_id: "r", series: "s", task: "t", harness: "hotdog", model, repeat: 1, started_at: "", duration_ms: 1000, exit_code: 0, timed_out: false, stdout_tail: "", stderr_tail: "", checks: [], pass, sandboxed: true });

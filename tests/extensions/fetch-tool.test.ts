@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   FetchTool,
   isPrivateAddress,
   assertPublicHost,
   fetchWithSafeRedirects,
 } from "@extensions/fetch-tool/index.ts";
+import { buildUnifiedSchema, resolveKey } from "@core/config/schema-loader.ts";
 import { TransientError } from "@core/error.ts";
 import { getDisplay } from "../helpers.ts";
 
@@ -1092,5 +1094,59 @@ describe("FetchTool image responses", () => {
     );
     expect(result.images ?? null).toBeNull();
     expect(result.output).toContain("Headers:");
+  });
+});
+
+describe("allowPrivateHosts env layer (config schema)", () => {
+  // Resolves the REAL fetch-tool extension.json schema through the shared
+  // config layer, like every other HOTDOG_* env var.
+  const ENV = "HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS";
+  const saved = process.env[ENV];
+  const setEnv = (v: string | undefined) => {
+    if (v === undefined) delete process.env[ENV];
+    else process.env[ENV] = v;
+  };
+  afterAll(() => setEnv(saved));
+
+  const extJson = JSON.parse(
+    readFileSync(new URL("../../src/extensions/fetch-tool/extension.json", import.meta.url), "utf-8"),
+  );
+  const schema = buildUnifiedSchema([{ configSchema: extJson.configSchema }]);
+  const resolve = (config: Record<string, unknown> = {}): boolean | undefined =>
+    (resolveKey("fetchTool", schema.fetchTool, { config }) as { allowPrivateHosts?: boolean }).allowPrivateHosts;
+
+  it("defaults false with no env and no config", () => {
+    setEnv(undefined);
+    expect(resolve()).toBe(false);
+  });
+
+  it("config file value still works", () => {
+    setEnv(undefined);
+    expect(resolve({ fetchTool: { allowPrivateHosts: true } })).toBe(true);
+  });
+
+  it("env truthy overrides config false", () => {
+    setEnv("1");
+    expect(resolve()).toBe(true);
+    expect(resolve({ fetchTool: { allowPrivateHosts: false } })).toBe(true);
+  });
+
+  it("env falsy overrides config true (standard truthy cast)", () => {
+    setEnv("0");
+    expect(resolve({ fetchTool: { allowPrivateHosts: true } })).toBe(false);
+  });
+
+  it("non-castable env values fall through to config", () => {
+    setEnv("maybe");
+    expect(resolve({ fetchTool: { allowPrivateHosts: true } })).toBe(true);
+    expect(resolve()).toBe(false);
+  });
+
+  it("sibling properties keep their defaults", () => {
+    setEnv("1");
+    const resolved = resolveKey("fetchTool", schema.fetchTool, { config: {} }) as Record<string, unknown>;
+    expect(resolved.maxBodyLength).toBe(20000);
+    expect(resolved.fetchTimeoutMs).toBe(30000);
+    expect(resolved.allowedSchemes).toEqual(["http", "https"]);
   });
 });

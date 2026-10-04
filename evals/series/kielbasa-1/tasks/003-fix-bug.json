@@ -1,0 +1,9 @@
+{
+  "id": "003-fix-bug",
+  "prompt": "The check script in this directory fails: `bun check.ts` exits non-zero. Fix the implementation so it passes. Do not modify check.ts.",
+  "fixtures": "fixture",
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "command", "cmd": "bun check.ts", "equals": 0 }
+  ]
+}

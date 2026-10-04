@@ -1,0 +1,12 @@
+{
+  "id": "002-bash-haiku",
+  "prompt": "Write a haiku about a hot dog to a file named poem.txt in the current directory, using the bash tool. Do not use any file-writing tool other than bash.",
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "file_exists", "path": "poem.txt" },
+    { "type": "file_match", "path": "poem.txt", "pattern": "\\S", "flags": "s" }
+  ],
+  "judge": {
+    "rubric": "poem.txt contains a haiku (or haiku-like short poem, at most 5 short lines) about a hot dog. Any prose filler or explanation instead of a poem means fail."
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "004-notes-summary",
+  "prompt": "Read NOTES.md in the current directory and list exactly the three action items, one per line, as \"owner: task\". No other commentary.",
+  "fixtures": "fixture-notes",
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "stdout_match", "pattern": "Maya" },
+    { "type": "stdout_match", "pattern": "Raj" },
+    { "type": "stdout_match", "pattern": "Lin" }
+  ],
+  "judge": {
+    "rubric": "The output lists exactly three action items (Maya/pricing deck, Raj/session-log bug, Lin/Q4 hiring plan), one per line in owner: task form, without inventing extra items or omitting any. Including unrelated notes (demo day, lunch order) as action items means fail."
+  }
+}

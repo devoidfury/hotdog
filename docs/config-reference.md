@@ -1012,7 +1012,7 @@ Bash commands run with the user's own permissions -- nothing mediates a running 
 | `maxBodyLength` | `number` | `20000` | Maximum number of characters to return before truncating responses. |
 | `fetchTimeoutMs` | `number` | `30000` | Timeout in milliseconds for requests (headers and body). Slow or dead hosts abort instead of hanging the agent. |
 | `allowedSchemes` | `string[]` | `["http", "https"]` | URL schemes the fetch tool may use. Blocks `file://` (local file reads) and other schemes by default. |
-| `allowPrivateHosts` | `boolean` | `false` | Allow hosts that are, or resolve to, private/reserved addresses (localhost, RFC1918, link-local/metadata, ULA, CGNAT). Default `false` blocks SSRF against local and cloud-internal services. |
+| `allowPrivateHosts` | `boolean` | `false` | Allow hosts that are, or resolve to, private/reserved addresses (localhost, RFC1918, link-local/metadata, ULA, CGNAT). Default `false` blocks SSRF against local and cloud-internal services. Env `HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS` (truthy/falsy cast: `1`/`0`/`true`/`false`/`on`/`off`) overrides the config file for a single process; used by eval tasks that fetch a local fixture webapp. |
 
 ```json
 { "fetchTool": { "enabled": true, "fetchTimeoutMs": 15000, "allowPrivateHosts": true } }

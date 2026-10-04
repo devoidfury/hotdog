@@ -16,6 +16,13 @@ export interface ToolMetadata {
   difficulty: number;
   /** True if the tool is only available when the active profile is a manager. */
   managerOnly?: boolean;
+  /**
+   * True if the tool survives profile whitelist/blacklist filters.
+   * For harness-synthesized contract tools registered only by explicit
+   * user opt-in (e.g. `structured_output` behind `--json-schema`): a
+   * profile's tool filters must not silently break the run contract.
+   */
+  pinned?: boolean;
 }
 
 export interface ToolDef {
@@ -206,6 +213,10 @@ export class ToolRegistry {
   filter(whitelist?: string[] | null, blacklist?: string[] | null): ToolRegistry {
     const result = new ToolRegistry();
     for (const [name, tool] of this.tools) {
+      if (tool.metadata.pinned) {
+        result.register(name, tool);
+        continue;
+      }
       if (blacklist && blacklist.includes(name)) continue;
       if (whitelist && !whitelist.includes(name)) continue;
       result.register(name, tool);

@@ -16,7 +16,7 @@ bun bin/hotdog prompt "hello"
 - **`--config <path>`** (`-f`) — config file path
 - **`--config-dir <path>`** (`-d`) — config directory
 - **`--loud`** (`-l`) — verbose stderr logging for LLM requests/responses
-- **`--json-schema <json|path>`** — one-shot structured output. Passes a JSON Schema (inline or a file path) to a synthetic `structured_output` tool; the first call whose arguments validate ends the run and the payload is printed to stdout as bare JSON (pipeable into `jq`). Exits non-zero if the model finishes without a valid call.
+- **`--json-schema <json|path>`** — one-shot structured output. Passes a JSON Schema (inline or a file path) to a synthetic `structured_output` tool; the first call whose arguments validate ends the run and the payload is printed to stdout as bare JSON (pipeable into `jq`). Exits non-zero if the model finishes without a valid call. The tool is `pinned` (ToolMetadata), so profile tool whitelists/blacklists never filter it out of the request.
 - **`--compact-debug`** — write compaction details to `compaction.out.json` (in the sessions dir)
 - **`--hook-trace`** — trace hook execution (see below)
 - **`--no-log`** — disable JSONL session logging

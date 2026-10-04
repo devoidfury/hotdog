@@ -1,0 +1,11 @@
+{
+  "id": "005-vision-board",
+  "prompt": "Look at the image board.png in the current directory (open it with the read tool). Reply with exactly one line in the form 'TL=<color> BR=<color>' naming the colors of the top-left and bottom-right squares. Use one of: red, orange, yellow, green, blue, purple.",
+  "fixtures": "fixture-vision",
+  "timeout_secs": 240,
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "stdout_match", "pattern": "TL\\s*[:=]\\s*red", "flags": "i" },
+    { "type": "stdout_match", "pattern": "BR\\s*[:=]\\s*yellow", "flags": "i" }
+  ]
+}

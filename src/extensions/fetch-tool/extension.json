@@ -31,7 +31,12 @@
         "allowPrivateHosts": {
           "type": "boolean",
           "default": false,
-          "description": "Allow fetching hosts that are, or resolve to, private/reserved addresses (localhost, RFC1918, link-local/metadata, ULA, CGNAT). Default false blocks SSRF against local/cloud-internal services."
+          "description": "Allow fetching hosts that are, or resolve to, private/reserved addresses (localhost, RFC1918, link-local/metadata, ULA, CGNAT). Default false blocks SSRF against local/cloud-internal services. Env HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS (truthy/falsy) overrides the config file.",
+          "layers": [
+            { "source": "env", "key": "HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS", "cast": "truthy" },
+            { "source": "config", "key": "fetchTool.allowPrivateHosts" },
+            { "default": false }
+          ]
         }
       },
       "additionalProperties": false,

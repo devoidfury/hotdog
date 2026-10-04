@@ -216,6 +216,49 @@ describe("ui-one-shot extension", () => {
       expect(cleanupCalled).toBe(true);
     });
 
+    it("does not echo the user prompt to stdout", async () => {
+      const { create } = await import("@extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("@core/session/index.ts");
+      const { OUTPUT_EVENT } = await import("@core/context/output.ts");
+      const core = createMockCore();
+      const ext = create(core);
+
+      let listener: ((event: any) => void) | null = null;
+      const mockBus = {
+        // Fire a user_message through the channel while the bus "runs".
+        runUntilCancelled: async () => {
+          listener?.({ type: OUTPUT_EVENT.USER_MESSAGE, content: "echo me please" });
+        },
+      };
+      (SessionManager as any).create = async () => ({
+        sessionId: () => "hide-user-session",
+        getAgent: () => ({ sessionId: "hide-user-session" }),
+        getBus: () => mockBus,
+        getTaskManager: () => null,
+        enqueue: () => {},
+        executeCommand: async () => 0,
+        onSessionEvents: (_sessionId: string, cb: (event: any) => void) => {
+          listener = cb;
+          return () => {};
+        },
+      });
+
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
+
+      const stdoutSpy = spyOn(process.stdout, "write").mockImplementation((() => true) as never);
+      try {
+        const exitCode = await (registry.prompt as any).handler({ prompt: "echo me please" }, core);
+        expect(exitCode).toBe(0);
+        // The listener was wired (channel attached) but the sink suppressed it.
+        expect(listener).not.toBeNull();
+        const writes = stdoutSpy.mock.calls.map((c) => String(c[0]));
+        expect(writes.some((w) => w.includes("echo me please"))).toBe(false);
+      } finally {
+        stdoutSpy.mockRestore();
+      }
+    });
+
     it("handles null bus gracefully", async () => {
       const { create } = await import("@extensions/ui-one-shot/index.ts");
       const { SessionManager } = await import("@core/session/index.ts");

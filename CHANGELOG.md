@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **evals** - added independent evals runner and a first easy series `kielbasa-1`
+
 - **Webui attachments render inline in the message, not as a side system message.** @-ref uploads were echoed as an extra `SYSTEM_MESSAGE` per file (typed `files[]`) while the user bubble itself carried the file-include part's at-rest JSON. The per-file system message is gone: the user-message event now carries the text minus file-include parts plus a `files[]` view of them, and the webui renders each as a collapsible box inside the user bubble -- live, session replay, and cold log replay alike. `SystemMessageEvent` loses its `files` field.
 
 - **Removed `--no-stream` / `stream` config (breaking).** The flag gated only display (`streaming_chunk` emission); the request path always streamed, and no display path had a non-streaming fallback, so `--no-stream` runs silently dropped the answer. Providers always saw `stream: true` + `stream_options.include_usage` either way. Output is now always streamed to the sink; `--no-stream` fails fast as an unknown flag, and `"stream"` in `defaults.json` surfaces as an unknown key in `hotdog rescue`.

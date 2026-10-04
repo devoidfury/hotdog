@@ -15,6 +15,10 @@
   - with Coverage report: `bun run coverage`
   - NOTE: uses `--only-failures`, which runs all tests, prints failures, and supresses green test output.
 
+## Evals
+
+`evals/` is a standalone (model x harness) eval runner -- real generation endpoints, never part of `bun test`. See `evals/README.md`. Unit tests for its libs live in `tests/evals/` and are endpoint-free.
+
 ## Rules & Guidelines
 
 - The project uses Bun runtime. Instead of node, always use bun.

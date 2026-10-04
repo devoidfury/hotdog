@@ -1,0 +1,8 @@
+{
+  "id": "001-greet",
+  "prompt": "Do not use any tools. Reply with exactly the following nothing else: Fastest hotdog shooter in the northwest. I probly, I aint never seen nobody do this",
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "stdout_match", "pattern": "Fastest hotdog shooter in the northwest. I probly, I aint never seen nobody do this" }
+  ]
+}

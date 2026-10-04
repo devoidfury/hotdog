@@ -57,6 +57,11 @@ describe("resolveOutputSchema", () => {
 });
 
 describe("StructuredOutputTool", () => {
+  it("is pinned so profile tool filters cannot hide it from the model", () => {
+    const tool = new StructuredOutputTool(SCHEMA, () => {});
+    expect(tool.metadata.pinned).toBe(true);
+  });
+
   it("tool def carries the user schema as parameters", () => {
     const tool = new StructuredOutputTool(SCHEMA, () => {});
     const def = tool.toToolDef();

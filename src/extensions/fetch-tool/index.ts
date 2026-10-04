@@ -600,6 +600,7 @@ const MAX_RESPONSE_CHARS = 2_000_000;
 /** Extension Entry Point. Create the fetch-tool extension. */
 export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema
+  // (allowPrivateHosts carries the HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS env layer there)
   const config = getExtensionConfig<{
     maxBodyLength: number;
     fetchTimeoutMs: number;

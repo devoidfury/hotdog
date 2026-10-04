@@ -101,6 +101,17 @@ describe("ToolRegistry — basic operations", () => {
     expect(filtered.has("bash")).toBe(true);
     expect(filtered.has("overwrite")).toBe(false);
   });
+
+  it("filter keeps pinned tools even outside the whitelist", () => {
+    const registry = new ToolRegistry();
+    const pinned = mkTool(async () => "done", "structured_output");
+    pinned.metadata = { sideEffects: false, difficulty: 1, pinned: true };
+    registry.register("structured_output", pinned);
+    registry.register("read", mkTool(async () => "read"));
+    expect(registry.filter(["read"]).has("structured_output")).toBe(true);
+    expect(registry.filter(null, ["structured_output"]).has("structured_output")).toBe(true);
+    expect(registry.filter(["read"]).has("read")).toBe(true);
+  });
 });
 
 describe("ToolRegistry — validateToolArgs", () => {

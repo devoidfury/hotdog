@@ -1,0 +1,19 @@
+{
+  "id": "007-web-comment",
+  "prompt": "A local journal API is running at http://127.0.0.1:8732. Using the fetch tool: log in with username 'grillmaster' and password 'kielbasa-secret', then post a comment with the exact text 'hotdog was here' using the token you got back. Finally reply with only the numeric comment id the API returned.",
+  "fixtures": "fixture-commentapp",
+  "timeout_secs": 240,
+  "env": { "HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS": "1" },
+  "serve": {
+    "cmd": "bun server.ts",
+    "ready_url": "http://127.0.0.1:8732/healthz",
+    "ready_timeout_secs": 15
+  },
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "file_exists", "path": "comments.jsonl" },
+    { "type": "file_match", "path": "comments.jsonl", "pattern": "\"user\":\"grillmaster\"" },
+    { "type": "file_match", "path": "comments.jsonl", "pattern": "\"text\":\"hotdog was here\"" },
+    { "type": "stdout_match", "pattern": "\\b1\\b" }
+  ]
+}

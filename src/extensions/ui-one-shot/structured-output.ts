@@ -46,7 +46,10 @@ export async function resolveOutputSchema(
 
 export class StructuredOutputTool {
   static readonly TOOL_NAME = STRUCTURED_OUTPUT_TOOL_NAME;
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
+  // Pinned: registered only when --json-schema is passed, so a profile
+  // whitelist/blacklist must not filter it out of the request (the model
+  // would then have no tool to answer through and reply in prose).
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, pinned: true };
 
   private readonly schema: Record<string, unknown>;
   private readonly onOutput: (payload: Record<string, unknown>) => void;

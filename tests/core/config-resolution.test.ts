@@ -119,6 +119,12 @@ describe("CONFIG_KEYS schema", () => {
     // camelCase before resolution), default 5
     expect(resolveKey("healthCheckTimeout", CONFIG_KEYS.healthCheckTimeout, { ...baseContext, config: { healthCheckTimeoutSecs: 7 } })).toBe(7);
     expect(resolveKey("healthCheckTimeout", CONFIG_KEYS.healthCheckTimeout, baseContext)).toBe(5);
+
+    // Provider-pool health sweep interval: config key, default 30; 0 is a
+    // real value (disables the interval), not skipped to the default
+    expect(resolveKey("providerHealthCheckIntervalSecs", CONFIG_KEYS.providerHealthCheckIntervalSecs, { ...baseContext, config: { providerHealthCheckIntervalSecs: 7 } })).toBe(7);
+    expect(resolveKey("providerHealthCheckIntervalSecs", CONFIG_KEYS.providerHealthCheckIntervalSecs, baseContext)).toBe(30);
+    expect(resolveKey("providerHealthCheckIntervalSecs", CONFIG_KEYS.providerHealthCheckIntervalSecs, { ...baseContext, config: { providerHealthCheckIntervalSecs: 0 } })).toBe(0);
   });
 
   it("contextLimit resolves from config, defaulting to 128000", () => {

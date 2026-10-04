@@ -114,7 +114,39 @@ describe("Info CLI - printInfoText branches", () => {
     expect(output).toContain("disabled");
   });
 
-  it("shows connectivity unreachable when ping fails", async () => {
+  // Connectivity is one sweep: the Providers section carries every verdict, and
+  // the JSON `connectivity` block is derived from the same pass -- no separate
+  // ping. When no provider resolves to the global baseUrl, a synthetic probe
+  // line covers it.
+  const unreachableStub = () => ({
+    buildConfig: async () => ({
+      resolved: {
+        baseUrl: "http://nonexistent.invalid:99999",
+        apiKey: "test-key",
+        model: "test-model",
+        stream: false,
+        chatTimeout: 1,
+        maxRetries: 3,
+        profileName: "default",
+        profileDef: {},
+        activeProvider: null,
+        configDir: join(homedir(), ".config", "hotdog"),
+      },
+      modelRegistry: {},
+      providers: [],
+    }),
+  });
+
+  it("probes the global baseUrl as an extra Providers line when nothing covers it", async () => {
+    const run = await infoCliRunner(unreachableStub());
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).not.toContain("Connectivity:");
+    expect(output).toContain("(base url) → http://nonexistent.invalid:99999");
+    expect(output).toContain("down:");
+  });
+
+  it("an inheriting provider answers for the baseUrl: one line, no extra probe", async () => {
     const run = await infoCliRunner({
       buildConfig: async () => ({
         resolved: {
@@ -126,17 +158,29 @@ describe("Info CLI - printInfoText branches", () => {
           maxRetries: 3,
           profileName: "default",
           profileDef: {},
-          activeProvider: null,
+          activeProvider: "inheriting",
           configDir: join(homedir(), ".config", "hotdog"),
         },
         modelRegistry: {},
-        providers: [],
+        // No url: the sweep probes this provider AT the baseUrl, so the
+        // provider line is the baseUrl verdict -- no synthetic line.
+        providers: [{ name: "inheriting", models: [] }],
       }),
     });
     const { exitCode, output } = await run("info");
     expect(exitCode).toBe(0);
-    expect(output).toContain("Connectivity:");
-    expect(output).toContain("unreachable");
+    expect(output).toContain("inheriting (active) → http://nonexistent.invalid:99999 (inherited)");
+    expect(output).toContain("down:");
+    expect(output).not.toContain("(base url)");
+  });
+
+  it("derives JSON connectivity from the same sweep when the base url is down", async () => {
+    const run = await infoCliRunner(unreachableStub(), { wantsJson: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.connectivity.reachable).toBe(false);
+    expect(parsed.connectivity.error).toBeTruthy();
   });
 });
 

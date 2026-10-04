@@ -406,6 +406,20 @@ Timeout in seconds for provider health-check requests (used by `info` connectivi
 { "healthCheckTimeoutSecs": 10 }
 ```
 
+### `providerHealthCheckIntervalSecs`
+
+- **Type:** `number`
+- **Default:** `30`
+- **Resolution:** config > default
+
+Interval in seconds for the provider-pool health sweep. A dead provider looks idle -- the preferred placement target -- until a task locks onto it and burns its retries on connection-refused. The sweep probes every provider with a resolvable url (providers with `fetchModels: true` are probed through `/v1/models`, which doubles as a live catalog refresh upserted into the running model registry; everything else through `/health`) on the `healthCheckTimeoutSecs` timeout, and `hotdog info` shows the resulting per-provider `up`/`down` verdict.
+
+Reachability is status-agnostic: only connection refused / timeout / DNS at the socket level marks a provider down. A positive interval also fires one sweep at manager startup, so a provider already dead when the session boots is demoted before the first placement instead of after the first interval tick. Connection-level task chat failures (refused / DNS / reset) demote their provider immediately, active even at `0`; HTTP-status errors and request timeouts do not demote -- a 500 or a stalled generation proves the socket answers. A down provider is skipped during multi-candidate placement -- unless every candidate is down, in which case placement proceeds anyway (fail-open). Pinned tasks are never rerouted by health. Recovery clears a verdict through either path: a successful probe, or any task completing a turn against the provider -- so demotion is never process-permanent, even with the timer off. Catalog refresh is upsert-only: models a backend dropped stay selectable until restart, because evicting them would need in-use checks against running tasks. `0` removes the timer only -- failure-driven demotion and placement filtering stay active.
+
+```json
+{ "providerHealthCheckIntervalSecs": 60 }
+```
+
 ### `streamIdleTimeoutSecs`
 
 - **Type:** `number`

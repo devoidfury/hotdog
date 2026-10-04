@@ -3,11 +3,12 @@
 ## Model System (`src/core/config/`)
 
 ### Core Types
-- **ModelRegistry** — stores models by name from provider configs. Built by `buildModelRegistry(config)`.
-- **ModelEntry** — `{ name, temperature, contextLimit, reasoningEffort, tags, maxToolDifficulty }` per model in registry
+- **ModelRegistry**: stores models by name from provider configs. Built by `buildModelRegistry(config)`.
+- **Live refresh**: for `fetchModels: true` providers, the provider-health sweep piggybacks `/v1/models` onto its probe -- fired once at manager startup, then on the interval -- and upserts results into the SHARED live registry with the same local-wins merge as boot. Upsert-only, never removal (running tasks hold locked placements), so a model a backend dropped stays selectable until restart. See [`providerHealthCheckIntervalSecs`](../config-reference.md#providerhealthcheckintervalsecs).
+- **ModelEntry**: `{ name, temperature, contextLimit, reasoningEffort, tags, maxToolDifficulty }` per model in registry
 - Model names use `provider/model` format (e.g., `ai365/qwen3.5-4b`) when a provider is active
 - **`maxToolDifficulty`** on a model entry limits which tools are exposed to that model (1–5 scale). See [Tool Filtering](tools-and-skills.md#tool-filtering).
-- **Modalities** — `inputModalities`/`outputModalities` are captured from `/v1/models` `architecture.*_modalities` when the provider reports them. Main-model selection surfaces (`/models`, `/model`, the `model` tool) hide entries that don't declare text in AND text out (`selectableModelKeys()` in `providers.ts`); entries without modality data always pass. The registry itself keeps every model, so pins and task placement are unaffected.
+- **Modalities**: `inputModalities`/`outputModalities` are captured from `/v1/models` `architecture.*_modalities` when the provider reports them. Main-model selection surfaces (`/models`, `/model`, the `model` tool) hide entries that don't declare text in AND text out (`selectableModelKeys()` in `providers.ts`); entries without modality data always pass. The registry itself keeps every model, so pins and task placement are unaffected.
 
 ### Model Switching
 - **By name**: `agent.model = "provider/model-name"` (setter emits `MODEL_CHANGE` hook)
@@ -30,11 +31,11 @@ The skills path is computed dynamically via the config schema's `joinConfigDir:s
 Extension-specific defaults (e.g., `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, compaction settings) are defined in each extension's `extension.json` configSchema.
 
 ### Config Resolution
-- **`loadConfig(configPath, cliConfigDir, extParams)`** — loads config from file, falls back to resolved config dir (CLI `--config-dir` > `HOTDOG_CONFIG_DIR` env > `./config` > `/etc/hotdog` > XDG). Merges extension defaults.
-- **`buildConfig(cli)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Resolves each config key through its declared layers (CLI, config file, env, provider, profile, default).
-- **`mergeExtensionConfigDefaults(defaultConfig, extParams)`** — merges extension-registered config defaults into base config
-- **`normalizeConfigKeys(obj)`** — converts snake_case to camelCase
-- **`validateConfig(config, extensionSchemas)`** — validates config against core schema and extension schemas
+- **`loadConfig(configPath, cliConfigDir, extParams)`**: loads config from file, falls back to resolved config dir (CLI `--config-dir` > `HOTDOG_CONFIG_DIR` env > `./config` > `/etc/hotdog` > XDG). Merges extension defaults.
+- **`buildConfig(cli)`**: single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Resolves each config key through its declared layers (CLI, config file, env, provider, profile, default).
+- **`mergeExtensionConfigDefaults(defaultConfig, extParams)`**: merges extension-registered config defaults into base config
+- **`normalizeConfigKeys(obj)`**: converts snake_case to camelCase
+- **`validateConfig(config, extensionSchemas)`**: validates config against core schema and extension schemas
 
 ### Providers
 Models are declared inside providers. Each provider has `name`, `url`, optional `api_key`, and a list of `models`. The active provider is selected via `--provider` CLI flag or `default_provider` config key.
@@ -83,7 +84,7 @@ Model names flow through `buildConfig()` → `resolveModel()`. Effective priorit
 2. CLI `--model`
 3. First model of the active provider (when the provider defines a `models` array)
 4. Schema chain: `--model` → merged profile model (`.profile.md` file wins over in-config) → env `HOTDOG_MODEL`/`AI_MODEL` → config `defaultModel`
-5. Default: `null` — agent construction fails with `No model configured`; model-free subcommands (`profiles`, `sessions`) still work
+5. Default: `null`, agent construction fails with `No model configured`; model-free subcommands (`profiles`, `sessions`) still work
 
 At each step, `resolveModelWithProvider()` qualifies the name: if it contains `/` it is used as-is; if it matches a model of the active provider it is prefixed `provider/`; otherwise the bare name passes through (errors at validation if not in the registry).
 

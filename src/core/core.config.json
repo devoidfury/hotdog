@@ -108,6 +108,13 @@
       { "default": 5 }
     ]
   },
+  "providerHealthCheckIntervalSecs": {
+    "type": "number",
+    "layers": [
+      { "source": "config", "key": "providerHealthCheckIntervalSecs" },
+      { "default": 30 }
+    ]
+  },
   "streamIdleTimeout": {
     "type": "number",
     "layers": [

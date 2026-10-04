@@ -381,6 +381,8 @@ export interface CoreConfig {
   toolOutputFmt?: string;
   chatTimeout?: number;
   healthCheckTimeout?: number;
+  /** Provider-pool health sweep interval in seconds; 0 disables the interval (failure-driven demotion stays on). */
+  providerHealthCheckIntervalSecs?: number;
   sessionId?: string;
   compactDebug?: boolean;
   noLog?: boolean;

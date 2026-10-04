@@ -3,6 +3,7 @@ import { HOOKS, HookSystem } from "../hooks.ts";
 import { MessageBus } from "./message-bus.ts";
 import { createTurnLanes, type TurnLanes } from "./turn-lanes.ts";
 import { TaskManager } from "./task-manager.ts";
+import type { ProviderHealth } from "./provider-health.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { trimTurns } from "../context/rewind.ts";
 import { AgentError, formatError } from "../error.ts";
@@ -114,6 +115,12 @@ export interface SessionManagerOptions {
     lanesDir?: string | null;
     /** Resolved default model (resolved config: model): last chain link for task placement. */
     defaultModel?: string | null;
+    /** Resolved providerHealthCheckIntervalSecs: task-manager health sweep interval (0 = interval off). */
+    healthIntervalSecs?: number;
+    /** Resolved healthCheckTimeout: health probe request timeout in seconds. */
+    healthCheckTimeoutSecs?: number;
+    /** Resolved contextLimit: fallback for the health catalog piggyback's new entries. */
+    healthContextLimit?: number;
   } | null;
   extensions?: unknown;
   profileManager?: ProfileManager;
@@ -199,6 +206,9 @@ export class SessionManager {
         lanesPerProvider: options.taskConfig.lanesPerProvider,
         lanesDir: options.taskConfig.lanesDir,
         defaultModel: options.taskConfig.defaultModel ?? null,
+        healthIntervalSecs: options.taskConfig.healthIntervalSecs,
+        healthCheckTimeoutSecs: options.taskConfig.healthCheckTimeoutSecs,
+        healthContextLimit: options.taskConfig.healthContextLimit,
         profileManager: options.profileManager,
       });
 
@@ -527,5 +537,10 @@ export class SessionManager {
 
   getTaskManager(): TaskManager | null {
     return this.#taskManager;
+  }
+
+  /** The TaskManager's provider-health registry (null when there is no TaskManager or the feature is off). */
+  getProviderHealth(): ProviderHealth | null {
+    return this.#taskManager?.providerHealth ?? null;
   }
 }

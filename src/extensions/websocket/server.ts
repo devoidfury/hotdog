@@ -96,6 +96,8 @@ export interface WsServer {
   onClose: (ws: HotdogServerSocket<unknown>) => void;
   startCleanupLoop: () => void;
   stopCleanupLoop: () => void;
+  /** Release the TaskManager's provider-health sweep timer, if a TaskManager was built. */
+  stopTaskManager: () => void;
 }
 
 export type HotdogServerSocket<T = undefined> = Bun.ServerWebSocket<T> & {
@@ -1354,8 +1356,10 @@ export function createWsServer(
   // resolve lazily; the observer relays spawn/status/activity to every connected client --
   // the webui subagents panel consumes it, and nothing reaches the main chat transcript.
   const resolvedCore = core.resolved;
+  // Hoisted so the returned stopTaskManager() can reach it (null when no registry).
+  let taskManager: TaskManager | null = null;
   if (resolvedCore?.modelRegistry) {
-    const taskManager = new TaskManager({
+    taskManager = new TaskManager({
       buildAgent: buildAgent as (config: Record<string, unknown>) => Promise<AgentLike>,
       modelRegistry: resolvedCore.modelRegistry,
       config: core.config,
@@ -1364,6 +1368,9 @@ export function createWsServer(
       lanesPerProvider: resolvedCore.taskLanesPerProvider,
       lanesDir: resolvedCore.taskLanesDir ?? null,
       defaultModel: resolvedCore.model ?? null,
+      healthIntervalSecs: resolvedCore.providerHealthCheckIntervalSecs,
+      healthCheckTimeoutSecs: resolvedCore.healthCheckTimeout,
+      healthContextLimit: resolvedCore.contextLimit,
       profileManager: resolvedCore.profileManager,
       sessionManager: registry.getSessionManager(),
     });
@@ -1509,5 +1516,6 @@ export function createWsServer(
     onClose,
     startCleanupLoop: () => registry.startCleanupLoop(sessionTimeoutMin),
     stopCleanupLoop: () => registry.stopCleanupLoop(),
+    stopTaskManager: () => taskManager?.stop(),
   };
 }

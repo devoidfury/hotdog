@@ -543,7 +543,7 @@ describe("buildReadlineCompleter", () => {
 
 describe("buildOnQuitHandler", () => {
   /** Run a quit handler with console.log captured and process.exit stubbed. */
-  function runQuitHandler(sessionId: string | null): { logCalls: string[]; exitCalled: boolean } {
+  function runQuitHandler(sessionId: string | null): { logCalls: string[]; exitCalled: boolean; tmStopped: boolean } {
     const logCalls: string[] = [];
     const restoreLog = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       logCalls.push(args.map(String).join(" "));
@@ -551,10 +551,11 @@ describe("buildOnQuitHandler", () => {
     const originalExit = process.exit;
     let exitCalled = false;
     process.exit = (() => { exitCalled = true; }) as never;
+    let tmStopped = false;
 
     try {
       const handler = buildOnQuitHandler(
-        { sessionId: () => sessionId } as never,
+        { sessionId: () => sessionId, getTaskManager: () => ({ stop: () => { tmStopped = true; } }) } as never,
         { cleanup: () => {} } as never,
       );
       handler();
@@ -563,14 +564,16 @@ describe("buildOnQuitHandler", () => {
       process.exit = originalExit;
     }
 
-    return { logCalls, exitCalled };
+    return { logCalls, exitCalled, tmStopped };
   }
 
   it("logs goodbye and session ID", () => {
-    const { logCalls, exitCalled } = runQuitHandler("test-session-123");
+    const { logCalls, exitCalled, tmStopped } = runQuitHandler("test-session-123");
     expect(logCalls.some((c) => c.includes("Goodbye"))).toBe(true);
     expect(logCalls.some((c) => c.includes("test-session-123"))).toBe(true);
     expect(exitCalled).toBe(true);
+    // The quit path must release the TaskManager's provider-health sweep timer.
+    expect(tmStopped).toBe(true);
   });
 
   it("includes how to resume the session (--session-id is the documented resume flag)", () => {
@@ -588,7 +591,7 @@ describe("buildOnQuitHandler", () => {
     process.exit = (() => { exitCount += 1; }) as never;
     try {
       const handler = buildOnQuitHandler(
-        { sessionId: () => "dup-session" } as never,
+        { sessionId: () => "dup-session", getTaskManager: () => ({ stop: () => {} }) } as never,
         { cleanup: () => {} } as never,
       );
       handler();

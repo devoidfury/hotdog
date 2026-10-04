@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   buildModelRegistry,
+  fetchRemoteModelsOutcome,
   resolveProvider,
   initSystemPromptTemplate,
   isTextGenerative,
@@ -383,6 +384,38 @@ describe("buildModelRegistry with fetchModels", () => {
     // Remote-only model is added
     expect(registry["test/remote-only"]!.name).toBe("test/remote-only");
     expect(registry["test/remote-only"]!.contextLimit).toBe(2000);
+  });
+
+  it("a 2xx with an unparseable body is reachable (status-agnostic doctrine)", async () => {
+    // Captive-portal / proxy HTML served with a JSON content-type must not
+    // demote a live provider during a health sweep.
+    globalThis.fetch = Object.assign(async () =>
+      ({
+        ok: true,
+        json: async () => {
+          throw new SyntaxError("Unexpected token '<'");
+        },
+      } as unknown as Response),
+      { preconnect: async () => {} },
+    );
+    const outcome = await fetchRemoteModelsOutcome("http://test.com", undefined, 1000);
+    expect(outcome.reachable).toBe(true);
+    expect(outcome.entries).toEqual([]);
+    expect(outcome.reason).toContain("bad /v1/models payload");
+  });
+
+  it("a mid-read timeout is a connection-level failure (not reachable)", async () => {
+    // Headers arrive, then the body stalls until our own abort fires.
+    globalThis.fetch = Object.assign((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_res, rej) => {
+        init?.signal?.addEventListener("abort", () =>
+          rej(new Error("The operation was aborted.")),
+        );
+      }),
+      { preconnect: async () => {} },
+    );
+    const outcome = await fetchRemoteModelsOutcome("http://test.com", undefined, 20);
+    expect(outcome.reachable).toBe(false);
   });
 
   it("handles fetch failure gracefully without crashing", async () => {

@@ -4,6 +4,7 @@ import { describe, it, expect } from "bun:test";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { TaskManager, TaskHandle, TASK_STATUS } from "@core/session/task-manager.ts";
+import { makeProviderHealth } from "@core/session/provider-health.ts";
 import { contentToText } from "@core/context/message.ts";
 import { createHooks } from "@core/hooks.ts";
 import { initializeLogger, resetLoggerForTesting, type LogEvent } from "@utils/logger.ts";
@@ -500,7 +501,7 @@ describe("TaskManager", () => {
       }
     });
 
-    it("logs expected failures message-only (no stack)", async () => {
+    it("logs nothing for expected failures; model still gets the message only", async () => {
       const logged = captureLoggedErrors();
       try {
         let delivered = "";
@@ -511,11 +512,10 @@ describe("TaskManager", () => {
         await manager.spawnTask("t-api", "work");
         await settle(() => manager.taskStatus("t-api") === TASK_STATUS.FAILED, "t-api -> FAILED");
 
+        // Expected errors are the task result, not a log line: the failure is
+        // already delivered to the delegating model and queryable via the task record.
         expect(delivered).toBe("Task failed: HTTP 400 bad input");
-        const line = logged.find((m) => m.includes("t-api"));
-        expect(line).toBeDefined();
-        expect(line).toContain("HTTP 400 bad input");
-        expect(/\n\s+at\s/.test(line!)).toBe(false);
+        expect(logged.find((m) => m.includes("t-api"))).toBeUndefined();
       } finally {
         resetLoggerForTesting();
       }
@@ -1987,6 +1987,387 @@ describe("placement fanout (cross-provider)", () => {
     );
     manager.interruptTask("t2");
   });
+});
+
+describe("provider-health placement filtering", () => {
+  async function settleH(fn: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!fn()) {
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+      await new Promise((r) => setTimeout(r, 1));
+    }
+  }
+
+  const cfgEntry = (name: string) => ({
+    name,
+    temperature: null,
+    contextLimit: 131072,
+    tags: [],
+  });
+
+  /** Recording fake covering the whole ProviderHealth surface. */
+  function fakeHealth(downNames: string[]) {
+    const down = new Set(downNames);
+    const markDowns: Array<{ provider: string; reason: string }> = [];
+    const noteUps: string[] = [];
+    return {
+      down,
+      markDowns,
+      noteUps,
+      health: {
+        isDown: (n: string) => down.has(n),
+        markDown: (n: string, reason: string) => {
+          markDowns.push({ provider: n, reason });
+          down.add(n);
+        },
+        noteUp: (n: string) => {
+          noteUps.push(n);
+          down.delete(n);
+        },
+        sweep: async () => {},
+        status: () => [],
+        stop: () => {},
+      },
+    };
+  }
+
+  // Same fleet as the fanout suite: n1/qwen + n2/qwen, cap 1, quiet peek.
+  // The agent's run rejects with a caller-supplied error, completes with a
+  // completion result when runOk is set, or hangs until interrupted when
+  // neither is given.
+  function makeHealthManager(
+    health: unknown,
+    over: { runError?: () => Error; runOk?: boolean; built?: Array<Record<string, unknown>> } = {},
+  ) {
+    const built = over.built ?? [];
+    const manager = new TaskManager({
+      buildAgent: async (cfg) => {
+        built.push(cfg);
+        const agent = {
+          abortSignal: null as AbortSignal | null,
+          run: async () => {
+            if (over.runError) throw over.runError();
+            if (over.runOk) return { type: "completion", content: "done" };
+            return new Promise<never>((_res, rej) => {
+              agent.abortSignal!.addEventListener("abort", () =>
+                rej(LlmError.Cancelled("aborted")),
+              );
+            });
+          },
+          notifyCompletion: () => {},
+        };
+        return agent as never;
+      },
+      modelRegistry: {
+        "n1/qwen": cfgEntry("n1/qwen"),
+        "n2/qwen": cfgEntry("n2/qwen"),
+        default: "n1/qwen",
+      } as never,
+      config: {} as never,
+      maxIterations: 100,
+      taskProfile: "default",
+      lanesPerProvider: 1,
+      runningPeek: async () => new Set<string>(),
+      providerHealth: health as never,
+    });
+    return { manager, built };
+  }
+
+  it("skips a down provider in multi-candidate fanout", async () => {
+    const { health } = fakeHealth(["n1"]);
+    const { manager, built } = makeHealthManager(health);
+    await manager.spawnTask("t1", "a", {} as never);
+    await settleH(() => built.length === 1, "t1 placed");
+    // n1 is marked down: the plan head is n1/qwen, but the task must land on n2.
+    expect(manager.taskLane("t1")!.provider).toBe("n2");
+    manager.interruptTask("t1");
+  });
+
+  it("all candidates down fails open: the task still starts", async () => {
+    const { health } = fakeHealth(["n1", "n2"]);
+    const { manager, built } = makeHealthManager(health);
+    await manager.spawnTask("t1", "a", {} as never);
+    await settleH(() => built.length === 1, "fail-open placement despite every provider down");
+    expect(manager.taskStatus("t1")).toBe("running");
+    manager.interruptTask("t1");
+  });
+
+  it("locked pins are immune to health filtering", async () => {
+    const { health } = fakeHealth(["n1", "n2"]);
+    const { manager, built } = makeHealthManager(health);
+    await manager.spawnTask("t1", "a", { pin: { model: "n2/qwen", provider: "n2" } } as never);
+    await settleH(() => built.length === 1, "pinned task starts despite n2 down");
+    expect(manager.taskLane("t1")!.provider).toBe("n2");
+    manager.interruptTask("t1");
+  });
+
+  it("connection-level chat failure marks the placed provider down", async () => {
+    const { health, markDowns } = fakeHealth([]);
+    const { manager } = makeHealthManager(health, {
+      runError: () => LlmError.Http("connect ECONNREFUSED 127.0.0.1:8080"),
+    });
+    await manager.spawnTask("t1", "a", {} as never);
+    await settleH(() => manager.taskStatus("t1") === "failed", "t1 fails");
+    expect(markDowns.length).toBe(1);
+    // Compare from the nullable side so tsc accepts the lane lookup.
+    expect(manager.taskLane("t1")!.provider).toBe(markDowns[0]!.provider);
+    expect(markDowns[0]!.reason).toContain("connect ECONNREFUSED");
+  });
+
+  it("HTTP-status API errors do NOT demote (a 500 proves the machine is up)", async () => {
+    const { health, markDowns } = fakeHealth([]);
+    const { manager } = makeHealthManager(health, {
+      runError: () => LlmError.Api("HTTP 500", 500),
+    });
+    await manager.spawnTask("t1", "a", {} as never);
+    await settleH(() => manager.taskStatus("t1") === "failed", "t1 fails");
+    expect(markDowns).toEqual([]);
+  });
+
+  it("chat timeouts do NOT demote (a stalled generation proves the socket answers)", async () => {
+    // chatTimeout / stream-idle stalls surface as LlmError.Timeout on a live
+    // provider; demoting on those would flap the pool around slow-but-up backends.
+    const { health, markDowns } = fakeHealth([]);
+    const { manager } = makeHealthManager(health, {
+      runError: () => LlmError.Timeout("Chat request timed out after 600s"),
+    });
+    await manager.spawnTask("t1", "a", {} as never);
+    await settleH(() => manager.taskStatus("t1") === "failed", "t1 fails");
+    expect(markDowns).toEqual([]);
+  });
+
+  it("a completed turn clears the verdict on the provider that ran it (interval-0 recovery)", async () => {
+    // Both providers down and no sweep timer in this setup: fail-open places
+    // the task anyway, and the completed turn is up-evidence -- noteUp on the
+    // placed provider only, the other keeps its verdict.
+    const { health, down, noteUps } = fakeHealth(["n1", "n2"]);
+    const { manager } = makeHealthManager(health, { runOk: true });
+    await manager.spawnTask("t1", "a", {} as never);
+    await settleH(() => manager.taskStatus("t1") === "completed", "t1 completes");
+    const placed = manager.taskLane("t1")!.provider!;
+    expect(noteUps).toEqual([placed]);
+    expect(down.has(placed)).toBe(false);
+    expect(down.has(placed === "n1" ? "n2" : "n1")).toBe(true);
+  });
+
+  it("interval 0 still builds a registry: no timer, failure-driven demotion active", async () => {
+    // Regression for the docs promise "0 disables the timer only": the
+    // manager must own a ProviderHealth even with no interval, demote on a
+    // connection-level chat failure, and filter the dead provider out of the
+    // next placement.
+    const built: Array<Record<string, unknown>> = [];
+    const manager = new TaskManager({
+      buildAgent: async (cfg) => {
+        built.push(cfg);
+        const agent = {
+          abortSignal: null as AbortSignal | null,
+          run: async () => {
+            if (built.length === 1) {
+              throw LlmError.Http("connect ECONNREFUSED 127.0.0.1:8080");
+            }
+            return new Promise<never>((_res, rej) => {
+              agent.abortSignal!.addEventListener("abort", () =>
+                rej(LlmError.Cancelled("aborted")),
+              );
+            });
+          },
+          notifyCompletion: () => {},
+        };
+        return agent as never;
+      },
+      modelRegistry: {
+        "n1/qwen": cfgEntry("n1/qwen"),
+        "n2/qwen": cfgEntry("n2/qwen"),
+        default: "n1/qwen",
+      } as never,
+      config: {} as never,
+      maxIterations: 100,
+      taskProfile: "default",
+      lanesPerProvider: 1,
+      runningPeek: async () => new Set<string>(),
+      healthIntervalSecs: 0,
+    });
+    expect(manager.providerHealth).not.toBeNull();
+    await manager.spawnTask("t1", "a", {} as never);
+    await settleH(() => manager.taskStatus("t1") === "failed", "t1 fails");
+    const dead = manager.taskLane("t1")!.provider!;
+    expect(manager.providerHealth!.isDown(dead)).toBe(true);
+
+    await manager.spawnTask("t2", "b", {} as never);
+    await settleH(() => manager.taskStatus("t2") === "running", "t2 placed away from the dead provider");
+    expect(manager.taskLane("t2")!.provider).not.toBe(dead);
+    manager.interruptTask("t2");
+  });
+
+  it("probe recovery wakes a task queued behind a down candidate", async () => {
+    // Real makeProviderHealth so the noteUp -> onRecover -> re-admit chain is
+    // the production one; only the probe is injected. n2's probe says down,
+    // n1 is occupied by a pinned task, so the second task queues; the sweep
+    // that flips n2 up must re-admit it with no other event.
+    const { mkTaskManager, verdicts } = buildRecoveryPair();
+    const { manager } = mkTaskManager();
+    verdicts.n2 = false;
+    await manager.providerHealth!.sweep();
+    expect(manager.providerHealth!.isDown("n2")).toBe(true);
+
+    await manager.spawnTask("t1", "a", { pin: { model: "n1/qwen", provider: "n1" } } as never);
+    await settleH(() => manager.taskStatus("t1") === "running", "t1 occupies n1");
+    await manager.spawnTask("t2", "b", {} as never);
+    await settleH(() => manager.taskStatus("t2") === "queued", "t2 queued (n1 full, n2 down)");
+
+    verdicts.n2 = true;
+    await manager.providerHealth!.sweep(); // noteUp fires onRecover -> retryQueued
+    expect(manager.providerHealth!.isDown("n2")).toBe(false);
+    await settleH(() => manager.taskStatus("t2") === "running", "t2 admitted on recovery");
+    expect(manager.taskLane("t2")!.provider).toBe("n2");
+    manager.interruptTask("t1");
+    manager.interruptTask("t2");
+  });
+
+  it("recovery clears a cross-process lane block: the fleet-blocked task wakes onto the returning provider", async () => {
+    // Health and the lane ledger meeting on one placement: manager A holds
+    // n1's ledger slot; manager B's sweep says n2 is down. B's fanout task
+    // health-filters n2 out of the plan, finds n1's slot fleet-wide busy, and
+    // blocks with the lanes-retry timer deliberately too slow to help. Flipping
+    // n2 up must clear the block and place the task onto n2's free slot.
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const lanesDir = await mkdtemp(join(tmpdir(), "hotdog-health-lanes-"));
+    try {
+      const registry = {
+        "n1/qwen": cfgEntry("n1/qwen"),
+        "n2/qwen": cfgEntry("n2/qwen"),
+        default: "n1/qwen",
+      } as never;
+      const mgrOpts = (extra: Record<string, unknown>) => ({
+        modelRegistry: registry,
+        config: {} as never,
+        maxIterations: 10,
+        taskProfile: "default",
+        lanesPerProvider: 1,
+        lanesDir,
+        runningPeek: async () => new Set<string>(),
+        ...extra,
+      }) as never;
+
+      // A: foreign holder of n1's slot, turn never ends on its own.
+      const mkHolder = () => {
+        const agent = {
+          abortSignal: null as AbortSignal | null,
+          run: () =>
+            new Promise<never>((_res, rej) => {
+              agent.abortSignal!.addEventListener("abort", () =>
+                rej(LlmError.Cancelled("aborted")),
+              );
+            }),
+          notifyCompletion: () => {},
+        };
+        return agent;
+      };
+      const mA = new TaskManager(
+        mgrOpts({ buildAgent: async () => mkHolder() as never }),
+      );
+      await mA.spawnTask("holder", "work", { workerModel: "n1/qwen" } as never);
+      await settleH(() => mA.taskStatus("holder") === "running", "holder runs on n1");
+
+      const verdicts: Record<string, boolean> = { n1: true, n2: false };
+      let mBRef: TaskManager | null = null;
+      const health = makeProviderHealth({
+        providers: [
+          { name: "n1", url: "http://n1.test", models: [] },
+          { name: "n2", url: "http://n2.test", models: [] },
+        ],
+        intervalMs: 0,
+        timeoutMs: 500,
+        probe: async (p) => ({ up: verdicts[p.name] === true }),
+        onRecover: () => mBRef?.retryQueued(),
+      });
+      const bG = {
+        build: () => {
+          const agent = {
+            abortSignal: null as AbortSignal | null,
+            run: () =>
+              new Promise<never>((_res, rej) => {
+                agent.abortSignal!.addEventListener("abort", () =>
+                  rej(LlmError.Cancelled("aborted")),
+                );
+              }),
+            notifyCompletion: () => {},
+          };
+          return agent;
+        },
+      };
+      const mB = new TaskManager(
+        mgrOpts({
+          buildAgent: async () => bG.build() as never,
+          providerHealth: health,
+          lanesRetryMs: 600_000, // recovery must be what wakes the task, not the lanes timer
+        }),
+      );
+      mBRef = mB;
+
+      await mB.spawnTask("b1", "fan", {} as never);
+      await settleH(() => mB.taskStatus("b1") === "queued", "b1 blocked (n1 fleet-busy, n2 down)");
+
+      verdicts.n2 = true;
+      await health.sweep(); // noteUp -> onRecover -> retryQueued clears the block
+      await settleH(() => mB.taskStatus("b1") === "running", "b1 wakes onto recovered n2");
+      expect(mB.taskLane("b1")!.provider).toBe("n2");
+      const n2slots = await readdir(join(lanesDir, "n2")).catch(() => [] as string[]);
+      expect(n2slots.filter((n) => n.startsWith("slot-")).length).toBe(1);
+
+      mB.interruptTask("b1");
+      mA.interruptTask("holder");
+    } finally {
+      await rm(lanesDir, { recursive: true, force: true });
+    }
+  });
+
+  function buildRecoveryPair() {
+    const verdicts: Record<string, boolean> = { n1: true, n2: false };
+    let managerRef: TaskManager | null = null;
+    const health = makeProviderHealth({
+      providers: [
+        { name: "n1", url: "http://n1.test", models: [] },
+        { name: "n2", url: "http://n2.test", models: [] },
+      ],
+      intervalMs: 0,
+      timeoutMs: 500,
+      probe: async (p) => ({ up: verdicts[p.name] === true }),
+      onRecover: () => managerRef?.retryQueued(),
+    });
+    const mk = () => {
+      const manager = new TaskManager({
+        buildAgent: async () => {
+          const agent = {
+            abortSignal: null as AbortSignal | null,
+            run: () =>
+              new Promise<never>((_res, rej) => {
+                agent.abortSignal!.addEventListener("abort", () =>
+                  rej(LlmError.Cancelled("aborted")),
+                );
+              }),
+            notifyCompletion: () => {},
+          };
+          return agent as never;
+        },
+        modelRegistry: {
+          "n1/qwen": cfgEntry("n1/qwen"),
+          "n2/qwen": cfgEntry("n2/qwen"),
+          default: "n1/qwen",
+        } as never,
+        config: {} as never,
+        maxIterations: 100,
+        taskProfile: "default",
+        lanesPerProvider: 1,
+        runningPeek: async () => new Set<string>(),
+        providerHealth: health,
+      });
+      managerRef = manager;
+      return { manager };
+    };
+    return { mkTaskManager: mk, verdicts };
+  }
 });
 
 describe("cross-process lane ledger (two TaskManagers, one lanesDir)", () => {

@@ -227,32 +227,46 @@ async function fetchLlamaCppProps(
   }
 }
 
-async function fetchRemoteModels(
-  provider: ProviderDef,
-  globalBaseUrl?: string,
-  globalApiKey?: string,
-): Promise<ProviderModelEntry[]> {
-  const baseUrl = provider.url || globalBaseUrl;
-  if (!baseUrl) return [];
+/**
+ * Outcome of one provider /v1/models request. `reachable` is STATUS-AGNOSTIC by design:
+ * ANY HTTP response -- even a 404 from a backend without the route -- proves the socket answers;
+ * only a connection-level failure (refused / DNS / timeout) is false.
+ */
+export interface RemoteModelsOutcome {
+  reachable: boolean;
+  /** Parsed (llama.cpp /props-enriched) entries from a 2xx body; empty otherwise. */
+  entries: ProviderModelEntry[];
+  /** Why it failed (network error or HTTP status), for logging. */
+  reason?: string;
+}
 
+/**
+ * GET <base>/v1/models. String concat instead of `new URL()` -- URL resolution
+ * drops path-prefixed bases (new URL("v1/models", "http://h:8080/api")
+ * -> "http://h:8080/v1/models").
+ */
+export async function fetchRemoteModelsOutcome(
+  baseUrl: string,
+  apiKey: string | undefined,
+  timeoutMs: number = 5000,
+): Promise<RemoteModelsOutcome> {
+  const url = `${baseUrl.replace(/\/+$/, "")}/v1/models`;
+
+  const headers: Record<string, string> = {};
+  if (apiKey) {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    // string concat instead of `new URL()` - URL resolution drops path-prefixed bases
-    // (new URL("v1/models", "http://h:8080/api") -> "http://h:8080/v1/models")
-    const url = `${baseUrl.replace(/\/+$/, "")}/v1/models`;
-
-    const headers: Record<string, string> = {};
-    const apiKey = provider.apiKey || globalApiKey;
-    if (apiKey) {
-      headers["Authorization"] = `Bearer ${apiKey}`;
+    const response = await hotdogFetch(url, { headers, signal: controller.signal });
+    if (!response.ok) {
+      // Reachable but no usable payload: up for health purposes, nothing to refresh.
+      return { reachable: true, entries: [], reason: `HTTP error! status: ${response.status}` };
     }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    // Headers arrived, the socket answers, so it's reachable.
     try {
-      const response = await hotdogFetch(url, { headers, signal: controller.signal });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
       const raw = (await response.json()) as LlamaSwapModelsResponse;
       const entries = parseModelsResponse(raw);
 
@@ -266,15 +280,105 @@ async function fetchRemoteModels(
         if (props) applyLlamaCppProps(entries, props);
       }
 
-      return entries;
-    } finally {
-      clearTimeout(timeoutId);
+      return { reachable: true, entries };
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        return { reachable: true, entries: [], reason: `bad /v1/models payload: ${formatError(e)}` };
+      }
+      throw e;
     }
   } catch (e) {
-    // Log error but don't crash the registry build
-    logger.error(`Failed to fetch remote models for ${provider.name}: ${formatError(e)}`);
-    return [];
+    return { reachable: false, entries: [], reason: formatError(e) };
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
+
+async function fetchRemoteModels(
+  provider: ProviderDef,
+  globalBaseUrl?: string,
+  globalApiKey?: string,
+): Promise<RemoteModelsOutcome> {
+  const baseUrl = provider.url || globalBaseUrl;
+  if (!baseUrl) return { reachable: false, entries: [] };
+  return fetchRemoteModelsOutcome(baseUrl, provider.apiKey || globalApiKey);
+}
+
+/**
+ * One provider's catalog contribution: static models deep-merged with remote
+ * ones when fetchModels:true (local takes priority, remote fills in missing
+ * fields), keyed "provider/model". Shared by the boot build (buildModelRegistry)
+ * and the health-driven catalog refresh -- pass `prefetchedRemote` to reuse the
+ * entries the health probe already fetched, so the sweep costs one request.
+ */
+export async function buildProviderModels(
+  provider: ProviderDef,
+  contextLimit: number,
+  globals: { baseUrl?: string; apiKey?: string },
+  prefetchedRemote?: ProviderModelEntry[],
+): Promise<Record<string, ModelConfig>> {
+  const registry: Record<string, ModelConfig> = {};
+  let models = provider.models || [];
+
+  if (provider.fetchModels) {
+    let remoteModels = prefetchedRemote;
+    if (!remoteModels) {
+      const outcome = await fetchRemoteModels(provider, globals.baseUrl, globals.apiKey);
+      // A fetch failure must not crash the registry build; the static models stay.
+      if (outcome.reason) {
+        logger.error(`Failed to fetch remote models for ${provider.name}: ${outcome.reason}`);
+      }
+      remoteModels = outcome.entries;
+    }
+    // Deep merge remote models with local ones. Local takes priority, but remote fills in missing fields
+    const localByName = new Map(models.map((m) => [m.name, m]));
+    for (const rm of remoteModels) {
+      const local = localByName.get(rm.name);
+      if (local) {
+        localByName.set(rm.name, {
+          ...rm,
+          ...local,
+        });
+      } else {
+        localByName.set(rm.name, rm);
+      }
+    }
+    models = [...localByName.values()];
+  }
+
+  for (const modelEntry of models) {
+    const modelName = `${provider.name}/${modelEntry.name}`;
+    registry[modelName] = {
+      name: modelName,
+      temperature: modelEntry.temperature ?? null,
+      contextLimit: modelEntry.contextLimit || contextLimit,
+      reasoningEffort: modelEntry.reasoning_effort || modelEntry.reasoningEffort || undefined,
+      roleMapping: modelEntry.roleMapping ?? provider.roleMapping,
+      protocol: modelEntry.protocol ?? provider.protocol,
+      wireFormat: modelEntry.wireFormat ?? provider.wireFormat,
+      controlTokens: modelEntry.controlTokens ?? provider.controlTokens,
+      tags: modelEntry.tags || [],
+      capabilities: modelEntry.capabilities || {},
+      inputModalities: modelEntry.inputModalities,
+      outputModalities: modelEntry.outputModalities,
+      maxToolDifficulty: modelEntry.maxToolDifficulty,
+    };
+  }
+  if (models.length === 0 && provider.defaultModel) {
+    registry[`${provider.name}/${provider.defaultModel}`] = {
+      name: `${provider.name}/${provider.defaultModel}`,
+      temperature: provider.temperature ?? null,
+      contextLimit: provider.contextLimit || contextLimit,
+      roleMapping: provider.roleMapping,
+      protocol: provider.protocol,
+      wireFormat: provider.wireFormat,
+      controlTokens: provider.controlTokens,
+      tags: provider.tags || [],
+      capabilities: {},
+    };
+  }
+
+  return registry;
 }
 
 export async function buildModelRegistry(
@@ -282,60 +386,15 @@ export async function buildModelRegistry(
   contextLimit: number,
 ): Promise<Record<string, ModelConfig>> {
   const registry: Record<string, ModelConfig> = {};
-  const providers = config.providers || [];
 
-  for (const provider of providers) {
-    let models = provider.models || [];
-
-    if (provider.fetchModels) {
-      const remoteModels = await fetchRemoteModels(provider, config.baseUrl, config.apiKey);
-      // Deep merge remote models with local ones. Local takes priority, but remote fills in missing fields
-      const localByName = new Map(models.map((m) => [m.name, m]));
-      for (const rm of remoteModels) {
-        const local = localByName.get(rm.name);
-        if (local) {
-          localByName.set(rm.name, {
-            ...rm,
-            ...local,
-          });
-        } else {
-          localByName.set(rm.name, rm);
-        }
-      }
-      models = [...localByName.values()];
-    }
-
-    for (const modelEntry of models) {
-      const modelName = `${provider.name}/${modelEntry.name}`;
-      registry[modelName] = {
-        name: modelName,
-        temperature: modelEntry.temperature ?? null,
-        contextLimit: modelEntry.contextLimit || contextLimit,
-        reasoningEffort: modelEntry.reasoning_effort || modelEntry.reasoningEffort || undefined,
-        roleMapping: modelEntry.roleMapping ?? provider.roleMapping,
-        protocol: modelEntry.protocol ?? provider.protocol,
-        wireFormat: modelEntry.wireFormat ?? provider.wireFormat,
-        controlTokens: modelEntry.controlTokens ?? provider.controlTokens,
-        tags: modelEntry.tags || [],
-        capabilities: modelEntry.capabilities || {},
-        inputModalities: modelEntry.inputModalities,
-        outputModalities: modelEntry.outputModalities,
-        maxToolDifficulty: modelEntry.maxToolDifficulty,
-      };
-    }
-    if (models.length === 0 && provider.defaultModel) {
-      registry[`${provider.name}/${provider.defaultModel}`] = {
-        name: `${provider.name}/${provider.defaultModel}`,
-        temperature: provider.temperature ?? null,
-        contextLimit: provider.contextLimit || contextLimit,
-        roleMapping: provider.roleMapping,
-        protocol: provider.protocol,
-        wireFormat: provider.wireFormat,
-        controlTokens: provider.controlTokens,
-        tags: provider.tags || [],
-        capabilities: {},
-      };
-    }
+  for (const provider of config.providers || []) {
+    Object.assign(
+      registry,
+      await buildProviderModels(provider, contextLimit, {
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+      }),
+    );
   }
 
   return registry;

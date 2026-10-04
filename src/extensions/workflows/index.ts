@@ -85,6 +85,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         lanesPerProvider: resolved.taskLanesPerProvider,
         lanesDir: resolved.taskLanesDir,
         defaultModel: resolved.model ?? null,
+        healthIntervalSecs: resolved.providerHealthCheckIntervalSecs,
+        healthCheckTimeoutSecs: resolved.healthCheckTimeout,
+        healthContextLimit: resolved.contextLimit,
         profileManager: resolved.profileManager,
       }),
     };

@@ -118,6 +118,7 @@ describe("getDefaultConfig", () => {
     expect(config.thinkerFormat).toBe("[Thinking: {}]");
     expect(config.chatTimeout).toBe(600);
     expect(config.healthCheckTimeout).toBe(5);
+    expect(config.providerHealthCheckIntervalSecs).toBe(30);
     expect(config.defaultModel).toBeNull();
     expect(config.extensionPaths).toEqual(["@extensions"]);
     expect(config.extensionAutoload).toBe(true);

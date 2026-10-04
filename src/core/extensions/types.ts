@@ -264,6 +264,8 @@ export interface ResolvedConfig {
   chatTimeout: number;
   /** Health-check (ping) timeout in seconds. */
   healthCheckTimeout?: number;
+  /** Provider-pool health sweep interval in seconds (0 disables the interval timer). */
+  providerHealthCheckIntervalSecs?: number;
   maxRetries: number;
   maxIterations: number;
   contextLimit: number;

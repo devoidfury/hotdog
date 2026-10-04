@@ -355,6 +355,9 @@ export function buildOnQuitHandler(
     if (interactiveSessionId) {
       console.log(`Session: ${interactiveSessionId} (resume with: hotdog --session-id ${interactiveSessionId})`);
     }
+    // Stop the provider-health sweep timer: unref'd so it never blocks exit,
+    // but a discarded manager must not keep probing providers.
+    sessionManager.getTaskManager()?.stop();
     extensions.cleanup();
     process.exit(0);
   };
@@ -439,6 +442,9 @@ export async function runInteractiveSession(
       lanesPerProvider: resolved.taskLanesPerProvider,
       lanesDir: resolved.taskLanesDir,
       defaultModel: resolved.model ?? null,
+      healthIntervalSecs: resolved.providerHealthCheckIntervalSecs,
+      healthCheckTimeoutSecs: resolved.healthCheckTimeout,
+      healthContextLimit: resolved.contextLimit,
     },
     profileManager: resolved.profileManager,
   });

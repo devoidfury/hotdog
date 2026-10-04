@@ -2,7 +2,7 @@ import { logger } from "@utils/logger.ts";
 import { HOOKS } from "../hooks.ts";
 import { Message, type MessageSource } from "../context/message.ts";
 import type { OutputEvent } from "../context/output.ts";
-import { LlmError, formatError } from "../error.ts";
+import { LlmError, formatError, isExpectedError } from "../error.ts";
 import { loadProfileFile, ProfileManager, type ProfileDef } from "../config/profiles.ts";
 import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
@@ -21,6 +21,7 @@ import {
 } from "./model-resolver.ts";
 import { LaneLedger, type LaneLease } from "./lane-ledger.ts";
 import { DEFAULT_LANES_RETRY_MS } from "./turn-lanes.ts";
+import { makeProviderHealth, type ProviderHealth } from "./provider-health.ts";
 import type { AgentLike } from "./index.ts";
 
 export const TASK_STATUS = {
@@ -239,6 +240,22 @@ export interface TaskManagerOptions {
   lanesDir?: string | null;
   /** Ledger re-attempt interval while tasks wait on foreign-held slots. Test seam. */
   lanesRetryMs?: number;
+  /**
+   * Shared provider-pool health registry.
+   * An explicit injection wins (shared / test seams); an explicit null opts out of health entirely.
+   * When absent the manager builds its own: healthIntervalSecs gates only the sweep TIMER,
+   * so failure-driven demotion and placement filtering stay active even at 0.
+   */
+  providerHealth?: ProviderHealth | null;
+  /** Sweep interval in seconds (resolved providerHealthCheckIntervalSecs). */
+  healthIntervalSecs?: number;
+  /** Probe timeout in seconds (resolved healthCheckTimeout). */
+  healthCheckTimeoutSecs?: number;
+  /**
+   * Resolved contextLimit (default 128000): the fallback for catalog-piggyback entries.
+   * Must be the resolved value, not config.contextLimit; a sweep must give a context-less remote model the same limit the boot registry did.
+   */
+  healthContextLimit?: number;
 }
 
 export interface TaskManagerRequiredOptions {
@@ -367,6 +384,8 @@ export class TaskManager {
   #profileManager: ProfileManager | undefined;
   /** External observer (websocket/webui relay); null = task agents stay silent. */
   #observer: TaskObserver | null = null;
+  /** Provider-pool health registry; null = health feature off (no filtering, no demotion). */
+  #providerHealth: ProviderHealth | null;
 
   constructor(options: TaskManagerOptions & TaskManagerRequiredOptions) {
     this.#buildAgent = options.buildAgent;
@@ -415,10 +434,50 @@ export class TaskManager {
     this.#lanesRetryTimer = null;
     this.#tasks = new Map();
     this.#profileManager = options.profileManager;
+    // One health registry per manager: an explicit injection wins (shared / test seams), an explicit null opts out.
+    // Otherwise always build one. The interval gates only the TIMER inside makeProviderHealth, so a 0 interval
+    // keeps failure-driven demotion and placement filtering alive. The recovered-callback re-admits queued
+    // tasks the instant a provider comes back -- nothing else calls #admit on a pure health transition.
+    this.#providerHealth =
+      options.providerHealth !== undefined
+        ? options.providerHealth
+        : makeProviderHealth({
+            providers: providerDefs,
+            globals: {
+              baseUrl: options.config.baseUrl,
+              apiKey: options.config.apiKey,
+            },
+            intervalMs: (options.healthIntervalSecs ?? 0) * 1000,
+            timeoutMs: (options.healthCheckTimeoutSecs ?? 5) * 1000,
+            modelRegistry: this.#modelRegistry,
+            contextLimit: options.healthContextLimit,
+            onRecover: () => this.retryQueued(),
+          });
   }
 
   setSessionManager(sessionManager: TaskManagerSessionManager): void {
     this.#sessionManager = sessionManager;
+  }
+
+  /** The health registry this manager consults for placement (null when the feature is off). */
+  get providerHealth(): ProviderHealth | null {
+    return this.#providerHealth;
+  }
+
+  /**
+   * Re-run the admission pass (health recovery callback, tests). Clears
+   * lane-blocked flags too: a provider coming back invalidates every "whole
+   * candidate set fleet-wide busy" verdict, exactly like a lanes-retry tick --
+   * still-full lanes just re-block themselves on the next pass.
+   */
+  retryQueued(): void {
+    for (const t of this.#tasks.values()) t.blocked = false;
+    this.#admit();
+  }
+
+  /** Release the health sweep timer, if this manager built one. */
+  stop(): void {
+    this.#providerHealth?.stop();
   }
 
   /**
@@ -893,26 +952,34 @@ export class TaskManager {
   }
 
   /**
-   * Start QUEUED entries and grant waiting warm turns whose provider lane has
-   * room, in insertion order. The scan is global, not per-lane, so a task
-   * queued on a saturated provider never head-of-line-blocks a later task on
-   * a free provider. Waiting warm turns are granted before new spawns: a
-   * parked session that yielded its slot gets it back ahead of fresh work.
+   * Drop placement candidates whose provider is marked down.
+   * Fails open when every candidate is down, a task queued forever on
+   * a pool we only think is dead is worse than one that retries and fails loudly.
+   * Pinned tasks have `candidates === null` and never pass through here.
+   */
+  #eligibleByHealth(cands: SpawnCandidate[]): SpawnCandidate[] {
+    if (!this.#providerHealth) return cands;
+    const up = cands.filter((c) => !this.#providerHealth!.isDown(c.provider));
+    return up.length > 0 ? up : cands;
+  }
+
+  /**
+   * Start QUEUED entries and grant waiting warm turns whose provider lane has room, in insertion order.
+   * The scan is global, not per-lane, so a task queued on a saturated provider never head-of-line-blocks
+   * a later task on a free provider. Waiting warm turns are granted before new spawns.
+   * A parked session that yielded its slot gets it back ahead of fresh work.
    *
-   * Placement: locked entries (candidates === null) enter on their lane as
-   * before; multi-candidate entries take the first candidate with capacity
-   * (plan order = warm-first), reserving then re-ranking via #warmPlace.
-   * Every start/grant additionally takes a slot in the cross-process ledger
-   * (when configured): the in-process scan decides ORDER, the ledger decides
-   * CAPACITY across all hotdog processes on the machine.
+   * Placement: locked entries (candidates === null) enter on their lane as before;
+   * multi-candidate entries take the first candidate with capacity (plan order = warm-first),
+   * reserving then re-ranking via #warmPlace.
+   * Every start/grant additionally takes a slot in the cross-process ledger (when configured):
+   * the in-process scan decides ORDER, the ledger decides CAPACITY across all hotdog processes on the machine.
    */
   #admit(): void {
-    // Warm grants count occupancy WITHOUT other warm waiters: a pending
-    // waiter reserves the slot but does not hold it. Counting waiters made
-    // each one see the next waiter as the blocker, so two waiters on a
-    // cap-1 lane mutually refused and none was ever granted. A grant flips
-    // the waiter to turnGranted, which DOES count, so waiters on one lane
-    // are granted one at a time in insertion order (FIFO).
+    // Warm grants count occupancy WITHOUT other warm waiters: a pending waiter reserves the slot but does not hold it.
+    // Counting waiters made each one see the next waiter as the blocker,
+    // so two waiters on a cap-1 lane mutually refused and none was ever granted.
+    // A grant flips the waiter to turnGranted, which DOES count, so waiters on one lane are granted one at a time in insertion order (FIFO).
     const warmUsed = new Map<string, number>();
     for (const task of this.#tasks.values()) {
       if ((this.#occupies(task) || task.placing) && !task.turnPending) {
@@ -956,10 +1023,12 @@ export class TaskManager {
         continue;
       }
       if (task.placing) continue;
-      // Multi-candidate entry: eligibility FIRST (a warm-but-full lane must
-      // never starve a cold-idle one), then plan order (warm-first at spawn,
-      // refreshed by #warmPlace before the start).
-      const eligible = task.candidates.filter(
+      // Multi-candidate entry:
+      // health first (a dead provider looks idle and warm, i.e. the PREFERRED victim),
+      // then eligibility (warm-but-full lane must not starve a cold-idle one),
+      // then plan order (warm-first at spawn, refreshed by #warmPlace before the start).
+      const pool = this.#eligibleByHealth(task.candidates);
+      const eligible = pool.filter(
         (c) => (used.get(c.provider) ?? 0) < this.#laneCap(c.provider),
       );
       if (eligible.length === 0) {
@@ -1015,7 +1084,9 @@ export class TaskManager {
    * flag.
    */
   async #warmPlace(task: TaskEntry): Promise<void> {
-    const plan = task.candidates ?? [];
+    // filter the plan BEFORE the warm sort: warmSortCandidates peeks /running on every plan provider (2s timeout each),
+    // so a known-dead node would add a peek penalty to every placement attempt.
+    const plan = this.#eligibleByHealth(task.candidates ?? []);
     let warm: SpawnCandidate[];
     try {
       warm = await warmSortCandidates(this.#modelRegistry, plan, this.#peekLoaded);
@@ -1033,7 +1104,8 @@ export class TaskManager {
       `[task ${task.taskId}] warm placement: ${warm.map((c) => c.key).join(" > ")}`,
     );
     const used = this.#laneOccupancy(task);
-    for (const c of warm) {
+    // failure-driven markDown lands synchronously, so filter on health again: the provider can go down between the admit pass and here.
+    for (const c of this.#eligibleByHealth(warm)) {
       if ((used.get(c.provider) ?? 0) >= this.#laneCap(c.provider)) {
         logger.debug(
           `[task ${task.taskId}] skip '${c.provider}': in-process full (${used.get(c.provider)}/${this.#laneCap(c.provider)})`,
@@ -1463,13 +1535,33 @@ export class TaskManager {
       if (LlmError.isCancelled(err) || entry.abortController.signal.aborted) {
         turn = { status: "cancelled", result: `Task aborted` };
       } else {
-        // Error Handling rule: report through formatError() -- unexpected
-        // errors (bugs) log message + full stack, expected ones message
-        // only. The delegating model gets the message alone; a stack in its
+        // Only unexpected errors (bugs) log, through formatError() with the full
+        // stack. Expected ones (LlmError api/http/timeout/...) are already the
+        // task result the delegating model receives; a log line would just echo it.
+        // The delegating model always gets the message alone -- a stack in its
         // context would waste tokens and leak internals.
-        logger.error(`[task ${taskId}] ${formatError(err)}`);
+        if (!isExpectedError(err)) {
+          logger.error(`[task ${taskId}] ${formatError(err)}`);
+        }
+        // Failure-driven demotion: connection-level chat failure takes the provider out immediately,
+        // so the next fanout does not hit the same dead provider between sweeps.
+        // llm-client throws LlmError.Http only for connection-level rejects (refused/DNS/reset mid-body);
+        // HTTP-status failures arrive as LlmError.Api with `status`, timeouts as LlmError.Timeout --
+        // neither demotes: a 500 or a chatTimeout/stream-idle stall proves the socket answers, and
+        // demoting on those would flap the pool around live-but-unhappy providers.
+        // Cancelled turns never reach this branch.
+        if (this.#providerHealth && entry.provider && err instanceof LlmError && err.type === "http") {
+          this.#providerHealth.markDown(entry.provider, `task ${taskId} chat failed: ${err.message}`);
+        }
         turn = { status: "failed", result: `Task failed: ${err instanceof Error ? err.message : String(err)}` };
       }
+    }
+    // Recovery evidence: a completed turn means at least one chat round-tripped, so the provider
+    // is up. This is the recovery path when the sweep timer is off (interval 0): fail-open
+    // placements and in-flight traffic keep producing evidence. Failed turns decide nothing here
+    // (the branch above owns demotion); cancelled turns are inconclusive.
+    if (turn.status === "completed" && this.#providerHealth && entry.provider) {
+      this.#providerHealth.noteUp(entry.provider);
     }
     entry.inRun = false;
     entry.lastResult = turn.result;

@@ -12,6 +12,7 @@ import {
   SchemaLayer,
 } from "@core/config/schema-loader.ts";
 import { Agent } from "@core/agent.ts";
+import { makeProviderHealth } from "@core/session/provider-health.ts";
 import {
   collectInfoPanels,
   CoreContext,
@@ -22,6 +23,10 @@ import {
 import type { BuildAgentConfig, DefaultConfig } from "@core/config/index.ts";
 import path from "node:path";
 import fs from "node:fs/promises";
+
+// Name for the synthetic baseUrl probe when no provider resolves to it.
+// Deliberately not a legal provider name, so it can never collide.
+const BASE_URL_PROBE = "*baseUrl";
 
 interface ConnectivityResult {
   reachable: boolean;
@@ -84,27 +89,67 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
     return await printConfigDebug(cli, await loadConfig(cli.config, configDir), providers, resolved);
   }
 
-  const client = core.createLlmClient();
-
-  let connectivity: ConnectivityResult;
-  try {
-    await client.ping(resolved.model || undefined);
-    connectivity = { reachable: true, error: null };
-  } catch (e: unknown) {
-    connectivity = { reachable: false, error: (e as Error).message };
-  }
-
   // Extension-owned status (the skills extension reports its own path and
   // counts; nothing here knows how any single extension computes them).
   const panels = collectInfoPanels(core.extensions);
 
+  // connectivity sweep of the provider pool through the same module the TaskManager uses,
+  // plus a synthetic probe for the global baseUrl when no provider resolves to it --
+  // the same <base>/health request the old standalone ping made.
+  // `info` is a one-shot command without a session, so it probes its own view rather than sharing a running manager's.
+  // The JSON `connectivity` block and the Providers health notes all read from these verdicts.
+  const baseUrl = resolved.baseUrl;
+  const baseCoverer = baseUrl
+    ? providers.find((p) => !p.url || p.url === baseUrl)
+    : undefined;
+  const baseProbe =
+    baseUrl && !baseCoverer
+      ? ({ name: BASE_URL_PROBE, url: baseUrl, models: [] } as ProviderDef)
+      : null;
+  const sweepProviders = baseProbe ? [...providers, baseProbe] : providers;
+
+  const providerHealthMap = new Map<string, { down: boolean; reason: string | null }>();
+  let baseUrlVerdict: { down: boolean; reason: string | null } | null = null;
+  if (sweepProviders.length > 0) {
+    const health = makeProviderHealth({
+      providers: sweepProviders,
+      globals: { baseUrl, apiKey: resolved.apiKey },
+      intervalMs: 0,
+      timeoutMs: (resolved.healthCheckTimeout ?? 5) * 1000,
+    });
+    await health.sweep();
+    health.stop();
+    for (const s of health.status()) {
+      if (baseProbe && s.name === BASE_URL_PROBE) {
+        baseUrlVerdict = { down: s.down, reason: s.reason };
+        continue;
+      }
+      const def = providers.find((p) => p.name === s.name);
+      if (!def?.url && !baseUrl) continue;
+      providerHealthMap.set(s.name, { down: s.down, reason: s.reason });
+    }
+  }
+
+  // JSON `connectivity`: the verdict for the url answering for the base -- the
+  // synthetic probe, else the first provider that resolves to it. Fail-open on
+  // a missing verdict, like health treats unknown providers everywhere else.
+  const connectivity: ConnectivityResult = (() => {
+    if (!baseUrl) return { reachable: false, error: "no base url configured" };
+    const v =
+      baseUrlVerdict ?? (baseCoverer ? (providerHealthMap.get(baseCoverer.name) ?? null) : null);
+    if (!v) return { reachable: true, error: null };
+    return v.down
+      ? { reachable: false, error: v.reason ?? "probe failed" }
+      : { reachable: true, error: null };
+  })();
+
   const extensionStatus = await getExtensionStatuses(config, core.extensions);
 
   if (cli.wantsJson) {
-    return printInfoJson(resolved, modelRegistry, providers, panels, connectivity, config, extensionStatus);
+    return printInfoJson(resolved, modelRegistry, providers, panels, connectivity, config, extensionStatus, providerHealthMap);
   }
 
-  return printInfoText(resolved, modelRegistry, providers, panels, connectivity, config, extensionStatus);
+  return printInfoText(resolved, modelRegistry, providers, panels, config, extensionStatus, providerHealthMap, baseUrlVerdict);
 }
 
 interface ExtensionStatus {
@@ -142,9 +187,10 @@ function printInfoText(
   modelRegistry: Record<string, unknown>,
   providers: ProviderDef[],
   panels: ExtensionInfoPanel[],
-  connectivity: ConnectivityResult,
   config: Record<string, unknown>,
   extensionStatus: ExtensionStatus[],
+  providerHealthMap: Map<string, { down: boolean; reason: string | null }> = new Map(),
+  baseUrlVerdict: { down: boolean; reason: string | null } | null = null,
 ): number {
   console.log("=== Agent Harness Info ===");
   console.log();
@@ -164,7 +210,7 @@ function printInfoText(
 
   printExtensionsSection(extensionStatus);
 
-  if (providers.length > 0) {
+  if (providers.length > 0 || baseUrlVerdict) {
     console.log();
     console.log("Providers:");
     for (const p of providers) {
@@ -173,7 +219,19 @@ function printInfoText(
       const marker = isActive ? " (active)" : isDefault ? " (default)" : "";
       const modelNames = (p.models || []).map((m) => m.name).join(", ");
       const displayUrl = p.url || `${resolved.baseUrl} (inherited)`;
-      console.log(`  ${p.name}${marker} → ${displayUrl}  [${modelNames}]`);
+      // Health verdict from the sweep (providers with no resolvable url are
+      // never probed; map absence, treated as up elsewhere, prints nothing).
+      const h = providerHealthMap.get(p.name);
+      const healthNote = h ? (h.down ? `  down: ${h.reason ?? "probe failed"}` : "  up") : "";
+      console.log(`  ${p.name}${marker} → ${displayUrl}  [${modelNames}]${healthNote}`);
+    }
+    // The synthetic baseUrl probe: shown only when no provider already answers
+    // for that url (otherwise its verdict is one of the lines above).
+    if (baseUrlVerdict) {
+      const note = baseUrlVerdict.down
+        ? `  down: ${baseUrlVerdict.reason ?? "probe failed"}`
+        : "  up";
+      console.log(`  (base url) → ${resolved.baseUrl}${note}`);
     }
     if (resolved.activeProvider) {
       console.log();
@@ -205,13 +263,6 @@ function printInfoText(
     }
   }
 
-  console.log();
-  console.log("Connectivity:");
-  if (connectivity.reachable) {
-    console.log(`  ${resolved.baseUrl} - reachable`);
-  } else {
-    console.log(`  ${resolved.baseUrl} - unreachable: ${connectivity.error}`);
-  }
   return 0;
 }
 
@@ -288,6 +339,7 @@ function printInfoJson(
   connectivity: ConnectivityResult,
   config: Record<string, unknown>,
   extensionStatus: ExtensionStatus[],
+  providerHealthMap: Map<string, { down: boolean; reason: string | null }> = new Map(),
 ): number {
   const json = {
     config: {
@@ -304,6 +356,13 @@ function printInfoJson(
         url: p.url || null,
         resolvedUrl: p.url || resolved.baseUrl,
         models: (p.models || []).map((m) => m.name),
+        health: (() => {
+          const h = providerHealthMap.get(p.name);
+          return h ? (h.down ? "down" : "up") : null;
+        })(),
+        health_error: providerHealthMap.get(p.name)?.down
+          ? providerHealthMap.get(p.name)!.reason
+          : null,
       })),
       active: resolved.activeProvider || null,
     },

@@ -13,6 +13,7 @@ async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Prom
       const shutdown = () => {
         server.stop();
         wsServer.stopCleanupLoop();
+        wsServer.stopTaskManager();
         authMiddleware.stopCleanup();
         resolve();
       };

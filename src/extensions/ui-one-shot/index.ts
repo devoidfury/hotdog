@@ -45,6 +45,9 @@ async function runOneShot(
       lanesPerProvider: resolved.taskLanesPerProvider,
       lanesDir: resolved.taskLanesDir,
       defaultModel: resolved.model ?? null,
+      healthIntervalSecs: resolved.providerHealthCheckIntervalSecs,
+      healthCheckTimeoutSecs: resolved.healthCheckTimeout,
+      healthContextLimit: resolved.contextLimit,
     },
     // Mirrors the interactive CLI: without it the TaskManager cannot resolve
     // worker profiles from the config directory.
@@ -97,6 +100,7 @@ async function runOneShot(
         console.log(`Session: ${oneShotSessionId}`);
       }
     }
+    sessionManager.getTaskManager()?.stop();
     await core.extensions.cleanup();
   }
 

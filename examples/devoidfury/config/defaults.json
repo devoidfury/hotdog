@@ -48,6 +48,10 @@
       "url": "https://bun.com/docs/mcp"
     }
   ],
+  "workflows": {
+    "max-runtime-mins": 90,
+    "max-nodes": 24
+  },
   "providers": [
     {
       "name": "ai365",
@@ -58,6 +62,12 @@
       "fetch-models": true,
       "apiKey": "$HOTDOG_ALT_KEY",
       "url": "$HOTDOG_ALT_URL"
+    },
+    {
+      "name": "home",
+      "fetch-models": true,
+      "apiKey": "$HOTDOG_ALT_KEY",
+      "url": "http://mini.home:9292"
     }
   ]
 }

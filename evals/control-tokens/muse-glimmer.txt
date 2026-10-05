@@ -1,0 +1,10 @@
+<tool>
+<|patch|>
+<|video|>
+<atem:function_calls>
+</atem:function_calls>
+<|start|>
+<|message|>
+<|eot|>
+<|eom|>
+</tool_output>

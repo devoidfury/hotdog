@@ -1,0 +1,10 @@
+{
+  "id": "006-weird-filenames",
+  "prompt": "In the current directory, count the total number of lines across all .md files (their names are unfriendly; some contain spaces, quotes, or worse). Write just the total number to manifest.txt (nothing else in the file). Exclude manifest.txt itself from the count.",
+  "fixtures": "fixture-filenames",
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "file_match", "path": "manifest.txt", "pattern": "^21$", "flags": "m" },
+    { "type": "command", "cmd": "total=$(find . -name '*.md' ! -name manifest.txt -type f -print0 | xargs -0 cat | wc -l); [ \"$total\" = 21 ]" }
+  ]
+}

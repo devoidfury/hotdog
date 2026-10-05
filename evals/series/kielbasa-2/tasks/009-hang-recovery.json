@@ -1,0 +1,10 @@
+{
+  "id": "009-hang-recovery",
+  "prompt": "Run `bun waiter.ts` in the current directory and report the token it produces, in the form TOKEN=<value>. The script may misbehave when you run it; figure out a way to get the token anyway.",
+  "fixtures": "fixture-hang",
+  "timeout_secs": 180,
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "stdout_match", "pattern": "TOKEN=kielbasa-77" }
+  ]
+}

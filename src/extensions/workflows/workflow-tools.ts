@@ -52,6 +52,8 @@ export class RunRegistry {
   #runs = new Map<string, ManagedRun>();
 
   add(mr: ManagedRun): void {
+    // Re-dispatching a settled id (resume/continue) replaces the old entry;
+    // history stays in the run dir's run.jsonl, not the registry.
     this.#runs.set(mr.runId, mr);
   }
 
@@ -65,6 +67,19 @@ export class RunRegistry {
 
   active(): ManagedRun[] {
     return this.all().filter((r) => !r.finished && !r.error);
+  }
+
+  /**
+   * A registry entry only blocks its id while the run is live. Once a run has
+   * settled (finished or crashed) it stays in the map for status/history, but
+   * its id becomes re-dispatchable so `run_id` can resume/continue the same
+   * run dir -- reconcile-resume re-verifies completed nodes against the
+   * filesystem, and the .owner claim still guards against live double-driving
+   * (in-process races included: see the post-claim re-check in dispatch).
+   */
+  blocks(id: string): boolean {
+    const m = this.#runs.get(id);
+    return !!m && !m.finished && !m.error;
   }
 }
 
@@ -411,8 +426,14 @@ export class WorkflowDispatchTool extends WorkflowTool {
         `invalid run_id '${forcedId}' (${RUN_ID_SHAPE_HINT})`,
       );
     }
-    if (forcedId && this.opts.registry.get(forcedId)) {
-      return ToolResult.err(`run ${forcedId} is already known in this process`);
+    // A settled run (finished or crashed) no longer blocks its id: `run_id`
+    // resumes/continues the same run dir (reconcile-resume re-verifies every
+    // completed node against the filesystem, so only unfinished work reruns).
+    // Only a LIVE in-process run refuses the id.
+    if (forcedId && this.opts.registry.blocks(forcedId)) {
+      return ToolResult.err(
+        `run ${forcedId} is still active in this process; wait for it or '/workflow cancel ${forcedId}'`,
+      );
     }
     const runId = forcedId || (await nextRunId(runsRoot, workflow.name));
     const runDir = join(runsRoot, runId);
@@ -434,8 +455,10 @@ export class WorkflowDispatchTool extends WorkflowTool {
       // Do NOT release the marker here: the winning registration's run() owns
       // it and releases it in its finally. Deleting it now would leave the
       // live run's dir unclaimed against foreign processes (double-drive).
-      if (this.opts.registry.get(forcedId)) {
-        return ToolResult.err(`run ${forcedId} is already known in this process`);
+      if (this.opts.registry.blocks(forcedId)) {
+        return ToolResult.err(
+          `run ${forcedId} is still active in this process; wait for it or '/workflow cancel ${forcedId}'`,
+        );
       }
     }
 

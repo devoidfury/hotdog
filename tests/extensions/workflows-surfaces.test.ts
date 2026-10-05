@@ -611,19 +611,116 @@ nodes:
     expect(r.output).toContain("owned by another process");
   });
 
-  it("dispatch refuses a run_id already active in-process", async () => {
+  it("dispatch refuses a run_id still active in-process", async () => {
     const root = freshDir();
     const wfDir = join(root, "defs");
     mkdirSync(wfDir);
     const file = join(wfDir, "wf.yaml");
-    writeFileSync(file, WORKFLOW_TEXT);
-    const fake = makeFakeAgents();
-    const opts = toolOpts(fake.tasks, root, wfDir);
+    writeFileSync(
+      file,
+      WORKFLOW_TEXT.replace("cli run smoke", "slow smoke").replace(
+        /nodes:\n([\s\S]*)$/,
+        "nodes:\n  - id: a\n    accept:\n      files: [a.out]\n",
+      ),
+    );
+    // Make node a slow so the first dispatch is still live when the second arrives.
+    const slow = makeFakeAgents({ slow: true });
+    const opts = toolOpts(slow.tasks, root, wfDir);
     const dispatch = new WorkflowDispatchTool(opts);
-    await dispatch.execute({ file, run_id: "fixed-id" });
+    const first = await dispatch.execute({ file, run_id: "fixed-id" });
+    expect(first.error).toBeNull();
+    // Still running: the id is blocked while live.
     const again = await dispatch.execute({ file, run_id: "fixed-id" });
     expect(again.error).not.toBeNull();
-    expect(again.error).toContain("already known");
+    expect(again.error).toContain("still active");
+    await settle(() => opts.registry.get("fixed-id")!.finished !== null, "run to finish");
+  });
+
+  it("dispatch resumes a settled run_id: completed nodes reuse, failed work reruns", async () => {
+    const root = freshDir();
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    const file = join(wfDir, "wf.yaml");
+    // a succeeds; b fails (verdict 'fail' exhausts its attempts).
+    writeFileSync(
+      file,
+      WORKFLOW_TEXT.replace("cli run smoke", "resume me"),
+    );
+    let bFails = true;
+    const tasks = new TaskManager({
+      buildAgent: async () => ({
+        run: async (input: string | Array<Record<string, unknown>>) => {
+          const prompt = contentToText(input);
+          const id = /node '([a-z0-9-]+)'/.exec(prompt)?.[1] ?? "x";
+          const dir = /\.verdict under (.+): first line/.exec(prompt)?.[1];
+          if (dir) {
+            writeFileSync(join(dir, `${id}.out`), "artifact");
+            writeFileSync(join(dir, `${id}.verdict`), id === "b" && bFails ? "fail" : "pass");
+          }
+          return { type: "completion", content: `${id} pointer-summary` };
+        },
+        notifyCompletion: () => {},
+        steer: () => {},
+      } as never),
+      modelRegistry: {},
+      config: {},
+      maxIterations: 3,
+      taskProfile: "default",
+    });
+    const opts = toolOpts(tasks, root, wfDir);
+    const dispatch = new WorkflowDispatchTool(opts);
+
+    const r1 = await dispatch.execute({ file, run_id: "resume-me" });
+    expect(r1.error).toBeNull();
+    const m1 = opts.registry.get("resume-me")!;
+    await settle(() => m1.finished !== null, "first run to finish");
+    expect(m1.finished!.outcome).toBe("failed");
+
+    // The failure cause is fixed on disk (verdict now passes for b); resume the
+    // SAME id: a's claim survives (no rebuild), b reruns.
+    bFails = false;
+    const r2 = await dispatch.execute({ file, run_id: "resume-me" });
+    expect(r2.error).toBeNull(); // settled ids are re-dispatchable
+    const m2 = opts.registry.get("resume-me")!;
+    expect(m2).not.toBe(m1); // the new run replaced the settled entry
+    await settle(() => m2.finished !== null, "resumed run to finish");
+    expect(m2.finished!.outcome).toBe("succeeded");
+    expect(m2.finished!.states.a).toBe("succeeded");
+    expect(m2.finished!.states.b).toBe("succeeded");
+
+    const log = readFileSync(join(root, "resume-me", "run.jsonl"), "utf8");
+    expect(log).toContain('"ev":"resumed"');
+    // The resumed event reused a's claim: 'a' never re-ran in the second pass --
+    // its succeeded events total exactly one across both passes.
+    const aSucceeded = log
+      .split("\n")
+      .filter((l) => l.includes('"ev":"node"') && l.includes('"id":"a"') && l.includes('"succeeded"'))
+      .length;
+    expect(aSucceeded).toBe(1);
+  });
+
+  it("dispatch resume of a crashed run_id works once the dir is released", async () => {
+    // A crashed registry entry (finished=null, error set) must not park its id.
+    const root = freshDir();
+    seedRun(root, "r-clash"); // records workflow "demo"
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    const file = join(wfDir, "wf.yaml");
+    writeFileSync(file, WORKFLOW_TEXT);
+    const opts = toolOpts(makeFakeAgents().tasks, root, wfDir);
+    const dispatch = new WorkflowDispatchTool(opts);
+    const ctx = { get: () => ({ sessionId: "mgr" }) };
+    // First attempt crashes on the resume guard (foreign workflow in the dir).
+    const r1 = await dispatch.execute({ file, run_id: "r-clash" }, ctx as never);
+    expect(r1.error).toBeNull();
+    await settle(() => opts.registry.get("r-clash")!.error !== null, "crash");
+    // Retrying the same id is refused again by the guard, NOT by 'already known'.
+    const r2 = await dispatch.execute({ file, run_id: "r-clash" }, ctx as never);
+    expect(r2.error).toBeNull();
+    await settle(() => {
+      const m = opts.registry.get("r-clash")!;
+      return m.error !== null && !m.error.includes("already known");
+    }, "second crash via guard");
   });
 
   it("a crashed dispatch still notifies the delegating session", async () => {

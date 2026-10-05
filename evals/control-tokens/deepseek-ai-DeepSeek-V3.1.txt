@@ -1,0 +1,12 @@
+<｜User｜>
+<｜Assistant｜>
+<think>
+</think>
+<｜tool▁calls▁begin｜>
+<｜tool▁call▁begin｜>
+<｜tool▁sep｜>
+<｜tool▁call▁end｜>
+<｜tool▁calls▁end｜>
+<｜end▁of▁sentence｜>
+<｜tool▁output▁begin｜>
+<｜tool▁output▁end｜>

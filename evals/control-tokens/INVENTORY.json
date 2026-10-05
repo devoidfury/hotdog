@@ -1,0 +1,1457 @@
+{
+  "</think>": {
+    "count": 30,
+    "files": [
+      "Bielik-11B-v3.0-Instruct.jinja",
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "HuggingFaceTB-SmolLM3-3B.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "LFM2.5-8B-A1B.jinja",
+      "LFM2.5-Instruct.jinja",
+      "MiniMax-M2.jinja",
+      "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
+      "NVIDIA-Nemotron-Nano-v2.jinja",
+      "Qwen-QwQ-32B.jinja",
+      "Qwen-Qwen3-0.6B.jinja",
+      "Qwen3.5-4B.jinja",
+      "Reka-Edge.jinja",
+      "Spark2.5.jinja",
+      "StepFun3.5-Flash.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "deepseek-ai-DeepSeek-V3.2.jinja",
+      "deepseek-ai-DeepSeek-V4-Flash-0731.jinja",
+      "deepseek-ai-DeepSeek-V4.jinja",
+      "ibm-granite-granite-3.3-2B-Instruct.jinja",
+      "inclusionai-ling-3.0-flash.jinja",
+      "llama-cpp-deepseek-r1.jinja",
+      "llama-cpp-rwkv-world.jinja",
+      "openbmb-MiniCPM5-1B.jinja",
+      "poolside-Laguna-S-2.1.jinja",
+      "poolside-Laguna-XS-2.1.jinja",
+      "poolside-Laguna-XS.2.jinja"
+    ]
+  },
+  "<think>": {
+    "count": 29,
+    "files": [
+      "Bielik-11B-v3.0-Instruct.jinja",
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "HuggingFaceTB-SmolLM3-3B.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "LFM2.5-8B-A1B.jinja",
+      "MiniMax-M2.jinja",
+      "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
+      "NVIDIA-Nemotron-Nano-v2.jinja",
+      "Qwen-QwQ-32B.jinja",
+      "Qwen-Qwen3-0.6B.jinja",
+      "Qwen3.5-4B.jinja",
+      "Reka-Edge.jinja",
+      "Spark2.5.jinja",
+      "StepFun3.5-Flash.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "deepseek-ai-DeepSeek-V3.2.jinja",
+      "deepseek-ai-DeepSeek-V4-Flash-0731.jinja",
+      "deepseek-ai-DeepSeek-V4.jinja",
+      "ibm-granite-granite-3.3-2B-Instruct.jinja",
+      "inclusionai-ling-3.0-flash.jinja",
+      "llama-cpp-deepseek-r1.jinja",
+      "llama-cpp-rwkv-world.jinja",
+      "openbmb-MiniCPM5-1B.jinja",
+      "poolside-Laguna-S-2.1.jinja",
+      "poolside-Laguna-XS-2.1.jinja",
+      "poolside-Laguna-XS.2.jinja"
+    ]
+  },
+  "</tool_call>": {
+    "count": 21,
+    "files": [
+      "Bielik-11B-v3.0-Instruct.jinja",
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "MiMo-VL.jinja",
+      "MiniMax-M3.jinja",
+      "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
+      "Qwen-QwQ-32B.jinja",
+      "Qwen-Qwen2.5-7B-Instruct.jinja",
+      "Qwen-Qwen3-0.6B.jinja",
+      "Qwen3-Coder.jinja",
+      "Qwen3.5-4B.jinja",
+      "Reka-Edge.jinja",
+      "Spark2.5.jinja",
+      "StepFun3.5-Flash.jinja",
+      "ibm-granite-granite-4.0.jinja",
+      "ibm-granite-granite-4.1.jinja",
+      "inclusionai-ling-3.0-flash.jinja",
+      "poolside-Laguna-S-2.1.jinja",
+      "poolside-Laguna-XS-2.1.jinja",
+      "poolside-Laguna-XS.2.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<tool_call>": {
+    "count": 21,
+    "files": [
+      "Bielik-11B-v3.0-Instruct.jinja",
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "MiMo-VL.jinja",
+      "MiniMax-M3.jinja",
+      "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
+      "Qwen-QwQ-32B.jinja",
+      "Qwen-Qwen2.5-7B-Instruct.jinja",
+      "Qwen-Qwen3-0.6B.jinja",
+      "Qwen3-Coder.jinja",
+      "Qwen3.5-4B.jinja",
+      "Reka-Edge.jinja",
+      "Spark2.5.jinja",
+      "StepFun3.5-Flash.jinja",
+      "ibm-granite-granite-4.0.jinja",
+      "ibm-granite-granite-4.1.jinja",
+      "inclusionai-ling-3.0-flash.jinja",
+      "poolside-Laguna-S-2.1.jinja",
+      "poolside-Laguna-XS-2.1.jinja",
+      "poolside-Laguna-XS.2.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<|im_end|>": {
+    "count": 19,
+    "files": [
+      "Bielik-11B-v3.0-Instruct.jinja",
+      "HuggingFaceTB-SmolLM3-3B.jinja",
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "LFM2-8B-A1B.jinja",
+      "LFM2.5-8B-A1B.jinja",
+      "LFM2.5-Instruct.jinja",
+      "MiMo-VL.jinja",
+      "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
+      "NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja",
+      "NousResearch-Hermes-3-Llama-3.1-8B-tool_use.jinja",
+      "Qwen-QwQ-32B.jinja",
+      "Qwen-Qwen2.5-7B-Instruct.jinja",
+      "Qwen-Qwen3-0.6B.jinja",
+      "Qwen3-Coder.jinja",
+      "Qwen3.5-4B.jinja",
+      "StepFun3.5-Flash.jinja",
+      "moonshotai-Kimi-K2.jinja",
+      "openbmb-MiniCPM5-1B.jinja"
+    ]
+  },
+  "<|im_start|>": {
+    "count": 16,
+    "files": [
+      "Bielik-11B-v3.0-Instruct.jinja",
+      "HuggingFaceTB-SmolLM3-3B.jinja",
+      "LFM2-8B-A1B.jinja",
+      "LFM2.5-8B-A1B.jinja",
+      "LFM2.5-Instruct.jinja",
+      "MiMo-VL.jinja",
+      "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
+      "NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja",
+      "NousResearch-Hermes-3-Llama-3.1-8B-tool_use.jinja",
+      "Qwen-QwQ-32B.jinja",
+      "Qwen-Qwen2.5-7B-Instruct.jinja",
+      "Qwen-Qwen3-0.6B.jinja",
+      "Qwen3-Coder.jinja",
+      "Qwen3.5-4B.jinja",
+      "StepFun3.5-Flash.jinja",
+      "openbmb-MiniCPM5-1B.jinja"
+    ]
+  },
+  "</tool_response>": {
+    "count": 10,
+    "files": [
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "MiMo-VL.jinja",
+      "ibm-granite-granite-4.0.jinja",
+      "ibm-granite-granite-4.1.jinja",
+      "inclusionai-ling-3.0-flash.jinja",
+      "openbmb-MiniCPM5-1B.jinja",
+      "poolside-Laguna-S-2.1.jinja",
+      "poolside-Laguna-XS-2.1.jinja",
+      "poolside-Laguna-XS.2.jinja"
+    ]
+  },
+  "<tool_response>": {
+    "count": 10,
+    "files": [
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "MiMo-VL.jinja",
+      "ibm-granite-granite-4.0.jinja",
+      "ibm-granite-granite-4.1.jinja",
+      "inclusionai-ling-3.0-flash.jinja",
+      "openbmb-MiniCPM5-1B.jinja",
+      "poolside-Laguna-S-2.1.jinja",
+      "poolside-Laguna-XS-2.1.jinja",
+      "poolside-Laguna-XS.2.jinja"
+    ]
+  },
+  "</tools>": {
+    "count": 9,
+    "files": [
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "MiMo-VL.jinja",
+      "MiniMax-M1.jinja",
+      "ibm-granite-granite-4.0.jinja",
+      "ibm-granite-granite-4.1.jinja",
+      "inclusionai-ling-3.0-flash.jinja",
+      "openbmb-MiniCPM5-1B.jinja",
+      "tencent-Hy3.jinja"
+    ]
+  },
+  "<tools>": {
+    "count": 9,
+    "files": [
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "MiMo-VL.jinja",
+      "MiniMax-M1.jinja",
+      "ibm-granite-granite-4.0.jinja",
+      "ibm-granite-granite-4.1.jinja",
+      "inclusionai-ling-3.0-flash.jinja",
+      "openbmb-MiniCPM5-1B.jinja",
+      "tencent-Hy3.jinja"
+    ]
+  },
+  "<｜end▁of▁sentence｜>": {
+    "count": 8,
+    "files": [
+      "Spark2.5.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "deepseek-ai-DeepSeek-V3.2.jinja",
+      "deepseek-ai-DeepSeek-V4-Flash-0731.jinja",
+      "deepseek-ai-DeepSeek-V4.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<｜Assistant｜>": {
+    "count": 7,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "deepseek-ai-DeepSeek-V3.2.jinja",
+      "deepseek-ai-DeepSeek-V4-Flash-0731.jinja",
+      "deepseek-ai-DeepSeek-V4.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<｜User｜>": {
+    "count": 7,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "deepseek-ai-DeepSeek-V3.2.jinja",
+      "deepseek-ai-DeepSeek-V4-Flash-0731.jinja",
+      "deepseek-ai-DeepSeek-V4.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<|end_header_id|>": {
+    "count": 6,
+    "files": [
+      "fireworks-ai-llama-3-firefunction-v2.jinja",
+      "meetkai-functionary-medium-v3.1.jinja",
+      "meetkai-functionary-medium-v3.2.jinja",
+      "meta-llama-Llama-3.1-8B-Instruct.jinja",
+      "meta-llama-Llama-3.2-3B-Instruct.jinja",
+      "meta-llama-Llama-3.3-70B-Instruct.jinja"
+    ]
+  },
+  "<|eot_id|>": {
+    "count": 6,
+    "files": [
+      "fireworks-ai-llama-3-firefunction-v2.jinja",
+      "meetkai-functionary-medium-v3.1.jinja",
+      "meetkai-functionary-medium-v3.2.jinja",
+      "meta-llama-Llama-3.1-8B-Instruct.jinja",
+      "meta-llama-Llama-3.2-3B-Instruct.jinja",
+      "meta-llama-Llama-3.3-70B-Instruct.jinja"
+    ]
+  },
+  "<|start_header_id|>": {
+    "count": 6,
+    "files": [
+      "fireworks-ai-llama-3-firefunction-v2.jinja",
+      "meetkai-functionary-medium-v3.1.jinja",
+      "meetkai-functionary-medium-v3.2.jinja",
+      "meta-llama-Llama-3.1-8B-Instruct.jinja",
+      "meta-llama-Llama-3.2-3B-Instruct.jinja",
+      "meta-llama-Llama-3.3-70B-Instruct.jinja"
+    ]
+  },
+  "</available_tools>": {
+    "count": 5,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja",
+      "poolside-Laguna-S-2.1.jinja",
+      "poolside-Laguna-XS-2.1.jinja",
+      "poolside-Laguna-XS.2.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<available_tools>": {
+    "count": 5,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja",
+      "poolside-Laguna-S-2.1.jinja",
+      "poolside-Laguna-XS-2.1.jinja",
+      "poolside-Laguna-XS.2.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<|end|>": {
+    "count": 5,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja",
+      "microsoft-Phi-3.5-mini-instruct.jinja",
+      "openai-gpt-oss-120b.jinja",
+      "unsloth-Apriel-1.5.jinja",
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|assistant|>": {
+    "count": 4,
+    "files": [
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "microsoft-Phi-3.5-mini-instruct.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<|system|>": {
+    "count": 4,
+    "files": [
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "microsoft-Phi-3.5-mini-instruct.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<|tool_call_end|>": {
+    "count": 4,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "LFM2.5-8B-A1B.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|user|>": {
+    "count": 4,
+    "files": [
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja",
+      "microsoft-Phi-3.5-mini-instruct.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<｜tool▁calls▁begin｜>": {
+    "count": 4,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<｜tool▁calls▁end｜>": {
+    "count": 4,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<｜tool▁call▁begin｜>": {
+    "count": 4,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<｜tool▁call▁end｜>": {
+    "count": 4,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<｜tool▁output▁begin｜>": {
+    "count": 4,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<｜tool▁output▁end｜>": {
+    "count": 4,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<｜tool▁sep｜>": {
+    "count": 4,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "deepseek-ai-DeepSeek-V3.1.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "[/INST]": {
+    "count": 4,
+    "files": [
+      "Mistral-Small-3.2-24B-Instruct-2506.jinja",
+      "mistralai-Ministral-3-14B-Reasoning-2512.jinja",
+      "mistralai-Mistral-Nemo-Instruct-2407.jinja",
+      "unsloth-mistral-Devstral-Small-2507.jinja"
+    ]
+  },
+  "[INST]": {
+    "count": 4,
+    "files": [
+      "Mistral-Small-3.2-24B-Instruct-2506.jinja",
+      "mistralai-Ministral-3-14B-Reasoning-2512.jinja",
+      "mistralai-Mistral-Nemo-Instruct-2407.jinja",
+      "unsloth-mistral-Devstral-Small-2507.jinja"
+    ]
+  },
+  "</tool_calls>": {
+    "count": 3,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja",
+      "MiniMax-M1.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<tool_calls>": {
+    "count": 3,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja",
+      "MiniMax-M1.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<|CHATBOT_TOKEN|>": {
+    "count": 3,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r-plus-tool_use.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|END_OF_TURN_TOKEN|>": {
+    "count": 3,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r-plus-tool_use.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|START_OF_TURN_TOKEN|>": {
+    "count": 3,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r-plus-tool_use.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|SYSTEM_TOKEN|>": {
+    "count": 3,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r-plus-tool_use.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|USER_TOKEN|>": {
+    "count": 3,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r-plus-tool_use.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|end_of_role|>": {
+    "count": 3,
+    "files": [
+      "ibm-granite-granite-3.3-2B-Instruct.jinja",
+      "ibm-granite-granite-4.0.jinja",
+      "ibm-granite-granite-4.1.jinja"
+    ]
+  },
+  "<|end_of_text|>": {
+    "count": 3,
+    "files": [
+      "ibm-granite-granite-3.3-2B-Instruct.jinja",
+      "ibm-granite-granite-4.0.jinja",
+      "ibm-granite-granite-4.1.jinja"
+    ]
+  },
+  "<|eom_id|>": {
+    "count": 3,
+    "files": [
+      "meetkai-functionary-medium-v3.1.jinja",
+      "meta-llama-Llama-3.1-8B-Instruct.jinja",
+      "meta-llama-Llama-3.3-70B-Instruct.jinja"
+    ]
+  },
+  "<|im_assistant|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|im_middle|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|im_system|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|im_user|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|media_content|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|media_end|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|media_pad|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|media_start|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|python_tag|>": {
+    "count": 3,
+    "files": [
+      "meetkai-functionary-medium-v3.1.jinja",
+      "meta-llama-Llama-3.1-8B-Instruct.jinja",
+      "meta-llama-Llama-3.3-70B-Instruct.jinja"
+    ]
+  },
+  "<|start_of_role|>": {
+    "count": 3,
+    "files": [
+      "ibm-granite-granite-3.3-2B-Instruct.jinja",
+      "ibm-granite-granite-4.0.jinja",
+      "ibm-granite-granite-4.1.jinja"
+    ]
+  },
+  "<|think|>": {
+    "count": 3,
+    "files": [
+      "google-gemma-4-31B-it-interleaved.jinja",
+      "google-gemma-4-31B-it.jinja",
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_call_argument_begin|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|tool_call_begin|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|tool_calls_section_begin|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|tool_calls_section_end|>": {
+    "count": 3,
+    "files": [
+      "Kimi-K2-Instruct.jinja",
+      "Kimi-K2-Thinking.jinja",
+      "moonshotai-Kimi-K2.jinja"
+    ]
+  },
+  "<|video|>": {
+    "count": 3,
+    "files": [
+      "google-gemma-4-31B-it-interleaved.jinja",
+      "google-gemma-4-31B-it.jinja",
+      "muse-glimmer.jinja"
+    ]
+  },
+  "<｜tool▁outputs▁begin｜>": {
+    "count": 3,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "<｜tool▁outputs▁end｜>": {
+    "count": 3,
+    "files": [
+      "deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+      "deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
+      "llama-cpp-deepseek-r1.jinja"
+    ]
+  },
+  "〈|EOS|〉": {
+    "count": 3,
+    "files": [
+      "poolside-Laguna-S-2.1.jinja",
+      "poolside-Laguna-XS-2.1.jinja",
+      "poolside-Laguna-XS.2.jinja"
+    ]
+  },
+  "<thinking>": {
+    "count": 2,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja",
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<|\"|>": {
+    "count": 2,
+    "files": [
+      "google-gemma-4-31B-it-interleaved.jinja",
+      "google-gemma-4-31B-it.jinja"
+    ]
+  },
+  "<|END_ACTION|>": {
+    "count": 2,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|END_THINKING|>": {
+    "count": 2,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|END_TOOL_RESULT|>": {
+    "count": 2,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|START_ACTION|>": {
+    "count": 2,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|START_THINKING|>": {
+    "count": 2,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|START_TOOL_RESULT|>": {
+    "count": 2,
+    "files": [
+      "Cohere2MoE.jinja",
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|audio|>": {
+    "count": 2,
+    "files": [
+      "google-gemma-4-31B-it-interleaved.jinja",
+      "google-gemma-4-31B-it.jinja"
+    ]
+  },
+  "<|content|>": {
+    "count": 2,
+    "files": [
+      "unsloth-Apriel-1.5.jinja",
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|image|>": {
+    "count": 2,
+    "files": [
+      "google-gemma-4-31B-it-interleaved.jinja",
+      "google-gemma-4-31B-it.jinja"
+    ]
+  },
+  "<|message_sep|>": {
+    "count": 2,
+    "files": [
+      "GigaChat3-10B-A1.8B.jinja",
+      "GigaChat3.1-10B-A1.8B.jinja"
+    ]
+  },
+  "<|message|>": {
+    "count": 2,
+    "files": [
+      "muse-glimmer.jinja",
+      "openai-gpt-oss-120b.jinja"
+    ]
+  },
+  "<|observation|>": {
+    "count": 2,
+    "files": [
+      "GLM-4.6.jinja",
+      "GLM-4.7-Flash.jinja"
+    ]
+  },
+  "<|role_sep|>": {
+    "count": 2,
+    "files": [
+      "GigaChat3-10B-A1.8B.jinja",
+      "GigaChat3.1-10B-A1.8B.jinja"
+    ]
+  },
+  "<|start|>": {
+    "count": 2,
+    "files": [
+      "muse-glimmer.jinja",
+      "openai-gpt-oss-120b.jinja"
+    ]
+  },
+  "[SYSTEM_PROMPT]": {
+    "count": 2,
+    "files": [
+      "Mistral-Small-3.2-24B-Instruct-2506.jinja",
+      "unsloth-mistral-Devstral-Small-2507.jinja"
+    ]
+  },
+  "[TOOL_CALLS]": {
+    "count": 2,
+    "files": [
+      "Mistral-Small-3.2-24B-Instruct-2506.jinja",
+      "unsloth-mistral-Devstral-Small-2507.jinja"
+    ]
+  },
+  "[TOOL_RESULTS]": {
+    "count": 2,
+    "files": [
+      "Mistral-Small-3.2-24B-Instruct-2506.jinja",
+      "unsloth-mistral-Devstral-Small-2507.jinja"
+    ]
+  },
+  "]~!b[": {
+    "count": 2,
+    "files": [
+      "MiniMax-M2.jinja",
+      "MiniMax-M3.jinja"
+    ]
+  },
+  "</atem:function_calls>": {
+    "count": 1,
+    "files": [
+      "muse-glimmer.jinja"
+    ]
+  },
+  "</function>": {
+    "count": 1,
+    "files": [
+      "openbmb-MiniCPM5-1B.jinja"
+    ]
+  },
+  "</minimax:tool_call>": {
+    "count": 1,
+    "files": [
+      "MiniMax-M2.jinja"
+    ]
+  },
+  "</mm:think>": {
+    "count": 1,
+    "files": [
+      "MiniMax-M3.jinja"
+    ]
+  },
+  "</seed:think>": {
+    "count": 1,
+    "files": [
+      "ByteDance-Seed-OSS.jinja"
+    ]
+  },
+  "</seed:tool_call>": {
+    "count": 1,
+    "files": [
+      "ByteDance-Seed-OSS.jinja"
+    ]
+  },
+  "</thinking>": {
+    "count": 1,
+    "files": [
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "</tool_output>": {
+    "count": 1,
+    "files": [
+      "muse-glimmer.jinja"
+    ]
+  },
+  "</tool_result>": {
+    "count": 1,
+    "files": [
+      "deepseek-ai-DeepSeek-V4.jinja"
+    ]
+  },
+  "<atem:function_calls>": {
+    "count": 1,
+    "files": [
+      "muse-glimmer.jinja"
+    ]
+  },
+  "<function-name-1>": {
+    "count": 1,
+    "files": [
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<function-name-2>": {
+    "count": 1,
+    "files": [
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<minimax:tool_call>": {
+    "count": 1,
+    "files": [
+      "MiniMax-M2.jinja"
+    ]
+  },
+  "<mm:think>": {
+    "count": 1,
+    "files": [
+      "MiniMax-M3.jinja"
+    ]
+  },
+  "<seed:think>": {
+    "count": 1,
+    "files": [
+      "ByteDance-Seed-OSS.jinja"
+    ]
+  },
+  "<seed:tool_call>": {
+    "count": 1,
+    "files": [
+      "ByteDance-Seed-OSS.jinja"
+    ]
+  },
+  "<sep>": {
+    "count": 1,
+    "files": [
+      "Reka-Edge.jinja"
+    ]
+  },
+  "<tool-name>": {
+    "count": 1,
+    "files": [
+      "MiniMax-M1.jinja"
+    ]
+  },
+  "<tool>": {
+    "count": 1,
+    "files": [
+      "muse-glimmer.jinja"
+    ]
+  },
+  "<tool_def_sep>": {
+    "count": 1,
+    "files": [
+      "openbmb-MiniCPM5-1B.jinja"
+    ]
+  },
+  "<tool_result>": {
+    "count": 1,
+    "files": [
+      "deepseek-ai-DeepSeek-V4.jinja"
+    ]
+  },
+  "<tool_sep>": {
+    "count": 1,
+    "files": [
+      "openbmb-MiniCPM5-1B.jinja"
+    ]
+  },
+  "<|Bot|>": {
+    "count": 1,
+    "files": [
+      "Spark2.5.jinja"
+    ]
+  },
+  "<|END_RESPONSE|>": {
+    "count": 1,
+    "files": [
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|END_TEXT|>": {
+    "count": 1,
+    "files": [
+      "Cohere2MoE.jinja"
+    ]
+  },
+  "<|IMG_PATCH|>": {
+    "count": 1,
+    "files": [
+      "Cohere2MoE.jinja"
+    ]
+  },
+  "<|NONE|>": {
+    "count": 1,
+    "files": [
+      "meetkai-functionary-medium-v3.2.jinja"
+    ]
+  },
+  "<|START_RESPONSE|>": {
+    "count": 1,
+    "files": [
+      "CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja"
+    ]
+  },
+  "<|START_TEXT|>": {
+    "count": 1,
+    "files": [
+      "Cohere2MoE.jinja"
+    ]
+  },
+  "<|System|>": {
+    "count": 1,
+    "files": [
+      "Spark2.5.jinja"
+    ]
+  },
+  "<|Tool|>": {
+    "count": 1,
+    "files": [
+      "Spark2.5.jinja"
+    ]
+  },
+  "<|User|>": {
+    "count": 1,
+    "files": [
+      "Spark2.5.jinja"
+    ]
+  },
+  "<|assistant_end|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|assistant_start|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|begin_assistant|>": {
+    "count": 1,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja"
+    ]
+  },
+  "<|begin_content|>": {
+    "count": 1,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja"
+    ]
+  },
+  "<|begin_system|>": {
+    "count": 1,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja"
+    ]
+  },
+  "<|begin_tool_result|>": {
+    "count": 1,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja"
+    ]
+  },
+  "<|begin_user|>": {
+    "count": 1,
+    "files": [
+      "Apriel-1.6-15b-Thinker-fixed.jinja"
+    ]
+  },
+  "<|begin|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|calls|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|call|>": {
+    "count": 1,
+    "files": [
+      "openai-gpt-oss-120b.jinja"
+    ]
+  },
+  "<|channel|>": {
+    "count": 1,
+    "files": [
+      "openai-gpt-oss-120b.jinja"
+    ]
+  },
+  "<|close|>": {
+    "count": 1,
+    "files": [
+      "Kimi-K3.jinja"
+    ]
+  },
+  "<|developer_end|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|developer_start|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|end_of_cite|>": {
+    "count": 1,
+    "files": [
+      "ibm-granite-granite-3.3-2B-Instruct.jinja"
+    ]
+  },
+  "<|end_of_msg|>": {
+    "count": 1,
+    "files": [
+      "Kimi-K3.jinja"
+    ]
+  },
+  "<|eom|>": {
+    "count": 1,
+    "files": [
+      "muse-glimmer.jinja"
+    ]
+  },
+  "<|eot|>": {
+    "count": 1,
+    "files": [
+      "muse-glimmer.jinja"
+    ]
+  },
+  "<|final|>": {
+    "count": 1,
+    "files": [
+      "openai-gpt-oss-120b.jinja"
+    ]
+  },
+  "<|function_call|>": {
+    "count": 1,
+    "files": [
+      "GigaChat3.1-10B-A1.8B.jinja"
+    ]
+  },
+  "<|function_list|>": {
+    "count": 1,
+    "files": [
+      "Bielik-11B-v3.0-Instruct.jinja"
+    ]
+  },
+  "<|function_output|>": {
+    "count": 1,
+    "files": [
+      "Bielik-11B-v3.0-Instruct.jinja"
+    ]
+  },
+  "<|image_pad|>": {
+    "count": 1,
+    "files": [
+      "Qwen3.5-4B.jinja"
+    ]
+  },
+  "<|inner_prefix|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|inner_suffix|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|kimi_image_placeholder|>": {
+    "count": 1,
+    "files": [
+      "Kimi-K3.jinja"
+    ]
+  },
+  "<|open|>": {
+    "count": 1,
+    "files": [
+      "Kimi-K3.jinja"
+    ]
+  },
+  "<|patch|>": {
+    "count": 1,
+    "files": [
+      "muse-glimmer.jinja"
+    ]
+  },
+  "<|return|>": {
+    "count": 1,
+    "files": [
+      "openai-gpt-oss-120b.jinja"
+    ]
+  },
+  "<|role_end|>": {
+    "count": 1,
+    "files": [
+      "inclusionai-ling-3.0-flash.jinja"
+    ]
+  },
+  "<|sep|>": {
+    "count": 1,
+    "files": [
+      "Kimi-K3.jinja"
+    ]
+  },
+  "<|start_of_cite|>": {
+    "count": 1,
+    "files": [
+      "ibm-granite-granite-3.3-2B-Instruct.jinja"
+    ]
+  },
+  "<|system_end|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|system_start|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|tool:begin|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool:end|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_call:args|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_call:begin|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_call:end|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_call:name|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_call_start|>": {
+    "count": 1,
+    "files": [
+      "LFM2.5-8B-A1B.jinja"
+    ]
+  },
+  "<|tool_calls|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_call|>": {
+    "count": 1,
+    "files": [
+      "ibm-granite-granite-3.3-2B-Instruct.jinja"
+    ]
+  },
+  "<|tool_list_end|>": {
+    "count": 1,
+    "files": [
+      "LFM2-8B-A1B.jinja"
+    ]
+  },
+  "<|tool_list_start|>": {
+    "count": 1,
+    "files": [
+      "LFM2-8B-A1B.jinja"
+    ]
+  },
+  "<|tool_response:begin|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_response:end|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_response:id|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_response:name|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_response:result|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_response_end|>": {
+    "count": 1,
+    "files": [
+      "LFM2-8B-A1B.jinja"
+    ]
+  },
+  "<|tool_response_start|>": {
+    "count": 1,
+    "files": [
+      "LFM2-8B-A1B.jinja"
+    ]
+  },
+  "<|tool_response|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tool_result|>": {
+    "count": 1,
+    "files": [
+      "unsloth-Apriel-1.5.jinja"
+    ]
+  },
+  "<|tools:begin|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tools:end|>": {
+    "count": 1,
+    "files": [
+      "upstage-Solar-Open-100B.jinja"
+    ]
+  },
+  "<|tools_prefix|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|tools_suffix|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|user_end|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|user_start|>": {
+    "count": 1,
+    "files": [
+      "Apertus-8B-Instruct.jinja"
+    ]
+  },
+  "<|video_pad|>": {
+    "count": 1,
+    "files": [
+      "Qwen3.5-4B.jinja"
+    ]
+  },
+  "<|vision_end|>": {
+    "count": 1,
+    "files": [
+      "Qwen3.5-4B.jinja"
+    ]
+  },
+  "<|vision_start|>": {
+    "count": 1,
+    "files": [
+      "Qwen3.5-4B.jinja"
+    ]
+  },
+  "<｜start▁of▁sentence｜>": {
+    "count": 1,
+    "files": [
+      "Spark2.5.jinja"
+    ]
+  },
+  "[/SYSTEM_PROMPT]": {
+    "count": 1,
+    "files": [
+      "unsloth-mistral-Devstral-Small-2507.jinja"
+    ]
+  },
+  "[/TOOL_RESULTS]": {
+    "count": 1,
+    "files": [
+      "unsloth-mistral-Devstral-Small-2507.jinja"
+    ]
+  },
+  "[ARGS]": {
+    "count": 1,
+    "files": [
+      "unsloth-mistral-Devstral-Small-2507.jinja"
+    ]
+  },
+  "[AVAILABLE_TOOLS]": {
+    "count": 1,
+    "files": [
+      "Mistral-Small-3.2-24B-Instruct-2506.jinja"
+    ]
+  },
+  "[CALL_ID]": {
+    "count": 1,
+    "files": [
+      "Mistral-Small-3.2-24B-Instruct-2506.jinja"
+    ]
+  },
+  "[TOOL_CONTENT]": {
+    "count": 1,
+    "files": [
+      "Mistral-Small-3.2-24B-Instruct-2506.jinja"
+    ]
+  },
+  "]~b]": {
+    "count": 1,
+    "files": [
+      "MiniMax-M3.jinja"
+    ]
+  },
+  "]~b]ai": {
+    "count": 1,
+    "files": [
+      "MiniMax-M2.jinja"
+    ]
+  },
+  "]~b]system": {
+    "count": 1,
+    "files": [
+      "MiniMax-M2.jinja"
+    ]
+  },
+  "]~b]tool": {
+    "count": 1,
+    "files": [
+      "MiniMax-M2.jinja"
+    ]
+  },
+  "]~b]user": {
+    "count": 1,
+    "files": [
+      "MiniMax-M2.jinja"
+    ]
+  }
+}

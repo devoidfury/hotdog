@@ -2,6 +2,8 @@ telemetry = false
 
 [test]
 preload = ["./tests/setup.ts", "./tests/dom-helper/index.ts"]
+# Eval fixtures intentionally ship broken/bait test files (e.g. kielbasa-2-008 conflicted repo)
+pathIgnorePatterns = ["evals/series/**"]
 coveragePathIgnorePatterns = [
     "**/*.test.ts",
     "tests/**",

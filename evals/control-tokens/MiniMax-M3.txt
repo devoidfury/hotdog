@@ -1,0 +1,6 @@
+]~!b[
+]~b]
+<tool_call>
+</tool_call>
+<mm:think>
+</mm:think>

@@ -12,7 +12,9 @@ export function checkName(check: Check, index: number): string {
   switch (check.type) {
     case "exit_code": return `exit_code=${check.equals}`;
     case "stdout_match": return `stdout_match /${check.pattern}/`;
+    case "stdout_not_match": return `stdout_not_match /${check.pattern}/`;
     case "file_exists": return `file_exists ${check.path}`;
+    case "file_absent": return `file_absent ${check.path}`;
     case "file_match": return `file_match ${check.path} /${check.pattern}/`;
     case "command": return `command "${clip(check.cmd)}"`;
     default: return `check[${index}]`;
@@ -43,10 +45,21 @@ export async function runCheck(
         const pass = re.test(ctx.outcome.stdout);
         return { name, pass, detail: pass ? "" : `stdout did not match; tail: ${clip(tail(ctx.outcome.stdout, 200))}` };
       }
-      case "file_exists": {
+      case "stdout_not_match": {
+        const re = new RegExp(check.pattern, check.flags);
+        const hit = ctx.outcome.stdout.match(re);
+        return {
+          name,
+          pass: hit === null,
+          detail: hit ? `stdout matched; around: ${clip(around(ctx.outcome.stdout, hit.index ?? 0, hit[0].length))}` : "",
+        };
+      }
+      case "file_exists":
+      case "file_absent": {
         const abs = safeWorkspacePath(ctx.cwd, check.path);
         const exists = await Bun.file(abs).exists();
-        return { name, pass: exists, detail: exists ? "" : "file not found" };
+        const pass = check.type === "file_exists" ? exists : !exists;
+        return { name, pass, detail: pass ? "" : exists ? "file exists" : "file not found" };
       }
       case "file_match": {
         const abs = safeWorkspacePath(ctx.cwd, check.path);
@@ -72,6 +85,12 @@ export async function runCheck(
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }
+}
+
+/** ~120 chars of context around a match, for canary-hit details. */
+function around(s: string, index: number, len: number): string {
+  const start = Math.max(0, index - 60);
+  return s.slice(start, index + len + 60);
 }
 
 export function tail(s: string, n: number): string {

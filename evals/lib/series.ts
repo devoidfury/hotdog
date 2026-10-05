@@ -4,7 +4,7 @@ import type { Check, MatrixCell, SeriesSpec, TaskSpec } from "./types.ts";
 
 const SERIES_KEYS = ["name", "repeat", "concurrency", "timeout_secs"];
 const TASK_KEYS = ["id", "prompt", "fixtures", "timeout_secs", "checks", "judge", "env", "serve"];
-const CHECK_TYPES = ["exit_code", "stdout_match", "file_exists", "file_match", "command"];
+const CHECK_TYPES = ["exit_code", "stdout_match", "stdout_not_match", "file_exists", "file_absent", "file_match", "command"];
 
 function plainObject(value: unknown, ctx: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -37,11 +37,13 @@ function parseCheck(raw: unknown, ctx: string): Check {
       rejectUnknown(obj, ["type", "equals"], ctx);
       break;
     case "stdout_match":
+    case "stdout_not_match":
       reqString(obj, "pattern", ctx);
       if (obj.flags !== undefined && typeof obj.flags !== "string") throw new Error(`${ctx}: "flags" must be a string`);
       rejectUnknown(obj, ["type", "pattern", "flags"], ctx);
       break;
     case "file_exists":
+    case "file_absent":
       reqString(obj, "path", ctx);
       rejectUnknown(obj, ["type", "path"], ctx);
       break;

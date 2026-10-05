@@ -1,0 +1,8 @@
+<|im_start|>
+<|function_list|>
+<|function_output|>
+<|im_end|>
+<tool_call>
+</tool_call>
+<think>
+</think>

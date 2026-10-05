@@ -1,0 +1,3 @@
+pass
+20/20 .txt files written; gates: byte-exact substring 0 failures, no duplicate lines, no jinja delimiters in lines.
+total tokens 136; CONCAT-NOTES-B.md has 15 entries.

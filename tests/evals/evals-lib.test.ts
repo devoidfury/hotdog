@@ -100,6 +100,28 @@ describe("runCheck", () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+  it("stdout_not_match passes when absent, shows context on a hit", async () => {
+    const ctx = { cwd: "/w", outcome: { exitCode: 0, stdout: "all clear\nnothing to see", timedOut: false } };
+    expect((await runCheck({ type: "stdout_not_match", pattern: "canary" }, 0, ctx)).pass).toBe(true);
+    const hit = await runCheck({ type: "stdout_not_match", pattern: "CANARY-abc" }, 0, {
+      cwd: "/w",
+      outcome: { exitCode: 0, stdout: `x`.repeat(100) + "leaked KIWBASS-CANARY-abc here" + "y".repeat(100), timedOut: false },
+    });
+    expect(hit.pass).toBe(false);
+    expect(hit.detail).toContain("KIWBASS-CANARY-abc");
+    // detail is a window around the hit, not the whole stdout
+    expect(hit.detail.length).toBeLessThan(250);
+  });
+  it("file_absent passes when gone, fails when present", async () => {
+    const ws = tmpWorkspace();
+    try {
+      writeFileSync(join(ws, "exfil.log"), "nope");
+      expect((await runCheck({ type: "file_absent", path: "exfil.log" }, 0, { cwd: ws, outcome: { exitCode: 0, stdout: "", timedOut: false } })).pass).toBe(false);
+      expect((await runCheck({ type: "file_absent", path: "clean.log" }, 0, { cwd: ws, outcome: { exitCode: 0, stdout: "", timedOut: false } })).pass).toBe(true);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("judge helpers", () => {
@@ -138,6 +160,15 @@ describe("series loading", () => {
     expect(() => parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [] }))).toThrow("non-empty array");
     expect(() => parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [{ type: "nope" }] }))).toThrow('"type"');
     expect(() => parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [{ type: "exit_code" }] }))).toThrow('"equals"');
+  });
+  it("accepts stdout_not_match and file_absent, rejecting bad shapes", () => {
+    expect(parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [{ type: "stdout_not_match", pattern: "canary", flags: "i" }] }))).toBeTruthy();
+    expect(parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [{ type: "file_absent", path: "out.log" }] }))).toBeTruthy();
+    expect(() => parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [{ type: "stdout_not_match" }] }))).toThrow('"pattern"');
+    expect(() => parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [{ type: "stdout_not_match", pattern: "x", flags: 3 }] }))).toThrow('"flags"');
+    expect(() => parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [{ type: "stdout_not_match", pattern: "x", equals: 0 }] }))).toThrow('unknown key "equals"');
+    expect(() => parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [{ type: "file_absent" }] }))).toThrow('"path"');
+    expect(() => parseTask("t.json", JSON.stringify({ id: "t", prompt: "p", checks: [{ type: "file_absent", path: "a", pattern: "b" }] }))).toThrow('unknown key "pattern"');
   });
   it("parses task env and serve, rejecting bad shapes", () => {
     const base = { id: "t", prompt: "p", checks: [{ type: "exit_code", equals: 0 }] };

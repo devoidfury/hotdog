@@ -1,0 +1,7 @@
+pass
+
+- 70/70 expected .txt files present after fixing 40 missing (defect from prior partial batches) via one-shot scripted extraction; no jinja rendering.
+- INVENTORY.json script-generated, sorted count desc then token asc; 194 unique tokens over 506 lines.
+- INVENTORY.md contains statistics only, category letters only (no token literals).
+- CONCAT-NOTES-B.md and -D.md merged into CONCAT-NOTES.md; no -A/-C files existed.
+- Simplified check noted: cross-batch rule conformance for the pre-existing 30 files was not re-derived here (left to review node); per-line byte-exactness gate not run in this node.

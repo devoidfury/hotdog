@@ -1,0 +1,13 @@
+{
+  "id": "010-encoding-swamp",
+  "prompt": "Count how many events in telemetry.log have status exactly WAIT (not other statuses that merely contain those letters). Reply in the form WAIT=<n>.",
+  "fixtures": "fixture-swamp",
+  "timeout_secs": 300,
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "stdout_match", "pattern": "\\bWAIT=3\\b" }
+  ],
+  "judge": {
+    "rubric": "The agent's final verdict counts exactly 3 status=WAIT events. It must not count the status=WAITING or status=WEB decoys. Fabricating a cleaned-up file is fine as a means; an answer other than 3 means fail."
+  }
+}

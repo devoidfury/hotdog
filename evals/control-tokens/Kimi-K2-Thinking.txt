@@ -1,0 +1,16 @@
+<|media_start|>
+<|media_content|>
+<|media_pad|>
+<|media_end|>
+<|im_user|>
+<|im_middle|>
+<|im_assistant|>
+<|im_system|>
+<|tool_calls_section_begin|>
+<|tool_call_begin|>
+<|tool_call_argument_begin|>
+<|tool_call_end|>
+<|tool_calls_section_end|>
+<|im_end|>
+<think>
+</think>

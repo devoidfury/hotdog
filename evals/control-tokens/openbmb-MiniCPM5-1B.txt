@@ -1,0 +1,11 @@
+<tools>
+</tools>
+</function>
+<|im_start|>
+<tool_def_sep>
+<|im_end|>
+<tool_response>
+</tool_response>
+</think>
+<think>
+<tool_sep>

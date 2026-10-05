@@ -1,0 +1,9 @@
+〈|EOS|〉
+<available_tools>
+</available_tools>
+<think>
+</think>
+<tool_call>
+</tool_call>
+<tool_response>
+</tool_response>

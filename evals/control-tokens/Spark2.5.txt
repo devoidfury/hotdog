@@ -1,0 +1,10 @@
+<｜start▁of▁sentence｜>
+<|System|>
+<｜end▁of▁sentence｜>
+<|User|>
+<|Bot|>
+<think>
+</think>
+<tool_call>
+</tool_call>
+<|Tool|>

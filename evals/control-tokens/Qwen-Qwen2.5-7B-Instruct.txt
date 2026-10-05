@@ -1,0 +1,4 @@
+<|im_start|>
+<tool_call>
+</tool_call>
+<|im_end|>

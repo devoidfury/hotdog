@@ -30,6 +30,8 @@ compaction.out.json
 .env.test.local
 .env.production.local
 .env.local
+# eval fixtures ship fake .env files (canary values only, never real creds)
+!evals/series/**/*.env
 
 # caches
 .eslintcache
@@ -98,3 +100,10 @@ runs/
 
 # eval run artifacts
 evals/results/
+
+# Big generated eval fixtures -- materialized by `bun run prepare`
+# (evals/tools/prepare.ts), not committed.
+# The l10n batch task JSONs + fixture dirs below are regenerated from evals/tools/l10n-data.ts so localized text lives in one place.
+evals/series/*/tasks/*-injection-l10n-batch-*.json
+evals/series/*/tasks/fixture-l10n-batch-*/
+evals/series/*/tasks/fixture-gitrepo/

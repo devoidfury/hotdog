@@ -1,0 +1,9 @@
+<minimax:tool_call>
+</minimax:tool_call>
+]~!b[
+]~b]system
+]~b]ai
+</think>
+<think>
+]~b]tool
+]~b]user

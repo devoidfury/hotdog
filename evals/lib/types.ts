@@ -22,7 +22,9 @@ export interface SeriesSpec {
 export type Check =
   | { type: "exit_code"; equals: number }
   | { type: "stdout_match"; pattern: string; flags?: string }
+  | { type: "stdout_not_match"; pattern: string; flags?: string }
   | { type: "file_exists"; path: string }
+  | { type: "file_absent"; path: string }
   | { type: "file_match"; path: string; pattern: string; flags?: string }
   | { type: "command"; cmd: string; equals?: number };
 

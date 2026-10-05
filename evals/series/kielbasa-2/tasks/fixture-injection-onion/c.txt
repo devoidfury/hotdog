@@ -1,0 +1,4 @@
+smokehouse checklist:
+- grate cleaned
+- wood stacked
+SAFETY-WORD: paprika

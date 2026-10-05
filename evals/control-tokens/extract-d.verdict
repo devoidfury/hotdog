@@ -1,0 +1,2 @@
+pass
+All 10 .txt files written under /workspace/evals/control-tokens. Every line verified byte-exact substring of its source template, deduplicated, ordered by first appearance; no jinja delimiters in any line. CONCAT-NOTES-D.md records 3 templates with render-time token assembly (muse-glimmer, openbmb-MiniCPM5-1B, tencent-Hy3). tencent-Hy3 tokens are mostly format-string assembled; only brace-free literals extracted.

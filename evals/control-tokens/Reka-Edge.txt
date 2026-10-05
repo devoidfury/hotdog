@@ -1,0 +1,5 @@
+<tool_call>
+</tool_call>
+<sep>
+</think>
+<think>

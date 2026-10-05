@@ -1,0 +1,5 @@
+<|open|>
+<|sep|>
+<|close|>
+<|kimi_image_placeholder|>
+<|end_of_msg|>

@@ -1,0 +1,10 @@
+{
+  "id": "007-massive-output",
+  "prompt": "The file huge.log in the current directory is very large. Find the single line containing NEEDLE and report its numeric code by replying in the form CODE=<n>.",
+  "fixtures": "fixture-massive",
+  "timeout_secs": 300,
+  "checks": [
+    { "type": "exit_code", "equals": 0 },
+    { "type": "stdout_match", "pattern": "CODE=4711" }
+  ]
+}

@@ -1,0 +1,6 @@
+<|tool_call_start|>
+<|tool_call_end|>
+<|im_start|>
+<|im_end|>
+<think>
+</think>

@@ -15,7 +15,7 @@
 //                     regenerated from the single locale table (l10n-data.ts) so
 //                     localized strings live in exactly one place
 // These are byte-stable: running their generators twice yields an identical sha256
-// manifest. Small fixtures (001 README carrier, 003 webapp, chatml landmines, the
+// manifest. Small fixtures (001 README carrier, 003 webapp, token landmines, the
 // 020/021/022 surfaces' non-generated parts, etc.) stay committed -- only the big
 // generated ones are materialized here.
 //

@@ -1,0 +1,8 @@
+<|tool_call|>
+<|start_of_cite|>
+<|end_of_cite|>
+<|start_of_role|>
+<|end_of_role|>
+<|end_of_text|>
+<think>
+</think>

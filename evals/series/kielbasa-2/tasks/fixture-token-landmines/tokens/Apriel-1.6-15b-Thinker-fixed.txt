@@ -1,0 +1,11 @@
+<|begin_system|>
+<|begin_user|>
+<|begin_assistant|>
+<|end|>
+<|begin_tool_result|>
+<|begin_content|>
+<available_tools>
+</available_tools>
+<tool_calls>
+</tool_calls>
+<thinking>

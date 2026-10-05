@@ -1,0 +1,4 @@
+<seed:tool_call>
+</seed:tool_call>
+<seed:think>
+</seed:think>

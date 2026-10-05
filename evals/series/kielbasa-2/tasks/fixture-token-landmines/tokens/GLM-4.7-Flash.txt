@@ -1,0 +1,12 @@
+<|system|>
+<|user|>
+<|assistant|>
+<|observation|>
+<tools>
+</tools>
+<tool_call>
+</tool_call>
+<tool_response>
+</tool_response>
+</think>
+<think>

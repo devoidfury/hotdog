@@ -43,6 +43,8 @@ export interface TaskSpec {
   /** Dir (relative to the task file) copied into the run workspace before the agent starts. */
   fixtures?: string;
   timeout_secs?: number;
+  /** Overrides the series repeat for this task (--repeat still overrides both). */
+  repeat?: number;
   checks: Check[];
   /** Optional LLM judge on top of the deterministic checks. */
   judge?: { rubric: string };

@@ -186,6 +186,25 @@ describe("series loading", () => {
     expect(() => parseTask("t.json", JSON.stringify({ ...base, serve: { cmd: "x", ready_url: "y", port: 8 } }))).toThrow('unknown key "port"');
     expect(() => parseTask("t.json", JSON.stringify({ ...base, serve: { cmd: "x", ready_url: "y", ready_timeout_secs: 0 } }))).toThrow("ready_timeout_secs");
   });
+  it("per-task repeat overrides series, --repeat overrides both", () => {
+    const base = { id: "t", prompt: "p", checks: [{ type: "exit_code", equals: 0 }] };
+    const t1 = parseTask("t.json", JSON.stringify(base));
+    const t2 = parseTask("t.json", JSON.stringify({ ...base, id: "t2", repeat: 3 }));
+    expect(t1.repeat).toBeUndefined();
+    expect(t2.repeat).toBe(3);
+    expect(() => parseTask("t.json", JSON.stringify({ ...base, repeat: 0 }))).toThrow('"repeat"');
+    expect(() => parseTask("t.json", JSON.stringify({ ...base, repeat: "3" }))).toThrow('"repeat"');
+    const loaded = {
+      series: { name: "s", repeat: 2, concurrency: 1, timeout_secs: 60 },
+      tasks: [t1, t2],
+      tasksDir: "d",
+      seriesDir: "d",
+    };
+    // t1 uses the series repeat (2), t2 its own (3).
+    expect(buildMatrix(loaded, { harnesses: ["h"], models: ["m"] }).length).toBe(5);
+    // --repeat wins over both.
+    expect(buildMatrix(loaded, { harnesses: ["h"], models: ["m"], repeat: 7 }).length).toBe(14);
+  });
   it("loads the shipped kielbasa-1 and builds the matrix from caller-supplied harness/model", () => {
     const loaded = loadSeries(join(import.meta.dir, "..", "..", "evals", "series", "kielbasa-1"));
     expect(loaded.series.name).toBe("kielbasa-1");

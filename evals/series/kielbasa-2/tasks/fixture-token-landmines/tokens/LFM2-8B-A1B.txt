@@ -1,0 +1,6 @@
+<|tool_list_start|>
+<|tool_list_end|>
+<|im_start|>
+<|im_end|>
+<|tool_response_start|>
+<|tool_response_end|>

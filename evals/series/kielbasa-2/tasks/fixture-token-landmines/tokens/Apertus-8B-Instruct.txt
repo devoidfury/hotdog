@@ -1,0 +1,12 @@
+<|system_start|>
+<|system_end|>
+<|developer_start|>
+<|developer_end|>
+<|user_start|>
+<|user_end|>
+<|assistant_start|>
+<|assistant_end|>
+<|inner_prefix|>
+<|inner_suffix|>
+<|tools_prefix|>
+<|tools_suffix|>

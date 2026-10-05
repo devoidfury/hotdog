@@ -1,0 +1,10 @@
+<|vision_start|>
+<|image_pad|>
+<|vision_end|>
+<|video_pad|>
+<|im_start|>
+<tool_call>
+</tool_call>
+<|im_end|>
+</think>
+<think>

@@ -1,0 +1,7 @@
+<tool_result>
+</tool_result>
+<think>
+</think>
+<｜User｜>
+<｜Assistant｜>
+<｜end▁of▁sentence｜>

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Check, MatrixCell, SeriesSpec, TaskSpec } from "./types.ts";
 
 const SERIES_KEYS = ["name", "repeat", "concurrency", "timeout_secs"];
-const TASK_KEYS = ["id", "prompt", "fixtures", "timeout_secs", "checks", "judge", "env", "serve"];
+const TASK_KEYS = ["id", "prompt", "fixtures", "timeout_secs", "repeat", "checks", "judge", "env", "serve"];
 const CHECK_TYPES = ["exit_code", "stdout_match", "stdout_not_match", "file_exists", "file_absent", "file_match", "command"];
 
 function plainObject(value: unknown, ctx: string): Record<string, unknown> {
@@ -75,6 +75,7 @@ export function parseTask(path: string, text: string): TaskSpec {
   const prompt = reqString(obj, "prompt", path);
   if (obj.fixtures !== undefined && typeof obj.fixtures !== "string") throw new Error(`${path}: "fixtures" must be a string`);
   if (obj.timeout_secs !== undefined && typeof obj.timeout_secs !== "number") throw new Error(`${path}: "timeout_secs" must be a number`);
+  if (obj.repeat !== undefined && (typeof obj.repeat !== "number" || obj.repeat < 1)) throw new Error(`${path}: "repeat" must be a number >= 1`);
   if (!Array.isArray(obj.checks) || obj.checks.length === 0) throw new Error(`${path}: "checks" must be a non-empty array`);
   const checks = obj.checks.map((c, i) => parseCheck(c, `${path} checks[${i}]`));
   const judge = obj.judge;
@@ -105,6 +106,7 @@ export function parseTask(path: string, text: string): TaskSpec {
     prompt,
     ...(typeof obj.fixtures === "string" ? { fixtures: obj.fixtures } : {}),
     ...(typeof obj.timeout_secs === "number" ? { timeout_secs: obj.timeout_secs } : {}),
+    ...(typeof obj.repeat === "number" ? { repeat: obj.repeat } : {}),
     checks,
     ...(judge !== undefined ? { judge: { rubric: (judge as Record<string, unknown>).rubric as string } } : {}),
     ...(env !== undefined ? { env: env as Record<string, string> } : {}),
@@ -201,9 +203,11 @@ export function buildMatrix(
     }
   }
   if (wantedTasks.length === 0) throw new Error("no tasks left after filtering");
-  const repeat = filters.repeat ?? series.repeat;
+  const repeatFlag = filters.repeat;
   const cells: MatrixCell[] = [];
   for (const task of wantedTasks) {
+    // Explicit --repeat wins; else the task's own repeat; else the series default.
+    const repeat = repeatFlag ?? task.repeat ?? series.repeat;
     for (const harnessId of harnesses) {
       for (const model of models) {
         for (let i = 1; i <= repeat; i++) {

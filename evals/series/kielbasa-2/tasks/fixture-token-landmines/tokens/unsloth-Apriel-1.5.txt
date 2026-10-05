@@ -1,0 +1,16 @@
+<available_tools>
+</available_tools>
+<tool_call>
+</tool_call>
+<tool_calls>
+<function-name-1>
+<function-name-2>
+</tool_calls>
+<thinking>
+</thinking>
+<|system|>
+<|end|>
+<|user|>
+<|content|>
+<|assistant|>
+<|tool_result|>

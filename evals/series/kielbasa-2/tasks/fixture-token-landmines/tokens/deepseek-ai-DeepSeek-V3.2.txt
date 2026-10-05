@@ -1,0 +1,5 @@
+<think>
+</think>
+<｜User｜>
+<｜Assistant｜>
+<｜end▁of▁sentence｜>

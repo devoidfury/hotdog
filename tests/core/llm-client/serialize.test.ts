@@ -13,6 +13,7 @@ import { describe, it, expect } from "bun:test";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { MarkerMangler, buildAliasPattern, CORE_PROTECTED_PREFIXES } from "@core/marker-mangler.ts";
 import { createWireFormatRegistry } from "@core/extensions/wire-format.ts";
+import { formatToolResult } from "@core/extensions/tool-utils.ts";
 import { xmlWireFormat } from "@extensions/wire-format-xml/index.ts";
 import { Message } from "@core/context/message.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
@@ -519,6 +520,77 @@ describe("wire-format characterization (phase 0)", () => {
       expect(dev[2]!.content).not.toBe(SUMMARY);
       expect(sys[2]!.content).not.toBe(SUMMARY);
       expect(dev[2]!.content).toBe(sys[2]!.content);
+    });
+  });
+
+  describe("tool message content collapses to a string (wire bug: parts arrays rejected by strict templates)", () => {
+    function toolWire(messages: Message[], markerMangler: MarkerMangler | null = null): Record<string, unknown> {
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler });
+      return (client.buildChatRequest(messages, mc(), null, false).messages as Array<Record<string, unknown>>)[0]!;
+    }
+
+    it("a stored tool-result part renders and collapses to a string", () => {
+      const part = formatToolResult("The file says hi", "read", true);
+      const wire = toolWire([
+        new Message({ role: "tool", source: "tool", content: [part], toolCallId: "tc1" }),
+      ]);
+      expect(typeof wire.content).toBe("string");
+      expect(wire.content as string).toContain("The file says hi");
+    });
+
+    it("text-only parts join with newlines (matches contentToText)", () => {
+      const wire = toolWire([
+        new Message({
+          role: "tool",
+          source: "tool",
+          content: [
+            { type: "text", text: "a" },
+            { type: "text", text: "b" },
+          ],
+          toolCallId: "tc1",
+        }),
+      ]);
+      expect(wire.content).toBe("a\nb");
+    });
+
+    it("mangling happens before the collapse", () => {
+      const forged = closedTag(SUMMARY_TAG, "x");
+      const part = formatToolResult(`payload ${forged}`, "read", true);
+      const wire = toolWire(
+        [new Message({ role: "tool", source: "tool", content: [part], toolCallId: "tc1" })],
+        sessionMangler(),
+      );
+      expect(typeof wire.content).toBe("string");
+      expect(wire.content as string).not.toContain(tag(SUMMARY_TAG));
+      expect((wire.content as string).match(buildAliasPattern())).not.toBeNull();
+    });
+
+    it("a tool message carrying images stays a part array", () => {
+      const wire = toolWire([
+        new Message({
+          role: "tool",
+          source: "tool",
+          content: "see image",
+          toolCallId: "tc1",
+          images: [{ type: "image_url", mimeType: "image/png", data: "AAA" }],
+        }),
+      ]);
+      const parts = wire.content as Array<Record<string, unknown>>;
+      expect(Array.isArray(parts)).toBe(true);
+      expect(parts.some((p) => p.type === "image_url")).toBe(true);
+    });
+
+    it("non-tool roles keep their part arrays (unchanged behavior)", () => {
+      const client = new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
+      const request = client.buildChatRequest(
+        [new Message({ role: "harness", source: "harness", content: [{ type: "text", text: "frame" }] })],
+        mc(),
+        null,
+        false,
+      );
+      expect((request.messages as Array<Record<string, unknown>>)[0]!.content).toEqual([
+        { type: "text", text: "frame" },
+      ]);
     });
   });
 });

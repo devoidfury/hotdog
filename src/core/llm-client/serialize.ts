@@ -28,6 +28,10 @@
 //   - source "user", "model", "tool" (and legacy messages with no source)
 //     are untrusted and always mangled.
 //
+// Tool messages (`role: "tool"`) additionally collapse their content to a
+// plain string once every part has become a text part -- strict chat
+// templates reject part arrays there.
+//
 // Wire messages are plain snake_case objects; field order per message is
 // pinned (role, content, reasoning_content?, tool_calls?, tool_call_id?) to
 // keep prompt-cache prefixes byte-stable. The internal `images` array is
@@ -86,6 +90,24 @@ function mangleContent(
   return content.map((part) => manglePart(part, mangler, trusted, wireFormat));
 }
 
+/**
+ * Tool messages carry a plain string `content` on the wire. Strict chat
+ * templates (llama.cpp, Ollama) interpolate tool results as raw strings and
+ * choke on part arrays; since the tool-result PART refactor the executor
+ * stores parts, so the rendered wrapper must collapse back here. Text-only
+ * arrays join with "\n" (matching contentToText's at-rest flattening);
+ * arrays with non-text parts (images) stay arrays, as everywhere else.
+ */
+function collapseToolContent(
+  content: string | Array<Record<string, unknown>>,
+): string | Array<Record<string, unknown>> {
+  if (typeof content === "string") return content;
+  if (content.every((p) => p.type === "text" && typeof p.text === "string")) {
+    return content.map((p) => p.text as string).join("\n");
+  }
+  return content;
+}
+
 function mangleToolCalls(
   toolCalls: ToolCall[] | null,
   mangler: MarkerMangler | null,
@@ -112,15 +134,14 @@ function serializeMessage(
   const trusted = msg.source === "system" || msg.source === "harness";
   const wireRole = roleMapping.wireRole(role);
 
-  const wire: WireMessage = {
-    role: wireRole,
-    content: mangleContent(
-      msg._buildContent() as string | Array<Record<string, unknown>>,
-      mangler,
-      trusted,
-      wireFormat,
-    ),
-  };
+  let content = mangleContent(
+    msg._buildContent() as string | Array<Record<string, unknown>>,
+    mangler,
+    trusted,
+    wireFormat,
+  );
+  if (msg.role === "tool") content = collapseToolContent(content);
+  const wire: WireMessage = { role: wireRole, content };
   if (msg.reasoningContent) wire.reasoning_content = msg.reasoningContent;
   const toolCalls = mangleToolCalls(msg.toolCalls, trusted ? null : mangler);
   if (toolCalls) wire.tool_calls = toolCalls;

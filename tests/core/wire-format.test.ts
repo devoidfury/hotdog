@@ -266,13 +266,10 @@ describe("renderResult shapes a part per format", () => {
 // ── end to end: a stored part, shaped by the request's format ─────────────
 
 describe("wire serialization of a tool-result part", () => {
-  /** A wrapper part is emitted as { type: "text", text }; strings pass through. */
+  /** Tool messages collapse to a plain string on the wire. */
 function textPart(content: unknown): string {
-  if (typeof content === "string") return content;
-  const parts = content as Array<{ type: string; text?: string }>;
-  expect(parts).toHaveLength(1);
-  expect(parts[0]!.type).toBe("text");
-  return parts[0]!.text!;
+  expect(typeof content).toBe("string");
+  return content as string;
 }
 
 function request(messages: Message[], clientOpts: Record<string, unknown>) {

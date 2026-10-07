@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
 import { createCommandRegistry } from "@core/extensions/registries.ts";
@@ -8,6 +8,22 @@ import { homedir, tmpdir } from "node:os";
 import { createMockCore } from "../helpers.ts";
 import { captureConsole } from "../test-helpers.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
+
+// The info handler runs a connectivity sweep through hotdogFetch, which calls
+// the global fetch. Stub it so tests never hit the network: a slow resolver
+// for the fixture hosts blows the test timeout, and the late print then leaks
+// into the next test's captureConsole window. The `down:` assertions still
+// hold -- a rejected probe is exactly the verdict they expect.
+let realFetch: typeof globalThis.fetch;
+beforeEach(() => {
+  realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error("Unable to connect. Is the computer able to access the url?");
+  }) as typeof globalThis.fetch;
+});
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
 
 // ── Shared helper to reduce boilerplate ─────────────────────────────────────
 

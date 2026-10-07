@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.3...main
+
+## [v0.11.3] - 2026-10-07
+
 - **question tool - a pending question survives a tab refresh.** A `question` blocked when the webui reconnects now re-renders its card after history instead of hanging with no UI to answer. Replay moved from the SessionManager's QUESTION-event buffer to the question bridge itself: on attach or session switch the server peeks the live pending question.
 
 - **webui - `wss://` on https pages.** The chat socket URL hardcoded `ws://`, which browsers block as mixed content on an https page.
+
+- webui - dropped the pulsing glow on the connection indicator
 
 - **evals** - added independent evals runner and a first easy series `kielbasa-1`
 
@@ -30,7 +36,7 @@
 
 - added `SECURITY.md` (security policy / reporting)
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.2...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.11.2...v0.11.3
 
 ## [v0.11.2] - 2026-09-29
 

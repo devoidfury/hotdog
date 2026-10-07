@@ -2,8 +2,8 @@
 // evals/tools/repo-check.sh. They prove gen-repo.ts builds a fixture on this
 // machine with a stable STRUCTURAL signature (git hashes embed timestamps, so
 // bytes cannot be stable), assert the fresh build's shape, and assert the
-// shipped fixture still carries the mid-merge + rerere-trap + quarantine
-// essentials. The full golden-resolution/check-suite end to end lives in
+// gen-fixtures-materialized shipped fixture (skipped when absent) still carries
+// the mid-merge + rerere-trap + quarantine essentials. The full golden-resolution/check-suite end to end lives in
 // evals/tools/repo-check.sh (dev tool, output recorded in the PR).
 //
 // No network, no model. Skips entirely when git is unavailable.
@@ -140,7 +140,13 @@ suite("008-git-mess fixture build (gen-repo.ts)", () => {
   });
 });
 
-suite("008-git-mess shipped fixture (checked-in output of gen-repo.ts)", () => {
+// Like l10n.test.ts: the shipped fixture is materialized by `bun run
+// gen-fixtures`, never committed (a nested .git object store cannot be tracked;
+// see evals/tools/prepare.ts), so a fresh clone -- CI -- has no fixture dir.
+// Skip rather than false-fail.
+const shippedSuite = existsSync(SHIPPED) ? describe : describe.skip;
+
+shippedSuite("008-git-mess shipped fixture (output of gen-repo.ts, via gen-fixtures)", () => {
   test("keeps the mid-merge + trap + quarantine shape", () => {
     expect(existsSync(SHIPPED)).toBe(true);
     expect(existsSync(join(SHIPPED, ".git", "MERGE_HEAD"))).toBe(true);

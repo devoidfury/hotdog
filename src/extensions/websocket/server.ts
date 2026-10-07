@@ -27,6 +27,8 @@ import { parseForkArg } from "@core/command-handlers.ts";
 import { completionPrefix, parseCompletionContext } from "@core/completion.ts";
 import { logger } from "@utils/logger.ts";
 import { splitFileIncludes, toolContentText } from "@utils/tool-content.ts";
+import { transcribeAudio } from "@utils/stt.ts";
+import { resolveSttTarget, type SttTarget } from "@core/config/stt.ts";
 
 interface SessionMetadata {
   profile: string;
@@ -69,6 +71,8 @@ interface SessionRegistryOptions {
   questionStrategy?: string;
   sessionTimeoutMin?: number;
   profiles?: Record<string, SwitchProfile>;
+  /** Resolved STT backend (explicit sttUrl or audio-capable registry model); advertised as sttEnabled. */
+  sttTarget?: SttTarget | null;
   /** Invoked when a session is deleted (cancels its pending questions). */
   onSessionDeleted?: (sessionId: string) => void;
 }
@@ -114,6 +118,12 @@ const PENDING_AUTH_TIMEOUT_MS = 30_000;
 // Cap for client-supplied completion input; nothing legit needs more.
 const MAX_COMPLETE_LINE = 10_000;
 
+// Ceiling on one transcribe upload, mirroring OpenAI's whisper 25MB limit.
+// Checked against the base64 string length (inflates ~4/3) before decoding,
+// so an oversized blob never costs a decode.
+const MAX_TRANSCRIBE_AUDIO_BYTES = 25 * 1024 * 1024;
+const MAX_TRANSCRIBE_BASE64_CHARS = Math.ceil(MAX_TRANSCRIBE_AUDIO_BYTES / 3) * 4;
+
 export class SessionRegistry {
   #sessionManager: SessionManager;
   #buildAgent: (config: {
@@ -136,6 +146,12 @@ export class SessionRegistry {
   #profiles: Record<string, SwitchProfile>;
   #onSessionDeleted: ((sessionId: string) => void) | null;
   #taskManager: TaskManager | null = null;
+  /** Resolved STT backend; every sessionCreated payload advertises its presence as sttEnabled. */
+  readonly sttTarget: SttTarget | null;
+
+  get sttEnabled(): boolean {
+    return this.sttTarget !== null;
+  }
   /** Publish the TaskManager whose observer feeds the webui subagents panel. */
   setTaskManager(taskManager: TaskManager | null): void {
     this.#taskManager = taskManager;
@@ -160,12 +176,14 @@ export class SessionRegistry {
     questionStrategy = "wait",
     sessionTimeoutMin = 30,
     profiles = {},
+    sttTarget = null,
     onSessionDeleted,
   }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
     this.#questionTimeoutSecs = questionTimeoutSecs;
     this.#questionStrategy = questionStrategy;
     this.#timeoutMin = sessionTimeoutMin;
+    this.sttTarget = sttTarget;
     this.#metadata = new Map();
     this.#channels = new Map();
     this.#profiles = profiles;
@@ -709,6 +727,58 @@ function uploadLimits(core: CoreContext): { maxFileSize: number; maxImageSize: n
   };
 }
 
+/**
+ * Push-to-talk transcription: decode the base64 audio, forward it to the
+ * OpenAI-compatible endpoint resolved from config (`sttUrl`/`sttModel`), and
+ * answer with a `transcript` message correlated by the client's request id.
+ * All failures land in-band ({ ok:false, error }): a missing or broken STT
+ * backend must never drop the socket.
+ */
+async function handleTranscribe(
+  ws: HotdogServerSocket<unknown>,
+  msg: C2SMessage,
+  stt: SttTarget | null,
+): Promise<void> {
+  const id = typeof msg.id === "string" ? msg.id : "";
+  const reply = (payload: { ok: boolean; text?: string; error?: string }) =>
+    SessionRegistry.sendSafe(ws, { type: S2C.TRANSCRIPT, id, ...payload });
+
+  if (!stt) {
+    reply({
+      ok: false,
+      error:
+        "Speech-to-text is not configured (no audio-capable model in the registry; set sttUrl to override)",
+    });
+    return;
+  }
+  if (typeof msg.data !== "string" || msg.data.length === 0) {
+    reply({ ok: false, error: "transcribe: missing audio data" });
+    return;
+  }
+  if (msg.data.length > MAX_TRANSCRIBE_BASE64_CHARS) {
+    reply({
+      ok: false,
+      error: `transcribe: audio too large (limit ${MAX_TRANSCRIBE_AUDIO_BYTES / 1024 / 1024}MB)`,
+    });
+    return;
+  }
+
+  try {
+    const audio = new Uint8Array(Buffer.from(msg.data, "base64"));
+    const text = await transcribeAudio({
+      url: stt.url,
+      model: stt.model,
+      authHeader: stt.authHeader,
+      audio,
+      mimeType: typeof msg.mimeType === "string" ? msg.mimeType : undefined,
+    });
+    reply({ ok: true, text });
+  } catch (err: unknown) {
+    logger.error(`[websocket] transcribe failed: ${formatError(err)}`);
+    reply({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 async function routeMessage(
   ws: HotdogServerSocket<unknown>,
   msg: C2SMessage,
@@ -794,6 +864,7 @@ async function routeMessage(
             title: null,
             currentModel: agent.model,
             models: Object.keys(agent.modelRegistry || {}),
+            sttEnabled: registry.sttEnabled,
           };
           SessionRegistry.sendSafe(ws, sessionCreatedMsg);
           registry.broadcast(sessionCreatedMsg);
@@ -1051,6 +1122,7 @@ async function routeMessage(
                 title: null,
                 currentModel: agent.model,
                 models: Object.keys(agent.modelRegistry || {}),
+                sttEnabled: registry.sttEnabled,
               };
               SessionRegistry.sendSafe(ws, sessionCreatedMsg);
               registry.broadcast(sessionCreatedMsg);
@@ -1106,6 +1178,11 @@ async function routeMessage(
       break;
     }
 
+    case C2S.TRANSCRIBE: {
+      await handleTranscribe(ws, msg, registry.sttTarget);
+      break;
+    }
+
     case C2S.LIST_LOGS: {
       listSessionLogs()
         .then((logs) => {
@@ -1146,6 +1223,7 @@ async function routeMessage(
               title: null,
               currentModel: agent.model,
               models: Object.keys(agent.modelRegistry || {}),
+              sttEnabled: registry.sttEnabled,
             };
             SessionRegistry.sendSafe(ws, sessionCreatedMsg);
             registry.broadcast(sessionCreatedMsg);
@@ -1288,6 +1366,7 @@ function attachToMostRecentSession(
     title: session.metadata.title,
     currentModel: agent?.model || mostRecent.model || "?",
     models: Object.keys(agent?.modelRegistry || {}),
+    sttEnabled: registry.sttEnabled,
   });
 
   replaySessionHistory(sessionId, session.agent, ws);
@@ -1322,6 +1401,7 @@ function createAndAttachSession(
         title: null,
         currentModel: agent.model,
         models: Object.keys(agent.modelRegistry || {}),
+        sttEnabled: registry.sttEnabled,
       });
     })
     .catch((err: unknown) => {
@@ -1350,6 +1430,12 @@ export function createWsServer(
 
   const sharedLlmClient = core.createLlmClient();
 
+  // Speech-to-text: explicit sttUrl, else auto-pick an audio-capable model
+  // from the registry (its provider supplies URL + key, like show-me's
+  // image models). Null = disabled; the webui hides its mic affordance from
+  // the sttEnabled flag on the sessionCreated payload.
+  const sttTarget = resolveSttTarget(core.resolved, sharedLlmClient);
+
   const buildAgent: (config: {
     model?: string;
     sessionId?: string;
@@ -1369,6 +1455,7 @@ export function createWsServer(
     questionStrategy,
     sessionTimeoutMin,
     profiles,
+    sttTarget,
     onSessionDeleted: (sid) => bridge?.dropSession(sid),
   });
 

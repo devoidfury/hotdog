@@ -14,6 +14,8 @@ export const C2S = {
   QUESTION_ANSWER: "questionAnswer",
   COMMAND: "command",
   COMPLETE: "complete",
+  // Voice transcription (push-to-talk / dictation)
+  TRANSCRIBE: "transcribe",
   // Cold session log management
   LIST_LOGS: "listLogs",
   LOAD_LOG: "loadLog",
@@ -62,6 +64,9 @@ export const S2C = {
   SESSION_STATE: "sessionState",
   SYSTEM_MESSAGE: "systemMessage",
 
+  // Voice transcription reply (correlated to a C2S transcribe by id)
+  TRANSCRIPT: "transcript",
+
   // Question answers (broadcast to all clients when a question is resolved)
   QUESTION_ANSWERED: "questionAnswered",
 
@@ -97,6 +102,37 @@ export interface UploadFileWire {
   mimeType?: string;
   /** Base64 payload (raw bytes, no data: prefix). */
   data: string;
+}
+
+// ── Voice transcription on C2S TRANSCRIBE ───────────────────────────────────
+
+/**
+ * One push-to-talk recording uploaded as base64 (same encoding convention as
+ * UploadFileWire). The server forwards the bytes to the OpenAI-compatible
+ * endpoint in config (`sttUrl`) and answers with a `transcript` message
+ * carrying the same `id`.
+ */
+export interface TranscribeRequestWire {
+  type: "transcribe";
+  /** Client-generated correlation id, echoed verbatim on the transcript reply. */
+  id: string;
+  /** Content type of the encoded audio, e.g. "audio/webm". */
+  mimeType: string;
+  /** Base64 payload (raw bytes, no data: prefix). */
+  data: string;
+}
+
+/**
+ * Reply to a transcribe request, correlated by `id`. Failures are in-band
+ * (`ok: false` + human-readable `error`): an unconfigured or broken STT
+ * backend must never drop the socket.
+ */
+export interface TranscriptReplyWire {
+  type: "transcript";
+  id: string;
+  ok: boolean;
+  text?: string;
+  error?: string;
 }
 
 // ── Images on the wire ──────────────────────────────────────────────────────

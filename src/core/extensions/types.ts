@@ -299,6 +299,10 @@ export interface ResolvedConfig {
   /** Named model groups for fanout delegation: name -> model members (bare or provider/qualified). */
   modelGroups?: Record<string, string[]>;
   profilesPath?: string;
+  /** OpenAI-compatible audio transcriptions endpoint (schema sttUrl); null disables speech-to-text. */
+  sttUrl?: string | null;
+  /** Model name sent to the STT endpoint (schema sttModel). */
+  sttModel?: string | null;
 
   profileManager?: ProfileManager;
 

@@ -19,6 +19,8 @@ import type { CliArgv } from "@core/config/index.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { CliChannel } from "./cli-channel.ts";
 import { ClipboardPasteInterceptor } from "./clipboard-paste.ts";
+import { DictationInterceptor } from "./dictation.ts";
+import { resolveSttTarget } from "@core/config/stt.ts";
 import {
   parseCompletionContext,
   registerSlashCommandNameCompletion,
@@ -58,6 +60,10 @@ Commands:
   /theme <name> - Set theme (dark, light, monochrome)
   /regenerate   - Regenerate system prompt
   /reasoning none|minimal|low|high|xhigh|max|unset - Set reasoning effort level
+
+Keys:
+  Ctrl+X        - Start/stop voice dictation (needs an audio-capable model);
+                  the transcript is inserted at the cursor, never auto-sent.
 `;
 
 // In shellMode, first words that look like common conversational openers are
@@ -481,6 +487,13 @@ export async function runInteractiveSession(
     pasteMarkerMinChars: uiCli.pasteMarkerMinChars as number,
   });
 
+  // Ctrl+X dictation: sits in front of the paste chain, swallows only the
+  // Ctrl+X byte. Disables itself when no STT target resolved (no sttUrl and
+  // no audio-capable registry model) or input is not a TTY.
+  const dictation = new DictationInterceptor(rl, {
+    target: resolveSttTarget(resolved, llmClient),
+  });
+
   const onQuit = buildOnQuitHandler(sessionManager, core.extensions);
   const channel = new CliChannel({
     sessionManager,
@@ -586,6 +599,8 @@ export async function runInteractiveSession(
     options.onSIGINT ||
     (() => {
       channel.interrupt();
+      // Drop any in-flight dictation recording with the interrupted turn.
+      dictation.cancel();
       (rl as { line: string; cursor: number }).line = "";
       (rl as { line: string; cursor: number }).cursor = 0;
       paste.onInterrupt();

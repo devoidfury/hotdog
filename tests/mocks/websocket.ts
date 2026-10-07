@@ -47,6 +47,20 @@ function makeMockAgent(overrides: Partial<AgentLike> = {}): AgentLike {
 export function createWsMockCore(): any {
   // Hook handlers registered via hooks.on(), keyed by hook name.
   const registeredHooks: Record<string, Array<(data: unknown) => unknown>> = {};
+  const resolved: Record<string, unknown> = {
+    baseUrl: "http://localhost:8000",
+    apiKey: "test-key",
+    model: "test-model",
+    chatTimeout: 30,
+    maxRetries: 3,
+    maxIterations: 100,
+    contextLimit: 128000,
+    hideTools: false,
+    hideThinking: true,
+    showTokenUse: true,
+    profileName: "default",
+    modelRegistry: { "test-model": {} },
+  };
   return {
     hooks: {
       notifyHooks: () => {},
@@ -63,20 +77,7 @@ export function createWsMockCore(): any {
     _registeredHooks: registeredHooks,
     config: {},
     completion: createCompletionService(),
-    resolved: {
-      baseUrl: "http://localhost:8000",
-      apiKey: "test-key",
-      model: "test-model",
-      chatTimeout: 30,
-      maxRetries: 3,
-      maxIterations: 100,
-      contextLimit: 128000,
-      hideTools: false,
-      hideThinking: true,
-      showTokenUse: true,
-      profileName: "default",
-      modelRegistry: { "test-model": {} },
-    },
+    resolved,
     toolRegistry: {
       getAll: () => [],
       get: () => null,
@@ -87,8 +88,8 @@ export function createWsMockCore(): any {
     },
     createLlmClient: (overrides?: Record<string, unknown>) =>
       new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
-        baseUrl: "http://localhost:8000",
-        apiKey: "test-key",
+        baseUrl: resolved.baseUrl as string,
+        apiKey: resolved.apiKey as string,
         chatTimeoutSecs: 30,
         maxRetries: 3,
         ...overrides,

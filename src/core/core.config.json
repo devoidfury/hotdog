@@ -550,5 +550,33 @@
       { "source": "config", "key": "defaultProvider" },
       { "default": null }
     ]
+  },
+  "sttUrl": {
+    "type": "string",
+    "cliFlag": {
+      "long": "--stt-url",
+      "type": "string",
+      "description": "OpenAI-compatible audio transcriptions endpoint (overrides audio-capable model auto-detection)"
+    },
+    "layers": [
+      { "source": "cli", "key": "sttUrl" },
+      { "source": "config", "key": "sttUrl" },
+      { "source": "env", "key": "HOTDOG_STT_URL" },
+      { "default": null }
+    ]
+  },
+  "sttModel": {
+    "type": "string",
+    "cliFlag": {
+      "long": "--stt-model",
+      "type": "string",
+      "description": "Model name sent to the STT endpoint; pins the registry model used for speech-to-text"
+    },
+    "layers": [
+      { "source": "cli", "key": "sttModel" },
+      { "source": "config", "key": "sttModel" },
+      { "source": "env", "key": "HOTDOG_STT_MODEL" },
+      { "default": null }
+    ]
   }
 }

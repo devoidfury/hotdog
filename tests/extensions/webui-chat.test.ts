@@ -71,3 +71,96 @@ describe("createChat.setSession", () => {
     expect(container.removed).toEqual(["scroll"]);
   });
 });
+
+// ── Push-to-talk client plumbing ───────────────────────────────────────────
+// The WS is faked so transcribe/transcript correlation runs under Bun.
+
+class FakeWebSocket {
+  static OPEN = 1;
+  static instances: FakeWebSocket[] = [];
+  readyState = FakeWebSocket.OPEN;
+  sent: Record<string, unknown>[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(_url: string) {
+    FakeWebSocket.instances.push(this);
+  }
+  send(data: string): void {
+    this.sent.push(JSON.parse(data));
+  }
+  close(): void {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+  emit(msg: Record<string, unknown>): void {
+    this.onmessage?.({ data: JSON.stringify(msg) });
+  }
+}
+
+describe("createChat.transcribe", () => {
+  const RealWebSocket = globalThis.WebSocket;
+  let chat: ChatController | null = null;
+
+  afterEach(() => {
+    chat?.disconnect();
+    chat = null;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = RealWebSocket;
+  });
+
+  function makeChat(): { chat: ChatController; ws: FakeWebSocket } {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    chat = createChat({
+      token: null,
+      host: "localhost",
+      getMessageListContainer: () => null,
+    });
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+    return { chat, ws };
+  }
+
+  it("sends a transcribe request and resolves with the transcript text", async () => {
+    const { chat, ws } = makeChat();
+    const p = chat.transcribe("audio/webm", "aGk=");
+    const req = ws.sent[ws.sent.length - 1]!;
+    expect(req.type).toBe("transcribe");
+    expect(req.mimeType).toBe("audio/webm");
+    expect(req.data).toBe("aGk=");
+    ws.emit({ type: "transcript", id: req.id, ok: true, text: "hello world" });
+    expect(await p).toBe("hello world");
+  });
+
+  it("rejects with the server error on ok:false", async () => {
+    const { chat, ws } = makeChat();
+    const p = chat.transcribe("audio/webm", "aGk=");
+    const req = ws.sent[ws.sent.length - 1]!;
+    ws.emit({ type: "transcript", id: req.id, ok: false, error: "audio too large" });
+    await expect(p).rejects.toThrow("audio too large");
+  });
+
+  it("rejects pending transcribes when the socket closes", async () => {
+    const { chat, ws } = makeChat();
+    const p = chat.transcribe("audio/webm", "aGk=");
+    ws.close();
+    await expect(p).rejects.toThrow("connection closed");
+  });
+
+  it("ignores transcript replies with unknown ids", async () => {
+    const { chat, ws } = makeChat();
+    ws.emit({ type: "transcript", id: "stt-never-sent", ok: true, text: "ghost" });
+    const p = chat.transcribe("audio/webm", "aGk=");
+    const req = ws.sent[ws.sent.length - 1]!;
+    ws.emit({ type: "transcript", id: req.id, ok: true, text: "real" });
+    expect(await p).toBe("real");
+  });
+
+  it("tracks sttEnabled from the sessionCreated payload", () => {
+    const { chat, ws } = makeChat();
+    ws.emit({ type: "sessionCreated", sessionId: "s1", sttEnabled: true });
+    expect(chat.sttEnabledAtom()).toBe(true);
+    ws.emit({ type: "sessionCreated", sessionId: "s2" });
+    expect(chat.sttEnabledAtom()).toBe(false);
+  });
+});

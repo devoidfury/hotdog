@@ -31,6 +31,10 @@ export type ProfileInfo = {
 const profilesAtom = reactiveState<Record<string, ProfileInfo>>({});
 const currentProfileAtom = reactiveState<string>("default");
 
+// Server has an STT backend configured (mirrors the sttEnabled flag carried
+// by every sessionCreated payload; drives the push-to-talk button).
+const sttEnabledAtom = reactiveState<boolean>(false);
+
 // ── Subagent tasks (strip + overlay panels; see ./subagents.tsx) ───────────
 // Broadcast feed (S2C taskList/taskUpdate/taskActivity), deliberately kept
 // outside the chat transcript: task-agent output never enters message-list.
@@ -114,6 +118,8 @@ interface SessionCreatedMessage {
   title?: string | null;
   currentModel?: string;
   models?: string[];
+  /** Server has an STT backend configured (drives the mic affordance). */
+  sttEnabled?: boolean;
 }
 
 interface SessionDeletedMessage {
@@ -313,6 +319,14 @@ interface ServerErrorMessage {
   message: string;
 }
 
+interface TranscriptMessage {
+  type: "transcript";
+  id: string;
+  ok: boolean;
+  text?: string;
+  error?: string;
+}
+
 export interface CompletionItem {
   value: string;
   display?: string;
@@ -358,7 +372,8 @@ type ServerMessage =
   | ProfilesMessage
   | ProfileSwitchedMessage
   | ServerErrorMessage
-  | CompletionsMessage;
+  | CompletionsMessage
+  | TranscriptMessage;
 
 interface ChatConfig {
   token: string | null;
@@ -399,6 +414,9 @@ export interface ChatController {
   setSession: (sessionId: string) => void;
   listProfiles: () => void;
   switchProfile: (profileName: string, force?: boolean) => void;
+  // Push-to-talk: upload a base64 recording, await the transcript text.
+  transcribe: (mimeType: string, data: string) => Promise<string>;
+  sttEnabledAtom: Atom<boolean>;
   // Raw WS message; the sidebar uses it to cancel non-active sessions.
   send: (obj: Record<string, unknown>) => void;
   ws: WebSocket | null;
@@ -458,6 +476,19 @@ export function createChat({
     | ((options: CompletionItem[], prefix: string) => void)
     | null = null;
 
+  // In-flight transcribe requests keyed by correlation id; the transcript
+  // reply resolves/rejects the matching promise (see C2S.TRANSCRIBE).
+  let transcribeSeq = 0;
+  const pendingTranscripts = new Map<
+    string,
+    { resolve: (text: string) => void; reject: (err: Error) => void }
+  >();
+
+  function rejectPendingTranscripts(reason: string): void {
+    for (const { reject } of pendingTranscripts.values()) reject(new Error(reason));
+    pendingTranscripts.clear();
+  }
+
   function handleServerMessage(data: ServerMessage): void {
     // Session-management messages are handled even before messageList is ready.
     switch (data.type) {
@@ -471,6 +502,7 @@ export function createChat({
         if (data.models && data.models.length > 0) {
           modelsAtom(data.models);
         }
+        sttEnabledAtom(Boolean(data.sttEnabled));
         // On page reload the server can send working state before
         // sessionCreated, so restore it from the map here.
         const createdSid = data.sessionId;
@@ -562,6 +594,15 @@ export function createChat({
       case "taskActivity":
         appendTaskActivity(data.taskId, data.activity);
         return;
+      case "transcript": {
+        // Correlated by id only: the reply is not session-tagged.
+        const pending = pendingTranscripts.get(data.id);
+        if (!pending) return;
+        pendingTranscripts.delete(data.id);
+        if (data.ok) pending.resolve(data.text ?? "");
+        else pending.reject(new Error(data.error || "transcription failed"));
+        return;
+      }
     }
 
     if (!messageList) return;
@@ -703,6 +744,8 @@ export function createChat({
       connectedAtom(false);
       workingAtom(false);
       ws = null;
+      // Nobody will ever answer in-flight transcribes over a dead socket.
+      rejectPendingTranscripts("connection closed");
       verifyTokenAndReconnect();
     };
 
@@ -850,6 +893,18 @@ export function createChat({
     });
   }
 
+  /**
+   * Upload one recording (base64, no data: prefix) and await the transcript.
+   * Rejects with the server's readable error on any failure (see S2C.TRANSCRIPT).
+   */
+  function transcribe(mimeType: string, data: string): Promise<string> {
+    const id = `stt-${++transcribeSeq}`;
+    return new Promise<string>((resolve, reject) => {
+      pendingTranscripts.set(id, { resolve, reject });
+      send({ type: "transcribe", id, mimeType, data });
+    });
+  }
+
   function setSession(sessionId: string): void {
     const container = getMessageListContainer();
     if (!container) {
@@ -942,6 +997,8 @@ export function createChat({
     getUserMessageCount,
     sessionWorkingMap,
     messageListAtom: () => messageList,
+    sttEnabledAtom,
+    transcribe,
     tasksAtom,
     activityVersionAtom,
     getTaskActivity,

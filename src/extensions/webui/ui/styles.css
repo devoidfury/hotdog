@@ -1667,6 +1667,31 @@ body {
     cursor: not-allowed;
 }
 
+/* Push-to-talk: same shell as #attach-btn, red while holding to record. */
+#mic-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    background: var(--bg-secondary, #2a2a2a);
+    color: var(--text, inherit);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+#mic-btn:hover:not(:disabled) {
+    background: var(--bg-active, #3a3a3a);
+}
+
+#mic-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#mic-btn.recording {
+    border-color: var(--error, #e55);
+    color: var(--error, #e55);
+}
+
 /* ── Subagents strip + overlay panels ────────────────────────────────────── */
 
 #subagents-strip {

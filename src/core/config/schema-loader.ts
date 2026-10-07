@@ -427,6 +427,10 @@ export interface CoreConfig {
   defaultSubcommand?: string;
   temperature?: number;
   defaultProvider?: string;
+  /** OpenAI-compatible audio transcriptions endpoint; null disables speech-to-text. */
+  sttUrl?: string | null;
+  /** Model name sent to the STT endpoint (sent as the multipart `model` field). */
+  sttModel?: string | null;
 }
 
 // Adds an index signature for extension-specific keys.

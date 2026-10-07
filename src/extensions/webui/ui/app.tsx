@@ -15,6 +15,7 @@ import {
 } from "./login.tsx";
 import { Sidebar, ContextMenu, type ContextMenuState, type SessionInfo, type LogInfo } from "./sessions.tsx";
 import { SubagentsStrip, TaskPanel } from "./subagents.tsx";
+import { audioBlobToWav } from "./wav.ts";
 
 type Screen = "login" | "main";
 
@@ -348,6 +349,8 @@ function startChat(): void {
     chat.currentProfileAtom,
     chat.tasksAtom,
     chat.activityVersionAtom,
+    chat.sttEnabledAtom,
+    sttPhaseAtom,
   ]);
   const stopModelRefresh = chat.currentModelAtom.effect(() => {
     chat?.listSessions();
@@ -409,8 +412,8 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** Read one File as base64 (data-URL payload with the prefix stripped). */
-function readFileAsBase64(file: File): Promise<string> {
+/** Read one File/Blob as base64 (data-URL payload with the prefix stripped). */
+function readFileAsBase64(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -450,6 +453,104 @@ async function onFilesPicked(e: Event): Promise<void> {
 
 function removeAttachment(id: string): void {
   attachmentsAtom(attachmentsAtom().filter((a) => a.id !== id));
+}
+
+// ── Push-to-talk dictation ──────────────────────────────────────────────────
+// Hold the mic button to record (MediaRecorder -> audio/webm); releasing sends
+// a `transcribe` and the reply is inserted at the caret. Never auto-sends --
+// the transcript always lands as editable text in the composer.
+
+type SttPhase = "idle" | "recording" | "transcribing";
+const sttPhaseAtom = reactiveState<SttPhase>("idle");
+
+let micRecorder: MediaRecorder | null = null;
+// Set when the button was released while getUserMedia permission was pending.
+let micStopArmed = false;
+
+function sttFail(message: string): void {
+  console.warn("[stt]", message);
+  sttPhaseAtom("idle");
+  chat?.messageListAtom()?.handleSystemMessage({ content: message });
+}
+
+function insertAtCaret(text: string): void {
+  const el = chatInputEl;
+  if (!el) return;
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0, start) + text + el.value.slice(end);
+  const pos = start + text.length;
+  el.setSelectionRange(pos, pos);
+  el.focus();
+  autoResize(el);
+}
+
+async function micStart(): Promise<void> {
+  if (!chat || sttPhaseAtom() !== "idle") return;
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    sttFail("Microphone capture needs a secure context (https or localhost).");
+    return;
+  }
+  micStopArmed = false;
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    sttFail("Microphone unavailable (permission denied?).");
+    return;
+  }
+  if (micStopArmed) {
+    // Released while the permission prompt was still up; nothing to record.
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  const chunks: Blob[] = [];
+  const rec = new MediaRecorder(stream);
+  micRecorder = rec;
+  rec.ondataavailable = (e: BlobEvent) => {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
+  rec.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    micRecorder = null;
+    const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+    if (blob.size === 0) {
+      sttPhaseAtom("idle");
+      return;
+    }
+    sttPhaseAtom("transcribing");
+    // Backend format sniffing: whisper/llama.cpp-style endpoints reject the
+    // browser's webm/opus upload; re-encode to wav, falling back to the raw
+    // recording if the browser can't (transcribe then fails with the
+    // backend's own error, which is more truthful than a silent drop).
+    const toSend = await audioBlobToWav(blob).catch(() => blob);
+    readFileAsBase64(toSend)
+      .then((data) => chat!.transcribe(toSend.type, data))
+      .then((text) => {
+        insertAtCaret(text);
+        sttPhaseAtom("idle");
+      })
+      .catch((err: unknown) => sttFail(err instanceof Error ? err.message : String(err)));
+  };
+  rec.start();
+  sttPhaseAtom("recording");
+}
+
+function micStop(): void {
+  if (micRecorder) micRecorder.stop();
+  else micStopArmed = true; // stop as soon as the pending permission resolves
+}
+
+function onMicMousedown(e: MouseEvent): void {
+  // Hold to talk: stop on mouseup wherever the pointer ended up.
+  e.preventDefault();
+  if (sttPhaseAtom() === "recording") return;
+  void micStart();
+  const up = () => {
+    document.removeEventListener("mouseup", up);
+    micStop();
+  };
+  document.addEventListener("mouseup", up);
 }
 
 function requestCompletions(el: HTMLTextAreaElement): void {
@@ -561,6 +662,7 @@ function App() {
   const attachments = attachmentsAtom();
   const tasks = chat ? chat.tasksAtom() : [];
   const openTasks = openTasksAtom();
+  const sttPhase = sttPhaseAtom();
 
   return (
     <>
@@ -694,6 +796,18 @@ function App() {
                 >
                   Attach
                 </button>
+                {chat?.sttEnabledAtom() ? (
+                  <button
+                    type="button"
+                    id="mic-btn"
+                    className={sttPhase === "recording" ? "recording" : undefined}
+                    title="Hold to record; the transcript is inserted into the input"
+                    disabled={activeLogId !== null || sttPhase === "transcribing"}
+                    onMousedown={onMicMousedown}
+                  >
+                    {sttPhase === "recording" ? "● Recording" : sttPhase === "transcribing" ? "..." : "Mic"}
+                  </button>
+                ) : null}
                 <label id="profile-selector">
                   Profile:{" "}
                   <select id="profile-select" ref={profileSelectRef} onChange={onProfileChange}>

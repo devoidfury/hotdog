@@ -139,6 +139,41 @@ The name of the default provider to use (must match a `name` in the `providers` 
 { "defaultProvider": "ai365" }
 ```
 
+### `sttUrl`
+
+- **Type:** `string`
+- **CLI flag:** `--stt-url`
+- **Default:** `null` (auto-detect an audio-capable registry model)
+- **Resolution:** CLI > config > env `HOTDOG_STT_URL` > default
+
+Full URL of an OpenAI-compatible audio transcriptions endpoint, e.g.
+`http://localhost:8080/v1/audio/transcriptions`. When unset (the default),
+speech-to-text auto-detects its backend from the model registry: the first
+model declaring `inputModalities: ["audio"]` + `outputModalities: ["text"]`
+wins, and its provider supplies the endpoint URL (`<provider-url>
+/v1/audio/transcriptions`) and transport API key -- the same way show-me
+auto-picks image-output models. Set `sttUrl` to point at an endpoint outside
+the registry. Credentials may ride the URL (`http://:KEY@host/...`): they are
+stripped from the request and sent as an HTTP Basic Authorization header.
+Transcripts are always inserted as editable text, never auto-sent. The CLI
+capture uses `arecord` (alsa-utils), 16 kHz mono wav.
+
+```json
+{ "sttUrl": "http://localhost:8080/v1/audio/transcriptions" }
+```
+
+### `sttModel`
+
+- **Type:** `string`
+- **CLI flag:** `--stt-model`
+- **Default:** `null`
+- **Resolution:** CLI > config > env `HOTDOG_STT_MODEL` > default
+
+With an explicit `sttUrl`: the model name sent as the multipart `model`
+field. Without one: pins the registry model used for speech-to-text (must
+declare audio input; entries with absent modality data are never
+auto-picked).
+
 ### `temperature`
 
 - **Type:** `number`
@@ -1454,6 +1489,8 @@ These extensions expose a single config knob, `{ "<key>": { "enabled": <boolean,
 | `TAVILY_API_KEY` | `webSearch.tavilyApiKey` | Tavily API key. |
 | `SEARXNG_INSTANCE_URL` | `webSearch.searxngInstanceUrl` | SearXNG instance URL. |
 | `HOTDOG_WEBUI_API_KEY` | `webui.apiKey` | WebUI API key for login authentication. |
+| `HOTDOG_STT_URL` | `sttUrl` | OpenAI-compatible audio transcriptions endpoint (enables speech-to-text). |
+| `HOTDOG_STT_MODEL` | `sttModel` | Model name sent to the STT endpoint. |
 
 ---
 
@@ -1553,3 +1590,4 @@ These extensions expose a single config knob, `{ "<key>": { "enabled": <boolean,
   ]
 }
 ```
+

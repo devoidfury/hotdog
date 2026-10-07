@@ -4,7 +4,7 @@ import { MessageBus } from "./message-bus.ts";
 import { createTurnLanes, type TurnLanes } from "./turn-lanes.ts";
 import { TaskManager } from "./task-manager.ts";
 import type { ProviderHealth } from "./provider-health.ts";
-import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
+import { OutputEvent } from "../context/output.ts";
 import { trimTurns } from "../context/rewind.ts";
 import { AgentError, formatError } from "../error.ts";
 import { logger } from "@utils/logger.ts";
@@ -15,7 +15,6 @@ import type { ProfileManager, SwitchProfile } from "../config/index.ts";
 import type { Message, ImageAttachment, MessageSource } from "../context/message.ts";
 import type { AgentRunResult, ForkSessionFn, ForkSessionResult, OutputSink } from "../agent.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
-import type { QuestionDef } from "../context/input.ts";
 
 export interface AgentLike {
   sessionId: string;
@@ -142,8 +141,6 @@ export class SessionManager {
   // no taskConfig was given: session turns then run uncoordinated.
   #turnLanes: TurnLanes | null;
   #llmClient: LlmClient | null;
-  // QUESTION events emitted while no channels are connected, replayed on reconnect.
-  #questionBuffers: Map<string, QuestionDef[][]>;
 
   static async create(options: SessionManagerOptions): Promise<SessionManager> {
     const instance = new SessionManager(options);
@@ -169,7 +166,6 @@ export class SessionManager {
     this.#taskManager = null;
     this.#turnLanes = null;
     this.#llmClient = options.llmClient || null;
-    this.#questionBuffers = new Map();
 
     const rawBuildAgent = options.buildAgent;
     this.#buildAgent = async (config: Record<string, unknown>) => {
@@ -339,7 +335,6 @@ export class SessionManager {
     this.#taskManager?.interruptTasksForSession(sessionId);
 
     this.#eventHandlers.delete(sessionId);
-    this.#questionBuffers.delete(sessionId);
 
     // Teardown notice for extensions, fire-and-forget
     if (existed) {
@@ -437,20 +432,7 @@ export class SessionManager {
           );
         }
       }
-    } else if (event.type === OUTPUT_EVENT.QUESTION && event.questions) {
-      if (!this.#questionBuffers.has(sessionId)) {
-        this.#questionBuffers.set(sessionId, []);
-      }
-      this.#questionBuffers.get(sessionId)!.push(event.questions);
     }
-  }
-
-  /** Clears the buffer; callers replay the returned questions to newly connected channels. */
-  drainPendingQuestions(sessionId: string): QuestionDef[][] {
-    const buffer = this.#questionBuffers.get(sessionId);
-    if (!buffer || buffer.length === 0) return [];
-    this.#questionBuffers.delete(sessionId);
-    return buffer;
   }
 
   getSessionInfo(

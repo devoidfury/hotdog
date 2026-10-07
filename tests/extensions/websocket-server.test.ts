@@ -1347,6 +1347,43 @@ describe("question tool integration (bridge)", () => {
     // The session manager's interrupt was called; no crash, session intact.
     expect(wsServer.sessionRegistry.get(sessionId)).not.toBeNull();
   });
+
+  it("replays the pending question to a reconnecting client (tab refresh)", async () => {
+    const p = startQuestion();
+
+    // Tab refresh: old socket closes, new one upgrades and auto-attaches
+    // to the most recent session.
+    wsServer.onClose(ws as unknown as HotdogServerSocket<unknown>);
+    const ws2 = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws2);
+
+    const created = await waitForMessage(ws2, S2C.SESSION_CREATED);
+    expect(created.sessionId).toBe(sessionId);
+
+    const question = await waitForMessage(ws2, S2C.QUESTION);
+    expect(question.sessionId).toBe(sessionId);
+    expect(question.questions[0].key).toBe("q1");
+    // Card must render after the replayed history, not before it.
+    const types = messageTypes(ws2);
+    expect(types.lastIndexOf(S2C.QUESTION)).toBeGreaterThan(
+      types.indexOf(S2C.SESSION_CREATED),
+    );
+
+    // The reconnected client can answer; the blocked tool call resolves.
+    await wsServer.onMessage(
+      ws2,
+      JSON.stringify({ type: C2S.QUESTION_ANSWER, sessionId, answers: { q1: "Ada" } }),
+    );
+    await expect(p).resolves.toEqual({ q1: "Ada" });
+  });
+
+  it("attaching with no pending question sends no question message", async () => {
+    wsServer.onClose(ws as unknown as HotdogServerSocket<unknown>);
+    const ws2 = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws2);
+    await waitForMessage(ws2, S2C.SESSION_CREATED);
+    expect(messageTypes(ws2)).not.toContain(S2C.QUESTION);
+  });
 });
 
 // ── COMPLETE message ─────────────────────────────────────────────────────

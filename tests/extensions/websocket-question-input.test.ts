@@ -51,6 +51,26 @@ describe("WebSocketQuestionBridge", () => {
     expect(c).not.toBe(a);
   });
 
+  it("peek returns live pending questions until resolved", async () => {
+    const questions = [{ key: "q1", prompt: "What?" }];
+    expect(bridge.peek("s1")).toBeNull();
+
+    const p = bridge.collect("s1", questions);
+    expect(bridge.peek("s1")).toBe(questions);
+
+    bridge.answer("s1", { q1: "Ada" });
+    await p;
+    expect(bridge.peek("s1")).toBeNull();
+  });
+
+  it("peek is null after cancel and for unknown sessions", async () => {
+    const p = bridge.collect("s1", [{ key: "q1", prompt: "What?" }]);
+    bridge.cancel("s1");
+    await p;
+    expect(bridge.peek("s1")).toBeNull();
+    expect(bridge.peek("nope")).toBeNull();
+  });
+
   it("isInteractive reflects channel presence", () => {
     const input = bridge.inputFor("s1");
     const state = hooks.state;

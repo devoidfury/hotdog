@@ -1,8 +1,8 @@
 // Tests for src/extensions/websocket/websocket-channel.ts — WebSocketChannel.
 // Base Channel behavior (send/enqueue, attach/detach, close, command routing)
 // is covered in tests/core/channel.test.ts. Only the behavior specific to this
-// subclass (event-to-protocol mapping, readiness, sendJson, pending question
-// replay) is tested here.
+// subclass (event-to-protocol mapping, readiness, sendJson) is tested here.
+// Pending-question replay is tested in websocket-server.test.ts.
 
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { WebSocketChannel } from "@extensions/websocket/websocket-channel.ts";
@@ -50,7 +50,6 @@ function createMockSessionManager(overrides: Partial<ChannelSessionManager> = {}
     onSessionEvents: mock((_sessionId, _handler) => () => {}),
     sessionIds: mock(() => ["session-1"]),
     getSessionInfo: mock((id) => ({ id, model: "test-model" })),
-    drainPendingQuestions: mock(() => []),
     ...overrides,
   };
 }
@@ -75,22 +74,6 @@ describe("WebSocketChannel - construction", () => {
 
     expect(channel.getCurrentSessionId()).toBe("session-1");
     expect(sm.onSessionEvents).toHaveBeenCalledWith("session-1", expect.any(Function));
-  });
-
-  it("replays pending questions on construction", () => {
-    const pendingQuestions = [[{ key: "q1", prompt: "Question 1" }]];
-    const sm = createMockSessionManager({
-      drainPendingQuestions: mock(() => pendingQuestions),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    expect(sm.drainPendingQuestions).toHaveBeenCalledWith("session-1");
   });
 });
 
@@ -494,35 +477,6 @@ describe("WebSocketChannel - getters", () => {
     expect(channel.sessionId).toBe("my-session");
   });
 
-});
-
-describe("WebSocketChannel - pending questions replay", () => {
-  it("replays multiple pending question sets", () => {
-    const pendingQuestions = [
-      [{ key: "q1", prompt: "Question 1" }],
-      [{ key: "q2", prompt: "Question 2" }],
-    ];
-    const sm = createMockSessionManager({
-      drainPendingQuestions: mock(() => pendingQuestions),
-      onSessionEvents: mock(() => () => {}),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    expect(sent.length).toBe(2);
-    const msg1 = JSON.parse(sent[0]);
-    const msg2 = JSON.parse(sent[1]);
-    expect(msg1.type).toBe(S2C.QUESTION);
-    expect(msg2.type).toBe(S2C.QUESTION);
-    expect(msg1.questions[0].key).toBe("q1");
-    expect(msg2.questions[0].key).toBe("q2");
-  });
 });
 
 describe("WebSocketChannel - broadcast without callback", () => {

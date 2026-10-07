@@ -90,7 +90,6 @@ function createMockSessionManager(overrides: Partial<ChannelSessionManager> = {}
     onSessionEvents: mock((_sessionId, _handler) => () => {}),
     sessionIds: mock(() => ["session-1", "session-2"]),
     getSessionInfo: mock((id) => ({ id, model: "test-model", profile: "default" })),
-    drainPendingQuestions: mock(() => []),
     ...overrides,
   };
 }

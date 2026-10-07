@@ -749,7 +749,7 @@ async function routeMessage(
             registry.sendTaskSnapshot(ws);
             if (!ws.activeSessionId) {
               if (registry.size > 0) {
-                attachToMostRecentSession(ws, registry);
+                attachToMostRecentSession(ws, registry, bridge);
               } else {
                 createAndAttachSession(ws, registry);
               }
@@ -933,6 +933,7 @@ async function routeMessage(
               value: isRunning,
             }),
           );
+          replayPendingQuestion(bridge, msg.sessionId as string, ws);
         }
       }
       break;
@@ -1226,9 +1227,27 @@ async function routeMessage(
   }
 }
 
+/** A blocked question outlives the socket that was showing it (tab
+ *  refresh, session switch). Re-send after attach so the client
+ *  renders the card again. */
+function replayPendingQuestion(
+  bridge: WebSocketQuestionBridge,
+  sessionId: string,
+  ws: HotdogServerSocket<unknown>,
+): void {
+  const questions = bridge.peek(sessionId);
+  if (!questions) return;
+  SessionRegistry.sendSafe(ws, {
+    type: S2C.QUESTION,
+    sessionId,
+    questions,
+  });
+}
+
 function attachToMostRecentSession(
   ws: HotdogServerSocket<unknown>,
   registry: SessionRegistry,
+  bridge: WebSocketQuestionBridge,
 ): void {
   const sessions = registry.list();
   let mostRecent: {
@@ -1280,6 +1299,8 @@ function attachToMostRecentSession(
     key: "working",
     value: isRunning,
   });
+
+  replayPendingQuestion(bridge, sessionId, ws);
 }
 
 function createAndAttachSession(
@@ -1455,7 +1476,7 @@ export function createWsServer(
 
     const existingCount = registry.size;
     if (existingCount > 0) {
-      attachToMostRecentSession(ws, registry);
+      attachToMostRecentSession(ws, registry, bridge);
     } else {
       createAndAttachSession(ws, registry);
     }

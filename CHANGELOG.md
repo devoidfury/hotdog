@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **question tool - a pending question survives a tab refresh.** A tool call blocked on `question` now re-renders its card when the client reconnects instead of hanging with no UI waiting for an answer. Replay moved from a SessionManager buffer of emitted QUESTION events to the bridge itself: on attach or session switch the server peeks the live pending question and re-sends it after history.
+
+- **webui - `wss://` on https pages.** The chat socket URL hardcoded `ws://`, which browsers block as mixed content on an https page.
+
 - **evals** - added independent evals runner and a first easy series `kielbasa-1`
 
 - **Webui attachments render inline in the message, not as a side system message.** @-ref uploads were echoed as an extra `SYSTEM_MESSAGE` per file (typed `files[]`) while the user bubble itself carried the file-include part's at-rest JSON. The per-file system message is gone: the user-message event now carries the text minus file-include parts plus a `files[]` view of them, and the webui renders each as a collapsible box inside the user bubble -- live, session replay, and cold log replay alike. `SystemMessageEvent` loses its `files` field.

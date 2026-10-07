@@ -49,9 +49,6 @@ export class WebSocketChannel extends Channel {
     this.#unsubscribers = new Map();
 
     this.attach(options.sessionId);
-
-    // Drain and replay any questions that were emitted while no channels were connected
-    this.#replayPendingQuestions();
   }
 
   protected write(event: OutputEvent): void {
@@ -168,17 +165,6 @@ export class WebSocketChannel extends Channel {
 
   protected _cleanup(): void {
     this.#ready = false;
-  }
-
-  /** Replay QUESTION events buffered while no channels were connected. */
-  #replayPendingQuestions(): void {
-    const pending = this.sessionManager.drainPendingQuestions(this.#sessionId);
-    for (const questions of pending) {
-      this.write({
-        type: OUTPUT_EVENT.QUESTION,
-        questions,
-      });
-    }
   }
 
   sendJson(msg: Record<string, unknown>): void {

@@ -435,7 +435,8 @@ export function createChat({
   onAuthFailure,
   onWorkingMapChange,
 }: ChatConfig): ChatController {
-  const wsUrl = `ws://${host}/ws`;
+  // Match the page scheme: browsers block ws:// (mixed content) on https pages.
+  const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${host}/ws`;
   let ws: WebSocket | null = null;
   let messageList: MessageListManager | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;

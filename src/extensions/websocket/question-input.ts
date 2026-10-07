@@ -113,6 +113,12 @@ export class WebSocketQuestionBridge {
     return this.#pending.has(sessionId);
   }
 
+  /** The pending questions, if any. Survive the socket that was showing
+   *  them; the attach flow replays these on reconnect. */
+  peek(sessionId: string): QuestionDef[] | null {
+    return this.#pending.get(sessionId)?.questions ?? null;
+  }
+
   /** Drop all pending questions and timers (server shutdown, tests). */
   clear(): void {
     for (const entry of this.#pending.values()) {

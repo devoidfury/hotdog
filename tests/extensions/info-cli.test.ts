@@ -19,7 +19,7 @@ beforeEach(() => {
   realFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
     throw new Error("Unable to connect. Is the computer able to access the url?");
-  }) as typeof globalThis.fetch;
+  }) as unknown as typeof globalThis.fetch;
 });
 afterEach(() => {
   globalThis.fetch = realFetch;

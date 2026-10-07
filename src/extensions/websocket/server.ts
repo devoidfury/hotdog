@@ -1476,7 +1476,7 @@ export function createWsServer(
 
     const existingCount = registry.size;
     if (existingCount > 0) {
-      attachToMostRecentSession(ws, registry, bridge);
+      attachToMostRecentSession(ws, registry, bridge!);
     } else {
       createAndAttachSession(ws, registry);
     }

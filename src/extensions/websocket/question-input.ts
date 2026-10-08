@@ -26,7 +26,10 @@ export interface QuestionBridgeHooks {
 
 interface PendingQuestion {
   questions: QuestionDef[];
-  resolve: (answers: Record<string, unknown>) => void;
+  /** `cancelled` separates a real answer from a cancel/timeout, which
+   *  resolves with defaults -- resumed callers must not record defaults as
+   *  the user's reply. Live collect() callers ignore the flag. */
+  resolve: (answers: Record<string, unknown>, cancelled: boolean) => void;
   timer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -85,12 +88,37 @@ export class WebSocketQuestionBridge {
     });
   }
 
+  /**
+   * Seed a pending question with no in-flight tool call behind it (a resumed
+   * session's unanswered question), answered through the normal
+   * C2S.questionAnswer path. No timeout timer: this waits for a human, it is
+   * not a live turn holding a lane.
+   */
+  inject(
+    sessionId: string,
+    questions: QuestionDef[],
+    onResolved: (answers: Record<string, unknown>, cancelled: boolean) => void,
+  ): void {
+    this.cancel(sessionId);
+    this.#pending.set(sessionId, { questions, resolve: onResolved, timer: null });
+  }
+
   answer(sessionId: string, answers: Record<string, unknown>): boolean {
     const entry = this.#pending.get(sessionId);
     if (!entry) return false;
     this.#pending.delete(sessionId);
     if (entry.timer) clearTimeout(entry.timer);
-    entry.resolve(answers);
+    entry.resolve(answers, false);
+    return true;
+  }
+
+  /** Drop a pending question WITHOUT resolving it (its answer is being
+   *  persisted elsewhere by the caller). */
+  remove(sessionId: string): boolean {
+    const entry = this.#pending.get(sessionId);
+    if (!entry) return false;
+    if (entry.timer) clearTimeout(entry.timer);
+    this.#pending.delete(sessionId);
     return true;
   }
 
@@ -100,7 +128,7 @@ export class WebSocketQuestionBridge {
     if (!entry) return false;
     this.#pending.delete(sessionId);
     if (entry.timer) clearTimeout(entry.timer);
-    entry.resolve(WebSocketQuestionBridge.defaults(entry.questions));
+    entry.resolve(WebSocketQuestionBridge.defaults(entry.questions), true);
     return true;
   }
 

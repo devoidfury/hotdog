@@ -292,4 +292,33 @@ describe("session turn lanes", () => {
     bus!.cancel();
     await rm(lanesDir, { recursive: true, force: true });
   });
+
+  it("SessionManager accepts an explicit turnLanes coordinator (webui seam, no taskConfig)", async () => {
+    // The ws registry builds its SessionManager without taskConfig (its
+    // TaskManager lives in the server), so the lanes must flow through the
+    // explicit option -- otherwise webui turns run uncoordinated.
+    const acquires: string[] = [];
+    let released = 0;
+    const ga = gatedAgent("prov/m1");
+    const sm = await SessionManager.create({
+      hooks: createHooks() as any,
+      buildAgent: async () => ga.agent as any,
+      turnLanes: {
+        acquireTurn: async (model: string) => {
+          acquires.push(model);
+          return async () => {
+            released++;
+          };
+        },
+      },
+    });
+    const bus = sm.getBus(sm.sessionId()!);
+    expect(bus).toBeDefined();
+    bus!.enqueue("hello");
+    await settle(() => ga.started() === 1, "turn gated by the explicit coordinator");
+    expect(acquires).toEqual(["prov/m1"]);
+    ga.finishTurn();
+    await settle(() => released === 1, "release runs when the turn settles");
+    bus!.cancel();
+  });
 });

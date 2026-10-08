@@ -185,3 +185,78 @@ describe("WebSocketQuestionBridge", () => {
     p.catch(() => {});
   });
 });
+
+describe("WebSocketQuestionBridge.inject (resumed pending questions)", () => {
+  let bridge: WebSocketQuestionBridge;
+
+  beforeEach(() => {
+    bridge = new WebSocketQuestionBridge(makeHooks());
+  });
+
+  afterEach(() => {
+    bridge.clear();
+  });
+
+  it("seeds a pending question answered through the normal answer path", () => {
+    const questions = [{ key: "q1", prompt: "What?" }];
+    const resolved: Array<Record<string, unknown>> = [];
+    bridge.inject("s1", questions, (a) => resolved.push(a));
+
+    // Re-presentation (peek on attach) works exactly like a live collect.
+    expect(bridge.peek("s1")).toBe(questions);
+    expect(bridge.hasPending("s1")).toBe(true);
+
+    expect(bridge.answer("s1", { q1: "here" })).toBe(true);
+    expect(resolved).toEqual([{ q1: "here" }]);
+    expect(bridge.hasPending("s1")).toBe(false);
+  });
+
+  it("replaces a stale pending question (the stale collect resolves, never hangs)", async () => {
+    const stale = bridge.collect("s1", [{ key: "old", prompt: "?" }]);
+    bridge.inject("s1", [{ key: "new", prompt: "?" }], () => {});
+    await stale; // resolved with defaults, not stranded
+    expect(bridge.peek("s1")).toEqual([{ key: "new", prompt: "?" }]);
+  });
+
+  it("cancel resolves an injected question with defaults", () => {
+    const resolved: Array<Record<string, unknown>> = [];
+    bridge.inject("s1", [{ key: "q1", prompt: "?", default: "fallback" }], (a) =>
+      resolved.push(a),
+    );
+    expect(bridge.cancel("s1")).toBe(true);
+    expect(resolved).toEqual([{ q1: "fallback" }]);
+  });
+
+  it("the cancelled flag separates an answer from a defaults-substituted cancel", () => {
+    // A resumed question's callback records tool results: defaults arriving
+    // flagged as cancelled must not be persisted as the user's reply.
+    const calls: Array<{ answers: Record<string, unknown>; cancelled: boolean }> = [];
+    const cb = (answers: Record<string, unknown>, cancelled: boolean) =>
+      calls.push({ answers, cancelled });
+
+    bridge.inject("s1", [{ key: "q1", prompt: "?", default: "fb" }], cb);
+    bridge.cancel("s1");
+    expect(calls).toEqual([{ answers: { q1: "fb" }, cancelled: true }]);
+
+    bridge.inject("s1", [{ key: "q1", prompt: "?" }], cb);
+    expect(bridge.answer("s1", { q1: "real" })).toBe(true);
+    expect(calls[1]).toEqual({ answers: { q1: "real" }, cancelled: false });
+  });
+
+  it("clear() drops injected questions", () => {
+    bridge.inject("s1", [{ key: "q", prompt: "?" }], () => {});
+    bridge.clear();
+    expect(bridge.hasPending("s1")).toBe(false);
+  });
+
+  it("remove() drops a pending question WITHOUT resolving it", () => {
+    let resolved = false;
+    bridge.inject("s1", [{ key: "q", prompt: "?" }], () => {
+      resolved = true;
+    });
+    expect(bridge.remove("s1")).toBe(true);
+    expect(bridge.hasPending("s1")).toBe(false);
+    expect(resolved).toBe(false); // the caller persisted the answer itself
+    expect(bridge.remove("s1")).toBe(false);
+  });
+});

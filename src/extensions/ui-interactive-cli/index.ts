@@ -11,10 +11,12 @@ import type { QuestionDef } from "@core/context/input.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { Agent } from "@core/agent.ts";
+import { Message } from "@core/context/message.ts";
+import { formatToolResult } from "@core/extensions/tool-utils.ts";
 import { createAgentFactory } from "@core/agent-factory.ts";
-import { restoreSessionIntoAgent } from "@core/session/session-log.ts";
+import { restoreSessionIntoAgent, type PendingQuestion } from "@core/session/session-log.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
-import { ExtensionError } from "@core/error.ts";
+import { ExtensionError, formatError } from "@core/error.ts";
 import type { CliArgv } from "@core/config/index.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { CliChannel } from "./cli-channel.ts";
@@ -346,6 +348,13 @@ export class AsyncInteractiveCliInput implements InputInterface {
 let currentInput: InputInterface | null = null;
 
 /**
+ * Unanswered questions reconstructed by a resume (buildInteractiveAgent),
+ * consumed once by the session loop after its input interface exists.
+ * Interactive hotdog is one session per process, so a module slot is enough.
+ */
+let resumePendingQuestions: PendingQuestion[] = [];
+
+/**
  * Build the shared shutdown handler. Idempotent, every exit path invokes it, and the notice must print exactly once.
  */
 export function buildOnQuitHandler(
@@ -381,12 +390,75 @@ export async function buildInteractiveAgent(
   const agent = await factory(agentConfig);
 
   const explicitSessionId = cli.sessionId as string | undefined;
-  const replayed = await restoreSessionIntoAgent(agent, explicitSessionId);
+  const { replayed, pendingQuestions } = await restoreSessionIntoAgent(agent, explicitSessionId);
   if (replayed > 0) {
     console.log(`Session restored: ${replayed} messages replayed from ${explicitSessionId}`);
   }
+  resumePendingQuestions = pendingQuestions;
 
   return agent;
+}
+
+/**
+ * Re-present questions a killed session never answered: ask each through the
+ * live input, write the answer as the held call's tool result (the executor's
+ * part shape), then queue a continuation turn through the bus -- never a
+ * direct agent call racing a typed prompt. No input seam (tests, piped
+ * stdin): resolve honestly as unanswered rather than hang. If the
+ * re-presentation is itself interrupted, sweep every still-held call closed
+ * with an honest error result: context must never end on unanswered
+ * tool_calls (guaranteed 400 on strict backends).
+ */
+export async function resumeUnansweredQuestions(
+  agent: AgentLike,
+  pending: PendingQuestion[],
+  input: InputInterface | null,
+  continueTurn: () => void,
+): Promise<void> {
+  console.log(
+    `Resuming: ${pending.length} unanswered question${pending.length > 1 ? "s" : ""} from before the interruption.`,
+  );
+  const held = pending.slice();
+  const writeToolResult = (toolCallId: string, content: string, success: boolean): void => {
+    agent.addMessage(
+      new Message({
+        role: "tool",
+        content: [formatToolResult(content, "question", success)],
+        toolCallId,
+        source: "tool",
+      }),
+    );
+  };
+  while (held.length > 0) {
+    const q = held[0]!;
+    let content: string;
+    let success = true;
+    if (input) {
+      try {
+        const answers = await input.collectAnswers(q.questions as QuestionDef[], null);
+        content = JSON.stringify(answers, null, 2);
+      } catch (e: unknown) {
+        // Sweep this and every remaining held call closed, then rethrow:
+        // the prompt returns on a wire-valid context.
+        const why = formatError(e);
+        for (const h of held.splice(0)) {
+          writeToolResult(
+            h.toolCallId,
+            `Question unanswered: the resume was interrupted (${why}); the question was not answered.`,
+            false,
+          );
+        }
+        throw e;
+      }
+    } else {
+      // No human reachable: honest unanswered, same wording class as one-shot.
+      content = "User is not connected (no interactive input); this question was not answered.";
+      success = false;
+    }
+    writeToolResult(q.toolCallId, content, success);
+    held.shift();
+  }
+  continueTurn();
 }
 
 export async function runInteractiveSession(
@@ -614,7 +686,22 @@ export async function runInteractiveSession(
   // options.onClose overrides (tests).
   rl.on("close", options.onClose || onQuit);
 
-  rl.prompt();
+  // Mid-question resume: re-present the restored log's unanswered questions
+  // before the first prompt; the TURN_END hook re-prompts when done.
+  if (agent && resumePendingQuestions.length > 0) {
+    const pending = resumePendingQuestions;
+    resumePendingQuestions = [];
+    void resumeUnansweredQuestions(agent, pending, currentInput, () => {
+      // Through the bus like every other turn: lane bookkeeping applies and
+      // a mid-continuation prompt queues instead of racing.
+      sessionManager.getBus(agent.sessionId)?.enqueue("", { continuation: true });
+    }).catch((e: unknown) => {
+      console.log(formatError(e));
+      rl.prompt();
+    });
+  } else {
+    rl.prompt();
+  }
 
   // Keep the process alive until the bus ends. SessionManager.create already
   // started the run loop; bus.run() is join-idempotent, so this JOINS that

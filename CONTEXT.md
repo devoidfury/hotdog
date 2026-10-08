@@ -72,7 +72,8 @@ Status markers: entries tagged **(planned)** are design intent -- nothing in the
 ## Persistence
 
 - **Session** — In-memory (MessageLog for LLM context) + persisted (JSONL for audit/resume). The separation is an implementation detail. Purpose: debugging, development, audit trails for the agent harness itself.
-- **Session Log** — Written by the agent itself, not by the sink. JSONL format. Resumable: load from serialized JSONL back into active session.
+- **Session Log** — Written by the agent itself, not by the sink. JSONL format. Resumable: load from serialized JSONL back into active session. One self-contained fact per line, append-only: a crash between lines means the earlier facts count, nothing to roll back.
+- **Resume Protocol** — The rules that make a killed session safe to continue. Two durability records in the session log: `tool_started` (fsynced on the executor's pre-flight hook, before side effects; the session-log extension fails closed per call and refuses any call whose own record could not be written, so an absent record means the call truly never dispatched) and `question_asked` (fsynced when the question reaches the UI; fire-and-forget like all output events, so a crash in that window degrades to the started-record classification). Replay classifies every unanswered call: started = outcome-unknown ("verify before retrying" -- a killed job never reports success and is never blind-retried), never-started = safe to retry (logs predating the records keep the generic interrupted wording). A held question (asked, no result) replays as a pending question the UI re-presents; its answer lands as the real tool result and a continuation turn finishes the interrupted run.
 
 ## Task System
 

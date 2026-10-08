@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join, resolve as resolveAbs, sep } from "node:path";
 import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
 import { MESSAGE_SOURCES, Message, type ToolCall, type ImageAttachment, type MessageSource } from "../context/message.ts";
-import { repairToolCalls } from "../context/repair.ts";
+import { repairToolCalls, INTERRUPTED_OUTCOME_UNKNOWN, INTERRUPTED_NOT_STARTED } from "../context/repair.ts";
 import { AgentError, CliError, formatError } from "../error.ts";
 import { logger } from "@utils/logger.ts";
 
@@ -17,6 +17,24 @@ export const LOG_SOURCE = {
   RESET: "reset",
   COMPACTION: "compaction",
   PROMPT: "prompt",
+  /**
+   * Durability record: fsynced before the tool runs (session-log extension,
+   * TOOL_BEFORE_EXECUTE). The gate fails closed per call -- a call whose own
+   * record could not be written is refused -- so in a log that uses the
+   * records: started with no result = outcome-unknown (side effects may have
+   * landed), neither = never dispatched. Pre-protocol logs hold no records,
+   * so absence proves nothing there; their dangling calls keep the generic
+   * interrupted wording. Never replayed as a message.
+   */
+  TOOL_STARTED: "tool_started",
+  /**
+   * Durability record: written when the question tool puts a question to the
+   * UI. Fsynced but fire-and-forget (output events are not awaited): losing
+   * the write degrades to the started-record classification, never to an
+   * unsafe claim. An asked call with no tool_result replays as a pending
+   * question. Never replayed as a message.
+   */
+  QUESTION_ASKED: "question_asked",
 } as const;
 
 export type LogSource = (typeof LOG_SOURCE)[keyof typeof LOG_SOURCE];
@@ -275,14 +293,20 @@ interface AgentForRestore extends AgentForReplay {
  * not a fresh session: an explicit `-s <id>` means "continue THIS
  * conversation", so throw CliError instead of silently starting over (a
  * silent start would surface later only as "why does the model not know X").
+ *
+ * Returns the replay count plus pending questions (question_asked with no
+ * result): the entry point owns re-presenting them -- interactive surfaces
+ * re-ask, headless ones resolve them as unanswered.
  */
 export async function restoreSessionIntoAgent(
   agent: AgentForRestore,
   explicitSessionId: string | null | undefined,
-): Promise<number> {
+): Promise<ReplayResult> {
   // No explicit id, or the agent did not adopt it (e.g. a subagent built
   // with its own id): never touch another session's log.
-  if (!explicitSessionId || agent.sessionId !== explicitSessionId) return 0;
+  if (!explicitSessionId || agent.sessionId !== explicitSessionId) {
+    return { replayed: 0, pendingQuestions: [] };
+  }
   if (!(await sessionExists(explicitSessionId))) {
     throw new CliError(`Invalid session id: ${explicitSessionId} (no such session)`);
   }
@@ -300,11 +324,58 @@ export async function restoreSessionIntoAgent(
   }
 }
 
-/** Converts log entries to Messages in the agent's context; returns the count replayed. */
-export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntry[]): number {
-  if (!entries || entries.length === 0) return 0;
+/** A question that was asked but never answered: replay holds the call open
+ *  and the entry point re-presents these to a human. */
+export interface PendingQuestion {
+  toolCallId: string;
+  /** The question defs as recorded in the question_asked entry's content. */
+  questions: unknown;
+}
+
+export interface ReplayResult {
+  /** Number of messages replayed into the agent's context. */
+  replayed: number;
+  /** Unanswered question-tool calls reconstructed from the log. */
+  pendingQuestions: PendingQuestion[];
+}
+
+/** Converts log entries to Messages in the agent's context. */
+export function replayEntriesIntoContext(
+  agent: AgentForReplay,
+  entries: LogEntry[],
+): ReplayResult {
+  if (!entries || entries.length === 0) return { replayed: 0, pendingQuestions: [] };
 
   const messages: Message[] = [];
+
+  // Durability bookkeeping for the resume protocol:
+  //  - started: calls whose execution began (a pre-flight, fsynced record)
+  //  - asked: question-tool calls put to the UI
+  //  - answered: tool_call_ids that received a result record
+  const started = new Set<string>();
+  const answered = new Set<string>();
+  const asked: PendingQuestion[] = [];
+
+  for (const entry of entries) {
+    const source = entry.source;
+
+    if (
+      (source === LOG_SOURCE.TOOL_STARTED ||
+        source === LOG_SOURCE.QUESTION_ASKED ||
+        source === LOG_SOURCE.TOOL_RESULT) &&
+      typeof entry.tool_call_id === "string" &&
+      entry.tool_call_id !== ""
+    ) {
+      if (source === LOG_SOURCE.TOOL_STARTED) started.add(entry.tool_call_id);
+      if (source === LOG_SOURCE.TOOL_RESULT) answered.add(entry.tool_call_id);
+      if (
+        source === LOG_SOURCE.QUESTION_ASKED &&
+        !asked.some((p) => p.toolCallId === entry.tool_call_id)
+      ) {
+        asked.push({ toolCallId: entry.tool_call_id, questions: entry.content });
+      }
+    }
+  }
 
   for (const entry of entries) {
     const source = entry.source;
@@ -372,6 +443,12 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
         break;
       }
 
+      // Durability records are bookkeeping, not conversation: they classify
+      // other entries (see the repair below) but never become messages.
+      case LOG_SOURCE.TOOL_STARTED:
+      case LOG_SOURCE.QUESTION_ASKED:
+        break;
+
       default:
         break;
     }
@@ -380,10 +457,23 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
   // A crash between log flushes (or an interrupt mid-tool-execution) can leave
   // tool_calls without results, or results without calls -- either way the next
   // request is a guaranteed 400 on strict backends. Repair before replay so a
-  // restored context is always wire-valid.
-  const { messages: repaired } = repairToolCalls(messages);
+  // restored context is always wire-valid. The started records classify each
+  // missing result (dispatched = outcome-unknown, never-dispatched = safe to
+  // retry, no records in the log = no claim); asked-but-unanswered questions
+  // are held open so the user's answer lands as the real tool result.
+  const pendingQuestions = asked.filter((p) => !answered.has(p.toolCallId));
+  const durabilityActive = started.size > 0;
+  const { messages: repaired } = repairToolCalls(messages, {
+    holdUnresolved: new Set(pendingQuestions.map((p) => p.toolCallId)),
+    synthesisFor: (tc) =>
+      started.has(tc.id)
+        ? INTERRUPTED_OUTCOME_UNKNOWN
+        : durabilityActive
+          ? INTERRUPTED_NOT_STARTED
+          : undefined,
+  });
   for (const msg of repaired) {
     agent.addMessage(msg);
   }
-  return repaired.length;
+  return { replayed: repaired.length, pendingQuestions };
 }

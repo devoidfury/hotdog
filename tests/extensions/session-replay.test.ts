@@ -74,7 +74,7 @@ test("replayEntriesIntoContext replays user and assistant messages", () => {
     { ts: "2024-01-01T00:00:03Z", session_id: "test", source: LOG_SOURCE.LLM, content: "I'm fine" },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(4);
   expect(agent.log.length).toBe(4);
   expect(agent.log.at(0)!.content).toBe("Hello");
@@ -91,7 +91,7 @@ test("replayEntriesIntoContext skips system prompt entries", () => {
     { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Hi" },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(2);
   expect(agent.log.length).toBe(2);
   expect(agent.log.at(0)!.content).toBe("Hello");
@@ -106,7 +106,7 @@ test("replayEntriesIntoContext skips reset entries", () => {
     { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.LLM, content: "After reset" },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(2);
   expect(agent.log.length).toBe(2);
   expect(agent.log.at(0)!.content).toBe("Before reset");
@@ -125,7 +125,7 @@ test("replayEntriesIntoContext handles tool calls in assistant messages", () => 
     reasoning_content: "I should list files",
   }];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   // The assistant is replayed, and repair synthesizes a result for the
   // dangling call (a crash left no tool_result entry behind it).
   expect(replayed).toBe(2);
@@ -157,7 +157,7 @@ test("replayEntriesIntoContext handles tool result entries", () => {
     },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   // Both replay; the matching result satisfies the call so nothing is synthesized.
   expect(replayed).toBe(2);
   expect(agent.log.at(0)!.role).toBe("assistant");
@@ -175,7 +175,7 @@ test("replayEntriesIntoContext handles compaction entries as harness messages", 
     content: "<system-notice>[Compacted 5 messages]\n\nUser asked about JS, assistant explained closures.</system-notice>",
   }];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
   expect(agent.log.at(0)!.role).toBe("harness");
   expect(agent.log.at(0)!.source).toBe("harness");
@@ -190,7 +190,7 @@ test("replayEntriesIntoContext restores harness provenance from origin", () => {
     { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Normal user input" },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(3);
   // Harness origin survives the round-trip: role "harness" plus the mangle
   // exemption the wire serializer applies to it.
@@ -211,7 +211,7 @@ test("replayEntriesIntoContext restores model provenance on LLM entries", () => 
     { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Bad origin", origin: "admin" },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(3);
   expect(agent.log.at(0)!.source).toBe("model");
   // Legacy entries without origin stay untagged.
@@ -229,7 +229,7 @@ test("replayEntriesIntoContext replays compaction entries with harness provenanc
     content: "[Compacted 5 messages]\nSummary here.",
   }];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
   expect(agent.log.at(0)!.role).toBe("harness");
   expect(agent.log.at(0)!.source).toBe("harness");
@@ -262,7 +262,7 @@ test("replayEntriesIntoContext restores untrusted parts raw (mangling is a wire 
     },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(2);
 
   // The parts structure survives the round-trip untouched: no escaping on
@@ -284,7 +284,7 @@ test("replayEntriesIntoContext handles PROMPT source as user messages", () => {
   const agent = createMockAgent();
   const entries: LogEntry[] = [{ ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.PROMPT, content: "Prompt template rendered content" }];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
   expect(agent.log.at(0)!.role).toBe("user");
   expect(agent.log.at(0)!.content).toBe("Prompt template rendered content");
@@ -298,7 +298,7 @@ test("replayEntriesIntoContext preserves images in user messages", () => {
     { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
   expect(agent.log.at(0)!.images).toEqual([
     { type: "image_url", mimeType: "image/png", data: "abc" },
@@ -320,7 +320,7 @@ test("replayEntriesIntoContext handles multiple images", () => {
     },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
   expect(agent.log.at(0)!.images!.length).toBe(2);
   expect(agent.log.at(0)!.images![0]!.mimeType).toBe("image/png");
@@ -333,7 +333,7 @@ test("replayEntriesIntoContext handles PROMPT source with images", () => {
     { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.PROMPT, content: "Template with image", images: [{ type: "image_url", mimeType: "image/webp", data: "webpimg" }] },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
   expect(agent.log.at(0)!.role).toBe("user");
   expect(agent.log.at(0)!.images).toEqual([
@@ -367,7 +367,7 @@ test("replayEntriesIntoContext handles mixed entry types", () => {
     },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   // The orphan tc_1 result (no matching call) is dropped; the dangling tc_2
   // call gets a synthesized result. Net: still 5 messages, reordered shape.
   expect(replayed).toBe(5);
@@ -386,21 +386,21 @@ test("replayEntriesIntoContext handles mixed entry types", () => {
 
 test("replayEntriesIntoContext returns 0 for empty entries", () => {
   const agent = createMockAgent();
-  expect(replayEntriesIntoContext(agent, [])).toBe(0);
+  expect(replayEntriesIntoContext(agent, [])).toEqual({ replayed: 0, pendingQuestions: [] });
   expect(agent.log.length).toBe(0);
 });
 
 test("replayEntriesIntoContext handles null/undefined entries", () => {
   const agent = createMockAgent();
-  expect(replayEntriesIntoContext(agent, null as any)).toBe(0);
-  expect(replayEntriesIntoContext(agent, undefined as any)).toBe(0);
+  expect(replayEntriesIntoContext(agent, null as any)).toEqual({ replayed: 0, pendingQuestions: [] });
+  expect(replayEntriesIntoContext(agent, undefined as any)).toEqual({ replayed: 0, pendingQuestions: [] });
 });
 
 test("replayEntriesIntoContext handles assistant without reasoning or tool_calls", () => {
   const agent = createMockAgent();
   const entries: LogEntry[] = [{ ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Simple response" }];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
   expect(agent.log.at(0)!.content).toBe("Simple response");
   expect(agent.log.at(0)!.reasoningContent).toBe(null);
@@ -411,7 +411,7 @@ test("replayEntriesIntoContext drops an orphan tool result (no matching call)", 
   const agent = createMockAgent();
   const entries: LogEntry[] = [{ ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.TOOL_RESULT, content: "no id" }];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   // A tool result with no matching call is a guaranteed 400 on strict
   // backends, so repair drops it at replay time.
   expect(replayed).toBe(0);
@@ -431,7 +431,7 @@ test("bridge: compacted-then-replayed session repairs with zero changes", () => 
     { ts: "2024-01-01T00:00:04Z", session_id: "test", source: LOG_SOURCE.LLM, content: "The file says done." },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries);
+  const { replayed } = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(5);
   expect(agent.log.length).toBe(5);
   // No synthesized results anywhere.
@@ -450,7 +450,7 @@ test("replayEntriesIntoContext skips unknown source types", () => {
     { source: LOG_SOURCE.LLM, content: "World" },
   ];
 
-  const replayed = replayEntriesIntoContext(agent, entries as any);
+  const { replayed } = replayEntriesIntoContext(agent, entries as any);
   expect(replayed).toBe(2);
   expect(agent.log.length).toBe(2);
 });
@@ -478,7 +478,7 @@ test("Session restoration: full round-trip with INPUT, LLM, and TOOL_RESULT entr
     expect(entries.length).toBe(4);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(4);
     expect(agent.log.length).toBe(4);
 
@@ -513,7 +513,7 @@ test("Session restoration: successive one-shot prompts resume correctly", async 
     expect(entries.length).toBe(4);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(4);
 
     expect(agent.log.at(0)!.content).toBe("Hello, world!");
@@ -547,7 +547,7 @@ test("Session restoration: _isRestoring flag prevents duplicate log writes", asy
 
     const agent = createMockAgent(sessionId);
     agent.isRestoring = true;
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     agent.isRestoring = false;
 
     expect(replayed).toBe(2);
@@ -574,7 +574,7 @@ test("Session restoration: handles session with reset marker", async () => {
     expect(entries[0]!.content).toBe("After reset");
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(2);
     expect(agent.log.at(0)!.content).toBe("After reset");
     expect(agent.log.at(1)!.content).toBe("Response after reset");
@@ -599,7 +599,7 @@ test("Session restoration: handles session with compaction entries", async () =>
     expect(entries.length).toBe(5);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(5);
     expect(agent.log.at(0)!.content).toBe("Question 1");
     expect(agent.log.at(1)!.content).toBe("Answer 1");
@@ -623,7 +623,7 @@ test("Session restoration: handles empty/non-existent session gracefully", async
     expect(entries.length).toBe(0);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(0);
     expect(agent.log.length).toBe(0);
   } finally {
@@ -647,7 +647,7 @@ test("Session restoration: preserves reasoning content in assistant messages", a
     expect(entries.length).toBe(1);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(1);
     expect(agent.log.at(0)!.reasoningContent).toBe(
       "First I need to understand the question. Then I'll reason through it step by step. The answer should be 42.",
@@ -677,7 +677,7 @@ test("Session restoration: preserves tool calls in assistant messages", async ()
     expect(entries[0]!.tool_calls).toEqual(toolCalls);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     // Both results satisfy the calls, so nothing is synthesized or dropped.
     expect(replayed).toBe(3);
     expect(agent.log.at(0)!.toolCalls).toEqual(toolCalls);
@@ -705,7 +705,7 @@ test("Session restoration: tool result entries preserve tool_call_id", async () 
     expect((entries[1]! as any).tool_name).toBe("read");
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(2);
     expect(agent.log.at(1)!.toolCallId).toBe("tc_1");
   } finally {
@@ -732,7 +732,7 @@ test("Session restoration: handles mixed entry types in correct order", async ()
     expect(entries.length).toBe(6);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(6);
 
     expect(agent.log.at(0)!.role).toBe("user");
@@ -759,7 +759,7 @@ test("Session restoration: skip system prompt entries, regenerate dynamically", 
     expect(entries.length).toBe(2);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(2);
     expect(agent.log.length).toBe(2);
   } finally {
@@ -788,7 +788,7 @@ test("Session restoration: multiple successive runs maintain consistent context"
     expect(entries.length).toBe(6);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(6);
 
     expect(agent.log.at(0)!.content).toBe("Run 1: Hello");
@@ -820,7 +820,7 @@ test("replayEntriesIntoContext round-trip with readSessionEntries", async () => 
     expect(entries.length).toBe(5);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     // The orphan tc_1 result is dropped; the dangling tc_2 call is synthesized.
     // 5 in, 5 out (one removed, one added).
     expect(replayed).toBe(5);
@@ -857,7 +857,7 @@ test("replayEntriesIntoContext round-trip with reset", async () => {
     expect(entries.length).toBe(2);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(2);
     expect(agent.log.at(0)!.content).toBe("after reset");
     expect(agent.log.at(1)!.content).toBe("response");
@@ -879,7 +879,7 @@ test("replayEntriesIntoContext with only reset entries returns 0", async () => {
     expect(entries.length).toBe(0);
 
     const agent = createMockAgent(sessionId);
-    const replayed = replayEntriesIntoContext(agent, entries);
+    const { replayed } = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(0);
     expect(agent.log.length).toBe(0);
   } finally {

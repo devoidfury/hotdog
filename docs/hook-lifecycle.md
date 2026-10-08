@@ -175,6 +175,14 @@ Each tool call goes through a dedicated sub-pipeline:
        │
        ▼
   TOOL_BEFORE_EXECUTE ───────► awaited notify
+       │                       Durability barrier: the session-log extension
+       │                       writes the fsynced tool_started record here,
+       │                       so the record is on disk before any side
+       │                       effect runs (see the resume protocol). Fail
+       │                       closed, per call: if the write fails, the
+       │                       TOOL_CALL gate below refuses THAT call; the
+       │                       next call gets a fresh barrier attempt, so a
+       │                       call only runs when its own record landed
        │
        ▼
   AGENT_TOOL_CONTEXT ─────────► awaited notify (build toolCtx, enrich it)

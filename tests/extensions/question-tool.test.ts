@@ -173,6 +173,23 @@ describe("QuestionTool", () => {
       expect(result.metadata!.get("questions_answered")).toBe("1");
     });
 
+    it("carries the toolCallId from the tool context on the question event", async () => {
+      const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+      const input = {
+        isInteractive: () => true,
+        collectAnswers: async () => ({ a: "yes" }),
+      };
+      const agent = {
+        emitOutput: (type: string, data: Record<string, unknown>) => events.push({ type, data }),
+      };
+      const values: Record<string, unknown> = { input, agent, toolCallId: "call_42" };
+      const ctx = { get: (key: string) => values[key] } as unknown as ToolContext;
+      await tool.execute(JSON.stringify({ questions: [{ key: "a", prompt: "Q?" }] }), ctx);
+      const ev = events.find((e) => e.type === "question");
+      expect(ev).toBeDefined();
+      expect(ev!.data.toolCallId).toBe("call_42");
+    });
+
     it("defers to a mounted bridge even when it reports non-interactive", async () => {
       // The websocket bridge reports isInteractive() from hasChannels() and
       // owns the wait/timeout strategy: no channel connected right now still

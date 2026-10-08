@@ -1,4 +1,4 @@
-import { Message } from "./message.ts";
+import { Message, type ToolCall } from "./message.ts";
 
 /**
  * Synthesized tool-result content for interrupted calls. Pinned verbatim: the
@@ -7,6 +7,23 @@ import { Message } from "./message.ts";
  */
 export const INTERRUPTED_TOOL_RESULT = "[Tool execution was interrupted]";
 
+/**
+ * Resume protocol: a `tool_started` with no result -- execution began, fate
+ * unknown. The verify-before-retry wording is the point: never assume
+ * success, never blind-retry a side effect.
+ */
+export const INTERRUPTED_OUTCOME_UNKNOWN =
+  "[Tool execution was interrupted before its result was recorded. Side effects may have landed: verify the current state before retrying this call.]";
+
+/**
+ * Resume protocol: no `tool_started` in a log that uses the records -- the
+ * call never dispatched, safe to retry. Only applied when the log carries
+ * started records at all (absence proves nothing otherwise); pre-protocol
+ * logs keep INTERRUPTED_TOOL_RESULT.
+ */
+export const INTERRUPTED_NOT_STARTED =
+  "[Tool execution was interrupted before the call started; it never ran. Safe to retry.]";
+
 export interface ToolCallRepair {
   /** New message array; the input is never mutated. */
   messages: Message[];
@@ -14,6 +31,19 @@ export interface ToolCallRepair {
   repaired: string[];
   /** Orphan/duplicate results that were dropped (call id, or "(missing id)"). */
   dropped: string[];
+  /** Call ids deliberately left unanswered (holdUnresolved); they stay pending. */
+  held: string[];
+}
+
+export interface ToolCallRepairOptions {
+  /** Call ids left unanswered: a replayed pending question. The caller
+   *  re-presents it and the real answer lands as these ids' tool result. */
+  holdUnresolved?: Set<string>;
+  /**
+   * Per-call synthesis text (resume classifies started vs never-started).
+   * Returning undefined falls back to INTERRUPTED_TOOL_RESULT.
+   */
+  synthesisFor?: (toolCall: ToolCall) => string | undefined;
 }
 
 /**
@@ -30,10 +60,14 @@ export interface ToolCallRepair {
  * Orphan and duplicate results are dropped. Everything else passes through
  * in order. Pure: healthy inputs come back untouched (same instances).
  */
-export function repairToolCalls(messages: Message[]): ToolCallRepair {
+export function repairToolCalls(
+  messages: Message[],
+  opts?: ToolCallRepairOptions,
+): ToolCallRepair {
   const out: Message[] = [];
   const repaired: string[] = [];
   const dropped: string[] = [];
+  const held: string[] = [];
 
   let i = 0;
   while (i < messages.length) {
@@ -94,10 +128,14 @@ export function repairToolCalls(messages: Message[]): ToolCallRepair {
       const id = tc?.id;
       if (typeof id !== "string" || id === "" || matched.has(id) || synthesized.has(id)) continue;
       synthesized.add(id);
+      if (opts?.holdUnresolved?.has(id)) {
+        held.push(id);
+        continue;
+      }
       out.push(
         new Message({
           role: "tool",
-          content: INTERRUPTED_TOOL_RESULT,
+          content: opts?.synthesisFor?.(tc) ?? INTERRUPTED_TOOL_RESULT,
           toolCallId: id,
           source: "harness",
         }),
@@ -108,7 +146,7 @@ export function repairToolCalls(messages: Message[]): ToolCallRepair {
     i = j;
   }
 
-  return { messages: out, repaired, dropped };
+  return { messages: out, repaired, dropped, held };
 }
 
 function toolResultLabel(toolCallId: string | null): string {

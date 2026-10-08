@@ -1,8 +1,8 @@
 // Session Log Extension
 // Append-only JSONL audit trail for observability.
 
-import { appendFile, readFile, access, mkdir } from "node:fs/promises";
-import { HOOKS } from "@core/hooks.ts";
+import { appendFile, open, readFile, access, mkdir } from "node:fs/promises";
+import { HOOKS, type GateAction } from "@core/hooks.ts";
 import { stripNulls } from "@utils/objects.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { isWrapperPart, isToolResultPart } from "@core/context/wrappers.ts";
@@ -94,6 +94,14 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
 
   // Track session state
   let isRestoring = false;
+  // Durability-barrier failures keyed by tool call id (set when that call's
+  // tool_started fsync fails). notifyHooks swallows handler errors, so the
+  // failure cannot propagate from TOOL_BEFORE_EXECUTE -- the TOOL_CALL gate
+  // below refuses the call instead. Per-call, never a global flag: this
+  // instance is shared across webui sessions, and another session's landed
+  // write must not rescue a call whose own record is missing (replay would
+  // read it as "never ran, safe to retry" when it may have run).
+  const barrierFailures = new Map<string, string>();
   // Track the most recent session ID so readEntries/getLogPath work correctly.
   let lastSessionId: string | null = null;
 
@@ -113,6 +121,40 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     );
     writeQueues.set(logPath, next);
     return next;
+  };
+
+  /**
+   * Durability-class append: same write queue (file order = dispatch order),
+   * fsynced so the record and everything appended before it survives
+   * kill -9 / power loss. Only for records whose presence on disk carries
+   * meaning: tool_started, question_asked.
+   */
+  const queuedFsyncAppend = (logPath: string, line: string): Promise<void> => {
+    const prev = writeQueues.get(logPath) ?? Promise.resolve();
+    const write = async () => {
+      const fh = await open(logPath, "a");
+      try {
+        await fh.appendFile(line);
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+    };
+    const next = prev.then(write, write);
+    writeQueues.set(logPath, next);
+    return next;
+  };
+
+  /** Validate + remember the log path for a session id; null when rejected. */
+  const resolveLogPath = (sessionId: string): string | null => {
+    try {
+      const logPath = sessionPath(sessionId);
+      lastSessionId = sessionId;
+      return logPath;
+    } catch (err) {
+      logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
+      return null;
+    }
   };
 
   /** Map message role to the correct log source type. */
@@ -240,9 +282,95 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       },
 
       /**
+       * Write the tool_started record on the executor's awaited hook, so the
+       * fsync lands the record (and the tool_calls entry appended before it)
+       * before any side effect runs. Classification semantics: see
+       * LOG_SOURCE.TOOL_STARTED.
+       */
+      [HOOKS.TOOL_BEFORE_EXECUTE]: async ({
+        toolCallId,
+        toolName,
+        input,
+        agent,
+      }: {
+        toolCallId?: string;
+        toolName: string;
+        input: string;
+        agent: { sessionId?: string };
+      }) => {
+        if (!toolCallId) return; // no id to tie the record (and any replay) to
+        const logPath = resolveLogPath(agent.sessionId || "unknown");
+        if (!logPath) return;
+        const entry = stripNulls({
+          ts: new Date().toISOString(),
+          session_id: agent.sessionId || "unknown",
+          source: LOG_SOURCE.TOOL_STARTED,
+          content: input,
+          tool_call_id: toolCallId,
+          tool_name: toolName,
+        });
+        // A rejection here is invisible to the executor (notifyHooks swallows
+        // handler errors): catch, remember it against the call id, and let
+        // the TOOL_CALL gate refuse it.
+        try {
+          await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+          barrierFailures.delete(toolCallId);
+        } catch (err) {
+          const why = formatError(err);
+          barrierFailures.set(toolCallId, why);
+          logger.error(
+            `[session-log] durability barrier failed: ${why} -- tool ${toolCallId} is blocked until its record can be written`,
+          );
+        }
+      },
+
+      /**
+       * Fail-closed gate: a call whose own tool_started write failed does not
+       * run. The block surfaces to the model as a normal blocked tool result.
+       * A retry is a new call id with a fresh barrier attempt.
+       */
+      [HOOKS.TOOL_CALL]: ({ toolCallId }: { toolCallId?: string }): GateAction | undefined => {
+        if (typeof toolCallId !== "string" || toolCallId === "") return undefined;
+        const failure = barrierFailures.get(toolCallId);
+        if (!failure) return undefined;
+        // The call is answered once (the block); forget its failure so the
+        // map cannot accumulate stale ids.
+        barrierFailures.delete(toolCallId);
+        return {
+          action: "block",
+          result:
+            `Tool not executed: the session log is unwritable (${failure}), so this call could not be recorded ` +
+            "before its side effects. Fix the sessions directory (disk space / permissions) and retry. " +
+            "If you accept losing crash-resume safety for this session, disable logging with --no-log.",
+        };
+      },
+
+      /**
        * Log compaction results.
        */
       [HOOKS.OUTPUT_EVENT]: async ({ type, data, agent }) => {
+        // Durability record for a question put to the UI (see
+        // LOG_SOURCE.QUESTION_ASKED): fsynced but fire-and-forget, since
+        // OUTPUT_EVENT handlers are not awaited.
+        if (type === "question") {
+          const d = data as { toolCallId?: unknown; questions?: unknown };
+          const toolCallId = typeof d.toolCallId === "string" ? d.toolCallId : "";
+          const questions = Array.isArray(d.questions) ? d.questions : null;
+          if (!toolCallId || !questions || questions.length === 0) return;
+          const sessionId = agent.sessionId || "unknown";
+          const logPath = resolveLogPath(sessionId);
+          if (!logPath) return;
+          const entry = stripNulls({
+            ts: new Date().toISOString(),
+            session_id: sessionId,
+            source: LOG_SOURCE.QUESTION_ASKED,
+            content: questions,
+            tool_call_id: toolCallId,
+          });
+          await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+          return;
+        }
+
         if (type === "compaction_result") {
           const compactionData = data as { summary?: string; messagesCompacted?: number };
           if (compactionData?.summary) {

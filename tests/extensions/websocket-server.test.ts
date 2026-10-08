@@ -3,7 +3,14 @@
 // (Merged from websocket-server.test.ts + websocket-server-extended.test.ts.)
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, mock, Mock } from "bun:test";
-import { SessionRegistry, createWsServer, type HotdogServerSocket } from "@extensions/websocket/server.ts";
+import {
+  SessionRegistry,
+  createWsServer,
+  seedResumedQuestions,
+  dismissResumedQuestions,
+  type HotdogServerSocket,
+} from "@extensions/websocket/server.ts";
+import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { MessageLog } from "@core/context/message-log.ts";
@@ -103,6 +110,59 @@ describe("SessionRegistry", () => {
     registry = new SessionRegistry({ buildAgent });
     const result = await registry.create();
     expect(result.sessionId).toBe("agent-session-123");
+  });
+
+  it("gates session turns through the injected turnLanes coordinator", async () => {
+    // Regression: the ws registry's SessionManager is built without
+    // taskConfig, so turnLanes must be handed through explicitly -- without
+    // it, two live webui sessions double up requests on one provider lane.
+    const acquires: string[] = [];
+    let releaseCalls = 0;
+    let runStarted = false;
+    let finishRun!: () => void;
+    const agent = {
+      sessionId: "lane-sess",
+      model: "prov/m1",
+      hooks: { runHookPipeline: async (_n: string, data: unknown) => data },
+      run: () => {
+        runStarted = true;
+        return new Promise<void>((r) => {
+          finishRun = r;
+        });
+      },
+      resetCancel: () => {},
+      cancel: () => {},
+    };
+    const reg = new SessionRegistry({
+      buildAgent: async () => agent as unknown as AgentLike,
+      turnLanes: {
+        acquireTurn: async (model: string) => {
+          acquires.push(model);
+          return async () => {
+            releaseCalls++;
+          };
+        },
+      },
+    });
+    try {
+      const { sessionId } = await reg.create();
+      expect(sessionId).toBe("lane-sess");
+      reg.getSessionManager().getBus(sessionId)!.enqueue("hello");
+
+      const deadline = Date.now() + 2000;
+      const settle = async (fn: () => boolean, what: string) => {
+        while (!fn()) {
+          if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+          await new Promise((r) => setTimeout(r, 5));
+        }
+      };
+      await settle(() => acquires.length === 1 && runStarted, "lane acquire then gated run");
+      expect(acquires).toEqual(["prov/m1"]);
+      finishRun();
+      await settle(() => releaseCalls === 1, "lane released when the turn settles");
+    } finally {
+      reg.stopCleanupLoop();
+    }
   });
 
   it("uses the proposed sessionId when the agent has none of its own", async () => {
@@ -1500,5 +1560,133 @@ describe("websocket extension create()", () => {
     // A second COMMANDS_REGISTER (another session's agent build) adds nothing.
     handlers[0]!({ registry });
     expect(core.completion.handlerCount()).toBe(2);
+  });
+});
+
+// ── resumed pending questions (seed chain + dismiss) ────────────────────────
+
+describe("resumed pending questions (seedResumedQuestions / dismissResumedQuestions)", () => {
+  type InjectCb = (answers: Record<string, unknown>, cancelled: boolean) => void;
+
+  function fakeBridge() {
+    const injected: Array<{ sessionId: string; questions: unknown; cb: InjectCb }> = [];
+    const removed: string[] = [];
+    const bridge = {
+      inject: (sessionId: string, questions: unknown, cb: InjectCb) => {
+        injected.push({ sessionId, questions, cb });
+      },
+      remove: (sessionId: string) => {
+        removed.push(sessionId);
+        return true;
+      },
+    } as unknown as WebSocketQuestionBridge;
+    return { bridge, injected, removed };
+  }
+
+  function fakeAgent() {
+    const added: Message[] = [];
+    return { agent: { addMessage: (m: Message) => added.push(m) } as unknown as AgentLike, added };
+  }
+
+  function fakeRegistry(agent: AgentLike | null) {
+    const broadcasts: Array<Record<string, unknown>> = [];
+    const reg = {
+      get: (_sid: string) => (agent ? { agent } : undefined),
+      broadcast: (m: Record<string, unknown>) => broadcasts.push(m),
+      getSessionManager: () => ({ getBus: () => undefined }),
+    } as unknown as SessionRegistry;
+    return { reg, broadcasts };
+  }
+
+  const pending = (sid: string) => [
+    { toolCallId: `${sid}-q1`, questions: [{ key: "a", prompt: "A?" }] },
+    { toolCallId: `${sid}-q2`, questions: [{ key: "b", prompt: "B?" }] },
+  ];
+
+  it("answer lands on the CURRENT agent, not the one captured at load", () => {
+    // Regression: the inject callback used to close over the agent from log
+    // load; a profile switch or /model before the answer wrote to a stale
+    // instance. It must resolve the agent fresh from the registry.
+    const sid = "resumed-fresh-agent";
+    const { bridge, injected } = fakeBridge();
+    const load = fakeAgent();
+    const live = fakeAgent();
+    // Seed with one registry shape whose get() returns the live agent (what
+    // the registry reports after a swap), NOT the load-time instance.
+    const { reg } = fakeRegistry(live.agent);
+
+    seedResumedQuestions(bridge, reg, sid, [pending(sid)[0]!]);
+    expect(injected).toHaveLength(1);
+    injected[0]!.cb({ a: "yes" }, false);
+
+    expect(load.added).toHaveLength(0);
+    expect(live.added).toHaveLength(1);
+    expect(live.added[0]!.toolCallId).toBe(`${sid}-q1`);
+  });
+
+  it("dismiss closes every held call honestly and tells the clients", () => {
+    const sid = "resumed-dismiss";
+    const { bridge, injected, removed } = fakeBridge();
+    const { agent, added } = fakeAgent();
+    const { reg, broadcasts } = fakeRegistry(agent);
+
+    seedResumedQuestions(bridge, reg, sid, pending(sid));
+    expect(injected).toHaveLength(1); // first question presented
+
+    dismissResumedQuestions(bridge, reg, sid);
+
+    // Both held calls answered with honest error results (wire-valid context).
+    expect(added).toHaveLength(2);
+    for (const m of added) {
+      expect(m.toolCallId).toMatch(/-q[12]$/);
+      const parts = m.content as Array<{ status: string; output: string }>;
+      expect(parts[0]!.status).toBe("error");
+      expect(parts[0]!.output).toContain("dismissed");
+    }
+    // The bridge entry is dropped WITHOUT resolving (no duplicate answer).
+    expect(removed).toEqual([sid]);
+    // Clients get the card-clearing signal: the same event the live answer
+    // path broadcasts, flagged dismissed with empty answers.
+    const cleared = broadcasts.find((b) => b.type === S2C.QUESTION_ANSWERED);
+    expect(cleared).toBeDefined();
+    expect(cleared!.dismissed).toBe(true);
+    expect(cleared!.answers).toEqual({});
+
+    // The stale inject callback must not write anything after the dismiss.
+    const before = added.length;
+    injected[0]!.cb({ a: "late" }, false);
+    expect(added).toHaveLength(before);
+  });
+
+  it("answering the last held call clears the hold and queues a continuation", () => {
+    const sid = "resumed-chain";
+    const { bridge, injected } = fakeBridge();
+    const { agent, added } = fakeAgent();
+    let continued = 0;
+    const reg = {
+      get: (_sid: string) => ({ agent }),
+      broadcast: () => {},
+      getSessionManager: () => ({
+        getBus: (_sid: string) => ({
+          enqueue: (_c: string, opts?: { continuation?: boolean }) => {
+            if (opts?.continuation) continued++;
+          },
+        }),
+      }),
+    } as unknown as SessionRegistry;
+
+    seedResumedQuestions(bridge, reg, sid, pending(sid));
+    injected[0]!.cb({ a: "1" }, false); // q1 answered, q2 chains
+    expect(injected).toHaveLength(2);
+    expect(added).toHaveLength(1);
+    expect(continued).toBe(0);
+
+    injected[1]!.cb({ b: "2" }, false); // q2 answered: continuation, no more holds
+    expect(added).toHaveLength(2);
+    expect(continued).toBe(1);
+
+    // Hold is gone: a later dismiss is a no-op.
+    dismissResumedQuestions(bridge, reg, sid);
+    expect(added).toHaveLength(2);
   });
 });

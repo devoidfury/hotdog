@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { HOOKS, createHooks } from "@core/hooks.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
+import { createTurnLanes, type TurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
 import { C2S, S2C, C2SMessage, wireImages, taskActivityMessage } from "./protocol.ts";
@@ -21,7 +22,11 @@ import {
   replayEntriesIntoContext,
   listSessionLogs,
   deleteSessionLog,
+  type PendingQuestion,
 } from "@core/session/session-log.ts";
+import { Message } from "@core/context/message.ts";
+import { formatToolResult } from "@core/extensions/tool-utils.ts";
+import type { QuestionDef } from "@core/context/input.ts";
 import { AgentError, formatError } from "@core/error.ts";
 import { parseForkArg } from "@core/command-handlers.ts";
 import { completionPrefix, parseCompletionContext } from "@core/completion.ts";
@@ -75,6 +80,10 @@ interface SessionRegistryOptions {
   sttTarget?: SttTarget | null;
   /** Invoked when a session is deleted (cancels its pending questions). */
   onSessionDeleted?: (sessionId: string) => void;
+  /** Provider-lane coordinator for session turns. Without it webui turns
+   *  run uncoordinated: two live sessions double up requests on one backend
+   *  instead of queueing on the lane. */
+  turnLanes?: TurnLanes;
 }
 
 interface CreateWsServerOptions {
@@ -178,6 +187,7 @@ export class SessionRegistry {
     profiles = {},
     sttTarget = null,
     onSessionDeleted,
+    turnLanes,
   }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
     this.#questionTimeoutSecs = questionTimeoutSecs;
@@ -196,6 +206,7 @@ export class SessionRegistry {
         config: Record<string, unknown>,
       ) => Promise<AgentLike>,
       llmClient: llmClient,
+      turnLanes,
     });
   }
 
@@ -568,16 +579,116 @@ export class SessionRegistry {
 async function loadLogIntoNewSession(
   logId: string,
   registry: SessionRegistry,
-): Promise<{ sessionId: string; agent: AgentLike }> {
+): Promise<{ sessionId: string; agent: AgentLike; pendingQuestions: PendingQuestion[] }> {
   const entries = await readSessionEntries(logId);
   if (entries.length === 0) {
     throw new AgentError(`No entries found for session ${logId}`);
   }
 
   const newSession = await registry.create({});
-  replayEntriesIntoContext(newSession.agent, entries);
+  const { pendingQuestions } = replayEntriesIntoContext(newSession.agent, entries);
 
-  return { sessionId: newSession.sessionId, agent: newSession.agent };
+  return { sessionId: newSession.sessionId, agent: newSession.agent, pendingQuestions };
+}
+
+/** Held resumed questions per session (cold log with unanswered questions):
+ *  each answer lands as its held call's tool result, the next question
+ *  chains, the last queues a continuation turn. A new prompt dismisses
+ *  whatever is still held (honest error results) -- no turn may start on a
+ *  dangling call (guaranteed 400 on strict backends). */
+const resumedHeldQuestions = new Map<string, PendingQuestion[]>();
+
+function resumedToolResult(content: string, toolCallId: string, success: boolean): Message {
+  return new Message({
+    role: "tool",
+    content: [formatToolResult(content, "question", success)],
+    toolCallId,
+    source: "tool",
+  });
+}
+
+export function seedResumedQuestions(
+  bridge: WebSocketQuestionBridge,
+  registry: SessionRegistry,
+  sessionId: string,
+  pending: PendingQuestion[],
+): void {
+  if (pending.length === 0) return;
+  resumedHeldQuestions.set(sessionId, pending.slice());
+  const injectNext = (queue: PendingQuestion[]): void => {
+    const q = queue[0];
+    if (!q) {
+      resumedHeldQuestions.delete(sessionId);
+      return;
+    }
+    bridge.inject(sessionId, q.questions as QuestionDef[], (answers, cancelled) => {
+      // The hold was dismissed (new prompt) or the session deleted since the
+      // inject: never write tool results for calls we no longer hold.
+      if (!resumedHeldQuestions.has(sessionId)) return;
+      // Resolve the agent fresh: /model or a profile switch may have replaced
+      // it between load and answer; the result must land on the live one.
+      const agent = registry.get(sessionId)?.agent;
+      if (!agent) return; // session gone with the hold: nothing to answer
+      agent.addMessage(
+        cancelled
+          ? resumedToolResult(
+              "Question unanswered: it was dismissed without an answer (cancel resolves with defaults, and defaults are not the user's reply).",
+              q.toolCallId,
+              false,
+            )
+          : resumedToolResult(JSON.stringify(answers, null, 2), q.toolCallId, true),
+      );
+      const rest = queue.slice(1);
+      if (rest.length > 0) {
+        resumedHeldQuestions.set(sessionId, rest);
+        injectNext(rest);
+        registry.broadcast({ type: S2C.QUESTION, sessionId, questions: rest[0]!.questions });
+        return;
+      }
+      // All held calls answered: drop the hold BEFORE the continuation, so a
+      // following prompt's dismiss cannot re-answer calls already resolved.
+      resumedHeldQuestions.delete(sessionId);
+      registry.getSessionManager().getBus(sessionId)?.enqueue("", { continuation: true });
+    });
+  };
+  injectNext(pending);
+}
+
+/**
+ * A new prompt abandons any still-held resumed questions: each unanswered
+ * call gets an honest error tool result so the context stays wire-valid.
+ * (Live questions are untouched -- they belong to a running turn, and their
+ * messages simply queue behind it.)
+ */
+export function dismissResumedQuestions(
+  bridge: WebSocketQuestionBridge,
+  registry: SessionRegistry,
+  sessionId: string,
+): void {
+  const held = resumedHeldQuestions.get(sessionId);
+  if (!held || held.length === 0) return;
+  const agent = registry.get(sessionId)?.agent;
+  resumedHeldQuestions.delete(sessionId);
+  bridge.remove(sessionId); // the queued resolve would write a duplicate answer
+  // Clear any question card still on clients -- answering a stale one would
+  // get "No pending question" back. Same event as the live answer path,
+  // flagged dismissed with empty answers.
+  registry.broadcast({
+    type: S2C.QUESTION_ANSWERED,
+    sessionId,
+    answers: {},
+    dismissed: true,
+  });
+  if (!agent) return;
+  for (const q of held) {
+    agent.addMessage(
+      resumedToolResult(
+        "Question unanswered: a new message arrived before an answer; the question was dismissed.",
+        q.toolCallId,
+        false,
+      ),
+    );
+  }
 }
 
 // Re-emit a session's history as S2C messages so the frontend can reconstruct the chat.
@@ -1016,6 +1127,9 @@ async function routeMessage(
       const files = msg.files;
       if (!sid) break;
 
+      // A new prompt supersedes any resumed question still on hold.
+      dismissResumedQuestions(bridge, registry, sid);
+
       if (Array.isArray(files) && files.length > 0) {
         // Webui upload: base64 files on the send message.
         // Validation is all-or-nothing so nothing is ever silently dropped.
@@ -1210,7 +1324,7 @@ async function routeMessage(
         }
 
         loadLogIntoNewSession(msg.logId as string, registry)
-          .then(({ sessionId, agent }) => {
+          .then(({ sessionId, agent, pendingQuestions }) => {
             const channel = registry.createChannel(sessionId, ws);
             ws.activeSessionId = sessionId;
             ws.activeChannel = channel;
@@ -1229,6 +1343,17 @@ async function routeMessage(
             registry.broadcast(sessionCreatedMsg);
 
             replaySessionHistory(sessionId, agent, ws);
+
+            // The log died mid-question: re-present to the loading client
+            // (other tabs get it via the attach flow).
+            if (pendingQuestions.length > 0) {
+              seedResumedQuestions(bridge, registry, sessionId, pendingQuestions);
+              SessionRegistry.sendSafe(ws, {
+                type: S2C.QUESTION,
+                sessionId,
+                questions: pendingQuestions[0]!.questions as QuestionDef[],
+              });
+            }
           })
           .catch((err: unknown) => {
             SessionRegistry.sendSafe(ws, {
@@ -1448,6 +1573,20 @@ export function createWsServer(
   // onSessionDeleted callback can reference it (called lazily).
   let bridge: WebSocketQuestionBridge | null = null;
 
+  // Webui turns must queue on the provider lane like everything else. The ws
+  // registry builds its SessionManager without taskConfig (its TaskManager
+  // lives here), so hand the lanes in explicitly: same caps, same ledger,
+  // same raw-config source the CLI's SessionManager uses.
+  const resolvedCore = core.resolved;
+  const turnLanes = resolvedCore
+    ? createTurnLanes({
+        lanesDir: resolvedCore.taskLanesDir ?? null,
+        lanesPerProvider: resolvedCore.taskLanesPerProvider,
+        providerDefs:
+          (core.config?.providers as { name: string; taskLanes?: unknown }[] | undefined) ?? [],
+      })
+    : undefined;
+
   const registry = new SessionRegistry({
     buildAgent,
     llmClient: sharedLlmClient,
@@ -1456,14 +1595,20 @@ export function createWsServer(
     sessionTimeoutMin,
     profiles,
     sttTarget,
-    onSessionDeleted: (sid) => bridge?.dropSession(sid),
+    turnLanes,
+    onSessionDeleted: (sid) => {
+      // Drop the hold FIRST: dropSession cancels the pending question, and
+      // the resolve callback checks resumedHeldQuestions before touching the
+      // (now deleted) session's agent or bus.
+      resumedHeldQuestions.delete(sid);
+      bridge?.dropSession(sid);
+    },
   });
 
   // Subagent tasks for webui/ws sessions: the registry's SessionManager is built without taskConfig,
   // so the TaskManager lives here. Publishing it as the taskManager service lets delegate_task
   // resolve lazily; the observer relays spawn/status/activity to every connected client --
   // the webui subagents panel consumes it, and nothing reaches the main chat transcript.
-  const resolvedCore = core.resolved;
   // Hoisted so the returned stopTaskManager() can reach it (null when no registry).
   let taskManager: TaskManager | null = null;
   if (resolvedCore?.modelRegistry) {

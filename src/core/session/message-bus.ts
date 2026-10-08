@@ -30,6 +30,8 @@ export interface MessageBusAgent {
     images?: unknown,
     opts?: { source?: MessageSource },
   ): Promise<unknown>;
+  /** Continue the loop with no new user message (resume continuation turns). */
+  continueRun?(): Promise<unknown>;
   resetCancel(): void;
   cancel(): void;
   /**
@@ -62,6 +64,10 @@ export interface BusQueueItem {
   content: string | Array<Record<string, unknown>>;
   source?: MessageSource;
   images?: ImageAttachment[];
+  /** Continuation turn (see Agent.continueRun): no user message, the context
+   *  tail IS the input. The INPUT pipeline skips these -- commands cannot
+   *  hide in an empty message. */
+  continuation?: boolean;
 }
 
 export interface Sink {
@@ -141,8 +147,14 @@ export class MessageBus {
 
   enqueue(
     content: string | Array<Record<string, unknown>>,
-    opts?: { source?: MessageSource; steering?: boolean; images?: ImageAttachment[] },
+    opts?: { source?: MessageSource; steering?: boolean; images?: ImageAttachment[]; continuation?: boolean },
   ): void {
+    // Continuation: nothing to sanitize, no steering -- just a queue slot.
+    if (opts?.continuation) {
+      this.#queue.push({ content: "", continuation: true });
+      this._wakeWaiter();
+      return;
+    }
     const clean = sanitizeQueuedContent(content, opts?.source);
     const agent = this.#sessionManager.getAgent();
     if (opts?.steering && !opts?.images && this.#isRunning && agent?.steer) {
@@ -443,16 +455,23 @@ export class MessageBus {
     // Reset before processing so a leftover cancel from an interrupt can't swallow this run.
     agent.resetCancel();
 
-    const piped = await this.#runInputPipeline(agent, content, source);
-    if (piped.handled) {
-      this.#isRunning = false;
-      this.#emitSessionState("working", false, agentSid);
-      return;
+    const continuation = typeof item !== "string" && item.continuation === true;
+
+    // INPUT pipelines and commands see user messages only; a continuation
+    // turn carries no content and goes straight to the model.
+    let images: ImageAttachment[] | undefined;
+    if (!continuation) {
+      const piped = await this.#runInputPipeline(agent, content, source);
+      if (piped.handled) {
+        this.#isRunning = false;
+        this.#emitSessionState("working", false, agentSid);
+        return;
+      }
+      content = piped.content;
+      // Images adopted from an INPUT transform ride Agent.run's images field;
+      // queue-item images (webui uploads) fill in when no transform adopted any.
+      images = piped.images ?? (typeof item === "string" ? undefined : item.images);
     }
-    content = piped.content;
-    // Images adopted from an INPUT transform ride Agent.run's images field;
-    // queue-item images (webui uploads) fill in when no transform adopted any.
-    const images = piped.images ?? (typeof item === "string" ? undefined : item.images);
 
     // Provider-lane gate: take a slot on the agent's CURRENT model lane before
     // the turn runs (see turn-lanes.ts). The lane is decided here, not at bus
@@ -468,7 +487,13 @@ export class MessageBus {
     }
 
     try {
-      await agent.run(content, images, source ? { source } : undefined);
+      if (continuation) {
+        // Agents without the continuation seam (test fakes) are a no-op: the
+        // answered tool results are persisted, the next turn picks them up.
+        if (typeof agent.continueRun === "function") await agent.continueRun();
+      } else {
+        await agent.run(content, images, source ? { source } : undefined);
+      }
     } catch (e: unknown) {
       // Suppress cancellation errors on interrupt — the UI already
       // prints an "Interrupted" message, so the full error is noise.

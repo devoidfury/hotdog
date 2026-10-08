@@ -105,6 +105,9 @@ export interface SessionManagerOptions {
   llmClient?: LlmClient;
   modelRegistry?: Record<string, ModelConfig>;
   coreConfig?: Record<string, unknown>;
+  // Explicit lane coordinator for hosts that keep their TaskManager outside
+  // the manager (webui/ws). taskConfig would build a second one in here.
+  turnLanes?: TurnLanes;
   // When provided, SessionManager creates and owns a TaskManager internally.
   taskConfig?: {
     maxIterations: number;
@@ -179,7 +182,9 @@ export class SessionManager {
       return rawBuildAgent(enrichedConfig);
     };
 
-    if (options.taskConfig) {
+    if (options.turnLanes) {
+      this.#turnLanes = options.turnLanes;
+    } else if (options.taskConfig) {
       // Top-level session turns share the machine-wide lane ledger with task
       // agents: one slot per active turn, resolved model's lane, same caps.
       this.#turnLanes = createTurnLanes({

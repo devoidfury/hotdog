@@ -153,7 +153,7 @@ export class ToolExecutor {
     // `input` seam -- the one route from an extension to the UI. Context
     // handlers only mount services on toolCtx/agent, so running them earlier
     // is order-neutral for everything else.
-    const toolCtx = this.#buildToolContext();
+    const toolCtx = this.#buildToolContext(toolCallId);
     await hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, { toolCtx, toolName, agent });
 
     // failOnError: a gate handler that throws must not be treated as a
@@ -280,10 +280,13 @@ export class ToolExecutor {
     );
   }
 
-  #buildToolContext(): ToolContext {
+  #buildToolContext(toolCallId?: string | null): ToolContext {
     const toolCtx = new ToolContext();
     toolCtx.set("agent", this.#deps.agent);
     toolCtx.set("isSessionRestoring", this.#deps.isRestoring());
+    // The call id rides the context so tools emitting their own output
+    // events can tie them to the call they answer.
+    if (toolCallId) toolCtx.set("toolCallId", toolCallId);
     // Build Workspace from the configured roots, or the process CWD. Roots
     // are pre-validated at config resolution (expandWorkspacePaths); if
     // construction still throws, let it surface as an unexpected error rather

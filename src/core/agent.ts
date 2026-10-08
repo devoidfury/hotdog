@@ -343,11 +343,13 @@ export class Agent implements AgentLike {
   async run(
     userInput: string | Array<Record<string, unknown>>,
     images?: ImageAttachment[],
-    opts?: { source?: MessageSource },
+    opts?: { source?: MessageSource; continuation?: boolean },
   ): Promise<AgentRunResult | undefined> {
-    if (!contentToText(userInput).trim() && (!images || images.length === 0)) {
-      return;
-    }
+    const emptyInput =
+      !contentToText(userInput).trim() && (!images || images.length === 0);
+    // A continuation (continueRun) has no user message: the context tail IS
+    // the input. Otherwise the old rule stands -- empty input is a no-op.
+    if (emptyInput && !opts?.continuation) return;
 
     // Re-entrancy guard: the loop keeps per-run state on the instance
     // (iterationCount, runAbortController, stream replay buffers). Two
@@ -364,21 +366,23 @@ export class Agent implements AgentLike {
     try {
       await this.ensureSystemPrompt();
 
-      // Provenance drives the internal role: harness-injected runs ride
-      // role "harness"; everything else is user input.
-      const userMsg = new Message({
-        role: opts?.source === "harness" ? "harness" : "user",
-        content: userInput,
-        images,
-        source: opts?.source ?? "user",
-      });
-      this.addMessage(userMsg);
-      const display = splitFileIncludes(userInput);
-      this.emitOutput("user_message", {
-        content: display.text,
-        ...(display.files.length > 0 ? { files: display.files } : {}),
-        ...(images && images.length > 0 ? { images } : {}),
-      });
+      if (!emptyInput) {
+        // Provenance drives the internal role: harness-injected runs ride
+        // role "harness"; everything else is user input.
+        const userMsg = new Message({
+          role: opts?.source === "harness" ? "harness" : "user",
+          content: userInput,
+          images,
+          source: opts?.source ?? "user",
+        });
+        this.addMessage(userMsg);
+        const display = splitFileIncludes(userInput);
+        this.emitOutput("user_message", {
+          content: display.text,
+          ...(display.files.length > 0 ? { files: display.files } : {}),
+          ...(images && images.length > 0 ? { images } : {}),
+        });
+      }
 
       let iteration = 0;
       // Consecutive empty completions (no text, no tool calls) this run.
@@ -474,6 +478,15 @@ export class Agent implements AgentLike {
         await this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, reason);
       }
     }
+  }
+
+  /**
+   * Continue an interrupted turn with no new user message: the context tail
+   * (e.g. a resumed pending question's answer, just written as its real tool
+   * result) goes straight to the model. Requires a non-empty conversation.
+   */
+  async continueRun(): Promise<AgentRunResult | undefined> {
+    return this.run("", undefined, { continuation: true });
   }
 
   /**

@@ -185,7 +185,13 @@ export class QuestionTool {
     }
 
     if (agent) {
-      agent.emitOutput("question", { questions });
+      // The toolCallId lets the session-log extension write a durable
+      // question_asked record; replay re-presents unanswered questions by id.
+      const toolCallId = ctx?.get("toolCallId") as string | undefined;
+      agent.emitOutput("question", {
+        questions,
+        ...(typeof toolCallId === "string" && toolCallId ? { toolCallId } : {}),
+      });
     }
 
     // Wrapped in a microtask so a synchronous result and a promise result take the same path; the race then works for both.

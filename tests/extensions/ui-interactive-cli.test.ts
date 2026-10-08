@@ -17,6 +17,7 @@ import {
   applyCommandReplacements,
   buildReadlineCompleter,
   buildOnQuitHandler,
+  resumeUnansweredQuestions,
 } from "@extensions/ui-interactive-cli/index.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
@@ -1358,5 +1359,114 @@ describe("registerShellCompletion provider", () => {
 
     // Should match non-slash input
     expect(shellProvider!.matcher({ line: "ls -la", cursorPos: 6 })).toBe(true);
+  });
+});
+
+// ── resumeUnansweredQuestions (durability resume re-presentation) ──────────
+
+describe("resumeUnansweredQuestions", () => {
+  type ToolResultPartView = { type: string; status: string; output: string };
+
+  function fakeAgent() {
+    const added: Array<{
+      role: string;
+      content: unknown;
+      toolCallId?: string | null;
+    }> = [];
+    return {
+      added,
+      agent: { addMessage: (m: unknown) => added.push(m as never) } as never,
+    };
+  }
+
+  const pending = [
+    { toolCallId: "call_q1", questions: [{ key: "a", prompt: "A?" }] },
+    { toolCallId: "call_q2", questions: [{ key: "b", prompt: "B?" }] },
+  ];
+
+  function parts(m: { content: unknown }): ToolResultPartView[] {
+    return m.content as ToolResultPartView[];
+  }
+
+  it("answers each held call and continues once", async () => {
+    const { added, agent } = fakeAgent();
+    let continued = 0;
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await resumeUnansweredQuestions(
+        agent,
+        pending,
+        {
+          isInteractive: () => true,
+          collectAnswers: async (qs: Array<{ key: string }>) => ({ [qs[0]!.key]: "yes" }),
+        } as never,
+        () => {
+          continued++;
+        },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+    expect(added).toHaveLength(2);
+    expect(added[0]!.toolCallId).toBe("call_q1");
+    expect(parts(added[0]!)[0]!.status).toBe("success");
+    expect(JSON.parse(parts(added[0]!)![0]!.output)).toEqual({ a: "yes" });
+    expect(added[1]!.toolCallId).toBe("call_q2");
+    expect(continued).toBe(1);
+  });
+
+  it("an interrupted re-presentation sweeps every remaining held call closed", async () => {
+    // The whole point: the context must never end on unanswered tool_calls
+    // after a resume interrupt (guaranteed 400 on strict backends), and the
+    // continuation must NOT run over questions that went unanswered.
+    const { added, agent } = fakeAgent();
+    let continued = 0;
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        resumeUnansweredQuestions(
+          agent,
+          pending,
+          {
+            isInteractive: () => true,
+            collectAnswers: async (qs: Array<{ key: string }>) => {
+              if (qs[0]!.key === "b") throw new Error("User cancelled");
+              return { a: "yes" };
+            },
+          } as never,
+          () => {
+            continued++;
+          },
+        ),
+      ).rejects.toThrow("User cancelled");
+    } finally {
+      logSpy.mockRestore();
+    }
+    // First answered normally, second closed with an honest error result.
+    expect(added).toHaveLength(2);
+    expect(parts(added[0]!)[0]!.status).toBe("success");
+    expect(added[1]!.toolCallId).toBe("call_q2");
+    expect(parts(added[1]!)[0]!.status).toBe("error");
+    expect(parts(added[1]!)[0]!.output).toContain("resume was interrupted");
+    expect(continued).toBe(0);
+  });
+
+  it("resolves honestly as unanswered when there is no input seam", async () => {
+    const { added, agent } = fakeAgent();
+    let continued = 0;
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await resumeUnansweredQuestions(agent, pending, null, () => {
+        continued++;
+      });
+    } finally {
+      logSpy.mockRestore();
+    }
+    expect(added).toHaveLength(2);
+    for (const m of added) {
+      expect(parts(m)[0]!.status).toBe("error");
+      expect(parts(m)[0]!.output).toContain("not answered");
+    }
+    expect(continued).toBe(1);
   });
 });

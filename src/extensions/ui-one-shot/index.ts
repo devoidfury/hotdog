@@ -1,5 +1,7 @@
 import { formatError } from "@core/error.ts";
 import { HOOKS } from "@core/hooks.ts";
+import { Message } from "@core/context/message.ts";
+import { formatToolResult } from "@core/extensions/tool-utils.ts";
 import { CliSubcommandRegistryLike } from "@core/extensions/registries.ts";
 import { logger } from "@utils/logger.ts";
 import { CliOutputSink } from "@utils/cli/cli.ts";
@@ -172,7 +174,25 @@ async function handlePromptSubcommand(
   // model never read. Same helper as the interactive CLI's resume.
   const buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike> = async (agentConfig) => {
     const agent = await factory(agentConfig);
-    await restoreSessionIntoAgent(agent, cli.sessionId as string | undefined);
+    const { pendingQuestions } = await restoreSessionIntoAgent(agent, cli.sessionId as string | undefined);
+    // No human on a one-shot resume: close held questions honestly as
+    // unanswered (error tool result) -- wire-valid context, honest transcript.
+    for (const q of pendingQuestions) {
+      agent.addMessage(
+        new Message({
+          role: "tool",
+          content: [
+            formatToolResult(
+              "User is not connected (non-interactive resume); this question was not answered.",
+              "question",
+              false,
+            ),
+          ],
+          toolCallId: q.toolCallId,
+          source: "tool",
+        }),
+      );
+    }
     return agent;
   };
 

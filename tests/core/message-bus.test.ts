@@ -907,3 +907,38 @@ describe("MessageBus — webui upload seam", () => {
     bus.isRunning = false;
   });
 });
+
+describe("MessageBus continuation turns", () => {
+  it("enqueues a continuation item without content", () => {
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
+    bus.enqueue("", { continuation: true });
+    expect(bus.queueItems).toEqual([{ content: "", continuation: true }]);
+  });
+
+  it("calls continueRun and skips agent.run and the INPUT pipeline", async () => {
+    const calls: string[] = [];
+    const agent = createMockAgent({
+      run: async () => { calls.push("run"); },
+      hooks: {
+        runHookPipeline: async () => {
+          calls.push("input-hook");
+          return { data: {} };
+        },
+      },
+    });
+    (agent as { continueRun?: () => Promise<void> }).continueRun = async () => {
+      calls.push("continueRun");
+    };
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    await bus._processMessage({ content: "", continuation: true });
+    expect(calls).toEqual(["continueRun"]);
+  });
+
+  it("a continuation is a no-op when the agent has no continueRun seam", async () => {
+    let ran = false;
+    const agent = createMockAgent({ run: async () => { ran = true; } });
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    await bus._processMessage({ content: "", continuation: true });
+    expect(ran).toBe(false);
+  });
+});

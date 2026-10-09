@@ -154,4 +154,18 @@ describe("transcribeAudio", () => {
     await transcribeAudio({ url: endpoint(), audio: new TextEncoder().encode("x") });
     expect(lastRequest!.authHeader).toBeNull();
   });
+
+  it("passes through an unparseable URL when splitUrlAuth can't parse it", async () => {
+    // An invalid URL falls through splitUrlAuth's catch block and the raw
+    // string is handed to fetch, which throws. We only care that the
+    // splitUrlAuth path is exercised (line 56).
+    let caught: Error | null = null;
+    try {
+      await transcribeAudio({ url: "not-a-valid-url", audio: new TextEncoder().encode("x") });
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught).not.toBeNull();
+    expect(caught!.message).toContain("invalid");
+  });
 });

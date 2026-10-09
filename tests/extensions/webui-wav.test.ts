@@ -1,8 +1,50 @@
-// Tests for webui/ui/wav.ts -- the pure PCM16 wav container writer.
-// (audioBlobToWav needs a browser AudioContext and is not exercisable in Bun.)
+// Tests for webui/ui/wav.ts -- the pure PCM16 wav container writer plus
+// audioBlobToWav (polyfilled AudioContext for Bun).
 
 import { describe, it, expect } from "bun:test";
-import { encodeWavPcm16 } from "@extensions/webui/ui/wav.ts";
+import { encodeWavPcm16, audioBlobToWav } from "@extensions/webui/ui/wav.ts";
+
+// Bun has no browser AudioContext. Provide a minimal polyfill so
+// audioBlobToWav can be exercised in the test harness.
+const polyfillAudioContext = () => {
+  if (globalThis.AudioContext) return;
+  class MockAudioContext {
+    async decodeAudioData(_buffer: ArrayBuffer) {
+      return {
+        duration: 0.1,
+        sampleRate: 16000,
+        getChannelData: (_ch: number) => new Float32Array([0.5, -0.5, 0.25]),
+      };
+    }
+    async close() {}
+  }
+  class MockOfflineAudioContext {
+    constructor(
+      private _channels: number,
+      private _length: number,
+      private _sampleRate: number,
+    ) {}
+    createBufferSource() {
+      const source: { buffer: unknown; connect: (d: unknown) => void; start: () => void } = {
+        buffer: null,
+        connect(_dest: unknown) {},
+        start(_when?: number, _offset?: number, _duration?: number) {},
+      };
+      return source;
+    }
+    get destination() {
+      return {};
+    }
+    async startRendering() {
+      return {
+        getChannelData: (_ch: number) => new Float32Array(this._length).fill(0.5),
+      };
+    }
+  }
+  (globalThis as Record<string, unknown>).AudioContext = MockAudioContext;
+  (globalThis as Record<string, unknown>).OfflineAudioContext = MockOfflineAudioContext;
+};
+polyfillAudioContext();
 
 function readHeader(buffer: ArrayBuffer) {
   const v = new DataView(buffer);
@@ -79,5 +121,22 @@ describe("encodeWavPcm16", () => {
     const empty = encodeWavPcm16([], 16000);
     expect(readHeader(empty).dataSize).toBe(0);
     expect(empty.byteLength).toBe(44);
+  });
+});
+
+describe("audioBlobToWav", () => {
+  it("decodes a blob and returns a 16 kHz mono wav blob", async () => {
+    const blob = new Blob([new ArrayBuffer(100)], { type: "audio/webm" });
+    const result = await audioBlobToWav(blob);
+    expect(result.type).toBe("audio/wav");
+    expect(result.size).toBeGreaterThan(44);
+    const buffer = await result.arrayBuffer();
+    const h = readHeader(buffer);
+    expect(h.riff).toBe("RIFF");
+    expect(h.wave).toBe("WAVE");
+    expect(h.audioFormat).toBe(1); // PCM
+    expect(h.channels).toBe(1);
+    expect(h.sampleRate).toBe(16000);
+    expect(h.bitsPerSample).toBe(16);
   });
 });

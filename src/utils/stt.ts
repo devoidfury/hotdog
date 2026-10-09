@@ -45,6 +45,11 @@ const MIME_EXTENSIONS: Record<string, string> = {
   "audio/mpga": "mpga",
 };
 
+/** Return the suggested upload extension for an audio mime type, or "bin". */
+function audioExtension(mimeType: string): string {
+  return MIME_EXTENSIONS[mimeType] ?? "bin";
+}
+
 // Credentials embedded in the endpoint URL (`http://:KEY@host/v1/...`) are
 // stripped from the request URL and re-sent as an HTTP Basic Authorization
 // header: Bun's fetch drops userinfo silently, and llama-swap (the lab
@@ -71,7 +76,7 @@ export async function transcribeAudio(
   opts: TranscribeAudioOptions,
 ): Promise<string> {
   const mimeType = opts.mimeType || "application/octet-stream";
-  const filename = opts.filename || `audio.${MIME_EXTENSIONS[mimeType] ?? "bin"}`;
+  const filename = opts.filename || `audio.${audioExtension(mimeType)}`;
 
   const form = new FormData();
   // slice() normalizes to an ArrayBuffer-backed copy (Uint8Array<ArrayBufferLike>

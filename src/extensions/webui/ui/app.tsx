@@ -74,6 +74,10 @@ interface PendingAttachment {
 }
 const attachmentsAtom = reactiveState<PendingAttachment[]>([]);
 
+// When checked, messages are injected into the next seam (mid-turn steering)
+// rather than queued. This is useful for redirecting the agent while it works.
+const steerAtom = reactiveState<boolean>(true);
+
 // Bumped whenever the app stops caring about a pending completion response
 // (escape, blur, edit, apply), so a late reply cannot reopen the menu;
 // chat.ts separately drops stale responses by request id.
@@ -400,7 +404,7 @@ function onChatSubmit(e: Event): void {
   if (text.startsWith("/") && !files) {
     chat?.sendSlashCommand(text);
   } else {
-    chat?.sendMessage(text, files);
+    chat?.sendMessage(text, files, steerAtom());
   }
 }
 
@@ -827,6 +831,15 @@ function App() {
                       </option>
                     ))}
                   </select>
+                </label>
+                <label id="steer-label">
+                  <input
+                    type="checkbox"
+                    id="steer-checkbox"
+                    checked={steerAtom()}
+                    onChange={(e) => steerAtom(e.target.checked)}
+                  />
+                  Steer
                 </label>
                 <button type="submit" id="send-btn">
                   Send

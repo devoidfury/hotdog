@@ -1692,6 +1692,31 @@ body {
     color: var(--error, #e55);
 }
 
+#steer-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    background: var(--bg-secondary, #2a2a2a);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+
+#steer-label:hover {
+    background: var(--bg-active, #3a3a3a);
+}
+
+#steer-checkbox {
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
 /* ── Subagents strip + overlay panels ────────────────────────────────────── */
 
 #subagents-strip {

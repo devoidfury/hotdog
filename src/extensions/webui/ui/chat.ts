@@ -810,7 +810,7 @@ export function createChat({
     }
   }
 
-  function sendMessage(content: string, files?: UploadFileWire[]): void {
+  function sendMessage(content: string, files?: UploadFileWire[], steer = false): void {
     if (!sessionIdAtom()) {
       console.warn("[chat] No active session");
       return;
@@ -821,6 +821,7 @@ export function createChat({
       sessionId: sessionIdAtom(),
       content,
       ...(files && files.length > 0 ? { files } : {}),
+      ...(steer ? { steering: true } : {}),
     });
   }
 

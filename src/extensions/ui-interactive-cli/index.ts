@@ -390,11 +390,19 @@ export async function buildInteractiveAgent(
   const agent = await factory(agentConfig);
 
   const explicitSessionId = cli.sessionId as string | undefined;
-  const { replayed, pendingQuestions } = await restoreSessionIntoAgent(agent, explicitSessionId);
+  const { replayed, pendingQuestions, profile } = await restoreSessionIntoAgent(agent, explicitSessionId);
   if (replayed > 0) {
     console.log(`Session restored: ${replayed} messages replayed from ${explicitSessionId}`);
   }
   resumePendingQuestions = pendingQuestions;
+
+  // Restore the profile the session ended on so the resumed agent runs with
+  // the same tools / model / body it had before the crash.
+  if (profile && core.resolved?.profileManager) {
+    const profiles = core.resolved.profileManager.getProfilesForSwitch();
+    const p = profiles[profile];
+    if (p) agent.applyProfile(profile, p);
+  }
 
   return agent;
 }

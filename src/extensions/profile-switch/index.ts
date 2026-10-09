@@ -56,10 +56,15 @@ export function create(core: CoreContext): ExtensionInstance {
               };
             }
 
-            // Context is preserved (unlike the webui switch flow, which
-            // wipes after asking); use /clear for a fresh start.
+            // Context preserved across /profile switches (unlike webui /fork).
+            const oldProfile = agent.profileName;
             agent.applyProfile(name, profile);
             agent.emitOutput("session_state", { key: "profile", value: name });
+            agent.hooks?.notifyHooks(HOOKS.PROFILE_SWITCH, {
+              agent,
+              fromProfile: oldProfile,
+              toProfile: name,
+            });
             return {
               action: ACTIONS.DISPLAY,
               content: `Switched to profile: ${name}`,

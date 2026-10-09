@@ -17,6 +17,7 @@ import {
   indexQuestionAsked,
   indexToolResult,
   indexResumeAttempt,
+  indexSessionProfile,
 } from "@core/session/session-index.ts";
 
 interface SessionLogMessage {
@@ -260,9 +261,26 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
 
   return {
     hooks: {
-      /**
-       * Track session restoration state via hook — avoids reading private fields.
-       */
+      [HOOKS.SESSION_CREATE]: async ({
+        sessionId,
+        config,
+      }: {
+        sessionId: string;
+        config: Record<string, unknown>;
+      }) => {
+        const logPath = resolveLogPath(sessionId);
+        if (!logPath) return;
+        const entry = stripNulls({
+          ts: new Date().toISOString(),
+          session_id: sessionId,
+          source: LOG_SOURCE.SESSION_START,
+          content: "",
+          model: (config.model as string) || null,
+          profile: (config.profileName as string) || null,
+        });
+        await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+      },
+
       [HOOKS.SESSION_RESTORE_ACTIVE]: ({
         isRestoring: restoring,
       }: {
@@ -438,13 +456,32 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         await safeIndex("resume_attempt", () => indexResumeAttempt(sessionId));
       },
 
-      /**
-       * Log compaction results.
-       */
+      [HOOKS.PROFILE_SWITCH]: async ({
+        agent,
+        fromProfile,
+        toProfile,
+      }: {
+        agent: { sessionId?: string };
+        fromProfile?: string;
+        toProfile: string;
+      }) => {
+        const sessionId = agent.sessionId || "unknown";
+        const logPath = resolveLogPath(sessionId);
+        if (!logPath) return;
+        const entry = stripNulls({
+          ts: new Date().toISOString(),
+          session_id: sessionId,
+          source: LOG_SOURCE.PROFILE_SWITCH,
+          content: "",
+          from_profile: fromProfile || null,
+          profile: toProfile,
+        });
+        await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+        await safeIndex("profile_switch", () => indexSessionProfile(sessionId, toProfile));
+      },
+
       [HOOKS.OUTPUT_EVENT]: async ({ type, data, agent }) => {
-        // Durability record for a question put to the UI (see
-        // LOG_SOURCE.QUESTION_ASKED): fsynced but fire-and-forget, since
-        // OUTPUT_EVENT handlers are not awaited.
+        // QUESTION durability: fsynced but fire-and-forget (handlers aren't awaited).
         if (type === "question") {
           const d = data as { toolCallId?: unknown; questions?: unknown };
           const toolCallId = typeof d.toolCallId === "string" ? d.toolCallId : "";
@@ -464,6 +501,49 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           // Commit point: awaiting_question is honest the moment the record
           // lands -- alive or dead, the session IS waiting on a human now.
           await safeIndex("question_asked", () => indexQuestionAsked(sessionId, toolCallId));
+          return;
+        }
+
+        // Token usage snapshot: replayed as an output event so the UI can
+        // show the token bubble on cold-log load and reconnect.
+        if (type === "token_usage") {
+          const d = data as {
+            sessionPromptTokens?: number;
+            sessionCachedTokens?: number;
+            sessionCompletionTokens?: number;
+            sessionTotalTokens?: number;
+            turns?: number;
+            promptTokens?: number;
+            cachedTokens?: number;
+            completionTokens?: number;
+            totalTokens?: number;
+            contextWindow?: number;
+          };
+          const sessionId = agent.sessionId || "unknown";
+          let logPath: string;
+          try {
+            logPath = sessionPath(sessionId);
+          } catch (err) {
+            logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
+            return;
+          }
+          const entry = stripNulls({
+            ts: new Date().toISOString(),
+            session_id: sessionId,
+            source: LOG_SOURCE.TOKEN_USAGE,
+            content: "",
+            sessionPromptTokens: d.sessionPromptTokens ?? 0,
+            sessionCachedTokens: d.sessionCachedTokens ?? 0,
+            sessionCompletionTokens: d.sessionCompletionTokens ?? 0,
+            sessionTotalTokens: d.sessionTotalTokens ?? 0,
+            turns: d.turns ?? 0,
+            promptTokens: d.promptTokens ?? 0,
+            cachedTokens: d.cachedTokens ?? 0,
+            completionTokens: d.completionTokens ?? 0,
+            totalTokens: d.totalTokens ?? 0,
+            contextWindow: d.contextWindow ?? 0,
+          });
+          await queuedAppend(logPath, JSON.stringify(entry) + "\n");
           return;
         }
 

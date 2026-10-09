@@ -532,4 +532,71 @@ describe("resume_attempt record (livelock cap counter)", () => {
       cleanup(sessionId);
     }
   });
+
+  it("restoreSessionIntoAgent returns the last profile from SESSION_START and PROFILE_SWITCH entries", async () => {
+    const sessionId = uniqueId("resume-profile");
+    const logPath = join(SESSIONS_DIR, `${sessionId}.jsonl`);
+    try {
+      writeFileSync(
+        logPath,
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.SESSION_START, content: "", profile: "default", model: "m1" })) + "\n" +
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "u1" })) + "\n" +
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.PROFILE_SWITCH, content: "", from_profile: "default", profile: "auditor" })) + "\n" +
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.LLM, content: "response" })) + "\n",
+      );
+
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      const agent = {
+        sessionId,
+        isRestoring: false,
+        addMessage: (_m: Message) => {},
+        hooks: {
+          notifyHooks: async (name: string, payload: unknown) => {
+            if (name === HOOKS.SESSION_RESUME_ATTEMPT) {
+              await ext.hooks[HOOKS.SESSION_RESUME_ATTEMPT]!(payload);
+            }
+          },
+        },
+      };
+
+      const result = await restoreSessionIntoAgent(agent, sessionId);
+      expect(result.profile).toBe("auditor");
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("restoreSessionIntoAgent returns null profile when log has no profile entries", async () => {
+    const sessionId = uniqueId("resume-no-profile");
+    const logPath = join(SESSIONS_DIR, `${sessionId}.jsonl`);
+    try {
+      writeFileSync(
+        logPath,
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "u1" })) + "\n",
+      );
+
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      const agent = {
+        sessionId,
+        isRestoring: false,
+        addMessage: (_m: Message) => {},
+        hooks: {
+          notifyHooks: async (name: string, payload: unknown) => {
+            if (name === HOOKS.SESSION_RESUME_ATTEMPT) {
+              await ext.hooks[HOOKS.SESSION_RESUME_ATTEMPT]!(payload);
+            }
+          },
+        },
+      };
+
+      const result = await restoreSessionIntoAgent(agent, sessionId);
+      expect(result.profile).toBeNull();
+    } finally {
+      cleanup(sessionId);
+    }
+  });
 });

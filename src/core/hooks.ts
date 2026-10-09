@@ -369,6 +369,10 @@ export const HOOKS = {
   AGENT_TOOL_CONTEXT: "agent:toolContext",
 
   MODEL_CHANGE: "model:change",
+  // Fired when a session's active profile changes at runtime (e.g. /profile).
+  // The session-log extension listens to fsync a `profile_switch` record so
+  // cold-log resume can restore the session with the profile it ended on.
+  PROFILE_SWITCH: "profile:switch",
 
   MESSAGES_AFTER_LLM: "messages:afterLLM",
 

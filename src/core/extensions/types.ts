@@ -85,6 +85,7 @@ export interface HookPayloads {
   "agent:toolContext": { toolCtx: ToolContext; toolName: string; agent: Agent };
 
   "model:change": { agent: Agent; oldModel: string; newModel: string };
+  "profile:switch": { agent: Agent; fromProfile?: string; toProfile: string };
 
   "messages:afterLLM": { response: StreamResult; messages: Message[]; agent: Agent };
 

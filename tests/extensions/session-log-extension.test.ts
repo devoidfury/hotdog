@@ -511,6 +511,67 @@ describe("write ordering serialization", () => {
     }
   });
 
+  it("SESSION_CREATE hook writes a session_start entry with model and profile", async () => {
+    const sessionId = `test-session-start-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.SESSION_CREATE] as (ctx: any) => Promise<void>;
+
+      await hook({
+        sessionId,
+        config: { model: "prov/my-model", profileName: "coder" },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      const startEntry = entries.find((e) => e.source === LOG_SOURCE.SESSION_START);
+      expect(startEntry).toBeDefined();
+      expect(startEntry!.model).toBe("prov/my-model");
+      expect(startEntry!.profile).toBe("coder");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("PROFILE_SWITCH hook writes a profile_switch entry with from/to profiles", async () => {
+    const sessionId = `test-profile-switch-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.PROFILE_SWITCH] as (ctx: any) => Promise<void>;
+
+      await hook({
+        agent: { sessionId },
+        fromProfile: "default",
+        toProfile: "auditor",
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      const switchEntry = entries.find((e) => e.source === LOG_SOURCE.PROFILE_SWITCH);
+      expect(switchEntry).toBeDefined();
+      expect(switchEntry!.from_profile).toBe("default");
+      expect(switchEntry!.profile).toBe("auditor");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("PROFILE_SWITCH hook rejects traversal session ids without writing", async () => {
+    const ext = await create(createMockCore() as any) as any;
+    const hook = ext.hooks[HOOKS.PROFILE_SWITCH] as (ctx: any) => Promise<void>;
+    const badId = "../evil-profile-" + Date.now();
+    const outsideFile = join(SESSIONS_DIR, "..", `${badId.slice(3)}.jsonl`);
+
+    try {
+      await expect(hook({
+        agent: { sessionId: badId },
+        fromProfile: "default",
+        toProfile: "auditor",
+      })).resolves.toBeUndefined();
+      expect(() => readFileSync(outsideFile)).toThrow();
+    } finally {
+      try { rmSync(outsideFile, { force: true }); } catch {}
+    }
+  });
+
   it("readEntries() drains pending writes before reading", async () => {
     const sessionId = `test-order-drain-${Date.now()}`;
     try {
@@ -528,6 +589,65 @@ describe("write ordering serialization", () => {
       await Promise.all(floats);
     } finally {
       cleanupTestFile(sessionId);
+    }
+  });
+
+  it("OUTPUT_EVENT token_usage writes a token_usage log entry with all token fields", async () => {
+    const sessionId = `test-token-usage-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
+
+      await hook({
+        type: "token_usage",
+        data: {
+          sessionPromptTokens: 100,
+          sessionCachedTokens: 50,
+          sessionCompletionTokens: 200,
+          sessionTotalTokens: 350,
+          turns: 3,
+          promptTokens: 100,
+          cachedTokens: 50,
+          completionTokens: 200,
+          totalTokens: 350,
+          contextWindow: 128000,
+        },
+        agent: { sessionId },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.source).toBe(LOG_SOURCE.TOKEN_USAGE);
+      expect(entries[0]!.sessionPromptTokens).toBe(100);
+      expect(entries[0]!.sessionCachedTokens).toBe(50);
+      expect(entries[0]!.sessionCompletionTokens).toBe(200);
+      expect(entries[0]!.sessionTotalTokens).toBe(350);
+      expect(entries[0]!.turns).toBe(3);
+      expect(entries[0]!.promptTokens).toBe(100);
+      expect(entries[0]!.cachedTokens).toBe(50);
+      expect(entries[0]!.completionTokens).toBe(200);
+      expect(entries[0]!.totalTokens).toBe(350);
+      expect(entries[0]!.contextWindow).toBe(128000);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("OUTPUT_EVENT token_usage rejects traversal session ids without writing", async () => {
+    const ext = await create(createMockCore() as any) as any;
+    const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
+    const badId = "../evil-token-" + Date.now();
+    const outsideFile = join(SESSIONS_DIR, "..", `${badId.slice(3)}.jsonl`);
+
+    try {
+      await expect(hook({
+        type: "token_usage",
+        data: { promptTokens: 10, cachedTokens: 5, completionTokens: 20, totalTokens: 35, contextWindow: 128000 },
+        agent: { sessionId: badId },
+      })).resolves.toBeUndefined();
+      expect(() => readFileSync(outsideFile)).toThrow();
+    } finally {
+      try { rmSync(outsideFile, { force: true }); } catch {}
     }
   });
 });

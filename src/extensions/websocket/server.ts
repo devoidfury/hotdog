@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { HOOKS, createHooks } from "@core/hooks.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
+import { indexSessionModel, getSessionRow } from "@core/session/session-index.ts";
 import { createTurnLanes, type TurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
@@ -277,6 +278,7 @@ export class SessionRegistry {
       model,
     });
 
+    this.#trackModelChanges(actualSessionId);
     return { sessionId: actualSessionId, agent };
   }
 
@@ -318,7 +320,18 @@ export class SessionRegistry {
         .filter((m) => m.role === "user").length,
     });
 
+    this.#trackModelChanges(newSessionId);
     return { sessionId: newSessionId, agent };
+  }
+
+  #trackModelChanges(sessionId: string): void {
+    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
+    if (!agent || !agent.hooks || typeof agent.hooks.on !== "function") return;
+    agent.hooks.on(HOOKS.MODEL_CHANGE, async ({ newModel }: { newModel: string }) => {
+      const meta = this.#metadata.get(sessionId);
+      if (meta) meta.model = newModel;
+      await indexSessionModel(sessionId, newModel);
+    });
   }
 
   get(
@@ -585,8 +598,22 @@ async function loadLogIntoNewSession(
     throw new AgentError(`No entries found for session ${logId}`);
   }
 
-  const newSession = await registry.create({});
-  const { pendingQuestions } = replayEntriesIntoContext(newSession.agent, entries);
+  // Restore persisted model and profile so the replayed session resumes with
+  // the same tool set it ended on, not the global defaults. The index is the
+  // source of truth for cold loads; metadata is in-memory-only and lost on restart.
+  const row = getSessionRow(logId);
+  const buildOpts: Record<string, unknown> = {
+    ...(row?.model ? { model: row.model } : {}),
+    ...(row?.profile ? { profileName: row.profile } : {}),
+  };
+  const newSession = await registry.create(buildOpts);
+  const { pendingQuestions, profile } = replayEntriesIntoContext(newSession.agent, entries);
+  // The log may have a PROFILE_SWITCH the index row hasn't mirrored yet
+  // (row updates only on tool fires or explicit index writes). Overlay it.
+  if (profile) {
+    const p = registry.listProfiles()[profile];
+    if (p) newSession.agent.applyProfile(profile, p);
+  }
 
   return { sessionId: newSession.sessionId, agent: newSession.agent, pendingQuestions };
 }

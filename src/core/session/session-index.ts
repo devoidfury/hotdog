@@ -449,7 +449,32 @@ export async function indexToolResult(sessionId: string, toolCallId: string): Pr
   }, true);
 }
 
-/** resume_attempt fsynced: mirror the counter (log remains its source of record). */
+/** Mirror the session's active model in the index so cold-log resume picks it up. */
+export async function indexSessionModel(
+  sessionId: string,
+  model: string,
+): Promise<void> {
+  await atCommitPoint(sessionId, 0, (d) => {
+    d.run(
+      `UPDATE sessions SET model = ? WHERE session_id = ?`,
+      [model, sessionId],
+    );
+  }, true);
+}
+
+/** Mirror the session's active profile in the index so cold-log resume picks it up. */
+export async function indexSessionProfile(
+  sessionId: string,
+  profile: string,
+): Promise<void> {
+  await atCommitPoint(sessionId, 0, (d) => {
+    d.run(
+      `UPDATE sessions SET profile = ? WHERE session_id = ?`,
+      [profile, sessionId],
+    );
+  }, true);
+}
+
 export async function indexResumeAttempt(sessionId: string): Promise<void> {
   await atCommitPoint(sessionId, 1, (d) => {
     d.run("UPDATE sessions SET resume_count = resume_count + 1 WHERE session_id = ?", [

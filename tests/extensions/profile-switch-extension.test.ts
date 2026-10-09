@@ -18,18 +18,25 @@ function createMockCore(profileManager: unknown = { getProfilesForSwitch: () => 
 }
 
 function createMockAgent() {
-  return {
+  const agent: any = {
     profileName: "default",
-    applied: null as unknown,
+    applied: null,
     events: [] as Array<{ type: string; data: Record<string, unknown> }>,
+    hookCalls: [] as Array<{ name: string; payload: unknown }>,
     applyProfile(name: string, profile: unknown) {
-      this.profileName = name;
-      this.applied = profile;
+      agent.profileName = name;
+      agent.applied = profile;
     },
     emitOutput(type: string, data: Record<string, unknown>) {
-      this.events.push({ type, data });
+      agent.events.push({ type, data });
+    },
+    hooks: {
+      notifyHooks: async (name: string, payload: unknown) => {
+        agent.hookCalls.push({ name, payload });
+      },
     },
   };
+  return agent;
 }
 
 async function register(core = createMockCore()) {
@@ -72,6 +79,32 @@ describe("profile-switch extension", () => {
     expect(agent.events).toEqual([
       { type: "session_state", data: { key: "profile", value: "auditor" } },
     ]);
+  });
+
+  it("/profile <name> emits a PROFILE_SWITCH hook with from/to profiles", async () => {
+    const registry = await register();
+    const agent = createMockAgent();
+    const result = await registry.get("profile")!.handler!(agent as any, "profile auditor");
+
+    expect(result.content).toContain("Switched to profile: auditor");
+    const hookCalls = (agent as any).hookCalls;
+    const switchHook = hookCalls.find((h: any) => h.name === HOOKS.PROFILE_SWITCH);
+    expect(switchHook).toBeDefined();
+    expect(switchHook.payload.fromProfile).toBe("default");
+    expect(switchHook.payload.toProfile).toBe("auditor");
+  });
+
+  it("/profile <name> emits PROFILE_SWITCH hook even when switching to the same profile", async () => {
+    const registry = await register();
+    const agent = createMockAgent();
+    const result = await registry.get("profile")!.handler!(agent as any, "profile default");
+
+    expect(result.content).toContain("Switched to profile: default");
+    const hookCalls = (agent as any).hookCalls;
+    const switchHook = hookCalls.find((h: any) => h.name === HOOKS.PROFILE_SWITCH);
+    expect(switchHook).toBeDefined();
+    expect(switchHook.payload.fromProfile).toBe("default");
+    expect(switchHook.payload.toProfile).toBe("default");
   });
 
   it("/profile:<name> colon format switches profile", async () => {

@@ -43,6 +43,12 @@ export const LOG_SOURCE = {
    * index costs a re-scan, never the cap. Never replayed as a message.
    */
   RESUME_ATTEMPT: "resume_attempt",
+  /** Session header: initial model and profile. Survives index loss. Never replayed. */
+  SESSION_START: "session_start",
+  /** Runtime profile switch (via /profile). Records from/to. Never replayed. */
+  PROFILE_SWITCH: "profile_switch",
+  /** Token usage snapshot after each LLM response. Replayed as an output event, not a message. */
+  TOKEN_USAGE: "token_usage",
 } as const;
 
 export type LogSource = (typeof LOG_SOURCE)[keyof typeof LOG_SOURCE];
@@ -273,6 +279,7 @@ export async function deleteSessionLog(sessionId: string): Promise<boolean> {
 
 export interface AgentForReplay {
   addMessage(msg: Message): void;
+  emitOutput?(type: string, data: Record<string, unknown>): void;
 }
 
 /**
@@ -315,18 +322,15 @@ export async function restoreSessionIntoAgent(
   // No explicit id, or the agent did not adopt it (e.g. a subagent built
   // with its own id): never touch another session's log.
   if (!explicitSessionId || agent.sessionId !== explicitSessionId) {
-    return { replayed: 0, pendingQuestions: [] };
+    return { replayed: 0, pendingQuestions: [], profile: null };
   }
   if (!(await sessionExists(explicitSessionId))) {
     throw new CliError(`Invalid session id: ${explicitSessionId} (no such session)`);
   }
 
-  // Resume bookkeeping BEFORE the replay: the resume_attempt record lands in
-  // the log first (the log is its system of record; the index mirrors it),
-  // replay ignores it as a message, and the awaited notify gives a
-  // deterministic point where the fsync has settled. notifyHooks swallows
-  // handler errors, so a failed write degrades like question_asked: a lower
-  // counter, never an unsafe claim.
+  // fsync the resume_attempt record before replay so the counter is honest
+  // even if the process dies mid-replay. notifyHooks swallows handler errors
+  // so a failed write degrades gracefully (lower counter, never unsafe).
   await agent.hooks?.notifyHooks(HOOKS.SESSION_RESUME_ATTEMPT, {
     agent,
     sessionId: explicitSessionId,
@@ -334,10 +338,9 @@ export async function restoreSessionIntoAgent(
 
   const entries = await readSessionEntries(explicitSessionId);
 
-  // Guard the replay with isRestoring so the session-log extension does not
-  // re-log the restored messages (duplicates would replay twice on the next
-  // resume). finally: a throw mid-replay must not leave the flag stuck
-  // true, which would silently stop all later logging.
+  // isRestoring prevents the session-log extension from re-logging restored
+  // messages (which would double-count on the next resume). finally: a throw
+  // mid-replay must not leave the flag stuck true, silently killing all later logging.
   agent.isRestoring = true;
   try {
     return replayEntriesIntoContext(agent, entries);
@@ -359,6 +362,8 @@ export interface ReplayResult {
   replayed: number;
   /** Unanswered question-tool calls reconstructed from the log. */
   pendingQuestions: PendingQuestion[];
+  /** Active profile at end of logged session (last SESSION_START or PROFILE_SWITCH). Null if absent. */
+  profile: string | null;
 }
 
 /** Durability facts reconstructed from a log scan: which calls began,
@@ -413,7 +418,18 @@ export function replayEntriesIntoContext(
   agent: AgentForReplay,
   entries: LogEntry[],
 ): ReplayResult {
-  if (!entries || entries.length === 0) return { replayed: 0, pendingQuestions: [] };
+  if (!entries || entries.length === 0) return { replayed: 0, pendingQuestions: [], profile: null };
+
+  // Last SESSION_START or PROFILE_SWITCH entry wins for profile restoration.
+  let lastProfile: string | null = null;
+  for (const entry of entries) {
+    if (entry.source === LOG_SOURCE.SESSION_START && entry.profile) {
+      lastProfile = entry.profile as string;
+    }
+    if (entry.source === LOG_SOURCE.PROFILE_SWITCH && entry.profile) {
+      lastProfile = entry.profile as string;
+    }
+  }
 
   const messages: Message[] = [];
 
@@ -487,11 +503,29 @@ export function replayEntriesIntoContext(
         break;
       }
 
+      case LOG_SOURCE.TOKEN_USAGE: {
+        const d = entry as unknown as Record<string, unknown>;
+        agent.emitOutput?.("token_usage", {
+          sessionPromptTokens: d.sessionPromptTokens as number,
+          sessionCachedTokens: d.sessionCachedTokens as number,
+          sessionCompletionTokens: d.sessionCompletionTokens as number,
+          sessionTotalTokens: d.sessionTotalTokens as number,
+          turns: d.turns as number,
+          promptTokens: d.promptTokens as number,
+          cachedTokens: d.cachedTokens as number,
+          completionTokens: d.completionTokens as number,
+          totalTokens: d.totalTokens as number,
+          contextWindow: d.contextWindow as number,
+        });
+        break;
+      }
+
       // Durability records are bookkeeping, not conversation: they classify
       // other entries (see the repair below) but never become messages.
       case LOG_SOURCE.TOOL_STARTED:
       case LOG_SOURCE.QUESTION_ASKED:
       case LOG_SOURCE.RESUME_ATTEMPT:
+      case LOG_SOURCE.SESSION_START:
         break;
 
       default:
@@ -520,5 +554,5 @@ export function replayEntriesIntoContext(
   for (const msg of repaired) {
     agent.addMessage(msg);
   }
-  return { replayed: repaired.length, pendingQuestions };
+  return { replayed: repaired.length, pendingQuestions, profile: lastProfile };
 }

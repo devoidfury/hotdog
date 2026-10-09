@@ -174,7 +174,14 @@ async function handlePromptSubcommand(
   // model never read. Same helper as the interactive CLI's resume.
   const buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike> = async (agentConfig) => {
     const agent = await factory(agentConfig);
-    const { pendingQuestions } = await restoreSessionIntoAgent(agent, cli.sessionId as string | undefined);
+    const { pendingQuestions, profile } = await restoreSessionIntoAgent(agent, cli.sessionId as string | undefined);
+    // Restore the profile the session ended on so the resumed agent runs with
+    // the same tools / model / body it had before the crash.
+    if (profile && resolved.profileManager) {
+      const profiles = resolved.profileManager.getProfilesForSwitch();
+      const p = profiles[profile];
+      if (p) agent.applyProfile(profile, p);
+    }
     // No human on a one-shot resume: close held questions honestly as
     // unanswered (error tool result) -- wire-valid context, honest transcript.
     for (const q of pendingQuestions) {

@@ -386,14 +386,14 @@ test("replayEntriesIntoContext handles mixed entry types", () => {
 
 test("replayEntriesIntoContext returns 0 for empty entries", () => {
   const agent = createMockAgent();
-  expect(replayEntriesIntoContext(agent, [])).toEqual({ replayed: 0, pendingQuestions: [] });
+  expect(replayEntriesIntoContext(agent, [])).toEqual({ replayed: 0, pendingQuestions: [], profile: null });
   expect(agent.log.length).toBe(0);
 });
 
 test("replayEntriesIntoContext handles null/undefined entries", () => {
   const agent = createMockAgent();
-  expect(replayEntriesIntoContext(agent, null as any)).toEqual({ replayed: 0, pendingQuestions: [] });
-  expect(replayEntriesIntoContext(agent, undefined as any)).toEqual({ replayed: 0, pendingQuestions: [] });
+  expect(replayEntriesIntoContext(agent, null as any)).toEqual({ replayed: 0, pendingQuestions: [], profile: null });
+  expect(replayEntriesIntoContext(agent, undefined as any)).toEqual({ replayed: 0, pendingQuestions: [], profile: null });
 });
 
 test("replayEntriesIntoContext handles assistant without reasoning or tool_calls", () => {
@@ -629,6 +629,57 @@ test("Session restoration: handles empty/non-existent session gracefully", async
   } finally {
     cleanupSession(sessionId);
   }
+});
+
+test("replayEntriesIntoContext emits token_usage events when the agent has emitOutput", () => {
+  const emitted: Array<{ type: string; data: Record<string, unknown> }> = [];
+  const agent = {
+    addMessage: () => {},
+    emitOutput: (type: string, data: Record<string, unknown>) => emitted.push({ type, data }),
+  };
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Hello" },
+    {
+      ts: "2024-01-01T00:00:01Z",
+      session_id: "test",
+      source: LOG_SOURCE.TOKEN_USAGE,
+      content: "",
+      sessionPromptTokens: 100,
+      sessionCachedTokens: 50,
+      sessionCompletionTokens: 200,
+      sessionTotalTokens: 350,
+      turns: 3,
+      promptTokens: 100,
+      cachedTokens: 50,
+      completionTokens: 200,
+      totalTokens: 350,
+      contextWindow: 128000,
+    },
+    { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Hi" },
+  ];
+
+  const { replayed } = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(2); // input + llm; token_usage is emitted, not counted as a message
+  expect(emitted).toHaveLength(1);
+  expect(emitted[0]!.type).toBe("token_usage");
+  expect(emitted[0]!.data.promptTokens).toBe(100);
+  expect(emitted[0]!.data.cachedTokens).toBe(50);
+  expect(emitted[0]!.data.completionTokens).toBe(200);
+  expect(emitted[0]!.data.totalTokens).toBe(350);
+  expect(emitted[0]!.data.contextWindow).toBe(128000);
+});
+
+test("replayEntriesIntoContext silently ignores token_usage when agent has no emitOutput", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.TOKEN_USAGE, content: "" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Hello" },
+  ];
+
+  const { replayed } = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(1);
+  expect(agent.log.length).toBe(1);
+  expect(agent.log.at(0)!.content).toBe("Hello");
 });
 
 test("Session restoration: preserves reasoning content in assistant messages", async () => {
@@ -885,4 +936,45 @@ test("replayEntriesIntoContext with only reset entries returns 0", async () => {
   } finally {
     cleanupSession(sessionId);
   }
+});
+
+test("replayEntriesIntoContext returns null profile when no profile entries exist", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "hi" },
+  ];
+  const { profile } = replayEntriesIntoContext(agent, entries);
+  expect(profile).toBeNull();
+});
+
+test("replayEntriesIntoContext returns SESSION_START profile", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.SESSION_START, content: "", profile: "coder" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "hi" },
+  ];
+  const { profile } = replayEntriesIntoContext(agent, entries);
+  expect(profile).toBe("coder");
+});
+
+test("replayEntriesIntoContext returns last PROFILE_SWITCH profile over SESSION_START", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.SESSION_START, content: "", profile: "default" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "hi" },
+    { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.PROFILE_SWITCH, content: "", from_profile: "default", profile: "auditor" },
+    { ts: "2024-01-01T00:00:03Z", session_id: "test", source: LOG_SOURCE.LLM, content: "hello" },
+  ];
+  const { profile } = replayEntriesIntoContext(agent, entries);
+  expect(profile).toBe("auditor");
+});
+
+test("replayEntriesIntoContext returns first PROFILE_SWITCH when no later one exists", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.SESSION_START, content: "", profile: "default" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.PROFILE_SWITCH, content: "", from_profile: "default", profile: "coder" },
+  ];
+  const { profile } = replayEntriesIntoContext(agent, entries);
+  expect(profile).toBe("coder");
 });

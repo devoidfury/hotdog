@@ -7,6 +7,7 @@ import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
 import { MESSAGE_SOURCES, Message, type ToolCall, type ImageAttachment, type MessageSource } from "../context/message.ts";
 import { repairToolCalls, INTERRUPTED_OUTCOME_UNKNOWN, INTERRUPTED_NOT_STARTED } from "../context/repair.ts";
 import { AgentError, CliError, formatError } from "../error.ts";
+import { HOOKS } from "../hooks.ts";
 import { logger } from "@utils/logger.ts";
 
 export const LOG_SOURCE = {
@@ -35,6 +36,13 @@ export const LOG_SOURCE = {
    * question. Never replayed as a message.
    */
   QUESTION_ASKED: "question_asked",
+  /**
+   * Durability record: written when a session log is resumed into a fresh
+   * agent (restoreSessionIntoAgent). The livelock cap's counter: the log is
+   * the system of record, the session index only mirrors it, so deleting the
+   * index costs a re-scan, never the cap. Never replayed as a message.
+   */
+  RESUME_ATTEMPT: "resume_attempt",
 } as const;
 
 export type LogSource = (typeof LOG_SOURCE)[keyof typeof LOG_SOURCE];
@@ -275,6 +283,8 @@ export interface AgentForReplay {
 interface AgentForRestore extends AgentForReplay {
   sessionId: string;
   isRestoring: boolean;
+  /** Hook surface used to fire SESSION_RESUME_ATTEMPT (absent on bare test agents). */
+  hooks?: { notifyHooks(name: string, payload: unknown): Promise<unknown> };
 }
 
 /**
@@ -310,6 +320,18 @@ export async function restoreSessionIntoAgent(
   if (!(await sessionExists(explicitSessionId))) {
     throw new CliError(`Invalid session id: ${explicitSessionId} (no such session)`);
   }
+
+  // Resume bookkeeping BEFORE the replay: the resume_attempt record lands in
+  // the log first (the log is its system of record; the index mirrors it),
+  // replay ignores it as a message, and the awaited notify gives a
+  // deterministic point where the fsync has settled. notifyHooks swallows
+  // handler errors, so a failed write degrades like question_asked: a lower
+  // counter, never an unsafe claim.
+  await agent.hooks?.notifyHooks(HOOKS.SESSION_RESUME_ATTEMPT, {
+    agent,
+    sessionId: explicitSessionId,
+  });
+
   const entries = await readSessionEntries(explicitSessionId);
 
   // Guard the replay with isRestoring so the session-log extension does not
@@ -339,22 +361,26 @@ export interface ReplayResult {
   pendingQuestions: PendingQuestion[];
 }
 
-/** Converts log entries to Messages in the agent's context. */
-export function replayEntriesIntoContext(
-  agent: AgentForReplay,
-  entries: LogEntry[],
-): ReplayResult {
-  if (!entries || entries.length === 0) return { replayed: 0, pendingQuestions: [] };
+/** Durability facts reconstructed from a log scan: which calls began,
+ *  which were answered, which questions were asked (asked order preserved,
+ *  deduplicated by tool_call_id). Shared by replay and the session index so
+ *  neither can drift from the other's classification rules. */
+export interface DurabilityFacts {
+  /** tool_call_ids with a tool_started record (execution began). */
+  started: Set<string>;
+  /** tool_call_ids with a tool_result record. */
+  answered: Set<string>;
+  /** question_asked records, in log order. */
+  asked: PendingQuestion[];
+  /** Number of resume_attempt records (the livelock cap's counter). */
+  resumeAttempts: number;
+}
 
-  const messages: Message[] = [];
-
-  // Durability bookkeeping for the resume protocol:
-  //  - started: calls whose execution began (a pre-flight, fsynced record)
-  //  - asked: question-tool calls put to the UI
-  //  - answered: tool_call_ids that received a result record
+export function collectDurabilityFacts(entries: LogEntry[]): DurabilityFacts {
   const started = new Set<string>();
   const answered = new Set<string>();
   const asked: PendingQuestion[] = [];
+  let resumeAttempts = 0;
 
   for (const entry of entries) {
     const source = entry.source;
@@ -375,7 +401,25 @@ export function replayEntriesIntoContext(
         asked.push({ toolCallId: entry.tool_call_id, questions: entry.content });
       }
     }
+
+    if (source === LOG_SOURCE.RESUME_ATTEMPT) resumeAttempts++;
   }
+
+  return { started, answered, asked, resumeAttempts };
+}
+
+/** Converts log entries to Messages in the agent's context. */
+export function replayEntriesIntoContext(
+  agent: AgentForReplay,
+  entries: LogEntry[],
+): ReplayResult {
+  if (!entries || entries.length === 0) return { replayed: 0, pendingQuestions: [] };
+
+  const messages: Message[] = [];
+
+  // Durability bookkeeping for the resume protocol: started/asked/answered
+  // drive the missing-result classification below (see collectDurabilityFacts).
+  const { started, answered, asked } = collectDurabilityFacts(entries);
 
   for (const entry of entries) {
     const source = entry.source;
@@ -447,6 +491,7 @@ export function replayEntriesIntoContext(
       // other entries (see the repair below) but never become messages.
       case LOG_SOURCE.TOOL_STARTED:
       case LOG_SOURCE.QUESTION_ASKED:
+      case LOG_SOURCE.RESUME_ATTEMPT:
         break;
 
       default:

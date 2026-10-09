@@ -11,16 +11,24 @@
 // leaves exactly one side effect on disk and replays as outcome-unknown.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
 
 import {
   replayEntriesIntoContext,
   readSessionEntries,
+  restoreSessionIntoAgent,
   LOG_SOURCE,
   type LogEntry,
 } from "@core/session/session-log.ts";
+import {
+  getSessionRow,
+  reconcileSessionIndex,
+  closeSessionIndex,
+  openSessionIndex,
+  SESSION_STATE,
+} from "@core/session/session-index.ts";
 import {
   INTERRUPTED_TOOL_RESULT,
   INTERRUPTED_OUTCOME_UNKNOWN,
@@ -39,6 +47,7 @@ beforeAll(() => {
 
 afterAll(() => {
   delete process.env.HOTDOG_SESSIONS_DIR;
+  closeSessionIndex();
   try { rmSync(SESSIONS_DIR, { recursive: true, force: true }); } catch {}
 });
 
@@ -382,6 +391,145 @@ describe("kill -9 mid-side-effect (definition of done)", () => {
     } finally {
       cleanup(sessionId);
       try { rmSync(counterPath); } catch {}
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part 2: the disposable session index mirrors these same durability records.
+// ---------------------------------------------------------------------------
+
+function openCallIds(sessionId: string): string[] {
+  return openSessionIndex()
+    .query<{ tool_call_id: string }, [string]>(
+      "SELECT tool_call_id FROM open_calls WHERE session_id = ? ORDER BY tool_call_id",
+    )
+    .all(sessionId)
+    .map((r) => r.tool_call_id);
+}
+
+describe("session index mirrors durability commit points", () => {
+  it("started/question/result flow through the real hooks; interrupted comes only from reconcile", async () => {
+    const sessionId = uniqueId("mirror");
+    try {
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      const agent = { sessionId, profileName: "prof", model: "mod" };
+
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: { sessionId, role: "user", content: "go", getTextContent: () => "go" },
+        agent,
+      });
+      await ext.hooks[HOOKS.TOOL_BEFORE_EXECUTE]!({
+        toolCallId: "c1",
+        toolName: "bash",
+        input: "echo 1",
+        agent,
+      });
+
+      // Live session mid tool call, row built by the missing-row sync: the
+      // state reflects the log's facts (an unanswered started IS what the
+      // ledger shows) and self-corrects when the result lands. The writer
+      // never DECLARES a state here -- TOOL_BEFORE_EXECUTE only mirrors the
+      // open call and the position.
+      let row = getSessionRow(sessionId);
+      expect(row?.state).toBe(SESSION_STATE.INTERRUPTED);
+      expect(row?.model).toBe("mod");
+      expect(row?.profile).toBe("prof");
+      expect(openCallIds(sessionId)).toEqual(["c1"]);
+
+      await ext.hooks[HOOKS.OUTPUT_EVENT]!({
+        type: "question",
+        data: { toolCallId: "c2", questions: [{ prompt: "which?" }] },
+        agent,
+      });
+      row = getSessionRow(sessionId);
+      expect(row?.state).toBe(SESSION_STATE.AWAITING_QUESTION);
+
+      // A plain tool result must not clear an open question...
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: { sessionId, role: "tool", toolCallId: "c1", content: "1" },
+        agent,
+      });
+      expect(getSessionRow(sessionId)?.state).toBe(SESSION_STATE.AWAITING_QUESTION);
+
+      // ...but answering the question does.
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: { sessionId, role: "tool", toolCallId: "c2", content: "this one" },
+        agent,
+      });
+      expect(getSessionRow(sessionId)?.state).toBe(SESSION_STATE.IDLE);
+      expect(openCallIds(sessionId)).toEqual([]);
+
+      // Crash simulation: a started record fsynced without an index txn (the
+      // writer died in between). The row is now stale; the next boot
+      // reconcile re-reads the log and is the only one who may call this
+      // session interrupted.
+      appendFileSync(
+        join(SESSIONS_DIR, `${sessionId}.jsonl`),
+        JSON.stringify(
+          entry({
+            session_id: sessionId,
+            source: LOG_SOURCE.TOOL_STARTED,
+            tool_call_id: "c3",
+            tool_name: "bash",
+            content: "echo never",
+          }),
+        ) + "\n",
+      );
+      const stats = await reconcileSessionIndex();
+      expect(stats.reindexed).toBeGreaterThanOrEqual(1);
+      expect(getSessionRow(sessionId)?.state).toBe(SESSION_STATE.INTERRUPTED);
+      expect(openCallIds(sessionId)).toEqual(["c3"]);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+});
+
+describe("resume_attempt record (livelock cap counter)", () => {
+  it("restoreSessionIntoAgent fsyncs the record, mirrors the count, replays it silently", async () => {
+    const sessionId = uniqueId("resume");
+    const logPath = join(SESSIONS_DIR, `${sessionId}.jsonl`);
+    try {
+      writeFileSync(
+        logPath,
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "u" })) + "\n",
+      );
+
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      const log: Message[] = [];
+      const agent = {
+        sessionId,
+        isRestoring: false,
+        addMessage: (m: Message) => void log.push(m),
+        hooks: {
+          notifyHooks: async (name: string, payload: unknown) => {
+            if (name === HOOKS.SESSION_RESUME_ATTEMPT) {
+              await ext.hooks[HOOKS.SESSION_RESUME_ATTEMPT]!(payload);
+            }
+          },
+        },
+      };
+
+      await restoreSessionIntoAgent(agent, sessionId);
+      await restoreSessionIntoAgent(agent, sessionId);
+
+      // Two attempts recorded IN THE LOG (the system of record)...
+      const entries = await readSessionEntries(sessionId);
+      expect(entries.filter((e) => e.source === LOG_SOURCE.RESUME_ATTEMPT)).toHaveLength(2);
+
+      // ...mirrored in the index (survivable: deleting the index re-derives it)...
+      expect(getSessionRow(sessionId)?.resume_count).toBe(2);
+
+      // ...and never replayed as a conversation message.
+      expect(log.filter((m) => m.content === "u")).toHaveLength(2); // one per restore
+      expect(log.filter((m) => (m.content ?? "") === "")).toHaveLength(0);
+    } finally {
+      cleanup(sessionId);
     }
   });
 });

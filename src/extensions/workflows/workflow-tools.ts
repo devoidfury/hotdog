@@ -2,7 +2,7 @@
  * Manager-only workflow tools.
  *
  * The repair loop for manager-designed graphs IS the tool error:
- * workflow_validate runs the exact same parseWorkflow as hand-authored config/workflows files,
+ * workflow_validate runs the exact same parseWorkflow as hand-authored <workflows.path> files,
  * and a valid design is saved as a graph file on the spot.
  * Orchestrator profile: these three plus the delegation tools, no bash/edit/file-write
  * (profile tool allowlists enforce; hermes anti-temptation pattern).

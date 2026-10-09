@@ -1,5 +1,9 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { HOOKS } from "@core/hooks.ts";
+import { buildUnifiedSchema, resolveKey } from "@core/config/schema-loader.ts";
 import { create } from "@extensions/workflows/index.ts";
 import {
   runWorkflowCommand,
@@ -87,5 +91,41 @@ describe("extension registration", () => {
     expect(registered.length).toBe(1);
     expect(registered[0]!.name).toBe("workflow");
     expect(typeof registered[0]!.handler).toBe("function");
+  });
+});
+
+describe("workflows.path default (config schema)", () => {
+  // Resolves the REAL workflows extension.json schema through the shared
+  // config layer, pinning HOTDOG_SESSIONS_DIR deterministically.
+  const ENV = "HOTDOG_SESSIONS_DIR";
+  const saved = process.env[ENV];
+  const setEnv = (v: string | undefined) => {
+    if (v === undefined) delete process.env[ENV];
+    else process.env[ENV] = v;
+  };
+  afterAll(() => setEnv(saved));
+
+  const extJson = JSON.parse(
+    readFileSync(new URL("../../src/extensions/workflows/extension.json", import.meta.url), "utf-8"),
+  );
+  const schema = buildUnifiedSchema([{ configSchema: extJson.configSchema }]);
+  const resolvePath = (config: Record<string, unknown> = {}): string | undefined => {
+    const resolved = resolveKey("workflows", schema.workflows, { config });
+    return (resolved as { path?: string } | undefined)?.path;
+  };
+
+  it("defaults to <sessions-dir>/workflows when HOTDOG_SESSIONS_DIR is set", () => {
+    setEnv("/tmp/hotdog-sessions-test");
+    expect(resolvePath()).toBe("/tmp/hotdog-sessions-test/workflows");
+  });
+
+  it("falls back to ~/.cache/hotdog/sessions/workflows when the override is unset", () => {
+    setEnv(undefined);
+    expect(resolvePath()).toBe(join(homedir(), ".cache", "hotdog", "sessions", "workflows"));
+  });
+
+  it("an explicit workflows.path still wins", () => {
+    setEnv("/tmp/hotdog-sessions-test");
+    expect(resolvePath({ workflows: { path: "/tmp/explicit-wf" } })).toBe("/tmp/explicit-wf");
   });
 });

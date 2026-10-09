@@ -10,6 +10,14 @@ import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
 
 import { LOG_SOURCE, sessionPath, sessionsDir, type LogEntry } from "@core/session/session-log.ts";
+import {
+  reconcileSessionIndex,
+  syncSessionFromLog,
+  indexToolStarted,
+  indexQuestionAsked,
+  indexToolResult,
+  indexResumeAttempt,
+} from "@core/session/session-index.ts";
 
 interface SessionLogMessage {
   sessionId?: string;
@@ -81,6 +89,14 @@ function messageToLogEntry(
 }
 
 /**
+ * Boot reconcile runs once per process per sessions dir: it is stat-only for
+ * fresh rows (O(changed), not O(all)), and the session-log extension's
+ * create() is the per-process point where the sessions world is already set
+ * up. `--reindex` (resolved config) forces the full-scan repair mode.
+ */
+let reconciledDir: string | null = null;
+
+/**
  * Create the session log extension.
  * Uses the current agent's session ID (from the hook context) for the log file.
  */
@@ -91,6 +107,26 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // Canonical sessions dir (respects HOTDOG_SESSIONS_DIR for tests).
   const cacheDir = sessionsDir();
   await mkdir(cacheDir, { recursive: true });
+
+  if (reconciledDir !== cacheDir) {
+    reconciledDir = cacheDir;
+    try {
+      const stats = await reconcileSessionIndex({ full: !!core.resolved?.reindex });
+      if (stats.adopted || stats.reindexed || stats.quarantined || stats.errors) {
+        logger.warn(
+          `[session-index] boot reconcile: ${stats.scanned} scanned, ${stats.unchanged} fresh, ` +
+            `${stats.reindexed} re-read, ${stats.adopted} adopted, ${stats.quarantined} quarantined` +
+            (stats.errors ? `, ${stats.errors} errors` : ""),
+        );
+      }
+    } catch (err) {
+      // The index is a mirror: a broken db file must never block a session.
+      // Row staleness (or nothing at all) costs re-reads, never correctness.
+      logger.error(
+        `[session-index] boot reconcile failed: ${formatError(err)} -- continuing without the index`,
+      );
+    }
+  }
 
   // Track session state
   let isRestoring = false;
@@ -154,6 +190,22 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     } catch (err) {
       logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
       return null;
+    }
+  };
+
+  /**
+   * Mirror a just-fsynced record into the session index. Failures are loud
+   * but harmless: the row goes stale (size/mtime disagree with the file),
+   * and the next boot reconcile re-derives it from the log. Never allowed to
+   * break the tool call that committed the record.
+   */
+  const safeIndex = async (what: string, fn: () => Promise<unknown>): Promise<void> => {
+    try {
+      await fn();
+    } catch (err) {
+      logger.error(
+        `[session-index] ${what} mirror write failed: ${formatError(err)} -- row stale, reconcile will repair`,
+      );
     }
   };
 
@@ -234,6 +286,13 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         // Skip logging during session restoration to avoid duplicate entries
         if (isRestoring) return;
         await appendMessageEntry(agent, message);
+        // A tool_result closes its mirrored durability call (and can clear
+        // awaiting_question). Index-only: no new log record here.
+        if (message.role === "tool" && message.toolCallId) {
+          await safeIndex("tool_result", () =>
+            indexToolResult(agent.sessionId || "unknown", message.toolCallId!),
+          );
+        }
       },
 
       /**
@@ -279,6 +338,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           done = appendMessageEntry(agent, message);
         }
         await done;
+        // The reset moved the replay window and wiped all durability facts:
+        // rebuild the row (and drop open_calls) from the checkpointed log.
+        await safeIndex("rewind", () => syncSessionFromLog(sessionId));
       },
 
       /**
@@ -296,14 +358,15 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         toolCallId?: string;
         toolName: string;
         input: string;
-        agent: { sessionId?: string };
+        agent: { sessionId?: string; profileName?: string; model?: string };
       }) => {
         if (!toolCallId) return; // no id to tie the record (and any replay) to
-        const logPath = resolveLogPath(agent.sessionId || "unknown");
+        const sessionId = agent.sessionId || "unknown";
+        const logPath = resolveLogPath(sessionId);
         if (!logPath) return;
         const entry = stripNulls({
           ts: new Date().toISOString(),
-          session_id: agent.sessionId || "unknown",
+          session_id: sessionId,
           source: LOG_SOURCE.TOOL_STARTED,
           content: input,
           tool_call_id: toolCallId,
@@ -321,7 +384,18 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           logger.error(
             `[session-log] durability barrier failed: ${why} -- tool ${toolCallId} is blocked until its record can be written`,
           );
+          return;
         }
+        // Commit point: the record is fsynced, so mirror the open call (and
+        // cheap sidebar metadata) in one index transaction. State is NOT
+        // touched -- a live writer mid-tool is not "interrupted", and the
+        // index must never outrank the log.
+        await safeIndex("tool_started", () =>
+          indexToolStarted(sessionId, toolCallId, {
+            profile: agent.profileName,
+            model: agent.model,
+          }),
+        );
       },
 
       /**
@@ -343,6 +417,25 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             "before its side effects. Fix the sessions directory (disk space / permissions) and retry. " +
             "If you accept losing crash-resume safety for this session, disable logging with --no-log.",
         };
+      },
+
+      /**
+       * Durability record for a `-s <id>` resume, fsynced before the replay
+       * begins (restoreSessionIntoAgent awaits this hook). The livelock cap's
+       * counter lives in the log; the index only mirrors it, so deleting the
+       * index costs a re-scan, never the cap.
+       */
+      [HOOKS.SESSION_RESUME_ATTEMPT]: async ({ sessionId }: { sessionId: string }) => {
+        const logPath = resolveLogPath(sessionId);
+        if (!logPath) return;
+        const entry = stripNulls({
+          ts: new Date().toISOString(),
+          session_id: sessionId,
+          source: LOG_SOURCE.RESUME_ATTEMPT,
+          content: "",
+        });
+        await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+        await safeIndex("resume_attempt", () => indexResumeAttempt(sessionId));
       },
 
       /**
@@ -368,6 +461,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             tool_call_id: toolCallId,
           });
           await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+          // Commit point: awaiting_question is honest the moment the record
+          // lands -- alive or dead, the session IS waiting on a human now.
+          await safeIndex("question_asked", () => indexQuestionAsked(sessionId, toolCallId));
           return;
         }
 

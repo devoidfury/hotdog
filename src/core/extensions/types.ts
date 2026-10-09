@@ -80,6 +80,7 @@ export interface HookPayloads {
   "session:end": { sessionId: string };
   "session:swap": { oldAgent?: AgentLike; newAgent: AgentLike };
   "session:restoreActive": { agent: Agent; isRestoring: boolean };
+  "session:resumeAttempt": { agent: Agent; sessionId: string };
 
   "agent:toolContext": { toolCtx: ToolContext; toolName: string; agent: Agent };
 

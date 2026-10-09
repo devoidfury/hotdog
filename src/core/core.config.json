@@ -168,6 +168,19 @@
       { "default": false }
     ]
   },
+  "reindex": {
+    "type": "boolean",
+    "cliFlag": {
+      "long": "--reindex",
+      "type": "boolean",
+      "description": "Repair the session index on startup: full re-scan of every session log (the index normally rebuilds itself stat-only)"
+    },
+    "layers": [
+      { "source": "cli", "key": "reindex", "cast": "truthy" },
+      { "source": "config", "key": "reindex" },
+      { "default": false }
+    ]
+  },
   "showTokenUse": {
     "type": "boolean",
     "cliFlag": {

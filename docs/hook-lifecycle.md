@@ -108,6 +108,7 @@ Session Delete ────────────► "session:end"
 | `session:end` | Session deleted (or task agent released) | notify (fire-and-forget) | `{ sessionId }` |
 | `session:swap` | Agent swapped | awaited notify (sync `switchSession()` fires unawaited) | `{ oldAgent, newAgent }` |
 | `session:restoreActive` | Restore flag changes | notify (fire-and-forget) | `{ agent, isRestoring }` |
+| `session:resumeAttempt` | Explicit `-s` resume, before replay | awaited notify | `{ agent, sessionId }` |
 
 ### 3. Agent Run Loop — Per-Iteration Lifecycle
 
@@ -239,6 +240,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | `SESSION_END` | `session:end` | notify (fire-and-forget) | Session deleted (`SessionManager.deleteSession`) or task agent released (`TaskManager._runTask`, fired on the agent's own hooks) |
 | `SESSION_SWAP` | `session:swap` | awaited notify | Agent swapped (`swap()` awaits it; the sync `switchSession()` path fires it unawaited) |
 | `SESSION_RESTORE_ACTIVE` | `session:restoreActive` | notify (fire-and-forget) | Restore flag changes on agent (sync setter) |
+| `SESSION_RESUME_ATTEMPT` | `session:resumeAttempt` | awaited notify | `restoreSessionIntoAgent()` resumes a session by explicit id; session-log fsyncs a `resume_attempt` record (livelock-cap counter, logged so it survives index deletion) before the replay reads |
 
 ### Message Flow
 

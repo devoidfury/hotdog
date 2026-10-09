@@ -6,6 +6,7 @@ import type { CastFn, ComputeFn, SchemaProperty, SchemaLayer, ConfigSchema } fro
 import type { ProviderDef } from "./providers.ts";
 import { ProfileDef } from "./profiles.ts";
 import { CliFlagDef } from "./index.ts";
+import { sessionsDir } from "../session/session-log.ts";
 
 export * from "./schema-types.ts";
 
@@ -53,6 +54,10 @@ const COMPUTE_BUILTINS: Record<string, (arg: unknown, ctx: unknown) => unknown> 
     const subPath = arg as string;
     const configDir = (ctx as { configDir?: string }).configDir;
     return join(configDir || "./config", subPath);
+  },
+
+  joinSessionsDir: (arg: unknown, _ctx: unknown): string => {
+    return join(sessionsDir(), arg as string);
   },
 };
 
@@ -386,6 +391,8 @@ export interface CoreConfig {
   sessionId?: string;
   compactDebug?: boolean;
   noLog?: boolean;
+  /** Repair mode: force a full session-index rebuild from the logs on startup. */
+  reindex?: boolean;
   showTokenUse?: boolean;
   hideTools?: boolean;
   hideThinking?: boolean;

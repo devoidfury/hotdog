@@ -305,6 +305,19 @@ Disable session logging. Can also be controlled via environment variables:
 { "noLog": true }
 ```
 
+### `reindex`
+
+- **Type:** `boolean`
+- **CLI flag:** `--reindex`
+- **Default:** `false`
+- **Resolution:** CLI > config > default
+
+Repair the session index (`sessions.sqlite` inside the sessions dir) on startup: full re-scan of every session log. Normally unnecessary -- the index is disposable (deleting it rebuilds from the logs) and boot reconcile is stat-only, reading a log only when its size/mtime disagree with the stored row.
+
+```json
+{ "reindex": true }
+```
+
 ### `sandboxMode`
 
 - **Type:** `boolean`
@@ -1199,7 +1212,7 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 |-------|------|---------|-------------|
 | `maxNodes` | `number` | `8` | Soft cap on nodes per workflow graph (exceeding it warns; validation refuses above the hard ceiling of 32). A workflow's own `limits.maxNodes` overrides. |
 | `maxRuntimeMins` | `number` | `60` | Default per-node cap in minutes on actual worker run time (a node's `maxRuntimeMins` overrides); time queued waiting for a provider-lane slot does not count. When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried. |
-| `path` | `string` | `<configDir>/workflows` | Directory holding `*.workflow.yaml` graphs; run dirs live under `<path>/runs`. |
+| `path` | `string` | `<sessions-dir>/workflows` (sessions dir = `$HOTDOG_SESSIONS_DIR`, or `~/.cache/hotdog/sessions`) | Directory holding `*.workflow.yaml` graphs; run dirs live under `<path>/runs`. |
 
 ```json
 { "workflows": { "maxNodes": 12, "maxRuntimeMins": 45 } }

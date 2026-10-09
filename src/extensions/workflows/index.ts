@@ -5,7 +5,7 @@
 // - Manager tools: workflow_validate (validates AND saves) / workflow_dispatch (file + optional args) / workflow_status 
 // - Slash commands: /workflow (status + cancel) and /followup <node> <msg>
 //   (mid-turn steering of a node's worker)
-// - Skills-style availability listing of config/workflows/*.workflow.yaml
+// - Skills-style availability listing of <workflows.path>/*.workflow.yaml
 //   (name + description) in manager system prompts
 //
 // The TaskManager is resolved lazily via the "taskManager" service (subagents

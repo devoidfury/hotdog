@@ -20,10 +20,10 @@
         },
         "path": {
           "type": "string",
-          "description": "Directory holding *.workflow.yaml graphs; runs live under <path>/runs",
+          "description": "Directory holding *.workflow.yaml graphs; runs live under <path>/runs. Defaults to <sessions-dir>/workflows (sessions dir is $HOTDOG_SESSIONS_DIR, or ~/.cache/hotdog/sessions).",
           "layers": [
             { "source": "config", "key": "workflows.path" },
-            { "compute": "joinConfigDir:workflows" }
+            { "compute": "joinSessionsDir:workflows" }
           ]
         }
       },

@@ -360,6 +360,11 @@ export const HOOKS = {
   SESSION_END: "session:end",
   SESSION_SWAP: "session:swap",
   SESSION_RESTORE_ACTIVE: "session:restoreActive",
+  // Fired by restoreSessionIntoAgent before replaying an explicit `-s` resume.
+  // Awaited: the session-log extension fsyncs a resume_attempt record (the
+  // livelock cap's counter, logged so it survives index deletion) and mirrors
+  // the count into the session index.
+  SESSION_RESUME_ATTEMPT: "session:resumeAttempt",
 
   AGENT_TOOL_CONTEXT: "agent:toolContext",
 

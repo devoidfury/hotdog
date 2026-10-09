@@ -21,7 +21,7 @@ export function parseHarnessSpec(path: string, text: string): HarnessSpec {
   }
   const obj = raw as Record<string, unknown>;
   for (const key of Object.keys(obj)) {
-    if (!["id", "command", "args", "env", "prompt_via"].includes(key)) {
+    if (!["id", "command", "args", "env", "prompt_via", "sandbox_ro_binds"].includes(key)) {
       throw new Error(`${path}: unknown key "${key}"`);
     }
   }
@@ -46,7 +46,18 @@ export function parseHarnessSpec(path: string, text: string): HarnessSpec {
       if (typeof v !== "string") throw new Error(`${path}: env["${k}"] must be a string`);
     }
   }
-  return { id, command, args: args as string[], ...(env !== undefined ? { env: env as Record<string, string> } : {}), ...(promptVia !== undefined ? { prompt_via: promptVia } : {}) };
+  const sandboxRoBinds = obj.sandbox_ro_binds;
+  if (sandboxRoBinds !== undefined) {
+    if (!Array.isArray(sandboxRoBinds) || sandboxRoBinds.some((p) => typeof p !== "string" || !p.startsWith("/"))) {
+      throw new Error(`${path}: "sandbox_ro_binds" must be an array of absolute path strings`);
+    }
+  }
+  return {
+    id, command, args: args as string[],
+    ...(env !== undefined ? { env: env as Record<string, string> } : {}),
+    ...(promptVia !== undefined ? { prompt_via: promptVia } : {}),
+    ...(sandboxRoBinds !== undefined ? { sandbox_ro_binds: sandboxRoBinds as string[] } : {}),
+  };
 }
 
 /** Expand the argv template. Throws on unknown placeholders or a missing required value. */

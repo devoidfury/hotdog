@@ -95,14 +95,23 @@ interface SandboxBase {
   hidden: string[];
 }
 
-function cellPlan(base: SandboxBase, opts: RunOpts, workspace: string, sessionDir: string): BwrapPlan {
+function cellPlan(base: SandboxBase, opts: RunOpts, workspace: string, sessionDir: string, extraRoBinds: string[] = []): BwrapPlan {
+  // Extra ro binds (a third-party harness's own checkout) deduped against the
+  // shared base; per-cell so one harness's checkout is not visible to another.
+  const baseSet = new Set(base.roBinds);
+  const roBinds = [...base.roBinds, ...extraRoBinds.filter((p) => !baseSet.has(p))];
   return {
-    roBinds: base.roBinds,
+    roBinds,
     hidden: base.hidden,
     // Re-bind the pieces the run needs that live under the hidden results dir.
     roBindsAfterHidden: [opts.schemaFile],
     rwBinds: [workspace, sessionDir],
   };
+}
+
+/** Spec-declared extra ro binds that exist host-side (bind sources must exist). */
+function extraRoBinds(spec: HarnessSpec): string[] {
+  return (spec.sandbox_ro_binds ?? []).filter((p) => existsSync(p));
 }
 
 /** bwrap-wrap an expanded spec+argv per the plan. */
@@ -146,7 +155,7 @@ async function executeCell(cell: MatrixCell, opts: RunOpts): Promise<RunRecord> 
     const sessionDir = join(opts.sessionsRoot, cell.runId);
     mkdirSync(sessionDir, { recursive: true }); // bwrap bind sources must exist host-side
     const spawn = opts.sandbox
-      ? applySandbox(opts.sandbox, harness, argv, cellPlan(opts.sandbox, opts, workspace, sessionDir))
+      ? applySandbox(opts.sandbox, harness, argv, cellPlan(opts.sandbox, opts, workspace, sessionDir, extraRoBinds(harness)))
       : { spec: harness, argv };
     // Per-task env (e.g. HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS) merged over the
     // harness spec's env but under the forced per-run values.
@@ -221,7 +230,7 @@ async function runJudge(
     const sessionDir = join(opts.sessionsRoot, `${cell.runId}-judge`);
     mkdirSync(sessionDir, { recursive: true });
     const spawn = opts.sandbox
-      ? applySandbox(opts.sandbox, opts.judge.harness, argv, cellPlan(opts.sandbox, opts, workspace, sessionDir))
+      ? applySandbox(opts.sandbox, opts.judge.harness, argv, cellPlan(opts.sandbox, opts, workspace, sessionDir, extraRoBinds(opts.judge.harness)))
       : { spec: opts.judge.harness, argv };
     const res = await runHarness({
       spec: spawn.spec,

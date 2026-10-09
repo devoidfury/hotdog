@@ -132,11 +132,27 @@ export function bwrapAvailable(force = false): boolean {
 function probeBwrap(): string | null {
   const bin = findBwrap();
   if (!bin) return null;
-  try {
-    // Probe the real recipe's core: tmpfs root must mount.
-    const probe = Bun.spawnSync([bin, "--tmpfs", "/", "--dev", "/dev", "--proc", "/proc", "--", "true"]);
-    return probe.exitCode === 0 ? bin : null;
-  } catch {
-    return null;
+  // Probe the real recipe's core: a fresh tmpfs root must mount and a
+  // trivially small allowlist must let a known binary exec. The command
+  // must be an absolute path (PATH dirs don't exist under the new root),
+  // and its dynamic loader dirs must be bound (execve of a dynamic ELF
+  // returns ENOENT when the loader is missing -- a bare `-- true` probe
+  // can never pass and always reported sandbox OFF).
+  const roBinds = ["/usr", "/bin", "/lib", "/lib64"].filter((p) => existsSync(p));
+  for (const cmd of ["/usr/bin/true", "/bin/true"]) {
+    if (!existsSync(cmd)) continue;
+    try {
+      const argv = [
+        bin,
+        "--tmpfs", "/", "--dev", "/dev", "--proc", "/proc",
+        ...roBinds.flatMap((p) => ["--ro-bind", p, p]),
+        "--", cmd,
+      ];
+      const probe = Bun.spawnSync(argv);
+      if (probe.exitCode === 0) return bin;
+    } catch {
+      // try the next candidate
+    }
   }
+  return null;
 }

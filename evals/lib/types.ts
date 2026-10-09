@@ -10,6 +10,12 @@ export interface HarnessSpec {
   env?: Record<string, string>;
   /** "arg" (default): prompt substituted at {prompt}. "stdin": prompt written to stdin. */
   prompt_via?: "arg" | "stdin";
+  /**
+   * Extra read-only paths to expose inside the bwrap sandbox. For third-party
+   * harnesses this is their checkout (the harness code must be loadable, same
+   * role as the repo root for hotdog). Paths that don't exist are ignored.
+   */
+  sandbox_ro_binds?: string[];
 }
 
 export interface SeriesSpec {

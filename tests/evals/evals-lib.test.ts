@@ -28,6 +28,12 @@ describe("parseHarnessSpec", () => {
   it("rejects unknown keys", () => {
     expect(() => parseHarnessSpec("h.json", JSON.stringify({ id: "h", command: "b", args: [], bogus: 1 }))).toThrow('unknown key "bogus"');
   });
+  it("accepts sandbox_ro_binds absolute paths, rejects bad shapes", () => {
+    const s = parseHarnessSpec("h.json", JSON.stringify({ id: "h", command: "b", args: [], sandbox_ro_binds: ["/a", "/b"] }));
+    expect(s.sandbox_ro_binds).toEqual(["/a", "/b"]);
+    expect(() => parseHarnessSpec("h.json", JSON.stringify({ id: "h", command: "b", args: [], sandbox_ro_binds: ["rel/path"] }))).toThrow("sandbox_ro_binds");
+    expect(() => parseHarnessSpec("h.json", JSON.stringify({ id: "h", command: "b", args: [], sandbox_ro_binds: "x" }))).toThrow("sandbox_ro_binds");
+  });
   it("rejects a non-arg array", () => {
     expect(() => parseHarnessSpec("h.json", JSON.stringify({ id: "h", command: "b", args: "x" }))).toThrow('"args"');
   });

@@ -45,11 +45,13 @@ Harnesses and models are chosen at run time via `--harness`/`--model`, never dec
   "command": "bun",
   "args": ["{repo}/bin/hotdog", "prompt", "{prompt}", "--model", "{model}"],
   "env": { "OPTIONAL": "var" },
-  "prompt_via": "arg"
+  "prompt_via": "arg",
+  "sandbox_ro_binds": ["/path/to/harness/checkout"]
 }
 ```
 
 - Spawned via argv, **no shell**, so the prompt is one argument regardless of quoting.
+- `sandbox_ro_binds` (optional): extra read-only paths exposed to the bwrap sandbox. Third-party harnesses declare their checkout here -- the sandbox allowlist only contains the hotdog repo itself, so a harness whose code lives elsewhere cannot exec inside it without this (same role as the repo root in the spec above). Missing paths are ignored; the bind is per-cell, so one harness's checkout is never visible while another harness runs.
 - Placeholders: `{prompt}` `{model}` `{repo}` (repo root) `{schema_file}` (verdict schema, judge harnesses only). Unknown placeholders are errors.
 - `prompt_via: "stdin"` writes the prompt to stdin instead (for harnesses that read stdin).
 - Every spawn (agents, judges, `command` checks) gets `NO_COLOR=1` and `TERM=dumb` forced last in the env -- over both the runner's env and the spec's `env` -- so captured stdout is plain and deterministic.

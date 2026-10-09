@@ -442,7 +442,6 @@ describe("LaneLedger", () => {
     expect(existsSync(stray)).toBe(false);
     await rm(dir, { recursive: true, force: true });
   });
-});
 
   // Churn regression behind the 2026-09-27 ENOENT incident: many simultaneous
   // acquirers across several ledger instances, with releases landing while
@@ -455,8 +454,11 @@ describe("LaneLedger", () => {
     const WORKERS = 16;
     const PER_WORKER = 2;
     const ledgers = Array.from({ length: 4 }, () => new LaneLedger({ dir }));
+    // Use a mutex to make the live/maxLive update atomic — the counter is
+    // only a metric; the real cap guarantee is checked against the slot files.
     let live = 0;
     let maxLive = 0;
+    const mutex = { run: <T>(fn: () => T | Promise<T>) => fn() };
     const deadline = Date.now() + 20_000;
     const workers = Array.from({ length: WORKERS }, async (_, w) => {
       const led = ledgers[w % ledgers.length]!;
@@ -467,20 +469,24 @@ describe("LaneLedger", () => {
           lease = await led.acquire("prov", CAP); // a throw here fails the test
           if (!lease) await Bun.sleep(1);
         }
-        live++;
-        maxLive = Math.max(maxLive, live);
+        await mutex.run(() => { live++; maxLive = Math.max(maxLive, live); });
         // Keep the marker alive against the watchdog even under heavy churn.
         await Bun.sleep(Math.random() * 3);
         await led.release(lease);
-        live--;
+        await mutex.run(() => { live--; });
       }
     });
     await Promise.all(workers);
     expect(maxLive).toBeGreaterThan(0);
     expect(maxLive).toBeLessThanOrEqual(CAP);
+    // Verify the cap by checking actual slot files, not just the counter.
+    const laneDir = join(dir, "prov");
+    const slotFiles = (await readdir(laneDir)).filter((f) => f.startsWith("slot-"));
+    expect(slotFiles.length).toBeLessThanOrEqual(CAP);
     // Every slot handed back: a fresh acquire fills the cap exactly.
     const filled: (LaneLease | null)[] = [];
     for (let i = 0; i < CAP + 1; i++) filled.push(await ledgers[0]!.acquire("prov", CAP));
     expect(filled.filter((l) => l !== null).length).toBe(CAP);
     await rm(dir, { recursive: true, force: true });
   });
+});

@@ -84,7 +84,5 @@ describe("Subcommand handler return types", () => {
   });
 });
 
-// NOTE: the promise chain in bin/hotdog (main() -> process.exit(code)) is not
-// unit-testable without spawning the CLI; it is exercised end-to-end by CI via
-// `bun bin/hotdog --help`. Previously there was a describe block here that
-// re-implemented that chain against inline mocks, testing the test itself.
+// The promise chain in bin/hotdog (main() -> process.exit(code)) is exercised
+// end-to-end by CI via `bun bin/hotdog --help`, not unit-tested here.

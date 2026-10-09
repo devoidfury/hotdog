@@ -1,13 +1,7 @@
 // Wire-format tests.
-//
-// Phase 0 pinned the pre-extraction behavior of LlmClient.buildChatRequest
-// (characterization); phase 2 moved serialization into
-// src/core/llm-client/serialize.ts and flipped the `images` leak assertion.
-// Assertions marked "BUG (fixed in phase N)" document known issues that
-// flip in later phases; everything else must survive refactors intact.
-//
-// NOTE: protected marker tags are built by string concatenation, never as
-// literal tag text, so the mangler-alias fossil scan stays green.
+// Assertions marked "BUG (fixed in phase N)" document known issues that flip
+// in later phases; everything else must survive refactors intact.
+// Protected marker tags are built by concatenation, never as literals.
 
 import { describe, it, expect } from "bun:test";
 import { LlmClient } from "@core/llm-client/client.ts";

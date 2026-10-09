@@ -250,11 +250,7 @@ describe('contentToText', () => {
     ).toBe('a\nb');
   });
 
-  // NOTE: wrapper tag names are assembled by concatenation so this file
-  // stays free of literal protected markers.
   it('renders wrapper parts at rest as DATA -- no markup, no mangling', () => {
-    // Core ships no shape: at rest every wrapper part is JSON data. The
-    // model-facing framing comes from the session WireFormat at the wire.
     const filePart = { type: 'file-include', path: 'note.md', content: 'hello' };
     const noticePart = { type: 'system-notice', text: 'resumed' };
     expect(
@@ -270,8 +266,6 @@ describe('contentToText', () => {
 });
 
 describe('Message — images', () => {
-  // Contract: toJSON() stores content RAW; images ride the separate `images`
-  // field; _buildContent() is the only place images merge into content parts.
 
   it('keeps raw content in toJSON and merges images in _buildContent', () => {
     const msg = new Message({

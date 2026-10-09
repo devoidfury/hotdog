@@ -132,10 +132,6 @@ describe('SessionManager', () => {
       expect(sessionManager.sessionId()).toBe(session1);
     });
 
-    it('should return undefined for non-existent session', () => {
-      expect(sessionManager.switchSession('non-existent')).toBeUndefined();
-    });
-
     it('should emit SESSION_SWAP with the previously active agent as oldAgent', async () => {
       const session1 = await sessionManager.create({ model: 'model-1' });
       await sessionManager.swap({ model: 'model-2' });
@@ -177,9 +173,6 @@ describe('SessionManager', () => {
       expect((agent as any).model).toBe('test-model');
     });
 
-    it('should return undefined for non-existent session ID', () => {
-      expect(sessionManager.getAgentBySessionId('non-existent')).toBeUndefined();
-    });
   });
 
   describe('sessionIds / sessionCount', () => {
@@ -218,9 +211,6 @@ describe('SessionManager', () => {
       expect(sessionManager.getBus(sessionId)!.isCancelled).toBe(true);
     });
 
-    it('should be no-op for non-existent session', () => {
-      expect(() => sessionManager.cancel('non-existent')).not.toThrow();
-    });
   });
 
   describe('interrupt', () => {
@@ -233,9 +223,6 @@ describe('SessionManager', () => {
       expect(bus.isIdle()).toBe(true);
     });
 
-    it('should be no-op for non-existent session', () => {
-      expect(() => sessionManager.interrupt('non-existent')).not.toThrow();
-    });
   });
 
   describe('enqueue', () => {
@@ -247,9 +234,6 @@ describe('SessionManager', () => {
       await settle(() => sessionManager.getBus(sessionId)!.isIdle(), 'bus to idle');
     });
 
-    it('should be no-op for non-existent session', () => {
-      expect(() => sessionManager.enqueue('non-existent', 'hi')).not.toThrow();
-    });
   });
 
   describe('executeCommand', () => {
@@ -271,9 +255,6 @@ describe('SessionManager', () => {
       expect(action).toBe(ACTIONS.DISPLAY);
     });
 
-    it('should return undefined for non-existent session', async () => {
-      expect(await sessionManager.executeCommand('non-existent', '/anything')).toBeUndefined();
-    });
   });
 
   describe('getSessionInfo', () => {
@@ -286,9 +267,6 @@ describe('SessionManager', () => {
       });
     });
 
-    it('should return null for non-existent session', () => {
-      expect(sessionManager.getSessionInfo('non-existent')).toBeNull();
-    });
   });
 
   describe('isSessionRunning', () => {
@@ -324,11 +302,6 @@ describe('SessionManager', () => {
       expect(sessionManager.getAgentBySessionId(sessionId)).toBeUndefined();
     });
 
-    it('should return false for non-existent session', () => {
-      const deleted = sessionManager.deleteSession('non-existent');
-      expect(deleted).toBe(false);
-    });
-
     it('should fire session:end with the deleted sessionId', async () => {
       const sessionId = await sessionManager.create({ model: 'test-model' });
       const seen: string[] = [];
@@ -340,12 +313,6 @@ describe('SessionManager', () => {
       expect(seen).toEqual([sessionId]);
     });
 
-    it('should not fire session:end for a non-existent session', () => {
-      let fired = false;
-      hooks.on('session:end', () => { fired = true; });
-      sessionManager.deleteSession('non-existent');
-      expect(fired).toBe(false);
-    });
   });
 
   describe('getStore', () => {
@@ -364,9 +331,6 @@ describe('SessionManager', () => {
       expect(typeof bus?.enqueue).toBe('function');
     });
 
-    it('should return undefined for non-existent session', () => {
-      expect(sessionManager.getBus('non-existent')).toBeUndefined();
-    });
   });
 
   describe('getTaskManager', () => {

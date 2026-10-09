@@ -1,14 +1,6 @@
 // Unit tests for semantic wrapper parts (src/core/context/wrappers.ts).
-//
-// Core owns the DATA (the part types, the shape validation) and the field
-// TRUST spec (what mangles at the wire). Core owns NO markup: at rest every
-// wrapper part is JSON data, and at the wire EVERY wrapper requires the
-// session's WireFormat. The byte-level shape of the built-in format is
-// pinned in tests/extensions/wire-format-xml.test.ts, together with the
-// forgery pins that depend on that format's real element names.
-//
-// NOTE: protected marker tags are built by string concatenation, never as
-// literal tag text, so the mangler-alias fossil scan stays green.
+// Byte-level shape is pinned in tests/extensions/wire-format-xml.test.ts.
+// Protected marker tags are built by concatenation, never as literals.
 
 import { describe, it, expect } from "bun:test";
 import {

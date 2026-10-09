@@ -1,7 +1,7 @@
 // Tests for utils/strings.ts — camelCase, parseCliFlagKey.
 
 import { describe, it, expect } from "bun:test";
-import { camelCase, parseCliFlagKey, suggestCandidates, xmlEscape } from "@utils/strings.ts";
+import { camelCase, parseCliFlagKey, suggestCandidates, xmlEscape, chatmlEscape, chatmlUnescape } from "@utils/strings.ts";
 
 describe("camelCase", () => {
   it("converts snake_case and kebab-case to camelCase", () => {
@@ -107,5 +107,41 @@ describe("suggestCandidates", () => {
 
   it("defaults to identity normalization", () => {
     expect(suggestCandidates("read", ["Read", "read"], { limit: 5 })).toEqual(["read"]);
+  });
+});
+
+describe("chatmlEscape", () => {
+  it("rewrites ChatML <|tag|> to ::8 wrapper form", () => {
+    expect(chatmlEscape("<::8|start|8::>")).toBe("<::8|start|8::>");
+    expect(chatmlEscape("<::8|end|8::>")).toBe("<::8|end|8::>");
+  });
+
+  it("leaves already-wrapped text untouched", () => {
+    expect(chatmlEscape("<::8|start|8::>")).toBe("<::8|start|8::>");
+  });
+
+  it("leaves non-ChatML text untouched", () => {
+    expect(chatmlEscape("hello world")).toBe("hello world");
+    expect(chatmlEscape("")).toBe("");
+  });
+
+  it("handles multiple tags", () => {
+    expect(chatmlEscape("<::8|start|8::>hi<::8|end|8::>")).toBe("<::8|start|8::>hi<::8|end|8::>");
+  });
+});
+
+describe("chatmlUnescape", () => {
+  it("rewrites ::8 wrappers back to ChatML <|tag|> form", () => {
+    expect(chatmlUnescape("<|start|>")).toBe("<|start|>");
+    expect(chatmlUnescape("<|end|>")).toBe("<|end|>");
+  });
+
+  it("leaves already-unescaped text untouched", () => {
+    expect(chatmlUnescape("<|start|>")).toBe("<|start|>");
+  });
+
+  it("leaves non-wrapper text untouched", () => {
+    expect(chatmlUnescape("hello world")).toBe("hello world");
+    expect(chatmlUnescape("")).toBe("");
   });
 });

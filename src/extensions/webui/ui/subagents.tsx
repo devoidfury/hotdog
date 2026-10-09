@@ -6,6 +6,7 @@
 // tasks stay openable for the rest of the session.
 
 import type { TaskInfoWire } from "@extensions/websocket/protocol.ts";
+import type { Ref } from "@utils/jsx";
 import type { TaskActivityBlock } from "./chat.ts";
 
 export function formatElapsed(info: TaskInfoWire, now: number): string {
@@ -55,15 +56,47 @@ export function SubagentsStrip({ tasks, now, openTaskIds, onOpen }: StripProps) 
   );
 }
 
+// Steering inputs are uncontrolled (the tree re-renders on every activity
+// tick, and re-binding a value prop would clobber the draft). Refs are
+// stable per task id so patch() does not detach them.
+const followupInputs = new Map<string, HTMLInputElement>();
+const followupRefs = new Map<string, Ref>();
+function followupInputRef(taskId: string): Ref {
+  let ref = followupRefs.get(taskId);
+  if (!ref) {
+    ref = (el) => {
+      if (el) followupInputs.set(taskId, el as unknown as HTMLInputElement);
+      else followupInputs.delete(taskId);
+    };
+    followupRefs.set(taskId, ref);
+  }
+  return ref;
+}
+
 interface PanelProps {
   task: TaskInfoWire;
   activity: TaskActivityBlock[];
   now: number;
   zBase: number;
+  /** Most recent server reply for a Cancel/steer on this task, if any. */
+  control: { ok: boolean; text: string } | null;
   onClose: (taskId: string) => void;
+  onCancel: (taskId: string) => void;
+  onFollowup: (taskId: string, message: string) => void;
 }
 
-export function TaskPanel({ task, activity, now, zBase, onClose }: PanelProps) {
+export function TaskPanel({
+  task,
+  activity,
+  now,
+  zBase,
+  control,
+  onClose,
+  onCancel,
+  onFollowup,
+}: PanelProps) {
+  const steerable = task.status === "running";
+  const cancellable = steerable || task.status === "queued";
   return (
     <div className="task-overlay" data-task-id={task.taskId} style={{ zIndex: String(zBase) }}>
       <div className="task-overlay-header">
@@ -72,6 +105,16 @@ export function TaskPanel({ task, activity, now, zBase, onClose }: PanelProps) {
           {task.taskId}
         </span>
         <span className="task-overlay-elapsed">{formatElapsed(task, now)}</span>
+        {cancellable ? (
+          <button
+            type="button"
+            className="task-overlay-cancel"
+            title="Cancel this task agent (queued or running)"
+            onClick={() => onCancel(task.taskId)}
+          >
+            Cancel
+          </button>
+        ) : null}
         <button
           type="button"
           className="task-overlay-close"
@@ -111,6 +154,40 @@ export function TaskPanel({ task, activity, now, zBase, onClose }: PanelProps) {
             </div>
           );
         })}
+      </div>
+      <div className="task-overlay-footer">
+        {control ? (
+          <div className={`task-control-note${control.ok ? "" : " error"}`}>
+            {control.text}
+          </div>
+        ) : null}
+        <form
+          className="task-followup-form"
+          onSubmit={(e: Event) => {
+            e.preventDefault();
+            const input = followupInputs.get(task.taskId);
+            const message = input ? input.value.trim() : "";
+            if (!message) return;
+            onFollowup(task.taskId, message);
+            if (input) input.value = "";
+          }}
+        >
+          <input
+            type="text"
+            className="task-followup-input"
+            placeholder={steerable ? "Steer this task..." : "Task not running -- steering disabled"}
+            disabled={!steerable}
+            ref={followupInputRef(task.taskId)}
+          />
+          <button
+            type="submit"
+            className="task-followup-send"
+            disabled={!steerable}
+            title="Inject the message at the task's next seam"
+          >
+            Steer
+          </button>
+        </form>
       </div>
     </div>
   );

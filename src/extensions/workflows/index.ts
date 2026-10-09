@@ -54,6 +54,12 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   };
   const workflowsDir = wfConfig.path?.trim() ? wfConfig.path.trim() : null;
   const runsRoot = workflowsDir ? join(workflowsDir, "runs") : null;
+  // Resolved modelGroups (config model-groups, camelCased keys): lets validate/
+  // dispatch resolve node `group` refs against declared names.
+  const modelGroups =
+    ((core.config as Record<string, unknown> | undefined)?.modelGroups as
+      | Record<string, string[]>
+      | undefined) ?? {};
 
   // Live availability listing: rescanned (stat-gated) per system-prompt build,
   // so graphs saved mid-session reach managers without a restart.
@@ -97,6 +103,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   const cliDeps: WorkflowCliDeps = {
     runsRoot: runsRoot ?? undefined,
     limits,
+    modelGroups,
     runHost,
     emit: (line) => console.log(line),
   };
@@ -207,6 +214,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           getRunsRoot: () => runsRoot,
           getWorkflowsDir: () => workflowsDir,
           limits,
+          getModelGroups: () => modelGroups,
           registry,
         };
         for (const [name, ctor] of Object.entries(WORKFLOW_TOOL_CONSTRUCTORS)) {

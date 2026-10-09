@@ -1919,3 +1919,81 @@ body {
     overflow-y: auto;
     color: var(--text-secondary);
 }
+
+.task-overlay-cancel {
+    padding: 3px 10px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--error-soft);
+    color: var(--error);
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.task-overlay-cancel:hover {
+    background: var(--error);
+    color: var(--bg-base);
+}
+
+.task-overlay-footer {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.task-control-note {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.task-control-note.error {
+    color: var(--error);
+}
+
+.task-followup-form {
+    display: flex;
+    gap: 6px;
+}
+
+.task-followup-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.82rem;
+}
+
+.task-followup-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.task-followup-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.task-followup-send {
+    padding: 6px 12px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--accent);
+    color: var(--bg-base);
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    cursor: pointer;
+}
+
+.task-followup-send:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

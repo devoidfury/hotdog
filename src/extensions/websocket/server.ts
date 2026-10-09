@@ -1183,6 +1183,40 @@ async function routeMessage(
       break;
     }
 
+    // Subagent panel controls: thin delegates onto the TaskManager primitives
+    // the task_interrupt / task_followup tools already use. No control logic
+    // here -- the primitives own queued/running/parked semantics.
+    case C2S.TASK_INTERRUPT: {
+      const taskId = typeof msg.taskId === "string" ? msg.taskId : null;
+      if (!taskId) break;
+      const taskManager = registry.getTaskManager();
+      const ok = taskManager ? taskManager.interruptTask(taskId) : false;
+      SessionRegistry.sendSafe(ws, {
+        type: S2C.TASK_CONTROL,
+        taskId,
+        action: "interrupt",
+        ok,
+        ...(ok ? {} : { error: "Task not found or no longer active" }),
+      });
+      break;
+    }
+
+    case C2S.TASK_FOLLOWUP: {
+      const taskId = typeof msg.taskId === "string" ? msg.taskId : null;
+      const message = typeof msg.message === "string" ? msg.message.trim() : "";
+      if (!taskId || !message) break;
+      const taskManager = registry.getTaskManager();
+      const ok = taskManager ? taskManager.sendFollowUp(taskId, message) : false;
+      SessionRegistry.sendSafe(ws, {
+        type: S2C.TASK_CONTROL,
+        taskId,
+        action: "followup",
+        ok,
+        ...(ok ? {} : { error: "Steering needs a running task with a live turn" }),
+      });
+      break;
+    }
+
     case C2S.QUESTION_ANSWER: {
       const sid = msg.sessionId as string | undefined;
       const answers = msg.answers;

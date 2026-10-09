@@ -52,6 +52,14 @@ function closeTask(taskId: string): void {
   openTasksAtom(openTasksAtom().filter((id) => id !== taskId));
 }
 
+function cancelTask(taskId: string): void {
+  // Server delegates to TaskManager.interruptTask; the taskUpdate feed
+  // flips the panel status to cancelled on the way back.
+  if (confirm(`Cancel task ${taskId}? In-flight work is aborted.`)) {
+    chat?.interruptTask(taskId);
+  }
+}
+
 // Tab-completion popup for the composer (server-driven, see C2S.COMPLETE).
 interface CompletionMenu {
   options: CompletionItem[];
@@ -353,6 +361,7 @@ function startChat(): void {
     chat.currentProfileAtom,
     chat.tasksAtom,
     chat.activityVersionAtom,
+    chat.taskControlAtom,
     chat.sttEnabledAtom,
     sttPhaseAtom,
   ]);
@@ -837,7 +846,9 @@ function App() {
                     type="checkbox"
                     id="steer-checkbox"
                     checked={steerAtom()}
-                    onChange={(e) => steerAtom(e.target.checked)}
+                    onChange={(e: Event) =>
+                      steerAtom((e.target as HTMLInputElement).checked)
+                    }
                   />
                   Steer
                 </label>
@@ -860,7 +871,10 @@ function App() {
               activity={chat.getTaskActivity(id)}
               now={nowAtom()}
               zBase={100 + i}
+              control={chat.taskControlAtom()[id] ?? null}
               onClose={closeTask}
+              onCancel={cancelTask}
+              onFollowup={(tid, message) => chat?.taskFollowup(tid, message)}
             />
           );
         })}

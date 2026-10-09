@@ -23,6 +23,7 @@
 
 import type { ModelConfig, ProviderDef } from "@core/config/providers.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
+import { camelCase } from "@utils/strings.ts";
 
 export interface ModelRequirements {
   ctx?: number;
@@ -99,6 +100,23 @@ export function parseGroupRef(value?: string | null): string | undefined {
   const v = value.trim();
   if (!v.startsWith("group:") || v.length <= 6) return undefined;
   return v.slice(6).trim() || undefined;
+}
+
+/**
+ * Forgiving model-group name resolution: a candidate matches a declared group
+ * when both normalize to the same camelCase form, so `basic-technician`,
+ * `basic_technician`, and `basicTechnician` all find `basicTechnician`.
+ * Returns the declared name, or null when no declared group matches.
+ */
+export function resolveModelGroup(
+  candidate: string,
+  modelGroups: Record<string, string[]>,
+): string | null {
+  const target = camelCase(candidate);
+  for (const name of Object.keys(modelGroups)) {
+    if (camelCase(name) === target) return name;
+  }
+  return null;
 }
 
 /**
@@ -326,7 +344,10 @@ export async function planSpawn(input: PlanInput): Promise<PlanResult> {
         error: `model group '${group}' cannot be resolved without a model catalog (configure providers/fetchModels)`,
       };
     }
-    const members = input.modelGroups?.[group];
+    // Forgiving name resolution: kebab/snake/camel spellings of a declared
+    // group all resolve to it (config keys arrive camelCased).
+    const resolvedGroup = resolveModelGroup(group, input.modelGroups ?? {});
+    const members = resolvedGroup ? input.modelGroups![resolvedGroup] : [];
     if (!members || members.length === 0) {
       const known = Object.keys(input.modelGroups ?? {});
       return {
@@ -363,7 +384,7 @@ export async function planSpawn(input: PlanInput): Promise<PlanResult> {
       const req = requires ? ` satisfying ${describeRequires(requires)}` : "";
       return { ok: false, error: `no catalog model in group '${group}'${req}` };
     }
-    return finishPlan(input, `group:${group}`, filtered);
+    return finishPlan(input, `group:${resolvedGroup}`, filtered);
   }
 
   // --- requirements-only: every catalog model that qualifies ---

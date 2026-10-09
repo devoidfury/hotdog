@@ -1932,6 +1932,25 @@ describe("placement fanout (cross-provider)", () => {
     );
   });
 
+  it("worker_model group ref resolves kebab-case to the declared camelCase group", async () => {
+    const { manager, built } = makeFanoutManager({
+      config: { modelGroups: { basicTechnician: ["qwen", "n3/other"] } } as never,
+    });
+    await manager.spawnTask("t1", "a", { workerModel: "group:basic-technician" } as never);
+    await settle(() => built.length === 1, "group task placed");
+    expect(built[0]!.model).toBe("n1/qwen"); // group's first member in declaration order
+    manager.interruptTask("t1");
+  });
+
+  it("worker_model with an unknown group ref fails loud at spawn", async () => {
+    const { manager } = makeFanoutManager({
+      config: { modelGroups: { basicTechnician: ["qwen"] } } as never,
+    });
+    await expect(
+      manager.spawnTask("t1", "a", { workerModel: "group:ghost-worker" } as never),
+    ).rejects.toThrow(/unknown model group 'ghost-worker'/);
+  });
+
   it("profile model spelled as group:... fails with a pointed error", async () => {
     const { manager } = makeFanoutManager({
       profileManager: profileMgr({ legacy: { model: "group:mid" } }),

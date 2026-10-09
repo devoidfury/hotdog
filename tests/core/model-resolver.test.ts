@@ -290,6 +290,33 @@ describe("planSpawn: model groups", () => {
     expect(!r.ok && r.error).toContain("mid");
   });
 
+  it("kebab-case spelling resolves to the declared camelCase group", async () => {
+    const groups = { basicTechnician: ["qwen", "n1/other"] };
+    const p = await planOk({ registry: fleet, group: "basic-technician", modelGroups: groups, cold: true });
+    expect(p.intent).toBe("group:basicTechnician");
+    expect(p.candidates.map((c) => c.key)).toEqual(["n1/qwen", "n2/qwen", "n1/other"]);
+  });
+
+  it("snake_case spelling also resolves to the declared camelCase group", async () => {
+    const groups = { basicTechnician: ["qwen"] };
+    const p = await planOk({ registry: fleet, group: "basic_technician", modelGroups: groups, cold: true });
+    expect(p.intent).toBe("group:basicTechnician");
+  });
+
+  it("declared camelCase group still resolves on exact match", async () => {
+    const groups = { basicTechnician: ["qwen"] };
+    const p = await planOk({ registry: fleet, group: "basicTechnician", modelGroups: groups, cold: true });
+    expect(p.intent).toBe("group:basicTechnician");
+  });
+
+  it("unknown kebab group errors with the known names", async () => {
+    const groups = { basicTechnician: ["qwen"], coders: ["n1/other"] };
+    const r = await planSpawn({ registry: fleet, group: "basic-technician-x", modelGroups: groups });
+    expect(!r.ok && r.error).toContain("unknown model group 'basic-technician-x'");
+    expect(!r.ok && r.error).toContain("basicTechnician");
+    expect(!r.ok && r.error).toContain("coders");
+  });
+
   it("a missing qualified member is a loud config error", async () => {
     const r = await planSpawn({
       registry: fleet,

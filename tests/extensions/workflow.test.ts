@@ -522,4 +522,71 @@ describe("parseWorkflow: model groups", () => {
     `);
     expect(errors.join("; ")).toContain("'group' must be a model-group name");
   });
+
+  it("accepts a camelCase group name (shape-only without modelGroups)", () => {
+    const wf = parseOk(`
+      version: 1
+      name: camelgroup
+      description: camelCase group id
+      nodes:
+        - id: worker
+          group: basicTechnician
+          accept:
+            files: [out.md]
+    `);
+    expect(wf.nodes[0]!.group).toBe("basicTechnician");
+  });
+
+  it("resolves kebab group to the declared camelCase name when modelGroups given", () => {
+    const wf = parseOk(
+      `
+      version: 1
+      name: kebabgroup
+      description: kebab group id
+      nodes:
+        - id: worker
+          group: basic-technician
+          accept:
+            files: [out.md]
+    `,
+      { modelGroups: { basicTechnician: ["gemma"], coders: ["qwen"] } },
+    );
+    expect(wf.nodes[0]!.group).toBe("basicTechnician");
+  });
+
+  it("declared camelCase group passes unchanged when modelGroups given", () => {
+    const wf = parseOk(
+      `
+      version: 1
+      name: cameldecl
+      description: declared camelCase group
+      nodes:
+        - id: worker
+          group: basicTechnician
+          accept:
+            files: [out.md]
+    `,
+      { modelGroups: { basicTechnician: ["gemma"], coders: ["qwen"] } },
+    );
+    expect(wf.nodes[0]!.group).toBe("basicTechnician");
+  });
+
+  it("unknown group errors with the known names when modelGroups given", () => {
+    const errors = expectErrors(
+      `
+      version: 1
+      name: unknowngroup
+      description: unknown group
+      nodes:
+        - id: worker
+          group: basic-technician-x
+          accept:
+            files: [out.md]
+    `,
+      { modelGroups: { basicTechnician: ["gemma"], coders: ["qwen"] } },
+    );
+    expect(errors.join("; ")).toContain("unknown model group 'basic-technician-x'");
+    expect(errors.join("; ")).toContain("basicTechnician");
+    expect(errors.join("; ")).toContain("coders");
+  });
 });

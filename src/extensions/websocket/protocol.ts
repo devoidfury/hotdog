@@ -24,6 +24,9 @@ export const C2S = {
   // Profile management
   LIST_PROFILES: "listProfiles",
   SWITCH_PROFILE: "switchProfile",
+  // Subagent task control (delegates to TaskManager primitives)
+  TASK_INTERRUPT: "taskInterrupt",
+  TASK_FOLLOWUP: "taskFollowup",
 } as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────
@@ -74,6 +77,9 @@ export const S2C = {
   TASK_LIST: "taskList",
   TASK_UPDATE: "taskUpdate",
   TASK_ACTIVITY: "taskActivity",
+  // Subagent task control reply (sent to the requesting socket only; the
+  // status change itself rides the broadcast taskUpdate observer feed)
+  TASK_CONTROL: "taskControl",
 
   // Connection management
   ERROR: "error",
@@ -265,6 +271,20 @@ export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | nu
     default:
       return null;
   }
+}
+
+/**
+ * Reply to a C2S taskInterrupt/taskFollowup request, sent to the requesting
+ * socket only. `action` mirrors the request so the client can word the
+ * inline feedback; the authoritative state change is already on its way via
+ * the broadcast taskUpdate observer feed.
+ */
+export interface TaskControlWire {
+  type: "taskControl";
+  taskId: string;
+  action: "interrupt" | "followup";
+  ok: boolean;
+  error?: string;
 }
 
 /** The broadcast envelope: every activity message is tagged with its task id. */

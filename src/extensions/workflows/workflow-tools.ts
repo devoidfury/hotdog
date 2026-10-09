@@ -229,6 +229,9 @@ export interface WorkflowToolOptions {
   getWorkflowsDir: () => string | null;
   /** Soft limits from resolved config (workflows.maxNodes, workflows.maxRuntimeMins). */
   limits: Partial<WorkflowLimits>;
+  /** Resolved config modelGroups: enables declared-group resolution in validate/dispatch.
+   *  When absent the group field is shape-checked only (runtime still resolves loudly). */
+  getModelGroups?: () => Record<string, string[]>;
   registry: RunRegistry;
 }
 
@@ -301,7 +304,14 @@ export class WorkflowValidateTool extends WorkflowTool {
     if (file) {
       const ref = await readWorkflowFileRef(file, this.opts.getWorkflowsDir());
       if ("error" in ref) return ToolResult.err(ref.error);
-      const r = runWorkflowCommandOnText("validate", ref.path, ref.text, this.opts.limits);
+      const r = runWorkflowCommandOnText(
+        "validate",
+        ref.path,
+        ref.text,
+        this.opts.limits,
+        undefined,
+        this.opts.getModelGroups?.(),
+      );
       if (r.code !== 0) return ToolResult.err([...r.err, ...r.out].join("\n"));
       return ToolResult.ok(r.out.join("\n"));
     }
@@ -309,9 +319,16 @@ export class WorkflowValidateTool extends WorkflowTool {
     // yaml mode: validate, then persist — validation IS the save step.
     // The identical entry point `hotdog workflow validate` uses — designs
     // face the same validator as hand-authored files.
-    const r = runWorkflowCommandOnText("validate", "designed workflow", yaml!, this.opts.limits);
+    const r = runWorkflowCommandOnText(
+      "validate",
+      "designed workflow",
+      yaml!,
+      this.opts.limits,
+      undefined,
+      this.opts.getModelGroups?.(),
+    );
     if (r.code !== 0) return ToolResult.err([...r.err, ...r.out].join("\n"));
-    const wf = parseWorkflow(yaml!, { limits: this.opts.limits }).workflow!; // validated above
+    const wf = parseWorkflow(yaml!, { limits: this.opts.limits, modelGroups: this.opts.getModelGroups?.() }).workflow!; // validated above
 
     const dir = this.opts.getWorkflowsDir();
     if (!dir) return ToolResult.err("Error: workflows.path is not configured");
@@ -406,6 +423,7 @@ export class WorkflowDispatchTool extends WorkflowTool {
     const parsed = parseWorkflow(ref.text, {
       limits: this.opts.limits,
       params: params ?? {},
+      modelGroups: this.opts.getModelGroups?.(),
     });
     if (!parsed.workflow) {
       return ToolResult.err([

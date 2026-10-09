@@ -49,6 +49,8 @@ export interface WorkflowCliDeps {
   runsRoot?: string;
   /** Limits from resolved config (soft node cap, default runtime). */
   limits?: Partial<WorkflowLimits>;
+  /** Resolved config modelGroups: enables declared-group resolution in validate/run. */
+  modelGroups?: Record<string, string[]>;
   /** Session-capable host for `run`; null when the config cannot drive agents. */
   runHost?: () => { tasks: EngineTaskPort } | null;
   /** Stream a line as it happens (live `run` progress). */
@@ -84,15 +86,17 @@ function takeParams(rest: string[]): { params: Record<string, string>; error?: s
 
 /** Pure half: run validate|render over a loaded file's text. `params`
  *  undefined keeps `{{params.x}}` refs lenient (literal text); passing a map
- *  activates strict substitution (what `run` and workflow_dispatch use). */
+ *  activates strict substitution (what `run` and workflow_dispatch use).
+ *  `modelGroups` enables declared-group resolution in the validator. */
 export function runWorkflowCommandOnText(
   verb: string,
   file: string,
   text: string,
   limits?: Partial<WorkflowLimits>,
   params?: Record<string, string>,
+  modelGroups?: Record<string, string[]>,
 ): CommandOutcome {
-  const result = parseWorkflow(text, { limits, params });
+  const result = parseWorkflow(text, { limits, params, modelGroups });
   const warnings = result.warnings.map((w) => `warning: ${w}`);
 
   if (!result.workflow) return invalidWorkflowOutcome(file, result);
@@ -157,7 +161,7 @@ async function cmdRun(args: string[], deps: WorkflowCliDeps): Promise<CommandOut
   if (outcome) return outcome;
   // STRICT param mode: an undecided required param fails the run even with
   // zero --param flags (params is always at least an empty object here).
-  const result = parseWorkflow(text!, { limits: deps.limits, params });
+  const result = parseWorkflow(text!, { limits: deps.limits, params, modelGroups: deps.modelGroups });
   if (!result.workflow) return invalidWorkflowOutcome(file, result);
   const workflow = result.workflow;
 
@@ -302,6 +306,7 @@ export async function runWorkflowCommand(
         text!,
         deps.limits,
         Object.keys(params).length > 0 ? params : undefined,
+        deps.modelGroups,
       );
     }
     case "run":

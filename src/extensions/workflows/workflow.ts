@@ -8,6 +8,7 @@
  */
 
 import { YAML } from "bun";
+import { resolveModelGroup } from "@core/session/model-resolver.ts";
 
 /** Defaults when no config overrides are passed via opts (configSchema
  *  defaults live in extension.json). hardMaxNodes and maxAttempts are
@@ -79,6 +80,9 @@ export interface ParseResult {
 }
 
 export const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+// Group names are config modelGroups keys: accept kebab/camel/snake spellings;
+// declared-name resolution (when modelGroups is passed) is what rejects unknowns.
+const GROUP_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 // "nodes.<id>" or "nodes.<id>.<field.path>" — a pure reference, no prose.
 const DATA_REF_RE = /^nodes\.([a-z0-9][a-z0-9-]*)((?:\.[A-Za-z0-9_-]+)*)$/;
 // "{{params.<id>}}" — a param reference inside any string value.
@@ -114,6 +118,7 @@ function checkKeys(
 function parseWorkflowObject(
   root: Record<string, unknown>,
   limits: WorkflowLimits,
+  modelGroups?: Record<string, string[]>,
 ): { workflow: Workflow | null; errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -260,10 +265,20 @@ function parseWorkflowObject(
 
     if (raw.group !== undefined) {
       const g = raw.group;
-      if (typeof g !== "string" || !ID_RE.test(g)) {
-        errors.push(`${where}: 'group' must be a model-group name (kebab-case id)`);
+      if (typeof g !== "string" || !GROUP_NAME_RE.test(g)) {
+        errors.push(`${where}: 'group' must be a model-group name`);
       } else if (raw.pin !== undefined) {
         errors.push(`${where}: 'pin' and 'group' are mutually exclusive`);
+      } else if (modelGroups) {
+        const resolved = resolveModelGroup(g, modelGroups);
+        if (!resolved) {
+          const known = Object.keys(modelGroups);
+          errors.push(
+            `${where}: unknown model group '${g}'${known.length ? ` (known: ${known.join(", ")})` : " (config modelGroups is empty)"}`,
+          );
+        } else {
+          node.group = resolved;
+        }
       } else {
         node.group = g;
       }
@@ -598,10 +613,17 @@ function substituteParams(
  * every referenced param must have a value and every supplied key must be declared.
  * Without it (validate/render/listing) substitution is lenient: unresolved refs keep their literal text.
  * Substitution runs on the YAML-parsed tree; values can not inject YAML structure.
+ * `opts.modelGroups` (the resolved config modelGroups) enables declared-name
+ * resolution of each node's `group`: an unknown group fails here, not at spawn.
+ * Without it the group field is shape-checked only (kebab/camel/snake id).
  */
 export function parseWorkflow(
   text: string,
-  opts: { limits?: Partial<WorkflowLimits>; params?: Record<string, string> } = {},
+  opts: {
+    limits?: Partial<WorkflowLimits>;
+    params?: Record<string, string>;
+    modelGroups?: Record<string, string[]>;
+  } = {},
 ): ParseResult {
   const limits: WorkflowLimits = { ...DEFAULT_WORKFLOW_LIMITS, ...opts.limits };
   let parsed: unknown;
@@ -629,7 +651,7 @@ export function parseWorkflow(
     }
   }
   const tree = substituteParams(parsed, declared, values, strict, paramErrors);
-  const r = parseWorkflowObject(tree as Record<string, unknown>, limits);
+  const r = parseWorkflowObject(tree as Record<string, unknown>, limits, opts.modelGroups);
   if (paramErrors.length > 0) {
     return { workflow: null, errors: [...paramErrors, ...r.errors], warnings: r.warnings };
   }

@@ -42,6 +42,11 @@ const tasksAtom = reactiveState<TaskInfoWire[]>([]);
 // Bumped on every activity item; panel bodies read the blocks from the map
 // below, so render only needs the version flip.
 const activityVersionAtom = reactiveState<number>(0);
+// Most recent task-control reply per task (S2C taskControl); the panel shows
+// it inline so the user sees Cancel/steer outcomes, not just the status flip.
+const taskControlAtom = reactiveState<
+  Record<string, { ok: boolean; text: string }>
+>({});
 
 /** Accumulated display blocks: consecutive text deltas merge into one block. */
 export type TaskActivityBlock =
@@ -259,6 +264,14 @@ interface TaskActivityMessage {
   activity: TaskActivityWire;
 }
 
+interface TaskControlMessage {
+  type: "taskControl";
+  taskId: string;
+  action: "interrupt" | "followup";
+  ok: boolean;
+  error?: string;
+}
+
 interface StreamingChunkMessage {
   type: "streamingChunk";
   content: string;
@@ -362,6 +375,7 @@ type ServerMessage =
   | TaskListMessage
   | TaskUpdateMessage
   | TaskActivityMessage
+  | TaskControlMessage
   | StreamingChunkMessage
   | StreamingReasoningChunkMessage
   | TaskProgressMessage
@@ -392,7 +406,7 @@ interface ChatConfig {
 export interface ChatController {
   connect: () => void;
   disconnect: () => void;
-  sendMessage: (content: string, files?: UploadFileWire[]) => void;
+  sendMessage: (content: string, files?: UploadFileWire[], steer?: boolean) => void;
   sendSlashCommand: (command: string) => void;
   cancel: () => void;
   createSession: (opts?: Record<string, unknown>) => void;
@@ -437,6 +451,10 @@ export interface ChatController {
   // Subagent strip/panels state (broadcast feed; not tied to the active session).
   tasksAtom: Atom<TaskInfoWire[]>;
   activityVersionAtom: Atom<number>;
+  taskControlAtom: Atom<Record<string, { ok: boolean; text: string }>>;
+  // Task controls: thin WS delegates onto the server's TaskManager primitives.
+  interruptTask: (taskId: string) => void;
+  taskFollowup: (taskId: string, message: string) => void;
   getTaskActivity: (taskId: string) => TaskActivityBlock[];
   clearTasks: () => void;
 }
@@ -594,6 +612,16 @@ export function createChat({
       case "taskActivity":
         appendTaskActivity(data.taskId, data.activity);
         return;
+      case "taskControl": {
+        const ok = data.ok;
+        const text = ok
+          ? data.action === "interrupt" ? "Task cancelled" : "Steering sent"
+          : data.error || "Task control failed";
+        const next = { ...taskControlAtom() };
+        next[data.taskId] = { ok, text };
+        taskControlAtom(next);
+        return;
+      }
       case "transcript": {
         // Correlated by id only: the reply is not session-tagged.
         const pending = pendingTranscripts.get(data.id);
@@ -937,6 +965,19 @@ export function createChat({
     send({ type: "switchProfile", sessionId, profileName, force });
   }
 
+  // Subagent task controls: the server delegates to the TaskManager
+  // primitives (interruptTask / sendFollowUp); outcomes arrive as taskControl.
+  function interruptTask(taskId: string): void {
+    if (!taskId) return;
+    send({ type: "taskInterrupt", taskId });
+  }
+
+  function taskFollowup(taskId: string, message: string): void {
+    const text = message.trim();
+    if (!taskId || !text) return;
+    send({ type: "taskFollowup", taskId, message: text });
+  }
+
   function getCurrentProfile(): string {
     return currentProfileAtom();
   }
@@ -1002,6 +1043,9 @@ export function createChat({
     transcribe,
     tasksAtom,
     activityVersionAtom,
+    taskControlAtom,
+    interruptTask,
+    taskFollowup,
     getTaskActivity,
     clearTasks,
   };

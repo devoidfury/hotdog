@@ -20,9 +20,9 @@ const polyfillAudioContext = () => {
   }
   class MockOfflineAudioContext {
     constructor(
-      private _channels: number,
+      _channels: number,
       private _length: number,
-      private _sampleRate: number,
+      _sampleRate: number,
     ) {}
     createBufferSource() {
       const source: { buffer: unknown; connect: (d: unknown) => void; start: () => void } = {

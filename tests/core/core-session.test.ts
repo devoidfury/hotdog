@@ -16,8 +16,7 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { ACTIONS } from '../../src/core/commands.ts';
 import { MockLLMClient } from '../helpers.ts';
 
-// Poll until a condition holds (fails loudly on timeout) instead of a
-// fixed sleep, which is racy under parallel test load.
+// Poll until a condition holds (fails loudly on timeout) instead of a fixed sleep.
 async function settle(fn: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!fn()) {
@@ -26,7 +25,6 @@ async function settle(fn: () => boolean, what: string, timeoutMs = 2000): Promis
   }
 }
 
-// Helper to create a minimal agent
 function createMockAgent(options: Record<string, unknown> = {}): AgentLike {
   const hooks = (options.hooks as HookSystem) || createHooks();
   const toolRegistry = (options.toolRegistry as any) || createToolRegistry();
@@ -151,14 +149,11 @@ describe('SessionManager', () => {
       expect((agent as any).model).toBe('model-1');
       expect(payload).not.toBeNull();
       expect((payload!.newAgent as any).model).toBe('model-1');
-      // oldAgent is the session that was current before the switch,
-      // NOT the switch target (which was previously misreported).
       expect((payload!.oldAgent as any).model).toBe('model-2');
       expect(payload!.oldAgent).not.toBe(agent);
     });
 
     it('should emit SESSION_SWAP with no oldAgent when switching from an empty manager', async () => {
-      // Register an agent without making any session current first.
       const agent = createMockAgent({ model: 'standalone', hooks });
       sessionManager.registerAgent(agent as any);
       const sessionId = (agent as any).sessionId;
@@ -248,7 +243,6 @@ describe('SessionManager', () => {
       const sessionId = await sessionManager.create({ model: 'test-model' });
       sessionManager.enqueue(sessionId, 'hello');
       expect(sessionManager.getBus(sessionId)!.isIdle()).toBe(false);
-      // The mock LLM run starts immediately; drain it so nothing lingers.
       sessionManager.interrupt(sessionId);
       await settle(() => sessionManager.getBus(sessionId)!.isIdle(), 'bus to idle');
     });

@@ -38,6 +38,10 @@ describe("CONFIG_KEYS schema", () => {
   });
 
   it("apiKey resolves with correct priority including env fallback", () => {
+    // HOTDOG_API_KEY outranks AI_API_KEY in the schema, so it must be cleared
+    // for the env-fallback leg to actually exercise AI_API_KEY. Deliberately
+    // not restored: tests must set the env they depend on, not inherit one.
+    delete process.env.HOTDOG_API_KEY;
     process.env.AI_API_KEY = "env-key";
     try {
       // Provider wins
@@ -54,6 +58,8 @@ describe("CONFIG_KEYS schema", () => {
       expect(resolveKey("apiKey", CONFIG_KEYS.apiKey, context)).toBe("env-key");
     } finally {
       delete process.env.AI_API_KEY;
+      // Not restoring HOTDOG_API_KEY: a leaked ambient key makes later
+      // env-fallback assertions order-dependent. Tests must set what they need.
     }
   });
 

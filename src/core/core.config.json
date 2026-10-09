@@ -406,7 +406,7 @@
     "type": "string",
     "layers": [
       { "source": "config", "key": "taskLanesDir" },
-      { "compute": "joinConfigDir:task-lanes" }
+      { "compute": "joinSessionsDir:task-lanes" }
     ]
   },
   "coreTools": {

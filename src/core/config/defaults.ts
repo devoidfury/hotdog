@@ -96,7 +96,7 @@ export function resolveConfigDirChain(cliConfigDir?: string | null): ConfigDirCa
   if (chain.some((c) => c.chosen && c.source === BUNDLED_EXAMPLE_SOURCE) && !bundledFallbackWarned) {
     bundledFallbackWarned = true;
     logger.warn(
-      `No config directory found (checked ./config, /etc/hotdog, ${xdg}); running on the bundled example config at ${chain.find((c) => c.chosen)!.path}. It lives inside the hotdog package/checkout and may receive state (task-lanes/); set HOTDOG_CONFIG_DIR to use a real config dir.`,
+      `No config directory found (checked ./config, /etc/hotdog, ${xdg}); running on the bundled example config at ${chain.find((c) => c.chosen)!.path}. It lives inside the hotdog package/checkout; set HOTDOG_CONFIG_DIR to use a real config dir.`,
     );
   }
 

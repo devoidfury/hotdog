@@ -706,9 +706,18 @@ describe("createWsServer", () => {
 
     await wsServer.onMessage(ws, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId: second.sessionId }));
 
-    const msg = lastMessage(ws);
-    expect(msg.type).toBe(S2C.SESSION_STATE);
-    expect(msg.sessionId).toBe(second.sessionId);
+    const all = ws.messages
+      .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+      .filter(Boolean) as any[];
+    // The switch's state reports land for the new session; a session-scoped
+    // task snapshot closes out the switch.
+    const working = all.filter(
+      (m) => m.type === S2C.SESSION_STATE && m.sessionId === second.sessionId,
+    );
+    expect(working.length).toBeGreaterThan(0);
+    const snapshot = all[all.length - 1];
+    expect(snapshot.type).toBe(S2C.TASK_LIST);
+    expect(snapshot.tasks).toEqual([]);
     expect((ws as unknown as HotdogServerSocket).activeSessionId).toBe(second.sessionId);
 
     const titleState = ws.messages

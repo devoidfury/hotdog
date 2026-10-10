@@ -137,6 +137,13 @@ export function TaskPanel({
               </div>
             );
           }
+          if (block.kind === "reasoning") {
+            return (
+              <div key={i} className="task-act task-act-reasoning">
+                {block.text}
+              </div>
+            );
+          }
           if (block.kind === "tool_call") {
             return (
               <div key={i} className="task-act task-act-tool">

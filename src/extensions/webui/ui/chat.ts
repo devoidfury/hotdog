@@ -48,9 +48,10 @@ const taskControlAtom = reactiveState<
   Record<string, { ok: boolean; text: string }>
 >({});
 
-/** Accumulated display blocks: consecutive text deltas merge into one block. */
+/** Accumulated display blocks: consecutive same-kind deltas merge into one block. */
 export type TaskActivityBlock =
   | { kind: "text"; text: string }
+  | { kind: "reasoning"; text: string }
   | { kind: "tool_call"; name: string; args: string }
   | { kind: "tool_result"; name: string; output: string; error?: string };
 
@@ -79,11 +80,11 @@ function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
     }
   }
   const last = blocks[blocks.length - 1];
-  if (activity.kind === "text") {
-    if (last && last.kind === "text") {
-      blocks[blocks.length - 1] = { kind: "text", text: last.text + activity.content };
+  if (activity.kind === "text" || activity.kind === "reasoning") {
+    if (last && last.kind === activity.kind) {
+      blocks[blocks.length - 1] = { kind: activity.kind, text: last.text + activity.content };
     } else {
-      blocks.push({ kind: "text", text: activity.content });
+      blocks.push({ kind: activity.kind, text: activity.content });
     }
   } else if (activity.kind === "tool_call") {
     blocks.push({ kind: "tool_call", name: activity.name, args: activity.args });
@@ -99,6 +100,13 @@ function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
     blocks.splice(0, blocks.length - MAX_ACTIVITY_BLOCKS);
   }
   activityVersionAtom(activityVersionAtom() + 1);
+}
+
+/** Seed blocks from a server replay (taskActivityHistory). Skipped when
+ * anything is accumulated: a panel open across the reconnect already has its tail. */
+function seedTaskActivity(taskId: string, history: TaskActivityWire[]): void {
+  if (taskActivity.has(taskId)) return;
+  for (const activity of history) appendTaskActivity(taskId, activity);
 }
 
 function getTaskActivity(taskId: string): TaskActivityBlock[] {
@@ -264,6 +272,12 @@ interface TaskActivityMessage {
   activity: TaskActivityWire;
 }
 
+interface TaskActivityHistoryMessage {
+  type: "taskActivityHistory";
+  taskId: string;
+  activity: TaskActivityWire[];
+}
+
 interface TaskControlMessage {
   type: "taskControl";
   taskId: string;
@@ -375,6 +389,7 @@ type ServerMessage =
   | TaskListMessage
   | TaskUpdateMessage
   | TaskActivityMessage
+  | TaskActivityHistoryMessage
   | TaskControlMessage
   | StreamingChunkMessage
   | StreamingReasoningChunkMessage
@@ -455,6 +470,7 @@ export interface ChatController {
   // Task controls: thin WS delegates onto the server's TaskManager primitives.
   interruptTask: (taskId: string) => void;
   taskFollowup: (taskId: string, message: string) => void;
+  requestTaskActivity: (taskId: string) => void;
   getTaskActivity: (taskId: string) => TaskActivityBlock[];
   clearTasks: () => void;
 }
@@ -611,6 +627,9 @@ export function createChat({
         return;
       case "taskActivity":
         appendTaskActivity(data.taskId, data.activity);
+        return;
+      case "taskActivityHistory":
+        seedTaskActivity(data.taskId, data.activity || []);
         return;
       case "taskControl": {
         const ok = data.ok;
@@ -978,6 +997,14 @@ export function createChat({
     send({ type: "taskFollowup", taskId, message: text });
   }
 
+  // Ask for a task's buffered activity (panel opened after a refresh; the
+  // live feed only covers events from connection time on). No-op while the
+  // socket is down; the next open re-requests.
+  function requestTaskActivity(taskId: string): void {
+    if (!taskId) return;
+    send({ type: "taskActivityRequest", taskId });
+  }
+
   function getCurrentProfile(): string {
     return currentProfileAtom();
   }
@@ -1046,6 +1073,7 @@ export function createChat({
     taskControlAtom,
     interruptTask,
     taskFollowup,
+    requestTaskActivity,
     getTaskActivity,
     clearTasks,
   };

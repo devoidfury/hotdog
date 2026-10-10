@@ -44,6 +44,8 @@ function syncTaskTick(): void {
 }
 
 function openTask(taskId: string): void {
+  // Panel opened after a page refresh: fetch the buffered history first.
+  if (chat && chat.getTaskActivity(taskId).length === 0) chat.requestTaskActivity(taskId);
   // Re-opening brings the panel to the front instead of duplicating it.
   openTasksAtom([...openTasksAtom().filter((id) => id !== taskId), taskId]);
 }
@@ -673,7 +675,10 @@ function App() {
   const menu = contextMenuAtom();
   const completionMenu = completionAtom();
   const attachments = attachmentsAtom();
-  const tasks = chat ? chat.tasksAtom() : [];
+  const allTasks = chat ? chat.tasksAtom() : [];
+  // Scope the server-global feed to the open session; null-parent tasks
+  // (workflow-engine spawns) belong to no session and never show.
+  const tasks = allTasks.filter((t) => sessionId !== null && t.sessionId === sessionId);
   const openTasks = openTasksAtom();
   const sttPhase = sttPhaseAtom();
 

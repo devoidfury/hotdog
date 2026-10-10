@@ -27,6 +27,8 @@ export const C2S = {
   // Subagent task control (delegates to TaskManager primitives)
   TASK_INTERRUPT: "taskInterrupt",
   TASK_FOLLOWUP: "taskFollowup",
+  // Replay buffered activity for one task (reconnecting panel; see TASK_ACTIVITY_HISTORY)
+  TASK_ACTIVITY_REQUEST: "taskActivityRequest",
 } as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────
@@ -77,6 +79,8 @@ export const S2C = {
   TASK_LIST: "taskList",
   TASK_UPDATE: "taskUpdate",
   TASK_ACTIVITY: "taskActivity",
+  // Reply to C2S TASK_ACTIVITY_REQUEST: buffered tail, requesting socket only
+  TASK_ACTIVITY_HISTORY: "taskActivityHistory",
   // Subagent task control reply (sent to the requesting socket only; the
   // status change itself rides the broadcast taskUpdate observer feed)
   TASK_CONTROL: "taskControl",
@@ -219,6 +223,8 @@ import { toolContentText } from "@utils/tool-content.ts";
 export interface TaskInfoWire {
   taskId: string;
   description: string;
+  /** The delegating session (null: no parent); webui scopes its task strip to it. */
+  sessionId: string | null;
   status: string;
   createdAt: number;
   startedAt: number | null;
@@ -232,6 +238,7 @@ export interface TaskInfoWire {
  */
 export type TaskActivityWire =
   | { kind: "text"; content: string }
+  | { kind: "reasoning"; content: string }
   | { kind: "tool_call"; name: string; args: string }
   | { kind: "tool_result"; name: string; output: string; error?: string };
 
@@ -249,7 +256,8 @@ function truncateActivity(value: string): string {
 
 /**
  * Serialize one task-agent OutputEvent into a wire activity payload, or null when the
- * event is not part of the panel's view (thinking, usage, session plumbing...).
+ * event is not part of the panel's view (usage, session plumbing...). Reasoning
+ * deltas get their own kind for separate styling.
  * The task id is NOT part of payload -- the enclosing taskActivity message has it (see taskActivityMessage).
  */
 export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | null {
@@ -257,6 +265,8 @@ export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | nu
     case OUTPUT_EVENT.STREAMING_CHUNK:
     case OUTPUT_EVENT.ASSISTANT_MESSAGE:
       return event.content ? { kind: "text", content: event.content } : null;
+    case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
+      return event.content ? { kind: "reasoning", content: event.content } : null;
     case OUTPUT_EVENT.TOOL_CALL:
       return { kind: "tool_call", name: event.toolName, args: truncateActivity(event.input) };
     case OUTPUT_EVENT.TOOL_RESULT: {

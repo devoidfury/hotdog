@@ -1894,6 +1894,17 @@ body {
     word-break: break-word;
 }
 
+/* Reasoning lane -- dimmer/italic, mirroring .thinking-block in the main chat. */
+.task-act-reasoning {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    font-style: italic;
+    color: var(--text-muted);
+    border-left: 2px solid var(--border);
+    padding-left: 8px;
+}
+
 .task-act-name {
     display: block;
     font-family: var(--font-mono);

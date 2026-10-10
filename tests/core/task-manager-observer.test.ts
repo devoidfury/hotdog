@@ -149,6 +149,22 @@ describe("TaskManager observer", () => {
     expect(terminal.kind === "task" && terminal.task.endedAt).toBeTruthy();
   });
 
+  it("reports sessionId on task snapshots (delegating session, null without a parent)", async () => {
+    const events: TaskObserverEvent[] = [];
+    const manager = makeManager((ev) => events.push(ev));
+    await manager.spawnTask("task-1", "child of s-1", {
+      managerAgent: { sessionId: "s-1" },
+    });
+    await manager.spawnTask("task-2", "orphan");
+    const infos = Object.fromEntries(
+      manager.listTasks().map((t) => [t.taskId, t.sessionId]),
+    );
+    expect(infos["task-1"]).toBe("s-1");
+    expect(infos["task-2"]).toBeNull();
+    const spawned = events.filter((e) => e.kind === "task");
+    expect(spawned[0]!.kind === "task" && spawned[0]!.task.sessionId).toBe("s-1");
+  });
+
   it("listTasks keeps terminal tasks with their metadata for late snapshots", async () => {
     const manager = makeManager(() => {});
     const handle = await manager.spawnTask("task-1", "one");

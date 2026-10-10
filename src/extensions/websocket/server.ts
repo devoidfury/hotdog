@@ -5,7 +5,7 @@ import { indexSessionModel, getSessionRow } from "@core/session/session-index.ts
 import { createTurnLanes, type TurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
-import { C2S, S2C, C2SMessage, wireImages, taskActivityMessage } from "./protocol.ts";
+import { C2S, S2C, C2SMessage, wireImages, taskActivityMessage, type TaskActivityWire } from "./protocol.ts";
 import { parseUploadedFiles } from "./uploads.ts";
 import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import { modelAcceptsImages } from "@core/config/providers.ts";
@@ -35,6 +35,10 @@ import { logger } from "@utils/logger.ts";
 import { splitFileIncludes, toolContentText } from "@utils/tool-content.ts";
 import { transcribeAudio } from "@utils/stt.ts";
 import { resolveSttTarget, type SttTarget } from "@core/config/stt.ts";
+
+/** Activity-replay ring bounds (see SessionRegistry.recordTaskActivity). */
+const MAX_TASK_ACTIVITY_HISTORY_ITEMS = 300;
+const MAX_TASK_ACTIVITY_HISTORY_TASKS = 50;
 
 interface SessionMetadata {
   profile: string;
@@ -156,6 +160,7 @@ export class SessionRegistry {
   #profiles: Record<string, SwitchProfile>;
   #onSessionDeleted: ((sessionId: string) => void) | null;
   #taskManager: TaskManager | null = null;
+  #taskActivityHistory = new Map<string, TaskActivityWire[]>();
   /** Resolved STT backend; every sessionCreated payload advertises its presence as sttEnabled. */
   readonly sttTarget: SttTarget | null;
 
@@ -171,11 +176,43 @@ export class SessionRegistry {
     return this.#taskManager;
   }
 
-  /** Current subagent task snapshot for one socket (sent on fresh auth). */
+  /** Send to sockets whose active session is `sessionId`: task traffic never crosses sessions. */
+  broadcastScoped(sessionId: string, msg: Record<string, unknown>): void {
+    if (!sessionId) return;
+    for (const ws of this.#allConnections) {
+      if (ws.activeSessionId === sessionId) SessionRegistry.sendSafe(ws, msg);
+    }
+  }
+
+  /** Buffer activity for reconnect replay (C2S TASK_ACTIVITY_REQUEST).
+   * Bounded: items per task, tasks per server (oldest-inserted evicted). */
+  recordTaskActivity(taskId: string, activity: TaskActivityWire): void {
+    let items = this.#taskActivityHistory.get(taskId);
+    if (!items) {
+      items = [];
+      this.#taskActivityHistory.set(taskId, items);
+      while (this.#taskActivityHistory.size > MAX_TASK_ACTIVITY_HISTORY_TASKS) {
+        const oldest = this.#taskActivityHistory.keys().next().value as string;
+        this.#taskActivityHistory.delete(oldest);
+      }
+    }
+    items.push(activity);
+    if (items.length > MAX_TASK_ACTIVITY_HISTORY_ITEMS) {
+      items.splice(0, items.length - MAX_TASK_ACTIVITY_HISTORY_ITEMS);
+    }
+  }
+
+  getTaskActivityHistory(taskId: string): TaskActivityWire[] {
+    return this.#taskActivityHistory.get(taskId) ?? [];
+  }
+
+  /** Current subagent task snapshot for one socket (sent when it attaches to a session). */
   sendTaskSnapshot(ws: HotdogServerSocket<unknown>): void {
+    const sessionId = ws.activeSessionId;
+    if (!sessionId || !this.#taskManager) return;
     SessionRegistry.sendSafe(ws, {
       type: S2C.TASK_LIST,
-      tasks: this.#taskManager ? this.#taskManager.listTasks() : [],
+      tasks: this.#taskManager.listTasks().filter((t) => t.sessionId === sessionId),
     });
   }
 
@@ -953,8 +990,7 @@ async function routeMessage(
             // registered via a token upgrade).
             registry.registerConnection(ws);
             ws.send(JSON.stringify({ type: S2C.AUTH_OK }));
-            // Late joiner: seed the subagents panel with what already ran.
-            registry.sendTaskSnapshot(ws);
+            // The task snapshot now rides the attach paths below.
             if (!ws.activeSessionId) {
               if (registry.size > 0) {
                 attachToMostRecentSession(ws, registry, bridge);
@@ -1006,6 +1042,7 @@ async function routeMessage(
           };
           SessionRegistry.sendSafe(ws, sessionCreatedMsg);
           registry.broadcast(sessionCreatedMsg);
+          registry.sendTaskSnapshot(ws);
         })
         .catch((err: unknown) => {
           SessionRegistry.sendSafe(ws, {
@@ -1143,6 +1180,7 @@ async function routeMessage(
             }),
           );
           replayPendingQuestion(bridge, msg.sessionId as string, ws);
+          registry.sendTaskSnapshot(ws);
         }
       }
       break;
@@ -1243,6 +1281,21 @@ async function routeMessage(
       });
       break;
     }
+    case C2S.TASK_ACTIVITY_REQUEST: {
+      // Buffered tail for one task, requester only. Gated to the socket's own
+      // session, so probing arbitrary task ids leaks nothing.
+      const taskId = typeof msg.taskId === "string" ? msg.taskId : null;
+      if (!taskId) break;
+      const taskManager = registry.getTaskManager();
+      const owner = taskManager ? taskManager.getTaskSession(taskId) : undefined;
+      const allowed = owner !== undefined && owner === ws.activeSessionId;
+      SessionRegistry.sendSafe(ws, {
+        type: S2C.TASK_ACTIVITY_HISTORY,
+        taskId,
+        activity: allowed ? registry.getTaskActivityHistory(taskId) : [],
+      });
+      break;
+    }
 
     case C2S.QUESTION_ANSWER: {
       const sid = msg.sessionId as string | undefined;
@@ -1301,6 +1354,8 @@ async function routeMessage(
               };
               SessionRegistry.sendSafe(ws, sessionCreatedMsg);
               registry.broadcast(sessionCreatedMsg);
+              // A fresh fork id owns no tasks, so it inherits none of the source's chips.
+              registry.sendTaskSnapshot(ws);
 
               // After the fork's sessionCreated lands (the client clears its list and
               // re-targets), replay the copied history, then start the optional prompt.
@@ -1402,6 +1457,7 @@ async function routeMessage(
             };
             SessionRegistry.sendSafe(ws, sessionCreatedMsg);
             registry.broadcast(sessionCreatedMsg);
+            registry.sendTaskSnapshot(ws);
 
             replaySessionHistory(sessionId, agent, ws);
 
@@ -1566,6 +1622,9 @@ function attachToMostRecentSession(
   });
 
   replayPendingQuestion(bridge, sessionId, ws);
+
+  // Late joiner: seed the subagents panel with this session's tasks.
+  registry.sendTaskSnapshot(ws);
 }
 
 function createAndAttachSession(
@@ -1589,6 +1648,8 @@ function createAndAttachSession(
         models: Object.keys(agent.modelRegistry || {}),
         sttEnabled: registry.sttEnabled,
       });
+      // Always empty here, but every attach path sends its snapshot.
+      registry.sendTaskSnapshot(ws);
     })
     .catch((err: unknown) => {
       SessionRegistry.sendSafe(ws, {
@@ -1673,7 +1734,7 @@ export function createWsServer(
   // Hoisted so the returned stopTaskManager() can reach it (null when no registry).
   let taskManager: TaskManager | null = null;
   if (resolvedCore?.modelRegistry) {
-    taskManager = new TaskManager({
+    const tm = new TaskManager({
       buildAgent: buildAgent as (config: Record<string, unknown>) => Promise<AgentLike>,
       modelRegistry: resolvedCore.modelRegistry,
       config: core.config,
@@ -1688,17 +1749,28 @@ export function createWsServer(
       profileManager: resolvedCore.profileManager,
       sessionManager: registry.getSessionManager(),
     });
+    taskManager = tm;
     // Hand-built mock cores (tests, embedded hosts) may carry no service
     // registry; the relay still works, only delegate_task lookup is skipped.
-    if (core.services) registerTaskManagerService(core, taskManager);
-    registry.setTaskManager(taskManager);
-    taskManager.setObserver((ev: TaskObserverEvent) => {
+    if (core.services) registerTaskManagerService(core, tm);
+    registry.setTaskManager(tm);
+    tm.setObserver((ev: TaskObserverEvent) => {
       if (ev.kind === "task") {
-        registry.broadcast({ type: S2C.TASK_UPDATE, task: ev.task });
+        if (ev.task.sessionId) {
+          registry.broadcastScoped(ev.task.sessionId, {
+            type: S2C.TASK_UPDATE,
+            task: ev.task,
+          });
+        }
         return;
       }
       const activityMsg = taskActivityMessage(ev.taskId, ev.event);
-      if (activityMsg) registry.broadcast(activityMsg);
+      if (!activityMsg) return;
+      // Buffer always for replay; live delivery only to the owning session
+      // (orphan tasks belong to no tab).
+      registry.recordTaskActivity(ev.taskId, activityMsg.activity);
+      const owner = tm.getTaskSession(ev.taskId);
+      if (owner) registry.broadcastScoped(owner, activityMsg);
     });
   }
 
@@ -1753,7 +1825,6 @@ export function createWsServer(
       }
       ws.authToken = token;
       registry.registerConnection(ws);
-      registry.sendTaskSnapshot(ws);
     } else if (auth && !token) {
       // Socket stays open so the client can still authenticate via a
       // protocol AUTH message; routeMessage() gates everything else.
@@ -1764,7 +1835,6 @@ export function createWsServer(
       return;
     } else {
       registry.registerConnection(ws);
-      registry.sendTaskSnapshot(ws);
     }
 
     const existingCount = registry.size;

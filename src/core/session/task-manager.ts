@@ -40,6 +40,8 @@ export interface TaskInfo {
   taskId: string;
   /** Spawn description, whitespace-flattened and truncated. */
   description: string;
+  /** The delegating session (null: no parent, e.g. workflow-engine spawns). */
+  sessionId: string | null;
   status: TaskStatus;
   createdAt: number;
   /** Set when the task first enters RUNNING; null while queued. */
@@ -505,6 +507,7 @@ export class TaskManager {
     return {
       taskId: entry.taskId,
       description: entry.description,
+      sessionId: entry.sessionId,
       status: entry.statusRef.value,
       createdAt: entry.createdAt,
       startedAt: entry.startedAt,
@@ -535,6 +538,13 @@ export class TaskManager {
   /** Snapshot of every task the registry still holds (terminal ones included). */
   listTasks(): TaskInfo[] {
     return Array.from(this.#tasks.values(), (entry) => this.#infoOf(entry));
+  }
+
+  /** Delegating session of a known task (null: no parent); undefined for
+   * unknown ids. The websocket relay uses it for feed scoping and replay gating. */
+  getTaskSession(taskId: string): string | null | undefined {
+    const entry = this.#tasks.get(taskId);
+    return entry ? entry.sessionId : undefined;
   }
 
   /** Exposed for extensions. */

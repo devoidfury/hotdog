@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **webui subagent feed is session-scoped, with reconnect replay.** `TaskInfo` gains `sessionId` (null for parentless spawns), task updates/activity now reach only the sockets whose active session owns the task, and snapshots re-scope on every attach path (auth/upgrade no longer sends one globally). Parentless tasks stay off the wire entirely. A task panel opened after a page refresh requests the buffered tail over new `taskActivityRequest` / `taskActivityHistory` messages (ring bounds: 300 items per task, 50 tasks; replay gated to the owning session). Task panels also render reasoning deltas in their own dimmed lane.
+
 - **session resume restores profile and model.** `restoreSessionIntoAgent` now returns the active profile (last `SESSION_START` or `PROFILE_SWITCH` entry) so the interactive CLI, one-shot, and websocket entry points replay with the same tools/model/body the session ended on. `TOKEN_USAGE` log entries replay as output events for the token bubble on cold-log load.
 
 - **webui session turns now queue on the provider lane.** The ws registry builds its `SessionManager` without `taskConfig` (its `TaskManager` lives in the server), so top-level webui turns ran uncoordinated: two live sessions hammered one backend instead of one waiting for the lane. `SessionManager` now takes an explicit `turnLanes` coordinator and `createWsServer` hands in the same `createTurnLanes` (same caps, same ledger) the CLI gets, so a second session's turn parks with the usual "Waiting for provider lane" status.

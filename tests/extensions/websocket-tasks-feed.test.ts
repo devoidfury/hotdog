@@ -23,6 +23,18 @@ describe("taskActivityFromEvent", () => {
     ).toBeNull();
   });
 
+  it("maps streaming reasoning deltas to their own lane", () => {
+    expect(
+      taskActivityFromEvent({
+        type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK,
+        content: "pondering",
+      }),
+    ).toEqual({ kind: "reasoning", content: "pondering" });
+    expect(
+      taskActivityFromEvent({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "" }),
+    ).toBeNull();
+  });
+
   it("maps tool calls and truncates oversized input", () => {
     const big = "y".repeat(MAX_TASK_ACTIVITY_CHARS + 100);
     const wire = taskActivityFromEvent({

@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  BUN_VERSION: "1.3.14"
+  BUN_VERSION: "1.4.2"
   # Point config resolution at the minimal example config so tests
   # that fall back to filesystem config discovery have a deterministic target.
   HOTDOG_CONFIG_DIR: "./examples/minimal-config/config"

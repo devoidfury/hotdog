@@ -1984,3 +1984,122 @@ describe('length-stop tool-call guard', () => {
     expect(tool.executeCount).toBe(1);
   });
 });
+
+// ── Gateway assistant-tail invariant ──────────────────────────────────────────
+//
+// Strict llama.cpp-style gateways collapse each assistant+tool pair into one
+// assistant turn, then reject a request whose last two messages are both
+// assistant (HTTP 400 "Cannot have 2 or more assistant messages at the end of
+// the list"). Internal role "assistant" is the only role that serializes to
+// wire "assistant" ("harness" rides user/developer), so asserting on the
+// internal role sequence is faithful to the wire shape.
+
+describe('gateway assistant-tail invariant', () => {
+  /** Wrap the mock so every messages array handed to the provider is recorded. */
+  function captureRequests(mockLLM: MockLLMClient): Array<Array<Message>> {
+    const seen: Array<Array<Message>> = [];
+    const orig = mockLLM.chatStreamCancellable.bind(mockLLM);
+    mockLLM.chatStreamCancellable = (
+      messages: unknown[],
+      modelConfig: Record<string, unknown>,
+      toolDefs: Record<string, unknown>[],
+      cancelSignal: AbortSignal | null | undefined,
+    ) => {
+      seen.push(messages as Array<Message>);
+      return orig(messages, modelConfig, toolDefs, cancelSignal);
+    };
+    return seen;
+  }
+
+  /** Last two non-system internal roles of a request. */
+  function tailRoles(messages: Array<Message>): [string | undefined, string | undefined] {
+    const nonSystem = messages.filter((m) => m.role !== 'system');
+    return [nonSystem.at(-2)?.role, nonSystem.at(-1)?.role];
+  }
+
+  const truncatedSeq = (id: string, finishReason: string) =>
+    buildStreamResponse({
+      // Args cut off mid-JSON, exactly what a length-truncated stream yields.
+      toolCalls: [{ index: 0, name: 'worker', arguments: '{"path": "/tmp/trun', id }],
+      finishReason,
+      usage: { total_tokens: 5 },
+    });
+
+  it('two consecutive length stops never leave a request ending in two assistant messages', async () => {
+    const tool = simpleTool('worker', 'should not run');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        truncatedSeq('call_1', 'length'),
+        truncatedSeq('call_2', 'length'),
+        buildStreamResponse({ content: 'Re-issued cleanly.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const requests = captureRequests(mockLLM);
+    const { agent, toolRegistry } = createFixture({ mockLLM });
+    toolRegistry.register('worker', tool);
+
+    const result = await agent.run('Do work');
+    expect(expectCompletion(result).content).toBe('Re-issued cleanly.');
+    expect(tool.executeCount).toBe(0);
+    expect(requests.length).toBe(3);
+
+    // (a) No provider request ends with two assistant messages: the length-stop
+    // branch appends a harness notice (wire role "user") after the skipped tool
+    // result, so even the request issued right after the second stop is clean.
+    for (const req of requests) {
+      const [prev, last] = tailRoles(req);
+      expect(last === 'assistant' && prev === 'assistant').toBe(false);
+    }
+
+    // (b) After the two truncated rounds, the tail actually sent to the provider
+    // is assistant/tool/harness (== assistant/tool/user on the wire).
+    const sent = requests[2]!.filter((m) => m.role !== 'system');
+    expect(sent.slice(-3).map((m) => m.role)).toEqual(['assistant', 'tool', 'harness']);
+
+    // The notice is a persisted system-notice part carrying the re-issue instruction.
+    const notice = sent[sent.length - 1]!;
+    expect(notice.source).toBe('harness');
+    const parts = notice.content as Array<Record<string, unknown>>;
+    expect(parts).toHaveLength(1);
+    expect(parts[0]!.type).toBe('system-notice');
+    expect(String(parts[0]!.text)).toContain('truncated');
+
+    // Full role sequence: each truncated round is assistant/tool/harness.
+    expect(agent.context.log.getAll().map((m) => m.role)).toEqual([
+      'user', 'assistant', 'tool', 'harness', 'assistant', 'tool', 'harness', 'assistant',
+    ]);
+  });
+
+  it('backstop: consecutive empty completions (maxEmptyRetries >= 2) never reach the wire as an assistant tail', async () => {
+    const emptySeq = () => buildStreamResponse({ usage: { total_tokens: 5 } });
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        emptySeq(), // first empty completion
+        emptySeq(), // second -- context tail is now [assistant, assistant]
+        buildStreamResponse({ content: 'Back.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const requests = captureRequests(mockLLM);
+    const { agent } = createFixture({ mockLLM, config: { maxEmptyRetries: 2 } });
+
+    const result = await agent.run('Hi');
+    expect(expectCompletion(result).content).toBe('Back.');
+    expect(requests.length).toBe(3);
+
+    // The budget allowed a second empty re-invoke, so the pre-backstop context
+    // tail was [assistant, assistant]. No request may carry that tail.
+    for (const req of requests) {
+      const [prev, last] = tailRoles(req);
+      expect(last === 'assistant' && prev === 'assistant').toBe(false);
+    }
+
+    // The third request carries the persisted harness nudge after the two
+    // empty assistant messages: assistant/assistant/harness on the internal
+    // sequence, assistant/assistant/user on the wire.
+    const sent = requests[2]!.filter((m) => m.role !== 'system');
+    expect(sent.slice(-3).map((m) => m.role)).toEqual(['assistant', 'assistant', 'harness']);
+    expect(agent.context.log.getAll().map((m) => m.role)).toEqual([
+      'user', 'assistant', 'assistant', 'harness', 'assistant',
+    ]);
+  });
+});

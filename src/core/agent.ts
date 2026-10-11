@@ -55,6 +55,23 @@ const TRUNCATED_STOP_TOOL_TEXT =
   "Re-issue the intended tool call now with complete arguments.";
 
 /**
+ * Harness notice appended after a length-stop response's skipped tool
+ * results (and as the backstop in _prepareIteration). Why a trailing
+ * user-shaped message is required at all: strict llama.cpp-style gateways
+ * collapse an assistant+tool pair into ONE assistant turn, so two
+ * consecutive length stops leave the wire tail
+ * [assistant, tool, assistant, tool] == [assistant, assistant] and the
+ * next request 400s with "Cannot have 2 or more assistant messages at the
+ * end of the list". A trailing user-role message (harness maps to
+ * user/developer, never assistant) breaks the collapse. The tool result
+ * above already carries the re-issue instruction; this text is kept short
+ * because its job is the conversation shape, not the instruction.
+ */
+const TRUNCATED_STOP_NUDGE_TEXT =
+  "The previous response was truncated by the output token limit, so its tool " +
+  "call was not executed. Re-issue that tool call now with complete arguments.";
+
+/**
  * Nudge for the empty-response-after-tools stall: the model returned neither
  * text nor tool calls after tool results (a common local-model failure). The
  * notice lands after the empty assistant message, so the context tail is no
@@ -567,6 +584,31 @@ export class Agent implements AgentLike {
     );
     messages = contextResult.data.messages;
 
+    // Backstop invariant: never issue a request whose last two non-system
+    // messages are both internal role "assistant" -- the only internal role
+    // that serializes to wire "assistant" (harness maps to user/developer).
+    // A strict llama.cpp-style gateway rejects such a tail: it collapses
+    // each assistant+tool pair into one assistant turn, so
+    // [assistant, tool, assistant, tool] arrives as two consecutive
+    // assistant messages and 400s. The length-stop branch appends its own
+    // notice; this catches any other assistant tail (e.g. consecutive empty
+    // completions when maxEmptyRetries >= 2). addMessage persists it; the
+    // local `messages` must carry it for this request too.
+    const nonSystemTail = messages.filter((m) => m.role !== "system");
+    if (
+      nonSystemTail.length >= 2 &&
+      nonSystemTail[nonSystemTail.length - 1]!.role === "assistant" &&
+      nonSystemTail[nonSystemTail.length - 2]!.role === "assistant"
+    ) {
+      const nudge = new Message({
+        role: "harness",
+        source: "harness",
+        content: [{ type: "system-notice", text: TRUNCATED_STOP_NUDGE_TEXT }],
+      });
+      this.addMessage(nudge);
+      messages = [...messages, nudge];
+    }
+
     let toolDefs = await this.getToolDefs();
     let modelConfig = resolveModelConfig(
       this.#model,
@@ -654,10 +696,12 @@ export class Agent implements AgentLike {
     if (response.finalToolCalls) {
       let toolCallsToExecute = response.finalToolCalls;
       let skippedToolResults: ToolResult[] = [];
+      let lengthStopped = false;
 
       if (isLengthStop(response.finishReason)) {
         // Streamed arguments may be silently truncated; nothing from this response is safe to run.
         // Fail every call with a re-issue instruction so the wire stays valid (paired tool call & result).
+        lengthStopped = true;
         toolCallsToExecute = [];
         skippedToolResults = response.finalToolCalls.map((tc) => ({
           toolName: tc.function?.name || "(unknown)",
@@ -698,6 +742,19 @@ export class Agent implements AgentLike {
           content: sr.content,
           toolCallId: sr.toolCallId,
         });
+      }
+
+      if (lengthStopped) {
+        // Trailing user-shaped notice: without it the context tail is
+        // [assistant, tool], which strict gateways collapse to one assistant
+        // turn; a second consecutive length stop then ends the wire with two
+        // assistant messages and 400s (see TRUNCATED_STOP_NUDGE_TEXT).
+        // Persisted via addMessage so it rides every later request.
+        this.addMessage(new Message({
+          role: "harness",
+          source: "harness",
+          content: [{ type: "system-notice", text: TRUNCATED_STOP_NUDGE_TEXT }],
+        }));
       }
 
       const finalResults = [...toolResults, ...skippedToolResults];

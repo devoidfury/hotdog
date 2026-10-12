@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **task questions stop holding the provider lane.** A worker blocked inside a `question` tool call held its lane slot, and the delegating manager session usually sits on that same lane, so it could never wake to answer. The worker now yields the slot while a question is pending and re-takes it before the question settles; the delegating session is woken through its bus with the question and a `task_followup` hint.
+
+- fix task interrupts while a worker sits in a question: the tool raced only the per-run abort controller, but an interrupt fires the agent-level signal, so the task stayed "running" inside its question forever. Both signals are raced now.
+
+- fix `task_followup` on a task blocked in a question: the message queued behind the pending question and never drained. It now settles as the answer (the text answers the first question, the rest take defaults).
+
+- fix stale pending questions outliving their task: the bridge entry survived a terminal task and could replay on reconnect or swallow a later answer. Terminal task events now cancel it.
+
 - **webui subagent feed is session-scoped, with reconnect replay.** `TaskInfo` gains `sessionId` (null for parentless spawns), task updates/activity now reach only the sockets whose active session owns the task, and snapshots re-scope on every attach path (auth/upgrade no longer sends one globally). Parentless tasks stay off the wire entirely. A task panel opened after a page refresh requests the buffered tail over new `taskActivityRequest` / `taskActivityHistory` messages (ring bounds: 300 items per task, 50 tasks; replay gated to the owning session). Task panels also render reasoning deltas in their own dimmed lane.
 
 - **session resume restores profile and model.** `restoreSessionIntoAgent` now returns the active profile (last `SESSION_START` or `PROFILE_SWITCH` entry) so the interactive CLI, one-shot, and websocket entry points replay with the same tools/model/body the session ended on. `TOKEN_USAGE` log entries replay as output events for the token bubble on cold-log load.

@@ -44,6 +44,12 @@ interface Agent {
   emitOutput(type: string, data: unknown): void;
   /** Per-run abort (null between runs or for standalone callers without a run). */
   runAbortController?: AbortController | null;
+  /**
+   * Agent-level abort (the owning task's interrupt). The run controller is
+   * per-iteration, so the wait must honor both: racing only the run controller
+   * leaves an interrupted task hanging in its question, still "running".
+   */
+  abortSignal?: AbortSignal | null;
 }
 
 function ensureKey(question: Question, index: number): string {
@@ -166,9 +172,11 @@ export class QuestionTool {
 
     const agent = ctx?.get("agent") as Agent | undefined;
 
-    // race the agent's run abort, exactly like user-gate's askUser(); sanity check before we render a question
-    const signal = agent?.runAbortController?.signal ?? null;
-    if (signal?.aborted) {
+    const signals: AbortSignal[] = [];
+    const runSignal = agent?.runAbortController?.signal ?? null;
+    if (runSignal) signals.push(runSignal);
+    if (agent?.abortSignal) signals.push(agent.abortSignal);
+    if (signals.some((s) => s.aborted)) {
       return ToolResult.err("Question cancelled: the run was interrupted");
     }
 
@@ -195,14 +203,17 @@ export class QuestionTool {
     }
 
     // Wrapped in a microtask so a synchronous result and a promise result take the same path; the race then works for both.
-    // The input gets the same signal: on abort it bails out of its prompt loop and re-attaches the main readline handler, so a line typed after
+    // The input gets the run signal: on abort it bails out of its prompt loop and re-attaches the main readline handler, so a line typed after
     // cancel goes to the next turn, not into a dead question loop.
-    const collect = Promise.resolve().then(() => inputInterface.collectAnswers(questions, signal));
-    let onAbort: (() => void) | null = null;
-    const aborted = signal
+    const collect = Promise.resolve().then(() => inputInterface.collectAnswers(questions, runSignal));
+    const abortCleanups: Array<() => void> = [];
+    const aborted = signals.length
       ? new Promise<"aborted">((resolve) => {
-          onAbort = () => resolve("aborted");
-          signal.addEventListener("abort", onAbort, { once: true });
+          for (const s of signals) {
+            const onAbort = () => resolve("aborted");
+            s.addEventListener("abort", onAbort, { once: true });
+            abortCleanups.push(() => s.removeEventListener("abort", onAbort));
+          }
         })
       : null;
 
@@ -210,7 +221,7 @@ export class QuestionTool {
     try {
       outcome = await (aborted ? Promise.race([collect, aborted]) : collect);
     } finally {
-      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+      for (const cleanup of abortCleanups) cleanup();
     }
     if (outcome === "aborted") {
       // The input resolves (partial answers, dropped here) rather than  rejecting on abort, so nothing dangles;

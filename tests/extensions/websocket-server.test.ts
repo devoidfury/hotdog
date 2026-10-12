@@ -13,8 +13,10 @@ import {
 import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
+import { LlmError } from "@core/error.ts";
 import { MessageLog } from "@core/context/message-log.ts";
 import type { AgentLike } from "@core/session/index.ts";
+import { TASK_STATUS } from "@core/session/task-manager.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 import { createFixture, simpleTool } from "../helpers.ts";
 import { Message } from "@core/context/message.ts";
@@ -1697,5 +1699,133 @@ describe("resumed pending questions (seedResumedQuestions / dismissResumedQuesti
     // Hold is gone: a later dismiss is a no-op.
     dismissResumedQuestions(bridge, reg, sid);
     expect(added).toHaveLength(2);
+  });
+});
+
+// ── Terminal task cleanup: stale pending questions ─────────────────────────
+// A worker killed while blocked in a question leaves its bridge pending
+// behind. The terminal observer event must cancel it under the WORKER's
+// session (where the pending is registered) -- not the delegating session,
+// which may carry its own live question that a wrong-keyed cancel would
+// resolve with defaults and swallow the user's answer.
+
+describe("terminal task cleanup (stale pending questions)", () => {
+  let core: any;
+  let wsServer: ReturnType<typeof createWsServer>;
+  let ws: MockWs;
+
+  afterEach(() => {
+    wsServer.stopTaskManager();
+    wsServer.stopCleanupLoop();
+  });
+
+  /** Poll until fn() is truthy; fails loudly on timeout. */
+  async function poll<T>(fn: () => T | null | undefined, what: string, timeoutMs = 2000): Promise<T> {
+    const start = Date.now();
+    for (;;) {
+      const v = fn();
+      if (v) return v;
+      if (Date.now() - start > timeoutMs) throw new Error(`Timed out waiting for ${what}`);
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  }
+
+  /** Drive the server's AGENT_TOOL_CONTEXT seam for one agent and start a live question collect. */
+  function startQuestionFor(agent: AgentLike, questions: Array<Record<string, unknown>>): Promise<Record<string, unknown>> {
+    const handlers = core._registeredHooks["agent:toolContext"];
+    expect(handlers).toHaveLength(1);
+    const store: Record<string, unknown> = {};
+    const toolCtx = {
+      get: (k: string) => store[k],
+      set: (k: string, v: unknown) => { store[k] = v; },
+    };
+    handlers[0]!({ toolCtx, toolName: "question", agent });
+    const input = store["input"] as {
+      collectAnswers: (qs: Array<Record<string, unknown>>) => Promise<Record<string, unknown>>;
+    };
+    expect(input).toBeDefined();
+    return input.collectAnswers(questions);
+  }
+
+  it("cancels the worker's stale pending, leaves the delegating session's own question alone", async () => {
+    core = createWsMockCore();
+    // Task workers (no sessionId in their config) hang until the task's
+    // abort signal fires, like a live in-flight turn. User sessions get the
+    // usual mock agent.
+    const buildAgent = async (config: { model?: string; sessionId?: string }): Promise<AgentLike> => {
+      if (config.sessionId) {
+        return makeWsMockAgent({ sessionId: config.sessionId, model: config.model || "test-model" });
+      }
+      const worker = makeWsMockAgent({
+        sessionId: "worker-stale",
+        model: config.model || "test-model",
+        abortSignal: null,
+        run: () =>
+          new Promise<never>((_res, rej) => {
+            (worker as unknown as { abortSignal: AbortSignal }).abortSignal.addEventListener(
+              "abort",
+              () => rej(LlmError.Cancelled("aborted")),
+              { once: true },
+            );
+          }),
+      });
+      return worker;
+    };
+
+    wsServer = createWsServer(core, {
+      buildAgent,
+      questionStrategy: "wait",
+      questionTimeoutSecs: 300,
+    });
+
+    ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    await waitForMessage(ws, S2C.SESSION_CREATED);
+    const mgrSid = (ws as unknown as HotdogServerSocket).activeSessionId!;
+
+    const tm = wsServer.sessionRegistry.getTaskManager()!;
+    await tm.spawnTask("task-stale", "work", { workerModel: "test-model" });
+    const workerAgent = await poll(
+      () => tm._test_tasks.get("task-stale")!.agent,
+      "worker agent build",
+    );
+
+    // The worker blocks in a question; the delegating session simultaneously
+    // has its own live question pending (e.g. the manager asked the user
+    // something while the task ran).
+    let workerAnswer: Record<string, unknown> | null = null;
+    const workerPending = startQuestionFor(workerAgent!, [{ key: "q", prompt: "Q?" }]);
+    workerPending.then((a) => { workerAnswer = a; });
+    let mgrAnswer: Record<string, unknown> | null = null;
+    const mgrAgent = wsServer.sessionRegistry.get(mgrSid)!.agent;
+    const mgrPending = startQuestionFor(mgrAgent, [{ key: "mq", prompt: "M?" }]);
+    mgrPending.then((a) => { mgrAnswer = a; });
+
+    // Kill the worker mid-question.
+    expect(tm.interruptTask("task-stale")).toBe(true);
+    await poll(
+      () => {
+        const s = tm.taskStatus("task-stale");
+        return s === TASK_STATUS.CANCELLED ? s : null;
+      },
+      "cancellation",
+    );
+
+    // The stale worker pending settles as a cancel (defaults: no live turn
+    // is left to consume a real answer). Poll with a deadline: a cleanup
+    // keyed on the wrong session never settles this promise at all.
+    const settled = await poll(() => workerAnswer, "worker pending settle");
+    expect(settled).toEqual({ q: "" });
+
+    // The delegating session's own question survived the terminal event:
+    // answering it still lands. (A wrong-keyed cancel would have resolved it
+    // with defaults already, and this answer would hit "No pending question".)
+    await wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: C2S.QUESTION_ANSWER, sessionId: mgrSid, answers: { mq: "still alive" } }),
+    );
+    expect(lastMessage(ws).type).toBe(S2C.QUESTION_ANSWERED);
+    const mgrSettled = await poll(() => mgrAnswer, "manager pending answer");
+    expect(mgrSettled).toEqual({ mq: "still alive" });
   });
 });

@@ -378,6 +378,83 @@ describe("execute - run cancellation", () => {
   });
 });
 
+// ── execute - agent-level abort (task interrupt) ───────────────────────────
+// The run controller is per-iteration; a task interrupt fires only the
+// agent-level signal. The wait must honor both, or an interrupted worker
+// sits in its question forever, still "running".
+
+describe("execute - agent-level abort (task interrupt)", () => {
+  let tool: QuestionTool;
+
+  const payload = JSON.stringify({ questions: [{ key: "a", prompt: "Q?" }] });
+
+  beforeEach(() => {
+    tool = new QuestionTool();
+  });
+
+  async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
+    const start = Date.now();
+    while (!cond()) {
+      if (Date.now() - start > timeoutMs) throw new Error("Timed out waiting for condition");
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  }
+
+  function makeHangingInput() {
+    let resolveCollect: (a: Record<string, string>) => void = () => {};
+    const collectPromise = new Promise<Record<string, string>>((r) => {
+      resolveCollect = r;
+    });
+    let calls = 0;
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: () => { calls += 1; return collectPromise; },
+    };
+    return { input, collectPromise, resolveCollect, get calls() { return calls; } };
+  }
+
+  function makeCtx(agent: Record<string, unknown>, input: unknown): ToolContext {
+    const values: Record<string, unknown> = { agent, input };
+    return { get: (key: string) => values[key] } as unknown as ToolContext;
+  }
+
+  it("cancels when the agent-level signal aborts while the run signal does not", async () => {
+    const run = new AbortController();
+    const agentLevel = new AbortController();
+    const hanging = makeHangingInput();
+    const agent = {
+      emitOutput: () => {},
+      runAbortController: run,
+      abortSignal: agentLevel.signal,
+    };
+
+    const pending = tool.execute(payload, makeCtx(agent, hanging.input));
+    await waitFor(() => hanging.calls > 0);
+    agentLevel.abort();
+
+    const result = await pending;
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("cancelled");
+    expect(run.signal.aborted).toBe(false); // only the agent-level source fired
+
+    // A late answer must not surface.
+    hanging.resolveCollect({ a: "late answer" });
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("cancels immediately when the agent-level signal is already aborted", async () => {
+    const agentLevel = new AbortController();
+    agentLevel.abort();
+    const hanging = makeHangingInput();
+    const agent = { emitOutput: () => {}, abortSignal: agentLevel.signal };
+
+    const result = await tool.execute(payload, makeCtx(agent, hanging.input));
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("cancelled");
+    expect(hanging.calls).toBe(0); // the prompt never started
+  });
+});
+
 describe("QuestionTool create() extension", () => {
   it("returns extension with tools:register hook", async () => {
     const ext = create({} as CoreContext);

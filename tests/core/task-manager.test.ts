@@ -1,8 +1,9 @@
 // Tests for TaskManager -- manages background task agents.
 
 import { describe, it, expect } from "bun:test";
-import { readdir } from "node:fs/promises";
+import { readdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { TaskManager, TaskHandle, TASK_STATUS } from "@core/session/task-manager.ts";
 import { makeProviderHealth } from "@core/session/provider-health.ts";
 import { contentToText } from "@core/context/message.ts";
@@ -19,10 +20,11 @@ function resultParts(taskId: string, result: string) {
 }
 
 // Poll until a condition holds (fails loudly on timeout) instead of a
-// fixed sleep, which is racy under parallel test load.
-async function settle(fn: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
+// fixed sleep, which is racy under parallel test load. Async predicates
+// (ledger file reads) are fine too.
+async function settle(fn: () => boolean | Promise<boolean>, what: string, timeoutMs = 2000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (!fn()) {
+  while (!(await fn())) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await new Promise(r => setTimeout(r, 1));
   }
@@ -2567,5 +2569,197 @@ describe("cross-process lane ledger (two TaskManagers, one lanesDir)", () => {
     mA.completeTask("a1");
     await settleCount(() => slotCount(lanesDir, "prov"), 0, "all slots released");
     await rm(lanesDir, { recursive: true, force: true });
+  });
+});
+
+// ── Task questions: lane handoff, manager wake, follow-up as answer ─────────
+// A worker blocked in a question must yield its lane slot (the delegating
+// manager often sits on the same lane and cannot wake to answer while the
+// asker holds it), get it back only when the question settles, and treat a
+// follow-up as the answer rather than a queued steer.
+
+describe("task questions (lane handoff + manager wake)", () => {
+  function slotCount(lanesDir: string, lane: string): Promise<number> {
+    return readdir(join(lanesDir, lane))
+      .then((names) => names.filter((n) => n.startsWith("slot-")).length)
+      .catch(() => 0);
+  }
+
+  // Hanging agent with a stable session id so the entry is findable by session.
+  function makeWorkerAgent(extra: Record<string, unknown> = {}) {
+    let releaseRun!: () => void;
+    const agent = {
+      sessionId: "worker-1",
+      abortSignal: null as AbortSignal | null,
+      run: () => new Promise<void>((resolve) => { releaseRun = resolve; }),
+      notifyCompletion: () => {},
+      ...extra,
+    };
+    return { agent, releaseRun: () => releaseRun() };
+  }
+
+  function makeManager(agent: Record<string, unknown>, opts: Record<string, unknown> = {}) {
+    return new TaskManager({
+      buildAgent: async () => agent as never,
+      modelRegistry: { "n1/qwen": { name: "n1/qwen" }, default: "n1/qwen" } as never,
+      config: {} as never,
+      maxIterations: 100,
+      taskProfile: "default",
+      ...opts,
+    } as never);
+  }
+
+  it("a question yields the lane slot and wakes the delegating session", async () => {
+    const lanesDir = await mkdtemp(join(tmpdir(), "task-question-lanes-"));
+    try {
+      const { agent, releaseRun } = makeWorkerAgent();
+      const busCalls: Array<{ content: Array<{ type: string; text: string }>; source: string }> = [];
+      const manager = makeManager(agent, {
+        lanesPerProvider: 1,
+        lanesDir,
+        sessionManager: {
+          getAgent: () => undefined,
+          getBus: () => ({
+            enqueue: (content: Array<{ type: string; text: string }>, opts: { source?: string } = {}) =>
+              busCalls.push({ content, source: opts.source ?? "" }),
+          }),
+        },
+      });
+
+      const handle = await manager.spawnTask("task-q1", "work", {
+        workerModel: "n1/qwen",
+        managerAgent: { sessionId: "mgr-1" },
+      } as never);
+      await settle(() => manager._test_tasks.get("task-q1")!.agent !== null, "agent build");
+      await settle(async () => (await slotCount(lanesDir, "n1")) === 1, "started task holds its slot");
+
+      // The question lands: the slot is yielded and the manager bus gets it.
+      manager.onTaskQuestionAsked("worker-1", [
+        { key: "how", prompt: "How should I finish?", options: ["proceed", "stop"] },
+      ]);
+      await settle(async () => (await slotCount(lanesDir, "n1")) === 0, "question yields the slot");
+      expect(busCalls).toHaveLength(1);
+      expect(busCalls[0]!.source).toBe("harness");
+      expect(busCalls[0]!.content[0]!.text).toContain("[Task question]");
+      expect(busCalls[0]!.content[1]!.type).toBe("untrusted");
+      expect(busCalls[0]!.content[1]!.text).toContain("task-q1");
+      expect(busCalls[0]!.content[1]!.text).toContain("How should I finish?");
+      expect(busCalls[0]!.content[1]!.text).toContain("proceed | stop");
+      expect(busCalls[0]!.content[1]!.text).toContain('task_followup("task-q1"');
+
+      // The answer settles: the slot comes back before the turn may continue.
+      await manager.onTaskQuestionSettled("worker-1");
+      await settle(async () => (await slotCount(lanesDir, "n1")) === 1, "settle re-acquires the slot");
+
+      releaseRun();
+      await settle(() => manager.taskStatus("task-q1") === TASK_STATUS.COMPLETED, "completion");
+      await settle(async () => (await slotCount(lanesDir, "n1")) === 0, "final release");
+      expect(handle.status).toBe(TASK_STATUS.COMPLETED);
+    } finally {
+      await rm(lanesDir, { recursive: true, force: true });
+    }
+  });
+
+  it("an interrupted question-taker re-takes no slot on settle", async () => {
+    const lanesDir = await mkdtemp(join(tmpdir(), "task-question-lanes-"));
+    try {
+      // Like the real agent, this fake's run rejects when the signal
+      // #driveTurn wires to the entry's abort controller.
+      let agent: Record<string, unknown> = {};
+      agent.sessionId = "worker-1";
+      agent.abortSignal = null;
+      agent.notifyCompletion = () => {};
+      agent.run = () =>
+        new Promise<never>((_res, rej) => {
+          (agent.abortSignal as AbortSignal).addEventListener("abort", () =>
+            rej(LlmError.Cancelled("aborted")),
+          );
+        });
+      const manager = makeManager(agent, { lanesPerProvider: 1, lanesDir });
+
+      await manager.spawnTask("task-q2", "work", { workerModel: "n1/qwen" } as never);
+      await settle(() => manager._test_tasks.get("task-q2")!.agent !== null, "agent build");
+      await settle(async () => (await slotCount(lanesDir, "n1")) === 1, "started task holds its slot");
+
+      manager.onTaskQuestionAsked("worker-1", [{ key: "how", prompt: "How?" }]);
+      await settle(async () => (await slotCount(lanesDir, "n1")) === 0, "question yields the slot");
+
+      // Interrupt lands while the worker sits in its question: the settle must
+      // not re-acquire (the turn is dying; #finalizeTurn owns the lane).
+      expect(manager.interruptTask("task-q2")).toBe(true);
+      await manager.onTaskQuestionSettled("worker-1");
+      expect(await slotCount(lanesDir, "n1")).toBe(0);
+
+      await settle(() => manager.taskStatus("task-q2") === TASK_STATUS.CANCELLED, "cancellation");
+      expect(await slotCount(lanesDir, "n1")).toBe(0);
+    } finally {
+      await rm(lanesDir, { recursive: true, force: true });
+    }
+  });
+
+  it("getTaskAgentSession names the worker session, not the delegating one", async () => {
+    const { agent, releaseRun } = makeWorkerAgent();
+    const manager = makeManager(agent);
+
+    const handle = await manager.spawnTask("task-sess", "work", {
+      managerAgent: { sessionId: "mgr-1" },
+    } as never);
+    await settle(() => manager._test_tasks.get("task-sess")!.agent !== null, "agent build");
+
+    expect(manager.getTaskSession("task-sess")).toBe("mgr-1");
+    expect(manager.getTaskAgentSession("task-sess")).toBe("worker-1");
+    expect(manager.getTaskAgentSession("nope")).toBeUndefined();
+
+    releaseRun();
+    await settle(() => manager.taskStatus("task-sess") === TASK_STATUS.COMPLETED, "completion");
+    // finalizeTurn released the agent: nothing left to key a cleanup on.
+    expect(manager.getTaskAgentSession("task-sess")).toBeNull();
+    expect(handle.status).toBe(TASK_STATUS.COMPLETED);
+  });
+
+  it("sendFollowUp hands the text to a pending question instead of the steer queue", async () => {
+    const resolved: Array<[string, string]> = [];
+    const steered: string[] = [];
+    const { agent, releaseRun } = makeWorkerAgent({ steer: (m: string) => steered.push(m) });
+    const manager = makeManager(agent, {
+      resolvePendingQuestion: (sid: string, text: string) => {
+        resolved.push([sid, text]);
+        return true;
+      },
+    });
+
+    await manager.spawnTask("task-fu", "work", {} as never);
+    await settle(() => manager._test_tasks.get("task-fu")!.agent !== null, "agent build");
+
+    expect(manager.sendFollowUp("task-fu", "the answer")).toBe(true);
+    // The question bridge (here: the hook) consumed the text for the worker's
+    // session; the steering queue must stay empty.
+    expect(resolved).toEqual([["worker-1", "the answer"]]);
+    expect(steered).toEqual([]);
+
+    releaseRun();
+    await settle(() => manager.taskStatus("task-fu") === TASK_STATUS.COMPLETED, "completion");
+  });
+
+  it("sendFollowUp falls back to the steer queue when nothing is pending", async () => {
+    const resolved: Array<[string, string]> = [];
+    const steered: string[] = [];
+    const { agent, releaseRun } = makeWorkerAgent({ steer: (m: string) => steered.push(m) });
+    const manager = makeManager(agent, {
+      resolvePendingQuestion: (sid: string, text: string) => {
+        resolved.push([sid, text]);
+        return false;
+      },
+    });
+
+    await manager.spawnTask("task-fu2", "work", {} as never);
+    await settle(() => manager._test_tasks.get("task-fu2")!.agent !== null, "agent build");
+
+    expect(manager.sendFollowUp("task-fu2", "keep going")).toBe(true);
+    expect(resolved).toEqual([["worker-1", "keep going"]]);
+    expect(steered).toEqual(["keep going"]);
+
+    releaseRun();
+    await settle(() => manager.taskStatus("task-fu2") === TASK_STATUS.COMPLETED, "completion");
   });
 });

@@ -1748,6 +1748,8 @@ export function createWsServer(
       healthContextLimit: resolvedCore.contextLimit,
       profileManager: resolvedCore.profileManager,
       sessionManager: registry.getSessionManager(),
+      // A follow-up on a session blocked in a question becomes its answer.
+      resolvePendingQuestion: (sid, text) => bridge?.answerWithText(sid, text) ?? false,
     });
     taskManager = tm;
     // Hand-built mock cores (tests, embedded hosts) may carry no service
@@ -1761,6 +1763,19 @@ export function createWsServer(
             type: S2C.TASK_UPDATE,
             task: ev.task,
           });
+        }
+        // A terminal task has no live turn left to resolve its pending
+        // question; drop the stale entry so it cannot replay on reconnect or
+        // swallow a later answer. Keyed on the WORKER's session: the pending
+        // is registered there, and the delegating session may carry its own
+        // live question that must not be cancelled.
+        const terminal =
+          ev.task.status === "cancelled" ||
+          ev.task.status === "failed" ||
+          ev.task.status === "completed";
+        if (terminal) {
+          const sid = tm.getTaskAgentSession(ev.task.taskId);
+          if (sid && bridge && bridge.hasPending(sid)) bridge.cancel(sid);
         }
         return;
       }
@@ -1785,6 +1800,10 @@ export function createWsServer(
     },
     hasChannels: (sid) => registry.hasChannels(sid),
     interrupt: (sid) => registry.getSessionManager().interrupt(sid),
+    // Task-host lane handoff: the worker yields its lane slot while a
+    // question is pending, back on settle.
+    onQuestionAsked: (sid, qs) => taskManager?.onTaskQuestionAsked(sid, qs),
+    onQuestionSettled: (sid) => taskManager?.onTaskQuestionSettled(sid),
   });
 
   // Give every tool call for WS agents an Input implementation that resolves

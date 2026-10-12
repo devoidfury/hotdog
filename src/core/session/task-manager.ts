@@ -258,6 +258,12 @@ export interface TaskManagerOptions {
    * Must be the resolved value, not config.contextLimit; a sweep must give a context-less remote model the same limit the boot registry did.
    */
   healthContextLimit?: number;
+  /**
+   * Treat a follow-up as the answer to the task's pending question (the
+   * websocket host wires its question bridge in). True when it was: a steer
+   * would sit behind the question forever.
+   */
+  resolvePendingQuestion?: (sessionId: string, text: string) => boolean;
 }
 
 export interface TaskManagerRequiredOptions {
@@ -338,6 +344,13 @@ interface TaskEntry {
   turnWaiters: Array<() => void>;
   /** Set by completeTask(); finalizes the task after the in-flight turn ends. */
   releaseRequested: boolean;
+  /**
+   * Blocked in a question-tool wait. onTaskQuestionAsked yielded the lane slot
+   * (a blocked asker holding the lane keeps the delegating manager -- often on
+   * the same lane -- from waking to answer); onTaskQuestionSettled takes it
+   * back before the tool's promise resolves.
+   */
+  questionYielded: boolean;
   onTurn?: (turn: TurnResult) => void;
   /** Fires at the start of every agent turn (see SpawnTaskOptions.onTurnStart). */
   onTurnStart?: () => void;
@@ -388,6 +401,8 @@ export class TaskManager {
   #observer: TaskObserver | null = null;
   /** Provider-pool health registry; null = health feature off (no filtering, no demotion). */
   #providerHealth: ProviderHealth | null;
+  /** Follow-up -> pending-question answer seam (null: plain steer only). */
+  #resolvePendingQuestion: ((sessionId: string, text: string) => boolean) | null;
 
   constructor(options: TaskManagerOptions & TaskManagerRequiredOptions) {
     this.#buildAgent = options.buildAgent;
@@ -436,6 +451,7 @@ export class TaskManager {
     this.#lanesRetryTimer = null;
     this.#tasks = new Map();
     this.#profileManager = options.profileManager;
+    this.#resolvePendingQuestion = options.resolvePendingQuestion ?? null;
     // One health registry per manager: an explicit injection wins (shared / test seams), an explicit null opts out.
     // Otherwise always build one. The interval gates only the TIMER inside makeProviderHealth, so a 0 interval
     // keeps failure-driven demotion and placement filtering alive. The recovered-callback re-admits queued
@@ -545,6 +561,17 @@ export class TaskManager {
   getTaskSession(taskId: string): string | null | undefined {
     const entry = this.#tasks.get(taskId);
     return entry ? entry.sessionId : undefined;
+  }
+
+  /** Worker agent's session for a known task (null: agent released or never
+   * built); undefined for unknown ids. Pending questions live under the
+   * worker's session, not the delegating one, so terminal cleanup must key
+   * on this. Set is guaranteed at terminal-event time: #finalizeTurn and
+   * #interruptEntry notify before nulling entry.agent. */
+  getTaskAgentSession(taskId: string): string | null | undefined {
+    const entry = this.#tasks.get(taskId);
+    if (!entry) return undefined;
+    return entry.agent ? entry.agent.sessionId : null;
   }
 
   /** Exposed for extensions. */
@@ -674,6 +701,7 @@ export class TaskManager {
       turnGranted: false,
       turnWaiters: [],
       releaseRequested: false,
+      questionYielded: false,
       onTurn: undefined,
       onTurnStart: undefined,
       lastResult: undefined,
@@ -1662,11 +1690,102 @@ export class TaskManager {
     // queue being drained -- its follow-up path is taskTurn().
     if (!task.agent || !task.inRun) return false;
 
+    // A pending question eats the follow-up as its answer: a steer would sit
+    // behind it forever.
+    const sessionId = task.agent.sessionId;
+    if (sessionId && this.#resolvePendingQuestion?.(sessionId, message)) {
+      return true;
+    }
+
     if (typeof task.agent.steer === "function") {
       task.agent.steer(message);
       return true;
     }
     return false;
+  }
+
+  /**
+   * A task agent put a question to its human: yield its lane slot while the
+   * wait holds (why: TaskEntry.questionYielded) and wake the delegating
+   * session. The slot comes back in onTaskQuestionSettled.
+   */
+  onTaskQuestionAsked(sessionId: string, questions: Array<{ key: string; prompt: string; options?: string[] }>): void {
+    const entry = this.#entryBySession(sessionId);
+    if (!entry || entry.statusRef.value !== TASK_STATUS.RUNNING) return;
+    entry.questionYielded = true;
+    this.#releaseSlot(entry);
+    this.#deliverQuestion(entry, questions);
+  }
+
+  /**
+   * The pending question for `sessionId` settled (answered, timed out, or
+   * cancelled). Re-acquires the slot yielded by onTaskQuestionAsked before the
+   * question tool's promise resolves, so the agent's next LLM call can never
+   * fire without a lane slot. A dead or aborted task takes no slot back.
+   */
+  async onTaskQuestionSettled(sessionId: string): Promise<void> {
+    const entry = this.#entryBySession(sessionId);
+    if (!entry || !entry.questionYielded) return;
+    entry.questionYielded = false;
+    if (entry.statusRef.value !== TASK_STATUS.RUNNING || entry.abortController.signal.aborted) {
+      return; // interrupt/delete won the race; #finalizeTurn owns the lane
+    }
+    const cap = this.#laneCap(entry.provider);
+    if (!this.#lanes || !Number.isFinite(cap)) return; // uncoordinated: nothing to take back
+    // Wait out a full lane exactly like a queued turn does.
+    for (;;) {
+      const got = await this.#acquireSlotSafe(entry.provider);
+      if (entry.statusRef.value !== TASK_STATUS.RUNNING || entry.abortController.signal.aborted) {
+        if (got.ok && got.lease) await this.#releaseLease(got.lease);
+        return;
+      }
+      if (got.ok && got.lease) {
+        entry.lease = got.lease;
+        return;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, this.#lanesRetryMs));
+    }
+  }
+
+  /** The RUNNING entry whose agent is the given session, if any. */
+  #entryBySession(sessionId: string): TaskEntry | undefined {
+    for (const entry of this.#tasks.values()) {
+      if (entry.statusRef.value === TASK_STATUS.RUNNING && entry.agent?.sessionId === sessionId) {
+        return entry;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Wake the delegating session with a task's pending question. Same framing
+   * boundary as deliverTaskCompletion: harness-trusted wrapper, model-authored
+   * body wrapped untrusted. Engine-spawned tasks (no delegating session) have
+   * no manager to reach -- the webui relay already showed the question.
+   */
+  #deliverQuestion(
+    entry: TaskEntry,
+    questions: Array<{ key: string; prompt: string; options?: string[] }>,
+  ): void {
+    if (!entry.sessionId || !this.#sessionManager?.getBus) return;
+    const lines = questions.map(
+      (q) => `- ${q.prompt}${q.options?.length ? ` (options: ${q.options.join(" | ")})` : ""}`,
+    );
+    const body =
+      `Task ${entry.taskId} is waiting for an answer:\n${lines.join("\n")}\n` +
+      `Reply with task_followup("${entry.taskId}", "<your answer>") -- the worker resumes as soon as the question is answered.`;
+    const content: Array<Record<string, unknown>> = [
+      { type: "text", text: "[Task question]\n" },
+      { type: "untrusted", text: body },
+    ];
+    const bus = this.#sessionManager.getBus(entry.sessionId);
+    if (bus) {
+      bus.enqueue(content, { source: "harness" });
+    } else {
+      logger.warn(
+        `[task ${entry.taskId}] delegating session ${entry.sessionId} has no bus; dropping task question`,
+      );
+    }
   }
 
   /** Cancel: queued -> terminal; running -> abort the in-flight turn; parked-idle -> terminal. */

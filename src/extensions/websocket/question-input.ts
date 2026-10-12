@@ -22,6 +22,18 @@ export interface QuestionBridgeHooks {
   getPolicy(sessionId: string): QuestionPolicy;
   hasChannels(sessionId: string): boolean;
   interrupt(sessionId: string): void;
+  /**
+   * A live question-tool call is about to block: fired once per collect,
+   * before the wait starts. The task host uses this to yield the worker's
+   * lane slot and wake the delegating manager.
+   */
+  onQuestionAsked?: (sessionId: string, questions: QuestionDef[]) => void;
+  /**
+   * The pending question settled (answered, timed out, or cancelled): awaited
+   * before the tool's promise resolves. The task host re-acquires the yielded
+   * lane slot here, so the agent's next LLM call never fires without one.
+   */
+  onQuestionSettled?: (sessionId: string, cancelled: boolean) => Promise<void> | void;
 }
 
 interface PendingQuestion {
@@ -72,7 +84,20 @@ export class WebSocketQuestionBridge {
     this.cancel(sessionId);
 
     return new Promise((resolve) => {
-      const entry: PendingQuestion = { questions, resolve, timer: null };
+      // Every resolution path (answer / answerWithText / timeout / cancel)
+      // goes through entry.resolve, so the settle hook fires once and the
+      // tool's promise only resolves after it settles. Injected (no live tool
+      // call behind it) pendings keep the raw resolve: they never held a
+      // lane slot.
+      const entry: PendingQuestion = {
+        questions,
+        resolve: (answers, cancelled) => {
+          void Promise.resolve(this.#hooks.onQuestionSettled?.(sessionId, cancelled)).then(
+            () => resolve(answers),
+          );
+        },
+        timer: null,
+      };
       const { strategy, timeoutSecs } = this.#hooks.getPolicy(sessionId);
 
       if (strategy !== "wait" && timeoutSecs > 0) {
@@ -80,12 +105,31 @@ export class WebSocketQuestionBridge {
           if (this.#pending.get(sessionId) !== entry) return; // already done
           this.#pending.delete(sessionId);
           if (strategy === "cancel") this.#hooks.interrupt(sessionId);
-          resolve(WebSocketQuestionBridge.defaults(questions));
+          entry.resolve(WebSocketQuestionBridge.defaults(questions), true);
         }, timeoutSecs * 1000);
       }
 
       this.#pending.set(sessionId, entry);
+      this.#hooks.onQuestionAsked?.(sessionId, questions);
     });
+  }
+
+  /**
+   * Settle the pending question with free text: the text answers the first
+   * question, the rest take defaults. This is how a follow-up lands on a
+   * session blocked in a question -- the text is the answer, not a new turn.
+   * False when nothing is pending.
+   */
+  answerWithText(sessionId: string, text: string): boolean {
+    const entry = this.#pending.get(sessionId);
+    if (!entry) return false;
+    this.#pending.delete(sessionId);
+    if (entry.timer) clearTimeout(entry.timer);
+    const answers = WebSocketQuestionBridge.defaults(entry.questions);
+    const first = entry.questions[0];
+    if (first) answers[first.key] = text;
+    entry.resolve(answers, false);
+    return true;
   }
 
   /**

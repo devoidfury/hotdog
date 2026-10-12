@@ -260,3 +260,112 @@ describe("WebSocketQuestionBridge.inject (resumed pending questions)", () => {
     expect(bridge.remove("s1")).toBe(false);
   });
 });
+
+// ── Task-host hooks: lane handoff around a live question ────────────────────
+// onQuestionAsked fires once per live collect (before the wait); onQuestionSettled
+// is awaited before the tool's promise resolves on every settle path, and never
+// fires for injected (no live tool call) pendings.
+
+describe("WebSocketQuestionBridge - task-host hooks", () => {
+  interface HookLog {
+    asked: Array<{ sid: string; n: number }>;
+    settled: Array<{ sid: string; cancelled: boolean }>;
+    order: string[];
+  }
+
+  function makeHookedBridge(): { bridge: WebSocketQuestionBridge; log: HookLog } {
+    const log: HookLog = { asked: [], settled: [], order: [] };
+    const hooks: QuestionBridgeHooks = {
+      getPolicy: () => ({ strategy: "wait", timeoutSecs: 300 }),
+      hasChannels: () => true,
+      interrupt: () => {},
+      onQuestionAsked: (sid, qs) => log.asked.push({ sid, n: qs.length }),
+      onQuestionSettled: async (sid, cancelled) => {
+        log.settled.push({ sid, cancelled });
+      },
+    };
+    const bridge = new WebSocketQuestionBridge(hooks);
+    return { bridge, log };
+  }
+
+  it("fires onQuestionAsked once per live collect, before the wait starts", async () => {
+    const { bridge, log } = makeHookedBridge();
+
+    const p = bridge.collect("s1", [{ key: "q", prompt: "Q?" }]);
+    expect(log.asked).toEqual([{ sid: "s1", n: 1 }]);
+
+    // answer() returns immediately; the settle hook must run before the
+    // tool's promise resolves (the task host re-acquires its lane slot in it).
+    const order: string[] = [];
+    void p.then(() => order.push("resolved"));
+    expect(log.settled).toEqual([]);
+    bridge.answer("s1", { q: "yes" });
+    expect(log.settled).toEqual([{ sid: "s1", cancelled: false }]);
+    expect(order).toEqual([]); // not resolved yet: the hook is in flight
+    await expect(p).resolves.toEqual({ q: "yes" });
+    expect(order).toEqual(["resolved"]);
+    bridge.clear();
+  });
+
+  it("cancel fires the settle hook with cancelled=true", async () => {
+    const { bridge, log } = makeHookedBridge();
+    const p = bridge.collect("s1", [{ key: "q", prompt: "Q?", default: "fb" }]);
+    bridge.cancel("s1");
+    expect(log.settled).toEqual([{ sid: "s1", cancelled: true }]);
+    await expect(p).resolves.toEqual({ q: "fb" });
+    bridge.clear();
+  });
+
+  it("a re-collect on the same session settles the stale pending, then asks the new one", async () => {
+    const { bridge, log } = makeHookedBridge();
+    const stale = bridge.collect("s1", [{ key: "a", prompt: "A?", default: "da" }]);
+    const fresh = bridge.collect("s1", [{ key: "b", prompt: "B?" }]);
+
+    // The stale pending settled first (cancelled), then the new question asked.
+    expect(log.settled).toEqual([{ sid: "s1", cancelled: true }]);
+    expect(log.asked).toEqual([
+      { sid: "s1", n: 1 },
+      { sid: "s1", n: 1 },
+    ]);
+
+    bridge.answer("s1", { b: "2" });
+    expect(log.settled).toEqual([
+      { sid: "s1", cancelled: true },
+      { sid: "s1", cancelled: false },
+    ]);
+    await expect(stale).resolves.toEqual({ a: "da" });
+    await expect(fresh).resolves.toEqual({ b: "2" });
+    bridge.clear();
+  });
+
+  it("an injected question fires no asked hook and no settle hook", () => {
+    const { bridge, log } = makeHookedBridge();
+    let resolved = false;
+    bridge.inject("s1", [{ key: "q", prompt: "?" }], () => {
+      resolved = true;
+    });
+    expect(log.asked).toEqual([]);
+
+    bridge.answer("s1", { q: "x" });
+    expect(resolved).toBe(true);
+    // Injected pendings keep the raw resolve path: nobody held a lane slot.
+    expect(log.settled).toEqual([]);
+    bridge.clear();
+  });
+
+  it("answerWithText settles with the text as the first answer and defaults for the rest", async () => {
+    const { bridge, log } = makeHookedBridge();
+    const p = bridge.collect("s1", [
+      { key: "q1", prompt: "First?" },
+      { key: "q2", prompt: "Second?", default: "d2" },
+    ]);
+
+    expect(bridge.answerWithText("s1", "steer text")).toBe(true);
+    expect(log.settled).toEqual([{ sid: "s1", cancelled: false }]);
+    await expect(p).resolves.toEqual({ q1: "steer text", q2: "d2" });
+
+    // A second steer with nothing pending is a no-op, not a phantom answer.
+    expect(bridge.answerWithText("s1", "late")).toBe(false);
+    bridge.clear();
+  });
+});

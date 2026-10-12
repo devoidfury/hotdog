@@ -517,6 +517,27 @@ describe("manager tools", () => {
     expect(s2.output).toContain("  b: succeeded");
   });
 
+  it("dispatched tasks carry the delegating session for the webui subagent feed", async () => {
+    const root = freshDir();
+    const wfDir = join(root, "defs");
+    mkdirSync(wfDir);
+    writeFileSync(join(wfDir, "runnable.workflow.yaml"), WORKFLOW_TEXT);
+    const fake = makeFakeAgents();
+    const opts = toolOpts(fake.tasks, join(root, "runs"), wfDir);
+    const dispatch = new WorkflowDispatchTool(opts);
+
+    const ctx = { get: () => ({ sessionId: "mgr-session" }) };
+    const r = await dispatch.execute({ file: "runnable" }, ctx as never);
+    expect(r.error).toBeNull();
+    const m = opts.registry.active()[0]!;
+    await settle(() => m.finished !== null || m.error !== null, "dispatched run to finish");
+
+    // The webui feed is scoped by task.sessionId; unstamped tasks are invisible.
+    const infos = fake.tasks.listTasks();
+    expect(infos.length).toBeGreaterThan(0);
+    for (const t of infos) expect(t.sessionId).toBe("mgr-session");
+  });
+
   it("workflow_dispatch cannot run files outside the workflows dir", async () => {
     const root = freshDir();
     const wfDir = join(root, "defs");

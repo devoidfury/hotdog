@@ -91,6 +91,12 @@ export interface RunConfig {
    * place on a real provider lane instead of the uncapped bare-name lane.
    */
   parentModel?: string;
+  /**
+   * Dispatching session id, stamped on every node spawn as managerAgent so
+   * the webui subagent feed (scoped by task sessionId) sees them. Absent for
+   * session-less hosts (foreground CLI).
+   */
+  managerSessionId?: string;
   limits?: Partial<WorkflowLimits>;
   /** Test seam for the wall-clock node cap (default: workflow/config minutes). */
   maxRuntimeMsOverride?: number;
@@ -378,6 +384,12 @@ export class WorkflowRun {
     }
   }
 
+  /** See RunConfig.managerSessionId. Empty object for session-less hosts. */
+  #managerAgentOpt(): Pick<SpawnTaskOptions, "managerAgent"> | Record<string, never> {
+    const sid = this.#cfg.managerSessionId;
+    return sid ? { managerAgent: { sessionId: sid } } : {};
+  }
+
   async #attemptLoop(nr: NodeRun): Promise<void> {
     const n = nr.node;
     const accept = n.accept;
@@ -410,6 +422,7 @@ export class WorkflowRun {
             requires: liveRequires(n),
             profile: n.profile,
             parentModel: this.#cfg.parentModel,
+            ...this.#managerAgentOpt(),
             park: true,
             onTurn: (t) => {
               this.#turnEnded(nr);
@@ -621,6 +634,7 @@ export class WorkflowRun {
           requires: liveRequires(jn),
           profile: jn.profile,
           parentModel: this.#cfg.parentModel,
+          ...this.#managerAgentOpt(),
           park: true,
           onTurn: (t) => {
             this.#turnEnded(jnr);

@@ -252,6 +252,50 @@ function readLog(dir: string): Array<Record<string, unknown>> {
 }
 
 describe("engine: state machine & gates", () => {
+  it("managerSessionId stamps the delegating session on node spawns", async () => {
+    const dir = freshDir();
+    const fake = makeFake(dir, { a: good({ "out.txt": "artifact" }) });
+    const workflow = wf(`
+      version: 1
+      name: scoped
+      description: stamped spawn
+      nodes:
+        - id: a
+          accept:
+            files: [out.txt]
+    `);
+    const run = new WorkflowRun({
+      workflow,
+      runId: "run-scoped",
+      runDir: dir,
+      tasks: fake.manager,
+      managerSessionId: "sess-7",
+    });
+    expect((await run.run()).outcome).toBe("succeeded");
+    const infos = fake.manager.listTasks();
+    expect(infos.length).toBeGreaterThan(0);
+    for (const t of infos) expect(t.sessionId).toBe("sess-7");
+  });
+
+  it("without managerSessionId the tasks carry no delegating session", async () => {
+    const dir = freshDir();
+    const fake = makeFake(dir, { a: good({ "out.txt": "artifact" }) });
+    const workflow = wf(`
+      version: 1
+      name: unscoped
+      description: unstamped spawn
+      nodes:
+        - id: a
+          accept:
+            files: [out.txt]
+    `);
+    const run = new WorkflowRun({ workflow, runId: "run-unscoped", runDir: dir, tasks: fake.manager });
+    expect((await run.run()).outcome).toBe("succeeded");
+    const infos = fake.manager.listTasks();
+    expect(infos.length).toBeGreaterThan(0);
+    for (const t of infos) expect(t.sessionId).toBeNull();
+  });
+
   it("runs a linear graph; downstream sees upstream pointer summaries", async () => {
     const dir = freshDir();
     const fake = makeFake(dir, {

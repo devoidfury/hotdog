@@ -498,6 +498,7 @@ export class WorkflowDispatchTool extends WorkflowTool {
       tasks,
       limits: this.opts.limits,
       ...(parentModel ? { parentModel } : {}),
+      ...(callingSessionId ? { managerSessionId: callingSessionId } : {}),
     });
     const managed: ManagedRun = {
       runId,

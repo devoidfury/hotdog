@@ -67,7 +67,6 @@ interface CreateSessionOptions {
 interface SwitchProfileOptions {
   sessionId: string;
   profileName: string;
-  force?: boolean;
 }
 
 interface SessionRegistryOptions {
@@ -456,49 +455,45 @@ export class SessionRegistry {
     return { ...this.#profiles };
   }
 
+  /**
+   * Switch the session's profile. Context is preserved -- switching never
+   * clears the message log (applyProfile rebuilds the system prompt and tool
+   * defs without touching messages; `/clear` stays the explicit wipe). Fires
+   * PROFILE_SWITCH so the session-log extension mirrors the switch into the
+   * log and the index -- without it a webui switch would be invisible to a
+   * future cold resume.
+   */
   async switchProfile({
     sessionId,
     profileName,
-    force = false,
-  }: SwitchProfileOptions): Promise<{
-    success: boolean;
-    requiresConfirmation: boolean;
-    error?: string;
-  }> {
+  }: SwitchProfileOptions): Promise<{ success: boolean; error?: string }> {
     const meta = this.#metadata.get(sessionId);
     if (!meta) {
-      return {
-        success: false,
-        requiresConfirmation: false,
-        error: "Session not found",
-      };
+      return { success: false, error: "Session not found" };
     }
 
     const profile = this.#profiles[profileName];
     if (!profile) {
-      return {
-        success: false,
-        requiresConfirmation: false,
-        error: `Profile "${profileName}" not found`,
-      };
-    }
-
-    if (!force && meta.userMessageCount >= 1) {
-      return { success: false, requiresConfirmation: true };
+      return { success: false, error: `Profile "${profileName}" not found` };
     }
 
     const agent = this.#sessionManager.getAgentBySessionId(sessionId);
     if (agent) {
+      const fromProfile = agent.profileName;
       agent.applyProfile(profileName, profile);
-      // Wipes messages + system prompt, hence the UI confirmation above.
-      await agent.clearContext();
       meta.model = agent.model;
+      // Fire-and-forget: notifyHooks swallows handler errors, and the switch
+      // must not fail because a log/index write did.
+      agent.hooks?.notifyHooks(HOOKS.PROFILE_SWITCH, {
+        agent: agent as Agent,
+        fromProfile,
+        toProfile: profileName,
+      });
     }
     meta.profile = profileName;
-    meta.userMessageCount = 0;
     meta.lastActivityAt = Date.now();
 
-    return { success: true, requiresConfirmation: false };
+    return { success: true };
   }
 
   incrementUserMessageCount(sessionId: string): void {
@@ -638,18 +633,32 @@ async function loadLogIntoNewSession(
   // Restore persisted model and profile so the replayed session resumes with
   // the same tool set it ended on, not the global defaults. The index is the
   // source of truth for cold loads; metadata is in-memory-only and lost on restart.
+  // NOTE: registry.create takes `profile` (it maps to the buildAgent config's
+  // `profileName`); passing `profileName` here silently resumed every cold
+  // session on "default".
   const row = getSessionRow(logId);
-  const buildOpts: Record<string, unknown> = {
+  const buildOpts: CreateSessionOptions = {
     ...(row?.model ? { model: row.model } : {}),
-    ...(row?.profile ? { profileName: row.profile } : {}),
+    ...(row?.profile ? { profile: row.profile } : {}),
   };
   const newSession = await registry.create(buildOpts);
   const { pendingQuestions, profile } = replayEntriesIntoContext(newSession.agent, entries);
+  const meta = registry.get(newSession.sessionId)?.metadata;
   // The log may have a PROFILE_SWITCH the index row hasn't mirrored yet
   // (row updates only on tool fires or explicit index writes). Overlay it.
-  if (profile) {
+  if (profile && profile !== newSession.agent.profileName) {
     const p = registry.listProfiles()[profile];
-    if (p) newSession.agent.applyProfile(profile, p);
+    if (p) {
+      newSession.agent.applyProfile(profile, p);
+      if (meta) meta.profile = profile;
+    }
+  }
+  // The replayed history is real context: keep the metadata count honest so
+  // the session list agrees with the message log.
+  if (meta) {
+    meta.userMessageCount = newSession.agent
+      .getMessages()
+      .filter((m) => m.role === "user").length;
   }
 
   return { sessionId: newSession.sessionId, agent: newSession.agent, pendingQuestions };
@@ -1090,7 +1099,6 @@ async function routeMessage(
         const result = await registry.switchProfile({
           sessionId: msg.sessionId as string,
           profileName: msg.profileName as string,
-          force: msg.force as boolean | undefined,
         });
         if (result.success) {
           ws.send(
@@ -1099,14 +1107,6 @@ async function routeMessage(
               sessionId: msg.sessionId,
               profile: msg.profileName,
               success: true,
-            }),
-          );
-        } else if (result.requiresConfirmation) {
-          ws.send(
-            JSON.stringify({
-              type: S2C.PROFILE_SWITCHED,
-              sessionId: msg.sessionId,
-              requiresConfirmation: true,
             }),
           );
         } else {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **webui profile fix: cold resume keeps its profile, switching never clears.** Resuming a cold session read the saved profile under the wrong key, so every resumed session silently rebuilt on `default`. Profile switching also still ran the old wipe-plus-confirm path; it now keeps the conversation like `/profile` in the CLI, and records the switch so the next resume inherits it.
+
 - **task questions stop holding the provider lane.** A worker blocked inside a `question` tool call held its lane slot, and the delegating manager session usually sits on that same lane, so it could never wake to answer. The worker now yields the slot while a question is pending and re-takes it before the question settles; the delegating session is woken through its bus with the question and a `task_followup` hint.
 
 - fix task interrupts while a worker sits in a question: the tool raced only the per-run abort controller, but an interrupt fires the agent-level signal, so the task stayed "running" inside its question forever. Both signals are raced now.

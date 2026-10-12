@@ -635,18 +635,10 @@ function onChatKeydown(e: KeyboardEvent): void {
 }
 
 function onProfileChange(e: Event): void {
-  const select = e.currentTarget as HTMLSelectElement;
-  const profileName = select.value;
+  const profileName = (e.currentTarget as HTMLSelectElement).value;
   if (!chat) return;
-
-  if (
-    chat.getUserMessageCount() > 0 &&
-    !confirm("Switching profile will clear session context and all messages. Continue?")
-  ) {
-    select.value = chat.currentProfileAtom();
-    return;
-  }
-  chat.switchProfile(profileName, true); // force: confirm() above already asked
+  // Switching preserves the conversation (see SessionRegistry.switchProfile).
+  chat.switchProfile(profileName);
 }
 
 function onModelChange(e: Event): void {

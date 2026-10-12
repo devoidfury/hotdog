@@ -226,7 +226,7 @@ describe("session management messages", () => {
     expect(chat.sessionIdAtom()).toBeNull();
   });
 
-  it("sessions updates profile/title/count for the active session", () => {
+  it("sessions updates profile/title for the active session", () => {
     const { ws, chat, callbacks } = makeChat();
     ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
     ws.fireMessage({
@@ -238,7 +238,6 @@ describe("session management messages", () => {
     });
     expect(chat.currentProfileAtom()).toBe("coder");
     expect(chat.sessionTitleAtom()).toBe("renamed");
-    expect(chat.getUserMessageCount()).toBe(3);
     expect(callbacks.sessionsUpdate).toHaveLength(1);
   });
 
@@ -383,9 +382,7 @@ describe("outbound commands", () => {
     expect(ws.lastSent()).toEqual({ type: "cancel", sessionId: "s1" });
     expect(chat.workingAtom()).toBe(false);
     chat.switchProfile("coder");
-    expect(ws.lastSent()).toMatchObject({ type: "switchProfile", profileName: "coder", force: false });
-    chat.switchProfile("coder", true);
-    expect(ws.lastSent()).toMatchObject({ force: true });
+    expect(ws.lastSent()).toEqual({ type: "switchProfile", sessionId: "s1", profileName: "coder" });
     chat.sendQuestionAnswer({ k: "v" });
     expect(ws.lastSent()).toMatchObject({ type: "questionAnswer", answers: { k: "v" } });
   });

@@ -10,6 +10,7 @@ import {
   dismissResumedQuestions,
   type HotdogServerSocket,
 } from "@extensions/websocket/server.ts";
+import { syncSessionFromLog, indexSessionProfile } from "@core/session/session-index.ts";
 import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
@@ -203,7 +204,7 @@ describe("SessionRegistry", () => {
   });
 
   describe("switchProfile", () => {
-    it("applies the full profile (model, whitelist, blacklist) and clears context", async () => {
+    it("applies the full profile (model, whitelist, blacklist) and preserves context", async () => {
       const { agent, toolRegistry } = createFixture({
         model: "prov/old-model",
         modelRegistry: {
@@ -236,16 +237,18 @@ describe("SessionRegistry", () => {
       expect(agent.profileBody).toBe("coder body");
       expect(agent.model).toBe("prov/new-model");
       expect(wsRegistry.get(sessionId)!.metadata.model).toBe("prov/new-model");
+      expect(wsRegistry.get(sessionId)!.metadata.profile).toBe("coder");
       expect(agent.contextLimit).toBe(64000);
       expect(agent.toolWhitelist).toEqual(["alpha"]);
-      // The UI confirmation exists for this wipe.
-      expect(agent.context.log.getAll()).toHaveLength(0);
+      // Switching never clears the message log (applyProfile only rebuilds the
+      // system prompt / tool defs; /clear stays the explicit wipe).
+      expect(agent.context.log.getAll()).toHaveLength(1);
       // The whitelist restricts the tools advertised from the next turn on.
       const names = (await agent.getToolDefs()).map((d) => d.function.name);
       expect(names).toEqual(["alpha"]);
     });
 
-    it("requires confirmation after a user message, and force overrides it", async () => {
+    it("switches without confirmation even after user messages, and keeps the count", async () => {
       const { agent } = createFixture({});
       const wsRegistry = new SessionRegistry({
         buildAgent: async () => agent,
@@ -254,13 +257,11 @@ describe("SessionRegistry", () => {
       const { sessionId } = await wsRegistry.create({});
       wsRegistry.incrementUserMessageCount(sessionId);
 
-      const guarded = await wsRegistry.switchProfile({ sessionId, profileName: "coder" });
-      expect(guarded).toEqual({ success: false, requiresConfirmation: true });
-      expect(agent.profileName).toBe("test"); // untouched
-
-      const forced = await wsRegistry.switchProfile({ sessionId, profileName: "coder", force: true });
-      expect(forced).toEqual({ success: true, requiresConfirmation: false });
+      const result = await wsRegistry.switchProfile({ sessionId, profileName: "coder" });
+      expect(result.success).toBe(true);
       expect(agent.profileName).toBe("coder");
+      // The switch is non-destructive, so the message count stays honest.
+      expect(wsRegistry.get(sessionId)!.metadata.userMessageCount).toBe(1);
     });
 
     it("errors on unknown profiles and unknown sessions", async () => {
@@ -895,6 +896,76 @@ describe("createWsServer - cold log operations", () => {
     wsServer.onMessage(ws, JSON.stringify({ type: C2S.LOAD_LOG, logId: "non-existent-log" }));
     const err = await waitForMessage(ws, S2C.ERROR);
     expect(err.message).toContain("No entries found");
+  });
+
+  it("LOAD_LOG restores the profile from the index row into build config, metadata, and SESSION_CREATED", async () => {
+    writeFixtureLog(FIXTURE_LOG_ID);
+    await syncSessionFromLog(FIXTURE_LOG_ID);
+    await indexSessionProfile(FIXTURE_LOG_ID, "coder");
+
+    const log = new MessageLog();
+    let builtProfileName: string | undefined;
+    wsServer = createWsServer(createWsMockCore(), {
+      profiles: {
+        coder: { body: "coder body", model: null, whitelistTools: null, blacklistTools: [], manager: false },
+      },
+      buildAgent: async (cfg) => {
+        builtProfileName = cfg.profileName;
+        return makeWsMockAgent({
+          sessionId: cfg.sessionId || "test",
+          profileName: cfg.profileName,
+          getMessages: () => log.getAll(),
+          addMessage: (msg: any) => { log.push(msg as any); },
+        });
+      },
+    });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.LOAD_LOG, logId: FIXTURE_LOG_ID }));
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    // The row's profile must reach the agent build (registry.create takes
+    // `profile`, NOT `profileName` -- the key that silently defaulted every
+    // cold resume).
+    expect(builtProfileName).toBe("coder");
+    expect(created.profile).toBe("coder");
+    expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.profile).toBe("coder");
+  });
+
+  it("LOAD_LOG overlays a log profile the index row has not mirrored", async () => {
+    const logId = `${FIXTURE_LOG_ID}-overlay`;
+    const lines = [
+      JSON.stringify({ ts: "2024-01-01T00:00:00Z", session_id: logId, source: "session_start", content: "", profile: "coder" }),
+      JSON.stringify({ ts: "2024-01-01T00:00:01Z", session_id: logId, source: "input", content: "hi" }),
+    ];
+    writeFileSync(join(SESSIONS_DIR, `${logId}.jsonl`), lines.join("\n") + "\n");
+    // Row exists but carries no profile -- replay must supply it, including
+    // the registry metadata (not just the agent).
+    await syncSessionFromLog(logId);
+
+    const log = new MessageLog();
+    wsServer = createWsServer(createWsMockCore(), {
+      profiles: {
+        coder: { body: "coder body", model: null, whitelistTools: null, blacklistTools: [], manager: false },
+      },
+      buildAgent: async (cfg) => {
+        const agent = makeWsMockAgent({
+          sessionId: cfg.sessionId || "test",
+          profileName: cfg.profileName,
+          getMessages: () => log.getAll(),
+          addMessage: (msg: any) => { log.push(msg as any); },
+        });
+        agent.applyProfile = (name: string) => { agent.profileName = name; };
+        return agent;
+      },
+    });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.LOAD_LOG, logId }));
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(created.profile).toBe("coder");
+    expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.profile).toBe("coder");
+    // The replayed user message is counted in the resumed metadata.
+    expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.userMessageCount).toBe(1);
   });
 });
 

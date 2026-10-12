@@ -120,8 +120,6 @@ function clearTasks(): void {
 }
 // Explicit session name for the active session; null = show the short id.
 const sessionTitleAtom = reactiveState<string | null>(null);
-// >0 means switching profiles will clear context, so confirm first.
-let userMessageCount = 0;
 
 interface SessionCreatedMessage {
   type: "sessionCreated";
@@ -339,7 +337,6 @@ interface ProfileSwitchedMessage {
   sessionId: string;
   profile?: string;
   success?: boolean;
-  requiresConfirmation?: boolean;
 }
 
 interface ServerErrorMessage {
@@ -443,7 +440,7 @@ export interface ChatController {
   ) => void;
   setSession: (sessionId: string) => void;
   listProfiles: () => void;
-  switchProfile: (profileName: string, force?: boolean) => void;
+  switchProfile: (profileName: string) => void;
   // Push-to-talk: upload a base64 recording, await the transcript text.
   transcribe: (mimeType: string, data: string) => Promise<string>;
   sttEnabledAtom: Atom<boolean>;
@@ -458,8 +455,6 @@ export interface ChatController {
   currentProfileAtom: Atom<string>;
   connectedAtom: Atom<boolean>;
   workingAtom: Atom<boolean>;
-  // User messages in the active session; >0 means profile switches clear context.
-  getUserMessageCount: () => number;
   // Per-session working state for the sidebar indicators.
   sessionWorkingMap: Map<string, boolean>;
   messageListAtom: () => MessageListManager | null;
@@ -562,11 +557,10 @@ export function createChat({
             currentProfileAtom(activeSession.profile);
           }
           // The list is authoritative for the active session's title
-          // (e.g. after a rename from this or another tab).
-          sessionTitleAtom(activeSession.title ?? null);
-        }
-        userMessageCount = activeSession?.userMessageCount || 0;
-        onSessionsUpdate?.(data.sessions as SessionInfo[], sessionIdAtom());
+        // (e.g. after a rename from this or another tab).
+        sessionTitleAtom(activeSession.title ?? null);
+      }
+      onSessionsUpdate?.(data.sessions as SessionInfo[], sessionIdAtom());
         return;
       }
       case "profiles":
@@ -976,13 +970,13 @@ export function createChat({
     send({ type: "listProfiles" });
   }
 
-  function switchProfile(profileName: string, force: boolean = false): void {
+  function switchProfile(profileName: string): void {
     const sessionId = sessionIdAtom();
     if (!sessionId) {
       console.warn("[chat] No active session for profile switch");
       return;
     }
-    send({ type: "switchProfile", sessionId, profileName, force });
+    send({ type: "switchProfile", sessionId, profileName });
   }
 
   // Subagent task controls: the server delegates to the TaskManager
@@ -1008,10 +1002,6 @@ export function createChat({
 
   function getCurrentProfile(): string {
     return currentProfileAtom();
-  }
-
-  function getUserMessageCount(): number {
-    return userMessageCount;
   }
 
   connect();
@@ -1064,7 +1054,6 @@ export function createChat({
     currentProfileAtom,
     connectedAtom,
     workingAtom,
-    getUserMessageCount,
     sessionWorkingMap,
     messageListAtom: () => messageList,
     sttEnabledAtom,

@@ -1073,11 +1073,18 @@ Bash commands run with the user's own permissions -- nothing mediates a running 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable compaction. |
-| `strategy` | `string` | `"summarize"` | Strategy: `summarize`, `drop`, `summarize-short`, `token-aware`, `trim`. Switch at runtime with `/compact <strategy>` or `/compact:<strategy>`. |
+| `strategy` | `string` | `"pass-the-baton"` | Strategy: `pass-the-baton`, `summarize`, `drop`, `summarize-short`, `token-aware`, `trim`. Switch at runtime with `/compact <strategy>` or `/compact:<strategy>`. `pass-the-baton` keeps the largest oldest prefix byte-identical (prefix-cache hit), pops the newest messages, and appends a system-notice ordering the model to wrap up and hand off — no summarization call. When the handoff happens (handoff tool, or a narrated final summary with stop — treated the same), the popped tail is replayed verbatim after the plan message of the fresh session; it is also mirrored to `baton-popped.json` in the sessions dir and consumed on replay. |
 | `reserveTokens` | `number` | `8000` | Token budget to reserve for the response. |
 | `contextLimit` | `number` | core `contextLimit` | Context window size in tokens used by the strategies; defaults to the core [`contextLimit`](#contextlimit). |
 | `keepRecentMessages` | `number` | `3` | Recent messages to keep after compaction. |
 | `userTurnGuardPrompt` | `string` | `"Continue from the compressed conversation context above."` | Prompt added when compaction ends in a non-user turn to ensure compatibility with some LLM templates. |
+| `batonNoticePrompt` | `string` | `"We've reached the end of the session. Wrap up now: ..."` | System-notice text appended by `pass-the-baton`, ordering the model to stop and produce a handoff. Its presence in context also marks the baton as already passed (no repeated pops). |
+
+Notes on `pass-the-baton`:
+
+- A manual `/compact` uses the configured strategy, so with `pass-the-baton` active it arms the same handoff restart: the notice orders the model to wrap up and the session restarts on its summary (or on an explicit `handoff` call). For a trim that never restarts the session use `/compact trim` (or `summarize`, `drop`) — `/compact --keep N` is always a plain cut.
+- Turns that happen between the pop and the handoff exist only inside the narrated summary: they are neither in the kept prefix nor in the stashed tail, so the summary is their only carrier into the fresh session.
+- Task/subagent workers have no continuation seam (`enqueueCallback` unwired): they drop the baton on completion instead of clearing their context with no plan to restart on. The notice stays in their context, so no repeated pops.
 
 ```json
 { "compaction": { "strategy": "token-aware", "reserveTokens": 16000 } }

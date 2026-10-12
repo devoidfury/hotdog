@@ -3,7 +3,9 @@ import { SummarizeStrategy, SUMMARIZE_SHORT_VARIANT } from "./strategies/summari
 import { DropStrategy } from "./strategies/drop.ts";
 import { TokenAwareStrategy } from "./strategies/token-aware.ts";
 import { TrimStrategy } from "./strategies/trim.ts";
+import { PassTheBatonStrategy, hasBatonNotice } from "./strategies/pass-the-baton.ts";
 import { shouldCompact, type WireRenderContext } from "./utils.ts";
+import { BATON_NOTICE_PROMPT } from "./prompts.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
@@ -16,7 +18,7 @@ import type { Agent } from "@core/agent.ts";
 import { CoreContext, ExtensionInstance, CommandsRegisterPayload, getExtensionConfig } from "@core/extensions/types.ts";
 import { resolveModelConfig, type ModelConfig } from "@core/config/providers.ts";
 import { matcher, completion } from "./completions.ts";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
 interface CompactionSettings {
@@ -25,6 +27,8 @@ interface CompactionSettings {
   keepRecentMessages: number;
   strategy: string;
   userTurnGuardPrompt: string;
+  /** System-notice text appended by pass-the-baton to order a handoff. */
+  batonNoticePrompt: string;
   /** Context window size in tokens; threaded from the core contextLimit unless overridden here. */
   contextLimit?: number;
 }
@@ -60,6 +64,15 @@ export function create(core: CoreContext): ExtensionInstance | null {
   strategyRegistry.register(new SummarizeStrategy(SUMMARIZE_SHORT_VARIANT));
   strategyRegistry.register(new TokenAwareStrategy());
   strategyRegistry.register(new TrimStrategy());
+  strategyRegistry.register(new PassTheBatonStrategy());
+
+  /**
+   * Live baton state per session: the tail popped by pass-the-baton, plus
+   * the flag set once the handoff has happened (via the handoff tool or a
+   * narrated final message) and the fresh context awaits the replay.
+   */
+  const batonStash = new Map<string, { popped: Message[]; replayPending: boolean }>();
+  const batonKey = (agent: { sessionId?: string | null }): string => agent.sessionId || "default";
 
   // Helpers are nested in create() so they close over core, settings, and the registry.
 
@@ -191,8 +204,10 @@ export function create(core: CoreContext): ExtensionInstance | null {
       if (!result) return false;
 
       const compactedCount = result.messagesCompacted;
-
-      const keptMessages = messages.slice(compactedCount);
+      const tailCut = result.keepFrom === "tail";
+      const keptMessages = tailCut
+        ? messages.slice(0, messages.length - compactedCount)
+        : messages.slice(compactedCount);
 
       // Safety net against custom strategies: a tool message must never be
       // the first kept message without its parent assistant tool_calls
@@ -204,6 +219,21 @@ export function create(core: CoreContext): ExtensionInstance | null {
         );
         return false;
       }
+
+      // Tail-pop (pass-the-baton): stash the popped tail so the fresh
+      // context after the handoff can pick the recent turns back up — the
+      // narrating agent shed them to stay on the cached prefix, the
+      // incoming agent inherits them (see the TURN_END/CONTEXT replay
+      // below). The live map is the in-process path; the file is the
+      // cross-process/debug record. Best-effort: a failed write must not
+      // abort the baton itself.
+      if (tailCut && compactedCount > 0) {
+        const popped = messages.slice(messages.length - compactedCount);
+        await stashBatonMessages(agent.sessionId, popped);
+        batonStash.set(batonKey(agent), { popped, replayPending: false });
+      }
+
+      const newContext: Message[] = [...keptMessages];
 
       if (result.summary) {
         // Harness message: the wrapper tag parts are trusted and reach the
@@ -220,18 +250,38 @@ export function create(core: CoreContext): ExtensionInstance | null {
             { type: "text", text: `</${tag}>` },
           ],
         });
-
-        agent.replaceContext(ensureUserTurnGuard([
-          summaryMsg,
-          ...keptMessages,
-        ]));
-      } else {
-        agent.replaceContext(ensureUserTurnGuard(keptMessages));
+        newContext.unshift(summaryMsg);
       }
 
+      if (result.appendNotice) {
+        // Harness system-notice: verbatim at the wire per the wrapper trust
+        // spec. Its harness role also satisfies ensureUserTurnGuard, so the
+        // baton notice stays the last message in the context.
+        newContext.push(
+          new Message({
+            role: "harness",
+            source: "harness",
+            content: [{ type: "system-notice", text: result.appendNotice }],
+          }),
+        );
+      }
+
+      agent.replaceContext(ensureUserTurnGuard(newContext));
+
+      // Normalized to the CompactionResultEvent shape (core/context/
+      // output.ts) so any sink bridge can forward it verbatim: token
+      // figures come from the strategy metadata, and a strategy with no
+      // summary (baton, drop, trim) omits the field rather than sending
+      // null — consumers render "Summary: null" if it is present.
       await core.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, {
         type: "compaction_result",
-        data: result,
+        data: {
+          messagesCompacted: result.messagesCompacted,
+          tokensBefore: result.metadata?.tokensBefore,
+          tokensAfter: result.metadata?.tokensAfter,
+          strategy: result.metadata?.strategyName ?? strategy.name,
+          ...(result.summary ? { summary: result.summary } : {}),
+        },
         agent,
       });
       return true;
@@ -259,6 +309,61 @@ export function create(core: CoreContext): ExtensionInstance | null {
       logger.warn(`[compaction] debug dump failed: ${formatError(err)}`);
       return false;
     }
+  }
+
+  /**
+   * Persist the tail popped by pass-the-baton. After the handoff, a fresh
+   * session can re-append these messages so the recent turns survive the
+   * pop; overwritten on each baton pass. The reader side (handoff into a
+   * new session) is intentionally not wired here.
+   */
+  async function stashBatonMessages(
+    sessionId: string | null | undefined,
+    popped: Message[],
+  ): Promise<void> {
+    const dir = sessionsDir();
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        join(dir, "baton-popped.json"),
+        JSON.stringify(
+          {
+            ts: new Date().toISOString(),
+            session_id: sessionId ?? null,
+            messages: popped.map((m) => m.toJSON()),
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+    } catch (err) {
+      logger.warn(`[compaction] baton stash failed: ${formatError(err)}`);
+    }
+  }
+
+  /** Best-effort removal of the stash file once its tail has been replayed. */
+  async function removeBatonStashFile(): Promise<void> {
+    try {
+      await unlink(join(sessionsDir(), "baton-popped.json"));
+    } catch {
+      // Missing or already gone: nothing to clean.
+    }
+  }
+
+  /**
+   * Formats the narrated summary as the plan message of the fresh session,
+   * mirroring the handoff tool's contract (title + plan + continuation
+   * note) without depending on that extension.
+   */
+  function formatBatonPlanMessage(summary: string): string {
+    return [
+      "# Baton handoff",
+      "",
+      "## Status",
+      summary,
+      "",
+      "_The previous session hit its context limit and handed off mid-session. Its most recent turns are appended below verbatim. Continue the work directly; do not restart it from scratch._",
+    ].join("\n");
   }
 
   async function _handleCompactCommand(agent: Agent, opts: { keep: number | null; debug: boolean }): Promise<Record<string, unknown>> {
@@ -345,6 +450,21 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
       // Runs before each LLM call; compacts in place when the token budget is exceeded.
       [HOOKS.CONTEXT]: async ({ messages, agent }) => {
+        // Baton replay (first act of the fresh session): re-append the
+        // popped tail verbatim, right after the plan message the drain
+        // already placed in context (bus messages enter the context before
+        // this hook fires, so the order is always plan-then-tail). The
+        // boundary rule on the pop side guarantees the tail never starts
+        // with a tool result orphaned from its parent assistant turn.
+        const st = agent ? batonStash.get(batonKey(agent)) : undefined;
+        if (st?.replayPending) {
+          batonStash.delete(batonKey(agent));
+          await removeBatonStashFile();
+          const current = agent.context.getMessages();
+          agent.replaceContext([...current, ...st.popped]);
+          return { messages: agent.buildMessages() };
+        }
+
         if (!settings.enabled) return;
 
         const nonSystemMessages = messages.filter((m) => m.role !== "system");
@@ -369,6 +489,96 @@ export function create(core: CoreContext): ExtensionInstance | null {
         return { messages: agent.buildMessages() };
       },
 
+      /**
+       * Baton handoff detection. After pass-the-baton fires there are two
+       * ways the session ends, and both must reach the same fresh context:
+       *
+       *  A. The model calls the handoff tool. The handoff-tool extension
+       *     (higher TURN_END priority, already run) clears the context and
+       *     enqueues its plan; we only mark the tail for replay.
+       *  B. The model ignores the tool and just emits its handoff as a
+       *     final summary message with stop ("completion"). We treat that
+       *     the same: clear, restart on the summary as the plan (the same
+       *     clear/ensureSystemPrompt/enqueue/claim sequence the handoff
+       *     tool runs, owned by us), and mark the tail for replay.
+       *
+       * The replay itself happens in the CONTEXT hook so it lands after
+       * the enqueued plan message (drained into context before that hook
+       * fires). Abnormal endings drop the baton: a cancelled or errored
+       * turn must not hijack whatever comes next.
+       */
+      [HOOKS.TURN_END]: async ({ reason, cancelled, agent, toolResults, claimTurn, message }) => {
+        if (!agent) return;
+        const key = batonKey(agent);
+        const st = batonStash.get(key);
+        if (!st) return;
+
+        if (cancelled || reason === "error" || reason === "max_iterations" || reason === "empty_response") {
+          batonStash.delete(key);
+          return;
+        }
+
+        // The handoff tool's registered name ("handoff" in the handoff-tool
+        // extension; referenced by name only — no dependency on it).
+        const notice = settings.batonNoticePrompt ?? BATON_NOTICE_PROMPT;
+        if (toolResults?.some((tr) => tr.toolName === "handoff")) {
+          // Path A, armed on a precondition instead of the call alone: the
+          // handoff tool cleared the context on success, so our notice is
+          // gone only when the restart actually happened. A failed call
+          // (ToolResult.err on bad input) or a synthesized skip (length-
+          // stop, maxToolCalls cap) leaves the context — and the notice —
+          // intact; replaying the tail into that live context would undo
+          // the pop. Keep the stash: a real handoff or a narrated wrap-up
+          // can still take the baton on a later turn.
+          if (hasBatonNotice(agent.context.getMessages(), notice)) return;
+          // Handoff-tool already claimed the turn and enqueued the plan.
+          // Nothing to do but queue the tail replay.
+          st.replayPending = true;
+          return;
+        }
+
+        if (reason !== "completion" || st.replayPending) return;
+
+        // Path B: only if our notice is still in the context — the model
+        // narrated its wrap-up in response to the baton. (If the notice is
+        // gone the context was rewritten out from under us; drop the baton
+        // rather than hijack the session.)
+        if (!hasBatonNotice(agent.context.getMessages(), notice)) {
+          batonStash.delete(key);
+          return;
+        }
+
+        // Continuation-seam guard: enqueue() reaches a draining consumer only
+        // when the host wired agent.enqueueCallback (the session bus does;
+        // factory-built task/subagent workers leave it null, where enqueue()
+        // is a silent no-op). Clearing such an agent would destroy its work
+        // with no plan to restart on — the baton is dropped, not taken.
+        if (typeof (agent as { enqueueCallback?: unknown }).enqueueCallback !== "function") {
+          batonStash.delete(key);
+          return;
+        }
+
+        // Own the continuation before any await, mirroring the handoff
+        // tool: a failed claim means another handler owns this turn.
+        if (claimTurn && !claimTurn()) return;
+
+        const summary =
+          typeof message === "string" && message.trim().length > 0
+            ? message
+            : "(The previous agent hit the context limit and stopped without a written summary. Its most recent turns are appended verbatim below.)";
+        try {
+          await agent.clearContext();
+          await agent.ensureSystemPrompt();
+          // The summary is model-authored, so it rides model provenance —
+          // same rule the handoff tool applies to the plan it enqueues.
+          agent.enqueue(formatBatonPlanMessage(summary), { source: "model" });
+          st.replayPending = true;
+        } catch (e: unknown) {
+          batonStash.delete(key);
+          logger.warn(`[compaction] baton handoff failed: ${formatError(e)}`);
+        }
+      },
+
       // Error-driven compaction (context-overflow rescue): llama.cpp/Ollama/
       // LM Studio/vLLM reject an oversized prompt with a 4xx/5xx. That is not
       // fatal -- compact once and let core's exactly-once provider:error
@@ -379,22 +589,38 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
         // The rescue is LLM-free on purpose: the backend just rejected a
         // roughly conversation-sized request, so a summarize pass (same size,
-        // same window) would likely fail too. trim drops the minimum number of
-        // oldest messages; when its local estimate claims the context already
-        // fits (that estimate is exactly what lost the race), fall back to the
-        // blunt drop. A second overflow propagates -- the core provider:error
-        // seam retries once and the retry is not itself re-caught.
+        // same window) would likely fail too. Chain, cheapest and
+        // cache-friendliest first:
+        //  - pass-the-baton pops the newest messages and orders a handoff;
+        //    the kept window stays a byte-prefix of the failed prompt, so
+        //    prefix-matching runners re-read it from cache. Declined when a
+        //    baton notice is already present or the estimate says the
+        //    context fits.
+        //  - trim drops the minimum number of oldest messages; its own fit
+        //    check returns null when the local estimate claims the context
+        //    already fits (that estimate is exactly what lost the race).
+        //  - drop is the blunt last resort, gated so a misclassified
+        //    overflow (a generic error body quoting an overflow phrase)
+        //    cannot silently lose real history from a young,
+        //    comfortably-fitting session. Same count gate the CONTEXT hook
+        //    uses; a genuine estimate-race overflow is conversation-sized
+        //    and passes it.
+        // A second overflow propagates -- the core provider:error seam
+        // retries once and the retry is not itself re-caught.
         let rescued = false;
-        const trim = strategyRegistry.get("trim");
-        if (trim) rescued = await _performCompaction(agent, trim);
+        const baton = strategyRegistry.get("pass-the-baton");
+        if (baton && baton.canCompact(agent.context.getMessages(), settings)) {
+          rescued = await _performCompaction(agent, baton);
+        }
+        if (!rescued) {
+          // trim stays ungated (as before): its execute self-checks the fit,
+          // so a genuine overflow of few but huge messages is rescued even
+          // below the message-count gate.
+          const trim = strategyRegistry.get("trim");
+          if (trim) rescued = await _performCompaction(agent, trim);
+        }
         if (!rescued) {
           const drop = strategyRegistry.get("drop");
-          // Gate the blunt fallback: drop.execute has no fit check of its own,
-          // so on a misclassified overflow (a generic error body quoting an
-          // overflow phrase) it would silently lose real history from a young,
-          // comfortably-fitting session. Same count gate the CONTEXT hook
-          // uses; a genuine estimate-race overflow is conversation-sized and
-          // passes it.
           if (drop && drop.canCompact(agent.context.getMessages(), settings)) {
             rescued = await _performCompaction(agent, drop);
           }

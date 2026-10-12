@@ -106,7 +106,7 @@ interface TokenUsageMessage {
   totalTokens: number;
 }
 
-interface CompactionResultMessage { summary: string; messagesCompacted: number; }
+interface CompactionResultMessage { summary?: string; messagesCompacted: number; }
 interface SessionStateMessage { key: string; value: string | string[] | boolean | number; }
 interface ErrorMessage { message: string; }
 
@@ -712,7 +712,11 @@ export function createMessageList(
     el.className = "message compaction-result";
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.textContent = `Compacted ${messagesCompacted} messages. Summary: ${summary}`;
+    // Strategies without a summary (pass-the-baton, drop, trim) omit the
+    // field; never render "Summary: null".
+    bubble.textContent = summary
+      ? `Compacted ${messagesCompacted} messages. Summary: ${summary}`
+      : `Compacted ${messagesCompacted} messages.`;
     el.appendChild(bubble);
     container.appendChild(el);
     scrollBottom();

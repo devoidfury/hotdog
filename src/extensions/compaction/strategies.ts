@@ -14,6 +14,12 @@ export interface CompactionSettings {
    * strategies must never guess it. Guard with requireContextLimit().
    */
   contextLimit?: number;
+  /**
+   * System-notice text appended by pass-the-baton. Threaded through the
+   * settings so strategies see the configured value; the schema default
+   * lives in extension.json, BATON_NOTICE_PROMPT is the code-side fallback.
+   */
+  batonNoticePrompt?: string;
 }
 
 /**
@@ -34,6 +40,19 @@ export function requireContextLimit(limit: number | undefined): number {
 export interface CompactResult {
   summary: string | null;
   messagesCompacted: number;
+  /**
+   * Which side `messagesCompacted` counts from. Omitted / "front": the
+   * oldest N are removed and the kept window is messages.slice(N).
+   * "tail": the newest N are popped and the kept window is
+   * messages.slice(0, length - N) — a strict prefix of the previous
+   * prompt, so prefix-cached runners re-read it from cache.
+   */
+  keepFrom?: "front" | "tail";
+  /**
+   * Harness system-notice text appended after the kept window
+   * (pass-the-baton orders the model to wrap up and hand off).
+   */
+  appendNotice?: string | null;
   metadata?: Record<string, unknown>;
 }
 

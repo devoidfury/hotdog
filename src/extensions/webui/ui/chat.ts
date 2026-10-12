@@ -313,7 +313,8 @@ interface TokenUsageMessage {
 
 interface CompactionResultMessage {
   type: "compactionResult";
-  summary: string;
+  // Absent for strategies with no summary (pass-the-baton, drop, trim).
+  summary?: string;
   messagesCompacted: number;
 }
 

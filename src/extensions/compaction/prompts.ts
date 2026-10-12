@@ -61,3 +61,11 @@ Use this EXACT format (keep each section very brief):
 <conversation>
 {conversation}
 </conversation>`;
+
+
+// Appended by the pass-the-baton strategy as a harness system-notice. The
+// extension.json default for compaction.batonNoticePrompt must match this
+// string verbatim (idempotency detection compares against the configured
+// text, so a drift only matters when the config default is relied upon).
+export const BATON_NOTICE_PROMPT =
+  "We've reached the end of the session. Wrap up now: you must hand off to the next agent, informing them of the current status and how to continue where you left off.";

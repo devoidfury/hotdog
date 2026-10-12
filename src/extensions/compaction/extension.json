@@ -3,7 +3,7 @@
   "provides": [],
   "loadOrder": 10,
   "dependsOn": ["core-tools"],
-  "description": "Context compaction strategies (summarize, drop, token-aware)",
+  "description": "Context compaction strategies (summarize, drop, summarize-short, token-aware, trim, pass-the-baton)",
   "configSchema": {
     "compaction": {
       "type": "object",
@@ -29,14 +29,19 @@
         },
         "strategy": {
           "type": "string",
-          "default": "summarize",
-          "enum": ["summarize", "drop", "summarize-short", "token-aware", "trim"],
+          "default": "pass-the-baton",
+          "enum": ["summarize", "drop", "summarize-short", "token-aware", "trim", "pass-the-baton"],
           "description": "Compaction strategy to use"
         },
         "userTurnGuardPrompt": {
           "type": "string",
           "default": "Continue from the compressed conversation context above.",
           "description": "Prompt added when compaction ends in a non-user turn to ensure compatibility with some LLM templates"
+        },
+        "batonNoticePrompt": {
+          "type": "string",
+          "default": "We've reached the end of the session. Wrap up now: you must hand off to the next agent, informing them of the current status and how to continue where you left off.",
+          "description": "System-notice text appended by pass-the-baton, ordering the model to stop and produce a handoff"
         }
       },
       "additionalProperties": false,

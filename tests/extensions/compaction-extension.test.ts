@@ -140,7 +140,7 @@ describe("Compaction Extension Creation", () => {
   it("should provide getStrategyList with all built-in strategies, correct names and order", () => {
     const ext = createCompactionExtension(createMockCore());
     const list = (ext as any).getStrategyList();
-    const expected = ["summarize", "drop", "summarize-short", "token-aware", "trim"];
+    const expected = ["summarize", "drop", "summarize-short", "token-aware", "trim", "pass-the-baton"];
     expect(list.map((s: any) => s.name)).toEqual(expected);
     for (const strategy of list) {
       expect((ext as any).registry.has(strategy.name)).toBe(true);

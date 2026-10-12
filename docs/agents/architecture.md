@@ -264,7 +264,7 @@ Each extension has:
 | `fetch-tool` | Fetch tool -- make HTTP requests |
 | `question-tool` | Question tool -- ask interactive questions |
 | `model-switch` | Model switching tool + `/model` slash commands |
-| `compaction` | Compaction strategies: summarize, summarize-short, drop, token-aware, trim |
+| `compaction` | Compaction strategies: pass-the-baton, summarize, summarize-short, drop, token-aware, trim |
 | `mcp-client` | MCP server connections (HTTP + stdio) |
 | `skills` | Skills discovery and loading |
 | `prompts` | Prompt template loading |

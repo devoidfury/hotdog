@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **webui subagent panels stop diffing the whole UI per token.** The streaming activity body lived inside the App tree, so every `taskActivity` delta diffed the entire UI -- hundreds of deltas per second. Each open panel now owns its own small mounted tree: rows keyed by block-object identity, so appends, merged-tail text patches, and eviction at the 200-block cap are all just the keyed diff touching new/changed rows. Activity bumps left the App render effect entirely and coalesce to one flush per animation frame -- the transcript, the strip, and everything else never re-render on subagent output.
+
+- fix activity panel rebind orphaning its previous mount: a ref set without a preceding null left the old body rendering into a detached element that no flush or unmount could reach. Rebind now tears the previous mount down first.
+
 - **webui profile fix: cold resume keeps its profile, switching never clears.** Resuming a cold session read the saved profile under the wrong key, so every resumed session silently rebuilt on `default`. Profile switching also still ran the old wipe-plus-confirm path; it now keeps the conversation like `/profile` in the CLI, and records the switch so the next resume inherits it.
 
 - **task questions stop holding the provider lane.** A worker blocked inside a `question` tool call held its lane slot, and the delegating manager session usually sits on that same lane, so it could never wake to answer. The worker now yields the slot while a question is pending and re-takes it before the question settles; the delegating session is woken through its bus with the question and a `task_followup` hint.

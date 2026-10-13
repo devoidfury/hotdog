@@ -4,9 +4,15 @@
 // a chip opens an overlay streaming that task's activity. Panels stack: the
 // last opened renders above earlier ones; each is dismissible, and terminal
 // tasks stay openable for the rest of the session.
+//
+// The streaming activity body is its own mounted tree per panel, kept out of
+// App: the feed can emit hundreds of deltas per second, and inside App each
+// one would diff the whole UI. TaskPanel's body div has no children prop --
+// childless host elements have no child slots, so App re-renders never touch
+// it -- and the registry's ref callback mounts an ActivityBody into it.
 
 import type { TaskInfoWire } from "@extensions/websocket/protocol.ts";
-import type { Ref } from "@utils/jsx";
+import { mount, type DomNode, type Ref } from "@utils/jsx";
 import type { TaskActivityBlock } from "./chat.ts";
 
 export function formatElapsed(info: TaskInfoWire, now: number): string {
@@ -56,8 +62,8 @@ export function SubagentsStrip({ tasks, now, openTaskIds, onOpen }: StripProps) 
   );
 }
 
-// Steering inputs are uncontrolled (the tree re-renders on every activity
-// tick, and re-binding a value prop would clobber the draft). Refs are
+// Steering inputs are uncontrolled (the App tree re-renders on status/tick
+// updates, and re-binding a value prop would clobber the draft). Refs are
 // stable per task id so patch() does not detach them.
 const followupInputs = new Map<string, HTMLInputElement>();
 const followupRefs = new Map<string, Ref>();
@@ -75,11 +81,13 @@ function followupInputRef(taskId: string): Ref {
 
 interface PanelProps {
   task: TaskInfoWire;
-  activity: TaskActivityBlock[];
   now: number;
   zBase: number;
   /** Most recent server reply for a Cancel/steer on this task, if any. */
   control: { ok: boolean; text: string } | null;
+  /** Ref onto the activity body div; its content is owned by the per-panel
+   * ActivityBody mount (see createActivityRegistry). */
+  bodyRef: Ref;
   onClose: (taskId: string) => void;
   onCancel: (taskId: string) => void;
   onFollowup: (taskId: string, message: string) => void;
@@ -87,10 +95,10 @@ interface PanelProps {
 
 export function TaskPanel({
   task,
-  activity,
   now,
   zBase,
   control,
+  bodyRef,
   onClose,
   onCancel,
   onFollowup,
@@ -125,43 +133,7 @@ export function TaskPanel({
         </button>
       </div>
       <div className="task-overlay-desc">{task.description || "(no description)"}</div>
-      <div className="task-overlay-body">
-        {activity.length === 0 ? (
-          <div className="task-act task-act-empty">Waiting for activity...</div>
-        ) : null}
-        {activity.map((block, i) => {
-          if (block.kind === "text") {
-            return (
-              <div key={i} className="task-act task-act-text">
-                {block.text}
-              </div>
-            );
-          }
-          if (block.kind === "reasoning") {
-            return (
-              <div key={i} className="task-act task-act-reasoning">
-                {block.text}
-              </div>
-            );
-          }
-          if (block.kind === "tool_call") {
-            return (
-              <div key={i} className="task-act task-act-tool">
-                <span className="task-act-name">tool: {block.name}</span>
-                <pre className="task-act-pre">{block.args}</pre>
-              </div>
-            );
-          }
-          return (
-            <div key={i} className={`task-act task-act-result${block.error ? " error" : ""}`}>
-              <span className="task-act-name">
-                {block.error ? "error" : "result"}: {block.name}
-              </span>
-              <pre className="task-act-pre">{block.error ?? block.output}</pre>
-            </div>
-          );
-        })}
-      </div>
+      <div className="task-overlay-body" ref={bodyRef}></div>
       <div className="task-overlay-footer">
         {control ? (
           <div className={`task-control-note${control.ok ? "" : " error"}`}>
@@ -198,4 +170,98 @@ export function TaskPanel({
       </div>
     </div>
   );
+}
+
+// ── Per-panel activity body mount ──────────────────────────────────────────
+// Rows are keyed by block-object identity (chat.ts merges deltas into the
+// same object), so the keyed diff alone handles appends, merged-tail text
+// patches, and eviction at the MAX_ACTIVITY_BLOCKS cap.
+
+type GetBlocks = (taskId: string) => TaskActivityBlock[];
+
+interface BodyProps {
+  taskId: string;
+  getBlocks: GetBlocks;
+  /** Stable row ids per block object (per panel; dies with the mount). */
+  keys: WeakMap<TaskActivityBlock, number>;
+  seq: { next: number };
+}
+
+function ActivityBody({ taskId, getBlocks, keys, seq }: BodyProps) {
+  const blocks = getBlocks(taskId);
+  if (blocks.length === 0)
+    return <div className="task-act task-act-empty">Waiting for activity...</div>;
+  return blocks.map((block) => {
+    let key = keys.get(block);
+    if (key === undefined) {
+      key = ++seq.next;
+      keys.set(block, key);
+    }
+    if (block.kind === "text" || block.kind === "reasoning") {
+      return (
+        <div key={key} className={`task-act task-act-${block.kind}`}>
+          {block.text}
+        </div>
+      );
+    }
+    if (block.kind === "tool_call") {
+      return (
+        <div key={key} className="task-act task-act-tool">
+          <span className="task-act-name">{`tool: ${block.name}`}</span>
+          <pre className="task-act-pre">{block.args}</pre>
+        </div>
+      );
+    }
+    return (
+      <div key={key} className={`task-act task-act-result${block.error ? " error" : ""}`}>
+        <span className="task-act-name">{`${block.error ? "error" : "result"}: ${block.name}`}</span>
+        <pre className="task-act-pre">{block.error ?? block.output}</pre>
+      </div>
+    );
+  });
+}
+
+interface ActivityPanel {
+  render: () => void;
+  destroy: () => void;
+}
+
+export interface ActivityRegistry {
+  /** Stable callback ref per task id (patch() must not detach it between App
+   * renders): set mounts the panel's body, null unmounts and forgets it. */
+  ref: (taskId: string) => Ref;
+  /** Re-render every live panel body. Wire to a coalescer + activityVersionAtom. */
+  renderAll: () => void;
+}
+
+export function createActivityRegistry(getBlocks: GetBlocks): ActivityRegistry {
+  const panels = new Map<string, ActivityPanel>();
+  const refs = new Map<string, Ref>();
+  return {
+    ref(taskId) {
+      let ref = refs.get(taskId);
+      if (!ref) {
+        ref = (el) => {
+          if (el) {
+            // A set without a preceding null (rebind) must not orphan the
+            // previous mount: drop it first so nothing renders or leaks there.
+            panels.get(taskId)?.destroy();
+            const keys = new WeakMap<TaskActivityBlock, number>();
+            const seq = { next: 0 };
+            const body = () => <ActivityBody taskId={taskId} getBlocks={getBlocks} keys={keys} seq={seq} />;
+            const mounted = mount(body(), el as unknown as DomNode);
+            panels.set(taskId, { render: () => mounted.render(body()), destroy: () => mounted.unmount() });
+          } else {
+            panels.get(taskId)?.destroy();
+            panels.delete(taskId);
+          }
+        };
+        refs.set(taskId, ref);
+      }
+      return ref;
+    },
+    renderAll() {
+      for (const panel of panels.values()) panel.render();
+    },
+  };
 }

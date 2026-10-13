@@ -836,6 +836,7 @@ body {
     background: none;
     border: none;
     padding: 0;
+    white-space: pre-wrap;
 }
 
 /* Lists */

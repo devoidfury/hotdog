@@ -14,7 +14,8 @@ import {
   loginAtoms,
 } from "./login.tsx";
 import { Sidebar, ContextMenu, type ContextMenuState, type SessionInfo, type LogInfo } from "./sessions.tsx";
-import { SubagentsStrip, TaskPanel } from "./subagents.tsx";
+import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
+import { createCoalescer } from "./batch.ts";
 import { audioBlobToWav } from "./wav.ts";
 
 type Screen = "login" | "main";
@@ -137,6 +138,13 @@ const contextMenuRef = domRef<HTMLDivElement>((el) => {
 const fileInputRef = domRef<HTMLInputElement>((el) => {
   fileInputEl = el;
 });
+
+// Panel activity bodies are per-panel declarative mounts (see subagents.tsx):
+// a delta re-renders only the open panels' small trees, coalesced to one
+// pass per frame. activityVersionAtom is deliberately NOT in the App render
+// effect -- streaming subagent output must never re-render the transcript.
+const activityRegistry = createActivityRegistry((taskId) => chat?.getTaskActivity(taskId) ?? []);
+const flushActivityViews = createCoalescer(() => activityRegistry.renderAll());
 
 // Several atoms usually flip within one WS message (e.g. sessionInfo sets
 // title, model, and models); coalesce to one render per microtask so each
@@ -351,7 +359,8 @@ function startChat(): void {
   });
 
   // Re-render on any chat atom change; also refresh the sidebar when the
-  // model changes, and pull profiles once connected.
+  // model changes, and pull profiles once connected. activityVersionAtom is
+  // absent on purpose -- it drives flushActivityViews, not the JSX tree.
   stopChatEffects = effect(render, [
     chat.connectedAtom,
     chat.workingAtom,
@@ -362,11 +371,11 @@ function startChat(): void {
     chat.profilesAtom,
     chat.currentProfileAtom,
     chat.tasksAtom,
-    chat.activityVersionAtom,
     chat.taskControlAtom,
     chat.sttEnabledAtom,
     sttPhaseAtom,
   ]);
+  const stopActivitySync = chat.activityVersionAtom.effect(flushActivityViews);
   const stopModelRefresh = chat.currentModelAtom.effect(() => {
     chat?.listSessions();
   });
@@ -382,6 +391,7 @@ function startChat(): void {
     stopModelRefresh();
     stopProfilesRefresh();
     stopTaskTick();
+    stopActivitySync();
   };
 }
 
@@ -865,10 +875,10 @@ function App() {
             <TaskPanel
               key={id}
               task={task}
-              activity={chat.getTaskActivity(id)}
               now={nowAtom()}
               zBase={100 + i}
               control={chat.taskControlAtom()[id] ?? null}
+              bodyRef={activityRegistry.ref(id)}
               onClose={closeTask}
               onCancel={cancelTask}
               onFollowup={(tid, message) => chat?.taskFollowup(tid, message)}

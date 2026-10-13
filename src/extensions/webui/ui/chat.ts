@@ -82,7 +82,9 @@ function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
   const last = blocks[blocks.length - 1];
   if (activity.kind === "text" || activity.kind === "reasoning") {
     if (last && last.kind === activity.kind) {
-      blocks[blocks.length - 1] = { kind: activity.kind, text: last.text + activity.content };
+      // Merged in place: panels key rows by block-object identity, so the
+      // row's DOM node stays alive and the diff patches just its text node.
+      (last as { kind: "text" | "reasoning"; text: string }).text += activity.content;
     } else {
       blocks.push({ kind: activity.kind, text: activity.content });
     }

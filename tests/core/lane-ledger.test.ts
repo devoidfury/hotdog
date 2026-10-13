@@ -443,6 +443,29 @@ describe("LaneLedger", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  // The handoff window behind the stress-counter flake (CI run 103905070677):
+  // release() frees the slot the moment its rm lands, not when the awaiting
+  // caller resumes. Caller bookkeeping after `await release` therefore lags
+  // the physical truth by several continuations -- long enough for a waiting
+  // acquirer to win the slot first.
+  it("a released slot is physically free before release() resolves", async () => {
+    const dir = await freshDir();
+    const led = new LaneLedger({ dir });
+    const lease = await led.acquire("prov", 1);
+    expect(lease).not.toBeNull();
+    const releasing = led.release(lease!);
+    // Watch the unlink land without awaiting release() itself.
+    const until = Date.now() + 5_000;
+    while (await Bun.file(lease!.path).exists()) {
+      if (Date.now() > until) throw new Error("release never unlinked the slot");
+      await Bun.sleep(1);
+    }
+    // The slot is up for grabs while release() is still pending.
+    expect(await led.acquire("prov", 1)).not.toBeNull();
+    await releasing;
+    await rm(dir, { recursive: true, force: true });
+  });
+
   // Churn regression behind the 2026-09-27 ENOENT incident: many simultaneous
   // acquirers across several ledger instances, with releases landing while
   // others are mid-acquire (the "released while we were looking" retry path).
@@ -454,11 +477,18 @@ describe("LaneLedger", () => {
     const WORKERS = 16;
     const PER_WORKER = 2;
     const ledgers = Array.from({ length: 4 }, () => new LaneLedger({ dir }));
-    // Use a mutex to make the live/maxLive update atomic — the counter is
-    // only a metric; the real cap guarantee is checked against the slot files.
+    // The live count is only a metric; the hard cap check is the slot files.
+    // Bookkeeping must stay on the right side of the physical transition:
+    // release() frees the slot when its rm lands, several continuations
+    // before the awaiting caller resumes, so a decrement AFTER the await lets
+    // a waiting acquirer win the slot and count itself first -- the counter
+    // then briefly exceeds the true holders (CI flake, run 103905070677:
+    // maxLive 4 against cap 3 while the file check stayed green).
+    // Decrementing before the release keeps the counter under the physically
+    // held set: an acquire can only win a slot whose holder already stepped
+    // out of the count. Sync one-liners; no locking needed.
     let live = 0;
     let maxLive = 0;
-    const mutex = { run: <T>(fn: () => T | Promise<T>) => fn() };
     const deadline = Date.now() + 20_000;
     const workers = Array.from({ length: WORKERS }, async (_, w) => {
       const led = ledgers[w % ledgers.length]!;
@@ -469,11 +499,12 @@ describe("LaneLedger", () => {
           lease = await led.acquire("prov", CAP); // a throw here fails the test
           if (!lease) await Bun.sleep(1);
         }
-        await mutex.run(() => { live++; maxLive = Math.max(maxLive, live); });
+        live++;
+        maxLive = Math.max(maxLive, live);
         // Keep the marker alive against the watchdog even under heavy churn.
         await Bun.sleep(Math.random() * 3);
+        live--;
         await led.release(lease);
-        await mutex.run(() => { live--; });
       }
     });
     await Promise.all(workers);

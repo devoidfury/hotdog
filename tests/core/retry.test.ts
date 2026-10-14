@@ -2,7 +2,6 @@ import { describe, it, expect } from "bun:test";
 import {
   shouldRetryLlmError,
   retryDelay,
-  extractHttpStatus,
   isRetryableHttpStatus,
   parseRetryAfterMs,
   resolveRetryDelayMs,
@@ -48,14 +47,14 @@ describe("shouldRetryLlmError", () => {
 });
 
 describe("shouldRetryLlmError — api status retry", () => {
-  it("retries on retryable HTTP status codes in the message", () => {
-    expect(shouldRetryLlmError(LlmError.Api("HTTP 500 (body: Internal Server Error)"), 1, 3)).toBe(true);
-    expect(shouldRetryLlmError(LlmError.Api("HTTP 429 (body: Too Many Requests)"), 1, 3)).toBe(true);
+  it("retries on retryable HTTP status codes", () => {
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 500 (body: Internal Server Error)", 500), 1, 3)).toBe(true);
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 429 (body: Too Many Requests)", 429), 1, 3)).toBe(true);
   });
 
   it("does not retry on non-retryable HTTP status codes", () => {
-    expect(shouldRetryLlmError(LlmError.Api("HTTP 301 (body: Moved Permanently)"), 1, 3)).toBe(false);
-    expect(shouldRetryLlmError(LlmError.Api("HTTP 400 (body: Bad Request)"), 1, 3)).toBe(false);
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 301 (body: Moved Permanently)", 301), 1, 3)).toBe(false);
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 400 (body: Bad Request)", 400), 1, 3)).toBe(false);
   });
 
   it("retries on retryable status from the field, independent of the message", () => {
@@ -67,13 +66,11 @@ describe("shouldRetryLlmError — api status retry", () => {
     expect(shouldRetryLlmError(LlmError.Api("bad input", 400), 1, 3)).toBe(false);
   });
 
-  it("field takes precedence over a contradictory message", () => {
-    // Message parses as retryable (500), field says 400: field wins.
+  it("the field is the only status; a contradictory or bare message never parses", () => {
+    // Field says 400: the "HTTP 500" in the message text is never consulted.
     expect(shouldRetryLlmError(LlmError.Api("HTTP 500 (body: Internal Server Error)", 400), 1, 3)).toBe(false);
-  });
-
-  it("falls back to the message when the field is absent", () => {
-    expect(shouldRetryLlmError(LlmError.Api("HTTP 500 (body: Internal Server Error)"), 1, 3)).toBe(true);
+    // No field at all: never retried, whatever the message claims.
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 500 (body: Internal Server Error)"), 1, 3)).toBe(false);
   });
 });
 
@@ -223,22 +220,6 @@ describe("retryDelay", () => {
     }
     expect(spy.added).toHaveLength(1);
     expect(spy.removed).toEqual(spy.added);
-  });
-});
-
-describe("extractHttpStatus", () => {
-  it("extracts status code from HTTP error message", () => {
-    expect(extractHttpStatus("HTTP 500 (body: Internal Server Error)")).toBe(
-      500,
-    );
-    expect(extractHttpStatus("HTTP 429 (body: Too Many Requests)")).toBe(429);
-    expect(extractHttpStatus("HTTP 200")).toBe(200);
-  });
-
-  it("returns null for non-HTTP messages", () => {
-    expect(extractHttpStatus("Bad input")).toBeNull();
-    expect(extractHttpStatus("Timeout")).toBeNull();
-    expect(extractHttpStatus("")).toBeNull();
   });
 });
 

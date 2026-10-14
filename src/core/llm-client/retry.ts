@@ -1,16 +1,6 @@
 import { LlmError } from "../error.ts";
 
 /**
- * Fallback: parses the status out of LlmError messages formatted
- * "HTTP <status> (body: ...)" for errors constructed without the
- * structured `status` field (extensions, older callers).
- */
-export function extractHttpStatus(message: string): number | null {
-  const match = message.match(/^HTTP (\d+)/);
-  return match ? parseInt(match[1] ?? "", 10) : null;
-}
-
-/**
  * Retry on 5xx (server errors) and 429 (rate limiting).
  * Do NOT retry on 4xx (client errors) except 429, or on 3xx (redirects):
  * a redirect of the same request will repeat identically on every attempt,
@@ -115,10 +105,9 @@ export function shouldRetryLlmError(e: unknown, attempt: number, maxRetries: num
       return true;
     }
     if (e.type === "api") {
-      // Prefer the structured status; fall back to the message for
-      // errors constructed without it.
-      const status = e.status ?? extractHttpStatus(e.message);
-      if (status !== null && isRetryableHttpStatus(status)) {
+      // Only the structured status counts: an api error built without one
+      // is never retried on the strength of its message text.
+      if (e.status !== undefined && isRetryableHttpStatus(e.status)) {
         return true;
       }
     }

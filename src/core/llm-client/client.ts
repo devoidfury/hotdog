@@ -547,7 +547,7 @@ export class LlmClient {
     let resp: Response;
     try {
       resp = await hotdogFetch(
-        `${url}${path}`,
+        `${url.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`,
         {
           method: "POST",
           headers,

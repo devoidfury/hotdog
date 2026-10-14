@@ -73,6 +73,23 @@ describe("LlmClient.resolveProviderSettings", () => {
     expect(settings.provider).toBe("openai");
   });
 
+  it("uses provider settings for models with multiple prefixes (e.g. openrouter)", () => {
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
+      baseUrl: "http://default.com",
+      apiKey: "default-key",
+      chatTimeoutSecs: 600,
+      maxRetries: 12,
+      providers: [
+        { name: "openrouter", url: "http://openrouter.ai/api/", apiKey: "openrouter-key", models: [] },
+      ],
+    });
+    // The model name in the registry will be "openrouter/nvidia/nemotron"
+    const settings = client.resolveProviderSettings("openrouter/nvidia/nemotron");
+    expect(settings.url).toBe("http://openrouter.ai/api/");
+    expect(settings.apiKey).toBe("openrouter-key");
+    expect(settings.provider).toBe("openrouter");
+  });
+
   it("uses provider URL but falls back to client apiKey", () => {
     const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg,
       baseUrl: "http://default.com",

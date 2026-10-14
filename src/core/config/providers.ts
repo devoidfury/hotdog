@@ -421,7 +421,7 @@ export function findModelEntry<T extends Partial<ModelConfig>>(
   modelRegistry: Record<string, T>,
 ): T | undefined {
   let entry = modelRegistry[modelName];
-  if (!entry && !modelName.includes("/")) {
+  if (!entry) {
     for (const key of Object.keys(modelRegistry)) {
       if (key.endsWith(`/${modelName}`)) {
         entry = modelRegistry[key];
@@ -493,7 +493,7 @@ export function resolveModelConfig(
     ? {
         name: entry.name || modelName,
         temperature: entry.temperature ?? null,
-        contextLimit: entry.contextLimit ?? contextLimit,
+        contextLimit: Number(entry.contextLimit ?? contextLimit),
         reasoningEffort: entry.reasoningEffort,
         roleMapping,
         protocol: entry.protocol as string | undefined,

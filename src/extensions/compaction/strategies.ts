@@ -27,14 +27,15 @@ export interface CompactionSettings {
  * must not fall back to a hardcoded or model-name-derived window size:
  * a missing value is a config resolution bug and guessing masks it.
  */
-export function requireContextLimit(limit: number | undefined): number {
-  if (typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0) {
+export function requireContextLimit(limit: number | string | undefined): number {
+  const num = typeof limit === "string" ? Number(limit) : limit;
+  if (typeof num !== "number" || !Number.isFinite(num) || num <= 0) {
     throw new ConfigError(
       `Compaction requires a positive contextLimit in tokens (got ${limit === undefined ? "undefined" : String(limit)}). ` +
         `Set compaction.contextLimit or the core contextLimit.`,
     );
   }
-  return limit;
+  return num;
 }
 
 export interface CompactResult {

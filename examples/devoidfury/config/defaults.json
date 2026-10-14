@@ -68,6 +68,17 @@
       "fetch-models": true,
       "apiKey": "$HOTDOG_ALT_KEY",
       "url": "http://mini.home:9292"
+    },
+    {
+      "name": "openrouter",
+      "url": "https://openrouter.ai/api/",
+      "apiKey": "$OPENROUTER_API_KEY",
+      "models": [
+        {
+          "name": "nvidia/nemotron-3-ultra-550b-a55b:free",
+          "contextLimit": 1048576
+        }
+      ]
     }
   ]
 }

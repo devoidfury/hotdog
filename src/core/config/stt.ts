@@ -16,6 +16,7 @@
 
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
+import { findModelKey } from "./providers.ts";
 
 export const TRANSCRIPTIONS_API_PATH = "/v1/audio/transcriptions";
 
@@ -49,19 +50,15 @@ export interface SttProviderResolver {
   resolveProviderSettings(name: string): { url: string; apiKey: string | null };
 }
 
-/** Registry key for a bare or provider-qualified name (findModelEntry's matching, key-returning). */
+/**
+ * Registry key for a bare or provider-qualified name. Delegates to findModelKey
+ * so the suffix-match dialect (unique-match-only) has exactly one home.
+ */
 function findRegistryKey(
   registry: Record<string, RegistryEntryLike>,
   name: string,
 ): { key: string; entry: RegistryEntryLike } | null {
-  const direct = registry[name];
-  if (direct) return { key: name, entry: direct };
-  if (!name.includes("/")) {
-    for (const key of Object.keys(registry)) {
-      if (key.endsWith(`/${name}`)) return { key, entry: registry[key]! };
-    }
-  }
-  return null;
+  return findModelKey(name, registry);
 }
 
 /** Resolve the transcriptions target, or null when no usable backend exists. */

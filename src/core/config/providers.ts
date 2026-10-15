@@ -411,25 +411,49 @@ export function resolveProvider(
   return providers.find((p) => p.name === providerName) ?? null;
 }
 
+// Warn-once memory for ambiguous suffix matches (same pattern as envRefWarned in ./index.ts).
+const suffixAmbiguityWarned = new Set<string>();
+
 /**
- * Look up a model entry in the registry by exact key, falling back to a suffix match ("provider/modelName")
- * when the name has no "/". Handles models fetched remotely (fetchModels: true) where the resolved name
- * is bare but the registry key is provider/modelName.
+ * Look up a model in the registry by exact key, falling back to a suffix match
+ * on the "/"-delimited tail. The tail may itself contain slashes: OpenRouter-style
+ * ids carry them ("nvidia/model:free" under the key "openrouter/nvidia/model:free").
+ *
+ * An ambiguous tail resolves to NOTHING, never to the first key hit: two providers
+ * hosting the same model must not make a bare or partial name silently become one
+ * provider's config (contextLimit, wireFormat, controlTokens) picked by key-iteration
+ * order. Callers fall back exactly as they do for an unknown name.
  */
+export function findModelKey<T>(
+  modelName: string,
+  modelRegistry: Record<string, T>,
+): { key: string; entry: T } | null {
+  const direct = modelRegistry[modelName];
+  if (direct) return { key: modelName, entry: direct };
+
+  let found: { key: string; entry: T } | null = null;
+  for (const key of Object.keys(modelRegistry)) {
+    if (!key.endsWith(`/${modelName}`)) continue;
+    if (found) {
+      if (!suffixAmbiguityWarned.has(modelName)) {
+        suffixAmbiguityWarned.add(modelName);
+        logger.warn(
+          `model '${modelName}' matches multiple registry keys ('${found.key}', '${key}'); refusing to pick one. Use the full key.`,
+        );
+      }
+      return null;
+    }
+    found = { key, entry: modelRegistry[key]! };
+  }
+  return found;
+}
+
+/** Entry form of findModelKey (bare names and remote-fetched models resolve through the suffix match). */
 export function findModelEntry<T extends Partial<ModelConfig>>(
   modelName: string,
   modelRegistry: Record<string, T>,
 ): T | undefined {
-  let entry = modelRegistry[modelName];
-  if (!entry) {
-    for (const key of Object.keys(modelRegistry)) {
-      if (key.endsWith(`/${modelName}`)) {
-        entry = modelRegistry[key];
-        break;
-      }
-    }
-  }
-  return entry;
+  return findModelKey(modelName, modelRegistry)?.entry;
 }
 
 /**

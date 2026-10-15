@@ -608,9 +608,25 @@ describe("findModelEntry", () => {
     expect(findModelEntry("unknown", registry)).toBeUndefined();
   });
 
-  it("does not suffix-match names that already contain a slash", () => {
+  it("suffix-matches slash-containing tails when exactly one key matches", () => {
     const deep = { "p/a/b": { name: "p/a/b", temperature: null, contextLimit: 1, tags: [] } };
+    expect(findModelEntry("a/b", deep)).toBe(deep["p/a/b"]);
+  });
+
+  it("resolves an ambiguous tail to nothing, never to the first key", () => {
+    const deep = {
+      "p1/a/b": { name: "p1/a/b", temperature: null, contextLimit: 1, tags: [] },
+      "p2/a/b": { name: "p2/a/b", temperature: null, contextLimit: 2, tags: [] },
+    };
     expect(findModelEntry("a/b", deep)).toBeUndefined();
+  });
+
+  it("resolves an ambiguous bare name to nothing, never to the first key", () => {
+    const twin = {
+      "pA/qwen": { name: "pA/qwen", temperature: null, contextLimit: 1, tags: [] },
+      "pB/qwen": { name: "pB/qwen", temperature: null, contextLimit: 2, tags: [] },
+    };
+    expect(findModelEntry("qwen", twin)).toBeUndefined();
   });
 });
 
@@ -649,12 +665,22 @@ describe("resolveModelConfig fallback lookup", () => {
     expect(config.name).toBe("unknown");
   });
 
-  it("does not fallback for names with multiple slashes but works with full path", () => {
+  it("suffix-matches a unique deep tail and the full key matches directly", () => {
     const registry: Record<string, ModelEntry> = {
       "provider/some/deep/model": { name: "provider/some/deep/model", temperature: null, contextLimit: 200000, tags: [] },
     };
-    expect(resolveModelConfig("some/deep/model", registry, 128000, undefined).contextLimit).toBe(128000);
+    expect(resolveModelConfig("some/deep/model", registry, 128000, undefined).contextLimit).toBe(200000);
     expect(resolveModelConfig("provider/some/deep/model", registry, 128000, undefined).contextLimit).toBe(200000);
+  });
+
+  it("an ambiguous deep tail falls back like an unknown name", () => {
+    const registry: Record<string, ModelEntry> = {
+      "p1/some/deep/model": { name: "p1/some/deep/model", temperature: null, contextLimit: 200000, tags: [] },
+      "p2/some/deep/model": { name: "p2/some/deep/model", temperature: null, contextLimit: 64000, tags: [] },
+    };
+    const config = resolveModelConfig("some/deep/model", registry, 128000, undefined);
+    expect(config.contextLimit).toBe(128000);
+    expect(config.name).toBe("some/deep/model");
   });
 
   it("carries roleMapping through in the entry branch", () => {

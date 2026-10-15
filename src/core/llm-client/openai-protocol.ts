@@ -56,6 +56,7 @@ export const openaiProtocol: LlmProtocol = {
       "Content-Type": "application/json",
       "User-Agent": `hotdog/${pkg.version}`,
       'HTTP-Referer': 'https://github.com/devoidfury/hotdog',
+      'X-OpenRouter-Categories': "cli-agent",
       'X-Title': 'hotdog'
     };
     if (ctx.apiKey) headers["Authorization"] = `Bearer ${ctx.apiKey}`;

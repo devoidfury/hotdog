@@ -116,9 +116,7 @@ describe("resolveSafe — invalid input", () => {
   });
 
   it("rejects non-string values", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(() => ws.resolveSafe(undefined as any)).toThrow(PathEscapeError);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(() => ws.resolveSafe(null as any)).toThrow(PathEscapeError);
   });
 });
@@ -732,9 +730,7 @@ describe("expandWorkspacePaths", () => {
   });
 
   it("throws for a non-array input", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(() => expandWorkspacePaths("/somewhere" as any)).toThrow(ConfigError);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(() => expandWorkspacePaths(null as any)).toThrow(ConfigError);
   });
 
@@ -744,7 +740,6 @@ describe("expandWorkspacePaths", () => {
 
   it("throws for empty-string and non-string entries", () => {
     expect(() => expandWorkspacePaths([""])).toThrow(ConfigError);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(() => expandWorkspacePaths([42 as any])).toThrow(ConfigError);
   });
 

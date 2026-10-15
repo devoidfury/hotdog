@@ -49,7 +49,6 @@ describe("parseRule", () => {
     for (const bad of ["", "   ", "bash.cmd=", ".cmd=git", "bash.=git", "=git", "!bash", "bash.cmd"]) {
       expect(() => parseRule(bad), bad).toThrow(ConfigError);
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(() => parseRule(7 as any)).toThrow(ConfigError);
   });
 });

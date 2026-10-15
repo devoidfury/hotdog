@@ -55,7 +55,6 @@ export class PathEscapeError extends ToolError {
  * Pinned @types/bun predates the Bun.Glob typing -- cast shim until the
  * typings catch up.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const GlobCtor = (Bun as any).Glob as new (pattern: string) => {
   scanSync(options?: { onlyFiles?: boolean }): Iterable<string>;
 };

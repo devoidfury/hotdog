@@ -56,7 +56,7 @@ const TRUNCATED_STOP_TOOL_TEXT =
 
 /**
  * Harness notice appended after a length-stop response's skipped tool
- * results (and as the backstop in _prepareIteration). Why a trailing
+ * results (and as the backstop in #prepareIteration). Why a trailing
  * user-shaped message is required at all: strict llama.cpp-style gateways
  * collapse an assistant+tool pair into ONE assistant turn, so two
  * consecutive length stops leave the wire tail
@@ -180,7 +180,7 @@ export class Agent implements AgentLike {
   toolWhitelist: string[] | null;
   /** True when the active profile is a manager (controls managerOnly tools). */
   managerProfile: boolean;
-  /** Steering messages (see steer()): injected between LLM calls by _prepareIteration. */
+  /** Steering messages (see steer()): injected between LLM calls by #prepareIteration. */
   steeringQueue: Array<string | Array<Record<string, unknown>>>;
   runAbortController: AbortController | null;
   commandRegistry: AgentCommandRegistry;
@@ -339,7 +339,7 @@ export class Agent implements AgentLike {
 
   /**
    * Queue a steering message: immediate notice for a running (or about-to-run) agent.
-   * Drained before every LLM call in _prepareIteration, so it reaches the model mid-turn without landing
+   * Drained before every LLM call in #prepareIteration, so it reaches the model mid-turn without landing
    * between an assistant(tool_calls) message and its tool results. This is the in-core append seam (the sibling
    * of the tool-result/system-notice appends); user submission goes through MessageBus.enqueue(..., { steering: true }),
    * which runs the INPUT pipeline first. Task follow-ups use this seam directly (task agents have no bus).
@@ -411,10 +411,10 @@ export class Agent implements AgentLike {
         this.iterationCount = iteration;
         turnEnded = false;
 
-        const params = await this._prepareIteration(iteration);
+        const params = await this.#prepareIteration(iteration);
         let response: StreamResult;
         try {
-          response = await this._performLlmCall(params);
+          response = await this.#performLlmCall(params);
         } catch (err) {
           // PROVIDER_ERROR pipeline: a handler (e.g. tool-call-repair dropping a corrupt stored tool call the backend will never accept) can repair the
           // history/params and set retry. Exactly one retry; a second failure propagates.
@@ -424,12 +424,12 @@ export class Agent implements AgentLike {
             errPayload,
           );
           if (!errPayload.retry) throw err;
-          response = await this._performLlmCall(params);
+          response = await this.#performLlmCall(params);
         }
         // Snapshot the context tail before the assistant message lands: the
         // empty-turn nudge fires only when this request ended on tool results.
         const afterToolResults = this.context.getMessages().at(-1)?.role === "tool";
-        const result = await this._handleLlmResponse(response, params);
+        const result = await this.#handleLlmResponse(response, params);
 
         if (typeof result === "string") {
           if (!this.cancelled && !result.trim()) {
@@ -445,17 +445,17 @@ export class Agent implements AgentLike {
                   content: [{ type: "system-notice", text: EMPTY_TURN_NUDGE_TEXT }],
                 }));
               }
-              await this._emitTurnEnd(iteration, response.fullText, [], false, false, "continue");
+              await this.#emitTurnEnd(iteration, response.fullText, [], false, false, "continue");
               turnEnded = true;
               continue;
             }
             // Re-invoke budget spent: stop honestly instead of completing empty.
-            await this._emitTurnEnd(iteration, response.fullText, [], true, false, "empty_response");
+            await this.#emitTurnEnd(iteration, response.fullText, [], true, false, "empty_response");
             turnEnded = true;
             return { type: "empty_response" };
           }
           emptyStreak = 0;
-          await this._emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
+          await this.#emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
           turnEnded = true;
           return { type: 'completion', content: result };
         }
@@ -463,12 +463,12 @@ export class Agent implements AgentLike {
         emptyStreak = 0;
         const { outcome, toolResults } = result;
         if (outcome !== "continue") {
-          await this._emitTurnEnd(iteration, response.fullText, toolResults, true, this.cancelled, "tool_return");
+          await this.#emitTurnEnd(iteration, response.fullText, toolResults, true, this.cancelled, "tool_return");
           turnEnded = true;
           return { type: 'tool_return', outcome };
         }
 
-        await this._emitTurnEnd(iteration, response.fullText, toolResults, false, this.cancelled, "continue");
+        await this.#emitTurnEnd(iteration, response.fullText, toolResults, false, this.cancelled, "continue");
         turnEnded = true;
       }
 
@@ -478,11 +478,11 @@ export class Agent implements AgentLike {
       // Costs +1 LLM call, but only on capped runs.
       let capSummary: string | null = null;
       if (!this.cancelled && !this.abortSignal?.aborted && this.iterationCount > 0) {
-        capSummary = await this._wrapUpAfterCap();
+        capSummary = await this.#wrapUpAfterCap();
       }
 
       // Emit turn-end so listeners unblock before the return/throw.
-      await this._emitTurnEnd(this.iterationCount, capSummary ?? "", [], true, this.cancelled, "max_iterations");
+      await this.#emitTurnEnd(this.iterationCount, capSummary ?? "", [], true, this.cancelled, "max_iterations");
       turnEnded = true;
       if (capSummary !== null) {
         return { type: "completion", content: capSummary };
@@ -492,7 +492,7 @@ export class Agent implements AgentLike {
       this.#running = false;
       if (!turnEnded) {
         const reason: TurnEndReason = this.cancelled ? "cancelled" : "error";
-        await this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, reason);
+        await this.#emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, reason);
       }
     }
   }
@@ -515,7 +515,7 @@ export class Agent implements AgentLike {
    * so a broken wrap-up never masks the cap. No PROVIDER_ERROR retry here:
    * the best-effort call gets exactly one attempt.
    */
-  private async _wrapUpAfterCap(): Promise<string | null> {
+  async #wrapUpAfterCap(): Promise<string | null> {
     this.addMessage(new Message({
       role: "harness",
       source: "harness",
@@ -532,12 +532,12 @@ export class Agent implements AgentLike {
     });
 
     try {
-      const params = await this._prepareIteration(this.iterationCount + 1);
+      const params = await this.#prepareIteration(this.iterationCount + 1);
       params.toolDefs = [];
-      const response = await this._performLlmCall(params);
+      const response = await this.#performLlmCall(params);
       if (!response.fullText.trim()) return null;
 
-      // Deliberately not _handleLlmResponse: tool-call-repair could forge
+      // Deliberately not #handleLlmResponse: tool-call-repair could forge
       // calls into the summary, and an assistant tool_calls message without
       // results would poison the wire for strict backends.
       this.addMessage(new Message({
@@ -546,7 +546,7 @@ export class Agent implements AgentLike {
         reasoningContent: response.fullReasoning,
         source: "model",
       }));
-      this._emitTokenUsage(response);
+      this.#emitTokenUsage(response);
       return response.fullText;
     } catch (e: unknown) {
       // Honest cancellation: a user abort during the wrap-up call cancels
@@ -557,7 +557,7 @@ export class Agent implements AgentLike {
     }
   }
 
-  private async _prepareIteration(iteration: number): Promise<LlmRequestParams> {
+  async #prepareIteration(iteration: number): Promise<LlmRequestParams> {
     await this.hooks.notifyHooks(HOOKS.TURN_START, {
       turnIndex: iteration,
       timestamp: Date.now(),
@@ -629,7 +629,7 @@ export class Agent implements AgentLike {
     };
   }
 
-  private async _performLlmCall(params: LlmRequestParams): Promise<StreamResult> {
+  async #performLlmCall(params: LlmRequestParams): Promise<StreamResult> {
     const { messages, modelConfig, toolDefs } = params;
     const runController = new AbortController();
     this.runAbortController = runController;
@@ -659,14 +659,14 @@ export class Agent implements AgentLike {
         runController.signal,
         this.sessionId,
       );
-      return await this._processStream(stream);
+      return await this.#processStream(stream);
     } finally {
       removeAbortForwarder?.();
       this.runAbortController = null;
     }
   }
 
-  private async _handleLlmResponse(
+  async #handleLlmResponse(
     response: StreamResult,
     params: LlmRequestParams,
   ): Promise<string | { outcome: string; toolResults: ToolResult[] }> {
@@ -691,7 +691,7 @@ export class Agent implements AgentLike {
       source: "model",
     });
     this.addMessage(assistantMsg);
-    this._emitTokenUsage(response);
+    this.#emitTokenUsage(response);
 
     if (response.finalToolCalls) {
       let toolCallsToExecute = response.finalToolCalls;
@@ -724,7 +724,7 @@ export class Agent implements AgentLike {
 
       // No WireFormat here: the executor stores tool-result PARTS and the
       // LlmClient shapes them per model when the request is built.
-      const { outcome, toolResults } = await this._executeTools(
+      const { outcome, toolResults } = await this.#executeTools(
         toolCallsToExecute,
         params.toolDefs.map((d) => d.function.name),
       );
@@ -765,7 +765,7 @@ export class Agent implements AgentLike {
     }
   }
 
-  private async _emitTurnEnd(
+  async #emitTurnEnd(
     iteration: number,
     message: string,
     toolResults: Array<ToolResult>,
@@ -794,7 +794,7 @@ export class Agent implements AgentLike {
     });
   }
 
-  _emitTokenUsage(response: { usage?: RawUsage | null }): void {
+  #emitTokenUsage(response: { usage?: RawUsage | null }): void {
     this.context.recordUsage(response.usage, (usage) => {
       this.emitOutput("token_usage", { ...usage, contextWindow: this.contextLimit });
     });
@@ -817,7 +817,7 @@ export class Agent implements AgentLike {
     });
   }
 
-  private _processStream(stream: AsyncIterable<StreamEvent>): Promise<StreamResult> {
+  #processStream(stream: AsyncIterable<StreamEvent>): Promise<StreamResult> {
     // The session mangler unescapes the assembled result once (stream events
     // carry raw wire content; per-chunk unescaping would fossilize aliases
     // split across deltas). onChunk/onReasoning below get per-chunk
@@ -829,7 +829,7 @@ export class Agent implements AgentLike {
     }, this.llmClient.markerMangler);
   }
 
-  private _executeTools(toolCalls: ToolCall[], availableToolNames?: string[]) {
+  #executeTools(toolCalls: ToolCall[], availableToolNames?: string[]) {
     // availableToolNames is the model-visible set from this iteration's request
     // (post PROVIDER_REQUEST), so availability never re-filters the registry.
     return this.#toolExecutor.execute(toolCalls, availableToolNames);

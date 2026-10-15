@@ -51,14 +51,6 @@ export class PathEscapeError extends ToolError {
   }
 }
 
-/**
- * Pinned @types/bun predates the Bun.Glob typing -- cast shim until the
- * typings catch up.
- */
-const GlobCtor = (Bun as any).Glob as new (pattern: string) => {
-  scanSync(options?: { onlyFiles?: boolean }): Iterable<string>;
-};
-
 // Characters that make an entry a glob pattern rather than a literal path.
 // Braces are included so patterns like ~/.config/{a,b} are detected even
 // without a *.
@@ -106,9 +98,8 @@ export function expandWorkspacePaths(entries: readonly string[]): string[] {
 
     const expanded = expandTilde(entry);
     const isGlob = GLOB_MAGIC.test(expanded);
-    // onlyFiles:false -- workspace roots are usually directories, and scanSync
-    // defaults to files only.
-    const matches = isGlob ? Array.from(new GlobCtor(expanded).scanSync({ onlyFiles: false })) : [expanded];
+    // onlyFiles:false -- workspace roots are usually directories, and scanSync defaults to files only.
+    const matches = isGlob ? Array.from(new Bun.Glob(expanded).scanSync({ onlyFiles: false })) : [expanded];
 
     if (isGlob && matches.length === 0) {
       // The entry may be a literal path whose name merely contains glob

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [BRK] dropped support for bun older than 1.4.2
+
 - **webui subagent panels stop diffing the whole UI per token.** The streaming activity body lived inside the App tree, so every `taskActivity` delta diffed the entire UI -- hundreds of deltas per second. Each open panel now owns its own small mounted tree: rows keyed by block-object identity, so appends, merged-tail text patches, and eviction at the 200-block cap are all just the keyed diff touching new/changed rows. Activity bumps left the App render effect entirely and coalesce to one flush per animation frame -- the transcript, the strip, and everything else never re-render on subagent output.
 
 - fix activity panel rebind orphaning its previous mount: a ref set without a preceding null left the old body rendering into a detached element that no flush or unmount could reach. Rebind now tears the previous mount down first.

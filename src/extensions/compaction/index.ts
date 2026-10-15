@@ -136,7 +136,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
       // Wire to task-agent abort signal if present. The listener is removed
       // in finally (not left on the agent's long-lived signal), mirroring
-      // Agent._performLlmCall so listeners don't accumulate across compactions.
+      // Agent#performLlmCall so listeners don't accumulate across compactions.
       const signal = agent.abortSignal;
       let removeAbortForwarder: (() => void) | null = null;
       if (signal?.aborted) {

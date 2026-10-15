@@ -9,7 +9,7 @@ import type { Agent } from "@core/agent.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-// Mirrors the per-notify claim closure core builds in _emitTurnEnd: first
+// Mirrors the per-notify claim closure core builds in #emitTurnEnd: first
 // caller wins, later callers lose.
 function makeClaimTurn(): () => boolean {
   let claimed = false;

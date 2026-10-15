@@ -4,13 +4,13 @@
 
 - [BRK] dropped support for bun older than 1.4.2
 
-- **webui subagent panels stop diffing the whole UI per token.** The streaming activity body lived inside the App tree, so every `taskActivity` delta diffed the entire UI -- hundreds of deltas per second. Each open panel now owns its own small mounted tree: rows keyed by block-object identity, so appends, merged-tail text patches, and eviction at the 200-block cap are all just the keyed diff touching new/changed rows. Activity bumps left the App render effect entirely and coalesce to one flush per animation frame -- the transcript, the strip, and everything else never re-render on subagent output.
+- **webui subagent panels performance fix** Mounted subagent panels as their own render subtree, and coalesce to one flush per animation frame to avoid re-rendering the entire UI on every streamed token.
 
 - fix activity panel rebind orphaning its previous mount: a ref set without a preceding null left the old body rendering into a detached element that no flush or unmount could reach. Rebind now tears the previous mount down first.
 
-- **webui profile fix: cold resume keeps its profile, switching never clears.** Resuming a cold session read the saved profile under the wrong key, so every resumed session silently rebuilt on `default`. Profile switching also still ran the old wipe-plus-confirm path; it now keeps the conversation like `/profile` in the CLI, and records the switch so the next resume inherits it.
+- **webui profile fix: cold resume keeps its profile, switching doesn't clear.** Resuming a cold session read the saved profile under the wrong key, so every resumed session silently rebuilt on `default`.
 
-- **task questions stop holding the provider lane.** A worker blocked inside a `question` tool call held its lane slot, and the delegating manager session usually sits on that same lane, so it could never wake to answer. The worker now yields the slot while a question is pending and re-takes it before the question settles; the delegating session is woken through its bus with the question and a `task_followup` hint.
+- fix hung subagent when using question tool - now it releases the provider lane while waiting for a response.
 
 - fix task interrupts while a worker sits in a question: the tool raced only the per-run abort controller, but an interrupt fires the agent-level signal, so the task stayed "running" inside its question forever. Both signals are raced now.
 

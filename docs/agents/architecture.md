@@ -274,6 +274,7 @@ Each extension has:
 | `ui-one-shot` | One-shot prompt mode (`-p`/`--prompt` flag, `prompt` subcommand) |
 | `ui-interactive-cli` | Interactive CLI session with readline loop |
 | `subagents` | Subagent tools for task delegation (manager-only) |
+| `workflows` | Multi-agent workflow (DAG) artifacts from `*.workflow.yaml` graphs: `workflow validate|render|run|list|status|reconcile|cancel` CLI, manager tools (`workflow_validate`/`dispatch`/`status`), and `/workflow` + `/followup` slash commands. Built on `TaskManager` |
 | `agents-md` | Loads AGENTS.md and contributes Project Context section |
 | `aspects` | Loads aspect files and contributes Guidelines section |
 | `environment` | Contributes Environment section to system prompt |

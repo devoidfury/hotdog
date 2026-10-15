@@ -75,6 +75,14 @@
       "apiKey": "$OPENROUTER_API_KEY",
       "models": [
         {
+          "name": "cohere/north-mini-code:free",
+          "contextLimit": 256000
+        },
+        {
+          "name": "dots-studio/dots-3-note-preview:free",
+          "contextLimit": 512000
+        },
+        {
           "name": "nvidia/nemotron-3-ultra-550b-a55b:free",
           "contextLimit": 1048576
         }

@@ -55,6 +55,8 @@ export const openaiProtocol: LlmProtocol = {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "User-Agent": `hotdog/${pkg.version}`,
+      'HTTP-Referer': 'https://github.com/devoidfury/hotdog',
+      'X-Title': 'hotdog'
     };
     if (ctx.apiKey) headers["Authorization"] = `Bearer ${ctx.apiKey}`;
     if (ctx.sessionId) {

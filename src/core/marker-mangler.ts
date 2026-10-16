@@ -1,18 +1,14 @@
 // Marker mangler — injection prevention for protected XML markers.
 //
-// Randomly aliases protected marker names before sending to the model,
-// and reverses the transformation on output.
+// Randomly aliases protected marker names before sending to the model, and reverses the transformation on output.
 //
 // Also automatically replaces chatML markers as those are commonly used in these model backend templates.
 
 import { chatmlEscape, chatmlUnescape } from "@utils/strings";
 
-// Core-owned protected prefixes: markers no WireFormat owns. Format-owned
-// element names (e.g. the XML format's tool/output/error/file-include/
-// system-notice) enter the union via WireFormat.markers, assembled at session
-// entry points and passed to the constructor or addPrefixes(). A wrapper
-// whose framing lives in a format has its protection travel with that format:
-// disable every format and nothing renders (or forges) those tags either.
+// Core-owned protected prefixes: markers no WireFormat owns. Format-owned element names (e.g. XML format's tool/output/error/file-include/)
+// enter the union via WireFormat.markers, assembled at session entry points and passed to the constructor or addPrefixes().
+// Protection travels with the format that owns a wrapper: disable every format and nothing renders (or forges) those tags either.
 export const CORE_PROTECTED_PREFIXES = [
   "tool-call",
   "tool_call",
@@ -27,8 +23,7 @@ export const CORE_PROTECTED_PREFIXES = [
 
 const ALIAS_LENGTH = 16;
 const ALIAS_CHARS = "abcdefghijkmnopqrstuvwxyz23456789";
-// Rejection bound: largest byte value keeping `byte % ALIAS_CHARS.length`
-// unbiased (256 is not a multiple of 34, so a raw modulo would skew low values).
+// Rejection bound keeping `byte % ALIAS_CHARS.length` unbiased -- 256 is not a multiple of 34, so a raw modulo would skew toward low values.
 const ALIAS_BYTE_MAX = 256 - (256 % ALIAS_CHARS.length);
 
 function generateAlias(): string {
@@ -47,13 +42,9 @@ function generateAlias(): string {
 }
 
 /**
- * Build a regex that matches a mangler alias literal
- * (m_ + exactly one alias body, i.e. ALIAS_LENGTH alias chars).
- *
- * A fresh regex is returned per call so global-flag lastIndex state is
- * never shared between callers. The match must not be embedded in a longer
- * identifier (lookbehind) nor be a prefix of a longer alias-char run
- * (lookahead), so only exact alias-length runs count.
+ * Build a regex matching a mangler alias literal: `m_` + exactly ALIAS_LENGTH alias chars.
+ * A fresh regex per call avoids shared global-flag state. The lookbehind/lookahead ensure the alias
+ * isn't embedded in or prefixed by a longer identifier, so only exact-length runs count.
  */
 export function buildAliasPattern(): RegExp {
   return new RegExp(
@@ -71,14 +62,10 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Rules for one from→to name pair. The exact-boundary rules run before the
-// dashed-prefix rule, mirroring the original application order: `<name>` uses
-// the exact rule, `<name-something>` falls through to the prefix rule.
-//
-// Rules are compiled ONCE per name pair (escape() runs per wire message per
-// request; rebuilding ~8 regexes per prefix per call was a hot path). All
-// patterns are /g; String.replace resets lastIndex after each global pass,
-// so a shared compiled regex is safe to reuse.
+// Rules for one from→to name pair. Exact-boundary rules run before the dashed-prefix rule
+// (`<name>` matches exactly, `<name-something>` falls to the prefix rule).
+// Compiled ONCE per pair-- escape() runs per wire message, so rebuilding ~8 regexes per call would be a hot path.
+// All patterns are /g and String.replace resets lastIndex after each pass, so the compiled regex is safe to share.
 function buildRules(from: string, to: string): ManglerRule[] {
   const escaped = escapeRegex(from);
   return [
@@ -106,10 +93,8 @@ export class MarkerMangler {
   #unescapeRules: ManglerRule[];
 
   /**
-   * @param prefixes - Protected marker prefixes to alias. Defaults to the
-   *   core list (CORE_PROTECTED_PREFIXES) so existing call sites keep working;
-   *   session entry points pass the derived union (core + active WireFormat
-   *   markers + model/provider controlTokens).
+   * @param prefixes - Protected prefixes to alias. Defaults to the core list;
+   * session entry points pass the derived union (core + active WireFormat markers + model/provider controlTokens).
    */
   constructor(prefixes: readonly string[] = CORE_PROTECTED_PREFIXES) {
     this.#mappings = new Map();
@@ -132,11 +117,8 @@ export class MarkerMangler {
     for (const rule of buildRules(alias, prefix)) this.#unescapeRules.push(rule);
   }
 
-  /**
-   * Add prefixes mid-session (e.g. on model switch when the token set grows).
-   * Existing aliases (and their compiled rules) are untouched; only new
-   * prefixes get fresh aliases and appended rules.
-   */
+  /** Add prefixes mid-session (e.g. on model switch). Existing aliases are
+   * untouched; only new prefixes get fresh aliases and appended rules. */
   addPrefixes(newOnes: readonly string[]): void {
     for (const prefix of newOnes) {
       if (!prefix || this.#mappings.has(prefix)) continue;

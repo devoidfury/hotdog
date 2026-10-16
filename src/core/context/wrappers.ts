@@ -1,36 +1,30 @@
 // Semantic wrapper parts.
 //
-// A wrapper part is harness structure wrapping a payload. It is one level
-// above the markup: core owns the DATA (the part types, shape validation)
-// and the field TRUST spec; the WireFormat extension (extensions/
-// wire-format-xml is the built-in) owns the model-facing SHAPE. The wire
-// serializer (llm-client/serialize.ts) is the only place a wrapper is
-// rendered and mangled.
+// A wrapper part is harness structure wrapping a payload -- one level above
+// the markup: core owns the DATA (part types, shape validation) and each
+// field's TRUST spec; the WireFormat extension (built-in: wire-format-xml)
+// owns the model-facing SHAPE. The wire serializer (llm-client/serialize.ts)
+// is the only place a wrapper is rendered and mangled.
 //
-// Field trust is fixed per wrapper type (the part's semantics, not its
-// message's provenance):
-//   - "file-include": the attached file's data. Path and content are file
-//     data and are mangled at the wire.
-//   - "system-notice": harness-generated notice. Verbatim.
-//   - "tool-result": one tool's output. `status` is harness-owned;
-//     everything the tool produced (name, metadata keys and values, error,
-//     hint, output) is tool data and is mangled at the wire.
+// Field trust is fixed per wrapper type (its semantics, not its message's
+// provenance):
+//   - "file-include": the attached file's path and content -- file data,
+//     mangled at the wire.
+//   - "system-notice": harness-generated notice -- verbatim.
+//   - "tool-result": one tool's output. `status` is harness-owned; everything
+//     the tool produced (name, metadata keys/values, error, hint, output) is
+//     tool data, mangled at the wire.
 //
-// WHAT CORE DOES NOT OWN: any markup at all. There is no canonical shape
-// here for any wrapper type -- framing belongs to the selected WireFormat
-// and is applied by the wire serializer. Serializing ANY wrapper without one
-// is an error, not a fallback. At rest (context, session logs, hooks, UI
-// handlers) every wrapper part is passed through as DATA (JSON), so no layer
-// downstream of the wire has to un-render a format it never chose; a display
-// consumer composes its own text (see utils/tool-content.ts).
+// CORE DOES NOT OWN any markup: there is no canonical shape here. Framing belongs to the selected WireFormat,
+// applied by the wire serializer. Serializing ANY wrapper without one is an error, not a fallback. At rest
+// (context, session logs, hooks, UI) every wrapper part passes through as DATA (JSON), so no layer downstream
+// has to un-render a format it never chose; a display consumer composes its own text (utils/tool-content.ts).
 //
-// Wrapper tag names are protected by the marker mangler: core's own tags via
-// CORE_PROTECTED_PREFIXES, the active format's tags via its `markers`, so
-// untrusted text cannot forge them. The origin of a wrapper part is enforced
-// at the queue boundary (message-bus.ts flattens parts arrays arriving
-// without harness provenance) and by the fact that INPUT-hook output is
-// trusted code: only harness producers ever place wrapper parts in messages,
-// so a rendered wrapper tag is a genuine harness marker.
+// Wrapper tag names are protected by the marker mangler: core's own tags via CORE_PROTECTED_PREFIXES,
+// the active format's tags via its `markers`, so untrusted text cannot forge them.
+// A wrapper part's origin is enforced at the queue boundary (message-bus.ts flattens parts arrays without harness
+// provenance) and by the fact that INPUT-hook output is trusted code: only harness producers ever place wrapper
+// parts in messages, so a rendered wrapper tag is a genuine harness marker.
 
 import type { MarkerMangler } from "../marker-mangler.ts";
 import { LlmError } from "../error.ts";
@@ -58,7 +52,7 @@ export interface SystemNoticePart {
  * part, and the session's WireFormat turns it into model-facing text at the
  * wire. Tool code names nothing that reaches the wire -- `tool` is the
  * registered name and `meta` keys come from harness-authored tool code, both
- * of which the wire mangles as data.
+ * which the wire mangles as data.
  */
 export interface ToolResultPart {
   type: "tool-result";
@@ -81,9 +75,8 @@ export type WrapperPart = FileIncludePart | SystemNoticePart | ToolResultPart;
 /**
  * What a tool message's content may hold: harness text (the executor's own
  * messages -- unknown tool, validation error, executor failure) or the
- * tool-result part(s). Nothing in this type is model-facing: a WireFormat
- * shapes the part when the message reaches the wire, and at rest the part
- * travels as data.
+ * tool-result part(s). Nothing here is model-facing: a WireFormat shapes the
+ * part when the message reaches the wire, and at rest the part travels as data.
  */
 export type ToolResultContent = string | ToolResultPart[];
 
@@ -115,12 +108,11 @@ export function isToolResultPart(part: unknown): part is ToolResultPart {
 }
 
 /**
- * The at-rest form of a wrapper part (context, session logs, hooks, display,
- * UI handlers): the part itself, as data -- for EVERY wrapper type. Core
- * prescribes no markup, so consumers get the fields. A consumer that wants
- * prose picks its own rendering (the CLI flattens tool results via
- * utils/tool-content.ts); the model-facing shape is chosen by the session's
- * WireFormat at the wire and nowhere else.
+ * The at-rest form of a wrapper part (context, session logs, hooks, display):
+ * the part itself, as data -- for EVERY wrapper type. Core prescribes no
+ * markup, so consumers get the fields. A consumer that wants prose picks its
+ * own rendering (the CLI flattens tool results via utils/tool-content.ts); the
+ * model-facing shape is chosen by the session's WireFormat at the wire only.
  */
 export function renderWrapperAtRest(part: WrapperPart): string {
   return JSON.stringify(part);
@@ -138,8 +130,8 @@ export function mangleFileIncludeFields(part: FileIncludePart, mangler: MarkerMa
 /**
  * Apply the tool-result trust spec: every value the tool produced (name,
  * metadata keys and values, error, hint, payload) is escaped; the
- * harness-generated `status` is verbatim. Returns a NEW part -- the stored
- * message content is never mutated.
+ * harness-generated `status` is verbatim. Returns a NEW part -- stored content
+ * is never mutated.
  *
  * Escaping happens here, before the part reaches the format, so a format
  * physically cannot emit an unescaped tool payload.
@@ -148,7 +140,7 @@ export function mangleToolResultFields(part: ToolResultPart, mangler: MarkerMang
   const m = (s: string): string => mangler.escape(s) ?? s;
   // A metadata key lands in a markup-NAME position in the built-in shape (and
   // in anything similar a replacement format invents), so it must be mangled as
-  // markup rather than as bare text: mangling the bracketed form aliases a
+  // markup rather than bare text: mangling the bracketed form aliases a
   // protected name hidden inside a tool-authored key
   // (`ToolResult.withEntry("system-notice", ...)`), which text mangling would
   // leave live in the wire markup.
@@ -167,17 +159,14 @@ export function mangleToolResultFields(part: ToolResultPart, mangler: MarkerMang
 }
 
 /**
- * Render a wrapper part for the model, at the wire boundary. The framing
- * comes from the session's WireFormat; with a mangler the fields mangle per
- * the type's trust spec BEFORE the format sees them (file-include: path +
- * content; tool-result: everything the tool produced; system-notice: none --
- * its text is harness-generated). A `null` mangler means mangling is
- * disabled for the session, not that the format is skipped.
+ * Render a wrapper part for the model, at the wire boundary. The framing comes from the session's WireFormat;
+ * with a mangler the fields mangle per the type's trust spec BEFORE the format sees them (file-include: path +
+ * content; tool-result: everything the tool produced; system-notice: none -- its text is harness-generated).
+ * A `null` mangler means mangling is disabled for the session, not that the format is skipped.
  *
  * @param format - The request's WireFormat. REQUIRED for ANY wrapper part:
  *   core ships no shape of its own, so an unconfigured format is a config
- *   error (LlmError, type "config") at the boundary rather than a silent
- *   guess.
+ *   error (LlmError, "config") at the boundary rather than a silent guess.
  */
 export function renderWrapperForWire(
   part: WrapperPart,

@@ -46,8 +46,8 @@ function isLengthStop(reason: string | null): boolean {
 }
 
 /**
- * Tool-result body for calls that arrive on a length-stopped response.
- * Streaming accumulates arguments verbatim; a call cut off mid-JSON is unparseable or silently short, executing it is worse than failing.
+ * Tool-result body for calls on a length-stopped response.
+ * Streaming accumulates arguments verbatim; a call cut off mid-JSON is unparseable or silently short, so executing it is worse than failing.
  */
 const TRUNCATED_STOP_TOOL_TEXT =
   "This response hit the output token limit (finish_reason=length), so its tool " +
@@ -55,29 +55,21 @@ const TRUNCATED_STOP_TOOL_TEXT =
   "Re-issue the intended tool call now with complete arguments.";
 
 /**
- * Harness notice appended after a length-stop response's skipped tool
- * results (and as the backstop in #prepareIteration). Why a trailing
- * user-shaped message is required at all: strict llama.cpp-style gateways
- * collapse an assistant+tool pair into ONE assistant turn, so two
- * consecutive length stops leave the wire tail
- * [assistant, tool, assistant, tool] == [assistant, assistant] and the
- * next request 400s with "Cannot have 2 or more assistant messages at the
- * end of the list". A trailing user-role message (harness maps to
- * user/developer, never assistant) breaks the collapse. The tool result
- * above already carries the re-issue instruction; this text is kept short
- * because its job is the conversation shape, not the instruction.
+ * Harness notice after a length-stop response's skipped tool results (and the backstop in #prepareIteration).
+ * Why a trailing user-shaped message is required: strict llama.cpp-style gateways collapse an assistant+tool pair
+ * into ONE assistant turn, so two consecutive length stops leave the wire tail [assistant, tool, assistant, tool] == [assistant, assistant]
+ * and the next request 400s with "Cannot have 2+ assistant messages at the end". A trailing user-role message breaks the collapse.
+ * The tool result above already carries the re-issue instruction; this text stays short -- its job is the conversation shape, not the instruction.
  */
 const TRUNCATED_STOP_NUDGE_TEXT =
   "The previous response was truncated by the output token limit, so its tool " +
   "call was not executed. Re-issue that tool call now with complete arguments.";
 
 /**
- * Nudge for the empty-response-after-tools stall: the model returned neither
- * text nor tool calls after tool results (a common local-model failure). The
- * notice lands after the empty assistant message, so the context tail is no
- * longer a tool result. Empty turns are budgeted by maxEmptyRetries; once the
- * budget is spent the run stops with the empty_response reason instead of
- * completing empty.
+ * Nudge for the empty-response-after-tools stall: the model returned neither text nor tool calls after
+ * tool results (a common local-model failure). The notice lands after the empty assistant message,
+ * so the context tail is no longer a tool result. Empty turns are budgeted by maxEmptyRetries;
+ * once spent, the run stops with empty_response instead of completing empty.
  */
 const EMPTY_TURN_NUDGE_TEXT =
   "Your last response was empty: no text and no tool calls after the tool results. " +
@@ -95,8 +87,8 @@ export interface OutputSink {
 }
 
 /**
- * Branch this session into a new one (the /fork command). Set by the owning SessionManager after construction.
- * left null by sessionless harnesses, where /fork errors.
+ * Branch this session into a new one (the /fork command).
+ * Set by the owning SessionManager after construction; left null by sessionless harnesses, where /fork errors.
  */
 export interface ForkSessionResult {
   sessionId: string;
@@ -200,10 +192,8 @@ export class Agent implements AgentLike {
       throw ConfigError.MissingConfig("contextLimit");
     }
     if (typeof options.model !== "string" || options.model.trim() === "") {
-      // No model anywhere in the resolution chain (CLI --model, profile,
-      // env, config default_model, provider models). Failing here -- at
-      // agent construction -- keeps model-free subcommands (profiles,
-      // sessions) usable with an incomplete config.
+      // No model anywhere in the resolution chain (CLI --model, profile, env, config default_model, provider models).
+      // Failing here, at agent construction, keeps model-free subcommands (profiles, sessions) usable with an incomplete config.
       throw new ConfigError(
         "No model configured. Set one via:\n" +
           "  --model <provider>/<name>     (CLI flag)\n" +
@@ -223,11 +213,9 @@ export class Agent implements AgentLike {
     this.hideThinking = options.hideThinking === true;
     this.sink = options.sink || null;
     this.modelRegistry = options.modelRegistry || {};
-    // Seed the window from the registry entry -- per-model context_limit from
-    // fetchModels (e.g. llama-swap autoload) only ever lands in the registry;
-    // options.contextLimit is the global resolved fallback. Registry entries
-    // are built with the same fallback, so this no-ops when the backend
-    // provided nothing. Must run after both #model and modelRegistry are set.
+    // Seed the window from the registry entry -- per-model context_limit from fetchModels (e.g. llama-swap autoload)
+    // only lands in the registry; options.contextLimit is the global fallback. Registry entries use the same fallback,
+    // so this no-ops when the backend provided nothing. Must run after both #model and modelRegistry are set.
     const initialEntry = this.#resolveModelEntry();
     if (initialEntry?.contextLimit != null) {
       this.contextLimit = initialEntry.contextLimit;
@@ -340,11 +328,12 @@ export class Agent implements AgentLike {
   }
 
   /**
-   * Queue a steering message: immediate notice for a running (or about-to-run) agent.
-   * Drained before every LLM call in #prepareIteration, so it reaches the model mid-turn without landing
-   * between an assistant(tool_calls) message and its tool results. This is the in-core append seam (the sibling
-   * of the tool-result/system-notice appends); user submission goes through MessageBus.enqueue(..., { steering: true }),
-   * which runs the INPUT pipeline first. Task follow-ups use this seam directly (task agents have no bus).
+   * Queue a steering message for the running (or about-to-run) agent.
+   * Drained before every LLM call in #prepareIteration, so it reaches the model mid-turn
+   * without landing between an assistant(tool_calls) message and its tool results.
+   * This is the in-core append seam (sibling of the tool-result/system-notice appends);
+   * user submission runs the INPUT pipeline first via MessageBus.enqueue(..., { steering: true });
+   * task follow-ups use this seam directly (task agents have no bus).
    */
   steer(content: string | Array<Record<string, unknown>>): void {
     this.steeringQueue.push(content);
@@ -353,11 +342,9 @@ export class Agent implements AgentLike {
   // ── Run Loop ──────────────────────────────────────────────────────────────
 
   /**
-   * Run the agent loop with the given user input; returns undefined if input
-   * was empty. `userInput` is plain text or content parts (harness callers
-   * may embed `untrusted` parts, mangled only at the wire). `opts.source`
-   * sets the message's provenance; harness-injected runs become role
-   * "harness", all other input is tagged source "user".
+   * Run the agent loop with the given user input; returns undefined if input was empty.
+   * `userInput` is plain text or content parts (harness callers may embed `untrusted` parts, mangled only at the wire).
+   * `opts.source` sets the message's provenance; harness-injected runs become role "harness", all other input is tagged source "user".
    */
   async run(
     userInput: string | Array<Record<string, unknown>>,
@@ -367,15 +354,12 @@ export class Agent implements AgentLike {
     const emptyInput =
       !contentToText(userInput).trim() && (!images || images.length === 0);
     // A continuation (continueRun) has no user message: the context tail IS
-    // the input. Otherwise the old rule stands -- empty input is a no-op.
+    // the input. Otherwise empty input is a no-op.
     if (emptyInput && !opts?.continuation) return;
 
-    // Re-entrancy guard: the loop keeps per-run state on the instance
-    // (iterationCount, runAbortController, stream replay buffers). Two
-    // overlapping runs -- e.g. an extension calling run() while the bus
-    // loop is mid-turn -- would corrupt each other's assembly silently.
-    // An "agent" error type means formatError() prints the stack: an
-    // overlapping run is a bug, not a runtime condition to recover from.
+    // Re-entrancy guard: the loop keeps per-run state on the instance (iterationCount, runAbortController, stream replay buffers).
+    // Two overlapping runs -- e.g. an extension calling run() mid-turn -- would/ corrupt each other's assembly.
+    // An "agent" error type prints the stack, so an overlapping run surfaces as a bug, not a recovered condition.
     if (this.#running) {
       throw AgentError.AlreadyRunning(this.sessionId);
     }
@@ -405,9 +389,7 @@ export class Agent implements AgentLike {
       }
 
       let iteration = 0;
-      // Consecutive empty completions (no text, no tool calls) this run.
-      // Any text or tool work resets it, so the budget bounds one stall
-      // episode, not the whole run.
+      // Consecutive empty completions (no text/tool calls); any text or tool work resets it, so the budget bounds one stall episode.
       let emptyStreak = 0;
       while (iteration < this.maxIterations) {
         iteration++;
@@ -419,8 +401,8 @@ export class Agent implements AgentLike {
         try {
           response = await this.#performLlmCall(params);
         } catch (err) {
-          // PROVIDER_ERROR pipeline: a handler (e.g. tool-call-repair dropping a corrupt stored tool call the backend will never accept) can repair the
-          // history/params and set retry. Exactly one retry; a second failure propagates.
+          // PROVIDER_ERROR pipeline: a handler (e.g. tool-call-repair dropping a corrupt stored tool call the backend will never accept)
+        // can repair the history/params and set retry. Exactly one retry; a second failure propagates.
           const errPayload = { error: err, params, agent: this, retry: false };
           await this.hooks.runHookPipeline<{ retry?: boolean }, "provider:error">(
             HOOKS.PROVIDER_ERROR,
@@ -439,9 +421,9 @@ export class Agent implements AgentLike {
             emptyStreak++;
             if (emptyStreak <= this.maxEmptyRetries) {
               if (afterToolResults) {
-                // Harness notice: persisted via addMessage so the session log records the retry.
-                // Only the after-tools variant needs a message: it also breaks the
-                // tool-result context tail that some strict chat templates reject.
+                // Harness notice, persisted so the session log records the retry.
+                // The after-tools variant also breaks the tool-result context tail
+                // that some strict chat templates reject.
                 this.addMessage(new Message({
                   role: "harness",
                   source: "harness",
@@ -511,12 +493,11 @@ export class Agent implements AgentLike {
 
   /**
    * One tools-off wrap-up call after the iteration cap (see the capped-finish
-   * block in run()). Appends a harness notice so the model knows why, builds
-   * params through the usual pipelines (compaction and steering still apply),
-   * then strips the tool defs so the summary call cannot smuggle in more work.
-   * Returns null on any failure -- the caller keeps the MaxIterations error,
-   * so a broken wrap-up never masks the cap. No PROVIDER_ERROR retry here:
-   * the best-effort call gets exactly one attempt.
+   * block in run()). Appends a harness notice, builds params through the usual
+   * pipelines (compaction and steering still apply), then strips the tool
+   * defs so the summary call cannot smuggle in more work. Returns null on any
+   * failure -- the caller keeps the MaxIterations error, so a broken wrap-up
+   * never masks the cap. No PROVIDER_ERROR retry: exactly one attempt.
    */
   async #wrapUpAfterCap(): Promise<string | null> {
     this.addMessage(new Message({
@@ -588,16 +569,15 @@ export class Agent implements AgentLike {
     );
     messages = contextResult.data.messages;
 
-    // Backstop invariant: never issue a request whose last two non-system
-    // messages are both internal role "assistant" -- the only internal role
-    // that serializes to wire "assistant" (harness maps to user/developer).
-    // A strict llama.cpp-style gateway rejects such a tail: it collapses
-    // each assistant+tool pair into one assistant turn, so
-    // [assistant, tool, assistant, tool] arrives as two consecutive
-    // assistant messages and 400s. The length-stop branch appends its own
-    // notice; this catches any other assistant tail (e.g. consecutive empty
-    // completions when maxEmptyRetries >= 2). addMessage persists it; the
-    // local `messages` must carry it for this request too.
+    // Backstop: never issue a request whose last two non-system messages are
+    // both internal role "assistant" (the only internal role that serializes
+    // to wire "assistant" -- harness maps to user/developer). A strict
+    // llama.cpp-style gateway collapses each assistant+tool pair into one
+    // assistant turn, so [assistant, tool, assistant, tool] arrives as two
+    // consecutive assistant messages and 400s. The length-stop branch
+    // appends its own notice; this catches any other assistant tail (e.g.
+    // consecutive empty completions when maxEmptyRetries >= 2). addMessage
+    // persists it; the local `messages` must carry it for this request too.
     const nonSystemTail = messages.filter((m) => m.role !== "system");
     if (
       nonSystemTail.length >= 2 &&
@@ -639,8 +619,8 @@ export class Agent implements AgentLike {
     this.runAbortController = runController;
 
     // Forward an external abort to this run's controller. The listener is per-run:
-    // it closes over runController(not this.runAbortController, which is nulled between runs)
-    // and is removed in finally, so it can't accumulate across runs or fire on a cleared controller while idle.
+    // it closes over runController (nulled between runs) and is removed in finally,
+    // so it can't accumulate across runs or fire on a cleared controller while idle.
     const signal = this.abortSignal;
     let removeAbortForwarder: (() => void) | null = null;
     if (signal?.aborted) {
@@ -675,8 +655,8 @@ export class Agent implements AgentLike {
     params: LlmRequestParams,
   ): Promise<string | { outcome: string; toolResults: ToolResult[] }> {
     const { modelConfig } = params;
-    // handlers may repair/replace the response before it becomes an assistant message and its tool calls execute 
-    // (e.g. tool-call-repair recovering markup the backend failed to parse into real tool calls).
+    // handlers may repair/replace the response before it becomes an assistant message and its tool calls execute
+    // (e.g.tool - call - repair recovering markup the backend failed to parse into real tool calls).
     const resPayload = { response, modelConfig, agent: this };
     await this.hooks.runHookPipeline<{ response?: StreamResult }, "provider:response">(
       HOOKS.PROVIDER_RESPONSE,
@@ -703,7 +683,7 @@ export class Agent implements AgentLike {
       let lengthStopped = false;
 
       if (isLengthStop(response.finishReason)) {
-        // Streamed arguments may be silently truncated; nothing from this response is safe to run.
+        // Streamed args may be silently truncated; nothing from this response is safe to run.
         // Fail every call with a re-issue instruction so the wire stays valid (paired tool call & result).
         lengthStopped = true;
         toolCallsToExecute = [];
@@ -749,11 +729,10 @@ export class Agent implements AgentLike {
       }
 
       if (lengthStopped) {
-        // Trailing user-shaped notice: without it the context tail is
-        // [assistant, tool], which strict gateways collapse to one assistant
-        // turn; a second consecutive length stop then ends the wire with two
-        // assistant messages and 400s (see TRUNCATED_STOP_NUDGE_TEXT).
-        // Persisted via addMessage so it rides every later request.
+        // Trailing user-shaped notice: without it the context tail is [assistant, tool],
+        // which strict gateways collapse to one assistant turn; a second consecutive
+        // length stop ends the wire with two assistant messages and 400s (see TRUNCATED_STOP_NUDGE_TEXT).
+        // Persisted so it rides every later request.
         this.addMessage(new Message({
           role: "harness",
           source: "harness",
@@ -777,7 +756,7 @@ export class Agent implements AgentLike {
     cancelled = false,
     reason: TurnEndReason,
   ): Promise<void> {
-    // One continuation owner per turn end. Handlers that enqueue the next
+    // One continuation owner per turn end: handlers that enqueue the next
     // input (loop re-fires, handoff plans) claim first; a failed claim means
     // another handler owns this turn and enqueuing would double up.
     let claimed = false;
@@ -854,7 +833,7 @@ export class Agent implements AgentLike {
 
   /**
    * rewind (undo/rewind/clear): replaces the context and also fires CONTEXT_REWOUND so session persistence checkpoints the log.
-   * Awaitable: settling means the checkpoint writes are done, so the next message can never race its append past the rewound-context re-appends.
+   * Awaitable: settling means checkpoint writes are done, so the next message can't race its append past the rewound-context re-appends.
    */
   rewindContext(newContext: Message[]): Promise<void> {
     this.replaceContext(newContext);
@@ -872,19 +851,14 @@ export class Agent implements AgentLike {
   /**
    * Switch this agent to a different profile at runtime.
    *
-   * Applies the profile's body and tool whitelist, resets the tool
-   * blacklist to the profile's (an empty profile blacklist clears whatever
-   * a top-level config carried), updates the manager-profile flag (which
-   * gates managerOnly tools like the subagent tools), and switches the
-   * model via the model setter when the profile specifies one (so per-model
-   * limits, reasoning effort, and MODEL_CHANGE all update). A profile that
-   * declares a model `group` instead leaves the session model alone (with a
-   * warning) -- groups place task workers, not session turns. Invalidates the
-   * cached system prompt and tool defs so the next turn rebuilds them from
-   * the new profile.
+   * Applies the profile's body and tool whitelist,
+   * resets the tool blacklist to the profile's (an empty blacklist clears whatever a top-level config carried),
+   * updates the manager-profile flag (which gates managerOnly tools like the subagent tools),
+   * and switches the model via the model setter when the profile specifies one (so per-model limits, reasoning effort, and MODEL_CHANGE all update).
+   * A profile declaring a model `group` instead leaves the session model alone (with a warning) -- groups place task workers, not session turns.
+   * Invalidates the cached system prompt and tool defs so the next turn rebuilds them from the new profile.
    *
-   * Does NOT clear the message log -- callers that want a wipe (e.g. the
-   * webui, which asks the user first) call clearContext() separately.
+   * Does NOT clear the message log -- callers that want a wipe (e.g. the webui, which asks the user first) call clearContext() separately.
    */
   applyProfile(name: string, profile: SwitchProfile): void {
     this.profileName = name;

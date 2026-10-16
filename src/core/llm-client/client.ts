@@ -3,28 +3,14 @@ import { MarkerMangler } from "../marker-mangler.ts";
 import type { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { ToolDef } from "../extensions/tool-registry.ts";
-import {
-  createWireFormatRegistry,
-  resolveWireFormatId,
-  WireFormat,
-  type WireFormatRegistry,
-} from "../extensions/wire-format.ts";
-import {
-  createRoleMappingRegistry,
-  resolveRoleMappingId,
-  type RoleMapping,
-  type RoleMappingRegistry,
-} from "../extensions/role-mapping.ts";
+import { createWireFormatRegistry, resolveWireFormatId, WireFormat, type WireFormatRegistry } from "../extensions/wire-format.ts";
+import { createRoleMappingRegistry, resolveRoleMappingId, type RoleMapping, type RoleMappingRegistry } from "../extensions/role-mapping.ts";
 import type { LlmProtocol, ProtocolContext } from "./protocol.ts";
 import { createLlmProtocolRegistry, resolveProtocolId, type LlmProtocolRegistry } from "./protocol.ts";
 import { openaiProtocol } from "./openai-protocol.ts";
 import { hotdogFetch, readCappedBody } from "@utils/fetch.ts";
 
-/**
- * Cap on how much of an error response body is READ. This only stops
- * hostile or broken endpoints from materializing multi-gigabyte error
- * pages into memory.
- */
+/** Cap on how much of an error response body is READ. Stops hostile or broken endpoints from materializing multi-gigabyte error pages into memory. */
 const MAX_ERROR_BODY_CHARS = 200_000;
 
 /**
@@ -96,12 +82,9 @@ export type StreamEvent =
   | { type: "finish"; reason: string }
   | {
       /**
-       * A mid-stream failure just occurred and the request is being
-       * re-issued from the start (a half-read SSE body cannot be resumed).
-       * Consumers must discard everything accumulated from the failed
-       * attempt -- text, reasoning, tool calls, usage, and replay buffers
-       * -- so the final result is the fully successful stream with no
-       * partial residue.
+       * A mid-stream failure re-issues the request from scratch (a half-read SSE body cannot be resumed).
+       * Consumers discard everything accumulated from the failed attempt -- text, reasoning, tool calls,
+       * usage, and replay buffers -- so only the successful stream remains.
        */
       type: "reset";
     };
@@ -157,12 +140,10 @@ export class LlmClient {
   }
 
   /**
-   * Tolerant resolution for compaction and the mangler union: `null` when no
-   * name is configured or nothing is registered. The REQUEST path is stricter
-   * (#requestWireFormat): a configured-but-unregistered name is a config
-   * error there. With nothing configured, requests that carry no wrapper part
-   * are unaffected; one that does throws at the wire boundary (renderWrapper)
-   * rather than inventing a shape.
+   * Tolerant resolution for compaction and the mangler union: `null` when no name is configured or nothing registered.
+   * The REQUEST path is stricter (#requestWireFormat): a configured-but-unregistered name is a config error there.
+   * With nothing configured, requests carrying no wrapper part are unaffected;
+   * one that does throws at the wire boundary rather than inventing a shape.
    */
   resolveWireFormat(modelConfig: ModelConfig): WireFormat | null {
     const id = resolveWireFormatId(modelConfig, this.providers, this.defaultWireFormat);
@@ -181,11 +162,11 @@ export class LlmClient {
   }
 
   /**
-   * WireFormat resolved FOR A REQUEST. Mirrors protocolFor: a name is
-   * configured but nothing registers it, that is a `config` error HERE -- it
-   * must not sail through on requests that happen to carry no wrapper part
-   * (the boundary's "No wire format is active" message would then blame the
-   * config for a mistake it cannot see). Nothing configured stays null.
+   * WireFormat resolved FOR A REQUEST: a configured-but-unregistered name is
+   * a `config` error HERE (mirrors protocolFor), so it must not sail through
+   * on requests that carry no wrapper part -- the boundary's "No wire format
+   * is active" message would otherwise blame the config for a mistake it
+   * cannot see. Nothing configured stays null.
    */
   #requestWireFormat(modelConfig: ModelConfig): WireFormat | null {
     const id = resolveWireFormatId(modelConfig, this.providers, this.defaultWireFormat);
@@ -364,17 +345,12 @@ export class LlmClient {
       }
     }
 
-    // The retry unit is the request PLUS full stream consumption: a
-    // half-read SSE body cannot be resumed, so a mid-stream failure
-    // (connection reset, chunked abort, stall) re-issues the whole request.
-    // (Retry stays idempotent for the agent: the assistant message is only
-    // added to context after the FULL stream is assembled.)
+    // Retry unit = request PLUS full stream consumption: a half-read SSE body cannot be resumed,
+    // so a mid-stream failure (reset, chunked abort, stall) re-issues the whole request.
+    // (Retry stays idempotent for the agent: the assistant message is only added after the FULL stream is assembled.)
     //
-    // The chat timeout is enforced per-attempt via hotdogFetch's built-in
-    // timeoutMs (an independent AbortSignal.timeout), NOT by aborting the
-    // shared abortController. Aborting the shared controller would poison
-    // every subsequent retry attempt with an already-aborted signal.
-    // The shared abortController is exclusively for user cancellation.
+    // The chat timeout is per-attempt via hotdogFetch's AbortSignal.timeout, NOT by aborting the shared controller --
+    // which is exclusively for user cancellation. Aborting it mid-retry would poison the next attempt.
     let response: Response | null = null;
     let delayMs = this.retryBaseDelayMs ?? 1000;
     // Per-attempt teardown controller + its user-cancel forwarder,
@@ -392,12 +368,13 @@ export class LlmClient {
         }
         removeAttemptForwarder?.();
 
-        // A stalled attempt cannot be torn down via response.body.cancel(): while the SSE parser
-        // has a pending read, the body is locked and cancel() rejects with "Cannot cancel a locked ReadableStream".
-        // The socket then stays open, the backend keeps generating into the void, and the retry's
-        // new request OVERLAPS the ghost on the same runner/session. An attempt-scoped fetch abort
-        // tears the connection down regardless of the locked body. It stays separate from the shared
-        // abortController so a torn-down attempt never poisons the next one.
+        // A stalled attempt can't be torn down via response.body.cancel(): with
+        // a pending read the body is locked and cancel() rejects
+        // ("Cannot cancel a locked ReadableStream"). The socket stays open, the
+        // backend keeps generating into the void, and the retry's new request
+        // would OVERLAP the ghost on the same session. An attempt-scoped fetch
+        // abort tears the connection down regardless; it stays separate from
+        // the shared controller so a torn-down attempt never poisons the next.
         attemptController = new AbortController();
         const onUserAbort = () => attemptController?.abort();
         abortController.signal.addEventListener("abort", onUserAbort, { once: true });
@@ -432,8 +409,8 @@ export class LlmClient {
           );
           return; // stream consumed to completion: success
         } catch (e: unknown) {
-          // Abort the attempt's socket first -- body.cancel() cannot reach it here (locked by the SSE reader, see above).
-          // Then classify the raw failure the same way the request phase does (see classifyStreamError).
+          // Abort the attempt's socket first (body.cancel() can't reach it here -- locked by the SSE reader, see above),
+          // then classify the failure the same way the request phase does (see classifyStreamError).
           response = null;
           attemptController.abort();
           const err = LlmClient.classifyStreamError(
@@ -444,9 +421,8 @@ export class LlmClient {
           );
           if (!shouldRetryLlmError(err, attempt, this.maxRetries)) throw err;
 
-          // A retry re-issues the request from scratch, so consumers must
-          // discard the failed attempt's partial output (and their replay
-          // buffers) before the new stream's events start arriving.
+          // A retry re-issues from scratch, so consumers discard the failed attempt's partial output
+          // (and replay buffers) before the new stream's events arrive.
           yield { type: "reset" };
 
           await retryDelay(resolveRetryDelayMs(err, delayMs), abortController.signal);
@@ -474,18 +450,13 @@ export class LlmClient {
   }
 
   /**
-   * Classify a raw failure from fetch or from reading the response body
-   * (connection reset mid-stream, stream terminated, stall).
+   * Classify a raw failure from fetch or reading the response body (reset, terminated, stall).
+   * The shared signal aborting means USER cancellation is not retried; an aborted read is
+   * the per-attempt timeout (retryable), any other failure is a transient network error (retryable).
+   * LlmErrors pass through so their own type/status decide retryability.
    *
-   * The shared signal aborting means USER cancellation (not retried).
-   * Otherwise an aborted read is the per-attempt timeout (retryable), and
-   * any other failure is a transient network error (retryable). LlmErrors
-   * pass through untouched so their own type/status decide retryability.
-   *
-   * `endpoint` names the URL a failure happened against. Provider blocks
-   * outrank `--ai-url` for any model whose prefix matches a provider name, so
-   * Bun's bare "Unable to connect." is otherwise a dead end: the user checked
-   * the wrong endpoint and has no way to know.
+   * `endpoint` names the URL a failure happened against; provider blocks
+   * outrank `--ai-url`, so a bare "Unable to connect." isn't a dead end.
    */
   /**
    * URL for error text: the query is dropped so a credential carried in the
@@ -589,15 +560,11 @@ export class LlmClient {
   }
 
   /**
-   * SSE inactivity watchdog. A wedged local backend (llama.cpp/vLLM/Ollama)
-   * can hold a 200 response with a silent body; without this, the failure only
-   * surfaces when the per-attempt chat timeout (600s by default) finally fires.
-   * No StreamEvent for `idleMs` aborts the attempt with a retryable timeout
-   * LlmError, which the caller's stream-error path turns into the usual
-   * reset-and-reissue. `<= 0` disables. The lifetime cap needs no second knob:
-   * hotdogFetch's AbortSignal.timeout(chatTimeout) already spans body reads, so
-   * a drip-fed stream that keeps resetting this watchdog still dies at the chat
-   * timeout (deliberate simplification: one idle knob, not two).
+   * SSE inactivity watchdog. A wedged local backend (llama.cpp/vLLM/Ollama) can hold a 200 with a silent body;
+   * without this the failure only surfaces when the per-attempt chat timeout (600s) finally fires.
+   * No StreamEvent for `idleMs` aborts the attempt with a retryable timeout LlmError, which the
+   * caller's stream-error path turns into the usual reset-and-reissue. `<= 0` disables.
+   * One idle knob suffices: hotdogFetch's AbortSignal.timeout spans body reads, so a drip-fed stream still dies at the chat timeout.
    */
   async *_withIdleWatchdog(
     source: AsyncGenerator<StreamEvent>,

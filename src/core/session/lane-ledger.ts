@@ -7,63 +7,64 @@
  * ledger is a filesystem counting semaphore: one directory per provider lane
  * under `dir`, up to `cap` numbered slot files. A slot is taken by an atomic
  * exclusive create (fs-atomic: contents and existence land as one event, so a
- * held slot can never read as an empty/corrupt file mid-write); a slot whose
- * marker is corrupt, names a dead pid on this host, names THIS process
- * without a live lease object (the missed-release watchdog, see
- * `processSlots`), or has stopped beating (see below) is reclaimed by renaming
- * a temporary claiming marker ONTO the slot: rename replaces atomically, so
- * while a slot is held (or being
- * reclaimed) the path never momentarily lacks a file and a concurrent
- * acquirer's exclusive create can never slip into a gap beside a live holder
- * (closing the old rename-aside protocol's over-admission window). A reclaim
- * finalizes by reading back: the last rename stands, and a reclaimer that
- * sees a rival's marker simply gives the slot up untouched, so a loser never
- * clobbers or deletes the winner's marker.
+ * held slot can never read as empty/corrupt mid-write); a slot whose marker is
+ * corrupt, names a dead pid on this host, names THIS process without a live
+ * lease object (the missed-release watchdog, see `processSlots`), or has
+ * stopped beating (see below) is reclaimed by renaming a temporary claiming
+ * marker ONTO the slot: rename replaces atomically, so while a slot is held (or
+ * being reclaimed) the path never lacks a file and a concurrent acquirer's
+ * exclusive create can never slip into a gap beside a live holder (closing the
+ * old rename-aside protocol's over-admission window). A reclaim finalizes by
+ * reading back: the last rename stands, and a reclaimer that sees a rival's
+ * marker simply gives the slot up untouched, so a loser never clobbers the
+ * winner's marker.
  *
  * Heartbeat leases: every holder refreshes its slot's mtime on a timer
  * (`#beat`), so liveness is provable by ANY reader, on any host. A slot whose
  * heartbeat has gone quiet for `leaseMs` is reclaimable whatever its marker
  * claims -- foreign host, live-looking pid, suspended holder. This is what
- * makes a shared ledger dir safe when host identity is not stable (a config
- * dir mounted into containers, where the hostname is a container id that
- * changes every run): without the heartbeat, the foreign-host rule below is a
- * permanent wedge that only a manual delete clears, and a recycled pid can
- * read as a live holder.
+ * makes a shared ledger dir safe when host identity is unstable (a config dir
+ * mounted into containers, where the hostname is a container id that changes
+ * every run): without the heartbeat, the foreign-host rule is a permanent
+ * wedge that only a manual delete clears, and a recycled pid can read as a
+ * live holder.
  *
  * Fresh heartbeat + foreign host is still occupied: the safe failure remains
  * under-admission while the owner is demonstrably still beating. A holder that
  * stalls past `leaseMs` without dying (SIGSTOP, a laptop sleep, a synchronous
- * block longer than the lease) loses its slot, and the lane then over-admits
- * by one until it notices -- token-checked release means it cannot evict the
- * new holder, it just runs alongside for a turn.
+ * block longer than the lease) loses its slot, and the lane then over-admits by
+ * one until it notices -- token-checked release means it cannot evict the new
+ * holder, it just runs alongside for a turn.
  *
  * Missed-release watchdog (`processSlots`): a marker naming a live pid is
- * otherwise unreclaimable, so a leaked lease -- a dropped slot file unlink, a
- * release that never ran -- would strand that lane for the rest of the
- * process's life and every waiter behind it. This process therefore registers
- * every lease it takes in a module-level `WeakRef` table; a marker whose pid
- * is ours with no reachable lease object is treated as free and reclaimed. It
- * is exactly the lease the caller dropped on the floor: a slot in use is
- * referenced by its holder (TaskEntry.lease, or the bus's turn-scoped
- * release). Reclaim lands on a GC tick, not the instant of the leak. Other
- * processes see the same marker as live only while its heartbeat stays fresh.
+ * otherwise unreclaimable, so a leaked lease -- a dropped unlink, a release
+ * that never ran -- would strand that lane for the rest of the process's life
+ * and every waiter behind it. This process registers every lease it takes in a
+ * module-level `WeakRef` table; a marker whose pid is ours with no reachable
+ * lease object is treated as free and reclaimed. It is exactly the lease the
+ * caller dropped: a slot in use is referenced by its holder (TaskEntry.lease,
+ * or the bus's turn-scoped release). Reclaim lands on a GC tick, not the
+ * instant of the leak. Other processes see the same marker as live only while
+ * its heartbeat stays fresh.
  *
- * Residual race (deliberate): the pre-rename re-verification shrinks the takeover window to a fs roundtrip,
- * but a rename that lands between a reclaimer's re-verify and its rename still supersedes it;
- * two reclaimers of the same stale marker can both rename onto the slot, and a read-back that
- * lands before a rival's rename misreports a win, stranding one phantom lease on a slot whose
- * prior holder was already dead. That is strictly narrower than the momentary-absence window it replaces,
- * and a phantom's release is token-checked, so it cannot evict the true holder. 
- * (Without the re-verify, a release + fresh same-pid claim landing inside the judge->reclaim await
- * chain let a reclaimer rename OVER a live marker)
+ * Residual race (deliberate): the pre-rename re-verify shrinks the takeover
+ * window to a fs roundtrip, but a rename landing between a reclaimer's re-verify
+ * and its rename still supersedes it; two reclaimers of the same stale marker
+ * can both rename onto the slot, and a read-back before a rival's rename
+ * misreports a win, stranding one phantom lease. That is strictly narrower than
+ * the momentary-absence window it replaces, and a phantom's release is
+ * token-checked, so it cannot evict the true holder.
  *
- * Filesystem errors THROW to the caller, which fails open: an unusable state dir must not deadlock every task.
- * Occupied is not an error -- acquire returns null and the caller queues.
+ * Filesystem errors THROW to the caller, which fails open: an unusable state
+ * dir must not deadlock every task. Occupied is not an error -- acquire
+ * returns null and the caller queues.
  *
- * Stale-file sweeper (`sweepStale`): acquire only ever looks at slot-0..cap-1, so slot files abandoned by a formerly-larger
- * cap and `.slot.claiming-*` temps orphaned by a reclaimer that died mid-reclaim are never touched by the protocol again.
- * A sweep at construction and then on an hourly timer deletes any file under the ledger dir quiet for `DEFAULT_LANE_STALE_MS`, so
- * such litter cannot accumulate forever (a retry storm once left ~7GB of it on devoid's laptop).
+ * Stale-file sweeper (`sweepStale`): acquire only ever looks at slot-0..cap-1,
+ * so slot files abandoned by a formerly-larger cap and `.slot.claiming-*` temps
+ * orphaned by a reclaimer that died mid-reclaim are never touched by the
+ * protocol again. A sweep at construction and then on an hourly timer deletes
+ * any file under the dir quiet for `DEFAULT_LANE_STALE_MS`, so such litter
+ * cannot accumulate forever.
  */
 
 import { mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
@@ -86,10 +87,12 @@ export const DEFAULT_LANE_LEASE_MS = 120_000;
 export const DEFAULT_LANE_SWEEP_INTERVAL_MS = 3_600_000;
 /**
  * A file under the ledger dir untouched for this long is deleted by the sweep.
- * Held slots refresh their mtime every `DEFAULT_LANE_HEARTBEAT_MS` (15s), and any slot quiet for `leaseMs` (2 min)
- * is already reclaimable by anyone, so a file quiet for 60 minutes provably has no live holder. The margin also keeps
- * the sweep well clear of a suspended-but-alive process's slots before they could matter: by then their leases expired long ago,
- * and deleting them matches what a reclaim would already conclude.
+ * Held slots refresh their mtime every `DEFAULT_LANE_HEARTBEAT_MS` (15s), and
+ * any slot quiet for `leaseMs` (2 min) is already reclaimable by anyone, so a
+ * file quiet for 60 minutes provably has no live holder. The margin also keeps
+ * the sweep clear of a suspended-but-alive process's slots before they could
+ * matter: by then their leases expired long ago, and deleting them matches what
+ * a reclaim would already conclude.
  */
 export const DEFAULT_LANE_STALE_MS = 3_600_000;
 
@@ -229,7 +232,7 @@ export class LaneLedger {
     } satisfies SlotMarker)}\n`;
     // Register before any file write: a marker of ours that reaches disk is
     // never momentarily orphaned in `processSlots` (else a rival acquirer in
-    // this process could watchdog-reclaim our slot out from under us).
+    // this process could watchdog-reclaim our slot).
     const lease: LaneLease = { lane, path: "", token };
     processSlots.set(token, new WeakRef(lease));
     let claimed = false;
@@ -250,14 +253,16 @@ export class LaneLedger {
           // Released while we were looking. Retry the exclusive create: under
           // this protocol an absent slot never HIDES a live marker (contents
           // only leave via atomic-rename takeover or token-checked release), so
-          // creating here cannot slip in beside a live holder the way the old
+          // creating here cannot slip beside a live holder the way the old
           // rename-aside reclaim did.
           if (await createExclusive(path, marker)) return won(path);
           continue; // a rival create won
         }
         const cur = parseMarker(raw);
-        // Read-then-stat ordering is deliberate: an intervening takeover makes the stat fresher than the content we judged,
-        // which reads as occupied (under-admission). The reverse order could hand a live holder's fresh marker a stale timestamp and steal it.
+        // Read-then-stat is deliberate: an intervening takeover makes the stat
+        // fresher than the content we judged, reading as occupied (under-
+        // admission). The reverse could hand a live holder's fresh marker a
+        // stale timestamp and steal it.
         const quiet = await this.#isQuiet(path);
         if (quiet === null) continue; // vanished between read and stat
         if (this.#occupied(cur, !quiet)) {
@@ -283,22 +288,21 @@ export class LaneLedger {
       }
       return null;
     } finally {
-      // Never took a slot -- including a mid-loop fs throw, whose error the
-      // caller swallows into a fail-open retry: no ghost registrations, or a
-      // broken state dir would grow `processSlots` one entry per retry tick.
+      // Never took a slot -- including a mid-loop fs throw the caller swallows
+      // into a fail-open retry: no ghost registrations, or a broken state dir
+      // would grow `processSlots` one entry per retry tick.
       if (!claimed) processSlots.delete(token);
     }
   }
 
   /**
    * Release a lease. A no-op when the file is gone or now belongs to someone
-   * else (token mismatch: we were reclaimed as stale and the slot re-taken).
-   * The watchdog unregisters only AFTER the unlink completes: while an
-   * in-flight release could still rm the slot, its token must keep reading
-   * as held (the `lease` parameter also roots the object), or a same-process
-   * acquirer could orphan-reclaim the slot in the read->rm window and the
-   * pending `rm` would then force-delete the new owner's marker. Once release
-   * returns, a failed unlink still self-heals: the dropped lease object fails
+   * else (token mismatch: reclaimed as stale, slot re-taken). The watchdog
+   * unregisters only AFTER the unlink: while an in-flight release could still
+   * rm the slot, its token must keep reading as held (the `lease` param also
+   * roots the object), or a same-process acquirer could orphan-reclaim the slot
+   * in the read->rm window and force-delete the new owner's marker. After
+   * release returns, a failed unlink still self-heals: the dropped lease fails
    * the WeakRef check and the next acquirer reclaims.
    */
   async release(lease: LaneLease): Promise<void> {
@@ -328,11 +332,13 @@ export class LaneLedger {
 
   /**
    * Delete files under the ledger dir that no acquire path touches anymore.
-   * A candidate is a file (in a lane subdir) whose mtime is older than `staleMs`.
-   * See DEFAULT_LANE_STALE_MS for why that provably means no live holder. Directories survive.
+   * A candidate is a file (in a lane subdir) whose mtime is older than
+   * `staleMs`. See DEFAULT_LANE_STALE_MS for why that provably means no live
+   * holder. Directories survive.
    *
-   * Fail-open; nothing here may reject or throw, a broken fs must not take down a session, and every miss self-heals on the next sweep.
-   * Returns the number of files deleted.
+   * Fail-open: nothing here may reject or throw (a broken fs must not take down
+   * a session), and every miss self-heals on the next sweep. Returns the count
+   * of files deleted.
    */
   async sweepStale(): Promise<number> {
     let deleted = 0;
@@ -370,10 +376,13 @@ export class LaneLedger {
           continue; // vanished or unstatable: not evidence to delete on
         }
         if (Date.now() - st.mtimeMs <= this.#staleMs) continue;
-        // a held slot beats every 15s and can only be stale here if the fs is lying. do not sweep a path this process currently holds.
+        // A held slot beats every 15s and can only be stale here if the fs is
+        // lying: never sweep a path this process currently holds.
         if ([...this.#held.values()].includes(path)) continue;
-        // Re-stat immediately before the rm. This does not close the race, a re-acquirer can rename a fresh marker onto a stale slot between
-        // this stat and the rm -- but deleting a slot whose lease already expired is exactly what the reclaim protocol concludes anyway.
+        // Re-stat immediately before the rm. This does not close the race (a
+        // re-acquirer can rename a fresh marker onto a stale slot between the
+        // stat and the rm), but deleting a slot whose lease already expired is
+        // exactly what the reclaim protocol concludes anyway.
         try {
           st = await stat(path);
         } catch {
@@ -401,15 +410,14 @@ export class LaneLedger {
    * Our own live lease first, and freshness cannot touch it: we know what this
    * process holds, and a beat that failed on a hiccup must not make us
    * double-book our own lane (other processes may still take a quiet slot --
-   * that tradeoff is the price of cross-host liveness, and `#beat` reports it).
+   * that tradeoff is the price of cross-host liveness).
    *
    * Everything else is heartbeat-first. A quiet slot is free whoever it names,
    * which is what makes the ledger survivable when neither half of the old
-   * identity story holds: a config dir mounted into containers has no stable
-   * hostname and no meaningful pid space, and a shared NFS ledger cannot read
-   * another machine's process table. A fresh heartbeat is then occupied, except
-   * on this host where a dead -- or recycled, identity-less -- pid still says
-   * free.
+   * identity story holds: a container has no stable hostname or meaningful pid
+   * space, and a shared NFS ledger cannot read another machine's process
+   * table. A fresh heartbeat is then occupied, except on this host where a dead
+   * -- or recycled, identity-less -- pid still says free.
    */
   #occupied(m: SlotMarker | null, fresh: boolean): boolean {
     if (m === null) return false; // corrupt: a writer died mid-create
@@ -447,8 +455,8 @@ export class LaneLedger {
 
   /**
    * Start refreshing `path`'s mtime. Unref'd: bookkeeping must never be the
-   * reason a process stays alive (a session with nothing left but a leaked
-   * lease should exit, and the heartbeat expiry is what frees its lane).
+   * reason a process stays alive (a session with nothing but a leaked lease
+   * should exit; the heartbeat expiry is what frees its lane).
    */
   #startBeating(token: string, path: string): void {
     this.#held.set(token, path);
@@ -461,9 +469,9 @@ export class LaneLedger {
   /**
    * Refresh every held slot we still own. The read-back is not redundant:
    * touching a slot a reclaimer handed to someone else would keep renewing
-   * that holder's lease from the outside, so a beat only ever lands on a
-   * marker carrying our own token. Losing the slot stops the beat, and says
-   * so loudly -- a silent lease loss is how a lane ends up over-admitted.
+   * that holder's lease from the outside, so a beat only lands on a marker
+   * carrying our own token. Losing the slot stops the beat and says so loudly
+   * -- a silent lease loss is how a lane ends up over-admitted.
    */
   async #beat(): Promise<void> {
     if (this.#beating) return; // a slow/stalled fs must not stack beats behind a timer
@@ -477,16 +485,15 @@ export class LaneLedger {
 
   async #beatAll(): Promise<void> {
     for (const [token, path] of [...this.#held]) {
-      // Refresh only what this process still actually holds. A lease the
-      // caller dropped without releasing must NOT keep renewing its slot: the
-      // whole point of the watchdog is that a ghost lease becomes reclaimable,
-      // and a perpetually-renewed mtime would make it un-reclaimable from
-      // another host, where the WeakRef check is invisible.
+      // Refresh only what this process still actually holds. A lease the caller
+      // dropped without releasing must NOT keep renewing its slot: the whole
+      // point of the watchdog is that a ghost lease becomes reclaimable, and a
+      // perpetually-renewed mtime would make it un-reclaimable from another
+      // host, where the WeakRef check is invisible.
       const ref = processSlots.get(token);
       if (ref === undefined || ref.deref() === undefined) {
-        // No lease object left to release this slot: stop renewing, and prune a
-        // collected watchdog entry so the ghost reads as free immediately on this
-        // host instead of refreshing forever.
+        // No lease left to release this slot: stop renewing and prune the
+        // collected watchdog entry so the ghost reads as free on this host.
         this.#held.delete(token);
         if (ref) processSlots.delete(token);
         continue;
@@ -537,15 +544,17 @@ export class LaneLedger {
   }
 
   /**
-   * Take over a slot whose present marker we judged free (corrupt, dead same-host pid, or heartbeat quiet).
-   * Our marker is written to a sibling temp file and renamed ONTO the slot: rename(2) replaces the target
-   * atomically, so the slot path is never momentarily absent -- no window for a third acquirer to create
-   * beside a holder. The judged bytes are re-verified against the slot right before the rename: rename
-   * replaces UNCONDITIONALLY, and the judgment was made an or more awaits ago, during which the judged
-   * holder may have released and a fresh one claimed the slot. Markers are never rewritten in place,
-   * so byte equality means the same marker still stands; anything else means re-judge on a later pass.
-   * Verify by read-back: our token in place means the takeover stands; a rival's token means we lost and
-   *  give the slot up without touching it. A filesystem error is thrown so the caller fails open.
+   * Take over a slot whose present marker we judged free (corrupt, dead
+   * same-host pid, or heartbeat quiet). Our marker is written to a sibling
+   * temp file and renamed ONTO the slot: rename(2) replaces the target
+   * atomically, so the slot path is never momentarily absent -- no window for
+   * a third acquirer to create beside a holder. The judged bytes are re-
+   * verified against the slot right before the rename (the judgment was made
+   * awaits ago, during which the holder may have released and a fresh one
+   * claimed it); markers are never rewritten in place, so byte equality means
+   * the same marker still stands. Verify by read-back: our token in place
+   * means the takeover stands, a rival's token means we lost and give the slot
+   * up untouched. A filesystem error is thrown so the caller fails open.
    */
   async #reclaimInPlace(
     path: string,

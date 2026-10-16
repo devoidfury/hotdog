@@ -168,13 +168,9 @@ export interface TaskManagerSessionManager {
 export interface SpawnTaskOptions {
   workerModel?: string;
   profile?: string;
-  /**
-   * Explicit model pin, validated against the model catalog, locked for the task's lifetime. Supersedes workerModel.
-   */
+  /** Explicit model pin, validated against the catalog, locked for the task's lifetime. Supersedes workerModel. */
   pin?: SpawnPin;
-  /**
-   * Capability requirements resolved against the catalog when no pin is given. Progressive enhancement; loaded-model preference via /running.
-   */
+  /** Capability requirements resolved against the catalog when no pin is given; loaded-model preference via /running. */
   requires?: ModelRequirements;
   /**
    * Declared model-group fanout (config modelGroups; "group:<name>" through
@@ -183,44 +179,37 @@ export interface SpawnTaskOptions {
    * Mutually exclusive with pin.
    */
   group?: string;
-  /**
-   * The agent that delegated this task. Its session's bus is the delivery
-   * target for the completion result. Without this, the result falls back to
-   * a direct append to the session manager's current agent's context.
-   */
+  /** The agent that delegated this task; its session's bus is the delivery target for the completion result. */
   managerAgent?: { sessionId: string } | null;
   /**
-   * Chain-default model hint: the delegating session's model, captured at
-   * call time. Used by spawn paths the session store cannot resolve (the
-   * workflow engine's parked nodes; hosts without a wired sessionManager),
-   * so the task is placed on the parent's model lane instead of falling onto
-   * the bare-name lane. Takes precedence over the managerAgent store lookup.
+   * Chain-default model hint: the delegating session's model, captured at call
+   * time. Used by spawn paths the session store cannot resolve (workflow
+   * engine's parked nodes; hosts without a wired sessionManager), so the task
+   * is placed on the parent's model lane rather than the bare-name lane.
+   * Takes precedence over the managerAgent store lookup.
    */
   parentModel?: string;
   /**
    * Park between turns (workflow-engine only): after each agent turn the task
    * stays RUNNING with its warm session; it holds its provider-lane slot
    * through turns but yields it while idle, so queued spawns and other nodes
-   * (e.g. its judge) run on; a follow-up turn re-acquires the slot. The consumer
-   * drives further turns via taskTurn() and releases via completeTask() or
-   * interruptTask(). Bus delivery is suppressed -- the consumer receives every
-   * turn through onTurn/taskTurn instead.
+   * (e.g. its judge) run on; a follow-up turn re-acquires the slot. The
+   * consumer drives further turns via taskTurn() and releases via
+   * completeTask() or interruptTask(). Bus delivery is suppressed -- the
+   * consumer receives every turn through onTurn/taskTurn instead.
    */
   park?: boolean;
   /**
-   * Fires after every agent turn (including the turn that ends a parked task),
-   * and also with a synthesized failed/cancelled result when a task dies
-   * without ever running a turn (agent-build failure, cancel while queued or
-   * parked-idle) -- a parked consumer waiting on onTurn can never hang.
-   * completeTask on a parked-idle task does not re-fire it (its result was
-   * already delivered).
+   * Fires after every agent turn (including the one that ends a parked task),
+   * and with a synthesized failed/cancelled result when a task dies without
+   * ever running a turn -- a parked consumer waiting on onTurn can never hang.
+   * completeTask on a parked-idle task does not re-fire it (already delivered).
    */
   onTurn?: (turn: TurnResult) => void;
   /**
-   * Fires when an agent turn for this task actually begins executing: on the
-   * cold start (after the lane slot is in hand) and on each warm taskTurn
-   * once it re-acquires the lane -- NOT while the task queues for a slot.
-   * Lets consumers (the workflow engine's runtime cap) count only real
+   * Fires when an agent turn actually begins: on cold start (lane in hand) and
+   * on each warm taskTurn once it re-acquires the lane -- NOT while queued for
+   * a slot. Lets consumers (the workflow engine's runtime cap) count only real
    * worker run time.
    */
   onTurnStart?: () => void;
@@ -243,10 +232,10 @@ export interface TaskManagerOptions {
   /** Ledger re-attempt interval while tasks wait on foreign-held slots. Test seam. */
   lanesRetryMs?: number;
   /**
-   * Shared provider-pool health registry.
-   * An explicit injection wins (shared / test seams); an explicit null opts out of health entirely.
-   * When absent the manager builds its own: healthIntervalSecs gates only the sweep TIMER,
-   * so failure-driven demotion and placement filtering stay active even at 0.
+   * Shared provider-pool health registry. An explicit injection wins
+   * (shared / test seams); an explicit null opts out. When absent the manager
+   * builds its own: healthIntervalSecs gates only the sweep TIMER, so
+   * failure-driven demotion and placement filtering stay active even at 0.
    */
   providerHealth?: ProviderHealth | null;
   /** Sweep interval in seconds (resolved providerHealthCheckIntervalSecs). */
@@ -254,8 +243,10 @@ export interface TaskManagerOptions {
   /** Probe timeout in seconds (resolved healthCheckTimeout). */
   healthCheckTimeoutSecs?: number;
   /**
-   * Resolved contextLimit (default 128000): the fallback for catalog-piggyback entries.
-   * Must be the resolved value, not config.contextLimit; a sweep must give a context-less remote model the same limit the boot registry did.
+   * Resolved contextLimit (default 128000): the fallback for
+   * catalog-piggyback entries. Must be the resolved value, not
+   * config.contextLimit; a sweep must give a context-less remote model the
+   * same limit the boot registry did.
    */
   healthContextLimit?: number;
   /**
@@ -271,11 +262,13 @@ export interface TaskManagerRequiredOptions {
   maxIterations: number;
   taskProfile: string;
   /**
-   * Concurrent task-agent turns allowed per provider lane (resolved config: taskLanesPerProvider).
-   * A provider's `taskLanes` in config overrides this for its lane.
-   * Undefined or < 1 means unlimited -- lane queueing exists because backend nodes thrash KV caches when too many models swap concurrently.
-   * A parked task holds its slot only while a turn is in flight (or waiting); while idle it yields, so it never
-   * blocks nodes that must run against it (e.g. a judge for the parked producer).
+   * Concurrent task-agent turns allowed per provider lane (resolved config:
+   * taskLanesPerProvider). A provider's `taskLanes` in config overrides this
+   * for its lane. Undefined or < 1 means unlimited -- lane queueing exists
+   * because backend nodes thrash KV caches when too many models swap
+   * concurrently. A parked task holds its slot only while a turn is in flight
+   * (or waiting); while idle it yields, so it never blocks nodes that must run
+   * against it (e.g. a judge for the parked producer).
    */
   lanesPerProvider?: number;
   /**
@@ -452,10 +445,12 @@ export class TaskManager {
     this.#tasks = new Map();
     this.#profileManager = options.profileManager;
     this.#resolvePendingQuestion = options.resolvePendingQuestion ?? null;
-    // One health registry per manager: an explicit injection wins (shared / test seams), an explicit null opts out.
-    // Otherwise always build one. The interval gates only the TIMER inside makeProviderHealth, so a 0 interval
-    // keeps failure-driven demotion and placement filtering alive. The recovered-callback re-admits queued
-    // tasks the instant a provider comes back -- nothing else calls #admit on a pure health transition.
+    // One health registry per manager: explicit injection wins (shared / test
+    // seams), explicit null opts out, otherwise build one. The interval gates
+    // only the TIMER inside makeProviderHealth, so a 0 interval keeps
+    // failure-driven demotion and placement filtering alive. The recovered
+    // callback re-admits queued tasks the instant a provider comes back --
+    // nothing else calls #admit on a pure health transition.
     this.#providerHealth =
       options.providerHealth !== undefined
         ? options.providerHealth
@@ -586,10 +581,10 @@ export class TaskManager {
 
   /**
    * Deliver a background-work completion to a session as a trusted harness
-   * message. PUBLIC API for extensions that own async work riding the
-   * task-completion delivery path (workflow runs; the task agents below) --
-   * the framing here (harness source, model-authored body wrapped as
-   * `untrusted`) is the security boundary and must not be reimplemented.
+   * message. PUBLIC API for extensions owning async work on the
+   * task-completion path (workflow runs; the task agents below) -- the
+   * framing here (harness source, model-authored body wrapped `untrusted`) is
+   * the security boundary and must not be reimplemented.
    *
    * `delivery` is the delegating session captured at dispatch; with no
    * routable target the result lands on the current agent's context.
@@ -646,9 +641,9 @@ export class TaskManager {
   ): Promise<TaskHandle> {
     // A live id collision would silently replace the registry entry: the
     // orphaned task keeps running but becomes unaddressable (status/interrupt/
-    // steer hit the new entry). Refuse loud, before any registration, like
-    // pin failures. Terminal ids stay reusable (slim records, long-lived
-    // webui managers: "task-1" in a new session must not collide).
+    // steer hit the new entry). Refuse loud, before registration, like pin
+    // failures. Terminal ids stay reusable (slim records, long-lived webui
+    // managers: "task-1" in a new session must not collide).
     const existing = this.#tasks.get(taskId);
     if (
       existing &&
@@ -657,15 +652,14 @@ export class TaskManager {
     ) {
       throw new Error(`[task ${taskId}] task id already in use (task is ${existing.statusRef.value})`);
     }
-    // Synchronous id reservation. Everything between the collision check
-    // above and the entry being startable awaits (profile load, resolver peek
-    // up to 2 s), and an await is exactly where a second same-id spawnTask
-    // slips in: without a reservation both calls pass the check and the
-    // second silently replaces the first registry entry, orphaning the first
-    // task. Registering here -- no await between the check and this set --
-    // makes the claim atomic. The placeholder is QUEUED but flagged planning
-    // (never scheduled); a plan failure deletes it, and a cancel landing in
-    // the planning window is honored by the terminal check below.
+    // Synchronous id reservation. Everything between the collision check and
+    // the entry being startable awaits (profile load, resolver peek up to 2 s);
+    // an await is exactly where a second same-id spawnTask slips in: without a
+    // reservation both calls pass and the second silently replaces the first,
+    // orphaning it. Registering here -- no await between the check and this set
+    // -- makes the claim atomic. The placeholder is QUEUED but flagged planning
+    // (never scheduled); a plan failure deletes it, and a cancel in the
+    // planning window is honored by the terminal check below.
     const abortController = new AbortController();
     const statusRef: { value: TaskStatus } = { value: TASK_STATUS.QUEUED };
     let settleFn!: (completion: TaskCompletion) => void;
@@ -740,23 +734,23 @@ export class TaskManager {
 
     // A found-but-frontmatter-only profile has body "" -- that must reach the
     // factory as an explicit empty string, never fall through to the session
-    // profile's body (which leaked e.g. the meta manager prompt into workers).
+    // profile's body (which leaked the meta manager prompt into workers).
     const resolvedProfileBody = taskProfile ? taskProfile.body : undefined;
 
     const toolWhitelist = taskProfile?.whitelistTools || null;
     const toolBlacklist = taskProfile?.blacklistTools || null;
 
-    // Capture the delegating agent up front so completion is delivered to
-    // ITS session's bus, even if other sessions are created in the meantime.
+    // Capture the delegating agent up front so completion is delivered to ITS
+    // session's bus, even if other sessions are created in the meantime.
     const delivery = options.managerAgent ?? null;
 
     // Parked tasks are consumed directly (onTurn/taskTurn/done); bus delivery
     // would duplicate every result into a session context.
     const parked = options.park === true;
 
-    // Task agents are silent to the UI; only onTaskComplete matters -- unless an observer is attached
-    // (websocket/webui relay), in which case every agent OutputEvent is forwarded tagged with the task id.
-    // Nothing here reaches the main chat transcript either way.
+    // Task agents are silent to the UI; only onTaskComplete matters -- unless an
+    // observer (websocket/webui relay) is attached, forwarding every agent
+    // OutputEvent tagged with the task id. Nothing reaches the main transcript.
     const sink = {
       emit: (event: unknown) => {
         this.#notify({ kind: "activity", taskId, event: event as OutputEvent });
@@ -769,9 +763,9 @@ export class TaskManager {
 
     const agentConfig: Record<string, unknown> = {
       model: headKey,
-      // Name the worker profile explicitly; without it the factory resolves
-      // the *session* profile name, which re-enables manager gating and
-      // grafts the session profile's overlays onto the worker.
+      // Name the worker profile explicitly; without it the factory resolves the
+      // *session* profile name, re-enabling manager gating and grafting the
+      // session profile's overlays onto the worker.
       profileName,
       ...(taskProfile ? { managerProfile: taskProfile.manager } : {}),
       profileBody: resolvedProfileBody,
@@ -798,10 +792,10 @@ export class TaskManager {
     entry.start = () => {
       entry.start = null;
       this.#setStatus(entry, TASK_STATUS.RUNNING);
-      // Last-resort net: a residual throw inside #launch (a throwing
-      // consumer onTurn, bus enqueue, or notifyCompletion) would otherwise
-      // be an unhandled rejection -- which kills the process -- and the
-      // entry would dangle non-terminal, hanging `done` and pinning its lane.
+      // Last-resort net: a residual throw inside #launch (a throwing consumer
+      // onTurn, bus enqueue, or notifyCompletion) would be an unhandled
+      // rejection -- killing the process -- leaving the entry dangling
+      // non-terminal, hanging `done` and pinning its lane.
       this.#launch(taskId, entry, agentConfig, taskDescription, sink.onTaskComplete).catch(
         (e: unknown) => this.#recoverTask(taskId, entry, e),
       );
@@ -824,11 +818,13 @@ export class TaskManager {
   }
 
   /**
-   * The chain-default model of the delegating side: the explicit parentModel hint captured at call time (workflow engine, delegate_task),
-   * else the manager agent's model via the session store (plain delegate_task path).
-   * A parent the store cannot resolve (unregistered session, host without a SessionManager) returns undefined;
-   * the caller then falls to the catalog default and finally the process build default, instead of placing the
-   * task on the uncapped phantom lane.
+   * The chain-default model of the delegating side: the explicit parentModel
+   * hint captured at call time (workflow engine, delegate_task), else the
+   * manager agent's model via the session store. A parent the store cannot
+   * resolve (unregistered session, host without a SessionManager) returns
+   * undefined; the caller then falls to the catalog default and finally the
+   * process build default, instead of placing the task on the uncapped phantom
+   * lane.
    */
   #parentModel(options: SpawnTaskOptions): string | undefined {
     const hint =
@@ -854,9 +850,9 @@ export class TaskManager {
     // Model admission -> placement plan. pin/group/requires validate against
     // the catalog and fail loud before registration; the legacy chain expands
     // bare values and the registry default into cross-provider copies (cold,
-    // never errors), while a provider-qualified explicit value stays strict.
-    // A worker profile may bind fanout itself via its `group` field; an
-    // explicit worker_model wins over it, same precedence as over profile model.
+    // never errors) while a provider-qualified explicit value stays strict.
+    // A worker profile may bind fanout via its `group` field; an explicit
+    // worker_model wins over it, same precedence as over profile model.
     const profileGroup = taskProfile?.group || undefined;
     if (
       !options.workerModel &&
@@ -864,8 +860,8 @@ export class TaskManager {
       taskProfile.model.startsWith("group:")
     ) {
       // Otherwise this lands in the legacy expand branch, finds no catalog
-      // copies for the pseudo-name, and launches with the literal string
-      // "group:..." as the model -- a runtime API error, not a config error.
+      // copies for the pseudo-name, and launches with the literal "group:..."
+      // as the model -- a runtime API error, not a config error.
       throw new Error(
         `[task ${taskId}] profile '${profileName}' model '${taskProfile.model}' looks like a group reference; declare it with the profile 'group' field instead`,
       );
@@ -916,12 +912,14 @@ export class TaskManager {
         // A bogus explicit pin is a caller error: fail at dispatch, not as an HTTP 404 from the gateway
         throw new Error(`[task ${taskId}] worker model '${explicit}' is not in the model catalog`);
       }
-      // Chain default: the delegating session's model (call-time hint or session-store lookup),
-      // then the catalog's `default` key (vestigial in practice: buildModelRegistry never sets one),
-      // then the process's resolved default model -- the exact value agent-factory runs on an empty model string.
-      // Naming it here keeps the task PLACED on that provider's lane (cap + ledger slot apply) instead of running
-      // unlocked on the phantom bare-name lane.
-      // Explicit qualified values honor their provider; bare values and the chain default can go anywhere the name exists.
+      // Chain default: the delegating session's model (call-time hint or
+      // session-store lookup), then the catalog's `default` key (vestigial in
+      // practice), then the process's resolved default model -- the exact value
+      // agent-factory runs on an empty model string. Naming it keeps the task
+      // PLACED on that provider's lane (cap + ledger slot apply) instead of
+      // running unlocked on the phantom bare-name lane. Explicit qualified
+      // values honor their provider; bare values and the chain default can go
+      // anywhere the name exists.
       const parentModel = this.#parentModel(options);
       const chainDefault = parentModel || registryDefault || this.#buildDefaultModel;
       const expandable = !explicit || explicit === registryDefault || !explicit.includes("/");
@@ -957,12 +955,12 @@ export class TaskManager {
 
   /**
    * Whether an entry consumes a slot on its provider lane right now.
-   * Non-parked tasks hold their slot from start to terminal. A parked task
-   * holds it through its first turn and whenever a turn is in flight or
-   * waiting, but yields while idle between turns: an idle parked session
-   * generates no model traffic, and holding on would deadlock it against
-   * whatever must run on its lane (a judge for the parked producer, under
-   * the default cap of 1). Warm turns re-acquire the slot through this scan.
+   * Non-parked tasks hold from start to terminal. A parked task holds it
+   * through its first turn and whenever a turn is in flight or waiting, but
+   * yields while idle between turns: an idle parked session generates no model
+   * traffic, and holding on would deadlock it against whatever must run on its
+   * lane (a judge for the parked producer, under cap 1). Warm turns
+   * re-acquire the slot through this scan.
    */
   #occupies(task: TaskEntry): boolean {
     if (task.statusRef.value !== TASK_STATUS.RUNNING) return false;
@@ -1002,16 +1000,18 @@ export class TaskManager {
   }
 
   /**
-   * Start QUEUED entries and grant waiting warm turns whose provider lane has room, in insertion order.
-   * The scan is global, not per-lane, so a task queued on a saturated provider never head-of-line-blocks
-   * a later task on a free provider. Waiting warm turns are granted before new spawns.
-   * A parked session that yielded its slot gets it back ahead of fresh work.
+   * Start QUEUED entries and grant waiting warm turns whose provider lane has
+   * room, in insertion order. The scan is global, not per-lane, so a task
+   * queued on a saturated provider never head-of-line-blocks a later task on a
+   * free provider; waiting warm turns are granted before new spawns, and a
+   * parked session that yielded its slot gets it back ahead of fresh work.
    *
-   * Placement: locked entries (candidates === null) enter on their lane as before;
-   * multi-candidate entries take the first candidate with capacity (plan order = warm-first),
-   * reserving then re-ranking via #warmPlace.
-   * Every start/grant additionally takes a slot in the cross-process ledger (when configured):
-   * the in-process scan decides ORDER, the ledger decides CAPACITY across all hotdog processes on the machine.
+   * Placement: locked entries (candidates === null) enter on their lane;
+   * multi-candidate entries take the first candidate with capacity
+   * (plan order = warm-first), reserving then re-ranking via #warmPlace. Every
+   * start/grant additionally takes a cross-process ledger slot (when
+   * configured): the in-process scan decides ORDER, the ledger CAPACITY across
+   * all hotdog processes on the machine.
    */
   #admit(): void {
     // Warm grants count occupancy WITHOUT other warm waiters: a pending waiter reserves the slot but does not hold it.
@@ -1117,9 +1117,8 @@ export class TaskManager {
    * Finish a multi-candidate placement: re-sort the plan by current cache
    * warmth, take a slot on the warmest candidate whose lane has in-process
    * room, then start. If every candidate is fleet-wide busy, drop the
-   * reservation and stay QUEUED; the lanes timer retries. Cancelled entries
-   * unwind without ever starting, and their reservation is released with the
-   * flag.
+   * reservation and stay QUEUED (the lanes timer retries). Cancelled entries
+   * unwind without starting, releasing their reservation with the flag.
    */
   async #warmPlace(task: TaskEntry): Promise<void> {
     // filter the plan BEFORE the warm sort: warmSortCandidates peeks /running on every plan provider (2s timeout each),
@@ -1142,7 +1141,8 @@ export class TaskManager {
       `[task ${task.taskId}] warm placement: ${warm.map((c) => c.key).join(" > ")}`,
     );
     const used = this.#laneOccupancy(task);
-    // failure-driven markDown lands synchronously, so filter on health again: the provider can go down between the admit pass and here.
+    // failure-driven markDown lands synchronously, so filter on health again:
+    // the provider can go down between the admit pass and here.
     for (const c of this.#eligibleByHealth(warm)) {
       if ((used.get(c.provider) ?? 0) >= this.#laneCap(c.provider)) {
         logger.debug(
@@ -1161,9 +1161,10 @@ export class TaskManager {
         logger.debug(`[task ${task.taskId}] skip '${c.provider}': ledger full (fleet-wide)`);
         continue; // this lane is fleet-wide busy; try the next home
       }
-      // The `used` snapshot above is one await stale: this entry's reservation was dropped at the top,
-      // so a sibling placement could have committed to this lane while we awaited the slot (both saw it free).
-      // Without the re-check two tasks can double-book a capped lane.
+      // The `used` snapshot above is one await stale: this entry's reservation
+      // was dropped at the top, so a sibling could have committed to this lane
+      // while we awaited the slot (both saw it free). Without the re-check two
+      // tasks can double-book a capped lane.
       const usedNow = this.#laneOccupancy(task).get(c.provider) ?? 0;
       if (usedNow >= this.#laneCap(c.provider)) {
         logger.debug(
@@ -1182,9 +1183,9 @@ export class TaskManager {
       this.#admit();
       return;
     }
-    // No lane has room anymore: release the reservation and wait. The
-    // abandoned candidate key must not linger in the view: while unplaced,
-    // model shows the intent (taskLane's documented contract).
+    // No lane has room anymore: release the reservation and wait. The abandoned
+    // candidate key must not linger in the view: while unplaced, model shows
+    // the intent (taskLane's documented contract).
     logger.debug(`[task ${task.taskId}] no placement home left; queued for retry`);
     task.provider = "";
     task.model = task.intent;
@@ -1219,10 +1220,9 @@ export class TaskManager {
 
   /**
    * Start a locked QUEUED entry once its ledger slot is in hand. A cancel
-   * during the acquire releases the slot right back; a ledger-full result
-   * marks the entry blocked (the retry timer clears the flag and re-admits).
-   * With coordination off the start stays synchronous, exactly as before the
-   * ledger existed.
+   * during the acquire releases the slot back; a ledger-full result marks the
+   * entry blocked (the retry timer clears the flag and re-admits). With
+   * coordination off the start stays synchronous, as before the ledger.
    */
   async #tryStart(task: TaskEntry): Promise<void> {
     const cap = this.#laneCap(task.provider);
@@ -1256,8 +1256,8 @@ export class TaskManager {
   /**
    * Complete an optimistically-granted warm turn: take the ledger slot, then
    * wake the taskTurn waiters. Roll the optimistic flip back on a full ledger
-   * (another process holds the lane; the retry timer re-attempts, and other
-   * waiters get their pass).
+   * (another process holds the lane; the retry timer re-attempts, waiters get
+   * their pass).
    */
   async #tryGrant(task: TaskEntry): Promise<void> {
     const cap = this.#laneCap(task.provider);
@@ -1302,11 +1302,11 @@ export class TaskManager {
   }
 
   /**
-   * Drop an entry's ledger slot (terminal transitions and parked-idle
-   * yields). The unlink is async, so a same-lane waiter admitted in the same
-   * synchronous pass may momentarily see the slot still held; the post-
-   * release wake clears that entry's blocked flag and re-admits it, keeping
-   * in-process lane handoff off the slow retry path.
+   * Drop an entry's ledger slot (terminal transitions and parked-idle yields).
+   * The unlink is async, so a same-lane waiter admitted in the same sync pass
+   * may momentarily see the slot still held; the post-release wake clears that
+   * entry's blocked flag and re-admits it, keeping in-process lane handoff off
+   * the slow retry path.
    */
   #releaseSlot(task: TaskEntry): void {
     const lease = task.lease;
@@ -1327,8 +1327,9 @@ export class TaskManager {
 
   /**
    * One shared retry tick while ANY entry waits on a fleet-full lane.
-   * Deliberately a one-shot setTimeout, the callback clears the tracked handle before re-admitting,
-   * and every still-failing pass re-arms through here, so the slot guard admits at most one pending tick.
+   * Deliberately a one-shot setTimeout: the callback clears the tracked handle
+   * before re-admitting, and every still-failing pass re-arms through here, so
+   * the slot guard admits at most one pending tick.
    */
   #armLanesRetry(): void {
     if (this.#lanesRetryTimer) return;
@@ -1403,8 +1404,8 @@ export class TaskManager {
    * Last-resort recovery for a residual throw inside #launch: log, force a
    * terminal FAILED (idempotent via `settled`), free the lane, then deliver
    * the synthesized turn result and hooks. Consumer callbacks run last and
-   * inside their own guard so a faulty consumer cannot resurrect the
-   * rejection this method exists to swallow.
+   * inside their own guard so a faulty consumer can't resurrect the rejection
+   * this method exists to swallow.
    */
   #recoverTask(taskId: string, entry: TaskEntry, e: unknown): void {
     logger.error(`[task ${taskId}] unhandled task fault: ${formatError(e)}`);
@@ -1573,31 +1574,32 @@ export class TaskManager {
       if (LlmError.isCancelled(err) || entry.abortController.signal.aborted) {
         turn = { status: "cancelled", result: `Task aborted` };
       } else {
-        // Only unexpected errors (bugs) log, through formatError() with the full
-        // stack. Expected ones (LlmError api/http/timeout/...) are already the
-        // task result the delegating model receives; a log line would just echo it.
-        // The delegating model always gets the message alone -- a stack in its
-        // context would waste tokens and leak internals.
+        // Only unexpected errors (bugs) log via formatError() with full stack.
+        // Expected ones (LlmError api/http/timeout/...) are already the task
+        // result the delegating model receives; a log line would echo it. The
+        // model always gets the message alone -- a stack would waste tokens
+        // and leak internals.
         if (!isExpectedError(err)) {
           logger.error(`[task ${taskId}] ${formatError(err)}`);
         }
-        // Failure-driven demotion: connection-level chat failure takes the provider out immediately,
-        // so the next fanout does not hit the same dead provider between sweeps.
-        // llm-client throws LlmError.Http only for connection-level rejects (refused/DNS/reset mid-body);
-        // HTTP-status failures arrive as LlmError.Api with `status`, timeouts as LlmError.Timeout --
-        // neither demotes: a 500 or a chatTimeout/stream-idle stall proves the socket answers, and
-        // demoting on those would flap the pool around live-but-unhappy providers.
-        // Cancelled turns never reach this branch.
+        // Failure-driven demotion: a connection-level chat failure takes the
+        // provider out immediately so the next fanout avoids the same dead
+        // provider. llm-client throws LlmError.Http only for connection-level
+        // rejects (refused/DNS/reset mid-body); HTTP-status failures arrive as
+        // LlmError.Api and timeouts as LlmError.Timeout -- neither demotes: a
+        // 500 or a stall proves the socket answers, and demoting on those would
+        // flap the pool around live-but-unhappy providers.
         if (this.#providerHealth && entry.provider && err instanceof LlmError && err.type === "http") {
           this.#providerHealth.markDown(entry.provider, `task ${taskId} chat failed: ${err.message}`);
         }
         turn = { status: "failed", result: `Task failed: ${err instanceof Error ? err.message : String(err)}` };
       }
     }
-    // Recovery evidence: a completed turn means at least one chat round-tripped, so the provider
-    // is up. This is the recovery path when the sweep timer is off (interval 0): fail-open
-    // placements and in-flight traffic keep producing evidence. Failed turns decide nothing here
-    // (the branch above owns demotion); cancelled turns are inconclusive.
+    // Recovery evidence: a completed turn means at least one chat
+    // round-tripped, so the provider is up. This is the recovery path when the
+    // sweep timer is off (interval 0): fail-open placements and in-flight
+    // traffic keep producing evidence. Failed turns decide nothing here (the
+    // branch above owns demotion); cancelled turns are inconclusive.
     if (turn.status === "completed" && this.#providerHealth && entry.provider) {
       this.#providerHealth.noteUp(entry.provider);
     }
@@ -1636,9 +1638,10 @@ export class TaskManager {
     // For parked tasks the sink drops this (the engine consumed the turn already).
     agent.notifyCompletion?.(turn.result);
 
-    // Release the finished agent: its full message context would otherwise stay pinned in #tasks
-    // for the manager's lifetime. The entry keeps only what post-run lookups use; sendFollowUp guards
-    // on a live agent, and a RUNNING entry with no agent only exists inside #launch's build window.
+    // Release the finished agent: its full message context would otherwise
+    // stay pinned in #tasks for the manager's lifetime. The entry keeps only
+    // what post-run lookups use; sendFollowUp guards on a live agent, and a
+    // RUNNING entry with no agent only exists inside #launch's build window.
     entry.agent = null;
 
     // Any warm turn still queued behind the lane never runs.
@@ -1795,8 +1798,8 @@ export class TaskManager {
       // Release any placement reservation so the lane is instantly reusable.
       entry.placing = false;
       // A planning entry (id reserved, plan still awaiting) cancels like any
-      // other queued task; the spawnTask continuation sees the terminal state
-      // and returns the handle without starting.
+      // other queued task; the continuation sees the terminal state and
+      // returns the handle without starting.
       entry.planning = false;
       entry.candidates = null;
       entry.provider = "";
@@ -1835,8 +1838,8 @@ export class TaskManager {
   /**
    * Abort every RUNNING task delegated from the given session. Called when
    * that session is deleted, so its subagent tasks don't keep running (and
-   * burning tokens) with no session left to receive their results. Tasks
-   * owned by other sessions are untouched. Returns how many were aborted.
+   * burning tokens) with no session to receive results. Other sessions' tasks
+   * are untouched. Returns how many were aborted.
    */
   interruptTasksForSession(sessionId: string): number {
     let interrupted = 0;

@@ -34,6 +34,8 @@ export interface AgentLike {
     images?: ImageAttachment[],
     opts?: { source?: MessageSource },
   ): Promise<AgentRunResult | undefined>;
+  /** Continue an interrupted turn with no new user message (bus continuation turns). */
+  continueRun?(): Promise<AgentRunResult | undefined>;
   clearContext(): Promise<void>;
   cancel(): void;
   resetCancel(): void;

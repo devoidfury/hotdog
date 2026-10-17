@@ -22,10 +22,13 @@
 // commit-point writes are rare (one per durability record). SQLite's win
 // over JSONL here is torn-tail rollback and queryability, nothing more.
 //
-// The `active`/`parked` states from the design notes are deliberately absent
-// in part 2: parked is part 3 (livelock cap), and "active" is live-registry
-// knowledge at query time (the webui already filters its own live sessions);
-// claim columns with no consumer would just drift.
+// `parked` is derivable from the log (MAX_CONSECUTIVE_AUTO_RESUMES auto
+// resume_attempt records with no progress between them) and outranks the
+// other states: it is the gate on the next auto-resume, and the writer only
+// sets it at the fsynced resume_attempt commit point where the cap is
+// reached. `active` stays absent: it is live-registry knowledge at query
+// time (the webui already filters its own live sessions); claim columns
+// with no consumer would just drift.
 
 import { Database } from "bun:sqlite";
 import { mkdirSync, statSync } from "node:fs";
@@ -35,7 +38,9 @@ import { logger } from "@utils/logger.ts";
 import { formatError } from "@core/error.ts";
 import {
   LOG_SOURCE,
+  MAX_CONSECUTIVE_AUTO_RESUMES,
   collectDurabilityFacts,
+  epochEntries,
   readSessionEntries,
   sessionPath,
   sessionsDir,
@@ -45,6 +50,9 @@ export const SESSION_STATE = {
   IDLE: "idle",
   AWAITING_QUESTION: "awaiting_question",
   INTERRUPTED: "interrupted",
+  /** Auto-resume churn without progress hit the cap; auto-resumes are
+   *  refused until a manual resume (the escape hatch) or progress. */
+  PARKED: "parked",
 } as const;
 export type SessionState = (typeof SESSION_STATE)[keyof typeof SESSION_STATE];
 
@@ -128,15 +136,25 @@ export function closeSessionIndex(): void {
   dbFile = null;
 }
 
-/** State derived purely from durability facts (no writer declarations). */
+/** State derived purely from durability facts (no writer declarations).
+ *  parked outranks everything: it is the gate on the next auto-resume. */
 export function deriveSessionState(facts: {
   started: Set<string>;
   answered: Set<string>;
   asked: Array<{ toolCallId: string }>;
+  consecutiveAutoResumes?: number;
+  /** v2 turn lifecycle: the log's last turn never reached turn_end. */
+  openTurn?: boolean;
 }): SessionState {
+  if ((facts.consecutiveAutoResumes ?? 0) >= MAX_CONSECUTIVE_AUTO_RESUMES) {
+    return SESSION_STATE.PARKED;
+  }
   for (const q of facts.asked) {
     if (!facts.answered.has(q.toolCallId)) return SESSION_STATE.AWAITING_QUESTION;
   }
+  // An open v2 turn is an interrupted turn even when no tool call dangles
+  // (crash mid-generation leaves a clean-looking tail).
+  if (facts.openTurn) return SESSION_STATE.INTERRUPTED;
   for (const id of facts.started) {
     if (!facts.answered.has(id)) return SESSION_STATE.INTERRUPTED;
   }
@@ -176,9 +194,17 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
   } catch {
     return null;
   }
-  const entries = await readSessionEntries(sessionId);
+  // One full-log read serves both views: the epoch (the context's open
+  // calls) is sliced from it, and the lifetime facts (the cap's counter,
+  // the resume count) are audit trails a mid-turn RESET must not truncate.
+  const full = await readSessionEntries(sessionId, { full: true });
+  const entries = epochEntries(full);
   const facts = collectDurabilityFacts(entries);
-  const state = deriveSessionState(facts);
+  const lifetime = collectDurabilityFacts(full);
+  const state = deriveSessionState({
+    ...facts,
+    consecutiveAutoResumes: lifetime.consecutiveAutoResumes,
+  });
   const title = deriveTitle(entries);
 
   const d = openSessionIndex();
@@ -203,7 +229,7 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
         entries.length,
         st.size,
         st.mtimeMs,
-        facts.resumeAttempts,
+        lifetime.resumeAttempts,
         title,
       ],
     );
@@ -475,10 +501,25 @@ export async function indexSessionProfile(
   }, true);
 }
 
-export async function indexResumeAttempt(sessionId: string): Promise<void> {
+/**
+ * resume_attempt fsynced: mirror the count. When the consecutive auto-resume
+ * cap was just reached, the row goes parked at this exact commit point;
+ * reconcile re-derives the same state if the index is lost.
+ *
+ * A manually resumed parked session keeps showing parked until a later
+ * commit point (or boot reconcile) re-derives from the progressed log -- a
+ * transient sidebar badge, not a gate: refusal always re-reads the log.
+ */
+export async function indexResumeAttempt(sessionId: string, reachedCap = false): Promise<void> {
   await atCommitPoint(sessionId, 1, (d) => {
     d.run("UPDATE sessions SET resume_count = resume_count + 1 WHERE session_id = ?", [
       sessionId,
     ]);
+    if (reachedCap) {
+      d.run("UPDATE sessions SET state = ? WHERE session_id = ?", [
+        SESSION_STATE.PARKED,
+        sessionId,
+      ]);
+    }
   });
 }

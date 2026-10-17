@@ -80,7 +80,14 @@ export interface HookPayloads {
   "session:end": { sessionId: string };
   "session:swap": { oldAgent?: AgentLike; newAgent: AgentLike };
   "session:restoreActive": { agent: Agent; isRestoring: boolean };
-  "session:resumeAttempt": { agent: Agent; sessionId: string };
+  "session:resumeAttempt": {
+    agent: Agent;
+    sessionId: string;
+    /** "auto" = non-user resume (webui reconnect, gateway dial-back); the livelock cap counts only these. */
+    origin: "auto" | "manual";
+    /** consecutiveAutoResumes AFTER this record lands (the cap's input). */
+    consecutiveAutoResumes: number;
+  };
 
   "agent:toolContext": { toolCtx: ToolContext; toolName: string; agent: Agent };
 
@@ -201,7 +208,13 @@ export interface HookPayloads {
     retry: boolean;
   };
 
-  "turn:start": { turnIndex: number; timestamp: number; agent: Agent };
+  "turn:start": {
+    turnIndex: number;
+    timestamp: number;
+    agent: Agent;
+    /** "continuation" for continueRun turns (no user message); "input" otherwise. */
+    kind?: "input" | "continuation";
+  };
   "turn:end": {
     turnIndex: number;
     message: string;

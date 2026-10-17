@@ -319,8 +319,10 @@ function startChat(): void {
     token,
     host: window.location.host,
     getMessageListContainer: () => messageListEl,
-    onSessionCreated: ({ sessionId }) => {
-      chat!.setSession(sessionId);
+    onSessionCreated: ({ sessionId, replayDelta }) => {
+      // A delta attach replays only the tail past the cursor, so the existing
+      // transcript (its prefix) must survive the switch.
+      chat!.setSession(sessionId, replayDelta === true);
       chat!.listSessions();
       chat!.listProfiles();
       clearLogView();

@@ -13,7 +13,6 @@ import {
 import { syncSessionFromLog, indexSessionProfile } from "@core/session/session-index.ts";
 import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
-import { LlmClient } from "@core/llm-client/client.ts";
 import { LlmError } from "@core/error.ts";
 import { MessageLog } from "@core/context/message-log.ts";
 import type { AgentLike } from "@core/session/index.ts";
@@ -73,6 +72,33 @@ async function waitForMessage(ws: MockWs, type: string, opts: { timeoutMs?: numb
       .find((m) => m && m.type === type);
     if (found) return found;
     if (Date.now() - start > timeoutMs) throw new Error(`Timed out waiting for ${type} message`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+/** Poll until the attach's cursor report (sessionState key=cursor) arrives. */
+async function waitForCursor(ws: MockWs): Promise<void> {
+  const start = Date.now();
+  for (;;) {
+    const found = ws.messages
+      .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+      .find((m) => m && m.type === S2C.SESSION_STATE && m.key === "cursor");
+    if (found) return;
+    if (Date.now() - start > 2000) throw new Error("Timed out waiting for cursor report");
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+/** Poll until a message matching the predicate arrives. */
+async function waitForMessageOf(ws: MockWs, pred: (m: any) => boolean, opts: { timeoutMs?: number } = {}): Promise<any> {
+  const { timeoutMs = 2000 } = opts;
+  const start = Date.now();
+  for (;;) {
+    const found = ws.messages
+      .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+      .find((m) => m && pred(m));
+    if (found) return found;
+    if (Date.now() - start > timeoutMs) throw new Error("Timed out waiting for matching message");
     await new Promise((r) => setTimeout(r, 5));
   }
 }
@@ -390,13 +416,33 @@ describe("SessionRegistry", () => {
     });
   });
 
-  it("cleans up idle sessions with 0 connected clients", async () => {
+  it("keeps the last 3 idle sessions hot past the timeout, colds the rest", async () => {
+    // Five sessions, all stale (100 min old) and client-free: the three most
+    // recently active stay hot; the two oldest go cold (deleted in-memory,
+    // logs untouched).
+    const created: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = await registry.create();
+      registry._test_metadata.get(r.sessionId)!.lastActivityAt =
+        Date.now() - (100 + i) * 60 * 1000; // i=0 is the most recent
+      created.push(r.sessionId);
+    }
+    registry._test_cleanupIdleSessions();
+
+    expect(registry.get(created[0]!)).not.toBeNull();
+    expect(registry.get(created[1]!)).not.toBeNull();
+    expect(registry.get(created[2]!)).not.toBeNull();
+    expect(registry.get(created[3]!)).toBeNull();
+    expect(registry.get(created[4]!)).toBeNull();
+  });
+
+  it("keeps a lone stale session hot (the grace covers <= 3 idle sessions)", async () => {
     const result = await registry.create();
     const meta = registry._test_metadata.get(result.sessionId);
     if (meta) meta.lastActivityAt = Date.now() - 100 * 60 * 1000; // 100 minutes ago
     registry._test_cleanupIdleSessions();
 
-    expect(registry.get(result.sessionId)).toBeNull();
+    expect(registry.get(result.sessionId)).not.toBeNull();
   });
 
   it("does not clean up sessions with connected clients", async () => {
@@ -629,6 +675,17 @@ describe("createWsServer", () => {
     expect((ws as unknown as HotdogServerSocket).activeChannel).toBeDefined();
     // The registry knows the fork (sidebar will list it).
     expect(wsServer.sessionRegistry.get(created.sessionId)).toBeDefined();
+    // The fork's attach closes the client's cursor bookkeeping like every
+    // other attach path: a cursor report for the fork (0 -- the replay came
+    // from memory, so no log coordinate can be claimed).
+    const cursor = await waitForMessageOf(
+      ws,
+      (m: any) =>
+        m.type === S2C.SESSION_STATE &&
+        m.key === "cursor" &&
+        m.sessionId === created.sessionId,
+    );
+    expect(cursor.value).toBe(0);
   });
 
   it("handles QUESTION_ANSWER message (no pending question → error)", async () => {
@@ -712,45 +769,47 @@ describe("createWsServer", () => {
     const all = ws.messages
       .map((m) => { try { return JSON.parse(m); } catch { return null; } })
       .filter(Boolean) as any[];
-    // The switch's state reports land for the new session; a session-scoped
+    // The attach's state reports land for the new session; a session-scoped
     // task snapshot closes out the switch.
-    const working = all.filter(
+    const states = all.filter(
       (m) => m.type === S2C.SESSION_STATE && m.sessionId === second.sessionId,
     );
-    expect(working.length).toBeGreaterThan(0);
+    expect(states.length).toBeGreaterThan(0);
     const snapshot = all[all.length - 1];
     expect(snapshot.type).toBe(S2C.TASK_LIST);
     expect(snapshot.tasks).toEqual([]);
     expect((ws as unknown as HotdogServerSocket).activeSessionId).toBe(second.sessionId);
 
-    const titleState = ws.messages
-      .map((m) => { try { return JSON.parse(m); } catch { return null; } })
-      .find((m) => m && m.type === S2C.SESSION_STATE && m.key === "title");
-    expect(titleState).toBeDefined();
-    expect(titleState!.value).toBe("second one");
+    // The attach's sessionCreated carries the title (the old switch sent a
+    // sessionState title key instead).
+    const created = all.find(
+      (m) => m.type === S2C.SESSION_CREATED && m.sessionId === second.sessionId,
+    );
+    expect(created).toBeDefined();
+    expect(created.title).toBe("second one");
   });
 
-  it("sends a null title in SWITCH_SESSION state when the session is untitled", async () => {
+  it("sends a null title in the SWITCH_SESSION attach when the session is untitled", async () => {
     const ws = await connectWithSession();
 
     const second = await wsServer.sessionRegistry.create({});
 
     await wsServer.onMessage(ws, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId: second.sessionId }));
 
-    const titleState = ws.messages
+    const created = ws.messages
       .map((m) => { try { return JSON.parse(m); } catch { return null; } })
-      .find((m) => m && m.type === S2C.SESSION_STATE && m.key === "title");
-    expect(titleState).toBeDefined();
-    expect(titleState!.value).toBeNull();
+      .find((m) => m && m.type === S2C.SESSION_CREATED && m.sessionId === second.sessionId);
+    expect(created).toBeDefined();
+    expect(created!.title).toBeNull();
   });
 
-  it("does nothing for SWITCH_SESSION to a non-existent session", async () => {
+  it("answers SWITCH_SESSION to a non-existent session with an error", async () => {
     const ws = await connectWithSession();
-    const countBefore = ws.messages.length;
 
     await wsServer.onMessage(ws, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId: "non-existent" }));
 
-    expect(ws.messages.length).toBe(countBefore);
+    const err = await waitForMessage(ws, S2C.ERROR);
+    expect(err.message).toBe("Session not found");
   });
 
   it("attaches to most recent session when multiple exist", async () => {
@@ -861,14 +920,16 @@ describe("createWsServer - cold log operations", () => {
     expect(err.message).toContain("not found");
   });
 
-  it("responds to LOAD_LOG by creating a session and replaying the log", async () => {
+  it("responds to LOAD_LOG by resuming the log under its own session id", async () => {
     writeFixtureLog(FIXTURE_LOG_ID);
-    // The loaded history is replayed into the new session's log, so the agent
-    // needs a real MessageLog and a working addMessage to replay from.
+    // The loaded history is replayed into the resumed agent, so it needs a
+    // real MessageLog and a working addMessage to replay from. The agent must
+    // adopt the log's own id (identity-preserving resume).
     const log = new MessageLog();
     wsServer = createWsServer(createWsMockCore(), {
-      buildAgent: async () =>
+      buildAgent: async (cfg) =>
         makeWsMockAgent({
+          sessionId: cfg.sessionId || "test",
           getMessages: () => log.getAll(),
           addMessage: (msg: any) => { log.push(msg as any); },
         }),
@@ -877,7 +938,10 @@ describe("createWsServer - cold log operations", () => {
 
     wsServer.onMessage(ws, JSON.stringify({ type: C2S.LOAD_LOG, logId: FIXTURE_LOG_ID }));
     const created = await waitForMessage(ws, S2C.SESSION_CREATED);
-    expect(typeof created.sessionId).toBe("string");
+    // Identity preserved: the resumed session IS the log's id (no fork to a
+    // new one), and it is live in the registry.
+    expect(created.sessionId).toBe(FIXTURE_LOG_ID);
+    expect(wsServer.sessionRegistry.get(FIXTURE_LOG_ID)).not.toBeNull();
 
     // The loaded history is replayed as user/assistant messages.
     const userMsg = await waitForMessage(ws, S2C.USER_MESSAGE);
@@ -888,14 +952,17 @@ describe("createWsServer - cold log operations", () => {
     expect(log.length).toBe(2);
   });
 
-  it("responds to LOAD_LOG with an error for a missing log", async () => {
+  it("responds to LOAD_LOG with a fallback error for a missing log", async () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
     ws = createWsMockWs();
 
     wsServer.onMessage(ws, JSON.stringify({ type: C2S.LOAD_LOG, logId: "non-existent-log" }));
     const err = await waitForMessage(ws, S2C.ERROR);
-    expect(err.message).toContain("No entries found");
+    expect(err.message).toContain("no log found");
+    // The socket is not stranded: the fallback attach opens a session.
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(typeof created.sessionId).toBe("string");
   });
 
   it("LOAD_LOG restores the profile from the index row into build config, metadata, and SESSION_CREATED", async () => {
@@ -966,6 +1033,49 @@ describe("createWsServer - cold log operations", () => {
     expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.profile).toBe("coder");
     // The replayed user message is counted in the resumed metadata.
     expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.userMessageCount).toBe(1);
+  });
+});
+
+// ── SIGTERM commit-point drain ───────────────────────────────────────────────
+
+describe("drainSessions", () => {
+  it("waits out the window, then interrupts turns that never settle", async () => {
+    const registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
+    try {
+      const { sessionId } = await registry.create();
+      const manager = registry.getSessionManager();
+      const bus = manager.getBus(sessionId)!;
+      bus.isRunning = true; // a turn stuck mid-generation
+      let cancelled = 0;
+      const agent = manager.getAgentBySessionId(sessionId)!;
+      // The unwind: interrupt() reaches agent.cancel(), which ends the turn.
+      agent.cancel = () => {
+        cancelled++;
+        bus.isRunning = false;
+      };
+
+      const start = Date.now();
+      await registry.drainSessions(120);
+
+      expect(cancelled).toBe(1);
+      expect(bus.isRunning).toBe(false);
+      expect(Date.now() - start).toBeGreaterThanOrEqual(100); // waited the window
+    } finally {
+      registry.stopCleanupLoop();
+    }
+  });
+
+  it("returns immediately when no session is running", async () => {
+    const registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
+    try {
+      const { sessionId } = await registry.create();
+      const start = Date.now();
+      await registry.drainSessions(500);
+      expect(Date.now() - start).toBeLessThan(300);
+      expect(registry.getSessionManager().isSessionRunning(sessionId)).toBe(false);
+    } finally {
+      registry.stopCleanupLoop();
+    }
   });
 });
 
@@ -1193,134 +1303,712 @@ describe("createWsServer - auth", () => {
   });
 });
 
-// ── replaySessionHistory Tests ───────────────────────────────────────────────
+// ── Log replay on attach (SWITCH_SESSION / reconnect) ───────────────────────
 
-describe("replaySessionHistory", () => {
-  /** Create a server core whose agent has a custom message log. */
-  function createReplayServer(mockAgent: AgentLike) {
-    const core = {
-      hooks: { notifyHooks: () => {}, notifyHooksAsync: async () => {} },
-      config: {},
-      resolved: {
-        baseUrl: "http://localhost:8000",
-        apiKey: "test-key",
-        model: "test-model",
-        stream: true,
-        chatTimeout: 30,
-        maxRetries: 3,
-        maxIterations: 100,
-        hideTools: false,
-        hideThinking: true,
-        showTokenUse: true,
-        profileName: "default",
-        modelRegistry: {},
-      },
-      toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
-      extensions: { cleanup: async () => {} },
-      createLlmClient: (overrides?: Record<string, unknown>) =>
-        new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, baseUrl: "http://localhost:8000", apiKey: "test-key",
-          chatTimeoutSecs: 30, maxRetries: 3, ...overrides }),
-    } as any;
+describe("log replay via SWITCH_SESSION", () => {
+  const servers: Array<ReturnType<typeof createWsServer>> = [];
+  const logs: string[] = [];
+  afterEach(() => {
+    for (const s of servers.splice(0)) s.stopCleanupLoop();
+    for (const p of logs.splice(0)) {
+      try { rmSync(p, { force: true }); } catch {}
+    }
+  });
 
-    const wsServer = createWsServer(core, { buildAgent: async () => mockAgent });
+  /** Create a session, write a log for it, and switch the socket onto it. */
+  async function switchWithLog(entries: Array<Record<string, unknown>>): Promise<MockWs> {
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+    servers.push(wsServer);
     const ws = createWsMockWs();
-    return { wsServer, ws };
-  }
-
-  function agentWithLog(log: any[]): AgentLike {
-    return makeWsMockAgent({ getMessages: () => log });
-  }
-
-  /** Switch the mock socket to the freshly created session, triggering replay. */
-  async function switchToCreatedSession(wsServer: ReturnType<typeof createWsServer>, ws: MockWs) {
-    const result = await wsServer.sessionRegistry.create({});
-    (ws as unknown as HotdogServerSocket).activeSessionId = result.sessionId;
-    await wsServer.onMessage(ws, JSON.stringify({
-      type: C2S.SWITCH_SESSION,
-      sessionId: result.sessionId,
-    }));
-    return result;
+    const { sessionId } = await wsServer.sessionRegistry.create({});
+    const logPath = join(SESSIONS_DIR, `${sessionId}.jsonl`);
+    writeFileSync(
+      logPath,
+      entries
+        .map((e) => JSON.stringify({ ts: "2024-01-01T00:00:00Z", session_id: sessionId, ...e }))
+        .join("\n") + "\n",
+    );
+    logs.push(logPath);
+    (ws as unknown as HotdogServerSocket).activeSessionId = sessionId;
+    await wsServer.onMessage(ws, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId }));
+    return ws;
   }
 
   it("replays user messages", async () => {
-    const mockAgent = agentWithLog([
-      { role: "user", content: "Hello", getTextContent: () => "Hello" },
-    ]);
-    const { wsServer, ws } = createReplayServer(mockAgent);
-
-    await switchToCreatedSession(wsServer, ws);
-
-    const msgs = ws.messages.map((m) => JSON.parse(m));
-    const userMsg = msgs.find((m: any) => m.type === S2C.USER_MESSAGE);
+    const ws = await switchWithLog([{ source: "input", content: "Hello" }]);
+    const userMsg = ws.messages
+      .map((m) => JSON.parse(m))
+      .find((m: any) => m.type === S2C.USER_MESSAGE);
     expect(userMsg).toBeDefined();
     expect(userMsg.content).toBe("Hello");
   });
 
   it("replays assistant messages with reasoning", async () => {
-    const mockAgent = agentWithLog([
-      {
-        role: "assistant",
-        content: "Here's my answer",
-        reasoningContent: "Let me think...",
-        getTextContent: () => "Here's my answer",
-      },
+    const ws = await switchWithLog([
+      { source: "llm", content: "Here's my answer", reasoning_content: "Let me think..." },
     ]);
-    const { wsServer, ws } = createReplayServer(mockAgent);
-
-    await switchToCreatedSession(wsServer, ws);
-
     const msgs = ws.messages.map((m) => JSON.parse(m));
     const thinkingMsg = msgs.find((m: any) => m.type === S2C.THINKING);
     const assistantMsg = msgs.find((m: any) => m.type === S2C.ASSISTANT_MESSAGE);
-
     expect(thinkingMsg).toBeDefined();
     expect(thinkingMsg.content).toBe("Let me think...");
     expect(assistantMsg).toBeDefined();
     expect(assistantMsg.content).toBe("Here's my answer");
   });
 
-  it("replays tool calls and results", async () => {
-    const mockAgent = agentWithLog([
+  it("replays tool calls and results with names resolved from the epoch", async () => {
+    const ws = await switchWithLog([
       {
-        role: "assistant",
+        source: "llm",
         content: "",
-        toolCalls: [
-          { id: "call_123", function: { name: "read_file", arguments: '{"path":"test.txt"}' } },
+        tool_calls: [
+          { id: "call_123", type: "function", function: { name: "read_file", arguments: '{"path":"test.txt"}' } },
         ],
-        getTextContent: () => "",
       },
-      {
-        role: "tool",
-        content: "File content here",
-        toolCallId: "call_123",
-      },
+      { source: "tool_result", tool_call_id: "call_123", content: "File content here" },
     ]);
-    const { wsServer, ws } = createReplayServer(mockAgent);
-
-    await switchToCreatedSession(wsServer, ws);
-
     const msgs = ws.messages.map((m) => JSON.parse(m));
     const toolCallMsg = msgs.find((m: any) => m.type === S2C.TOOL_CALL);
     const toolResultMsg = msgs.find((m: any) => m.type === S2C.TOOL_RESULT);
-
     expect(toolCallMsg).toBeDefined();
     expect(toolCallMsg.name).toBe("read_file");
     expect(toolResultMsg).toBeDefined();
     expect(toolResultMsg.output).toBe("File content here");
+    expect(toolResultMsg.name).toBe("read_file");
   });
 
-  it("replays messages without getTextContent via the content field", async () => {
-    const mockAgent = agentWithLog([
-      { role: "user", content: "Hello" }, // No getTextContent
+  it("never replays bookkeeping records as conversation", async () => {
+    const ws = await switchWithLog([
+      { source: "session_start", content: "", profile: "default", model: "m" },
+      { source: "input", content: "hi" },
+      { source: "tool_started", tool_call_id: "c1", tool_name: "bash", content: "{}" },
+      { source: "resume_attempt", content: { origin: "manual" } },
+      { source: "token_usage", content: "" },
+      { source: "llm", content: "done" },
     ]);
-    const { wsServer, ws } = createReplayServer(mockAgent);
-
-    await switchToCreatedSession(wsServer, ws);
-
     const msgs = ws.messages.map((m) => JSON.parse(m));
-    const userMsg = msgs.find((m: any) => m.type === S2C.USER_MESSAGE);
-    expect(userMsg).toBeDefined();
-    expect(userMsg.content).toBe("Hello");
+    const types = msgs.map((m: any) => m.type);
+    expect(types.filter((t) => t === S2C.USER_MESSAGE)).toHaveLength(1);
+    expect(types.filter((t) => t === S2C.ASSISTANT_MESSAGE)).toHaveLength(1);
+    // Bookkeeping must not surface as any conversation message.
+    expect(types).not.toContain(S2C.TOOL_CALL);
+    expect(types).not.toContain(S2C.TOOL_RESULT);
+  });
+
+  it("reports the full log length as the client's replay cursor", async () => {
+    const ws = await switchWithLog([
+      { source: "input", content: "one" },
+      { source: "llm", content: "two" },
+    ]);
+    // The cursor is a full-log coordinate (append-only; stable across
+    // RESETs), not the epoch length. No RESET here, so the two agree.
+    const cursor = ws.messages
+      .map((m) => JSON.parse(m))
+      .find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
+    expect(cursor).toBeDefined();
+    expect(cursor.value).toBe(2);
+  });
+});
+
+// ── Reconnect identity (?session=...&cursor=...) ────────────────────────────
+
+describe("reconnect attach with session id + cursor", () => {
+  const servers: Array<ReturnType<typeof createWsServer>> = [];
+  const logs: string[] = [];
+  afterEach(() => {
+    for (const s of servers.splice(0)) s.stopCleanupLoop();
+    for (const p of logs.splice(0)) {
+      try { rmSync(p, { force: true }); } catch {}
+    }
+  });
+
+  function writeLog(logId: string, contents: string[]): void {
+    const logPath = join(SESSIONS_DIR, `${logId}.jsonl`);
+    writeFileSync(
+      logPath,
+      contents
+        .map((c, i) =>
+          JSON.stringify({ ts: `2024-01-01T00:00:0${i}Z`, session_id: logId, source: "input", content: c }),
+        )
+        .join("\n") + "\n",
+    );
+    logs.push(logPath);
+  }
+
+  it("adopts a cold session under its own id and replays the full log", async () => {
+    writeLog("reconnect-full", ["one", "two"]);
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+    servers.push(wsServer);
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws?session=reconnect-full", headers: { host: "localhost" } }, ws);
+
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(created.sessionId).toBe("reconnect-full");
+    expect(wsServer.sessionRegistry.get("reconnect-full")).not.toBeNull();
+    const users = ws.messages
+      .map((m) => JSON.parse(m))
+      .filter((m: any) => m.type === S2C.USER_MESSAGE)
+      .map((m: any) => m.content);
+    expect(users).toEqual(["one", "two"]);
+
+    // Exactly one sessionCreated for the adopter: the adoption broadcast must
+    // target other tabs only. A duplicate (arriving after the cursor report)
+    // would make the client re-run its attach bookkeeping and clear the
+    // just-replayed transcript.
+    await waitForCursor(ws);
+    const createdCount = ws.messages
+      .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+      .filter((m) => m && m.type === S2C.SESSION_CREATED && m.sessionId === "reconnect-full")
+      .length;
+    expect(createdCount).toBe(1);
+  });
+
+  it("refreshes other tabs' sidebars on adoption without re-attaching them", async () => {
+    writeLog("reconnect-broadcast", ["one"]);
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+    servers.push(wsServer);
+
+    // A second tab attaches first (default attach on an empty registry).
+    const other = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, other);
+    await waitForMessage(other, S2C.SESSION_CREATED);
+
+    // The adopting tab reconnects to the cold log.
+    const adopter = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws?session=reconnect-broadcast", headers: { host: "localhost" } }, adopter);
+    await waitForMessage(adopter, S2C.SESSION_CREATED);
+
+    // The adoption reaches other tabs as a SIDEBAR REFRESH (sessions list),
+    // never as a sessionCreated: that event is an attach command on the
+    // client (re-targets the socket, saves the remembered id, clears the
+    // transcript), so broadcasting it would yank a tab that is working on a
+    // different session. Waiting for the refresh proves the adoption fully
+    // completed, so both sockets' streams are settled for the counts below.
+    const refresh = await waitForMessageOf(
+      other,
+      (m: any) => m.type === S2C.SESSIONS && m.sessions.some((s: any) => s.id === "reconnect-broadcast"),
+    );
+    expect(refresh.sessions.some((s: any) => s.id === "reconnect-broadcast")).toBe(true);
+
+    const createdFor = (ws: MockWs, sessionId: string) =>
+      ws.messages
+        .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+        .filter((m) => m && m.type === S2C.SESSION_CREATED && m.sessionId === sessionId)
+        .length;
+    expect(createdFor(adopter, "reconnect-broadcast")).toBe(1); // attach only
+    expect(createdFor(other, "reconnect-broadcast")).toBe(0); // no attach command
+  });
+
+  it("replays only the delta when the client sends a cursor", async () => {
+    writeLog("reconnect-delta", ["one", "two", "three"]);
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+    servers.push(wsServer);
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws?session=reconnect-delta&cursor=1", headers: { host: "localhost" } }, ws);
+
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(created.sessionId).toBe("reconnect-delta");
+    // The client's transcript already ends at entry 1: only the tail is sent,
+    // and sessionCreated flags it as a delta (no client-side clear).
+    expect(created.replayDelta).toBe(true);
+    const users = ws.messages
+      .map((m) => JSON.parse(m))
+      .filter((m: any) => m.type === S2C.USER_MESSAGE)
+      .map((m: any) => m.content);
+    expect(users).toEqual(["two", "three"]);
+    const cursor = ws.messages
+      .map((m) => JSON.parse(m))
+      .find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
+    expect(cursor.value).toBe(3);
+  });
+
+  it("reports cursor 0 when an in-flight partial stream is flushed", async () => {
+    writeLog("reconnect-partial", ["one", "two"]);
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+    servers.push(wsServer);
+    // A live session that owns that log, mid-generation. The attach must
+    // flush the partial AND refuse to claim a delta cursor: the transcript
+    // would then hold content the log lacks at that position, so a delta
+    // could replay the finished response on top of the partial.
+    await wsServer.sessionRegistry.create({ sessionId: "reconnect-partial" });
+    const agent = wsServer.sessionRegistry.get("reconnect-partial")!.agent as {
+      currentStreamingContent?: string;
+    };
+    agent.currentStreamingContent = "half of the response";
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws?session=reconnect-partial", headers: { host: "localhost" } }, ws);
+
+    const chunk = await waitForMessage(ws, S2C.STREAMING_CHUNK);
+    expect(chunk.content).toBe("half of the response");
+    const cursor = await waitForMessageOf(
+      ws,
+      (m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor",
+    );
+    expect(cursor.value).toBe(0);
+  });
+
+  // The cursor lives in the FULL log's append-only coordinate space: a RESET
+  // appends, it never moves an earlier entry. These fixtures exercise the
+  // case an epoch-length cursor got wrong -- a RESET that shrank the epoch
+  // below the client's cursor and regrew the log past it while the socket
+  // was down. When the slice crosses the RESET the server takes a full
+  // replay (the epoch) instead of a delta: the client's retained prefix may
+  // no longer be the honest head of its transcript (a rewind re-appends its
+  // kept messages below the marker, a clear/handoff invalidated it).
+  describe("cursor coordinates survive a RESET", () => {
+    /** Full log (8 entries): 3 conversation entries, a RESET, a compaction,
+     *  then 3 more conversation entries. Epoch length is 4; the full log
+     *  (8) is past the client's cursor of 3. */
+    const FIXTURE: Array<Record<string, unknown>> = [
+      { source: "input", content: "one" },
+      {
+        source: "llm",
+        content: "thinking",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "bash", arguments: "{}" } }],
+      },
+      { source: "tool_result", tool_call_id: "c1", content: "ran" },
+      { source: "reset", content: "" },
+      { source: "compaction", content: [{ type: "text", text: "summary" }] },
+      {
+        source: "llm",
+        content: "asking",
+        tool_calls: [{ id: "c2", type: "function", function: { name: "read_file", arguments: "{}" } }],
+      },
+      { source: "tool_result", tool_call_id: "c2", content: "data" },
+      { source: "llm", content: "four" },
+    ];
+
+    function writeFixture(logId: string): void {
+      const logPath = join(SESSIONS_DIR, `${logId}.jsonl`);
+      writeFileSync(
+        logPath,
+        FIXTURE.map((l, i) =>
+          JSON.stringify({ ts: `2024-01-01T00:00:0${i}Z`, session_id: logId, ...l }),
+        ).join("\n") + "\n",
+      );
+      logs.push(logPath);
+    }
+
+    it("a slice crossing a RESET takes a full replay (the epoch), reporting the full length", async () => {
+      writeFixture("cursor-reset-delta");
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+      servers.push(wsServer);
+      const ws = createWsMockWs();
+      // The client attached clean at full position 3 (it holds one/thinking/
+      // ran), went away, the RESET landed and the turn regrew the log. The
+      // delta would cross the marker: the retained prefix is no longer the
+      // honest head, so the epoch replaces it.
+      wsServer.onUpgrade({ url: "/ws?session=cursor-reset-delta&cursor=3", headers: { host: "localhost" } }, ws);
+
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      // No delta flag: the transcript is cleared and replayed from the epoch.
+      expect(created.replayDelta).toBeUndefined();
+      const msgs = ws.messages.map((m) => JSON.parse(m));
+      // The epoch is exactly the post-RESET work: nothing the client already
+      // holds (no "one"/"thinking"/"ran"), nothing missing.
+      const users = msgs.filter((m: any) => m.type === S2C.USER_MESSAGE).map((m: any) => m.content);
+      expect(users).toEqual([]);
+      const assistants = msgs.filter((m: any) => m.type === S2C.ASSISTANT_MESSAGE).map((m: any) => m.content);
+      expect(assistants).toEqual(["asking", "four"]);
+      // The compaction entry is bookkeeping: never surfaces.
+      const types = msgs.map((m: any) => m.type);
+      expect(types).not.toContain(S2C.THINKING);
+      // Tool-result names resolve across the RESET boundary (call c2's LLM
+      // entry is in the same slice; the full log is the name space).
+      const call = msgs.find((m: any) => m.type === S2C.TOOL_CALL);
+      const result = msgs.find((m: any) => m.type === S2C.TOOL_RESULT);
+      expect(call.name).toBe("read_file");
+      expect(result.name).toBe("read_file");
+      expect(result.output).toBe("data");
+      // The new cursor is the FULL log length (8), not the epoch length (4):
+      // the next delta continues from the append-only position.
+      const cursor = msgs.find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
+      expect(cursor.value).toBe(8);
+    });
+
+    // A rewind (/undo, /rewind, /clear, handoff, baton) re-appends its kept
+    // messages below the RESET -- unlike compaction, which writes no RESET
+    // at all. The kept entries are copies of the tail the client already
+    // holds, so a delta across the marker would duplicate them.
+    const REWIND_FIXTURE: Array<Record<string, unknown>> = [
+      { source: "input", content: "one" },
+      {
+        source: "llm",
+        content: "thinking",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "bash", arguments: "{}" } }],
+      },
+      { source: "tool_result", tool_call_id: "c1", content: "ran" },
+      { source: "reset", content: "" },
+      // The kept messages, re-appended by the rewind handler (the undone
+      // tail is above the marker, only in the full log).
+      { source: "input", content: "one" },
+      {
+        source: "llm",
+        content: "thinking",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "bash", arguments: "{}" } }],
+      },
+      { source: "tool_result", tool_call_id: "c1", content: "ran" },
+    ];
+
+    function writeRewindFixture(logId: string): void {
+      const logPath = join(SESSIONS_DIR, `${logId}.jsonl`);
+      writeFileSync(
+        logPath,
+        REWIND_FIXTURE.map((l, i) =>
+          JSON.stringify({ ts: `2024-01-01T00:00:0${i}Z`, session_id: logId, ...l }),
+        ).join("\n") + "\n",
+      );
+      logs.push(logPath);
+    }
+
+    it("a delta across a rewind RESET (kept messages re-appended) clamps to a full replay", async () => {
+      writeRewindFixture("cursor-rewind");
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+      servers.push(wsServer);
+      const ws = createWsMockWs();
+      // The client attached clean at full position 3 (it holds one/thinking/
+      // ran), went away, a rewind re-appended the kept tail. The delta past
+      // the cursor would be the three re-appended copies: duplicates.
+      wsServer.onUpgrade({ url: "/ws?session=cursor-rewind&cursor=3", headers: { host: "localhost" } }, ws);
+
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      // No delta flag: the transcript is cleared and replayed from the epoch.
+      expect(created.replayDelta).toBeUndefined();
+      const msgs = ws.messages.map((m) => JSON.parse(m));
+      // The epoch is exactly the kept messages: one copy each, nothing stale.
+      const users = msgs.filter((m: any) => m.type === S2C.USER_MESSAGE).map((m: any) => m.content);
+      expect(users).toEqual(["one"]);
+      const assistants = msgs.filter((m: any) => m.type === S2C.ASSISTANT_MESSAGE).map((m: any) => m.content);
+      expect(assistants).toEqual(["thinking"]);
+      const result = msgs.find((m: any) => m.type === S2C.TOOL_RESULT);
+      expect(result.output).toBe("ran");
+      // The new cursor indexes the FULL log (7), so the next clean reconnect
+      // deltas normally.
+      const cursor = msgs.find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
+      expect(cursor.value).toBe(7);
+    });
+
+    it("a full replay after a RESET sends the epoch and reports the full length", async () => {
+      writeFixture("cursor-reset-full");
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+      servers.push(wsServer);
+      const ws = createWsMockWs();
+      wsServer.onUpgrade({ url: "/ws?session=cursor-reset-full", headers: { host: "localhost" } }, ws);
+
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      expect(created.replayDelta).toBeUndefined();
+      const msgs = ws.messages.map((m) => JSON.parse(m));
+      // Full replay is the context's view: the EPOCH (post-RESET) only.
+      const assistants = msgs.filter((m: any) => m.type === S2C.ASSISTANT_MESSAGE).map((m: any) => m.content);
+      expect(assistants).toEqual(["asking", "four"]);
+      const users = msgs.filter((m: any) => m.type === S2C.USER_MESSAGE);
+      expect(users).toEqual([]);
+      // But the cursor is the full length: it indexes the append-only log,
+      // so the client can delta from it even though it never saw the head.
+      const cursor = msgs.find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
+      expect(cursor.value).toBe(8);
+    });
+
+    it("a cursor beyond the full length (log shrank under it) clamps to a full replay", async () => {
+      writeFixture("cursor-stale");
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+      servers.push(wsServer);
+      const ws = createWsMockWs();
+      wsServer.onUpgrade({ url: "/ws?session=cursor-stale&cursor=99", headers: { host: "localhost" } }, ws);
+
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      expect(created.replayDelta).toBeUndefined();
+      const msgs = ws.messages.map((m) => JSON.parse(m));
+      // Stale transcript discarded: the epoch is replayed in full.
+      const assistants = msgs.filter((m: any) => m.type === S2C.ASSISTANT_MESSAGE).map((m: any) => m.content);
+      expect(assistants).toEqual(["asking", "four"]);
+      const cursor = msgs.find((m: any) => m.type === S2C.SESSION_STATE && m.key === "cursor");
+      expect(cursor.value).toBe(8);
+    });
+  });
+
+  it("falls back to a fresh session (with an error) when the saved id has no log", async () => {
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+    servers.push(wsServer);
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws?session=never-was", headers: { host: "localhost" } }, ws);
+
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(created.sessionId).not.toBe("never-was");
+    const err = await waitForMessage(ws, S2C.ERROR);
+    expect(err.message).toContain("no log found");
+  });
+
+  it("refuses an auto-resume at the livelock cap, with a parked explanation", async () => {
+    // Five consecutive auto resume_attempts with no progress between them.
+    const logId = "reconnect-parked";
+    const lines = [
+      JSON.stringify({ ts: "2024-01-01T00:00:00Z", session_id: logId, source: "input", content: "work" }),
+    ];
+    for (let i = 0; i < 5; i++) {
+      lines.push(
+        JSON.stringify({ ts: `2024-01-01T00:00:1${i}Z`, session_id: logId, source: "resume_attempt", content: { origin: "auto" } }),
+      );
+    }
+    const logPath = join(SESSIONS_DIR, `${logId}.jsonl`);
+    writeFileSync(logPath, lines.join("\n") + "\n");
+    logs.push(logPath);
+
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+    servers.push(wsServer);
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: `/ws?session=${logId}`, headers: { host: "localhost" } }, ws);
+
+    const err = await waitForMessage(ws, S2C.ERROR);
+    expect(err.message).toContain("parked");
+    expect(err.message).toContain("5");
+    // And the socket is not stranded: the fallback attach opened a session.
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(created.sessionId).not.toBe(logId);
+  });
+
+  it("manual resume (LOAD_LOG) bypasses the livelock cap", async () => {
+    const logId = "reconnect-manual";
+    const lines = [
+      JSON.stringify({ ts: "2024-01-01T00:00:00Z", session_id: logId, source: "input", content: "work" }),
+    ];
+    for (let i = 0; i < 5; i++) {
+      lines.push(
+        JSON.stringify({ ts: `2024-01-01T00:00:1${i}Z`, session_id: logId, source: "resume_attempt", content: { origin: "auto" } }),
+      );
+    }
+    const logPath = join(SESSIONS_DIR, `${logId}.jsonl`);
+    writeFileSync(logPath, lines.join("\n") + "\n");
+    logs.push(logPath);
+
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+    servers.push(wsServer);
+    const ws = createWsMockWs();
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.LOAD_LOG, logId }));
+
+    // User intent: an explicit resume is never capped or parked, even at the
+    // cap. (Record writing is the session-log extension's job; the mock
+    // hooks here swallow it, so no count assertion.)
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(created.sessionId).toBe(logId);
+    expect(wsServer.sessionRegistry.get(logId)).not.toBeNull();
+  });
+
+  // ── Open-turn auto-continuation (attachResumedSession tail) ────────────
+  // A cold log whose last v2 turn is open enqueues exactly one continuation
+  // turn on the session bus right after the adopter's cursor report. The
+  // bus run loop consumes the queue item almost immediately, so the tests
+  // observe it through a continueRun spy on the mock agent, never by
+  // polling the queue.
+  describe("open-turn auto-continuation", () => {
+    function spyContinuation() {
+      let continued = 0;
+      const buildAgent = async (cfg: {
+        model?: string;
+        sessionId?: string;
+        profileName?: string;
+      }): Promise<AgentLike> =>
+        makeWsMockAgent({
+          sessionId: cfg.sessionId || "test",
+          continueRun: () => {
+            continued++;
+            return Promise.resolve(undefined);
+          },
+        });
+      return { buildAgent, count: () => continued };
+    }
+
+    /** Poll until count() reaches expected (the enqueue lands in a
+     *  microtask after the cursor report, so never assert immediately). */
+    async function waitForCount(count: () => number, expected: number): Promise<void> {
+      const start = Date.now();
+      for (;;) {
+        if (count() === expected) return;
+        if (Date.now() - start > 2000) {
+          throw new Error(`expected continueRun x${expected}, got ${count()}`);
+        }
+        await new Promise((r) => setTimeout(r, 5));
+      }
+    }
+
+    const line = (logId: string, over: Record<string, unknown>): string =>
+      JSON.stringify({
+        ts: "2024-01-01T00:00:00Z",
+        session_id: logId,
+        source: "input",
+        content: "",
+        ...over,
+      });
+
+    /** Write raw JSONL lines (turn/question/resume records, unlike the
+     *  block's writeLog which stamps everything as user input). */
+    function writeLines(logId: string, lines: string[]): void {
+      const logPath = join(SESSIONS_DIR, `${logId}.jsonl`);
+      writeFileSync(logPath, lines.join("\n") + "\n");
+      logs.push(logPath);
+    }
+
+    it("auto-continues an open v2 turn on reconnect", async () => {
+      const logId = "open-turn-auto";
+      writeLines(logId, [
+        line(logId, { source: "input", content: "work" }),
+        line(logId, { source: "turn_started", v: 2, content: { kind: "input" } }),
+      ]);
+      const { buildAgent, count } = spyContinuation();
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent });
+      servers.push(wsServer);
+      const ws = createWsMockWs();
+      wsServer.onUpgrade({ url: `/ws?session=${logId}`, headers: { host: "localhost" } }, ws);
+
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      expect(created.sessionId).toBe(logId);
+      const users = ws.messages
+        .map((m) => JSON.parse(m))
+        .filter((m: any) => m.type === S2C.USER_MESSAGE)
+        .map((m: any) => m.content);
+      expect(users).toEqual(["work"]);
+      // Enqueue fires right after the cursor lands: exactly once, a
+      // double-enqueue is the bug this guards against.
+      await waitForCursor(ws);
+      await waitForCount(count, 1);
+    });
+
+    it("does not continue a closed v2 turn", async () => {
+      const logId = "closed-turn";
+      writeLines(logId, [
+        line(logId, { source: "input", content: "work" }),
+        line(logId, { source: "turn_started", v: 2, content: { kind: "input" } }),
+        line(logId, { source: "llm", content: "done" }),
+        line(logId, { source: "turn_end", v: 2, content: { status: "completed" } }),
+      ]);
+      const { buildAgent, count } = spyContinuation();
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent });
+      servers.push(wsServer);
+      const ws = createWsMockWs();
+      wsServer.onUpgrade({ url: `/ws?session=${logId}`, headers: { host: "localhost" } }, ws);
+
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      expect(created.sessionId).toBe(logId);
+      await waitForCursor(ws);
+      // A (missing) enqueue would fire in a microtask right after the
+      // cursor report; give it a beat before asserting absence.
+      await new Promise((r) => setTimeout(r, 100));
+      expect(count()).toBe(0);
+    });
+
+    it("never auto-resumes a v1 tail (no turn records)", async () => {
+      const logId = "v1-tail";
+      writeLines(logId, [
+        line(logId, { source: "input", content: "work" }),
+        // Pre-protocol shape: a dangling tool call, no turn lifecycle.
+        line(logId, { source: "tool_started", content: "{}", tool_call_id: "c1" }),
+      ]);
+      const { buildAgent, count } = spyContinuation();
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent });
+      servers.push(wsServer);
+      const ws = createWsMockWs();
+      wsServer.onUpgrade({ url: `/ws?session=${logId}`, headers: { host: "localhost" } }, ws);
+
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      expect(created.sessionId).toBe(logId);
+      await waitForCursor(ws);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(count()).toBe(0);
+    });
+
+    it("lets the held question win over the open turn; the answer drives the continuation", async () => {
+      const logId = "held-question";
+      writeLines(logId, [
+        line(logId, { source: "input", content: "work" }),
+        line(logId, { source: "turn_started", v: 2, content: { kind: "input" } }),
+        line(logId, {
+          source: "llm",
+          content: "let me ask",
+          tool_calls: [
+            { id: "call_q", type: "function", function: { name: "question", arguments: "{}" } },
+          ],
+        }),
+        line(logId, {
+          source: "question_asked",
+          tool_call_id: "call_q",
+          content: [{ key: "mode", prompt: "Which mode?" }],
+        }),
+      ]);
+      const { buildAgent, count } = spyContinuation();
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent });
+      servers.push(wsServer);
+      const ws = createWsMockWs();
+      wsServer.onUpgrade({ url: `/ws?session=${logId}`, headers: { host: "localhost" } }, ws);
+
+      // The held question is re-presented to the adopter instead of a
+      // continuation: a turn must not start on a dangling question call.
+      const question = await waitForMessage(ws, S2C.QUESTION);
+      expect(question.sessionId).toBe(logId);
+      expect(question.questions[0].key).toBe("mode");
+      await waitForCursor(ws);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(count()).toBe(0);
+
+      // Answering the held call enqueues the continuation instead.
+      await wsServer.onMessage(
+        ws,
+        JSON.stringify({ type: C2S.QUESTION_ANSWER, sessionId: logId, answers: { mode: "a" } }),
+      );
+      await waitForCount(count, 1);
+    });
+
+    it("enqueues exactly once for concurrent adopters", async () => {
+      const logId = "concurrent-adopt";
+      writeLines(logId, [
+        line(logId, { source: "input", content: "work" }),
+        line(logId, { source: "turn_started", v: 2, content: { kind: "input" } }),
+      ]);
+      const { buildAgent, count } = spyContinuation();
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent });
+      servers.push(wsServer);
+
+      // Two tabs reconnect to the same cold log in one tick: both attach
+      // flows start before either adoption completes, so pendingAdoptions
+      // is what dedupes them.
+      const ws1 = createWsMockWs();
+      const ws2 = createWsMockWs();
+      wsServer.onUpgrade({ url: `/ws?session=${logId}`, headers: { host: "localhost" } }, ws1);
+      wsServer.onUpgrade({ url: `/ws?session=${logId}`, headers: { host: "localhost" } }, ws2);
+
+      const created1 = await waitForMessage(ws1, S2C.SESSION_CREATED);
+      const created2 = await waitForMessage(ws2, S2C.SESSION_CREATED);
+      expect(created1.sessionId).toBe(logId);
+      expect(created2.sessionId).toBe(logId);
+      await waitForCount(count, 1);
+    });
+
+    it("does not continue a parked log with an open turn (fallback, never adopted)", async () => {
+      const logId = "parked-open-turn";
+      const lines = [
+        line(logId, { source: "input", content: "work" }),
+        line(logId, { source: "turn_started", v: 2, content: { kind: "input" } }),
+      ];
+      for (let i = 0; i < 5; i++) {
+        lines.push(line(logId, { source: "resume_attempt", content: { origin: "auto" } }));
+      }
+      writeLines(logId, lines);
+      const { buildAgent, count } = spyContinuation();
+      const wsServer = createWsServer(createWsMockCore(), { buildAgent });
+      servers.push(wsServer);
+      const ws = createWsMockWs();
+      wsServer.onUpgrade({ url: `/ws?session=${logId}`, headers: { host: "localhost" } }, ws);
+
+      const err = await waitForMessage(ws, S2C.ERROR);
+      expect(err.message).toContain("parked");
+      // The socket is not stranded: the fallback attach opened a session,
+      // and the parked log was refused before adoption, never adopted.
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      expect(created.sessionId).not.toBe(logId);
+      expect(wsServer.sessionRegistry.get(logId)).toBeNull();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(count()).toBe(0);
+    });
   });
 });
 

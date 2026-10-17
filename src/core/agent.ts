@@ -186,6 +186,8 @@ export class Agent implements AgentLike {
   commandRegistry: AgentCommandRegistry;
   #toolExecutor: ToolExecutor;
   #streamProcessor: StreamProcessor;
+  /** This run's kind for the TURN_START payload (session-log turn records). */
+  #turnKind: "input" | "continuation" | null = null;
   enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
   /** See ForkSessionFn. Injected by SessionManager; null when no session hosts this agent. */
   forkSession: ForkSessionFn | null;
@@ -378,6 +380,7 @@ export class Agent implements AgentLike {
       throw AgentError.AlreadyRunning(this.sessionId);
     }
     this.#running = true;
+    this.#turnKind = opts?.continuation ? "continuation" : "input";
 
     let turnEnded = false;
     try {
@@ -562,6 +565,7 @@ export class Agent implements AgentLike {
       turnIndex: iteration,
       timestamp: Date.now(),
       agent: this,
+      kind: this.#turnKind ?? "input",
     });
 
     if (this.cancelled) throw LlmError.Cancelled("Agent cancelled");

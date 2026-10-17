@@ -96,7 +96,9 @@ class FakeWebSocket {
   onmessage: ((e: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  constructor(_url: string) {
+  url: string;
+  constructor(url: string) {
+    this.url = url;
     FakeWebSocket.instances.push(this);
   }
   send(data: string): void {
@@ -603,5 +605,126 @@ describe("createChat task controls", () => {
       taskId: "t1",
       message: "keep going",
     });
+  });
+});
+
+// ── Reconnect identity (session durability part 3) ────────────────────────
+// The client remembers its session across socket drops (sessionStorage in the
+// browser; the in-memory fallback under Bun) and rides it on the upgrade
+// URL, with its replay cursor only when the transcript is clean.
+
+describe("createChat reconnect identity", () => {
+  const RealWebSocket = globalThis.WebSocket;
+  let chat: ChatController | null = null;
+  let createdCalls: Array<{ sessionId: string; replayDelta?: boolean }> = [];
+
+  afterEach(() => {
+    chat?.disconnect();
+    chat = null;
+    FakeWebSocket.instances = [];
+    createdCalls = [];
+    globalThis.WebSocket = RealWebSocket;
+  });
+
+  function makeChat(): ChatController {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    chat = createChat({
+      token: null,
+      host: "localhost",
+      getMessageListContainer: () => makeContainer() as unknown as HTMLElement,
+      // Same wiring as app.tsx: setSession keeps the transcript on deltas.
+      onSessionCreated: (d) => {
+        createdCalls.push(d);
+        chat!.setSession(d.sessionId, d.replayDelta === true);
+      },
+    });
+    return chat!;
+  }
+
+  function lastWs(): FakeWebSocket {
+    return FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+  }
+
+  /** The attach's replay burst: sessionCreated, a delta message, cursor. */
+  function emitDeltaAttach(ws: FakeWebSocket, sessionId: string, cursor: number): void {
+    ws.emit({ type: "sessionCreated", sessionId, replayDelta: true });
+    ws.emit({ type: "userMessage", sessionId, content: "one" });
+    ws.emit({ type: "sessionState", sessionId, key: "cursor", value: cursor });
+  }
+
+  it("first connect carries no session; a clean transcript reconnects with the cursor", () => {
+    makeChat();
+    const ws1 = lastWs();
+    expect(new URL(ws1.url).searchParams.get("session")).toBeNull();
+
+    emitDeltaAttach(ws1, "s1", 2);
+    expect(createdCalls).toEqual([{ sessionId: "s1", replayDelta: true }]);
+
+    chat!.disconnect();
+    chat!.connect();
+    const ws2 = lastWs();
+    const p2 = new URL(ws2.url).searchParams;
+    expect(p2.get("session")).toBe("s1");
+    expect(p2.get("cursor")).toBe("2");
+  });
+
+  it("omits the cursor when a live event dirtied the transcript", () => {
+    makeChat();
+    const ws1 = lastWs();
+    emitDeltaAttach(ws1, "s1", 2);
+
+    // A live event after the cursor report: the stored cursor no longer
+    // matches the transcript, so the next reconnect takes a full replay.
+    ws1.emit({ type: "assistantMessage", sessionId: "s1", content: "hi" });
+
+    chat!.disconnect();
+    chat!.connect();
+    const p2 = new URL(lastWs().url).searchParams;
+    expect(p2.get("session")).toBe("s1");
+    expect(p2.get("cursor")).toBeNull();
+  });
+
+  it("replay-burst events do not dirty the transcript", () => {
+    makeChat();
+    const ws1 = lastWs();
+
+    // The whole burst, including the tail's own events, stays clean.
+    ws1.emit({ type: "sessionCreated", sessionId: "s1", replayDelta: true });
+    ws1.emit({ type: "assistantMessage", sessionId: "s1", content: "tail" });
+    ws1.emit({ type: "sessionState", sessionId: "s1", key: "cursor", value: 3 });
+
+    chat!.disconnect();
+    chat!.connect();
+    const p2 = new URL(lastWs().url).searchParams;
+    expect(p2.get("session")).toBe("s1");
+    expect(p2.get("cursor")).toBe("3");
+  });
+
+  it("a full attach (no replayDelta) still reconnects with the cursor once clean", () => {
+    makeChat();
+    const ws1 = lastWs();
+
+    ws1.emit({ type: "sessionCreated", sessionId: "s1" });
+    expect(createdCalls).toEqual([{ sessionId: "s1", replayDelta: false }]);
+    ws1.emit({ type: "userMessage", sessionId: "s1", content: "one" });
+    ws1.emit({ type: "sessionState", sessionId: "s1", key: "cursor", value: 1 });
+
+    chat!.disconnect();
+    chat!.connect();
+    const p2 = new URL(lastWs().url).searchParams;
+    expect(p2.get("session")).toBe("s1");
+    expect(p2.get("cursor")).toBe("1");
+  });
+
+  it("a deleted session drops the remembered id (default attach next)", () => {
+    makeChat();
+    const ws1 = lastWs();
+    ws1.emit({ type: "sessionCreated", sessionId: "s1" });
+    ws1.emit({ type: "sessionState", sessionId: "s1", key: "cursor", value: 1 });
+    ws1.emit({ type: "sessionDeleted", sessionId: "s1" });
+
+    chat!.disconnect();
+    chat!.connect();
+    expect(new URL(lastWs().url).searchParams.get("session")).toBeNull();
   });
 });

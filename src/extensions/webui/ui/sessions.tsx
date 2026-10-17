@@ -20,6 +20,9 @@ export interface LogInfo {
   createdAt: number;
   lastActivityAt: number;
   messageCount: number;
+  /** Derived index state (idle/awaiting_question/interrupted/parked);
+   *  absent when the log has no reconciled row yet. */
+  state?: string;
 }
 
 export interface ContextMenuItem {
@@ -128,11 +131,16 @@ export function Sidebar(p: SidebarProps) {
                   {log.messageCount > 0
                     ? `${log.messageCount} msg${log.messageCount > 1 ? "s" : ""}`
                     : "empty"}
+                  {log.state && log.state !== "idle" ? (
+                    <span className={`log-state-badge log-state-${log.state}`}>
+                      {log.state.replace(/_/g, " ")}
+                    </span>
+                  ) : null}
                 </span>
                 <div className="log-actions">
                   <button
                     className="log-continue-btn"
-                    title="Continue in new session"
+                    title="Continue this session (keeps its session id)"
                     onClick={(e: MouseEvent) => {
                       e.stopPropagation();
                       p.onContinueLog(log.id);

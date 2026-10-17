@@ -9,7 +9,7 @@ import { isWrapperPart, isToolResultPart } from "@core/context/wrappers.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
 
-import { LOG_SOURCE, sessionPath, sessionsDir, type LogEntry } from "@core/session/session-log.ts";
+import { LOG_SOURCE, LOG_VERSION, MAX_CONSECUTIVE_AUTO_RESUMES, sessionPath, sessionsDir, type LogEntry } from "@core/session/session-log.ts";
 import {
   reconcileSessionIndex,
   syncSessionFromLog,
@@ -78,6 +78,7 @@ function messageToLogEntry(
     session_id: message.sessionId || "unknown",
     role: message.role,
     source,
+    v: LOG_VERSION,
     content: message.content,
     reasoning_content: message.reasoningContent || null,
     tool_calls: message.toolCalls || null,
@@ -139,6 +140,10 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // write must not rescue a call whose own record is missing (replay would
   // read it as "never ran, safe to retry" when it may have run).
   const barrierFailures = new Map<string, string>();
+  // Open turns per session (v2): set on the turn_started record, cleared on
+  // turn_end. A mid-turn checkpoint uses this to re-emit the marker below
+  // the reset, so a crash after compaction still shows an open turn.
+  const openTurns = new Map<string, "input" | "continuation">();
   // Track the most recent session ID so readEntries/getLogPath work correctly.
   let lastSessionId: string | null = null;
 
@@ -274,6 +279,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           ts: new Date().toISOString(),
           session_id: sessionId,
           source: LOG_SOURCE.SESSION_START,
+          v: LOG_VERSION,
           content: "",
           model: (config.model as string) || null,
           profile: (config.profileName as string) || null,
@@ -343,6 +349,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           ts: new Date().toISOString(),
           session_id: sessionId,
           source: LOG_SOURCE.RESET,
+          v: LOG_VERSION,
           content: "",
         });
 
@@ -354,6 +361,21 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           if (message.role === "system") continue;
           // appendMessageEntry queues synchronously before its first await.
           done = appendMessageEntry(agent, message);
+        }
+        // A mid-turn checkpoint truncates the epoch view: the original
+        // turn_started sits above the reset and would vanish, hiding the open
+        // turn. Re-emit the marker (same kind) in the same atomic block.
+        // Between-turn rewinds have no open turn and add nothing.
+        const openKind = openTurns.get(sessionId);
+        if (openKind !== undefined) {
+          const marker = stripNulls({
+            ts: new Date().toISOString(),
+            session_id: sessionId,
+            source: LOG_SOURCE.TURN_STARTED,
+            v: LOG_VERSION,
+            content: { kind: openKind },
+          });
+          done = queuedAppend(logPath, JSON.stringify(marker) + "\n");
         }
         await done;
         // The reset moved the replay window and wiped all durability facts:
@@ -386,6 +408,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           ts: new Date().toISOString(),
           session_id: sessionId,
           source: LOG_SOURCE.TOOL_STARTED,
+          v: LOG_VERSION,
           content: input,
           tool_call_id: toolCallId,
           tool_name: toolName,
@@ -438,22 +461,110 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       },
 
       /**
-       * Durability record for a `-s <id>` resume, fsynced before the replay
-       * begins (restoreSessionIntoAgent awaits this hook). The livelock cap's
-       * counter lives in the log; the index only mirrors it, so deleting the
-       * index costs a re-scan, never the cap.
+       * Turn lifecycle (v2): fsync turn_started on the turn's FIRST iteration
+       * (turnIndex === 1; TURN_START fires per iteration). Awaited, so the
+       * record lands before the turn's first LLM call: a crash mid-turn
+       * leaves an open turn the auto-resume can continue.
        */
-      [HOOKS.SESSION_RESUME_ATTEMPT]: async ({ sessionId }: { sessionId: string }) => {
+      [HOOKS.TURN_START]: async ({
+        turnIndex,
+        agent,
+        kind,
+      }: {
+        turnIndex: number;
+        agent: { sessionId?: string };
+        kind?: "input" | "continuation";
+      }) => {
+        if (turnIndex !== 1) return; // one record per turn, not per iteration
+        const sessionId = agent.sessionId || "unknown";
+        const logPath = resolveLogPath(sessionId);
+        if (!logPath) return;
+        const entry = stripNulls({
+          ts: new Date().toISOString(),
+          session_id: sessionId,
+          source: LOG_SOURCE.TURN_STARTED,
+          v: LOG_VERSION,
+          content: { kind: kind ?? "input" },
+        });
+        await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+        openTurns.set(sessionId, kind ?? "input");
+      },
+
+      /**
+       * Turn lifecycle (v2): fsync turn_end when the turn stops (TURN_END
+       * fires per iteration with stopped: false for in-turn advances).
+       * Status: completed / cancelled (user interrupt) / error (failure or
+       * empty-response budget spent). Awaited, so a crash cannot leave a
+       * finished turn looking open.
+       *
+       * A between-turn context clear may run BEFORE this handler and
+       * re-emit the open-turn marker; turn_end lands after that marker, so
+       * the pair still closes. A crash strictly between the two writes
+       * reports a false open turn (one spurious continuation, bounded).
+       */
+      [HOOKS.TURN_END]: async ({
+        stopped,
+        reason,
+        cancelled,
+        agent,
+      }: {
+        stopped: boolean;
+        reason?: string;
+        cancelled?: boolean;
+        agent: { sessionId?: string };
+      }) => {
+        if (!stopped) return;
+        // cancelled outranks reason: a late cancel still carries reason
+        // "completion" ("cancelled" is only the mid-LLM abort path).
+        const status =
+          reason === "cancelled" || cancelled === true
+            ? "cancelled"
+            : reason === "error" || reason === "empty_response"
+              ? "error"
+              : "completed";
+        const sessionId = agent.sessionId || "unknown";
+        const logPath = resolveLogPath(sessionId);
+        if (!logPath) return;
+        const entry = stripNulls({
+          ts: new Date().toISOString(),
+          session_id: sessionId,
+          source: LOG_SOURCE.TURN_END,
+          v: LOG_VERSION,
+          content: { status },
+        });
+        await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+        openTurns.delete(sessionId);
+      },
+
+      /**
+       * Durability record for a resume into an existing log, fsynced before
+       * the replay begins. The cap's counter lives in the log; the index
+       * only mirrors it, so deleting the index costs a re-scan, never the
+       * cap. `content` carries the origin (only "auto" resumes count);
+       * pre-cap logs carry no origin and derive as manual.
+       */
+      [HOOKS.SESSION_RESUME_ATTEMPT]: async ({
+        sessionId,
+        origin,
+        consecutiveAutoResumes,
+      }: {
+        sessionId: string;
+        origin?: string;
+        consecutiveAutoResumes?: number;
+      }) => {
         const logPath = resolveLogPath(sessionId);
         if (!logPath) return;
         const entry = stripNulls({
           ts: new Date().toISOString(),
           session_id: sessionId,
           source: LOG_SOURCE.RESUME_ATTEMPT,
-          content: "",
+          v: LOG_VERSION,
+          content: { origin: origin === "auto" ? "auto" : "manual" },
         });
         await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
-        await safeIndex("resume_attempt", () => indexResumeAttempt(sessionId));
+        await safeIndex("resume_attempt", () =>
+          indexResumeAttempt(sessionId, (consecutiveAutoResumes ?? 0) >= MAX_CONSECUTIVE_AUTO_RESUMES),
+        );
       },
 
       [HOOKS.PROFILE_SWITCH]: async ({
@@ -472,6 +583,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           ts: new Date().toISOString(),
           session_id: sessionId,
           source: LOG_SOURCE.PROFILE_SWITCH,
+          v: LOG_VERSION,
           content: "",
           from_profile: fromProfile || null,
           profile: toProfile,
@@ -494,6 +606,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             ts: new Date().toISOString(),
             session_id: sessionId,
             source: LOG_SOURCE.QUESTION_ASKED,
+            v: LOG_VERSION,
             content: questions,
             tool_call_id: toolCallId,
           });
@@ -531,6 +644,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             ts: new Date().toISOString(),
             session_id: sessionId,
             source: LOG_SOURCE.TOKEN_USAGE,
+            v: LOG_VERSION,
             content: "",
             sessionPromptTokens: d.sessionPromptTokens ?? 0,
             sessionCachedTokens: d.sessionCachedTokens ?? 0,
@@ -569,6 +683,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
               ts: new Date().toISOString(),
               session_id: sessionId,
               source: LOG_SOURCE.COMPACTION,
+              v: LOG_VERSION,
               content: [
                 { type: "text", text: `<${tag}>` },
                 { type: "untrusted", text: compactionData.summary },

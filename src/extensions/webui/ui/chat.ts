@@ -123,6 +123,25 @@ function clearTasks(): void {
 // Explicit session name for the active session; null = show the short id.
 const sessionTitleAtom = reactiveState<string | null>(null);
 
+// Transcript-changing events (server to client). Any arriving after an
+// attach's cursor report marks the transcript dirty: the next reconnect does
+// a full replay, not a delta from the stored cursor.
+const CONVERSATION_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "userMessage",
+  "assistantMessage",
+  "thinking",
+  "toolCall",
+  "toolResult",
+  "streamingChunk",
+  "streamingReasoningChunk",
+  "question",
+  "questionAnswered",
+  "compacting",
+  "commandResult",
+  "compactionResult",
+  "systemMessage",
+]);
+
 interface SessionCreatedMessage {
   type: "sessionCreated";
   sessionId: string;
@@ -133,6 +152,9 @@ interface SessionCreatedMessage {
   models?: string[];
   /** Server has an STT backend configured (drives the mic affordance). */
   sttEnabled?: boolean;
+  /** The server replayed only the delta from the client's cursor, so the
+   *  client keeps its transcript (it ends exactly at that cursor). */
+  replayDelta?: boolean;
 }
 
 interface SessionDeletedMessage {
@@ -152,7 +174,15 @@ interface SessionsMessage {
 
 interface LogsListedMessage {
   type: "logsListed";
-  logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number }>;
+  logs: Array<{
+    id: string;
+    createdAt: number;
+    lastActivityAt: number;
+    messageCount: number;
+    /** Derived index state (idle/awaiting_question/interrupted/parked);
+     *  absent when the log has no reconciled row yet. */
+    state?: string;
+  }>;
 }
 
 // Image payload type (UiImage) is defined in message-list.ts; the server
@@ -409,9 +439,11 @@ interface ChatConfig {
   host?: string;
   /** The #message-list element, handed out by the JSX tree via ref. */
   getMessageListContainer: () => HTMLElement | null;
-  onSessionCreated?: (data: { sessionId: string }) => void;
+  onSessionCreated?: (data: { sessionId: string; replayDelta?: boolean }) => void;
   onSessionsUpdate?: (sessions: SessionInfo[], activeSessionId: string | null) => void;
-  onLogsUpdate?: (logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number }>) => void;
+  onLogsUpdate?: (
+    logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number; state?: string }>,
+  ) => void;
   onLogViewed?: (logId: string, entries: LogEntry[]) => void;
   onLogDeleted?: (logId: string) => void;
   onAuthFailure?: () => void;
@@ -440,7 +472,7 @@ export interface ChatController {
     cursorPos: number,
     onResult: (options: CompletionItem[], prefix: string) => void,
   ) => void;
-  setSession: (sessionId: string) => void;
+  setSession: (sessionId: string, keepTranscript?: boolean) => void;
   listProfiles: () => void;
   switchProfile: (profileName: string) => void;
   // Push-to-talk: upload a base64 recording, await the transcript text.
@@ -485,8 +517,6 @@ export function createChat({
   onAuthFailure,
   onWorkingMapChange,
 }: ChatConfig): ChatController {
-  // Match the page scheme: browsers block ws:// (mixed content) on https pages.
-  const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${host}/ws`;
   let ws: WebSocket | null = null;
   let messageList: MessageListManager | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -500,6 +530,56 @@ export function createChat({
 
   // Per-session working state; kept across switches so the sidebar stays accurate.
   const sessionWorkingMap = new Map<string, boolean>();
+
+  // ── Reconnect identity (session durability part 3) ─────────────────────
+  // The session id survives page reloads; the replay cursor (full log length
+  // at the last attach -- an append-only coordinate, stable across
+  // compactions) only survives this socket generation. The cursor is sent
+  // only when the transcript is clean (untouched since the last attach), so
+  // the server's delta replay is exactly the tail: nothing cleared, nothing
+  // duplicated.
+  // sessionStorage, not localStorage: the key must be per-TAB. localStorage
+  // is shared across tabs of one webui, and every tab writes its active
+  // session on attach -- with localStorage, tab B's attach would retarget
+  // tab A's next reconnect onto B's session. sessionStorage still survives
+  // in-tab reloads (the reconnect case); a fresh tab takes the default attach.
+  const SESSION_STORAGE_KEY = "hotdog-active-session";
+  const storage: Storage | null =
+    typeof window !== "undefined" && "sessionStorage" in window
+      ? (window as unknown as { sessionStorage: Storage }).sessionStorage
+      : null;
+  let savedSessionId: string | null = null;
+  try {
+    savedSessionId = storage?.getItem(SESSION_STORAGE_KEY) ?? null;
+  } catch {
+    savedSessionId = null;
+  }
+  let attachCursor: number | null = null; // full log length at last attach
+  let replayPending = false; // between sessionCreated and its cursor report
+  let dirtySinceAttach = false; // live events arrived after the last attach
+
+  function saveSessionId(id: string | null): void {
+    savedSessionId = id;
+    if (!storage) return;
+    try {
+      if (id) storage.setItem(SESSION_STORAGE_KEY, id);
+      else storage.removeItem(SESSION_STORAGE_KEY);
+    } catch {}
+  }
+
+  /** Build the connect URL: the remembered session (and, when clean, its
+   *  replay cursor) ride the upgrade so both auth flows can use them. */
+  function connectUrl(): string {
+    // Match the page scheme: browsers block ws:// (mixed content) on https pages.
+    const base = `${window.location.protocol === "https:" ? "wss" : "ws"}://${host}/ws`;
+    if (!savedSessionId) return base;
+    const params = new URLSearchParams();
+    params.set("session", savedSessionId);
+    if (attachCursor !== null && !dirtySinceAttach && !replayPending) {
+      params.set("cursor", String(attachCursor));
+    }
+    return `${base}?${params.toString()}`;
+  }
 
   // One in-flight completion request at a time: each new request supersedes
   // the previous, whose (now stale) response is dropped by id mismatch.
@@ -535,13 +615,22 @@ export function createChat({
           modelsAtom(data.models);
         }
         sttEnabledAtom(Boolean(data.sttEnabled));
+        // Reconnect identity: remember the session for the next reconnect.
+        saveSessionId(data.sessionId);
+        // The replay burst follows this message (up to the cursor report);
+        // those events must not mark the transcript dirty. The attach either
+        // replaces the transcript (full) or keeps it clean (delta) -- clean
+        // either way.
+        replayPending = true;
+        attachCursor = null;
+        dirtySinceAttach = false;
         // On page reload the server can send working state before
         // sessionCreated, so restore it from the map here.
         const createdSid = data.sessionId;
         if (sessionWorkingMap.has(createdSid)) {
           workingAtom(sessionWorkingMap.get(createdSid) ?? false);
         }
-        onSessionCreated?.({ sessionId: data.sessionId });
+        onSessionCreated?.({ sessionId: data.sessionId, replayDelta: data.replayDelta === true });
         return;
       case "sessionDeleted":
         if (data.sessionId === sessionIdAtom()) {
@@ -549,6 +638,11 @@ export function createChat({
           sessionIdAtom(null);
           sessionTitleAtom(null);
           currentModelAtom("");
+          // The remembered session is gone: the next reconnect takes the
+          // default attach, not a dead id.
+          saveSessionId(null);
+          attachCursor = null;
+          dirtySinceAttach = false;
         }
         return;
       case "sessions": {
@@ -661,6 +755,14 @@ export function createChat({
       }
     }
 
+    // A transcript that grew after the attach's cursor report can no longer
+    // be reconstructed as a delta, so the next reconnect falls back to a
+    // full replay. Replay-burst events (replayPending) are exempt: they
+    // arrive before the cursor report and are what it was measured for.
+    if (!replayPending && CONVERSATION_EVENT_TYPES.has(data.type)) {
+      dirtySinceAttach = true;
+    }
+
     switch (data.type) {
       case "userMessage":
         messageList.handleUserMessage(data);
@@ -710,6 +812,13 @@ export function createChat({
         messageList.handleSystemMessage(data);
         break;
       case "sessionState":
+        if (data.key === "cursor") {
+          // End of the attach's replay burst: the transcript ends exactly at
+          // this full-log position, a valid delta cursor for the next
+          // reconnect.
+          attachCursor = Number(data.value);
+          replayPending = false;
+        }
         if (data.key === "working") {
           const sid = (data as { sessionId?: string }).sessionId;
           if (sid) {
@@ -752,7 +861,7 @@ export function createChat({
     authFailed = false;
 
     try {
-      ws = new WebSocket(wsUrl);
+      ws = new WebSocket(connectUrl());
     } catch (e) {
       logger.error("[chat] WS connection failed:", e);
       connectedAtom(false);
@@ -950,7 +1059,7 @@ export function createChat({
     });
   }
 
-  function setSession(sessionId: string): void {
+  function setSession(sessionId: string, keepTranscript = false): void {
     const container = getMessageListContainer();
     if (!container) {
       console.warn("[chat] message list container not mounted");
@@ -965,7 +1074,10 @@ export function createChat({
       onQuestionAnswer: (answers) => sendQuestionAnswer(answers),
     });
     sessionIdAtom(sessionId);
-    messageList.clear();
+    // A delta replay only sends the tail the transcript does not already
+    // hold (it ends exactly at the attach cursor): clearing would lose the
+    // prefix. Full replays always clear first.
+    if (!keepTranscript) messageList.clear();
   }
 
   function listProfiles(): void {

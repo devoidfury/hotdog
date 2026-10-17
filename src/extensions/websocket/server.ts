@@ -19,10 +19,20 @@ import type { AuthMiddleware } from "./auth.ts";
 import { Agent } from "@core/agent.ts";
 import { createAgentFactory } from "@core/agent-factory.ts";
 import {
+  LOG_SOURCE,
+  MAX_CONSECUTIVE_AUTO_RESUMES,
+  collectDurabilityFacts,
+  conversationContent,
+  epochEntries,
+  epochStartIndex,
   readSessionEntries,
-  replayEntriesIntoContext,
+  restoreSessionIntoAgent,
+  sessionExists,
+  sessionPath,
   listSessionLogs,
   deleteSessionLog,
+  type AgentForRestore,
+  type LogEntry,
   type PendingQuestion,
 } from "@core/session/session-log.ts";
 import { Message } from "@core/context/message.ts";
@@ -32,7 +42,7 @@ import { AgentError, formatError } from "@core/error.ts";
 import { parseForkArg } from "@core/command-handlers.ts";
 import { completionPrefix, parseCompletionContext } from "@core/completion.ts";
 import { logger } from "@utils/logger.ts";
-import { splitFileIncludes, toolContentText } from "@utils/tool-content.ts";
+import { splitFileIncludes, toolContentText, wrapperContentText } from "@utils/tool-content.ts";
 import { transcribeAudio } from "@utils/stt.ts";
 import { resolveSttTarget, type SttTarget } from "@core/config/stt.ts";
 
@@ -62,6 +72,8 @@ interface CreateSessionOptions {
   model?: string;
   questionStrategy?: string;
   questionTimeoutSecs?: number;
+  /** Adopt an existing session id (cold-log resume keeps its identity). */
+  sessionId?: string;
 }
 
 interface SwitchProfileOptions {
@@ -113,6 +125,9 @@ export interface WsServer {
   onClose: (ws: HotdogServerSocket<unknown>) => void;
   startCleanupLoop: () => void;
   stopCleanupLoop: () => void;
+  /** SIGTERM commit-point drain: wait (bounded) for in-flight turns to
+   *  settle, then interrupt stragglers -- exit at a commit point, not mid-write. */
+  drainSessions: (timeoutMs?: number) => Promise<void>;
   /** Release the TaskManager's provider-health sweep timer, if a TaskManager was built. */
   stopTaskManager: () => void;
 }
@@ -121,12 +136,36 @@ export type HotdogServerSocket<T = undefined> = Bun.ServerWebSocket<T> & {
   activeSessionId?: string;
   activeChannel?: WebSocketChannel;
   authToken?: string;
+  /** Reconnect identity from the upgrade URL (?session=...&cursor=...): the
+   *  session the client was on, plus its replay position (full log length at
+   *  the last attach -- an append-only coordinate, stable across RESETs). */
+  resumeSessionId?: string;
+  resumeCursor?: number;
+  /** True once an implicit attach has been started for this socket. The
+   *  post-AUTH attach site must not fire its own while the upgrade-site
+   *  attach is in flight: activeSessionId is only set once the attach's
+   *  first awaits settle, so it cannot gate the race (a token-upgrade client
+   *  that also sends AUTH would otherwise get two attach bursts). Never
+   *  cleared: a socket takes at most one implicit attach; later switches
+   *  are explicit (SWITCH_SESSION). */
+  attachStarted?: boolean;
 };
 
 // How long a socket that never authenticates is kept before the cleanup
 // loop closes it. Comfortably longer than a legit AUTH round-trip (first
 // message after open), short enough that anonymous sockets do not pile up.
 const PENDING_AUTH_TIMEOUT_MS = 30_000;
+
+// Idle-cleanup grace: this many recently-active, client-free sessions stay
+// hot past the idle timeout ("what was I doing" window); the rest go cold.
+const MAX_HOT_IDLE_SESSIONS = 3;
+
+// SIGTERM drain bounds: 10s for a turn to reach its commit point, then
+// interrupt and 2s for the unwind. Fits well inside systemd's default
+// TimeoutStopSec (90s); a longer generation is cut, never half-persisted.
+const DRAIN_TIMEOUT_MS = 10_000;
+const DRAIN_POLL_MS = 100;
+const DRAIN_SETTLE_MS = 2_000;
 
 // Cap for client-supplied completion input; nothing legit needs more.
 const MAX_COMPLETE_LINE = 10_000;
@@ -269,6 +308,17 @@ export class SessionRegistry {
     }
   }
 
+  /**
+   * Broadcast to every registered connection except one. The exclusion is
+   * for the adopting socket, which already refreshed its sidebar.
+   */
+  broadcastExcept(except: HotdogServerSocket<unknown>, msg: Record<string, unknown>): void {
+    for (const ws of this.#allConnections) {
+      if (ws === except) continue;
+      SessionRegistry.sendSafe(ws, msg);
+    }
+  }
+
   static sendSafe(ws: HotdogServerSocket<unknown>, msg: Record<string, unknown>): void {
     try {
       if (ws.readyState === 1) {
@@ -282,11 +332,14 @@ export class SessionRegistry {
     model,
     questionStrategy,
     questionTimeoutSecs,
+    sessionId,
   }: CreateSessionOptions = {}): Promise<{
     sessionId: string;
     agent: AgentLike;
   }> {
-    const proposedSessionId = crypto.randomUUID();
+    // Caller-supplied id (cold-log adoption) wins: the agent adopts the log's
+    // own id or the session loses its identity across restarts.
+    const proposedSessionId = sessionId ?? crypto.randomUUID();
 
     const agent = await this.#buildAgent({
       model,
@@ -568,13 +621,38 @@ export class SessionRegistry {
   #cleanupIdleSessions(): void {
     const now = Date.now();
     const timeoutMs = this.#timeoutMin * 60 * 1000;
-    for (const [id, meta] of this.#metadata) {
-      if (
-        now - meta.lastActivityAt > timeoutMs &&
-        meta.connectedClients === 0
-      ) {
-        this.delete(id);
-      }
+    // Idle past the timeout and holding no clients, most recently active first.
+    const stale = [...this.#metadata.entries()]
+      .filter(([, meta]) => meta.connectedClients === 0 && now - meta.lastActivityAt > timeoutMs)
+      .sort((a, b) => b[1].lastActivityAt - a[1].lastActivityAt);
+    // Keep the recent few hot (the in-memory agent makes a return visit
+    // instant). Older ones go cold (log-only); logs are never deleted here.
+    for (const [id] of stale.slice(MAX_HOT_IDLE_SESSIONS)) this.delete(id);
+  }
+
+  /**
+   * SIGTERM commit-point drain. In-flight turns get up to `timeoutMs` to
+   * reach their next fsynced commit point; anything still running after the
+   * window is interrupted (aborted mid-LLM, so no partial stream persists;
+   * a started tool call replays as outcome-unknown). Queued messages that
+   * never reached a turn were never logged -- honest loss.
+   */
+  async drainSessions(timeoutMs = DRAIN_TIMEOUT_MS): Promise<void> {
+    const manager = this.#sessionManager;
+    const running = () =>
+      manager.sessionIds().filter((id) => manager.isSessionRunning(id));
+    const deadline = Date.now() + timeoutMs;
+    while (running().length > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, DRAIN_POLL_MS));
+    }
+    for (const id of running()) {
+      manager.interrupt(id);
+    }
+    // Give the interrupts a beat to unwind (abort propagation, turn end)
+    // before the caller stops the server.
+    const settleDeadline = Date.now() + DRAIN_SETTLE_MS;
+    while (running().length > 0 && Date.now() < settleDeadline) {
+      await new Promise((r) => setTimeout(r, DRAIN_POLL_MS));
     }
   }
 
@@ -621,47 +699,416 @@ export class SessionRegistry {
   }
 }
 
-async function loadLogIntoNewSession(
-  logId: string,
-  registry: SessionRegistry,
-): Promise<{ sessionId: string; agent: AgentLike; pendingQuestions: PendingQuestion[] }> {
-  const entries = await readSessionEntries(logId);
-  if (entries.length === 0) {
-    throw new AgentError(`No entries found for session ${logId}`);
-  }
+/**
+ * Cold-log adoption: build a fresh agent that ADOPTS the log's own session
+ * id and replay the log into it (restoreSessionIntoAgent: fsyncs the
+ * resume_attempt record, classifies dangling calls, reports held questions).
+ * The session keeps its identity across restarts, and the cap's counter
+ * lands in the log it counts. The same id is never adopted twice: concurrent
+ * adoptions (two tabs reconnecting to one cold session) would fork two
+ * writers onto one JSONL file.
+ */
+const pendingAdoptions = new Map<
+  string,
+  Promise<{ pendingQuestions: PendingQuestion[]; openTurn: boolean }>
+>();
 
-  // Restore persisted model and profile so the replayed session resumes with
-  // the same tool set it ended on, not the global defaults. The index is the
-  // source of truth for cold loads; metadata is in-memory-only and lost on restart.
-  // NOTE: registry.create takes `profile` (it maps to the buildAgent config's
-  // `profileName`); passing `profileName` here silently resumed every cold
-  // session on "default".
-  const row = getSessionRow(logId);
-  const buildOpts: CreateSessionOptions = {
-    ...(row?.model ? { model: row.model } : {}),
-    ...(row?.profile ? { profile: row.profile } : {}),
-  };
-  const newSession = await registry.create(buildOpts);
-  const { pendingQuestions, profile } = replayEntriesIntoContext(newSession.agent, entries);
-  const meta = registry.get(newSession.sessionId)?.metadata;
-  // The log may have a PROFILE_SWITCH the index row hasn't mirrored yet
-  // (row updates only on tool fires or explicit index writes). Overlay it.
-  if (profile && profile !== newSession.agent.profileName) {
-    const p = registry.listProfiles()[profile];
-    if (p) {
-      newSession.agent.applyProfile(profile, p);
-      if (meta) meta.profile = profile;
+export async function adoptSessionLog(
+  sessionId: string,
+  registry: SessionRegistry,
+  auto: boolean,
+  /** The FULL log read before adoption: reused for the metadata overlay so
+   *  the log is not re-read for a session this call is about to grow. */
+  preAdoptionEntries: LogEntry[],
+): Promise<{ pendingQuestions: PendingQuestion[]; openTurn: boolean; adopted: boolean }> {
+  const inFlight = pendingAdoptions.get(sessionId);
+  if (inFlight) {
+    const result = await inFlight;
+    return { ...result, adopted: false };
+  }
+  const attempt = (async () => {
+    // Restore persisted model and profile so the resumed session runs with
+    // the tool set it ended on. The index is the source of truth for cold
+    // loads; metadata is in-memory-only and lost on restart. registry.create
+    // takes `profile` (it maps to the buildAgent config's `profileName`).
+    const row = getSessionRow(sessionId);
+    const { agent } = await registry.create({
+      ...(row?.model ? { model: row.model } : {}),
+      ...(row?.profile ? { profile: row.profile } : {}),
+      sessionId,
+    });
+    // The agent adopted the id (registry.create hands it through), so this
+    // replays the log into the same log and writes the resume_attempt record.
+    // Real agents always carry the restore surface; AgentLike is looser.
+    const { pendingQuestions, profile, openTurn } = await restoreSessionIntoAgent(
+      agent as unknown as AgentForRestore,
+      sessionId,
+      { auto },
+    );
+    const meta = registry.get(sessionId)?.metadata;
+    // The log may have a PROFILE_SWITCH the index row hasn't mirrored yet.
+    // Overlay it.
+    if (profile && profile !== agent.profileName) {
+      const p = registry.listProfiles()[profile];
+      if (p) {
+        agent.applyProfile(profile, p);
+        if (meta) meta.profile = profile;
+      }
+    }
+    // Restore UI metadata from the log's own timeline so the sidebar agrees
+    // with what the user sees.
+    if (meta) {
+      meta.userMessageCount = agent
+        .getMessages()
+        .filter((m) => m.role === "user").length;
+      let createdAt = 0;
+      let lastActivityAt = 0;
+      for (const e of preAdoptionEntries) {
+        const t = Date.parse(e.ts);
+        if (!(t > 0)) continue;
+        if (createdAt === 0 || t < createdAt) createdAt = t;
+        if (t > lastActivityAt) lastActivityAt = t;
+      }
+      if (createdAt > 0) meta.createdAt = createdAt;
+      if (lastActivityAt > 0) meta.lastActivityAt = lastActivityAt;
+    }
+    return { pendingQuestions, openTurn };
+  })();
+  pendingAdoptions.set(sessionId, attempt);
+  try {
+    const result = await attempt;
+    return { ...result, adopted: true };
+  } finally {
+    pendingAdoptions.delete(sessionId);
+  }
+}
+
+/**
+ * Replay a slice of a session's FULL log as S2C messages. `startIdx` is the
+ * client's replay cursor: a position in the full log (append-only -- a RESET
+ * never moves an earlier entry), so the slice is exactly the tail the
+ * client does not hold. Full replays pass the epoch's start as `startIdx`.
+ * Only conversation entries are sent; bookkeeping records never surface.
+ * Tool-result names resolve across the WHOLE log, so a result whose call
+ * predates the slice (even across a RESET) carries the right name.
+ */
+function replayLogSlice(
+  ws: HotdogServerSocket<unknown>,
+  sessionId: string,
+  entries: LogEntry[],
+  startIdx: number,
+): void {
+  const callNames = new Map<string, string>();
+  for (const e of entries) {
+    if (e.source !== LOG_SOURCE.LLM || !Array.isArray(e.tool_calls)) continue;
+    for (const tc of e.tool_calls as Array<{ id?: string; function?: { name?: string } }>) {
+      if (tc?.id && tc.function?.name) callNames.set(tc.id, tc.function.name);
     }
   }
-  // The replayed history is real context: keep the metadata count honest so
-  // the session list agrees with the message log.
-  if (meta) {
-    meta.userMessageCount = newSession.agent
-      .getMessages()
-      .filter((m) => m.role === "user").length;
+
+  for (let i = startIdx; i < entries.length; i++) {
+    const e = entries[i]!;
+    // Conversation sources only hold text or content parts (see the helper).
+    const content = conversationContent(e);
+    switch (e.source) {
+      case LOG_SOURCE.INPUT:
+      case LOG_SOURCE.PROMPT: {
+        const userImgs = wireImages(e.images);
+        const display = splitFileIncludes(content);
+        ws.send(
+          JSON.stringify({
+            type: S2C.USER_MESSAGE,
+            sessionId,
+            content: display.text,
+            ...(display.files.length > 0 ? { files: display.files } : {}),
+            ...(userImgs ? { images: userImgs } : {}),
+          }),
+        );
+        break;
+      }
+      case LOG_SOURCE.LLM: {
+        if (e.reasoning_content) {
+          ws.send(
+            JSON.stringify({ type: S2C.THINKING, sessionId, content: e.reasoning_content }),
+          );
+        }
+        const toolCalls = Array.isArray(e.tool_calls)
+          ? (e.tool_calls as Array<{ id: string; function?: { name?: string; arguments?: string } }>)
+          : undefined;
+        if (toolCalls && toolCalls.length > 0) {
+          for (const tc of toolCalls) {
+            ws.send(
+              JSON.stringify({
+                type: S2C.TOOL_CALL,
+                sessionId,
+                name: tc.function?.name || "unknown",
+                args: tc.function?.arguments || "{}",
+              }),
+            );
+          }
+        }
+        const text = wrapperContentText(content);
+        if (text) {
+          ws.send(JSON.stringify({ type: S2C.ASSISTANT_MESSAGE, sessionId, content: text }));
+        }
+        break;
+      }
+      case LOG_SOURCE.TOOL_RESULT: {
+        const toolImgs = wireImages(e.images);
+        ws.send(
+          JSON.stringify({
+            type: S2C.TOOL_RESULT,
+            sessionId,
+            name:
+              (typeof e.tool_call_id === "string" ? callNames.get(e.tool_call_id) : undefined) ||
+              "unknown",
+            output: toolContentText(content ?? ""),
+            ...(toolImgs ? { images: toolImgs } : {}),
+          }),
+        );
+        break;
+      }
+      default:
+        break; // bookkeeping records never replay as conversation
+    }
+  }
+}
+
+/**
+ * Attach a socket to a LIVE session: channel, sessionCreated, history
+ * replay from the log at `cursor`, in-flight partial-stream flush, and the
+ * new replay cursor (FULL log length). The log -- not the in-memory
+ * messages -- is replayed, so the cursor the client persists is exactly a
+ * full-log index it can hand back on the next reconnect.
+ *
+ * The cursor lives in the full log's append-only coordinate space: an
+ * epoch-length cursor is only valid while no RESET has moved the index
+ * space, and a RESET that shrinks the epoch below the cursor and regrows
+ * it past it would silently replay the wrong slice. The full log only ever
+ * grows, so a valid cursor stays valid across compactions.
+ *
+ * `cursor > 0` means the client asked for a delta (it only sends one when
+ * its transcript ends exactly at that position: the slice is the exact
+ * tail, nothing to clear or duplicate). The client skips its transcript
+ * clear when it sees `replayDelta: true` on sessionCreated. Two cases
+ * clamp to a full replay instead: a cursor beyond the full length (the log
+ * shrank under it -- truncation/corruption; a RESET only appends), and a
+ * slice that CROSSES a RESET (a rewind re-appends its kept messages below
+ * the marker, so the tail would replay copies the client already holds).
+ * Compaction writes no RESET (replaceContext), so common-case cursors are
+ * unaffected.
+ */
+/** The sessionCreated payload for a live session (attach + broadcast share it). */
+function sessionCreatedPayload(
+  registry: SessionRegistry,
+  sessionId: string,
+): Record<string, unknown> {
+  const session = registry.get(sessionId);
+  const agent = (session?.agent as Agent) || null;
+  const meta = session?.metadata;
+  return {
+    type: S2C.SESSION_CREATED,
+    sessionId,
+    profile: agent?.profileName || meta?.profile || "default",
+    title: meta?.title ?? null,
+    currentModel: agent?.model || meta?.model || "?",
+    models: Object.keys(agent?.modelRegistry || {}),
+    sttEnabled: registry.sttEnabled,
+  };
+}
+
+export async function attachLiveSession(
+  ws: HotdogServerSocket<unknown>,
+  registry: SessionRegistry,
+  bridge: WebSocketQuestionBridge,
+  sessionId: string,
+  cursor = 0,
+  fullOverride?: LogEntry[],
+): Promise<boolean> {
+  const session = registry.get(sessionId);
+  if (!session) return false;
+  if (ws.activeSessionId && ws.activeChannel) {
+    registry.removeChannel(ws.activeSessionId, ws.activeChannel);
+  }
+  const channel = registry.createChannel(sessionId, ws);
+  if (!channel) return false;
+  ws.activeSessionId = sessionId;
+  ws.activeChannel = channel;
+
+  const agent = session.agent as Agent;
+
+  // Cold adoption passes the PRE-adoption full log (the log has since grown
+  // by bookkeeping records); live attaches read the current one.
+  const full = fullOverride ?? (await readSessionEntries(sessionId, { full: true }));
+  // A cursor beyond the full length means the log shrank under it
+  // (truncation/corruption): the retained transcript is stale, so a full
+  // replay (the epoch -- the context's view) instead of a delta that would
+  // keep the stale head. A delta sends the exact full-log tail past it.
+  const epochStart = epochStartIndex(full);
+  const c = Number.isFinite(cursor) && cursor > 0 ? Math.trunc(cursor) : 0;
+  // A slice crossing a RESET is not the exact tail of the client's
+  // transcript: full replay, not a duplicate-laden delta.
+  const replayDelta =
+    c > 0 && c <= full.length && !full.slice(c).some((e) => e.source === LOG_SOURCE.RESET);
+  const start = replayDelta ? c : epochStart;
+
+  SessionRegistry.sendSafe(ws, {
+    ...sessionCreatedPayload(registry, sessionId),
+    ...(replayDelta ? { replayDelta: true } : {}),
+  });
+
+  replayLogSlice(ws, sessionId, full, start);
+
+  // Flush in-flight chunks that haven't reached the log yet (their LLM
+  // entry lands when the response completes).
+  const partialReasoning = agent.currentStreamingReasoning;
+  const partialContent = agent.currentStreamingContent;
+  if (partialReasoning) {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.STREAMING_REASONING_CHUNK,
+      sessionId,
+      content: partialReasoning,
+    });
+  }
+  if (partialContent) {
+    SessionRegistry.sendSafe(ws, { type: S2C.STREAMING_CHUNK, sessionId, content: partialContent });
   }
 
-  return { sessionId: newSession.sessionId, agent: newSession.agent, pendingQuestions };
+  // The client's new replay position for the next reconnect (full log
+  // length: the append-only coordinate the cursor lives in). 0 when a
+  // partial was flushed above: the transcript then holds content the log
+  // lacks at that position, so the next reconnect must full-replay instead
+  // of a delta that could replay the finished response on top of the
+  // partial.
+  SessionRegistry.sendSafe(ws, {
+    type: S2C.SESSION_STATE,
+    sessionId,
+    key: "cursor",
+    value: partialReasoning || partialContent ? 0 : full.length,
+  });
+  const isRunning = registry.getSessionManager().isSessionRunning(sessionId);
+  SessionRegistry.sendSafe(ws, { type: S2C.SESSION_STATE, sessionId, key: "working", value: isRunning });
+  replayPendingQuestion(bridge, sessionId, ws);
+  registry.sendTaskSnapshot(ws);
+  return true;
+}
+
+/**
+ * Attach a socket to the session it was last on (reconnect identity): the
+ * session id survives the disconnect; the cursor (optional) lets the client
+ * keep its transcript and take only the delta. Live: attach directly. Cold:
+ * adopt the log under its own id, with the livelock cap enforced for AUTO
+ * resumes only (manual resumes always pass). Unknown or parked sessions
+ * fall back to the most recent, with an honest error after the fallback
+ * lands (so it survives the client's transcript clear).
+ */
+export async function attachResumedSession(
+  ws: HotdogServerSocket<unknown>,
+  registry: SessionRegistry,
+  bridge: WebSocketQuestionBridge,
+  sessionId: string,
+  cursor = 0,
+  auto: boolean,
+): Promise<void> {
+  const fallBack = (reason: string): Promise<void> =>
+    fallbackAttach(ws, registry, bridge, reason);
+
+  try {
+    sessionPath(sessionId); // invalid id (traversal, separators) = unknown
+  } catch {
+    return fallBack(`Session ${JSON.stringify(String(sessionId).slice(0, 80))} is not a valid id.`);
+  }
+
+  if (registry.get(sessionId)) {
+    // The live session can go cold between the get and the attach; fall
+    // back instead of stranding the socket.
+    if (!(await attachLiveSession(ws, registry, bridge, sessionId, cursor))) {
+      return fallBack(`Session ${sessionId} could not be attached.`);
+    }
+    return;
+  }
+
+  if (!(await sessionExists(sessionId))) {
+    return fallBack(`Session ${sessionId} no longer exists (no log found).`);
+  }
+
+  // One full-log read serves both consumers: the cap's counter (an audit
+  // trail a RESET must not recharge) and the pre-adoption full log (the
+  // cursor's coordinate space) come from the same array.
+  const fullEntries = await readSessionEntries(sessionId, { full: true });
+  if (epochEntries(fullEntries).length === 0) {
+    return fallBack(`Session ${sessionId}'s log is empty.`);
+  }
+
+  if (auto) {
+    const { consecutiveAutoResumes } = collectDurabilityFacts(fullEntries);
+    if (consecutiveAutoResumes >= MAX_CONSECUTIVE_AUTO_RESUMES) {
+      return fallBack(
+        `Session ${sessionId} is parked after ${consecutiveAutoResumes} consecutive auto-resumes ` +
+          `without progress. Open it from Recent Logs and pick Continue to resume it manually.`,
+      );
+    }
+  }
+
+  const { pendingQuestions, openTurn, adopted } = await adoptSessionLog(
+    sessionId,
+    registry,
+    auto,
+    fullEntries,
+  );
+  // Replay the PRE-adoption full log: the log now also holds the adoption's
+  // session_start/resume_attempt records (bookkeeping, never sent), and the
+  // client's cursor indexes the pre-adoption positions.
+  const attached = await attachLiveSession(ws, registry, bridge, sessionId, cursor, fullEntries);
+  if (!attached) return fallBack(`Session ${sessionId} could not be resumed.`);
+
+  if (adopted) {
+    // Newly live session: other tabs' sidebars learn it moved from Recent
+    // Logs as a SIDEBAR REFRESH, not a sessionCreated -- that event is an
+    // attach command on the client (re-targets the socket, clears the
+    // transcript), so broadcasting it would yank tabs working on other
+    // sessions. The adopting socket is excluded (it refreshed itself).
+    registry.broadcastExcept(ws, { type: S2C.SESSIONS, sessions: registry.list() });
+  }
+
+  // Held questions (the log died mid-question): the adopting client re-presents
+  // them; later attachers get them via replayPendingQuestion on the bridge.
+  if (adopted && pendingQuestions.length > 0) {
+    seedResumedQuestions(bridge, registry, sessionId, pendingQuestions);
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.QUESTION,
+      sessionId,
+      questions: pendingQuestions[0]!.questions as QuestionDef[],
+    });
+  }
+
+  // Interrupted turn (v2: turn_started with no turn_end): restart the agent
+  // loop so it continues from the repaired context (interrupted tool results
+  // ride along as outcome-unknown). Held questions win: a turn must not
+  // start on a dangling question call (400 on strict backends); the
+  // question's ANSWER enqueues the continuation instead. Only the adopting
+  // client triggers it (concurrent adopters dedupe); no double-start.
+  if (adopted && openTurn && pendingQuestions.length === 0) {
+    registry.getSessionManager().getBus(sessionId)?.enqueue("", { continuation: true });
+  }
+}
+
+/** Fallback attach (saved session unknown/parked): most recent session, or a
+ *  fresh one when the server holds none. The reason is sent AFTER the
+ *  fallback's sessionCreated: the client clears its transcript on attach, so
+ *  an earlier error would never render. */
+async function fallbackAttach(
+  ws: HotdogServerSocket<unknown>,
+  registry: SessionRegistry,
+  bridge: WebSocketQuestionBridge,
+  reason: string,
+): Promise<void> {
+  if (registry.size > 0) {
+    await attachToMostRecentSession(ws, registry, bridge);
+  } else {
+    await createAndAttachSession(ws, registry);
+  }
+  SessionRegistry.sendSafe(ws, { type: S2C.ERROR, message: reason });
 }
 
 /** Held resumed questions per session (cold log with unanswered questions):
@@ -999,10 +1446,29 @@ async function routeMessage(
             // registered via a token upgrade).
             registry.registerConnection(ws);
             ws.send(JSON.stringify({ type: S2C.AUTH_OK }));
-            // The task snapshot now rides the attach paths below.
-            if (!ws.activeSessionId) {
-              if (registry.size > 0) {
-                attachToMostRecentSession(ws, registry, bridge);
+            // The task snapshot rides the attach paths below. A client that
+            // remembers its session (upgrade ?session=...) gets it back
+            // instead of the most recent one. attachStarted covers an
+            // upgrade-site attach still in flight (activeSessionId is not set
+            // until its first awaits settle).
+            if (!ws.activeSessionId && !ws.attachStarted) {
+              ws.attachStarted = true;
+              if (ws.resumeSessionId) {
+                attachResumedSession(
+                  ws,
+                  registry,
+                  bridge,
+                  ws.resumeSessionId,
+                  ws.resumeCursor ?? 0,
+                  true,
+                ).catch((err: unknown) => {
+                  logger.error(`[websocket] resumed attach failed: ${formatError(err)}`);
+                  void fallbackAttach(ws, registry, bridge, "Session resume failed.");
+                });
+              } else if (registry.size > 0) {
+                void attachToMostRecentSession(ws, registry, bridge).catch((err: unknown) => {
+                  logger.error(`[websocket] attach to most recent failed: ${formatError(err)}`);
+                });
               } else {
                 createAndAttachSession(ws, registry);
               }
@@ -1122,65 +1588,17 @@ async function routeMessage(
     }
 
     case C2S.SWITCH_SESSION: {
+      // Manual sidebar switch: the client has no replay cursor for a session
+      // it is not currently on, so this is always a full replay (cursor 0).
       if (msg.sessionId) {
-        const session = registry.get(msg.sessionId as string);
-        if (session) {
-          if (ws.activeSessionId && ws.activeChannel) {
-            registry.removeChannel(ws.activeSessionId, ws.activeChannel);
-          }
-          const channel = registry.createChannel(msg.sessionId as string, ws);
-          ws.activeSessionId = msg.sessionId as string;
-          ws.activeChannel = channel;
-
-          const agent = session.agent as Agent;
-          ws.send(
-            JSON.stringify({
-              type: S2C.SESSION_STATE,
-              sessionId: msg.sessionId,
-              key: "model",
-              value: agent?.model || session.metadata.model || "?",
-            }),
-          );
-          ws.send(
-            JSON.stringify({
-              type: S2C.SESSION_STATE,
-              sessionId: msg.sessionId,
-              key: "models",
-              value: Object.keys(agent?.modelRegistry || {}),
-            }),
-          );
-          ws.send(
-            JSON.stringify({
-              type: S2C.SESSION_STATE,
-              sessionId: msg.sessionId,
-              key: "profile",
-              value:
-                agent?.profileName || session.metadata.profile || "default",
-            }),
-          );
-          ws.send(
-            JSON.stringify({
-              type: S2C.SESSION_STATE,
-              sessionId: msg.sessionId,
-              key: "title",
-              // null = display name follows the profile.
-              value: session.metadata.title ?? null,
-            }),
-          );
-          replaySessionHistory(msg.sessionId as string, session.agent, ws);
-          const isRunning = registry
-            .getSessionManager()
-            .isSessionRunning(msg.sessionId as string);
-          ws.send(
-            JSON.stringify({
-              type: S2C.SESSION_STATE,
-              sessionId: msg.sessionId,
-              key: "working",
-              value: isRunning,
-            }),
-          );
-          replayPendingQuestion(bridge, msg.sessionId as string, ws);
-          registry.sendTaskSnapshot(ws);
+        const attached = await attachLiveSession(
+          ws,
+          registry,
+          bridge,
+          msg.sessionId as string,
+        );
+        if (!attached) {
+          ws.send(JSON.stringify({ type: S2C.ERROR, message: "Session not found" }));
         }
       }
       break;
@@ -1360,6 +1778,16 @@ async function routeMessage(
               // After the fork's sessionCreated lands (the client clears its list and
               // re-targets), replay the copied history, then start the optional prompt.
               replaySessionHistory(newSessionId, agent, ws);
+              // Close the client's attach bookkeeping like every other attach path.
+              // Cursor 0 on purpose: this replay came from in-memory messages, not a
+              // log read, so no log coordinate can be claimed -- the next reconnect
+              // takes a full replay.
+              SessionRegistry.sendSafe(ws, {
+                type: S2C.SESSION_STATE,
+                sessionId: newSessionId,
+                key: "cursor",
+                value: 0,
+              });
               if (prompt) {
                 sessionManager.enqueue(newSessionId, prompt);
               }
@@ -1418,7 +1846,15 @@ async function routeMessage(
         .then((logs) => {
           // Only return cold logs, not sessions that are still live.
           const activeIds = new Set(registry.list().map((s) => s.id));
-          const coldLogs = logs.filter((log) => !activeIds.has(log.id));
+          const coldLogs = logs
+            .filter((log) => !activeIds.has(log.id))
+            .map((log) => {
+              // The index row carries the session's derived state (parked,
+              // interrupted, ...) so the sidebar can badge it; missing row
+              // (fresh log, unreconciled) simply has no state.
+              const row = getSessionRow(log.id);
+              return row ? { ...log, state: row.state } : log;
+            });
           SessionRegistry.sendSafe(ws, {
             type: S2C.LOGS_LISTED,
             logs: coldLogs,
@@ -1434,50 +1870,21 @@ async function routeMessage(
     }
 
     case C2S.LOAD_LOG: {
+      // "Continue": resume the log under its OWN session id (identity is
+      // preserved; the session keeps living in the same log). User-initiated,
+      // so auto=false: the livelock cap never blocks an explicit resume, and
+      // its resume_attempt records as manual. If the log is already live
+      // (another tab on it), this is just an attach.
       if (msg.logId) {
-        if (ws.activeSessionId && ws.activeChannel) {
-          registry.removeChannel(ws.activeSessionId, ws.activeChannel);
-        }
-
-        loadLogIntoNewSession(msg.logId as string, registry)
-          .then(({ sessionId, agent, pendingQuestions }) => {
-            const channel = registry.createChannel(sessionId, ws);
-            ws.activeSessionId = sessionId;
-            ws.activeChannel = channel;
-
-            const sessionCreatedMsg = {
-              type: S2C.SESSION_CREATED,
-              sessionId,
-              profile: agent.profileName || "default",
-              // Fresh session (rebuilt from a cold log): no explicit title yet.
-              title: null,
-              currentModel: agent.model,
-              models: Object.keys(agent.modelRegistry || {}),
-              sttEnabled: registry.sttEnabled,
-            };
-            SessionRegistry.sendSafe(ws, sessionCreatedMsg);
-            registry.broadcast(sessionCreatedMsg);
-            registry.sendTaskSnapshot(ws);
-
-            replaySessionHistory(sessionId, agent, ws);
-
-            // The log died mid-question: re-present to the loading client
-            // (other tabs get it via the attach flow).
-            if (pendingQuestions.length > 0) {
-              seedResumedQuestions(bridge, registry, sessionId, pendingQuestions);
-              SessionRegistry.sendSafe(ws, {
-                type: S2C.QUESTION,
-                sessionId,
-                questions: pendingQuestions[0]!.questions as QuestionDef[],
-              });
-            }
-          })
-          .catch((err: unknown) => {
+        attachResumedSession(ws, registry, bridge, msg.logId as string, 0, false).catch(
+          (err: unknown) => {
+            logger.error(`[websocket] loadLog failed: ${formatError(err)}`);
             SessionRegistry.sendSafe(ws, {
               type: S2C.ERROR,
               message: err instanceof Error ? err.message : String(err),
             });
-          });
+          },
+        );
       }
       break;
     }
@@ -1564,18 +1971,13 @@ function replayPendingQuestion(
   });
 }
 
-function attachToMostRecentSession(
+async function attachToMostRecentSession(
   ws: HotdogServerSocket<unknown>,
   registry: SessionRegistry,
   bridge: WebSocketQuestionBridge,
-): void {
+): Promise<void> {
   const sessions = registry.list();
-  let mostRecent: {
-    id: string;
-    lastActivityAt: number;
-    profile: string;
-    model: string;
-  } | null = null;
+  let mostRecent: { id: string; lastActivityAt: number } | null = null;
   let mostRecentTime = 0;
   for (const s of sessions) {
     if (s.lastActivityAt > mostRecentTime) {
@@ -1589,42 +1991,22 @@ function attachToMostRecentSession(
     return;
   }
 
-  const sessionId = mostRecent.id;
-  const session = registry.get(sessionId);
-  if (!session || !session.agent) {
-    createAndAttachSession(ws, registry);
-    return;
-  }
+  const attached = await attachLiveSession(ws, registry, bridge, mostRecent.id);
+  if (!attached) createAndAttachSession(ws, registry);
+}
 
-  const channel = registry.createChannel(sessionId, ws);
-  ws.activeSessionId = sessionId;
-  ws.activeChannel = channel;
-
-  const agent = session.agent as Agent;
-  SessionRegistry.sendSafe(ws, {
-    type: S2C.SESSION_CREATED,
-    sessionId,
-    profile: agent?.profileName || mostRecent.profile || "default",
-    title: session.metadata.title,
-    currentModel: agent?.model || mostRecent.model || "?",
-    models: Object.keys(agent?.modelRegistry || {}),
-    sttEnabled: registry.sttEnabled,
-  });
-
-  replaySessionHistory(sessionId, session.agent, ws);
-
-  const isRunning = registry.getSessionManager().isSessionRunning(sessionId);
-  SessionRegistry.sendSafe(ws, {
-    type: S2C.SESSION_STATE,
-    sessionId,
-    key: "working",
-    value: isRunning,
-  });
-
-  replayPendingQuestion(bridge, sessionId, ws);
-
-  // Late joiner: seed the subagents panel with this session's tasks.
-  registry.sendTaskSnapshot(ws);
+/**
+ * Reconnect identity from the upgrade URL: `?session=<id>[&cursor=<n>]`.
+ * The id survives page reloads; the cursor (replay position) only the socket
+ * generation. Invalid shapes fall back to the default attach.
+ */
+function parseResumeParams(url: URL): { sessionId: string; cursor: number } | null {
+  const sessionId = url.searchParams.get("session");
+  if (!sessionId) return null;
+  const cursorRaw = url.searchParams.get("cursor");
+  const cursor =
+    cursorRaw !== null && /^\d+$/.test(cursorRaw) ? Number(cursorRaw) : 0;
+  return { sessionId, cursor };
 }
 
 function createAndAttachSession(
@@ -1647,6 +2029,14 @@ function createAndAttachSession(
         currentModel: agent.model,
         models: Object.keys(agent.modelRegistry || {}),
         sttEnabled: registry.sttEnabled,
+      });
+      // The replay position for the next reconnect (0 = full replay), closing
+      // the client's attach bookkeeping like every other attach path.
+      SessionRegistry.sendSafe(ws, {
+        type: S2C.SESSION_STATE,
+        sessionId,
+        key: "cursor",
+        value: 0,
       });
       // Always empty here, but every attach path sends its snapshot.
       registry.sendTaskSnapshot(ws);
@@ -1828,6 +2218,14 @@ export function createWsServer(
     const url = new URL(req.url, `http://${req.headers?.host || "localhost"}`);
     const token = url.searchParams.get("token");
 
+    // Reconnect identity (?session=...&cursor=...): parsed up front so both
+    // attach sites (no-auth upgrade, post-AUTH) can use it.
+    const resumed = parseResumeParams(url);
+    if (resumed) {
+      ws.resumeSessionId = resumed.sessionId;
+      ws.resumeCursor = resumed.cursor;
+    }
+
     // Only register a socket for broadcasts once it is authenticated (or
     // auth is disabled): an unauthenticated socket must not receive
     // broadcast events (e.g. question answers) while it waits to auth.
@@ -1856,10 +2254,29 @@ export function createWsServer(
       registry.registerConnection(ws);
     }
 
-    const existingCount = registry.size;
-    if (existingCount > 0) {
-      attachToMostRecentSession(ws, registry, bridge!);
+    // Reconnect first, then fall back to the historical default. attachStarted
+    // (not activeSessionId, which the in-flight attach has not set yet) keeps
+    // a token-upgrade client's later AUTH message from firing a second attach.
+    if (resumed) {
+      ws.attachStarted = true;
+      attachResumedSession(
+        ws,
+        registry,
+        bridge!,
+        resumed.sessionId,
+        resumed.cursor,
+        true,
+      ).catch((err: unknown) => {
+        logger.error(`[websocket] resumed attach failed: ${formatError(err)}`);
+        void fallbackAttach(ws, registry, bridge!, "Session resume failed.");
+      });
+    } else if (registry.size > 0) {
+      ws.attachStarted = true;
+      void attachToMostRecentSession(ws, registry, bridge!).catch((err: unknown) => {
+        logger.error(`[websocket] attach to most recent failed: ${formatError(err)}`);
+      });
     } else {
+      ws.attachStarted = true;
       createAndAttachSession(ws, registry);
     }
   }
@@ -1919,6 +2336,7 @@ export function createWsServer(
     onClose,
     startCleanupLoop: () => registry.startCleanupLoop(sessionTimeoutMin),
     stopCleanupLoop: () => registry.stopCleanupLoop(),
+    drainSessions: (timeoutMs?: number) => registry.drainSessions(timeoutMs),
     stopTaskManager: () => taskManager?.stop(),
   };
 }

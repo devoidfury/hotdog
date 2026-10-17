@@ -3,6 +3,7 @@
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import {
+  conversationContent,
   replayEntriesIntoContext,
   readSessionEntries,
   sessionExists,
@@ -271,11 +272,11 @@ test("replayEntriesIntoContext restores untrusted parts raw (mangling is a wire 
   const [compaction, taskResult] = [agent.log.at(0)!, agent.log.at(1)!];
   expect(compaction.role).toBe("harness");
   expect(compaction.source).toBe("harness");
-  expect(compaction.content).toEqual(entries[0]!.content);
+  expect(compaction.content).toEqual(conversationContent(entries[0]!));
 
   expect(taskResult.role).toBe("harness");
   expect(taskResult.source).toBe("harness");
-  expect(taskResult.content).toEqual(entries[1]!.content);
+  expect(taskResult.content).toEqual(conversationContent(entries[1]!));
   // Display form flattens the raw parts.
   expect(taskResult.getTextContent()).toContain("raw task result");
 });
@@ -386,14 +387,14 @@ test("replayEntriesIntoContext handles mixed entry types", () => {
 
 test("replayEntriesIntoContext returns 0 for empty entries", () => {
   const agent = createMockAgent();
-  expect(replayEntriesIntoContext(agent, [])).toEqual({ replayed: 0, pendingQuestions: [], profile: null });
+  expect(replayEntriesIntoContext(agent, [])).toEqual({ replayed: 0, pendingQuestions: [], profile: null, openTurn: false });
   expect(agent.log.length).toBe(0);
 });
 
 test("replayEntriesIntoContext handles null/undefined entries", () => {
   const agent = createMockAgent();
-  expect(replayEntriesIntoContext(agent, null as any)).toEqual({ replayed: 0, pendingQuestions: [], profile: null });
-  expect(replayEntriesIntoContext(agent, undefined as any)).toEqual({ replayed: 0, pendingQuestions: [], profile: null });
+  expect(replayEntriesIntoContext(agent, null as any)).toEqual({ replayed: 0, pendingQuestions: [], profile: null, openTurn: false });
+  expect(replayEntriesIntoContext(agent, undefined as any)).toEqual({ replayed: 0, pendingQuestions: [], profile: null, openTurn: false });
 });
 
 test("replayEntriesIntoContext handles assistant without reasoning or tool_calls", () => {

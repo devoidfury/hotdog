@@ -1,5 +1,5 @@
 import { HOOKS } from "@core/hooks.ts";
-import { deleteSessionLog, readSessionEntries, sessionExists, sessionsDir as getSessionsDir, type LogEntry } from "@core/session/session-log.ts";
+import { conversationContent, deleteSessionLog, readSessionEntries, sessionExists, sessionsDir as getSessionsDir, type LogEntry } from "@core/session/session-log.ts";
 import { toolContentText, wrapperContentText } from "@utils/tool-content.ts";
 import { readdir, access, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -227,14 +227,15 @@ async function reviewSession(
     const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "unknown";
     const role = entry.role || entry.source;
     // content may be raw parts (harness messages); flatten for display.
+    // Bookkeeping entries (resume_attempt) degrade to empty text.
     const content =
       entry.content == null
         ? entry.result || ""
         : typeof entry.content === "string"
           ? entry.content
           : entry.source === "tool_result"
-            ? toolContentText(entry.content)
-            : wrapperContentText(entry.content);
+            ? toolContentText(conversationContent(entry))
+            : wrapperContentText(conversationContent(entry));
 
     let max = 200;
     if (entry.source === "system_prompt") {

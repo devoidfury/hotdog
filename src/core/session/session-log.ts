@@ -49,16 +49,47 @@ export const LOG_SOURCE = {
   PROFILE_SWITCH: "profile_switch",
   /** Token usage snapshot after each LLM response. Replayed as an output event, not a message. */
   TOKEN_USAGE: "token_usage",
+  /**
+   * Turn lifecycle (protocol v2): fsynced on a turn's first iteration. A
+   * turn_started with no turn_end after it was still running when the log
+   * ended (crash) -- auto-resume continues it. Never replayed.
+   */
+  TURN_STARTED: "turn_started",
+  /**
+   * Turn lifecycle (protocol v2): fsynced when a turn stops. `status`:
+   * "completed" | "cancelled" | "error" (the last two never auto-resume).
+   * Never replayed.
+   */
+  TURN_END: "turn_end",
 } as const;
 
 export type LogSource = (typeof LOG_SOURCE)[keyof typeof LOG_SOURCE];
+
+/** Protocol version stamped in the `v` field of v2 entries. v1 entries have
+ *  no `v`; their logs predate turn records, so they are never auto-resumed. */
+export const LOG_VERSION = 2;
+
+/**
+ * Livelock cap: this many consecutive auto-resumes without progress (user
+ * input, LLM response, tool result; harness-origin messages never count)
+ * park the session until a manual resume (Continue, CLI -s). The consecutive
+ * counter is derived from the FULL log, so a mid-turn RESET cannot recharge
+ * it. Manual resumes never count.
+ */
+export const MAX_CONSECUTIVE_AUTO_RESUMES = 5;
 
 export interface LogEntry {
   ts: string;
   session_id: string;
   source: LogSource;
-  /** Plain text, or raw content parts (harness messages with `untrusted` parts; never escaped on disk). */
-  content: string | Array<Record<string, unknown>>;
+  /** Log protocol version (see LOG_VERSION). Absent on v1 entries. */
+  v?: number;
+  /**
+   * Plain text, raw content parts (never escaped on disk), or a plain
+   * bookkeeping object (resume_attempt carries `{ origin }`). Conversation
+   * sources only ever hold text or parts.
+   */
+  content: string | Array<Record<string, unknown>> | Record<string, unknown>;
   images?: Array<{ type: string; mimeType: string; data: string }>;
   reasoning_content?: string | null;
   tool_calls?: ToolCall[] | null;
@@ -102,7 +133,16 @@ export function sessionPath(sessionId: string): string {
   return path;
 }
 
-export async function readSessionEntries(sessionId: string): Promise<LogEntry[]> {
+/**
+ * Read a session's log. Default is the EPOCH view (entries after the last
+ * RESET): the replay/context semantics. `full: true` returns the whole log:
+ * audit facts (the cap's consecutive counter, the resume count) must survive
+ * mid-turn checkpoints -- a RESET in between would otherwise recharge the cap.
+ */
+export async function readSessionEntries(
+  sessionId: string,
+  opts: { full?: boolean } = {},
+): Promise<LogEntry[]> {
   let path: string;
   try {
     path = sessionPath(sessionId);
@@ -142,8 +182,24 @@ export async function readSessionEntries(sessionId: string): Promise<LogEntry[]>
     }
   }
 
+  if (opts.full) return entries;
   // Replay from the last reset event (or beginning if no reset)
   return entries.slice(lastResetIdx ?? 0);
+}
+
+/** Index of the first epoch entry in a FULL log (the RESET entry delimits,
+ *  not belongs). 0 when the log has no RESET. */
+export function epochStartIndex(entries: LogEntry[]): number {
+  let start = 0;
+  for (let i = 0; i < entries.length; i++) {
+    if (entries[i]!.source === LOG_SOURCE.RESET) start = i + 1;
+  }
+  return start;
+}
+
+/** The epoch view of a full-log read: entries after the last RESET. */
+export function epochEntries(entries: LogEntry[]): LogEntry[] {
+  return entries.slice(epochStartIndex(entries));
 }
 
 export async function readAllSessions(): Promise<LogEntry[]> {
@@ -287,7 +343,7 @@ export interface AgentForReplay {
  * isRestoring flag (which fires SESSION_RESTORE_ACTIVE so the session-log
  * extension suppresses its own writes during the replay).
  */
-interface AgentForRestore extends AgentForReplay {
+export interface AgentForRestore extends AgentForReplay {
   sessionId: string;
   isRestoring: boolean;
   /** Hook surface used to fire SESSION_RESUME_ATTEMPT (absent on bare test agents). */
@@ -312,20 +368,38 @@ interface AgentForRestore extends AgentForReplay {
  * silent start would surface later only as "why does the model not know X").
  *
  * Returns the replay count plus pending questions (question_asked with no
- * result): the entry point owns re-presenting them -- interactive surfaces
- * re-ask, headless ones resolve them as unanswered.
+ * result): the entry point owns re-presenting them.
+ *
+ * `opts.auto` marks a non-user resume (webui reconnect). Auto-resumes are
+ * capped: MAX_CONSECUTIVE_AUTO_RESUMES without progress parks the session
+ * and throws here. Manual resumes (CLI -s, webui Continue) are the escape
+ * hatch, never refused. The check reads the log first, so a refused attempt
+ * writes no resume_attempt record (a refusal is not an attempt).
  */
 export async function restoreSessionIntoAgent(
   agent: AgentForRestore,
   explicitSessionId: string | null | undefined,
+  opts: { auto?: boolean } = {},
 ): Promise<ReplayResult> {
   // No explicit id, or the agent did not adopt it (e.g. a subagent built
   // with its own id): never touch another session's log.
   if (!explicitSessionId || agent.sessionId !== explicitSessionId) {
-    return { replayed: 0, pendingQuestions: [], profile: null };
+    return { replayed: 0, pendingQuestions: [], profile: null, openTurn: false };
   }
   if (!(await sessionExists(explicitSessionId))) {
     throw new CliError(`Invalid session id: ${explicitSessionId} (no such session)`);
+  }
+
+  // FULL log: the cap's counter is an audit trail a mid-turn RESET must not
+  // recharge. The epoch view is sliced from the same read for the replay.
+  const fullEntries = await readSessionEntries(explicitSessionId, { full: true });
+  const { consecutiveAutoResumes } = collectDurabilityFacts(fullEntries);
+
+  if (opts.auto && consecutiveAutoResumes >= MAX_CONSECUTIVE_AUTO_RESUMES) {
+    throw new AgentError(
+      `Session ${explicitSessionId} is parked after ${consecutiveAutoResumes} consecutive ` +
+        `auto-resumes without progress; resume it manually (Continue from the webui history, or -s ${explicitSessionId}).`,
+    );
   }
 
   // fsync the resume_attempt record before replay so the counter is honest
@@ -334,16 +408,18 @@ export async function restoreSessionIntoAgent(
   await agent.hooks?.notifyHooks(HOOKS.SESSION_RESUME_ATTEMPT, {
     agent,
     sessionId: explicitSessionId,
+    origin: opts.auto ? "auto" : "manual",
+    // Count after THIS record lands: the index parks the row when the cap is
+    // just reached.
+    consecutiveAutoResumes: consecutiveAutoResumes + (opts.auto ? 1 : 0),
   });
-
-  const entries = await readSessionEntries(explicitSessionId);
 
   // isRestoring prevents the session-log extension from re-logging restored
   // messages (which would double-count on the next resume). finally: a throw
   // mid-replay must not leave the flag stuck true, silently killing all later logging.
   agent.isRestoring = true;
   try {
-    return replayEntriesIntoContext(agent, entries);
+    return replayEntriesIntoContext(agent, epochEntries(fullEntries));
   } finally {
     agent.isRestoring = false;
   }
@@ -364,6 +440,13 @@ export interface ReplayResult {
   pendingQuestions: PendingQuestion[];
   /** Active profile at end of logged session (last SESSION_START or PROFILE_SWITCH). Null if absent. */
   profile: string | null;
+  /**
+   * True when the log's last turn is open (a v2 turn_started with no turn_end
+   * after it): it was running when the log ended. The entry point continues
+   * it (webui enqueues a continuation turn; held questions win -- the answer
+   * drives the continuation). v1 logs never report this.
+   */
+  openTurn: boolean;
 }
 
 /** Durability facts reconstructed from a log scan: which calls began,
@@ -379,6 +462,47 @@ export interface DurabilityFacts {
   asked: PendingQuestion[];
   /** Number of resume_attempt records (the livelock cap's counter). */
   resumeAttempts: number;
+  /** Auto resume_attempt records since the last progress entry (the livelock
+   *  cap's consecutive counter; see MAX_CONSECUTIVE_AUTO_RESUMES). Scope
+   *  follows the entries passed in: cap consumers read the FULL log so a
+   *  RESET cannot recharge the counter. */
+  consecutiveAutoResumes: number;
+  /**
+   * True when the last turn in the given entries is open (a v2 turn_started
+   * with no turn_end after it) -- it was running when the log ended.
+   */
+  openTurn: boolean;
+}
+
+/** Log sources that count as progress (they reset the consecutive counter). */
+const PROGRESS_SOURCES: ReadonlySet<string> = new Set([
+  LOG_SOURCE.INPUT,
+  LOG_SOURCE.PROMPT,
+  LOG_SOURCE.LLM,
+  LOG_SOURCE.TOOL_RESULT,
+]);
+
+/**
+ * True when an entry counts as progress for the livelock cap. Harness-origin
+ * entries never do: the session-log extension logs every harness message
+ * (nudges, notices) under source INPUT, and a machine-generated line
+ * resetting the counter would let a crash-loop that nudges once per cycle
+ * churn forever without parking. Real responses carry origin "model"/"tool".
+ */
+function isProgressEntry(entry: LogEntry): boolean {
+  return PROGRESS_SOURCES.has(entry.source) && entry.origin !== "harness";
+}
+
+/** True when a resume_attempt entry records an auto-resume. Pre-cap logs
+ *  carry no origin and count as manual. */
+function isAutoResume(entry: LogEntry): boolean {
+  const c = entry.content;
+  return (
+    c !== null &&
+    typeof c === "object" &&
+    !Array.isArray(c) &&
+    (c as Record<string, unknown>).origin === "auto"
+  );
 }
 
 export function collectDurabilityFacts(entries: LogEntry[]): DurabilityFacts {
@@ -386,9 +510,16 @@ export function collectDurabilityFacts(entries: LogEntry[]): DurabilityFacts {
   const answered = new Set<string>();
   const asked: PendingQuestion[] = [];
   let resumeAttempts = 0;
+  let consecutiveAutoResumes = 0;
+  // Turn lifecycle (v2): whichever of turn_started/turn_end lands last
+  // decides whether the final turn is open.
+  let openTurn = false;
 
   for (const entry of entries) {
     const source = entry.source;
+
+    if (source === LOG_SOURCE.TURN_STARTED) openTurn = true;
+    else if (source === LOG_SOURCE.TURN_END) openTurn = false;
 
     if (
       (source === LOG_SOURCE.TOOL_STARTED ||
@@ -407,10 +538,25 @@ export function collectDurabilityFacts(entries: LogEntry[]): DurabilityFacts {
       }
     }
 
-    if (source === LOG_SOURCE.RESUME_ATTEMPT) resumeAttempts++;
+    if (source === LOG_SOURCE.RESUME_ATTEMPT) {
+      resumeAttempts++;
+      if (isAutoResume(entry)) consecutiveAutoResumes++;
+    } else if (isProgressEntry(entry)) {
+      consecutiveAutoResumes = 0;
+    }
   }
 
-  return { started, answered, asked, resumeAttempts };
+  return { started, answered, asked, resumeAttempts, consecutiveAutoResumes, openTurn };
+}
+
+/**
+ * The conversation content of an entry: text or raw content parts. The
+ * plain-object shape belongs to bookkeeping entries (never replayed as
+ * messages), so it degrades to empty text rather than a cast.
+ */
+export function conversationContent(entry: LogEntry): string | Array<Record<string, unknown>> {
+  const c = entry.content;
+  return typeof c === "string" || Array.isArray(c) ? c : "";
 }
 
 /** Converts log entries to Messages in the agent's context. */
@@ -418,7 +564,9 @@ export function replayEntriesIntoContext(
   agent: AgentForReplay,
   entries: LogEntry[],
 ): ReplayResult {
-  if (!entries || entries.length === 0) return { replayed: 0, pendingQuestions: [], profile: null };
+  if (!entries || entries.length === 0) {
+    return { replayed: 0, pendingQuestions: [], profile: null, openTurn: false };
+  }
 
   // Last SESSION_START or PROFILE_SWITCH entry wins for profile restoration.
   let lastProfile: string | null = null;
@@ -434,8 +582,9 @@ export function replayEntriesIntoContext(
   const messages: Message[] = [];
 
   // Durability bookkeeping for the resume protocol: started/asked/answered
-  // drive the missing-result classification below (see collectDurabilityFacts).
-  const { started, answered, asked } = collectDurabilityFacts(entries);
+  // drive the missing-result classification below; openTurn drives the
+  // auto-resume continuation.
+  const { started, answered, asked, openTurn } = collectDurabilityFacts(entries);
 
   for (const entry of entries) {
     const source = entry.source;
@@ -448,6 +597,10 @@ export function replayEntriesIntoContext(
     if (source === LOG_SOURCE.RESET) {
       continue;
     }
+
+    // Conversation sources only hold text or parts (the object shape is
+    // bookkeeping, never turned into a message below).
+    const content = conversationContent(entry);
 
     // Provenance survives replay: harness-originated entries are re-tagged so
     // they keep their mangle exemption and role "harness" after resume;
@@ -465,7 +618,7 @@ export function replayEntriesIntoContext(
         messages.push(
           new Message({
             role: role ?? "user",
-            content: entry.content,
+            content,
             images: entry.images as ImageAttachment[] | undefined,
             source: origin,
           }),
@@ -477,7 +630,7 @@ export function replayEntriesIntoContext(
         messages.push(
           new Message({
             role: role ?? "assistant",
-            content: entry.content,
+            content,
             reasoningContent: entry.reasoning_content ?? null,
             toolCalls: entry.tool_calls ?? null,
             source: origin,
@@ -490,7 +643,7 @@ export function replayEntriesIntoContext(
         messages.push(
           new Message({
             role: "tool",
-            content: entry.content,
+            content,
             toolCallId: entry.tool_call_id ?? null,
             source: origin ?? "tool",
           }),
@@ -499,7 +652,7 @@ export function replayEntriesIntoContext(
       }
 
       case LOG_SOURCE.COMPACTION: {
-        messages.push(new Message({ role: "harness", source: "harness", content: entry.content }));
+        messages.push(new Message({ role: "harness", source: "harness", content }));
         break;
       }
 
@@ -526,6 +679,8 @@ export function replayEntriesIntoContext(
       case LOG_SOURCE.QUESTION_ASKED:
       case LOG_SOURCE.RESUME_ATTEMPT:
       case LOG_SOURCE.SESSION_START:
+      case LOG_SOURCE.TURN_STARTED:
+      case LOG_SOURCE.TURN_END:
         break;
 
       default:
@@ -554,5 +709,5 @@ export function replayEntriesIntoContext(
   for (const msg of repaired) {
     agent.addMessage(msg);
   }
-  return { replayed: repaired.length, pendingQuestions, profile: lastProfile };
+  return { replayed: repaired.length, pendingQuestions, profile: lastProfile, openTurn };
 }

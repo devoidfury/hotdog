@@ -108,7 +108,7 @@ Session Delete ────────────► "session:end"
 | `session:end` | Session deleted (or task agent released) | notify (fire-and-forget) | `{ sessionId }` |
 | `session:swap` | Agent swapped | awaited notify (sync `switchSession()` fires unawaited) | `{ oldAgent, newAgent }` |
 | `session:restoreActive` | Restore flag changes | notify (fire-and-forget) | `{ agent, isRestoring }` |
-| `session:resumeAttempt` | Explicit `-s` resume, before replay | awaited notify | `{ agent, sessionId }` |
+| `session:resumeAttempt` | Any resume of an existing log (CLI `-s`, webui Continue, webui reconnect auto-resume), before replay | awaited notify | `{ agent, sessionId, origin, consecutiveAutoResumes }` |
 
 ### 3. Agent Run Loop — Per-Iteration Lifecycle
 
@@ -240,7 +240,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | `SESSION_END` | `session:end` | notify (fire-and-forget) | Session deleted (`SessionManager.deleteSession`) or task agent released (`TaskManager._runTask`, fired on the agent's own hooks) |
 | `SESSION_SWAP` | `session:swap` | awaited notify | Agent swapped (`swap()` awaits it; the sync `switchSession()` path fires it unawaited) |
 | `SESSION_RESTORE_ACTIVE` | `session:restoreActive` | notify (fire-and-forget) | Restore flag changes on agent (sync setter) |
-| `SESSION_RESUME_ATTEMPT` | `session:resumeAttempt` | awaited notify | `restoreSessionIntoAgent()` resumes a session by explicit id; session-log fsyncs a `resume_attempt` record (livelock-cap counter, logged so it survives index deletion) before the replay reads |
+| `SESSION_RESUME_ATTEMPT` | `session:resumeAttempt` | awaited notify | `restoreSessionIntoAgent()` resumes a session by explicit id; session-log fsyncs a `resume_attempt` record (livelock-cap counter, logged so it survives index deletion) before the replay reads. `origin` is `"auto"` (non-user: webui reconnect, future gateway dial-back -- the only resumes the livelock cap counts) or `"manual"` (Continue, CLI `-s` -- never capped); `consecutiveAutoResumes` is the counter AFTER this record lands, so the index can park the row when the cap is reached |
 
 ### Message Flow
 
@@ -292,8 +292,8 @@ The `LlmProtocol` (selected by the `protocol` field on the model or provider ent
 
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
-| `TURN_START` | `turn:start` | awaited notify | Beginning of each agent loop iteration |
-| `TURN_END` | `turn:end` | awaited notify | End of each agent loop iteration (settled before the loop returns, advances, or throws). Payload carries `claimTurn()`: first caller wins and owns the turn's continuation — handlers that enqueue the next input (loop re-fire, handoff plan) claim first; a failed claim must not enqueue. Claim synchronously and register above continuation followers via `hookPriorities`. |
+| `TURN_START` | `turn:start` | awaited notify | Beginning of each agent loop iteration; payload carries `kind` (`"continuation"` for `continueRun` turns, `"input"` otherwise). session-log writes the v2 `turn_started` durability record here, on the turn's first iteration only (fsynced before the first LLM call) |
+| `TURN_END` | `turn:end` | awaited notify | End of each agent loop iteration (settled before the loop returns, advances, or throws). Payload carries `claimTurn()`: first caller wins and owns the turn's continuation — handlers that enqueue the next input (loop re-fire, handoff plan) claim first; a failed claim must not enqueue. Claim synchronously and register above continuation followers via `hookPriorities`. session-log writes the v2 `turn_end` record on `stopped: true` (status completed/cancelled/error), which closes the open turn for the resume protocol |
 
 ### Model / Config
 

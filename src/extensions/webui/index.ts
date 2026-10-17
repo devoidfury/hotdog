@@ -10,9 +10,16 @@ async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Prom
     const { server, wsServer, authMiddleware } = await createWebuiServer(core, config);
 
     await new Promise<void>((resolve) => {
-      const shutdown = () => {
-        server.stop();
+      let shuttingDown = false;
+      const shutdown = async () => {
+        if (shuttingDown) return;
+        shuttingDown = true;
         wsServer.stopCleanupLoop();
+        // Commit-point drain (SIGTERM and SIGINT alike): let in-flight turns
+        // reach their next fsynced commit point (bounded at 10s), then
+        // interrupt stragglers, so a planned restart never exits mid-write.
+        await wsServer.drainSessions();
+        server.stop();
         wsServer.stopTaskManager();
         authMiddleware.stopCleanup();
         resolve();

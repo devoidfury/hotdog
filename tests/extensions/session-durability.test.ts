@@ -10,7 +10,7 @@
 // Plus the kill -9 definition-of-done: a process SIGKILLed mid-side-effect
 // leaves exactly one side effect on disk and replays as outcome-unknown.
 
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
@@ -19,6 +19,7 @@ import {
   replayEntriesIntoContext,
   readSessionEntries,
   restoreSessionIntoAgent,
+  collectDurabilityFacts,
   LOG_SOURCE,
   type LogEntry,
 } from "@core/session/session-log.ts";
@@ -27,6 +28,7 @@ import {
   reconcileSessionIndex,
   closeSessionIndex,
   openSessionIndex,
+  deriveSessionState,
   SESSION_STATE,
 } from "@core/session/session-index.ts";
 import {
@@ -598,5 +600,432 @@ describe("resume_attempt record (livelock cap counter)", () => {
     } finally {
       cleanup(sessionId);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part 3: the livelock cap on consecutive auto-resumes.
+// ---------------------------------------------------------------------------
+
+function autoResumeEntry(): LogEntry {
+  return entry({ source: LOG_SOURCE.RESUME_ATTEMPT, content: { origin: "auto" } });
+}
+function manualResumeEntry(): LogEntry {
+  return entry({ source: LOG_SOURCE.RESUME_ATTEMPT, content: { origin: "manual" } });
+}
+/** Pre-cap record: no origin field (counts as manual). */
+function legacyResumeEntry(): LogEntry {
+  return entry({ source: LOG_SOURCE.RESUME_ATTEMPT, content: "" });
+}
+function progressEntry(): LogEntry {
+  return entry({ source: LOG_SOURCE.LLM, content: "ok" });
+}
+
+describe("consecutive auto-resume counter", () => {
+  it("counts auto resumes since the last progress entry", () => {
+    expect(collectDurabilityFacts([progressEntry(), autoResumeEntry(), autoResumeEntry()]).consecutiveAutoResumes).toBe(2);
+    // Manual resumes never count, and do not reset the chain.
+    expect(collectDurabilityFacts([autoResumeEntry(), manualResumeEntry(), autoResumeEntry()]).consecutiveAutoResumes).toBe(2);
+    // Pre-cap records (no origin) count as manual.
+    expect(collectDurabilityFacts([legacyResumeEntry(), autoResumeEntry()]).consecutiveAutoResumes).toBe(1);
+    // Progress resets.
+    expect(collectDurabilityFacts([autoResumeEntry(), autoResumeEntry(), progressEntry(), autoResumeEntry()]).consecutiveAutoResumes).toBe(1);
+    // A held question is not progress (waiting on a human is not churn).
+    const q = entry({ source: LOG_SOURCE.QUESTION_ASKED, tool_call_id: "q", content: [] });
+    expect(collectDurabilityFacts([autoResumeEntry(), q, autoResumeEntry()]).consecutiveAutoResumes).toBe(2);
+    // resume_attempt itself is not progress.
+    expect(collectDurabilityFacts([autoResumeEntry(), manualResumeEntry()]).resumeAttempts).toBe(2);
+  });
+
+  it("harness-origin input is not progress (machine nudges must not reset the cap)", () => {
+    // The session-log extension logs every harness message (empty-turn
+    // nudge, truncated-stop notice) under source INPUT. A crash loop that
+    // nudges once per cycle must not recharge the cap forever: only real
+    // user/LLM/tool activity is progress.
+    const nudge = entry({ source: LOG_SOURCE.INPUT, origin: "harness", content: "nudge" });
+    expect(collectDurabilityFacts([autoResumeEntry(), nudge, autoResumeEntry()]).consecutiveAutoResumes).toBe(2);
+    // Real user input still resets.
+    const user = entry({ source: LOG_SOURCE.INPUT, origin: "user", content: "hi" });
+    expect(collectDurabilityFacts([autoResumeEntry(), user, autoResumeEntry()]).consecutiveAutoResumes).toBe(1);
+    // Model responses are origin-agnostic progress (their origin is "model").
+    expect(collectDurabilityFacts([autoResumeEntry(), progressEntry(), autoResumeEntry()]).consecutiveAutoResumes).toBe(1);
+    // v1 entries carry no origin at all: treated as progress (pre-cap logs
+    // have no auto-resume records anyway, so this cannot park a legacy log).
+    const legacy = entry({ source: LOG_SOURCE.INPUT, content: "hi" });
+    expect(collectDurabilityFacts([autoResumeEntry(), legacy, autoResumeEntry()]).consecutiveAutoResumes).toBe(1);
+  });
+
+  it("deriveSessionState prioritizes parked", () => {
+    const base = { started: new Set<string>(), answered: new Set<string>(), asked: [] as Array<{ toolCallId: string }> };
+    expect(deriveSessionState({ ...base, consecutiveAutoResumes: 5 })).toBe(SESSION_STATE.PARKED);
+    expect(deriveSessionState({ ...base, consecutiveAutoResumes: 4 })).toBe(SESSION_STATE.IDLE);
+    // parked outranks an open question too: it gates the next auto-resume.
+    expect(deriveSessionState({ ...base, asked: [{ toolCallId: "q" }], consecutiveAutoResumes: 5 })).toBe(SESSION_STATE.PARKED);
+  });
+});
+
+describe("livelock cap on auto-resume (restoreSessionIntoAgent)", () => {
+  /** Write a log: one input, then n auto resume attempts. */
+  function writeLivelockLog(sessionId: string, autos: number): void {
+    const lines = [JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "work" }))];
+    for (let i = 0; i < autos; i++) {
+      lines.push(JSON.stringify(autoResumeEntry()));
+    }
+    writeFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+  }
+
+  type ResumeExt = { hooks: Record<string, (p: unknown) => Promise<unknown>> };
+
+  function resumeAgent(sessionId: string, ext: ResumeExt) {
+    const log: Message[] = [];
+    return {
+      sessionId,
+      isRestoring: false,
+      addMessage: (m: Message) => void log.push(m),
+      hooks: {
+        notifyHooks: async (name: string, payload: unknown) => {
+          if (name === HOOKS.SESSION_RESUME_ATTEMPT) {
+            await ext.hooks[HOOKS.SESSION_RESUME_ATTEMPT]!(payload);
+          }
+        },
+      },
+    };
+  }
+
+  it("refuses an auto-resume at the cap and writes no attempt record", async () => {
+    const sessionId = uniqueId("cap-refused");
+    try {
+      writeLivelockLog(sessionId, 5);
+      const ext = (await create(createMockCore() as never)) as never as ResumeExt;
+      const agent = resumeAgent(sessionId, ext);
+
+      await expect(restoreSessionIntoAgent(agent, sessionId, { auto: true })).rejects.toThrow("parked");
+      // A refusal is not an attempt: the counter must not climb on refusal.
+      const entries = await readSessionEntries(sessionId);
+      expect(entries.filter((e) => e.source === LOG_SOURCE.RESUME_ATTEMPT)).toHaveLength(5);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("manual resume bypasses the cap (the escape hatch)", async () => {
+    const sessionId = uniqueId("cap-manual");
+    try {
+      writeLivelockLog(sessionId, 5);
+      const ext = (await create(createMockCore() as never)) as never as ResumeExt;
+      const agent = resumeAgent(sessionId, ext);
+
+      const result = await restoreSessionIntoAgent(agent, sessionId); // manual
+      expect(result.replayed).toBeGreaterThan(0);
+      const entries = await readSessionEntries(sessionId);
+      const attempts = entries.filter((e) => e.source === LOG_SOURCE.RESUME_ATTEMPT);
+      expect(attempts).toHaveLength(6);
+      expect((attempts[5] as { content: unknown }).content).toEqual({ origin: "manual" });
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("records origin auto and parks the row when the cap is reached", async () => {
+    const sessionId = uniqueId("cap-reached");
+    try {
+      writeLivelockLog(sessionId, 4);
+      const ext = (await create(createMockCore() as never)) as never as ResumeExt;
+      const agent = resumeAgent(sessionId, ext);
+
+      // The 5th auto-resume is still allowed (cap = refuse at 5); this one
+      // pushes the consecutive count to the cap and must park the row.
+      await restoreSessionIntoAgent(agent, sessionId, { auto: true });
+      const entries = await readSessionEntries(sessionId);
+      const attempts = entries.filter((e) => e.source === LOG_SOURCE.RESUME_ATTEMPT);
+      expect(attempts).toHaveLength(5);
+      expect((attempts[4] as { content: unknown }).content).toEqual({ origin: "auto" });
+      expect(getSessionRow(sessionId)?.state).toBe(SESSION_STATE.PARKED);
+      // The index is disposable: reconcile re-derives parked from the log.
+      await reconcileSessionIndex();
+      expect(getSessionRow(sessionId)?.state).toBe(SESSION_STATE.PARKED);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("a RESET between auto-resumes does not recharge the cap (lifetime-scoped counter)", async () => {
+    const sessionId = uniqueId("cap-reset");
+    try {
+      // input (progress), 2 autos, a mid-turn checkpoint (RESET), 3 more
+      // autos: 5 consecutive since the last progress in the FULL log, but
+      // only 3 in the post-RESET epoch -- an epoch-scoped counter would
+      // wrongly allow this resume.
+      const lines = [
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "work" })),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.RESET, content: "" })),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(autoResumeEntry()),
+      ];
+      writeFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+      const ext = (await create(createMockCore() as never)) as never as ResumeExt;
+      const agent = resumeAgent(sessionId, ext);
+
+      await expect(restoreSessionIntoAgent(agent, sessionId, { auto: true })).rejects.toThrow("parked");
+      // The refusal writes no record across the reset either.
+      const entries = await readSessionEntries(sessionId, { full: true });
+      expect(entries.filter((e) => e.source === LOG_SOURCE.RESUME_ATTEMPT)).toHaveLength(5);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("under-cap churn across a RESET still resumes (the cap counts, the epoch replays)", async () => {
+    const sessionId = uniqueId("cap-reset-under");
+    try {
+      // input, 2 autos, RESET, 2 autos: 4 consecutive < cap in the full log.
+      const lines = [
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "work" })),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.RESET, content: "" })),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(autoResumeEntry()),
+      ];
+      writeFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+      const ext = (await create(createMockCore() as never)) as never as ResumeExt;
+      const agent = resumeAgent(sessionId, ext);
+
+      const result = await restoreSessionIntoAgent(agent, sessionId, { auto: true });
+      expect(result.openTurn).toBe(false);
+      const entries = await readSessionEntries(sessionId, { full: true });
+      expect(entries.filter((e) => e.source === LOG_SOURCE.RESUME_ATTEMPT)).toHaveLength(5);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("reconcile re-derives parked across a RESET (full-log lifetime facts)", async () => {
+    const sessionId = uniqueId("cap-reset-reconcile");
+    try {
+      // 5 consecutive autos in the full log, split by a RESET: the epoch
+      // alone only holds 4, so a boot resync must still land on parked.
+      const lines = [
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "work" })),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.RESET, content: "" })),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(autoResumeEntry()),
+        JSON.stringify(autoResumeEntry()),
+      ];
+      writeFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+
+      await reconcileSessionIndex();
+      expect(getSessionRow(sessionId)?.state).toBe(SESSION_STATE.PARKED);
+      // The mirror count is lifetime-scoped too: all 5 attempts, not the
+      // epoch's 4.
+      expect(getSessionRow(sessionId)?.resume_count).toBe(5);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part 3.5: turn lifecycle records (protocol v2) and auto-resume.
+// ---------------------------------------------------------------------------
+
+describe("turn lifecycle records (protocol v2)", () => {
+  function turnStarted(kind = "input"): LogEntry {
+    return entry({ source: LOG_SOURCE.TURN_STARTED, v: 2, content: { kind } });
+  }
+  function turnEnd(status = "completed"): LogEntry {
+    return entry({ source: LOG_SOURCE.TURN_END, v: 2, content: { status } });
+  }
+
+  it("openTurn tracks the v2 turn_started/turn_end pair", () => {
+    // Open: a turn_started with no turn_end after it.
+    expect(collectDurabilityFacts([turnStarted()]).openTurn).toBe(true);
+    // Closed: the turn_end lands.
+    expect(collectDurabilityFacts([turnStarted(), turnEnd()]).openTurn).toBe(false);
+    // A later turn re-opens.
+    expect(collectDurabilityFacts([turnStarted(), turnEnd(), turnStarted()]).openTurn).toBe(true);
+    // v1 logs carry no turn records: never open, never auto-resumed.
+    expect(collectDurabilityFacts([entry({ source: LOG_SOURCE.INPUT, content: "hi" })]).openTurn).toBe(false);
+  });
+
+  it("deriveSessionState reports an open v2 turn as interrupted", () => {
+    const base = { started: new Set<string>(), answered: new Set<string>(), asked: [] as Array<{ toolCallId: string }> };
+    // Crash mid-generation: no dangling calls, but the turn is open.
+    expect(deriveSessionState({ ...base, openTurn: true })).toBe(SESSION_STATE.INTERRUPTED);
+    // A held question outranks: the session waits on a human, not a resume.
+    expect(deriveSessionState({ ...base, openTurn: true, asked: [{ toolCallId: "q" }] })).toBe(
+      SESSION_STATE.AWAITING_QUESTION,
+    );
+    // Parked still outranks everything.
+    expect(deriveSessionState({ ...base, openTurn: true, consecutiveAutoResumes: 5 })).toBe(SESSION_STATE.PARKED);
+  });
+
+  describe("turn records written by the session-log extension", () => {
+    type TurnExt = {
+      hooks: Record<string, (p: unknown) => Promise<unknown>>;
+    };
+    let ext: TurnExt;
+
+    beforeEach(async () => {
+      ext = (await create(createMockCore() as never)) as never as TurnExt;
+    });
+
+    it("writes turn_started on the first iteration only, with kind and v2", async () => {
+      const sessionId = uniqueId("turn-start");
+      try {
+        await ext.hooks[HOOKS.TURN_START]!({ turnIndex: 2, agent: { sessionId } });
+        await ext.hooks[HOOKS.TURN_START]!({ turnIndex: 1, agent: { sessionId }, kind: "continuation" });
+        const entries = (await readSessionEntries(sessionId)).filter(
+          (e) => e.source === LOG_SOURCE.TURN_STARTED,
+        );
+        expect(entries).toHaveLength(1);
+        expect(entries[0]!.content).toEqual({ kind: "continuation" });
+        expect(entries[0]!.v).toBe(2);
+      } finally {
+        cleanup(sessionId);
+      }
+    });
+
+    it("writes turn_end only when the turn stops, with the mapped status", async () => {
+      const sessionId = uniqueId("turn-end");
+      // [stopped, reason, cancelled?]
+      const fired: Array<[boolean, string, boolean?]> = [
+        [false, "continue"], // in-turn advance: no record
+        [true, "completion"],
+        [true, "tool_return"],
+        [true, "max_iterations"],
+        [true, "cancelled"],
+        // Cancel that lands after the final response assembled: reason is
+        // still "completion", the flag must carry the cancellation.
+        [true, "completion", true],
+        [true, "error"],
+        [true, "empty_response"],
+      ];
+      try {
+        for (const [stopped, reason, cancelled] of fired) {
+          await ext.hooks[HOOKS.TURN_END]!({ stopped, reason, cancelled, agent: { sessionId } });
+        }
+        const ends = (await readSessionEntries(sessionId)).filter((e) => e.source === LOG_SOURCE.TURN_END);
+        expect(ends.map((e) => (e.content as { status: string }).status)).toEqual([
+          "completed",
+          "completed",
+          "completed",
+          "cancelled",
+          "cancelled",
+          "error",
+          "error",
+        ]);
+        expect(ends.every((e) => e.v === 2)).toBe(true);
+      } finally {
+        cleanup(sessionId);
+      }
+    });
+
+    it("stamps v2 on conversation entries", async () => {
+      const sessionId = uniqueId("v-stamp");
+      try {
+        await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+          message: { role: "user", content: "hi" },
+          agent: { sessionId },
+        });
+        const entries = await readSessionEntries(sessionId);
+        expect(entries.every((e) => e.v === 2)).toBe(true);
+      } finally {
+        cleanup(sessionId);
+      }
+    });
+
+    it("re-emits the open-turn marker after a mid-turn checkpoint", async () => {
+      const sessionId = uniqueId("rewind-reemit");
+      try {
+        // Open the turn, then checkpoint (compaction): the reset truncates the
+        // epoch view, and the marker must be re-emitted below it.
+        await ext.hooks[HOOKS.TURN_START]!({ turnIndex: 1, agent: { sessionId }, kind: "input" });
+        await ext.hooks[HOOKS.CONTEXT_REWOUND]!({
+          agent: { sessionId },
+          newContext: [{ role: "harness", content: "summary" }],
+        });
+        const entries = await readSessionEntries(sessionId); // epoch after the reset
+        const starts = entries.filter((e) => e.source === LOG_SOURCE.TURN_STARTED);
+        expect(starts).toHaveLength(1);
+        expect(starts[0]!.content).toEqual({ kind: "input" });
+        expect(collectDurabilityFacts(entries).openTurn).toBe(true);
+      } finally {
+        cleanup(sessionId);
+      }
+    });
+  });
+
+  describe("auto-resume continuation (restoreSessionIntoAgent)", () => {
+    function resumeAgent(sessionId: string, ext: never) {
+      const log: Message[] = [];
+      return {
+        sessionId,
+        isRestoring: false,
+        addMessage: (m: Message) => void log.push(m),
+        hooks: {
+          notifyHooks: async (name: string, payload: unknown) => {
+            if (name === HOOKS.SESSION_RESUME_ATTEMPT) {
+              await (ext as { hooks: Record<string, (p: unknown) => Promise<unknown>> }).hooks[
+                HOOKS.SESSION_RESUME_ATTEMPT
+              ]!(payload);
+            }
+          },
+        },
+      };
+    }
+
+    it("reports openTurn from a v2 open log, closed from a finished log, absent from v1", async () => {
+      const ext = (await create(createMockCore() as never)) as never;
+      const v2open = uniqueId("open");
+      const v2closed = uniqueId("closed");
+      const v1 = uniqueId("v1");
+      const line = (sessionId: string, e: LogEntry) => JSON.stringify({ ...e, session_id: sessionId });
+      try {
+        // v2, open: input, turn started, died mid-tool (started, no result).
+        writeFileSync(
+          join(SESSIONS_DIR, `${v2open}.jsonl`),
+          [
+            line(v2open, entry({ source: LOG_SOURCE.INPUT, v: 2, content: "work" })),
+            line(v2open, entry({ source: LOG_SOURCE.TURN_STARTED, v: 2, content: { kind: "input" } })),
+            line(v2open, entry({ source: LOG_SOURCE.TOOL_STARTED, v: 2, content: "{}", tool_call_id: "c1" })),
+          ].join("\n") + "\n",
+        );
+        // v2, closed: the turn ended (final response).
+        writeFileSync(
+          join(SESSIONS_DIR, `${v2closed}.jsonl`),
+          [
+            line(v2closed, entry({ source: LOG_SOURCE.INPUT, v: 2, content: "work" })),
+            line(v2closed, entry({ source: LOG_SOURCE.TURN_STARTED, v: 2, content: { kind: "input" } })),
+            line(v2closed, entry({ source: LOG_SOURCE.LLM, v: 2, content: "done" })),
+            line(v2closed, entry({ source: LOG_SOURCE.TURN_END, v: 2, content: { status: "completed" } })),
+          ].join("\n") + "\n",
+        );
+        // v1: the same shape without turn records (pre-protocol log).
+        writeFileSync(
+          join(SESSIONS_DIR, `${v1}.jsonl`),
+          [
+            line(v1, entry({ source: LOG_SOURCE.INPUT, content: "work" })),
+            line(v1, entry({ source: LOG_SOURCE.TOOL_STARTED, content: "{}", tool_call_id: "c1" })),
+          ].join("\n") + "\n",
+        );
+
+        const open = await restoreSessionIntoAgent(resumeAgent(v2open, ext), v2open, { auto: true });
+        expect(open.openTurn).toBe(true);
+        const closed = await restoreSessionIntoAgent(resumeAgent(v2closed, ext), v2closed, { auto: true });
+        expect(closed.openTurn).toBe(false);
+        const old = await restoreSessionIntoAgent(resumeAgent(v1, ext), v1, { auto: true });
+        expect(old.openTurn).toBe(false);
+      } finally {
+        cleanup(v2open);
+        cleanup(v2closed);
+        cleanup(v1);
+      }
+    });
   });
 });

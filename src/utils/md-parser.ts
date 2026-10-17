@@ -23,6 +23,8 @@ export interface MdCodeBlock {
 export interface MdList {
   type: "list";
   ordered: boolean;
+  /** First item's marker number (1-based); rendered as <ol start> when != 1. Always 1 for ul. */
+  start: number;
   items: MdListItem[];
 }
 
@@ -242,7 +244,11 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
     case "list": {
       const la = a as MdList;
       const lb = b as MdList;
-      if (la.ordered !== lb.ordered || la.items.length !== lb.items.length)
+      if (
+        la.ordered !== lb.ordered ||
+        la.start !== lb.start ||
+        la.items.length !== lb.items.length
+      )
         return false;
       for (let i = 0; i < la.items.length; i++) {
         if (!inlineArraysEqual(la.items[i]!.children, lb.items[i]!.children))
@@ -404,10 +410,12 @@ function blockToHtml(block: MdBlock): string {
     }
     case "list": {
       const tag = block.ordered ? "ol" : "ul";
+      // Respects the model's numbering when a list starts anywhere but 1.
+      const startAttr = block.ordered && block.start !== 1 ? ` start="${block.start}"` : "";
       const items = block.items
         .map((item) => `<li>${item.children.map(inlineToHtml).join("")}</li>`)
         .join("");
-      return `<${tag}>${items}</${tag}>`;
+      return `<${tag}${startAttr}>${items}</${tag}>`;
     }
     case "blockquote":
       return `<blockquote>${block.children.map(blockToHtml).join("")}</blockquote>`;
@@ -511,6 +519,7 @@ function parseList(
 ): MdList & { _nextIndex: number } {
   const firstLine = lines[start]!.trim();
   const ordered = isOrderedListLine(firstLine);
+  const startNumber = ordered ? Number(firstLine.match(/^(\d+)/)![1]) : 1;
   const items: MdListItem[] = [];
   let i = start;
 
@@ -522,7 +531,17 @@ function parseList(
       items.push({ children: parseInline(content) });
       i++;
     } else if (trimmed === "") {
-      break;
+      // Loose list: a blank line between items of the same marker kind keeps
+      // one list (CommonMark). Breaking here split every LLM loose list into
+      // one <ol> per item, each restarting numbering at 1.
+      let j = i;
+      while (j < lines.length && lines[j]!.trim() === "") j++;
+      const next = j < lines.length ? lines[j]!.trim() : "";
+      if (next !== "" && isListLine(next) && isOrderedListLine(next) === ordered) {
+        i = j;
+      } else {
+        break;
+      }
     } else if (items.length > 0) {
       // Non-list line inside a list: treat it as a continuation of the last item.
       const continuation = parseInline(trimmed);
@@ -533,7 +552,7 @@ function parseList(
     }
   }
 
-  return { type: "list", ordered, items, _nextIndex: i };
+  return { type: "list", ordered, start: startNumber, items, _nextIndex: i };
 }
 
 function parseTable(

@@ -84,6 +84,53 @@ describe("parseMarkdown", () => {
     expect((withParens.children[0] as { ordered: boolean }).ordered).toBe(true);
   });
 
+  it("keeps a loose list (blank line between items) as one list", () => {
+    const doc = parseMarkdown("1. first item.\n\n2. second item.\n\n3. third item.");
+    expect(doc.children).toHaveLength(1);
+    const list = doc.children[0] as MdList;
+    expect(list.type).toBe("list");
+    expect(list.ordered).toBe(true);
+    expect(list.items).toHaveLength(3);
+    expect(markdownToHtml("1. first.\n\n2. second.")).toBe(
+      "<ol><li>first.</li><li>second.</li></ol>",
+    );
+
+    const ul = parseMarkdown("- one\n\n- two");
+    expect(ul.children).toHaveLength(1);
+    expect((ul.children[0] as MdList).items).toHaveLength(2);
+  });
+
+  it("ends a list at a blank line followed by a different kind or text", () => {
+    // ul then ol: different marker kinds never merge.
+    const mixed = parseMarkdown("- bullet\n\n1. ordered");
+    expect(mixed.children).toHaveLength(2);
+    expect((mixed.children[0] as MdList).ordered).toBe(false);
+    expect((mixed.children[1] as MdList).ordered).toBe(true);
+
+    // blank line + paragraph text: list ends, text is its own block.
+    const thenText = parseMarkdown("1. one\n\nnot a list item");
+    expect(thenText.children).toHaveLength(2);
+    expect((thenText.children[0] as MdList).items).toHaveLength(1);
+    expect(thenText.children[1]?.type).toBe("paragraph");
+
+    // trailing blank lines at EOF: no hang, single list.
+    const trailing = parseMarkdown("1. one\n\n\n");
+    expect(trailing.children).toHaveLength(1);
+    expect((trailing.children[0] as MdList).items).toHaveLength(1);
+  });
+
+  it("renders ordered list numbering via start when the first marker is not 1", () => {
+    const doc = parseMarkdown("3. third\n4. fourth");
+    expect((doc.children[0] as MdList).start).toBe(3);
+    expect(markdownToHtml("3. third\n4. fourth")).toBe(
+      '<ol start="3"><li>third</li><li>fourth</li></ol>',
+    );
+    // start="1" is not emitted
+    expect(markdownToHtml("1. one\n2. two")).toBe(
+      "<ol><li>one</li><li>two</li></ol>",
+    );
+  });
+
   // ── Blockquotes ───────────────────────────────────────────────────
 
   it("parses blockquotes with nested content", () => {
@@ -297,6 +344,26 @@ describe("createStreamingParser", () => {
     expect(r.tree.children[0]?.type).toBe("code_block");
     const code = r.tree.children[0] as { type: "code_block"; content: string };
     expect(code.content).toContain("const x = 1;");
+  });
+
+  it("merges a loose ordered list fed across the blank-line boundary", () => {
+    const parser = createStreamingParser();
+
+    parser.feed("Intro.\n\n1. first.\n");
+    // Mid-stream: list flushed with one item; blank line arriving must not crash.
+    const mid = parser.feed("\n");
+    expect((mid.tree.children[1] as MdList).items).toHaveLength(1);
+
+    const done = parser.feed("2. second.\n\n3. third.");
+    expect(done.tree.children).toHaveLength(2);
+    const list = done.tree.children[1] as MdList;
+    expect(list.type).toBe("list");
+    expect(list.items).toHaveLength(3);
+    // The list block changed, so the DOM update starts there — earlier blocks stay.
+    expect(done.stableFrom).toBe(1);
+    expect(mdTreeToHtml(done.tree)).toContain(
+      "<ol><li>first.</li><li>second.</li><li>third.</li></ol>",
+    );
   });
 
   it("finalizes and returns complete tree", () => {

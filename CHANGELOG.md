@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- webui - fix numbered loose lists markup
+
 - [BRK] dropped support for bun older than 1.4.2
 
 - **webui subagent panels performance fix** Mounted subagent panels as their own render subtree, and coalesce to one flush per animation frame to avoid re-rendering the entire UI on every streamed token.

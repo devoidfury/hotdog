@@ -141,13 +141,17 @@ export function create(core: CoreContext): ExtensionInstance {
 
   const handoffTool = new HandoffTool(pending);
 
-  // Inlines files that exist and are small enough; everything else (too
-  // large, missing, binary, a directory, or rejected by the workspace
-  // boundary) is listed with a note. Per-file failures are swallowed so a
-  // bad path can never break the handoff.
-  async function buildFilesSection(files: string[], workspace: Workspace): Promise<string[]> {
-    const parts: string[] = ["", "## Relevant Files"];
-    const remaining: Array<{ path: string; note: string }> = [];
+  // Inlines files that exist and are small enough as file-include wrapper
+  // parts (the same shape the file-attachment extension and webui uploads
+  // use); everything else (too large, missing, binary, a directory, or
+  // rejected by the workspace boundary) is listed with a note. Per-file
+  // failures are swallowed so a bad path can never break the handoff.
+  async function collectFiles(
+    files: string[],
+    workspace: Workspace,
+  ): Promise<{ includes: Array<Record<string, unknown>>; notes: string[] }> {
+    const includes: Array<Record<string, unknown>> = [];
+    const notes: string[] = [];
     // Dedup by resolved path: the model can list the same file twice, or
     // via different notations ("a/b" and "./a/b"); inlining it twice only
     // burns context.
@@ -158,7 +162,7 @@ export function create(core: CoreContext): ExtensionInstance {
       try {
         resolved = workspace.resolveSafe(file);
       } catch {
-        remaining.push({ path: file, note: "path rejected" });
+        notes.push(`- ${file} (path rejected)`);
         continue;
       }
       if (seen.has(resolved)) continue;
@@ -168,17 +172,17 @@ export function create(core: CoreContext): ExtensionInstance {
       try {
         stats = await fs.stat(resolved);
       } catch {
-        remaining.push({ path: file, note: "not found" });
+        notes.push(`- ${file} (not found)`);
         continue;
       }
 
       if (stats.isDirectory()) {
-        remaining.push({ path: file, note: "directory" });
+        notes.push(`- ${file} (directory)`);
         continue;
       }
       // autoIncludeBytes of 0 means "never inline", including 0-byte files.
       if (autoIncludeBytes <= 0 || stats.size > autoIncludeBytes) {
-        remaining.push({ path: file, note: formatBytes(stats.size) });
+        notes.push(`- ${file} (${formatBytes(stats.size)})`);
         continue;
       }
 
@@ -186,55 +190,64 @@ export function create(core: CoreContext): ExtensionInstance {
       try {
         content = await fs.readFile(resolved, "utf-8");
       } catch {
-        remaining.push({ path: file, note: "unreadable" });
+        notes.push(`- ${file} (unreadable)`);
         continue;
       }
       if (content.includes("\u0000")) {
-        remaining.push({ path: file, note: `${formatBytes(stats.size)}, binary` });
+        notes.push(`- ${file} (${formatBytes(stats.size)}, binary)`);
         continue;
       }
 
-      // The fence must be strictly longer than the longest backtick run in
-      // the content, or a run in the body closes the block early.
-      const maxRun = [...content.matchAll(/`+/g)].reduce((max, m) => Math.max(max, m[0]!.length), 0);
-      const fence = "`".repeat(Math.max(3, maxRun) + 1);
-      parts.push(`### ${file}`, fence, content, fence);
+      includes.push({ type: "file-include", path: file, content });
     }
 
-    for (const { path, note } of remaining) {
-      parts.push(`- ${path} (${note})`);
-    }
-    return parts;
+    return { includes, notes };
   }
 
-  // Formats the handoff payload as the first user message of the fresh conversation.
-  async function buildHandoffMessage(payload: HandoffPayload, workspace: Workspace): Promise<string> {
-    const parts: string[] = [];
+  // Formats the handoff payload as the first user message of the fresh
+  // conversation, as semantic content parts (see context/wrappers.ts): the
+  // harness framing is `text`, the model-authored title/instructions/plan
+  // ride `untrusted` parts (mangled at the wire regardless of the message's
+  // provenance), and inlined files ride `file-include` wrapper parts so the
+  // wire frames them per the format's trust spec and every sink can split
+  // them out as attachments. No hand-rolled fences.
+  async function buildHandoffMessage(
+    payload: HandoffPayload,
+    workspace: Workspace,
+  ): Promise<Array<Record<string, unknown>>> {
+    const parts: Array<Record<string, unknown>> = [];
 
     if (payload.title) {
-      parts.push(`# ${payload.title}`);
-      parts.push("");
+      parts.push({ type: "untrusted", text: `# ${payload.title}\n\n` });
     }
 
     if (payload.instructions) {
-      parts.push(`## Instructions`);
-      parts.push(payload.instructions);
-      parts.push("");
+      parts.push({ type: "text", text: "## Instructions\n" });
+      parts.push({ type: "untrusted", text: `${payload.instructions}\n\n` });
     }
 
-    parts.push(`## Plan`);
-    parts.push(payload.content);
+    parts.push({ type: "text", text: "## Plan\n" });
+    parts.push({ type: "untrusted", text: payload.content });
 
     if (payload.files && payload.files.length > 0) {
-      parts.push(...(await buildFilesSection(payload.files, workspace)));
+      const { includes, notes } = await collectFiles(payload.files, workspace);
+      parts.push({ type: "text", text: "\n\n## Relevant Files\n" });
+      for (const file of includes) {
+        parts.push(file);
+        parts.push({ type: "text", text: "\n" });
+      }
+      if (notes.length > 0) {
+        // The notes interpolate model-listed paths, so they ride untrusted.
+        parts.push({ type: "untrusted", text: `\n${notes.join("\n")}` });
+      }
     }
 
-    parts.push("");
-    parts.push(
-      "_This conversation started from a handoff. The plan above was prepared in a previous phase. Proceed with execution._",
-    );
+    parts.push({
+      type: "text",
+      text: "\n\n_This conversation started from a handoff. The plan above was prepared in a previous phase. Proceed with execution._",
+    });
 
-    return parts.join("\n");
+    return parts;
   }
 
   return {
@@ -294,8 +307,10 @@ export function create(core: CoreContext): ExtensionInstance {
 
           await agent.clearContext();
           await agent.ensureSystemPrompt();
-          // The model composed the handoff content, so tag it as model-sourced.
-          agent.enqueue(message, { source: "model" });
+          // Harness provenance is the only way the wrapper parts survive the
+          // bus queue boundary (sanitizeQueuedContent); the model-authored
+          // pieces ride `untrusted` parts inside it, mangled at the wire.
+          agent.enqueue(message, { source: "harness" });
         } catch (e: unknown) {
           // Emit instead of rethrowing so a failure mid-transition doesn't
           // break the agent loop.

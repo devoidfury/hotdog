@@ -4,6 +4,7 @@ import { create as createHandoffExtension, HandoffTool } from "@extensions/hando
 import { HookSystem, HOOKS } from "@core/hooks.ts";
 import { createCommandRegistry } from "@core/extensions/registries.ts";
 import { ToolContext } from "@core/extensions/tool-context.ts";
+import { contentToText } from "@core/context/message.ts";
 import { ACTIONS } from "@core/commands.ts";
 import type { Agent } from "@core/agent.ts";
 
@@ -743,7 +744,8 @@ describe("Loop extension", () => {
       const enqueued = agent.getEnqueued();
       expect(enqueued).toHaveLength(2);
       expect(enqueued[0]).toBe("tick");
-      expect(enqueued[1]).toContain("the plan");
+      // The handoff plan rides content parts; flatten for the prose check.
+      expect(contentToText(enqueued[1])).toContain("the plan");
 
       // The handoff run completes: the loop re-enqueues its prompt.
       await hooks.notifyHooks(HOOKS.TURN_END, {

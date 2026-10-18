@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { HandoffTool, create } from "@extensions/handoff-tool/index.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { ToolContext } from "@core/extensions/tool-context.ts";
+import { contentToText } from "@core/context/message.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
 
 interface TestPayload {
@@ -255,11 +256,15 @@ describe("handoff-tool create() extension", () => {
     );
 
     // Mock agent
-    const enqueuedMessages: string[] = [];
+    const enqueuedMessages: Array<{
+      content: Array<Record<string, unknown>>;
+      opts: { source?: string } | undefined;
+    }> = [];
     const mockAgent = {
       clearContext: vi.fn().mockResolvedValue(undefined),
       ensureSystemPrompt: vi.fn().mockResolvedValue(undefined),
-      enqueue: (text: string) => enqueuedMessages.push(text),
+      enqueue: (content: Array<Record<string, unknown>>, opts: { source?: string } | undefined) =>
+        enqueuedMessages.push({ content, opts }),
       emitOutput: vi.fn(),
     };
 
@@ -277,9 +282,12 @@ describe("handoff-tool create() extension", () => {
     expect(mockAgent.clearContext).toHaveBeenCalledTimes(1);
     expect(mockAgent.ensureSystemPrompt).toHaveBeenCalledTimes(1);
 
-    // Verify handoff message was enqueued with proper structure
+    // Verify handoff message was enqueued with proper structure: parts
+    // (harness provenance is the only way they survive the queue boundary).
     expect(enqueuedMessages).toHaveLength(1);
-    const message = enqueuedMessages[0];
+    const { content, opts } = enqueuedMessages[0]!;
+    expect(opts?.source).toBe("harness");
+    const message = contentToText(content);
     expect(message).toContain("# Execution Phase");
     expect(message).toContain("## Instructions");
     expect(message).toContain("Be careful");
@@ -288,6 +296,23 @@ describe("handoff-tool create() extension", () => {
     expect(message).toContain("## Relevant Files");
     expect(message).toContain("src/main.ts");
     expect(message).toContain("started from a handoff");
+
+    // Model-authored prose rides `untrusted` parts, never harness-trusted text.
+    const untrusted = content
+      .filter((p) => p.type === "untrusted")
+      .map((p) => String(p.text))
+      .join("\n");
+    expect(untrusted).toContain("Execution Phase");
+    expect(untrusted).toContain("Be careful");
+    expect(untrusted).toContain("Execute the plan");
+    // Structural framing is harness text.
+    const trustedText = content
+      .filter((p) => p.type === "text")
+      .map((p) => String(p.text))
+      .join("\n");
+    expect(trustedText).toContain("## Plan");
+    expect(trustedText).toContain("## Relevant Files");
+    expect(trustedText).toContain("started from a handoff");
   });
 
   it("TURN_END hook takes the turn claim and defers (keeping pending) when it is lost", async () => {
@@ -309,7 +334,7 @@ describe("handoff-tool create() extension", () => {
     const mockAgent = {
       clearContext: vi.fn().mockResolvedValue(undefined),
       ensureSystemPrompt: vi.fn().mockResolvedValue(undefined),
-      enqueue: (text: string) => enqueuedMessages.push(text),
+      enqueue: (content: Array<Record<string, unknown>>) => enqueuedMessages.push(contentToText(content)),
       emitOutput: vi.fn(),
     };
     const base = {
@@ -365,7 +390,7 @@ describe("handoff-tool create() extension", () => {
       sessionId,
       clearContext: vi.fn().mockResolvedValue(undefined),
       ensureSystemPrompt: vi.fn().mockResolvedValue(undefined),
-      enqueue: (text: string) => enqueued.push(text),
+      enqueue: (content: Array<Record<string, unknown>>) => enqueued.push(contentToText(content)),
       emitOutput: vi.fn(),
     });
     const agentA = makeAgent("session-a", enqueuedA);
@@ -544,11 +569,24 @@ describe("handoff-tool create() extension", () => {
 describe("handoff auto-inline files", () => {
   let tmpDir: string;
 
+  interface RunResult {
+    parts: Array<Record<string, unknown>>;
+    text: string;
+    source: string | undefined;
+  }
+
+  /** The file-include parts of a run result, in order. */
+  function includesOf(result: RunResult): Array<{ path: string; content: string }> {
+    return result.parts
+      .filter((p) => p.type === "file-include")
+      .map((p) => ({ path: String(p.path), content: String(p.content) }));
+  }
+
   async function runHandoff(
     handoffConfig: Record<string, unknown>,
     files: string[],
     agentConfig: Record<string, unknown> = {},
-  ): Promise<string> {
+  ): Promise<RunResult> {
     const ext = create({
       config: { handoffTool: handoffConfig },
     } as unknown as CoreContext);
@@ -567,11 +605,12 @@ describe("handoff auto-inline files", () => {
       null!,
     );
 
-    const enqueued: string[] = [];
+    const enqueued: Array<{ content: Array<Record<string, unknown>>; source: string | undefined }> = [];
     const agent = {
       clearContext: vi.fn().mockResolvedValue(undefined),
       ensureSystemPrompt: vi.fn().mockResolvedValue(undefined),
-      enqueue: (text: string) => enqueued.push(text),
+      enqueue: (content: Array<Record<string, unknown>>, opts?: { source?: string }) =>
+        enqueued.push({ content, source: opts?.source }),
       emitOutput: vi.fn(),
       config: agentConfig,
     };
@@ -584,7 +623,11 @@ describe("handoff auto-inline files", () => {
     });
 
     expect(enqueued).toHaveLength(1);
-    return enqueued[0]!;
+    return {
+      parts: enqueued[0]!.content,
+      text: contentToText(enqueued[0]!.content),
+      source: enqueued[0]!.source,
+    };
   }
 
   beforeEach(() => {
@@ -603,37 +646,37 @@ describe("handoff auto-inline files", () => {
   });
 
   it("inlines files under the limit, lists oversized and missing files with notes", async () => {
-    const message = await runHandoff(
+    const result = await runHandoff(
       { autoIncludeFilesUnderBytes: 100 },
       ["small.txt", "big.txt", "kb.txt", "missing.txt"],
       { workspaceRoots: [tmpDir] },
     );
 
-    expect(message).toContain("## Relevant Files");
-    // small.txt inlined under its own heading
-    expect(message).toContain("### small.txt");
-    expect(message).toContain("hello world");
-    expect(message).not.toContain("- small.txt");
+    // Harness provenance: the only way wrapper parts survive the queue boundary.
+    expect(result.source).toBe("harness");
+    expect(result.text).toContain("## Relevant Files");
+    // small.txt inlined as a file-include wrapper part, not fenced prose.
+    expect(includesOf(result)).toEqual([{ path: "small.txt", content: "hello world\n" }]);
+    expect(result.text).not.toContain("### small.txt");
+    expect(result.text).not.toContain("- small.txt");
     // oversized files listed with human sizes
-    expect(message).toContain("- big.txt (300B)");
-    expect(message).toContain("- kb.txt (5.0KB)");
+    expect(result.text).toContain("- big.txt (300B)");
+    expect(result.text).toContain("- kb.txt (5.0KB)");
     // missing files listed as not found (may be a file to create)
-    expect(message).toContain("- missing.txt (not found)");
+    expect(result.text).toContain("- missing.txt (not found)");
   });
 
   it("inlines everything at a generous limit with nothing left over", async () => {
-    const message = await runHandoff(
+    const result = await runHandoff(
       { autoIncludeFilesUnderBytes: 24576 },
       ["small.txt", "big.txt", "kb.txt"],
       { workspaceRoots: [tmpDir] },
     );
 
-    expect(message).toContain("### small.txt");
-    expect(message).toContain("### big.txt");
-    expect(message).toContain("### kb.txt");
+    expect(includesOf(result).map((f) => f.path)).toEqual(["small.txt", "big.txt", "kb.txt"]);
     // nothing left over
-    expect(message).not.toContain("(not found)");
-    expect(message).not.toContain("(300B)");
+    expect(result.text).not.toContain("(not found)");
+    expect(result.text).not.toContain("(300B)");
   });
 
   it("throws ConfigError when autoIncludeFilesUnderBytes is missing or invalid", () => {
@@ -656,95 +699,84 @@ describe("handoff auto-inline files", () => {
   });
 
   it("lists everything when autoIncludeFilesUnderBytes is 0", async () => {
-    const message = await runHandoff(
+    const result = await runHandoff(
       { autoIncludeFilesUnderBytes: 0 },
       ["small.txt"],
       { workspaceRoots: [tmpDir] },
     );
 
-    expect(message).not.toContain("### small.txt");
-    expect(message).not.toContain("hello world");
-    expect(message).toContain("- small.txt (12B)");
+    expect(includesOf(result)).toHaveLength(0);
+    expect(result.text).not.toContain("hello world");
+    expect(result.text).toContain("- small.txt (12B)");
   });
 
   it("does not inline 0-byte files when autoIncludeFilesUnderBytes is 0", async () => {
     writeFileSync(join(tmpDir, "empty.txt"), "");
-    const message = await runHandoff(
+    const result = await runHandoff(
       { autoIncludeFilesUnderBytes: 0 },
       ["empty.txt"],
       { workspaceRoots: [tmpDir] },
     );
 
-    expect(message).not.toContain("### empty.txt");
-    expect(message).toContain("- empty.txt (0B)");
+    expect(includesOf(result)).toHaveLength(0);
+    expect(result.text).toContain("- empty.txt (0B)");
   });
 
   it("does not inline binary files even under the limit", async () => {
-    const message = await runHandoff(
+    const result = await runHandoff(
       { autoIncludeFilesUnderBytes: 100 },
       ["bin.dat"],
       { workspaceRoots: [tmpDir] },
     );
 
-    expect(message).not.toContain("### bin.dat");
-    expect(message).toContain("- bin.dat (3B, binary)");
+    expect(includesOf(result)).toHaveLength(0);
+    expect(result.text).toContain("- bin.dat (3B, binary)");
   });
 
   it("notes directories and workspace-rejected paths", async () => {
-    const message = await runHandoff(
+    const result = await runHandoff(
       { autoIncludeFilesUnderBytes: 100 },
       ["sub", "../escape.txt"],
       { workspaceRoots: [tmpDir] },
     );
 
-    expect(message).toContain("- sub (directory)");
-    expect(message).toContain("- ../escape.txt (path rejected)");
+    expect(includesOf(result)).toHaveLength(0);
+    expect(result.text).toContain("- sub (directory)");
+    expect(result.text).toContain("- ../escape.txt (path rejected)");
   });
 
-  it("widens the code fence when content contains triple backticks", async () => {
-    const message = await runHandoff(
+  it("rides file content verbatim in the part; framing is the wire's job", async () => {
+    // Backtick runs need no fence widening: the content is data inside a
+    // file-include wrapper, not fenced markdown prose.
+    const result = await runHandoff(
       { autoIncludeFilesUnderBytes: 100 },
-      ["fence.md"],
+      ["fence.md", "fence5.md"],
       { workspaceRoots: [tmpDir] },
     );
 
-    expect(message).toContain("### fence.md");
-    expect(message).toContain("````");
-    expect(message).toContain("code");
-  });
-
-  it("widens the code fence past longer backtick runs in the content", async () => {
-    const message = await runHandoff(
-      { autoIncludeFilesUnderBytes: 100 },
-      ["fence5.md"],
-      { workspaceRoots: [tmpDir] },
-    );
-
-    // A 5-backtick run in the body needs a strictly longer fence.
-    expect(message).toContain("### fence5.md");
-    expect(message).toContain("``````");
-    expect(message).toContain("b");
+    expect(includesOf(result)).toEqual([
+      { path: "fence.md", content: "before\n```\ncode\n```\nafter\n" },
+      { path: "fence5.md", content: "a\n`````\nb\n`````\nc\n" },
+    ]);
   });
 
   it("inlines a duplicate path only once", async () => {
-    const message = await runHandoff(
+    const result = await runHandoff(
       { autoIncludeFilesUnderBytes: 100 },
       ["small.txt", "small.txt"],
       { workspaceRoots: [tmpDir] },
     );
 
-    expect(message.match(/### small\.txt/g)).toHaveLength(1);
-    expect(message.match(/hello world/g)).toHaveLength(1);
+    expect(includesOf(result)).toEqual([{ path: "small.txt", content: "hello world\n" }]);
   });
 
   it("inlines the same file only once across different path notations", async () => {
-    const message = await runHandoff(
+    const result = await runHandoff(
       { autoIncludeFilesUnderBytes: 100 },
       ["small.txt", "./small.txt", join(tmpDir, "small.txt")],
       { workspaceRoots: [tmpDir] },
     );
 
-    expect(message.match(/### small\.txt/g)).toHaveLength(1);
-    expect(message.match(/hello world/g)).toHaveLength(1);
+    expect(includesOf(result)).toEqual([{ path: "small.txt", content: "hello world\n" }]);
   });
 });

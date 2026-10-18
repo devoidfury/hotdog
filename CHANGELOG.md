@@ -2,7 +2,13 @@
 
 ## Unreleased
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.12.0...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.12.1...main
+
+## [v0.12.1] - 2026-10-18
+
+- set tool exec plane default to prior behavior, "inline", due to discovered tool crash that will be fixed in next release.
+
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.12.0...v0.12.1
 
 ## [v0.12.0] - 2026-10-18
 

@@ -358,7 +358,7 @@
     "layers": [
       { "source": "cli", "key": "toolExec" },
       { "source": "config", "key": "toolExec" },
-      { "default": "worker" }
+      { "default": "inline" }
     ]
   },
   "execFence": {

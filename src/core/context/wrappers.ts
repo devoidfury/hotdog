@@ -10,7 +10,8 @@
 // provenance):
 //   - "file-include": the attached file's path and content -- file data,
 //     mangled at the wire.
-//   - "system-notice": harness-generated notice -- verbatim.
+//   - "system-notice": harness-generated notice -- verbatim, so any untrusted
+//     fragment interpolated into it must pass sanitizeNoticeText() first.
 //   - "tool-result": one tool's output. `status` is harness-owned; everything
 //     the tool produced (name, metadata keys/values, error, hint, output) is
 //     tool data, mangled at the wire.
@@ -43,6 +44,24 @@ export interface FileIncludePart {
 export interface SystemNoticePart {
   type: "system-notice";
   text: string;
+}
+
+/**
+ * Neutralize wire-marker bytes in an UNTRUSTED fragment interpolated into a
+ * `system-notice` text (a file path, a name -- anything that did not originate
+ * in harness code).
+ *
+ * system-notice renders VERBATIM at harness trust level: the marker mangler
+ * never processes this channel, so a hostile fragment carrying an angle-bracket
+ * closing sequence -- a cloned repo may name a file whose component spells the
+ * live notice tag plus `>` -- would close the element early and forge framing
+ * the model is told to trust. Any future notice builder that interpolates
+ * environment data MUST route the fragment through here; the notice's own
+ * template lines are harness text and stay as written. `<`, `>`, NUL, CR and
+ * LF become an ellipsis: a forged tag needs `<>`, a fake notice line needs `\n`.
+ */
+export function sanitizeNoticeText(fragment: string): string {
+  return fragment.replace(/[<>\u0000\r\n]/g, "\u2026");
 }
 
 /**

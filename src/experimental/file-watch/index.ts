@@ -61,6 +61,7 @@ import { isAbsolute, relative, resolve as resolveAbs } from "node:path";
 import { HOOKS } from "@core/hooks.ts";
 import { formatError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
+import { sanitizeNoticeText } from "@core/context/wrappers.ts";
 import type { Agent } from "@core/agent.ts";
 import { logger } from "@utils/logger.ts";
 import {
@@ -259,7 +260,12 @@ export function create(core: CoreContext): ExtensionInstance {
 
   const displayPath = (absPath: string): string => {
     const rel = relative(primaryRoot, absPath);
-    return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : absPath;
+    // Sanitized here (not at the call sites) because BOTH consumers are
+    // harness-trust text with a filesystem-derived fragment inside: the
+    // system-notice renders verbatim, and an angle bracket in a path component
+    // of a cloned hostile repo must not be able to spell a wire marker.
+    // sanitizeNoticeText is the shared contract for exactly this.
+    return sanitizeNoticeText(rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : absPath);
   };
 
   // Interest set per session, keyed by sessionId: a shared tool/hook

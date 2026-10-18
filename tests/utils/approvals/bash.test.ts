@@ -5,6 +5,7 @@
 import { describe, it, expect } from "bun:test";
 import { Workspace } from "@utils/workspace.ts";
 import { parseCommandline } from "@utils/approvals/bash.ts";
+import { compileApprovalRules, decide } from "@utils/approvals/rules.ts";
 
 const ws = new Workspace("/ws");
 
@@ -74,6 +75,26 @@ describe("bail table (anything unanalyzable is an ASK)", () => {
     expect(parse("find . -name tmp").ok).toBe(true);
   });
 
+  it("bails on bundled and glued inline-code flags (bypass corpus)", () => {
+    // Exact-word flag matching parsed every form below as clean; each one
+    // runs a program: `-lc` bundles `-c`, and a glued tail reads as one
+    // quoted word whose text starts with the flag.
+    expectBail("bash -lc 'echo hi'", "inline code");
+    expectBail("sh -lc \"echo hi\"", "inline code");
+    expectBail("bash -lxc 'echo hi'", "inline code");
+    expectBail("python -c'print(1)'", "inline code");
+    expectBail("python3 -c'import os'", "inline code");
+    expectBail("perl -e'print 1'", "inline code");
+    expectBail("node -e'process.exit(0)'", "inline code");
+    expectBail("ruby -e'puts 1'", "inline code");
+    expectBail("node --eval 'process.exit(0)'", "inline code");
+    // Ordinary flags on the same binaries stay parseable.
+    expect(parse("bash --norc script.sh").ok).toBe(true);
+    expect(parse("python -m pytest").ok).toBe(true);
+    expect(parse("node --check index.js").ok).toBe(true);
+    expect(parse("ruby --version").ok).toBe(true);
+  });
+
   it("bails on quoting tricks around the command name and on cd escapes", () => {
     expectBail('"git" status', "quoted");
     expectBail("cd / && ls", "leaves the workspace");
@@ -118,19 +139,49 @@ describe("happy paths", () => {
   });
 
   it("treats redirection targets as paths, and ignores inert ones", () => {
-    expect(values(parse("echo hi > out.txt"), "path")).toEqual(["/ws/out.txt"]);
-    expect(values(parse("echo hi >> /ws/logs/app.log"), "path")).toEqual(["/ws/logs/app.log"]);
-    expect(values(parse("npm run build > /dev/null 2>&1"), "path")).toEqual([]);
-    expect(values(parse("sort < /ws/in.txt"), "path")).toEqual(["/ws/in.txt"]);
+    const allowPaths = (command: string) => {
+      const r = parse(command);
+      if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
+      return r.targets.filter((t) => t.param === "path" && !t.denyOnly).map((t) => t.value);
+    };
+    expect(allowPaths("echo hi > out.txt")).toEqual(["/ws/out.txt"]);
+    expect(allowPaths("echo hi >> /ws/logs/app.log")).toEqual(["/ws/logs/app.log"]);
+    expect(allowPaths("npm run build > /dev/null 2>&1")).toEqual([]);
+    expect(allowPaths("sort < /ws/in.txt")).toEqual(["/ws/in.txt"]);
   });
 
-  it("keeps flags and barewords out of the way (opaque, deny-only)", () => {
+  it("keeps flags out of the way and barewords deny-only", () => {
     const r = parse("grep -rn TODO src/");
-    expect(values(r, "path")).toEqual(["/ws/src"]);
-    if (!r.ok) throw new Error("unexpected bail");
+    if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
+    // Allow-demanded paths: only the slashed argument.
+    expect(
+      r.targets.filter((t) => t.param === "path" && !t.denyOnly).map((t) => t.value),
+    ).toEqual(["/ws/src"]);
     const opaque = r.targets.filter((t) => t.param === "arg");
     expect(opaque.map((t) => t.value)).toEqual(["TODO"]);
     expect(opaque.every((t) => t.denyOnly)).toBe(true);
+    // The bare word is ALSO deny-reachable as a path: deny must never miss a
+    // filename, while allow behavior stays unchanged (no rule demanded).
+    const denyPaths = r.targets.filter((t) => t.param === "path" && t.denyOnly);
+    expect(denyPaths.map((t) => t.value)).toEqual(["/ws/TODO"]);
+  });
+
+  it("bare filenames reach path deny rules (deny never misses)", () => {
+    const rules = compileApprovalRules({
+      allow: ["bash.cmd=rm"],
+      deny: ["bash.path=secrets.env"],
+    });
+    const verdictOf = (command: string) => {
+      const r = parse(command);
+      if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
+      return decide({ tool: "bash", recognized: true, targets: r.targets }, rules).verdict;
+    };
+    // Slashed or not, after a cd or not: the deny rule reaches all of them.
+    for (const command of ["rm secrets.env", "rm ./secrets.env", "cd sub && rm secrets.env"]) {
+      expect(verdictOf(command), command).toBe("deny");
+    }
+    // Allow behavior unchanged: a bare word demands no path rule.
+    expect(verdictOf("rm notes.txt")).toBe("allow");
   });
 
   it("respects quotes: a quoted glob or slash-word is a literal, not magic", () => {

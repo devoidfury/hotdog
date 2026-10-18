@@ -38,6 +38,25 @@ const ALWAYS_INLINE_INTERPRETERS = new Set(["awk", "gawk", "mawk"]);
 /** `find` can execute and delete on its own. */
 const FIND_BAIL_FLAGS = new Set(["-exec", "-execdir", "-ok", "-okdir", "-delete"]);
 
+/** sh-family accepts bundled one-letter flags: `-lc`, `-lxc` all turn on `-c`. */
+const SH_FAMILY = new Set(["sh", "bash", "zsh", "dash"]);
+/** Any bundled sh flag word containing `c` runs the argument as a program. */
+const SH_C_BUNDLE = /^-[a-zA-Z]*c/;
+
+/**
+ * Does this argument word turn the interpreter into a code runner? Catches the
+ * exact flag, bundled sh forms (`bash -lc '...'`), and flags glued to their
+ * operand (`python -c'print(1)'`, `node -e'...'` -- the tokenizer quotes the
+ * glued tail, exact matching alone misses both). Unknown bundlings of these
+ * commands bail too: an honest allow-rule workflow never needs them, and when
+ * unsure this layer asks.
+ */
+function runsInlineCode(cmd: string, inlineFlags: string[], text: string): boolean {
+  if (!text.startsWith("-")) return false;
+  if (SH_FAMILY.has(cmd) && SH_C_BUNDLE.test(text)) return true;
+  return inlineFlags.some((flag) => text.startsWith(flag));
+}
+
 /** Redirection targets that discard or replay output instead of data at risk. */
 const INERT_TARGETS = ["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/fd"];
 
@@ -193,7 +212,8 @@ function isDigits(text: string): boolean {
  *
  * - `cmd`: each segment's command basename -- must be allowed.
  * - `path`: path-shaped arguments and redirection targets, resolved against the segment's directory (after `cd`) -- must be allowed.
- *           A bare filename with no `/` is NOT treated as a path (it would demand a rule for every `git checkout main`); it lands in `arg`.
+ *           A bare filename with no `/` is NOT an allow-demanded path (it would demand a rule for every `git checkout main`); it lands in `arg`,
+ *           and ALSO as a denyOnly `path` target so path deny rules still reach it.
  * - `arg`: flags and non-path words -- opaque, deny-matchable only.
  */
 export function parseCommandline(command: string, workspace: Workspace): BashParse {
@@ -231,7 +251,7 @@ export function parseCommandline(command: string, workspace: Workspace): BashPar
     if (ALWAYS_BAIL.has(cmd)) return { ok: false, reason: `'${cmd}' runs arbitrary programs` };
     if (ALWAYS_INLINE_INTERPRETERS.has(cmd)) return { ok: false, reason: `'${cmd}' takes its program as an argument` };
     const inlineFlags = INLINE_CODE_FLAGS[cmd];
-    if (inlineFlags && words.slice(1).some((w) => inlineFlags.includes(w.word.text))) {
+    if (inlineFlags && words.slice(1).some((w) => runsInlineCode(cmd, inlineFlags, w.word.text))) {
       return { ok: false, reason: `'${cmd}' is running inline code` };
     }
     if (cmd === "find" && words.some((w) => FIND_BAIL_FLAGS.has(w.word.text))) {
@@ -259,6 +279,14 @@ export function parseCommandline(command: string, workspace: Workspace): BashPar
         pushPathTarget(text);
       } else {
         targets.push({ param: "arg", value: text, denyOnly: true });
+        // `rm secrets.env` names a file just as much as `rm ./secrets.env`
+        // does, and deny is the one verdict that must never miss: also emit
+        // the bare word as a denyOnly path target resolved against the
+        // cd-tracked base, so `bash.path=**/secrets.env`-style denies reach it.
+        // denyOnly keeps allow behavior unchanged (no rule demanded for
+        // `git checkout main`).
+        const bareFile = resolvePathTarget(workspace, base, text);
+        if (bareFile) targets.push({ ...bareFile, denyOnly: true });
       }
     }
 
@@ -285,17 +313,17 @@ export function parseCommandline(command: string, workspace: Workspace): BashPar
   }
 
   if (analyzed === 0) return { ok: false, reason: "nothing to analyze" };
-  // One value reached twice (an argument and its own redirection) is one ask.
-  const seen = new Set<string>();
-  return {
-    ok: true,
-    targets: targets.filter((t) => {
-      const key = `${t.param}\u0000${t.value}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }),
-  };
+  // One value reached twice (a bare-word argument and its own redirection) is
+  // one ask -- and the STRONGER form wins: an allow-demanded target replaces
+  // the denyOnly shadow the bare-word pass emitted for the same path, so
+  // `echo hi > out.txt` still demands a path allow.
+  const byKey = new Map<string, ApprovalTarget>();
+  for (const t of targets) {
+    const key = `${t.param}\u0000${t.value}`;
+    const prev = byKey.get(key);
+    if (!prev || (prev.denyOnly && !t.denyOnly)) byKey.set(key, t);
+  }
+  return { ok: true, targets: [...byKey.values()] };
 }
 
 /** Resolve a path argument to a target, or null for sinks (/dev/null & co). */

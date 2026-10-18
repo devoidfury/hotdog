@@ -49,6 +49,10 @@ describe('toolContentText', () => {
     expect(toolContentText([p])).toBe('META: {"b":"2","a":"1"}');
   });
 
+  it('degrades the bookkeeping plain-object shape to "" (cold-log entries)', () => {
+    expect(toolContentText({ session: 'x', foo: 'bar' } as unknown as never)).toBe('');
+  });
+
   it('flattens several parts in order and ignores non-tool parts', () => {
     const parts = [
       { type: 'text', text: 'harness text is ignored here' },
@@ -86,6 +90,10 @@ describe("wrapperContentText (display flattener)", () => {
     expect(wrapperContentText(null)).toBe("");
     expect(wrapperContentText(undefined)).toBe("");
   });
+
+  it("degrades the bookkeeping plain-object shape to '' (cold-log entries)", () => {
+    expect(wrapperContentText({ session: "x", foo: "bar" } as unknown as never)).toBe("");
+  });
 });
 
 describe("splitFileIncludes (attachment splitter)", () => {
@@ -114,5 +122,9 @@ describe("splitFileIncludes (attachment splitter)", () => {
   it("passes strings through with no files", () => {
     expect(splitFileIncludes("plain")).toEqual({ text: "plain", files: [] });
     expect(splitFileIncludes(null)).toEqual({ text: "", files: [] });
+  });
+
+  it("degrades the bookkeeping plain-object shape to empty text", () => {
+    expect(splitFileIncludes({ session: "x" } as unknown as never)).toEqual({ text: "", files: [] });
   });
 });

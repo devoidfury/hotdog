@@ -394,6 +394,19 @@ describe("session log replay", () => {
     expect(container.querySelector(".message.user .content")!.textContent).toBe("part one\npart two");
   });
 
+  it("tolerates bookkeeping entries with plain-object content (old cold logs)", () => {
+    // VIEW_LOG ships raw entries; bookkeeping sources carry object content.
+    // renderLogEntries flattens content before the source switch, so this
+    // must not throw (regression: "content is not iterable").
+    expect(() =>
+      ml.renderLogEntries([
+        { source: "session_start", content: { sessionId: "abc", profile: "default" } as unknown as string },
+        { source: "llm", content: "after the bookkeeping entry" },
+      ]),
+    ).not.toThrow();
+    expect(container.querySelector(".message.assistant .content")!.textContent).toContain("after the bookkeeping entry");
+  });
+
   it("log replay renders stored file-include parts as inline attachment boxes", () => {
     ml.renderLogEntries([
       {

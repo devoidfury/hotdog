@@ -12,6 +12,9 @@ import { isToolResultPart, isWrapperPart, type ToolResultContent } from "@core/c
 export function toolContentText(content: ToolResultContent | Array<unknown> | null | undefined): string {
   if (content == null) return "";
   if (typeof content === "string") return content;
+  // Persisted entries may carry the bookkeeping plain-object shape (see
+  // conversationContent() in session-log.ts); degrade it to empty, same as there.
+  if (!Array.isArray(content)) return "";
   const lines: string[] = [];
   for (const part of content) {
     if (!isToolResultPart(part)) continue;
@@ -34,6 +37,8 @@ export function toolContentText(content: ToolResultContent | Array<unknown> | nu
 export function wrapperContentText(content: string | Array<unknown> | null | undefined): string {
   if (content == null) return "";
   if (typeof content === "string") return content;
+  // Bookkeeping plain-object shape (see conversationContent() in session-log.ts).
+  if (!Array.isArray(content)) return "";
   const lines: string[] = [];
   for (const part of content) {
     if (part == null || typeof part !== "object") continue;

@@ -542,6 +542,12 @@ export class Agent implements AgentLike {
   }
 
   async #prepareIteration(iteration: number): Promise<LlmRequestParams> {
+    // Self-heal the system prompt every iteration (cached no-op when unchanged).
+    // run() builds it once per turn, but a mid-run model switch clears it
+    // (model setter -> clearSystemPrompt) and the bus allows /model while a
+    // run is in flight -- without this backstop the rest of the turn would
+    // ship requests with no system message at all.
+    await this.ensureSystemPrompt();
     await this.hooks.notifyHooks(HOOKS.TURN_START, {
       turnIndex: iteration,
       timestamp: Date.now(),

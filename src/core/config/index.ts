@@ -271,6 +271,26 @@ export async function buildConfig(
   providers: ProviderDef[];
 }> {
   const extParams = configRegistry?.getConfigParams();
+
+  // An explicitly requested config dir must exist: a typo'd --config-dir /
+  // HOTDOG_CONFIG_DIR would otherwise silently discard the providers/keys/model
+  // and surface later as a generic "No AI URL configured". An EXISTING dir with
+  // no defaults.json stays legal -- that is the isolation pattern (pure defaults
+  // + CLI flags). Enforced here, on the session-launch path, not inside
+  // loadConfig: diagnostics (info --config-debug, the early bootstrap) must be
+  // able to look at a missing/broken config without crashing.
+  if ((cliArgv.configDir || process.env.HOTDOG_CONFIG_DIR) && !cliArgv.config) {
+    const explicitDir = resolveConfigDir(cliArgv.configDir ?? undefined);
+    try {
+      await fsPromises.access(explicitDir);
+    } catch {
+      throw ConfigError.LoadFailed(
+        explicitDir,
+        "Config directory does not exist (explicitly requested via --config-dir / HOTDOG_CONFIG_DIR)",
+      );
+    }
+  }
+
   const configDir = resolveConfigDir(cliArgv.configDir ?? undefined);
 
   const config = await loadConfig(cliArgv.config ?? undefined, cliArgv.configDir ?? undefined, extParams);

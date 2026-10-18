@@ -141,8 +141,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // read it as "never ran, safe to retry" when it may have run).
   const barrierFailures = new Map<string, string>();
   // Open turns per session (v2): set on the turn_started record, cleared on
-  // turn_end. A mid-turn checkpoint uses this to re-emit the marker below
-  // the reset, so a crash after compaction still shows an open turn.
+  // turn_end. A rewind checkpoint (CONTEXT_REWOUND) uses this to re-emit the
+  // marker below the reset. Compaction never reaches this path: it fires only
+  // CONTEXT_REPLACED, which writes nothing (in-memory-only by design).
   const openTurns = new Map<string, "input" | "continuation">();
   // Track the most recent session ID so readEntries/getLogPath work correctly.
   let lastSessionId: string | null = null;

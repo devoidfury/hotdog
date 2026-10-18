@@ -31,6 +31,8 @@ The config directory is resolved in the following order:
 
 The config file itself is always named `defaults.json`.
 
+Sources 1-2 are explicit: the directory must exist, or hotdog fails at startup instead of silently falling through. An existing explicit directory without a `defaults.json` is legal and means pure built-in defaults plus CLI flags (the isolation pattern). Only the unflagged chain (3-6) falls through, ending in the bundled example with a warning.
+
 Copy the bundled `examples/minimal-config/config` to `~/.config/hotdog` or `/etc/hotdog` to persist your config, or use `HOTDOG_CONFIG_DIR`/`--config-dir` to keep this folder wherever you want it.
 
 ---

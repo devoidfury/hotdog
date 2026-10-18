@@ -752,7 +752,7 @@ describe("livelock cap on auto-resume (restoreSessionIntoAgent)", () => {
   it("a RESET between auto-resumes does not recharge the cap (lifetime-scoped counter)", async () => {
     const sessionId = uniqueId("cap-reset");
     try {
-      // input (progress), 2 autos, a mid-turn checkpoint (RESET), 3 more
+      // input (progress), 2 autos, a rewind checkpoint (RESET), 3 more
       // autos: 5 consecutive since the last progress in the FULL log, but
       // only 3 in the post-RESET epoch -- an epoch-scoped counter would
       // wrongly allow this resume.
@@ -940,11 +940,13 @@ describe("turn lifecycle records (protocol v2)", () => {
       }
     });
 
-    it("re-emits the open-turn marker after a mid-turn checkpoint", async () => {
+    it("re-emits the open-turn marker after a rewind checkpoint", async () => {
+      // The rewind path (/undo, /rewind, /clear, handoff): the checkpoint
+      // resets the epoch view, and the open-turn marker must be re-emitted
+      // below it. Compaction is NOT this path -- see the CONTEXT_REPLACED
+      // contract test below.
       const sessionId = uniqueId("rewind-reemit");
       try {
-        // Open the turn, then checkpoint (compaction): the reset truncates the
-        // epoch view, and the marker must be re-emitted below it.
         await ext.hooks[HOOKS.TURN_START]!({ turnIndex: 1, agent: { sessionId }, kind: "input" });
         await ext.hooks[HOOKS.CONTEXT_REWOUND]!({
           agent: { sessionId },
@@ -954,6 +956,34 @@ describe("turn lifecycle records (protocol v2)", () => {
         const starts = entries.filter((e) => e.source === LOG_SOURCE.TURN_STARTED);
         expect(starts).toHaveLength(1);
         expect(starts[0]!.content).toEqual({ kind: "input" });
+        expect(collectDurabilityFacts(entries).openTurn).toBe(true);
+      } finally {
+        cleanup(sessionId);
+      }
+    });
+
+    it("compaction (CONTEXT_REPLACED) never checkpoints: no RESET, epoch keeps the pre-compaction history", async () => {
+      // Production contract (agent.replaceContext fires only CONTEXT_REPLACED):
+      // the writer deliberately registers no handler for it. Compaction is
+      // in-memory-only -- no RESET is written, the epoch keeps the
+      // pre-compaction entries, and resume rebuilds the full history (the
+      // summary exists only in the live agent). The old test hand-fired
+      // CONTEXT_REWOUND to fake a compaction checkpoint; this pins the truth.
+      expect(ext.hooks[HOOKS.CONTEXT_REPLACED]).toBeUndefined();
+
+      const sessionId = uniqueId("compact-noreset");
+      try {
+        await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+          message: { role: "user", content: "pre-compaction work" },
+          agent: { sessionId },
+        });
+        await ext.hooks[HOOKS.TURN_START]!({ turnIndex: 1, agent: { sessionId }, kind: "input" });
+        // A production compaction would fire CONTEXT_REPLACED here; the
+        // writer sees nothing, so the epoch below is exactly what a resume
+        // would replay.
+        const entries = await readSessionEntries(sessionId);
+        expect(entries.some((e) => e.source === LOG_SOURCE.RESET)).toBe(false);
+        expect(entries.some((e) => e.source === LOG_SOURCE.INPUT)).toBe(true);
         expect(collectDurabilityFacts(entries).openTurn).toBe(true);
       } finally {
         cleanup(sessionId);

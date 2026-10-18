@@ -411,6 +411,19 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
     log(`  ${mark}  ${c.source.padEnd(28)} ${c.path}`);
   }
   const configDir = chain.find((c) => c.chosen)!.path;
+  // An explicit source (flag/env) must exist: buildConfig fails startup on a
+  // missing one (it never falls through to defaults). Say so here too -- rescue
+  // is where users come to understand why the run died.
+  const chosenCandidate = chain.find((c) => c.chosen)!;
+  if (
+    !chosenCandidate.exists &&
+    (chosenCandidate.source === "--config-dir flag" ||
+      chosenCandidate.source.startsWith("HOTDOG_CONFIG_DIR"))
+  ) {
+    problems++;
+    log(`  PROBLEM: the explicit config directory does not exist.`);
+    log("  Startup will fail here: an explicit --config-dir / HOTDOG_CONFIG_DIR never falls through to defaults.");
+  }
   log();
 
   // 2. Which defaults.json files are in play: the explicit --config file plus

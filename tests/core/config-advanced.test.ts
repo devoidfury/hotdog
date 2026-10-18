@@ -259,13 +259,35 @@ describe("buildConfig", () => {
     }
   });
 
-  it("handles missing config dir gracefully", async () => {
-    const result = await buildConfig({ configDir: '/nonexistent/path' });
-    expect(result.resolved).not.toBeNull();
-    expect(result.modelRegistry).not.toBeNull();
-    // No model anywhere in the resolution chain: resolution stays null and
-    // the hard error surfaces at agent construction, not here.
-    expect(result.resolved.model).toBeNull();
+  it("throws when an explicitly supplied config dir does not exist", async () => {
+    // A typo'd --config-dir must not silently discard the model/keys/providers
+    // and surface later as a generic resolution failure.
+    await expect(buildConfig({ configDir: '/nonexistent/path' })).rejects.toThrow(
+      /explicitly requested/,
+    );
+  });
+
+  it("accepts an explicit EMPTY config dir: the isolation pattern (pure defaults + flags)", async () => {
+    // Existing dir, no defaults.json -- the wire-conformance harness runs this
+    // shape on purpose. Isolation stays legal; only a missing dir is fatal.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-empty-config-'));
+    try {
+      const result = await buildConfig({ configDir: tmpDir });
+      expect(result.resolved).toBeDefined();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("throws when HOTDOG_CONFIG_DIR points at a directory without defaults.json", async () => {
+    const prev = process.env.HOTDOG_CONFIG_DIR;
+    process.env.HOTDOG_CONFIG_DIR = '/nonexistent/env/path';
+    try {
+      await expect(buildConfig({})).rejects.toThrow(/explicitly requested/);
+    } finally {
+      if (prev === undefined) delete process.env.HOTDOG_CONFIG_DIR;
+      else process.env.HOTDOG_CONFIG_DIR = prev;
+    }
   });
 
   it("merges profile from file", async () => {

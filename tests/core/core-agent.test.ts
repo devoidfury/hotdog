@@ -886,6 +886,38 @@ describe('Agent — end-to-end loop', () => {
       await agent.ensureSystemPrompt();
       expect(agent.context.getSystemPrompt()).toContain('Harness model: replaced-model');
     });
+
+    it('rebuilds the system prompt before the next request after a mid-run model switch', async () => {
+      // Regression: /model during a run is allowed (the bus mid-turn guard
+      // covers Clear/Undo/Rewind/Fork only) and the model setter clears the
+      // cached prompt. run() builds the prompt once per turn, so without the
+      // #prepareIteration backstop every remaining request of the turn went
+      // out with no system message at all.
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'flip', arguments: '{}', id: 'call_1' }], usage: { total_tokens: 5 } }),
+          buildStreamResponse({ content: 'done', usage: { total_tokens: 6 } }),
+        ],
+      });
+      const { agent, hooks, toolRegistry } = createFixture({ mockLLM });
+      // Bake the model name into the prompt so the rebuilt message is identifiable.
+      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, async ({ agent: a }: { agent: unknown }) => {
+        return { name: 'env-chunk', priority: 100, content: `Harness model: ${(a as { model: string }).model}` };
+      });
+      const flip = simpleTool('flip');
+      flip.execute = async () => {
+        agent.model = 'mid-run-model'; // what /model does mid-turn
+        return 'flipped';
+      };
+      toolRegistry.register('flip', flip);
+
+      await agent.run('go');
+
+      expect(mockLLM.callCount).toBe(2);
+      const second = mockLLM.lastMessages as Message[];
+      expect(second[0]!.role).toBe('system');
+      expect(second[0]!.content).toContain('Harness model: mid-run-model');
+    });
   });
 
 // resolveModelConfig tests moved to providers.test.ts

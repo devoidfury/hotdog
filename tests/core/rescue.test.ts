@@ -366,6 +366,14 @@ async function runMain(
 }
 
 describe("main rescue subcommand", () => {
+  it("flags an explicit config dir that does not exist (startup would fail)", async () => {
+    const missing = path.join(os.tmpdir(), `rescue-missing-${Date.now()}`);
+    const { exitCode, stdout } = await runMain(["--config-dir", missing, "rescue"]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("PROBLEM");
+    expect(stdout).toContain("never falls through");
+  });
+
   it("reports a broken config with context, exit 1, and leaves the file alone", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-int-"));
     try {

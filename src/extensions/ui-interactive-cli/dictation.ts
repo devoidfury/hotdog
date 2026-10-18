@@ -68,9 +68,18 @@ export function createArecordCapture(command: string = "arecord"): CaptureFactor
       stdio: "ignore",
     });
     let spawnError: Error | null = null;
+    // Settled at spawn time (close, or spawn error): a capture that dies
+    // before stop() is called must not leave stop() awaiting a close event
+    // that already fired (that hang printed "Transcribing…" forever).
+    let settleClose: () => void = () => {};
+    const closed = new Promise<void>((resolve) => {
+      settleClose = resolve;
+    });
     proc.on("error", (err: Error) => {
       spawnError = err;
+      settleClose();
     });
+    proc.on("close", () => settleClose());
 
     return {
       async stop(): Promise<Uint8Array> {
@@ -78,7 +87,7 @@ export function createArecordCapture(command: string = "arecord"): CaptureFactor
         const p = proc;
         proc = null;
         p.kill("SIGINT");
-        await new Promise<void>((resolve) => p.on("close", () => resolve()));
+        await closed;
         try {
           if (spawnError) throw spawnError;
           const bytes = readFileSync(file);

@@ -206,6 +206,28 @@ describe("createArecordCapture", () => {
     await expect(capture.stop()).rejects.toThrow();
   });
 
+  it("stop rejects (no hang) when the process died before stop", async () => {
+    // Real timing: Ctrl+X lands seconds after spawn, so the error/close
+    // events have already dispatched. A close listener attached in stop()
+    // would await an event that never comes (the "Transcribing…" hang).
+    const capture = createArecordCapture("hotdog-no-such-capture-cmd")();
+    await new Promise((r) => setTimeout(r, 100));
+    await expect(capture.stop()).rejects.toThrow();
+  });
+
+  it("stop rejects (no hang) when the capture command exits early", async () => {
+    // e.g. arecord dies on a device error mid-recording: close fires while
+    // the user is still talking, so it has already fired by the time of stop.
+    const dir = mkdtempSync(join(tmpdir(), "dictation-test-"));
+    const stub = join(dir, "dying-arecord.sh");
+    writeFileSync(stub, "#!/bin/sh\nexit 1\n");
+    chmodSync(stub, 0o755);
+
+    const capture = createArecordCapture(stub)();
+    await new Promise((r) => setTimeout(r, 100));
+    await expect(capture.stop()).rejects.toThrow();
+  });
+
   it("cancel is safe with nothing recorded", () => {
     const capture = createArecordCapture("hotdog-no-such-capture-cmd")();
     expect(() => capture.cancel()).not.toThrow();

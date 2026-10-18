@@ -4,7 +4,7 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { createChat, type ChatController } from "@extensions/webui/ui/chat.ts";
-import { createActivityRegistry, formatElapsed, SubagentsStrip, TaskPanel, type ActivityRegistry } from "@extensions/webui/ui/subagents.tsx";
+import { createActivityRegistry, formatElapsed, SubagentsStrip, TaskPanel, chipLabel, runDiscriminators, statusGlyph, MAX_STRIP_CHIPS, type ActivityRegistry } from "@extensions/webui/ui/subagents.tsx";
 import { createCoalescer } from "@extensions/webui/ui/batch.ts";
 import { mount, renderToString } from "@utils/jsx";
 import type { TaskInfoWire } from "@extensions/websocket/protocol.ts";
@@ -539,12 +539,12 @@ describe("SubagentsStrip", () => {
     );
     const chips = host.querySelectorAll(".subagent-chip");
     // Live (queued 500, running 0) before settled (2000, 1000), each group
-    // newest-before-oldest.
+    // newest-before-oldest. The tooltip carries full id, description, status.
     expect([...chips].map((c) => c.getAttribute("title"))).toEqual([
-      "wait: wait",
-      "run: run",
-      "done-new: (no description)",
-      "done-old: done-old",
+      "wait: wait \u2014 queued",
+      "run: run \u2014 running",
+      "done-new: (no description) \u2014 completed",
+      "done-old: done-old \u2014 completed",
     ]);
     expect(chips[1]!.getAttribute("class")).toContain("status-running");
     expect(chips[1]!.getAttribute("class")).toContain(" open");
@@ -555,6 +555,110 @@ describe("SubagentsStrip", () => {
     (chips[0] as unknown as HTMLElement).click();
     (chips[3] as unknown as HTMLElement).click();
     expect(opened).toEqual(["wait", "done-old"]);
+  });
+
+  it("chip labels use the task_id step suffix, glyphs not badge text", () => {
+    const host = fakeEl("div");
+    mount(
+      <SubagentsStrip
+        tasks={[wire("20261017-1848-hotdog-archeology:report-review#2", "completed", 1, "Workflow 'hotdog-archeology' step review", 2000)]}
+        now={2000}
+        openTaskIds={[]}
+        onOpen={() => {}}
+      />,
+      host as unknown as Parameters<typeof mount>[1],
+    );
+    const chip = host.querySelector(".subagent-chip")!;
+    // Suffix after the last ':'; single run -> NO run discriminator.
+    expect(chip.querySelector(".subagent-id")!.textContent).toBe("report-review#2");
+    expect(chip.querySelector(".subagent-glyph")!.textContent).toBe("\u2713");
+    // Status badge text is gone; the full id lives in the tooltip.
+    expect(chip.textContent).not.toContain("COMPLETED");
+    expect(chip.getAttribute("title")).toContain("20261017-1848-hotdog-archeology:report-review#2");
+  });
+
+  it("falls back to the first words of the description for colon-less ids", () => {
+    expect(chipLabel(wire("plain-id", "queued", 0, "review the three report sections carefully now"))).toBe(
+      "review the three report sections",
+    );
+    expect(chipLabel(wire("run:a", "queued", 0, "desc"))).toBe("a");
+    expect(chipLabel(wire("run:", "queued", 0, ""))).toBe("run:");
+  });
+
+  it("adds run discriminators only when 2+ runs share the strip", () => {
+    const one = runDiscriminators([wire("runX:step#1", "completed", 0)]);
+    expect(one.size).toBe(0);
+
+    const tasks = [
+      wire("20261017-1848-hotdog-archeology:report-review#2", "completed", 0),
+      wire("20261017-1848-hotdog-archeology:synthesis#1", "completed", 0),
+      wire("20261016-0900-other-run:dig#3", "completed", 0),
+    ];
+    const discs = runDiscriminators(tasks);
+    // Shortest distinguishing trailing segment group per run.
+    expect(discs.get("20261017-1848-hotdog-archeology:report-review#2")).toBe("archeology");
+    expect(discs.get("20261016-0900-other-run:dig#3")).toBe("run");
+
+    const host = fakeEl("div");
+    mount(
+      <SubagentsStrip tasks={tasks} now={0} openTaskIds={[]} onOpen={() => {}} />,
+      host as unknown as Parameters<typeof mount>[1],
+    );
+    const ids = [...host.querySelectorAll(".subagent-id")].map((e) => e.textContent);
+    expect(ids).toContain("archeology:report-review#2");
+    expect(ids).toContain("run:dig#3");
+  });
+
+  it("collapses past MAX_STRIP_CHIPS behind a +N chip that expands the strip", () => {
+    const many = Array.from({ length: 11 }, (_, i) => wire(`r:step#${i}`, "completed", i));
+    const host = fakeEl("div");
+    let expanded = false;
+    const render = () =>
+      mount(
+        <SubagentsStrip
+          tasks={many}
+          now={0}
+          openTaskIds={[]}
+          onOpen={() => {}}
+          expanded={expanded}
+          onToggleExpanded={() => {
+            expanded = !expanded;
+          }}
+        />,
+        host as unknown as Parameters<typeof mount>[1],
+      );
+    const m = render();
+    let chips = host.querySelectorAll(".subagent-chip");
+    expect(chips).toHaveLength(MAX_STRIP_CHIPS + 1); // capped + the overflow chip
+    const more = chips[8]!;
+    expect(more.getAttribute("class")).toContain("subagent-more");
+    expect(more.textContent).toBe("+3");
+    (more as unknown as HTMLElement).click();
+    expect(expanded).toBe(true);
+    m.render(
+      <SubagentsStrip
+        tasks={many}
+        now={0}
+        openTaskIds={[]}
+        onOpen={() => {}}
+        expanded={expanded}
+        onToggleExpanded={() => {
+          expanded = !expanded;
+        }}
+      />,
+    );
+    chips = host.querySelectorAll(".subagent-chip");
+    expect(chips).toHaveLength(11 + 1); // every task + collapse chip
+    expect(host.children[0]!.getAttribute("class")).toContain("expanded");
+  });
+
+  it("statusGlyph maps known statuses and dots the unknown", () => {
+    expect(statusGlyph("completed")).toBe("\u2713");
+    expect(statusGlyph("failed")).toBe("\u2717");
+    expect(statusGlyph("cancelled")).toBe("\u2298");
+    expect(statusGlyph("running")).toBe("\u25d0");
+    expect(statusGlyph("queued")).toBe("\u25cb");
+    expect(statusGlyph("weird")).toBe("\u2022");
   });
 });
 

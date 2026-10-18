@@ -115,12 +115,35 @@ describe("WebSocketChannel - write()", () => {
       },
     },
     {
+      name: "TOOL_CALL with display + toolCallId",
+      event: {
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "read",
+        input: '{"path":"a.ts"}',
+        toolCallId: "tc-1",
+        display: "a.ts",
+      },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.TOOL_CALL);
+        expect(msg.display).toBe("a.ts");
+        expect(msg.toolCallId).toBe("tc-1");
+      },
+    },
+    {
       name: "TOOL_RESULT",
       event: { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", content: "file.txt" },
       expected: (msg: any) => {
         expect(msg.type).toBe(S2C.TOOL_RESULT);
         expect(msg.name).toBe("bash");
         expect(msg.output).toBe("file.txt");
+      },
+    },
+    {
+      name: "TOOL_RESULT with toolCallId",
+      event: { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", content: "ok", toolCallId: "tc-2" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.TOOL_RESULT);
+        expect(msg.toolCallId).toBe("tc-2");
       },
     },
     {

@@ -80,9 +80,14 @@ export class WebSocketChannel extends Channel {
       case OUTPUT_EVENT.TOOL_CALL:
         msg.name = event.toolName;
         msg.args = event.input;
+        // The call id lets clients pair results to calls; display is the
+        // tool's own header (see ToolCallEvent).
+        if (event.toolCallId) msg.toolCallId = event.toolCallId;
+        if (event.display !== undefined) msg.display = event.display;
         break;
       case OUTPUT_EVENT.TOOL_RESULT:
         msg.name = event.toolName;
+        if (event.toolCallId) msg.toolCallId = event.toolCallId;
         // Content parts travel as text on this transport: the browser has no
         // part renderer, so flatten the fields here (display, not a format).
         msg.output = toolContentText(event.content);

@@ -1316,8 +1316,11 @@ describe("log replay via SWITCH_SESSION", () => {
   });
 
   /** Create a session, write a log for it, and switch the socket onto it. */
-  async function switchWithLog(entries: Array<Record<string, unknown>>): Promise<MockWs> {
-    const wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+  async function switchWithLog(
+    entries: Array<Record<string, unknown>>,
+    buildAgent = createWsMockAgentFactory(),
+  ): Promise<MockWs> {
+    const wsServer = createWsServer(createWsMockCore(), { buildAgent });
     servers.push(wsServer);
     const ws = createWsMockWs();
     const { sessionId } = await wsServer.sessionRegistry.create({});
@@ -1375,6 +1378,41 @@ describe("log replay via SWITCH_SESSION", () => {
     expect(toolResultMsg).toBeDefined();
     expect(toolResultMsg.output).toBe("File content here");
     expect(toolResultMsg.name).toBe("read_file");
+    // Call ids ride the wire so clients pair results to calls exactly.
+    expect(toolCallMsg.toolCallId).toBe("call_123");
+    expect(toolResultMsg.toolCallId).toBe("call_123");
+    // No registry on the mock agent: no display, header falls back client-side.
+    expect(toolCallMsg.display).toBeUndefined();
+  });
+
+  it("replays tool calls with a display header resolved from the session's registry", async () => {
+    const fakeTool = {
+      callDisplay: (input: string | Record<string, unknown> | null) =>
+        `read ${typeof input === "string" ? String(JSON.parse(input).path) : "?"}`,
+    };
+    const ws = await switchWithLog(
+      [
+        {
+          source: "llm",
+          content: "",
+          tool_calls: [
+            { id: "call_9", type: "function", function: { name: "read_file", arguments: '{"path":"notes.md"}' } },
+          ],
+        },
+      ],
+      async (config: { model?: string; sessionId?: string }) =>
+        // Object.assign dodges the excess-property check: toolRegistry is a
+        // real Agent member that the structural AgentLike mock type omits.
+        makeWsMockAgent(
+          Object.assign({ sessionId: config.sessionId || "test" }, {
+            toolRegistry: { get: (n: string) => (n === "read_file" ? fakeTool : undefined) },
+          }),
+        ),
+    );
+    const msgs = ws.messages.map((m) => JSON.parse(m));
+    const toolCallMsg = msgs.find((m: any) => m.type === S2C.TOOL_CALL);
+    expect(toolCallMsg.display).toBe("read notes.md");
+    expect(toolCallMsg.toolCallId).toBe("call_9");
   });
 
   it("never replays bookkeeping records as conversation", async () => {

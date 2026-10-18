@@ -45,8 +45,7 @@
     "layers": [
       { "source": "cli", "key": "toolfmt" },
       { "source": "config", "key": "toolCallDisplayFormat" },
-      { "source": "config", "key": "toolfmt" },
-      { "default": "  \u2192 {} {}" }
+      { "source": "config", "key": "toolfmt" }
     ]
   },
   "toolOutputFmt": {

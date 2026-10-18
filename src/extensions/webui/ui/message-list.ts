@@ -12,6 +12,8 @@ import {
   type MdDocument,
 } from "@utils/md-parser.ts";
 import { toolContentText, wrapperContentText, splitFileIncludes } from "@utils/tool-content.ts";
+import { ToolBlockController } from "./tool-block.tsx";
+import type { DomNode } from "@utils/jsx";
 
 // Debug instrumentation, enabled with ?debug=1 in the URL.
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
@@ -57,8 +59,8 @@ interface UserMessage { content: string; images?: UiImage[]; files?: Array<{ pat
 interface AssistantMessage { content: string; }
 interface StreamingChunk { content: string; }
 interface ThinkingMessage { content: string; }
-interface ToolCallMessage { name: string; args: string; }
-interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; }
+interface ToolCallMessage { name: string; args: string; display?: string; toolCallId?: string; }
+interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; toolCallId?: string; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
 
@@ -151,7 +153,10 @@ export function createMessageList(
 ): MessageListManager {
   let currentAssistantEl: HTMLDivElement | null = null;
   let currentThinkingEl: HTMLDivElement | null = null;
-  let currentToolCalls: HTMLDivElement[] = [];
+  // Tool-call/result pairing: by tool-call id when the wire carries one,
+  // else the oldest unresolved call with the same name (id-less log replay).
+  const toolBlocksById = new Map<string, ToolBlockController>();
+  const pendingToolCallsByName = new Map<string, ToolBlockController[]>();
   let hasToolCallsSinceLastAssistant = false;
   let hideThinkingValue = hideThinking;
 
@@ -390,68 +395,46 @@ export function createMessageList(
     el.innerHTML = mdTreeToHtml(tree);
   }
 
-  function handleToolCall({ name, args }: ToolCallMessage): void {
+  function handleToolCall({ name, args, display, toolCallId }: ToolCallMessage): void {
     // Finalize the current assistant message so tool calls appear as
     // separate blocks after the user message, not nested inside the assistant.
     finalizeAssistant();
 
-    const block = document.createElement("div");
-    block.className = "tool-call-block";
+    const host = document.createElement("div");
+    container.appendChild(host);
+    const block = new ToolBlockController(host as unknown as DomNode, { name, args, display });
+    if (toolCallId) toolBlocksById.set(toolCallId, block);
+    const queue = pendingToolCallsByName.get(name);
+    if (queue) queue.push(block);
+    else pendingToolCallsByName.set(name, [block]);
 
-    const header = document.createElement("div");
-    header.className = "tool-call-header";
-    header.innerHTML = `<span>🛠 ${sanitize(name)}</span><span>${sanitize(args)}</span>`;
-
-    const body = document.createElement("div");
-    body.className = "tool-call-body hidden";
-    body.textContent = args;
-
-    header.addEventListener("click", () => {
-      // Swap in the full output when expanding.
-      const isHidden = body.classList.contains("hidden");
-      if (isHidden && body.dataset.fullOutput) {
-        body.textContent = body.dataset.fullOutput;
-      }
-      body.classList.toggle("hidden");
-    });
-
-    block.appendChild(header);
-    block.appendChild(body);
-    container.appendChild(block);
-
-    currentToolCalls.push(block);
     hasToolCallsSinceLastAssistant = true;
     scrollBottom();
   }
 
-  function handleToolResult({ name, output, error, images }: ToolResultMessage): void {
-    // Attach the result to the most recent matching tool call block.
-    const blocks = container.querySelectorAll<HTMLDivElement>(".tool-call-block");
-    let target: HTMLDivElement | null = null;
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const hdr = blocks[i]!.querySelector(".tool-call-header span");
-      if (hdr && hdr.textContent?.includes(name)) {
-        target = blocks[i]!;
-        break;
+  function handleToolResult({ name, output, error, images, toolCallId }: ToolResultMessage): void {
+    // Pair by tool-call id first; without one (old logs), fall back to the
+    // oldest unresolved call of the same name.
+    let block = toolCallId ? toolBlocksById.get(toolCallId) : undefined;
+    if (block && toolCallId) {
+      toolBlocksById.delete(toolCallId);
+      const queue = pendingToolCallsByName.get(name);
+      if (queue) {
+        const at = queue.indexOf(block);
+        if (at !== -1) queue.splice(at, 1);
       }
     }
-    if (!target) return;
-
-    const body = target.querySelector<HTMLDivElement>(".tool-call-body");
-    if (body) {
-      // Keep the full output for expansion; show a truncated preview.
-      const fullOutput = output || error || "";
-      body.dataset.fullOutput = fullOutput;
-      body.dataset.truncated = "true";
-
-      if (output)
-        body.textContent =
-          output.slice(0, 2000) + "\n\n<click to show full response>";
-      else if (error) body.textContent = `Error: ${error}`;
+    if (!block) {
+      const queue = pendingToolCallsByName.get(name);
+      block = queue && queue.length > 0 ? queue.shift() : undefined;
     }
-    // Thumbnails live under the block (outside the collapsed body) so they
-    // stay visible; images never render as raw markup (see appendImages).
-    if (images && images.length > 0) appendImages(target, images);
+    if (!block) return; // orphan result: no matching call to attach to
+
+    block.setResult({
+      ...(output !== undefined ? { output } : {}),
+      ...(error !== undefined ? { error } : {}),
+      ...(images ? { images } : {}),
+    });
     scrollBottom();
   }
 
@@ -762,7 +745,6 @@ export function createMessageList(
       currentThinkingEl.remove();
     }
     currentThinkingEl = null;
-    currentToolCalls = [];
     hasToolCallsSinceLastAssistant = false;
     streamingParser = null;
     thinkingParser = null;
@@ -789,12 +771,22 @@ export function createMessageList(
     }
   }
 
+  /** Tear down every live tool-block mount (the DOM is dropped by the caller). */
+  function destroyToolBlocks(): void {
+    for (const block of toolBlocksById.values()) block.destroy();
+    for (const queue of pendingToolCallsByName.values()) {
+      for (const block of queue) block.destroy();
+    }
+    toolBlocksById.clear();
+    pendingToolCallsByName.clear();
+  }
+
   function clear(): void {
     container.innerHTML = "";
     followBottom = true;
     currentAssistantEl = null;
     currentThinkingEl = null;
-    currentToolCalls = [];
+    destroyToolBlocks();
     hasToolCallsSinceLastAssistant = false;
     streamingParser = null;
     thinkingParser = null;
@@ -869,7 +861,7 @@ export function createMessageList(
                 : typeof toolCall.args === "string"
                   ? toolCall.args
                   : JSON.stringify(toolCall.arguments ?? toolCall.args ?? {}, null, 2);
-              handleToolCall({ name, args });
+              handleToolCall({ name, args, toolCallId: tc.id || undefined });
             }
           }
           if (content.trim()) {
@@ -883,6 +875,7 @@ export function createMessageList(
               (entry as { tool_name?: string | null }).tool_name || extractToolNameFromEntry(entry),
             output: content,
             images: entry.images,
+            toolCallId: (entry as { tool_call_id?: string | null }).tool_call_id || undefined,
           });
           break;
         case "compaction":
@@ -910,6 +903,9 @@ export function createMessageList(
   /** Detach the container's scroll listener; the container itself is left untouched. */
   function destroy(): void {
     container.removeEventListener("scroll", onScroll);
+    // The manager is dropped after this: no tool block may outlive it with
+    // a live mount still waiting for a result.
+    destroyToolBlocks();
   }
 
   return {

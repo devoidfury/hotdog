@@ -25,14 +25,91 @@ export function formatElapsed(info: TaskInfoWire, now: number): string {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
+/** Chips rendered before the strip collapses behind a "+N" overflow chip. */
+export const MAX_STRIP_CHIPS = 8;
+
+/**
+ * Chip label: the task_id suffix after the last ':' (the step name, e.g.
+ * `report-review#2`); without a ':' the first few words of the description;
+ * failing everything, the raw id. The full id + description ride the title.
+ */
+export function chipLabel(task: TaskInfoWire): string {
+  const at = task.taskId.lastIndexOf(":");
+  if (at !== -1 && at < task.taskId.length - 1) return task.taskId.slice(at + 1);
+  const words = (task.description || "").trim().split(/\s+/).slice(0, 5).join(" ");
+  return words || task.taskId;
+}
+
+/** The run part of a task id (`<run>:<step>` convention); null when unrunned. */
+function runOf(taskId: string): string | null {
+  const at = taskId.lastIndexOf(":");
+  return at > 0 ? taskId.slice(0, at) : null;
+}
+
+/**
+ * Per-task run discriminator, present ONLY when the strip spans 2+ distinct
+ * runs (one run's chips need no prefix). The shortest trailing dash-segment
+ * group that no other run also ends with, so `hotdog-archeology` beats
+ * reprinting `20261017-1848-hotdog-archeology`.
+ */
+export function runDiscriminators(tasks: TaskInfoWire[]): Map<string, string> {
+  const runs = new Map<string, string[]>();
+  for (const t of tasks) {
+    const run = runOf(t.taskId);
+    if (!run) continue;
+    const ids = runs.get(run);
+    if (ids) ids.push(t.taskId);
+    else runs.set(run, [t.taskId]);
+  }
+  const out = new Map<string, string>();
+  if (runs.size <= 1) return out;
+  const runList = [...runs.keys()];
+  runList.forEach((run, i) => {
+    const segs = run.split("-");
+    let disc = run;
+    for (let k = 1; k < segs.length; k++) {
+      const cand = segs.slice(-k).join("-");
+      if (!runList.some((other, j) => j !== i && (other === cand || other.endsWith("-" + cand)))) {
+        disc = cand;
+        break;
+      }
+    }
+    for (const id of runs.get(run)!) out.set(id, disc);
+  });
+  return out;
+}
+
+const STATUS_GLYPHS: Record<string, string> = {
+  completed: "✓",
+  failed: "✗",
+  cancelled: "⊘",
+  running: "◐",
+  queued: "○",
+};
+
+/** Status as a glyph (color comes from the chip's status-* class). */
+export function statusGlyph(status: string): string {
+  return STATUS_GLYPHS[status] ?? "•";
+}
+
 interface StripProps {
   tasks: TaskInfoWire[];
   now: number;
   openTaskIds: string[];
   onOpen: (taskId: string) => void;
+  /** Overflow revealed (the strip lists every task instead of +N behind a chip). */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 }
 
-export function SubagentsStrip({ tasks, now, openTaskIds, onOpen }: StripProps) {
+export function SubagentsStrip({
+  tasks,
+  now,
+  openTaskIds,
+  onOpen,
+  expanded = false,
+  onToggleExpanded,
+}: StripProps) {
   if (tasks.length === 0) return null;
   // Live tasks first, newest before oldest among the settled ones.
   const ordered = tasks.slice().sort((a, b) => {
@@ -41,23 +118,54 @@ export function SubagentsStrip({ tasks, now, openTaskIds, onOpen }: StripProps) 
     if (liveA !== liveB) return liveB - liveA;
     return b.createdAt - a.createdAt;
   });
+  const discriminators = runDiscriminators(ordered);
+  const overflow = !expanded && ordered.length > MAX_STRIP_CHIPS ? ordered.length - MAX_STRIP_CHIPS : 0;
+  const visible = overflow > 0 ? ordered.slice(0, MAX_STRIP_CHIPS) : ordered;
   return (
-    <div id="subagents-strip" title="Background task agents">
+    <div
+      id="subagents-strip"
+      className={expanded ? "expanded" : undefined}
+      title="Background task agents"
+    >
       <span className="subagents-label">Subagents</span>
-      {ordered.map((t) => (
+      {visible.map((t) => {
+        const disc = discriminators.get(t.taskId);
+        return (
+          <button
+            type="button"
+            key={t.taskId}
+            className={`subagent-chip status-${t.status}${openTaskIds.includes(t.taskId) ? " open" : ""}`}
+            title={`${t.taskId}: ${t.description || "(no description)"} — ${t.status}`}
+            onClick={() => onOpen(t.taskId)}
+          >
+            <span className="subagent-glyph" aria-hidden="true">
+              {statusGlyph(t.status)}
+            </span>
+            <span className="subagent-id">{disc ? `${disc}:` : ""}{chipLabel(t)}</span>
+            <span className="subagent-elapsed">{formatElapsed(t, now)}</span>
+          </button>
+        );
+      })}
+      {overflow > 0 ? (
         <button
           type="button"
-          key={t.taskId}
-          className={`subagent-chip status-${t.status}${openTaskIds.includes(t.taskId) ? " open" : ""}`}
-          title={`${t.taskId}: ${t.description || "(no description)"}`}
-          onClick={() => onOpen(t.taskId)}
+          className="subagent-chip subagent-more"
+          title={`Show ${overflow} more task agent${overflow === 1 ? "" : "s"}`}
+          onClick={onToggleExpanded}
         >
-          <span className="subagent-id">{t.taskId}</span>
-          <span className="subagent-desc">{t.description || "(no description)"}</span>
-          <span className="subagent-status">{t.status}</span>
-          <span className="subagent-elapsed">{formatElapsed(t, now)}</span>
+          +{overflow}
         </button>
-      ))}
+      ) : null}
+      {expanded && ordered.length > MAX_STRIP_CHIPS ? (
+        <button
+          type="button"
+          className="subagent-chip subagent-more"
+          title="Collapse the strip"
+          onClick={onToggleExpanded}
+        >
+          −
+        </button>
+      ) : null}
     </div>
   );
 }

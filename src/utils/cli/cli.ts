@@ -89,6 +89,13 @@ export function formatCompacting(messageCount: number, keepRecent: number): stri
 }
 
 /**
+ * Visual cue for an unconfigured tool-call line. Kept in the sink (not the
+ * schema) so the schema default cannot shadow the tool's own callDisplay:
+ * template > display > `prefix + name args`.
+ */
+const TOOL_CALL_PREFIX = "  \u2192 ";
+
+/**
  * Format a tool call display using the tool formatter.
  */
 export function formatToolCall(toolName: string, input: string, toolFmt: string): string {
@@ -297,9 +304,17 @@ export class CliOutputSink extends OutputSink {
 
   override emitToolCall(event: ToolCallEvent): void {
     this._transitionTo(Modes.ToolCall);
-    this._processContent(
-      spoofSafe(formatToolCall(event.toolName, event.input, this.toolCallDisplayFormat || "{}: {}")),
-    );
+    // Precedence: explicit user template (the schema carries no default for
+    // toolCallDisplayFormat, so an unset option really means "user chose
+    // nothing") > the tool's semantic header (Tool.callDisplay) > name +
+    // raw args. display never passes through a template -- its text may
+    // legitimately contain "{}".
+    const text = this.toolCallDisplayFormat
+      ? formatToolCall(event.toolName, event.input, this.toolCallDisplayFormat)
+      : event.display !== undefined
+        ? `${TOOL_CALL_PREFIX}${event.display}`
+        : formatToolCall(event.toolName, event.input, `${TOOL_CALL_PREFIX}{} {}`);
+    this._processContent(spoofSafe(text));
   }
 
   override emitToolResult(event: ToolResultEvent): void {

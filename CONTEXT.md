@@ -67,7 +67,7 @@ Status markers: entries tagged **(planned)** are design intent -- nothing in the
 - **Output** — Decoupling agent from UI layer. Agent emits raw data; UI layer formats display. Deliberate domain boundary.
 - **Sink** — UI implementation of OutputSink. `CliOutputSink` extends `OutputSink` with formatting and color support. One sink per agent. Task agents get a silent sink that emits nothing to the UI (only the task-complete callback matters).
 - **OutputEvent** — Domain concept: events representing changes in the agent's state. Emitted to the sink for display. 15 types: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `THINKING`, `TOOL_CALL`, `TOOL_RESULT`, `COMPACTING`, `COMMAND_RESULT`, `QUESTION`, `STREAMING_CHUNK`, `STREAMING_REASONING_CHUNK`, `TASK_PROGRESS`, `TOKEN_USAGE`, `COMPACTION_RESULT`, `SESSION_STATE`, `SYSTEM_MESSAGE`.
-- **TruncatedOutput** — Tool output head-truncated at a max-lines cap with a `[truncated, N more lines]` tail note (`truncateOutput()` in tool-utils); context manipulation, not UI formatting. **Pager** (planned) — paginating the remainder into context; not implemented.
+- **TruncatedOutput** — Tool output head-truncated at a max-lines cap with a `[truncated, N more lines]` tail note (`truncateOutput()` in tool-utils); context manipulation, not UI formatting.
 
 ## Persistence
 

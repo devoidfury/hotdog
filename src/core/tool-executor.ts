@@ -4,7 +4,7 @@ import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } fr
 import { logger } from "@utils/logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
-import type { ToolRegistry } from "./extensions/tool-registry.ts";
+import { safeCallDisplay, type ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
 import type { HookPayloads } from "./extensions/types.ts";
 import { Workspace } from "@utils/workspace.ts";
@@ -139,7 +139,12 @@ export class ToolExecutor {
       );
     }
 
-    this.#deps.emitOutput("tool_call", { toolName, input, toolCallId });
+    this.#deps.emitOutput("tool_call", {
+      toolName,
+      input,
+      toolCallId,
+      display: safeCallDisplay(this.#deps.toolRegistry.get(toolName), input),
+    });
     await hooks.notifyHooks(HOOKS.TOOL_BEFORE_EXECUTE, {
       toolCallId,
       toolName,

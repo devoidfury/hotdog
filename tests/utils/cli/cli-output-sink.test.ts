@@ -66,6 +66,56 @@ describe("CliOutputSink", () => {
     expect(stdoutWrites.some((w) => w.includes("bash"))).toBe(true);
   });
 
+  describe("emitToolCall display precedence", () => {
+    it("uses the event display when no template is configured", () => {
+      const plain = new CliOutputSink({ palette: new ColorPalette({ use_colors: false }) });
+      plain.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "read",
+        input: '{"path":"src/a.ts","offset":200,"limit":202}',
+        toolCallId: "1",
+        display: "src/a.ts (lines 200-402)",
+      });
+      const written = stdoutWrites.join("");
+      // Arrow cue retained even without a template.
+      expect(written).toContain("→ src/a.ts (lines 200-402)");
+      // Raw args JSON never reaches the header when display is present.
+      expect(written).not.toContain('"path"');
+    });
+
+    it("explicit toolCallDisplayFormat wins over display", () => {
+      sink.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "bash",
+        input: '{"command":"ls"}',
+        toolCallId: "1",
+        display: "bash: ls",
+      });
+      const written = stdoutWrites.join("");
+      expect(written).toContain("→ bash");
+      expect(written).toContain('{"command":"ls"}');
+      expect(written).not.toContain("bash: ls");
+    });
+
+    it("falls back to the default template when display is absent", () => {
+      const plain = new CliOutputSink({ palette: new ColorPalette({ use_colors: false }) });
+      plain.emit({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: '{"command":"ls"}', toolCallId: "1" });
+      expect(stdoutWrites.join("")).toContain("→ bash {\"command\":\"ls\"}");
+    });
+
+    it("display is never run through a template (brace-safe)", () => {
+      const plain = new CliOutputSink({ palette: new ColorPalette({ use_colors: false }) });
+      plain.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "edit",
+        input: "{}",
+        toolCallId: "1",
+        display: "a.ts: '{}' → '{}'",
+      });
+      expect(stdoutWrites.join("")).toContain("a.ts: '{}' → '{}'");
+    });
+  });
+
   it("emitToolResult writes to stdout", () => {
     sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "{}", content: "output", toolCallId: "1" });
     expect(stdoutWrites.some((w) => w.includes("output"))).toBe(true);

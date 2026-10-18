@@ -37,6 +37,7 @@ import {
 } from "@core/session/session-log.ts";
 import { Message } from "@core/context/message.ts";
 import { formatToolResult } from "@core/extensions/tool-utils.ts";
+import { safeCallDisplay, type ToolRegistry } from "@core/extensions/tool-registry.ts";
 import type { QuestionDef } from "@core/context/input.ts";
 import { AgentError, formatError } from "@core/error.ts";
 import { parseForkArg } from "@core/command-handlers.ts";
@@ -797,6 +798,7 @@ function replayLogSlice(
   sessionId: string,
   entries: LogEntry[],
   startIdx: number,
+  toolRegistry?: ToolRegistry,
 ): void {
   const callNames = new Map<string, string>();
   for (const e of entries) {
@@ -837,12 +839,19 @@ function replayLogSlice(
           : undefined;
         if (toolCalls && toolCalls.length > 0) {
           for (const tc of toolCalls) {
+            const name = tc.function?.name || "unknown";
+            const args = tc.function?.arguments || "{}";
+            // Replay has no live tool object: resolve the display header from
+            // the registry by name (undefined when the tool is unknown now).
+            const display = safeCallDisplay(toolRegistry?.get(name), args);
             ws.send(
               JSON.stringify({
                 type: S2C.TOOL_CALL,
                 sessionId,
-                name: tc.function?.name || "unknown",
-                args: tc.function?.arguments || "{}",
+                name,
+                args,
+                ...(tc.id ? { toolCallId: tc.id } : {}),
+                ...(display !== undefined ? { display } : {}),
               }),
             );
           }
@@ -855,14 +864,14 @@ function replayLogSlice(
       }
       case LOG_SOURCE.TOOL_RESULT: {
         const toolImgs = wireImages(e.images);
+        const callId = typeof e.tool_call_id === "string" ? e.tool_call_id : undefined;
         ws.send(
           JSON.stringify({
             type: S2C.TOOL_RESULT,
             sessionId,
-            name:
-              (typeof e.tool_call_id === "string" ? callNames.get(e.tool_call_id) : undefined) ||
-              "unknown",
+            name: (callId ? callNames.get(callId) : undefined) || "unknown",
             output: toolContentText(content ?? ""),
+            ...(callId ? { toolCallId: callId } : {}),
             ...(toolImgs ? { images: toolImgs } : {}),
           }),
         );
@@ -957,7 +966,7 @@ export async function attachLiveSession(
     ...(replayDelta ? { replayDelta: true } : {}),
   });
 
-  replayLogSlice(ws, sessionId, full, start);
+  replayLogSlice(ws, sessionId, full, start, agent?.toolRegistry);
 
   // Flush in-flight chunks that haven't reached the log yet (their LLM
   // entry lands when the response completes).
@@ -1263,12 +1272,17 @@ function replaySessionHistory(
           if (toolCalls && toolCalls.length > 0) {
             pendingToolCalls = toolCalls;
             for (const tc of toolCalls) {
+              const name = tc.function?.name || "unknown";
+              const args = tc.function?.arguments || "{}";
+              const display = safeCallDisplay((agent as Agent).toolRegistry?.get(name), args);
               ws.send(
                 JSON.stringify({
                   type: S2C.TOOL_CALL,
                   sessionId,
-                  name: tc.function?.name || "unknown",
-                  args: tc.function?.arguments || "{}",
+                  name,
+                  args,
+                  ...(tc.id ? { toolCallId: tc.id } : {}),
+                  ...(display !== undefined ? { display } : {}),
                 }),
               );
             }
@@ -1302,6 +1316,7 @@ function replaySessionHistory(
               // Parts (tool-result) flatten for this string-only transport;
               // legacy entries are already plain text.
               output: toolContentText(msg.content ?? ""),
+              ...(msg.toolCallId ? { toolCallId: msg.toolCallId } : {}),
               ...(toolImgs ? { images: toolImgs } : {}),
             }),
           );

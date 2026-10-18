@@ -247,6 +247,8 @@ interface ToolCallMessage {
   type: "toolCall";
   name: string;
   args: string;
+  display?: string;
+  toolCallId?: string;
 }
 
 interface ToolResultMessage {
@@ -255,6 +257,7 @@ interface ToolResultMessage {
   output?: string;
   error?: string;
   images?: UiImage[];
+  toolCallId?: string;
 }
 
 interface CompactingMessage {

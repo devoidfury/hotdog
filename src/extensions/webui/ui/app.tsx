@@ -30,6 +30,7 @@ const contextMenuAtom = reactiveState<ContextMenuState | null>(null);
 // last entry renders above the others. nowAtom ticks once per second while a
 // task is live so elapsed times refresh.
 const openTasksAtom = reactiveState<string[]>([]);
+const stripExpandedAtom = reactiveState<boolean>(false);
 const nowAtom = reactiveState<number>(Date.now());
 let taskTickTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -196,6 +197,7 @@ function handleAuthFailure(): void {
     taskTickTimer = null;
   }
   openTasksAtom([]);
+  stripExpandedAtom(false);
   // The message-list div persists across login screens (main-ui is only
   // class-hidden), and each new chat attaches a fresh MessageListManager.
   // Clear the container so stale messages from the old chat do not pile up.
@@ -738,6 +740,8 @@ function App() {
             now={nowAtom()}
             openTaskIds={openTasks}
             onOpen={openTask}
+            expanded={stripExpandedAtom()}
+            onToggleExpanded={() => stripExpandedAtom(!stripExpandedAtom())}
           />
 
           {working ? (

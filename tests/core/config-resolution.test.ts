@@ -112,8 +112,11 @@ describe("CONFIG_KEYS schema", () => {
       cli: { toolfmt: "cli" },
       config: { toolCallDisplayFormat: "new", toolfmt: "legacy" },
     })).toBe("cli");
-    // Default when nothing is set
-    expect(resolveKey("toolCallDisplayFormat", CONFIG_KEYS.toolCallDisplayFormat, baseContext)).toBe("  \u2192 {} {}");
+    // Unset resolves to undefined: the schema carries NO default, so a CLI
+    // sink can tell "user chose a template" from "nothing chosen" and let
+    // the tool's own callDisplay header win in between (the sink holds the
+    // `  → {} {}` template as its own last resort).
+    expect(resolveKey("toolCallDisplayFormat", CONFIG_KEYS.toolCallDisplayFormat, baseContext)).toBeUndefined();
   });
 
   it("timeouts resolve with correct fallback", () => {

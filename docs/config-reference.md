@@ -203,10 +203,10 @@ Format string for thinking/reasoning output. `{}` is replaced with the thinking 
 
 - **Type:** `string`
 - **CLI flag:** `--toolfmt`
-- **Default:** `"  → {} {}"`
-- **Resolution:** CLI > config > default
+- **Default:** unset — tool calls print the tool's own semantic header (e.g. `bash: ls -la`, `src/a.ts (lines 200-402)`), falling back to `  → name {args}` when a tool cannot summarize the call
+- **Resolution:** CLI > config > built-in fallback
 
-Format string for tool call display. First `{}` is the tool name, second `{}` is the arguments. The legacy `toolfmt` config key is still honored as a fallback for pre-rename config files.
+Format string for tool call display. First `{}` is the tool name, second `{}` is the arguments. Setting it opts out of the per-tool semantic headers entirely. The legacy `toolfmt` config key is still honored as a fallback for pre-rename config files.
 
 ```json
 { "toolCallDisplayFormat": "🔧 {} {}" }
@@ -1246,21 +1246,6 @@ Parsing is fail-closed: the call block must run to the end of the text (prose af
 
 ```json
 { "toolCallRepair": { "enabled": true, "maxRepairsPerTurn": 5 } }
-```
-
-### `toolPager`
-
-[Tool Pager](../src/extensions/tool-pager) — tool-result size hygiene on the `tool:result` pipeline: oversized outputs are written whole to `<sessionsDir>/<sessionId>/tool-results/` and replaced in context by a preview plus a one-line note with the file path and the sha256 of the full output (head-keep for reads, tail-keep for `bash`); byte-identical repeat results are stubbed from the 2nd occurrence on; model-facing error bodies are capped at 2048 chars.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `boolean` | `true` | Enable/disable the pager. |
-| `maxLines` | `number` | `600` | Spill when the output exceeds this many lines (lines OR bytes). |
-| `maxBytes` | `number` | `50000` | Spill when the output exceeds this many bytes (lines OR bytes). |
-| `previewChars` | `number` | `2000` | Characters kept in context next to the file reference. |
-
-```json
-{ "toolPager": { "maxBytes": 100000 } }
 ```
 
 ### `userGate`

@@ -158,20 +158,61 @@ describe("thinking", () => {
 
 describe("tool calls and results", () => {
   it("renders a collapsible tool call and attaches matching results", () => {
-    ml.handleToolCall({ name: "read", args: '{"path":"a.ts"}' });
+    ml.handleToolCall({ name: "read", args: '{"path":"a.ts"}', toolCallId: "t1" });
     const block = container.querySelector(".tool-call-block")!;
-    expect(block.querySelector(".tool-call-header span")!.textContent).toContain("read");
+    expect(block.querySelector(".tool-call-name")!.textContent).toContain("read");
+    expect(block.querySelector(".tool-call-display")!.textContent).toBe("a.ts");
     expect(block.querySelector(".tool-call-body")!.classList.contains("hidden")).toBe(true);
 
-    ml.handleToolResult({ name: "read", output: "x".repeat(2500) });
-    const body = block.querySelector(".tool-call-body") as HTMLElement;
-    expect(body.dataset.fullOutput).toHaveLength(2500);
-    expect(body.textContent).toContain("click to show full response");
+    ml.handleToolResult({ name: "read", output: "x".repeat(2500), toolCallId: "t1" });
+    const pre = block.querySelector(".tool-result-pre")!;
+    expect(pre.textContent).toContain("500 more chars");
 
-    // Expand swaps in the full output.
+    // Expand reveals the body; "show full result" swaps in the full output.
     (block.querySelector(".tool-call-header") as HTMLElement).click();
-    expect(body.classList.contains("hidden")).toBe(false);
-    expect(body.textContent).toHaveLength(2500);
+    expect(block.querySelector(".tool-call-body")!.classList.contains("hidden")).toBe(false);
+    const toggles = block.querySelectorAll<HTMLElement>(".tool-raw-toggle");
+    toggles[toggles.length - 1]!.click();
+    expect(block.querySelector(".tool-result-pre")!.textContent).toHaveLength(2500);
+  });
+
+  it("prefers the server display header and never shows raw JSON there", () => {
+    ml.handleToolCall({
+      name: "read",
+      args: '{"path":"src/a.ts","offset":200,"limit":202}',
+      display: "src/a.ts (lines 200-402)",
+    });
+    const header = container.querySelector(".tool-call-header")!;
+    expect(header.querySelector(".tool-call-display")!.textContent).toBe("src/a.ts (lines 200-402)");
+  });
+
+  it("falls back to a compact summary when no display is sent", () => {
+    ml.handleToolCall({ name: "weird", args: '{"alpha":"beta","gamma":{"deep":1}}' });
+    const header = container.querySelector(".tool-call-header")!;
+    expect(header.querySelector(".tool-call-display")!.textContent).toBe("beta");
+    // The header is a summary, not the raw JSON line.
+    expect(header.textContent).not.toContain('{"alpha"');
+  });
+
+  it("pairs results by tool-call id, not name", () => {
+    ml.handleToolCall({ name: "bash", args: '{"command":"ls"}', toolCallId: "a" });
+    ml.handleToolCall({ name: "bash", args: '{"command":"pwd"}', toolCallId: "b" });
+    // Results arrive newest-first: name-based pairing would hit the wrong call.
+    ml.handleToolResult({ name: "bash", output: "RESULT-B", toolCallId: "b" });
+    const blocks = container.querySelectorAll(".tool-call-block");
+    expect(blocks[0]!.querySelector(".tool-result-pre")).toBeNull();
+    expect(blocks[1]!.querySelector(".tool-result-pre")!.textContent).toBe("RESULT-B");
+    ml.handleToolResult({ name: "bash", output: "RESULT-A", toolCallId: "a" });
+    expect(blocks[0]!.querySelector(".tool-result-pre")!.textContent).toBe("RESULT-A");
+  });
+
+  it("falls back to oldest-unresolved same-name pairing without ids", () => {
+    ml.handleToolCall({ name: "bash", args: '{"command":"ls"}' });
+    ml.handleToolCall({ name: "bash", args: '{"command":"pwd"}' });
+    ml.handleToolResult({ name: "bash", output: "FIRST" });
+    const blocks = container.querySelectorAll(".tool-call-block");
+    expect(blocks[0]!.querySelector(".tool-result-pre")!.textContent).toBe("FIRST");
+    expect(blocks[1]!.querySelector(".tool-result-pre")).toBeNull();
   });
 
   it("renders error results and ignores results with no matching call", () => {
@@ -179,7 +220,33 @@ describe("tool calls and results", () => {
     expect(container.children).toHaveLength(0);
     ml.handleToolCall({ name: "bash", args: "ls" });
     ml.handleToolResult({ name: "bash", error: "boom" });
-    expect((container.querySelector(".tool-call-body") as HTMLElement).textContent).toBe("Error: boom");
+    const block = container.querySelector(".tool-call-block")!;
+    expect(block.className).toContain("status-error");
+    expect(block.querySelector(".tool-result-section")!.textContent).toContain("Error: boom");
+  });
+
+  it("renders edit calls as a diff body", () => {
+    ml.handleToolCall({
+      name: "edit",
+      args: JSON.stringify({ path: "a.ts", oldString: "one\ntwo\nthree", newString: "one\nTWO\nthree" }),
+    });
+    const block = container.querySelector(".tool-call-block")!;
+    (block.querySelector(".tool-call-header") as HTMLElement).click();
+    expect(block.querySelector(".diff-del")!.textContent).toContain("two");
+    expect(block.querySelector(".diff-add")!.textContent).toContain("TWO");
+    const lines = block.querySelectorAll(".diff-line");
+    expect(lines[0]!.classList.contains("diff-ctx")).toBe(true);
+    expect(lines[lines.length - 1]!.classList.contains("diff-ctx")).toBe(true);
+  });
+
+  it("toggles args between pretty and raw JSON", () => {
+    ml.handleToolCall({ name: "grep", args: '{"pattern":"x","path":"src"}' });
+    const block = container.querySelector(".tool-call-block")!;
+    (block.querySelector(".tool-call-header") as HTMLElement).click();
+    const argsPre = block.querySelector(".tool-args")!;
+    expect(argsPre.textContent).toContain('"pattern": "x"'); // pretty
+    block.querySelector<HTMLElement>(".tool-raw-toggle")!.click();
+    expect(argsPre.textContent).toBe('{"pattern":"x","path":"src"}'); // raw
   });
 
   it("sanitizes tool names in headers", () => {
@@ -310,9 +377,11 @@ describe("session log replay", () => {
     expect(container.querySelectorAll(".message.user")).toHaveLength(2);
     expect(container.querySelector(".thinking-block")!.textContent).toContain("because");
     expect(container.querySelectorAll(".tool-call-block")).toHaveLength(2);
-    // grep result attaches to the most recent matching call (the grep one).
-    const bodies = container.querySelectorAll<HTMLElement>(".tool-call-body");
-    expect(bodies[0]!.dataset.fullOutput).toContain("hit");
+    // Entries carry no tool_call_id: the grep result pairs by name to the
+    // grep block (the only pending "grep" call).
+    const blocks = container.querySelectorAll(".tool-call-block");
+    expect(blocks[0]!.querySelector(".tool-result-pre")!.textContent).toContain("hit");
+    expect(blocks[1]!.querySelector(".tool-result-pre")!.textContent).toContain("did it");
     expect(container.querySelector(".message.assistant .content")!.textContent).toContain("answer");
     expect(texts(".compacting .bubble")[0]).toContain("compressed");
   });
@@ -349,9 +418,9 @@ describe("session log replay", () => {
       { source: "llm", content: "", tool_calls: [{ id: "1", name: "read", args: { p: 1 } }] },
       { source: "tool_result", content: "not json at all" },
     ]);
-    // extractToolName returns "tool"; no header matches, so the result is
-    // silently dropped and the block keeps its original (absent) output.
-    expect((container.querySelector(".tool-call-body") as HTMLElement).dataset.fullOutput).toBeUndefined();
+    // extractToolName returns "tool"; no pending call has that name, so the
+    // result is silently dropped and the block keeps no result section.
+    expect(container.querySelector(".tool-call-block .tool-result-section")).toBeNull();
   });
 
   it("a stored tool-result part names its own tool and flattens for display", () => {
@@ -376,10 +445,11 @@ describe("session log replay", () => {
     // The entry carries no tool_name: the stored part names the tool, which
     // matches the pending call. The body shows the flattened fields, not
     // markup or at-rest JSON.
-    const body = container.querySelector(".tool-call-body") as HTMLElement;
-    expect(body.dataset.fullOutput).toBe(
-      'partial\nError: boom\nHINT: check the path\nMETA: {"exit_code":"1"}',
-    );
+    const pre = container.querySelector(".tool-result-pre")!;
+    expect(pre.textContent).toContain("partial");
+    expect(pre.textContent).toContain("Error: boom");
+    expect(pre.textContent).toContain("HINT: check the path");
+    expect(pre.textContent).toContain('META: {"exit_code":"1"}');
   });
 });
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **tool calls carry their semantic header end to end.** `Tool.callDisplay()` existed on every tool but had no production caller: the UIs printed raw args JSON instead. The `tool_call` output event now carries `display`; the CLI prints it by default (an explicit `toolCallDisplayFormat` still wins, and that key no longer carries a schema default so a chosen template can be told apart from none), and the websocket sends it on the live, log-replay, and fork-replay paths. Webui tool blocks render the header instead of the arg dump (args move into the collapsed body behind a pretty/raw toggle), pair results to calls by tool-call id instead of scanning backwards by name, and render edit calls as a diff (`oldString`/`newString` client-side, prefix/suffix-trimmed). `tools/preview.ts` (`bun run preview`) renders the real components into a standalone HTML page for design review.
+
+- **webui subagents strip is scannable now.** Chips carry a one-line step label (the task_id suffix after the last `:`, else the first words of the description) with a colored status glyph instead of a wrapped four-line id plus a COMPLETED badge; a run discriminator prefixes the label only when several runs share the strip. The strip is bounded at two rows with the remainder behind a "+N" chip (click reveals/collapses); full id, description, and status ride the tooltip.
+
 - webui - fix numbered loose lists markup
 
 - [BRK] dropped support for bun older than 1.4.2

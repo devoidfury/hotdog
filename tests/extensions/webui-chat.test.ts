@@ -196,6 +196,9 @@ function taskInfo(taskId: string, status = "running"): TaskInfoWire {
     createdAt: 1,
     startedAt: null,
     endedAt: null,
+    activeMs: 0,
+    inRun: false,
+    turnStartedAt: null,
   };
 }
 

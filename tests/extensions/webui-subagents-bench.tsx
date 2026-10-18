@@ -43,6 +43,9 @@ function taskInfo(taskId: string): TaskInfoWire {
     createdAt: 0,
     startedAt: null,
     endedAt: null,
+    activeMs: 0,
+    inRun: true,
+    turnStartedAt: Date.now(),
   };
 }
 

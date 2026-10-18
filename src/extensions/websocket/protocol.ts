@@ -229,6 +229,12 @@ export interface TaskInfoWire {
   createdAt: number;
   startedAt: number | null;
   endedAt: number | null;
+  /** Accumulated milliseconds the task's own agent turns ran (banked at turn ends). */
+  activeMs: number;
+  /** True while an agent turn is in flight; RUNNING && !inRun means parked (judge/lane/retry wait). */
+  inRun: boolean;
+  /** Wall start of the in-flight turn, null when none; live display adds (now - turnStartedAt). */
+  turnStartedAt: number | null;
 }
 
 /**

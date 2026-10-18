@@ -15,14 +15,30 @@ import type { TaskInfoWire } from "@extensions/websocket/protocol.ts";
 import { mount, type DomNode, type Ref } from "@utils/jsx";
 import type { TaskActivityBlock } from "./chat.ts";
 
+/**
+ * Milliseconds the chip's clock shows. Only the task's own agent-turn time
+ * counts: queued tasks tick their wall-clock wait, an in-flight turn ticks
+ * from its anchor on top of the banked total, and a parked RUNNING task
+ * (judge running for it, waiting on a lane slot, between warm retries) sits
+ * frozen at the accumulated total -- so terminal and parked tasks read the
+ * same way (accumulated active time).
+ */
 export function formatElapsed(info: TaskInfoWire, now: number): string {
-  const start = info.startedAt ?? info.createdAt;
-  const end = info.endedAt ?? now;
-  const secs = Math.max(0, Math.floor((end - start) / 1000));
+  const ms =
+    info.status === "queued"
+      ? Math.max(0, now - info.createdAt)
+      : info.activeMs +
+        (info.turnStartedAt === null ? 0 : Math.max(0, now - info.turnStartedAt));
+  const secs = Math.max(0, Math.floor(ms / 1000));
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m ${secs % 60}s`;
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+/** RUNNING with no agent turn in flight: parked (judge/lane/retry wait). */
+function isParked(info: TaskInfoWire): boolean {
+  return info.status === "running" && !info.inRun;
 }
 
 /** Chips rendered before the strip collapses behind a "+N" overflow chip. */
@@ -130,19 +146,20 @@ export function SubagentsStrip({
       <span className="subagents-label">Subagents</span>
       {visible.map((t) => {
         const disc = discriminators.get(t.taskId);
+        const parked = isParked(t);
         return (
           <button
             type="button"
             key={t.taskId}
-            className={`subagent-chip status-${t.status}${openTaskIds.includes(t.taskId) ? " open" : ""}`}
-            title={`${t.taskId}: ${t.description || "(no description)"} — ${t.status}`}
+            className={`subagent-chip status-${t.status}${parked ? " waiting" : ""}${openTaskIds.includes(t.taskId) ? " open" : ""}`}
+            title={`${t.taskId}: ${t.description || "(no description)"} — ${parked ? "waiting" : t.status}`}
             onClick={() => onOpen(t.taskId)}
           >
             <span className="subagent-glyph" aria-hidden="true">
-              {statusGlyph(t.status)}
+              {parked ? "\u25cc" : statusGlyph(t.status)}
             </span>
             <span className="subagent-id">{disc ? `${disc}:` : ""}{chipLabel(t)}</span>
-            <span className="subagent-elapsed">{formatElapsed(t, now)}</span>
+            <span className={`subagent-elapsed${parked ? " waiting" : ""}`}>{formatElapsed(t, now)}</span>
           </button>
         );
       })}
@@ -213,14 +230,15 @@ export function TaskPanel({
 }: PanelProps) {
   const steerable = task.status === "running";
   const cancellable = steerable || task.status === "queued";
+  const parked = isParked(task);
   return (
     <div className="task-overlay" data-task-id={task.taskId} style={{ zIndex: String(zBase) }}>
       <div className="task-overlay-header">
-        <span className="subagent-status">{task.status}</span>
+        <span className="subagent-status">{parked ? "waiting" : task.status}</span>
         <span className="task-overlay-title" title={task.description}>
           {task.taskId}
         </span>
-        <span className="task-overlay-elapsed">{formatElapsed(task, now)}</span>
+        <span className={`task-overlay-elapsed${parked ? " waiting" : ""}`}>{formatElapsed(task, now)}</span>
         {cancellable ? (
           <button
             type="button"

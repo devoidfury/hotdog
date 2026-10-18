@@ -482,7 +482,7 @@ export class WorkflowRun {
         nr.task = null;
         critique = null;
         if (nr.runtimeKilled) {
-          this.#settleNode(nr, "failed", `max_runtime exceeded (${this.#runtimeMs(n)}ms)`);
+          this.#settleNode(nr, "failed", this.#maxRuntimeDetail(nr));
           return;
         }
         nr.detail = `attempt ${nr.attempt} ${turn.status}: ${turn.result}`;
@@ -526,7 +526,7 @@ export class WorkflowRun {
       if (gateResult.ok) {
         if (nr.runtimeKilled) {
           this.#releaseTask(nr);
-          this.#settleNode(nr, "failed", `max_runtime exceeded (${this.#runtimeMs(n)}ms)`);
+          this.#settleNode(nr, "failed", this.#maxRuntimeDetail(nr));
           return;
         }
         const released = task ? this.#cfg.tasks.completeTask(task.id) : false;
@@ -553,7 +553,7 @@ export class WorkflowRun {
       });
       if (nr.runtimeKilled || this.#runtimeElapsed(nr)) {
         this.#releaseTask(nr);
-        this.#settleNode(nr, "failed", `max_runtime exceeded (${this.#runtimeMs(n)}ms) before acceptance`);
+        this.#settleNode(nr, "failed", `${this.#maxRuntimeDetail(nr)} before acceptance`);
         return;
       }
       if (nr.attempt >= accept.maxAttempts || !accept.retryOn.includes(gateResult.kind)) {
@@ -853,9 +853,21 @@ export class WorkflowRun {
     return mins * 60_000;
   }
 
-  #runtimeElapsed(nr: NodeRun): boolean {
+  /** Turn time actually used: banked plus the live in-flight turn (may exceed
+   * the cap slightly -- the kill lands at turn granularity, which is itself
+   * the diagnostic). */
+  #runtimeUsedMs(nr: NodeRun): number {
     const live = nr.runtimeRunningSince === null ? 0 : Date.now() - nr.runtimeRunningSince;
-    return nr.runtimeUsedMs + live >= this.#runtimeMs(nr.node);
+    return nr.runtimeUsedMs + live;
+  }
+
+  #runtimeElapsed(nr: NodeRun): boolean {
+    return this.#runtimeUsedMs(nr) >= this.#runtimeMs(nr.node);
+  }
+
+  /** Cap-kill failure detail: time used vs the cap (the cap alone is useless). */
+  #maxRuntimeDetail(nr: NodeRun): string {
+    return `max_runtime exceeded (used ${this.#runtimeUsedMs(nr)}ms of ${this.#runtimeMs(nr.node)}ms cap, attempt ${nr.attempt})`;
   }
 
   /** onTurnStart: the worker began running; arm the deadline for the cap left. */

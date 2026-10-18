@@ -73,11 +73,24 @@ describe("TaskManager observer", () => {
     const statuses = events
       .filter((e) => e.kind === "task")
       .map((e) => (e.kind === "task" ? e.task.status : "?"));
+    // Spawn (queued), status -> running, then the two turn-boundary snapshots
+    // (turn start arms the live anchor; turn end banks it and, for a parked
+    // task, freezes the display clock while status stays RUNNING), then the
+    // terminal transition.
     expect(statuses).toEqual([
       TASK_STATUS.QUEUED,
       TASK_STATUS.RUNNING,
+      TASK_STATUS.RUNNING,
+      TASK_STATUS.RUNNING,
       TASK_STATUS.COMPLETED,
     ]);
+    const turnStart = events[2]!.kind === "task" ? events[2]!.task : null;
+    expect(turnStart?.inRun).toBe(true);
+    expect(turnStart?.turnStartedAt).not.toBeNull();
+    const turnEnd = events[3]!.kind === "task" ? events[3]!.task : null;
+    expect(turnEnd?.inRun).toBe(false);
+    expect(turnEnd?.turnStartedAt).toBeNull();
+    expect(turnEnd?.activeMs).toBeGreaterThanOrEqual(0);
     const last = events[events.length - 1]!;
     expect(last.kind).toBe("task");
     expect(last.kind === "task" && last.task.startedAt).toBeTruthy();

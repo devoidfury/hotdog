@@ -1941,6 +1941,19 @@ body {
     color: var(--text-muted);
 }
 
+/* Parked RUNNING task (its judge running, waiting on a lane slot, between
+   warm retries): no agent turn in flight, so the clock is frozen at the
+   accumulated active total. Muted treatment reads as paused, not working. */
+.subagent-chip.waiting .subagent-glyph {
+    color: var(--text-muted);
+}
+
+.subagent-elapsed.waiting,
+.task-overlay-elapsed.waiting {
+    opacity: 0.55;
+    font-style: italic;
+}
+
 .task-overlay {
     position: fixed;
     top: 12%;

@@ -48,11 +48,29 @@ export interface TaskInfo {
   startedAt: number | null;
   /** Set on the terminal transition; null until then. */
   endedAt: number | null;
+  /**
+   * Accumulated wall milliseconds the task's OWN agent turns have run, banked
+   * at each turn end. Excludes lane-queue waits, judging parks, and between-
+   * retry gaps (mirrors the engine's runtime-cap accounting). The display
+   * clock should use activeMs (+ live turn time) rather than now - startedAt,
+   * so parked RUNNING tasks freeze instead of ticking.
+   */
+  activeMs: number;
+  /** True while an agent turn is in flight. RUNNING && !inRun means parked. */
+  inRun: boolean;
+  /**
+   * Wall start of the in-flight turn; null when none. Live display =
+   * activeMs + (now - turnStartedAt); frozen at activeMs while null.
+   */
+  turnStartedAt: number | null;
 }
 
 /**
  * Observation stream for external consumers (the websocket/webui relay).
- * `task` fires once at spawn and on every status change with a fresh snapshot;
+ * `task` fires once at spawn, on every status change, and at every turn
+ * boundary (start/end) with a fresh snapshot -- the turn-boundary events carry
+ * the inRun/turnStartedAt flips the display clock needs while status stays
+ * RUNNING (parked judge waits, warm retries);
  * `activity` forwards every OutputEvent the task agent's sink receives, tagged with the task id.
  * Task output never reaches the main chat transcript through this path.
  */
@@ -330,6 +348,10 @@ interface TaskEntry {
   parked: boolean;
   /** True while an agent turn is in flight. */
   inRun: boolean;
+  /** Accumulated agent-turn milliseconds, banked at each turn end (see TaskInfo.activeMs). */
+  activeMs: number;
+  /** Wall start of the in-flight turn; null when none (see TaskInfo.turnStartedAt). */
+  turnStartedAt: number | null;
   /** True while a warm taskTurn waits for a free lane slot (granted by #admit). */
   turnPending: boolean;
   /** True between a #admit grant of a warm turn and the turn actually starting (holds the slot). */
@@ -523,6 +545,9 @@ export class TaskManager {
       createdAt: entry.createdAt,
       startedAt: entry.startedAt,
       endedAt: entry.endedAt,
+      activeMs: entry.activeMs,
+      inRun: entry.inRun,
+      turnStartedAt: entry.turnStartedAt,
     };
   }
 
@@ -542,6 +567,15 @@ export class TaskManager {
       status === TASK_STATUS.CANCELLED
     ) {
       entry.endedAt = now;
+      // A terminal transition can cut across an in-flight turn (synthesized
+      // cancels, release races): bank the partial turn so the terminal
+      // snapshot's activeMs is complete and frozen (the guarded bank in
+      // #driveTurn then skips).
+      if (entry.turnStartedAt !== null) {
+        entry.activeMs += Math.max(0, now - entry.turnStartedAt);
+        entry.turnStartedAt = null;
+        entry.inRun = false;
+      }
     }
     this.#notify({ kind: "task", task: this.#infoOf(entry) });
   }
@@ -691,6 +725,8 @@ export class TaskManager {
       blocked: false,
       parked: false,
       inRun: false,
+      activeMs: 0,
+      turnStartedAt: null,
       turnPending: false,
       turnGranted: false,
       turnWaiters: [],
@@ -1549,6 +1585,11 @@ export class TaskManager {
     prompt: TurnPrompt,
   ): Promise<TurnResult> {
     entry.inRun = true;
+    entry.turnStartedAt = Date.now();
+    // Turn-start snapshot: the display clock needs the live anchor even when
+    // the status stays RUNNING (a warm retry after a park never re-notifies
+    // through #setStatus).
+    this.#notify({ kind: "task", task: this.#infoOf(entry) });
     // Turn-start signal (runtime-cap accounting): the lane is in hand and the
     // agent turn begins here. A faulty callback must not disturb the turn.
     try {
@@ -1604,6 +1645,15 @@ export class TaskManager {
       this.#providerHealth.noteUp(entry.provider);
     }
     entry.inRun = false;
+    // Bank the finished turn (display accounting mirror of the engine's cap:
+    // only the task's own turns run the clock). Guarded because a terminal
+    // transition may have banked it already (see #setStatus).
+    if (entry.turnStartedAt !== null) {
+      entry.activeMs += Math.max(0, Date.now() - entry.turnStartedAt);
+      entry.turnStartedAt = null;
+    }
+    // Turn-end snapshot: parked tasks flip to the frozen waiting clock here.
+    this.#notify({ kind: "task", task: this.#infoOf(entry) });
     entry.lastResult = turn.result;
     entry.onTurn?.(turn);
     // A parked entry that stays RUNNING has just gone idle: it yields its

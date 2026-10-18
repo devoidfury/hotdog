@@ -2763,3 +2763,131 @@ describe("task questions (lane handoff + manager wake)", () => {
     await settle(() => manager.taskStatus("task-fu2") === TASK_STATUS.COMPLETED, "completion");
   });
 });
+
+describe("accumulated active-turn time (TaskInfo.activeMs)", () => {
+  // Regression: the webui subagents strip clocked wall time since startedAt,
+  // so a parked RUNNING task (its judge running / lane waiting / between warm
+  // retries) kept ticking. The snapshot now carries the accumulated active
+  // turn time: banked at each turn end, with a live anchor while a turn is in
+  // flight. RUNNING + inRun=false => parked => the clock freezes.
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const infoOf = (m: TaskManager, id: string) => m.listTasks().find((t) => t.taskId === id)!;
+  /** Banked + live contribution of the in-flight turn (what the strip displays). */
+  const liveMs = (m: TaskManager, id: string) => {
+    const i = infoOf(m, id);
+    return i.activeMs + (i.turnStartedAt === null ? 0 : Date.now() - i.turnStartedAt);
+  };
+  /** Gate collecting onTurn deliveries (parked consumer). */
+  function turnGate() {
+    const results: unknown[] = [];
+    const waiters: Array<(t: unknown) => void> = [];
+    return {
+      onTurn: (t: unknown) => {
+        results.push(t);
+        waiters.shift()?.(t);
+      },
+      next: () =>
+        results.length > 0
+          ? Promise.resolve(results[results.length - 1])
+          : new Promise((resolve) => waiters.push(resolve)),
+    };
+  }
+
+  it("freezes while parked, grows only during turns, sibling keeps ticking", async () => {
+    let releaseSlow!: () => void;
+    let builds = 0;
+    const gate = turnGate();
+    const manager = new TaskManager({
+      buildAgent: async () => {
+        builds++;
+        if (builds === 1) {
+          return {
+            run: async () => {
+              await sleep(40); // one ~40ms worker turn
+              return { type: "completion", content: "out1" };
+            },
+            notifyCompletion: () => {},
+          } as any;
+        }
+        return {
+          run: () =>
+            new Promise((resolve) => {
+              releaseSlow = () => resolve({ type: "completion", content: "slow done" });
+            }),
+          notifyCompletion: () => {},
+        } as any;
+      },
+      modelRegistry: {} as any,
+      config: {} as any,
+      maxIterations: 10,
+      taskProfile: "default",
+    });
+
+    const h1 = await manager.spawnTask("t1", "parked worker", { park: true, onTurn: gate.onTurn });
+    await settle(() => infoOf(manager, "t1").inRun === true, "t1 turn in flight");
+    expect(infoOf(manager, "t1").turnStartedAt).not.toBeNull(); // live anchor armed
+    await gate.next(); // turn delivered; t1 is now parked-idle (RUNNING, no turn)
+
+    const parked = infoOf(manager, "t1");
+    expect(parked.status).toBe(TASK_STATUS.RUNNING);
+    expect(parked.inRun).toBe(false);
+    expect(parked.turnStartedAt).toBeNull();
+    expect(parked.activeMs).toBeGreaterThanOrEqual(25); // the turn counted...
+    expect(parked.activeMs).toBeLessThan(5000); // ...as active time, not since-spawn wall
+
+    // A sibling task keeps running its own turn the whole time below.
+    const h2 = await manager.spawnTask("t2", "slow sibling");
+    await settle(() => infoOf(manager, "t2").inRun === true, "t2 turn in flight");
+    const t2Early = liveMs(manager, "t2");
+    await sleep(80);
+
+    // Parked t1: clock frozen despite status RUNNING...
+    expect(infoOf(manager, "t1").activeMs).toBe(parked.activeMs);
+    expect(infoOf(manager, "t1").turnStartedAt).toBeNull();
+    // ...while the in-flight sibling's clock keeps growing.
+    expect(liveMs(manager, "t2")).toBeGreaterThanOrEqual(t2Early + 60);
+
+    releaseSlow();
+    expect((await h2.done).status).toBe(TASK_STATUS.COMPLETED);
+    const done2 = infoOf(manager, "t2");
+    expect(done2.turnStartedAt).toBeNull();
+    expect(done2.activeMs).toBeGreaterThanOrEqual(t2Early + 60); // turn banked at end
+    const frozen2 = done2.activeMs;
+    await sleep(40);
+    expect(infoOf(manager, "t2").activeMs).toBe(frozen2); // terminal total frozen
+
+    // Releasing the parked task reports its accumulated time -- no jump.
+    expect(manager.completeTask("t1")).toBe(true);
+    expect((await h1.done).status).toBe(TASK_STATUS.COMPLETED);
+    expect(infoOf(manager, "t1").activeMs).toBe(parked.activeMs);
+  });
+
+  it("banks the partial turn when a running task is interrupted", async () => {
+    const manager = new TaskManager({
+      buildAgent: async () => {
+        const agent: any = { notifyCompletion: () => {} };
+        agent.run = () =>
+          new Promise((_resolve, reject) => {
+            agent.abortSignal.addEventListener("abort", () => reject(LlmError.Cancelled("aborted")));
+          });
+        return agent;
+      },
+      modelRegistry: {} as any,
+      config: {} as any,
+      maxIterations: 10,
+      taskProfile: "default",
+    });
+
+    const h = await manager.spawnTask("t1", "aborted mid turn");
+    await settle(() => infoOf(manager, "t1").inRun === true, "turn in flight");
+    await sleep(30);
+    h.interrupt();
+    expect((await h.done).status).toBe(TASK_STATUS.CANCELLED);
+    const last = infoOf(manager, "t1");
+    expect(last.turnStartedAt).toBeNull();
+    expect(last.activeMs).toBeGreaterThanOrEqual(20); // the partial turn was banked
+    await sleep(30);
+    expect(infoOf(manager, "t1").activeMs).toBe(last.activeMs); // stays frozen
+  });
+});

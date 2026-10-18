@@ -729,8 +729,10 @@ describe("engine: state machine & gates", () => {
     expect(t.taskTurns).toBe(1); // killed mid-turn-2, not retried further
     const summary = await runP;
     expect(summary.states.a).toBe("failed");
-    expect(String(readLog(dir).find((e) => e.id === "a" && e.state === "failed")!.detail)).toContain(
-      "max_runtime exceeded",
+    // The failure names the time actually used (banked + the killed live
+    // turn), not just the cap: "used N of cap" is the diagnostic that matters.
+    expect(String(readLog(dir).find((e) => e.id === "a" && e.state === "failed")!.detail)).toMatch(
+      /max_runtime exceeded \(used \d+ms of 80ms cap, attempt \d+\)/,
     );
   });
 
@@ -883,6 +885,63 @@ describe("engine: judge gates", () => {
     expect(summary).not.toBeNull(); // null = stall (the deadlock this test guards)
     expect(summary!.outcome).toBe("succeeded");
     expect(summary!.states).toEqual({ build: "succeeded", gate: "succeeded" });
+  });
+
+  it("the judge's wall time burns neither the producer's cap nor its accumulated active time", async () => {
+    // Regression (webui strip): a gated producer parks RUNNING while its
+    // judge runs; display clocked wall since startedAt, so "synthesis#1" kept
+    // ticking through 20+ minutes of judging. The producer's snapshot now
+    // carries accumulated turn time only.
+    // Cap 400ms for every node. Producer ACTIVE time: 2 x ~60ms turns.
+    // Producer WALL time (parked judging twice + warm retry): ~460ms > cap,
+    // so any wall-clock accounting -- cap logic or display -- trips here.
+    const dir = freshDir();
+    const fake = makeFake(dir, {
+      build: async ({ dir: d }) => {
+        await sleep(60);
+        writeFile(d, "out.txt", "work");
+        writeFile(d, "build.verdict", "pass");
+      },
+      gate: async ({ dir: d, attempt }) => {
+        await sleep(170); // deliberately slow judge; still < its own 400ms cap per turn
+        writeFile(d, "gate.verdict", attempt === 1 ? "reject\ntry harder" : "pass\nsolid");
+      },
+    });
+    const workflow = wf(`
+      version: 1
+      name: judged-clock
+      description: judging wall time must not count as producer runtime
+      nodes:
+        - id: build
+          accept:
+            files: [out.txt]
+            judge: gate
+            maxAttempts: 2
+        - id: gate
+          dependsOn: [build]
+    `);
+    const run = new WorkflowRun({
+      workflow,
+      runId: "r",
+      runDir: dir,
+      tasks: fake.manager,
+      maxRuntimeMsOverride: 400,
+    });
+    const summary = await Promise.race([
+      run.run(),
+      new Promise<null>((r) => setTimeout(() => r(null), 6000)),
+    ]);
+    expect(summary).not.toBeNull(); // null = stall or cap-kill hang
+    expect(summary!.outcome).toBe("succeeded");
+    expect(summary!.states).toEqual({ build: "succeeded", gate: "succeeded" });
+
+    // The producer task's accumulated clock excludes ~340ms of judge wall
+    // time: it shows only its own ~120ms of worker turns.
+    const buildId = run.status().find((s) => s.id === "build")!.task!;
+    const buildInfo = fake.manager.listTasks().find((t) => t.taskId === buildId)!;
+    expect(buildInfo.status).toBe(TASK_STATUS.COMPLETED);
+    expect(buildInfo.activeMs).toBeGreaterThanOrEqual(90); // both producer turns counted
+    expect(buildInfo.activeMs).toBeLessThan(300); // judge wall time excluded
   });
 
   it("judge rejects once, producer warm-retries, judge passes", async () => {

@@ -94,6 +94,9 @@ const taskInfoWire: TaskInfoWire = {
   createdAt: 0,
   startedAt: null,
   endedAt: null,
+  activeMs: 0,
+  inRun: false,
+  turnStartedAt: null,
 };
 
 // Ref callbacks take the runtime's structural DomElement; re-type for
@@ -294,6 +297,9 @@ describe("panel activity body", () => {
       createdAt: 0,
       startedAt: null,
       endedAt: null,
+      activeMs: 0,
+      inRun: false,
+      turnStartedAt: null,
     };
     ws.emit({ type: "taskList", tasks: [task2] });
     const el1 = fakeEl("div");
@@ -507,7 +513,20 @@ describe("SubagentsStrip", () => {
     createdAt: number,
     description: string = taskId,
     endedAt: number | null = null,
-  ): TaskInfoWire => ({ taskId, description, sessionId: "s1", status, createdAt, startedAt: null, endedAt });
+    overrides: Partial<TaskInfoWire> = {},
+  ): TaskInfoWire => ({
+    taskId,
+    description,
+    sessionId: "s1",
+    status,
+    createdAt,
+    startedAt: null,
+    endedAt,
+    activeMs: 0,
+    inRun: false,
+    turnStartedAt: null,
+    ...overrides,
+  });
 
   it("renders nothing when there are no tasks", () => {
     const host = fakeEl("div");
@@ -527,8 +546,8 @@ describe("SubagentsStrip", () => {
       <SubagentsStrip
         tasks={[
           wire("done-old", "completed", 1000),
-          wire("done-new", "completed", 2000, "", 9000),
-          wire("run", "running", 0),
+          wire("done-new", "completed", 2000, "", 9000, { activeMs: 7000 }),
+          wire("run", "running", 0, "run", null, { inRun: true, turnStartedAt: 3000, activeMs: 1000 }),
           wire("wait", "queued", 500),
         ]}
         now={4000}
@@ -547,10 +566,14 @@ describe("SubagentsStrip", () => {
       "done-old: done-old \u2014 completed",
     ]);
     expect(chips[1]!.getAttribute("class")).toContain("status-running");
+    expect(chips[1]!.getAttribute("class")).not.toContain("waiting");
     expect(chips[1]!.getAttribute("class")).toContain(" open");
     expect(chips[0]!.getAttribute("class")).not.toContain(" open");
-    // Elapsed: live tasks count to `now`, settled ones to endedAt.
+    // Elapsed: queued waits in wall time (500 -> 4000 = 3s); an in-flight turn
+    // counts banked 1000ms + live 1000ms; completed shows its accumulated
+    // active total (frozen, endedAt ignored).
     expect(chips[0]!.querySelector(".subagent-elapsed")!.textContent).toBe("3s");
+    expect(chips[1]!.querySelector(".subagent-elapsed")!.textContent).toBe("2s");
     expect(chips[2]!.querySelector(".subagent-elapsed")!.textContent).toBe("7s");
     (chips[0] as unknown as HTMLElement).click();
     (chips[3] as unknown as HTMLElement).click();
@@ -662,13 +685,82 @@ describe("SubagentsStrip", () => {
   });
 });
 
-// ── formatElapsed ───────────────────────────────────────────────────────────
+// ── formatElapsed & parked treatment ────────────────────────────────────────
 
 describe("formatElapsed", () => {
-  it("formats minute and hour ranges from the start fallback and endedAt", () => {
-    const base: TaskInfoWire = { ...taskInfoWire, startedAt: null, endedAt: null };
-    expect(formatElapsed(base, 65_000)).toBe("1m 5s");
-    expect(formatElapsed(base, 3_720_000)).toBe("1h 2m");
-    expect(formatElapsed({ ...base, endedAt: 125_000 }, 9_999_999)).toBe("2m 5s");
+  it("ticks accumulated active time only during an in-flight turn", () => {
+    const live: TaskInfoWire = {
+      ...taskInfoWire,
+      activeMs: 65_000,
+      inRun: true,
+      turnStartedAt: 1_000,
+    };
+    expect(formatElapsed(live, 1_000)).toBe("1m 5s");
+    expect(formatElapsed(live, 31_000)).toBe("1m 35s"); // ticks with `now` while running
+  });
+
+  it("freezes parked-running and terminal tasks at the accumulated total", () => {
+    // RUNNING with no turn in flight = parked (judge running for it, waiting
+    // on a lane slot, between warm retries): the clock must not tick.
+    const parked: TaskInfoWire = { ...taskInfoWire, activeMs: 65_000, inRun: false, turnStartedAt: null };
+    expect(formatElapsed(parked, 9_999_999)).toBe("1m 5s");
+    // Completed total is the accumulated active time, not endedAt - startedAt.
+    const done: TaskInfoWire = {
+      ...parked,
+      status: "completed",
+      startedAt: 0,
+      endedAt: 90_000,
+    };
+    expect(formatElapsed(done, 9_999_999)).toBe("1m 5s");
+  });
+
+  it("queued tasks still show their wall-clock wait", () => {
+    const queued: TaskInfoWire = {
+      ...taskInfoWire,
+      status: "queued",
+      createdAt: 0,
+      activeMs: 0,
+      inRun: false,
+      turnStartedAt: null,
+    };
+    expect(formatElapsed(queued, 3_720_000)).toBe("1h 2m");
+  });
+});
+
+describe("SubagentsStrip parked treatment", () => {
+  const chipOf = (task: TaskInfoWire): Element => {
+    const host = fakeEl("div");
+    mount(
+      <SubagentsStrip tasks={[task]} now={50_000} openTaskIds={[]} onOpen={() => {}} />,
+      host as unknown as Parameters<typeof mount>[1],
+    );
+    return host.querySelector(".subagent-chip")!;
+  };
+
+  it("mutes a parked-running chip (waiting on a judge/lane/retry)", () => {
+    const parked: TaskInfoWire = {
+      ...taskInfoWire,
+      activeMs: 12_000,
+      inRun: false,
+      turnStartedAt: null,
+    };
+    const chip = chipOf(parked);
+    expect(chip.getAttribute("class")).toContain("status-running");
+    expect(chip.getAttribute("class")).toContain("waiting");
+    expect(chip.querySelector(".subagent-elapsed")!.getAttribute("class")).toContain("waiting");
+    expect(chip.querySelector(".subagent-elapsed")!.textContent).toBe("12s"); // frozen
+  });
+
+  it("keeps an in-flight-running chip un-muted", () => {
+    const live: TaskInfoWire = {
+      ...taskInfoWire,
+      activeMs: 12_000,
+      inRun: true,
+      turnStartedAt: 48_000,
+    };
+    const chip = chipOf(live);
+    expect(chip.getAttribute("class")).not.toContain("waiting");
+    expect(chip.querySelector(".subagent-elapsed")!.getAttribute("class")).not.toContain("waiting");
+    expect(chip.querySelector(".subagent-elapsed")!.textContent).toBe("14s"); // live tick
   });
 });

@@ -309,6 +309,10 @@ export interface ResolvedConfig {
   taskProfile?: string;
   /** Concurrent task agents allowed per provider lane. */
   taskLanesPerProvider?: number;
+  /** Execution plane for tools tagged `execution: "worker"`. */
+  toolExec?: "worker" | "inline";
+  /** Fence policy for pooled executors: probe = jail when the platform supports it (bwrap), off = plain spawn. */
+  execFence?: "off" | "probe";
   /** Directory for the cross-process lane slot ledger (taskLanesPerProvider is machine-wide when set). */
   taskLanesDir?: string;
   /** Named model groups for fanout delegation: name -> model members (bare or provider/qualified). */

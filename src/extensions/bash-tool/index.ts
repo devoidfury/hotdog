@@ -9,7 +9,7 @@ import {
 } from "@core/extensions/tool-utils.ts";
 import { HOOKS } from "@core/hooks.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
-import { AssistantRetryableError } from "@core/error.ts";
+import { AssistantRetryableError, ToolError } from "@core/error.ts";
 import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig } from "@core/extensions/types.ts";
 import { copyScrubbedEnv, envScrubExtraKeys } from "@utils/env.ts";
 import type { Workspace } from "@utils/workspace.ts";
@@ -94,7 +94,7 @@ export function resolveBashTimeout(
 
 export class BashTool {
   static readonly TOOL_NAME = "bash";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 2 };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 2, execution: "worker" };
 
   readonly timeoutMs: number;
   readonly maxOutputLines: number;
@@ -161,6 +161,14 @@ export class BashTool {
       return ToolResult.err("Error: command is required");
     }
 
+    // Run-scoped cancellation (tool context `abortSignal`, set by the inline
+    // executor and by the pooled runner): an already-cancelled run never even
+    // spawns, so a queued call cannot leak a process after its run is gone.
+    const abortSignal = ctx?.get?.("abortSignal") as AbortSignal | undefined;
+    if (abortSignal?.aborted) {
+      throw new ToolError("Command cancelled before it started");
+    }
+
     // Explicit bash, not shell:true (which uses /bin/sh -- dash on Debian-ish systems, where brace expansion and other bashisms silently break).
     const proc: ChildProcess = spawn(command, [], {
       shell: "bash",
@@ -181,6 +189,8 @@ export class BashTool {
       let stderrTruncated = false;
       let done = false;
       let timedOut = false;
+      let cancelledBySignal = false;
+      let detachAbort: (() => void) | null = null;
       let termTimer: ReturnType<typeof setTimeout>;
       let killTimer: ReturnType<typeof setTimeout>;
 
@@ -192,6 +202,10 @@ export class BashTool {
       const finish = (result: ToolResult | Error) => {
         if (done) return;
         done = true;
+        // The signal outlives this call (it is the run's), so never leave a
+        // listener behind on it.
+        detachAbort?.();
+        detachAbort = null;
         if (result instanceof Error) {
           reject(result);
         } else {
@@ -253,13 +267,30 @@ export class BashTool {
         );
       }, timeout + KILL_GRACE_MS);
 
+      // Cancellation: same escalation as a timeout, just initiated by the
+      // host instead of the clock. The SIGKILL timer is re-armed for the
+      // grace period (the timeout's copy could be minutes away), and finish()
+      // deliberately leaves it armed so a shell that traps TERM still dies.
+      const onAbort = () => {
+        cancelledBySignal = true;
+        clearTimeout(termTimer);
+        killProcessGroup(proc, "SIGTERM");
+        clearTimeout(killTimer);
+        killTimer = setTimeout(() => killProcessGroup(proc, "SIGKILL"), KILL_GRACE_MS);
+        finish(new ToolError("Command cancelled"));
+      };
+      if (abortSignal) {
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+        detachAbort = () => abortSignal.removeEventListener("abort", onAbort);
+      }
+
       const cmdFirstLine = command.trim().split("\n")[0] ?? "";
       proc.on("close", (code: number | null) => {
         // "close" only means the SHELL exited -- group members can outlive
         // it (e.g. they trap TERM). So after a timeout the SIGKILL
         // escalation stays armed; a dead group just makes it a no-op.
         clearTimeout(termTimer);
-        if (!timedOut) clearTimeout(killTimer);
+        if (!timedOut && !cancelledBySignal) clearTimeout(killTimer);
         if (done) return; // already settled by a timeout; output not needed
         // Flush any trailing sequence held by the stream decoders before use.
         stdout += stdoutDecoder.decode();

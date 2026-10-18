@@ -177,6 +177,20 @@ describe("createChat.transcribe", () => {
     ws.emit({ type: "sessionCreated", sessionId: "s2" });
     expect(chat.sttEnabledAtom()).toBe(false);
   });
+
+  it("tracks the tool-exec posture from the sessionCreated payload", () => {
+    const { chat, ws } = makeChat();
+    expect(chat.toolExecAtom()).toBe("");
+    ws.emit({ type: "sessionCreated", sessionId: "s1", toolExec: "worker (fence: none)" });
+    expect(chat.toolExecAtom()).toBe("worker (fence: none)");
+    ws.emit({
+      type: "sessionCreated",
+      sessionId: "s2",
+      toolExec: "worker (fence: none) [degraded: broker respawn cap]",
+    });
+    // The strip reads the atom verbatim, so a degraded plane is visible.
+    expect(chat.toolExecAtom()).toContain("degraded");
+  });
 });
 
 // ── Subagent task feed ──────────────────────────────────────────────────────

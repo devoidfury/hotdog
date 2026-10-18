@@ -35,6 +35,11 @@ const currentProfileAtom = reactiveState<string>("default");
 // by every sessionCreated payload; drives the push-to-talk button).
 const sttEnabledAtom = reactiveState<boolean>(false);
 
+// Tool execution plane posture, carried by the same sessionCreated
+// payload as sttEnabled: "worker (fence: none)", "inline (unfenced)", plus a
+// degraded marker. Empty until the first attach.
+const toolExecAtom = reactiveState<string>("");
+
 // ── Subagent tasks (strip + overlay panels; see ./subagents.tsx) ───────────
 // Broadcast feed (S2C taskList/taskUpdate/taskActivity), deliberately kept
 // outside the chat transcript: task-agent output never enters message-list.
@@ -152,6 +157,8 @@ interface SessionCreatedMessage {
   models?: string[];
   /** Server has an STT backend configured (drives the mic affordance). */
   sttEnabled?: boolean;
+  /** Tool-exec plane posture for the status strip; "" when the server said nothing. */
+  toolExec?: string;
   /** The server replayed only the delta from the client's cursor, so the
    *  client keeps its transcript (it ends exactly at that cursor). */
   replayDelta?: boolean;
@@ -481,6 +488,8 @@ export interface ChatController {
   // Push-to-talk: upload a base64 recording, await the transcript text.
   transcribe: (mimeType: string, data: string) => Promise<string>;
   sttEnabledAtom: Atom<boolean>;
+  /** Tool-exec plane posture for the header strip ("" until the first attach). */
+  toolExecAtom: Atom<string>;
   // Raw WS message; the sidebar uses it to cancel non-active sessions.
   send: (obj: Record<string, unknown>) => void;
   ws: WebSocket | null;
@@ -618,6 +627,7 @@ export function createChat({
           modelsAtom(data.models);
         }
         sttEnabledAtom(Boolean(data.sttEnabled));
+        toolExecAtom(data.toolExec ?? "");
         // Reconnect identity: remember the session for the next reconnect.
         saveSessionId(data.sessionId);
         // The replay burst follows this message (up to the cursor report);
@@ -1174,6 +1184,7 @@ export function createChat({
     sessionWorkingMap,
     messageListAtom: () => messageList,
     sttEnabledAtom,
+    toolExecAtom,
     transcribe,
     tasksAtom,
     activityVersionAtom,

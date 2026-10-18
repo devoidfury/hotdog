@@ -2626,3 +2626,48 @@ describe("terminal task cleanup (stale pending questions)", () => {
     expect(mgrSettled).toEqual({ mq: "still alive" });
   });
 });
+
+// ── Tool-exec posture strip ───────────────────────────────────────
+
+describe("tool-exec posture on sessionCreated", () => {
+  let server: ReturnType<typeof createWsServer> | null = null;
+
+  afterEach(() => {
+    server?.stopCleanupLoop();
+    server = null;
+  });
+
+  async function attach(resolved: Record<string, unknown> = {}): Promise<any> {
+    const core = createWsMockCore();
+    Object.assign(core.resolved, resolved);
+    server = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    const ws = createWsMockWs();
+    server.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    return waitForMessage(ws, S2C.SESSION_CREATED);
+  }
+
+  it("advertises the posture on the same payload as sttEnabled (no new channel)", async () => {
+    // A host whose resolved bag never opted into the plane is inline, and says so.
+    expect((await attach()).toolExec).toBe("inline (unfenced)");
+    expect((await attach({ toolExec: "worker", execFence: "off" })).toolExec).toBe(
+      "worker (fence: off)",
+    );
+    // Probe policy reports the probe outcome -- jail or honest failure, never silence.
+    expect((await attach({ toolExec: "worker" })).toolExec).toMatch(
+      /^worker \(fence: (bwrap|none -- probe failed)\)$/,
+    );
+  });
+
+  it("SessionRegistry labels the posture from resolved values only", () => {
+    const buildAgent = async () => makeWsMockAgent({});
+    const plain = new SessionRegistry({ buildAgent });
+    const off = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "worker", execFence: "off" } });
+    const probe = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "worker" } });
+    expect(plain.toolExecLabel).toBe("inline (unfenced)");
+    expect(off.toolExecLabel).toBe("worker (fence: off)");
+    expect(probe.toolExecLabel).toMatch(/^worker \(fence: (bwrap|none -- probe failed)\)$/);
+    plain.stopCleanupLoop();
+    off.stopCleanupLoop();
+    probe.stopCleanupLoop();
+  });
+});

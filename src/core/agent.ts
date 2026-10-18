@@ -15,6 +15,7 @@ import { type RawUsage } from "./token-tracker.ts";
 import { logger } from "@utils/logger.ts";
 import { splitFileIncludes } from "@utils/tool-content.ts";
 import { ToolExecutor, createToolExecutor, type ToolResult } from "./tool-executor.ts";
+import type { ToolExecLink, WireToolConfig } from "./tool-exec-protocol.ts";
 import type { AgentLike } from "./session/index.ts";
 
 export interface ModelRegistry {
@@ -141,6 +142,10 @@ export interface AgentOptions {
   /** True when the active profile is a manager (controls managerOnly tools). */
   managerProfile?: boolean;
   commandRegistry?: AgentCommandRegistry;
+  /** Tool execution plane (see ToolExecutorDeps.toolExec): unset keeps everything inline. */
+  toolExec?: "worker" | "inline";
+  toolExecLink?: ToolExecLink | null;
+  toolExecConfig?: WireToolConfig;
   // Set by the owning MessageBus after construction; lets the agent (and extensions via hooks) queue messages.
   enqueueCallback?: (content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void;
 }
@@ -175,6 +180,14 @@ export class Agent implements AgentLike {
   /** Steering messages (see steer()): injected between LLM calls by #prepareIteration. */
   steeringQueue: Array<string | Array<Record<string, unknown>>>;
   runAbortController: AbortController | null;
+  /**
+   * Run-lifetime cancellation signal: live for the whole of run(),
+   * including tool execution, where the per-iteration `runAbortController`
+   * is already null. Aborted by cancel() and by the host's abortSignal.
+   */
+  #runAbort: AbortController | null = null;
+  /** Plane link, kept for the run-start warm (null when inline/unset). */
+  #execWarmLink: ToolExecLink | null;
   commandRegistry: AgentCommandRegistry;
   #toolExecutor: ToolExecutor;
   #streamProcessor: StreamProcessor;
@@ -264,7 +277,14 @@ export class Agent implements AgentLike {
       toolRetryDelay: options.config.toolRetryDelay,
       isRestoring: () => this.#isRestoring,
       agent: this,
+      runSignal: () => this.#runAbort?.signal ?? null,
+      toolExec: options.toolExec,
+      toolExecLink: options.toolExecLink ?? null,
+      toolExecConfig: options.toolExecConfig,
     });
+    // Warm needs the link too, but only when the plane is actually on.
+    this.#execWarmLink =
+      options.toolExec === "worker" ? (options.toolExecLink ?? null) : null;
     this.enqueueCallback = options.enqueueCallback || null;
     this.forkSession = null;
   }
@@ -365,6 +385,31 @@ export class Agent implements AgentLike {
     }
     this.#running = true;
     this.#turnKind = opts?.continuation ? "continuation" : "input";
+
+    // Run-lifetime cancellation: cancel() aborts this, and unlike the
+    // per-iteration LLM controller it is still live while tools execute, so
+    // the exec plane can send a cancel frame and inline bash can kill its
+    // group. The host's abortSignal (harness hosts, message bus)
+    // forwards into it for exactly the duration of this run, the same way
+    // #performLlmCall forwards it per request.
+    const runAbort = new AbortController();
+    this.#runAbort = runAbort;
+    const hostSignal = this.abortSignal;
+    // Only the abort is forwarded: `cancelled` stays the cancel()-owned flag
+    // it has always been, so a host abort still reports "Agent aborted".
+    const onHostAbort = () => runAbort.abort();
+    if (hostSignal?.aborted) onHostAbort();
+    else hostSignal?.addEventListener("abort", onHostAbort, { once: true });
+
+    // Warm the pool entry for this session: fire-and-forget, so the
+    // spawn cost hides behind first-token latency and a session that never
+    // calls a tool pays only the entry the idle reaper takes back. Skipped
+    // when nothing enabled is tagged for the plane (sandboxMode, tight
+    // whitelists): no entry to warm. The workspace rides along so the warmed
+    // entry gets the same fence the first invoke would plan (increment 3).
+    if (this.#execWarmLink && this.#hasWorkerTools()) {
+      this.#execWarmLink.warm?.(this.sessionId, "rw", this.#toolExecutor.planeWorkspace());
+    }
 
     let turnEnded = false;
     try {
@@ -475,6 +520,8 @@ export class Agent implements AgentLike {
       throw AgentError.MaxIterations(this.maxIterations);
     } finally {
       this.#running = false;
+      if (this.#runAbort === runAbort) this.#runAbort = null;
+      hostSignal?.removeEventListener("abort", onHostAbort);
       if (!turnEnded) {
         const reason: TurnEndReason = this.cancelled ? "cancelled" : "error";
         await this.#emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, reason);
@@ -899,10 +946,23 @@ export class Agent implements AgentLike {
     await this.hooks.notifyHooks(HOOKS.CONTEXT_REWOUND, { agent: this, newContext: [] });
   }
 
+  /** Cheap per-run check for warm: is any registered tool tagged for the exec plane? */
+  #hasWorkerTools(): boolean {
+    for (const { metadata } of this.#toolRegistry.getAllWithMetadata()) {
+      if (metadata.execution === "worker") return true;
+    }
+    return false;
+  }
+
   cancel(): void {
     this.cancelled = true;
     if (this.runAbortController && !this.runAbortController.signal.aborted) {
       this.runAbortController.abort();
+    }
+    // Also interrupt work that outlives the LLM request -- the per-iteration
+    // controller is null while tools run (see #runAbort).
+    if (this.#runAbort && !this.#runAbort.signal.aborted) {
+      this.#runAbort.abort();
     }
   }
 

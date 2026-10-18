@@ -18,6 +18,7 @@ import { getExtensionConfig } from "@core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import { Agent } from "@core/agent.ts";
 import { createAgentFactory } from "@core/agent-factory.ts";
+import { execFenceDisplay, toolExecModeLabel, sharedToolExecDegraded } from "@core/tool-exec-broker.ts";
 import {
   LOG_SOURCE,
   MAX_CONSECUTIVE_AUTO_RESUMES,
@@ -97,6 +98,11 @@ interface SessionRegistryOptions {
   sttTarget?: SttTarget | null;
   /** Invoked when a session is deleted (cancels its pending questions). */
   onSessionDeleted?: (sessionId: string) => void;
+  /**
+   * Resolved bag the tool-exec plane posture is read from. Omitted
+   * = inline (unfenced): a registry built without it advertises no plane.
+   */
+  toolExecResolved?: Record<string, unknown>;
   /** Provider-lane coordinator for session turns. Without it webui turns
    *  run uncoordinated: two live sessions double up requests on one backend
    *  instead of queueing on the lane. */
@@ -202,10 +208,25 @@ export class SessionRegistry {
   #taskActivityHistory = new Map<string, TaskActivityWire[]>();
   /** Resolved STT backend; every sessionCreated payload advertises its presence as sttEnabled. */
   readonly sttTarget: SttTarget | null;
+  #toolExecResolved: Record<string, unknown>;
 
   get sttEnabled(): boolean {
     return this.sttTarget !== null;
   }
+
+  /**
+   * Tool-exec plane posture for the webui status strip. Read per
+   * payload so the degraded flag is current at attach time; a strip that went
+   * stale mid-session refreshes on the next attach or session switch.
+   */
+  get toolExecLabel(): string {
+    return toolExecModeLabel(
+      this.#toolExecResolved,
+      sharedToolExecDegraded(),
+      execFenceDisplay(this.#toolExecResolved),
+    );
+  }
+
   /** Publish the TaskManager whose observer feeds the webui subagents panel. */
   setTaskManager(taskManager: TaskManager | null): void {
     this.#taskManager = taskManager;
@@ -265,12 +286,14 @@ export class SessionRegistry {
     sttTarget = null,
     onSessionDeleted,
     turnLanes,
+    toolExecResolved = {},
   }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
     this.#questionTimeoutSecs = questionTimeoutSecs;
     this.#questionStrategy = questionStrategy;
     this.#timeoutMin = sessionTimeoutMin;
     this.sttTarget = sttTarget;
+    this.#toolExecResolved = toolExecResolved;
     this.#metadata = new Map();
     this.#channels = new Map();
     this.#profiles = profiles;
@@ -923,6 +946,7 @@ function sessionCreatedPayload(
     currentModel: agent?.model || meta?.model || "?",
     models: Object.keys(agent?.modelRegistry || {}),
     sttEnabled: registry.sttEnabled,
+    toolExec: registry.toolExecLabel,
   };
 }
 
@@ -1529,6 +1553,7 @@ async function routeMessage(
             currentModel: agent.model,
             models: Object.keys(agent.modelRegistry || {}),
             sttEnabled: registry.sttEnabled,
+            toolExec: registry.toolExecLabel,
           };
           SessionRegistry.sendSafe(ws, sessionCreatedMsg);
           registry.broadcast(sessionCreatedMsg);
@@ -1784,6 +1809,7 @@ async function routeMessage(
                 currentModel: agent.model,
                 models: Object.keys(agent.modelRegistry || {}),
                 sttEnabled: registry.sttEnabled,
+                toolExec: registry.toolExecLabel,
               };
               SessionRegistry.sendSafe(ws, sessionCreatedMsg);
               registry.broadcast(sessionCreatedMsg);
@@ -2044,6 +2070,7 @@ function createAndAttachSession(
         currentModel: agent.model,
         models: Object.keys(agent.modelRegistry || {}),
         sttEnabled: registry.sttEnabled,
+        toolExec: registry.toolExecLabel,
       });
       // The replay position for the next reconnect (0 = full replay), closing
       // the client's attach bookkeeping like every other attach path.
@@ -2123,6 +2150,8 @@ export function createWsServer(
     profiles,
     sttTarget,
     turnLanes,
+    // Posture strip source: the resolved plane keys, read per payload.
+    toolExecResolved: (core.resolved as Record<string, unknown> | undefined) ?? {},
     onSessionDeleted: (sid) => {
       // Drop the hold FIRST: dropSession cancels the pending question, and
       // the resolve callback checks resumedHeldQuestions before touching the

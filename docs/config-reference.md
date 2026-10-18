@@ -333,6 +333,72 @@ When enabled, restricts the agent to tools that have no side effects (no file wr
 { "sandboxMode": true }
 ```
 
+### `toolExec`
+
+- **Type:** `"worker"` | `"inline"`
+- **CLI flag:** `--tool-exec`
+- **Default:** `"worker"`
+- **Resolution:** CLI > config > default
+
+Execution plane for tools tagged `execution: "worker"` (`ToolMetadata`). `worker`
+runs them in pooled, out-of-process executor entries keyed `(session, class)`;
+`inline` runs everything in-process — the pre-plane code path, with no pool object
+and zero added cycles. Tools without the tag stay inline either way. `hotdog info`
+reports the posture (`tools: worker (fence: …) | inline (unfenced)`), and the webui
+header strip shows the same string; the plane never silently downgrades.
+
+What the worker plane does once it is on:
+
+- **Cancellation** — cancelling a run sends a cancel frame for the in-flight call
+  and settles it immediately as an error tool result (`[tool-exec cancelled]`).
+  `bash` kills the command's whole process group (SIGTERM, then SIGKILL); the
+  file tools cannot be interrupted mid-syscall, so their late answer is dropped.
+  Inline `bash` gets the same signal and dies the same way.
+- **Crashes** — an executor entry that dies with a call in flight answers
+  `[tool-exec crashed]` and the pool re-fills on the next call. A broker that
+  dies respawns a capped number of times (3 consecutive, reset by any call that
+  completes, or 3 crash deaths within any 60s window regardless of completions);
+  past either cap calls reject loudly and the posture line gains
+  `[degraded: broker respawn cap]`. It never falls back to inline execution.
+- **Teardown** — an idle entry is dropped after 5 minutes; dropping an entry
+  (idle reap, fence-plan change, session teardown) EOFs the runner, which
+  cancels its in-flight calls and kills the command's whole process group, so
+  a reaped `bash` never outlives its entry.
+
+```json
+{ "toolExec": "inline" }
+```
+
+### `execFence`
+
+- **Type:** `"off"` | `"probe"`
+- **CLI flag:** `--exec-fence`
+- **Default:** `"probe"`
+- **Resolution:** CLI > config > default
+
+Whether pooled executor entries are wrapped in an OS jail plan when the platform
+supports it. The backend is **bubblewrap** (Linux): a probed plan gives the entry
+a fresh tmpfs root, read-only system directories, and read-write access to ONLY
+the session's workspace roots plus a private scratch dir — no `$HOME`, no hotdog
+config files, no sibling session roots, no `.git` of the hotdog checkout. The
+capability probe runs once per process; when bwrap is missing or the probe fails,
+entries spawn plain and the posture says so (`worker (fence: none -- probe failed)`).
+macOS/Windows have no jail backend yet: the plane runs pooled but unfenced there,
+and the status line shows it. Use `off` to skip the probe (dev loop, CI).
+
+The posture quadrants:
+
+| `toolExec` | `execFence` | Behavior |
+|---|---|---|
+| `worker` | `probe` (probe good) | Pooled executors, jailed per (session, class). Shipping default on Linux with bwrap. |
+| `worker` | `probe` (probe fails) | Pooled executors, plain spawn. Crash isolation + credential-free plane + log integrity remain; the fence is flagged absent. |
+| `worker` | `off` | Pooled executors, plain spawn, no probe. Dev loop (macOS), CI. |
+| `inline` | any | Everything in-process, the pre-plane code path. No pool exists. `inline (unfenced)`. |
+
+```json
+{ "execFence": "off" }
+```
+
 ### `maxToolDifficulty` (CLI-only)
 
 - **Type:** `number` (1–5)

@@ -904,3 +904,56 @@ describe("Info CLI - extension info panels", () => {
     expect(output).toContain("Widget:");
   });
 });
+
+// ── Tool execution plane posture line ────────
+
+describe("Info CLI - tool exec plane", () => {
+  it("shows the worker posture with the probe result, honestly either way", async () => {
+    const run = await infoCliRunner({ resolved: { toolExec: "worker", execFence: "probe" } });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    // Environment-dependent by nature: "bwrap" where the probe passes,
+    // "none -- probe failed" where the platform has no working jail. What it
+    // must never be is silent or a false claim.
+    expect(output).toMatch(/Tools Exec:\s+worker \(fence: (bwrap|none -- probe failed)\)/);
+  });
+
+  it("reports fence off without probing", async () => {
+    const run = await infoCliRunner({ resolved: { toolExec: "worker", execFence: "off" } });
+    const { output } = await run("info");
+    expect(output).toContain("Tools Exec:      worker (fence: off)");
+  });
+
+  it("shows inline as unfenced (never a silent posture)", async () => {
+    const run = await infoCliRunner({ resolved: { toolExec: "inline" } });
+    const { output } = await run("info");
+    expect(output).toContain("Tools Exec:      inline (unfenced)");
+  });
+
+  it("mirrors the posture in JSON output", async () => {
+    const run = await infoCliRunner(
+      { resolved: { toolExec: "worker", execFence: "off" } },
+      { wantsJson: true },
+    );
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.config.tools_exec).toBe("worker");
+    expect(parsed.config.tools_fence).toBe("off");
+    // Degraded is runtime state on the shared broker: a process that
+    // never exhausted its respawn budget reports false rather than omitting it.
+    expect(parsed.config.tools_exec_degraded).toBe(false);
+  });
+
+  it("JSON fence mirrors the probe outcome for probe policy", async () => {
+    const run = await infoCliRunner(
+      { resolved: { toolExec: "worker", execFence: "probe" } },
+      { wantsJson: true },
+    );
+    const { output } = await run("info");
+    const parsed = JSON.parse(output.trim());
+    // "bwrap" where the jail works, "none" where it does not; never "off"
+    // (that is policy, not capability).
+    expect(["bwrap", "none"]).toContain(parsed.config.tools_fence);
+  });
+});

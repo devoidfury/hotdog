@@ -394,3 +394,92 @@ describe('BashTool model-supplied timeout', () => {
     expect(desc2).not.toContain('Capped');
   });
 });
+
+describe('BashTool cancellation (abortSignal on the tool context)', () => {
+  it('kills the process group and settles promptly when the signal fires', async () => {
+    const dir = tmpDir('hotdog-bash-abort-');
+    const pidFile = `${dir}/pid`;
+    try {
+      const controller = new AbortController();
+      const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+      const running = tool.execute(
+        JSON.stringify({ command: `echo $ > ${pidFile}; sleep 30` }),
+        new ToolContext({ abortSignal: controller.signal }),
+      );
+      // Wait for the shell to record its pid, then cancel.
+      const deadline = Date.now() + 5000;
+      while (!fs.existsSync(pidFile)) {
+        if (Date.now() > deadline) throw new Error('the shell never started');
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      const t0 = Date.now();
+      controller.abort();
+      await expect(running).rejects.toThrow(/[Cc]ancelled/);
+      // Prompt: nowhere near the 30s command or its timeout.
+      expect(Date.now() - t0).toBeLessThan(3000);
+      await waitForExit(pid);
+      expect(processAlive(pid)).toBe(false);
+    } finally {
+      cleanupDir(dir);
+    }
+  }, 15000);
+
+  it('kills a shell that traps TERM via the SIGKILL escalation', async () => {
+    const dir = tmpDir('hotdog-bash-abort-term-');
+    const pidFile = `${dir}/pid`;
+    try {
+      const controller = new AbortController();
+      const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+      const running = tool.execute(
+        JSON.stringify({ command: `sh -c 'echo $ > ${pidFile}; trap "" TERM; sleep 300'` }),
+        new ToolContext({ abortSignal: controller.signal }),
+      );
+      const deadline = Date.now() + 5000;
+      while (!fs.existsSync(pidFile)) {
+        if (Date.now() > deadline) throw new Error('the shell never started');
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      controller.abort();
+      await expect(running).rejects.toThrow(/[Cc]ancelled/);
+      // The promise settled before the group died; the escalation still lands.
+      await waitForExit(pid, 8000);
+      expect(processAlive(pid)).toBe(false);
+    } finally {
+      cleanupDir(dir);
+    }
+  }, 20000);
+
+  it('does not run an already-cancelled command', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    const t0 = Date.now();
+    await expect(
+      tool.execute(
+        JSON.stringify({ command: 'echo should-not-run' }),
+        new ToolContext({ abortSignal: controller.signal }),
+      ),
+    ).rejects.toThrow(/[Cc]ancelled/);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  it('a settled command leaves no abort listener debt on a long-lived signal', async () => {
+    // Regression: the listener rides the RUN's signal, so it must be detached
+    // when the call ends or every bash call in a session would pile one up.
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    for (let i = 0; i < 5; i++) {
+      const result = await tool.execute(
+        JSON.stringify({ command: 'echo ok' }),
+        new ToolContext({ abortSignal: signal }),
+      );
+      expect(resultStr(result)).toContain('ok');
+    }
+    // Nothing left to abort: no throw, no hanging listener callables.
+    expect(signal.aborted).toBe(false);
+    controller.abort();
+  });
+});

@@ -121,11 +121,13 @@ Full list of subcommands, CLI flags, and interactive slash commands: [CLI refere
 
 This hotdog comes with minimal guardrails by default. A dedicated host, a vm, or at least a container is recommended. See [examples/](examples/).
 
-When you want the agent reined in:
+What ships on by default: the tool execution plane (`toolExec: "worker"`) runs the tagged tools (`bash`, `read`, `grep`) in pooled out-of-process executors, so a tool crash cannot take down your session, and provider keys never enter the process that executes agent-authored commands. On Linux with bubblewrap installed, each session's executor additionally runs in a jail: no `$HOME`, no config files, read-write only inside your workspace roots (`execFence: "probe"`). Run `hotdog info` to see the posture (`Tools Exec: worker (fence: bwrap | off | none -- probe failed)`); an unavailable fence is always reported, never assumed. See [SECURITY.md](SECURITY.md) for the boundary and its honest limits.
+
+When you want the agent reined in further:
 
 - `--sandbox` restricts the agent to tools with no side effects: no file writes, no network, no external commands.
 - `userGate` prompts you before risky tool calls: allow / deny / ask.
-- Disable the `bash` tool - it runs with your own permissions and can do anything the user you run it as can do. Be careful what you give agents with `bash` access to.
+- Disable the `bash` tool. Inside a working fence it can already only reach your workspace roots; unfenced (inline mode, no bwrap, macOS/Windows) it still runs with your own permissions and can do anything the user you run it as can do. Be careful what you give agents with `bash` access to.
 
 ## Extension Anatomy
 

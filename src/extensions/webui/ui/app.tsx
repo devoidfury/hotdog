@@ -377,6 +377,7 @@ function startChat(): void {
     chat.tasksAtom,
     chat.taskControlAtom,
     chat.sttEnabledAtom,
+    chat.toolExecAtom,
     sttPhaseAtom,
   ]);
   const stopActivitySync = chat.activityVersionAtom.effect(flushActivityViews);
@@ -678,6 +679,9 @@ function App() {
   const activeLogId = activeLogIdAtom();
   const sessionId = chat?.sessionIdAtom() ?? null;
   const title = chat?.sessionTitleAtom() ?? null;
+  // Tool-exec plane posture: "worker (fence: bwrap | off | none -- probe
+  // failed)" / "inline (unfenced)", plus anything carrying [degraded: ...].
+  const toolExec = chat?.toolExecAtom() ?? "";
   const menu = contextMenuAtom();
   const completionMenu = completionAtom();
   const attachments = attachmentsAtom();
@@ -726,8 +730,19 @@ function App() {
                 </button>
               </span>
             ) : null}
-            <span id="connection-status" className={connected ? "status-connected" : "status-disconnected"}>
-              {connected ? "Connected" : "Disconnected"}
+            <span className="header-status-group">
+              {toolExec ? (
+                <span
+                  id="tool-exec-status"
+                  className={toolExec.includes("degraded") ? "tool-exec-degraded" : undefined}
+                  title="Tool execution plane (config keys: toolExec, execFence)"
+                >
+                  tools: {toolExec}
+                </span>
+              ) : null}
+              <span id="connection-status" className={connected ? "status-connected" : "status-disconnected"}>
+                {connected ? "Connected" : "Disconnected"}
+              </span>
             </span>
           </div>
 

@@ -1,5 +1,5 @@
 import { Message, type ToolCall, type ImageAttachment } from "./context/message.ts";
-import { formatError, AssistantRetryableError, TransientError } from "./error.ts";
+import { formatError, AssistantRetryableError, ToolError, TransientError } from "./error.ts";
 import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
 import { logger } from "@utils/logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
@@ -10,6 +10,11 @@ import type { HookPayloads } from "./extensions/types.ts";
 import { Workspace } from "@utils/workspace.ts";
 import { suggestCandidates } from "@utils/strings.ts";
 import type { ToolResultContent } from "./context/wrappers.ts";
+import {
+  reviveToolResult,
+  type ToolExecLink,
+  type WireToolConfig,
+} from "./tool-exec-protocol.ts";
 
 export interface ToolResult {
   toolName: string;
@@ -39,13 +44,36 @@ export interface ToolExecutorDeps {
   isRestoring: () => boolean;
   /** Agent reference — hook payloads and addMessage (fires CONTEXT_MESSAGE). */
   agent: Agent;
+  /**
+   * Cancellation observer for the current run. The agent passes its
+   * run-lifetime signal: `cancel()` aborts it, and unlike the per-iteration
+   * controller around the LLM fetch it is still live while a tool executes.
+   * Unset (standalone callers) means nothing can interrupt a call.
+   */
+  runSignal?: () => AbortSignal | null;
+  /**
+   * Tool execution plane. "worker" + a link
+   * routes tools tagged `execution: "worker"` through the broker; anything
+   * else (including unset) is inline. When inline, no plane object exists
+   * and the execute site is today's exact code path.
+   */
+  toolExec?: "worker" | "inline";
+  toolExecLink?: ToolExecLink | null;
+  /** Per-tool config scalars the runner needs (bash caps, coreTools limits, env policy). */
+  toolExecConfig?: WireToolConfig;
 }
 
 export class ToolExecutor {
   #deps: ToolExecutorDeps;
+  /** Non-null only when toolExec is "worker" AND a link was provided: the one fork point. */
+  #execPlane: { link: ToolExecLink; config: WireToolConfig } | null;
 
   constructor(deps: ToolExecutorDeps) {
     this.#deps = deps;
+    this.#execPlane =
+      deps.toolExec === "worker" && deps.toolExecLink
+        ? { link: deps.toolExecLink, config: deps.toolExecConfig ?? {} }
+        : null;
   }
 
   /**
@@ -202,11 +230,16 @@ export class ToolExecutor {
     // maxRetries counts retries AFTER the initial attempt (total attempts = 1 + maxRetries).
     const maxAttempts = 1 + Math.max(0, this.#deps.maxRetries);
     let attempts = 0;
+    // The plane fork: tagged tools leave the process when the
+    // plane is on; untagged tools and inline mode never touch the link.
+    const plane = this.#execPlane && tool.metadata.execution === "worker" ? this.#execPlane : null;
 
     while (attempts < maxAttempts) {
       attempts++;
       try {
-        result = await tool.execute(input, toolCtx);
+        result = plane
+          ? await this.#executeViaPlane(plane, toolName, input)
+          : await tool.execute(input, toolCtx);
         success = true;
         // Check for stop-loop sentinel on ToolResult
         if (
@@ -285,6 +318,86 @@ export class ToolExecutor {
     );
   }
 
+  /**
+   * The workspace the tools run against: configured roots (or the process
+   * CWD), and the deny list where one is configured (an explicit [] wins and
+   * disables the denylist; null means unconfigured -> the built-in
+   * DEFAULT_DENY_PATTERNS via the Workspace default).
+   */
+  #workspaceSpec(): { roots: string[]; deny: readonly string[] | null } {
+    // Roots are pre-validated at config resolution (expandWorkspacePaths);
+    // if construction still throws, let it surface as an unexpected error
+    // rather than silently degrading to an unbounded workspace.
+    const roots =
+      this.#deps.workspaceRoots && this.#deps.workspaceRoots.length > 0
+        ? this.#deps.workspaceRoots
+        : [process.cwd()];
+    return { roots, deny: this.#deps.workspaceDeny };
+  }
+
+  /**
+   * The workspace in wire shape, for the run-start warm so a pre-spawned
+   * entry gets the same fence an invoke would plan for this session.
+   */
+  planeWorkspace(): { roots: string[]; deny: readonly string[] | null } {
+    const { roots, deny } = this.#workspaceSpec();
+    return { roots, deny: deny ?? null };
+  }
+
+  /**
+   * One tool call across the plane: minimal plain-data ctx, the
+   * result revived so hooks/formatToolResult/images see the same shapes as
+   * inline. A rejected invoke (spawn failure, dispatch failure, broker death)
+   * propagates to execute()'s catch and becomes the error tool result --
+   * the plane never downgrades to an inline retry.
+   *
+   * Cancellation: the call id is minted here because a cancel frame names it.
+   * When the run is cancelled, the frame goes out and the call settles
+   * immediately -- the runner's answer is never awaited, because `read` and
+   * `grep` cannot be interrupted and a cancelled run must not wait on a
+   * syscall. The late reply (or rejection) is dropped by the link.
+   */
+  async #executeViaPlane(
+    plane: { link: ToolExecLink; config: WireToolConfig },
+    toolName: string,
+    input: string,
+  ): Promise<unknown> {
+    const workspace = this.#workspaceSpec();
+    const session = this.#deps.agent.sessionId;
+    // A run that is already gone never dispatches: no frame, no id to cancel.
+    const signal = this.#deps.runSignal?.() ?? null;
+    if (signal?.aborted) {
+      throw new ToolError(`[tool-exec cancelled] ${toolName} was cancelled before dispatch`);
+    }
+    const id = crypto.randomUUID();
+    const done = plane.link.invoke({
+      id,
+      session,
+      tool: toolName,
+      args: input,
+      ctx: { session, workspace, toolConfig: plane.config },
+    });
+    // If the cancel wins, nothing is left listening for this rejection.
+    done.catch(() => {});
+    // No run signal (standalone callers): nothing can interrupt, no race.
+    if (!signal) return reviveToolResult(await done);
+
+    let onAbort: (() => void) | null = null;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      onAbort = () => {
+        plane.link.cancel?.(id);
+        reject(new ToolError(`[tool-exec cancelled] ${toolName} was cancelled mid-call`));
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      return reviveToolResult(await Promise.race([done, cancelled]));
+    } finally {
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+    }
+  }
+
   #buildToolContext(toolCallId?: string | null): ToolContext {
     const toolCtx = new ToolContext();
     toolCtx.set("agent", this.#deps.agent);
@@ -292,17 +405,12 @@ export class ToolExecutor {
     // The call id rides the context so tools emitting their own output
     // events can tie them to the call they answer.
     if (toolCallId) toolCtx.set("toolCallId", toolCallId);
-    // Build Workspace from the configured roots, or the process CWD. Roots
-    // are pre-validated at config resolution (expandWorkspacePaths); if
-    // construction still throws, let it surface as an unexpected error rather
-    // than silently degrading to an unbounded workspace.
-    const roots =
-      this.#deps.workspaceRoots && this.#deps.workspaceRoots.length > 0
-        ? this.#deps.workspaceRoots
-        : [process.cwd()];
-    // A configured deny list (even an explicit []) wins; null means
-    // unconfigured and falls back to the built-in DEFAULT_DENY_PATTERNS.
-    const deny = this.#deps.workspaceDeny;
+    // Cancellation reaches inline tools the same way it reaches the runner's:
+    // a run-scoped signal on the context, so inline bash kills its process
+    // group too instead of running to its timeout after the user cancelled.
+    const runSignal = this.#deps.runSignal?.() ?? null;
+    if (runSignal) toolCtx.set("abortSignal", runSignal);
+    const { roots, deny } = this.#workspaceSpec();
     toolCtx.set(
       "workspace",
       deny !== null ? new Workspace(roots, deny) : new Workspace(roots),

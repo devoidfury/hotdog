@@ -12,6 +12,12 @@ import {
   SchemaLayer,
 } from "@core/config/schema-loader.ts";
 import { Agent } from "@core/agent.ts";
+import {
+  execFenceDisplay,
+  toolExecModeLabel,
+  toolExecPlaneSettings,
+  sharedToolExecDegraded,
+} from "@core/tool-exec-broker.ts";
 import { makeProviderHealth } from "@core/session/provider-health.ts";
 import {
   collectInfoPanels,
@@ -201,6 +207,10 @@ function printInfoText(
   console.log(`  Default Model:   ${resolved.model || "(none)"}`);
   console.log(`  Chat Timeout:    ${resolved.chatTimeout}s`);
   console.log(`  Profile:         ${resolved.profileName}`);
+  // Tool execution plane posture: never silent.
+  // The degraded flag is runtime state on the shared broker, so it is passed
+  // in rather than read from the resolved config.
+  console.log(`  Tools Exec:      ${toolExecModeLabel(resolved, sharedToolExecDegraded(), execFenceDisplay(resolved))}`);
   if (resolved.profileDef?.whitelistTools) {
     console.log(`  Whitelist Tools: ${(resolved.profileDef.whitelistTools as string[]).join(", ")}`);
   }
@@ -341,6 +351,12 @@ function printInfoJson(
   extensionStatus: ExtensionStatus[],
   providerHealthMap: Map<string, { down: boolean; reason: string | null }> = new Map(),
 ): number {
+  // Tool plane posture in the JSON mirror of the text line above: the fence
+  // is the probe result -- "bwrap" jailed, "off" by policy, "none" wanted but
+  // unavailable (probe failed; the text line carries that wording).
+  const plane = toolExecPlaneSettings(resolved);
+  const planeDegraded = sharedToolExecDegraded();
+  const fenceDisplay = execFenceDisplay(resolved);
   const json = {
     config: {
       ai_url: resolved.baseUrl,
@@ -349,6 +365,16 @@ function printInfoJson(
       profile: resolved.profileName,
       profile_whitelist: resolved.profileDef?.whitelistTools || null,
       profile_blacklist: resolved.profileDef?.blacklistTools || [],
+      tools_exec: plane.mode,
+      tools_fence:
+        plane.mode === "worker"
+          ? fenceDisplay === "bwrap" || fenceDisplay === "off"
+            ? fenceDisplay
+            : "none"
+          : null,
+      // Runtime flag: crash-respawn budget exhausted, never an
+      // inline downgrade -- a degraded plane still rejects loudly.
+      tools_exec_degraded: planeDegraded,
     },
     providers: {
       configured: providers.map((p) => ({

@@ -317,3 +317,28 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     expect(result.contextLimit).toBe(128000);
   });
 });
+
+// ── Tool execution plane keys ────────────────
+
+describe("toolExec / execFence", () => {
+  const baseContext: ResolutionContext = {
+    cli: {},
+    config: {},
+    provider: null,
+    profile: null,
+    profileName: "default",
+    profilesPath: "./config/profiles",
+  };
+
+  it("ships the plane on: toolExec defaults to worker, execFence to probe", () => {
+    expect(resolveKey("toolExec", CONFIG_KEYS.toolExec, baseContext)).toBe("worker");
+    expect(resolveKey("execFence", CONFIG_KEYS.execFence, baseContext)).toBe("probe");
+  });
+
+  it("resolves layers cli > config for both keys", () => {
+    expect(resolveKey("toolExec", CONFIG_KEYS.toolExec, { ...baseContext, config: { toolExec: "inline" } })).toBe("inline");
+    expect(resolveKey("toolExec", CONFIG_KEYS.toolExec, { ...baseContext, cli: { toolExec: "inline" }, config: { toolExec: "worker" } })).toBe("inline");
+    expect(resolveKey("execFence", CONFIG_KEYS.execFence, { ...baseContext, config: { execFence: "off" } })).toBe("off");
+    expect(resolveKey("execFence", CONFIG_KEYS.execFence, { ...baseContext, cli: { execFence: "off" }, config: { execFence: "probe" } })).toBe("off");
+  });
+});

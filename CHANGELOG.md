@@ -10,6 +10,10 @@
 
 - **webui subagents strip is scannable now.** Chips carry a one-line step label (the task_id suffix after the last `:`, else the first words of the description) with a colored status glyph instead of a wrapped four-line id plus a COMPLETED badge; a run discriminator prefixes the label only when several runs share the strip. The strip is bounded at two rows with the remainder behind a "+N" chip (click reveals/collapses); full id, description, and status ride the tooltip.
 
+- **tool exec plane fence (increment 3).** Tagged tools (`bash`, `read`, `grep`) on the worker plane now run inside a bubblewrap jail when the platform provides one: fresh tmpfs root, read-only system dirs, read-write ONLY the session's workspace roots plus a private scratch -- no `$HOME`, no hotdog config files, no sibling session roots, no `.git` (`execFence: "probe"`, default; `hotdog info` reports `fence: bwrap | off | none -- probe failed`). Dropping an entry now takes the command's whole process group with it instead of orphaning it, a broker that dies once per served call is finally caught by a sliding death window, and the evals harness shares the same planner module.
+
+- **tool exec plane hardening (increment 2).** Cancelling a run now interrupts work in flight: the supervisor sends a cancel frame and settles the call immediately as `[tool-exec cancelled]`, while `bash` gets SIGTERM-then-SIGKILL across its whole process group (inline calls get the same signal on the tool context). A pooled executor that dies mid-call reports `[tool-exec crashed]` and its pool entry re-fills on the next call; the broker respawns up to 3 consecutive deaths (any completed call refreshes the budget) and afterwards rejects loudly and shows `[degraded: broker respawn cap]` in `hotdog info` and the webui header strip, which now shows the plane posture. Idle pool entries are reaped after 5 minutes, and a run pre-warms its session entry so the first tool call skips the spawn.
+
 - webui - fix numbered loose lists markup
 
 - [BRK] dropped support for bun older than 1.4.2

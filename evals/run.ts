@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expandArgv, expandEnvValues, expandRoBinds, loadHarnessSpec, runHarness, usedPlaceholders } from "./lib/harness.ts";
 import { startServe } from "./lib/serve.ts";
-import { bwrapArgv, bwrapBinary, baseRoBinds, hiddenRepoPaths, type BwrapPlan } from "./lib/bwrap.ts";
+import { bwrapArgv, bwrapBinary, baseRoBinds, hiddenRepoPaths, type BwrapPlan } from "../src/utils/exec-plan.ts";
 import { formatJudgePrompt, parseVerdict, runCheck, tail, VERDICT_SCHEMA } from "./lib/score.ts";
 import { buildMatrix, loadSeries } from "./lib/series.ts";
 import { fmtErr, formatDryRun, formatSummary, resultsDirName } from "./lib/format.ts";

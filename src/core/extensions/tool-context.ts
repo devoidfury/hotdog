@@ -11,6 +11,13 @@ export interface DefaultToolContext extends Record<string, unknown> {
   workspace: Workspace;
   taskManager?: unknown;
   sessionCore?: unknown;
+  /**
+   * Run-scoped cancellation, set by the ToolExecutor (inline) and by the
+   * pooled runner (worker plane). Optional: tools behave as before when no
+   * host offered one (standalone callers). Long-running tools should abort
+   * their work when it fires.
+   */
+  abortSignal?: AbortSignal;
 }
 
 /**

@@ -165,8 +165,10 @@ Built-in command handler implementations for core commands. Extracted from `agen
 Runs the full tool call pipeline (TOOL_BEFORE_EXECUTE → AGENT_TOOL_CONTEXT → TOOL_CALL gate → validate → execute → TOOL_AFTER_EXECUTE → TOOL_RESULT → TOOL_METRICS); the notify hooks in this chain are awaited, so context mounts (even from async handlers) are complete before the gate runs and before `tool.execute()` — the gate payload carries the `toolCtx` so an approval-style handler can prompt through it. Extracted from Agent so tool execution is testable independently. Key exports:
 - `ToolExecutor` class — manages the tool execution pipeline
 - `createToolExecutor(deps)` — factory function
-- `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, emitOutput, workspaceRoots, maxRetries, toolRetryDelay, isRestoring, agent)
+- `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, emitOutput, workspaceRoots, maxRetries, toolRetryDelay, isRestoring, agent, runSignal, toolExec/toolExecLink/toolExecConfig)
 - `ToolCall` — typed tool call object
+
+The execute site is the plane's one fork: with `toolExec: "worker"` a tool tagged `execution: "worker"` is dispatched through the `ToolExecLink` (`src/core/tool-exec-broker.ts`) into a pooled runner (`src/workers/tool-exec.ts`) instead of running in-process; untagged tools and inline mode take today's path. `runSignal` is the run-lifetime cancellation signal (`Agent.cancel()`): a worker call races it and sends a cancel frame, an inline call gets it on the tool context as `abortSignal`, so long-running tools interrupt either way. Frames, error/result serialization and the crash vocabulary (`executor-died` → `[tool-exec crashed]`) live in `src/core/tool-exec-protocol.ts`. The fence is argv: the supervisor computes a jail plan per (session, class) with `planFor()` (`src/utils/exec-plan.ts`, shared probe-and-degrade with the evals harness), rides it on the invoke/warm frame as `{id, prefix}`, and the broker prepends it verbatim at entry spawn (`bwrap <plan> -- bun <runner>`); a fence-id change replaces the entry, a probe failure spawns plain and is reported by `execFenceDisplay()`.
 
 ### Token Tracker (`src/core/token-tracker.ts`)
 Accumulates session token usage and tracks last-reported values. Key exports:

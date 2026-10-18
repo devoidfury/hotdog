@@ -348,6 +348,32 @@
       { "default": false }
     ]
   },
+  "toolExec": {
+    "type": "string",
+    "cliFlag": {
+      "long": "--tool-exec",
+      "type": "string",
+      "description": "Tool execution plane: worker (tagged tools run in pooled out-of-process executors) or inline (everything in-process, zero added machinery)"
+    },
+    "layers": [
+      { "source": "cli", "key": "toolExec" },
+      { "source": "config", "key": "toolExec" },
+      { "default": "worker" }
+    ]
+  },
+  "execFence": {
+    "type": "string",
+    "cliFlag": {
+      "long": "--exec-fence",
+      "type": "string",
+      "description": "Fence for pooled executors: probe (jail when the platform supports it) or off (plain spawn)"
+    },
+    "layers": [
+      { "source": "cli", "key": "execFence" },
+      { "source": "config", "key": "execFence" },
+      { "default": "probe" }
+    ]
+  },
   "envScrubbing": {
     "type": "boolean",
     "cliFlag": {

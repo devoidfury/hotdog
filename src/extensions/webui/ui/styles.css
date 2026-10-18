@@ -689,6 +689,26 @@ body {
     background: var(--error);
 }
 
+/* Tool-exec plane posture + connection dot, grouped so the strip stays
+   right-aligned as items come and go. */
+.header-status-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+#tool-exec-status {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+}
+
+/* A degraded plane (broker respawn cap) must not look calm. */
+.tool-exec-degraded {
+    color: var(--error);
+    font-weight: 600;
+}
+
 .status-connected {
     color: var(--success);
     font-size: 0.75rem;
@@ -1023,8 +1043,9 @@ body {
     word-break: break-word;
     color: var(--text-secondary);
     line-height: 1.5;
-    max-height: 200px;
+    height: 40vh;
     overflow-y: auto;
+    resize: vertical;
 }
 
 .tool-call-body.hidden {
@@ -1213,8 +1234,9 @@ body {
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 320px;
+    height: 40vh;
     overflow-y: auto;
+    resize: vertical;
 }
 
 .message.question {

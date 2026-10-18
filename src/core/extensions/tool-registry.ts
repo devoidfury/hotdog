@@ -24,6 +24,12 @@ export interface ToolMetadata {
    * profile's tool filters must not silently break the run contract.
    */
   pinned?: boolean;
+  /**
+   * Where the tool executes when `toolExec: "worker"` is on. Default `"local"`: the tool keeps running
+   * in-process even with the plane on. `"worker"` tools (capability tools:
+   * bash, file ops, network) run in a pooled out-of-process executor.
+   */
+  execution?: "local" | "worker";
 }
 
 export interface ToolDef {

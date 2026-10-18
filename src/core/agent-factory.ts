@@ -5,6 +5,9 @@ import { HOOKS } from "./hooks.ts";
 import { getLayerDefault, CONFIG_SCHEMA } from "./config/schema-loader.ts";
 import type { CoreContext, ResolvedConfig } from "./extensions/types.ts";
 import type { SwitchProfile } from "./config/profiles.ts";
+import { sharedToolExecBroker, toolExecPlaneSettings } from "./tool-exec-broker.ts";
+import type { WireToolConfig } from "./tool-exec-protocol.ts";
+import { envScrubExtraKeys } from "@utils/env.ts";
 
 export interface AgentFactoryOptions {
   /** Resolved config; defaults to core.resolved. */
@@ -62,6 +65,18 @@ export function createAgentFactory(
           ? startupProfile.blacklistTools
           : ((baseConfig.blacklistTools as string[] | null | undefined) ?? null);
 
+    // Tool execution plane: an invalid posture
+    // fails the build loudly; a worker plane shares one broker per process
+    // and hands the pooled runners the merged tool-config scalars they are
+    // not allowed to resolve themselves (the runner never boots the config).
+    const plane = toolExecPlaneSettings(resolved);
+    const toolExecConfig: WireToolConfig = {
+      bashTool: baseConfig.bashTool as Record<string, unknown> | undefined,
+      coreTools: baseConfig.coreTools as Record<string, unknown> | undefined,
+      envScrubbing: resolved.envScrubbing !== false,
+      envScrubExtra: envScrubExtraKeys(baseConfig),
+    };
+
     const agent = new Agent({
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
@@ -108,6 +123,9 @@ export function createAgentFactory(
       sessionId: (agentConfig.sessionId as string) || crypto.randomUUID(),
       abortSignal: (agentConfig.abortSignal as AbortSignal | null | undefined) ?? null,
       toolWhitelist,
+      toolExec: plane.mode,
+      toolExecLink: plane.mode === "worker" ? sharedToolExecBroker({ fence: plane.fence }) : null,
+      toolExecConfig,
       // Precedence: explicit override > profile overlay > resolved profileDef
       // (the profile the config resolution chain picked at startup).
       managerProfile: pickBoolean(

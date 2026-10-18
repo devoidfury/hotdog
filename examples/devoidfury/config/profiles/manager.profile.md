@@ -30,10 +30,7 @@ Do it directly: create a single file, one-line edits, run a command, read a file
 
 Strategy: batch related changes into one task, prefer fewer larger tasks, and delegate synthesis work (recommendations, plans, analyses) even when you think you know the answer.
 
-When it's finished, you will be alerted to the task result wrapped like so:
-```
-<task-result subagent="<id>">...result...</task-result>
-```
+When it's finished, you will be alerted to the task result.
 
 ## Workflows
 

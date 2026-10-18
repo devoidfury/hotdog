@@ -1,0 +1,15 @@
+{
+  "id": "crab-code",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/crab-code/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "OPENAI_BASE_URL": "{base_url}",
+    "OPENAI_API_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/crab-code"
+  ]
+}

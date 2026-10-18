@@ -1,0 +1,17 @@
+{
+  "id": "ob-1",
+  "command": "bun",
+  "args": [
+    "{harness_root}/ob-1/src/index.ts"
+  ],
+  "prompt_via": "stdin",
+  "env": {
+    "OB1_BASE_URL": "{base_url}",
+    "OB1_API_KEY": "{key}",
+    "OB1_MODEL": "{model}",
+    "OB1_PERMISSION": "autopilot"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/ob-1"
+  ]
+}

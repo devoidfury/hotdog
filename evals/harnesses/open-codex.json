@@ -1,0 +1,14 @@
+{
+  "id": "open-codex",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/open-codex/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "OPENAI_API_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/open-codex"
+  ]
+}

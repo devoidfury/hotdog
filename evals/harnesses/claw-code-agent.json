@@ -1,0 +1,18 @@
+{
+  "id": "claw-code-agent",
+  "command": "claw-code-agent",
+  "args": [
+    "agent",
+    "--model",
+    "{model}",
+    "--base-url",
+    "{base_url}",
+    "--api-key",
+    "{key}",
+    "{prompt}"
+  ],
+  "sandbox_ro_binds": [
+    "{harness_root}/claw-code-agent",
+    "{venv_root}/claw-code-agent/venv"
+  ]
+}

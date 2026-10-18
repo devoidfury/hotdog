@@ -1,0 +1,14 @@
+{
+  "id": "prime-agent",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/prime-agent/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "PRIME_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/prime-agent"
+  ]
+}

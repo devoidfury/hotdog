@@ -1,0 +1,14 @@
+{
+  "id": "smelt",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/smelt/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "SMELT_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/smelt"
+  ]
+}

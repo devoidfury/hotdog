@@ -1,0 +1,16 @@
+{
+  "id": "openlumara",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/openlumara/run.sh"
+  ],
+  "prompt_via": "stdin",
+  "env": {
+    "OPENLUMARA_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/openlumara",
+    "{venv_root}/openlumara/venv"
+  ]
+}

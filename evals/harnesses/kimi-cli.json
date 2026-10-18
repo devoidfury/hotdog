@@ -1,0 +1,16 @@
+{
+  "id": "kimi-cli",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/kimi-cli/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "KIMI_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/kimi-cli",
+    "{venv_root}/kimi-cli/venv"
+  ]
+}

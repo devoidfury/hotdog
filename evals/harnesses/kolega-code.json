@@ -1,0 +1,21 @@
+{
+  "id": "kolega-code",
+  "command": "kolega-code",
+  "args": [
+    "ask",
+    "{prompt}",
+    "--model",
+    "{model}",
+    "--endpoint-url",
+    "{base_url}",
+    "--endpoint-api-key",
+    "{key}"
+  ],
+  "env": {
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/kolega-code",
+    "{venv_root}/kolega-code/venv"
+  ]
+}

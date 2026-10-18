@@ -1,0 +1,19 @@
+{
+  "id": "mimo-code",
+  "command": "bun",
+  "args": [
+    "{harness_root}/mimo-code/packages/cli/bin/mimo",
+    "run",
+    "{prompt}",
+    "--model",
+    "openai-compatible/{model}"
+  ],
+  "env": {
+    "OPENAI_API_KEY": "{key}",
+    "OPENAI_BASE_URL": "{base_url}",
+    "MIMOCODE_CONFIG_DIR": "{harness_root}/mimo-code/packages/cli"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/mimo-code"
+  ]
+}

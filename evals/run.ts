@@ -1,13 +1,19 @@
 // hotdog eval runner. Usage:
 //   bun evals/run.ts --series series/kielbasa-1 --harness <id> --model <id> [--task <id>]
 //                    [--judge-harness <id> --judge-model <id>]
+//                    [--gateway-key <k>] [--gateway-url <url>]
+//                    [--harness-dir <dir>] [--venv-dir <dir>]
 //                    [--repeat n] [--concurrency n] [--dry-run] [--keep-workspace]
+// Gateway key/url, the harness-checkout root and the venv root come from the
+// flags above or $HOTDOG_EVAL_GATEWAY_KEY / $HOTDOG_EVAL_GATEWAY_URL /
+// $HOTDOG_EVAL_HARNESS_DIR / $HOTDOG_EVAL_VENV_DIR. Nothing machine-specific
+// lives in the harness specs; see evals/README.md.
 // Real model calls happen only when NOT --dry-run.
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { expandArgv, loadHarnessSpec, runHarness } from "./lib/harness.ts";
+import { expandArgv, expandEnvValues, expandRoBinds, loadHarnessSpec, runHarness, usedPlaceholders } from "./lib/harness.ts";
 import { startServe } from "./lib/serve.ts";
 import { bwrapArgv, bwrapBinary, baseRoBinds, hiddenRepoPaths, type BwrapPlan } from "./lib/bwrap.ts";
 import { formatJudgePrompt, parseVerdict, runCheck, tail, VERDICT_SCHEMA } from "./lib/score.ts";
@@ -27,6 +33,10 @@ interface Options {
   models: string[];
   judgeHarness?: string;
   judgeModel?: string;
+  gatewayKey: string;
+  gatewayUrl: string;
+  harnessDir: string;
+  venvDir: string;
   repeat?: number;
   concurrency?: number;
   dryRun: boolean;
@@ -43,7 +53,7 @@ function positiveInt(raw: string, flag: string): number {
 }
 
 function parseArgs(argv: string[]): Options {
-  const opts: Options = { series: "", tasks: [], harnesses: [], models: [], dryRun: false, keepWorkspace: false };
+  const opts: Options = { series: "", tasks: [], harnesses: [], models: [], gatewayKey: "", gatewayUrl: "", harnessDir: "", venvDir: "", dryRun: false, keepWorkspace: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     const next = (): string => {
@@ -58,6 +68,10 @@ function parseArgs(argv: string[]): Options {
       case "--model": opts.models.push(next()); break;
       case "--judge-harness": opts.judgeHarness = next(); break;
       case "--judge-model": opts.judgeModel = next(); break;
+      case "--gateway-key": opts.gatewayKey = next(); break;
+      case "--gateway-url": opts.gatewayUrl = next(); break;
+      case "--harness-dir": opts.harnessDir = next(); break;
+      case "--venv-dir": opts.venvDir = next(); break;
       case "--repeat": opts.repeat = positiveInt(next(), arg); break;
       case "--concurrency": opts.concurrency = positiveInt(next(), arg); break;
       case "--dry-run": opts.dryRun = true; break;
@@ -78,6 +92,69 @@ function loadHarness(id: string): HarnessSpec {
   return loadHarnessSpec(join(HARNESS_DIR, `${id}.json`));
 }
 
+/**
+ * Runtime config: everything a spec may reference besides task data. Flags win
+ * over env; --venv-dir defaults to /opt/harnesses. Dry-run substitutes stub
+ * values so plans print without a configured gateway.
+ */
+interface Runtime {
+  /** Expansion vars (prompt/model/schema_file are added per expansion site). */
+  vars: Record<string, string>;
+  /** Env injected into every harness spawn so run scripts can find the config. */
+  inject: Record<string, string>;
+}
+
+const RUNTIME_HINTS: Record<string, string> = {
+  key: "--gateway-key <k> or $HOTDOG_EVAL_GATEWAY_KEY",
+  base_url: "--gateway-url <url> or $HOTDOG_EVAL_GATEWAY_URL",
+  gateway_url: "--gateway-url <url> or $HOTDOG_EVAL_GATEWAY_URL",
+  harness_root: "--harness-dir <dir> or $HOTDOG_EVAL_HARNESS_DIR",
+};
+
+function buildRuntime(opts: Options): Runtime {
+  const stub = opts.dryRun;
+  const key = opts.gatewayKey || process.env.HOTDOG_EVAL_GATEWAY_KEY || "";
+  const gw = (opts.gatewayUrl || process.env.HOTDOG_EVAL_GATEWAY_URL || "").replace(/\/+$/, "");
+  const harnessRoot = opts.harnessDir || process.env.HOTDOG_EVAL_HARNESS_DIR || "";
+  const venvRoot = opts.venvDir || process.env.HOTDOG_EVAL_VENV_DIR || "/opt/harnesses";
+  const vars: Record<string, string> = {
+    repo: REPO_ROOT,
+    home: process.env.HOME ?? "",
+    venv_root: venvRoot,
+  };
+  if (key || stub) vars.key = key || "<key>";
+  if (gw || stub) {
+    vars.gateway_url = gw || "<gateway-url>";
+    vars.base_url = `${gw || "<gateway-url>"}/v1`;
+  }
+  if (harnessRoot || stub) vars.harness_root = harnessRoot || "<harness-dir>";
+  const inject: Record<string, string> = {};
+  if (key) inject.HOTDOG_EVAL_GATEWAY_KEY = key;
+  if (gw) inject.HOTDOG_EVAL_GATEWAY_URL = gw;
+  if (harnessRoot) inject.HOTDOG_EVAL_HARNESS_DIR = harnessRoot;
+  inject.HOTDOG_EVAL_VENV_DIR = venvRoot;
+  return { vars, inject };
+}
+
+/** Fail before any run starts if a spec needs runtime config that wasn't provided. */
+function requireRuntime(specs: HarnessSpec[], vars: Record<string, string>): void {
+  const missing = new Map<string, string[]>();
+  for (const spec of specs) {
+    for (const p of usedPlaceholders(spec)) {
+      if (!PER_RUN_VARS.has(p) && !(p in vars)) {
+        missing.set(p, [...(missing.get(p) ?? []), spec.id]);
+      }
+    }
+  }
+  if (missing.size) {
+    const parts = [...missing.entries()].map(([p, ids]) => `"{${p}}" (used by ${ids.join(", ")}): ${RUNTIME_HINTS[p] ?? "internal error"}`);
+    throw new Error(`missing runtime config -- ${parts.join("; ")}`);
+  }
+}
+
+// Placeholders the runner always supplies at the expansion site itself.
+const PER_RUN_VARS = new Set(["prompt", "model", "schema_file"]);
+
 interface RunOpts {
   seriesName: string;
   timeoutSecs: number;
@@ -87,6 +164,7 @@ interface RunOpts {
   keepWorkspaceFlag: boolean;
   sandbox: SandboxBase | null;
   sessionsRoot: string;
+  runtime: Runtime;
 }
 
 interface SandboxBase {
@@ -109,9 +187,9 @@ function cellPlan(base: SandboxBase, opts: RunOpts, workspace: string, sessionDi
   };
 }
 
-/** Spec-declared extra ro binds that exist host-side (bind sources must exist). */
-function extraRoBinds(spec: HarnessSpec): string[] {
-  return (spec.sandbox_ro_binds ?? []).filter((p) => existsSync(p));
+/** Expanded spec ro binds that exist host-side (bind sources must exist). */
+function extraRoBinds(spec: HarnessSpec, vars: Record<string, string>): string[] {
+  return expandRoBinds(spec, vars).filter((p) => existsSync(p));
 }
 
 /** bwrap-wrap an expanded spec+argv per the plan. */
@@ -146,20 +224,16 @@ async function executeCell(cell: MatrixCell, opts: RunOpts): Promise<RunRecord> 
     if (cell.task.fixtures) {
       cpSync(join(opts.tasksDir, cell.task.fixtures), workspace, { recursive: true });
     }
-    const argv = expandArgv(harness, {
-      prompt: cell.task.prompt,
-      model: cell.model,
-      repo: REPO_ROOT,
-      schema_file: opts.schemaFile,
-    });
+    const vars = { ...opts.runtime.vars, prompt: cell.task.prompt, model: cell.model, schema_file: opts.schemaFile };
+    const argv = expandArgv(harness, vars);
     const sessionDir = join(opts.sessionsRoot, cell.runId);
     mkdirSync(sessionDir, { recursive: true }); // bwrap bind sources must exist host-side
     const spawn = opts.sandbox
-      ? applySandbox(opts.sandbox, harness, argv, cellPlan(opts.sandbox, opts, workspace, sessionDir, extraRoBinds(harness)))
+      ? applySandbox(opts.sandbox, harness, argv, cellPlan(opts.sandbox, opts, workspace, sessionDir, extraRoBinds(harness, opts.runtime.vars)))
       : { spec: harness, argv };
-    // Per-task env (e.g. HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS) merged over the
-    // harness spec's env but under the forced per-run values.
-    const spec = cell.task.env ? { ...spawn.spec, env: { ...(spawn.spec.env ?? {}), ...cell.task.env } } : spawn.spec;
+    // Spec env placeholders ({key}, {base_url}, ...) expand here; per-task env
+    // (e.g. HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS) merges over it.
+    const spec = { ...spawn.spec, env: { ...expandEnvValues(harness, vars), ...(cell.task.env ?? {}) } };
     // serve runs on the host (grading apparatus, not the agent); the sandbox
     // shares the network namespace, so the agent can still reach it.
     let serveHandle: { stop(): void } | null = null;
@@ -178,7 +252,7 @@ async function executeCell(cell: MatrixCell, opts: RunOpts): Promise<RunRecord> 
         cwd: workspace,
         prompt: cell.task.prompt,
         timeoutSecs: cell.task.timeout_secs ?? opts.timeoutSecs,
-        env: { HOTDOG_SESSIONS_DIR: sessionDir },
+        env: { HOTDOG_SESSIONS_DIR: sessionDir, HOTDOG_EVAL_MODEL: cell.model, ...opts.runtime.inject },
       });
     } finally {
       serveHandle?.stop();
@@ -221,24 +295,20 @@ async function runJudge(
     return { name, pass: false, detail: "task has a judge but no judge harness was configured" };
   }
   try {
-    const argv = expandArgv(opts.judge.harness, {
-      prompt: formatJudgePrompt(cell.task, cell.task.judge!.rubric, stdout),
-      model: opts.judge.model,
-      repo: REPO_ROOT,
-      schema_file: opts.schemaFile,
-    });
+    const vars = { ...opts.runtime.vars, prompt: formatJudgePrompt(cell.task, cell.task.judge!.rubric, stdout), model: opts.judge.model, schema_file: opts.schemaFile };
+    const argv = expandArgv(opts.judge.harness, vars);
     const sessionDir = join(opts.sessionsRoot, `${cell.runId}-judge`);
     mkdirSync(sessionDir, { recursive: true });
     const spawn = opts.sandbox
-      ? applySandbox(opts.sandbox, opts.judge.harness, argv, cellPlan(opts.sandbox, opts, workspace, sessionDir, extraRoBinds(opts.judge.harness)))
+      ? applySandbox(opts.sandbox, opts.judge.harness, argv, cellPlan(opts.sandbox, opts, workspace, sessionDir, extraRoBinds(opts.judge.harness, opts.runtime.vars)))
       : { spec: opts.judge.harness, argv };
     const res = await runHarness({
-      spec: spawn.spec,
+      spec: { ...spawn.spec, env: { ...expandEnvValues(opts.judge.harness, vars), ...(spawn.spec.env ?? {}) } },
       argv: spawn.argv,
       cwd: workspace,
       prompt: "",
       timeoutSecs: JUDGE_TIMEOUT_SECS,
-      env: { HOTDOG_SESSIONS_DIR: sessionDir },
+      env: { HOTDOG_SESSIONS_DIR: sessionDir, HOTDOG_EVAL_MODEL: opts.judge.model, ...opts.runtime.inject },
     });
     // Always persist the judge's raw output next to its session log, so verdicts
     // (and stdout contamination) are inspectable after the fact.
@@ -314,11 +384,16 @@ async function main(): Promise<number> {
     }
   }
 
+  // Runtime config (gateway key/url, harness checkout root) must be available
+  // for every selected spec before the first cell runs.
+  const runtime = buildRuntime(opts);
+  requireRuntime(opts.harnesses.map(loadHarness).concat(judge ? [judge.harness] : []), runtime.vars);
+
   if (opts.dryRun) {
     console.log(formatDryRun(cells));
     for (const cell of cells) {
       const harness = loadHarness(cell.harnessId);
-      const argv = expandArgv(harness, { prompt: "<prompt>", model: cell.model, repo: REPO_ROOT, schema_file: "<schema>" });
+      const argv = expandArgv(harness, { ...runtime.vars, prompt: "<prompt>", model: cell.model, schema_file: "<schema>" });
       console.log(`  ${cell.runId}: ${harness.command} ${argv.map((a) => (a.length > 60 ? a.slice(0, 57) + "..." : a)).join(" ")}`);
       if (cell.task.serve) console.log(`    serve: ${cell.task.serve.cmd} (ready ${cell.task.serve.ready_url})`);
     }
@@ -353,6 +428,7 @@ async function main(): Promise<number> {
       keepWorkspaceFlag: opts.keepWorkspace,
       sandbox,
       sessionsRoot: join(resultsDir, "sessions"),
+      runtime,
     });
     records.push(record);
     appendFileSync(runsFile, JSON.stringify(record) + "\n");

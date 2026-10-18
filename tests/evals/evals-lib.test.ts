@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { baseRoBinds, bwrapArgv, bwrapAvailable, findBwrap, hiddenRepoPaths } from "../../evals/lib/bwrap.ts";
-import { expandArgv, parseHarnessSpec, runHarness, safeWorkspacePath } from "../../evals/lib/harness.ts";
+import { expandArgv, expandEnvValues, expandRoBinds, parseHarnessSpec, runHarness, safeWorkspacePath, usedPlaceholders } from "../../evals/lib/harness.ts";
 import { formatJudgePrompt, parseVerdict, runCheck } from "../../evals/lib/score.ts";
 import { buildMatrix, parseSeries, parseTask, loadSeries } from "../../evals/lib/series.ts";
 import { fmtErr, formatDryRun, formatSummary, resultsDirName, summarize } from "../../evals/lib/format.ts";
@@ -31,6 +31,8 @@ describe("parseHarnessSpec", () => {
   it("accepts sandbox_ro_binds absolute paths, rejects bad shapes", () => {
     const s = parseHarnessSpec("h.json", JSON.stringify({ id: "h", command: "b", args: [], sandbox_ro_binds: ["/a", "/b"] }));
     expect(s.sandbox_ro_binds).toEqual(["/a", "/b"]);
+    const ph = parseHarnessSpec("h.json", JSON.stringify({ id: "h", command: "b", args: [], sandbox_ro_binds: ["{harness_root}/a"] }));
+    expect(ph.sandbox_ro_binds).toEqual(["{harness_root}/a"]);
     expect(() => parseHarnessSpec("h.json", JSON.stringify({ id: "h", command: "b", args: [], sandbox_ro_binds: ["rel/path"] }))).toThrow("sandbox_ro_binds");
     expect(() => parseHarnessSpec("h.json", JSON.stringify({ id: "h", command: "b", args: [], sandbox_ro_binds: "x" }))).toThrow("sandbox_ro_binds");
   });
@@ -57,6 +59,33 @@ describe("expandArgv", () => {
   });
   it("forbids {prompt} with prompt_via stdin", () => {
     expect(() => expandArgv({ ...spec, prompt_via: "stdin" as const, args: ["{prompt}"] }, vars)).toThrow("must not contain {prompt}");
+  });
+});
+
+describe("runtime placeholders", () => {
+  const runtimeVars = { key: "secret", base_url: "http://gw:9292/v1", gateway_url: "http://gw:9292", harness_root: "/hr", venv_root: "/vr" };
+
+  it("expands key/base_url in argv", () => {
+    expect(expandArgv({ id: "h", command: "b", args: ["--key", "{key}", "--base", "{base_url}", "{prompt}"] }, { ...runtimeVars, prompt: "p" }))
+      .toEqual(["--key", "secret", "--base", "http://gw:9292/v1", "p"]);
+  });
+  it("expands env values (keys stay literal)", () => {
+    expect(expandEnvValues({ id: "h", command: "b", args: [], env: { GW_KEY: "{key}", OTHER: "plain" } }, runtimeVars))
+      .toEqual({ GW_KEY: "secret", OTHER: "plain" });
+  });
+  it("expands sandbox_ro_binds and requires absolute results", () => {
+    expect(expandRoBinds({ id: "h", command: "b", args: [], sandbox_ro_binds: ["{harness_root}/x", "/abs"] }, runtimeVars))
+      .toEqual(["/hr/x", "/abs"]);
+    expect(() => expandRoBinds({ id: "h", command: "b", args: [], sandbox_ro_binds: ["{harness_root}/x"] }, { harness_root: "rel/path" }))
+      .toThrow("did not expand to an absolute path");
+  });
+  it("throws when a runtime placeholder has no value", () => {
+    expect(() => expandArgv({ id: "h", command: "b", args: ["{key}", "{prompt}"] }, { prompt: "p" }))
+      .toThrow('no value provided for "{key}"');
+  });
+  it("usedPlaceholders scans args, env and binds", () => {
+    const used = usedPlaceholders({ id: "h", command: "b", args: ["{prompt}"], env: { K: "{key}" }, sandbox_ro_binds: ["{harness_root}/x"] });
+    expect([...used].sort()).toEqual(["harness_root", "key", "prompt"]);
   });
 });
 

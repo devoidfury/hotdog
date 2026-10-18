@@ -1,0 +1,16 @@
+{
+  "id": "grinta-coding-agent",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/grinta-coding-agent/run.sh"
+  ],
+  "prompt_via": "stdin",
+  "env": {
+    "LLM_API_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/grinta-coding-agent",
+    "{venv_root}/grinta-coding-agent/venv"
+  ]
+}

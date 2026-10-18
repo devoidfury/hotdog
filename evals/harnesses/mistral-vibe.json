@@ -1,0 +1,16 @@
+{
+  "id": "mistral-vibe",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/mistral-vibe/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "VIBE_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/mistral-vibe",
+    "{venv_root}/mistral-vibe/venv"
+  ]
+}

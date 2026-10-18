@@ -1,0 +1,14 @@
+{
+  "id": "molt",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/molt/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "MOLT_API_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/molt"
+  ]
+}

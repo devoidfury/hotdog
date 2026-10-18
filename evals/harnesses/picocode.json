@@ -1,0 +1,14 @@
+{
+  "id": "picocode",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/picocode/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "PICOCODE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/picocode"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "crush",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/crush/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "CRUSH_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/crush"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "openharness",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/openharness/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "OH_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/openharness"
+  ]
+}

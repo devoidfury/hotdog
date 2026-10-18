@@ -1,0 +1,18 @@
+{
+  "id": "mocode",
+  "command": "node",
+  "args": [
+    "{harness_root}/mocode/bin/mocode.js",
+    "-p",
+    "{prompt}",
+    "--dangerously-skip-permissions"
+  ],
+  "env": {
+    "LLM_BASE_URL": "{base_url}",
+    "LLM_API_KEY": "{key}",
+    "LLM_MODEL": "{model}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/mocode"
+  ]
+}

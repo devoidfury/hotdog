@@ -1,0 +1,14 @@
+{
+  "id": "opencode",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/opencode/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "OPENCODE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/opencode"
+  ]
+}

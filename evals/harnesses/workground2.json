@@ -1,0 +1,14 @@
+{
+  "id": "workground2",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/workground2/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "WGT2_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/workground2"
+  ]
+}

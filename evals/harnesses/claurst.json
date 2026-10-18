@@ -1,0 +1,20 @@
+{
+  "id": "claurst",
+  "command": "node",
+  "args": [
+    "{harness_root}/claurst/npm/bin/claurst",
+    "-p",
+    "{prompt}",
+    "--model",
+    "{model}",
+    "--provider",
+    "openai"
+  ],
+  "env": {
+    "OPENAI_API_KEY": "{key}",
+    "CLAURST_API_BASE": "{base_url}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/claurst"
+  ]
+}

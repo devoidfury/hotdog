@@ -1,0 +1,14 @@
+{
+  "id": "letta-code",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/letta-code/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "LETTA_STUDY_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/letta-code"
+  ]
+}

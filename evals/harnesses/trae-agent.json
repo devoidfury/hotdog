@@ -1,0 +1,17 @@
+{
+  "id": "trae-agent",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/trae-agent/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "TRAE_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/trae-agent",
+    "{venv_root}/trae-agent/venv",
+    "{home}/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu"
+  ]
+}

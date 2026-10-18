@@ -1,0 +1,15 @@
+{
+  "id": "tura",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/tura/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "TURA_PROVIDER_CONFIG": "{home}/harness-runs/tura/provider_config.json",
+    "OPENAI_API_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/tura"
+  ]
+}

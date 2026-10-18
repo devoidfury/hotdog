@@ -1,0 +1,16 @@
+{
+  "id": "plandex",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/plandex/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "PLANDEX_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/plandex",
+    "{home}/plandex-litellm",
+    "{home}/.local/share/uv/python"
+  ]
+}

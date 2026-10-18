@@ -1,0 +1,14 @@
+{
+  "id": "kode-cli",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/kode-cli/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "KODE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/kode-cli"
+  ]
+}

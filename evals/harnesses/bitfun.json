@@ -1,0 +1,14 @@
+{
+  "id": "bitfun",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/bitfun/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "BITFUN_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/bitfun"
+  ]
+}

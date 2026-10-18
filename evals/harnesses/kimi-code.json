@@ -1,0 +1,14 @@
+{
+  "id": "kimi-code",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/kimi-code/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "KIMI_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/kimi-code"
+  ]
+}

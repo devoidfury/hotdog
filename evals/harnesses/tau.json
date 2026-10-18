@@ -1,0 +1,16 @@
+{
+  "id": "tau",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/tau/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "TAU_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/tau",
+    "{venv_root}/tau/venv"
+  ]
+}

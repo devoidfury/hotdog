@@ -1,0 +1,14 @@
+{
+  "id": "codex",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/codex/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "CODEX_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/codex"
+  ]
+}

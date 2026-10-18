@@ -1,0 +1,16 @@
+{
+  "id": "ouroboros",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/ouroboros/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "OBO_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/ouroboros",
+    "{venv_root}/ouroboros/venv"
+  ]
+}

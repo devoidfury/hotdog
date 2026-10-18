@@ -1,0 +1,16 @@
+{
+  "id": "ra-aid",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/ra-aid/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "RA_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/ra-aid",
+    "{venv_root}/ra-aid/venv"
+  ]
+}

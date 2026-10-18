@@ -1,0 +1,14 @@
+{
+  "id": "open-interpreter",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/open-interpreter/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "OI_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/open-interpreter"
+  ]
+}

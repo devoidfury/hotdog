@@ -1,0 +1,17 @@
+{
+  "id": "cursor-agent",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/cursor-agent/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "CURSOR_GW_KEY": "{key}",
+    "CURSOR_MODEL": "{model}",
+    "CURSOR_BASE_URL": "{base_url}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/cursor-agent",
+    "{venv_root}/cursor-agent/venv"
+  ]
+}

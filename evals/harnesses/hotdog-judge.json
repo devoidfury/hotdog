@@ -1,5 +1,14 @@
 {
   "id": "hotdog-judge",
   "command": "bun",
-  "args": ["{repo}/bin/hotdog", "prompt", "{prompt}", "--model", "{model}", "--json-schema", "{schema_file}", "--no-log"]
+  "args": [
+    "{repo}/bin/hotdog",
+    "prompt",
+    "{prompt}",
+    "--model",
+    "{model}",
+    "--json-schema",
+    "{schema_file}",
+    "--no-log"
+  ]
 }

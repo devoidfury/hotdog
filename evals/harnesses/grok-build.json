@@ -1,0 +1,14 @@
+{
+  "id": "grok-build",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/grok-build/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "GROK_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/grok-build"
+  ]
+}

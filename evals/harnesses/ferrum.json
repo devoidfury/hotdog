@@ -1,0 +1,14 @@
+{
+  "id": "ferrum",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/ferrum/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "FERRUM_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/ferrum"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "hermes-agent",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/hermes-agent/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "HERMES_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/hermes-agent",
+    "{venv_root}/hermes-agent/venv"
+  ]
+}

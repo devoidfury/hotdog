@@ -1,5 +1,11 @@
 {
   "id": "hotdog",
   "command": "bun",
-  "args": ["{repo}/bin/hotdog", "prompt", "{prompt}", "--model", "{model}"]
+  "args": [
+    "{repo}/bin/hotdog",
+    "prompt",
+    "{prompt}",
+    "--model",
+    "{model}"
+  ]
 }

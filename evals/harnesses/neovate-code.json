@@ -1,0 +1,15 @@
+{
+  "id": "neovate-code",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/neovate-code/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "NEOVATE_GW_KEY": "{key}",
+    "NEOVATE_GW_BASE": "{base_url}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/neovate-code"
+  ]
+}

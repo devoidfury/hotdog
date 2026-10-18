@@ -1,0 +1,36 @@
+{
+  "$schema": "https://plandex.ai/schemas/models-input.schema.json",
+  "providers": [
+    { "name": "gw", "baseUrl": "__GW_URL__/v1", "apiKeyEnvVar": "PLANDEX_GW_KEY" }
+  ],
+  "models": [
+    {
+      "modelId": "openai/__MODEL__",
+      "publisher": "gw",
+      "description": "gateway __MODEL__",
+      "defaultMaxConvoTokens": 131072,
+      "maxTokens": 262144,
+      "maxOutputTokens": 8192,
+      "reservedOutputTokens": 2048,
+      "preferredOutputFormat": "xml",
+      "reasoningEffortEnabled": true,
+      "reasoningEffort": "low",
+      "providers": [ { "provider": "custom", "customProvider": "gw", "modelName": "__MODEL__" } ]
+    }
+  ],
+  "modelPacks": [
+    {
+      "name": "gw",
+      "description": "gateway pack",
+      "planner": "openai/__MODEL__",
+      "architect": "openai/__MODEL__",
+      "coder": "openai/__MODEL__",
+      "summarizer": "openai/__MODEL__",
+      "builder": "openai/__MODEL__",
+      "wholeFileBuilder": "openai/__MODEL__",
+      "names": "openai/__MODEL__",
+      "commitMessages": "openai/__MODEL__",
+      "autoContinue": "openai/__MODEL__"
+    }
+  ]
+}

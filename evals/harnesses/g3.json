@@ -1,0 +1,14 @@
+{
+  "id": "g3",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/g3/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "G3_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/g3"
+  ]
+}

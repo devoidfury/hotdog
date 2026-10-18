@@ -1,0 +1,14 @@
+{
+  "id": "vtcode",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/vtcode/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "VTCODE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/vtcode"
+  ]
+}

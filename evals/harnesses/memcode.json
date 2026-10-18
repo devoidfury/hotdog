@@ -1,0 +1,14 @@
+{
+  "id": "memcode",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/memcode/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "MEMCODE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/memcode"
+  ]
+}

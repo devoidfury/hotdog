@@ -1,0 +1,14 @@
+{
+  "id": "oh-my-pi",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/oh-my-pi/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "OMP_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/oh-my-pi"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "free-code",
+  "command": "cli",
+  "args": [
+    "-p",
+    "{prompt}",
+    "--model",
+    "{model}"
+  ],
+  "env": {
+    "ANTHROPIC_BASE_URL": "{gateway_url}",
+    "ANTHROPIC_API_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/free-code"
+  ]
+}

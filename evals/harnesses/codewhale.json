@@ -1,0 +1,15 @@
+{
+  "id": "codewhale",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/codewhale/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "CW_GW_KEY": "{key}",
+    "CODEWHALE_NO_UPDATE_CHECK": "1"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/codewhale"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "grok-cli",
+  "command": "bun",
+  "args": [
+    "{harness_root}/grok-cli/dist/index.js",
+    "-p",
+    "{prompt}",
+    "-u",
+    "{base_url}",
+    "-m",
+    "{model}",
+    "-k",
+    "{key}"
+  ],
+  "env": {
+    "GROK_API_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/grok-cli"
+  ]
+}

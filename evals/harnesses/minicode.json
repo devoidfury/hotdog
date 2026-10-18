@@ -1,0 +1,19 @@
+{
+  "id": "minicode",
+  "command": "bun",
+  "args": [
+    "{harness_root}/minicode/cli/index.ts",
+    "exec",
+    "--json",
+    "--allow-all",
+    "{prompt}"
+  ],
+  "env": {
+    "AGENT_BASE_URL": "{base_url}",
+    "OPENAI_API_KEY": "{key}",
+    "AGENT_MODEL": "{model}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/minicode"
+  ]
+}

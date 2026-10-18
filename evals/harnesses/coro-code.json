@@ -1,0 +1,19 @@
+{
+  "id": "coro-code",
+  "command": "coro",
+  "args": [
+    "--protocol",
+    "openai",
+    "--max-steps",
+    "1",
+    "{prompt}"
+  ],
+  "env": {
+    "OPENAI_BASE_URL": "{base_url}",
+    "OPENAI_API_KEY": "{key}",
+    "OPENAI_MODEL": "{model}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/coro-code"
+  ]
+}

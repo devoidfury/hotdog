@@ -1,0 +1,14 @@
+{
+  "id": "zeroclaw",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/zeroclaw/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "ZC_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/zeroclaw"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "codex-infinity",
+  "command": "node",
+  "args": [
+    "{harness_root}/codex-infinity/codex-cli/bin/codex-infinity.js",
+    "exec",
+    "{prompt}",
+    "-m",
+    "{model}",
+    "-c",
+    "model_provider=gateway",
+    "-c",
+    "model_providers.gateway.name=Gateway",
+    "-c",
+    "model_providers.gateway.base_url={base_url}",
+    "-c",
+    "model_providers.gateway.env_key=HOTDOG_API_KEY",
+    "--skip-git-repo-check"
+  ],
+  "env": {},
+  "sandbox_ro_binds": [
+    "{harness_root}/codex-infinity"
+  ]
+}

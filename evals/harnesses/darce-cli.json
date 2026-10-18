@@ -1,0 +1,16 @@
+{
+  "id": "darce-cli",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/darce/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "DARCE_GW_KEY": "{key}",
+    "DARCE_API_BASE": "{gateway_url}",
+    "DARCE_MODEL": "{model}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/darce-cli"
+  ]
+}

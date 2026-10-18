@@ -1,0 +1,18 @@
+{
+  "id": "mini-kode",
+  "command": "node",
+  "args": [
+    "{harness_root}/mini-kode/dist/index.mjs",
+    "-a",
+    "yolo",
+    "{prompt}"
+  ],
+  "env": {
+    "MINIKODE_BASE_URL": "{base_url}",
+    "MINIKODE_API_KEY": "{key}",
+    "MINIKODE_MODEL": "{model}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/mini-kode"
+  ]
+}

@@ -4,16 +4,21 @@
 export interface HarnessSpec {
   id: string;
   command: string;
-  /** Argv template. Placeholders: {prompt} {model} {repo} {schema_file}. */
+  /**
+   * Argv template. Placeholders: {prompt} {model} {repo} {schema_file} plus
+   * runtime ones ({key} {base_url} {gateway_url} {harness_root} {venv_root}
+   * {home}) supplied by the runner via flags/env, never inlined.
+   */
   args: string[];
-  /** Extra env for the spawned process (merged over the runner's env). */
+  /** Extra env for the spawned process (merged over the runner's env). Values may use the same placeholders as args. */
   env?: Record<string, string>;
   /** "arg" (default): prompt substituted at {prompt}. "stdin": prompt written to stdin. */
   prompt_via?: "arg" | "stdin";
   /**
    * Extra read-only paths to expose inside the bwrap sandbox. For third-party
    * harnesses this is their checkout (the harness code must be loadable, same
-   * role as the repo root for hotdog). Paths that don't exist are ignored.
+   * role as the repo root for hotdog). Absolute paths or {placeholder}-based
+   * ones (expanded before use). Paths that don't exist are ignored.
    */
   sandbox_ro_binds?: string[];
 }

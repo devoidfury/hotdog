@@ -1,0 +1,15 @@
+{
+  "id": "deepagents",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/deepagents/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "DCODE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/deepagents",
+    "{home}/.local/share/uv/python"
+  ]
+}

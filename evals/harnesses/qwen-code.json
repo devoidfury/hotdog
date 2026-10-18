@@ -1,0 +1,20 @@
+{
+  "id": "qwen-code",
+  "command": "node",
+  "args": [
+    "{harness_root}/qwen-code/packages/cli/dist/index.js",
+    "-p",
+    "{prompt}",
+    "--model",
+    "{model}",
+    "--auth-type",
+    "openai"
+  ],
+  "env": {
+    "OPENAI_BASE_URL": "{base_url}",
+    "OPENAI_API_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/qwen-code"
+  ]
+}

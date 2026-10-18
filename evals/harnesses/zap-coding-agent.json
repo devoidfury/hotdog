@@ -1,0 +1,14 @@
+{
+  "id": "zap-coding-agent",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/zap-coding-agent/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "ZAP_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/zap-coding-agent"
+  ]
+}

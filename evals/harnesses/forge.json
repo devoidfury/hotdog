@@ -1,0 +1,14 @@
+{
+  "id": "forge",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/forge/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "FORGE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/forge"
+  ]
+}

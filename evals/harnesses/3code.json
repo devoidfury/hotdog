@@ -1,0 +1,14 @@
+{
+  "id": "3code",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/3code/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "THREECODE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/3code"
+  ]
+}

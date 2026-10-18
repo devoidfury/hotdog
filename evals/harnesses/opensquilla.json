@@ -1,0 +1,16 @@
+{
+  "id": "opensquilla",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/opensquilla/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "OSQ_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/opensquilla",
+    "{venv_root}/opensquilla/venv"
+  ]
+}

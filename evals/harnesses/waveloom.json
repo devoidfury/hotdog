@@ -1,0 +1,14 @@
+{
+  "id": "waveloom",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/waveloom/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "WAVE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/waveloom"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "gptme",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/gptme/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "GPTME_GW_KEY": "{key}",
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/gptme",
+    "{venv_root}/gptme/venv"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "dexto",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/dexto/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "DEXTO_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/dexto",
+    "{home}/.local/node22"
+  ]
+}

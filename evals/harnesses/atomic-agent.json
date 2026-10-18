@@ -1,0 +1,14 @@
+{
+  "id": "atomic-agent",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/atomic-agent/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "ATOMIC_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/atomic-agent"
+  ]
+}

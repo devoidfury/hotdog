@@ -3,7 +3,38 @@ import { join, resolve } from "node:path";
 import type { HarnessRunResult, HarnessSpec } from "./types.ts";
 
 const PLACEHOLDER = /\{([a-z_]+)\}/g;
-const KNOWN_PLACEHOLDERS = new Set(["prompt", "model", "repo", "schema_file"]);
+const KNOWN_PLACEHOLDERS = new Set([
+  "prompt", "model", "repo", "schema_file",
+  // runtime-config placeholders (never inlined in a spec): resolved from
+  // runner flags/env by run.ts, see evals/README.md
+  "key", "base_url", "gateway_url", "harness_root", "venv_root", "home",
+]);
+
+/** Expand {placeholders} in one template string. Throws on unknown/missing. */
+export function expandPlaceholders(id: string, text: string, vars: Record<string, string>): string {
+  return text.replace(PLACEHOLDER, (whole, name: string) => {
+    if (!KNOWN_PLACEHOLDERS.has(name)) {
+      throw new Error(`harness "${id}": unknown placeholder "${whole}"`);
+    }
+    const value = vars[name];
+    if (value === undefined) {
+      throw new Error(`harness "${id}": no value provided for "{${name}}"`);
+    }
+    return value;
+  });
+}
+
+/** Placeholder names used across a spec's args, env values and ro binds. */
+export function usedPlaceholders(spec: HarnessSpec): Set<string> {
+  const found = new Set<string>();
+  const scan = (s: string): void => {
+    for (const m of s.matchAll(PLACEHOLDER)) found.add(m[1]!);
+  };
+  spec.args.forEach(scan);
+  Object.values(spec.env ?? {}).forEach(scan);
+  (spec.sandbox_ro_binds ?? []).forEach(scan);
+  return found;
+}
 
 export function loadHarnessSpec(path: string): HarnessSpec {
   return parseHarnessSpec(path, readFileSync(path, "utf8"));
@@ -48,8 +79,8 @@ export function parseHarnessSpec(path: string, text: string): HarnessSpec {
   }
   const sandboxRoBinds = obj.sandbox_ro_binds;
   if (sandboxRoBinds !== undefined) {
-    if (!Array.isArray(sandboxRoBinds) || sandboxRoBinds.some((p) => typeof p !== "string" || !p.startsWith("/"))) {
-      throw new Error(`${path}: "sandbox_ro_binds" must be an array of absolute path strings`);
+    if (!Array.isArray(sandboxRoBinds) || sandboxRoBinds.some((p) => typeof p !== "string" || !(p.startsWith("/") || p.startsWith("{")))) {
+      throw new Error(`${path}: "sandbox_ro_binds" must be an array of absolute path strings (or placeholder-prefixed)`);
     }
   }
   return {
@@ -74,18 +105,25 @@ export function expandArgv(spec: HarnessSpec, vars: Record<string, string>): str
   if (needsModel && !(vars.model ?? "").trim()) {
     throw new Error(`harness "${spec.id}": args use {model} but the model is empty`);
   }
-  return spec.args.map((arg) =>
-    arg.replace(PLACEHOLDER, (whole, name: string) => {
-      if (!KNOWN_PLACEHOLDERS.has(name)) {
-        throw new Error(`harness "${spec.id}": unknown placeholder "${whole}"`);
-      }
-      const value = vars[name];
-      if (value === undefined) {
-        throw new Error(`harness "${spec.id}": no value provided for "{${name}}"`);
-      }
-      return value;
-    }),
-  );
+  return spec.args.map((arg) => expandPlaceholders(spec.id, arg, vars));
+}
+
+/** Expand placeholders in the spec's env values (keys are literal). */
+export function expandEnvValues(spec: HarnessSpec, vars: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(spec.env ?? {})) out[k] = expandPlaceholders(spec.id, v, vars);
+  return out;
+}
+
+/** Expand placeholders in sandbox_ro_binds; results must be absolute paths. */
+export function expandRoBinds(spec: HarnessSpec, vars: Record<string, string>): string[] {
+  return (spec.sandbox_ro_binds ?? []).map((p) => {
+    const expanded = expandPlaceholders(spec.id, p, vars);
+    if (!expanded.startsWith("/")) {
+      throw new Error(`harness "${spec.id}": sandbox_ro_binds entry "${p}" did not expand to an absolute path`);
+    }
+    return expanded;
+  });
 }
 
 export async function runHarness(opts: {

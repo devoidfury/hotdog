@@ -1,0 +1,24 @@
+{
+  "id": "aider",
+  "command": "aider",
+  "args": [
+    "--message",
+    "{prompt}",
+    "--model",
+    "openai/{model}",
+    "--openai-api-base",
+    "{base_url}",
+    "--openai-api-key",
+    "{key}",
+    "--no-pretty",
+    "--no-stream",
+    "--no-show-model-warnings"
+  ],
+  "env": {
+    "COLUMNS": "500"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/aider",
+    "{venv_root}/aider/venv"
+  ]
+}

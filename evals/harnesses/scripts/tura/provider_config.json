@@ -1,0 +1,7 @@
+{
+  "provider_base_url": { "openai": "__GW_URL__/v1" },
+  "routes": {
+    "fast":     { "default_temperature": 0.2, "providers": [ { "model": "__MODEL__", "provider": "openai" } ] },
+    "thinking": { "default_temperature": 0.2, "providers": [ { "model": "__MODEL__", "provider": "openai" } ] }
+  }
+}

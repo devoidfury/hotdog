@@ -1,0 +1,15 @@
+{
+  "id": "SWE-agent",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/SWE-agent/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "SWE_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/SWE-agent",
+    "{venv_root}/SWE-agent/venv"
+  ]
+}

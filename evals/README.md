@@ -23,7 +23,7 @@ bun evals/run.ts --series series/kielbasa-1 --task 003-fix-bug \
   --model ai365/qwen3.8-flash-next --model other/model --repeat 3
 ```
 
-Flags: `--series <dir>` (required), `--harness <id>` (repeatable, required), `--model <id>` (repeatable, required), `--judge-harness <id>` / `--judge-model <id>` (required as a pair when any selected task has a judge), `--task <id>` (repeatable), `--repeat <n>`, `--concurrency <n>`, `--dry-run`, `--keep-workspace`.
+Flags: `--series <dir>` (required), `--harness <id>` (repeatable, required), `--model <id>` (repeatable, required), `--judge-harness <id>` / `--judge-model <id>` (required as a pair when any selected task has a judge), `--gateway-key <k>`, `--gateway-url <url>`, `--harness-dir <dir>`, `--venv-dir <dir>` (see "Runtime config"), `--task <id>` (repeatable), `--repeat <n>`, `--concurrency <n>`, `--dry-run`, `--keep-workspace`.
 
 Exit code: 0 if every run passed, 1 otherwise. A matrix that plans zero runs (bad `--repeat`/filters) is an error, not a pass.
 
@@ -46,18 +46,44 @@ Harnesses and models are chosen at run time via `--harness`/`--model`, never dec
   "args": ["{repo}/bin/hotdog", "prompt", "{prompt}", "--model", "{model}"],
   "env": { "OPTIONAL": "var" },
   "prompt_via": "arg",
-  "sandbox_ro_binds": ["/path/to/harness/checkout"]
+  "sandbox_ro_binds": ["{harness_root}/some-harness"]
 }
 ```
 
 - Spawned via argv, **no shell**, so the prompt is one argument regardless of quoting.
-- `sandbox_ro_binds` (optional): extra read-only paths exposed to the bwrap sandbox. Third-party harnesses declare their checkout here -- the sandbox allowlist only contains the hotdog repo itself, so a harness whose code lives elsewhere cannot exec inside it without this (same role as the repo root in the spec above). Missing paths are ignored; the bind is per-cell, so one harness's checkout is never visible while another harness runs.
-- Placeholders: `{prompt}` `{model}` `{repo}` (repo root) `{schema_file}` (verdict schema, judge harnesses only). Unknown placeholders are errors.
+- `sandbox_ro_binds` (optional): extra read-only paths exposed to the bwrap sandbox. Third-party harnesses declare their checkout here -- the sandbox allowlist only contains the hotdog repo itself, so a harness whose code lives elsewhere cannot exec inside it without this (same role as the repo root in the spec above). Entries are absolute paths or use runtime placeholders; they are expanded, then missing paths are ignored. The bind is per-cell, so one harness's checkout is never visible while another harness runs.
+- Placeholders in `args`, `env` values and `sandbox_ro_binds`: `{prompt}` `{model}` `{repo}` (repo root) `{schema_file}` (verdict schema, judge harnesses only), plus the runtime ones below. Unknown placeholders are errors.
+- `command` is a plain executable name resolved via `PATH` (or `{repo}/...` for in-repo entry points) -- never an absolute path pinned to one machine.
 - `prompt_via: "stdin"` writes the prompt to stdin instead (for harnesses that read stdin).
 - Every spawn (agents, judges, `command` checks) gets `NO_COLOR=1` and `TERM=dumb` forced last in the env -- over both the runner's env and the spec's `env` -- so captured stdout is plain and deterministic.
 - Timeout kills the process; the run is recorded as `timed_out`.
 - Swapping harnesses is per-run: add a spec, pass its id with `--harness`, give it the model ids that harness understands.
 - Note: hotdog resolves config from its normal chain (`./config` -> `/etc/hotdog` -> ...) relative to the temp workspace, so on a new machine you may need `/etc/hotdog` or `~/.config/hotdog` set up with provider credentials.
+
+### Runtime config (nothing machine-specific in the repo)
+
+Harness specs never inline API keys, gateway URLs or home-directory paths. They reference runtime placeholders, resolved by the runner from flags (winning) or environment:
+
+| Placeholder | Meaning | Flag | Env |
+|---|---|---|---|
+| `{key}` | gateway API key | `--gateway-key` | `HOTDOG_EVAL_GATEWAY_KEY` |
+| `{gateway_url}` | gateway origin, no trailing `/v1` (for Anthropic-style endpoints) | `--gateway-url` | `HOTDOG_EVAL_GATEWAY_URL` |
+| `{base_url}` | `{gateway_url}/v1` (OpenAI-compatible) | (from `--gateway-url`) | (same) |
+| `{harness_root}` | root holding third-party harness checkouts | `--harness-dir` | `HOTDOG_EVAL_HARNESS_DIR` |
+| `{venv_root}` | root of installed Python venvs (default `/opt/harnesses`) | `--venv-dir` | `HOTDOG_EVAL_VENV_DIR` |
+| `{home}` | the runner's `$HOME` | -- | -- |
+
+If a selected spec uses a placeholder with no value, the runner refuses to start and names the flag/env to set (`--dry-run` substitutes stubs instead). Whatever is configured is also injected into every harness spawn as `HOTDOG_EVAL_GATEWAY_KEY` / `HOTDOG_EVAL_GATEWAY_URL` / `HOTDOG_EVAL_HARNESS_DIR` / `HOTDOG_EVAL_VENV_DIR`, and the cell's model as `HOTDOG_EVAL_MODEL`, which is how the run scripts below read it. Pass plain model ids with `--model` (scripts add their own provider prefixes like `gw/` or `openai/`; `{model}` in specs expands verbatim).
+
+### Harness run scripts (`evals/harnesses/scripts/<id>/`)
+
+Harnesses without a usable one-shot CLI get a wrapper script in the repo (`run.sh` plus helper configs). Specs invoke them as `bash {repo}/evals/harnesses/scripts/<id>/run.sh "{prompt}"`. The scripts:
+
+- read the gateway/root config from the injected `HOTDOG_EVAL_*` env vars and the run's model from `HOTDOG_EVAL_MODEL` (they fail loudly under `set -u` if unset);
+- keep their own helper files next to themselves (`$HERE`, the script's directory) -- no dependence on the runner's cwd;
+- stamp machine-specific values into per-run config copies via `__GW_URL__` / `__MODEL__` tokens + `sed` where a file must be materialized at runtime (see `3code`, `tura`).
+
+Prerequisites per harness (the binary checkout under `{harness_root}`, a venv under `{venv_root}`, a specific node build via `HOTDOG_EVAL_NODE_DIR`, plandex needing postgres + prebuilt binaries under `{harness_root}/plandex/bin`, ...) are the harness's own; the scripts document them inline. `jcode` additionally only accepts an IP-based gateway URL on some rigs.
 
 ## Task files (`evals/series/<name>/tasks/*.json`)
 

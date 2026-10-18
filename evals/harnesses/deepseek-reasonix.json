@@ -1,0 +1,14 @@
+{
+  "id": "deepseek-reasonix",
+  "command": "bash",
+  "args": [
+    "{repo}/evals/harnesses/scripts/deepseek-reasonix/run.sh",
+    "{prompt}"
+  ],
+  "env": {
+    "REASONIX_GW_KEY": "{key}"
+  },
+  "sandbox_ro_binds": [
+    "{harness_root}/deepseek-reasonix"
+  ]
+}

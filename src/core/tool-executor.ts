@@ -238,7 +238,7 @@ export class ToolExecutor {
       attempts++;
       try {
         result = plane
-          ? await this.#executeViaPlane(plane, toolName, input)
+          ? await this.#executeViaPlane(plane, toolName, input, toolCallId)
           : await tool.execute(input, toolCtx);
         success = true;
         // Check for stop-loop sentinel on ToolResult
@@ -361,6 +361,7 @@ export class ToolExecutor {
     plane: { link: ToolExecLink; config: WireToolConfig },
     toolName: string,
     input: string,
+    toolCallId?: string,
   ): Promise<unknown> {
     const workspace = this.#workspaceSpec();
     const session = this.#deps.agent.sessionId;
@@ -376,6 +377,7 @@ export class ToolExecutor {
       tool: toolName,
       args: input,
       ctx: { session, workspace, toolConfig: plane.config },
+      toolCallId,
     });
     // If the cancel wins, nothing is left listening for this rejection.
     done.catch(() => {});

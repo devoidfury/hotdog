@@ -391,7 +391,7 @@ The posture quadrants:
 | `toolExec` | `execFence` | Behavior |
 |---|---|---|
 | `worker` | `probe` (probe good) | Pooled executors, jailed per (session, class). Shipping default on Linux with bwrap. |
-| `worker` | `probe` (probe fails) | Pooled executors, plain spawn. Crash isolation + credential-free plane + log integrity remain; the fence is flagged absent. |
+| `worker` | `probe` (probe fails) | Pooled executors, plain spawn. Crash isolation + credential-scrubbed plane (while `envScrubbing` is on) + log integrity remain; the fence is flagged absent. |
 | `worker` | `off` | Pooled executors, plain spawn, no probe. Dev loop (macOS), CI. |
 | `inline` | any | Everything in-process, the pre-plane code path. No pool exists. `inline (unfenced)`. |
 

@@ -108,3 +108,59 @@ describe("broker worker (real spawn)", () => {
     ).rejects.toThrow(/not registered in the runner/);
   });
 });
+
+// ── Env posture (envScrubbing) ──────────────────────────────────────────────
+//
+// Scrubbing happens on two hops: the broker spawn (supervisor -> broker child,
+// inherited by every pool entry) and the runner's BashTool. The sentinel is
+// secret-shaped (HOTDOG* is scrubbed by the heuristic); set it AFTER module
+// setup and build a broker per case so each spawn sees the env it claims to.
+
+describe("broker env posture (envScrubbing)", () => {
+  const SENTINEL = "HOTDOG_SPAWN_ENV_SENTINEL";
+  const echoSentinel = { command: `echo "v=\${${SENTINEL}:-gone}"` };
+
+  it("scrubs secret-shaped keys into the plane by default", async () => {
+    process.env[SENTINEL] = "plane-visible";
+    const tight = new ToolExecBroker({ fence: "off" });
+    try {
+      const result = await tight.invoke({
+        session: "spawn-tight-env",
+        tool: "bash",
+        args: echoSentinel,
+        ctx: ctx(),
+      });
+      expect(result.kind).toBe("tool-result");
+      if (result.kind !== "tool-result") return;
+      expect(result.output).toContain("v=gone");
+    } finally {
+      await tight.close();
+      delete process.env[SENTINEL];
+    }
+  });
+
+  it("envScrubbing off: the full copy reaches bash (--disable-env-scrubbing respected)", async () => {
+    process.env[SENTINEL] = "plane-visible";
+    const open = new ToolExecBroker({ fence: "off", envScrubbing: false });
+    try {
+      const result = await open.invoke({
+        session: "spawn-open-env",
+        tool: "bash",
+        args: echoSentinel,
+        ctx: {
+          session: "spawn-open-env",
+          workspace: { roots: [dir], deny: [".env*"] },
+          // The runner honors the same opt-out on its hop (agent-factory
+          // passes the resolved value in the wire toolConfig).
+          toolConfig: { ...TOOL_CONFIG, envScrubbing: false },
+        },
+      });
+      expect(result.kind).toBe("tool-result");
+      if (result.kind !== "tool-result") return;
+      expect(result.output).toContain("v=plane-visible");
+    } finally {
+      await open.close();
+      delete process.env[SENTINEL];
+    }
+  });
+});

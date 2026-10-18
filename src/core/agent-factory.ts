@@ -124,7 +124,17 @@ export function createAgentFactory(
       abortSignal: (agentConfig.abortSignal as AbortSignal | null | undefined) ?? null,
       toolWhitelist,
       toolExec: plane.mode,
-      toolExecLink: plane.mode === "worker" ? sharedToolExecBroker({ fence: plane.fence }) : null,
+      toolExecLink: plane.mode === "worker"
+        ? sharedToolExecBroker({
+            fence: plane.fence,
+            // The plane's env policy is the resolved one: with scrubbing on,
+            // provider keys never enter it; with `envScrubbing: false`, the
+            // full copy reaches bash, exactly as `--disable-env-scrubbing`
+            // promises. See ToolExecBrokerOptions.envScrubbing.
+            envScrubbing: resolved.envScrubbing !== false,
+            envScrubExtra: envScrubExtraKeys(baseConfig),
+          })
+        : null,
       toolExecConfig,
       // Precedence: explicit override > profile overlay > resolved profileDef
       // (the profile the config resolution chain picked at startup).

@@ -494,6 +494,32 @@ describe("fence argv (seam fence, real spawn)", () => {
     await settle(() => !processAlive(oldPid), "the fence-changed entry to die");
   });
 
+  it("a call in flight when the fence changes fails as replaced, not crashed", async () => {
+    // The swap is a deliberate policy change, not a death: the pending call
+    // must read "[tool-exec replaced]" (with the reason), never the crash
+    // wording the model would otherwise act on.
+    const marker = join(dir, `replaced-marker-${process.pid}-${Date.now()}`);
+    const dying = startSignalled(broker, "harden-fence", marker, "sleep 3");
+    const dyingSettled = dying.then(
+      () => null,
+      (e: Error) => e,
+    ); // attached now: no unhandled rejection while the fresh call runs
+    await waitSignalled(marker);
+    nextFence = envFence("f3");
+    const fresh = await broker.invoke({
+      session: "harden-fence",
+      tool: "bash",
+      args: { command: "echo fresh-wall" },
+      ctx: ctx("harden-fence"),
+    });
+    expect(text(fresh)).toContain("fresh-wall");
+    const err = await dyingSettled;
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).toContain("[tool-exec replaced]");
+    expect(err!.message).toContain("changed fence plan");
+    expect(err!.message).not.toContain("crashed");
+  });
+
   it("a warm that could not plan a fence is corrected by the first invoke", async () => {
     // Warm without a workspace spawns unfenced (there are no roots to plan
     // against); the fenced invoke for the same key must not reuse it.

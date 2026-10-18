@@ -81,6 +81,12 @@ export interface ExecutorDiedError {
   poolKey: string;
 }
 
+/** Error frame payload for a pool entry deliberately swapped by a fence-plan change mid-call. */
+export interface ExecutorReplacedError {
+  kind: "executor-replaced";
+  poolKey: string;
+}
+
 // ── Fence ────────────────────────────────────────────────────────────────────
 
 /**
@@ -107,6 +113,12 @@ export interface InvokeFrame {
   class?: ExecClass;
   /** Fence for a fresh entry under this key; absent/empty id = plain spawn. */
   fence?: WireFence;
+  /**
+   * The model-facing tool call id. `id` correlates the wire/cancel; this
+   * rides to the runner's ToolContext so tools that emit output events tie
+   * them to the call the transcript shows.
+   */
+  toolCallId?: string;
   tool: string;
   args: string | Record<string, unknown>;
   ctx: WireToolCtx;
@@ -140,7 +152,7 @@ export interface OkFrame {
 export interface FailFrame {
   id: string;
   ok: false;
-  error: WireError | ExecutorDiedError;
+  error: WireError | ExecutorDiedError | ExecutorReplacedError;
 }
 export interface ReadyFrame {
   op: "ready";
@@ -168,6 +180,8 @@ export interface ToolExecLink {
     tool: string;
     args: string | Record<string, unknown>;
     ctx: WireToolCtx;
+    /** The model-facing tool call id, forwarded to the runner's ToolContext. */
+    toolCallId?: string;
   }): Promise<WireToolResult>;
   /** Interrupt the call with this id. Never awaited: the caller settles. */
   cancel?(id: string): void;

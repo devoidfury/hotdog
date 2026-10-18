@@ -34,6 +34,7 @@ import {
   type InvokeFrame,
   type ExecClass,
   type ExecutorDiedError,
+  type ExecutorReplacedError,
   type WireError,
   type WireFence,
   type WireToolResult,
@@ -118,9 +119,47 @@ export function sharedToolExecDegraded(): boolean {
 }
 
 // One supervisor, one broker child (user ruling). Agent factories share it.
+// The first creation pins the posture; later callers with different knobs get
+// the same broker, so name the drift once instead of letting an ignored
+// config mislead its owner (hand-built multi-agent hosts are where this bites).
 let sharedBroker: ToolExecBroker | null = null;
+let sharedPosture: SharedPosture | null = null;
+let postureWarned = false;
+
+export interface SharedPosture {
+  fence: string;
+  envScrubbing: string;
+}
+
+/** Posture keys a later caller asks for that differ from the pinned ones ("", ""). */
+export function postureDrift(pinned: SharedPosture, opts: ToolExecBrokerOptions): string[] {
+  const drift: string[] = [];
+  if (opts.fence !== undefined && opts.fence !== pinned.fence) {
+    drift.push(`fence: kept "${pinned.fence}", ignored "${opts.fence}"`);
+  }
+  if (opts.envScrubbing !== undefined && String(opts.envScrubbing) !== pinned.envScrubbing) {
+    drift.push(`envScrubbing: kept ${pinned.envScrubbing}, ignored ${opts.envScrubbing}`);
+  }
+  return drift;
+}
+
 export function sharedToolExecBroker(opts?: ToolExecBrokerOptions): ToolExecBroker {
-  return (sharedBroker ??= new ToolExecBroker(opts));
+  if (!sharedBroker) {
+    sharedPosture = {
+      fence: opts?.fence ?? "probe",
+      envScrubbing: String(opts?.envScrubbing ?? true),
+    };
+    sharedBroker = new ToolExecBroker(opts);
+    return sharedBroker;
+  }
+  if (!postureWarned && sharedPosture && opts) {
+    const drift = postureDrift(sharedPosture, opts);
+    if (drift.length > 0) {
+      postureWarned = true;
+      logger.warn(`[tool-exec] one broker per process keeps its first posture; ${drift.join("; ")}`);
+    }
+  }
+  return sharedBroker;
 }
 
 // ── Supervisor-side client ───────────────────────────────────────────────────
@@ -217,6 +256,17 @@ export interface ToolExecBrokerOptions {
   /** Fence policy from the resolved config. Default `probe`. */
   fence?: "off" | "probe";
   /**
+   * Scrub secret-shaped env keys at the broker spawn. Default true. `false`
+   * is the `envScrubbing: false` / `--disable-env-scrubbing` opt-out, and it
+   * must reach this spawn too: pool entries inherit the broker's env, so a
+   * broker that scrubbed unconditionally would silently defeat the opt-out
+   * for every plane-routed tool (the runner's BashTool cannot restore keys
+   * that never arrived).
+   */
+  envScrubbing?: boolean;
+  /** Exact extra secret names (`envScrub.extra`) beyond the substring heuristics. */
+  envScrubExtra?: readonly string[];
+  /**
    * Test seam replacing the built-in planner: any prefix argv can stand in
    * for bwrap (e.g. `env VAR=...`) so the fence plumbing is tested on hosts
    * without it. `null` disables the fence, like `fence: "off"`.
@@ -283,6 +333,8 @@ export class ToolExecBroker implements ToolExecLink {
     tool: string;
     args: string | Record<string, unknown>;
     ctx: InvokeFrame["ctx"];
+    /** The model-facing tool call id; `id` correlates cancel, this attributes output. */
+    toolCallId?: string;
   }): Promise<WireToolResult> {
     await this.#ensureStarted();
     const proc = this.#proc!;
@@ -294,6 +346,7 @@ export class ToolExecBroker implements ToolExecLink {
       session: req.session,
       class: "rw",
       ...(fence ? { fence } : {}),
+      ...(req.toolCallId !== undefined ? { toolCallId: req.toolCallId } : {}),
       tool: req.tool,
       args: req.args,
       ctx: req.ctx,
@@ -437,8 +490,13 @@ export class ToolExecBroker implements ToolExecLink {
           stdio: ["pipe", "pipe", "pipe"],
           cwd: PROJECT_ROOT,
           // The tool plane never sees provider credentials or hotdog's own
-          // env; pool entries inherit from the broker.
-          env: copyScrubbedEnv(process.env) as Record<string, string>,
+          // env; pool entries inherit from the broker. `envScrubbing: false`
+          // copies the full environment on purpose (see ToolExecBrokerOptions).
+          env: copyScrubbedEnv(
+            process.env,
+            this.#opts.envScrubExtra,
+            this.#opts.envScrubbing !== false,
+          ) as Record<string, string>,
         },
       );
     } catch (e) {
@@ -563,16 +621,23 @@ function degradedError(reason: string): ToolError {
 }
 
 /**
- * FailFrame payloads: the plain wire error, or the executor-died shape --
- * a pool entry that vanished with the call in flight. Surfaced as a
- * "[tool-exec crashed]" error tool result; the entry itself is
- * already gone from the broker's pool map, so the next call re-fills it.
+ * FailFrame payloads: the plain wire error, the executor-died shape (a pool
+ * entry that vanished with the call in flight), or the executor-replaced
+ * shape (a deliberate swap: the fence plan changed under a live entry).
+ * Surfaced as "[tool-exec crashed]" respectively "[tool-exec replaced]" error
+ * tool results; the entry itself is already gone from the broker's pool map,
+ * so the next call re-fills it.
  */
-function wireFailToError(error: WireError | ExecutorDiedError): Error {
+function wireFailToError(error: WireError | ExecutorDiedError | ExecutorReplacedError): Error {
   if ("message" in error) return reviveWireError(error);
   if (error.kind === "executor-died") {
     return new ToolError(
       `[tool-exec crashed] pool entry ${error.poolKey ?? "?"} died with the call in flight`,
+    );
+  }
+  if (error.kind === "executor-replaced") {
+    return new ToolError(
+      `[tool-exec replaced] pool entry ${error.poolKey ?? "?"} was replaced by a changed fence plan with the call in flight`,
     );
   }
   return new Error(`[tool-exec] unknown fail frame (kind ${String((error as { kind?: string }).kind)})`);
@@ -721,7 +786,9 @@ function ensureEntry(
       armIdle(existing, key, state);
       return existing;
     }
-    dropEntry(existing, key, state);
+    // Deliberate policy swap, not a crash: pending calls get the
+    // executor-replaced shape so the model-facing error says what happened.
+    dropEntry(existing, key, state, "executor-replaced");
   }
   let entry: PoolEntry;
   try {
@@ -886,8 +953,9 @@ function failEntry(
 
 /**
  * Remove an entry and end its process. Anything pending gets the
- * executor-died shape -- for a crash and for a reap that raced a
- * live call alike, since the supervisor's answer is the same either way: the
+ * executor-died shape (crash) or the executor-replaced shape (a deliberate
+ * fence-plan swap) -- for a reap that raced a live call, death and replacement
+ * answer alike, since the supervisor's answer is the same either way: the
  * entry you were talking to is gone. Re-filling is lazy: the next call on this
  * key spawns a fresh entry.
  *
@@ -897,13 +965,18 @@ function failEntry(
  * to land. Killing the runner outright as the first strike would orphan a
  * detached shell -- which is precisely the leak this entry exists to prevent.
  */
-function dropEntry(entry: PoolEntry, key: string, state: BrokerState): void {
+function dropEntry(
+  entry: PoolEntry,
+  key: string,
+  state: BrokerState,
+  failKind: "executor-died" | "executor-replaced" = "executor-died",
+): void {
   clearIdle(entry);
   if (entry.dead) return;
   entry.dead = true;
   if (state.pool.get(key) === entry) state.pool.delete(key);
   for (const id of entry.pending) {
-    writeSupervisor({ id, ok: false, error: { kind: "executor-died", poolKey: key } });
+    writeSupervisor({ id, ok: false, error: { kind: failKind, poolKey: key } });
   }
   entry.pending.clear();
   try {

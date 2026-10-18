@@ -18,6 +18,8 @@ import {
   type WireToolResult,
 } from "@core/tool-exec-protocol.ts";
 import {
+  postureDrift,
+  sharedToolExecBroker,
   toolExecPlaneSettings,
   toolExecModeLabel,
 } from "@core/tool-exec-broker.ts";
@@ -41,7 +43,7 @@ function makeTool(name: string, execute: Tool["execute"], execution?: "local" | 
 }
 
 interface FakeLink extends ToolExecLink {
-  calls: Array<{ session: string; tool: string; args: unknown; ctx: unknown }>;
+  calls: Array<{ session: string; tool: string; args: unknown; ctx: unknown; toolCallId?: string }>;
   responses: Array<() => Promise<WireToolResult>>;
 }
 
@@ -50,7 +52,13 @@ function fakeLink(...responders: Array<() => Promise<WireToolResult>>): FakeLink
     calls: [],
     responses: [...responders],
     async invoke(req) {
-      link.calls.push({ session: req.session, tool: req.tool, args: req.args, ctx: req.ctx });
+      link.calls.push({
+        session: req.session,
+        tool: req.tool,
+        args: req.args,
+        ctx: req.ctx,
+        toolCallId: req.toolCallId,
+      });
       const next = link.responses.shift();
       if (!next) throw new Error("fake link: no scripted response");
       return next();
@@ -157,6 +165,18 @@ describe("ToolExecutor plane fork", () => {
     await executor.execute([call("planned")]);
     expect(localRan).toBe(true);
     expect(link.calls).toHaveLength(0);
+  });
+
+  it("carries the model's tool call id to the link (output attribution on the runner)", async () => {
+    const link = fakeLink(okText("ok"));
+    const { executor } = setup(
+      [makeTool("planned", async () => "local", "worker")],
+      { toolExec: "worker", toolExecLink: link },
+    );
+    await executor.execute([call("planned")]);
+    // The transcript call id, not the wire/cancel correlation id: a tool
+    // emitting output events on the runner must key them to the visible call.
+    expect(link.calls[0]!.toolCallId).toBe("call-planned");
   });
 
   it("a link failure becomes an error tool result (no inline downgrade)", async () => {
@@ -482,5 +502,28 @@ describe("run-start warm", () => {
     const link = cancellableLink();
     await warmAgent("inline", link).run("hello");
     expect(link.warmed).toHaveLength(0);
+  });
+});
+
+// ── Shared broker posture pinning ───────────────────────────────────────────
+
+describe("shared broker posture pinning", () => {
+  it("computes drift from the pinned posture and ignores unset or matching knobs", () => {
+    const pinned = { fence: "probe", envScrubbing: "true" };
+    expect(postureDrift(pinned, {})).toEqual([]);
+    expect(postureDrift(pinned, { fence: "probe", envScrubbing: true })).toEqual([]);
+    expect(postureDrift(pinned, { fence: "off" })).toEqual(['fence: kept "probe", ignored "off"']);
+    expect(postureDrift(pinned, { envScrubbing: false })).toEqual([
+      "envScrubbing: kept true, ignored false",
+    ]);
+    expect(postureDrift(pinned, { fence: "off", envScrubbing: false })).toHaveLength(2);
+  });
+
+  it("one broker per process: later opts never mint a second instance", () => {
+    // Construction starts no process (#ensureStarted is lazy), so this is a
+    // cheap identity check on the shared singleton.
+    const first = sharedToolExecBroker();
+    expect(sharedToolExecBroker({ fence: "off" })).toBe(first);
+    expect(sharedToolExecBroker()).toBe(first);
   });
 });

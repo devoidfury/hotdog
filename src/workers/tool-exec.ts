@@ -106,7 +106,9 @@ async function handleInvoke(frame: InvokeFrame): Promise<void> {
     const toolCtx = new ToolContext({
       workspace,
       isSessionRestoring: false,
-      toolCallId: frame.id,
+      // The model's call id when the frame carries one; the wire id only
+      // attributes when the host never sent one (standalone broker clients).
+      toolCallId: frame.toolCallId ?? frame.id,
       abortSignal: controller.signal,
     });
     const tool = factory(frame.ctx.toolConfig ?? {});

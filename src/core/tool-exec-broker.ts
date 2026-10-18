@@ -999,6 +999,19 @@ function dropEntry(
   entry.killTimer.unref?.();
 }
 
+// Test seams for the child half: a spawned broker child never reports coverage
+// back to the test process, so tests/core/tool-exec-broker-worker.test.ts
+// drives these in-process. The supervisor never calls any of them.
+export {
+  type PoolEntry,
+  type BrokerState,
+  poolKey,
+  parseBrokerArgs,
+  handleFrame,
+  spawnEntry,
+  relayRunnerLine,
+};
+
 if (import.meta.main) {
   runBroker();
 }

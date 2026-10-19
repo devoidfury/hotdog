@@ -173,6 +173,45 @@ describe("StreamProcessor", () => {
 
       expect(result.finalToolCalls).toBeNull();
     });
+
+    it("should preserve args and id when a backend resends the name after args streamed", async () => {
+      // llama.cpp-family backends emit the name on every delta (id only on
+      // the first). The resend must not clobber accumulated args or the id.
+      const processor = createStreamProcessor();
+      const result = await processEvents(processor, [
+        { type: "toolName", index: 0, name: "read", toolCallId: "call-1" },
+        { type: "toolArgument", index: 0, arguments: '{"path":' },
+        { type: "toolName", index: 0, name: "read", toolCallId: "" },
+        { type: "toolArgument", index: 0, arguments: '"a.txt"}' },
+        { type: "toolName", index: 0, name: "read", toolCallId: "" },
+      ]);
+
+      expect(result.finalToolCalls).toEqual([
+        {
+          id: "call-1",
+          type: "function",
+          function: { name: "read", arguments: '{"path":"a.txt"}' },
+        },
+      ]);
+    });
+
+    it("should fill name and id when toolName arrives after toolArgument", async () => {
+      // Some backends stream arguments before the name/id event; merging
+      // keeps the early argument fragment.
+      const processor = createStreamProcessor();
+      const result = await processEvents(processor, [
+        { type: "toolArgument", index: 0, arguments: '{"cmd": "ls"}' },
+        { type: "toolName", index: 0, name: "bash", toolCallId: "call-9" },
+      ]);
+
+      expect(result.finalToolCalls).toEqual([
+        {
+          id: "call-9",
+          type: "function",
+          function: { name: "bash", arguments: '{"cmd": "ls"}' },
+        },
+      ]);
+    });
   });
 
   describe("usage and finish", () => {

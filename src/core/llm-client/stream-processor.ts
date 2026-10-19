@@ -134,10 +134,15 @@ export class StreamProcessor {
         }
 
         case "toolName": {
+          // Merge, never replace: llama.cpp-family backends resend the name
+          // (often without the id) on deltas after arguments have already
+          // streamed; a wholesale set would drop the buffered arg fragments
+          // and blank the call id.
+          const existing = toolCallsBuffer.get(event.index);
           toolCallsBuffer.set(event.index, {
-            name: event.name,
-            args: [],
-            id: event.toolCallId || "",
+            name: event.name || existing?.name || "",
+            args: existing?.args ?? [],
+            id: event.toolCallId || existing?.id || "",
           });
           break;
         }

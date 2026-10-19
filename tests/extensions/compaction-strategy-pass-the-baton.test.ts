@@ -14,7 +14,7 @@ import { LlmError } from "@core/error.ts";
 import { MessageLog } from "@core/context/message-log.ts";
 import { ToolRegistry } from "@core/extensions/tool-registry.ts";
 import { create as createCompactionExtension } from "@extensions/compaction/index.ts";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 
@@ -399,7 +399,7 @@ describe("Compaction Extension — pass-the-baton wiring", () => {
     expect(after.filter(isBatonNotice)).toHaveLength(1);
   });
 
-  it("stash: popped tail is persisted to baton-popped.json for the fresh session", async () => {
+  it("stash: popped tail is persisted to <session-id>.baton.json for the fresh session", async () => {
     const dir = join(TMP, "stash");
     process.env.HOTDOG_SESSIONS_DIR = dir;
     const agent = createMockAgent(makeMessages(10));
@@ -407,7 +407,7 @@ describe("Compaction Extension — pass-the-baton wiring", () => {
 
     await ext.hooks[HOOKS.CONTEXT]!({ messages: agent.context.getMessages(), agent });
 
-    const file = join(dir, "baton-popped.json");
+    const file = join(dir, "baton-test-session.baton.json");
     expect(existsSync(file)).toBe(true);
     const stashed = JSON.parse(readFileSync(file, "utf8"));
     expect(stashed.session_id).toBe("baton-test-session");
@@ -415,6 +415,57 @@ describe("Compaction Extension — pass-the-baton wiring", () => {
     // The popped messages are the NEWEST ones, in original order.
     expect(stashed.messages[2].content).toBe(BULK);
     expect(stashed.messages[0].role).toBe("assistant");
+  });
+
+  it("stash: concurrent sessions pop to separate files without clobbering", async () => {
+    const dir = join(TMP, "stash-isolation");
+    process.env.HOTDOG_SESSIONS_DIR = dir;
+    const ext = createCompactionExtension(createMockCore()) as any;
+    const a = createMockAgent(makeMessages(10));
+    a.sessionId = "session-alpha";
+    const b = createMockAgent(makeMessages(10));
+    b.sessionId = "session-beta";
+
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: a.context.getMessages(), agent: a });
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: b.context.getMessages(), agent: b });
+
+    // One file per session; each carries its own stash.
+    const alpha = JSON.parse(readFileSync(join(dir, "session-alpha.baton.json"), "utf8"));
+    const beta = JSON.parse(readFileSync(join(dir, "session-beta.baton.json"), "utf8"));
+    expect(alpha.session_id).toBe("session-alpha");
+    expect(beta.session_id).toBe("session-beta");
+    expect(alpha.messages).toHaveLength(3);
+    expect(beta.messages).toHaveLength(3);
+  });
+
+  it("stash: a crafted session id skips the file mirror, replay still works in-process", async () => {
+    const dir = join(TMP, "stash-unsafe");
+    process.env.HOTDOG_SESSIONS_DIR = dir;
+    const ext = createCompactionExtension(createMockCore()) as any;
+    const agent = createMockAgent(makeMessages(10));
+    // Same shape a hostile resume payload could carry: join() would place
+    // the file OUTSIDE the sessions dir. The id guard must refuse the mirror.
+    agent.sessionId = "../escape";
+
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: agent.context.getMessages(), agent });
+
+    expect(existsSync(join(dir, "../escape.baton.json"))).toBe(false);
+    expect(existsSync(join(TMP, "escape.baton.json"))).toBe(false);
+    // Nothing landed in the sessions dir either (the mirror never opened it).
+    expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
+
+    // The live map is unaffected: path B handoff still replays the tail.
+    await ext.hooks[HOOKS.TURN_END]!({
+      reason: "completion",
+      cancelled: false,
+      stopped: true,
+      toolResults: [],
+      message: "Handoff summary.",
+      claimTurn: () => true,
+      agent,
+    });
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: agent.context.getMessages(), agent });
+    expect(agent.log.getAll()).toHaveLength(4); // plan + 3 popped
   });
 
   it("provider:error rescue prefers pass-the-baton over trim/drop (cache-safe rescue)", async () => {
@@ -524,7 +575,7 @@ describe("Compaction Extension — baton replay lifecycle", () => {
     expect(ctxResult.messages).toHaveLength(4);
 
     // Stash file consumed alongside the live map.
-    expect(existsSync(join(dir, "baton-popped.json"))).toBe(false);
+    expect(existsSync(join(dir, "baton-test-session.baton.json"))).toBe(false);
   });
 
   it("path A: a handoff tool call replays the tail onto the plan it left behind", async () => {
@@ -566,10 +617,12 @@ describe("Compaction Extension — baton replay lifecycle", () => {
   });
 
   it("cancelled endings drop the baton (no hijack of the next turn)", async () => {
-    process.env.HOTDOG_SESSIONS_DIR = join(TMP, "replayC");
+    const dir = join(TMP, "replayC");
+    process.env.HOTDOG_SESSIONS_DIR = dir;
     const agent = createMockAgent(makeMessages(10));
     const ext = createCompactionExtension(createMockCore()) as any;
     await fireBaton(ext, agent, agent.log.getAll());
+    expect(existsSync(join(dir, "baton-test-session.baton.json"))).toBe(true);
 
     await ext.hooks[HOOKS.TURN_END]!({
       reason: "cancelled",
@@ -580,6 +633,8 @@ describe("Compaction Extension — baton replay lifecycle", () => {
       agent,
     });
     expect(agent.clearedCount).toBe(0);
+    // Dropped for good: the mirror file goes with the live entry.
+    expect(existsSync(join(dir, "baton-test-session.baton.json"))).toBe(false);
 
     // A later completion must not handoff off a dead baton.
     await ext.hooks[HOOKS.TURN_END]!({
@@ -596,7 +651,8 @@ describe("Compaction Extension — baton replay lifecycle", () => {
   });
 
   it("completion with the notice gone (context rewritten) drops the baton", async () => {
-    process.env.HOTDOG_SESSIONS_DIR = join(TMP, "replayD");
+    const dir = join(TMP, "replayD");
+    process.env.HOTDOG_SESSIONS_DIR = dir;
     const agent = createMockAgent(makeMessages(10));
     const ext = createCompactionExtension(createMockCore()) as any;
     await fireBaton(ext, agent, agent.log.getAll());
@@ -615,6 +671,8 @@ describe("Compaction Extension — baton replay lifecycle", () => {
     });
     expect(agent.clearedCount).toBe(0);
     expect(agent.log.getAll()).toHaveLength(1);
+    // Dead stash file unlinked, not left behind in the sessions dir.
+    expect(existsSync(join(dir, "baton-test-session.baton.json"))).toBe(false);
 
     // And no replay lingers: the next CONTEXT leaves the context alone.
     await ext.hooks[HOOKS.CONTEXT]!({ messages: agent.context.getMessages(), agent });
@@ -622,7 +680,8 @@ describe("Compaction Extension — baton replay lifecycle", () => {
   });
 
   it("a failed turn claim defers: the handoff retries on the next completion", async () => {
-    process.env.HOTDOG_SESSIONS_DIR = join(TMP, "replayE");
+    const dir = join(TMP, "replayE");
+    process.env.HOTDOG_SESSIONS_DIR = dir;
     const agent = createMockAgent(makeMessages(10));
     const ext = createCompactionExtension(createMockCore()) as any;
     await fireBaton(ext, agent, agent.log.getAll());
@@ -639,6 +698,8 @@ describe("Compaction Extension — baton replay lifecycle", () => {
     });
     expect(agent.clearedCount).toBe(0);
     expect(agent.log.getAll()).toHaveLength(8);
+    // Deferred, not dropped: the stash file must survive for the retry.
+    expect(existsSync(join(dir, "baton-test-session.baton.json"))).toBe(true);
 
     // Next completion: the baton is still pending and takes it.
     await ext.hooks[HOOKS.TURN_END]!({
@@ -693,7 +754,8 @@ describe("Compaction Extension — baton replay lifecycle", () => {
   });
 
   it("a worker agent without the continuation seam drops the baton (path B)", async () => {
-    process.env.HOTDOG_SESSIONS_DIR = join(TMP, "replayH");
+    const dir = join(TMP, "replayH");
+    process.env.HOTDOG_SESSIONS_DIR = dir;
     const agent = createMockAgent(makeMessages(10));
     // Factory-built task/subagent workers never get an enqueueCallback:
     // enqueue() is a silent no-op there, so clearing would leave the
@@ -713,6 +775,8 @@ describe("Compaction Extension — baton replay lifecycle", () => {
     });
     expect(agent.clearedCount).toBe(0);
     expect(agent.log.getAll()).toHaveLength(8);
+    // Final drop: no stash file left behind for a worker that can never replay.
+    expect(existsSync(join(dir, "baton-test-session.baton.json"))).toBe(false);
 
     // The drop is final: a later completion does not revisit it.
     await ext.hooks[HOOKS.TURN_END]!({
@@ -725,6 +789,34 @@ describe("Compaction Extension — baton replay lifecycle", () => {
       agent,
     });
     expect(agent.clearedCount).toBe(0);
+  });
+
+  it("a failed handoff (clearContext throws) drops the baton and unlinks its file", async () => {
+    const dir = join(TMP, "replayI");
+    process.env.HOTDOG_SESSIONS_DIR = dir;
+    const agent = createMockAgent(makeMessages(10));
+    const ext = createCompactionExtension(createMockCore()) as any;
+    await fireBaton(ext, agent, agent.log.getAll());
+    expect(existsSync(join(dir, "baton-test-session.baton.json"))).toBe(true);
+
+    agent.clearContext = async () => {
+      throw new Error("boom");
+    };
+
+    await ext.hooks[HOOKS.TURN_END]!({
+      reason: "completion",
+      cancelled: false,
+      stopped: true,
+      toolResults: [],
+      message: "summary",
+      claimTurn: () => true,
+      agent,
+    });
+    expect(existsSync(join(dir, "baton-test-session.baton.json"))).toBe(false);
+
+    // No replay lingers: the next CONTEXT leaves the context alone.
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: agent.context.getMessages(), agent });
+    expect(agent.log.getAll()).toHaveLength(8);
   });
 
   it("turn ends without a baton (plain completion) never touch the session", async () => {

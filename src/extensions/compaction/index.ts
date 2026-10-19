@@ -13,7 +13,7 @@ import { isContextOverflowError } from "@core/llm-client/retry.ts";
 import { logger } from "@utils/logger.ts";
 import { LlmError, formatError } from "@core/error.ts";
 import { Message } from "@core/context/message.ts";
-import { sessionsDir } from "@core/session/session-log.ts";
+import { sessionsDir, isSafeSessionId } from "@core/session/session-log.ts";
 import type { Agent } from "@core/agent.ts";
 import { CoreContext, ExtensionInstance, CommandsRegisterPayload, getExtensionConfig } from "@core/extensions/types.ts";
 import { resolveModelConfig, type ModelConfig } from "@core/config/providers.ts";
@@ -316,16 +316,28 @@ export function create(core: CoreContext): ExtensionInstance | null {
    * session can re-append these messages so the recent turns survive the
    * pop; overwritten on each baton pass. The reader side (handoff into a
    * new session) is intentionally not wired here.
+   *
+   * One file per session (`<session-id>.baton.json`) so concurrent
+   * sessions popping at once cannot clobber each other's stash; the
+   * name follows batonKey's fallback ("default") so write and remove
+   * always target the same file. Unsafe ids skip the mirror (see
+   * batonStashPath) but keep working through the live map.
    */
   async function stashBatonMessages(
     sessionId: string | null | undefined,
     popped: Message[],
   ): Promise<void> {
-    const dir = sessionsDir();
+    const path = batonStashPath(sessionId);
+    if (!path) {
+      logger.warn(
+        `[compaction] baton stash skipped: unsafe session id ${JSON.stringify(String(sessionId).slice(0, 80))}`,
+      );
+      return;
+    }
     try {
-      await mkdir(dir, { recursive: true });
+      await mkdir(sessionsDir(), { recursive: true });
       await writeFile(
-        join(dir, "baton-popped.json"),
+        path,
         JSON.stringify(
           {
             ts: new Date().toISOString(),
@@ -341,13 +353,36 @@ export function create(core: CoreContext): ExtensionInstance | null {
     }
   }
 
-  /** Best-effort removal of the stash file once its tail has been replayed. */
-  async function removeBatonStashFile(): Promise<void> {
+  /**
+   * Path of the per-session stash file, or null when the key is not a
+   * safe file name. Applies the same id guard sessionLog uses for the
+   * .jsonl logs: a crafted session id must not escape the sessions dir
+   * through join(). The "default" fallback key always passes.
+   */
+  function batonStashPath(sessionId: string | null | undefined): string | null {
+    const key = batonKey({ sessionId });
+    if (!isSafeSessionId(key)) return null;
+    return join(sessionsDir(), `${key}.baton.json`);
+  }
+
+  /** Best-effort removal of the stash file once its tail is replayed or dropped. */
+  async function removeBatonStashFile(sessionId: string | null | undefined): Promise<void> {
+    const path = batonStashPath(sessionId);
+    if (!path) return;
     try {
-      await unlink(join(sessionsDir(), "baton-popped.json"));
+      await unlink(path);
     } catch {
       // Missing or already gone: nothing to clean.
     }
+  }
+
+  /**
+   * Drop the baton for good: forget the live entry and unlink its mirror
+   * so an abandoned tail cannot outlive the session that popped it.
+   */
+  async function dropBaton(agent: { sessionId?: string | null }): Promise<void> {
+    batonStash.delete(batonKey(agent));
+    await removeBatonStashFile(agent.sessionId);
   }
 
   /**
@@ -458,8 +493,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // with a tool result orphaned from its parent assistant turn.
         const st = agent ? batonStash.get(batonKey(agent)) : undefined;
         if (st?.replayPending) {
-          batonStash.delete(batonKey(agent));
-          await removeBatonStashFile();
+          await dropBaton(agent);
           const current = agent.context.getMessages();
           agent.replaceContext([...current, ...st.popped]);
           return { messages: agent.buildMessages() };
@@ -514,7 +548,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         if (!st) return;
 
         if (cancelled || reason === "error" || reason === "max_iterations" || reason === "empty_response") {
-          batonStash.delete(key);
+          await dropBaton(agent);
           return;
         }
 
@@ -544,7 +578,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // gone the context was rewritten out from under us; drop the baton
         // rather than hijack the session.)
         if (!hasBatonNotice(agent.context.getMessages(), notice)) {
-          batonStash.delete(key);
+          await dropBaton(agent);
           return;
         }
 
@@ -554,7 +588,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // is a silent no-op). Clearing such an agent would destroy its work
         // with no plan to restart on — the baton is dropped, not taken.
         if (typeof (agent as { enqueueCallback?: unknown }).enqueueCallback !== "function") {
-          batonStash.delete(key);
+          await dropBaton(agent);
           return;
         }
 
@@ -574,7 +608,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
           agent.enqueue(formatBatonPlanMessage(summary), { source: "model" });
           st.replayPending = true;
         } catch (e: unknown) {
-          batonStash.delete(key);
+          await dropBaton(agent);
           logger.warn(`[compaction] baton handoff failed: ${formatError(e)}`);
         }
       },

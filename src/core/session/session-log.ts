@@ -118,8 +118,13 @@ export function sessionsDir(): string {
 // Allows hand-supplied IDs (e.g. CLI --session) while rejecting path separators and `..` traversal.
 const SESSION_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
+/** True when the id can be safely embedded in a sessions-dir file name. */
+export function isSafeSessionId(sessionId: string | null | undefined): boolean {
+  return typeof sessionId === "string" && SESSION_ID_RE.test(sessionId);
+}
+
 export function sessionPath(sessionId: string): string {
-  if (typeof sessionId !== "string" || !SESSION_ID_RE.test(sessionId)) {
+  if (!isSafeSessionId(sessionId)) {
     throw new AgentError(
       `Invalid session id: ${JSON.stringify(String(sessionId).slice(0, 80))}`,
     );

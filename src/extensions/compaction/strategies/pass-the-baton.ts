@@ -55,7 +55,8 @@ export function hasBatonNotice(messages: Message[], notice: string): boolean {
  * LLM runners hit their cache and the only new compute is the small notice
  * plus the model's wrap-up. There is no summarization call at all: the
  * model narrates its own handoff, and the session ends with it. The popped
- * tail is stashed (baton-popped.json) so the fresh session after the
+ * tail is stashed (`<session-id>.baton.json`, one file per session so
+ * concurrent pops cannot collide) so the fresh session after the
  * handoff can re-append the recent turns.
  */
 export class PassTheBatonStrategy extends CompactionStrategy {

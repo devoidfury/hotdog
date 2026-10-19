@@ -71,6 +71,17 @@ export function bwrapArgv(opts: {
     opts.binary ?? "bwrap",
     "--die-with-parent", // no orphans if the spawner dies
     "--new-session",     // detach from the controlling terminal (TIOCSTI guard)
+    // Process isolation is opt-in in bwrap, so say it explicitly: sharing
+    // the host PID namespace would let jailed code read /proc/<pid>/* and
+    // SIGKILL the supervisor, the broker, and sibling sessions (same uid).
+    // With a private pidns, the jail's /proc (mounted last) shows only the
+    // jail's own processes, host-uid signaling dies with the namespace, and
+    // even setsid'd grandchildren are reaped when the pidns init exits.
+    "--unshare-pid",
+    // IPC and UTS likewise: no System V shm/message queues and no host
+    // hostname leaking through the default namespaces.
+    "--unshare-ipc",
+    "--unshare-uts",
     "--tmpfs", "/",
   ];
   if (opts.setEnv) {
@@ -103,7 +114,9 @@ export function bwrapArgv(opts: {
   // shadows everything mounted under it earlier -- including the jail's /proc
   // -- and Bun aborts at startup inside the mangled view (bun.report
   // la1744846fgGgkggC041rBAa). Re-mounting after every bind guarantees a
-  // fresh /dev and /proc whatever the allowlist drags in.
+  // fresh /dev and /proc whatever the allowlist drags in -- and because the
+  // mount stays after every bind, the --unshare-pid above holds: the /proc
+  // the jail sees is the NEW namespace's, not a host copy dragged in rw.
   pre.push("--dev", "/dev", "--proc", "/proc");
   pre.push("--", opts.command, ...opts.args);
   return pre;
@@ -259,8 +272,14 @@ function probeBwrap(): string | null {
   for (const cmd of ["/usr/bin/true", "/bin/true"]) {
     if (!existsSync(cmd)) continue;
     try {
+      // The probe tests AVAILABILITY, and pidns specifically: a host whose
+      // kernel/userns policy cannot create a PID namespace must probe-fail
+      // and run unfenced (loudly), rather than ship a pid-sharing "jail"
+      // that Security.md does not describe. Same flags as the real plan,
+      // so probe and plan can never disagree on what the platform offers.
       const argv = [
         bin,
+        "--unshare-pid", "--unshare-ipc", "--unshare-uts",
         "--tmpfs", "/", "--dev", "/dev", "--proc", "/proc",
         ...roBinds.flatMap((p) => ["--ro-bind", p, p]),
         "--", cmd,

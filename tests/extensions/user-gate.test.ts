@@ -74,10 +74,11 @@ describe("user-gate TOOL_CALL handler", () => {
     expect(hooks.handlerCount(HOOKS.TOOL_CALL)).toBe(0);
   });
 
-  it("asks the human and continues on 'allow once'", async () => {
+  it("asks the human and allows (no verdict adopted) on 'allow once'", async () => {
     const { input, asked } = answerWith("allow once");
     const r = await run({ enabled: true }, payload({ inputOverride: input } as never));
-    expect(r.action).toBe("continue");
+    // Allow returns no opinion: nothing is adopted onto the payload.
+    expect(r.action).toBeUndefined();
     expect(asked).toHaveLength(1);
     expect(asked[0]).toContain("git status");
     expect(asked[0]).toContain("cmd: git");
@@ -140,7 +141,7 @@ describe("user-gate TOOL_CALL handler", () => {
       { enabled: true, allow: ["bash.cmd=git"] },
       payload({ inputOverride: input } as never),
     );
-    expect(r.action).toBe("continue");
+    expect(r.action).toBeUndefined();
     expect(asked).toBe(0);
   });
 
@@ -166,7 +167,7 @@ describe("user-gate TOOL_CALL handler", () => {
       const make = () => payload({ inputOverride: input } as never);
       const p = make();
       await hooks.runHookPipeline<GateAction, "tool:call">(HOOKS.TOOL_CALL, p, { failOnError: true });
-      expect(p.action).toBe("continue");
+      expect(p.action).toBeUndefined();
       await hooks.runHookPipeline<GateAction, "tool:call">(HOOKS.TOOL_CALL, make(), { failOnError: true });
       expect(asked).toBe(expectSecondPrompt ? 2 : 1);
     }
@@ -228,7 +229,7 @@ describe('default "deny" (allowlist-only)', () => {
       { enabled: true, default: "deny", allow: ["bash.cmd=ls"] },
       payload({ input: JSON.stringify({ command: "ls -la" }), inputOverride: input } as never),
     );
-    expect(r.action).toBe("continue");
+    expect(r.action).toBeUndefined();
     expect(asked).toBe(0);
   });
 
@@ -378,7 +379,7 @@ describe("fail-closed matrix", () => {
       payload({ input: "{not json", inputOverride: input } as never),
     );
     // the bail forces an ask, and the human still has to say yes
-    expect(r.action).toBe("continue");
+    expect(r.action).toBeUndefined();
 
     const blocked = await run({ enabled: true, default: "allow" }, payload({ input: "{not json" } as never));
     expect(blocked.action).toBe("block");
@@ -430,8 +431,34 @@ describe("prompt queue", () => {
     expect(release.length).toBe(2);
     release[1]!();
     await Promise.all([p1, p2]);
-    expect(gate1.action).toBe("continue");
-    expect(gate2.action).toBe("continue");
+    expect(gate1.action).toBeUndefined();
+    expect(gate2.action).toBeUndefined();
     expect(maxInFlight).toBe(1);
+  });
+});
+
+describe("gate composition (DM-3)", () => {
+  it("an allow (no opinion) leaves an earlier block verdict intact", async () => {
+    // Registration-order torture: the user-gate allow path runs AFTER a
+    // blocking gate. Its old `{ action: "continue" }` used to overwrite the
+    // block on the payload; returning nothing must leave it alone. (Run
+    // WITHOUT the executor's shouldStop on purpose -- the fix is the absent
+    // adoption, not just the short-circuit.)
+    const { input, asked } = answerWith("allow once");
+    const hooks = new HookSystem();
+    hooks.on(HOOKS.TOOL_CALL, () => ({ action: "block", result: "log-integrity barrier" }), "session-log");
+    const core = {
+      hooks,
+      config: { userGate: { enabled: true, allow: ["bash.cmd=git"] } },
+    } as unknown as CoreContext;
+    const instance = create(core);
+    for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
+      hooks.on(name, handler as never, "user-gate");
+    }
+    const p = payload({ inputOverride: input } as never);
+    await hooks.runHookPipeline<GateAction, "tool:call">(HOOKS.TOOL_CALL, p, { failOnError: true });
+    expect(p.action).toBe("block");
+    expect(String(p.result)).toContain("log-integrity barrier");
+    expect(asked).toHaveLength(0); // the allow path ran: no prompt needed
   });
 });

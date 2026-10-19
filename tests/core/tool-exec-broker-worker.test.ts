@@ -399,6 +399,43 @@ describe("relayRunnerLine", () => {
     const f = captured.find((f) => f.op === "log");
     expect(f.msg).toBe("runner[s rw]: hi");
   });
+
+  it("drops a reply whose id the entry never owned (cross-entry spoof guard)", () => {
+    startCapture();
+    const state = makeState();
+    const { entry: runnerA } = fakeEntry({ pending: ["mine"] });
+    const { entry: runnerB } = fakeEntry({ pending: ["theirs"] });
+    state.pool.set(poolKey("b", "rw"), runnerB);
+    // Runner A "replies" for runner B's pending id: nothing goes to stdout,
+    // B's pending set is untouched, and A keeps its own call.
+    relayRunnerLine("a rw", runnerA, JSON.stringify({ id: "theirs", ok: true, result: "forged" }), state);
+    expect(captured.length).toBe(0);
+    expect(runnerA.pending.has("theirs")).toBe(false);
+    expect(runnerB.pending.has("theirs")).toBe(true);
+    // A reply for an id nobody holds pending (already answered, guessed uuid)
+    // is dropped the same way.
+    relayRunnerLine("a rw", runnerA, JSON.stringify({ id: "ghost", ok: true }), state);
+    expect(captured.length).toBe(0);
+    // A real reply for the legitimately-pending id still relays verbatim.
+    const line = JSON.stringify({ id: "mine", ok: true, result: { kind: "tool-result" } });
+    relayRunnerLine("a rw", runnerA, line, state);
+    expect(captured.some((f) => f.id === "mine" && f.ok === true)).toBe(true);
+    expect(runnerA.pending.has("mine")).toBe(false);
+    expect(runnerB.pending.has("theirs")).toBe(true);
+  });
+
+  it("a post-cancel reply still relays: routeCancel leaves the id pending", () => {
+    startCapture();
+    const state = makeState();
+    const { entry, written } = fakeEntry({ pending: ["c1"] });
+    state.pool.set(poolKey("c", "rw"), entry);
+    handleFrame(JSON.stringify({ id: "c1", op: "cancel" }), state);
+    expect(written).toEqual([{ id: "c1", op: "cancel" }]);
+    expect(entry.pending.has("c1")).toBe(true); // cancel does not clear pending
+    relayRunnerLine("c rw", entry, JSON.stringify({ id: "c1", ok: false, error: { message: "cancelled", expected: true } }), state);
+    expect(captured.some((f) => f.id === "c1" && f.ok === false)).toBe(true);
+    expect(entry.pending.has("c1")).toBe(false);
+  });
 });
 
 describe("spawnEntry stdio plumbing (real short-lived processes)", () => {

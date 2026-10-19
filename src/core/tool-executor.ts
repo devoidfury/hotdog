@@ -192,11 +192,21 @@ export class ToolExecutor {
     // failOnError: a gate handler that throws must not be treated as a
     // pass — the error propagates to execute()'s catch and becomes the tool
     // result, so the tool never runs (fail closed).
+    // shouldStop: `block`/`handled` are terminal verdicts -- the pipeline
+    // stops at the first one, so a later handler's `continue` can never
+    // disarm an earlier block. A returned verdict is sticky by construction
+    // (docs/hook-lifecycle.md, "Pipeline — Gate").
     const gate: HookPayloads["tool:call"] = { toolCallId, toolName, input, agent, toolCtx };
-    await hooks.runHookPipeline<GateAction | undefined, "tool:call">(
+    const gateResult = await hooks.runHookPipeline<GateAction | undefined, "tool:call">(
       HOOKS.TOOL_CALL,
       gate,
-      { failOnError: true },
+      {
+        failOnError: true,
+        shouldStop: (r: unknown) => {
+          const action = (r as GateAction | undefined)?.action;
+          return action === "block" || action === "handled";
+        },
+      },
     );
     input = gate.input;
     if (gate.action === "block") {
@@ -205,6 +215,20 @@ export class ToolExecutor {
       // other result -- the request's WireFormat shapes it at the wire.
       const blockedPart = formatToolResult(gate.result, toolName, false);
       return this.#writeToolResult(toolName, input, [blockedPart], toolCallId);
+    }
+    if (gate.action === "handled") {
+      // A handler claimed the call: the tool never runs. The handler's own
+      // result answers the model when it provided one; otherwise a generic
+      // result names the verdict and whoever returned it. Same error-status
+      // wrapper as block: the registered tool did NOT execute, and the
+      // wrapper must not claim it did.
+      const by = gateResult.results.at(-1)?.source ?? "a TOOL_CALL handler";
+      const handledPart = formatToolResult(
+        gate.result ?? `Tool call intercepted by ${by} (verdict: handled); the tool did not run.`,
+        toolName,
+        false,
+      );
+      return this.#writeToolResult(toolName, input, [handledPart], toolCallId);
     }
 
     const tool = this.#deps.toolRegistry.get(toolName);

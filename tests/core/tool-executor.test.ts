@@ -670,6 +670,104 @@ describe('ToolExecutor', () => {
       expect(result.outcome).toBe('continue');
       expect(result.toolResults).toHaveLength(1);
     });
+
+    // ── Gate composition law (DM-3): block/handled are terminal ──
+
+    it('a later `continue` cannot disarm an earlier block (terminal verdicts)', async () => {
+      const deps = createMockDeps();
+      let toolExecuted = false;
+
+      deps.hooks.on('tool:call', () => ({ action: 'block', result: 'first gate says no' }), 'blocker');
+      deps.hooks.on('tool:call', () => ({ action: 'continue' }), 'disarmer');
+
+      deps.toolRegistry.register('sticky_gate', makeTestTool('sticky_gate', async () => {
+        toolExecuted = true;
+        return 'nope';
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'sticky_gate', arguments: '{}' },
+      }]);
+
+      expect(toolExecuted).toBe(false);
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('first gate says no');
+    });
+
+    it('a `handled` verdict synthesizes the handler result and does NOT execute the tool', async () => {
+      const deps = createMockDeps();
+      let toolExecuted = false;
+
+      deps.hooks.on('tool:call', () => ({ action: 'handled', result: 'answered by the proxy' }), 'proxy');
+
+      deps.toolRegistry.register('handled_gate', makeTestTool('handled_gate', async () => {
+        toolExecuted = true;
+        return 'should not reach';
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'handled_gate', arguments: '{}' },
+      }]);
+
+      expect(toolExecuted).toBe(false);
+      const part = resultPart(result.toolResults[0]!.content);
+      expect(part.status).toBe('error'); // the registered tool did not run
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('answered by the proxy');
+    });
+
+    it('a `handled` verdict with no result answers with a generic note naming the source', async () => {
+      const deps = createMockDeps();
+      let toolExecuted = false;
+
+      deps.hooks.on('tool:call', () => ({ action: 'handled' }), 'mystery-handler');
+
+      deps.toolRegistry.register('handled_bare', makeTestTool('handled_bare', async () => {
+        toolExecuted = true;
+        return 'nope';
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'handled_bare', arguments: '{}' },
+      }]);
+
+      expect(toolExecuted).toBe(false);
+      const text = toolContentText(result.toolResults[0]!.content);
+      expect(text).toContain('Tool call intercepted');
+      expect(text).toContain('handled');
+      expect(text).toContain('mystery-handler');
+    });
+
+    it('a gate handler with no opinion (returns undefined) leaves the call to execute', async () => {
+      // The shape user-gate's allow path returns: no verdict adopted, the
+      // stickiness rule must not swallow the call.
+      const deps = createMockDeps();
+      let toolExecuted = false;
+
+      deps.hooks.on('tool:call', () => undefined, 'no-opinion');
+
+      deps.toolRegistry.register('undef_gate', makeTestTool('undef_gate', async () => {
+        toolExecuted = true;
+        return 'ran fine';
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'undef_gate', arguments: '{}' },
+      }]);
+
+      expect(toolExecuted).toBe(true);
+      expect(toolContentText(result.toolResults[0]!.content)).toContain('ran fine');
+    });
   });
 
   describe('availability resolution', () => {

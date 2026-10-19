@@ -366,12 +366,35 @@ Extensions provide tools via the `tools:register` hook. The handler receives the
 }
 ```
 
-### 3. Pipeline — Gate (block/modify)
+### 3. Pipeline — Gate (block/modify/handled)
 
-The `tool:call` hook uses `runHookPipeline` with `shouldStop`. Handlers can block execution or modify input arguments.
-The pipeline is `failOnError: true`: a handler that throws becomes the tool result and the tool never runs, so a handler
-that itself wants to say "denied" should return `{ action: "block", result }` rather than throw. `user-gate` is the
-built-in handler of this kind — tool-call approvals on top of `toolCtx.get("input")`
+The `tool:call` hook uses `runHookPipeline` with `shouldStop` on the terminal
+verdicts — `block` and `handled` — and `failOnError: true`. Handlers can block
+execution, rewrite input arguments, or take the call over.
+
+**Composition law: terminal verdicts are sticky.** The pipeline stops at the
+first `block` or `handled`, so later handlers never run and no subsequent
+`continue` can disarm the verdict; registration order cannot flip a block into
+a pass. `continue` and returning nothing both allow the call, but they are not
+the same patch: `{ action: "continue" }` still *adopts* onto the payload and
+rewrites an earlier handler's `action` record, while returning nothing leaves
+every field exactly as the previous handler left it. A no-opinion handler —
+user-gate on allow, file-watch when its writeGuard does not fire — returns
+nothing.
+
+The verdicts:
+
+| Return | Effect |
+|---|---|
+| `{ action: "continue" }` | allow, explicitly (prefer returning nothing for no opinion) |
+| `{ action: "modify", input }` | allow with rewritten arguments |
+| `{ action: "block", result }` | tool never runs; `result` answers the model as an error tool result |
+| `{ action: "handled", result? }` | tool never runs; the handler's `result` answers the model, or the harness synthesizes a generic "Tool call intercepted by …" result |
+
+A handler that throws becomes the tool result and the tool never runs, so a
+handler that itself wants to say "denied" should return
+`{ action: "block", result }` rather than throw. `user-gate` is the built-in
+handler of this kind — tool-call approvals on top of `toolCtx.get("input")`
 (`docs/config-reference.md` "userGate").
 
 ```js
@@ -384,7 +407,7 @@ built-in handler of this kind — tool-call approvals on top of `toolCtx.get("in
     args.command = `set -euo pipefail; ${args.command}`;
     return { action: "modify", input: JSON.stringify(args) };
   }
-  return { action: "continue" };
+  return; // no opinion: leave the payload as the other handlers left it
 }
 ```
 
@@ -399,7 +422,7 @@ The `context`, `provider:request`, `provider:response`, `provider:error`, `tool:
 { action, input }   on tool:call          gates and rewrites the call
 ```
 
-Two handlers patching *different* fields both take effect — `{ modelConfig }` followed by `{ messages }` keeps both. Two patching the *same* field: the last one wins. A bare array is not a patch and is ignored (only objects are adopted), so `[...messages]` silently does nothing.
+Two handlers patching *different* fields both take effect — `{ modelConfig }` followed by `{ messages }` keeps both. Two patching the *same* field: the last one wins. A bare array is not a patch and is ignored (only objects are adopted), so `[...messages]` silently does nothing. (The one caller-side exception is the TOOL_CALL gate: `block`/`handled` stop the pipeline at the handler that returned them, so no later handler gets a turn to patch them away — see §3.)
 
 ```js
 // compaction extension — checks token budget, compacts if needed

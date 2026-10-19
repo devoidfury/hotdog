@@ -344,6 +344,11 @@ describe("bwrap", () => {
       "/x/bwrap",
       "--die-with-parent",
       "--new-session",
+      // Process isolation is explicit (N-1): no host PID namespace peeking
+      // or signaling, no shared IPC/UTS.
+      "--unshare-pid",
+      "--unshare-ipc",
+      "--unshare-uts",
       "--tmpfs", "/",
       "--ro-bind", "/usr", "/usr",
       "--ro-bind", "/etc/ssl", "/etc/ssl",

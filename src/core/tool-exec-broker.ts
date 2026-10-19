@@ -704,9 +704,10 @@ function runBroker(): void {
     // Supervisor gone: EOF every runner and exit. The runners cancel their
     // in-flight work and kill their process groups on that EOF, then leave;
     // hard-killing them here would orphan a detached bash group instead of
-    // reaping it. (A runner wedged past its own drain outlives us -- the same
-    // documented trade-off as an unclean supervisor death, and fenced entries
-    // go down with their jail either way via --die-with-parent.)
+    // reaping it. (A runner wedged past its own drain outlives us only on the
+    // unfenced path: fenced entries go down with their jail either way --
+    // --die-with-parent takes the runner, and --unshare-pid takes setsid'd
+    // grandchildren down with the namespace.)
     for (const entry of state.pool.values()) {
       try {
         entry.proc.stdin?.end();
@@ -910,7 +911,12 @@ function spawnEntry(key: string, state: BrokerState, fence?: WireFence): PoolEnt
   return entry;
 }
 
-/** Forward a runner reply verbatim: call ids are supervisor-scoped. */
+/**
+ * Forward a runner reply verbatim -- after checking the id belongs to this
+ * entry. Call ids are supervisor-scoped (one uuid space across all
+ * sessions), so entry-level ownership is the only thing standing between a
+ * hostile runner and another session's pending call.
+ */
 function relayRunnerLine(
   key: string,
   entry: PoolEntry,
@@ -929,6 +935,16 @@ function relayRunnerLine(
     return;
   }
   if ("ok" in frame) {
+    // Ownership gate: relay only replies for calls THIS entry holds pending.
+    // The supervisor's pending map is global across sessions, so a buggy or
+    // compromised runner (the defined adversary: model-authored code) that
+    // guesses another entry's call id must not forge that session's tool
+    // result through this channel. Late post-cancel replies still relay:
+    // routeCancel deliberately leaves the id pending until the reply lands.
+    if (!entry.pending.has(frame.id)) {
+      logger.warn(`[tool-exec] runner[${key}] reply for unowned id ${frame.id} dropped`);
+      return;
+    }
     entry.pending.delete(frame.id);
     // The idle clock restarts here (armIdle ignores a still-busy entry).
     armIdle(entry, key, state);

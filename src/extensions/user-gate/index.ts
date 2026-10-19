@@ -1,6 +1,7 @@
 // user-gate: tool-call approvals, ABOVE the spawn boundary.
 //
-// One TOOL_CALL hook: decide -> (session memo) -> ask -> continue or block.
+// One TOOL_CALL hook: decide -> (session memo) -> ask -> allow (no opinion,
+// no verdict adopted) or block.
 // This decides whether a call runs at all -- once a process is spawned there is no mediation inside it.
 // This is NOT enforcement: the bash triage it builds on has a documented bail list, and the answer to
 // "can a determined model get around this?" is yes.
@@ -211,7 +212,7 @@ export function create(core: CoreContext): ExtensionInstance {
   /** In-memory only: allows die with the process, by design. */
   const sessionGrants = new Set<string>();
 
-  const handler = async (payload: ToolCallPayload): Promise<GateAction> => {
+  const handler = async (payload: ToolCallPayload): Promise<GateAction | undefined> => {
     try {
       const parsedArgs = parseToolArgs(payload.input);
       const workspace = payload.toolCtx?.get("workspace");
@@ -230,7 +231,13 @@ export function create(core: CoreContext): ExtensionInstance {
       }
 
       const decision = decide(call, rules);
-      if (decision.verdict === "allow") return { action: "continue" };
+      // Allow returns NOTHING (no-opinion), matching how file-watch defers:
+      // an explicit `{ action: "continue" }` is still adopted onto the
+      // payload and rewrites an earlier handler's verdict record. With the
+      // gate's shouldStop a returned block/handled can no longer be
+      // disarmed, but the no-opinion form stays the correct allow shape --
+      // the gate never claims a verdict it did not make.
+      if (decision.verdict === "allow") return;
       if (decision.verdict === "deny") {
         logger.info(`[user-gate] deny: ${decision.reasons.join("; ")}`);
         // A deny rule has no in-session remedy, and saying so stops the model
@@ -245,7 +252,7 @@ export function create(core: CoreContext): ExtensionInstance {
       }
 
       const key = memoKey(call);
-      if (sessionGrants.has(key)) return { action: "continue" };
+      if (sessionGrants.has(key)) return;
 
       const outcome = await enqueuePrompt(() =>
         askUser(
@@ -263,7 +270,7 @@ export function create(core: CoreContext): ExtensionInstance {
         logger.info(
           `[user-gate] allowed${outcome.session ? " for session" : " once"}: ${payload.toolName} ${what}\n  ${suggestRuleLine(call)}`,
         );
-        return { action: "continue" };
+        return;
       }
 
       logger.info(`[user-gate] deny: ${outcome.reason}`);

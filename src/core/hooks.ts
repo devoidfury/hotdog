@@ -11,11 +11,19 @@ import type { ImageAttachment } from "./context/message.ts";
 import type { ModelConfig } from "./config/providers.ts";
 import type { ToolDef } from "./extensions/tool-registry.ts";
 
+/**
+ * GateAction is a TOOL_CALL pipeline handler's verdict. Composition law
+ * (enforced by the executor's shouldStop, see docs/hook-lifecycle.md):
+ * `block` and `handled` are TERMINAL -- the pipeline stops at the first one,
+ * so a later handler's `continue` cannot disarm an earlier verdict.
+ * `continue` adopts a no-op; returning `undefined` (nothing) is the
+ * no-opinion form that leaves the payload entirely alone.
+ */
 export type GateAction =
   | { action: "continue" }
   | { action: "modify"; input?: string; result?: unknown }
   | { action: "block"; result: unknown }
-  | { action: "handled" };
+  | { action: "handled"; result?: unknown };
 
 /** CONTEXT hook: a returned `messages` replaces the payload's array for the
  * rest of the chain and for the caller. */
@@ -412,7 +420,10 @@ export const HOOKS = {
   // Pipeline run before each LLM call; a handler returns { messages } to replace the array - adopted into the payload for the rest of the chain.
   CONTEXT: "context",
 
-  // Gate pipeline: continue / modify input / block with a provided result.
+  // Gate pipeline: continue / modify input / block with a provided result /
+  // handled (stop and synthesize a result). Run with shouldStop on
+  // block|handled -- terminal verdicts stop the chain and cannot be
+  // overwritten by later handlers.
   TOOL_CALL: "tool:call",
 
   // Pipeline: handlers can replace the tool result before it reaches context.

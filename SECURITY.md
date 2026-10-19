@@ -16,13 +16,19 @@ out-of-process executors, not inside the agent process:
   jail). `envScrubbing: false` is honored plane-wide: that opt-out hands the
   broker -- and through it every pool entry -- the full environment copy, so
   the "keys never enter" property is exactly as switched-off as it is inline.
-- Session-log records are physically unwritable by tool-executed code.
+- Session-log records are physically unwritable by tool-executed code when
+  the fence is up and the sessions directory lives outside the workspace
+  roots. With the fence down (`toolExec: "inline"`, a failed probe, macOS) or
+  a sessions dir inside a jail's rw roots, the records are ordinary files and
+  only the workspace checks stand between tool code and them.
 - Workspace roots and deny patterns become OS-enforced for tagged tools where
   the platform fence works: on Linux with bubblewrap (`execFence: "probe"`),
   each entry gets a fresh tmpfs root with read-only system dirs and read-write
-  ONLY the session's workspace roots -- no `$HOME`, no config chain, no sibling
-  session roots. `hotdog info` reports the posture (`fence: bwrap`, `off`, or
-  `none -- probe failed`); the plane never fails open silently.
+  ONLY the session's workspace roots, inside its own PID/IPC/UTS namespaces
+  (jailed code sees and can signal no host process) -- no `$HOME`, no config
+  chain, no sibling session roots. `hotdog info` reports the posture
+  (`fence: bwrap`, `off`, or `none -- probe failed`); the plane never fails
+  open silently.
 - Per-session jails: cross-workspace reads via `bash` are structurally
   impossible for tagged tools when the fence is up.
 

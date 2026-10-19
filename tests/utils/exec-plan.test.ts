@@ -51,6 +51,12 @@ describe("planFor (plane jail argv)", () => {
       expect(argv[0]).toBe("/x/bwrap");
       expect(argv).toContain("--die-with-parent");
       expect(argv).toContain("--new-session");
+      // Process isolation is explicit, not namespace-default (N-1): without
+      // these the jail shares the host PID namespace and jailed code could
+      // see and SIGKILL host processes.
+      expect(argv).toContain("--unshare-pid");
+      expect(argv).toContain("--unshare-ipc");
+      expect(argv).toContain("--unshare-uts");
       // Fresh tmpfs root: /home, /root, sibling sessions DO NOT EXIST.
       const i = argv.indexOf("--tmpfs");
       expect(argv[i + 1]).toBe("/");
@@ -122,6 +128,30 @@ describe("planFor (plane jail argv)", () => {
       expect(rootBindIdx).toBeGreaterThan(-1);
       expect(argv.indexOf("/dev")).toBeGreaterThan(rootBindIdx);
       expect(argv.indexOf("/proc")).toBeGreaterThan(rootBindIdx);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("unshares the PID namespace before the /proc mount (the jail's /proc shows only its own pids)", () => {
+    const scratch = tmpRoot("pidns");
+    try {
+      const r = planFor({
+        roots: ["/"],
+        cls: "rw",
+        scratch,
+        command: "bun",
+        args: [],
+        repoRoot: "/nonexistent-repo",
+        binary: "/x/bwrap",
+      });
+      const argv = r.prefixArgv!;
+      // Order matters: --proc must come after --unshare-pid (and after every
+      // bind, the sibling test above pins), so the /proc the jail sees is
+      // the NEW namespace's procfs, not a host copy.
+      expect(argv.indexOf("--unshare-pid")).toBeLessThan(argv.indexOf("--proc"));
+      expect(argv.indexOf("--unshare-ipc")).toBeLessThan(argv.indexOf("--proc"));
+      expect(argv.indexOf("--unshare-uts")).toBeLessThan(argv.indexOf("--proc"));
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }

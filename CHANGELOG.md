@@ -5,6 +5,8 @@
 - **baton stash is per-session.** The popped tail mirrored by `pass-the-baton` now lands in `<sessionsDir>/<session-id>.baton.json` instead of a shared `baton-popped.json`, so two sessions popping at once can no longer clobber each other's stash.
 - **baton stash cleanup and id guard.** Abandoned batons (cancelled/errored turn, context rewritten, missing continuation seam, failed handoff) now unlink their `<session-id>.baton.json` mirror instead of leaving it behind; the mirror is only written when the session id passes the same traversal guard as the session logs (`isSafeSessionId` in `session-log.ts`), and an unsafe id degrades to the in-process stash only.
 
+- **Tool exec plane ships on again.** `toolExec` default returns to `worker`. The crash behind the v0.12.1 rollback was the executor mount plan mishandling a `/`-mounted scenario; fixed in `exec-plan.ts` with regression tests.
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.12.1...main
 
 ## [v0.12.1] - 2026-10-18

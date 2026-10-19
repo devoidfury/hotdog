@@ -72,8 +72,6 @@ export function bwrapArgv(opts: {
     "--die-with-parent", // no orphans if the spawner dies
     "--new-session",     // detach from the controlling terminal (TIOCSTI guard)
     "--tmpfs", "/",
-    "--dev", "/dev",
-    "--proc", "/proc",
   ];
   if (opts.setEnv) {
     for (const [k, v] of Object.entries(opts.setEnv)) pre.push("--setenv", k, v);
@@ -82,12 +80,31 @@ export function bwrapArgv(opts: {
     for (const p of paths) pre.push(flag, p, p);
   };
   binds("--ro-bind", opts.plan.roBinds);
+  // First hidden pass BEFORE the rw binds: a hidden dir is also the mount
+  // point for post-hidden rw binds (the eval session dir lives under the
+  // hidden results dir, and the repo is ro -- bwrap cannot mkdir under it).
   for (const p of opts.plan.hidden) pre.push("--tmpfs", p);
   binds("--ro-bind", opts.plan.roBindsAfterHidden);
   binds("--bind", opts.plan.rwBinds);
   if (opts.plan.binds) {
     for (const [src, dst] of opts.plan.binds) pre.push("--bind", src, dst);
   }
+  // Mount order is precedence: an rw bind mounted after a hidden tmpfs
+  // re-exposes it when the bind source is an ANCESTOR of the hidden path
+  // (workspace "." == the repo itself resurrects `.git`). Re-assert the
+  // tmpfs over those -- but only where no rw bind lives UNDER the hidden
+  // path (that bind must keep winning, which is the eval session-dir case).
+  for (const p of opts.plan.hidden) {
+    if (opts.plan.rwBinds.some((r) => r === p || r.startsWith(`${p}/`))) continue;
+    pre.push("--tmpfs", p);
+  }
+  // /dev and /proc are jail-owned virtual fs, mounted LAST. An rw bind of
+  // "/" (legal workspace config: paths: [".", "/"]) is a recursive bind that
+  // shadows everything mounted under it earlier -- including the jail's /proc
+  // -- and Bun aborts at startup inside the mangled view (bun.report
+  // la1744846fgGgkggC041rBAa). Re-mounting after every bind guarantees a
+  // fresh /dev and /proc whatever the allowlist drags in.
+  pre.push("--dev", "/dev", "--proc", "/proc");
   pre.push("--", opts.command, ...opts.args);
   return pre;
 }
@@ -140,7 +157,13 @@ export interface PlanePlanResult {
  * The per-(session, class) plan for a pooled executor: rw ONLY the session's
  * roots plus `scratch` (mounted as /tmp, so temp files survive across calls
  * inside one entry but nowhere else); no $HOME, no config chain, no sibling
- * session roots; the repo is ro (the runner imports it) with `.git` hidden.
+ * session roots; the repo is ro (the runner imports it).
+ *
+ * `.git` is deliberately NOT hidden here: tool-executed git commands (and
+ * `project_info` shelling out to git) need status/history/commits. A session
+ * whose roots include the repo gets `.git` writable via the rw bind (it wins
+ * over the ro bind by mount order); everywhere else the repo's `.git` stays
+ * ro. The evals harness keeps hiding git history via `hiddenRepoPaths()`.
  *
  * `cls` is carried for the backend contract: today `rw` and `net` plan
  * identically (bwrap shares network by default; `--unshare-net` arrives with
@@ -167,7 +190,8 @@ export function planFor(opts: {
       repoRoot,
       configChain: false,
     }),
-    hidden: [join(repoRoot, ".git")].filter((p) => existsSync(p)),
+    // No hidden paths: see the doc comment -- `.git` must stay reachable for git tooling.
+    hidden: [],
     roBindsAfterHidden: [],
     rwBinds: opts.roots.filter((p) => existsSync(p)),
     binds: [[opts.scratch, "/tmp"]],

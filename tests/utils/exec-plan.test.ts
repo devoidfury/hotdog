@@ -73,7 +73,7 @@ describe("planFor (plane jail argv)", () => {
     }
   });
 
-  it("ro-binds the repo (the runner imports it) and hides its .git", () => {
+  it("ro-binds the repo (the runner imports it) and leaves its .git visible", () => {
     const repo = tmpRoot("repo");
     mkdirSync(join(repo, ".git"));
     writeFileSync(join(repo, "src.txt"), "x");
@@ -91,13 +91,65 @@ describe("planFor (plane jail argv)", () => {
       });
       const argv = r.prefixArgv!;
       expect(argv).toContain(repo); // ro-bind of the repo dir
-      // .git is HIDDEN (tmpfs over it), not ro-bound.
+      // .git is NOT hidden -- git status/history read through the ro repo bind.
       const git = join(repo, ".git");
-      const gi = argv.indexOf(git);
-      expect(gi).toBeGreaterThan(-1);
-      expect(argv[gi - 1]).toBe("--tmpfs");
+      expect(argv).not.toContain(git);
     } finally {
       rmSync(repo, { recursive: true, force: true });
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("mounts /dev and /proc after an rw \"/\" root (bun aborts on a shadowed /proc)", () => {
+    const scratch = tmpRoot("rootbind");
+    try {
+      const r = planFor({
+        roots: ["/"],
+        cls: "rw",
+        scratch,
+        command: "bun",
+        args: [],
+        repoRoot: "/nonexistent-repo",
+        binary: "/x/bwrap",
+      });
+      const argv = r.prefixArgv!;
+      const devIdx = argv.indexOf("--dev");
+      // The rw bind (`--bind / /`) must be mounted before --dev/--proc, not after.
+      let rootBindIdx = -1;
+      for (let i = 0; i < devIdx; i++) {
+        if (argv[i] === "--bind" && argv[i + 1] === "/" && argv[i + 2] === "/") rootBindIdx = i;
+      }
+      expect(rootBindIdx).toBeGreaterThan(-1);
+      expect(argv.indexOf("/dev")).toBeGreaterThan(rootBindIdx);
+      expect(argv.indexOf("/proc")).toBeGreaterThan(rootBindIdx);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("never tmpfs-es .git when the workspace IS the repo (rw bind must keep it writable)", () => {
+    const root = tmpRoot("gitrw");
+    mkdirSync(join(root, ".git"));
+    const scratch = tmpRoot("gitrw-scratch");
+    try {
+      // Workspace == the repo: git status/history/commits must work, so no
+      // tmpfs (initial or re-asserted) may cover .git after the rw bind.
+      const r = planFor({
+        roots: [root],
+        cls: "rw",
+        scratch,
+        command: "bun",
+        args: [],
+        repoRoot: root,
+        binary: "/x/bwrap",
+      });
+      const argv = r.prefixArgv!;
+      const git = join(root, ".git");
+      expect(argv).not.toContain(git);
+      const bindIdx = argv.indexOf("--bind");
+      expect(argv[bindIdx + 1]).toBe(root); // the rw bind that makes .git writable
+    } finally {
+      rmSync(root, { recursive: true, force: true });
       rmSync(scratch, { recursive: true, force: true });
     }
   });

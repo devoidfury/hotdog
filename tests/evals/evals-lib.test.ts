@@ -345,14 +345,18 @@ describe("bwrap", () => {
       "--die-with-parent",
       "--new-session",
       "--tmpfs", "/",
-      "--dev", "/dev",
-      "--proc", "/proc",
       "--ro-bind", "/usr", "/usr",
       "--ro-bind", "/etc/ssl", "/etc/ssl",
       "--tmpfs", "/repo/evals/series",
       "--ro-bind", "/repo/evals/results/verdict.schema.json", "/repo/evals/results/verdict.schema.json",
       "--bind", "/ws", "/ws",
       "--bind", "/logs", "/logs",
+      // Hidden re-asserted after the rw binds (an rw ancestor would
+      // re-expose it); virtual fs mounted last so an rw "/" bind cannot
+      // shadow the jail's /dev and /proc.
+      "--tmpfs", "/repo/evals/series",
+      "--dev", "/dev",
+      "--proc", "/proc",
       "--", "bun", "app.ts", "x y",
     ]);
     expect(bwrapArgv({ command: "true", args: [], plan: { roBinds: [], hidden: [], roBindsAfterHidden: [], rwBinds: [] } })[0]).toBe("bwrap");

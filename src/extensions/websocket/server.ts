@@ -109,7 +109,7 @@ interface SessionRegistryOptions {
   turnLanes?: TurnLanes;
 }
 
-interface CreateWsServerOptions {
+export interface CreateWsServerOptions {
   buildAgent?: (config: {
     model?: string;
     sessionId?: string;
@@ -506,6 +506,11 @@ export class SessionRegistry {
     }
 
     this.#sessionManager.deleteSession(sessionId);
+    // The registry's SessionManager is built without taskConfig (this host's
+    // TaskManager is the published one), so its delete cascade cannot reach
+    // the tasks -- interrupt them here or a deleted session's delegates run
+    // forever with nobody to receive results.
+    this.#taskManager?.interruptTasksForSession(sessionId);
     this.#metadata.delete(sessionId);
     this.#onSessionDeleted?.(sessionId);
     return true;

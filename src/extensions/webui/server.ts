@@ -1,11 +1,9 @@
-import { createWsServer } from "../websocket/server.ts";
+import { createWsServer, type CreateWsServerOptions } from "../websocket/server.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { upgradeOriginAllowed, LOOPBACK_HOSTS } from "../websocket/origin.ts";
+import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import { logger } from "@utils/logger.ts";
-import {
-  CoreContext,
-  getExtensionConfig,
-} from "@core/extensions/types.ts";
+import { CoreContext } from "@core/extensions/types.ts";
 
 import { ExtensionError } from "@core/error.ts";
 import { ProfileManager, type ProfileDef } from "@core/config/index.ts";
@@ -18,6 +16,14 @@ import webuiFrontend from "./ui/index.html";
 interface WebuiWsData {
   url: string;
 }
+
+// Transport frame cap aligned with the app-level caps: the biggest legitimate
+// frame is a webui upload -- one 10 MB image (core-tools/defaults.ts) riding
+// base64 on a C2S send (~4/3 expansion) plus its JSON envelope. Bigger frames
+// die at the socket before JSON parse + base64 decode; the value stays under
+// Bun's 16 MiB default, so it's a genuine tightening. Derived from the image
+// cap so the two cannot drift.
+const WS_MAX_PAYLOAD_BYTES = 4 * Math.ceil(DEFAULT_MAX_IMAGE_SIZE / 3) + 1024 * 1024;
 
 export interface WebuiConfig {
   port?: number;
@@ -36,6 +42,9 @@ interface WebuiServerResult {
 export async function createWebuiServer(
   core: CoreContext,
   config: WebuiConfig,
+  // Host/test seam: an embedded host (or an integration test) can supply its
+  // own agent factory instead of the resolved config's default one.
+  options: Pick<CreateWsServerOptions, "buildAgent"> = {},
 ): Promise<WebuiServerResult> {
   const { port, host, apiKey, sessionTokenTtlMin } = config;
 
@@ -46,14 +55,9 @@ export async function createWebuiServer(
     );
   }
 
-  const webuiConfig = getExtensionConfig<WebuiConfig>(core, "webui");
-  const maxAgeSecs = webuiConfig.maxAgeSecs;
-  if (!maxAgeSecs) {
-    throw ExtensionError.ConfigFailed(
-      "webui",
-      "missing required webui.maxAgeSecs configuration",
-    );
-  }
+  // webui.maxAgeSecs needs no check here: resolution fills the configSchema
+  // default (3600), and an explicit 0 (no caching) is a legal configured
+  // value -- a truthiness gate would reject it.
 
   const authMiddleware = createAuthMiddleware({
     validateApiKey: async (key: string) => apiKeyEquals(key, apiKey),
@@ -84,6 +88,7 @@ export async function createWebuiServer(
 
   const wsServer = createWsServer(core, {
     auth: authMiddleware,
+    buildAgent: options.buildAgent,
     sessionTimeoutMin: wsConfig?.sessionTimeoutMin as number | undefined,
     questionTimeoutSecs: wsConfig?.questionTimeoutSecs as number | undefined,
     questionStrategy: wsConfig?.questionStrategy as string | undefined,
@@ -160,6 +165,8 @@ export async function createWebuiServer(
     },
 
     websocket: {
+      // Frame bound for upgraded sockets (see WS_MAX_PAYLOAD_BYTES).
+      maxPayloadLength: WS_MAX_PAYLOAD_BYTES,
       open(ws) {
         const { url } = ws.data;
         wsServer.onUpgrade(

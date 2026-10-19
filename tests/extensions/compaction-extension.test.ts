@@ -215,6 +215,41 @@ describe("Hook Integration", () => {
     expect((result as { messages: unknown[] }).messages.length).toBeLessThan(messages.length);
   });
 
+  it("counts the system prompt in the trigger: a large system message over budget compacts", async () => {
+    // Regression: the trigger estimated only non-system messages, so a big
+    // system prompt + AGENTS.md + skill chunks under-counted the window and
+    // the provider overflowed before compaction fired.
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+    });
+    const ext = createCompactionExtension(core);
+    const modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 8000 },
+    };
+
+    // Control: the same conversation under an empty system prompt fits
+    // (~90 of the 7900 usable tokens) and must stay untouched.
+    const control = createMockAgent(makeMessages(6, "x".repeat(60)), "test-model", modelRegistry);
+    const controlResult = await (ext as any).hooks![HOOKS.CONTEXT]!({
+      messages: [{ role: "system", content: "" }, ...makeMessages(6, "x".repeat(60))] as any,
+      agent: control,
+    });
+    expect(controlResult).toBeUndefined();
+    expect(control.log.length).toBe(6);
+
+    // A ~20k-token system message pushes the request over the threshold even
+    // though the conversation itself never moved.
+    const agent = createMockAgent(makeMessages(6, "x".repeat(60)), "test-model", modelRegistry);
+    const messages = [{ role: "system", content: "S".repeat(80000) }, ...makeMessages(6, "x".repeat(60))];
+    const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
+
+    expect(result).toBeDefined();
+    expect(agent.log.length).toBeLessThan(6);
+    expect((result as { messages: unknown[] }).messages.length).toBeLessThan(messages.length);
+  });
+
   it("wraps the summary as a harness message with the raw summary in an untrusted part", async () => {
     const tag = "previous-context-summary";
     // The summarization "model" echoes a protected marker into its output.

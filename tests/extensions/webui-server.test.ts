@@ -68,27 +68,6 @@ describe("createWebuiServer", () => {
         createWebuiServer(core, { port: 0, apiKey: undefined }),
       ).rejects.toThrow("No API key configured");
     });
-
-    it("throws when maxAgeSecs is missing from webui config", async () => {
-      const core = createMockCore({ webui: {} });
-      await expect(
-        createWebuiServer(core, { port: 0, apiKey: "test-key" }),
-      ).rejects.toThrow("missing required webui.maxAgeSecs");
-    });
-
-    it("throws when maxAgeSecs is 0", async () => {
-      const core = createMockCore({ webui: { maxAgeSecs: 0 } });
-      await expect(
-        createWebuiServer(core, { port: 0, apiKey: "test-key" }),
-      ).rejects.toThrow("missing required webui.maxAgeSecs");
-    });
-
-    it("throws when maxAgeSecs is null", async () => {
-      const core = createMockCore({ webui: { maxAgeSecs: null } });
-      await expect(
-        createWebuiServer(core, { port: 0, apiKey: "test-key" }),
-      ).rejects.toThrow("missing required webui.maxAgeSecs");
-    });
   });
 
   describe("server creation", () => {
@@ -127,6 +106,26 @@ describe("createWebuiServer", () => {
       server = result.server;
       wsServer = result.wsServer;
       expect(result.server.port).toBeGreaterThan(0);
+    });
+
+    // The old required-check threw on any falsy maxAgeSecs: unreachable for
+    // the missing case (resolution fills the schema default 3600) and wrong
+    // for 0, which means "no asset caching".
+    it("accepts maxAgeSecs 0 (no caching) and a webui block without it", async () => {
+      for (const webui of [{ maxAgeSecs: 0 }, { maxAgeSecs: null }, {}]) {
+        const result = await createWebuiServer(createMockCore({ webui }), {
+          port: 0,
+          host: "127.0.0.1",
+          apiKey: "test-key",
+        });
+        server = result.server;
+        wsServer = result.wsServer;
+        expect(result.server.port).toBeGreaterThan(0);
+        server.stop(true);
+        wsServer.stopCleanupLoop();
+        server = null;
+        wsServer = null;
+      }
     });
   });
 

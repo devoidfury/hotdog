@@ -1886,8 +1886,8 @@ export class TaskManager {
   }
 
   /**
-   * Abort every RUNNING task delegated from the given session. Called when
-   * that session is deleted, so its subagent tasks don't keep running (and
+   * Abort every RUNNING/QUEUED task delegated from the given session. Called
+   * when that session is deleted, so its subagent tasks don't keep running (and
    * burning tokens) with no session to receive results. Other sessions' tasks
    * are untouched. Returns how many were aborted.
    */

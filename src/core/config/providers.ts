@@ -411,7 +411,8 @@ export function resolveProvider(
   return providers.find((p) => p.name === providerName) ?? null;
 }
 
-// Warn-once memory for ambiguous suffix matches (same pattern as envRefWarned in ./index.ts).
+// Warn-once memory for ambiguous suffix matches (the lookup repeats constantly,
+// so a live warning would bury the log).
 const suffixAmbiguityWarned = new Set<string>();
 
 /**

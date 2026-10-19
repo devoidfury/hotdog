@@ -357,6 +357,16 @@ describe("createCore.createLlmClient (modelWireFormat layering)", () => {
     expect(core.createLlmClient().maxRetries).toBe(0);
   });
 
+  it("an explicit chatTimeout / healthCheckTimeout of 0 survives the fallback", async () => {
+    // 0 means "no timeout" (hotdogFetch only arms a timeout when ms > 0), so
+    // a configured 0 must reach the client -- the same ?? rule as maxRetries
+    // above, for the two options that used || until this test pinned it.
+    const core = await buildCore({ chatTimeoutSecs: 0, healthCheckTimeoutSecs: 0 }, {});
+    const client = core.createLlmClient();
+    expect(client.chatTimeoutSecs).toBe(0);
+    expect(client.healthCheckTimeoutSecs).toBe(0);
+  });
+
   it("uses the schema default (5) when nothing is set", async () => {
     const core = await buildCore({}, {});
     expect(core.createLlmClient().maxRetries).toBe(5);

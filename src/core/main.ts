@@ -155,8 +155,8 @@ export function createCore(
       return new LlmClient({
         baseUrl: resolved?.baseUrl ?? null,
         apiKey: resolved?.apiKey ?? null,
-        chatTimeoutSecs: resolved?.chatTimeout || 30,
-        healthCheckTimeoutSecs: resolved?.healthCheckTimeout || 5,
+        chatTimeoutSecs: resolved?.chatTimeout ?? 30,
+        healthCheckTimeoutSecs: resolved?.healthCheckTimeout ?? 5,
         streamIdleTimeoutSecs: resolved?.streamIdleTimeout as number | undefined,
         // Schema default (core.config.json) as fallback when resolved is
         // unset; ?? so an explicit 0 (no retries) survives.

@@ -506,8 +506,13 @@ export function create(core: CoreContext): ExtensionInstance | null {
         if (nonSystemMessages.length <= settings.keepRecentMessages * 2) return;
 
         const modelConfig = getModelConfig(agent);
+        // The trigger bills the FULL window: the system prompt (base prompt +
+        // AGENTS.md + skill chunks) rides every request, so estimating only
+        // the conversation under-counts and the provider overflows before
+        // compaction fires. Strategies still see -- and evict -- only the
+        // non-system messages.
         if (
-          !shouldCompact(nonSystemMessages, modelConfig.contextLimit, settings.reserveTokens, wireFor(agent, modelConfig))
+          !shouldCompact(messages, modelConfig.contextLimit, settings.reserveTokens, wireFor(agent, modelConfig))
         )
           return;
 

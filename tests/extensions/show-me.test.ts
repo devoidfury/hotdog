@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Workspace } from "@utils/workspace.ts";
+
 import {
   create as createShowMe,
   extractGeneratedImage,
@@ -100,8 +102,11 @@ function makeAgent(client: ImageChatClient, registry: Record<string, unknown> = 
   return { agent, emitted };
 }
 
-function toolCtx(agent: unknown) {
-  return { get: (key: string) => (key === "agent" ? agent : undefined) } as any;
+function toolCtx(agent: unknown, workspace?: unknown) {
+  return {
+    get: (key: string) =>
+      key === "agent" ? agent : key === "workspace" ? workspace : undefined,
+  } as any;
 }
 
 // ── Size Parsing ────────────────────────────────────────────────────────────
@@ -415,7 +420,7 @@ describe("show-me extension", () => {
 
       const result = await registered.get("show_me").execute(
         { description: "a kitten", size: "640x480", output_path: outPath },
-        toolCtx(agent),
+        toolCtx(agent, new Workspace(dir)),
       );
       expect(result.isOk()).toBe(true);
       expect(result.output).toContain(outPath);
@@ -442,7 +447,7 @@ describe("show-me extension", () => {
 
       const result = await registered
         .get("show_me")
-        .execute({ description: "a kitten", output_path: outPath }, toolCtx(agent));
+        .execute({ description: "a kitten", output_path: outPath }, toolCtx(agent, new Workspace(dir)));
       expect(result.isOk()).toBe(true);
       expect((await readFile(outPath)).equals(PNG_BYTES)).toBe(true);
     } finally {
@@ -466,7 +471,7 @@ describe("show-me extension", () => {
 
       const result = await registered
         .get("show_me")
-        .execute({ description: "a kitten", output_path: outPath }, toolCtx(agent));
+        .execute({ description: "a kitten", output_path: outPath }, toolCtx(agent, new Workspace(dir)));
       expect(result.isOk()).toBe(true);
       expect(result.output).toContain(outPath);
       const lines = emitted.map(([, data]) => (data as { content: string }).content);
@@ -489,7 +494,7 @@ describe("show-me extension", () => {
 
     const result = await registered
       .get("show_me")
-      .execute({ description: "a kitten" }, toolCtx(agent));
+      .execute({ description: "a kitten" }, toolCtx(agent, new Workspace(tmpdir())));
     expect(result.isErr()).toBe(true);
     expect(result.error).toContain('outputModalities include "image"');
     expect(result.error).toContain("showMe.imageModel");
@@ -561,6 +566,93 @@ describe("show-me extension", () => {
       expect(bad.error).toContain("does not declare image output");
     } finally {
       process.chdir(prevCwd);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── Containment (the law every file tool obeys) ─────────────────────────────
+
+describe("show_me output_path containment", () => {
+  async function registerTool(imageModel = "picgen/draw-1") {
+    const inst = createShowMe(makeCore({ imageModel }));
+    const registered = new Map<string, any>();
+    await inst.hooks![HOOKS.TOOLS_REGISTER]!({
+      register: (name: string, tool: unknown) => registered.set(name, tool),
+      getAll: () => [],
+    } as any);
+    return registered.get("show_me");
+  }
+
+  it("rejects an absolute output_path outside the roots -- before generation, without writing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "show-me-contain-"));
+    try {
+      const outside = join(tmpdir(), `hotdog-escape-${Date.now()}.png`);
+      const captured: Captured = {};
+      const client = makeFakeClient(imagePayload(), captured);
+      const { agent } = makeAgent(client);
+      const tool = await registerTool();
+
+      const result = await tool.execute(
+        { description: "a kitten", output_path: outside },
+        toolCtx(agent, new Workspace(dir)),
+      );
+      expect(result.isErr()).toBe(true);
+      expect(result.error).toContain("Path escape rejected");
+      // The containment fires before the request: no tokens burned, nothing mkdir'd.
+      expect(captured.requests).toBeUndefined();
+      expect(existsSync(outside)).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a relative .. escape the same way", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "show-me-contain-"));
+    try {
+      const client = makeFakeClient(imagePayload(), {});
+      const { agent } = makeAgent(client);
+      const tool = await registerTool();
+
+      const result = await tool.execute(
+        { description: "a kitten", output_path: "../outside.png" },
+        toolCtx(agent, new Workspace(dir)),
+      );
+      expect(result.isErr()).toBe(true);
+      expect(result.error).toContain("Path escape rejected");
+      expect(existsSync(join(dir, "..", "outside.png"))).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to write at all when the tool context carries no workspace", async () => {
+    const client = makeFakeClient(imagePayload(), {});
+    const { agent } = makeAgent(client);
+    const tool = await registerTool();
+
+    const result = await tool.execute(
+      { description: "a kitten", output_path: "pic.png" },
+      toolCtx(agent), // agent only -- no workspace to contain the write
+    );
+    expect(result.isErr()).toBe(true);
+    expect(result.error).toContain("no workspace");
+  });
+
+  it("accepts a relative path inside the roots and writes under it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "show-me-contain-"));
+    try {
+      const client = makeFakeClient(imagePayload(), {});
+      const { agent } = makeAgent(client);
+      const tool = await registerTool();
+
+      const result = await tool.execute(
+        { description: "a kitten", output_path: "sub/pic.png" },
+        toolCtx(agent, new Workspace(dir)),
+      );
+      expect(result.isOk()).toBe(true);
+      expect((await readFile(join(dir, "sub", "pic.png"))).equals(PNG_BYTES)).toBe(true);
+    } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });

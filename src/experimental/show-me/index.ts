@@ -19,6 +19,7 @@ import { dirname, join, resolve as resolveAbs } from "node:path";
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
 import { ToolError, formatError } from "@core/error.ts";
+import { Workspace } from "@utils/workspace.ts";
 import { findModelEntry, resolveModelConfig, type ModelConfig } from "@core/config/providers.ts";
 import {
   defaultCallDisplay,
@@ -211,10 +212,14 @@ function extensionForMime(mimeType: string): string {
   );
 }
 
-/** Timestamped default output path under ./generated/ (relative to cwd). */
-export function defaultOutputPath(now: Date, mimeType: string): string {
+/**
+ * Timestamped default output path under `generated/`: inside the workspace
+ * primary root when one is known, else (standalone callers) the process cwd.
+ */
+export function defaultOutputPath(now: Date, mimeType: string, root?: string): string {
   const stamp = now.toISOString().replace(/[:.]/g, "-");
-  return join(resolveAbs(DEFAULT_OUTPUT_DIR), `show-me-${stamp}.${extensionForMime(mimeType)}`);
+  const dir = root ? join(root, DEFAULT_OUTPUT_DIR) : resolveAbs(DEFAULT_OUTPUT_DIR);
+  return join(dir, `show-me-${stamp}.${extensionForMime(mimeType)}`);
 }
 
 // ── LlmClient Call ──────────────────────────────────────────────────────────
@@ -275,8 +280,25 @@ export interface GenerateImageParams {
   prompt: string;
   size: string;
   outputPath?: string | null;
+  /**
+   * Containment boundary (the tool context's workspace): an explicit
+   * outputPath goes through `Workspace.resolveSafe`, and the generated
+   * default lands under the primary root. Tool wiring must always supply
+   * it; only standalone unit callers may leave it out.
+   */
+  workspace?: Workspace | null;
   signal?: AbortSignal | null;
   emit?: (line: string) => void;
+}
+
+/**
+ * Resolve an explicit output path through `Workspace.resolveSafe` -- the law
+ * every file tool obeys: escapes and denylisted targets throw a
+ * PathEscapeError (a ToolError), so nothing is ever mkdir'd outside the
+ * roots. No workspace (standalone unit callers) resolves against cwd.
+ */
+function resolveOutputPath(outputPath: string, workspace?: Workspace | null): string {
+  return workspace ? workspace.resolveSafe(outputPath) : resolveAbs(outputPath);
 }
 
 /** Generate an image and write it to disk. Returns the written path. */
@@ -291,6 +313,12 @@ export async function generateImage(p: GenerateImageParams): Promise<string> {
     p.contextLimit,
     undefined,
   );
+
+  // An explicit path resolves BEFORE the request: an escape must fail like
+  // any file tool, not after the model already burned tokens. The generated
+  // default is contained by construction and can wait for the decoded mime.
+  const requested = p.outputPath?.trim();
+  const explicitOut = requested ? resolveOutputPath(requested, p.workspace) : null;
 
   // Images API request: the wire model name is the registry key without its provider prefix,
   // matching how the chat protocol addresses models. b64_json keeps bytes in-band; no download step.
@@ -312,9 +340,7 @@ export async function generateImage(p: GenerateImageParams): Promise<string> {
     );
   }
 
-  const outPath = p.outputPath?.trim()
-    ? resolveAbs(p.outputPath.trim())
-    : defaultOutputPath(new Date(), image.mimeType);
+  const outPath = explicitOut ?? defaultOutputPath(new Date(), image.mimeType, p.workspace?.root);
 
   await mkdir(dirname(outPath), { recursive: true });
   await writeFile(outPath, image.data);
@@ -352,7 +378,7 @@ class ShowMeTool {
           size: param("string", `Output size as WIDTHxHEIGHT (default ${DEFAULT_SIZE}).`),
           output_path: param(
             "string",
-            "Optional file path for the generated image; defaults to a timestamped file under ./generated/.",
+            "Optional file path for the generated image, inside the workspace (escapes are rejected); defaults to a timestamped file under ./generated/.",
           ),
         },
         required: ["description"],
@@ -378,6 +404,13 @@ class ShowMeTool {
       return ToolResult.err("show_me: no agent available in tool context");
     }
 
+    // No workspace on the context means nothing can contain the write --
+    // fail closed rather than mkdir at whatever path the model named.
+    const workspace = ctx?.get("workspace") as Workspace | undefined;
+    if (!workspace) {
+      return ToolResult.err("show_me: no workspace on the tool context; refusing to write");
+    }
+
     try {
       const written = await generateImage({
         client: agent.llmClient as unknown as ImageChatClient,
@@ -387,6 +420,7 @@ class ShowMeTool {
         prompt: description,
         size: normalizeSize(args.size),
         outputPath: typeof args.output_path === "string" ? args.output_path : null,
+        workspace,
         signal: agent.abortSignal ?? null,
         emit: (line) => agent.emitOutput("command_result", { content: line }),
       });
@@ -405,6 +439,16 @@ export function create(core: CoreContext): ExtensionInstance {
 
   const imageModel = (config.imageModel ?? "").trim();
 
+  // Containment boundary for the slash-command path too. A command invocation
+  // carries no tool ctx, so the Workspace is built from the resolved config;
+  // without resolved roots (bare-core callers) the default stays cwd-relative.
+  function workspaceFromConfig(): Workspace | null {
+    const roots = core.resolved?.workspaceRoots;
+    if (!roots || roots.length === 0) return null;
+    const deny = core.resolved?.workspaceDeny ?? null;
+    return deny !== null ? new Workspace(roots, deny) : new Workspace(roots);
+  }
+
   async function runForAgent(agent: Agent, prompt: string, size: string): Promise<string> {
     return generateImage({
       client: agent.llmClient as unknown as ImageChatClient,
@@ -413,6 +457,7 @@ export function create(core: CoreContext): ExtensionInstance {
       contextLimit: agent.contextLimit,
       prompt,
       size,
+      workspace: workspaceFromConfig(),
       signal: agent.abortSignal ?? null,
       emit: (line) => agent.emitOutput("command_result", { content: line }),
     });

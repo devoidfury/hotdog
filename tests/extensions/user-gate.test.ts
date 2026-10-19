@@ -462,3 +462,65 @@ describe("gate composition (DM-3)", () => {
     expect(asked).toHaveLength(0); // the allow path ran: no prompt needed
   });
 });
+
+describe("session grants are keyed by session (no cross-session silencing)", () => {
+  it("an allow-for-session in one session does not silence another session's prompt", async () => {
+    // The webui/ws host serves many sessions per process: a grant made while
+    // talking to session A must not answer for session B.
+    const hooks = new HookSystem();
+    const core = { hooks, config: { userGate: { enabled: true } } } as unknown as CoreContext;
+    const instance = create(core);
+    for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
+      hooks.on(name, handler as never, "user-gate");
+    }
+    let asked = 0;
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: () => {
+        asked++;
+        return { approve: "allow for session" };
+      },
+    };
+    const runAs = (sessionId: string) =>
+      hooks.runHookPipeline<GateAction, "tool:call">(
+        HOOKS.TOOL_CALL,
+        payload({ inputOverride: input, agent: { sessionId } } as never),
+        { failOnError: true },
+      );
+
+    await runAs("A");
+    expect(asked).toBe(1);
+    await runAs("A"); // same session: the memo answers
+    expect(asked).toBe(1);
+    await runAs("B"); // different session: must prompt again
+    expect(asked).toBe(2);
+  });
+
+  it('an "allow for session" with no session id degrades to "allow once"', async () => {
+    // No key to remember by -> no memo. The gate fails toward prompting.
+    const hooks = new HookSystem();
+    const core = { hooks, config: { userGate: { enabled: true } } } as unknown as CoreContext;
+    const instance = create(core);
+    for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
+      hooks.on(name, handler as never, "user-gate");
+    }
+    let asked = 0;
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: () => {
+        asked++;
+        return { approve: "allow for session" };
+      },
+    };
+    const runAnonymous = () =>
+      hooks.runHookPipeline<GateAction, "tool:call">(
+        HOOKS.TOOL_CALL,
+        payload({ inputOverride: input, agent: {} } as never),
+        { failOnError: true },
+      );
+
+    await runAnonymous();
+    await runAnonymous();
+    expect(asked).toBe(2);
+  });
+});

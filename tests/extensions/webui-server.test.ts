@@ -268,7 +268,13 @@ describe("createWebuiServer", () => {
         predicate: (m: Record<string, unknown>) => boolean,
       ) => Promise<Record<string, unknown>>;
     }> {
-      const ws = new WebSocket(`${baseUrl.replace("http", "ws")}/ws`);
+      // Browsers always send Origin on a WS handshake and the server refuses
+      // upgrades without one; the Bun client doesn't send it on its own, so
+      // the honest same-origin value goes in explicitly. (Bun's WS client
+      // accepts headers; the DOM-flavored global typing here doesn't know it.)
+      const ws = new WebSocket(`${baseUrl.replace("http", "ws")}/ws`, {
+        headers: { Origin: baseUrl },
+      } as any);
       const received: Array<Record<string, unknown>> = [];
       ws.onmessage = (event) => {
         received.push(JSON.parse(event.data as string));
@@ -428,12 +434,36 @@ describe("createWebuiServer", () => {
 
       // A non-WebSocket GET to /ws fails Bun's upgrade and the app answers
       // with its own 400 "Upgrade failed" response (server.ts, not Bun).
+      // Same-origin Origin keeps the origin gate out of this test's way.
       const res = await fetch(`${baseUrl}/ws`, {
-        headers: { "Upgrade": "not-websocket" },
+        headers: { "Upgrade": "not-websocket", Origin: baseUrl },
       });
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.error).toBe("Upgrade failed");
+    });
+
+    it("GET /ws with a foreign Origin returns 403 before any upgrade", async () => {
+      // Cross-site drive-by shape: the page's Origin is not the server's host.
+      await startServer();
+      const res = await fetch(`${baseUrl}/ws`, {
+        headers: { Upgrade: "websocket", Connection: "Upgrade", Origin: "http://evil.example" },
+      });
+      expect(res.status).toBe(403);
+      const data = await res.json();
+      expect(String(data.error)).toMatch(/same-origin/i);
+    });
+
+    it("GET /ws with no Origin returns 403 (fail closed)", async () => {
+      // Browsers always send Origin on a WebSocket handshake; a handshake
+      // without one is not a browser, and there are no non-browser WS
+      // clients to accommodate. Bun's own WS client omits Origin -- this
+      // pins that such a socket cannot reach the agent.
+      await startServer();
+      const res = await fetch(`${baseUrl}/ws`, {
+        headers: { Upgrade: "websocket", Connection: "Upgrade" },
+      });
+      expect(res.status).toBe(403);
     });
   });
 });

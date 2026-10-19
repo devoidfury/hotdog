@@ -210,7 +210,9 @@ function isDigits(text: string): boolean {
 /**
  * Extract approval targets from a bash command line, or explain why the command cannot be analyzed.
  *
- * - `cmd`: each segment's command basename -- must be allowed.
+ * - `cmd`: each segment's command basename -- must be allowed. A path-shaped argv[0] (`/tmp/git`, `./run.sh`)
+ *          ALSO emits a `path` target for its resolved location: sharing a basename with an allowed command
+ *          must not admit a planted binary.
  * - `path`: path-shaped arguments and redirection targets, resolved against the segment's directory (after `cd`) -- must be allowed.
  *           A bare filename with no `/` is NOT an allow-demanded path (it would demand a rule for every `git checkout main`); it lands in `arg`,
  *           and ALSO as a denyOnly `path` target so path deny rules still reach it.
@@ -246,7 +248,8 @@ export function parseCommandline(command: string, workspace: Workspace): BashPar
     if (words.length === 0) return { ok: false, reason: "dangling operator" };
     analyzed++;
 
-    const cmd = basename(words[0]!.word.text);
+    const argv0 = words[0]!.word.text;
+    const cmd = basename(argv0);
     if (words[0]!.word.quoted) return { ok: false, reason: "the command name itself is quoted" };
     if (ALWAYS_BAIL.has(cmd)) return { ok: false, reason: `'${cmd}' runs arbitrary programs` };
     if (ALWAYS_INLINE_INTERPRETERS.has(cmd)) return { ok: false, reason: `'${cmd}' takes its program as an argument` };
@@ -259,6 +262,9 @@ export function parseCommandline(command: string, workspace: Workspace): BashPar
     }
 
     targets.push({ param: "cmd", value: cmd });
+    // A path-shaped argv[0] must also be allow-demanded as a path: sharing a
+    // basename with an allowed command must not admit a planted `/tmp/git`.
+    if (looksLikePath(argv0)) pushPathTarget(argv0);
 
     let cdHandled = false;
     for (const { text, quoted } of words.slice(1).map((w) => w.word)) {

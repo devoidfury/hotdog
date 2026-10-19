@@ -205,3 +205,61 @@ describe("happy paths", () => {
     expect(values(parse("ls && ;; pwd"), "cmd")).toEqual(["ls", "pwd"]);
   });
 });
+describe("path-shaped argv[0] is a path target (planted-binary guard)", () => {
+  /** All targets for a param, with their denyOnly flag, for allow-demand checks. */
+  function pathTargets(r: ReturnType<typeof parse>): Array<{ value: string; denyOnly?: boolean }> {
+    if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
+    return r.targets.filter((t) => t.param === "path").map((t) => ({ value: t.value, denyOnly: t.denyOnly }));
+  }
+
+  it("keeps the cmd basename but ALSO demands the binary's location", () => {
+    const r = parse("/tmp/git status");
+    expect(r.ok).toBe(true);
+    expect(values(r, "cmd")).toEqual(["git"]);
+    // The planted binary must be allow-demanded as a path, not shadowed denyOnly.
+    expect(pathTargets(r)).toContainEqual({ value: "/tmp/git" });
+  });
+
+  it("a cmd:git allow no longer admits /tmp/git (the bypass is closed)", () => {
+    const rules = compileApprovalRules({ allow: ["bash.cmd=git"] });
+    const verdictOf = (command: string) => {
+      const r = parse(command);
+      if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
+      return decide({ tool: "bash", recognized: true, targets: r.targets }, rules).verdict;
+    };
+    expect(verdictOf("/tmp/git status")).toBe("ask");
+    expect(verdictOf("/usr/bin/git push origin main")).toBe("ask");
+    // Same basename without a path shape still rides the cmd rule.
+    expect(verdictOf("git status")).toBe("allow");
+  });
+
+  it("a path allow for the exact location closes the loop", () => {
+    const rules = compileApprovalRules({ allow: ["bash.cmd=git", "bash.path=/usr/bin/git"] });
+    const r = parse("/usr/bin/git status");
+    if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
+    expect(decide({ tool: "bash", recognized: true, targets: r.targets }, rules).verdict).toBe("allow");
+  });
+
+  it("a path deny reaches argv[0] (a quarantine dir stays quarantined)", () => {
+    const rules = compileApprovalRules({ allow: ["bash.cmd=git", "bash.path=**"], deny: ["bash.path=/tmp/**"] });
+    const r = parse("/tmp/git status");
+    if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
+    expect(decide({ tool: "bash", recognized: true, targets: r.targets }, rules).verdict).toBe("deny");
+  });
+
+  it("relative argv[0] resolves against the cd-tracked base like every other path", () => {
+    expect(pathTargets(parse("./git status"))).toContainEqual({ value: "/ws/git" });
+    expect(pathTargets(parse("cd sub && ./deploy.sh"))).toContainEqual({ value: "/ws/sub/deploy.sh" });
+    // The cmd side still sees the basename for rule matching.
+    expect(values(parse("./git status"), "cmd")).toEqual(["git"]);
+  });
+
+  it("a tool-level bash allow still covers path-shaped invocations", () => {
+    // decide() short-circuits on a whole-tool allow; pinning that this fix
+    // did not sneak a path demand in front of the human's explicit "yes".
+    const rules = compileApprovalRules({ allow: ["bash"] });
+    const r = parse("/tmp/git status");
+    if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
+    expect(decide({ tool: "bash", recognized: true, targets: r.targets }, rules).verdict).toBe("allow");
+  });
+});

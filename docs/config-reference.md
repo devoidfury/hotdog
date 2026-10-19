@@ -1527,6 +1527,8 @@ CLI flag: `--shell-mode`.
 { "webui": { "port": 8080, "apiKey": "your-key" } }
 ```
 
+WebSocket upgrades at `/ws` are restricted to same-origin handshakes: the request's `Origin` (always sent by browsers) and `Host` must name the bound host -- loopback names on a loopback bind, the bound name on a named bind, same-host on a wildcard (`0.0.0.0`) bind. Foreign, missing, or unparseable origins are refused with a 403 before the socket opens. Non-browser WS clients must therefore send an `Origin` header matching the server.
+
 ### Enabled-only extensions
 
 These extensions expose a single config knob, `{ "<key>": { "enabled": <boolean, default true> } }`, to turn them off:

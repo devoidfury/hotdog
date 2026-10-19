@@ -12,8 +12,8 @@
 //
 // Prompts are queued one-at-a-time process-wide: parallel tool calls ask in turn, so only one question is ever live in the UI.
 //
-// "Always allow" is a session memo (tool + required target values) plus a printed config line.
-// Nothing is ever written to config from here.
+// "Always allow" is a per-session memo (tool + required target values, keyed by
+// payload.agent.sessionId) plus a printed config line. Nothing is ever written to config from here.
 
 import { HOOKS, type GateAction } from "@core/hooks.ts";
 import {
@@ -209,8 +209,14 @@ export function create(core: CoreContext): ExtensionInstance {
     };
   }
 
-  /** In-memory only: allows die with the process, by design. */
-  const sessionGrants = new Set<string>();
+  /**
+   * In-memory only: allows die with the process, by design.
+   * Keyed by the requesting agent's sessionId: one process serves many webui/ws
+   * sessions, and a grant made while talking to one of them must not silence
+   * prompts in another. A call with no session id gets no memo (fail toward
+   * prompting: "allow for session" degrades to "allow once").
+   */
+  const sessionGrants = new Map<string, Set<string>>();
 
   const handler = async (payload: ToolCallPayload): Promise<GateAction | undefined> => {
     try {
@@ -252,7 +258,9 @@ export function create(core: CoreContext): ExtensionInstance {
       }
 
       const key = memoKey(call);
-      if (sessionGrants.has(key)) return;
+      const rawSessionId = (payload.agent as { sessionId?: unknown } | undefined)?.sessionId;
+      const grantKey = typeof rawSessionId === "string" ? rawSessionId : null;
+      if (grantKey !== null && sessionGrants.get(grantKey)?.has(key)) return;
 
       const outcome = await enqueuePrompt(() =>
         askUser(
@@ -265,10 +273,20 @@ export function create(core: CoreContext): ExtensionInstance {
       );
 
       if (outcome.action === "allow") {
-        if (outcome.session) sessionGrants.add(key);
+        // Without a session to remember by, "allow for session" degrades to
+        // "allow once" -- and the log line says what actually happened.
+        const remembered = outcome.session && grantKey !== null;
+        if (remembered) {
+          let mine = sessionGrants.get(grantKey);
+          if (!mine) {
+            mine = new Set();
+            sessionGrants.set(grantKey, mine);
+          }
+          mine.add(key);
+        }
         const what = call.bailReason ? "(unparsed call)" : key.split("\u0000")[1] || "it";
         logger.info(
-          `[user-gate] allowed${outcome.session ? " for session" : " once"}: ${payload.toolName} ${what}\n  ${suggestRuleLine(call)}`,
+          `[user-gate] allowed${remembered ? " for session" : " once"}: ${payload.toolName} ${what}\n  ${suggestRuleLine(call)}`,
         );
         return;
       }

@@ -1,5 +1,6 @@
 import { createWsServer } from "../websocket/server.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
+import { upgradeOriginAllowed, LOOPBACK_HOSTS } from "../websocket/origin.ts";
 import { logger } from "@utils/logger.ts";
 import {
   CoreContext,
@@ -94,7 +95,6 @@ export async function createWebuiServer(
   // session tokens travel in cleartext over plain HTTP, so exposing the
   // WebUI beyond localhost puts a live agent behind a shared-key check only.
   const effectiveHost = host ?? "127.0.0.1";
-  const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
   if (!LOOPBACK_HOSTS.has(effectiveHost)) {
     logger.warn(
       `[webui] binding to non-loopback host '${effectiveHost}' -- ` +
@@ -121,6 +121,19 @@ export async function createWebuiServer(
       },
 
       "/ws": async function (req: BunRequest) {
+        // Same-origin gate BEFORE the upgrade: browsers always send Origin on
+        // a WS handshake, so a foreign or missing one is a cross-site (or
+        // DNS-rebound) page reaching for a live agent -- refuse it with a
+        // plain 403. Host-policy semantics: ../websocket/origin.ts.
+        if (!upgradeOriginAllowed(req.headers.get("origin"), req.headers.get("host"), effectiveHost)) {
+          logger.warn(
+            `[webui] refused cross-origin WS upgrade: origin=${req.headers.get("origin") ?? "(none)"} host=${req.headers.get("host") ?? "(none)"}`,
+          );
+          return Response.json(
+            { error: "Forbidden: WebSocket upgrades are restricted to same-origin requests" },
+            { status: 403 },
+          );
+        }
         // No token check at upgrade: the socket opens unauthenticated and
         // the websocket extension gates all non-AUTH traffic until the
         // first AUTH message validates (onUpgrade/routeMessage in

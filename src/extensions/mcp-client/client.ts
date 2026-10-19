@@ -242,8 +242,12 @@ export class McpClient {
     return response;
   }
 
-  async listTools(): Promise<unknown> {
-    const result = await this._sendRequest("tools/list", {});
+  async listTools(cursor?: string | null): Promise<unknown> {
+    // The cursor MUST be echoed back per the tools/list pagination contract;
+    // a spec-conformant server restarts from page one when it is omitted,
+    // so a paginating client loop without it never terminates.
+    const params: Record<string, unknown> = cursor ? { cursor } : {};
+    const result = await this._sendRequest("tools/list", params);
     return parseMcpToolsListResponse(result as Record<string, unknown>);
   }
 

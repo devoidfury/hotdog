@@ -75,7 +75,7 @@ export class McpConnection {
     let cursor: string | null = null;
 
     do {
-      const result = await this.#client.listTools() as Record<string, unknown>;
+      const result = await this.#client.listTools(cursor) as Record<string, unknown>;
       allTools.push(...(result.tools as Record<string, unknown>[]));
       cursor = result.nextCursor as string | null;
     } while (cursor);

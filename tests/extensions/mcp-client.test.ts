@@ -248,7 +248,14 @@ describe("McpConnection", () => {
   });
 
   it("discoverTools follows pagination cursors", async () => {
+    // The fake keys off the cursor PARAMETER, not call count: a spec-
+    // conformant server restarts from page one whenever tools/list arrives
+    // without `params.cursor`, so a client that fails to thread the cursor
+    // loops forever. The missing-cursor counter both detects that bug and
+    // bounds the fake so a regression fails the assertion instead of hanging.
     let listCalls = 0;
+    let missingCursorCalls = 0;
+    let sawCursor1 = false;
     const handler = async (_url: string, opts?: RequestInit) => {
       const body = opts?.body ? JSON.parse(opts.body as string) : {};
       if (body.method === "initialize") {
@@ -256,16 +263,27 @@ describe("McpConnection", () => {
       }
       if (body.method === "tools/list") {
         listCalls++;
-        if (listCalls === 1) {
+        const cursor = (body.params as Record<string, unknown> | undefined)?.cursor;
+        if (!cursor) {
+          missingCursorCalls++;
+          if (missingCursorCalls > 1) {
+            // Bug path: client never sent the cursor. End the loop with an
+            // empty final page so the tool-list assertion below fails.
+            return jsonResponse({ jsonrpc: "2.0", id: body.id, result: { tools: [] } });
+          }
           return jsonResponse({
             jsonrpc: "2.0", id: body.id,
             result: { tools: [{ name: "tool1", description: "", inputSchema: {} }], nextCursor: "cursor1" },
           });
         }
-        return jsonResponse({
-          jsonrpc: "2.0", id: body.id,
-          result: { tools: [{ name: "tool2", description: "", inputSchema: {} }] },
-        });
+        if (cursor === "cursor1") {
+          sawCursor1 = true;
+          return jsonResponse({
+            jsonrpc: "2.0", id: body.id,
+            result: { tools: [{ name: "tool2", description: "", inputSchema: {} }] },
+          });
+        }
+        return jsonResponse({ jsonrpc: "2.0", id: body.id, result: { tools: [] } });
       }
       return jsonResponse({ jsonrpc: "2.0", id: body.id, result: {} });
     };
@@ -275,6 +293,8 @@ describe("McpConnection", () => {
       try {
         expect(conn.tools.map((t) => t.name)).toEqual(["tool1", "tool2"]);
         expect(listCalls).toBe(2);
+        expect(missingCursorCalls).toBe(1);
+        expect(sawCursor1).toBe(true);
       } finally {
         await conn.shutdown();
       }

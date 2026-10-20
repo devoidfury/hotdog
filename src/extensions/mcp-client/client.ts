@@ -23,8 +23,26 @@ class PendingRequest {
   }
 }
 
+/**
+ * Default per-request response timeout for streaming (stdio) transports.
+ * A wedged server must not hang a tool call forever. Callers pass the
+ * resolved `mcpClient.requestTimeoutSecs` config instead (house rule:
+ * components take resolved values; this is the direct-construction default).
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Hard cap on responses buffered ahead of their request. Buffered entries are
+ * the only unbounded accumulation left in the client: a hostile or buggy
+ * server can spew unmatched responses forever, so past the cap the
+ * connection is declared broken (pending requests fail clean, buffer is
+ * dropped, transport destroyed) instead of growing memory without bound.
+ */
+export const MAX_BUFFERED_RESPONSES = 1000;
+
 export class McpClient {
   readonly #transport: McpTransport;
+  readonly #requestTimeoutMs: number;
 
   #idCounter: number = 0;
 
@@ -40,15 +58,33 @@ export class McpClient {
 
   #cancelled: boolean = false;
 
+  // Set when the transport closed (server process died or destroy()): new
+  // requests fail fast instead of waiting out the response timeout.
+  #transportClosed: boolean = false;
+
   #messageCleanup: (() => void) | null = null;
 
-  constructor(transport: McpTransport) {
+  #closeCleanup: (() => void) | null = null;
+
+  constructor(transport: McpTransport, requestTimeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS) {
     this.#transport = transport;
+    this.#requestTimeoutMs = requestTimeoutMs;
 
     if (transport.isStreaming) {
       this.#messageCleanup = transport.onMessage((line) => {
         void this.#handleLine(line);
       });
+    }
+    // Fail-fast on transport close: pending requests reject the moment the
+    // server process/socket dies, not 30s later. shutdown() rejects first
+    // with "Cancelled" and this becomes a no-op.
+    this.#closeCleanup = transport.onClose(() => {
+      this.#failAllPending(new McpError("MCP transport closed (server process exited)"));
+    });
+    // Death that beat the subscription (server crashed between spawn and
+    // construction): start closed rather than hanging the first request.
+    if (transport.exited) {
+      this.#failAllPending(new McpError("MCP transport closed (server process exited)"));
     }
   }
 
@@ -58,6 +94,7 @@ export class McpClient {
     env: Record<string, string> = {},
     extraScrubKeys?: readonly string[],
     envScrubbing: boolean = true,
+    requestTimeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
   ): Promise<McpClient> {
     const transport = new StdioTransport(command, args, env, extraScrubKeys, envScrubbing);
 
@@ -81,7 +118,7 @@ export class McpClient {
       }
     });
 
-    return new McpClient(transport);
+    return new McpClient(transport, requestTimeoutMs);
   }
 
   static async forHttp(
@@ -90,7 +127,19 @@ export class McpClient {
     timeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
   ): Promise<McpClient> {
     const transport = new HttpTransport(url, headers, timeoutMs);
+    // HTTP answers ride send(): the per-request timeout is the transport's;
+    // the client's streaming timeout does not apply.
     return new McpClient(transport);
+  }
+
+  /** @internal Exposed for testing. */
+  get requestTimeoutMs(): number {
+    return this.#requestTimeoutMs;
+  }
+
+  /** @internal Exposed for testing. */
+  get transportClosed(): boolean {
+    return this.#transportClosed;
   }
 
   /** @internal Exposed for testing. */
@@ -157,14 +206,52 @@ export class McpClient {
             error: msg.error,
             raw: line,
           });
+          if (this.#buffered.length > MAX_BUFFERED_RESPONSES) {
+            // Unmatched responses never stop coming: a hostile or broken
+            // peer. Fail the connection cleanly -- the buffer is dropped
+            // (so it stays bounded no matter how long the flood lasts),
+            // every pending request rejects with a real error instead of
+            // timing out, and the transport is torn down.
+            logger.error(
+              `[mcp] server flooded the connection with >${MAX_BUFFERED_RESPONSES} unmatched responses; failing the connection`,
+            );
+            this.#buffered = [];
+            this.#failAllPending(
+              new McpError(
+                `MCP server sent more than ${MAX_BUFFERED_RESPONSES} responses with no matching request; connection failed`,
+              ),
+            );
+            void this.#transport.destroy().catch(() => {});
+          }
         }
       }
+    }
+  }
+
+  /**
+   * Reject everything outstanding and stop accepting new requests (transport
+   * close or buffered-response flood). Idempotent: later floods and the
+   * shutdown path are no-ops once everything has settled. Buffered orphans
+   * are NOT part of the teardown: the flood path drops them explicitly (the
+   * close path keeps historic buffer semantics; a dead transport accepts
+   * no new requests anyway).
+   */
+  #failAllPending(reason: Error): void {
+    this.#transportClosed = true;
+    for (const [id, pending] of this.#pending) {
+      this.#pending.delete(id);
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.reject?.(reason);
     }
   }
 
   private async _sendRequest(method: string, params: unknown): Promise<unknown> {
     if (this.#cancelled) {
       throw new McpError("Client is cancelled");
+    }
+    if (this.#transportClosed) {
+      // The server process is already gone: fail now, not at timeout.
+      throw new McpError("MCP transport closed");
     }
 
     const id = ++this.#idCounter;
@@ -202,7 +289,7 @@ export class McpClient {
       pending.timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(new McpError("Timeout waiting for response"));
-      }, 30000);
+      }, this.#requestTimeoutMs);
     });
 
     this.#pending.delete(id);
@@ -274,8 +361,11 @@ export class McpClient {
       if (pending.timer) clearTimeout(pending.timer);
       if (pending.reject) pending.reject(new McpError("Cancelled"));
     }
+    this.#buffered = [];
     this.#messageCleanup?.();
     this.#messageCleanup = null;
+    this.#closeCleanup?.();
+    this.#closeCleanup = null;
     await this.#transport.destroy();
   }
 }

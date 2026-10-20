@@ -17,18 +17,18 @@ interface McpServerConfig {
   blacklistTools?: string[];
 }
 
-/** Fallback when config is absent or malformed (the schema default is 30). */
-const DEFAULT_HTTP_TIMEOUT_SECS = 30;
+/** Fallback when config is absent or malformed (both schema defaults are 30). */
+const DEFAULT_TIMEOUT_SECS = 30;
 
 /**
- * Sanitize the config-supplied timeout: a missing or non-positive value
+ * Sanitize a config-supplied timeout: a missing or non-positive value
  * must mean "use the default", never "no timeout" (an unbounded timeout is
- * exactly the hang this setting exists to prevent).
+ * exactly the hang these settings exist to prevent).
  */
-function resolveHttpTimeoutSecs(value: unknown): number {
+function resolveTimeoutSecs(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
-    : DEFAULT_HTTP_TIMEOUT_SECS;
+    : DEFAULT_TIMEOUT_SECS;
 }
 
 /** @param options - Loader options; `Connection` overrides the McpConnection class (test seam). */
@@ -42,8 +42,12 @@ export function create(core: CoreContext, options: { Connection?: typeof McpConn
     return null;
   }
 
-  const clientConfig = getExtensionConfig<{ httpTimeoutSecs?: number }>(core, "mcpClient");
-  const httpTimeoutMs = Math.round(resolveHttpTimeoutSecs(clientConfig.httpTimeoutSecs) * 1000);
+  const clientConfig = getExtensionConfig<{ httpTimeoutSecs?: number; requestTimeoutSecs?: number }>(core, "mcpClient");
+  const httpTimeoutMs = Math.round(resolveTimeoutSecs(clientConfig.httpTimeoutSecs) * 1000);
+  // Stdio request-response timeout (config: mcpClient.requestTimeoutSecs).
+  // A wedged stdio server must fail the tool call, not pin it for 30s per
+  // request with no way to tune it.
+  const requestTimeoutMs = Math.round(resolveTimeoutSecs(clientConfig.requestTimeoutSecs) * 1000);
   const envScrubExtra = envScrubExtraKeys(core.config);
   const envScrubbing = core.resolved?.envScrubbing !== false;
 
@@ -54,7 +58,7 @@ export function create(core: CoreContext, options: { Connection?: typeof McpConn
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         for (const server of enabledServers) {
           try {
-            const conn = await _connectServer(server, Connection, httpTimeoutMs, envScrubExtra, envScrubbing);
+            const conn = await _connectServer(server, Connection, httpTimeoutMs, requestTimeoutMs, envScrubExtra, envScrubbing);
             if (!conn) continue;
             connections.push(conn);
 
@@ -93,6 +97,7 @@ async function _connectServer(
   server: McpServerConfig,
   Connection: typeof McpConnection,
   httpTimeoutMs: number,
+  requestTimeoutMs: number,
   envScrubExtra?: readonly string[],
   envScrubbing: boolean = true,
 ): Promise<McpConnection | null> {
@@ -100,7 +105,7 @@ async function _connectServer(
     if (server.url) {
       return await Connection.connectHttp(server.name, server.url, server.headers || {}, httpTimeoutMs);
     } else if (server.command) {
-      return await Connection.connectStdio(server.name, server.command, server.args || [], server.env || {}, envScrubExtra, envScrubbing);
+      return await Connection.connectStdio(server.name, server.command, server.args || [], server.env || {}, envScrubExtra, envScrubbing, requestTimeoutMs);
     }
     return null;
   } catch (e: unknown) {

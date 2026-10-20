@@ -35,6 +35,13 @@ export interface McpTransport {
   sendNotification(serialized: string): void;
 
   /**
+   * True once the transport is known dead (stdio child exited, or destroy()
+   * ran). Optional: transports without a death signal rely on onClose alone.
+   * Covers the race where the server dies before the client subscribes.
+   */
+  readonly exited?: boolean;
+
+  /**
    * Set the negotiated MCP protocol version after a successful initialize.
    * HTTP transports must send it as the MCP-Protocol-Version header on all
    * subsequent requests (transports spec, 2025-06-18+); no-op elsewhere.
@@ -63,6 +70,7 @@ export class StdioTransport implements McpTransport {
   #stderrOutput: string = "";
   #stderrTruncated: boolean = false;
   #destroyed: boolean = false;
+  #closeNotified: boolean = false;
 
   constructor(command: string, args: string[] = [], env: Record<string, string> = {}, extraScrubKeys?: readonly string[], envScrubbing: boolean = true) {
     this.#command = command;
@@ -88,8 +96,22 @@ export class StdioTransport implements McpTransport {
       }
     });
 
+    // Unexpected death -> close handlers fire too. "close" (not "exit"): it
+    // lands after stdout EOF, so a response the server wrote before dying
+    // is still delivered -- rejecting on exit would race the last flush.
+    this.#child.on("close", () => this.#notifyClose());
+
     this.#startReader();
     this.#startStderrReader();
+  }
+
+  /** Fire close handlers exactly once (natural death or destroy()). */
+  #notifyClose(): void {
+    if (this.#closeNotified) return;
+    this.#closeNotified = true;
+    for (const handler of this.#closeHandlers) {
+      try { handler(); } catch { /* ignore */ }
+    }
   }
 
   /** @internal Exposed for testing. */
@@ -109,6 +131,13 @@ export class StdioTransport implements McpTransport {
 
   /** @internal Exposed for testing. */
   get child(): ChildProcess { return this.#child; }
+
+  /**
+   * True once the child is gone (streams closed). Lets a client constructed
+   * after an instant crash see the death its subscription missed.
+   * @internal
+   */
+  get exited(): boolean { return this.#closeNotified; }
 
   async send(serialized: string): Promise<undefined> {
     if (this.#destroyed) {
@@ -147,9 +176,7 @@ export class StdioTransport implements McpTransport {
     if (this.#destroyed) return;
     this.#destroyed = true;
 
-    for (const handler of this.#closeHandlers) {
-      try { handler(); } catch { /* ignore */ }
-    }
+    this.#notifyClose();
 
     // Group kill on POSIX: workers spawned by the MCP server die with it.
     // Falls back to the direct child on Windows (no process groups).

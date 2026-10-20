@@ -3,7 +3,12 @@
 // disabled-config error path, the size cap, and the auth gate.
 
 import { describe, it, expect, afterEach, afterAll, beforeEach } from "bun:test";
-import { createWsServer } from "@extensions/websocket/server.ts";
+import {
+  createWsServer,
+  WS_MAX_PAYLOAD_BYTES,
+  MAX_TRANSCRIBE_AUDIO_BYTES,
+  MAX_TRANSCRIBE_BASE64_CHARS,
+} from "@extensions/websocket/server.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs } from "../mocks/websocket.ts";
 
@@ -122,8 +127,10 @@ describe("websocket transcribe", () => {
   it("rejects oversized audio before touching the backend", async () => {
     const ws = await connect({ sttUrl: sttUrl() });
 
-    // 25MB raw audio cap -> base64 is ~4/3 of that; overshoot it.
-    const oversized = "x".repeat(Math.ceil((25 * 1024 * 1024) / 3) * 4 + 4);
+    // The cap is now derived from the WS frame bound (10 MiB audio ->
+    // 4*ceil(10MiB/3) base64 chars = the frame bound minus its 1 MiB
+    // envelope). Overshoot the base64 cap by a char group.
+    const oversized = "x".repeat(MAX_TRANSCRIBE_BASE64_CHARS + 4);
     wsServer!.onMessage(
       ws,
       JSON.stringify({ type: C2S.TRANSCRIBE, id: "req-3", mimeType: "audio/webm", data: oversized }),
@@ -132,7 +139,17 @@ describe("websocket transcribe", () => {
     const reply = await waitForMessage(ws, S2C.TRANSCRIPT);
     expect(reply.ok).toBe(false);
     expect(reply.error).toContain("too large");
+    expect(reply.error).toContain("limit 10MB");
     expect(captured).toBeNull();
+  });
+
+  it("the transcribe cap is aligned under the transport frame bound (app message beats socket close)", () => {
+    // If the base64 cap ever drifts above (frame bound - envelope), large
+    // recordings die at the transport again instead of answering "audio too
+    // large" -- the exact failure this alignment fixed. Same 1 MiB envelope
+    // headroom the 10 MB image upload enjoys.
+    expect(MAX_TRANSCRIBE_BASE64_CHARS).toBe(WS_MAX_PAYLOAD_BYTES - 1024 * 1024);
+    expect(MAX_TRANSCRIBE_AUDIO_BYTES).toBe(10 * 1024 * 1024);
   });
 
   it("replies ok:false when the backend fails", async () => {

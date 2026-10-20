@@ -18,6 +18,7 @@ import {
   indexToolResult,
   indexResumeAttempt,
   indexSessionProfile,
+  indexSessionModel,
 } from "@core/session/session-index.ts";
 
 interface SessionLogMessage {
@@ -591,6 +592,36 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         });
         await queuedAppend(logPath, JSON.stringify(entry) + "\n");
         await safeIndex("profile_switch", () => indexSessionProfile(sessionId, toProfile));
+      },
+
+      /**
+       * Model switch (model setter: /model, the webui selector, or the model
+       * change implied by a profile switch). Without this record the model
+       * timeline lives only in the index, so an index loss would silently
+       * revert a switched session to its session_start model on the next
+       * rebuild. Never replayed as a message.
+       */
+      [HOOKS.MODEL_CHANGE]: async ({
+        agent,
+        newModel,
+      }: {
+        agent: { sessionId?: string };
+        newModel?: string;
+      }) => {
+        if (!newModel) return;
+        const sessionId = agent.sessionId || "unknown";
+        const logPath = resolveLogPath(sessionId);
+        if (!logPath) return;
+        const entry = stripNulls({
+          ts: new Date().toISOString(),
+          session_id: sessionId,
+          source: LOG_SOURCE.MODEL_CHANGE,
+          v: LOG_VERSION,
+          content: "",
+          model: newModel,
+        });
+        await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+        await safeIndex("model_change", () => indexSessionModel(sessionId, newModel));
       },
 
       [HOOKS.OUTPUT_EVENT]: async ({ type, data, agent }) => {

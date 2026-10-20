@@ -303,5 +303,18 @@ export function create(core: CoreContext): ExtensionInstance {
     }
   };
 
-  return { hooks: { [HOOKS.TOOL_CALL]: handler } };
+  return {
+    hooks: {
+      [HOOKS.TOOL_CALL]: handler,
+      // A dead session must not keep its grants alive forever: in a 24/7
+      // host (webui/ws) sessionGrants would grow with every session that
+      // ever said "allow for session". Fires on session delete and on task
+      // agent teardown (same reclaim hook file-watch/loop-detect use); the
+      // grants are in-memory-only anyway, so dropping them only forgets
+      // what could never be honoured again.
+      [HOOKS.SESSION_END]: ({ sessionId }: { sessionId: string }) => {
+        sessionGrants.delete(sessionId);
+      },
+    },
+  };
 }

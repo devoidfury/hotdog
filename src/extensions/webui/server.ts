@@ -1,7 +1,6 @@
-import { createWsServer, type CreateWsServerOptions } from "../websocket/server.ts";
+import { createWsServer, WS_MAX_PAYLOAD_BYTES, type CreateWsServerOptions } from "../websocket/server.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { upgradeOriginAllowed, LOOPBACK_HOSTS } from "../websocket/origin.ts";
-import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import { logger } from "@utils/logger.ts";
 import { CoreContext } from "@core/extensions/types.ts";
 
@@ -17,13 +16,11 @@ interface WebuiWsData {
   url: string;
 }
 
-// Transport frame cap aligned with the app-level caps: the biggest legitimate
-// frame is a webui upload -- one 10 MB image (core-tools/defaults.ts) riding
-// base64 on a C2S send (~4/3 expansion) plus its JSON envelope. Bigger frames
-// die at the socket before JSON parse + base64 decode; the value stays under
-// Bun's 16 MiB default, so it's a genuine tightening. Derived from the image
-// cap so the two cannot drift.
-const WS_MAX_PAYLOAD_BYTES = 4 * Math.ceil(DEFAULT_MAX_IMAGE_SIZE / 3) + 1024 * 1024;
+// Transport frame cap for upgraded sockets: WS_MAX_PAYLOAD_BYTES is derived
+// in the websocket extension (single source: it must stay aligned with the
+// app-level caps -- see there). The bound is applied below on the
+// `websocket:` handler because Bun's root-level maxPayloadLength is ignored
+// in 1.4.2.
 
 export interface WebuiConfig {
   port?: number;

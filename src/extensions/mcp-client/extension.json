@@ -11,6 +11,11 @@
           "type": "number",
           "default": 30,
           "description": "Timeout in seconds for MCP HTTP requests (connect, headers, and body). Prevents a wedged HTTP server from hanging a tool call indefinitely."
+        },
+        "requestTimeoutSecs": {
+          "type": "number",
+          "default": 30,
+          "description": "Timeout in seconds for a stdio MCP server to answer one request. Prevents a wedged stdio server from hanging a tool call indefinitely. Invalid or missing values fall back to the default (never \"no timeout\")."
         }
       },
       "additionalProperties": false,

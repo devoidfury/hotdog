@@ -35,6 +35,29 @@ export const TASK_STATUS = {
 
 export type TaskStatus = (typeof TASK_STATUS)[keyof typeof TASK_STATUS];
 
+function isTerminalStatus(status: TaskStatus): boolean {
+  return (
+    status === TASK_STATUS.COMPLETED ||
+    status === TASK_STATUS.FAILED ||
+    status === TASK_STATUS.CANCELLED
+  );
+}
+
+/**
+ * Hard bound on terminal (completed/failed/cancelled) records kept in the
+ * registry. Without it a long-lived daemon's #tasks grows with every task
+ * ever run: terminal entries are otherwise removed by nobody (only the
+ * spawn-plan-failure path deletes), and several lookups are full scans.
+ * Policy: on every terminal transition, keep the most recent
+ * MAX_TERMINAL_TASKS terminal records -- most recently ENDED first,
+ * insertion order breaking same-clock ties -- and evict the rest.
+ * QUEUED/RUNNING entries are never touched. An evicted id reads exactly
+ * like a post-restart id: taskStatus null, follow-up refused -- and the
+ * bound is generous enough that listTasks() replay on attach still covers
+ * a full day of ordinary daemon activity.
+ */
+export const MAX_TERMINAL_TASKS = 200;
+
 /** Display-oriented snapshot of one task (webui subagents panel, diagnostics). */
 export interface TaskInfo {
   taskId: string;
@@ -410,6 +433,8 @@ export class TaskManager {
   // Terminal tasks keep a slim record (no agent) so a long-lived manager --
   // the webui TaskManager outlives every session -- does not pin each dead
   // task's full Agent/context forever. See #finalizeTurn for the release point.
+  // The slim records are themselves bounded: only the most recent
+  // MAX_TERMINAL_TASKS terminal entries survive (see #evictTerminalTasks).
   #tasks: Map<string, TaskEntry>;
   #profileManager: ProfileManager | undefined;
   /** External observer (websocket/webui relay); null = task agents stay silent. */
@@ -561,11 +586,7 @@ export class TaskManager {
     const now = Date.now();
     if (status === TASK_STATUS.RUNNING) {
       if (entry.startedAt === null) entry.startedAt = now;
-    } else if (
-      status === TASK_STATUS.COMPLETED ||
-      status === TASK_STATUS.FAILED ||
-      status === TASK_STATUS.CANCELLED
-    ) {
+    } else if (isTerminalStatus(status)) {
       entry.endedAt = now;
       // A terminal transition can cut across an in-flight turn (synthesized
       // cancels, release races): bank the partial turn so the terminal
@@ -578,6 +599,44 @@ export class TaskManager {
       }
     }
     this.#notify({ kind: "task", task: this.#infoOf(entry) });
+    // One status write point = one sweep point: every terminal transition
+    // (natural finish, queued cancel, parked cancel) passes through here,
+    // so the terminal-record bound holds at all times.
+    if (isTerminalStatus(status)) this.#evictTerminalTasks();
+  }
+
+  /**
+   * Enforce MAX_TERMINAL_TASKS: drop the terminal records that ended
+   * earliest (insertion order breaks same-clock ties, so a completion
+   * flood still evicts oldest-spawned-first). Sorting by endedAt keeps a
+   * long-running task's record after its late finish -- "most recent"
+   * means most recently ENDED, which is what follow-ups/status queries on
+   * finished work actually target. The entry that just turned terminal has
+   * the freshest endedAt, so it is evicted by its own sweep only on an exact
+   * same-clock tie -- and an evicted id reads like a post-restart id, so the
+   * worst case is a just-finished task aging out a few ms early.
+   */
+  #evictTerminalTasks(): void {
+    let terminal = 0;
+    for (const entry of this.#tasks.values()) {
+      if (isTerminalStatus(entry.statusRef.value)) terminal++;
+    }
+    if (terminal <= MAX_TERMINAL_TASKS) return;
+    const victims: Array<{ id: string; endedAt: number; order: number }> = [];
+    let order = 0;
+    for (const [id, entry] of this.#tasks) {
+      if (isTerminalStatus(entry.statusRef.value)) {
+        victims.push({ id, endedAt: entry.endedAt ?? 0, order: order++ });
+      } else {
+        order++;
+      }
+    }
+    victims.sort((a, b) => a.endedAt - b.endedAt || a.order - b.order);
+    for (const victim of victims) {
+      if (terminal <= MAX_TERMINAL_TASKS) break;
+      this.#tasks.delete(victim.id);
+      terminal--;
+    }
   }
 
   /** Snapshot of every task the registry still holds (terminal ones included). */
@@ -686,6 +745,12 @@ export class TaskManager {
     ) {
       throw new Error(`[task ${taskId}] task id already in use (task is ${existing.statusRef.value})`);
     }
+    // A reused terminal id must sit at the recency END: Map.set keeps an
+    // existing key's insertion position, and that position is the
+    // same-endedAt tiebreak in the terminal-record sweep. Without the
+    // delete-then-set, a respawn on an old id would inherit the old
+    // record's spot and lose a flood tie against younger records.
+    if (existing) this.#tasks.delete(taskId);
     // Synchronous id reservation. Everything between the collision check and
     // the entry being startable awaits (profile load, resolver peek up to 2 s);
     // an await is exactly where a second same-id spawnTask slips in: without a

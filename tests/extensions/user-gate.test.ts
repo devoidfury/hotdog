@@ -496,6 +496,47 @@ describe("session grants are keyed by session (no cross-session silencing)", () 
     expect(asked).toBe(2);
   });
 
+  it("grants are pruned when the session ends (no unbounded Map in a 24/7 host)", async () => {
+    // The grants Map is keyed by sessionId and lives for the process. On a
+    // webui/ws host that outlives every session, a finished session's Set
+    // must be reclaimed at SESSION_END -- and only that session's grants.
+    const hooks = new HookSystem();
+    const core = { hooks, config: { userGate: { enabled: true } } } as unknown as CoreContext;
+    const instance = create(core);
+    for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
+      hooks.on(name, handler as never, "user-gate");
+    }
+    let asked = 0;
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: () => {
+        asked++;
+        return { approve: "allow for session" };
+      },
+    };
+    const runAs = (sessionId: string) =>
+      hooks.runHookPipeline<GateAction, "tool:call">(
+        HOOKS.TOOL_CALL,
+        payload({ inputOverride: input, agent: { sessionId } } as never),
+        { failOnError: true },
+      );
+
+    await runAs("A"); // prompts (1): grant recorded for A
+    await runAs("A"); // silent (memo)
+    await runAs("B"); // prompts (2): grant recorded for B
+    await runAs("B"); // silent (memo)
+    expect(asked).toBe(2);
+
+    await hooks.notifyHooks(HOOKS.SESSION_END, { sessionId: "A" });
+
+    // A is a dead session: no grants left, a session named A prompts again.
+    await runAs("A");
+    expect(asked).toBe(3);
+    // ...and B's own grant survived A's teardown (prune is keyed, not global).
+    await runAs("B");
+    expect(asked).toBe(3);
+  });
+
   it('an "allow for session" with no session id degrades to "allow once"', async () => {
     // No key to remember by -> no memo. The gate fails toward prompting.
     const hooks = new HookSystem();

@@ -31,7 +31,7 @@
 // with no consumer would just drift.
 
 import { Database } from "bun:sqlite";
-import { mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { logger } from "@utils/logger.ts";
@@ -44,6 +44,7 @@ import {
   readSessionEntries,
   sessionPath,
   sessionsDir,
+  type LogEntry,
 } from "./session-log.ts";
 
 export const SESSION_STATE = {
@@ -109,6 +110,56 @@ export function sessionIndexPath(): string {
   return join(sessionsDir(), "sessions.sqlite");
 }
 
+/** Open + prepare one index file. Any throw (corrupt header, WAL failure,
+ *  schema refusal) closes the handle before propagating, so a quarantined
+ *  file never stays pinned by a half-open connection. */
+function openPrepared(path: string): Database {
+  const next = new Database(path, { create: true });
+  try {
+    next.exec("PRAGMA journal_mode = WAL;");
+    next.exec("PRAGMA synchronous = FULL;");
+    // Multiple hotdog processes share the index (webui + one-shot + CLI).
+    next.exec("PRAGMA busy_timeout = 5000;");
+    next.exec(SCHEMA);
+  } catch (err) {
+    try { next.close(); } catch {}
+    throw err;
+  }
+  return next;
+}
+
+/**
+ * Rename a corrupt index (and its WAL sidecars, whose stale frames must not
+ * meet a fresh main db) aside for postmortem -- NEVER delete: the corrupt
+ * bytes are the evidence, and the rebuild costs only a log re-scan. Returns
+ * the renamed main-file path, or null when there was no file to move.
+ */
+function quarantineIndexFiles(path: string): string | null {
+  let aside: string | null = null;
+  let stamp = Date.now();
+  // renameSync silently replaces an existing destination; "never delete"
+  // means stepping forward until the quarantine name is free.
+  while (existsSync(`${path}.corrupt-${stamp}`)) stamp++;
+  const base = `${path}.corrupt-${stamp}`;
+  for (const suffix of ["", "-wal", "-shm"]) {
+    const src = path + suffix;
+    try {
+      statSync(src);
+    } catch {
+      continue; // sidecar absent (or already gone): nothing to move
+    }
+    try {
+      renameSync(src, base + suffix);
+      if (suffix === "") aside = base + suffix;
+    } catch (err) {
+      logger.error(
+        `[session-index] could not quarantine ${src}: ${formatError(err)} -- leaving it in place`,
+      );
+    }
+  }
+  return aside;
+}
+
 export function openSessionIndex(): Database {
   const path = sessionIndexPath();
   if (db && dbFile === path) return db;
@@ -117,12 +168,27 @@ export function openSessionIndex(): Database {
     try { db.close(); } catch {}
   }
   mkdirSync(sessionsDir(), { recursive: true });
-  const next = new Database(path, { create: true });
-  next.exec("PRAGMA journal_mode = WAL;");
-  next.exec("PRAGMA synchronous = FULL;");
-  // Multiple hotdog processes share the index (webui + one-shot + CLI).
-  next.exec("PRAGMA busy_timeout = 5000;");
-  next.exec(SCHEMA);
+  let next: Database;
+  try {
+    next = openPrepared(path);
+  } catch (err) {
+    // Corrupt index: quarantine aside and rebuild empty. The logs are the
+    // system of record, so this only costs re-reads -- reconcile (boot, or
+    // the row-missing sync in atCommitPoint) repopulates every row. Without
+    // this the throw rethrows forever and the process runs de-indexed for
+    // its whole life (boot reconcile catches once; every later open fails).
+    const quarantined = quarantineIndexFiles(path);
+    logger.error(
+      `[session-index] index at ${path} failed to open (${formatError(err)}); ` +
+        (quarantined
+          ? `quarantined the corrupt file to ${quarantined}`
+          : "no index file was in the way") +
+        " -- rebuilding an empty index from the session logs",
+    );
+    // A second failure is environmental (disk/permissions), not index
+    // corruption: propagate honestly instead of looping.
+    next = openPrepared(path);
+  }
   db = next;
   dbFile = path;
   return db;
@@ -181,6 +247,35 @@ function deriveTitle(entries: Array<{ source: string; content: unknown }>): stri
 }
 
 /**
+ * Model/profile fidelity for rebuilds: the session's model/profile columns
+ * are re-derived from the log's own header/switch records, so a rebuilt
+ * index restores what the session ran on instead of silently defaulting.
+ * Attested records: session_start (initial model + profile), model_change
+ * (runtime model switch), profile_switch (runtime profile switch; last
+ * wins, matching replay's profile rule). Null means the log attests nothing
+ * -- the column stays absent and resume must warn, not default quietly.
+ */
+export function deriveModelProfileFromLog(
+  entries: LogEntry[],
+): { model: string | null; profile: string | null } {
+  let model: string | null = null;
+  let profile: string | null = null;
+  for (const e of entries) {
+    const m = e.model;
+    const p = e.profile;
+    if (e.source === LOG_SOURCE.SESSION_START) {
+      if (typeof m === "string" && m) model = m;
+      if (typeof p === "string" && p) profile = p;
+    } else if (e.source === LOG_SOURCE.MODEL_CHANGE) {
+      if (typeof m === "string" && m) model = m;
+    } else if (e.source === LOG_SOURCE.PROFILE_SWITCH) {
+      if (typeof p === "string" && p) profile = p;
+    }
+  }
+  return { model, profile };
+}
+
+/**
  * Rebuild one session's row (and its open_calls mirror) from a full log read.
  * This is the adopt/reindex/repair path; returns null when the log file does
  * not exist. Position fields (size/mtime/updated_at) come from a stat taken
@@ -206,12 +301,21 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
     consecutiveAutoResumes: lifetime.consecutiveAutoResumes,
   });
   const title = deriveTitle(entries);
+  // Model/profile fidelity invariant: a rebuild restores the model/profile
+  // the log itself attests (session_start / model_change / profile_switch).
+  // A rebuilt index must never resume a session on the boot-default model
+  // when the log says otherwise. The log cannot re-attest a live mirror, so
+  // on conflict the row's existing value wins (COALESCE(sessions.x, ...)):
+  // the mirror came from the writer's live agent and may be newer than the
+  // log's attestation (legacy logs predate model_change records); the
+  // derived value only ever fills an absent column.
+  const derived = deriveModelProfileFromLog(full);
 
   const d = openSessionIndex();
   const write = d.transaction(() => {
     d.run(
-      `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title, profile, model)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_id) DO UPDATE SET
          path = excluded.path,
          updated_at = excluded.updated_at,
@@ -220,7 +324,9 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
          size = excluded.size,
          mtime = excluded.mtime,
          resume_count = excluded.resume_count,
-         title = COALESCE(excluded.title, sessions.title)`,
+         title = COALESCE(excluded.title, sessions.title),
+         profile = COALESCE(sessions.profile, excluded.profile),
+         model = COALESCE(sessions.model, excluded.model)`,
       [
         sessionId,
         path,
@@ -231,6 +337,8 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
         st.mtimeMs,
         lifetime.resumeAttempts,
         title,
+        derived.profile,
+        derived.model,
       ],
     );
     d.run("DELETE FROM open_calls WHERE session_id = ?", [sessionId]);

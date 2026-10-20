@@ -1187,11 +1187,13 @@ Notes on `pass-the-baton`:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `httpTimeoutSecs` | `number` | `30` | Timeout in seconds for MCP HTTP requests (connect, headers, and body). Prevents a wedged HTTP server from hanging a tool call indefinitely. Invalid or missing values fall back to the default (never "no timeout"). |
+| `requestTimeoutSecs` | `number` | `30` | Timeout in seconds for a stdio MCP server to answer one request. Prevents a wedged stdio server from hanging a tool call indefinitely. Invalid or missing values fall back to the default (never "no timeout"). |
 
 ```json
 {
   "mcpClient": {
-    "httpTimeoutSecs": 60
+    "httpTimeoutSecs": 60,
+    "requestTimeoutSecs": 120
   }
 }
 ```

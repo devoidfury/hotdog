@@ -37,6 +37,7 @@ import {
   type PendingQuestion,
 } from "@core/session/session-log.ts";
 import { Message } from "@core/context/message.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { formatToolResult } from "@core/extensions/tool-utils.ts";
 import { safeCallDisplay, type ToolRegistry } from "@core/extensions/tool-registry.ts";
 import type { QuestionDef } from "@core/context/input.ts";
@@ -177,11 +178,32 @@ const DRAIN_SETTLE_MS = 2_000;
 // Cap for client-supplied completion input; nothing legit needs more.
 const MAX_COMPLETE_LINE = 10_000;
 
-// Ceiling on one transcribe upload, mirroring OpenAI's whisper 25MB limit.
-// Checked against the base64 string length (inflates ~4/3) before decoding,
-// so an oversized blob never costs a decode.
-const MAX_TRANSCRIBE_AUDIO_BYTES = 25 * 1024 * 1024;
-const MAX_TRANSCRIBE_BASE64_CHARS = Math.ceil(MAX_TRANSCRIBE_AUDIO_BYTES / 3) * 4;
+/**
+ * Transport frame bound for upgraded sockets -- enforced on the `websocket:`
+ * handler of the host's Bun.serve (see webui/server.ts, which applies it;
+ * Bun quirk: a root-level maxPayloadLength is ignored in 1.4.2). The biggest
+ * legitimate frame is a webui upload: one 10 MB image (core-tools/defaults)
+ * riding base64 on a C2S send (~4/3 expansion) plus its JSON envelope. The
+ * value sits just above that so the app-level parsers stay the last line of
+ * defense, and stays under Bun's 16 MiB default (a genuine tightening).
+ * Exported so app-level upload caps stay derived from it (no drift).
+ */
+export const WS_MAX_PAYLOAD_BYTES = 4 * Math.ceil(DEFAULT_MAX_IMAGE_SIZE / 3) + 1024 * 1024;
+
+// Ceiling on one transcribe upload. It USED to mirror OpenAI's whisper 25MB
+// limit -- unreachable: audio rides the same WS frames as image uploads, and
+// a 25 MB blob base64's past WS_MAX_PAYLOAD_BYTES, so the socket closed at
+// the transport instead of answering with the app-level "audio too large".
+// Now derived from the frame bound: 10 MiB audio base64's to exactly the
+// frame bound minus its 1 MiB envelope headroom (same shape as an image
+// upload), so any recording the transport can carry at all gets the explicit
+// app-level rejection; a recording so large its FRAME exceeds the bound dies
+// at the socket like any oversized frame (chunked uploads are out of scope).
+// Checked against the base64 string length before decoding, so an oversized
+// blob never costs a decode.
+export const MAX_TRANSCRIBE_AUDIO_BYTES = 10 * 1024 * 1024;
+/** @internal Exposed for testing (bound-alignment pin against the frame cap). */
+export const MAX_TRANSCRIBE_BASE64_CHARS = Math.ceil(MAX_TRANSCRIBE_AUDIO_BYTES / 3) * 4;
 
 export class SessionRegistry {
   #sessionManager: SessionManager;
@@ -766,6 +788,22 @@ export async function adoptSessionLog(
       ...(row?.profile ? { profile: row.profile } : {}),
       sessionId,
     });
+    // Model fidelity, loud half: with no log-attested model (legacy log or a
+    // rebuild from one), the session resumes on the host default -- that is
+    // a model swap the user must never discover from a transcript that
+    // "looks fine", so it is announced, not assumed.
+    if (!row?.model) {
+      const why =
+        `Resuming ${sessionId} with no model attested in the session log ` +
+        "(legacy log or an index rebuilt from one): continuing on the host default model. " +
+        "Set the model explicitly (/model or the selector) if that is wrong.";
+      logger.error(`[session-index] ${why}`);
+      // Chat-visible too, best effort: the sink relays to whoever is attached.
+      agent.sink?.emit({
+        type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+        content: why,
+      });
+    }
     // The agent adopted the id (registry.create hands it through), so this
     // replays the log into the same log and writes the resume_attempt record.
     // Real agents always carry the restore surface; AgentLike is looser.

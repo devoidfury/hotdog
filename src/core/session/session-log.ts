@@ -47,6 +47,14 @@ export const LOG_SOURCE = {
   SESSION_START: "session_start",
   /** Runtime profile switch (via /profile). Records from/to. Never replayed. */
   PROFILE_SWITCH: "profile_switch",
+  /**
+   * Runtime model switch (the model setter: /model, the webui selector, or
+   * the model change implied by a profile switch). The session index mirrors
+   * the model column, so without this record a rebuild could only attest the
+   * session_start model and a mid-session switch would silently revert on
+   * resume. Never replayed.
+   */
+  MODEL_CHANGE: "model_change",
   /** Token usage snapshot after each LLM response. Replayed as an output event, not a message. */
   TOKEN_USAGE: "token_usage",
   /**
@@ -684,6 +692,8 @@ export function replayEntriesIntoContext(
       case LOG_SOURCE.QUESTION_ASKED:
       case LOG_SOURCE.RESUME_ATTEMPT:
       case LOG_SOURCE.SESSION_START:
+      case LOG_SOURCE.PROFILE_SWITCH:
+      case LOG_SOURCE.MODEL_CHANGE:
       case LOG_SOURCE.TURN_STARTED:
       case LOG_SOURCE.TURN_END:
         break;

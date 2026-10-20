@@ -4,7 +4,7 @@ import { describe, it, expect } from "bun:test";
 import { readdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { TaskManager, TaskHandle, TASK_STATUS } from "@core/session/task-manager.ts";
+import { TaskManager, TaskHandle, TASK_STATUS, MAX_TERMINAL_TASKS } from "@core/session/task-manager.ts";
 import { makeProviderHealth } from "@core/session/provider-health.ts";
 import { contentToText } from "@core/context/message.ts";
 import { createHooks } from "@core/hooks.ts";
@@ -2889,5 +2889,87 @@ describe("accumulated active-turn time (TaskInfo.activeMs)", () => {
     expect(last.activeMs).toBeGreaterThanOrEqual(20); // the partial turn was banked
     await sleep(30);
     expect(infoOf(manager, "t1").activeMs).toBe(last.activeMs); // stays frozen
+  });
+});
+
+describe("terminal-record eviction (improvement #6)", () => {
+  const doneAgent = () =>
+    ({ run: async () => ({ type: "completion", content: "done" }), notifyCompletion: () => {} }) as any;
+
+  function managerWith(buildAgent: () => any) {
+    return new TaskManager({
+      buildAgent: async () => buildAgent(),
+      modelRegistry: {} as any,
+      config: {} as any,
+      maxIterations: 100,
+      taskProfile: "default",
+    });
+  }
+
+  it("bounds the registry: terminal records stop at MAX_TERMINAL_TASKS, oldest-ended evicted first", async () => {
+    const manager = managerWith(doneAgent);
+    for (let i = 0; i < MAX_TERMINAL_TASKS + 5; i++) {
+      const h = await manager.spawnTask(`t-${i}`, `job ${i}`);
+      await h.done;
+    }
+    expect(manager._test_tasks.size).toBe(MAX_TERMINAL_TASKS);
+    // The oldest-ended records are gone; the most recent finishers stay
+    // queryable (panel replay, status polls).
+    expect(manager.taskStatus("t-0")).toBeNull();
+    expect(manager.taskStatus(`t-${MAX_TERMINAL_TASKS + 4}`)).toBe(TASK_STATUS.COMPLETED);
+    expect(manager.sendFollowUp("t-0", "still there?")).toBe(false);
+  });
+
+  it("never evicts queued/running entries, and a long runner keeps its record after a flood", async () => {
+    // First built agent hangs until released; all later agents finish at once.
+    let release!: () => void;
+    let builds = 0;
+    const manager = managerWith(() => {
+      builds++;
+      if (builds === 1) {
+        return {
+          run: () => new Promise<any>((resolve) => { release = () => resolve({ type: "completion", content: "late" }); }),
+          notifyCompletion: () => {},
+        } as any;
+      }
+      return doneAgent();
+    });
+
+    const long = await manager.spawnTask("t-long", "the long one");
+    await settle(() => manager._test_tasks.get("t-long")!.agent !== null, "agent build");
+
+    // Flood past the bound while the long task runs: eviction is terminal-only.
+    for (let i = 0; i < MAX_TERMINAL_TASKS + 3; i++) {
+      const h = await manager.spawnTask(`t-${i}`, `job ${i}`);
+      await h.done;
+    }
+    expect(manager.taskStatus("t-long")).toBe(TASK_STATUS.RUNNING);
+    expect(manager._test_tasks.size).toBe(MAX_TERMINAL_TASKS + 1);
+
+    // The late finish is the most recently ENDED record: the sweep must keep
+    // it even though it was the first spawn (insertion order says otherwise).
+    release();
+    expect((await long.done).status).toBe(TASK_STATUS.COMPLETED);
+    expect(manager.taskStatus("t-long")).toBe(TASK_STATUS.COMPLETED);
+    expect(manager._test_tasks.size).toBe(MAX_TERMINAL_TASKS);
+  });
+
+  it("a reused terminal id gets a fresh record that survives a same-ms completion flood", async () => {
+    const manager = managerWith(doneAgent);
+    // Fill the registry to exactly the bound.
+    for (let i = 0; i < MAX_TERMINAL_TASKS; i++) {
+      const h = await manager.spawnTask(`r-${i}`, `job ${i}`);
+      await h.done;
+    }
+    // Reuse the id of an old (would-be-first-victim) record and complete it.
+    const reused = await manager.spawnTask("r-0", "second life");
+    await reused.done;
+    // One more completion tips the sweep: r-0 is freshest (ended last), so
+    // it stays even though Map-insertion would put it at the old spot.
+    const tip = await manager.spawnTask("r-tip", "tip over");
+    await tip.done;
+    expect(manager.taskStatus("r-0")).toBe(TASK_STATUS.COMPLETED);
+    expect(manager.taskStatus("r-1")).toBeNull(); // oldest ended, gone first
+    expect(manager._test_tasks.size).toBe(MAX_TERMINAL_TASKS);
   });
 });

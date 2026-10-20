@@ -1,6 +1,7 @@
 import { McpClient } from "./client.ts";
 import { McpContentBlock, McpError } from "./types.ts";
 import { DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
+import { DEFAULT_REQUEST_TIMEOUT_MS } from "./client.ts";
 
 /** Shared client handle for use by McpTool instances. */
 export class McpConnectionHandle {
@@ -37,8 +38,9 @@ export class McpConnection {
     env: Record<string, string> = {},
     extraScrubKeys?: readonly string[],
     envScrubbing: boolean = true,
+    requestTimeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
   ): Promise<McpConnection> {
-    const client = await McpClient.forStdio(command, args, env, extraScrubKeys, envScrubbing);
+    const client = await McpClient.forStdio(command, args, env, extraScrubKeys, envScrubbing, requestTimeoutMs);
     const conn = new McpConnection(client, serverName);
     await conn._initialize();
     return conn;

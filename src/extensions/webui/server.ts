@@ -1,4 +1,5 @@
-import { createWsServer, WS_MAX_PAYLOAD_BYTES, type CreateWsServerOptions } from "../websocket/server.ts";
+import { createWsServer, type CreateWsServerOptions } from "../websocket/server.ts";
+import { WS_MAX_PAYLOAD_BYTES } from "../websocket/constants.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { upgradeOriginAllowed, LOOPBACK_HOSTS } from "../websocket/origin.ts";
 import { logger } from "@utils/logger.ts";
@@ -133,8 +134,8 @@ export async function createWebuiServer(
         }
         // No token check at upgrade: the socket opens unauthenticated and
         // the websocket extension gates all non-AUTH traffic until the
-        // first AUTH message validates (onUpgrade/routeMessage in
-        // ../websocket/server.ts).
+        // first AUTH message validates (onUpgrade in ../websocket/server.ts,
+        // routeMessage in ../websocket/message-routing.ts).
         const upgraded = server.upgrade(req, {
           data: { url: req.url } as WebuiWsData,
         });

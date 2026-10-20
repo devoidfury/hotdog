@@ -4,7 +4,7 @@ import { Channel, ChannelSessionManager } from "@core/channel.ts";
 import { OUTPUT_EVENT, OutputEvent, OutputEventType } from "@core/context/output.ts";
 import { toolContentText } from "@utils/tool-content.ts";
 import { S2C, S2CType, wireImages } from "./protocol.ts";
-import type { HotdogServerSocket } from "./server.ts";
+import type { HotdogServerSocket } from "./socket.ts";
 
 // ── OUTPUT_EVENT → S2C mapping ──────────────────────────────────────────────
 

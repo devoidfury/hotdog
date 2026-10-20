@@ -3,12 +3,12 @@
 // disabled-config error path, the size cap, and the auth gate.
 
 import { describe, it, expect, afterEach, afterAll, beforeEach } from "bun:test";
+import { createWsServer } from "@extensions/websocket/server.ts";
 import {
-  createWsServer,
   WS_MAX_PAYLOAD_BYTES,
   MAX_TRANSCRIBE_AUDIO_BYTES,
   MAX_TRANSCRIBE_BASE64_CHARS,
-} from "@extensions/websocket/server.ts";
+} from "@extensions/websocket/constants.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs } from "../mocks/websocket.ts";
 

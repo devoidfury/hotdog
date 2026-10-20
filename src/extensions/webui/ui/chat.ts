@@ -228,7 +228,7 @@ interface AuthErrorMessage {
   type: "authError";
   message: string;
   // Machine-readable discriminator on the server's pre-auth gate rejection
-  // (see routeMessage in ../websocket/server.ts): "auth_required".
+  // (see routeMessage in ../websocket/message-routing.ts): "auth_required".
   code?: string;
 }
 

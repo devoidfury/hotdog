@@ -3,13 +3,10 @@
 // (Merged from websocket-server.test.ts + websocket-server-extended.test.ts.)
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, mock, Mock } from "bun:test";
-import {
-  SessionRegistry,
-  createWsServer,
-  seedResumedQuestions,
-  dismissResumedQuestions,
-  type HotdogServerSocket,
-} from "@extensions/websocket/server.ts";
+import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
+import { createWsServer } from "@extensions/websocket/server.ts";
+import { dismissResumedQuestions, seedResumedQuestions } from "@extensions/websocket/resume.ts";
+import type { HotdogServerSocket } from "@extensions/websocket/socket.ts";
 import { syncSessionFromLog, indexSessionProfile } from "@core/session/session-index.ts";
 import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";

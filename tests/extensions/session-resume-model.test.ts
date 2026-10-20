@@ -15,7 +15,9 @@ import {
   closeSessionIndex,
 } from "@core/session/session-index.ts";
 import { readSessionEntries, LOG_SOURCE, type LogEntry } from "@core/session/session-log.ts";
-import { adoptSessionLog, createWsServer, SessionRegistry } from "@extensions/websocket/server.ts";
+import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
+import { createWsServer } from "@extensions/websocket/server.ts";
+import { adoptSessionLog } from "@extensions/websocket/resume.ts";
 import { S2C } from "@extensions/websocket/protocol.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import { createHooks } from "@core/hooks.ts";

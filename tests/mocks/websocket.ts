@@ -3,7 +3,7 @@
 import { mock } from "bun:test";
 import type { AgentLike } from "@core/session/index.ts";
 import type { HookSystem } from "@core/hooks.ts";
-import type { HotdogServerSocket } from "@extensions/websocket/server.ts";
+import type { HotdogServerSocket } from "@extensions/websocket/socket.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { createCompletionService } from "@core/completion.ts";
 import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";

@@ -40,6 +40,13 @@ export interface CommandDefinition {
   matches?: (cmd: string) => boolean;
   /** The CompletionContext.command will be set to this command's name. */
   completion?: CompletionHandler;
+  /**
+   * True when the command rewrites or branches the session context. The bus
+   * rejects such commands mid-run (in-flight loop would append to the array
+   * being undone, or a snapshot would catch a still-writing agent). The
+   * command declares this itself so core never hard-codes extension names.
+   */
+  mutatesSession?: boolean;
 }
 
 export class AgentCommandRegistry {

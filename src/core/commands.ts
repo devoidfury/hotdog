@@ -26,17 +26,6 @@ export const Command = {
 } as const;
 
 /**
- * Commands that rewrite the session's context (or branch it). Rejected while a run is active:
- * replacing context mid-turn lets the in-flight loop append to the just-undone array, silently corrupting both histories.
- */
-export const SESSION_MUTATING_COMMANDS: ReadonlySet<string> = new Set([
-  Command.Clear,
-  Command.Undo,
-  Command.Rewind,
-  Command.Fork,
-]);
-
-/**
  * Action constants — returned by command handlers to tell the core how to proceed after executing a command.
  *
  *   DISPLAY — show the result content as a command response (default)
@@ -53,7 +42,7 @@ export const ACTIONS = {
 
 export interface CommandRegistryLike {
   match(cmd: string): string | null;
-  get(name: string): { handler?: CommandHandler } | undefined;
+  get(name: string): { handler?: CommandHandler; mutatesSession?: boolean } | undefined;
   names(): string[];
 }
 

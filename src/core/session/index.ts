@@ -279,7 +279,7 @@ export class SessionManager {
       throw new AgentError(`Cannot fork unknown session: ${sourceSessionId}`);
     }
     // UI servers (e.g. the webui ws layer) may call this directly, bypassing the bus's
-    // SESSION_MUTATING_COMMANDS guard; the same invariant applies mid-turn.
+    // mutatesSession guard; the same invariant applies mid-turn.
     if (entry.bus.isRunning) {
       throw new AgentError(
         `Cannot fork ${sourceSessionId} while the session is running.`,

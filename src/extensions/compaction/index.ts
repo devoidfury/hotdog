@@ -700,6 +700,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
         registry.register("compact", {
           description: "Compact context ([n] [--compact-debug]) or switch strategy (<strategy>, compact:<strategy>)",
+          mutatesSession: true,
           matches: (cmd: string) =>
             cmd === "compact" || cmd.startsWith("compact ") || cmd.startsWith("compact:"),
           completion,

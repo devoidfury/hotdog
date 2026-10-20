@@ -3,6 +3,8 @@
 import { describe, it, expect } from "bun:test";
 import { MessageBus } from "@core/session/message-bus.ts";
 import { ACTIONS } from "@core/commands.ts";
+import { CORE_COMMAND_HANDLERS } from "@core/command-handlers.ts";
+import { createCommandRegistry } from "@core/extensions/registries.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { LlmError } from "@core/error.ts";
@@ -782,19 +784,32 @@ describe("MessageBus single run-loop invariant (double-consumer regression)", ()
 });
 
 describe("MessageBus.executeCommand — session-mutating guard", () => {
-  // undo/rewind/fork/clear rewrite or branch the context; mid-run they would
-  // corrupt the in-flight turn, so the bus rejects them before dispatch.
+  // The guard is data-driven: rejection keys off CommandDefinition.mutatesSession
+  // on the registered definition -- the same registry lookup dispatch uses.
+  // Core's four context-rewriting commands carry the flag in CORE_COMMAND_HANDLERS;
+  // these tests build the REAL registry so the flag wiring itself is covered.
+  function coreRegistry() {
+    const registry = createCommandRegistry();
+    for (const [name, def] of Object.entries(CORE_COMMAND_HANDLERS)) {
+      registry.register(name, def);
+    }
+    return registry;
+  }
+
   const mutatingCmds = ["clear", "undo", "rewind 2", "fork 1 hello"];
 
   for (const cmdText of mutatingCmds) {
     it(`rejects /${cmdText.split(" ")[0]} while a run is active`, async () => {
       let dispatched = false;
-      const agent = createMockAgent({
-        executeCommand: async () => {
-          dispatched = true;
-          return null;
-        },
-      });
+      const agent = {
+        ...createMockAgent({
+          executeCommand: async () => {
+            dispatched = true;
+            return null;
+          },
+        }),
+        commandRegistry: coreRegistry(),
+      };
       const sink = createMockSink();
       const bus = new MessageBus({
         sessionManager: createMockSessionManager(() => agent),
@@ -810,6 +825,77 @@ describe("MessageBus.executeCommand — session-mutating guard", () => {
       expect(emitted[0]!.content).toContain("not available while the session is running");
     });
   }
+
+  it("dispatches an unflagged core command while a run is active", async () => {
+    let dispatched = false;
+    const agent = {
+      ...createMockAgent({
+        executeCommand: async () => {
+          dispatched = true;
+          return null;
+        },
+      }),
+      commandRegistry: coreRegistry(),
+    };
+    const bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink: createMockSink(),
+    });
+    bus.isRunning = true;
+
+    await bus.executeCommand("tokens");
+    expect(dispatched).toBe(true);
+  });
+
+  // Registry-inverted guard: core never names extension commands. A custom
+  // command opts in via CommandDefinition.mutatesSession; without the flag it
+  // dispatches even mid-run.
+  function createRegistryAgent(mutatesSession: boolean, onDispatch: () => void) {
+    const registry = {
+      match: (cmd: string) => (cmd === "compact" || cmd.startsWith("compact ") ? "compact" : null),
+      get: (name: string) => (name === "compact" ? { mutatesSession } : undefined),
+      names: () => ["compact"],
+    };
+    return {
+      ...createMockAgent({
+        executeCommand: async () => {
+          onDispatch();
+          return null;
+        },
+      }),
+      commandRegistry: registry,
+    };
+  }
+
+  it("rejects a mutatesSession custom command while a run is active", async () => {
+    let dispatched = false;
+    const agent = createRegistryAgent(true, () => (dispatched = true));
+    const sink = createMockSink();
+    const bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink,
+    });
+    bus.isRunning = true;
+
+    const action = await bus.executeCommand("compact");
+    expect(action).toBe(ACTIONS.ERROR);
+    expect(dispatched).toBe(false);
+    const emitted = sink._emitted as Array<{ type: unknown; content?: string }>;
+    expect(emitted[0]!.content).toContain("not available while the session is running");
+  });
+
+  it("dispatches a custom command without mutatesSession while a run is active", async () => {
+    let dispatched = false;
+    const agent = createRegistryAgent(false, () => (dispatched = true));
+    const bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink: createMockSink(),
+    });
+    bus.isRunning = true;
+
+    await bus.executeCommand("compact");
+    expect(dispatched).toBe(true);
+  });
 
   it("dispatches undo when idle", async () => {
     let dispatched = false;

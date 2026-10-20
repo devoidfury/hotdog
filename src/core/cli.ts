@@ -184,9 +184,9 @@ export function parseArgs(
     }
 
     if (!options.subcommand) {
-      const isKnownSubcommand = knownSubcommands
-        ? knownSubcommands.includes(arg)
-        : arg === "info" || arg === "show-prompt" || arg === "sessions";
+      // Subcommand names come from the caller's cli:subcommandsRegister
+      // registry (core + extensions own them); parseArgs holds no list.
+      const isKnownSubcommand = knownSubcommands?.includes(arg) ?? false;
 
       if (isKnownSubcommand) {
         options.subcommand = arg;

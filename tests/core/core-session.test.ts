@@ -500,7 +500,7 @@ describe('SessionManager.forkSession', () => {
 
   it('rejects while the source session is running (direct-call guard)', async () => {
     // UI servers (webui ws layer) fork around the command bus, so the bus's
-    // SESSION_MUTATING_COMMANDS guard never runs; forkSession guards itself.
+    // mutatesSession guard never runs; forkSession guards itself.
     const { sm } = await createSourceSession();
     sm.getBus('fork-src')!.isRunning = true;
     await expect(

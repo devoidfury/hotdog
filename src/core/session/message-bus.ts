@@ -4,7 +4,7 @@ import { contentToText, type ImageAttachment, type Message, type MessageSource }
 import { repairToolCalls } from "../context/repair.ts";
 import { HOOKS } from "../hooks.ts";
 import type { HookPayloads } from "../extensions/types.ts";
-import { parseCommand, ACTIONS, SESSION_MUTATING_COMMANDS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
+import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 import type { CommandResult } from "../extensions/registries.ts";
 import type { TurnLanes } from "./turn-lanes.ts";
 
@@ -561,8 +561,11 @@ export class MessageBus {
     }
 
     // Rewriting/branching the context mid-turn could corrupt both histories: in-flight loop would append to the array being undone,
-    // or a fork would snapshot an agent whose turn is still writing.
-    if (this.#isRunning && SESSION_MUTATING_COMMANDS.has(cmd.type)) {
+    // or a fork would snapshot an agent whose turn is still writing. Commands
+    // declare the property (CommandDefinition.mutatesSession); the same
+    // registry lookup dispatch uses resolves core and extension commands alike.
+    const def = agent.commandRegistry?.get(cmd._customCommand ?? cmd.type);
+    if (this.#isRunning && def?.mutatesSession === true) {
       this.#sink.emit({
         type: OUTPUT_EVENT.COMMAND_RESULT,
         content:

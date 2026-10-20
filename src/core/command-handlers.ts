@@ -4,16 +4,20 @@ import { Command, ACTIONS } from "./commands.ts";
 import { trimTurns } from "./context/rewind.ts";
 import { formatError } from "./error.ts";
 import { computeTokenCost, findModelPrice, isPricingConfigured } from "./token-pricing.ts";
-import type { CommandHandler, CommandResult } from "./extensions/registries.ts";
+import type {
+  CommandDefinition,
+  CommandHandler,
+  CommandResult,
+} from "./extensions/registries.ts";
 import type { CompletionContext, CompletionOption } from "./completion.ts";
 import type { Agent } from "./agent.ts";
 
 export { type CommandResult } from "./extensions/registries.ts";
 
-export interface CommandHandlerDef {
+/** Core command definitions; the registry interface, with handler required. */
+export interface CommandHandlerDef extends CommandDefinition {
   handler: CommandHandler;
   description: string;
-  completion?: (ctx: CompletionContext) => CompletionOption[];
 }
 
 // Re-export for external use
@@ -278,7 +282,7 @@ export function handleReasoning(
 }
 
 export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
-  [Command.Clear]: { handler: handleClear, description: "Clear context" },
+  [Command.Clear]: { handler: handleClear, description: "Clear context", mutatesSession: true },
   [Command.Quit]: { handler: handleQuit, description: "Exit" },
   [Command.Help]: { handler: handleHelp, description: "Show help" },
   [Command.Tokens]: { handler: handleTokens, description: "Show token usage" },
@@ -297,14 +301,17 @@ export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
   [Command.Undo]: {
     handler: handleUndo,
     description: "Undo the last turn",
+    mutatesSession: true,
   },
   [Command.Rewind]: {
     handler: handleRewind,
     description: "Rewind the last N turns",
+    mutatesSession: true,
   },
   [Command.Fork]: {
     handler: handleFork,
     description: "Branch a new session from N turns back with an optional prompt",
+    mutatesSession: true,
   },
   [Command.Reasoning]: {
     handler: handleReasoning,

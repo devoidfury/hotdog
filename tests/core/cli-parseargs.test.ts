@@ -77,13 +77,13 @@ describe("parseArgs", () => {
 
   it("parses subcommand", () => {
     withArgs(["info"], () => {
-      expect(parseArgs().subcommand).toBe("info");
+      expect(parseArgs(null, ["info", "show-prompt", "sessions"]).subcommand).toBe("info");
     });
   });
 
   it("parses show-prompt subcommand", () => {
     withArgs(["show-prompt"], () => {
-      expect(parseArgs().subcommand).toBe("show-prompt");
+      expect(parseArgs(null, ["info", "show-prompt", "sessions"]).subcommand).toBe("show-prompt");
     });
   });
 
@@ -95,7 +95,7 @@ describe("parseArgs", () => {
       getCliFlags: () => [{ long: "--session-id", type: "string", description: "" }],
     } as any;
     withArgs(["sessions", "show", "--session-id", "abc123"], () => {
-      expect(parseArgs(registryStub).subcommand).toBe("sessions");
+      expect(parseArgs(registryStub, ["sessions"]).subcommand).toBe("sessions");
     });
   });
 

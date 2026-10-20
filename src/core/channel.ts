@@ -129,11 +129,16 @@ export abstract class Channel {
 
   isChannelCommand(cmdText: string): boolean {
     const channelCmds = Object.values(ChannelCommand);
+    // Argument-taking commands also match "<cmd> <arg>"; the names themselves
+    // live only in ChannelCommand.
+    const argCmds: readonly string[] = [
+      ChannelCommand.Attach,
+      ChannelCommand.Detach,
+      ChannelCommand.Switch,
+    ];
     return (
       channelCmds.includes(cmdText as ChannelCommandType) ||
-      cmdText.startsWith("attach ") ||
-      cmdText.startsWith("detach ") ||
-      cmdText.startsWith("switch ")
+      argCmds.some((c) => cmdText.startsWith(`${c} `))
     );
   }
 

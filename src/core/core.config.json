@@ -427,6 +427,13 @@
       { "default": {} }
     ]
   },
+  "modelPricing": {
+    "type": "object",
+    "layers": [
+      { "source": "config", "key": "modelPricing" },
+      { "default": null }
+    ]
+  },
   "taskLanesDir": {
     "type": "string",
     "layers": [

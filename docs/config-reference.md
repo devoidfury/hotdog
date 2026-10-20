@@ -57,7 +57,7 @@ All three forms above are equivalent.
 { "api_key": "$MY_API_TOKEN" }
 ```
 
-Rules: whole-string only (`"http://$HOST"` and `"cost $5"` are left alone); an unset variable is a hard config error at startup, not a silent literal. No escape syntax -- there is no way to write a literal value that is exactly `$SOMETHING`. `env` objects (`bashTool.env`, `mcpServers[].env`) are exempt from key normalization and keep variable names verbatim (`http_proxy`, not `httpProxy`).
+Rules: whole-string only (`"http://$HOST"` and `"cost $5"` are left alone); an unset variable is a hard config error at startup, not a silent literal. No escape syntax -- there is no way to write a literal value that is exactly `$SOMETHING`. `env` objects (`bashTool.env`, `mcpServers[].env`) are exempt from key normalization and keep variable names verbatim (`http_proxy`, not `httpProxy`), and so are the model ids in [`modelPricing`](#modelpricing) -- their rate entries still normalize normally.
 
 ---
 
@@ -660,6 +660,28 @@ Placement semantics: a task waits for the first member with a free provider lane
   "modelGroups": {
     "mid-level": ["qwen3.8-flash-next", "llama-3.3-70b"],
     "frontier": ["vendor-x/big-model"]
+  }
+}
+```
+
+### `modelPricing`
+
+- **Type:** `object`
+- **Default:** `null` (feature off)
+- **Resolution:** config > default
+
+Opt-in price table that answers "what did this run cost" on paid endpoints. Maps a model name to per-million-token USD rates: `input` for prompt tokens that were not cache hits, `cachedInput` for cache hits, `output` for completion tokens. `/tokens` then appends a `cost:` line to the session block and the last-call block; nothing else changes and nothing is written to the session log -- the numbers are computed from the token tracker at display time.
+
+`cachedInput` is optional and defaults to `0`, matching the house model that cached tokens are free (the tracker already treats prompt totals as net of cached). Keys must match the session model name exactly -- what `--model` / `defaultModel` / the log attests, usually `provider/model`. A model with no entry is not guessed at: the display says the model has no `modelPricing` entry and stays tokens-only otherwise.
+
+Model ids are exempt from [key normalization](#file-format--key-normalization), so `"anthropic/claude-3.5-sonnet"` stays itself (`claude-3.5-sonnet` would otherwise camelCase into `claude-3.5Sonnet`); the rate fields inside each entry normalize as usual (`cached_input` works).
+
+```json
+{
+  "modelPricing": {
+    "openrouter/anthropic/claude-3.5-sonnet": { "input": 3, "cachedInput": 0.3, "output": 15 },
+    "openrouter/google/gemini-2.5-flash": { "input": 0.3, "cachedInput": 0.03, "output": 2.5 },
+    "ollama/qwen3": { "input": 0, "output": 0 }
   }
 }
 ```

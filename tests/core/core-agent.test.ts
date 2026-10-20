@@ -7,7 +7,7 @@ import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { Message } from '../../src/core/context/message.ts';
 import { AgentError, ConfigError, LlmError } from '../../src/core/error.ts';
 import type { LlmClient } from '../../src/core/llm-client/client.ts';
-import type { OutputEvent } from '../../src/core/context/output.ts';
+import type { OutputEvent, SessionStateEvent } from '../../src/core/context/output.ts';
 import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
 import { describe, it, expect } from 'bun:test';
 import {
@@ -1621,6 +1621,100 @@ describe('Agent — end-to-end loop', () => {
       agent.applyProfile('fresh', makeProfile());
       expect(agent.context.log.getAll()).toHaveLength(1);
     });
+  });
+});
+
+describe('Agent — model setter same-value guard', () => {
+  const registry = {
+    'prov/old-model': { name: 'old-model', contextLimit: 128000 },
+    'prov/new-model': { name: 'new-model', contextLimit: 64000, reasoningEffort: 'low' },
+  };
+
+  /** Tool whose def text is mutable, so a stale defs cache is observable. */
+  function spyTool(getDescription: () => string) {
+    return new MockTool({
+      name: 'spy',
+      toToolDef: () => ({
+        type: 'function',
+        function: { name: 'spy', description: getDescription(), parameters: { type: 'object', properties: {}, required: [] } },
+      }),
+    });
+  }
+
+  it('setting the same model emits nothing and changes nothing', () => {
+    const emitted: OutputEvent[] = [];
+    const { agent, hooks } = createFixture({
+      model: 'prov/old-model',
+      contextLimit: 128000,
+      modelRegistry: registry,
+      sink: { emit: (e: OutputEvent) => { emitted.push(e); } },
+    });
+    const changes: unknown[] = [];
+    hooks.on(HOOKS.MODEL_CHANGE, (d: unknown) => { changes.push(d); });
+    agent.reasoningEffort = 'high';
+
+    agent.model = 'prov/old-model';
+
+    expect(changes).toHaveLength(0);
+    expect(emitted).toHaveLength(0);
+    expect(agent.model).toBe('prov/old-model');
+    expect(agent.reasoningEffort).toBe('high');
+    expect(agent.contextLimit).toBe(128000);
+  });
+
+  it('setting the same model leaves the cached tool defs and system prompt alone', async () => {
+    let description = 'v1';
+    const { agent, toolRegistry } = createFixture({
+      model: 'prov/old-model',
+      modelRegistry: registry,
+      managerProfile: true,
+      profileBody: 'body',
+    });
+    toolRegistry.register('spy', spyTool(() => description));
+    await agent.ensureSystemPrompt();
+    await agent.getToolDefs(); // warm the defs cache
+
+    description = 'v2';
+    agent.model = 'prov/old-model';
+
+    expect((await agent.getToolDefs())[0]!.function.description).toBe('v1'); // cache survived
+    expect(agent.context.getSystemPrompt()).toContain('body'); // prompt survived
+  });
+
+  it('a real switch records exactly one MODEL_CHANGE and keeps every side effect', async () => {
+    let description = 'v1';
+    const emitted: OutputEvent[] = [];
+    const { agent, hooks, toolRegistry } = createFixture({
+      model: 'prov/old-model',
+      contextLimit: 128000,
+      modelRegistry: registry,
+      managerProfile: true,
+      profileBody: 'body',
+      sink: { emit: (e: OutputEvent) => { emitted.push(e); } },
+    });
+    const changes: Array<{ oldModel: string; newModel: string }> = [];
+    hooks.on(HOOKS.MODEL_CHANGE, ({ oldModel, newModel }: { oldModel: string; newModel: string }) => {
+      changes.push({ oldModel, newModel });
+    });
+    toolRegistry.register('spy', spyTool(() => description));
+    await agent.ensureSystemPrompt();
+    await agent.getToolDefs();
+
+    description = 'v2';
+    agent.reasoningEffort = 'high';
+    agent.model = 'prov/new-model';
+
+    expect(changes).toEqual([{ oldModel: 'prov/old-model', newModel: 'prov/new-model' }]);
+    expect(agent.model).toBe('prov/new-model');
+    expect(agent.contextLimit).toBe(64000);
+    expect(agent.reasoningEffort).toBe('low'); // reset to the new model's default
+    expect(agent.context.getSystemPrompt()).toBeNull(); // rebuilt on the next turn
+    expect((await agent.getToolDefs())[0]!.function.description).toBe('v2'); // stale defs dropped
+    const modelStates = emitted.filter(
+      (e): e is SessionStateEvent => e.type === OUTPUT_EVENT.SESSION_STATE && e.key === 'model',
+    );
+    expect(modelStates).toHaveLength(1);
+    expect(modelStates[0]!.value).toBe('prov/new-model');
   });
 });
 

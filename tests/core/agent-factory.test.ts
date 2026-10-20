@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { createAgentFactory } from "@core/agent-factory.ts";
+import { handleTokens } from "@core/command-handlers.ts";
 import { HOOKS } from "@core/hooks.ts";
 
 function makeCore(overrides: Record<string, unknown> = {}) {
@@ -200,6 +201,42 @@ describe("createAgentFactory", () => {
     const factory = createAgentFactory(core, { resolved: resolved as never, llmClient: {} as never });
     const agent = await factory();
     expect(agent).toBeDefined();
+  });
+
+  it("carries modelPricing from the config bag through to the /tokens cost line", async () => {
+    // The pricing table rides the raw config bag (no dedicated Agent option);
+    // this pins that chain end to end: config -> Agent.config -> handleTokens.
+    const pricing = { "vendor/model": { input: 3, cachedInput: 0.3, output: 15 } };
+    const { core } = makeCore({ config: { modelPricing: pricing } });
+    const factory = createAgentFactory(core, {
+      resolved: { ...resolved, model: "vendor/model" } as never,
+      llmClient: {} as never,
+    });
+    const agent = await factory();
+
+    // 1,000 raw prompt tokens of which 400 were cache hits: the tracker nets
+    // them, so the cost must bill 600 input + 400 cached, never 1,000 input.
+    agent.context.recordUsage({
+      prompt_tokens: 1000,
+      prompt_tokens_details: { cached_tokens: 400 },
+      completion_tokens: 200,
+      total_tokens: 1200,
+    });
+    const costLines = (handleTokens(agent).content ?? "")
+      .split("\n")
+      .filter((line) => line.trimStart().startsWith("cost:"));
+    // 600/1e6*3 + 400/1e6*0.3 + 200/1e6*15 = 0.00492 (same numbers for the only call)
+    expect(costLines).toHaveLength(2);
+    expect(costLines[0]).toContain("$0.0049");
+
+    // Same table, unmapped model: honest unpriced line, no invented rate.
+    const otherFactory = createAgentFactory(
+      makeCore({ config: { modelPricing: pricing } }).core,
+      { resolved: { ...resolved, model: "vendor/other" } as never, llmClient: {} as never },
+    );
+    const other = await otherFactory();
+    other.context.recordUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
+    expect(handleTokens(other).content).toContain("model 'vendor/other' has no modelPricing entry");
   });
 });
 

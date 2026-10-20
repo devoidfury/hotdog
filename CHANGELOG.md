@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **opt-in cost display (`modelPricing`).** A local model-name -> per-million-token rate table (`input` / `cachedInput` / `output`, `cachedInput` defaulting to 0 like the tracker's free-cache house model) adds a `cost:` line to `/tokens`, for the session and the last call. Display-only: no session-log records, no network fetch. Unset key = byte-identical display; a configured table with no entry for the session model says the model is unpriced instead of guessing.
+- **model setter is a no-op on the same value.** `agent.model = <current model>` no longer fires `MODEL_CHANGE` or rebuilds caches, so every resume stopped writing a redundant model-change record into its own log. Real switches behave exactly as before.
+
 - **baton stash is per-session.** The popped tail mirrored by `pass-the-baton` now lands in `<sessionsDir>/<session-id>.baton.json` instead of a shared `baton-popped.json`, so two sessions popping at once can no longer clobber each other's stash.
 - **baton stash cleanup and id guard.** Abandoned batons (cancelled/errored turn, context rewritten, missing continuation seam, failed handoff) now unlink their `<session-id>.baton.json` mirror instead of leaving it behind; the mirror is only written when the session id passes the same traversal guard as the session logs (`isSafeSessionId` in `session-log.ts`), and an unsafe id degrades to the in-process stash only.
 

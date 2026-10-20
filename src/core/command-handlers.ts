@@ -3,6 +3,7 @@
 import { Command, ACTIONS } from "./commands.ts";
 import { trimTurns } from "./context/rewind.ts";
 import { formatError } from "./error.ts";
+import { computeTokenCost, findModelPrice, isPricingConfigured } from "./token-pricing.ts";
 import type { CommandHandler, CommandResult } from "./extensions/registries.ts";
 import type { CompletionContext, CompletionOption } from "./completion.ts";
 import type { Agent } from "./agent.ts";
@@ -44,11 +45,42 @@ export function handleHelp(): CommandResult {
   return { action: ACTIONS.DISPLAY, content: "Help (use /help for commands)" };
 }
 
+/** "$1.23" for real amounts; 4 decimals below a cent, so a cheap local run reads $0.0021 rather than $0.00. */
+function formatUsd(value: number): string {
+  return `$${Math.abs(value) >= 0.01 ? value.toFixed(2) : value.toFixed(4)}`;
+}
+
 export function handleTokens(agent: Agent): CommandResult {
   const u = agent.context.getTokenUsage();
   if (u.turns === 0) {
     return { action: ACTIONS.DISPLAY, content: "No token usage recorded yet." };
   }
+
+  // Cost lines are opt-in via the `modelPricing` config key: no key, no lines.
+  // Numbers come from the tracker (prompt totals are already net of cached).
+  const pricing = agent.config?.modelPricing;
+  const pricingConfigured = isPricingConfigured(pricing);
+  const price = pricingConfigured ? findModelPrice(pricing, agent.model) : undefined;
+  const sessionCost = price
+    ? computeTokenCost(
+        {
+          promptTokens: u.sessionPromptTokens,
+          cachedTokens: u.sessionCachedTokens,
+          completionTokens: u.sessionCompletionTokens,
+        },
+        price,
+      )
+    : null;
+  const lastCallCost = price
+    ? computeTokenCost(
+        {
+          promptTokens: u.promptTokens || 0,
+          cachedTokens: u.cachedTokens || 0,
+          completionTokens: u.completionTokens || 0,
+        },
+        price,
+      )
+    : null;
 
   const promptProcessed = u.sessionPromptTokens; // accumulated as (prompt - cached)
   const lines = [
@@ -67,6 +99,14 @@ export function handleTokens(agent: Agent): CommandResult {
     lines.push(`  cache hit:   ${cacheRate}% of prompt tokens`);
   }
 
+  if (pricingConfigured) {
+    lines.push(
+      sessionCost
+        ? `  cost:        ${formatUsd(sessionCost.total)}`
+        : `  cost:        model '${agent.model}' has no modelPricing entry`,
+    );
+  }
+
   // Most recent call values from the provider.
   lines.push("");
   lines.push("Last call:");
@@ -76,6 +116,9 @@ export function handleTokens(agent: Agent): CommandResult {
     `  completion:  ${(u.completionTokens || 0).toLocaleString()} tokens`,
   );
   lines.push(`  total:       ${(u.totalTokens || 0).toLocaleString()} tokens`);
+  if (lastCallCost) {
+    lines.push(`  cost:        ${formatUsd(lastCallCost.total)}`);
+  }
 
   return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
 }

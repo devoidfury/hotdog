@@ -124,6 +124,64 @@ describe("handleTokens", () => {
     const result = handleTokens(agent as any);
     expect(result.content).not.toContain("cache hit");
   });
+
+  // ── Cost lines (opt-in `modelPricing`) ────────────────────────────────────
+
+  // session: 1,200 net prompt / 800 cached / 400 completion; last call: 1,000 / 400 / 200.
+  const PRICING_USAGE: TokenUsage = {
+    sessionPromptTokens: 1200, sessionCachedTokens: 800, sessionCompletionTokens: 400, sessionTotalTokens: 2400,
+    turns: 2, promptTokens: 1000, cachedTokens: 400,
+    completionTokens: 200, totalTokens: 1600,
+  };
+
+  function makePricingAgent(model: string, modelPricing: unknown) {
+    return makeMockAgent({
+      model,
+      config: modelPricing === undefined ? {} : { modelPricing },
+      context: {
+        clearSystemPrompt: mock(() => {}),
+        getSystemPrompt: mock(() => null),
+        getTokenUsage: mock((): TokenUsage => ({ ...PRICING_USAGE })),
+      },
+    });
+  }
+
+  const costLines = (content?: string) =>
+    (content ?? "").split("\n").filter((line) => line.trimStart().startsWith("cost:"));
+
+  it("adds a cost line to the session block and the last-call block for a priced model", () => {
+    const agent = makePricingAgent("vendor/model", {
+      "vendor/model": { input: 3, cachedInput: 0.3, output: 15 },
+    });
+    const lines = costLines(handleTokens(agent as any).content);
+    // session: 1200/1e6*3 + 800/1e6*0.3 + 400/1e6*15 = 0.00984
+    // last call: 1000/1e6*3 + 400/1e6*0.3 + 200/1e6*15 = 0.00612
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("$0.0098");
+    expect(lines[1]).toContain("$0.0061");
+  });
+
+  it("formats amounts at or above a cent with two decimals", () => {
+    const agent = makePricingAgent("vendor/model", {
+      "vendor/model": { input: 3000, cachedInput: 300, output: 15000 },
+    });
+    expect(costLines(handleTokens(agent as any).content)[0]).toContain("$9.84");
+  });
+
+  it("keeps the display tokens-only when pricing is not configured", () => {
+    const result = handleTokens(makePricingAgent("vendor/model", undefined) as any);
+    expect(result.content).not.toContain("cost");
+    expect(result.content).toContain("Token usage (2 turns):");
+  });
+
+  it("names the model as unpriced when pricing is configured but the model has no entry", () => {
+    const result = handleTokens(makePricingAgent("vendor/other", {
+      "vendor/model": { input: 3, output: 15 },
+    }) as any);
+    const lines = costLines(result.content);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("model 'vendor/other' has no modelPricing entry");
+  });
 });
 
 describe("handleTools", () => {

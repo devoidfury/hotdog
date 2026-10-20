@@ -72,7 +72,25 @@ export function normalizeConfigKeys(obj: unknown): unknown {
       normalized[key] = value;
       continue;
     }
-    normalized[camelCase(key)] = normalizeConfigKeys(value);
+    const camelKey = camelCase(key);
+    // Same problem in `modelPricing`: its keys are model IDs, and
+    // "claude-3.5-sonnet" would camelCase into "claude-3.5Sonnet". Model keys
+    // stay verbatim; the rate entries below them normalize like any config.
+    if (
+      camelKey === "modelPricing" &&
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value)
+    ) {
+      normalized[camelKey] = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([model, rates]) => [
+          model,
+          normalizeConfigKeys(rates),
+        ]),
+      );
+      continue;
+    }
+    normalized[camelKey] = normalizeConfigKeys(value);
   }
   return normalized;
 }

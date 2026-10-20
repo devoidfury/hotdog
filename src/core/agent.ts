@@ -296,6 +296,11 @@ export class Agent implements AgentLike {
   }
   set model(v: string) {
     const oldModel = this.#model;
+    // Same-model set is a silent no-op (mirrors applyProfile's guard): resume
+    // re-attests the model the session already runs, and writing it again would
+    // log a MODEL_CHANGE record for a change that never happened, plus rebuild
+    // caches that are already correct.
+    if (v === oldModel) return;
     this.#model = v;
     // Suffix-tolerant lookup (bare name -> "provider/name") matches
     // resolveModelConfig's resolution, so the window tracks the same entry.

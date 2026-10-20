@@ -8,6 +8,7 @@ import {
   normalizeConfigKeys,
   interpolateEnvVars,
   loadConfig,
+  validateConfig,
   buildAgentConfig,
   buildConfig,
 } from "@core/config/index.ts";
@@ -138,9 +139,49 @@ describe("normalizeConfigKeys", () => {
     expect(mcpEnv["MY-FLAG"]).toBe("f");
   });
 
+  it("keeps modelPricing model ids verbatim while normalizing each rate entry", () => {
+    const result = normalizeConfigKeys({
+      model_pricing: {
+        "anthropic/claude-3.5-sonnet": { input: 3, cached_input: 0.3, output: 15 },
+      },
+    }) as Record<string, unknown>;
+
+    expect(result.modelPricing).toEqual({
+      "anthropic/claude-3.5-sonnet": { input: 3, cachedInput: 0.3, output: 15 },
+    });
+  });
+
   it("handles empty object and arrays", () => {
     expect(normalizeConfigKeys({})).toEqual({});
     expect(normalizeConfigKeys([])).toEqual([]);
+  });
+});
+
+// ── modelPricing (opt-in cost display) ──────────────────────────────────────
+
+describe("modelPricing resolution", () => {
+  it("is null when unset, and reaches the config bag with model ids intact", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-pricing-cfg-"));
+    try {
+      const priced = path.join(dir, "priced.json");
+      fs.writeFileSync(
+        priced,
+        JSON.stringify({
+          model_pricing: { "anthropic/claude-3.5-sonnet": { input: 3, cached_input: 0.3, output: 15 } },
+        }),
+      );
+      const cfg = await loadConfig(priced);
+      expect(cfg.modelPricing).toEqual({
+        "anthropic/claude-3.5-sonnet": { input: 3, cachedInput: 0.3, output: 15 },
+      });
+      expect(validateConfig({ modelPricing: cfg.modelPricing }).valid).toBe(true);
+
+      const bare = path.join(dir, "bare.json");
+      fs.writeFileSync(bare, JSON.stringify({ default_model: "m" }));
+      expect((await loadConfig(bare)).modelPricing).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

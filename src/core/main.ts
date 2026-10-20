@@ -12,6 +12,7 @@ import {
 } from "./extensions/extensions.ts";
 import { createServiceRegistry } from "./extensions/service-registry.ts";
 import { createHooks, HOOKS, type HookSystem, type HookTraceOptions } from "./hooks.ts";
+import { migrateDataLayout } from "./data-migration.ts";
 import { createCompletionService } from "./completion.ts";
 import type { CoreContext, ExtensionInstance, ToolMetadataPayload } from "./extensions/types.ts";
 import type { ToolMetadata } from "./extensions/tool-registry.ts";
@@ -211,6 +212,11 @@ export async function main(): Promise<number> {
   const minLevel = resolveLogLevel();
   const logTarget = resolveLogTarget();
   initializeLogger({ hooks, minLevel, target: logTarget });
+
+  // One-shot sessions/data layout migration (moved workflows/ and
+  // task-lanes/ out of the sessions dir). Must run before any extension or
+  // subcommand touches those dirs; never fatal.
+  migrateDataLayout();
 
   const configRegistry = new ConfigRegistry();
 

@@ -23,3 +23,11 @@ process.env.HOTDOG_CONFIG_DIR = new URL(
   "../examples/minimal-config/config",
   import.meta.url,
 ).pathname;
+
+// Hermetic data resolution: main() runs the sessions/data layout migration at
+// startup. Without a pin it would look at (and could move) the host's real
+// ~/.cache/hotdog when neither HOTDOG_DATA_DIR nor HOTDOG_SESSIONS_DIR is set.
+// Point the data dir at a scratch path; it does not exist, so the migration's
+// fresh-install guard skips all work. Tests that exercise the dirs manage the
+// env vars themselves and restore the saved value.
+process.env.HOTDOG_DATA_DIR = "/tmp/hotdog-test-data";

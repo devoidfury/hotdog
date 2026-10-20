@@ -6,11 +6,7 @@
 
 - [BRK] workflows directory moved to `<data>/workflows`
 - [BRK] task-lanes directory moved to `<data>/task-lanes`
-
-```
-mv ~/.cache/hotdog/sessions/workflows ~/.cache/hotdog/workflows
-mv ~/.cache/hotdog/sessions/task-lanes ~/.cache/hotdog/task-lanes
-```
+- **Auto-migration at startup.** The first run after upgrading moves a `workflows/` / `task-lanes/` dir found at the old sessions-dir location into the data dir (copy+delete across filesystems, e.g. `HOTDOG_SESSIONS_DIR` on tmpfs). If BOTH the old and new location exist, nothing is merged or deleted -- a warn names both paths and the new location wins, so a pre-upgrade process (webui daemon) is never cut out from under. Set `workflows.path` / `taskLanesDir` explicitly to keep data wherever it is.
 
 - **opt-in cost display (`modelPricing`).** A local model-name -> per-million-token rate table (`input` / `cachedInput` / `output`, `cachedInput` defaulting to 0 like the tracker's free-cache house model) adds a `cost:` line to `/tokens`, for the session and the last call. Display-only: no session-log records, no network fetch. Unset key = byte-identical display; a configured table with no entry for the session model says the model is unpriced instead of guessing.
 - **model setter is a no-op on the same value.** `agent.model = <current model>` no longer fires `MODEL_CHANGE` or rebuilds caches, so every resume stopped writing a redundant model-change record into its own log. Real switches behave exactly as before.

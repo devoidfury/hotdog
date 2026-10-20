@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from "bun:test";
 import readline from "node:readline";
+import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import {
   shouldMountRenderer,
@@ -293,6 +294,76 @@ describe("teardown pairing (§10)", () => {
     termHandler();
     expect(bridge.guard.fired).toBe(true);
     expect(sig.exits.length).toBe(exitsBefore + 1);
+  });
+});
+
+describe("suspend/resume child handoff (§5)", () => {
+  it("suspend commits the tail, unwinds modes in order, erases the frame, releases stdin listeners", () => {
+    const { bridge, term, clock } = makeBridge();
+    bridge.mount();
+    bridge.capture.write("(m)> half-typed");
+    clock.runAll();
+    bridge.commitText("dangling tail"); // unterminated partial line
+    const stdin = new EventEmitter();
+    stdin.on("data", () => {}); // readline stand-in
+    term.grid.modeLog.length = 0;
+
+    bridge.suspend(stdin as never);
+    clock.runAll();
+
+    // The tail commits as a permanent row before the handoff (commit-or-drop).
+    const snap = term.grid.snapshot();
+    expect([...snap.scrollback, ...snap.screen].join("\n")).toContain("dangling tail");
+    // Mode unwind in §5 order: ?2004l precedes raw:off.
+    const log = term.grid.modeLog;
+    expect(log.indexOf("?2004l")).toBeGreaterThanOrEqual(0);
+    expect(log.indexOf("?2004l")).toBeLessThan(log.indexOf("raw:off"));
+    // Input stops ONLY via listener release (pitfall 6) -- the child gets a
+    // cooked, uncontended terminal.
+    expect(stdin.listenerCount("data")).toBe(0);
+    // Frame erased with the live geometry: no ghost of the echo.
+    expect(term.grid.snapshot().screen.join("")).not.toContain("half-typed");
+  });
+
+  it("resume re-enables the mode pair, repaints the frame, re-attaches the same listeners", () => {
+    const { bridge, term, clock } = makeBridge();
+    bridge.mount();
+    bridge.capture.write("(m)> still-typing");
+    clock.runAll();
+    const listener = () => {};
+    const stdin = new EventEmitter();
+    stdin.on("data", listener);
+
+    const resume = bridge.suspend(stdin as never);
+    clock.runAll();
+    term.grid.modeLog.length = 0;
+
+    resume();
+    clock.runAll();
+
+    const log = term.grid.modeLog;
+    expect(log.indexOf("raw:on")).toBeGreaterThanOrEqual(0);
+    expect(log.indexOf("raw:on")).toBeLessThan(log.indexOf("?2004h"));
+    expect(stdin.listenerCount("data")).toBe(1);
+    expect(stdin.rawListeners("data")[0]).toBe(listener);
+    // The frame comes back with the echo it held before the child ran.
+    expect(term.grid.snapshot().screen.join("\n")).toContain("still-typing");
+  });
+
+  it("double suspend is inert; the listener returns exactly once via the outer resume", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    const stdin = new EventEmitter();
+    stdin.on("data", () => {});
+
+    const outer = bridge.suspend(stdin as never);
+    const inner = bridge.suspend(stdin as never);
+    expect(stdin.listenerCount("data")).toBe(0);
+    inner(); // no-op: the inner scope must not double-attach or restore early
+    expect(stdin.listenerCount("data")).toBe(0);
+    outer();
+    clock.runAll();
+    expect(stdin.listenerCount("data")).toBe(1);
   });
 });
 

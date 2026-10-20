@@ -696,9 +696,17 @@ export async function runInteractiveSession(
     }
     
     rl.pause();
+    // §5 suspend/resume bracket (split only): stdin.pause is neutered while
+    // the renderer is mounted, so rl.pause() alone leaves hotdog's stdin
+    // listener racing a stdio-inherit child for tty bytes (arrow escapes get
+    // shredded into "OB"/"BO" debris and the child eats keystrokes). Hand the
+    // terminal over properly: frame erased, cooked mode, listeners released;
+    // the paired restore repaints and re-attaches on child close.
+    const resumeChildTerminal = bridge?.suspend(process.stdin);
     const result = await executeShellCommand(cmd, {
       captureOutput: sendToAssistant,
     });
+    resumeChildTerminal?.();
     rl.resume();
     // The bracket may stay (stage 2) but process.stdin.pause is neutered
     // while mounted (pitfall 6); settled shell output lands before the rows

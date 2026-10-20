@@ -22,10 +22,17 @@ export interface Clock {
   now(): number;
 }
 
-/** Raw byte chunks from stdin, pre-StdinBuffer. StdinBuffer itself is stage 3. */
+/** Raw stdin chunk. Buffer-backed sources hand bytes (a multi-byte UTF-8
+ * sequence may straddle chunks); string chunks pass through untouched.
+ * Widened from `string` in stage 3a -- StdinBuffer's incremental decoder is
+ * the only correct place to turn bytes into text (§5); per-chunk
+ * toString("utf8") corrupts split sequences into U+FFFD. */
+export type KeyChunk = string | Uint8Array;
+
+/** Raw byte chunks from stdin, pre-StdinBuffer. StdinBuffer decodes these. */
 export interface KeySource {
   /** Subscribe to raw chunks; returns an unsubscribe fn. Never pauses the stream (pitfall 6). */
-  onData(cb: (chunk: string) => void): () => void;
+  onData(cb: (chunk: KeyChunk) => void): () => void;
 }
 
 /** The slice of process the TeardownGuard needs; tests inject a fake so signal wiring is observable. */

@@ -175,6 +175,13 @@ export interface OutputBridgeOptions {
   signalHost: SignalHost;
 }
 
+/** The stdin slice suspend() needs; process.stdin satisfies it structurally. */
+export interface StdinHandoffHost {
+  rawListeners(event: "data"): ((chunk: unknown) => void)[];
+  removeAllListeners(event: "data"): unknown;
+  on(event: "data", listener: (chunk: unknown) => void): unknown;
+}
+
 /**
  * The mounted side of the split session: commit/arbiter line channels over
  * the core's FIFO (§2 rubric 1/3), the readline capture stream (§2 stage-2
@@ -195,6 +202,7 @@ export class OutputBridge {
   #promptText = "";
   #questionMode = false;
   #mounted = false;
+  #suspended = false;
   #repushScheduled = false;
 
   constructor(private readonly opts: OutputBridgeOptions) {
@@ -319,6 +327,42 @@ export class OutputBridge {
     this.guard.run();
   }
 
+  /**
+   * §5 Suspend()/Resume(): hand the terminal to a stdio:"inherit" child
+   * (shell exec). While mounted, stdin.pause is neutered (§2, pitfall 6), so
+   * the legacy rl.pause() bracket does nothing to input -- hotdog's stdin
+   * listener and the child race for the tty byte stream, shredding arrow-key
+   * escapes (application-cursor-mode `\x1bOB` arrives as "BO" debris and the
+   * child eats the rest). The handoff instead: commit the tail, erase the
+   * frame (INV-5), `?2004l`, raw off, and RELEASE all stdin "data" listeners
+   * (readline's, clipboard-paste's interceptor -- whoever is attached).
+   * Removing the listeners is what stops input; the stream is never paused.
+   * The returned thunk is Resume(): modes back on, frame repainted, listeners
+   * re-attached. Repeated suspend while suspended is a no-op.
+   */
+  suspend(stdin: StdinHandoffHost): () => void {
+    if (this.#suspended) return () => {};
+    this.#suspended = true;
+    this.flushPending();
+    // §10 order: drain queued commits synchronously BEFORE the erase, or a
+    // pending print repaints the frame over the erase (INV-2 machinery
+    // restores frame rows around a print).
+    this.core.drainCommitsSync();
+    this.core.eraseFrame();
+    this.core.modes.bracketedPaste(false);
+    this.core.modes.setRawMode(false);
+    const saved = stdin.rawListeners("data");
+    stdin.removeAllListeners("data");
+    return () => {
+      if (!this.#suspended) return;
+      this.#suspended = false;
+      this.core.modes.setRawMode(true);
+      this.core.modes.bracketedPaste(true);
+      this.#paintFrame(this.capture.frameRows());
+      for (const listener of saved) stdin.on("data", listener);
+    };
+  }
+
   #commitLines(lines: string[]): void {
     this.transcriptLog.push(...lines);
     this.core.commit(lines);
@@ -366,8 +410,8 @@ function consoleArgs(args: unknown[]): string {
  * stdout -> commit channel, stderr -> arbiter, console.* -> the same two
  * channels (Bun's console bypasses process.stdout.write at the fd level, so
  * patching the stream alone would miss it), and neuter stdin.pause --
- * pitfall 6: the rl.pause()/rl.resume() shell-exec bracket may stay, but it
- * must never pause the shared stream (Suspend()/Resume() is stage 3, §5).
+ * pitfall 6: the shell-exec bracket may stay, but it must never pause the
+ * shared stream; the child handoff is OutputBridge.suspend()/resume() (§5).
  * Returns the restore function (registered as a TeardownGuard hook).
  */
 export function installIoPatches(bridge: OutputBridge, host: IoPatchHost): () => void {

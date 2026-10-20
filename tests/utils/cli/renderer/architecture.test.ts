@@ -121,3 +121,37 @@ describe("architecture: mode bytes have exactly one home (§10)", () => {
 function basenameIs(file: string, name: string): boolean {
   return file.endsWith("/" + name);
 }
+
+// Appended by the stage-3a audit: the input/editor stack (the modules 3b will
+// drive) must stay pure -- no fs, no process, no global timers. Persistence,
+// signals, and timing all arrive through the injected seams (Clock, save
+// callback), which is what makes the whole stack testable without a TTY.
+
+describe("architecture: the 3a input stack has no ambient runtime access", () => {
+  const PURE = [
+    "stdin-buffer.ts", "keyevents.ts", "clusters.ts", "line-editor.ts",
+    "history.ts", "popup.ts", "editor-view.ts",
+  ];
+
+  it("no fs/process/tty imports and no bare process references", () => {
+    const offenders: string[] = [];
+    for (const name of PURE) {
+      const code = stripComments(readFileSync(join(RENDERER, name), "utf8"));
+      if (/node:(fs|process|tty|child_process|net)/.test(code)) offenders.push(`${name}: node: builtin`);
+      if (/\bprocess\b/.test(code)) offenders.push(`${name}: process reference`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("timers are reached only through the injected Clock (clock.setTimeout, never bare)", () => {
+    const offenders: string[] = [];
+    for (const name of PURE) {
+      const code = stripComments(readFileSync(join(RENDERER, name), "utf8"));
+      // Any .setTimeout( style call is a seam call; a BARE setTimeout( is the global.
+      if (/(?<![.\w])(setTimeout|setInterval|clearTimeout|clearInterval|setImmediate|clearImmediate)\s*\(/.test(code)) {
+        offenders.push(`${name}: global timer call`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});

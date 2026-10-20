@@ -2,7 +2,7 @@
 // This is plumbing only -- no frame/escape policy lives here (mode bytes are
 // owned by TeardownGuard, §10).
 
-import type { KeySource, Terminal } from "./seams.ts";
+import type { KeyChunk, KeySource, Terminal } from "./seams.ts";
 
 /** stdin slice the real seams need; process.stdin satisfies it structurally. */
 interface StdinLike {
@@ -57,9 +57,12 @@ export class ProcessTerminal implements Terminal {
 export class StdinKeySource implements KeySource {
   constructor(private readonly stdin: StdinLike = process.stdin) {}
 
-  onData(cb: (chunk: string) => void): () => void {
+  onData(cb: (chunk: KeyChunk) => void): () => void {
+    // Bytes pass through UNDECODED: a multi-byte UTF-8 sequence straddling a
+    // chunk boundary would become U+FFFDs if we decoded per-chunk here. The
+    // StdinBuffer's incremental decoder owns bytes->text (seams.ts).
     const handler = (chunk: Buffer | string): void => {
-      cb(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+      cb(chunk);
     };
     this.stdin.on("data", handler);
     return () => void this.stdin.off("data", handler);

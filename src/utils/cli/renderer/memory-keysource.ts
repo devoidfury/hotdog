@@ -1,5 +1,7 @@
 // MemoryKeySource: feeds raw byte chunks to KeySource subscribers by hand
-// (§11; the stage-3 StdinBuffer will sit behind this seam).
+// (§11; the stage-3 StdinBuffer sits behind this seam). Method parameters are
+// bivariant, so the string-only pusher still satisfies the KeyChunk-widened
+// KeySource seam; StdinBuffer's handler accepts both forms anyway.
 
 import type { KeySource } from "./seams.ts";
 

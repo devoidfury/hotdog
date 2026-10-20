@@ -238,39 +238,6 @@ export function epochEntries(entries: LogEntry[]): LogEntry[] {
   return entries.slice(epochStartIndex(entries));
 }
 
-export async function readAllSessions(): Promise<LogEntry[]> {
-  const dir = sessionsDir();
-  try {
-    await access(dir);
-  } catch {
-    return [];
-  }
-
-  const allEntries: LogEntry[] = [];
-  const files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl"));
-
-  for (const file of files) {
-    const path = join(dir, file);
-    const content = await readFile(path, "utf-8");
-
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      try {
-        allEntries.push(JSON.parse(trimmed) as LogEntry);
-      } catch {
-        logger.warn(
-          `[session-log] malformed JSON in ${file}: ` +
-            `"${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}"`,
-        );
-      }
-    }
-  }
-
-  return allEntries;
-}
-
 export async function sessionExists(sessionId: string): Promise<boolean> {
   try {
     await access(sessionPath(sessionId));

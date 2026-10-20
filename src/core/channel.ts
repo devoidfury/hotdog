@@ -39,12 +39,14 @@ export abstract class Channel {
   public attachedSessions: Set<string>;
   public currentSessionId: string | null;
   public isClosed: boolean;
+  #unsubscribers: Map<string, () => void>;
 
   constructor(options: { sessionManager: ChannelSessionManager }) {
     this.sessionManager = options.sessionManager;
     this.attachedSessions = new Set();
     this.currentSessionId = null;
     this.isClosed = false;
+    this.#unsubscribers = new Map();
   }
 
   async send(text: string): Promise<void> {
@@ -243,9 +245,22 @@ export abstract class Channel {
     this._cleanup();
   }
 
+  protected _subscribe(sessionId: string): void {
+    const unsubscribe = this.sessionManager.onSessionEvents(sessionId, (event: OutputEvent) => {
+      this.write(event);
+    });
+    this.#unsubscribers.set(sessionId, unsubscribe);
+  }
+
+  protected _unsubscribe(sessionId: string): void {
+    const unsubscribe = this.#unsubscribers.get(sessionId);
+    if (unsubscribe) {
+      unsubscribe();
+      this.#unsubscribers.delete(sessionId);
+    }
+  }
+
   protected abstract write(event: OutputEvent): void;
   abstract read(): AsyncIterable<string>;
-  protected abstract _subscribe(sessionId: string): void;
-  protected abstract _unsubscribe(sessionId: string): void;
   protected abstract _cleanup(): void;
 }

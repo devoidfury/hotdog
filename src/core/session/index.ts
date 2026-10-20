@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { HOOKS, HookSystem } from "../hooks.ts";
 import { MessageBus } from "./message-bus.ts";
 import { createTurnLanes, type TurnLanes } from "./turn-lanes.ts";
-import { TaskManager } from "./task-manager.ts";
+import { TaskManager, TaskManagerRequiredOptions } from "./task-manager.ts";
 import type { ProviderHealth } from "./provider-health.ts";
 import { OutputEvent } from "../context/output.ts";
 import { trimTurns } from "../context/rewind.ts";
@@ -15,6 +15,7 @@ import type { ProfileManager, SwitchProfile } from "../config/index.ts";
 import type { Message, ImageAttachment, MessageSource } from "../context/message.ts";
 import type { AgentRunResult, ForkSessionFn, ForkSessionResult, OutputSink } from "../agent.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
+import { ResolvedConfig } from "@core/extensions/types.ts";
 
 export interface AgentLike {
   sessionId: string;
@@ -534,5 +535,19 @@ export class SessionManager {
   /** The TaskManager's provider-health registry (null when there is no TaskManager or the feature is off). */
   getProviderHealth(): ProviderHealth | null {
     return this.#taskManager?.providerHealth ?? null;
+  }
+}
+
+export function buildTaskConfigOptions(resolved: ResolvedConfig): SessionManagerOptions["taskConfig"] & Omit<TaskManagerRequiredOptions, "buildAgent"> {
+  return {
+    maxIterations: resolved.maxIterations,
+    taskProfile: resolved.taskProfile || "task-default",
+    lanesPerProvider: resolved.taskLanesPerProvider,
+    lanesDir: resolved.taskLanesDir,
+    spawnLogPath: resolved.taskSpawnsPath,
+    defaultModel: resolved.model ?? null,
+    healthIntervalSecs: resolved.providerHealthCheckIntervalSecs,
+    healthCheckTimeoutSecs: resolved.healthCheckTimeout,
+    healthContextLimit: resolved.contextLimit,
   }
 }

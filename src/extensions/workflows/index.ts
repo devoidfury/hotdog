@@ -2,7 +2,7 @@
 //
 // Surfaces:
 // - CLI: `hotdog workflow validate|render|run|list|status|reconcile|cancel`
-// - Manager tools: workflow_validate (validates AND saves) / workflow_dispatch (file + optional args) / workflow_status 
+// - Manager tools: workflow_validate (validates AND saves) / workflow_dispatch (file + optional args) / workflow_status
 // - Slash commands: /workflow (status + cancel) and /followup <node> <msg>
 //   (mid-turn steering of a node's worker)
 // - Skills-style availability listing of <workflows.path>/*.workflow.yaml
@@ -38,6 +38,7 @@ import {
   type ManagedRun,
 } from "./workflow-tools.ts";
 import type { WorkflowLimits } from "./workflow.ts";
+import { buildTaskConfigOptions } from "@core/session/index.ts";
 
 interface WorkflowsExtensionConfig {
   maxNodes?: number;
@@ -99,17 +100,10 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     const llmClient = core.createLlmClient();
     host = {
       tasks: new TaskManager({
+        ...buildTaskConfigOptions(resolved),
         buildAgent: createAgentFactory(core, { resolved, config: core.config, llmClient }),
         modelRegistry: resolved.modelRegistry,
         config: core.config,
-        maxIterations: resolved.maxIterations,
-        taskProfile: resolved.taskProfile || "task-default",
-        lanesPerProvider: resolved.taskLanesPerProvider,
-        lanesDir: resolved.taskLanesDir,
-        defaultModel: resolved.model ?? null,
-        healthIntervalSecs: resolved.providerHealthCheckIntervalSecs,
-        healthCheckTimeoutSecs: resolved.healthCheckTimeout,
-        healthContextLimit: resolved.contextLimit,
         profileManager: resolved.profileManager,
       }),
     };

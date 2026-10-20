@@ -4,7 +4,6 @@
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import {
   readSessionEntries,
-  readAllSessions,
   sessionExists,
   listSessionLogs,
   deleteSessionLog,
@@ -126,31 +125,6 @@ test("sessionExists returns true for existing session", async () => {
 
 test("sessionExists returns false for non-existent session", async () => {
   expect(await sessionExists("non-existent-session-xyz")).toBe(false);
-});
-
-test("readAllSessions reads from multiple session files", async () => {
-  const dir = TEST_SESSIONS_DIR;
-  mkdirSync(dir, { recursive: true });
-
-  const testId1 = "test-readall-1";
-  const testId2 = "test-readall-2";
-
-  try {
-    const file1 = join(dir, `${testId1}.jsonl`);
-    const file2 = join(dir, `${testId2}.jsonl`);
-
-    writeFileSync(file1, '{"ts":"2024-01-01","source":"input","content":"from session 1"}\n');
-    writeFileSync(file2, '{"ts":"2024-01-01","source":"input","content":"from session 2"}\n');
-
-    const allEntries = await readAllSessions();
-    expect(allEntries.length).toBeGreaterThanOrEqual(2);
-
-    rmSync(file1);
-    rmSync(file2);
-  } finally {
-    try { rmSync(join(dir, `${testId1}.jsonl`)); } catch {}
-    try { rmSync(join(dir, `${testId2}.jsonl`)); } catch {}
-  }
 });
 
 // ── listSessionLogs ─────────────────────────────────────────────────────────
@@ -326,37 +300,5 @@ test("readSessionEntries round-trip works for a real UUID", async () => {
     expect(await sessionExists(uuid)).toBe(true);
   } finally {
     try { rmSync(join(TEST_SESSIONS_DIR, `${uuid}.jsonl`)); } catch {}
-  }
-});
-
-// ── readAllSessions malformed JSON handling ────────────────────────────────
-
-test("readAllSessions handles malformed JSON lines", async () => {
-  const dir = TEST_SESSIONS_DIR;
-  mkdirSync(dir, { recursive: true });
-
-  const testId = "test-readall-malformed";
-  const file = join(dir, `${testId}.jsonl`);
-
-  try {
-    writeFileSync(
-      file,
-      [
-        `{"ts":"2024-01-01T00:00:00Z","session_id":"${testId}","source":"input","content":"valid"}`,
-        "this is not json",
-        `{"ts":"2024-01-01T00:00:01Z","session_id":"${testId}","source":"input","content":"also valid"}`,
-      ].join("\n"),
-    );
-
-    const allEntries = await readAllSessions();
-    // Should have at least our 2 valid entries (malformed line is skipped)
-    const sessionEntries = allEntries.filter((e) => e.session_id === testId);
-    expect(sessionEntries.length).toBe(2);
-    expect(sessionEntries[0]!.content).toBe("valid");
-    expect(sessionEntries[1]!.content).toBe("also valid");
-
-    rmSync(file);
-  } finally {
-    try { rmSync(file); } catch {}
   }
 });

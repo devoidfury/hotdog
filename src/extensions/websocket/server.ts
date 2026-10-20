@@ -8,7 +8,7 @@
 // CreateWsServerOptions, and WsServer.
 
 import { HOOKS } from "@core/hooks.ts";
-import type { AgentLike } from "@core/session/index.ts";
+import { buildTaskConfigOptions, type AgentLike } from "@core/session/index.ts";
 import { createTurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { S2C, taskActivityMessage, C2SMessage } from "./protocol.ts";
@@ -132,18 +132,10 @@ export function createWsServer(
   let taskManager: TaskManager | null = null;
   if (resolvedCore?.modelRegistry) {
     const tm = new TaskManager({
+      ...buildTaskConfigOptions(resolvedCore),
       buildAgent: buildAgent as (config: Record<string, unknown>) => Promise<AgentLike>,
       modelRegistry: resolvedCore.modelRegistry,
       config: core.config,
-      maxIterations: resolvedCore.maxIterations,
-      taskProfile: resolvedCore.taskProfile || "task-default",
-      lanesPerProvider: resolvedCore.taskLanesPerProvider,
-      lanesDir: resolvedCore.taskLanesDir ?? null,
-      spawnLogPath: resolvedCore.taskSpawnsPath ?? null,
-      defaultModel: resolvedCore.model ?? null,
-      healthIntervalSecs: resolvedCore.providerHealthCheckIntervalSecs,
-      healthCheckTimeoutSecs: resolvedCore.healthCheckTimeout,
-      healthContextLimit: resolvedCore.contextLimit,
       profileManager: resolvedCore.profileManager,
       sessionManager: registry.getSessionManager(),
       // A follow-up on a session blocked in a question becomes its answer.

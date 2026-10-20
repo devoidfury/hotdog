@@ -400,17 +400,6 @@ export async function buildModelRegistry(
   return registry;
 }
 
-export function resolveProvider(
-  cli: { provider?: string },
-  config: { defaultProvider?: string; providers?: ProviderDef[] },
-): ProviderDef | null {
-  const providerName = cli.provider || config.defaultProvider;
-  const providers = config.providers || [];
-
-  if (!providerName) return null;
-  return providers.find((p) => p.name === providerName) ?? null;
-}
-
 // Warn-once memory for ambiguous suffix matches (the lookup repeats constantly,
 // so a live warning would bury the log).
 const suffixAmbiguityWarned = new Set<string>();

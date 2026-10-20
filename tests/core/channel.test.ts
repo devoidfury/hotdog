@@ -29,11 +29,11 @@ class TestChannel extends Channel {
     yield "test";
   }
 
-  protected _subscribe(sessionId: string): void {
+  override _subscribe(sessionId: string): void {
     this.subscribeCalls.push(sessionId);
   }
 
-  protected _unsubscribe(sessionId: string): void {
+  override _unsubscribe(sessionId: string): void {
     this.unsubscribeCalls.push(sessionId);
   }
 
@@ -64,10 +64,6 @@ class MinimalChannel extends Channel {
   async *read(): AsyncIterable<string> {
     yield "test";
   }
-
-  protected _subscribe(_sessionId: string): void {}
-
-  protected _unsubscribe(_sessionId: string): void {}
 
   protected _cleanup(): void {}
 

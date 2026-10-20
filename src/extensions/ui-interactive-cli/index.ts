@@ -9,7 +9,7 @@ import { parseForkArg } from "@core/command-handlers.ts";
 import { HOOKS } from "@core/hooks.ts";
 import type { QuestionDef } from "@core/context/input.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
-import { SessionManager, type AgentLike } from "@core/session/index.ts";
+import { buildTaskConfigOptions, SessionManager, type AgentLike } from "@core/session/index.ts";
 import { Agent } from "@core/agent.ts";
 import { Message } from "@core/context/message.ts";
 import { formatToolResult } from "@core/extensions/tool-utils.ts";
@@ -581,17 +581,7 @@ export async function runInteractiveSession(
     llmClient,
     modelRegistry: resolved.modelRegistry,
     coreConfig: config,
-    taskConfig: {
-      maxIterations: resolved.maxIterations,
-      taskProfile: resolved.taskProfile || "task-default",
-      lanesPerProvider: resolved.taskLanesPerProvider,
-      lanesDir: resolved.taskLanesDir,
-      spawnLogPath: resolved.taskSpawnsPath,
-      defaultModel: resolved.model ?? null,
-      healthIntervalSecs: resolved.providerHealthCheckIntervalSecs,
-      healthCheckTimeoutSecs: resolved.healthCheckTimeout,
-      healthContextLimit: resolved.contextLimit,
-    },
+    taskConfig: buildTaskConfigOptions(resolved),
     profileManager: resolved.profileManager,
   });
 

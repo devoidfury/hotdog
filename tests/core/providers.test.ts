@@ -1,10 +1,9 @@
-// Tests for providers.ts — buildModelRegistry, resolveProvider, initSystemPromptTemplate.
+// Tests for providers.ts — buildModelRegistry, initSystemPromptTemplate.
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   buildModelRegistry,
   fetchRemoteModelsOutcome,
-  resolveProvider,
   initSystemPromptTemplate,
   isTextGenerative,
   selectableModelKeys,
@@ -127,57 +126,6 @@ describe("buildModelRegistry", () => {
     expect(registry["ai365/dsv4"]!.reasoningEffort).toBe("max");
     expect(registry["ai365/qwen"]!.reasoningEffort).toBe("high");
     expect(registry["ai365/basic"]!.reasoningEffort).toBeUndefined();
-  });
-});
-
-// ── resolveProvider ─────────────────────────────────────────────────────────
-
-describe("resolveProvider", () => {
-  it("returns null when no provider name or default is given", () => {
-    expect(resolveProvider({}, { providers: [] })).toBeNull();
-    expect(resolveProvider({ provider: undefined }, { providers: [] })).toBeNull();
-    expect(resolveProvider({}, {})).toBeNull();
-  });
-
-  it("returns provider when CLI provider matches", () => {
-    const config = {
-      providers: [
-        { name: "openai", url: "http://openai.com" },
-        { name: "anthropic", url: "http://anthropic.com" },
-      ],
-    } as any;
-    const result = resolveProvider({ provider: "openai" }, config);
-    expect(result!.name).toBe("openai");
-    expect((result as any).url).toBe("http://openai.com");
-  });
-
-  it("returns provider when config defaultProvider matches", () => {
-    const config = {
-      defaultProvider: "anthropic",
-      providers: [
-        { name: "openai", url: "http://openai.com" },
-        { name: "anthropic", url: "http://anthropic.com" },
-      ],
-    } as any;
-    const result = resolveProvider({}, config);
-    expect(result!.name).toBe("anthropic");
-  });
-
-  it("CLI provider overrides config defaultProvider", () => {
-    const config = {
-      defaultProvider: "anthropic",
-      providers: [
-        { name: "openai", url: "http://openai.com" },
-        { name: "anthropic", url: "http://anthropic.com" },
-      ],
-    } as any;
-    const result = resolveProvider({ provider: "openai" }, config);
-    expect(result!.name).toBe("openai");
-  });
-
-  it("returns null when provider name not found", () => {
-    expect(resolveProvider({ provider: "nonexistent" }, { providers: [{ name: "openai" }] as any })).toBeNull();
-    expect(resolveProvider({ provider: "test" }, {})).toBeNull();
   });
 });
 

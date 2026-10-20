@@ -15,15 +15,12 @@ export class CliChannel extends Channel {
   #sink: CliOutputSink;
   #rl: readline.Interface;
   #onQuit: (() => void) | undefined;
-  #unsubscribers: Map<string, () => void>;
 
   constructor(options: CliChannelOptions) {
     super({ sessionManager: options.sessionManager });
     this.#sink = options.sink;
     this.#rl = options.rl;
     this.#onQuit = options.onQuit;
-    this.#unsubscribers = new Map();
-
     this.attach(options.sessionId);
   }
 
@@ -35,21 +32,6 @@ export class CliChannel extends Channel {
     // `return` in an async generator only sets the completion value; delegate
     // so callers actually receive the readline lines.
     yield* this.#rl[Symbol.asyncIterator]();
-  }
-
-  protected _subscribe(sessionId: string): void {
-    const unsubscribe = this.sessionManager.onSessionEvents(sessionId, (event: OutputEvent) => {
-      this.write(event);
-    });
-    this.#unsubscribers.set(sessionId, unsubscribe);
-  }
-
-  protected _unsubscribe(sessionId: string): void {
-    const unsubscribe = this.#unsubscribers.get(sessionId);
-    if (unsubscribe) {
-      unsubscribe();
-      this.#unsubscribers.delete(sessionId);
-    }
   }
 
   protected _cleanup(): void {

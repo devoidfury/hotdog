@@ -10,13 +10,10 @@ export interface OneShotChannelOptions {
 
 export class OneShotChannel extends Channel {
   #sink: CliOutputSink;
-  #unsubscribers: Map<string, () => void>;
 
   constructor(options: OneShotChannelOptions) {
     super({ sessionManager: options.sessionManager });
     this.#sink = options.sink;
-    this.#unsubscribers = new Map();
-
     this.attach(options.sessionId);
   }
 
@@ -27,21 +24,6 @@ export class OneShotChannel extends Channel {
   // No further input in one-shot mode — the single prompt is enqueued up front
   async *read(): AsyncIterable<string> {
     return;
-  }
-
-  protected _subscribe(sessionId: string): void {
-    const unsubscribe = this.sessionManager.onSessionEvents(sessionId, (event: OutputEvent) => {
-      this.write(event);
-    });
-    this.#unsubscribers.set(sessionId, unsubscribe);
-  }
-
-  protected _unsubscribe(sessionId: string): void {
-    const unsubscribe = this.#unsubscribers.get(sessionId);
-    if (unsubscribe) {
-      unsubscribe();
-      this.#unsubscribers.delete(sessionId);
-    }
   }
 
   protected _cleanup(): void {

@@ -38,7 +38,6 @@ export class WebSocketChannel extends Channel {
   #sessionId: string;
   #ready: boolean;
   #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;
-  #unsubscribers: Map<string, () => void>;
 
   constructor(options: WebSocketChannelOptions) {
     super({ sessionManager: options.sessionManager });
@@ -46,8 +45,6 @@ export class WebSocketChannel extends Channel {
     this.#sessionId = options.sessionId;
     this.#ready = true;
     this.#broadcastCallback = options.broadcastCallback;
-    this.#unsubscribers = new Map();
-
     this.attach(options.sessionId);
   }
 
@@ -148,24 +145,6 @@ export class WebSocketChannel extends Channel {
   async *read(): AsyncIterable<string> {
     // Placeholder: messages are dispatched via routeMessage, not this iterator.
     yield "";
-  }
-
-  protected _subscribe(sessionId: string): void {
-    const unsubscribe = this.sessionManager.onSessionEvents(
-      sessionId,
-      (event: OutputEvent) => {
-        this.write(event);
-      },
-    );
-    this.#unsubscribers.set(sessionId, unsubscribe);
-  }
-
-  protected _unsubscribe(sessionId: string): void {
-    const unsubscribe = this.#unsubscribers.get(sessionId);
-    if (unsubscribe) {
-      unsubscribe();
-      this.#unsubscribers.delete(sessionId);
-    }
   }
 
   protected _cleanup(): void {

@@ -6,7 +6,7 @@ import { CliSubcommandRegistryLike } from "@core/extensions/registries.ts";
 import { logger } from "@utils/logger.ts";
 import { CliOutputSink } from "@utils/cli/cli.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
-import { SessionManager, type AgentLike } from "@core/session/index.ts";
+import { buildTaskConfigOptions, SessionManager, type AgentLike } from "@core/session/index.ts";
 import { createAgentFactory } from "@core/agent-factory.ts";
 import { restoreSessionIntoAgent } from "@core/session/session-log.ts";
 import { getSessionRow } from "@core/session/session-index.ts";
@@ -42,17 +42,7 @@ async function runOneShot(
     llmClient: llmClient,
     modelRegistry,
     coreConfig: config,
-    taskConfig: {
-      maxIterations: resolved.maxIterations,
-      taskProfile: resolved.taskProfile || "task-default",
-      lanesPerProvider: resolved.taskLanesPerProvider,
-      lanesDir: resolved.taskLanesDir,
-      spawnLogPath: resolved.taskSpawnsPath,
-      defaultModel: resolved.model ?? null,
-      healthIntervalSecs: resolved.providerHealthCheckIntervalSecs,
-      healthCheckTimeoutSecs: resolved.healthCheckTimeout,
-      healthContextLimit: resolved.contextLimit,
-    },
+    taskConfig: buildTaskConfigOptions(resolved),
     // Mirrors the interactive CLI: without it the TaskManager cannot resolve
     // worker profiles from the config directory.
     profileManager: resolved.profileManager,

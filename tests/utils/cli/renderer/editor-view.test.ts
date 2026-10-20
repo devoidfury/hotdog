@@ -261,6 +261,29 @@ describe("EditorView -- history navigation with draft", () => {
     h.feed("\x1b[A"); // up -> one (walk resumes from the stored position)
     expect(h.view.text).toBe("one");
   });
+
+  it("Up on an empty history is inert: no phantom draft to bury later typing", () => {
+    const h = make();
+    h.feed("abc");
+    h.feed("\x1b[A"); // Up with nothing to recall
+    expect(h.view.text).toBe("abc");
+    h.feed("d");
+    h.feed("\x1b[B"); // Down must NOT restore a phantom draft over "abcd"
+    expect(h.view.text).toBe("abcd");
+    expect(h.events.some((e) => e.type === "history")).toBe(false);
+  });
+
+  it("Up at the oldest end stays put, and a fresh type + Down keeps the text", () => {
+    const h = make();
+    h.feed("only\r");
+    h.feed("\x1b[A"); // -> only
+    expect(h.view.text).toBe("only");
+    h.feed("\x1b[A"); // already oldest: no event, no re-stash
+    expect(h.events.filter((e) => e.type === "history" && e.phase === "prev")).toHaveLength(1);
+    h.feed(" typed"); // walk still active (editing breaks it only on submit-side ops)
+    h.feed("\x1b[B"); // down past newest -> the walk's draft ("") restores
+    expect(h.view.text).toBe(""); // documented §4 walk semantics: draft was the empty line
+  });
 });
 
 describe("EditorView -- completion popup lifecycle", () => {

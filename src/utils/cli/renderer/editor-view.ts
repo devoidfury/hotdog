@@ -304,7 +304,13 @@ export class EditorView {
       return;
     }
     if (delta < 0) {
-      if (!this.history.walkActive) this.history.beginWalk(this.editor.buffer);
+      if (!this.history.walkActive) {
+        // Up with no entries to show must NOT begin a walk: stashing a draft
+        // that prev() can never displace latches walkActive, and a later
+        // Down buries freshly typed text under that phantom draft.
+        if (this.history.size === 0) return;
+        this.history.beginWalk(this.editor.buffer);
+      }
       const t = this.history.prev();
       if (t !== null) {
         this.editor.setText(t);

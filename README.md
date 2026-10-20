@@ -39,7 +39,7 @@ hotdog -m "qwen3.8-flash-next" -p "See if you can improve the test coverage. @pa
 
 ### Install from npm (optional)
 
-The same source tree is published as `@read-receipt/hotdog`. From v0.13.1 every npm version is published from a tagged GitHub release with npm provenance (0.12.1 was the one-time manual bootstrap, no attestation).
+The same source tree is published as `@read-receipt/hotdog`. From v0.13.0 every npm version is published from a tagged GitHub release with npm provenance.
 
 ```sh
 # global: links `hotdog` into ~/.bun/bin (already on your PATH if bun's installer set it up)

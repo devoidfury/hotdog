@@ -4,7 +4,8 @@
   "main": "bin/hotdog",
   "dependencies": {},
   "devDependencies": {
-    "@types/bun": "^1.4.3"
+    "@types/bun": "^1.4.3",
+    "typescript": "^7.0.2"
   },
   "bin": {
     "hotdog": "bin/hotdog"

@@ -126,7 +126,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             // reloading the system prompt (which would bust the cached prefix).
             const messages = agent.context?.getMessages?.();
             const hasConversationTurns = messages?.some(
-              (m: any) => m.role === "user" || m.role === "harness",
+              (m) => m.role === "user" || m.role === "harness",
             );
             if (hasConversationTurns && typeof agent.addMessage === "function") {
               const skill = loader.getSkill(name);

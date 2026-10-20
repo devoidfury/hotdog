@@ -38,13 +38,16 @@ export interface ProfileDef {
   group?: string | null;
   blacklistTools: string[];
   whitelistTools: string[] | null;
+  /** Aspect file names this profile loads (consumed by the aspects extension). */
+  aspects?: string[];
   /** Snake_case alias for blacklistTools (from JSON config). */
   blacklist_tools?: string[];
   /** Snake_case alias for whitelistTools (from JSON config). */
   whitelist_tools?: string[] | null;
   manager: boolean;
   visibleWorker: boolean;
-  [key: string]: any;
+  /** Extra keys from parsed profile files (config-style additions ride along unread). */
+  [key: string]: unknown;
 }
 
 export interface SwitchProfile {

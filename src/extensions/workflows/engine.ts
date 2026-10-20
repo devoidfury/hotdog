@@ -98,8 +98,15 @@ export interface RunConfig {
    */
   managerSessionId?: string;
   limits?: Partial<WorkflowLimits>;
-  /** Test seam for the wall-clock node cap (default: workflow/config minutes). */
+  /** Test seam for the wall-clock node cap (default: workflow/config minutes).
+   *  An explicit override enforces regardless of enableRuntimeTimeouts. */
   maxRuntimeMsOverride?: number;
+  /**
+   * The effective workflows.enableRuntimeTimeouts, captured by the caller at
+   * dispatch time. False keeps every runtime-cap kill point dormant; the run
+   * duration accounting (and the run.jsonl stats it feeds) is untouched.
+   */
+  enableRuntimeTimeouts?: boolean;
   /** Test seam for the run-dir ownership claim (pid/host/liveness). Defaults to this process. */
   claimOptions?: ClaimOptions;
 }
@@ -216,6 +223,7 @@ function critiqueParts(gateResult: GateResult, turnResult: string): PromptPart[]
 export class WorkflowRun {
   #cfg: RunConfig;
   #limits: WorkflowLimits;
+  #timeoutsEnabled: boolean;
   #runs = new Map<string, NodeRun>();
   #cancelRequested = false;
   #taskSeq = 0;
@@ -225,6 +233,8 @@ export class WorkflowRun {
   constructor(cfg: RunConfig) {
     this.#cfg = cfg;
     this.#limits = { ...DEFAULT_WORKFLOW_LIMITS, ...cfg.limits };
+    // Effective caps freeze at construction (dispatch): a mid-flight config flip must not re-arm a live run.
+    this.#timeoutsEnabled = cfg.enableRuntimeTimeouts === true || cfg.maxRuntimeMsOverride !== undefined;
     this.#runStartedMs = Date.now();
     for (const node of cfg.workflow.nodes) {
       let resolve!: () => void;
@@ -843,6 +853,9 @@ export class WorkflowRun {
   // Accumulated worker-run time, not wall clock since queueing: the deadline
   // is armed when a turn actually starts (onTurnStart) and banked when the
   // turn ends, so waiting for a provider-lane slot never burns the cap.
+  // When timeouts are disabled only this accounting runs: the deadline never
+  // arms (the sole writer of runtimeKilled) and #runtimeElapsed stays false,
+  // so all three disposition kill sites are unreachable by construction.
 
   #runtimeMs(n: WorkflowNode): number {
     if (this.#cfg.maxRuntimeMsOverride !== undefined) return this.#cfg.maxRuntimeMsOverride;
@@ -862,6 +875,7 @@ export class WorkflowRun {
   }
 
   #runtimeElapsed(nr: NodeRun): boolean {
+    if (!this.#timeoutsEnabled) return false; // dormant when the toggle is off
     return this.#runtimeUsedMs(nr) >= this.#runtimeMs(nr.node);
   }
 
@@ -874,6 +888,7 @@ export class WorkflowRun {
   #turnStarted(nr: NodeRun): void {
     if (nr.deadlineTimer !== null) clearTimeout(nr.deadlineTimer);
     nr.runtimeRunningSince = Date.now();
+    if (!this.#timeoutsEnabled) return; // bank-only: the kill timer stays unarmed
     const remaining = this.#runtimeMs(nr.node) - nr.runtimeUsedMs;
     nr.deadlineTimer = setTimeout(() => {
       nr.deadlineTimer = null;

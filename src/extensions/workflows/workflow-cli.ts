@@ -49,6 +49,8 @@ export interface WorkflowCliDeps {
   runsRoot?: string;
   /** Limits from resolved config (soft node cap, default runtime). */
   limits?: Partial<WorkflowLimits>;
+  /** Resolved workflows.enableRuntimeTimeouts: gates render's cap lines and `run`'s kill points. */
+  enableRuntimeTimeouts?: boolean;
   /** Resolved config modelGroups: enables declared-group resolution in validate/run. */
   modelGroups?: Record<string, string[]>;
   /** Session-capable host for `run`; null when the config cannot drive agents. */
@@ -95,6 +97,7 @@ export function runWorkflowCommandOnText(
   limits?: Partial<WorkflowLimits>,
   params?: Record<string, string>,
   modelGroups?: Record<string, string[]>,
+  enableRuntimeTimeouts?: boolean,
 ): CommandOutcome {
   const result = parseWorkflow(text, { limits, params, modelGroups });
   const warnings = result.warnings.map((w) => `warning: ${w}`);
@@ -102,7 +105,10 @@ export function runWorkflowCommandOnText(
   if (!result.workflow) return invalidWorkflowOutcome(file, result);
 
   if (verb === "render") {
-    return { code: 0, out: [renderWorkflow(result.workflow).replace(/\n$/, ""), ...warnings], err: [] };
+    const rendered = renderWorkflow(result.workflow, {
+      showRuntimeTimeouts: enableRuntimeTimeouts !== false,
+    });
+    return { code: 0, out: [rendered.replace(/\n$/, ""), ...warnings], err: [] };
   }
 
   const wf = result.workflow;
@@ -168,7 +174,14 @@ async function cmdRun(args: string[], deps: WorkflowCliDeps): Promise<CommandOut
   const runsRoot = deps.runsRoot!;
   const runId = forcedId ?? (await nextRunId(runsRoot, workflow.name));
   const runDir = join(runsRoot, runId);
-  const run = new WorkflowRun({ workflow, runId, runDir, tasks: host.tasks, limits: deps.limits });
+  const run = new WorkflowRun({
+    workflow,
+    runId,
+    runDir,
+    tasks: host.tasks,
+    limits: deps.limits,
+    enableRuntimeTimeouts: deps.enableRuntimeTimeouts === true,
+  });
 
   const emit = deps.emit ?? (() => {});
   emit(`run ${runId} (${workflow.name}) in ${runDir}`);
@@ -307,6 +320,7 @@ export async function runWorkflowCommand(
         deps.limits,
         Object.keys(params).length > 0 ? params : undefined,
         deps.modelGroups,
+        deps.enableRuntimeTimeouts,
       );
     }
     case "run":

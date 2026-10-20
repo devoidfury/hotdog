@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Workflow runtime timeouts are opt-in (`workflows.enableRuntimeTimeouts`, default off).** A runtime-cap kill took down too many near-complete workers, and the kill is terminal: it fails the node immediately and skips the rest of its retry ladder. With the toggle off, nodes run to completion -- run duration stats are still logged, `workflow_validate` still validates `maxRuntimeMins` so graphs stay portable for when the toggle is on, and the render output drops the runtime-cap lines. Residual stop-paths: bash 600s tool caps, provider timeouts, `/workflow cancel`. The engine captures the setting once at dispatch, so a mid-run config flip never changes a live run; the `maxRuntimeMsOverride` test seam still enforces regardless.
+
 ## [v0.13.0] - 2026-10-20
 
 - `$HOTDOG_DATA_DIR` (`<data>`) can be set to change where sessions/workflows/temp data is saved. defaults to ~/.cache/hotdog/

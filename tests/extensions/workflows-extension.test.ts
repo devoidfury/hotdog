@@ -10,6 +10,7 @@ import {
   runWorkflowCommandOnText,
 } from "@extensions/workflows/workflow-cli.ts";
 import { parseWorkflow, renderWorkflow } from "@extensions/workflows/workflow.ts";
+import { RunRegistry, WorkflowDispatchTool } from "@extensions/workflows/workflow-tools.ts";
 
 const VALID = `
 version: 1
@@ -143,5 +144,82 @@ describe("workflows.path default (config schema)", () => {
   it("an explicit workflows.path still wins", () => {
     setEnv("/tmp/hotdog-data-test");
     expect(resolvePath({ workflows: { path: "/tmp/explicit-wf" } })).toBe("/tmp/explicit-wf");
+  });
+});
+
+describe("workflows.enableRuntimeTimeouts (config schema)", () => {
+  // Resolves the REAL workflows extension.json through the shared config
+  // layer: the key exists, defaults false, and an explicit true passes.
+  const extJson = JSON.parse(
+    readFileSync(new URL("../../src/extensions/workflows/extension.json", import.meta.url), "utf-8"),
+  );
+  const schema = buildUnifiedSchema([{ configSchema: extJson.configSchema }]);
+  const resolve = (config: Record<string, unknown> = {}): Record<string, unknown> =>
+    resolveKey("workflows", schema.workflows, { config }) as Record<string, unknown>;
+
+  it("defaults false and stays false when unset", () => {
+    expect(resolve().enableRuntimeTimeouts).toBe(false);
+    expect(resolve({ workflows: {} }).enableRuntimeTimeouts).toBe(false);
+  });
+
+  it("an explicit true resolves through", () => {
+    expect(resolve({ workflows: { enableRuntimeTimeouts: true } }).enableRuntimeTimeouts).toBe(true);
+  });
+});
+
+describe("runtime-cap text visibility (enableRuntimeTimeouts)", () => {
+  const WITH_CAP = `
+version: 1
+name: captext
+description: render text follows the toggle
+nodes:
+  - id: a
+    maxRuntimeMins: 20
+`;
+
+  it("renderWorkflow-level: hidden when off, today's bytes when on or unset", () => {
+    const on = runWorkflowCommandOnText("render", "f.yaml", WITH_CAP, undefined, undefined, undefined, true);
+    expect(on.out[0]).toContain("maxRuntime default");
+    expect(on.out[0]).toContain("max-runtime: 20m");
+    const bare = runWorkflowCommandOnText("render", "f.yaml", WITH_CAP);
+    expect(bare.out[0]).toContain("maxRuntime default"); // no config context: byte-identical to today
+    expect(bare.out[0]).toContain("max-runtime: 20m");
+    const off = runWorkflowCommandOnText("render", "f.yaml", WITH_CAP, undefined, undefined, undefined, false);
+    expect(off.out[0]).not.toContain("maxRuntime");
+    expect(off.out[0]).not.toContain("max-runtime");
+    expect(off.out[0]).toContain("maxNodes 8"); // the rest of the render is untouched
+  });
+
+  it("CLI render follows deps.enableRuntimeTimeouts", async () => {
+    const path = `/tmp/hotdog-wf-captext-${process.pid}.workflow.yaml`;
+    await Bun.write(path, WITH_CAP);
+    try {
+      expect((await runWorkflowCommand(["render", path])).out[0]).toContain("maxRuntime default");
+      const off = await runWorkflowCommand(["render", path], { enableRuntimeTimeouts: false });
+      expect(off.code).toBe(0);
+      expect(off.out[0]).not.toContain("maxRuntime");
+    } finally {
+      await Bun.file(path).delete();
+    }
+  });
+
+  it("workflow_dispatch toolDef carries the cap note only when caps are on", () => {
+    const opts = {
+      taskManagerProvider: () => null,
+      getRunsRoot: () => null,
+      getWorkflowsDir: () => null,
+      limits: {},
+      registry: new RunRegistry(),
+    };
+    const on = JSON.stringify(new WorkflowDispatchTool({ ...opts, enableRuntimeTimeouts: true }).toToolDef());
+    expect(on).toContain("A node over its maxRuntimeMins (default: 60)");
+    const configured = JSON.stringify(
+      new WorkflowDispatchTool({ ...opts, limits: { maxRuntimeMins: 45 }, enableRuntimeTimeouts: true }).toToolDef(),
+    );
+    expect(configured).toContain("A node over its maxRuntimeMins (default: 45)");
+    const off = JSON.stringify(new WorkflowDispatchTool({ ...opts, enableRuntimeTimeouts: false }).toToolDef());
+    expect(off).not.toContain("maxRuntime");
+    const bare = JSON.stringify(new WorkflowDispatchTool(opts).toToolDef());
+    expect(bare).toBe(off); // unset behaves as off: the note costs zero prompt bytes
   });
 });

@@ -1312,7 +1312,8 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `maxNodes` | `number` | `8` | Soft cap on nodes per workflow graph (exceeding it warns; validation refuses above the hard ceiling of 32). A workflow's own `limits.maxNodes` overrides. |
-| `maxRuntimeMins` | `number` | `60` | Default per-node cap in minutes on actual worker run time (a node's `maxRuntimeMins` overrides); time queued waiting for a provider-lane slot does not count. When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried. |
+| `maxRuntimeMins` | `number` | `60` | Default per-node cap in minutes on actual worker run time (a node's `maxRuntimeMins` overrides); time queued waiting for a provider-lane slot does not count. When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried. Enforced only when `enableRuntimeTimeouts` is true. |
+| `enableRuntimeTimeouts` | `boolean` | `false` | Enforce the per-node runtime caps. Off: caps are never enforced, nodes run to completion; stop a run with `/workflow cancel` (Ctrl-C for a CLI run). On: an over-cap in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried. The effective value is captured at dispatch; flipping it mid-run changes nothing for running runs. |
 | `path` | `string` | `<data-dir>/workflows` (data dir = `$HOTDOG_DATA_DIR`, or `~/.cache/hotdog`) | Directory holding `*.workflow.yaml` graphs; run dirs live under `<path>/runs`. |
 
 ```json

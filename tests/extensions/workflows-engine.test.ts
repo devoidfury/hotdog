@@ -1293,3 +1293,141 @@ describe("engine: run log, reconcile & resume", () => {
     ).rejects.toThrow("holds workflow 'two'");
   });
 });
+
+describe("engine: enableRuntimeTimeouts toggle", () => {
+  // Caps driven through cfg.limits so the tests stay fast without touching
+  // the override seam: 0.002 minutes = 120ms of worker run time.
+  const TINY_CAP = { maxRuntimeMins: 0.002 };
+
+  it("off: a node past its cap is not killed mid-turn and its gate-failed retry proceeds", async () => {
+    const dir = freshDir();
+    const { port, spawned } = makeManualPort();
+    const workflow = wf(`
+      version: 1
+      name: capped-off
+      description: past-cap worker survives when caps are off
+      nodes:
+        - id: a
+          accept:
+            maxAttempts: 3
+    `);
+    const runP = new WorkflowRun({
+      workflow,
+      runId: "r",
+      runDir: dir,
+      tasks: port,
+      limits: { ...TINY_CAP },
+      enableRuntimeTimeouts: false,
+    }).run();
+    await settle(() => spawned.length === 1, "spawn");
+    const t = spawned[0]!;
+    t.startTurn();
+    await sleep(260); // over twice the cap spent actually running
+    expect(t.interrupts).toBe(0); // the deadline timer was never armed
+    t.endTurn({ status: "completed", result: "a pointer-summary" }); // no verdict yet: gate fails
+    // The gate-failed site's elapsed-cap kill must not fire either: the node
+    // takes its warm retry instead of failing "before acceptance".
+    await settle(() => t.taskTurns === 1, "warm retry");
+    writeFile(dir, "a.verdict", "pass");
+    t.startTurn();
+    t.endTurn({ status: "completed", result: "a pointer-summary" });
+    const summary = await runP;
+    expect(summary.states.a).toBe(NODE_STATE.SUCCEEDED);
+  });
+
+  it("off + maxRuntimeMsOverride present: the override still enforces", async () => {
+    const dir = freshDir();
+    const fake = makeFake(dir, {
+      a: ({ onAbort }) =>
+        new Promise((_resolve, reject) => {
+          onAbort(() => reject(LlmError.Cancelled("aborted")));
+        }),
+    });
+    const workflow = wf(`
+      version: 1
+      name: capped-off-override
+      description: the test-seam override outranks the toggle
+      nodes:
+        - id: a
+          accept:
+            maxAttempts: 3
+    `);
+    const summary = await new WorkflowRun({
+      workflow,
+      runId: "r",
+      runDir: dir,
+      tasks: fake.manager,
+      enableRuntimeTimeouts: false,
+      maxRuntimeMsOverride: 80,
+    }).run();
+    expect(summary.states.a).toBe("failed");
+    expect(String(readLog(dir).find((e) => e.id === "a" && e.state === "failed")!.detail)).toContain(
+      "max_runtime",
+    );
+    expect(fake.turns["a"]).toBe(1); // terminal kill, exactly like the toggle-on semantics
+  });
+
+  it("on: cap kill semantics unchanged (mid-turn interrupt, terminal fail, dependents blocked)", async () => {
+    const dir = freshDir();
+    const { port, spawned } = makeManualPort();
+    const workflow = wf(`
+      version: 1
+      name: capped-on
+      description: caps on kills like before the toggle existed
+      nodes:
+        - id: a
+          accept:
+            maxAttempts: 3
+        - id: b
+          dependsOn: [a]
+    `);
+    const runP = new WorkflowRun({
+      workflow,
+      runId: "r",
+      runDir: dir,
+      tasks: port,
+      limits: { ...TINY_CAP },
+      enableRuntimeTimeouts: true,
+    }).run();
+    await settle(() => spawned.length === 1, "spawn");
+    spawned[0]!.startTurn(); // the deadline arms when the worker actually starts
+    await settle(() => spawned[0]!.interrupts >= 1, "deadline kill fires");
+    const summary = await runP;
+    expect(summary.states.a).toBe("failed");
+    expect(summary.states.b).toBe("blocked");
+    expect(String(readLog(dir).find((e) => e.id === "a" && e.state === "failed")!.detail)).toMatch(
+      /max_runtime exceeded \(used \d+ms of \d+ms cap, attempt \d+\)/,
+    );
+  });
+
+  it("off: run.jsonl still records the run stats (timed lines, full transition trail)", async () => {
+    const dir = freshDir();
+    const fake = makeFake(dir, { a: good({ "out.txt": "artifact" }) });
+    const workflow = wf(`
+      version: 1
+      name: stats-off
+      description: run duration stats survive the toggle
+      nodes:
+        - id: a
+          accept:
+            files: [out.txt]
+    `);
+    const summary = await new WorkflowRun({
+      workflow,
+      runId: "r",
+      runDir: dir,
+      tasks: fake.manager,
+      enableRuntimeTimeouts: false,
+    }).run();
+    expect(summary.outcome).toBe("succeeded");
+    const log = readLog(dir);
+    for (const e of log) expect(typeof e.t).toBe("string");
+    expect(typeof log.find((e) => e.ev === "started")!.startedAt).toBe("number");
+    expect(log.filter((e) => e.ev === "node" && e.id === "a").map((e) => e.state)).toEqual([
+      "queued",
+      "running",
+      "succeeded",
+    ]);
+    expect(log.at(-1)!.ev).toBe("finished");
+  });
+});

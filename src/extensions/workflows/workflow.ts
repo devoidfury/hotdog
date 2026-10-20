@@ -691,15 +691,26 @@ export function topoOrder(wf: Workflow): string[] {
 }
 
 /** Deterministic plain-text rendering, byte-identical for identical inputs.
- *  For humans in `hotdog workflow render` and for the manager's eyes. */
-export function renderWorkflow(wf: Workflow): string {
+ *  For humans in `hotdog workflow render` and for the manager's eyes.
+ *  `showRuntimeTimeouts` (default true) drops the runtime-cap lines when the
+ *  workflows.enableRuntimeTimeouts toggle is off, so nobody tunes a cap that
+ *  will never fire. */
+export function renderWorkflow(
+  wf: Workflow,
+  opts: { showRuntimeTimeouts?: boolean } = {},
+): string {
+  const showRuntime = opts.showRuntimeTimeouts !== false;
   const byId = new Map(wf.nodes.map((n) => [n.id, n]));
   const lines: string[] = [];
   lines.push(`workflow ${wf.name} (v${wf.version})`);
   lines.push(`  ${wf.description}`);
-  lines.push(
-    `  limits: maxNodes ${wf.limits.maxNodes}, maxRuntime default ${wf.limits.maxRuntimeMins ?? DEFAULT_WORKFLOW_LIMITS.maxRuntimeMins}m`,
-  );
+  const limitsBits = [`maxNodes ${wf.limits.maxNodes}`];
+  if (showRuntime) {
+    limitsBits.push(
+      `maxRuntime default ${wf.limits.maxRuntimeMins ?? DEFAULT_WORKFLOW_LIMITS.maxRuntimeMins}m`,
+    );
+  }
+  lines.push(`  limits: ${limitsBits.join(", ")}`);
   lines.push("");
   lines.push("nodes (execution order):");
   topoOrder(wf).forEach((id, i) => {
@@ -729,7 +740,7 @@ export function renderWorkflow(wf: Workflow): string {
         : "attempts=1",
     );
     lines.push(`     accept: ${acc.join(", ")}`);
-    if (n.maxRuntimeMins) lines.push(`     max-runtime: ${n.maxRuntimeMins}m`);
+    if (showRuntime && n.maxRuntimeMins) lines.push(`     max-runtime: ${n.maxRuntimeMins}m`);
   });
   const dataEdges: string[] = [];
   for (const n of wf.nodes) {

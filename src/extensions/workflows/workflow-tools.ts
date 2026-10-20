@@ -22,7 +22,7 @@ import type { ToolContext } from "@core/extensions/types.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
-import { parseWorkflow, type WorkflowLimits } from "./workflow.ts";
+import { DEFAULT_WORKFLOW_LIMITS, parseWorkflow, type WorkflowLimits } from "./workflow.ts";
 import {
   claimRunDir,
   isSafeRunId,
@@ -229,6 +229,8 @@ export interface WorkflowToolOptions {
   getWorkflowsDir: () => string | null;
   /** Soft limits from resolved config (workflows.maxNodes, workflows.maxRuntimeMins). */
   limits: Partial<WorkflowLimits>;
+  /** Resolved workflows.enableRuntimeTimeouts; gates the engine caps of dispatched runs. */
+  enableRuntimeTimeouts?: boolean;
   /** Resolved config modelGroups: enables declared-group resolution in validate/dispatch.
    *  When absent the group field is shape-checked only (runtime still resolves loudly). */
   getModelGroups?: () => Record<string, string[]>;
@@ -497,6 +499,7 @@ export class WorkflowDispatchTool extends WorkflowTool {
       runDir,
       tasks,
       limits: this.opts.limits,
+      enableRuntimeTimeouts: this.opts.enableRuntimeTimeouts === true,
       ...(parentModel ? { parentModel } : {}),
       ...(callingSessionId ? { managerSessionId: callingSessionId } : {}),
     });
@@ -547,17 +550,25 @@ export class WorkflowDispatchTool extends WorkflowTool {
   }
 
   toToolDef(): ToolDef {
+    const lines = [
+      "Dispatch a saved workflow graph for execution: nodes run as parked task agents on provider lanes.",
+      "Each node is machine-gated (declared output files + verdict); failed attempts retry with critique, exhausted attempts fail the node and block its descendants.",
+      "file is the path workflow_validate returned, or a saved graph's name, resolved against the workflows dir.",
+      "args optionally supplies values for the graph's declared params (id->string), making saved graphs reusable templates.",
+      "Call workflow_validate first.",
+      "run_id optionally resumes a previous run dir (filesystem-verified completed nodes are reused).",
+      "The run completes asynchronously with a completion message; use workflow_status to inspect, and do NOT redesign the graph just to change an output: reconcile / resume with args instead.",
+    ];
+    // Cap guidance only exists when caps are enforced -- off costs zero prompt bytes.
+    if (this.opts.enableRuntimeTimeouts === true) {
+      const defaultMax = this.opts.limits.maxRuntimeMins ?? DEFAULT_WORKFLOW_LIMITS.maxRuntimeMins;
+      lines.push(
+        `A node over its maxRuntimeMins (default: ${defaultMax}) is interrupted and fails immediately, remaining attempts not retried.`,
+      );
+    }
     return toolDef(
       "workflow_dispatch",
-      [
-        "Dispatch a saved workflow graph for execution: nodes run as parked task agents on provider lanes.",
-        "Each node is machine-gated (declared output files + verdict); failed attempts retry with critique, exhausted attempts fail the node and block its descendants.",
-        "file is the path workflow_validate returned, or a saved graph's name, resolved against the workflows dir.",
-        "args optionally supplies values for the graph's declared params (id->string), making saved graphs reusable templates.",
-        "Call workflow_validate first.",
-        "run_id optionally resumes a previous run dir (filesystem-verified completed nodes are reused).",
-        "The run completes asynchronously with a completion message; use workflow_status to inspect, and do NOT redesign the graph just to change an output: reconcile / resume with args instead.",
-      ].join(" "),
+      lines.join(" "),
       {
         properties: {
           file: param("string", "The workflow file to run (path returned by workflow_validate, or a saved graph's name)"),

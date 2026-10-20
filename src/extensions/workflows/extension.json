@@ -18,6 +18,11 @@
           "minimum": 1,
           "description": "Default per-node cap in minutes on actual worker run time (a node's maxRuntimeMins overrides); time queued waiting for a provider-lane slot does not count. When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried."
         },
+        "enableRuntimeTimeouts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enforce the per-node runtime caps. Off (default): caps are never enforced, nodes run to completion; stop a run with '/workflow cancel' (Ctrl-C for a CLI run). On: an over-cap in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried."
+        },
         "path": {
           "type": "string",
           "description": "Directory holding *.workflow.yaml graphs; runs live under <path>/runs. Defaults to <data-dir>/workflows (data dir is $HOTDOG_DATA_DIR, or ~/.cache/hotdog).",

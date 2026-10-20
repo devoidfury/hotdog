@@ -41,6 +41,7 @@ import type { WorkflowLimits } from "./workflow.ts";
 interface WorkflowsExtensionConfig {
   maxNodes?: number;
   maxRuntimeMins?: number;
+  enableRuntimeTimeouts?: boolean;
   path?: string;
 }
 
@@ -54,6 +55,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   };
   const workflowsDir = wfConfig.path?.trim() ? wfConfig.path.trim() : null;
   const runsRoot = workflowsDir ? join(workflowsDir, "runs") : null;
+  // Resolved at extension load like limits; the engine ctor re-freezes it per run.
+  const enableRuntimeTimeouts = wfConfig.enableRuntimeTimeouts === true;
   // Resolved modelGroups (config model-groups, camelCased keys): lets validate/
   // dispatch resolve node `group` refs against declared names.
   const modelGroups =
@@ -103,6 +106,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   const cliDeps: WorkflowCliDeps = {
     runsRoot: runsRoot ?? undefined,
     limits,
+    enableRuntimeTimeouts,
     modelGroups,
     runHost,
     emit: (line) => console.log(line),
@@ -214,6 +218,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           getRunsRoot: () => runsRoot,
           getWorkflowsDir: () => workflowsDir,
           limits,
+          enableRuntimeTimeouts,
           getModelGroups: () => modelGroups,
           registry,
         };

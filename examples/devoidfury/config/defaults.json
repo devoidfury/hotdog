@@ -50,7 +50,6 @@
     }
   ],
   "workflows": {
-    "max-runtime-mins": 90,
     "max-nodes": 24
   },
   "providers": [

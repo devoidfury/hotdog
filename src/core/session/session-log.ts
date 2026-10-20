@@ -8,6 +8,7 @@ import { MESSAGE_SOURCES, Message, type ToolCall, type ImageAttachment, type Mes
 import { repairToolCalls, INTERRUPTED_OUTCOME_UNKNOWN, INTERRUPTED_NOT_STARTED } from "../context/repair.ts";
 import { AgentError, CliError, formatError } from "../error.ts";
 import { HOOKS } from "../hooks.ts";
+import { parseJsonLines } from "@utils/json-lines.ts";
 import { logger } from "@utils/logger.ts";
 
 export const LOG_SOURCE = {
@@ -170,6 +171,15 @@ export function sessionPath(sessionId: string): string {
 }
 
 /**
+ * Shape gate for a parsed JSONL value: `null`, numbers, strings and arrays are
+ * valid JSON but are not entries. Dropped at the read site, because everything
+ * downstream (the epoch scan, replay, the audit facts) reads fields off them.
+ */
+function isLogEntry(value: unknown): value is LogEntry {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * Read a session's log. Default is the EPOCH view (entries after the last
  * RESET): the replay/context semantics. `full: true` returns the whole log:
  * audit facts (the cap's consecutive counter, the resume count) must survive
@@ -194,33 +204,17 @@ export async function readSessionEntries(
   }
 
   const content = await readFile(path, "utf-8");
-  const lines = content.split("\n");
-  const entries: LogEntry[] = [];
-  let lastResetIdx: number | null = null;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    try {
-      const entry = JSON.parse(trimmed) as LogEntry;
-      entries.push(entry);
-      if (entry.source === LOG_SOURCE.RESET) {
-        lastResetIdx = entries.length;
-      }
-    } catch {
-      logger.warn(
-        `[session-log] malformed JSON line in session ${sessionId}: ` +
-          `line ${i + 1} — "${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}"`,
-      );
-    }
+  const parsed = parseJsonLines<unknown>(content, "warn", `session-log ${sessionId}`);
+  const entries = parsed.filter(isLogEntry);
+  if (entries.length !== parsed.length) {
+    logger.warn(
+      `[session-log ${sessionId}] dropped ${parsed.length - entries.length} non-record JSON line(s)`,
+    );
   }
 
   if (opts.full) return entries;
   // Replay from the last reset event (or beginning if no reset)
-  return entries.slice(lastResetIdx ?? 0);
+  return epochEntries(entries);
 }
 
 /** Index of the first epoch entry in a FULL log (the RESET entry delimits,
@@ -272,26 +266,21 @@ export async function listSessionLogs(): Promise<SessionLogInfo[]> {
     try {
       const metadata = await stat(filePath);
       const content = await readFile(filePath, "utf-8");
-      const lines = content.split("\n").filter(Boolean);
-      if (lines.length === 0) continue;
+      const entries = parseJsonLines<unknown>(content, "skip").filter(isLogEntry);
+      if (entries.length === 0) continue;
 
       let createdAt = 0;
       let lastActivityAt = 0;
       let messageCount = 0;
 
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line) as Record<string, unknown> & LogEntry;
-          const ts = (entry.ts as string) ? new Date(entry.ts as string).getTime() : 0;
-          if (ts > 0) {
-            if (createdAt === 0 || ts < createdAt) createdAt = ts;
-            if (ts > lastActivityAt) lastActivityAt = ts;
-          }
-          if (entry.source && entry.source !== LOG_SOURCE.SYSTEM_PROMPT && entry.source !== LOG_SOURCE.RESET) {
-            messageCount++;
-          }
-        } catch {
-          // skip malformed lines
+      for (const entry of entries) {
+        const ts = (entry.ts as string) ? new Date(entry.ts as string).getTime() : 0;
+        if (ts > 0) {
+          if (createdAt === 0 || ts < createdAt) createdAt = ts;
+          if (ts > lastActivityAt) lastActivityAt = ts;
+        }
+        if (entry.source && entry.source !== LOG_SOURCE.SYSTEM_PROMPT && entry.source !== LOG_SOURCE.RESET) {
+          messageCount++;
         }
       }
 

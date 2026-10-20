@@ -1,3 +1,8 @@
+// Whole-message payloads are type aliases, not interfaces: they are handed to
+// sendSafe/send as JSON bodies, and an interface has no implicit index signature
+// (so it would not satisfy Record<string, unknown>). Nested value objects
+// (UploadFileWire, WireImage) stay interfaces.
+
 // Server→client messages always include `sessionId`.
 
 // ── Client → Server ─────────────────────────────────────────────────────────
@@ -121,29 +126,34 @@ export interface UploadFileWire {
  * UploadFileWire). The server forwards the bytes to the OpenAI-compatible
  * endpoint in config (`sttUrl`) and answers with a `transcript` message
  * carrying the same `id`.
+ *
+ * Both ends compile against this: the webui builds it in chat.ts transcribe(),
+ * the server parses the untrusted socket into it (parseTranscribeRequest in
+ * ./message-routing.ts), so a field change breaks the build instead of the
+ * first malformed message.
  */
-export interface TranscribeRequestWire {
+export type TranscribeRequestWire = {
   type: "transcribe";
   /** Client-generated correlation id, echoed verbatim on the transcript reply. */
   id: string;
-  /** Content type of the encoded audio, e.g. "audio/webm". */
-  mimeType: string;
+  /** Content type of the encoded audio, e.g. "audio/webm". Absent: the backend sniffs the container. */
+  mimeType?: string;
   /** Base64 payload (raw bytes, no data: prefix). */
   data: string;
-}
+};
 
 /**
  * Reply to a transcribe request, correlated by `id`. Failures are in-band
  * (`ok: false` + human-readable `error`): an unconfigured or broken STT
  * backend must never drop the socket.
  */
-export interface TranscriptReplyWire {
+export type TranscriptReplyWire = {
   type: "transcript";
   id: string;
   ok: boolean;
   text?: string;
   error?: string;
-}
+};
 
 // ── Images on the wire ──────────────────────────────────────────────────────
 
@@ -295,12 +305,28 @@ export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | nu
  * inline feedback; the authoritative state change is already on its way via
  * the broadcast taskUpdate observer feed.
  */
-export interface TaskControlWire {
+export type TaskControlWire = {
   type: "taskControl";
   taskId: string;
   action: "interrupt" | "followup";
   ok: boolean;
   error?: string;
+};
+
+/**
+ * One taskControl reply. Built here so the message the server sends is the
+ * declaration above, checked at compile time; `error` rides only on failure
+ * because the client words the success itself.
+ */
+export function taskControlMessage(
+  taskId: string,
+  action: TaskControlWire["action"],
+  ok: boolean,
+  error?: string,
+): TaskControlWire {
+  const wire: TaskControlWire = { type: S2C.TASK_CONTROL, taskId, action, ok };
+  if (error !== undefined) wire.error = error;
+  return wire;
 }
 
 /** The broadcast envelope: every activity message is tagged with its task id. */

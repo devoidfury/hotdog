@@ -1,3 +1,5 @@
+import { spoofSafe } from "./spoof.ts";
+
 export interface MdDocument {
   type: "document";
   children: MdBlock[];
@@ -111,7 +113,10 @@ export type MdInline =
   | MdImage;
 
 export function parseMarkdown(markdown: string): MdDocument {
-  const lines = markdown.split("\n");
+  // CRLF is a line ending, not a spoof. Splitting here keeps a Windows-y code block from rendering
+  // [U+000D] on every line (token noise teaches people to ignore the tokens); a lone CR -- the
+  // line-rewind trick -- survives to render and gets tokenized there.
+  const lines = markdown.split(/\r\n|\n/);
   const blocks: MdBlock[] = [];
   let i = 0;
 
@@ -344,12 +349,17 @@ export function createStreamingParser(): StreamingMdParser {
   return new StreamingMdParser();
 }
 
+// Two-step render policy: neutralize spoofing code points first, then escape.
+// Escaping stops markup; it does nothing about U+202E reordering a sentence inside a safe element,
+// or a zero-width splitting a host in an href. spoofSafe is idempotent (its tokens are ASCII),
+// so this stays correct when a caller already ran it upstream.
 function escapeHtml(text: string): string {
-  return text
+  return spoofSafe(text)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 const SAFE_LINK_SCHEMES = new Set(["http", "https", "mailto"]);

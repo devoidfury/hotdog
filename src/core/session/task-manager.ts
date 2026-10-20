@@ -45,17 +45,14 @@ function isTerminalStatus(status: TaskStatus): boolean {
 }
 
 /**
- * Hard bound on terminal (completed/failed/cancelled) records kept in the
- * registry. Without it a long-lived daemon's #tasks grows with every task
- * ever run: terminal entries are otherwise removed by nobody (only the
- * spawn-plan-failure path deletes), and several lookups are full scans.
- * Policy: on every terminal transition, keep the most recent
- * MAX_TERMINAL_TASKS terminal records -- most recently ENDED first,
- * insertion order breaking same-clock ties -- and evict the rest.
- * QUEUED/RUNNING entries are never touched. An evicted id reads exactly
- * like a post-restart id: taskStatus null, follow-up refused -- and the
- * bound is generous enough that listTasks() replay on attach still covers
- * a full day of ordinary daemon activity.
+ * Hard bound on terminal (completed/failed/cancelled) records kept in the registry.
+ * Without it a long-lived daemon's #tasks grows with every task ever run:
+ * terminal entries are otherwise removed by nobody (only the spawn-plan-failure path deletes),
+ * and several lookups are full scans.
+ * 
+ * Policy: on every terminal transition, keep the most recent MAX_TERMINAL_TASKS terminal records --
+ * most recently ENDED first, insertion order breaking same-clock ties -- and evict the rest.
+ * QUEUED/RUNNING entries are never touched. An evicted id reads exactly like a post-restart id.
  */
 export const MAX_TERMINAL_TASKS = 200;
 
@@ -73,19 +70,14 @@ export interface TaskInfo {
   /** Set on the terminal transition; null until then. */
   endedAt: number | null;
   /**
-   * Accumulated wall milliseconds the task's OWN agent turns have run, banked
-   * at each turn end. Excludes lane-queue waits, judging parks, and between-
-   * retry gaps (mirrors the engine's runtime-cap accounting). The display
-   * clock should use activeMs (+ live turn time) rather than now - startedAt,
-   * so parked RUNNING tasks freeze instead of ticking.
+   * Accumulated wall milliseconds the task's OWN agent turns have run, banked at each turn end.
+   * Excludes lane-queue waits, judging parks, and between-retry gaps (mirrors the engine's runtime-cap accounting).
+   * The display clock should use activeMs (+ live turn time) rather than now - startedAt, so parked RUNNING tasks freeze.
    */
   activeMs: number;
   /** True while an agent turn is in flight. RUNNING && !inRun means parked. */
   inRun: boolean;
-  /**
-   * Wall start of the in-flight turn; null when none. Live display =
-   * activeMs + (now - turnStartedAt); frozen at activeMs while null.
-   */
+  /** Wall start of the in-flight turn; null when none. Live display = activeMs + (now - turnStartedAt); frozen at activeMs while null. */
   turnStartedAt: number | null;
 }
 
@@ -296,10 +288,8 @@ export interface TaskManagerOptions {
   /** Probe timeout in seconds (resolved healthCheckTimeout). */
   healthCheckTimeoutSecs?: number;
   /**
-   * Resolved contextLimit (default 128000): the fallback for
-   * catalog-piggyback entries. Must be the resolved value, not
-   * config.contextLimit; a sweep must give a context-less remote model the
-   * same limit the boot registry did.
+   * Resolved contextLimit (default 128000): the fallback for catalog-piggyback entries.
+   * Must be the resolved value, not config.contextLimit; a sweep must give a context-less remote model the same limit the boot registry did.
    */
   healthContextLimit?: number;
   /**
@@ -476,9 +466,8 @@ export class TaskManager {
     // modelGroups / noSpread ride the resolved config bag, same as providers.
     this.#modelGroups =
       ((options.config as Record<string, unknown>).modelGroups as Record<string, string[]>) ?? {};
-    // Per-lane caps: the global lanesPerProvider (taskLanesPerProvider) is the
-    // fleet default; a numeric provider taskLanes overrides it for that lane
-    // only. Both normalize below 1 to unlimited (shared with session turns).
+    // Per-lane caps: the global lanesPerProvider (taskLanesPerProvider) is the  fleet default;
+    // a numeric provider taskLanes overrides it for that lane only. Both normalize below 1 to unlimited (shared with session turns).
     this.#laneCaps = makeLaneCaps(options.lanesPerProvider, providerDefs);
     this.#buildDefaultModel =
       typeof options.defaultModel === "string" ? options.defaultModel.trim() : "";
@@ -509,12 +498,11 @@ export class TaskManager {
       : null;
     this.#profileManager = options.profileManager;
     this.#resolvePendingQuestion = options.resolvePendingQuestion ?? null;
-    // One health registry per manager: explicit injection wins (shared / test
-    // seams), explicit null opts out, otherwise build one. The interval gates
-    // only the TIMER inside makeProviderHealth, so a 0 interval keeps
-    // failure-driven demotion and placement filtering alive. The recovered
-    // callback re-admits queued tasks the instant a provider comes back --
-    // nothing else calls #admit on a pure health transition.
+    // One health registry per manager: explicit injection wins (shared / test seams),
+    // explicit null opts out, otherwise build one. The interval gates only the
+    // TIMER inside makeProviderHealth, so a 0 interval keeps failure-driven demotion
+    // and placement filtering alive. The recovered callback re-admits queued tasks when
+    // a provider comes back -- nothing else calls #admit on a pure health transition.
     this.#providerHealth =
       options.providerHealth !== undefined
         ? options.providerHealth
@@ -628,15 +616,11 @@ export class TaskManager {
   }
 
   /**
-   * Enforce MAX_TERMINAL_TASKS: drop the terminal records that ended
-   * earliest (insertion order breaks same-clock ties, so a completion
-   * flood still evicts oldest-spawned-first). Sorting by endedAt keeps a
-   * long-running task's record after its late finish -- "most recent"
-   * means most recently ENDED, which is what follow-ups/status queries on
-   * finished work actually target. The entry that just turned terminal has
-   * the freshest endedAt, so it is evicted by its own sweep only on an exact
-   * same-clock tie -- and an evicted id reads like a post-restart id, so the
-   * worst case is a just-finished task aging out a few ms early.
+   * Enforce MAX_TERMINAL_TASKS: drop the terminal records that ended earliest.
+   * Sorting by endedAt keeps a long-running task's record after its late finish --
+   * "most recent" means most recently ENDED, which is what follow-ups/status queries on finished work actually target.
+   * The entry that just turned terminal has the freshest endedAt, so it is evicted by its own sweep only on an exact tie --
+   * and an evicted id reads like a post-restart id, so the worst case is a just-finished task aging out a few ms early.
    */
   #evictTerminalTasks(): void {
     let terminal = 0;
@@ -1485,15 +1469,13 @@ export class TaskManager {
     try {
       agent = await this.#buildAgent(agentConfig);
     } catch (err: unknown) {
-      // Build failures used to throw out of spawnTask into the delegating
-      // tool; queued tasks make that impossible, so they are reported the
-      // same way run failures are.
+      // Build failures used to throw out of spawnTask into the delegating tool;
+      // queued tasks make that impossible, so they are reported the same way run failures are.
       this.#setStatus(entry, TASK_STATUS.FAILED);
       logger.error(`[task ${taskId}] ${formatError(err)}`);
       const result = `Task failed: ${err instanceof Error ? err.message : String(err)}`;
       notify(result);
-      // No-turn terminal transition: deliver a synthesized turn result so a
-      // parked consumer (workflow engine attempt gate) can never hang.
+      // No-turn terminal transition: deliver a synthesized turn result so a parked consumer (workflow engine attempt gate) can never hang.
       entry.onTurn?.({ status: "failed", result });
       this.#releaseSlot(entry);
       entry.settle(TASK_STATUS.FAILED, result);
@@ -1623,9 +1605,8 @@ export class TaskManager {
       entry.turnGranted = false;
     }
     if (!ready) {
-      // The slot was taken while this session sat idle (in-process or by
-      // another process): queue for #admit (waiting turns are granted before
-      // new spawns).
+      // The slot was taken while this session sat idle (in-process or by another process):
+      // queue for #admit (waiting turns are granted before new spawns).
       entry.turnPending = true;
       // Register the waiter BEFORE admitting: a coordination-off grant wakes
       // synchronously inside #admit, and a wake with no registered waiter
@@ -1654,9 +1635,8 @@ export class TaskManager {
   }
 
   /**
-   * Release a parked task as completed. Called while a turn is in flight, the
-   * release takes effect once it ends. Returns false for non-parked or
-   * non-running tasks.
+   * Release a parked task as completed. Called while a turn is in flight, the release takes effect once it ends.
+   * Returns false for non-parked or non-running tasks.
    */
   completeTask(taskId: string): boolean {
     const entry = this.#tasks.get(taskId);
@@ -1791,8 +1771,7 @@ export class TaskManager {
     // Any warm turn still queued behind the lane never runs.
     this.#wakeTurnWaiters(entry);
 
-    // Free lane (ledger slot included): give queued tasks a chance at the
-    // released slot.
+    // Free lane (ledger slot included): give queued tasks a chance at the released slot.
     this.#releaseSlot(entry);
     this.#admit();
 
@@ -1847,8 +1826,7 @@ export class TaskManager {
     // queue being drained -- its follow-up path is taskTurn().
     if (!task.agent || !task.inRun) return false;
 
-    // A pending question eats the follow-up as its answer: a steer would sit
-    // behind it forever.
+    // A pending question eats the follow-up as its answer: a steer would sit behind it forever.
     const sessionId = task.agent.sessionId;
     if (sessionId && this.#resolvePendingQuestion?.(sessionId, message)) {
       return true;
@@ -1875,10 +1853,9 @@ export class TaskManager {
   }
 
   /**
-   * The pending question for `sessionId` settled (answered, timed out, or
-   * cancelled). Re-acquires the slot yielded by onTaskQuestionAsked before the
-   * question tool's promise resolves, so the agent's next LLM call can never
-   * fire without a lane slot. A dead or aborted task takes no slot back.
+   * The pending question for `sessionId` settled (answered, timed out, or cancelled).
+   * Re-acquires the slot yielded by onTaskQuestionAsked before the question tool's promise resolves,
+   * so the agent's next LLM call can never fire without a lane slot. A dead or aborted task takes no slot back.
    */
   async onTaskQuestionSettled(sessionId: string): Promise<void> {
     const entry = this.#entryBySession(sessionId);
@@ -1915,9 +1892,8 @@ export class TaskManager {
   }
 
   /**
-   * Wake the delegating session with a task's pending question. Same framing
-   * boundary as deliverTaskCompletion: harness-trusted wrapper, model-authored
-   * body wrapped untrusted. Engine-spawned tasks (no delegating session) have
+   * Wake the delegating session with a task's pending question. Same framing boundary as deliverTaskCompletion:
+   * harness-trusted wrapper, model-authored body wrapped untrusted. Engine-spawned tasks (no delegating session) have
    * no manager to reach -- the webui relay already showed the question.
    */
   #deliverQuestion(
@@ -1951,9 +1927,8 @@ export class TaskManager {
     if (status === TASK_STATUS.QUEUED) {
       // Release any placement reservation so the lane is instantly reusable.
       entry.placing = false;
-      // A planning entry (id reserved, plan still awaiting) cancels like any
-      // other queued task; the continuation sees the terminal state and
-      // returns the handle without starting.
+      // A planning entry (id reserved, plan still awaiting) cancels like any other queued task;
+      // the continuation sees the terminal state and returns the handle without starting.
       entry.planning = false;
       entry.candidates = null;
       entry.provider = "";
@@ -1990,10 +1965,9 @@ export class TaskManager {
   }
 
   /**
-   * Abort every RUNNING/QUEUED task delegated from the given session. Called
-   * when that session is deleted, so its subagent tasks don't keep running (and
-   * burning tokens) with no session to receive results. Other sessions' tasks
-   * are untouched. Returns how many were aborted.
+   * Abort every RUNNING/QUEUED task delegated from the given session.
+   * Called when that session is deleted, so its subagents don't keep running/burning tokens with no session to receive results.
+   * Other sessions' tasks are untouched. Returns how many were aborted.
    */
   interruptTasksForSession(sessionId: string): number {
     let interrupted = 0;

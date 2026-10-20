@@ -13,7 +13,15 @@ import { parseUploadedFiles } from "./uploads.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
-import { C2S, S2C, C2SMessage, wireImages } from "./protocol.ts";
+import {
+  C2S,
+  S2C,
+  taskControlMessage,
+  C2SMessage,
+  wireImages,
+  type TranscribeRequestWire,
+  type TranscriptReplyWire,
+} from "./protocol.ts";
 import { parseForkArg } from "@core/command-handlers.ts";
 import { completionPrefix, parseCompletionContext } from "@core/completion.ts";
 import { formatError } from "@core/error.ts";
@@ -45,6 +53,33 @@ function uploadLimits(core: CoreContext): { maxFileSize: number; maxImageSize: n
 }
 
 /**
+ * Parses (never casts) one `transcribe` off an untrusted socket into
+ * TranscribeRequestWire. This is the only place its fields are checked, so
+ * everything downstream reads typed values; a rejected payload comes back as the
+ * in-band error text. `id` comes from the caller: a reply needs the correlation
+ * key even when the rest of the request is junk.
+ */
+function parseTranscribeRequest(
+  msg: C2SMessage,
+  id: string,
+): TranscribeRequestWire | { error: string } {
+  if (typeof msg.data !== "string" || msg.data.length === 0) {
+    return { error: "transcribe: missing audio data" };
+  }
+  if (msg.data.length > MAX_TRANSCRIBE_BASE64_CHARS) {
+    return {
+      error: `transcribe: audio too large (limit ${MAX_TRANSCRIBE_AUDIO_BYTES / 1024 / 1024}MB)`,
+    };
+  }
+  return {
+    type: C2S.TRANSCRIBE,
+    id,
+    mimeType: typeof msg.mimeType === "string" ? msg.mimeType : undefined,
+    data: msg.data,
+  };
+}
+
+/**
  * Push-to-talk transcription: decode the base64 audio, forward it to the
  * OpenAI-compatible endpoint resolved from config (`sttUrl`/`sttModel`), and
  * answer with a `transcript` message correlated by the client's request id.
@@ -57,9 +92,16 @@ async function handleTranscribe(
   stt: SttTarget | null,
 ): Promise<void> {
   const id = typeof msg.id === "string" ? msg.id : "";
-  const reply = (payload: { ok: boolean; text?: string; error?: string }) =>
-    SessionRegistry.sendSafe(ws, { type: S2C.TRANSCRIPT, id, ...payload });
+  const reply = (payload: { ok: boolean; text?: string; error?: string }) => {
+    const wire: TranscriptReplyWire = { type: S2C.TRANSCRIPT, id, ...payload };
+    SessionRegistry.sendSafe(ws, wire);
+  };
 
+  const req = parseTranscribeRequest(msg, id);
+  if ("error" in req) {
+    reply({ ok: false, error: req.error });
+    return;
+  }
   if (!stt) {
     reply({
       ok: false,
@@ -68,26 +110,15 @@ async function handleTranscribe(
     });
     return;
   }
-  if (typeof msg.data !== "string" || msg.data.length === 0) {
-    reply({ ok: false, error: "transcribe: missing audio data" });
-    return;
-  }
-  if (msg.data.length > MAX_TRANSCRIBE_BASE64_CHARS) {
-    reply({
-      ok: false,
-      error: `transcribe: audio too large (limit ${MAX_TRANSCRIBE_AUDIO_BYTES / 1024 / 1024}MB)`,
-    });
-    return;
-  }
 
   try {
-    const audio = new Uint8Array(Buffer.from(msg.data, "base64"));
+    const audio = new Uint8Array(Buffer.from(req.data, "base64"));
     const text = await transcribeAudio({
       url: stt.url,
       model: stt.model,
       authHeader: stt.authHeader,
       audio,
-      mimeType: typeof msg.mimeType === "string" ? msg.mimeType : undefined,
+      mimeType: req.mimeType,
     });
     reply({ ok: true, text });
   } catch (err: unknown) {
@@ -361,13 +392,15 @@ export async function routeMessage(
       if (!taskId) break;
       const taskManager = registry.getTaskManager();
       const ok = taskManager ? taskManager.interruptTask(taskId) : false;
-      SessionRegistry.sendSafe(ws, {
-        type: S2C.TASK_CONTROL,
-        taskId,
-        action: "interrupt",
-        ok,
-        ...(ok ? {} : { error: "Task not found or no longer active" }),
-      });
+      SessionRegistry.sendSafe(
+        ws,
+        taskControlMessage(
+          taskId,
+          "interrupt",
+          ok,
+          ok ? undefined : "Task not found or no longer active",
+        ),
+      );
       break;
     }
 
@@ -377,13 +410,15 @@ export async function routeMessage(
       if (!taskId || !message) break;
       const taskManager = registry.getTaskManager();
       const ok = taskManager ? taskManager.sendFollowUp(taskId, message) : false;
-      SessionRegistry.sendSafe(ws, {
-        type: S2C.TASK_CONTROL,
-        taskId,
-        action: "followup",
-        ok,
-        ...(ok ? {} : { error: "Steering needs a running task with a live turn" }),
-      });
+      SessionRegistry.sendSafe(
+        ws,
+        taskControlMessage(
+          taskId,
+          "followup",
+          ok,
+          ok ? undefined : "Steering needs a running task with a live turn",
+        ),
+      );
       break;
     }
     case C2S.TASK_ACTIVITY_REQUEST: {

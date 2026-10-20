@@ -20,6 +20,7 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { hostname } from "node:os";
+import { parseJsonLines } from "@utils/json-lines.ts";
 import { logger } from "@utils/logger.ts";
 import { formatError } from "../error.ts";
 
@@ -109,15 +110,8 @@ export class SpawnLog {
     }
     const host = hostname();
     const open = new Map<string, { task: OrphanedTask; pid?: number; host?: string }>();
-    for (const raw of text.split("\n")) {
-      const line = raw.trim();
-      if (!line) continue;
-      let ev: Record<string, unknown>;
-      try {
-        ev = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        continue; // torn or foreign line: skipped, never fatal
-      }
+    // Torn or foreign lines are skipped, never fatal: the sidecar is a hint surface.
+    for (const ev of parseJsonLines(text, "skip")) {
       if (typeof ev.id !== "string") continue;
       if (ev.ev === "spawn") {
         open.set(ev.id, {

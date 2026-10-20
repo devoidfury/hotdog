@@ -179,6 +179,34 @@ describe("websocket transcribe", () => {
     expect(reply.error).toContain("missing audio");
   });
 
+  // TranscribeRequestWire declares mimeType optional, so a client that omits it
+  // (leaving the container to the backend) is a valid request, not a rejection.
+  it("accepts a request with no mimeType", async () => {
+    const ws = await connect({ sttUrl: sttUrl(), sttModel: "whisper-1" });
+    wsServer!.onMessage(
+      ws,
+      JSON.stringify({ type: C2S.TRANSCRIBE, id: "no-mime", data: Buffer.from("FAKEAUDIO").toString("base64") }),
+    );
+
+    const reply = await waitForMessage(ws, S2C.TRANSCRIPT);
+    expect(reply).toMatchObject({ id: "no-mime", ok: true, text: "transcribed text" });
+    expect(captured!.fileText).toBe("FAKEAUDIO");
+  });
+
+  // The reply must always carry a correlation id: one without it would strand the
+  // client's pending promise, so a non-string id degrades to "" instead of failing.
+  it("replies under an empty correlation id when the request has no usable one", async () => {
+    const ws = await connect({ sttUrl: sttUrl() });
+    wsServer!.onMessage(
+      ws,
+      JSON.stringify({ type: C2S.TRANSCRIBE, id: 42, mimeType: "audio/webm", data: "aGk=" }),
+    );
+
+    const reply = await waitForMessage(ws, S2C.TRANSCRIPT);
+    expect(reply.id).toBe("");
+    expect(reply.ok).toBe(true);
+  });
+
   it("auto-detects an audio-capable registry model: enabled without sttUrl, provider URL + key used", async () => {
     const core = createWsMockCore();
     // The mock LlmClient follows resolved.baseUrl, so the fake backend is the provider.

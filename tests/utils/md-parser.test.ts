@@ -10,6 +10,7 @@ import {
   type MdList,
 } from "@utils/md-parser.ts";
 import type { MdBlock, MdInline, MdBold, MdItalic } from "@utils/md-parser.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 
 describe("parseMarkdown", () => {
   // ── Edge cases ────────────────────────────────────────────────────
@@ -733,6 +734,66 @@ describe("mdTreeToHtml url scheme safety", () => {
         "![c](data:text/html,evil) ![d](ftp://host/img.png)",
     );
     expect(html).not.toContain("<img");
+  });
+});
+
+// The webui writes mdTreeToHtml output straight to innerHTML (ui/message-list.ts), so this is
+// the one model-controlled render boundary that needs the repo's two-step policy: escaping stops
+// markup, spoofSafe stops the bidi/zero-width reordering that survives *inside* safe markup.
+describe("mdTreeToHtml spoof neutralization", () => {
+  it("renders a bidi override as a visible token instead of reordering the line", () => {
+    expect(markdownToHtml("git di\u{202E}ff --stat")).toBe("<p>git di[U+202E]ff --stat</p>");
+  });
+
+  it("neutralizes zero-widths in fenced and inline code", () => {
+    expect(markdownToHtml("```\nrm\u200B -rf ./\n```")).toContain("rm[U+200B] -rf ./");
+    expect(markdownToHtml("`a\u2060b`")).toContain(">a[U+2060]b<");
+  });
+
+  it("neutralizes terminal control characters, which render as nothing in HTML", () => {
+    expect(markdownToHtml("done\u001b[2K")).toBe("<p>done[U+001B][2K</p>");
+  });
+
+  it("keeps tab and newline in fenced code (alignment, not spoofing)", () => {
+    expect(markdownToHtml("```\nif x:\n\ty = 1\n```")).toContain("<code>if x:\n\ty = 1</code>");
+  });
+
+  it("neutralizes attribute values: href, alt and the fence-language class", () => {
+    expect(markdownToHtml("[x](https://exa\u200Bmple.com)")).toContain(
+      'href="https://exa[U+200B]mple.com"',
+    );
+    expect(markdownToHtml("![al\u200Bt](i.png)")).toContain('alt="al[U+200B]t"');
+    expect(markdownToHtml("```js\u202E\nx\n```")).toContain('class="code-block lang-js[U+202E]"');
+  });
+
+  it("neutralizes before escaping: tokens stay readable and markup is still escaped", () => {
+    expect(markdownToHtml("<\u202Escript>alert(1)</script>")).toBe(
+      "<p>&lt;[U+202E]script&gt;alert(1)&lt;/script&gt;</p>",
+    );
+  });
+
+  it("escapes apostrophes too, matching the other escapers' 5-char set", () => {
+    expect(markdownToHtml("it's")).toBe("<p>it&#39;s</p>");
+  });
+
+  it("is idempotent: text already neutralized upstream renders the same", () => {
+    const raw = "git di\u{202E}ff \u2066x\u2069 \u0007";
+    expect(markdownToHtml(spoofSafe(raw))).toBe(markdownToHtml(raw));
+  });
+
+  it("covers the streaming render path (renderBlocksToHtml)", () => {
+    const result = createStreamingParser().feed("hello \u202E world");
+    expect(renderBlocksToHtml(result.tree, 0)).toBe("<p>hello [U+202E] world</p>");
+  });
+
+  it("treats CRLF as a line ending, so benign Windows endings stay quiet", () => {
+    expect(markdownToHtml("```\r\na = 1\r\n\tb = 2\r\n```")).toBe(
+      "<pre class=\"code-block\"><code>a = 1\n\tb = 2</code></pre>",
+    );
+  });
+
+  it("still tokenizes a lone CR (the line-rewind trick)", () => {
+    expect(markdownToHtml("ls -al\rGONE")).toBe("<p>ls -al[U+000D]GONE</p>");
   });
 });
 

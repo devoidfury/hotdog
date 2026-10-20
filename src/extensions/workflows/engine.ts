@@ -20,6 +20,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { formatError } from "@core/error.ts";
 import { createExclusive } from "@utils/fs-atomic.ts";
+import { parseJsonLines } from "@utils/json-lines.ts";
 import { logger } from "@utils/logger.ts";
 import type {
   SpawnTaskOptions,
@@ -1316,15 +1317,7 @@ async function scanRunDirForInterruption(
   let nodeActivity = false;
   let lastEv: string | null = null;
   const state = new Map<string, string>();
-  for (const raw of journal.text.split("\n")) {
-    const line = raw.trim();
-    if (!line) continue;
-    let ev: Record<string, unknown>;
-    try {
-      ev = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue; // tolerate a torn final line
-    }
+  for (const ev of parseJsonLines(journal.text, "skip")) {
     if (typeof ev.ev === "string") lastEv = ev.ev;
     if (ev.ev === "started") {
       started = {
@@ -1517,15 +1510,7 @@ async function readRunLog(runDir: string): Promise<RunLogEvents | null> {
   let finished: RunLogEvents["finished"] = null;
   const lastState = new Map<string, string>();
   const succeeded = new Map<string, SucceededClaim>();
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (!line) continue;
-    let ev: Record<string, unknown>;
-    try {
-      ev = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue; // tolerate a torn final line
-    }
+  for (const ev of parseJsonLines(text, "skip")) {
     // Unknown ev values (interrupted markers, anything a future writer adds)
     // fall through ignored: node state derives from node/finished events only,
     // so an annotated journal resumes exactly like an unmarked one.

@@ -79,6 +79,9 @@ describe("C2S taskInterrupt / taskFollowup", () => {
     expect(reply.taskId).toBe("task-1");
     expect(reply.action).toBe("interrupt");
     expect(reply.ok).toBe(true);
+    // A success carries no error key at all (TaskControlWire's optional field is
+    // omitted, not set to undefined): the client words the success itself.
+    expect(Object.keys(reply).sort()).toEqual(["action", "ok", "taskId", "type"]);
   });
 
   it("replies ok:false when the primitive declines (unknown/terminal task)", async () => {

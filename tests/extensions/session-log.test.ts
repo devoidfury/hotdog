@@ -67,6 +67,34 @@ test("readSessionEntries handles malformed JSON lines", async () => {
   }
 });
 
+// Valid JSON is not the same thing as being an entry: `null`, numbers, strings and
+// arrays all parse, and every consumer (the epoch scan, replay, the audit facts)
+// reads fields off what the read returns. Junk gets dropped at the read site.
+test("readSessionEntries drops non-record JSON lines instead of throwing", async () => {
+  setupTestDir();
+  try {
+    writeFileSync(
+      join(TEST_SESSIONS_DIR, `${TEST_SESSION_ID}.jsonl`),
+      [
+        "null",
+        "7",
+        '"a bare string"',
+        "[1,2]",
+        '{"ts":"2024-01-01T00:00:00Z","source":"input","content":"real"}',
+      ].join("\n"),
+    );
+
+    const epoch = await readSessionEntries(TEST_SESSION_ID);
+    expect(epoch.length).toBe(1);
+    expect(epoch[0]!.content).toBe("real");
+
+    const full = await readSessionEntries(TEST_SESSION_ID, { full: true });
+    expect(full.length).toBe(1);
+  } finally {
+    teardown();
+  }
+});
+
 test("readSessionEntries replays from last reset", async () => {
   const uniqueId = "test-reset-replay-" + Date.now();
   const dir = TEST_SESSIONS_DIR;
@@ -191,6 +219,39 @@ test("listSessionLogs excludes sessions with only system/reset entries", async (
     rmSync(file);
   } finally {
     try { rmSync(file); } catch {}
+  }
+});
+
+// A stray non-record line must not hide a session (a field deref on it used to get
+// swallowed by the per-file catch, dropping the row whole) nor count as a message.
+test("listSessionLogs survives non-record lines and still counts the real messages", async () => {
+  const dir = TEST_SESSIONS_DIR;
+  mkdirSync(dir, { recursive: true });
+
+  const mixedId = "test-list-junk-mixed";
+  const junkOnlyId = "test-list-junk-only";
+  const mixed = join(dir, `${mixedId}.jsonl`);
+  const junkOnly = join(dir, `${junkOnlyId}.jsonl`);
+
+  try {
+    writeFileSync(
+      mixed,
+      [
+        "null",
+        '{"ts":"2024-01-03T00:00:00Z","source":"input","content":"real"}',
+        "[]",
+      ].join("\n"),
+    );
+    writeFileSync(junkOnly, "null\n42\n");
+
+    const sessions = await listSessionLogs();
+    const listed = sessions.find((s) => s.id === mixedId);
+    expect(listed).toBeDefined();
+    expect(listed!.messageCount).toBe(1);
+    expect(sessions.find((s) => s.id === junkOnlyId)).toBeUndefined();
+  } finally {
+    try { rmSync(mixed); } catch {}
+    try { rmSync(junkOnly); } catch {}
   }
 });
 

@@ -9,6 +9,9 @@ import type {
   UploadFileWire,
   TaskInfoWire,
   TaskActivityWire,
+  TaskControlWire,
+  TranscribeRequestWire,
+  TranscriptReplyWire,
 } from "@extensions/websocket/protocol.ts";
 
 export type { UploadFileWire };
@@ -318,14 +321,6 @@ interface TaskActivityHistoryMessage {
   activity: TaskActivityWire[];
 }
 
-interface TaskControlMessage {
-  type: "taskControl";
-  taskId: string;
-  action: "interrupt" | "followup";
-  ok: boolean;
-  error?: string;
-}
-
 interface StreamingChunkMessage {
   type: "streamingChunk";
   content: string;
@@ -386,14 +381,6 @@ interface ServerErrorMessage {
   message: string;
 }
 
-interface TranscriptMessage {
-  type: "transcript";
-  id: string;
-  ok: boolean;
-  text?: string;
-  error?: string;
-}
-
 export interface CompletionItem {
   value: string;
   display?: string;
@@ -430,7 +417,7 @@ type ServerMessage =
   | TaskUpdateMessage
   | TaskActivityMessage
   | TaskActivityHistoryMessage
-  | TaskControlMessage
+  | TaskControlWire
   | StreamingChunkMessage
   | StreamingReasoningChunkMessage
   | TaskProgressMessage
@@ -442,7 +429,7 @@ type ServerMessage =
   | ProfileSwitchedMessage
   | ServerErrorMessage
   | CompletionsMessage
-  | TranscriptMessage;
+  | TranscriptReplyWire;
 
 interface ChatConfig {
   token: string | null;
@@ -1066,9 +1053,10 @@ export function createChat({
    */
   function transcribe(mimeType: string, data: string): Promise<string> {
     const id = `stt-${++transcribeSeq}`;
+    const req: TranscribeRequestWire = { type: "transcribe", id, mimeType, data };
     return new Promise<string>((resolve, reject) => {
       pendingTranscripts.set(id, { resolve, reject });
-      send({ type: "transcribe", id, mimeType, data });
+      send(req);
     });
   }
 

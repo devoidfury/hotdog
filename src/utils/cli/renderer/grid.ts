@@ -1,6 +1,8 @@
 // In-memory Grid: the test-side Terminal (design note §11). Implements a
-// parser subset limited to the sequences the renderer emits -- CUU/CUD/CUF/
-// CUB, CPL/NPL, CUP, ED, EL, IL, DL, CR/LF, printable chars -- with
+// parser subset limited to the sequences the renderer emits plus what bun's
+// readline paints into the capture stream -- CUU/CUD/CUF/CUB, CPL/NPL, CUP,
+// CHP (cursor to column; every bun readline refresh leads with `\x1b[1G` and
+// ends with `\x1b[<n>G`), ED, EL, IL, DL, CR/LF, printable chars -- with
 // ?2026/?2004/?25 recorded to a mode log instead of interpreted. SGR is
 // consumed and ignored (golden tests compare text, not attributes); OSC 8
 // spans are consumed invisibly.
@@ -174,7 +176,7 @@ export class Grid {
   private dispatchCsi(final: string, priv: boolean, params: number[]): void {
     // Cursor/line ops default absent-or-zero params to 1; ED/EL default to 0.
     const n = (k: number): number => (params[k] ? params[k]! : 1);
-    if ("ABCDEFHfLM".includes(final)) this.pendingWrap = false;
+    if ("ABCDEFGHfLM".includes(final)) this.pendingWrap = false;
     switch (final) {
       case "A":
         this.cursorRow = Math.max(0, this.cursorRow - n(0));
@@ -187,6 +189,9 @@ export class Grid {
         return;
       case "D":
         this.cursorCol = Math.max(0, this.cursorCol - n(0));
+        return;
+      case "G": // CHP/HPA: cursor to column n, row unchanged.
+        this.cursorCol = Math.min(this.cols - 1, n(0) - 1);
         return;
       case "E": // CNL: down n lines, first column
         this.cursorCol = 0;

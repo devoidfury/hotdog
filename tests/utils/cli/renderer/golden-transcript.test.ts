@@ -6,7 +6,7 @@
 // bytes -- scrollback is write-once, so the exact bytes are the contract.
 
 import { describe, it, expect } from "bun:test";
-import { GridTerminal } from "@utils/cli/renderer/grid.ts";
+import { Grid, GridTerminal } from "@utils/cli/renderer/grid.ts";
 import { FakeClock } from "@utils/cli/renderer/fake-clock.ts";
 import { RendererCore } from "@utils/cli/renderer/commit.ts";
 import { TeardownGuard } from "@utils/cli/renderer/teardown.ts";
@@ -332,5 +332,143 @@ describe("shrink float -> re-pin (documented consequence of the literal INV-5)",
       r.startsWith("C") || r === "B1"
     );
     expect(all).toEqual(["C1", "C2", "C3", "B1"]);
+  });
+});
+
+// ── Bun readline wire compatibility ─────────────────────────────────────
+// Bun's readline repaints a line as `\x1b[1G` + `\x1b[0J` + text + `\x1b[<n>G`
+// (measured against bun 1.x, node:readline). The capture Grid must interpret
+// the column-set (CHP) or every repaint re-emits the prompt after the stale
+// one instead of overwriting from column 1, and the physical cursor must be
+// projected from the capture grid -- paintBody parks at the frame anchor, so
+// without projection the visible cursor sits at column 0 while typing.
+
+describe("grid: bun readline refresh sequences", () => {
+  it("interprets CSI G (cursor to column) and does not duplicate the prompt across refreshes", () => {
+    const g = new Grid(4, 40);
+    g.feed("(m)> ");
+    expect(g.cursorCol).toBe(5);
+    // The refresh bun emits after editing the line to "(m)> hi":
+    g.feed("\x1b[1G\x1b[0J(m)> hi\x1b[8G");
+    expect(g.snapshot().screen[0]).toBe("(m)> hi");
+    expect(g.cursorCol).toBe(7);
+    expect(g.cursorRow).toBe(0);
+    // Backspace refresh: same recipe, shorter tail.
+    g.feed("\x1b[1G\x1b[0J(m)> h\x1b[7G");
+    expect(g.snapshot().screen[0]).toBe("(m)> h");
+    expect(g.cursorCol).toBe(6);
+    expect(g.snapshot().screen.filter((r) => r !== "").length).toBe(1);
+  });
+
+  it("bare CSI G (no params) also means column 1", () => {
+    const g = new Grid(4, 40);
+    g.feed("hello\x1b[Gx");
+    expect(g.snapshot().screen[0]).toBe("xello");
+  });
+});
+
+describe("core: physical cursor projection (frame anchor invariant)", () => {
+  function recorder2(rows: number, cols: number) {
+    const inner = new GridTerminal({ rows, cols });
+    const bytes: string[] = [];
+    const t: Terminal = {
+      write: (s) => {
+        bytes.push(s);
+        inner.write(s);
+      },
+      get isTTY() {
+        return true;
+      },
+      get columns() {
+        return inner.columns;
+      },
+      get rows() {
+        return inner.rows;
+      },
+      setRawMode: () => {},
+      onResize: () => () => {},
+    };
+    const clock = new FakeClock();
+    const core = new RendererCore({ terminal: t, clock });
+    return { inner, bytes, core, clock };
+  }
+
+  it("setFrame without a cursor emits no placement bytes (golden compatibility)", () => {
+    const { core, bytes, clock } = recorder2(10, 20);
+    core.mount();
+    clock.runAll();
+    bytes.length = 0;
+    core.setFrame(["plain frame"]);
+    clock.runAll();
+    expect(bytes.join("")).not.toContain("G");
+  });
+
+  it("setFrame with a cursor parks the anchor THEN places the cursor at (row, col)", () => {
+    const { core, bytes, clock } = recorder2(10, 20);
+    core.mount();
+    clock.runAll();
+    bytes.length = 0;
+    core.setFrame(["(m)> hi"], { row: 0, col: 6 });
+    clock.runAll();
+    const out = bytes.join("");
+    // Placement after the park: column 6 (0-based) -> CSI 7G on the anchor row.
+    expect(out).toContain("\x1b[7G");
+    expect(out.indexOf("\x1b[7G")).toBeGreaterThan(out.indexOf("(m)> hi"));
+  });
+
+  it("a commit after a cursor placement restores the anchor before painting", () => {
+    const { core, bytes, clock, inner } = recorder2(10, 20);
+    core.mount();
+    clock.runAll();
+    core.setFrame(["(m)> hello"], { row: 0, col: 9 });
+    clock.runAll();
+    bytes.length = 0;
+    core.commit(["a committed row"]);
+    clock.runAll();
+    const out = bytes.join("");
+    // The frame content must still be exactly one row with the committed row
+    // above it -- if the anchor was not restored the paint would land a row
+    // low and the grid would show the frame split or duplicated.
+    const screen = inner.grid.snapshot().screen.filter((r) => r !== "");
+    expect(screen[0]).toBe("a committed row");
+    expect(screen[1]).toBe("(m)> hello");
+    expect(screen.filter((r) => r.includes("(m)> hello")).length).toBe(1);
+    expect(out).toContain("\x1b[1L"); // SCI insert still used
+  });
+
+  it("multi-row frame places the cursor on its row and re-anchors on the next paint", () => {
+    const { core, inner, clock } = recorder2(10, 20);
+    core.mount();
+    clock.runAll();
+    core.setFrame(["line one", "line two tail"], { row: 1, col: 9 });
+    clock.runAll();
+    // Physical cursor now one row below the anchor; next paint must restore it:
+    core.setFrame(["line one", "short"], { row: 1, col: 5 });
+    clock.runAll();
+    const screen = inner.grid.snapshot().screen.filter((r) => r !== "");
+    expect(screen).toEqual(["line one", "short"]);
+  });
+
+  it("placement never exceeds the frame height (bottom clamp guard)", () => {
+    // The capture grid's cursor can sit BELOW the visible frame rows (the
+    // readline submit echo writes a bare `\r\n` into the capture, line-feeding
+    // the model cursor past the single frame row). A down() beyond the frame
+    // risks terminal clamping at the screen bottom: the written bytes and the
+    // tracked parkOffset would disagree, and the next anchor restore would
+    // land a row high, painting over committed scrollback content.
+    const { core, bytes, clock } = recorder2(10, 20);
+    core.mount();
+    clock.runAll();
+    bytes.length = 0;
+    core.setFrame(["(m)> hello"], { row: 3, col: 0 });
+    clock.runAll();
+    const out = bytes.join("");
+    expect(out).not.toMatch(/\x1b\[\d+B/); // no downward placement outside the 1-row frame
+    bytes.length = 0;
+    core.commit(["x"]);
+    clock.runAll();
+    // No phantom anchor restore: a clamped placement would make the flush
+    // begin by moving up 3 rows (parkOffset), corrupting committed content.
+    expect(bytes.join("")).not.toContain("\x1b[3A");
   });
 });

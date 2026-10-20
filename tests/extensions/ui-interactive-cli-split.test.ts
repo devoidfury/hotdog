@@ -432,3 +432,177 @@ describe("non-TTY determinism golden (§9, legacy passthrough)", () => {
     }
   });
 });
+
+// ── Bun readline wire compatibility (regression: duplicated prompt, dead cursor) ──
+// Bun's readline repaints an edited line as `\x1b[1G` + `\x1b[0J` + text +
+// `\x1b[<n>G` (measured against a real TTY on bun 1.x). Line editing needs a
+// real TTY stdin -- a fake Readable only raw-echoes -- so the edit refresh is
+// fed as the measured byte sequence rather than driven through key events.
+// (This is also why the older capture test above passed throughout: raw echo
+// renders identically to a refresh, and never exercised the edit path.)
+
+describe("capture: bun readline refresh + cursor projection", () => {
+  it("an edit refresh leaves one prompt copy; cursor() reports readline's position", () => {
+    const painted: string[][] = [];
+    const capture = new CaptureStream((rows) => painted.push(rows), 24, 80);
+    const input = new Readable({ read() {} });
+    (input as unknown as { isTTY: boolean }).isTTY = true;
+    (input as unknown as { setRawMode: (m: boolean) => unknown }).setRawMode = () => input;
+    const rl = readline.createInterface({
+      input,
+      output: capture as never,
+      prompt: "(m)> ",
+    });
+    rl.prompt();
+    input.emit("data", Buffer.from("hello")); // raw echo path
+    // The exact bytes readline writes when the line becomes "hell" (measured):
+    capture.write("\x1b[1G\x1b[0J(m)> hell\x1b[10G");
+    const rows = capture.frameRows();
+    rl.close();
+
+    // Exactly one prompt copy survives, minus the deleted char.
+    expect(rows).toEqual(["(m)> hell"]);
+    // The capture tracks where readline believes the cursor is, so the
+    // renderer can put the PHYSICAL cursor there.
+    expect(capture.cursor()).toEqual({ row: 0, col: 9 });
+  });
+
+  it("submit at the screen bottom keeps the submitted row intact", () => {
+    // Regression: Enter at bottom-of-screen -> cursor jumped a row and the
+    // streaming rows overwrote the submitted line. The submit echo (a bare
+    // `\r\n`, measured on a real PTY) line-feeds the capture cursor below
+    // the frame; placement beyond the frame clamped at the screen bottom,
+    // desyncing the parkOffset the next anchor restore depends on.
+    const term = new GridTerminal({ rows: 5, cols: 20 });
+    const clock = new FakeClock();
+    const sig: SignalHost = { on: () => () => {}, exit: () => {} };
+    const bridge = new OutputBridge({ terminal: term, clock, signalHost: sig });
+    bridge.setPrompt("(m)> ");
+    bridge.mount();
+    clock.runAll();
+    // Fill the screen so the frame anchor sits at the LAST screen row --
+    // the position where a phantom down() gets clamped by the terminal.
+    bridge.commitText("l1\nl2\nl3\nl4\n");
+    clock.runAll();
+    expect(term.grid.cursorRow).toBe(4);
+    bridge.capture.write("(m)> hello");
+    clock.runAll();
+    // Measured submit path: readline's Enter echo, then the bridge handler,
+    // then the synchronous commit drain.
+    bridge.capture.write("\r\n");
+    bridge.lineSubmitted("hello");
+    bridge.core.drainCommitsSync();
+    clock.runAll();
+    bridge.capture.write("(m)> ");
+    clock.runAll();
+    bridge.commitText("stream-1\nstream-2\n");
+    clock.runAll();
+
+    const screen = term.grid.snapshot().screen;
+    expect(screen.filter((r) => r === "l4").length).toBe(1);
+    expect(screen.filter((r) => r === "(m)> hello").length).toBe(1); // survived
+    expect(screen.filter((r) => r === "stream-1").length).toBe(1);
+    expect(screen.filter((r) => r === "stream-2").length).toBe(1);
+    expect(screen[screen.length - 1]).toBe("(m)>"); // frame pinned at the bottom
+    const rows = ["l4", "(m)> hello", "stream-1", "stream-2", "(m)>"];
+    expect(screen.map((r) => r)).toEqual(rows);
+  });
+});
+
+// ── Turn-boundary newline assembly (regression: phantom blank rows) ──────
+// Legacy stdout+stderr share one byte stream, so a lone "\n" written while a
+// line is unterminated terminates that line -- it never prints a blank. The
+// split channels would otherwise commit such separators (the sink's _flushNl
+// lands on the OTHER stream; TURN_END's log("") closes the unterminated
+// token-usage line; the interrupt notice's leading "\n" follows a pinned
+// echo) as empty scrollback rows.
+
+describe("newline assembly: terminators are not blank rows", () => {
+  it("a separator written to the other channel terminates the open row", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    // Streaming content (stdout, unterminated), the sink's "\n" separator to
+    // stderr, the token line (unterminated), TURN_END's sink.log("") -> "\n".
+    bridge.commitText("the answer");
+    bridge.arbiteText("\n");
+    bridge.arbiteText("Token usage: 1234");
+    bridge.commitText("\n"); // sink.log("") on TURN_END
+    clock.runAll();
+    // Neither separator committed a blank row.
+    expect(bridge.transcriptLog).toEqual(["the answer", "Token usage: 1234"]);
+  });
+
+  it("a blank row at column 0 is still a real blank row", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    bridge.commitText("a\n"); // terminated: nothing open
+    bridge.commitText("\nb\n"); // leading "\n" on a closed stream: genuine blank
+    clock.runAll();
+    expect(bridge.transcriptLog).toEqual(["a", "", "b"]);
+  });
+
+  it('terminator + blank ("\n\n" over an open row) keeps exactly the one blank', () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    bridge.commitText("out line");
+    bridge.arbiteText("\n\n"); // first eats the open row, second is the blank
+    bridge.arbiteText("warn\n");
+    clock.runAll();
+    expect(bridge.transcriptLog).toEqual(["out line", "", "warn"]);
+  });
+
+  it("the interrupt notice prints directly under the pinned echo", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    bridge.capture.write("(m)> half-typed");
+    bridge.flushEcho();
+    // sink.log("\nInterrupted ...") -- logRouter appends the trailing "\n".
+    bridge.commitText("\nInterrupted (/quit, /exit, or ctrl-d to exit)\n");
+    clock.runAll();
+    expect(bridge.transcriptLog).toEqual([
+      "(m)> half-typed",
+      "Interrupted (/quit, /exit, or ctrl-d to exit)",
+    ]);
+  });
+
+  it("a full sink turn (streaming + token usage + TURN_END nudge) commits no blanks", async () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    const saved = process.env.NO_COLOR;
+    process.env.NO_COLOR = "1";
+    try {
+      const palette = await CliOutputSink.resolve(false, "dark", null);
+      const sink = new CliOutputSink({ palette, hideUserMessage: true });
+      // The split wiring in miniature: the io patches route the sink's
+      // streams into the bridge channels, logRouter into the commit channel.
+      sink.outStream = { write: (s: string) => (bridge.commitText(s), true) } as never;
+      sink.altStream = { write: (s: string) => (bridge.arbiteText(s), true) } as never;
+      sink.logRouter = (m: string) => bridge.commitText(m + "\n");
+
+      sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "the answer\n" } as OutputEvent);
+      sink.emit({
+        type: OUTPUT_EVENT.TOKEN_USAGE,
+        sessionPromptTokens: 1,
+        sessionCachedTokens: 0,
+        sessionCompletionTokens: 2,
+        sessionTotalTokens: 3,
+        turns: 1,
+        promptTokens: 1,
+        cachedTokens: 0,
+        completionTokens: 2,
+        totalTokens: 3,
+        contextWindow: 100,
+      } as OutputEvent);
+      sink.log(""); // the TURN_END re-prompt nudge
+      clock.runAll();
+
+      expect(bridge.transcriptLog).toEqual([
+        "the answer",
+        "Token usage: 0 cached, 1 processed, 2 generated. (3/100)",
+      ]);
+    } finally {
+      if (saved === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = saved;
+    }
+  });
+});

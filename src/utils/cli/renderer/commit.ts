@@ -5,7 +5,11 @@
 // The cursor bookkeeping is purely relative: every paint and every commit
 // starts and ends with the cursor parked at the frame's top row (the anchor),
 // so absolute rows never enter the math and reflow of committed content above
-// the frame cannot corrupt it.
+// the frame cannot corrupt it. The one exception is the BOUNDED placement:
+// after a paint the visible cursor may be moved to the frame's edit position
+// (setFrame's optional cursor -- where readline believes it is). The core
+// tracks that deviation (parkOffset) and every anchor-relative operation
+// restores the anchor first, so the invariant closes over placements too.
 
 import type { Clock, Terminal } from "./seams.ts";
 import { wrapToWidth } from "./width.ts";
@@ -22,7 +26,15 @@ const HOME = `${CSI}H`;
 
 const up = (n: number): string => (n > 0 ? `${CSI}${n}A` : "");
 const down = (n: number): string => (n > 0 ? `${CSI}${n}B` : "");
+/** CHP: cursor to column (1-based). Column 0 is where the anchor park leaves it -- no bytes. */
+const toColumn = (col: number): string => (col > 0 ? `${CSI}${col + 1}G` : "");
 const insertLines = (n: number): string => `${CSI}${n}L`; // SCI
+
+/** Where the edit cursor sits inside the frame, 0-based, relative to the anchor. */
+export interface FrameCursor {
+  row: number;
+  col: number;
+}
 
 export interface RendererCoreOptions {
   terminal: Terminal;
@@ -41,6 +53,9 @@ export class RendererCore {
   private readonly out: BoundedWriter;
 
   private frameRows: string[] = [];
+  private frameCursor: FrameCursor | null = null;
+  /** Rows the physical cursor sits below the anchor after a placement. */
+  private parkOffset = 0;
   private paintedHeight = 0;
   private mounted = false;
   private dead = false;
@@ -73,15 +88,18 @@ export class RendererCore {
    * Transient frame content (§2 rubric 2: only the renderer paints these).
    * Coalesced through the scheduler normally; DROPPED while a commit print is
    * pending -- INV-6: nothing transient rides in the frame between the freeze
-   * and the insert.
+   * and the insert. `cursor`, when given, is the edit position to project onto
+   * the physical terminal after the paint (the capture grid's cursor in
+   * split mode; without it the visible cursor stays parked at the anchor).
    */
-  setFrame(rows: string[]): void {
+  setFrame(rows: string[], cursor?: FrameCursor | null): void {
     if (this.dead) return;
     if (this.printPending()) {
       this.droppedMutations++;
       return;
     }
     this.frameRows = rows;
+    this.frameCursor = cursor ?? null;
     if (this.mounted) this.scheduler.requestRender();
   }
 
@@ -151,6 +169,8 @@ export class RendererCore {
     for (const row of this.transcriptSource().flatMap((r) => wrapToWidth(r, width))) {
       this.out.write(`${row}\r\n`);
     }
+    // ESC[H is absolute: any pending placement deviation is moot now.
+    this.parkOffset = 0;
     // Fresh page under the transcript: paint body without shrink-erase --
     // nothing above needs preserving, and a nested window would be noise.
     this.paintedHeight = 0;
@@ -158,6 +178,7 @@ export class RendererCore {
     const rows = this.wrappedFrame();
     this.paintBody(rows, false);
     this.paintedHeight = rows.length;
+    this.placeCursor(rows.length);
     this.modes.showCursor();
     this.modes.endSync();
   }
@@ -203,10 +224,33 @@ export class RendererCore {
     this.modes.beginSync();
     this.modes.hideCursor();
     this.paintBody(rows, erase);
+    this.placeCursor(rows.length);
     this.modes.showCursor();
     this.modes.endSync();
     this.paintedHeight = rows.length;
     this.forceEraseNext = false;
+  }
+
+  /**
+   * Move the visible cursor from the anchor to the frame's edit position
+   * (where readline believes it is). Records the deviation so every anchor-
+   * relative operation restores the park first. No cursor = no bytes: legacy
+   * golden transcripts stay byte-identical.
+   *
+   * The row is CLAMPED to the frame's painted height: the capture model's
+   * cursor can sit below the visible frame (the readline submit echo's bare
+   * `\r\n` line-feeds it), and a down() that the terminal clamps at the
+   * screen bottom would desync parkOffset from the bytes actually written --
+   * the next anchor restore then lands a row high and paints over committed
+   * content (the submitted row, then the streaming rows that follow it).
+   */
+  private placeCursor(frameHeight: number): void {
+    const c = this.frameCursor;
+    if (!c) return;
+    const row = Math.max(0, Math.min(c.row, frameHeight - 1));
+    const s = toColumn(c.col) + down(row);
+    if (s !== "") this.out.write(s);
+    this.parkOffset = row;
   }
 
   /**
@@ -218,7 +262,11 @@ export class RendererCore {
    * san's fork fixed).
    */
   private paintBody(rows: string[], erase: boolean): void {
-    let s = "\r";
+    // Restore the anchor if a previous placement left the cursor low; then
+    // column 0. (up(0)/the no-cursor path emit no extra bytes.)
+    let s = up(this.parkOffset);
+    this.parkOffset = 0;
+    s += "\r";
     if (erase) s += ERASE_DOWN; // anchor row, erase down
     for (let i = 0; i < rows.length; i++) {
       s += rows[i]! + ERASE_LINE;
@@ -268,6 +316,9 @@ export class RendererCore {
       for (let off = 0; off < payload.length; off += capacity) {
         this.insertAbove(payload.slice(off, off + capacity), h);
       }
+      // The print re-parked the cursor at the (new) anchor; put the edit
+      // position back so a commit mid-typing does not teleport the cursor.
+      this.placeCursor(h);
       this.modes.showCursor();
       this.modes.endSync();
     } finally {
@@ -298,8 +349,10 @@ export class RendererCore {
 
   eraseFrame(): void {
     if (!this.mounted || this.paintedHeight === 0) return;
-    // INV-5 shrink-to-zero from the anchor: the cursor is parked there.
-    this.out.write(`\r${ERASE_DOWN}`);
+    // INV-5 shrink-to-zero from the anchor: restore the park if a placement
+    // left the cursor low, then erase down.
+    this.out.write(`${up(this.parkOffset)}\r${ERASE_DOWN}`);
+    this.parkOffset = 0;
     this.paintedHeight = 0;
   }
 }

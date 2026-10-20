@@ -144,6 +144,15 @@ export class CaptureStream extends EventEmitter {
     return screen.slice(0, last + 1);
   }
 
+  /**
+   * Where the model cursor sits inside the frame (0-based, relative to the
+   * frame's top row) -- readline's believed edit position, projected onto the
+   * physical terminal by the core after each paint.
+   */
+  cursor(): { row: number; col: number } {
+    return { row: this.#grid.cursorRow, col: this.#grid.cursorCol };
+  }
+
   reset(rows?: number, cols?: number): void {
     this.#grid = new Grid(rows ?? this.#grid.rows, cols ?? this.#grid.cols);
     this.#pending = "";
@@ -181,6 +190,8 @@ export class OutputBridge {
 
   readonly #outChannel: LineChannel;
   readonly #errChannel: LineChannel;
+  /** True right after the bridge commits its own unterminated row (interrupt echo). */
+  #lineOpen = false;
   #promptText = "";
   #questionMode = false;
   #mounted = false;
@@ -230,14 +241,34 @@ export class OutputBridge {
   commitText(text: string): void {
     // An in-flight stderr partial would otherwise appear AFTER newer stdout
     // rows; flush it first so the two channels keep their temporal order.
+    const open = this.#errChannel.hasPartial;
     this.#errChannel.flush();
-    this.#outChannel.write(text);
+    this.#outChannel.write(this.#eatTerminator(text, open));
   }
 
   /** stderr/arbiter channel (§2 rubric 3): foreign writes become clean permanent rows too. */
   arbiteText(text: string): void {
+    const open = this.#outChannel.hasPartial;
     this.#outChannel.flush();
-    this.#errChannel.write(text);
+    this.#errChannel.write(this.#eatTerminator(text, open));
+  }
+
+  /**
+   * Legacy stdout+stderr share ONE byte stream: a "\n" written while the
+   * current line is unterminated is that line's TERMINATOR, never a blank
+   * row. In row space the cross-channel flush above already committed the
+   * open row (a committed row is implicitly terminated), so a matching
+   * leading "\n" must be consumed with it -- otherwise every ad-hoc flush
+   * point the sink relies on (its _flushNl separator written to the OTHER
+   * stream, the TURN_END log("") after an unterminated token-usage line,
+   * the interrupt notice's leading "\n" after a pinned echo) commits a
+   * phantom blank row. When nothing was open the "\n" IS a real blank row
+   * (cursor at column 0 in legacy too) and passes through untouched.
+   */
+  #eatTerminator(text: string, otherChannelClosedRow: boolean): string {
+    const open = otherChannelClosedRow || this.#lineOpen;
+    this.#lineOpen = false;
+    return open && text.startsWith("\n") ? text.slice(1) : text;
   }
 
   /** Force the trailing partial lines out (question prompts, quit, exec boundaries). */
@@ -273,7 +304,13 @@ export class OutputBridge {
   flushEcho(): void {
     const rows = this.capture.frameRows();
     this.capture.reset();
-    if (rows.length > 0) this.#commitLines(rows);
+    if (rows.length > 0) {
+      this.#commitLines(rows);
+      // Legacy cursor sat at the end of the unpinned echo (no newline was
+      // written); the "\n" the interrupt notice leads with is that row's
+      // terminator, not a blank row.
+      this.#lineOpen = true;
+    }
   }
 
   /** Quit path: settle the rows, restore the terminal, then let exit proceed. */
@@ -289,7 +326,7 @@ export class OutputBridge {
 
   #paintFrame(rows: string[]): void {
     const before = this.core.droppedMutationCount;
-    this.core.setFrame(rows);
+    this.core.setFrame(rows, this.capture.cursor());
     if (this.core.droppedMutationCount > before) this.#scheduleRepush();
   }
 

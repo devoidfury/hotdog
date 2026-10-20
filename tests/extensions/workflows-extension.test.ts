@@ -96,14 +96,19 @@ describe("extension registration", () => {
 
 describe("workflows.path default (config schema)", () => {
   // Resolves the REAL workflows extension.json schema through the shared
-  // config layer, pinning HOTDOG_SESSIONS_DIR deterministically.
-  const ENV = "HOTDOG_SESSIONS_DIR";
+  // config layer, pinning HOTDOG_DATA_DIR deterministically.
+  const ENV = "HOTDOG_DATA_DIR";
   const saved = process.env[ENV];
+  const savedSessions = process.env.HOTDOG_SESSIONS_DIR;
   const setEnv = (v: string | undefined) => {
     if (v === undefined) delete process.env[ENV];
     else process.env[ENV] = v;
   };
-  afterAll(() => setEnv(saved));
+  afterAll(() => {
+    setEnv(saved);
+    if (savedSessions === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
+    else process.env.HOTDOG_SESSIONS_DIR = savedSessions;
+  });
 
   const extJson = JSON.parse(
     readFileSync(new URL("../../src/extensions/workflows/extension.json", import.meta.url), "utf-8"),
@@ -114,18 +119,29 @@ describe("workflows.path default (config schema)", () => {
     return (resolved as { path?: string } | undefined)?.path;
   };
 
-  it("defaults to <sessions-dir>/workflows when HOTDOG_SESSIONS_DIR is set", () => {
-    setEnv("/tmp/hotdog-sessions-test");
-    expect(resolvePath()).toBe("/tmp/hotdog-sessions-test/workflows");
+  it("defaults to <data-dir>/workflows when HOTDOG_DATA_DIR is set", () => {
+    setEnv("/tmp/hotdog-data-test");
+    expect(resolvePath()).toBe("/tmp/hotdog-data-test/workflows");
   });
 
-  it("falls back to ~/.cache/hotdog/sessions/workflows when the override is unset", () => {
+  it("falls back to ~/.cache/hotdog/workflows when the override is unset", () => {
     setEnv(undefined);
-    expect(resolvePath()).toBe(join(homedir(), ".cache", "hotdog", "sessions", "workflows"));
+    expect(resolvePath()).toBe(join(homedir(), ".cache", "hotdog", "workflows"));
+  });
+
+  it("the sessions-dir override does not leak into the workflows default", () => {
+    setEnv(undefined);
+    process.env.HOTDOG_SESSIONS_DIR = "/tmp/hotdog-sessions-test";
+    try {
+      expect(resolvePath()).toBe(join(homedir(), ".cache", "hotdog", "workflows"));
+    } finally {
+      if (savedSessions === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
+      else process.env.HOTDOG_SESSIONS_DIR = savedSessions;
+    }
   });
 
   it("an explicit workflows.path still wins", () => {
-    setEnv("/tmp/hotdog-sessions-test");
+    setEnv("/tmp/hotdog-data-test");
     expect(resolvePath({ workflows: { path: "/tmp/explicit-wf" } })).toBe("/tmp/explicit-wf");
   });
 });

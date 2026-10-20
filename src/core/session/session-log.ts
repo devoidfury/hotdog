@@ -116,11 +116,34 @@ export interface LogEntry {
   [key: string]: unknown;
 }
 
+/**
+ * The data dir: the top-level writable location for everything hotdog stores
+ * at runtime (session logs under sessions/, workflows/, task lanes/). The
+ * config dir is user-owned input; the data dir is hotdog-owned output.
+ * Configurable via HOTDOG_DATA_DIR (env-only: schema compute builtins resolve
+ * during config loading, so a config-file key here would be circular).
+ */
+export function dataDir(): string {
+  const override = process.env.HOTDOG_DATA_DIR;
+  if (override) return override;
+  const home = homedir();
+  return join(home, ".cache", "hotdog");
+}
+
+/** Join a path onto the data dir, e.g. joinDataDir("workflows"). */
+export function joinDataDir(...parts: string[]): string {
+  return join(dataDir(), ...parts);
+}
+
+/**
+ * The sessions dir, one level inside the data dir. HOTDOG_SESSIONS_DIR is a
+ * narrower override: it wins over HOTDOG_DATA_DIR, letting session logs live
+ * apart from the rest of the data (e.g. tmpfs, or a test harness).
+ */
 export function sessionsDir(): string {
   const override = process.env.HOTDOG_SESSIONS_DIR;
   if (override) return override;
-  const home = homedir();
-  return join(home, ".cache", "hotdog", "sessions");
+  return joinDataDir("sessions");
 }
 
 // Allows hand-supplied IDs (e.g. CLI --session) while rejecting path separators and `..` traversal.

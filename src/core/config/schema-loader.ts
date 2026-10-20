@@ -6,7 +6,7 @@ import type { CastFn, ComputeFn, SchemaProperty, SchemaLayer, ConfigSchema } fro
 import type { ProviderDef } from "./providers.ts";
 import { ProfileDef } from "./profiles.ts";
 import { CliFlagDef } from "./index.ts";
-import { sessionsDir } from "../session/session-log.ts";
+import { joinDataDir } from "../session/session-log.ts";
 
 export * from "./schema-types.ts";
 
@@ -56,8 +56,8 @@ const COMPUTE_BUILTINS: Record<string, (arg: unknown, ctx: unknown) => unknown> 
     return join(configDir || "./config", subPath);
   },
 
-  joinSessionsDir: (arg: unknown, _ctx: unknown): string => {
-    return join(sessionsDir(), arg as string);
+  joinDataDir: (arg: unknown, _ctx: unknown): string => {
+    return joinDataDir(arg as string);
   },
 };
 

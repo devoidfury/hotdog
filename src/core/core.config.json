@@ -438,7 +438,7 @@
     "type": "string",
     "layers": [
       { "source": "config", "key": "taskLanesDir" },
-      { "compute": "joinSessionsDir:task-lanes" }
+      { "compute": "joinDataDir:task-lanes" }
     ]
   },
   "coreTools": {

@@ -136,41 +136,41 @@ describe("resolveCompute", () => {
   });
 });
 
-describe("joinSessionsDir compute builtin", () => {
-  const savedOverride = process.env.HOTDOG_SESSIONS_DIR;
+describe("joinDataDir compute builtin", () => {
+  const savedOverride = process.env.HOTDOG_DATA_DIR;
 
-  function withSessionsDirEnv(value: string | undefined, fn: () => void): void {
-    if (value === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
-    else process.env.HOTDOG_SESSIONS_DIR = value;
+  function withDataDirEnv(value: string | undefined, fn: () => void): void {
+    if (value === undefined) delete process.env.HOTDOG_DATA_DIR;
+    else process.env.HOTDOG_DATA_DIR = value;
     try {
       fn();
     } finally {
-      if (savedOverride === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
-      else process.env.HOTDOG_SESSIONS_DIR = savedOverride;
+      if (savedOverride === undefined) delete process.env.HOTDOG_DATA_DIR;
+      else process.env.HOTDOG_DATA_DIR = savedOverride;
     }
   }
 
-  it("joins onto HOTDOG_SESSIONS_DIR when set", () => {
-    withSessionsDirEnv("/tmp/hotdog-sessions-test", () => {
-      const fn = resolveCompute("joinSessionsDir:workflows")!;
+  it("joins onto HOTDOG_DATA_DIR when set", () => {
+    withDataDirEnv("/tmp/hotdog-data-test", () => {
+      const fn = resolveCompute("joinDataDir:workflows")!;
       expect(typeof fn).toBe("function");
-      expect(fn({})).toBe("/tmp/hotdog-sessions-test/workflows");
+      expect(fn({})).toBe("/tmp/hotdog-data-test/workflows");
       // The context configDir must not leak into the result.
-      expect(fn({ configDir: "/tmp/config" })).toBe("/tmp/hotdog-sessions-test/workflows");
+      expect(fn({ configDir: "/tmp/config" })).toBe("/tmp/hotdog-data-test/workflows");
     });
   });
 
-  it("falls back to ~/.cache/hotdog/sessions when the override is unset", () => {
-    withSessionsDirEnv(undefined, () => {
-      const fn = resolveCompute("joinSessionsDir:workflows")!;
-      expect(fn({})).toBe(join(homedir(), ".cache", "hotdog", "sessions", "workflows"));
+  it("falls back to ~/.cache/hotdog when the override is unset", () => {
+    withDataDirEnv(undefined, () => {
+      const fn = resolveCompute("joinDataDir:workflows")!;
+      expect(fn({})).toBe(join(homedir(), ".cache", "hotdog", "workflows"));
     });
   });
 
   it("parses the paren form", () => {
-    withSessionsDirEnv("/tmp/hotdog-sessions-test", () => {
-      const fn = resolveCompute("joinSessionsDir('runs')")!;
-      expect(fn({})).toBe("/tmp/hotdog-sessions-test/runs");
+    withDataDirEnv("/tmp/hotdog-data-test", () => {
+      const fn = resolveCompute("joinDataDir('runs')")!;
+      expect(fn({})).toBe("/tmp/hotdog-data-test/runs");
     });
   });
 });

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `$HOTDOG_DATA_DIR` (`<data>`) can be set to change where sessions/workflows/temp data is saved. defaults to ~/.cache/hotdog/
+
+- [BRK] workflows directory moved to `<data>/workflows`
+- [BRK] task-lanes directory moved to `<data>/task-lanes`
+
+```
+mv ~/.cache/hotdog/sessions/workflows ~/.cache/hotdog/workflows
+mv ~/.cache/hotdog/sessions/task-lanes ~/.cache/hotdog/task-lanes
+```
+
 - **opt-in cost display (`modelPricing`).** A local model-name -> per-million-token rate table (`input` / `cachedInput` / `output`, `cachedInput` defaulting to 0 like the tracker's free-cache house model) adds a `cost:` line to `/tokens`, for the session and the last call. Display-only: no session-log records, no network fetch. Unset key = byte-identical display; a configured table with no entry for the session model says the model is unpriced instead of guessing.
 - **model setter is a no-op on the same value.** `agent.model = <current model>` no longer fires `MODEL_CHANGE` or rebuilds caches, so every resume stopped writing a redundant model-change record into its own log. Real switches behave exactly as before.
 

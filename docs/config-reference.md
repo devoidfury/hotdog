@@ -639,10 +639,10 @@ This is the fleet-wide default: a provider's own `taskLanes` overrides it for th
 ### `taskLanesDir`
 
 - **Type:** `string`
-- **Default:** `<sessionsDir>/task-lanes` (i.e. `~/.cache/hotdog/sessions/task-lanes`, or `$HOTDOG_SESSIONS_DIR/task-lanes`)
+- **Default:** `<dataDir>/task-lanes` (i.e. `~/.cache/hotdog/task-lanes`, or `$HOTDOG_DATA_DIR/task-lanes`)
 - **Resolution:** config > compute
 
-Directory holding the cross-process lane slot ledger: one subdir per provider lane (`_` for the bare-name lane), each holding up to `taskLanesPerProvider` / `taskLanes` numbered slot files. Slot files are ephemeral bookkeeping -- live turns (task agents and top-level session turns) hold them and refresh their mtime every 15s, and quiet ones are reclaimed automatically -- so the dir is safe to delete when nothing is running, and it should not be synced or backed up. The ledger dir is swept at startup and hourly, and any file quiet for 60 minutes is deleted, so leftovers from killed or upgraded processes cannot accumulate. Sharing it between machines (NFS) or between container instances of a mounted sessions dir works precisely because of the heartbeat: host identity and pid numbering are not trustworthy across either boundary.
+Directory holding the cross-process lane slot ledger: one subdir per provider lane (`_` for the bare-name lane), each holding up to `taskLanesPerProvider` / `taskLanes` numbered slot files. Slot files are ephemeral bookkeeping -- live turns (task agents and top-level session turns) hold them and refresh their mtime every 15s, and quiet ones are reclaimed automatically -- so the dir is safe to delete when nothing is running, and it should not be synced or backed up. The ledger dir is swept at startup and hourly, and any file quiet for 60 minutes is deleted, so leftovers from killed or upgraded processes cannot accumulate. Sharing it between machines (NFS) or between container instances of a mounted data dir works precisely because of the heartbeat: host identity and pid numbering are not trustworthy across either boundary.
 
 ```json
 { "taskLanesDir": "/var/tmp/hotdog-lanes" }
@@ -1313,7 +1313,7 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 |-------|------|---------|-------------|
 | `maxNodes` | `number` | `8` | Soft cap on nodes per workflow graph (exceeding it warns; validation refuses above the hard ceiling of 32). A workflow's own `limits.maxNodes` overrides. |
 | `maxRuntimeMins` | `number` | `60` | Default per-node cap in minutes on actual worker run time (a node's `maxRuntimeMins` overrides); time queued waiting for a provider-lane slot does not count. When the cap elapses the in-flight attempt is interrupted and the node fails immediately; remaining attempts are not retried. |
-| `path` | `string` | `<sessions-dir>/workflows` (sessions dir = `$HOTDOG_SESSIONS_DIR`, or `~/.cache/hotdog/sessions`) | Directory holding `*.workflow.yaml` graphs; run dirs live under `<path>/runs`. |
+| `path` | `string` | `<data-dir>/workflows` (data dir = `$HOTDOG_DATA_DIR`, or `~/.cache/hotdog`) | Directory holding `*.workflow.yaml` graphs; run dirs live under `<path>/runs`. |
 
 ```json
 { "workflows": { "maxNodes": 12, "maxRuntimeMins": 45 } }
@@ -1587,7 +1587,8 @@ These extensions expose a single config knob, `{ "<key>": { "enabled": <boolean,
 | `HOTDOG_HOOK_TRACE` | `hookTrace` | Set to `true` to enable hook tracing. |
 | `HOTDOG_LOG_LEVEL` | Logging | Log level (`debug`, `info`, `warn`, `error`). `debug` required for `hookTrace`. |
 | `HOTDOG_LOG_TARGET` | Logging | Log target (`stderr`, `stdout`, `none`). |
-| `HOTDOG_SESSIONS_DIR` | Session logs | Override the directory where JSONL session logs are stored. |
+| `HOTDOG_DATA_DIR` | Data directory | Override the top-level runtime data dir (default `~/.cache/hotdog`). Holds `sessions/`, `workflows/`, `task-lanes/`. Env-only: schema computes resolve during config loading. |
+| `HOTDOG_SESSIONS_DIR` | Session logs | Override the directory where JSONL session logs are stored. Wins over the `HOTDOG_DATA_DIR`-derived `<data>/sessions`. |
 | `BRAVE_API_KEY` | `webSearch.braveApiKey` | Brave Search API key. |
 | `TAVILY_API_KEY` | `webSearch.tavilyApiKey` | Tavily API key. |
 | `SEARXNG_INSTANCE_URL` | `webSearch.searxngInstanceUrl` | SearXNG instance URL. |

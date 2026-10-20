@@ -380,8 +380,10 @@ Whether pooled executor entries are wrapped in an OS jail plan when the platform
 supports it. The backend is **bubblewrap** (Linux): a probed plan gives the entry
 a fresh tmpfs root, read-only system directories, and read-write access to ONLY
 the session's workspace roots plus a private scratch dir — no `$HOME`, no hotdog
-config files, no sibling session roots, no `.git` of the hotdog checkout. The
-capability probe runs once per process; when bwrap is missing or the probe fails,
+config files, no sibling session roots. The hotdog checkout itself rides the jail
+read-only (the pooled runner imports it): its `.git` is readable by tool code but
+never writable, except when the session's workspace roots include the repo.
+The capability probe runs once per process; when bwrap is missing or the probe fails,
 entries spawn plain and the posture says so (`worker (fence: none -- probe failed)`).
 macOS/Windows have no jail backend yet: the plane runs pooled but unfenced there,
 and the status line shows it. Use `off` to skip the probe (dev loop, CI).

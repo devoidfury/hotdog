@@ -21,6 +21,12 @@
           "type": "number",
           "default": 400,
           "description": "Minimum length (characters) for a single-line paste to be shown as a [Paste #N] marker; shorter single-line pastes (with any surrounding newlines trimmed) are inserted into the line as-is. Set to 0 to always use the marker."
+        },
+        "renderer": {
+          "type": "string",
+          "enum": ["legacy", "split"],
+          "default": "legacy",
+          "description": "Interactive CLI output renderer. 'legacy' = today's direct stdout/stderr writes (byte-identical default). 'split' mounts the managed bottom-region renderer (commits transcript rows into native scrollback) but only when both stdin and stdout are TTYs; any non-TTY stream falls back to legacy regardless of this knob. This is the stage-2/3 rollback kill-switch."
         }
       },
       "additionalProperties": false,

@@ -76,6 +76,13 @@ export interface ClipboardPasteInterceptorOptions {
    * Source of truth for the value is the `pasteMarkerMinChars` config key.
    */
   pasteMarkerMinChars: number;
+  /**
+   * Split renderer mode (design note §10): the renderer's TeardownGuard owns
+   * the paired ?2004h/l enable/disable, so the interceptor emits neither.
+   * Its listener swap and teardown stay intact -- this only absorbs the
+   * escape-write point so bracketed paste is never restored twice.
+   */
+  rendererOwnsBracketedPaste?: boolean;
 }
 
 export class ClipboardPasteInterceptor {
@@ -84,6 +91,7 @@ export class ClipboardPasteInterceptor {
   readonly #stdin: InputLike | null;
   readonly #stdout: OutputLike | null;
   readonly #markerMinChars: number;
+  readonly #rendererOwnsPasteMode: boolean;
   #input: DataListener | null = null;
   /** sequential marker number; incremented per paste, never reset */
   #seq = 0;
@@ -107,6 +115,7 @@ export class ClipboardPasteInterceptor {
       );
     }
     this.#markerMinChars = options.pasteMarkerMinChars;
+    this.#rendererOwnsPasteMode = options.rendererOwnsBracketedPaste === true;
     const input = (rl as { input?: unknown }).input as InputLike | undefined;
     const output = (rl as { output?: unknown }).output as OutputLike | undefined;
     const dataListeners = (input?.listeners?.("data") ?? []) as DataListener[];
@@ -201,6 +210,9 @@ export class ClipboardPasteInterceptor {
   }
 
   #writeEscape(seq: string): void {
+    // Split renderer owns the paired ?2004h/l enable/disable (TeardownGuard);
+    // emitting it here would double-toggle bracketed paste (§10 absorption).
+    if (this.#rendererOwnsPasteMode) return;
     if (this.#stdout?.isTTY !== true) return;
     try {
       this.#stdout.write(seq);

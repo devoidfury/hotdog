@@ -165,6 +165,13 @@ export class CliOutputSink extends OutputSink {
   outStream: NodeJS.WriteStream;
   altStream: NodeJS.WriteStream;
 
+  /**
+   * Split renderer commit channel (design note §2 rubric 1), installed by the
+   * ui-interactive-cli split bridge. Null = legacy mode: sink.log() falls back
+   * to plain console.log, byte-identical to today's behavior.
+   */
+  logRouter: ((message: string) => void) | null = null;
+
   constructor(options: CliOutputSinkOptions = {}) {
     super();
     this.thinkerFormat = options.thinkerFormat || "[Thinking: {}]";
@@ -265,6 +272,19 @@ export class CliOutputSink extends OutputSink {
    */
   setPalette(palette: ColorPalette): void {
     this.palette = palette;
+  }
+
+  /**
+   * Permanent output row (banner, goodbye, shell-mode results, notices).
+   * Legacy mode: plain console.log -- identical bytes and call shape.
+   * Split mode: handed to the renderer as committed clean rows.
+   */
+  log(message: string): void {
+    if (this.logRouter) {
+      this.logRouter(message);
+    } else {
+      console.log(message);
+    }
   }
 
   /**

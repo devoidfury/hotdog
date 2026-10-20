@@ -23,6 +23,7 @@ import { registerTaskManagerService } from "../subagents/index.ts";
 import { CliChannel } from "./cli-channel.ts";
 import { ClipboardPasteInterceptor } from "./clipboard-paste.ts";
 import { DictationInterceptor } from "./dictation.ts";
+import { mountSplitRenderer, type OutputBridge } from "./split-bridge.ts";
 import { resolveSttTarget } from "@core/config/stt.ts";
 import {
   parseCompletionContext,
@@ -251,6 +252,10 @@ export class AsyncInteractiveCliInput implements InputInterface {
     let pendingLine: ((line: string) => void) | null = null;
     try {
       if (signal?.aborted) return answers;
+      // Split mode: the takeover prints via owned channels (never raw
+      // stdout); the exclusive question FOCUS mode is stage 3 (§8) -- the
+      // mechanics here stay exactly as before.
+      uiBridge?.setQuestionMode(true);
 
       const aborted = signal
         ? new Promise<"aborted">((resolve) => {
@@ -284,6 +289,9 @@ export class AsyncInteractiveCliInput implements InputInterface {
         while (!valid) {
           const prompt = defaultValue !== "" ? ` [${defaultValue}] ` : " ";
           process.stdout.write(prompt);
+          // Split mode: the answer prompt carries no newline -- push the
+          // partial row out so the prompt is actually visible before waiting.
+          uiFlush();
           const linePromise = new Promise<string>((resolve) => {
             const onLine = (line: string) => {
               pendingLine = null;
@@ -338,6 +346,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
     } finally {
       if (signal && onAbort) signal.removeEventListener("abort", onAbort);
       if (pendingLine) rl.removeListener("line", pendingLine);
+      uiBridge?.setQuestionMode(false);
       this.#addLineHandler(this.#onLine);
     }
 
@@ -347,6 +356,23 @@ export class AsyncInteractiveCliInput implements InputInterface {
 
 // Shared with the question tool via AGENT_TOOL_CONTEXT.
 let currentInput: InputInterface | null = null;
+
+/**
+ * Printer for permanent console.log output sites (design note §2: these rows
+ * commit in split mode). Default is plain console.log -- legacy mode keeps
+ * today's exact bytes and stays visible to test spies. runInteractiveSession
+ * rebinds it to the sink's log channel each session (which itself only
+ * diverges from console.log once the split bridge installs its router).
+ */
+let uiOut: (message: string) => void = (message: string) => {
+  console.log(message);
+};
+
+/** Commit pending partial rows before blocking on user input (split mode; no-op in legacy). */
+let uiFlush: () => void = () => {};
+
+/** The live split bridge when the renderer is mounted; module slot like currentInput (one session per process). */
+let uiBridge: OutputBridge | null = null;
 
 /**
  * Unanswered questions reconstructed by a resume (buildInteractiveAgent),
@@ -366,10 +392,10 @@ export function buildOnQuitHandler(
   return () => {
     if (quitStarted) return;
     quitStarted = true;
-    console.log("\nGoodbye!");
+    uiOut("\nGoodbye!");
     const interactiveSessionId = sessionManager.sessionId();
     if (interactiveSessionId) {
-      console.log(`Session: ${interactiveSessionId} (resume with: hotdog --session-id ${interactiveSessionId})`);
+      uiOut(`Session: ${interactiveSessionId} (resume with: hotdog --session-id ${interactiveSessionId})`);
     }
     // Stop the provider-health sweep timer: unref'd so it never blocks exit,
     // but a discarded manager must not keep probing providers.
@@ -393,7 +419,7 @@ export async function buildInteractiveAgent(
   const explicitSessionId = cli.sessionId as string | undefined;
   const { replayed, pendingQuestions, profile } = await restoreSessionIntoAgent(agent, explicitSessionId);
   if (replayed > 0) {
-    console.log(`Session restored: ${replayed} messages replayed from ${explicitSessionId}`);
+    uiOut(`Session restored: ${replayed} messages replayed from ${explicitSessionId}`);
   }
   resumePendingQuestions = pendingQuestions;
 
@@ -412,7 +438,7 @@ export async function buildInteractiveAgent(
     if (!cliModel && attestedModel) {
       agent.model = attestedModel;
     } else if (!cliModel && !attestedModel) {
-      console.log(
+      uiOut(
         `Resuming ${explicitSessionId} with no model attested in its log (legacy log or an index rebuilt from one): ` +
           `continuing on the default model (${agent.model}). Pass -m <model> if that is wrong.`,
       );
@@ -438,7 +464,7 @@ export async function resumeUnansweredQuestions(
   input: InputInterface | null,
   continueTurn: () => void,
 ): Promise<void> {
-  console.log(
+  uiOut(
     `Resuming: ${pending.length} unanswered question${pending.length > 1 ? "s" : ""} from before the interruption.`,
   );
   const held = pending.slice();
@@ -510,6 +536,24 @@ export async function runInteractiveSession(
     hideUserMessage: true,
   });
 
+  // Split-renderer kill switch (design note §9/§12): mounts iff the knob says
+  // "split" AND both stdio streams are TTYs. Non-TTY is passthrough
+  // regardless of the knob; "legacy" (the default) never touches a global.
+  const uiCli = (config.uiInteractiveCli as Record<string, unknown>) || {};
+  const bridge = mountSplitRenderer({
+    knob: uiCli.renderer,
+    stdinIsTTY: process.stdin.isTTY,
+    stdoutIsTTY: process.stdout.isTTY,
+  });
+  uiBridge = bridge;
+  if (bridge) {
+    sink.logRouter = (message: string) => bridge.commitText(message + "\n");
+  }
+  uiOut = (message: string) => sink.log(message);
+  uiFlush = () => {
+    bridge?.flushPending();
+  };
+
   const llmClient = core.createLlmClient();
 
   const buildAgent = async (agentConfig: Record<string, unknown>): Promise<AgentLike> => {
@@ -555,23 +599,37 @@ export async function runInteractiveSession(
   registerTaskManagerService(core, sessionManager.getTaskManager());
 
   const agent = sessionManager.getAgent();
-  console.log(`hotdog ${pkg.version} (interactive mode)`);
-  console.log(`Model: ${resolved.model}`);
-  console.log(`Profile: ${resolved.profileName}`);
-  console.log(`Session: ${agent?.sessionId || "unknown"}`);
-  console.log("Type /quit or /exit to exit.\n");
+  sink.log(`hotdog ${pkg.version} (interactive mode)`);
+  sink.log(`Model: ${resolved.model}`);
+  sink.log(`Profile: ${resolved.profileName}`);
+  sink.log(`Session: ${agent?.sessionId || "unknown"}`);
+  sink.log("Type /quit or /exit to exit.\n");
 
-  const uiCli = (config.uiInteractiveCli as Record<string, unknown>) || {};
   const shellMode = uiCli.shellMode;
 
   const createReadline = options.createReadline || readline.createInterface;
 
   const rl = createReadline({
     input: process.stdin,
-    output: process.stdout,
+    output: bridge ? (bridge.capture as unknown as NodeJS.WriteStream) : process.stdout,
     prompt: `(${resolved.model})> `,
     completer: buildReadlineCompleter(sessionManager, core),
   });
+
+  if (bridge) {
+    // The prompt text is echoed into committed rows on submit, so the bridge
+    // tracks it; readline stays in charge of input and repaints through the
+    // capture stream (stage-2 note §2 row 5).
+    bridge.setPrompt(`(${resolved.model})> `);
+    const origSetPrompt = rl.setPrompt.bind(rl);
+    rl.setPrompt = (prompt: string): void => {
+      bridge.setPrompt(prompt);
+      origSetPrompt(prompt);
+    };
+    // Registered before the main line handler so the submit echo commits as a
+    // transcript row ahead of anything the turn prints.
+    rl.on("line", (line: string) => bridge.lineSubmitted(line));
+  }
 
   // Intercept bracketed paste before readline: pasted payloads become inline
   // `[Paste #N - M lines]` markers (real content restored in `lineHandler`),
@@ -580,6 +638,10 @@ export async function runInteractiveSession(
   // missing or invalid value
   const paste = new ClipboardPasteInterceptor(rl, {
     pasteMarkerMinChars: uiCli.pasteMarkerMinChars as number,
+    // In split mode the renderer's TeardownGuard owns the ?2004h/l pair (§10);
+    // the interceptor keeps the listener swap and its own teardown, minus the
+    // escape writes -- bracketed paste is never enabled/disabled twice.
+    rendererOwnsBracketedPaste: !!bridge,
   });
 
   // Ctrl+X dictation: sits in front of the paste chain, swallows only the
@@ -590,12 +652,20 @@ export async function runInteractiveSession(
   });
 
   const onQuit = buildOnQuitHandler(sessionManager, core.extensions);
+  // Teardown pairs with every exit path (§10): restore the terminal first so
+  // the goodbye rows land on a plain screen via passthrough stdout.
+  const exitSession = bridge
+    ? (): void => {
+        bridge.shutdown();
+        onQuit();
+      }
+    : onQuit;
   const channel = new CliChannel({
     sessionManager,
     sessionId: sessionManager.sessionId()!,
     sink,
     rl,
-    onQuit,
+    onQuit: exitSession,
   });
 
   // Define the line handler
@@ -614,7 +684,7 @@ export async function runInteractiveSession(
   core.hooks.on(HOOKS.TURN_END, ({ stopped }) => {
     if (stopped) {
       setImmediate(() => {
-        console.log("");
+        sink.log("");
         rl.prompt();
       });
     }
@@ -639,6 +709,10 @@ export async function runInteractiveSession(
       captureOutput: sendToAssistant,
     });
     rl.resume();
+    // The bracket may stay (stage 2) but process.stdin.pause is neutered
+    // while mounted (pitfall 6); settled shell output lands before the rows
+    // printed below.
+    uiFlush();
 
     if (sendToAssistant) {
       const notePart = note ? `Note: ${note}\n\n` : "";
@@ -646,12 +720,12 @@ export async function runInteractiveSession(
       await channel.send(msg);
     } else {
       if (result.content) {
-        console.log(result.content);
+        sink.log(result.content);
       } else if (result.error) {
-        console.log(`${result.error}`);
+        sink.log(`${result.error}`);
       }
       if (result.exitCode != 0) {
-        console.log(`[exec: exit code ${result.exitCode}]`);
+        sink.log(`[exec: exit code ${result.exitCode}]`);
       }
     }
     rl.prompt();
@@ -668,7 +742,7 @@ export async function runInteractiveSession(
 
     if (trimmed.startsWith("/")) {
       const cmdText = trimmed.slice(1).trim();
-      handleSlashCommand(cmdText, sessionManager, channel, rl, onQuit);
+      handleSlashCommand(cmdText, sessionManager, channel, rl, exitSession);
       return;
     }
 
@@ -699,7 +773,10 @@ export async function runInteractiveSession(
       (rl as { line: string; cursor: number }).line = "";
       (rl as { line: string; cursor: number }).cursor = 0;
       paste.onInterrupt();
-      console.log("\nInterrupted (/quit, /exit, or ctrl-d to exit)");
+      // Split mode: pin the current echo into scrollback (it stays visible on
+      // the legacy path), then the notice prints below it like today.
+      bridge?.flushEcho();
+      sink.log("\nInterrupted (/quit, /exit, or ctrl-d to exit)");
       rl.prompt();
     });
 
@@ -707,7 +784,7 @@ export async function runInteractiveSession(
 
   // Ctrl+D (EOF) closes readline: shut down through the shared handler so the session id still prints.
   // options.onClose overrides (tests).
-  rl.on("close", options.onClose || onQuit);
+  rl.on("close", options.onClose || exitSession);
 
   // Mid-question resume: re-present the restored log's unanswered questions
   // before the first prompt; the TURN_END hook re-prompts when done.
@@ -719,7 +796,7 @@ export async function runInteractiveSession(
       // a mid-continuation prompt queues instead of racing.
       sessionManager.getBus(agent.sessionId)?.enqueue("", { continuation: true });
     }).catch((e: unknown) => {
-      console.log(formatError(e));
+      sink.log(formatError(e));
       rl.prompt();
     });
   } else {
@@ -748,7 +825,7 @@ export function handleSlashCommand(
   // UI-only commands handled directly by the UI layer
   switch (cmd.type) {
     case Command.Help:
-      console.log(HELP_TEXT);
+      uiOut(HELP_TEXT);
       rl.prompt();
       return;
 
@@ -777,12 +854,12 @@ export function handleSlashCommand(
         }
       }
       if (!action || !(action & ACTIONS.PROMPT)) {
-        console.log("");
+        uiOut("");
         rl.prompt();
       }
     },
     () => {
-      console.log("");
+      uiOut("");
       rl.prompt();
     },
   );

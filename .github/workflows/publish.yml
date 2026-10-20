@@ -79,10 +79,16 @@ jobs:
             exit 1
           fi
 
-      # OIDC publish requires npm CLI >= 11.5.1. The runner ships node+npm;
-      # print it so a silent regression (or a needed bump) is visible in logs.
-      - name: "Check npm version"
-        run: npm --version
+      # OIDC trusted publishing requires npm CLI >= 11.5.1; the runner's node
+      # ships npm 10.x, which never attempts the token exchange and fails with
+      # a bare ENEEDAUTH. Upgrade in-place: the npm client is unavoidably in
+      # its own trust path, this pins the release line, and npm ships no
+      # lifecycle scripts, so the install just lays down files over TLS with
+      # integrity checks. The version print keeps a regression visible.
+      - name: "Upgrade npm (trusted publishing requires >= 11.5.1)"
+        run: |
+          npm install -g npm@12
+          npm --version
 
       - name: "Preview tarball"
         run: npm pack --dry-run

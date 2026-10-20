@@ -15,7 +15,10 @@
     "bun": ">=1.4.2"
   },
   "author": "Thomas Hunkapiller <tom@furycodes.com> (https://furycodes.com/)",
-  "repository": "github:devoidfury/hotdog",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devoidfury/hotdog.git"
+  },
   "scripts": {
     "start": "bun bin/hotdog",
     "loud-test": "bun test --parallel",

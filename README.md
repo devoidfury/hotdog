@@ -2,7 +2,7 @@
 
 **agent harness built for local, open-weight models.** Point it at llama.cpp, llama-swap, vllm, or any OpenAI-compatible endpoint and run your entire agent stack on your own hardware. No cloud, no API bills, no telemetry or data harvesting.
 
-**Zero dependencies** - bring your own [Bun](https://bun.sh) and hotdog will run from source code. No `npm install`, no `node_modules`, no build step, no postinstall hooks. The whole runtime is the TypeScript in this repo.  
+**Zero dependencies** - bring your own [Bun](https://bun.sh) and hotdog will run from source code. No `npm install`, no `node_modules`, no build step, no postinstall hooks. The whole runtime is the TypeScript in this repo. Prefer a package manager? The same source tree is published as [`@read-receipt/hotdog`](https://www.npmjs.com/package/@read-receipt/hotdog) -- still zero dependencies, see [Install from npm](#install-from-npm-optional).  
 *More info @ [supply chain rationale](docs/supply-chain.md).*
 
 ## Quick Start
@@ -37,13 +37,34 @@ export PATH="$PATH:/path/to/hotdog/bin"
 hotdog -m "qwen3.8-flash-next" -p "See if you can improve the test coverage. @package.json"
 ```
 
+### Install from npm (optional)
+
+The same source tree is published as `@read-receipt/hotdog`. From v0.13.1 every npm version is published from a tagged GitHub release with npm provenance (0.12.1 was the one-time manual bootstrap, no attestation).
+
+```sh
+# global: links `hotdog` into ~/.bun/bin (already on your PATH if bun's installer set it up)
+bun add -g @read-receipt/hotdog
+
+# or project-local, then run via bun
+bun add @read-receipt/hotdog
+bun node_modules/.bin/hotdog info
+```
+
+The tarball is this repo's source and nothing else (`bin/`, `src/`, `examples/`, `tsconfig.json`) -- zero dependencies to resolve, no install scripts, and Bun verifies the tarball integrity on install. First-time config, straight from the installed package:
+
+```sh
+cp -r ~/.bun/install/global/node_modules/@read-receipt/hotdog/examples/minimal-config/config ~/.config/hotdog
+```
+
+Then point it at your inference server (`HOTDOG_AI_URL`/`HOTDOG_API_KEY` or `providers` in `defaults.json`) and go: `hotdog info` to confirm, `hotdog -p "hello"` for a first prompt. Git clone stays the recommended path for hacking on hotdog itself -- extensions aside, though, this is the identical code the repo runs.
+
 > [!CAUTION]
 > No API key means your inference server is vulnerable to misuse by anything on the network. Always configure local inference servers to require an API key. llama.cpp, llama-swap, vllm, and others support API key configuration.
 
 ## Why? _You gonna eat that?_
 
 - **Local first.** Built and tested daily against local backends (llama-swap, llama.cpp, vllm, ds4).
-- **Short supply chain.** `dependencies` is empty. Just Bun. No packages to install means nothing to compromise. Pin a git tag and you know exactly what you're running.
+- **Short supply chain.** `dependencies` is empty. Just Bun. No packages to install means nothing to compromise. Pin a git tag and you know exactly what you're running; from the npm package, release provenance names the exact commit and workflow that built it.
 - **Wire-format integrity.** Markers, chat-template control tokens, and tool-call delimiters inside untrusted output get rewritten to per-session aliases, so nothing a tool reads can forge a fake turn or system message.
 - **Small harness footprint.** Minimal context and system prompt injected by the harness itself. Instead, you write and compose your own system prompts with tool-sets as profiles.
 - **Tiny core, extensions to build out the agent you want.** Disable any feature you don't like, drop in your own extensions to add new functionality.

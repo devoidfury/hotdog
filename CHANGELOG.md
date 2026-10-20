@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [v0.13.0] - 2026-10-20
 
 - `$HOTDOG_DATA_DIR` (`<data>`) can be set to change where sessions/workflows/temp data is saved. defaults to ~/.cache/hotdog/
 
@@ -18,7 +18,7 @@
 
 - [BRK] dropped the dead `webui.maxAgeSecs` config key (no consumers since the run-3 housekeeping work); a config that still sets it now fails startup validation ("additional property not allowed") -- delete the key.
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.12.1...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.12.1...v0.13.0
 
 ## [v0.12.1] - 2026-10-18
 

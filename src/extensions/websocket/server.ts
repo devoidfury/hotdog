@@ -139,6 +139,7 @@ export function createWsServer(
       taskProfile: resolvedCore.taskProfile || "task-default",
       lanesPerProvider: resolvedCore.taskLanesPerProvider,
       lanesDir: resolvedCore.taskLanesDir ?? null,
+      spawnLogPath: resolvedCore.taskSpawnsPath ?? null,
       defaultModel: resolvedCore.model ?? null,
       healthIntervalSecs: resolvedCore.providerHealthCheckIntervalSecs,
       healthCheckTimeoutSecs: resolvedCore.healthCheckTimeout,

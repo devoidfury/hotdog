@@ -648,6 +648,18 @@ Directory holding the cross-process lane slot ledger: one subdir per provider la
 { "taskLanesDir": "/var/tmp/hotdog-lanes" }
 ```
 
+### `taskSpawnsPath`
+
+- **Type:** `string`
+- **Default:** `<dataDir>/task-spawns.jsonl` (i.e. `~/.cache/hotdog/task-spawns.jsonl`, or `$HOTDOG_DATA_DIR/task-spawns.jsonl`)
+- **Resolution:** config > compute
+
+Append-only JSONL restart sidecar for `delegate_task` records: one spawn line per non-parked task (id, description, calling session, timestamp, writer pid/host) and one end line per terminal transition. A later process reads it to list never-ended tasks from dead processes as "interrupted by restart" (`plan_status`) and to answer `task_status` on such ids honestly -- surfacing only, nothing is ever auto-respawned. Workflow-engine (parked) spawns are not recorded; their lifecycle lives in the run's `run.jsonl`.
+
+```json
+{ "taskSpawnsPath": "/var/tmp/hotdog-spawns.jsonl" }
+```
+
 ### `modelGroups`
 
 - **Type:** `object`
@@ -1307,7 +1319,7 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 
 ### `workflows`
 
-[Workflows](../src/extensions/workflows) — multi-agent workflow (DAG) artifacts: `hotdog workflow validate|render|run|list|status|reconcile|cancel` (`--param key=value` supplies values for graphs that declare `params`), the manager tools `workflow_validate` / `workflow_dispatch` / `workflow_status` (managerOnly), and the `/workflow` + `/followup` slash commands. `workflow_validate` persists a manager-designed graph under `path` on the spot (same-name validate updates in place) and returns its file; `workflow_dispatch(file=...)` runs a saved graph (the file reference only resolves inside the workflows dir), optionally with `args` filling the graph's declared `params` so saved graphs double as reusable templates.
+[Workflows](../src/extensions/workflows) — multi-agent workflow (DAG) artifacts: `hotdog workflow validate|render|run|list|status|reconcile|cancel` (`--param key=value` supplies values for graphs that declare `params`), the manager tools `workflow_validate` / `workflow_dispatch` / `workflow_status` (managerOnly), and the `/workflow` + `/followup` slash commands. `workflow_validate` persists a manager-designed graph under `path` on the spot (same-name validate updates in place) and returns its file; `workflow_dispatch(file=...)` runs a saved graph (the file reference only resolves inside the workflows dir), optionally with `args` filling the graph's declared `params` so saved graphs double as reusable templates. Runs orphaned by a process restart (no terminal `finished` event, owner claim dead/absent) get one `interrupted` event appended to their journal at activation and are listed as resumable by `workflow_status` (no run_id) and `workflow list`; nothing auto-resumes -- re-dispatch with `run_id` to reconcile.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

@@ -139,13 +139,13 @@ describe("cli: list / status / reconcile / cancel", () => {
   it("list reports one line per run dir, skipping non-runs", async () => {
     const root = freshDir();
     seedRun(root, "20260101-1010-one", { finished: "succeeded" });
-    seedRun(root, "20260101-1011-two"); // unfinished
+    seedRun(root, "20260101-1011-two"); // unfinished, owner absent -> interrupted
     mkdirSync(join(root, "not-a-run"));
     const r = await runWorkflowCommand(["list"], { runsRoot: root });
     expect(r.code).toBe(0);
     expect(r.out).toEqual([
       "20260101-1010-one  demo  succeeded",
-      "20260101-1011-two  demo  unfinished",
+      "20260101-1011-two  demo  interrupted (resumable: run --id 20260101-1011-two)",
     ]);
   });
 

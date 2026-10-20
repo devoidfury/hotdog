@@ -27,6 +27,7 @@ import {
 } from "@core/extensions/types.ts";
 import type { Agent } from "@core/agent.ts";
 import { TASK_MANAGER_SERVICE } from "../subagents/index.ts";
+import { markInterruptedRuns } from "./engine.ts";
 import { runWorkflowCommand, type WorkflowCliDeps } from "./workflow-cli.ts";
 import {
   WORKFLOW_TOOL_CONSTRUCTORS,
@@ -63,6 +64,18 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     ((core.config as Record<string, unknown> | undefined)?.modelGroups as
       | Record<string, string[]>
       | undefined) ?? {};
+
+  // Restart durability: mark runs whose owner died (warn + one `interrupted`
+  // journal event each), never auto-resume -- a restart often means deliberate
+  // tree changes. Cost is one readdir + small journal tail reads; nothing here
+  // builds an agent.
+  if (runsRoot) {
+    try {
+      await markInterruptedRuns(runsRoot);
+    } catch (e: unknown) {
+      logger.warn(`[workflows] interrupted-run scan failed: ${formatError(e)}`);
+    }
+  }
 
   // Live availability listing: rescanned (stat-gated) per system-prompt build,
   // so graphs saved mid-session reach managers without a restart.

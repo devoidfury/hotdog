@@ -117,6 +117,8 @@ export interface SessionManagerOptions {
     lanesPerProvider?: number;
     /** Cross-process lane ledger dir (resolved config: taskLanesDir). */
     lanesDir?: string | null;
+    /** Restart sidecar for delegate_task records (resolved config: taskSpawnsPath). */
+    spawnLogPath?: string | null;
     /** Resolved default model (resolved config: model): last chain link for task placement. */
     defaultModel?: string | null;
     /** Resolved providerHealthCheckIntervalSecs: task-manager health sweep interval (0 = interval off). */
@@ -208,6 +210,7 @@ export class SessionManager {
         taskProfile: options.taskConfig.taskProfile,
         lanesPerProvider: options.taskConfig.lanesPerProvider,
         lanesDir: options.taskConfig.lanesDir,
+        spawnLogPath: options.taskConfig.spawnLogPath ?? null,
         defaultModel: options.taskConfig.defaultModel ?? null,
         healthIntervalSecs: options.taskConfig.healthIntervalSecs,
         healthCheckTimeoutSecs: options.taskConfig.healthCheckTimeoutSecs,

@@ -15,7 +15,7 @@
  * (validate completed claims against the filesystem, reuse only what matches).
  */
 
-import { appendFile, mkdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { appendFile, mkdir, open, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { formatError } from "@core/error.ts";
@@ -1207,6 +1207,236 @@ export async function claimRunDir(
   throw new Error(`cannot claim run dir '${runDir}': repeated ownership races`);
 }
 
+// ---------------------------------------------------------------------------
+// restart interruption scan & marking (mark + surface only; never auto-resume)
+// ---------------------------------------------------------------------------
+//
+// A process kill mid-run leaves the run dir claimed-by-nothing (or by a dead
+// pid) with a journal that never reached `finished`. At extension activation
+// we mark such dirs with one `interrupted` journal event and surface them via
+// workflow_status / `workflow list` -- a restart often means deliberate tree
+// changes, so nothing is ever auto-resumed; a human or manager re-dispatches
+// with run_id and reconcile-resume re-verifies everything on the filesystem.
+/** Journal marker naming a run whose owner died mid-flight. */
+export const INTERRUPTED_EV = "interrupted";
+/** Resume instruction carried verbatim in the marker detail. */
+export const INTERRUPTED_DETAIL = "owner lost (restart?); resumable with dispatch run_id";
+
+/**
+ * Upper bound on the journal bytes a scan may read per dir when `bounded`
+ * (the activation pass): run journals are append-only and unbounded, and run
+ * dirs are never GC'd, so boot-time scanning must never read one whole. The
+ * marking decision lives at the edges: the `started` head line (the engine's
+ * first write) and the last events (terminal status, the marker, the node
+ * event a kill interrupted). Journals within twice the window are read whole,
+ * so real runs judge with exact rules; larger ones fall back to the edge
+ * rules below (one marker line can then be missed only in exotic shapes,
+ * e.g. death moments after a `resumed` line on a >2x-window journal).
+ */
+const INTERRUPTED_SCAN_WINDOW = 64 * 1024;
+
+/**
+ * Journal text for the scan: whole file, or (bounded) its first window +
+ * last window with a mid-line boundary fragment dropped. Null when the dir
+ * holds no readable journal (not a run dir).
+ */
+async function readJournalForScan(
+  runDir: string,
+  bounded: boolean,
+): Promise<{ text: string; truncated: boolean } | null> {
+  const path = join(runDir, "run.jsonl");
+  if (!bounded) {
+    try {
+      return { text: await readFile(path, "utf8"), truncated: false };
+    } catch {
+      return null;
+    }
+  }
+  let fh: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    fh = await open(path);
+  } catch {
+    return null; // not a run dir (no journal yet)
+  }
+  try {
+    const { size } = await fh.stat();
+    if (size <= INTERRUPTED_SCAN_WINDOW * 2) {
+      const buf = Buffer.alloc(size);
+      const { bytesRead } = await fh.read(buf, 0, size, 0);
+      return { text: buf.subarray(0, bytesRead).toString("utf8"), truncated: false };
+    }
+    // Head: only the first line matters (the engine's `started` event). Tail:
+    // a fragment cut mid-line is dropped -- the byte before the window says
+    // whether the window starts on a line boundary.
+    const head = Buffer.alloc(INTERRUPTED_SCAN_WINDOW);
+    const { bytesRead: headRead } = await fh.read(head, 0, INTERRUPTED_SCAN_WINDOW, 0);
+    const headText = head.subarray(0, headRead).toString("utf8");
+    const headNl = headText.indexOf("\n");
+    const headLine = headNl === -1 ? headText : headText.slice(0, headNl);
+    const tail = Buffer.alloc(INTERRUPTED_SCAN_WINDOW);
+    const { bytesRead: tailRead } = await fh.read(tail, 0, INTERRUPTED_SCAN_WINDOW, size - INTERRUPTED_SCAN_WINDOW);
+    const boundary = Buffer.alloc(1);
+    await fh.read(boundary, 0, 1, size - INTERRUPTED_SCAN_WINDOW - 1);
+    let tailText = tail.subarray(0, tailRead).toString("utf8");
+    if (boundary[0] !== 0x0a) {
+      const nl = tailText.indexOf("\n");
+      tailText = nl === -1 ? "" : tailText.slice(nl + 1);
+    }
+    return { text: `${headLine}\n${tailText}`, truncated: true };
+  } catch {
+    return null; // unreadable journal: treat like no journal
+  } finally {
+    await fh.close().catch(() => {});
+  }
+}
+
+export interface InterruptedRunView {
+  runId: string;
+  workflow: string;
+  runDir: string;
+  /** Graph-order node ids with the last state seen for each (transient states included). */
+  nodes: Array<{ id: string; state: string }>;
+  /** Journal holds at least one node event: marking (not just listing) applies. */
+  nodeActivity: boolean;
+  /** Last parsed event is already an `interrupted` marker -- the rescan skip rule. */
+  marked: boolean;
+}
+
+async function scanRunDirForInterruption(
+  runDir: string,
+  host: string,
+  alive: (pid: number) => boolean,
+  bounded = false,
+): Promise<InterruptedRunView | null> {
+  const journal = await readJournalForScan(runDir, bounded);
+  if (!journal) return null; // not a run dir (no journal yet)
+  let started: { runId: string; workflow: string; nodes: string[] } | null = null;
+  let finished = false;
+  let sawResumed = false;
+  let nodeActivity = false;
+  let lastEv: string | null = null;
+  const state = new Map<string, string>();
+  for (const raw of journal.text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let ev: Record<string, unknown>;
+    try {
+      ev = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue; // tolerate a torn final line
+    }
+    if (typeof ev.ev === "string") lastEv = ev.ev;
+    if (ev.ev === "started") {
+      started = {
+        runId: String(ev.runId ?? ""),
+        workflow: String(ev.workflow ?? ""),
+        nodes: (ev.nodes as string[]) ?? [],
+      };
+    } else if (ev.ev === "finished") {
+      finished = true;
+    } else if (ev.ev === "resumed") {
+      sawResumed = true;
+    } else if (ev.ev === "node") {
+      nodeActivity = true;
+      if (ev.id != null) state.set(String(ev.id), String(ev.state ?? ""));
+    }
+  }
+  if (!started || finished) return null;
+  if (journal.truncated) {
+    // Only the journal edges are visible: the head line must be the engine's
+    // `started` event; anything appended after it is engine progress unless
+    // the last event itself is terminal/marker-shaped (already judged above).
+    if (lastEv === INTERRUPTED_EV) {
+      nodeActivity = true; // a marker sits after real node activity
+    } else if (lastEv !== "started" && lastEv !== null) {
+      nodeActivity = true;
+    } else {
+      nodeActivity = nodeActivity || sawResumed;
+    }
+  }
+  const owner = await readRunOwner(runDir);
+  if (owner && owner.host === host && alive(owner.pid)) return null; // live run, hands off
+  // Absent/corrupt marker, dead same-host pid, or a foreign-host claim (whose
+  // liveness cannot be checked from here -- the same reclaim-with-warning
+  // stance claimRunDir takes) all read as an interrupted run.
+  return {
+    runId: started.runId,
+    workflow: started.workflow,
+    runDir,
+    nodes: started.nodes.map((id) => ({ id, state: state.get(id) ?? "pending" })),
+    nodeActivity,
+    marked: lastEv === INTERRUPTED_EV,
+  };
+}
+
+/**
+ * Every run dir whose journal lacks a terminal `finished` event and whose
+ * owner marker is stale or absent -- whether or not this process ever knew
+ * them. Read-only; live-owner and finished dirs are never returned.
+ * `bounded` caps per-dir journal reads to the scan window (see
+ * INTERRUPTED_SCAN_WINDOW); the activation pass uses it, on-demand surfaces
+ * keep exact full-journal rules and display data.
+ */
+export async function scanInterruptedRuns(
+  runsRoot: string,
+  opts?: ClaimOptions,
+  bounded = false,
+): Promise<InterruptedRunView[]> {
+  const host = opts?.host ?? hostname();
+  const alive = opts?.pidAlive ?? pidAliveDefault;
+  let names: string[];
+  try {
+    names = (await readdir(runsRoot, { withFileTypes: true }))
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return [];
+  }
+  names.sort();
+  const out: InterruptedRunView[] = [];
+  for (const name of names) {
+    const v = await scanRunDirForInterruption(join(runsRoot, name), host, alive, bounded);
+    if (v) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * Activation pass: warn once per interrupted run and append the `interrupted`
+ * marker where one is missing. The marker applies only to dirs with node
+ * activity, and NEVER when the last parsed event already is one -- so rescans
+ * (repeated activations) append at most one marker per death. The write is a
+ * single-line O_APPEND (the run journal's own writer idiom): never a rewrite,
+ * and the stale-owner requirement means no live process shares the file.
+ * Bounded: per dir the scan reads only the head line + tail window, never a
+ * whole journal (run dirs accumulate forever; boot cost must not).
+ */
+export async function markInterruptedRuns(
+  runsRoot: string,
+  opts?: ClaimOptions,
+): Promise<InterruptedRunView[]> {
+  const runs = await scanInterruptedRuns(runsRoot, opts, true);
+  for (const r of runs) {
+    logger.warn(
+      `[workflows] run '${r.runId}' (${r.workflow}) interrupted: ${INTERRUPTED_DETAIL}`,
+    );
+    if (!r.nodeActivity || r.marked) continue;
+    const line = `${JSON.stringify({
+      t: new Date().toISOString(),
+      ev: INTERRUPTED_EV,
+      detail: INTERRUPTED_DETAIL,
+    })}\n`;
+    try {
+      await appendFile(join(r.runDir, "run.jsonl"), line);
+    } catch (e: unknown) {
+      logger.warn(
+        `[workflows] could not mark run '${r.runId}' interrupted: ${formatError(e)}`,
+      );
+    }
+  }
+  return runs;
+}
+
 /**
  * Run directory name: `YYYYMMDD-HHmm-<workflow-name>`.
  * The directory is RESERVED here with an exclusive mkdir, not probed for a
@@ -1296,6 +1526,9 @@ async function readRunLog(runDir: string): Promise<RunLogEvents | null> {
     } catch {
       continue; // tolerate a torn final line
     }
+    // Unknown ev values (interrupted markers, anything a future writer adds)
+    // fall through ignored: node state derives from node/finished events only,
+    // so an annotated journal resumes exactly like an unmarked one.
     if (ev.ev === "started") {
       started = {
         runId: String(ev.runId),

@@ -28,6 +28,8 @@ hotdog workflow run <f> [--id <run-id>] [--param key=value]...
                                  # --id re-runs a previous run dir, reusing filesystem-verified nodes
                                  # (refused while another live process owns that run dir)
 hotdog workflow list             # List runs under <workflows.path>/runs
+                                 # Runs whose owner died (no terminal event, stale/absent .owner)
+                                 # are named "interrupted (resumable: run --id <run-id>)"
 hotdog workflow status <run-id>  # Node states from a run's run.jsonl (works cross-process)
 hotdog workflow reconcile <run-id>
                                  # Check completed claims against the filesystem (resume planning)

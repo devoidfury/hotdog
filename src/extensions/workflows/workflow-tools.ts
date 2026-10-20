@@ -28,8 +28,10 @@ import {
   isSafeRunId,
   nextRunId,
   readRunSummary,
+  scanInterruptedRuns,
   RUN_ID_SHAPE_HINT,
   WorkflowRun,
+  type InterruptedRunView,
   type RunSummary,
 } from "./engine.ts";
 import { runWorkflowCommandOnText } from "./workflow-cli.ts";
@@ -98,6 +100,11 @@ export function managedRunLines(m: ManagedRun): string[] {
       return `  ${v.id}: ${v.state}${attempt}${detail}`;
     }),
   ];
+}
+
+/** Last known per-node states of an interrupted run, rendered `id=state` in graph order. */
+function interruptedLastStates(r: InterruptedRunView): string {
+  return r.nodes.map((n) => `${n.id}=${n.state}`).join(", ") || "(no node activity)";
 }
 
 /** Pointer-only completion text for the manager's bus (never node payloads). */
@@ -623,26 +630,41 @@ export class WorkflowStatusTool extends WorkflowTool {
     }
 
     const runs = reg.all();
-    if (runs.length === 0) {
-      return ToolResult.ok("No workflow runs dispatched in this process.");
-    }
+    // In-process bytes stay untouched; the disk-derived section only appears
+    // when a run dir exists whose journal never reached `finished` and whose
+    // owner marker is stale or absent (restart survivors, foreign or not).
+    const inProcess =
+      runs.length === 0
+        ? "No workflow runs dispatched in this process."
+        : runs
+            .map((m) =>
+              m.finished
+                ? `${m.runId}  ${m.workflow}  ${m.finished.outcome}`
+                : m.error
+                  ? `${m.runId}  ${m.workflow}  crashed`
+                  : `${m.runId}  ${m.workflow}  active`,
+            )
+            .join("\n");
+    const runsRoot = this.opts.getRunsRoot();
+    const resumable = runsRoot ? await scanInterruptedRuns(runsRoot) : [];
+    if (resumable.length === 0) return ToolResult.ok(inProcess);
     return ToolResult.ok(
-      runs
-        .map((m) =>
-          m.finished
-            ? `${m.runId}  ${m.workflow}  ${m.finished.outcome}`
-            : m.error
-              ? `${m.runId}  ${m.workflow}  crashed`
-              : `${m.runId}  ${m.workflow}  active`,
-        )
-        .join("\n"),
+      [
+        inProcess,
+        "",
+        "Interrupted runs on disk (owner lost -- restart?):",
+        ...resumable.map(
+          (r) =>
+            `  ${r.runId}  ${r.workflow}  last: ${interruptedLastStates(r)} -- re-dispatch the same file with run_id`,
+        ),
+      ].join("\n"),
     );
   }
 
   toToolDef(): ToolDef {
     return toolDef(
       "workflow_status",
-      "[DO NOT USE for polling] Show workflow runs dispatched in this session (with no run_id) or one run's per-node states (run_id). Runs notify on completion; only call this when the user asks or before deciding a recovery step.",
+      "[DO NOT USE for polling] Show workflow runs dispatched in this session (with no run_id) or one run's per-node states (run_id). Runs notify on completion; only call this when the user asks or before deciding a recovery step. With no run_id, runs orphaned by a process restart are also listed from disk with their resume instruction.",
       {
         properties: {
           run_id: param("string", "Optional run id to inspect in detail"),

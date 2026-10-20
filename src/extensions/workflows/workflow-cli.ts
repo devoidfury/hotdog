@@ -26,6 +26,7 @@ import {
   readRunOwner,
   readRunSummary,
   reconcileRun,
+  scanInterruptedRuns,
   RUN_ID_SHAPE_HINT,
   WorkflowRun,
   type EngineTaskPort,
@@ -240,11 +241,16 @@ async function cmdList(runsRoot: string): Promise<CommandOutcome> {
     return { code: 0, out: ["no runs"], err: [] };
   }
   names.sort();
+  // Runs whose owner is gone (restart survivors) are named as interrupted;
+  // one still owned by a live process stays a plain "unfinished".
+  const interrupted = new Set((await scanInterruptedRuns(runsRoot)).map((r) => r.runId));
   const out: string[] = [];
   for (const name of names) {
     const s = await readRunSummary(join(runsRoot, name));
     if (!s) continue; // not a run dir (no usable run.jsonl)
-    out.push(`${s.runId}  ${s.workflow}  ${s.outcome ?? "unfinished"}`);
+    const outcome =
+      s.outcome ?? (interrupted.has(s.runId) ? `interrupted (resumable: run --id ${s.runId})` : "unfinished");
+    out.push(`${s.runId}  ${s.workflow}  ${outcome}`);
   }
   return { code: 0, out: out.length ? out : ["no runs"], err: [] };
 }

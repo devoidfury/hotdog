@@ -315,6 +315,8 @@ export interface ResolvedConfig {
   execFence?: "off" | "probe";
   /** Directory for the cross-process lane slot ledger (taskLanesPerProvider is machine-wide when set). */
   taskLanesDir?: string;
+  /** Append-only restart sidecar for delegate_task records (JSONL in the data dir). */
+  taskSpawnsPath?: string;
   /** Named model groups for fanout delegation: name -> model members (bare or provider/qualified). */
   modelGroups?: Record<string, string[]>;
   profilesPath?: string;

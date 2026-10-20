@@ -20,6 +20,7 @@ import {
   type SpawnPin,
 } from "./model-resolver.ts";
 import { LaneLedger, type LaneLease } from "./lane-ledger.ts";
+import { SpawnLog, type OrphanedTask } from "./spawn-log.ts";
 import { DEFAULT_LANES_RETRY_MS } from "./turn-lanes.ts";
 import { makeProviderHealth, type ProviderHealth } from "./provider-health.ts";
 import type { AgentLike } from "./index.ts";
@@ -270,6 +271,17 @@ export interface TaskManagerOptions {
    * unset disables cross-process coordination (per-process caps only).
    */
   lanesDir?: string | null;
+  /**
+   * Append-only restart sidecar for delegate_task records (resolved config:
+   * taskSpawnsPath, a JSONL file in the data dir). One spawn line per
+   * non-parked spawn, one end line per terminal transition; the next process
+   * lifetime reads it to surface restart orphans (plan_status / task_status).
+   * Unset disables the sidecar entirely. Parked (workflow-engine) spawns are
+   * skipped: their lifecycle lives in the run journal, not here.
+   */
+  spawnLogPath?: string | null;
+  /** Test seam for the spawn sidecar's owner-liveness check (default: signal-0 on this host). */
+  spawnLogPidAlive?: (pid: number) => boolean;
   /** Ledger re-attempt interval while tasks wait on foreign-held slots. Test seam. */
   lanesRetryMs?: number;
   /**
@@ -436,6 +448,8 @@ export class TaskManager {
   // The slim records are themselves bounded: only the most recent
   // MAX_TERMINAL_TASKS terminal entries survive (see #evictTerminalTasks).
   #tasks: Map<string, TaskEntry>;
+  /** Restart sidecar for delegate_task records (null: disabled). */
+  #spawnLog: SpawnLog | null;
   #profileManager: ProfileManager | undefined;
   /** External observer (websocket/webui relay); null = task agents stay silent. */
   #observer: TaskObserver | null = null;
@@ -490,6 +504,9 @@ export class TaskManager {
         : DEFAULT_LANES_RETRY_MS;
     this.#lanesRetryTimer = null;
     this.#tasks = new Map();
+    this.#spawnLog = options.spawnLogPath
+      ? new SpawnLog(options.spawnLogPath, options.spawnLogPidAlive)
+      : null;
     this.#profileManager = options.profileManager;
     this.#resolvePendingQuestion = options.resolvePendingQuestion ?? null;
     // One health registry per manager: explicit injection wins (shared / test
@@ -602,7 +619,12 @@ export class TaskManager {
     // One status write point = one sweep point: every terminal transition
     // (natural finish, queued cancel, parked cancel) passes through here,
     // so the terminal-record bound holds at all times.
-    if (isTerminalStatus(status)) this.#evictTerminalTasks();
+    if (isTerminalStatus(status)) {
+      // Restart sidecar: the end line for this lifetime's spawn (parked tasks
+      // were never recorded; a stray end line stays inert on read).
+      if (!entry.parked) this.#spawnLog?.recordEnd(entry.taskId, status);
+      this.#evictTerminalTasks();
+    }
   }
 
   /**
@@ -848,6 +870,13 @@ export class TaskManager {
     // Parked tasks are consumed directly (onTurn/taskTurn/done); bus delivery
     // would duplicate every result into a session context.
     const parked = options.park === true;
+
+    // Restart sidecar (fire-and-forget): parked spawns are workflow-engine
+    // owned -- their lifecycle lives in the run journal, so only delegate-style
+    // tasks are recorded here. A failed write never disturbs execution.
+    if (!parked) {
+      this.#spawnLog?.recordSpawn({ taskId, description: entry.description, sessionId: entry.sessionId });
+    }
 
     // Task agents are silent to the UI; only onTaskComplete matters -- unless an
     // observer (websocket/webui relay) is attached, forwarding every agent
@@ -1789,6 +1818,16 @@ export class TaskManager {
     const task = this.#tasks.get(taskId);
     if (!task) return null;
     return task.statusRef.value;
+  }
+
+  /**
+   * Tasks whose spawn the sidecar recorded but whose terminal transition never
+   * landed and whose writer pid is not alive: survivors of a process restart,
+   * from THIS lifetime's view. Surfacing only -- nothing is auto-respawned.
+   * Empty when the sidecar is unset.
+   */
+  orphanedTasks(): Promise<OrphanedTask[]> {
+    return this.#spawnLog ? this.#spawnLog.orphans() : Promise.resolve([]);
   }
 
   /** Locked model + provider lane for a spawned task, or null if unknown. Provider is null while a multi-candidate task waits unplaced (model then shows the intent). */

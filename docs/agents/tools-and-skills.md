@@ -108,7 +108,7 @@ The `TaskManager` is resolved **lazily**: extensions load in `main()` before any
 | `task_status` | Check status of a running task |
 | `task_followup` | Send follow-up to a running task |
 | `task_interrupt` | Interrupt (cancel) a running task |
-| `plan_status` | Check status of task agents — shows all active tasks or a specific task's status |
+| `plan_status` | Check status of task agents — shows all active tasks or a specific task's status; tasks spawned by a previous process that never ended appear in an "interrupted by restart" section (surfacing only, nothing auto-respawns) |
 | `wait` | Model yields control back to user |
 
 ## Skills

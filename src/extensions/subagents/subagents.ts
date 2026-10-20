@@ -192,6 +192,16 @@ export class TaskStatusTool extends SubagentTool {
     const status = (backend.value as TaskManager).taskStatus(args.task_id as string);
 
     if (status === null) {
+      // Restart survivor (sidecar-spawned, never ended, writer pid dead):
+      // answer honestly instead of pretending the id never existed.
+      const orphan = (await restartOrphans(backend.value as TaskManager)).find(
+        (o) => o.taskId === args.task_id,
+      );
+      if (orphan) {
+        return ToolResult.ok(
+          `Task ${args.task_id}: interrupted by process restart (spawned ${ageText(orphan.spawnedAt)}; nothing reruns it automatically)`,
+        ).withEntries({ task_id: args.task_id, status: "interrupted" });
+      }
       return ToolResult.err(`Task ${args.task_id} not found`);
     }
     const lane = (backend.value as TaskManager).taskLane?.(args.task_id as string) ?? null;
@@ -323,6 +333,43 @@ export class TaskInterruptTool extends SubagentTool {
 
 // ── plan_status ─────────────────────────────────────────────────────────────
 
+/** Human age for restart-orphan records ("spawned <age>" in plan_status). */
+function ageText(spawnedAt: number | null): string {
+  if (spawnedAt === null) return "age unknown";
+  const s = Math.max(0, Math.floor((Date.now() - spawnedAt) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+/**
+ * Restart orphans (sidecar-spawned, never ended, writer pid dead). Absent on
+ * backends without the sidecar. Surfacing only: a restart often means
+ * deliberate tree changes, so nothing is ever auto-respawned.
+ */
+async function restartOrphans(backend: TaskManager): Promise<Awaited<ReturnType<TaskManager["orphanedTasks"]>>> {
+  try {
+    // sessionCore backends (no sidecar) lack the method; a broken read must
+    // never break the status tool.
+    return typeof backend.orphanedTasks === "function" ? await backend.orphanedTasks() : [];
+  } catch {
+    return [];
+  }
+}
+
+function orphanSection(
+  orphans: Awaited<ReturnType<TaskManager["orphanedTasks"]>>,
+): string[] {
+  return [
+    "",
+    "interrupted by restart:",
+    ...orphans.map((o) => `  ${o.taskId} -- ${o.description} (${ageText(o.spawnedAt)})`),
+  ];
+}
+
 /** Check the status of task agents. Shows all active tasks or the status of a specific task. */
 export class PlanStatusTool extends SubagentTool {
   static readonly TOOL_NAME = "plan_status";
@@ -337,6 +384,16 @@ export class PlanStatusTool extends SubagentTool {
     if (args.task_id) {
       const status = (backend.value as TaskManager).taskStatus(args.task_id as string);
       if (status === null) {
+        // An id the restart sidecar still holds open answers honestly rather
+        // than "not found": it died with the previous process.
+        const orphan = (await restartOrphans(backend.value as TaskManager)).find(
+          (o) => o.taskId === args.task_id,
+        );
+        if (orphan) {
+          return ToolResult.ok(
+            `Task ${args.task_id}: interrupted by process restart (spawned ${ageText(orphan.spawnedAt)}; nothing reruns it automatically)`,
+          ).withEntries({ task_id: args.task_id, status: "interrupted" });
+        }
         return ToolResult.err(`Task ${args.task_id} not found`);
       }
       return ToolResult.ok(`Task ${args.task_id}: ${status}`).withEntries({
@@ -346,9 +403,17 @@ export class PlanStatusTool extends SubagentTool {
     }
 
     const active = (backend.value as TaskManager).activeTasks();
+    const orphans = await restartOrphans(backend.value as TaskManager);
 
     if (active.length === 0) {
-      return ToolResult.ok("No active tasks").withEntry(
+      // Empty orphan list keeps the historical bytes exactly.
+      if (orphans.length === 0) {
+        return ToolResult.ok("No active tasks").withEntry(
+          "active_task_count",
+          "0",
+        );
+      }
+      return ToolResult.ok(["No active tasks", ...orphanSection(orphans)].join("\n")).withEntry(
         "active_task_count",
         "0",
       );
@@ -359,6 +424,7 @@ export class PlanStatusTool extends SubagentTool {
       const status = (backend.value as TaskManager).taskStatus(taskId);
       lines.push(`  ${taskId} — ${status}`);
     }
+    lines.push(...orphanSection(orphans));
     return ToolResult.ok(lines.join("\n")).withEntry(
       "active_task_count",
       String(active.length),

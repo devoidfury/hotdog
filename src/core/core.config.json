@@ -441,6 +441,13 @@
       { "compute": "joinDataDir:task-lanes" }
     ]
   },
+  "taskSpawnsPath": {
+    "type": "string",
+    "layers": [
+      { "source": "config", "key": "taskSpawnsPath" },
+      { "compute": "joinDataDir:task-spawns.jsonl" }
+    ]
+  },
   "coreTools": {
     "type": "object",
     "layers": [

@@ -1523,7 +1523,6 @@ CLI flag: `--shell-mode`.
 | `host` | `string` | `"127.0.0.1"` | WebUI server host. Loopback by default; set `0.0.0.0` explicitly to expose beyond localhost. |
 | `apiKey` | `string` | `null` | API key for login authentication (also from env `HOTDOG_WEBUI_API_KEY`). |
 | `sessionTokenTtlMin` | `number` | `1440` | Session token TTL in minutes (default: 24 hours). |
-| `maxAgeSecs` | `number` | `3600` | Cache-Control max-age for static assets (seconds). |
 
 ```json
 { "webui": { "port": 8080, "apiKey": "your-key" } }

@@ -72,6 +72,8 @@ describe("ui-one-shot extension", () => {
         getAll: () => [],
         get: () => null,
         register: () => {},
+        // The real Agent's model setter clears cached tool defs.
+        clearToolDefs: () => {},
       },
       extensions: {
         has: () => false,
@@ -786,6 +788,66 @@ describe("ui-one-shot extension", () => {
       const agent = await buildAgentFn(cli);
       // A fresh UUID can never match an existing log.
       expect(agent.getMessages().length).toBe(0);
+    });
+
+    // ── resume model fidelity: the CLI consumes the log's attestation ──────
+    // Same contract as the interactive CLI: attested model applies on resume,
+    // explicit -m wins, attesting nothing is announced (stderr: safe even in
+    // --json-schema mode where stdout carries only the payload), never a
+    // quiet swap onto the default.
+    describe("resume model fidelity", () => {
+      async function writeLog(sessionId: string, model: string | null): Promise<void> {
+        const { LOG_SOURCE } = await import("@core/session/session-log.ts");
+        const { reconcileSessionIndex } = await import("@core/session/session-index.ts");
+        await writeFile(
+          join(sessionsDir, `${sessionId}.jsonl`),
+          [
+            ...(model
+              ? [{ ts: "2024-01-01T00:00:00Z", session_id: sessionId, source: LOG_SOURCE.SESSION_START, content: "", model }]
+              : []),
+            { ts: "2024-01-01T00:00:01Z", session_id: sessionId, source: LOG_SOURCE.INPUT, content: "Earlier question" },
+          ]
+            .map((e) => JSON.stringify(e))
+            .join("\n") + "\n",
+        );
+        await reconcileSessionIndex();
+      }
+
+      it("applies the attested model on resume (runtime switch survives)", async () => {
+        const sessionId = "oneshot-resume-model";
+        await writeLog(sessionId, "switched-model");
+        const cli = { prompt: "continue", sessionId };
+        const buildAgentFn = await captureBuildAgent(cli);
+        const agent = await buildAgentFn(cli);
+        expect(agent.model).toBe("switched-model");
+      });
+
+      it("an explicit -m/--model beats the attested model", async () => {
+        const sessionId = "oneshot-resume-model-explicit";
+        await writeLog(sessionId, "switched-model");
+        const cli = { prompt: "continue", sessionId, model: "explicit-model" };
+        const buildAgentFn = await captureBuildAgent(cli);
+        const agent = await buildAgentFn(cli);
+        expect(agent.model).toBe("explicit-model");
+      });
+
+      it("prints an honest line when the log attests no model and none was given", async () => {
+        const sessionId = "oneshot-resume-model-unknown";
+        await writeLog(sessionId, null);
+        const errLines: string[] = [];
+        const errSpy = spyOn(console, "error").mockImplementation((msg: unknown) => {
+          errLines.push(String(msg));
+        });
+        try {
+          const cli = { prompt: "continue", sessionId };
+          const buildAgentFn = await captureBuildAgent(cli);
+          const agent = await buildAgentFn(cli);
+          expect(errLines.some((l) => /no model attested/i.test(l))).toBe(true);
+          expect(agent.model).toBe("test-model");
+        } finally {
+          errSpy.mockRestore();
+        }
+      });
     });
   });
 

@@ -21,9 +21,7 @@ function createMockCore(config: Record<string, unknown> = {}) {
         questionTimeoutSecs: 300,
         questionStrategy: "wait",
       },
-      webui: {
-        maxAgeSecs: 3600,
-      },
+      webui: {},
       ...config,
     },
     // profilesPath makes createWebuiServer build a ProfileManager from the
@@ -95,37 +93,6 @@ describe("createWebuiServer", () => {
       server = result.server;
       wsServer = result.wsServer;
       expect(result.server.port).toBeGreaterThan(0);
-    });
-
-    it("accepts a custom webui.maxAgeSecs", async () => {
-      const result = await createWebuiServer(createMockCore({ webui: { maxAgeSecs: 7200 } }), {
-        port: 0,
-        host: "127.0.0.1",
-        apiKey: "test-key",
-      });
-      server = result.server;
-      wsServer = result.wsServer;
-      expect(result.server.port).toBeGreaterThan(0);
-    });
-
-    // The old required-check threw on any falsy maxAgeSecs: unreachable for
-    // the missing case (resolution fills the schema default 3600) and wrong
-    // for 0, which means "no asset caching".
-    it("accepts maxAgeSecs 0 (no caching) and a webui block without it", async () => {
-      for (const webui of [{ maxAgeSecs: 0 }, { maxAgeSecs: null }, {}]) {
-        const result = await createWebuiServer(createMockCore({ webui }), {
-          port: 0,
-          host: "127.0.0.1",
-          apiKey: "test-key",
-        });
-        server = result.server;
-        wsServer = result.wsServer;
-        expect(result.server.port).toBeGreaterThan(0);
-        server.stop(true);
-        wsServer.stopCleanupLoop();
-        server = null;
-        wsServer = null;
-      }
     });
   });
 

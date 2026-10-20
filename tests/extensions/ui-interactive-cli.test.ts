@@ -1049,6 +1049,8 @@ describe("buildInteractiveAgent", () => {
           get: () => undefined,
           getAll: () => [],
           isEmpty: () => true,
+          // The real Agent's model setter clears cached tool defs.
+          clearToolDefs: () => {},
         },
         ...core,
       } as never,
@@ -1154,6 +1156,86 @@ describe("buildInteractiveAgent", () => {
       await expect(
         buildAgent({ sessionId: id }, {}, { sessionId: id }),
       ).rejects.toThrow("Invalid session id");
+    });
+
+    // ── resume model fidelity: the CLI consumes the log's attestation ──────
+    // The session index mirrors the model the session ran on (session_start
+    // + model_change records, derived on rebuild). `-s <id>` must apply it;
+    // an explicit -m always wins; attesting nothing is announced, never a
+    // quiet swap onto the default.
+    describe("resume model fidelity", () => {
+      async function writeLog(sessionId: string, model: string | null): Promise<void> {
+        const { LOG_SOURCE } = await import("@core/session/session-log.ts");
+        const { reconcileSessionIndex } = await import("@core/session/session-index.ts");
+        await writeFile(
+          join(sessionsDir, `${sessionId}.jsonl`),
+          [
+            ...(model
+              ? [{ ts: "2024-01-01T00:00:00Z", session_id: sessionId, source: LOG_SOURCE.SESSION_START, content: "", model }]
+              : []),
+            { ts: "2024-01-01T00:00:01Z", session_id: sessionId, source: LOG_SOURCE.INPUT, content: "Earlier question" },
+          ]
+            .map((e) => JSON.stringify(e))
+            .join("\n") + "\n",
+        );
+        // Mirror the log's attestation into the index row the resume reads.
+        await reconcileSessionIndex();
+      }
+
+      it("applies the attested model on resume (runtime switch survives)", async () => {
+        const sessionId = "interactive-resume-model";
+        await writeLog(sessionId, "switched-model");
+        const agent = await buildAgent({ sessionId }, {}, { sessionId });
+        expect(agent.model).toBe("switched-model");
+      });
+
+      it("an explicit -m/--model beats the attested model", async () => {
+        const sessionId = "interactive-resume-model-explicit";
+        await writeLog(sessionId, "switched-model");
+        const agent = await buildAgent(
+          { sessionId, model: "explicit-model" },
+          {},
+          { sessionId, model: "explicit-model" },
+        );
+        expect(agent.model).toBe("explicit-model");
+      });
+
+      it("prints an honest line when the log attests no model and none was given", async () => {
+        const sessionId = "interactive-resume-model-unknown";
+        await writeLog(sessionId, null);
+        const logs: string[] = [];
+        const logSpy = spyOn(console, "log").mockImplementation((msg: unknown) => {
+          logs.push(String(msg));
+        });
+        try {
+          const agent = await buildAgent({ sessionId }, {}, { sessionId });
+          expect(logs.some((l) => /no model attested/i.test(l))).toBe(true);
+          // Honest about what runs: the default (no silent claim otherwise).
+          expect(agent.model).toBe("test-model");
+        } finally {
+          logSpy.mockRestore();
+        }
+      });
+
+      it("stays quiet when -m is explicit and the log attests nothing", async () => {
+        const sessionId = "interactive-resume-model-explicit-unknown";
+        await writeLog(sessionId, null);
+        const logs: string[] = [];
+        const logSpy = spyOn(console, "log").mockImplementation((msg: unknown) => {
+          logs.push(String(msg));
+        });
+        try {
+          const agent = await buildAgent(
+            { sessionId, model: "explicit-model" },
+            {},
+            { sessionId, model: "explicit-model" },
+          );
+          expect(logs.some((l) => /no model attested/i.test(l))).toBe(false);
+          expect(agent.model).toBe("explicit-model");
+        } finally {
+          logSpy.mockRestore();
+        }
+      });
     });
   });
 });

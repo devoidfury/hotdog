@@ -15,7 +15,8 @@ import {
   closeSessionIndex,
 } from "@core/session/session-index.ts";
 import { readSessionEntries, LOG_SOURCE, type LogEntry } from "@core/session/session-log.ts";
-import { adoptSessionLog, SessionRegistry } from "@extensions/websocket/server.ts";
+import { adoptSessionLog, createWsServer, SessionRegistry } from "@extensions/websocket/server.ts";
+import { S2C } from "@extensions/websocket/protocol.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import { createHooks } from "@core/hooks.ts";
 import {
@@ -23,7 +24,7 @@ import {
   resetLoggerForTesting,
   type LogEvent,
 } from "@utils/logger.ts";
-import { makeWsMockAgent } from "../mocks/websocket.ts";
+import { makeWsMockAgent, createWsMockCore, createWsMockWs } from "../mocks/websocket.ts";
 
 const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-resume-model-"));
 
@@ -96,10 +97,11 @@ describe("adoptSessionLog model fidelity", () => {
     try {
       const logged = captureLoggedErrors();
       try {
-        await adoptSessionLog(sessionId, registry, false, entries);
+        const res = await adoptSessionLog(sessionId, registry, false, entries);
         expect(configs[0]!.model).toBe("attested-model");
         expect(configs[0]!.profileName).toBe("attested-profile");
         expect(logged.some((l) => /no model attested/i.test(l))).toBe(false);
+        expect(res.modelWarning).toBeNull();
       } finally {
         resetLoggerForTesting();
       }
@@ -117,15 +119,102 @@ describe("adoptSessionLog model fidelity", () => {
     try {
       const logged = captureLoggedErrors();
       try {
-        await adoptSessionLog(sessionId, registry, false, entries);
+        const res = await adoptSessionLog(sessionId, registry, false, entries);
         // Host default lands -- but only after an explicit, loud warning.
         expect(configs[0]!.model).toBeUndefined();
         expect(logged.some((l) => /no model attested/i.test(l))).toBe(true);
+        // The warning text is handed back so the attach path can deliver it
+        // to the resuming socket (a pre-attach sink emit reaches no one).
+        expect(String(res.modelWarning)).toMatch(/no model attested/i);
       } finally {
         resetLoggerForTesting();
       }
     } finally {
       registry.stopCleanupLoop();
+      rmSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), { force: true });
+    }
+  });
+});
+
+// ── The warning must reach the resuming client ─────────────────────────────
+// The pre-attach sink emit died unheard: output events are neither persisted
+// nor replayed, and the resuming socket only subscribes during attach. The
+// fix emits the warning AFTER attach (same slot the held-question replay
+// uses), so a resuming client's transcript carries it.
+
+async function waitForMessage(
+  ws: { messages: string[] },
+  type: string,
+  timeoutMs = 2000,
+): Promise<any> {
+  const start = Date.now();
+  for (;;) {
+    const found = ws.messages
+      .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+      .find((m) => m && m.type === type);
+    if (found) return found;
+    if (Date.now() - start > timeoutMs) throw new Error(`Timed out waiting for ${type}`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+function parsedMessages(ws: { messages: string[] }): any[] {
+  return ws.messages
+    .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+    .filter(Boolean);
+}
+
+describe("resuming client receives the unknown-model warning", () => {
+  function resumeServer(): ReturnType<typeof createWsServer> {
+    return createWsServer(createWsMockCore(), {
+      buildAgent: async (cfg: { sessionId?: string }) =>
+        makeWsMockAgent({ sessionId: cfg.sessionId || "x" }),
+    });
+  }
+
+  it("gets the systemMessage after attach when the log attests no model", async () => {
+    const sessionId = uniqueId("warn-visible");
+    writeLog(sessionId, [line({ session_id: sessionId, content: "u" })]);
+    await reconcileSessionIndex();
+    const server = resumeServer();
+    try {
+      const ws = createWsMockWs();
+      server.onUpgrade({ url: `/ws?session=${sessionId}`, headers: { host: "localhost" } }, ws);
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      expect(created.sessionId).toBe(sessionId);
+      const sys = await waitForMessage(ws, S2C.SYSTEM_MESSAGE);
+      expect(String(sys.content)).toMatch(/no model attested/i);
+      expect(sys.sessionId).toBe(sessionId);
+    } finally {
+      server.stopCleanupLoop();
+      rmSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), { force: true });
+    }
+  });
+
+  it("stays silent on attach when the index attests a model", async () => {
+    const sessionId = uniqueId("warn-silent");
+    writeLog(sessionId, [
+      line({ session_id: sessionId, source: LOG_SOURCE.SESSION_START, content: "", model: "attested-model" }),
+      line({ session_id: sessionId, content: "u" }),
+    ]);
+    await reconcileSessionIndex();
+    const server = resumeServer();
+    try {
+      const ws = createWsMockWs();
+      server.onUpgrade({ url: `/ws?session=${sessionId}`, headers: { host: "localhost" } }, ws);
+      const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+      expect(created.sessionId).toBe(sessionId);
+      await waitForMessage(ws, S2C.SESSION_STATE);
+      // The warning (missing) would land right after the attach burst; give
+      // it a beat before asserting absence.
+      await new Promise((r) => setTimeout(r, 100));
+      expect(
+        parsedMessages(ws).some(
+          (m) => m.type === S2C.SYSTEM_MESSAGE && /no model attested/i.test(String(m.content)),
+        ),
+      ).toBe(false);
+    } finally {
+      server.stopCleanupLoop();
       rmSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), { force: true });
     }
   });

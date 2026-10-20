@@ -27,7 +27,6 @@ export interface WebuiConfig {
   host?: string;
   apiKey?: string | null;
   sessionTokenTtlMin?: number;
-  maxAgeSecs?: number;
 }
 
 interface WebuiServerResult {
@@ -51,10 +50,6 @@ export async function createWebuiServer(
       "No API key configured. Set webui.apiKey in config or HOTDOG_WEBUI_API_KEY env var.",
     );
   }
-
-  // webui.maxAgeSecs needs no check here: resolution fills the configSchema
-  // default (3600), and an explicit 0 (no caching) is a legal configured
-  // value -- a truthiness gate would reject it.
 
   const authMiddleware = createAuthMiddleware({
     validateApiKey: async (key: string) => apiKeyEquals(key, apiKey),

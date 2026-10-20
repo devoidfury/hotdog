@@ -9,6 +9,7 @@ import type { LlmClient } from "@core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { createAgentFactory } from "@core/agent-factory.ts";
 import { restoreSessionIntoAgent } from "@core/session/session-log.ts";
+import { getSessionRow } from "@core/session/session-index.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
 import { StructuredOutputTool, resolveOutputSchema, STRUCTURED_OUTPUT_TOOL_NAME } from "./structured-output.ts";
@@ -181,6 +182,20 @@ async function handlePromptSubcommand(
       const profiles = resolved.profileManager.getProfilesForSwitch();
       const p = profiles[profile];
       if (p) agent.applyProfile(profile, p);
+    }
+    // Model precedence on resume: explicit -m > the model the index attests from the log (what the session actually ran on; wins over a profile-implied model from applyProfile above) > profile/boot default.
+    if (cli.sessionId && agent.sessionId === cli.sessionId) {
+      const cliModel = typeof cli.model === "string" && cli.model ? cli.model : null;
+      const attestedModel = getSessionRow(cli.sessionId)?.model ?? null;
+      if (!cliModel && attestedModel) {
+        agent.model = attestedModel;
+      } else if (!cliModel && !attestedModel) {
+        // stderr, not stdout: --json-schema keeps stdout bare JSON.
+        console.error(
+          `Resuming ${cli.sessionId} with no model attested in its log (legacy log or an index rebuilt from one): ` +
+            `continuing on the default model (${agent.model}). Pass -m <model> if that is wrong.`,
+        );
+      }
     }
     // No human on a one-shot resume: close held questions honestly as
     // unanswered (error tool result) -- wire-valid context, honest transcript.

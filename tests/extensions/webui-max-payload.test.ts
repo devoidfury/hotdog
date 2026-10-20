@@ -27,7 +27,7 @@ function createMockCore() {
   return createBaseMockCore({
     config: {
       websocket: { sessionTimeoutMin: 30, questionTimeoutSecs: 300, questionStrategy: "wait" },
-      webui: { maxAgeSecs: 3600 },
+      webui: {},
     },
     resolved: {
       profilesPath: "./config/profiles",

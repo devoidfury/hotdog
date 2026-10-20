@@ -15,6 +15,7 @@ import { Message } from "@core/context/message.ts";
 import { formatToolResult } from "@core/extensions/tool-utils.ts";
 import { createAgentFactory } from "@core/agent-factory.ts";
 import { restoreSessionIntoAgent, type PendingQuestion } from "@core/session/session-log.ts";
+import { getSessionRow } from "@core/session/session-index.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { ExtensionError, formatError } from "@core/error.ts";
 import type { CliArgv } from "@core/config/index.ts";
@@ -402,6 +403,20 @@ export async function buildInteractiveAgent(
     const profiles = core.resolved.profileManager.getProfilesForSwitch();
     const p = profiles[profile];
     if (p) agent.applyProfile(profile, p);
+  }
+
+  // Model precedence on resume: explicit -m > the model the index attests from the log (what the session actually ran on; wins over a profile-implied model from applyProfile above) > profile/boot default.
+  if (explicitSessionId && agent.sessionId === explicitSessionId) {
+    const cliModel = typeof cli.model === "string" && cli.model ? cli.model : null;
+    const attestedModel = getSessionRow(explicitSessionId)?.model ?? null;
+    if (!cliModel && attestedModel) {
+      agent.model = attestedModel;
+    } else if (!cliModel && !attestedModel) {
+      console.log(
+        `Resuming ${explicitSessionId} with no model attested in its log (legacy log or an index rebuilt from one): ` +
+          `continuing on the default model (${agent.model}). Pass -m <model> if that is wrong.`,
+      );
+    }
   }
 
   return agent;

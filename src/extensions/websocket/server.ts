@@ -37,7 +37,6 @@ import {
   type PendingQuestion,
 } from "@core/session/session-log.ts";
 import { Message } from "@core/context/message.ts";
-import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { formatToolResult } from "@core/extensions/tool-utils.ts";
 import { safeCallDisplay, type ToolRegistry } from "@core/extensions/tool-registry.ts";
 import type { QuestionDef } from "@core/context/input.ts";
@@ -761,7 +760,7 @@ export class SessionRegistry {
  */
 const pendingAdoptions = new Map<
   string,
-  Promise<{ pendingQuestions: PendingQuestion[]; openTurn: boolean }>
+  Promise<{ pendingQuestions: PendingQuestion[]; openTurn: boolean; modelWarning: string | null }>
 >();
 
 export async function adoptSessionLog(
@@ -771,7 +770,7 @@ export async function adoptSessionLog(
   /** The FULL log read before adoption: reused for the metadata overlay so
    *  the log is not re-read for a session this call is about to grow. */
   preAdoptionEntries: LogEntry[],
-): Promise<{ pendingQuestions: PendingQuestion[]; openTurn: boolean; adopted: boolean }> {
+): Promise<{ pendingQuestions: PendingQuestion[]; openTurn: boolean; adopted: boolean; modelWarning: string | null }> {
   const inFlight = pendingAdoptions.get(sessionId);
   if (inFlight) {
     const result = await inFlight;
@@ -791,18 +790,18 @@ export async function adoptSessionLog(
     // Model fidelity, loud half: with no log-attested model (legacy log or a
     // rebuild from one), the session resumes on the host default -- that is
     // a model swap the user must never discover from a transcript that
-    // "looks fine", so it is announced, not assumed.
+    // "looks fine", so it is announced, not assumed. The chat-visible half
+    // must NOT ride the sink here: output events are neither persisted nor
+    // replayed, and the resuming socket only subscribes during attach, so a
+    // pre-attach emit reaches no one (the one flow that needs it). The text
+    // rides back to attachResumedSession and is sent after attach lands.
+    let modelWarning: string | null = null;
     if (!row?.model) {
-      const why =
+      modelWarning =
         `Resuming ${sessionId} with no model attested in the session log ` +
         "(legacy log or an index rebuilt from one): continuing on the host default model. " +
         "Set the model explicitly (/model or the selector) if that is wrong.";
-      logger.error(`[session-index] ${why}`);
-      // Chat-visible too, best effort: the sink relays to whoever is attached.
-      agent.sink?.emit({
-        type: OUTPUT_EVENT.SYSTEM_MESSAGE,
-        content: why,
-      });
+      logger.error(`[session-index] ${modelWarning}`);
     }
     // The agent adopted the id (registry.create hands it through), so this
     // replays the log into the same log and writes the resume_attempt record.
@@ -839,7 +838,7 @@ export async function adoptSessionLog(
       if (createdAt > 0) meta.createdAt = createdAt;
       if (lastActivityAt > 0) meta.lastActivityAt = lastActivityAt;
     }
-    return { pendingQuestions, openTurn };
+    return { pendingQuestions, openTurn, modelWarning };
   })();
   pendingAdoptions.set(sessionId, attempt);
   try {
@@ -1126,7 +1125,7 @@ export async function attachResumedSession(
     }
   }
 
-  const { pendingQuestions, openTurn, adopted } = await adoptSessionLog(
+  const { pendingQuestions, openTurn, adopted, modelWarning } = await adoptSessionLog(
     sessionId,
     registry,
     auto,
@@ -1137,6 +1136,18 @@ export async function attachResumedSession(
   // client's cursor indexes the pre-adoption positions.
   const attached = await attachLiveSession(ws, registry, bridge, sessionId, cursor, fullEntries);
   if (!attached) return fallBack(`Session ${sessionId} could not be resumed.`);
+
+  // The adopt-time model warning, delivered where it can be seen: the socket
+  // only subscribes during attach and output events are never replayed, so
+  // this rides the attach burst right after the cursor (like the held
+  // questions below), before any continuation turn starts.
+  if (modelWarning) {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.SYSTEM_MESSAGE,
+      sessionId,
+      content: modelWarning,
+    });
+  }
 
   if (adopted) {
     // Newly live session: other tabs' sidebars learn it moved from Recent

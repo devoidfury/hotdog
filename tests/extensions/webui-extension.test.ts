@@ -92,7 +92,6 @@ describe("WebUI Extension", () => {
           port: 0,
           host: "127.0.0.1",
           apiKey: "test-key",
-          maxAgeSecs: 3600,
         });
 
         const done = handler({}, core);
@@ -122,7 +121,6 @@ describe("WebUI Extension", () => {
       // Missing apiKey makes createWebuiServer throw before anything binds.
       const { core, handler } = await getHandler({
         port: 0,
-        maxAgeSecs: 3600,
       });
       expect(await handler({}, core)).toBe(1);
     });

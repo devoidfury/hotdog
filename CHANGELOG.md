@@ -7,6 +7,8 @@
 
 - **Tool exec plane ships on again.** `toolExec` default returns to `worker`. The crash behind the v0.12.1 rollback was the executor mount plan mishandling a `/`-mounted scenario; fixed in `exec-plan.ts` with regression tests.
 
+- [BRK] dropped the dead `webui.maxAgeSecs` config key (no consumers since the run-3 housekeeping work); a config that still sets it now fails startup validation ("additional property not allowed") -- delete the key.
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.12.1...main
 
 ## [v0.12.1] - 2026-10-18

@@ -1,0 +1,67 @@
+name: Publish
+
+# Fires when a GitHub Release is published.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for npm trusted publishing + provenance
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: "bun test + typecheck before publish"
+    runs-on: ubuntu-latest
+    env:
+      BUN_VERSION: "1.4.2"
+      HOTDOG_CONFIG_DIR: "./examples/minimal-config/config"
+    steps:
+      - uses: ./.github/actions/checkout
+
+      - name: "Install bun"
+        run: examples/docker/bun-install.sh "$BUN_VERSION"
+
+      - name: "Run tests"
+        run: bun run loud-test
+
+      - name: "Run type check"
+        run: bun i --no-save && bun run check
+
+  publish:
+    name: "npm publish (trusted publishing, provenance)"
+    needs: test
+    runs-on: ubuntu-latest
+    # Optional but recommended: a GitHub environment named `npm`, which you
+    # then also name in the npm Trusted Publisher config. With required
+    # reviewers on the environment, every publish gets human approval.
+    # environment: npm
+    steps:
+      - uses: ./.github/actions/checkout
+
+      - name: "Guard: release tag must match package.json version"
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::release tag '${GITHUB_REF_NAME}' does not match package.json version $PKG"
+            exit 1
+          fi
+
+      # OIDC publish requires npm CLI >= 11.5.1. The runner ships node+npm;
+      # print it so a silent regression (or a needed bump) is visible in logs.
+      - name: "Check npm version"
+        run: npm --version
+
+      - name: "Preview tarball"
+        run: npm pack --dry-run
+
+      # Prereleases go to the `next` tag so `latest` never moves by accident.
+      # access/provenance come from publishConfig in package.json.
+      # NOTE: plain `npm`, never `bun publish` (provenance is a hard error there).
+      - name: "Publish"
+        run: npm publish ${{ github.event.release.prerelease && '--tag next' || '' }}

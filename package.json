@@ -1,5 +1,5 @@
 {
-  "name": "@hotdog/agent",
+  "name": "@read-receipt/hotdog",
   "version": "0.12.1",
   "main": "bin/hotdog",
   "dependencies": {},
@@ -14,7 +14,7 @@
   "engines": {
     "bun": ">=1.4.2"
   },
-  "author": "Thomas Hunkapiller <tom@furycodes.com> (http://furycodes.com/)",
+  "author": "Thomas Hunkapiller <tom@furycodes.com> (https://furycodes.com/)",
   "repository": "github:devoidfury/hotdog",
   "scripts": {
     "start": "bun bin/hotdog",

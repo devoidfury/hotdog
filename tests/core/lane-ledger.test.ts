@@ -79,9 +79,22 @@ describe("LaneLedger", () => {
     expect(await led2.acquire("prov", 1)).toBeNull();
 
     lost = null;
-    Bun.gc(true);
-    const took = await led2.acquire("prov", 1);
-    expect(took).not.toBeNull(); // the ghost slot came back
+    // Reclaim lands "on a GC tick", not the instant of the leak, and one forced
+    // GC is not one tick: the liveness-check acquire above deref'd the lease's
+    // WeakRef, and JSC defers clearing a ref accessed this cycle by another
+    // collection -- under parallel load that outran a single `gc(true)` (the
+    // observed flake). Poll gc+acquire on a deadline, the same shape as the
+    // dropped-lease-beats-quiet test. Failed acquires self-unregister, so
+    // polling leaves no watchdog entries behind.
+    let took: LaneLease | null = null;
+    const gcBy = Date.now() + 2_000;
+    while (!took) {
+      Bun.gc(true);
+      took = await led2.acquire("prov", 1);
+      if (took) break;
+      if (Date.now() > gcBy) throw new Error("watchdog never reclaimed the dropped lease");
+      await Bun.sleep(10);
+    }
     const m = JSON.parse(await readFile(slotPath, "utf8"));
     expect(m.token).toBe(took!.token);
     await led2.release(took!);

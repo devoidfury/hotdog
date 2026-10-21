@@ -59,6 +59,15 @@ export class EditorView {
   private lastOpWasKill = false;
   private offStdin: (() => void) | null = null;
 
+  /**
+   * Bracketed-paste policy delegate (stage 3b). When set, paste events hand
+   * the raw payload to this function INSTEAD of the default insertText, so
+   * the session layer can turn multi-line payloads into [Paste #N] markers;
+   * the handler is expected to place text via insertText itself. Dictation
+   * transcripts keep calling insertText directly and are never re-filtered.
+   */
+  pasteHandler: ((text: string) => void) | null = null;
+
   constructor(opts: EditorViewOptions = {}) {
     this.editor = new LineEditor();
     this.popup = new Popup();
@@ -148,6 +157,10 @@ export class EditorView {
       return;
     }
     if (e.kind === "paste") {
+      if (this.pasteHandler) {
+        this.pasteHandler(e.text);
+        return;
+      }
       this.insertText(e.text);
       return;
     }

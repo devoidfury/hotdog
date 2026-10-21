@@ -5,7 +5,7 @@
 // quit and simulated SIGTERM (paired restore visible in the Grid mode log), and
 // the non-TTY determinism golden for the legacy passthrough path.
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterAll } from "bun:test";
 import readline from "node:readline";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
@@ -971,3 +971,537 @@ describe("editor input mount (stage 3b)", () => {
     })).toBeTypeOf("function");
   });
 });
+
+// ── Stage-3b swap: the editor path IS the session ─────────────────────────
+// runInteractiveSession driven end-to-end on the editor input path with an
+// injected mounted bridge (Grid + FakeClock + MemoryKeySource; note §11, no
+// PTY). node:readline is never constructed on this path, so every behavior
+// readline used to provide (submit routing, interrupt, quit, paste markers,
+// dictation, questions, prompt retarget, completion popup, teardown pairing)
+// gets its own rig-driven test here. Legacy readline tests in
+// ui-interactive-cli.test.ts stay untouched as the byte-identity proof.
+
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { createCompletionService } from "@core/completion.ts";
+import {
+  runInteractiveSession,
+  EditorCliInput,
+  buildOnQuitHandler,
+  resetUiSlotsForTesting,
+} from "@extensions/ui-interactive-cli/index.ts";
+import type { CaptureFactory } from "@extensions/ui-interactive-cli/dictation.ts";
+
+/** One macrotask: drains the promise chains the async handlers run on. */
+const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Real-time wait for paths that cross child processes (which/bash spawns). */
+async function waitFor(cond: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("waitFor: condition not met");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** Stub SessionManager.create (same seam the legacy integration tests use). */
+async function withStubbedSessionManager(sm: unknown, fn: () => Promise<void>): Promise<void> {
+  const { SessionManager: SM } = await import("@core/session/index.ts");
+  const original = SM.create;
+  (SM as unknown as { create: unknown }).create = async () => sm;
+  try {
+    await fn();
+  } finally {
+    (SM as unknown as { create: unknown }).create = original;
+  }
+}
+
+interface SessionRigOptions {
+  uiCli?: Record<string, unknown>;
+  resolvedExtra?: Record<string, unknown>;
+  completion?: ReturnType<typeof createCompletionService>;
+  hooks?: unknown;
+  dictation?: { capture?: CaptureFactory; transcribe?: (audio: Uint8Array) => Promise<string> };
+}
+
+function makeSessionRig(opts: SessionRigOptions = {}) {
+  const term = new GridTerminal({ rows: 24, cols: 80 });
+  const clock = new FakeClock();
+  const sig = new FakeSignalHost();
+  const bridge = new OutputBridge({ terminal: term, clock, signalHost: sig });
+  // mountSplitRenderer mounts before the session starts; injected rigs do
+  // the same (mountEditorInput would refuse input on an unmounted bridge
+  // modes, and the exit-pairing counts start from the mount enable).
+  bridge.mount();
+  const keys = new MemoryKeySource();
+
+  const calls = {
+    enqueue: [] as string[],
+    execute: [] as string[],
+    interrupt: 0,
+  };
+  const agent = {
+    sessionId: "test-session",
+    commandRegistry: { names: () => ["test"] },
+    modelRegistry: {},
+  };
+  const sm = {
+    getAgent: () => agent,
+    sessionId: () => "test-session",
+    getBus: () => ({ run: async () => {} }),
+    getTaskManager: () => null,
+    executeCommand: async (_id: string, cmdText: string) => {
+      calls.execute.push(cmdText);
+      return undefined;
+    },
+    onSessionEvents: () => () => {},
+    interrupt: () => {
+      calls.interrupt++;
+    },
+    cancel: () => {},
+    enqueue: (_id: string, text: string) => {
+      calls.enqueue.push(text);
+    },
+    sessionIds: () => ["test-session"],
+    getSessionInfo: (id: string) => ({ id, model: "test-model" }),
+  };
+
+  const core = {
+    resolved: {
+      model: "test-model",
+      theme: "dark",
+      profileName: "test",
+      modelRegistry: {},
+      ...(opts.resolvedExtra ?? {}),
+    },
+    config: {
+      uiInteractiveCli: { shellMode: false, pasteMarkerMinChars: 80, renderer: "split", ...(opts.uiCli ?? {}) },
+    },
+    hooks: opts.hooks ?? { on: () => {}, notifyHooks: () => {} },
+    completion: opts.completion ?? { register: () => () => {}, request: async () => [] },
+    extensions: { get: () => undefined, getAll: () => [], cleanup: () => {} },
+    createLlmClient: () => ({ resolveProviderSettings: () => ({ url: "http://test", apiKey: null }) }),
+  };
+
+  const done = withStubbedSessionManager(sm, async () => {
+    await runInteractiveSession({}, core as never, { bridge, keySource: keys, dictation: opts.dictation });
+  });
+
+  const screenRows = (): string[] => term.grid.snapshot().screen.map((r) => r.replace(/\s+$/, ""));
+  const count = (log: string[], entry: string): number => log.filter((m) => m === entry).length;
+  return { term, clock, sig, bridge, keys, calls, done, screenRows, count };
+}
+
+/** Run fn with process.exit stubbed (same pattern as the legacy suite). */
+async function withStubbedExit(fn: (exitCalls: number[]) => Promise<void>): Promise<void> {
+  const original = process.exit;
+  const exitCalls: number[] = [];
+  process.exit = ((code?: number) => {
+    exitCalls.push(code ?? 0);
+    return undefined as never;
+  }) as never;
+  try {
+    await fn(exitCalls);
+  } finally {
+    process.exit = original;
+  }
+}
+
+describe("editor session swap: submit routing (stage 3b)", () => {
+  it("plain line goes through channel.send and pins the prompt echo", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+
+    rig.keys.push("hello there\r");
+    await tick();
+
+    expect(rig.calls.enqueue).toEqual(["hello there"]);
+    expect(rig.bridge.transcriptLog).toContain("(test-model)> hello there");
+  });
+
+  it("slash lines route to sessionManager.executeCommand, never to the model queue", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+
+    rig.keys.push("/tokens\r");
+    await tick();
+
+    expect(rig.calls.execute).toEqual(["tokens"]);
+    expect(rig.calls.enqueue).toEqual([]);
+  });
+
+  it("shell mode executes system commands and sends non-commands to the model", async () => {
+    const rig = makeSessionRig({ uiCli: { shellMode: true, pasteMarkerMinChars: 80 } });
+    await rig.done;
+
+    // "grep x /dev/null" is a real system command that exits 1 silently:
+    // the exec result row proves the editor path ran it through the bridge
+    // suspend/resume bracket instead of enqueueing. "please respond" is not
+    // a command, so it goes to the model. Both decisions cross child
+    // processes (which/bash), so wait on real time rather than macrotasks.
+    rig.keys.push("grep x /dev/null\r");
+    await waitFor(() => rig.bridge.transcriptLog.join("\n").includes("[exec: exit code 1]"));
+    expect(rig.calls.enqueue).toEqual([]);
+
+    rig.keys.push("please respond\r");
+    await waitFor(() => rig.calls.enqueue.length === 1);
+    expect(rig.calls.enqueue).toEqual(["please respond"]);
+  });
+});
+
+describe("editor session swap: interrupt / quit / exit pairing (§10 suite-6)", () => {
+  it("ctrl-c interrupts once and pins the echo exactly once", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+
+    rig.keys.push("abc");
+    await tick();
+    rig.keys.push("\x03");
+    await tick();
+
+    expect(rig.calls.interrupt).toBe(1);
+    const echo = rig.bridge.transcriptLog.filter((r) => r === "(test-model)> abc");
+    expect(echo.length).toBe(1); // no double flushEcho: the handler must not re-pin
+    const notice = rig.bridge.transcriptLog.filter((r) =>
+      r.startsWith("Interrupted (/quit, /exit, or ctrl-d to exit)"),
+    );
+    expect(notice.length).toBe(1);
+  });
+
+  it("ctrl-d quit leaves raw mode and bracketed paste restored exactly once", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+
+    await withStubbedExit(async (exitCalls) => {
+      rig.keys.push("\x04");
+      await tick();
+      expect(exitCalls).toEqual([0]);
+    });
+
+    const log = rig.term.grid.modeLog;
+    // ?25h rides every frame paint; the pairing that must land exactly once
+    // per exit is the raw-mode + bracketed-paste pair (§10 steps 4-5).
+    expect(rig.count(log, "?2004l")).toBe(1);
+    expect(rig.count(log, "raw:off")).toBe(1);
+    expect(rig.term.rawMode).toBe(false);
+    // The last-chance hook (process exit / repeat quit) is idempotent.
+    rig.bridge.shutdown();
+    expect(rig.count(rig.term.grid.modeLog, "?2004l")).toBe(1);
+    expect(rig.count(rig.term.grid.modeLog, "raw:off")).toBe(1);
+  });
+
+  it("/quit slash tears down exactly once", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+
+    await withStubbedExit(async (exitCalls) => {
+      rig.keys.push("/quit\r");
+      await tick();
+      expect(exitCalls).toEqual([0]);
+    });
+
+    const log = rig.term.grid.modeLog;
+    expect(rig.count(log, "?2004l")).toBe(1);
+    expect(rig.count(log, "raw:off")).toBe(1);
+  });
+
+  it("SIGTERM restores once and exits 128+15; handlers were separate", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    expect(rig.sig.handlers.SIGTERM.length).toBe(1);
+    expect(rig.sig.handlers.SIGHUP.length).toBe(1);
+
+    rig.sig.handlers.SIGTERM[0]!();
+
+    expect(rig.sig.exits).toEqual([128 + 15]);
+    const log = rig.term.grid.modeLog;
+    expect(rig.count(log, "?2004l")).toBe(1);
+    expect(rig.count(log, "raw:off")).toBe(1);
+  });
+});
+
+describe("editor session swap: paste markers over buffer text", () => {
+  it("multi-line paste collapses to a marker and restores content at submit", async () => {
+    const rig = makeSessionRig({ uiCli: { shellMode: false, pasteMarkerMinChars: 10 } });
+    await rig.done;
+
+    rig.keys.push("\x1b[200~multi\nline\ncontent\x1b[201~");
+    rig.clock.runAll();
+    expect(rig.bridge.editor?.text).toBe("[Paste #1 - 3 lines]");
+
+    rig.keys.push(" explain\r");
+    await tick();
+    expect(rig.calls.enqueue).toEqual(["multi\nline\ncontent explain"]);
+  });
+
+  it("min-chars boundary: short single-line inserts as-is, at/over gets a marker", async () => {
+    const rig = makeSessionRig({ uiCli: { shellMode: false, pasteMarkerMinChars: 10 } });
+    await rig.done;
+
+    rig.keys.push("\x1b[200~123456789\x1b[201~"); // 9 < 10: inline
+    rig.clock.runAll();
+    expect(rig.bridge.editor?.text).toBe("123456789");
+
+    rig.keys.push("\x1b[200~1234567890\x1b[201~"); // exactly 10: marker (seq only counts markers)
+    rig.clock.runAll();
+    expect(rig.bridge.editor?.text).toBe("123456789[Paste #1 - 1 line]");
+
+    rig.keys.push("\r");
+    await tick();
+    expect(rig.calls.enqueue).toEqual(["1234567891234567890"]);
+  });
+});
+
+describe("editor session swap: ctrl-x dictation over unhandled keys", () => {
+  it("inserts the transcript at the cursor and never auto-sends", async () => {
+    let cancelled = 0;
+    const capture: CaptureFactory = () => ({
+      stop: async () => new Uint8Array([1, 2, 3]),
+      cancel: () => {
+        cancelled++;
+      },
+    });
+    const rig = makeSessionRig({
+      resolvedExtra: { sttUrl: "http://stt.test" },
+      dictation: { capture, transcribe: async () => "voice transcript" },
+    });
+    await rig.done;
+
+    rig.keys.push("note: ");
+    rig.keys.push("\x18"); // start recording
+    await tick();
+    rig.keys.push("\x18"); // stop -> transcribe -> insert at cursor
+    await tick();
+
+    expect(rig.bridge.editor?.text).toBe("note: voice transcript");
+    expect(rig.calls.enqueue).toEqual([]); // insert only; sending stays the user's call
+    expect(rig.bridge.transcriptLog).toContain("● Recording… press Ctrl+X to stop");
+
+    rig.keys.push("\r");
+    await tick();
+    expect(rig.calls.enqueue).toEqual(["note: voice transcript"]);
+  });
+
+  it("interrupt cancels an in-flight recording", async () => {
+    let cancelled = 0;
+    const capture: CaptureFactory = () => ({
+      stop: async () => new Uint8Array([1]),
+      cancel: () => {
+        cancelled++;
+      },
+    });
+    const rig = makeSessionRig({
+      resolvedExtra: { sttUrl: "http://stt.test" },
+      dictation: { capture, transcribe: async () => "never" },
+    });
+    await rig.done;
+
+    rig.keys.push("\x18"); // recording
+    await tick();
+    rig.keys.push("\x03"); // interrupt drops the recording
+    await tick();
+    expect(cancelled).toBe(1);
+  });
+});
+
+describe("editor session swap: question focus (§8)", () => {
+  it("menu answers resolve, abort mid-question resolves partial, lines return to the normal handler", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    const input = new EditorCliInput(rig.bridge);
+    const controller = new AbortController();
+
+    const captured: string[] = [];
+    const origOut = process.stdout.write;
+    process.stdout.write = ((chunk: unknown) => {
+      captured.push(String(chunk));
+      return true;
+    }) as never;
+    try {
+      const pending = input.collectAnswers(
+        [
+          { key: "color", prompt: "Pick a color", options: ["red", "green", "blue"] },
+          { key: "city", prompt: "Pick a city", options: ["Oslo", "Lima"] },
+        ],
+        controller.signal,
+      );
+      expect(rig.bridge.questionMode).toBe(true);
+      await tick();
+
+      rig.keys.push("2\r"); // menu index -> green
+      await tick();
+      // The answer echo commits bare (no prompt prefix) and never reaches
+      // the normal submit handler.
+      expect(rig.bridge.transcriptLog).toContain("2");
+      expect(rig.calls.enqueue).toEqual([]);
+
+      controller.abort();
+      const answers = await pending; // resolves partial; never rejects
+      expect(answers).toEqual({ color: "green" });
+      expect(rig.bridge.questionMode).toBe(false);
+
+      // Focus released: the next line is a normal submit again.
+      rig.keys.push("back to normal\r");
+      await tick();
+      expect(rig.calls.enqueue).toEqual(["back to normal"]);
+
+      const printed = captured.join("");
+      expect(printed).toContain("Pick a color");
+      expect(printed).toContain("[2] green");
+    } finally {
+      process.stdout.write = origOut;
+    }
+  });
+
+  it("the completion popup is suppressed while a question owns the input", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hotdog-3b-qpopup-"));
+    writeFileSync(join(dir, "alpha.txt"), "a");
+    const rig = makeSessionRig();
+    try {
+      await rig.done;
+      const input = new EditorCliInput(rig.bridge);
+
+      // One optional free-text question, so Enter submits whatever is typed.
+      const pending = input.collectAnswers([{ key: "note", prompt: "Note?", required: false }], null);
+      await tick();
+
+      // A path word + Tab opens the SYNCHRONOUS readdir popup in normal
+      // mode; while the question owns the input it must not appear.
+      rig.keys.push(`cat ${dir}/al`);
+      rig.keys.push("\t");
+      rig.clock.runAll();
+      expect(rig.bridge.editor?.popupOpen).toBe(false);
+
+      rig.keys.push("\r"); // the typed text goes to the question as free text
+      const answers = await pending;
+      expect(answers).toEqual({ note: `cat ${dir}/al` });
+      expect(rig.bridge.questionMode).toBe(false);
+
+      // Back in normal mode the same Tab opens the popup right away.
+      rig.keys.push(`cat ${dir}/al`);
+      rig.keys.push("\t");
+      rig.clock.runAll();
+      expect(rig.bridge.editor?.popupOpen).toBe(true);
+      expect(rig.screenRows().some((r) => r.includes("alpha.txt"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("editor session swap: MODEL_CHANGE retargets the mounted prompt", () => {
+  it("frame shows the new model prompt", async () => {
+    const hooks = new HookSystem();
+    const rig = makeSessionRig({ hooks });
+    await rig.done;
+    rig.clock.runAll(); // drain the paint the mount scheduled on the fake clock
+    const committed = () => rig.screenRows().join("\n");
+    expect(committed()).toContain("(test-model)>");
+
+    await hooks.notifyHooks(HOOKS.MODEL_CHANGE, {
+      agent: { model: "gpt-new" } as never,
+      oldModel: "test-model",
+      newModel: "gpt-new",
+    });
+    rig.clock.runAll();
+
+    expect(committed()).toContain("(gpt-new)>");
+    // The live frame row is the only prompt copy; it carries the new model.
+    expect(committed().includes("(test-model)>")).toBe(false);
+  });
+});
+
+describe("editor session swap: completion popup sources", () => {
+  it("async provider degrades cold, then opens (and accepts) on cache/refresh", async () => {
+    const completion = createCompletionService();
+    completion.register(
+      (ctx) => ctx.line.slice(0, ctx.cursorPos).startsWith("hel"),
+      () => [{ value: "hello" }],
+      "test:hel",
+    );
+    const rig = makeSessionRig({ completion });
+    await rig.done;
+
+    rig.keys.push("hel");
+    rig.keys.push("\t");
+    rig.clock.runAll();
+    // Cold cache: the provider is async, so the key-time answer is empty.
+    expect(rig.bridge.editor?.popupOpen).toBe(false);
+
+    await tick(); // the provider round resolves and refreshes the open span
+    rig.clock.runAll();
+    expect(rig.bridge.editor?.popupOpen).toBe(true);
+
+    rig.keys.push("\r"); // enter accepts the popup instead of submitting
+    rig.clock.runAll();
+    expect(rig.bridge.editor?.text).toBe("hello");
+    expect(rig.calls.enqueue).toEqual([]);
+  });
+
+  it("readdir path completer answers synchronously at Tab", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hotdog-3b-readdir-"));
+    writeFileSync(join(dir, "alpha.txt"), "a");
+    writeFileSync(join(dir, "beta.txt"), "b");
+    mkdirSync(join(dir, "subdir"));
+    const rig = makeSessionRig();
+    try {
+      await rig.done;
+      rig.keys.push(`cat ${dir}/al`);
+      rig.keys.push("\t");
+      rig.clock.runAll();
+      expect(rig.bridge.editor?.popupOpen).toBe(true); // NO await: readdir is sync
+      const rows = rig.screenRows();
+      expect(rows.some((r) => r.includes("alpha.txt"))).toBe(true);
+      expect(rows.some((r) => r.includes("beta.txt"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("module-slot release after mounted sessions (sequential-process hygiene)", () => {
+  it("console spies stay blind while a session holds the slots and see output again once released", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+
+    // Call the shared quit handler with console.log captured. buildOnQuitHandler
+    // prints through the uiOut module slot, so where its bytes land proves
+    // which printer the slot currently points at.
+    const sayGoodbye = async (): Promise<string[]> => {
+      const lines: string[] = [];
+      await withStubbedExit(async () => {
+        const original = console.log;
+        console.log = (...args: unknown[]) => {
+          lines.push(args.join(" "));
+        };
+        try {
+          buildOnQuitHandler(
+            { sessionId: () => "slot-test", getTaskManager: () => null } as never,
+            { cleanup: () => {} } as never,
+          )();
+        } finally {
+          console.log = original;
+        }
+      });
+      return lines;
+    };
+
+    // Slots still bound to the rig's sink: the commit router sends the bytes
+    // into the GridTerminal, and the console spy captures nothing.
+    expect(await sayGoodbye()).toEqual([]);
+
+    resetUiSlotsForTesting();
+
+    const after = await sayGoodbye();
+    expect(after.join("\n")).toContain("Goodbye!");
+    expect(after.join("\n")).toContain("slot-test");
+  });
+});
+
+// The mounted-session rigs above rebind the uiOut/uiFlush/uiBridge module
+// slots. Releasing them when this file finishes is what keeps a plain
+// sequential `bun test` (and the coverage script) green for every file that
+// runs after this one in the same process.
+afterAll(resetUiSlotsForTesting);

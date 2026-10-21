@@ -22,8 +22,10 @@ import type { CliArgv } from "@core/config/index.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { CliChannel } from "./cli-channel.ts";
 import { ClipboardPasteInterceptor } from "./clipboard-paste.ts";
-import { DictationInterceptor } from "./dictation.ts";
+import { DictationInterceptor, DictationCore, type CaptureFactory } from "./dictation.ts";
+import { EditorPasteMarkers } from "./paste-markers.ts";
 import { mountSplitRenderer, type OutputBridge } from "./split-bridge.ts";
+import { StdinKeySource, type KeySource } from "@utils/cli/renderer/index.ts";
 import { resolveSttTarget } from "@core/config/stt.ts";
 import {
   parseCompletionContext,
@@ -31,6 +33,7 @@ import {
   registerCommandCompletions,
   registerShellCompletion,
   buildReadlineCompleter,
+  buildEditorCompleter,
 } from "./completions.ts";
 
 export {
@@ -113,6 +116,21 @@ interface InteractiveSessionOptions {
   onClose?: () => void;
   onSIGINT?: () => void;
   setupInput?: () => void;
+  /**
+   * Stage-3b test seams (§11: constructor-injected objects, never
+   * mock.module): inject a mounted bridge built on the Grid/FakeClock rig
+   * instead of mountSplitRenderer, and hand the editor input a scripted
+   * KeySource instead of process.stdin. Omitted on the legacy path, so
+   * existing tests drive the byte-identical readline flow.
+   */
+  bridge?: OutputBridge | null;
+  keySource?: KeySource;
+  /**
+   * Test seam for the editor-path dictation: inject the fake audio capture
+   * and fake transcription so a rigged ctrl-x drives the real toggle state
+   * machine without arecord or an STT endpoint.
+   */
+  dictation?: { capture?: CaptureFactory; transcribe?: (audio: Uint8Array) => Promise<string> };
 }
 
 export async function isSystemCommand(cmd: string): Promise<boolean> {
@@ -216,6 +234,126 @@ interface InputInterface {
   collectAnswers(questions: QuestionDef[], signal?: AbortSignal | null): Promise<Record<string, string>>;
 }
 
+/**
+ * One cancellable wait for the next submitted line. cancel() exists for the
+ * abort path: a line typed after the caller gave up must flow back to the
+ * normal handler, never into a dead question loop.
+ */
+interface LineWait {
+  line: Promise<string>;
+  cancel(): void;
+}
+
+/**
+ * The question/approval prompt loop shared by the readline takeover
+ * (AsyncInteractiveCliInput) and the stage-3b editor focus (EditorCliInput).
+ * It only knows how to print the model-supplied menu and judge answers;
+ * where lines come from is the caller's waitLine(). Abort semantics are the
+ * rule: the run's abort signal wins the race, ALREADY-GATHERED answers
+ * resolve (never reject -- the caller drops the partials) and the pending
+ * wait is cancelled, so the input is released the moment the prompt is.
+ */
+async function runQuestions(
+  questions: QuestionDef[],
+  signal: AbortSignal | null | undefined,
+  normalize: (line: string) => string,
+  waitLine: () => LineWait,
+): Promise<Record<string, string>> {
+  const answers: Record<string, string> = {};
+  let onAbort: (() => void) | null = null;
+  try {
+    if (signal?.aborted) return answers;
+
+    const aborted = signal
+      ? new Promise<"aborted">((resolve) => {
+          onAbort = () => resolve("aborted");
+          signal.addEventListener("abort", onAbort, { once: true });
+        })
+      : null;
+
+    for (const q of questions) {
+      const key = q.key;
+      const promptText = q.prompt || "";
+      const options = q.options || [];
+      const defaultValue = q.default ?? "";
+
+      // prompt, options and default are model-supplied. spoofSafe is idempotent, so double neutralization upstream is harmless.
+      process.stdout.write(`\n  ? ${spoofSafe(promptText)}\n`);
+
+      if (options.length > 0) {
+        for (let i = 0; i < options.length; i++) {
+          process.stdout.write(`    [${i + 1}] ${spoofSafe(options[i] ?? "")}\n`);
+        }
+      }
+
+      if (defaultValue !== "") {
+        process.stdout.write(`    (default: ${spoofSafe(defaultValue)})\n`);
+      }
+
+      let answer = "";
+      let valid = false;
+
+      while (!valid) {
+        const prompt = defaultValue !== "" ? ` [${defaultValue}] ` : " ";
+        process.stdout.write(prompt);
+        // Split mode: the answer prompt carries no newline -- push the
+        // partial row out so the prompt is actually visible before waiting.
+        uiFlush();
+        const wait = waitLine();
+
+        // Race the line against the run abort: a cancelled run must stop
+        // prompting and release the input, not keep owning it. We RESOLVE
+        // (partial answers, dropped by the caller) rather than reject, so
+        // the never-awaited promise can never go unhandled.
+        let line: string;
+        if (aborted) {
+          const outcome = await Promise.race([wait.line, aborted]);
+          if (outcome === "aborted") {
+            wait.cancel();
+            return answers;
+          }
+          line = outcome;
+        } else {
+          line = await wait.line;
+        }
+
+        const trimmed = normalize(line).trim();
+
+        // The CLI renders options as a numbered menu, so index ("2") and
+        // exact option-text input become a selection; anything else stays
+        // free text for the shared resolver to judge.
+        let text = trimmed;
+        let selectedOption: string | null = null;
+        if (trimmed !== "" && options.length > 0) {
+          const idx = parseInt(trimmed, 10);
+          if (!isNaN(idx) && idx >= 1 && idx <= options.length) {
+            selectedOption = options[idx - 1] ?? "";
+            text = "";
+          } else if (options.includes(trimmed)) {
+            selectedOption = trimmed;
+            text = "";
+          }
+        }
+
+        const resolvedAnswer = resolveQuestionAnswer(q, { text, selectedOption });
+        if (resolvedAnswer.error) {
+          process.stderr.write(`  ${spoofSafe(resolvedAnswer.error)}\n`);
+          continue;
+        }
+
+        answer = resolvedAnswer.value;
+        valid = true;
+      }
+
+      answers[key] = answer;
+    }
+  } finally {
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+  }
+
+  return answers;
+}
+
 export class AsyncInteractiveCliInput implements InputInterface {
   readonly #rl: readline.Interface;
   readonly #onLine: (line: string) => void;
@@ -244,113 +382,75 @@ export class AsyncInteractiveCliInput implements InputInterface {
     // Take over readline for the duration of the prompt.
     rl.removeListener("line", this.#onLine);
 
-    const answers: Record<string, string> = {};
-    let onAbort: (() => void) | null = null;
     // Our pending one-shot "line" listener, the cancellable stand-in for rl.question:
     // readline's question callback cannot be removed once pending, so a line typed after cancel would be fed into a dead loop.
-    // A plain listener we own can be detached in the finally block.
+    // A plain listener we own can be detached when the wait loses the race.
     let pendingLine: ((line: string) => void) | null = null;
+    // Split mode: the takeover prints via owned channels (never raw
+    // stdout); the bridge question-mode flag keeps the submit echo prefix off
+    // answer rows.
+    uiBridge?.setQuestionMode(true);
     try {
-      if (signal?.aborted) return answers;
-      // Split mode: the takeover prints via owned channels (never raw
-      // stdout); the exclusive question FOCUS mode is stage 3 (§8) -- the
-      // mechanics here stay exactly as before.
-      uiBridge?.setQuestionMode(true);
-
-      const aborted = signal
-        ? new Promise<"aborted">((resolve) => {
-            onAbort = () => resolve("aborted");
-            signal.addEventListener("abort", onAbort, { once: true });
-          })
-        : null;
-
-      for (const q of questions) {
-        const key = q.key;
-        const promptText = q.prompt || "";
-        const options = q.options || [];
-        const defaultValue = q.default ?? "";
-
-        // prompt, options and default are model-supplied. spoofSafe is idempotent, so double neutralization upstream is harmless.
-        process.stdout.write(`\n  ? ${spoofSafe(promptText)}\n`);
-
-        if (options.length > 0) {
-          for (let i = 0; i < options.length; i++) {
-            process.stdout.write(`    [${i + 1}] ${spoofSafe(options[i] ?? "")}\n`);
+      return await runQuestions(questions, signal, this.#normalize, () => ({
+        line: new Promise<string>((resolve) => {
+          const onLine = (line: string) => {
+            pendingLine = null;
+            rl.removeListener("line", onLine);
+            resolve(line ?? "");
+          };
+          pendingLine = onLine;
+          rl.on("line", onLine);
+        }),
+        cancel: () => {
+          if (pendingLine) {
+            rl.removeListener("line", pendingLine);
+            pendingLine = null;
           }
-        }
-
-        if (defaultValue !== "") {
-          process.stdout.write(`    (default: ${spoofSafe(defaultValue)})\n`);
-        }
-
-        let answer = "";
-        let valid = false;
-
-        while (!valid) {
-          const prompt = defaultValue !== "" ? ` [${defaultValue}] ` : " ";
-          process.stdout.write(prompt);
-          // Split mode: the answer prompt carries no newline -- push the
-          // partial row out so the prompt is actually visible before waiting.
-          uiFlush();
-          const linePromise = new Promise<string>((resolve) => {
-            const onLine = (line: string) => {
-              pendingLine = null;
-              rl.removeListener("line", onLine);
-              resolve(line ?? "");
-            };
-            pendingLine = onLine;
-            rl.on("line", onLine);
-          });
-
-          // Race the line against the run abort: a cancelled run must stop prompting and release readline, not keep owning it.
-          // We RESOLVE (partial answers, dropped by the caller) rather than reject, so the never-awaited promise can never go unhandled.
-          let line: string;
-          if (aborted) {
-            const outcome = await Promise.race([linePromise, aborted]);
-            if (outcome === "aborted") return answers;
-            line = outcome;
-          } else {
-            line = await linePromise;
-          }
-
-          const trimmed = this.#normalize(line).trim();
-
-          // The CLI renders options as a numbered menu, so index ("2") and
-          // exact option-text input become a selection; anything else stays
-          // free text for the shared resolver to judge.
-          let text = trimmed;
-          let selectedOption: string | null = null;
-          if (trimmed !== "" && options.length > 0) {
-            const idx = parseInt(trimmed, 10);
-            if (!isNaN(idx) && idx >= 1 && idx <= options.length) {
-              selectedOption = options[idx - 1] ?? "";
-              text = "";
-            } else if (options.includes(trimmed)) {
-              selectedOption = trimmed;
-              text = "";
-            }
-          }
-
-          const resolvedAnswer = resolveQuestionAnswer(q, { text, selectedOption });
-          if (resolvedAnswer.error) {
-            process.stderr.write(`  ${spoofSafe(resolvedAnswer.error)}\n`);
-            continue;
-          }
-
-          answer = resolvedAnswer.value;
-          valid = true;
-        }
-
-        answers[key] = answer;
-      }
+        },
+      }));
     } finally {
-      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
       if (pendingLine) rl.removeListener("line", pendingLine);
       uiBridge?.setQuestionMode(false);
       this.#addLineHandler(this.#onLine);
     }
+  }
+}
 
-    return answers;
+/**
+ * Question input for the stage-3b EDITOR path. There is no listener takeover
+ * to perform: the bridge routes a submitted editor line to the open
+ * question's wait instead of the normal handler, which is exactly the §8
+ * exclusive question focus (Esc still interrupts, the answer buffer is the
+ * editor buffer).
+ */
+export class EditorCliInput implements InputInterface {
+  readonly #bridge: OutputBridge;
+  readonly #normalize: (line: string) => string;
+
+  constructor(bridge: OutputBridge, normalize: (line: string) => string = (line) => line) {
+    this.#bridge = bridge;
+    this.#normalize = normalize;
+  }
+
+  isInteractive(): boolean {
+    return true;
+  }
+
+  async collectAnswers(questions: QuestionDef[], signal?: AbortSignal | null): Promise<Record<string, string>> {
+    this.#bridge.setQuestionMode(true);
+    // The bridge routes submitted lines to the OPEN wait, so at most one is
+    // live per collectAnswers run and the finally drops it if the abort won.
+    const activeWaits: LineWait[] = [];
+    try {
+      return await runQuestions(questions, signal, this.#normalize, () => {
+        const wait = this.#bridge.waitForLine();
+        activeWaits.push(wait);
+        return wait;
+      });
+    } finally {
+      for (const wait of activeWaits) wait.cancel();
+      this.#bridge.setQuestionMode(false);
+    }
   }
 }
 
@@ -364,15 +464,36 @@ let currentInput: InputInterface | null = null;
  * rebinds it to the sink's log channel each session (which itself only
  * diverges from console.log once the split bridge installs its router).
  */
-let uiOut: (message: string) => void = (message: string) => {
+function defaultUiOut(message: string): void {
   console.log(message);
-};
+}
 
 /** Commit pending partial rows before blocking on user input (split mode; no-op in legacy). */
-let uiFlush: () => void = () => {};
+function defaultUiFlush(): void {}
+
+/** Session-scoped printer slots: rebound by runInteractiveSession at session start, released back to the defaults by resetUiSlotsForTesting. */
+let uiOut: (message: string) => void = defaultUiOut;
+let uiFlush: () => void = defaultUiFlush;
 
 /** The live split bridge when the renderer is mounted; module slot like currentInput (one session per process). */
 let uiBridge: OutputBridge | null = null;
+
+/**
+ * Release the session-scoped uiOut/uiFlush/uiBridge module slots back to
+ * their console defaults. Production doctrine is one session per process, so
+ * the rebinding normally dies with the process and this function has no role
+ * there. It exists for shared test processes: plain sequential `bun test`
+ * (and the coverage script, which lacks --parallel) runs every file in one
+ * process, so a split-mode session that ran in an earlier file would keep
+ * uiOut pointed at its dead rig sink and later files' console spies would
+ * capture nothing. The split rig suite releases the slots in its afterAll;
+ * any new file that mounts a bridge session must do the same.
+ */
+export function resetUiSlotsForTesting(): void {
+  uiOut = defaultUiOut;
+  uiFlush = defaultUiFlush;
+  uiBridge = null;
+}
 
 /**
  * Unanswered questions reconstructed by a resume (buildInteractiveAgent),
@@ -539,12 +660,18 @@ export async function runInteractiveSession(
   // Split-renderer kill switch (design note §9/§12): mounts iff the knob says
   // "split" AND both stdio streams are TTYs. Non-TTY is passthrough
   // regardless of the knob; "legacy" (the default) never touches a global.
+  // options.bridge injects an already-mounted rig bridge for the split-mode
+  // session tests (§11 constructor injection); omitting it keeps the real
+  // mount decision untouched.
   const uiCli = (config.uiInteractiveCli as Record<string, unknown>) || {};
-  const bridge = mountSplitRenderer({
-    knob: uiCli.renderer,
-    stdinIsTTY: process.stdin.isTTY,
-    stdoutIsTTY: process.stdout.isTTY,
-  });
+  const bridge =
+    options.bridge !== undefined
+      ? options.bridge
+      : mountSplitRenderer({
+          knob: uiCli.renderer,
+          stdinIsTTY: process.stdin.isTTY,
+          stdoutIsTTY: process.stdout.isTTY,
+        });
   uiBridge = bridge;
   if (bridge) {
     sink.logRouter = (message: string) => bridge.commitText(message + "\n");
@@ -598,59 +725,96 @@ export async function runInteractiveSession(
 
   const shellMode = uiCli.shellMode;
 
-  const createReadline = options.createReadline || readline.createInterface;
+  // Stage-3b swap: when a bridge is mounted the session runs ENTIRELY on the
+  // editor input path. node:readline is never constructed there and neither
+  // the rl-shaped paste nor dictation interceptor exists; their semantics
+  // re-hang off the editor's events (paste markers on the view's paste hook,
+  // ctrl-x on unhandled keys, questions on the bridge's line focus). The
+  // legacy branch keeps its pre-swap construction shape exactly.
+  let rl: readline.Interface | null = null;
+  let normalizeLine: (line: string) => string = (line) => line;
+  let resetPasteState: () => void = () => {};
+  let cancelDictation: () => void = () => {};
+  let toggleDictation: () => void = () => {};
+  let editorPasteHandler: ((raw: string) => void) | null = null;
 
-  const rl = createReadline({
-    input: process.stdin,
-    output: bridge ? (bridge.capture as unknown as NodeJS.WriteStream) : process.stdout,
-    prompt: `(${resolved.model})> `,
-    completer: buildReadlineCompleter(sessionManager, core),
-  });
-
-  if (bridge) {
-    // The prompt text is echoed into committed rows on submit, so the bridge
-    // tracks it; readline stays in charge of input and repaints through the
-    // capture stream (stage-2 note §2 row 5).
-    bridge.setPrompt(`(${resolved.model})> `);
-    const origSetPrompt = rl.setPrompt.bind(rl);
-    rl.setPrompt = (prompt: string): void => {
-      bridge.setPrompt(prompt);
-      origSetPrompt(prompt);
-    };
-    // Registered before the main line handler so the submit echo commits as a
-    // transcript row ahead of anything the turn prints.
-    rl.on("line", (line: string) => bridge.lineSubmitted(line));
-  }
-
-  // Intercept bracketed paste before readline: pasted payloads become inline
-  // `[Paste #N - M lines]` markers (real content restored in `lineHandler`),
-  // except short single-line pastes which are inserted as-is.
-  // config record is untyped; the constructor validates and fails loud on a
-  // missing or invalid value
-  const paste = new ClipboardPasteInterceptor(rl, {
-    pasteMarkerMinChars: uiCli.pasteMarkerMinChars as number,
-    // In split mode the renderer's TeardownGuard owns the ?2004h/l pair (§10);
-    // the interceptor keeps the listener swap and its own teardown, minus the
-    // escape writes -- bracketed paste is never enabled/disabled twice.
-    rendererOwnsBracketedPaste: !!bridge,
-  });
-
-  // Ctrl+X dictation: sits in front of the paste chain, swallows only the
-  // Ctrl+X byte. Disables itself when no STT target resolved (no sttUrl and
-  // no audio-capable registry model) or input is not a TTY.
-  const dictation = new DictationInterceptor(rl, {
-    target: resolveSttTarget(resolved, llmClient),
-  });
+  const sttTarget = resolveSttTarget(resolved, llmClient);
 
   const onQuit = buildOnQuitHandler(sessionManager, core.extensions);
   // Teardown pairs with every exit path (§10): restore the terminal first so
-  // the goodbye rows land on a plain screen via passthrough stdout.
+  // the goodbye rows land on a plain screen via passthrough stdout. An
+  // in-flight dictation recording exits with the session too.
   const exitSession = bridge
     ? (): void => {
+        cancelDictation();
         bridge.shutdown();
         onQuit();
       }
     : onQuit;
+
+  if (bridge) {
+    // The prompt text is echoed into committed rows on submit, so the bridge
+    // tracks it (the same string the readline prompt used to carry).
+    bridge.setPrompt(`(${resolved.model})> `);
+
+    // Bracketed-paste payloads on the editor path: multi-line (or long)
+    // pastes collapse into an inline `[Paste #N - M lines]` marker in the
+    // buffer with the real content restored by normalize() at submit; short
+    // single-line pastes insert as-is. config record is untyped; the
+    // constructor validates and fails loud on a missing or invalid value.
+    const pasteMarkers = new EditorPasteMarkers({
+      pasteMarkerMinChars: uiCli.pasteMarkerMinChars as number,
+      insert: (text) => bridge.editor?.insertText(text),
+    });
+    normalizeLine = (line) => pasteMarkers.normalize(line);
+    resetPasteState = () => pasteMarkers.onInterrupt();
+    editorPasteHandler = (raw) => pasteMarkers.handlePaste(raw);
+
+    // Ctrl+X dictation on the editor path: it binds from the editor's
+    // unhandled-key event (stage 3a deliberately left ctrl-x unhandled) and
+    // the transcript lands at the cursor via the view -- never auto-sent.
+    if (sttTarget) {
+      const dictationCore = new DictationCore({
+        target: sttTarget,
+        capture: options.dictation?.capture,
+        transcribe: options.dictation?.transcribe,
+        hooks: {
+          recording: () => sink.log("● Recording… press Ctrl+X to stop"),
+          transcribing: () => sink.log("Transcribing…"),
+          transcript: (text) => bridge.editor?.insertText(text),
+          failed: (err) => sink.log(`Dictation failed: ${formatError(err)}`),
+        },
+      });
+      toggleDictation = () => dictationCore.toggle();
+      cancelDictation = () => dictationCore.cancel();
+    }
+  } else {
+    const createReadline = options.createReadline || readline.createInterface;
+
+    rl = createReadline({
+      input: process.stdin,
+      output: process.stdout,
+      prompt: `(${resolved.model})> `,
+      completer: buildReadlineCompleter(sessionManager, core),
+    });
+
+    // Intercept bracketed paste before readline: pasted payloads become inline
+    // `[Paste #N - M lines]` markers (real content restored in `lineHandler`),
+    // except short single-line pastes which are inserted as-is.
+    const paste = new ClipboardPasteInterceptor(rl, {
+      pasteMarkerMinChars: uiCli.pasteMarkerMinChars as number,
+    });
+
+    // Ctrl+X dictation: sits in front of the paste chain, swallows only the
+    // Ctrl+X byte. Disables itself when no STT target resolved (no sttUrl and
+    // no audio-capable registry model) or input is not a TTY.
+    const dictation = new DictationInterceptor(rl, { target: sttTarget });
+
+    normalizeLine = (line) => paste.normalize(line);
+    resetPasteState = () => paste.onInterrupt();
+    cancelDictation = () => dictation.cancel();
+  }
+
   const channel = new CliChannel({
     sessionManager,
     sessionId: sessionManager.sessionId()!,
@@ -660,15 +824,26 @@ export async function runInteractiveSession(
   });
 
   // Define the line handler
-  let lineHandler: (line: string) => void;
+  let lineHandler: (line: string) => Promise<void>;
 
   const addLineHandler = (handler: (line: string) => void) => {
-    rl.on("line", handler);
+    rl?.on("line", handler);
   };
 
-  // Listen for model changes and update the prompt
+  // The prompt surface handleSlashCommand drives: readline on the legacy
+  // path; on the editor path there is nothing to repaint (the frame keeps the
+  // live editor row on screen) and close() performs the bridge teardown that
+  // readline's "close" event used to trigger on /quit.
+  const uiHost: PromptUi = bridge
+    ? { prompt: () => {}, close: () => bridge.shutdown() }
+    : (rl as readline.Interface);
+
+  // Listen for model changes and update the prompt: the mounted editor's
+  // frame is the prompt painter when the bridge is up, readline's echo when
+  // it is not.
   core.hooks.on(HOOKS.MODEL_CHANGE, ({ newModel }) => {
-    rl.setPrompt(`(${newModel})> `);
+    if (bridge) bridge.setPrompt(`(${newModel})> `);
+    else (rl as readline.Interface).setPrompt(`(${newModel})> `);
   });
 
   // Re-display prompt after agent finishes
@@ -676,7 +851,9 @@ export async function runInteractiveSession(
     if (stopped) {
       setImmediate(() => {
         sink.log("");
-        rl.prompt();
+        // The editor path has no readline to re-prompt: its frame is
+        // persistently on screen.
+        if (!bridge) (rl as readline.Interface).prompt();
       });
     }
   });
@@ -695,22 +872,21 @@ export async function runInteractiveSession(
       return false;
     }
     
-    rl.pause();
-    // §5 suspend/resume bracket (split only): stdin.pause is neutered while
-    // the renderer is mounted, so rl.pause() alone leaves hotdog's stdin
-    // listener racing a stdio-inherit child for tty bytes (arrow escapes get
-    // shredded into "OB"/"BO" debris and the child eats keystrokes). Hand the
-    // terminal over properly: frame erased, cooked mode, listeners released;
-    // the paired restore repaints and re-attaches on child close.
+    // The child handoff (§5): rl.pause() is the legacy half of the bracket
+    // and a no-op on the editor path, which has no readline; while the
+    // renderer is mounted the real work is bridge.suspend() -- stdin.pause is
+    // neutered there (pitfall 6), so releasing the input listeners is what
+    // stops hotdog racing a stdio-inherit child for tty bytes (arrow escapes
+    // arrive shredded otherwise). The paired restore repaints and re-attaches
+    // on child close; settled shell output lands before the rows printed
+    // below.
+    rl?.pause();
     const resumeChildTerminal = bridge?.suspend(process.stdin);
     const result = await executeShellCommand(cmd, {
       captureOutput: sendToAssistant,
     });
     resumeChildTerminal?.();
-    rl.resume();
-    // The bracket may stay (stage 2) but process.stdin.pause is neutered
-    // while mounted (pitfall 6); settled shell output lands before the rows
-    // printed below.
+    rl?.resume();
     uiFlush();
 
     if (sendToAssistant) {
@@ -727,21 +903,21 @@ export async function runInteractiveSession(
         sink.log(`[exec: exit code ${result.exitCode}]`);
       }
     }
-    rl.prompt();
+    rl?.prompt();
     return true;
   };
 
   lineHandler = async (line: string) => {
-    const trimmed = paste.normalize(line).trim();
+    const trimmed = normalizeLine(line).trim();
 
     if (!trimmed) {
-      rl.prompt();
+      rl?.prompt();
       return;
     }
 
     if (trimmed.startsWith("/")) {
       const cmdText = trimmed.slice(1).trim();
-      handleSlashCommand(cmdText, sessionManager, channel, rl, exitSession);
+      handleSlashCommand(cmdText, sessionManager, channel, uiHost, exitSession);
       return;
     }
 
@@ -753,14 +929,21 @@ export async function runInteractiveSession(
     await channel.send(trimmed);
   };
 
-  rl.on("line", lineHandler);
-
   // Create the input interface for question tool
   const setupInput =
     options.setupInput ||
-    (() => {
-      currentInput = new AsyncInteractiveCliInput(rl, lineHandler, addLineHandler, (l) => paste.normalize(l));
-    });
+    (bridge
+      ? () => {
+          currentInput = new EditorCliInput(bridge, normalizeLine);
+        }
+      : () => {
+          currentInput = new AsyncInteractiveCliInput(
+            rl as readline.Interface,
+            lineHandler,
+            addLineHandler,
+            normalizeLine,
+          );
+        });
   setupInput();
 
   const handleSigint =
@@ -768,22 +951,62 @@ export async function runInteractiveSession(
     (() => {
       channel.interrupt();
       // Drop any in-flight dictation recording with the interrupted turn.
-      dictation.cancel();
-      (rl as { line: string; cursor: number }).line = "";
-      (rl as { line: string; cursor: number }).cursor = 0;
-      paste.onInterrupt();
-      // Split mode: pin the current echo into scrollback (it stays visible on
-      // the legacy path), then the notice prints below it like today.
-      bridge?.flushEcho();
+      cancelDictation();
+      // Blank readline's line buffer. The editor path has no buffer to blank
+      // (the view stashed the draft itself before firing the interrupt event,
+      // and the bridge already pinned the echoed rows -- flushing the echo
+      // again here would commit them twice).
+      if (rl) {
+        (rl as { line: string; cursor: number }).line = "";
+        (rl as { line: string; cursor: number }).cursor = 0;
+      }
+      resetPasteState();
       sink.log("\nInterrupted (/quit, /exit, or ctrl-d to exit)");
-      rl.prompt();
+      rl?.prompt();
     });
 
-  rl.on("SIGINT", handleSigint);
-
-  // Ctrl+D (EOF) closes readline: shut down through the shared handler so the session id still prints.
-  // options.onClose overrides (tests).
-  rl.on("close", options.onClose || exitSession);
+  if (bridge) {
+    // Editor input mount (stage 3b): submit/interrupt/quit replace readline's
+    // line/SIGINT/close listeners, popup answers Tab synchronously, and
+    // unhandled keys carry the ctrl-x dictation toggle. The KeySource attaches
+    // HERE, after bridge.mount() established raw mode + bracketed paste (§5;
+    // mount() is idempotent), and stopping input only ever means detaching
+    // listeners -- the shared stream is never paused (pitfall 6).
+    bridge.mount();
+    const editorCompleter = buildEditorCompleter(sessionManager, core, () => bridge.editor, !!shellMode);
+    bridge.mountEditorInput(options.keySource ?? new StdinKeySource(process.stdin), {
+      submit: (line) => {
+        // Fire-and-forget like the readline "line" wiring, with the
+        // rejection reported instead of left dangling.
+        void lineHandler(line).catch((e: unknown) => {
+          sink.log(formatError(e));
+        });
+      },
+      interrupt: handleSigint,
+      quit: options.onClose || exitSession,
+      popup: (word, from) => {
+        // The completion popup is suppressed while a question owns the
+        // input (§8: numbers + free text need no interference).
+        if (bridge.questionMode) return undefined;
+        return editorCompleter(word, from);
+      },
+      unhandled: (key) => {
+        if (key === "ctrl-x") toggleDictation();
+      },
+    });
+    if (bridge.editor && editorPasteHandler) {
+      // Raw paste payloads route to the marker controller instead of the
+      // view's default as-is insertion.
+      bridge.editor.pasteHandler = editorPasteHandler;
+    }
+  } else {
+    const legacyRl = rl as readline.Interface;
+    legacyRl.on("line", lineHandler);
+    legacyRl.on("SIGINT", handleSigint);
+    // Ctrl+D (EOF) closes readline: shut down through the shared handler so the session id still prints.
+    // options.onClose overrides (tests).
+    legacyRl.on("close", options.onClose || exitSession);
+  }
 
   // Mid-question resume: re-present the restored log's unanswered questions
   // before the first prompt; the TURN_END hook re-prompts when done.
@@ -796,10 +1019,12 @@ export async function runInteractiveSession(
       sessionManager.getBus(agent.sessionId)?.enqueue("", { continuation: true });
     }).catch((e: unknown) => {
       sink.log(formatError(e));
-      rl.prompt();
+      rl?.prompt();
     });
   } else {
-    rl.prompt();
+    // First prompt on the legacy path; the editor path's mounted input is
+    // already painting the prompt row inside the frame.
+    rl?.prompt();
   }
 
   // Keep the process alive until the bus ends. SessionManager.create already
@@ -812,11 +1037,22 @@ export async function runInteractiveSession(
   }
 }
 
+/**
+ * The slice handleSlashCommand needs to redraw the prompt after a command
+ * finishes (and to tear the input down on /quit): readline satisfies it on
+ * the legacy path, the editor path passes a no-op host whose close() runs
+ * the bridge teardown.
+ */
+export interface PromptUi {
+  prompt(): unknown;
+  close(): unknown;
+}
+
 export function handleSlashCommand(
   cmdText: string,
   sessionManager: SessionManager,
   channel: CliChannel,
-  rl: readline.Interface,
+  ui: PromptUi,
   onQuit: () => void,
 ): void {
   const cmd = parseCommand(cmdText);
@@ -825,11 +1061,11 @@ export function handleSlashCommand(
   switch (cmd.type) {
     case Command.Help:
       uiOut(HELP_TEXT);
-      rl.prompt();
+      ui.prompt();
       return;
 
     case Command.Quit:
-      rl.close();
+      ui.close();
       onQuit();
       return;
   }
@@ -854,12 +1090,12 @@ export function handleSlashCommand(
       }
       if (!action || !(action & ACTIONS.PROMPT)) {
         uiOut("");
-        rl.prompt();
+        ui.prompt();
       }
     },
     () => {
       uiOut("");
-      rl.prompt();
+      ui.prompt();
     },
   );
 }

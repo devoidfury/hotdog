@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readdirSync } from "node:fs";
 import type { CompletionContext } from "@core/completion.ts";
 import {
   parseCompletionContext,
@@ -6,6 +7,8 @@ import {
 } from "@core/completion.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
 import type { SessionManager } from "@core/session/index.ts";
+import type { Completion, EditorView } from "@utils/cli/renderer/index.ts";
+import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
 
 export {
@@ -145,4 +148,120 @@ export function buildReadlineCompleter(
         callback(null, [[], prefix]);
       });
   };
+}
+// ── Stage-3b editor popup completions ──────────────────────────────────────
+
+/** Cap on raw directory entries per completion request (popup shows far fewer). */
+const PATH_COMPLETION_LIMIT = 200;
+
+/**
+ * Zero-dep file-path completer: readdirSync on the directory part of the
+ * word plus a prefix filter, so file completion exists without the shell
+ * provider's bash subprocess. Directories keep a trailing "/" in both the
+ * label and the insert text so repeated Tabs descend the path. Hidden
+ * entries only appear once the prefix itself starts with a dot. Any readdir
+ * failure (missing/gone directory, not a directory) means "no candidates".
+ */
+export function pathCompletions(word: string): Completion[] {
+  const slash = word.lastIndexOf("/");
+  const dirPrefix = slash >= 0 ? word.slice(0, slash + 1) : "";
+  const prefix = word.slice(slash + 1);
+  let entries;
+  try {
+    entries = readdirSync(dirPrefix === "" ? "." : dirPrefix, { withFileTypes: true });
+  } catch (e) {
+    logger.debug(`ui-interactive-cli: path completion failed: ${formatError(e)}`);
+    return [];
+  }
+  const out: Completion[] = [];
+  for (const entry of entries) {
+    if (!entry.name.startsWith(prefix)) continue;
+    if (!prefix.startsWith(".") && entry.name.startsWith(".")) continue;
+    const isDir = entry.isDirectory();
+    const value = `${dirPrefix}${entry.name}${isDir ? "/" : ""}`;
+    out.push({ label: value, insert: value });
+    if (out.length >= PATH_COMPLETION_LIMIT) break;
+  }
+  return out;
+}
+
+export interface EditorPopupCompleter {
+  /**
+   * word is the span text the popup was requested for and `from` its buffer
+   * start; the span end is always the cursor. (Fewer parameters than
+   * EditorInputHandlers.popup by design -- TS drops the unused tail.)
+   */
+  (word: string, from: number): Completion[] | undefined;
+}
+
+/**
+ * The synchronous popup provider for the mounted EditorView (Tab at key
+ * time cannot await). The core.completion providers are async, so this uses
+ * the cache-or-degrade contract: the request itself answers instantly with
+ * the live readdir candidates plus whatever the providers returned for this
+ * word on an earlier round, and separately fires the provider request; when
+ * that resolves, the popup is (re-)opened in place -- but only while the
+ * buffer span is still the exact word the request was made for, so a late
+ * reply never overwrites what the user has since typed. A cold cache on a
+ * provider-only word degrades to no popup on that Tab and a cache-hit popup
+ * on the next one.
+ */
+export function buildEditorCompleter(
+  sessionManager: SessionManager,
+  core: CoreContext,
+  getView: () => EditorView | null,
+  shellMode: boolean,
+): EditorPopupCompleter {
+  const providerCache = new Map<string, Completion[]>();
+  const inFlight = new Set<string>();
+
+  return (word, from) => {
+    const view = getView();
+    if (!view) return undefined;
+    const lineBeforeCursor = view.text.slice(0, view.cursor);
+    const slashNameSpan = lineBeforeCursor.trimStart().startsWith("/") && from === 0;
+
+    // readdir applies to real path words and to any shell-mode span; a
+    // slash-command NAME span ("/mod|") is command-name territory only.
+    const wantPaths = !slashNameSpan && (word.includes("/") || shellMode);
+    const paths = wantPaths ? pathCompletions(word) : [];
+
+    // One provider round per word at a time; results merge into the cache.
+    const agent = sessionManager.getAgent();
+    if (agent && !inFlight.has(word)) {
+      inFlight.add(word);
+      const ctx = parseCompletionContext(view.text, view.cursor, agent);
+      core.completion
+        .request(ctx, 200)
+        .then((options) => {
+          providerCache.set(
+            word,
+            options.map((o) => ({ label: o.display ?? o.value, insert: o.value })),
+          );
+          const live = getView();
+          if (live && live.text.slice(from, live.cursor) === word) {
+            live.openPopup(mergeCandidates(providerCache.get(word) ?? [], wantPaths ? pathCompletions(word) : []), from);
+          }
+        })
+        .catch((e) => {
+          logger.debug(`ui-interactive-cli: popup completion error: ${formatError(e)}`);
+        })
+        .finally(() => {
+          inFlight.delete(word);
+        });
+    }
+
+    const merged = mergeCandidates(providerCache.get(word) ?? [], paths);
+    return merged.length > 0 ? merged : undefined;
+  };
+}
+
+function mergeCandidates(a: Completion[], b: Completion[]): Completion[] {
+  if (b.length === 0) return a;
+  const seen = new Set(a.map((c) => c.label));
+  const out = [...a];
+  for (const c of b) {
+    if (!seen.has(c.label)) out.push(c);
+  }
+  return out;
 }

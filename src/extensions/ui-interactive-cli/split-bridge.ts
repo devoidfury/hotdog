@@ -4,8 +4,10 @@
 // §9 (mount rule), §10 (teardown), §12 (stage 2).
 //
 // This file owns POLICY-FREE plumbing only: mount decision, line framing of
-// the routed channels, the readline capture stream (until the 3b swap deletes
-// readline), the stage-3b editor input mount, and process-level
+// the routed channels, the readline capture stream (kept as a bridge-level
+// capability; the stage-3b swap means the interactive session no longer
+// constructs readline at all, so on a mounted session the editor path is the
+// only frame source), the stage-3b editor input mount, and process-level
 // install/restore. Every terminal byte goes through the core's TerminalModes
 // (teardown.ts is the sole byte home, §10); the bridge never embeds
 // ?2026/?2004/?25/raw sequences itself.
@@ -225,6 +227,8 @@ export class OutputBridge {
   #repushScheduled = false;
   /** The editor input path (stage 3b): owns the frame instead of the capture. */
   #editor: EditorView | null = null;
+  /** Editor question focus (§8): resolvers waiting for the next submitted line. */
+  #lineWaiters: ((line: string) => void)[] = [];
   /** Last editor block the frame showed -- the interrupt echo, since the
    * view has already cleared its buffer (stash-to-draft) when the event fires. */
   #lastBlockRows: string[] = [];
@@ -313,13 +317,45 @@ export class OutputBridge {
 
   setPrompt(text: string): void {
     this.#promptText = text;
-    // The editor repaints at the bridge's own pace (view.setPrompt's contract).
-    this.#editor?.setPrompt(text);
+    if (this.#editor) {
+      // The view never self-paints (setPrompt's contract), so a MODEL_CHANGE
+      // retarget must repaint here or the frame keeps showing the stale model.
+      this.#editor.setPrompt(text);
+      this.#repaint();
+    }
   }
 
   /** During a question takeover the main prompt is not what the user answers. */
   setQuestionMode(on: boolean): void {
     this.#questionMode = on;
+  }
+
+  /** True while a question owns the input (the popup is suppressed, §8). */
+  get questionMode(): boolean {
+    return this.#questionMode;
+  }
+
+  /**
+   * §8 editor question focus: resolves with the NEXT submitted editor line
+   * instead of delivering it to the normal submit handler, which is what
+   * makes the question exclusive. cancel() detaches the wait so a line typed
+   * after the caller gave up (run abort) flows back to the normal handler
+   * rather than vanishing into a dead question loop.
+   */
+  waitForLine(): { line: Promise<string>; cancel: () => void } {
+    let settle!: (line: string) => void;
+    const line = new Promise<string>((resolve) => {
+      settle = resolve;
+    });
+    const waiter = (text: string): void => settle(text);
+    this.#lineWaiters.push(waiter);
+    return {
+      line,
+      cancel: () => {
+        const at = this.#lineWaiters.indexOf(waiter);
+        if (at >= 0) this.#lineWaiters.splice(at, 1);
+      },
+    };
   }
 
   /** The mounted editor (stage 3b), or null on the readline/capture path. */
@@ -354,7 +390,11 @@ export class OutputBridge {
       case "submit":
         // Prompt+line become the transcript row; the view has already reset.
         this.lineSubmitted(e.text);
-        h.submit(e.text);
+        // A pending question owns the input: the line answers it and never
+        // reaches the normal submit handler (§8 exclusivity).
+        const waiter = this.#lineWaiters.shift();
+        if (waiter) waiter(e.text);
+        else h.submit(e.text);
         return;
       case "interrupt":
         this.flushEcho();

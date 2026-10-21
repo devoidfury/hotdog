@@ -418,6 +418,15 @@ describe("executeShellCommand", () => {
     expect(result.exitCode).toBe(0);
   });
 
+  it("captures stderr into the transcript too (|@ sends diagnostics to the model)", async () => {
+    const result = await runWithSuppressedStdout(() =>
+      executeShellCommand("echo out-line; echo err-line >&2", { captureOutput: true })
+    );
+    expect(result.content).toContain("out-line");
+    expect(result.content).toContain("err-line");
+    expect(result.exitCode).toBe(0);
+  });
+
   it("returns non-zero exit code for failing command", async () => {
     const result = await runWithSuppressedStdout(() => executeShellCommand("exit 42"));
     expect(result.exitCode).toBe(42);

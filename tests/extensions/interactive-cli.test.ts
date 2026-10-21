@@ -23,4 +23,12 @@ describe("Interactive CLI", () => {
     expect(core.cliSubcommandRegistry.has("cli")).toBe(true);
     expect(core.cliSubcommandRegistry.get("cli")!.description).toContain("Interactive");
   });
+
+  it("cleanup clears the shared question input", async () => {
+    const core = createMockCore() as unknown as CoreContext;
+    const { create } = await import("@extensions/ui-interactive-cli/index.ts");
+    const ext = create(core);
+    const cleanup = ext.cleanup as () => Promise<void>;
+    await expect(cleanup()).resolves.toBeUndefined();
+  });
 });

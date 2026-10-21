@@ -8,11 +8,13 @@
 import { describe, it, expect } from "bun:test";
 import readline from "node:readline";
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import {
   shouldMountRenderer,
   installIoPatches,
   incompleteEscapeStart,
+  processSignalHost,
   CaptureStream,
   mountSplitRenderer,
   OutputBridge,
@@ -676,4 +678,172 @@ describe("newline assembly: terminators are not blank rows", () => {
       else process.env.NO_COLOR = saved;
     }
   });
+});
+
+// ── Viewport plumbing: capture geometry + the mount resize subscription ──
+// §6: on a resize the core erases with the OLD geometry (core.handleResize)
+// and the capture model re-wraps at the new width; readline is told to repaint
+// via the capture's own "resize" event.
+
+describe("capture geometry + resize wiring (§6 viewport change)", () => {
+  it("columns/rows report the capture geometry; setGeometry rebuilds and tells readline", () => {
+    const painted: string[][] = [];
+    const capture = new CaptureStream((rows) => painted.push(rows), 12, 40);
+    expect([capture.columns, capture.rows]).toEqual([40, 12]);
+
+    capture.write("wide line\n");
+    let resizes = 0;
+    capture.on("resize", () => {
+      resizes++;
+    });
+    capture.setGeometry(8, 30);
+
+    expect([capture.columns, capture.rows]).toEqual([30, 8]);
+    expect(resizes).toBe(1); // readline repaint signal
+    expect(capture.frameRows()).toEqual([]); // the old wrap is gone
+    expect(painted[painted.length - 1]).toEqual([]); // and the core was told
+  });
+
+  it("mount subscribes to terminal resize so the capture follows the viewport", () => {
+    const { bridge, term, clock } = makeBridge();
+    bridge.mount();
+    bridge.capture.write("(m)> typing into a wide viewport");
+    clock.runAll();
+    expect(bridge.capture.frameRows().join("")).toContain("typing");
+
+    term.resize(40, 10); // cols, rows -- GridTerminal fires onResize like stdout
+    expect([bridge.capture.columns, bridge.capture.rows]).toEqual([40, 10]);
+    expect(bridge.capture.frameRows()).toEqual([]);
+    clock.runAll();
+  });
+});
+
+describe("question takeover (§8 prompt suppression)", () => {
+  it("lineSubmitted commits the bare answer while question mode is on", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    bridge.setPrompt("(m)> ");
+    bridge.setQuestionMode(true);
+    bridge.lineSubmitted("blue"); // the answer is not the main prompt's line
+    bridge.setQuestionMode(false);
+    bridge.lineSubmitted("next turn");
+    clock.runAll();
+    expect(bridge.transcriptLog).toEqual(["blue", "(m)> next turn"]);
+  });
+});
+
+describe("console routing through the io patches (Bun bypasses stdout)", () => {
+  function fakeHost(): IoPatchHost {
+    return {
+      stdout: { write: () => true },
+      stderr: { write: () => true },
+      stdin: { pause: () => "paused" },
+      console: { log: () => {}, error: () => {}, warn: () => {} },
+    };
+  }
+
+  it("console.log commits, console.error/warn arbitrate, non-strings stringify", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    const host = fakeHost();
+    installIoPatches(bridge, host);
+
+    host.console.log("count", 7, { a: 1 });
+    host.console.error("bad", null);
+    host.console.warn("meh", true);
+    clock.runAll();
+
+    expect(bridge.transcriptLog).toEqual([
+      "count 7 [object Object]",
+      "bad null",
+      "meh true",
+    ]);
+  });
+
+  it("the write callback fires whichever positional slot carries it", () => {
+    const { bridge } = makeBridge();
+    bridge.mount();
+    const host = fakeHost();
+    installIoPatches(bridge, host);
+
+    let cbErr: unknown = "uncalled";
+    const accepted = host.stdout.write("cb-line\n", (err?: Error | null) => {
+      cbErr = err;
+    });
+    expect(accepted).toBe(true);
+    expect(cbErr).toBe(null);
+
+    let cbErr2: unknown = "uncalled";
+    host.stderr.write("cb-err\n", "utf8", (err?: Error | null) => {
+      cbErr2 = err;
+    });
+    expect(cbErr2).toBe(null);
+    expect(bridge.transcriptLog).toEqual(["cb-line", "cb-err"]);
+  });
+});
+
+describe("processSignalHost (the real SignalHost seam)", () => {
+  it("registers on the live process and hands back a working unsubscribe", () => {
+    const before = process.listenerCount("SIGTERM");
+    const off = processSignalHost.on("SIGTERM", () => {});
+    expect(process.listenerCount("SIGTERM")).toBe(before + 1);
+    off();
+    expect(process.listenerCount("SIGTERM")).toBe(before);
+    expect(() => off()).not.toThrow(); // unsubscribing twice is inert
+  });
+});
+
+// ── mountSplitRenderer against the real process ─────────────────────────
+// bun test's stdio is piped, so the §9 gate can only open by declaration.
+// The probe fixture mounts for real (patching ITS stdout/stderr/console) and
+// the parent reads the mounted session's bytes off the pipe -- including the
+// exit code processSignalHost.exit produces, which nothing in-process may
+// touch.
+
+describe("mountSplitRenderer real-process probe", () => {
+  const PROBE = join(import.meta.dir, "../fixtures/split-mount-probe.ts");
+
+  async function runProbe(env: Record<string, string> = {}): Promise<{ out: string; err: string; code: number }> {
+    const proc = Bun.spawn(["bun", PROBE], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, HOTDOG_LOG_TARGET: "none", ...env },
+    });
+    const [out, err] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    return { out, err, code: await proc.exited };
+  }
+
+  it("routes stdio + console into the frame, restores on shutdown, exits on command", async () => {
+    const { out, err, code } = await runProbe();
+
+    // The seam's exit() is the process exit code -- 7 came from the probe.
+    expect(code).toBe(7);
+    // Enable pair landed before any content; the unwind after the last row.
+    const enable = out.indexOf("\x1b[?2004h");
+    const disable = out.indexOf("\x1b[?2004l");
+    expect(enable).toBeGreaterThanOrEqual(0);
+    expect(disable).toBeGreaterThan(enable);
+    expect(out).toContain("console-routed-line");
+    expect(out).toContain("stdout-routed-line");
+    expect(out).toContain("stderr-routed-line");
+    expect(out.indexOf("console-routed-line")).toBeGreaterThan(enable);
+    expect(out.indexOf("stderr-routed-line")).toBeLessThan(disable);
+    // The renderer was the only writer: nothing reached the real stderr.
+    expect(err).toBe("");
+    // Bytes after the restore are plain again (the router is gone): the
+    // goodbye line is the last thing on the stream, newline included.
+    const tail = out.slice(out.indexOf("after-restore") + "after-restore".length);
+    expect(tail).toBe("\n");
+  }, 20000);
+
+  it("the process.on(exit) last-chance restore unwinds when nobody calls shutdown", async () => {
+    const { out, code } = await runProbe({ PROBE_MODE: "exit-handler" });
+    expect(code).toBe(0);
+    expect(out).toContain("stdout-routed-line"); // queued commits drained
+    expect(out).toContain("\x1b[?2004h");
+    expect(out).toContain("\x1b[?2004l"); // the exit hook restored the modes
+  }, 20000);
 });

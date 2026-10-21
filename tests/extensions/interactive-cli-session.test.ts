@@ -7,6 +7,7 @@ import { HookSystem } from "@core/hooks.ts";
 import { createCompletionService } from "@core/completion.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
+import { ToolContext } from "@core/extensions/tool-context.ts";
 import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
 
 const testRoleReg = createRoleMappingRegistry();
@@ -54,6 +55,8 @@ describe("runInteractiveSession", () => {
       showTokenUse: true,
       profileName: "default",
       modelRegistry: { "test-model": { contextLimit: 128000 } },
+      maxToolCallsPerIteration: 10,
+      toolRetryDelay: 1,
       taskProfile: "task-default",
       profileBody: "",
       theme: "dark",
@@ -74,6 +77,9 @@ describe("runInteractiveSession", () => {
         getAll: () => [],
         get: () => null,
         register: () => {},
+        names: () => [],
+        isEmpty: () => true,
+        clearToolDefs: () => {},
       },
       extensions: {
         has: () => false,
@@ -485,11 +491,121 @@ describe("runInteractiveSession", () => {
       expect(capturedBuildAgent).toBeDefined();
       expect(typeof capturedBuildAgent).toBe("function");
 
+      // Calling it is the point: SessionManager hands this factory to model
+      // switches and side tasks, so it must assemble a live agent.
+      const built = await capturedBuildAgent({});
+      expect(typeof built.sessionId).toBe("string");
+      expect(built.model).toBe("test-model");
+
       // Clean up
       (mockBus as any)._resolve();
       try { await sessionPromise; } catch { /* ignore */ }
     } finally {
       // Restore
     }
+  });
+
+  it("shares the live question input through AGENT_TOOL_CONTEXT and re-attaches the line handler", async () => {
+    const { runInteractiveSession, create } = await import("@extensions/ui-interactive-cli/index.ts");
+    const { SessionManager } = await import("@core/session/index.ts");
+    const core = createMockCore();
+
+    const mockBus = {
+      run: async () => new Promise<void>((resolve) => { (mockBus as any)._resolve = resolve; }),
+      runUntilCancelled: async () => {},
+      cancel: () => {},
+    };
+    (SessionManager as any).create = async () => ({
+      sessionId: () => "test-session-question-input",
+      getAgent: () => ({ sessionId: "test-session-question-input" }),
+      getBus: () => mockBus,
+      getTaskManager: () => null,
+      enqueue: () => {},
+      executeCommand: async () => 0,
+      onSessionEvents: () => () => {},
+    });
+
+    // readline double that records every "line" wire-up and tear-down, so the
+    // question takeover (detach main -> one-shot -> re-attach main) is visible.
+    const wire: Array<{ op: "on" | "off"; h: (line: string) => void }> = [];
+    const mockRl = {
+      on: (event: string, h: (line: string) => void) => {
+        if (event === "line") wire.push({ op: "on", h });
+        return mockRl;
+      },
+      removeListener: (event: string, h: (line: string) => void) => {
+        if (event === "line") wire.push({ op: "off", h });
+        return mockRl;
+      },
+      prompt: () => mockRl,
+      setPrompt: () => mockRl,
+      close: () => {},
+      question: () => mockRl,
+    } as any;
+
+    const sessionPromise = runInteractiveSession({}, core, {
+      createReadline: () => mockRl,
+      onClose: () => {},
+      onSIGINT: () => {},
+      // No setupInput override: the session builds the real
+      // AsyncInteractiveCliInput over its own addLineHandler.
+    });
+
+    await waitFor(() => wire.some((w) => w.op === "on"));
+    const mainHandler = wire.find((w) => w.op === "on")!.h;
+
+    // The question tool reaches the live input through the tool context.
+    const ext = create(core);
+    const ctx = new ToolContext();
+    (ext.hooks![HOOKS.AGENT_TOOL_CONTEXT] as (p: unknown) => void)({ toolCtx: ctx });
+    const input = ctx.get("input") as {
+      isInteractive(): boolean;
+      collectAnswers(
+        q: Array<{ key: string; prompt: string; options?: string[] }>,
+        signal?: AbortSignal | null,
+      ): Promise<Record<string, string>>;
+    };
+    expect(input).toBeDefined();
+    expect(input.isInteractive()).toBe(true);
+
+    // The menu prints to stdout; keep it out of the test log while answering.
+    const origOut = process.stdout.write;
+    const origErr = process.stderr.write;
+    process.stdout.write = () => true;
+    process.stderr.write = () => true;
+    let answers: Record<string, string> = {};
+    try {
+      const collecting = input.collectAnswers(
+        [{ key: "color", prompt: "Pick a color", options: ["red", "blue"] }],
+        null,
+      );
+      // The takeover: main detached, a one-shot answer listener attached.
+      await waitFor(() => {
+        const last = wire[wire.length - 1];
+        return !!last && last.op === "on" && last.h !== mainHandler;
+      });
+      expect(wire.some((w) => w.op === "off" && w.h === mainHandler)).toBe(true);
+      const oneShot = wire[wire.length - 1]!.h;
+      expect(oneShot).not.toBe(mainHandler);
+      oneShot("2"); // menu index -> the second option's text
+      answers = await collecting;
+    } finally {
+      process.stdout.write = origOut;
+      process.stderr.write = origErr;
+    }
+
+    expect(answers).toEqual({ color: "blue" });
+    // Ownership returns to the session: the last wire-up is the main handler
+    // again, re-attached through the session's addLineHandler.
+    expect(wire[wire.length - 1]).toEqual({ op: "on", h: mainHandler });
+
+    (mockBus as any)._resolve();
+    try { await sessionPromise; } catch { /* ignore */ }
+
+    // cleanup drops the shared input, so the next session starts clean.
+    await (ext.cleanup as () => Promise<void>)();
+    const after = new ToolContext();
+    (ext.hooks![HOOKS.AGENT_TOOL_CONTEXT] as (p: unknown) => void)({ toolCtx: after });
+    expect(after.has("input")).toBe(false);
   });
 });

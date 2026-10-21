@@ -983,7 +983,6 @@ describe("editor input mount (stage 3b)", () => {
 
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
 import { createCompletionService } from "@core/completion.ts";
 import {

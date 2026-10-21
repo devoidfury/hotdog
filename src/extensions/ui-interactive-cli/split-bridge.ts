@@ -13,6 +13,7 @@
 // ?2026/?2004/?25/raw sequences itself.
 
 import { EventEmitter } from "node:events";
+import { formatError } from "@core/error.ts";
 import { RendererCore } from "@utils/cli/renderer/commit.ts";
 import { Grid } from "@utils/cli/renderer/grid.ts";
 import { ProcessTerminal } from "@utils/cli/renderer/terminal.ts";
@@ -663,6 +664,75 @@ export interface SplitMountOptions {
   host?: IoPatchHost;
 }
 
+/** Process surface the §10 crash route needs; tests inject a fake emitter. */
+export interface CrashTeardownHost {
+  /** Register one handler for both crash events; returns the fn that removes both. */
+  onCrash(handler: (err: unknown) => void): () => void;
+  writeStderr(text: string): void;
+  exit(code: number): void;
+}
+
+export const processCrashTeardownHost: CrashTeardownHost = {
+  onCrash(handler: (err: unknown) => void): () => void {
+    const onException = (err: Error): void => handler(err);
+    const onRejection = (reason: unknown): void => handler(reason);
+    process.on("uncaughtException", onException);
+    process.on("unhandledRejection", onRejection);
+    return () => {
+      process.off("uncaughtException", onException);
+      process.off("unhandledRejection", onRejection);
+    };
+  },
+  writeStderr(text: string): void {
+    process.stderr.write(text);
+  },
+  exit(code: number): void {
+    process.exit(code);
+  },
+};
+
+/** The crash route's exit code: the conventional generic-failure value. */
+export const CRASH_EXIT_CODE = 1;
+
+/**
+ * §10 crash teardown for the mounted session. On uncaughtException or
+ * unhandledRejection: report the error (the real host's stderr write lands on
+ * the bridge arbiter while the io patches are live, so the row commits above
+ * the restored screen instead of shredding a mid-frame paint), run the
+ * idempotent TeardownGuard (raw mode and bracketed paste off exactly once,
+ * even mid-frame or on a second crash), then exit non-zero. Nothing here
+ * swallows the crash: the handler never returns control to the event loop,
+ * and a handler that turned a crash into a silent hang would be worse than
+ * no handler at all. The install lives in mountSplitRenderer only, and the
+ * returned unregister is registered as a TeardownGuard hook, so a clean
+ * session end removes both handlers (a leaked uncaughtException handler
+ * would neuter the test runner's and any later legacy run's crash reporting).
+ */
+export function installCrashTeardown(bridge: OutputBridge, host: CrashTeardownHost): () => void {
+  const onCrash = (err: unknown): void => {
+    try {
+      host.writeStderr(`${formatError(err)}\n`);
+    } catch (writeErr: unknown) {
+      // The report stream itself died; the exit code and the mode restore
+      // still happen below.
+      void writeErr;
+    }
+    // shutdown() flushes pending rows BEFORE the guard; if that flush itself
+    // throws, the idempotent guard.run() in the finally still unwinds raw
+    // mode + bracketed paste, and the exit still fires non-zero. The handler
+    // never returns control to the event loop.
+    try {
+      bridge.shutdown();
+    } finally {
+      bridge.guard.run();
+      host.exit(CRASH_EXIT_CODE);
+    }
+  };
+  const unregister = host.onCrash(onCrash);
+  bridge.guard.onTeardown(unregister);
+  return unregister;
+}
+
 /**
  * Mount everything the split mode owns, or return null WITHOUT touching a
  * single global (the legacy/passthrough guarantee). The Terminal writes
@@ -708,6 +778,11 @@ export function mountSplitRenderer(options: SplitMountOptions): OutputBridge | n
     console: globalThis.console,
   };
   bridge.guard.onTeardown(installIoPatches(bridge, host));
+  // §10 crash route: report + restore + non-zero exit on uncaughtException /
+  // unhandledRejection; the paired unregister is a teardown hook, so a clean
+  // session end removes both handlers and leaves nothing behind for other
+  // processes' files or legacy runs to trip over.
+  installCrashTeardown(bridge, processCrashTeardownHost);
   // §10 last-chance: anything that exits without an explicit teardown still
   // restores the terminal. Idempotent with onQuit/rl-close/signal paths.
   process.on("exit", () => bridge.guard.run());

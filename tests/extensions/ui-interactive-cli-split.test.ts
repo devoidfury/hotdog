@@ -1498,8 +1498,14 @@ describe("module-slot release after mounted sessions (sequential-process hygiene
   });
 });
 
-// ── Stage-3b audit ledger closure (run 20261020-2233): items B, C, G ──
+// ── Stage-3b audit ledger closure (run 20261020-2233): items B, C, D, G ──
 
+import {
+  installCrashTeardown,
+  processCrashTeardownHost,
+  CRASH_EXIT_CODE,
+  type CrashTeardownHost,
+} from "@extensions/ui-interactive-cli/split-bridge.ts";
 import { create } from "@extensions/ui-interactive-cli/index.ts";
 
 describe("editor session swap: blank submit never dirties scrollback (ledger B)", () => {
@@ -1654,6 +1660,133 @@ describe("editor session swap: question entry stashes the draft (ledger C, note 
     expect(rig.bridge.editor?.text).toBe("half-typed");
     expect(rig.calls.enqueue).toEqual([]); // restored, not auto-submitted
   });
+});
+
+/** CrashTeardownHost double: an emitter stands in for the process crash events. */
+class FakeCrashHost implements CrashTeardownHost {
+  readonly emitter = new EventEmitter();
+  readonly exits: number[] = [];
+  readonly stderrChunks: string[] = [];
+
+  onCrash(handler: (err: unknown) => void): () => void {
+    const onException = (err: unknown): void => handler(err);
+    const onRejection = (reason: unknown): void => handler(reason);
+    this.emitter.on("uncaughtException", onException);
+    this.emitter.on("unhandledRejection", onRejection);
+    return () => {
+      this.emitter.off("uncaughtException", onException);
+      this.emitter.off("unhandledRejection", onRejection);
+    };
+  }
+
+  writeStderr(text: string): void {
+    this.stderrChunks.push(text);
+  }
+
+  exit(code: number): void {
+    this.exits.push(code);
+  }
+}
+
+describe("crash teardown install/uninstall (ledger D, note 10)", () => {
+  const count = (log: string[], entry: string): number => log.filter((m) => m === entry).length;
+
+  it("a fake uncaughtException reports, restores the mode pair exactly once, and exits non-zero", () => {
+    const { bridge, term } = makeBridge();
+    bridge.mount();
+    const host = new FakeCrashHost();
+    installCrashTeardown(bridge, host);
+    term.grid.modeLog.length = 0;
+
+    host.emitter.emit("uncaughtException", new Error("boom-crash"));
+
+    expect(bridge.guard.fired).toBe(true);
+    expect(count(term.grid.modeLog, "?2004l")).toBe(1);
+    expect(count(term.grid.modeLog, "raw:off")).toBe(1);
+    expect(term.rawMode).toBe(false);
+    // formatError()ed through stderr: the message (and, unexpected-error, stack)
+    // reach the report -- the crash is never swallowed.
+    expect(host.stderrChunks.join("")).toContain("boom-crash");
+    expect(host.exits).toEqual([CRASH_EXIT_CODE]);
+
+    // Teardown ran the paired unregister before exiting: a second crash event
+    // finds no listener and cannot double-restore.
+    expect(host.emitter.listenerCount("uncaughtException")).toBe(0);
+    expect(host.emitter.listenerCount("unhandledRejection")).toBe(0);
+    host.emitter.emit("uncaughtException", new Error("second-crash"));
+    expect(count(term.grid.modeLog, "raw:off")).toBe(1);
+    expect(count(term.grid.modeLog, "?2004l")).toBe(1);
+    expect(host.exits).toEqual([CRASH_EXIT_CODE]);
+    expect(host.stderrChunks.join("")).not.toContain("second-crash");
+  });
+
+  it("an unhandledRejection reason takes the same report/restore/exit route", () => {
+    const { bridge, term } = makeBridge();
+    bridge.mount();
+    const host = new FakeCrashHost();
+    installCrashTeardown(bridge, host);
+    term.grid.modeLog.length = 0;
+
+    host.emitter.emit("unhandledRejection", "silent-fail-reason");
+
+    expect(count(term.grid.modeLog, "raw:off")).toBe(1);
+    expect(count(term.grid.modeLog, "?2004l")).toBe(1);
+    expect(term.rawMode).toBe(false);
+    expect(host.stderrChunks.join("")).toContain("silent-fail-reason");
+    expect(host.exits).toEqual([CRASH_EXIT_CODE]);
+  });
+
+  it("a clean session end removes both crash handlers (register/unregister parity)", () => {
+    const { bridge } = makeBridge();
+    bridge.mount();
+    const host = new FakeCrashHost();
+    expect(host.emitter.listenerCount("uncaughtException")).toBe(0);
+
+    const unregister = installCrashTeardown(bridge, host);
+    expect(host.emitter.listenerCount("uncaughtException")).toBe(1);
+    expect(host.emitter.listenerCount("unhandledRejection")).toBe(1);
+
+    bridge.shutdown(); // the /quit / ctrl-d / signal end-of-session route
+    expect(host.emitter.listenerCount("uncaughtException")).toBe(0);
+    expect(host.emitter.listenerCount("unhandledRejection")).toBe(0);
+    unregister(); // double-removal is inert
+  });
+
+  it("processCrashTeardownHost registers both real handlers and removes them on off", () => {
+    const before = {
+      ex: process.listenerCount("uncaughtException"),
+      rej: process.listenerCount("unhandledRejection"),
+    };
+    const off = processCrashTeardownHost.onCrash(() => {});
+    expect(process.listenerCount("uncaughtException")).toBe(before.ex + 1);
+    expect(process.listenerCount("unhandledRejection")).toBe(before.rej + 1);
+    off();
+    expect(process.listenerCount("uncaughtException")).toBe(before.ex);
+    expect(process.listenerCount("unhandledRejection")).toBe(before.rej);
+  });
+
+  it("real-process probe: a thrown error restores the terminal and exits non-zero (no swallow)", async () => {
+    const probe = join(import.meta.dir, "../fixtures/split-mount-probe.ts");
+    const proc = Bun.spawn(["bun", probe], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, HOTDOG_LOG_TARGET: "none", PROBE_MODE: "crash" },
+    });
+    const [out, err] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const code = await proc.exited;
+    // The crash report landed on the arbiter (routed stderr) BEFORE the mode
+    // restore bytes, and nothing reached the real stderr: a silent-hang
+    // handler (or no handler at all) could not produce this byte order.
+    expect(out).toContain("boom-crash");
+    expect(out.indexOf("boom-crash")).toBeLessThan(out.indexOf("\x1b[?2004l"));
+    expect(out).toContain("\x1b[?2004l"); // bracketed paste off
+    expect(out).not.toContain("SURVIVED-THE-CRASH"); // control never returned to the loop
+    expect(err).toBe("");
+    expect(code).toBe(1);
+  }, 20000);
 });
 
 describe("editor session swap: paste-marker answer through the session's own wiring (ledger G)", () => {

@@ -22,6 +22,24 @@ console.log("console-routed-line");
 process.stderr.write("stderr-routed-line\n");
 process.stdout.write("stdout-routed-line\n");
 
+if (process.env.PROBE_MODE === "crash") {
+  // §10 crash route (ledger item D): a throw from a timer callback reaches
+  // the uncaughtException handler installCrashTeardown put on the process.
+  // The handler must report the error, restore raw mode + bracketed paste,
+  // and exit non-zero. The second timer is the anti-swallow tripwire: if the
+  // handler ever returned control to the event loop, this process would keep
+  // running and print the marker. The never-resolving await parks the module
+  // so the timers below decide the outcome.
+  setTimeout(() => {
+    throw new Error("boom-crash");
+  }, 10);
+  setTimeout(() => {
+    process.stdout.write("SURVIVED-THE-CRASH\n");
+    process.exit(0);
+  }, 100);
+  await new Promise(() => {});
+}
+
 if (process.env.PROBE_MODE === "exit-handler") {
   // No shutdown(): the exit listener mount registered must unwind the modes.
   process.exit(0);

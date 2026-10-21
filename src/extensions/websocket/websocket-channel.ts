@@ -8,7 +8,10 @@ import type { HotdogServerSocket } from "./socket.ts";
 
 // ── OUTPUT_EVENT → S2C mapping ──────────────────────────────────────────────
 
-const EVENT_TO_PROTOCOL: Record<OutputEventType, S2CType> = {
+// Partial: frame-only events (QUEUE_UPDATE) intentionally stay off the
+// wire -- write() drops unmapped types. Adding a key here IS a protocol
+// change; the type no longer forces one.
+const EVENT_TO_PROTOCOL: Partial<Record<OutputEventType, S2CType>> = {
   [OUTPUT_EVENT.USER_MESSAGE]: S2C.USER_MESSAGE,
   [OUTPUT_EVENT.ASSISTANT_MESSAGE]: S2C.ASSISTANT_MESSAGE,
   [OUTPUT_EVENT.THINKING]: S2C.THINKING,

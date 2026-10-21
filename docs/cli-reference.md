@@ -93,3 +93,27 @@ hotdog workflow cancel <run-id>  # Finished runs: idempotent report; live runs o
 /regenerate        Regenerate system prompt
 /reasoning <level> Set reasoning effort (none/minimal/low/high/xhigh/max/unset)
 ```
+
+## Interactive Input Behavior (split renderer)
+
+With the split renderer mounted (`uiInteractiveCli.renderer: "split"`, a TTY
+stdin+stdout, TERM not `dumb`):
+
+- **Enter steers mid-run.** A submitted line while the agent is running is
+  injected as steering -- delivered before the model's next LLM call
+  instead of waiting for the turn to end. At idle it simply starts the next
+  turn, and lines carrying images always queue normally. While a steering
+  submission is still undelivered the frame shows a chip row:
+  `↑ queued: <first 40 characters>`.
+- **Esc / Ctrl-C interrupt**, never steer: the turn is cancelled, pending
+  steering is untouched, the question/approval prompt (if any) releases the
+  input. Ctrl-D on an empty buffer quits.
+- **Status line** (top frame row) shows the turn count with state: `#2`
+  idle, `#3 · working` during a turn, `#3 · waiting for lane` while the
+  provider lane is full. A cost suffix (`· $0.0021`) appears only when the
+  `modelPricing` config key exists for the session model. Before the first
+  turn the row is hidden.
+
+On the legacy renderer (`renderer: "legacy"`, the current default) mid-run
+submissions queue and no status/chip rows appear; the key bindings are the
+same.

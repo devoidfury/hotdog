@@ -259,6 +259,44 @@ export interface EditorInputHandlers {
  * answer arrived and it was empty, distinct from ordinary vertical spacing. */
 const NO_ANSWER_MARK = "(no answer)";
 
+/** Status-line state (§12 stage 4, owner ruling 4): turn count + lane-wait +
+ * working state by default; `cost` is a preformatted USD string that exists
+ * only when `modelPricing` is configured. Context-% stays off. */
+export interface FrameStatus {
+  turns: number;
+  working: boolean;
+  laneWait: boolean;
+  cost: string | null;
+}
+
+/**
+ * The status row text, or null for nothing-to-show (before the first turn
+ * and while idle: the frame is just the editor then). While active the
+ * counter reads as the turn in flight (#turns+1); lane-wait shows over
+ * working -- waiting for a provider lane IS the current activity.
+ */
+export function statusRowText(s: FrameStatus): string | null {
+  if (s.turns === 0 && !s.working) return null;
+  let text = s.working ? `#${s.turns + 1}` : `#${s.turns}`;
+  const state = s.laneWait ? "waiting for lane" : s.working ? "working" : null;
+  if (state) text += ` · ${state}`;
+  if (s.cost) text += ` · ${s.cost}`;
+  return text;
+}
+
+/**
+ * The queue-chip row text (§8 steer affordance): `↑ queued: <first 40 runes>`
+ * plus the extra count. Null when nothing is pending. Rune-safe truncation
+ * (codepoints, surrogate-safe via Array.from); newlines collapse so the chip
+ * is always one frame row.
+ */
+export function queueChipText(pending: number, preview: string): string | null {
+  if (pending <= 0) return null;
+  const runes = Array.from(preview.replace(/[\r\n]+/g, " ").trim());
+  const shown = runes.length === 0 ? "item" : runes.length > 40 ? `${runes.slice(0, 40).join("")}…` : runes.join("");
+  return pending > 1 ? `↑ queued: ${shown} (+${pending - 1})` : `↑ queued: ${shown}`;
+}
+
 /**
  * The mounted side of the split session: commit/arbiter line channels over
  * the core's FIFO (§2 rubric 1/3), the readline capture stream (§2 stage-2
@@ -293,6 +331,10 @@ export class OutputBridge {
   /** Last editor block the frame showed -- the interrupt echo, since the
    * view has already cleared its buffer (stash-to-draft) when the event fires. */
   #lastBlockRows: string[] = [];
+  /** Status-line state (§12 stage 4). */
+  #status: FrameStatus = { turns: 0, working: false, laneWait: false, cost: null };
+  /** Precomposed queue-chip text (§8), or null for no chip. */
+  #chipText: string | null = null;
 
   constructor(private readonly opts: OutputBridgeOptions) {
     this.core = new RendererCore({
@@ -426,6 +468,31 @@ export class OutputBridge {
   /** Answer echo shape: `<label> > <answer>`, or the bare line with no label. */
   #answerEcho(answer: string): string {
     return this.#questionLabel === "" ? answer : `${this.#questionLabel} > ${answer}`;
+  }
+
+  /**
+   * Merge a status-line patch (§12 stage 4). Repaint only when the composed
+   * row text actually changes, so a token-usage tick with an unchanged cost
+   * (or an idle working:false on an already-idle frame) never storms paints.
+   */
+  updateStatus(patch: Partial<FrameStatus>): void {
+    const before = statusRowText(this.#status);
+    this.#status = { ...this.#status, ...patch };
+    if (statusRowText(this.#status) !== before) this.#repaint();
+  }
+
+  /** TURN_END: bump the turn counter; the turn settled, so the working and
+   * lane-wait hints go with it (the bus's working:false is idempotent here). */
+  addTurn(): void {
+    this.updateStatus({ turns: this.#status.turns + 1, working: false, laneWait: false });
+  }
+
+  /** The QUEUE_UPDATE chip row (§8): pending undelivered steering. */
+  setQueueChip(pending: number, preview: string): void {
+    const next = queueChipText(pending, preview);
+    if (next === this.#chipText) return;
+    this.#chipText = next;
+    this.#repaint();
   }
 
   /** True while a question owns the input (the popup is suppressed, §8). */
@@ -639,7 +706,8 @@ export class OutputBridge {
 
   /**
    * Repaint the frame from whichever input path is live: the editor composer
-   * (popup rows above the wrapped block, §4) or the readline capture.
+   * (status row on top, popup rows immediately above the wrapped block §4,
+   * queue chip below it) or the readline capture.
    */
   #repaint(): void {
     const editor = this.#editor;
@@ -648,11 +716,18 @@ export class OutputBridge {
       return;
     }
     const width = this.opts.terminal.columns;
+    // Status/chip rows are stage-4 editor-path features (split mode only);
+    // the block's height budget accounts for every non-block row (INV-2
+    // sees the frame grow).
+    const status = statusRowText(this.#status);
+    const chip = this.#chipText;
     const popup = editor.popupRows(width);
-    const block = editor.view(width, Math.max(1, this.opts.terminal.rows - popup.length));
+    const chrome = popup.length + (status ? 1 : 0) + (chip ? 1 : 0);
+    const block = editor.view(width, Math.max(1, this.opts.terminal.rows - chrome));
+    const rows = [...(status ? [status] : []), ...popup, ...block.rows, ...(chip ? [chip] : [])];
     this.#lastBlockRows = block.rows;
-    this.#setFrame([...popup, ...block.rows], {
-      row: popup.length + block.cursorRow,
+    this.#setFrame(rows, {
+      row: (status ? 1 : 0) + popup.length + block.cursorRow,
       col: block.cursorCol,
     });
   }

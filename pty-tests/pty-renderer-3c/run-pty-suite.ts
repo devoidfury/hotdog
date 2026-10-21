@@ -368,6 +368,11 @@ function scenarios(): Scenario[] {
         { name: "modes:?2026 balanced", run: (c) => syncBalanced(c.toString("latin1")) },
         cursorPairedTeardownShow(),
         contains("hello stub world", "submitted echo row"),
+        // Stage-4 status line on the wire: the frame showed the working
+        // state during the turn and the settled turn count after it.
+        // (The capture is decoded latin1, so the UTF-8 "·" reads as "Â·".)
+        contains("\u00C2\u00B7 working", "status row: working state painted"),
+        contains("#1", "status row: turn count after the first turn"),
         contains("Goodbye", "goodbye after teardown"),
         {
           name: "stty: raw OFF + echo ON after exit (orphan-proof, same pty)",

@@ -113,6 +113,58 @@ describe("MessageBus steering (enqueue with steering: true)", () => {
     expect(bus.queue).toEqual(["nope"]);
   });
 
+  it("emits QUEUE_UPDATE on a steering enqueue and again on chain drain (§8 chip signal)", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const steered: string[] = [];
+    const agent = {
+      ...createMockAgent({
+        hooks: { runHookPipeline: async () => { await gate; return {}; } },
+      }),
+      steer: (c: string) => steered.push(c),
+    };
+    const sink = createMockSink();
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
+    bus.isRunning = true;
+    bus.enqueue("make it purple", { steering: true });
+    bus.enqueue("and shorter", { steering: true });
+
+    const updates = () =>
+      sink._emitted.filter((e) => (e as { type: number }).type === OUTPUT_EVENT.QUEUE_UPDATE);
+    // Both accepted, first pending previewed for the chip.
+    expect(updates()).toContainEqual({
+      type: OUTPUT_EVENT.QUEUE_UPDATE,
+      pending: 1,
+      preview: "make it purple",
+    });
+    expect(updates()).toContainEqual({
+      type: OUTPUT_EVENT.QUEUE_UPDATE,
+      pending: 2,
+      preview: "make it purple",
+    });
+
+    release();
+    await bus.steeringPending;
+    expect(steered).toEqual(["make it purple", "and shorter"]);
+    // The last update reports the chain fully drained: the chip goes away.
+    expect(updates()[updates().length - 1]).toEqual({
+      type: OUTPUT_EVENT.QUEUE_UPDATE,
+      pending: 0,
+      preview: "",
+    });
+  });
+
+  it("emits no QUEUE_UPDATE when a steering submit falls back to the normal queue", () => {
+    const sink = createMockSink();
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink });
+    bus.enqueue("idle steer", { steering: true }); // idle: plain queue, no chip
+    expect(
+      sink._emitted.filter((e) => (e as { type: number }).type === OUTPUT_EVENT.QUEUE_UPDATE),
+    ).toEqual([]);
+  });
+
   it("runs steering through the INPUT pipeline, like any other input", async () => {
     const steered: unknown[] = [];
     const seenHooks: string[] = [];

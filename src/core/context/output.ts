@@ -18,6 +18,7 @@ export const OUTPUT_EVENT = {
   COMPACTION_RESULT: 13,
   SESSION_STATE: 14,
   SYSTEM_MESSAGE: 15,
+  QUEUE_UPDATE: 16,
 } as const;
 
 export type OutputEventType = (typeof OUTPUT_EVENT)[keyof typeof OUTPUT_EVENT];
@@ -37,6 +38,7 @@ export const EVENT_NAME_MAP: Record<string, OutputEventType> = {
   token_usage: OUTPUT_EVENT.TOKEN_USAGE,
   compaction_result: OUTPUT_EVENT.COMPACTION_RESULT,
   session_state: OUTPUT_EVENT.SESSION_STATE,
+  queue_update: OUTPUT_EVENT.QUEUE_UPDATE,
 };
 
 export type EventName = keyof typeof EVENT_NAME_MAP;
@@ -170,6 +172,20 @@ export interface SystemMessageEvent {
   content: string;
 }
 
+/**
+ * Pending mid-run steering count (steer-default, design §8): emitted by the
+ * bus on a steering enqueue and on chain drain. Frame content for the split
+ * renderer's queue chip -- NOT printable output: the base sink ignores it
+ * (no switch case) and WebSocket drops it (unmapped in EVENT_TO_PROTOCOL),
+ * so no wire protocol is added.
+ */
+export interface QueueUpdateEvent {
+  type: typeof OUTPUT_EVENT.QUEUE_UPDATE;
+  pending: number;
+  /** The first pending item's text ("" for structured content). */
+  preview: string;
+}
+
 export type OutputEvent =
   | UserMessageEvent
   | AssistantMessageEvent
@@ -185,7 +201,8 @@ export type OutputEvent =
   | TokenUsageEvent
   | CompactionResultEvent
   | SessionStateEvent
-  | SystemMessageEvent;
+  | SystemMessageEvent
+  | QueueUpdateEvent;
 
 /** Base sink; the Agent only depends on this interface, never on a specific UI. */
 export class OutputSink {

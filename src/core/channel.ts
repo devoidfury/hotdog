@@ -16,7 +16,9 @@ export type ChannelCommandType =
 
 // Minimal SessionManager surface, so Channel avoids a circular import.
 export interface ChannelSessionManager {
-  enqueue(sessionId: string, text: string): void;
+  /** `steering` routes a mid-run send to the agent's steer queue (drained
+   * between LLM calls); the bus falls back to the normal queue at idle. */
+  enqueue(sessionId: string, text: string, opts?: { steering?: boolean }): void;
   cancel(sessionId: string): void;
   interrupt(sessionId: string): void;
   executeCommand(
@@ -61,7 +63,11 @@ export abstract class Channel {
     }
 
     if (this.currentSessionId) {
-      this.sessionManager.enqueue(this.currentSessionId, trimmed);
+      // Steer-default (§8, owner ruling): every user submit asks to steer.
+      // Safe at idle (the bus queues it normally), mid-run it lands in the
+      // agent's steering queue; image-bearing items never steer bus-side.
+      // Esc stays the interrupt -- the two have distinct envelopes.
+      this.sessionManager.enqueue(this.currentSessionId, trimmed, { steering: true });
     }
   }
 

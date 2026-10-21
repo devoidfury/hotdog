@@ -125,6 +125,11 @@ export class MessageBus {
   // Serializes mid-run steering delivery: pipelines are async, so per-item
   // fire-and-forget would let a later submission overtake an earlier one.
   #steerChain: Promise<void> = Promise.resolve();
+  // Previews of steering items accepted but not yet delivered (chain order).
+  // Drives the QUEUE_UPDATE chip: pushed at enqueue, shifted when the chain
+  // delivers. Interrupt/cancel do NOT clear it -- the chain still drains,
+  // and shifting a cleared list would drift the count off the deliveries.
+  #pendingSteers: string[] = [];
   readonly #lanes: TurnLanes | null;
   // Active lane wait (null when not waiting). cancel()/interrupt() abort it so
   // a lane-blocked turn unwinds without leaking the slot it might land on.
@@ -163,6 +168,8 @@ export class MessageBus {
       // The chain preserves submission order across async pipelines.
       // Items carrying images never take this path: steering has no images
       // seam, so they queue and ride the next Agent.run instead of being dropped.
+      this.#pendingSteers.push(typeof clean === "string" ? clean : "");
+      this.#emitQueueUpdate();
       this.#steerChain = this.#steerChain.then(() => this.#deliverSteering(agent, clean, opts?.source));
       return;
     }
@@ -431,7 +438,21 @@ export class MessageBus {
         type: OUTPUT_EVENT.COMMAND_RESULT,
         content: isExpectedError(e) ? (e as Error).message : formatError(e),
       });
+    } finally {
+      // Chain order == push order, so the head of the preview list is this
+      // delivery; the chip updates on every settle (delivered or errored).
+      this.#pendingSteers.shift();
+      this.#emitQueueUpdate();
     }
+  }
+
+  /** Steer-default chip signal (§8): pending count + first pending preview. */
+  #emitQueueUpdate(): void {
+    this.#sink.emit({
+      type: OUTPUT_EVENT.QUEUE_UPDATE,
+      pending: this.#pendingSteers.length,
+      preview: this.#pendingSteers[0] ?? "",
+    });
   }
 
   /** Runs the input hook pipeline, then hands off to the agent. */

@@ -18,6 +18,13 @@ import { restoreSessionIntoAgent, type PendingQuestion } from "@core/session/ses
 import { getSessionRow } from "@core/session/session-index.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { ExtensionError, formatError } from "@core/error.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
+import {
+  computeTokenCost,
+  findModelPrice,
+  isPricingConfigured,
+  type CostableUsage,
+} from "@core/token-pricing.ts";
 import type { CliArgv } from "@core/config/index.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { CliChannel } from "./cli-channel.ts";
@@ -862,6 +869,8 @@ export async function runInteractiveSession(
   // Re-display prompt after agent finishes
   core.hooks.on(HOOKS.TURN_END, ({ stopped }) => {
     if (stopped) {
+      // Status-line turn counter (§12 stage 4): the settled turn is the tick.
+      bridge?.addTurn();
       setImmediate(() => {
         sink.log("");
         // The editor path has no readline to re-prompt: its frame is
@@ -1012,6 +1021,59 @@ export async function runInteractiveSession(
       // view's default as-is insertion.
       bridge.editor.pasteHandler = editorPasteHandler;
     }
+
+    // ── Stage-4 status line + queue chip (§12 stage 4, ruling 4, §8) ──────
+    // Tap the session's event fan-out (the same seam Channel uses; N
+    // subscribers supported). Turn count rides the TURN_END hook below;
+    // working/lane-wait come from bus events; cost exists only while the
+    // modelPricing key is configured (dark by default), context-% off.
+    const pricing = resolved.modelPricing;
+    let pricedModel = String(resolved.model ?? "");
+    let usage: CostableUsage | null = null;
+    const sessionCost = (): string | null => {
+      if (!usage || !isPricingConfigured(pricing)) return null;
+      const price = findModelPrice(pricing, pricedModel);
+      if (!price) return null;
+      const total = computeTokenCost(usage, price).total;
+      // Same reading class as /tokens: 4 decimals below a cent.
+      return `$${Math.abs(total) >= 0.01 ? total.toFixed(2) : total.toFixed(4)}`;
+    };
+    sessionManager.onSessionEvents(sessionManager.sessionId()!, (ev) => {
+      switch (ev.type) {
+        case OUTPUT_EVENT.SESSION_STATE:
+          if (ev.key === "working") {
+            bridge.updateStatus({ working: ev.value === true });
+          } else if (ev.key === "model") {
+            pricedModel = String(ev.value ?? "");
+            bridge.updateStatus({ cost: sessionCost() });
+          }
+          return;
+        case OUTPUT_EVENT.SYSTEM_MESSAGE:
+          if (ev.content.startsWith("Waiting for provider lane")) {
+            bridge.updateStatus({ laneWait: true });
+          }
+          return;
+        case OUTPUT_EVENT.STREAMING_CHUNK:
+        case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
+        case OUTPUT_EVENT.THINKING:
+        case OUTPUT_EVENT.TOOL_CALL:
+        case OUTPUT_EVENT.ASSISTANT_MESSAGE:
+          // First sign the turn is actually running: the lane wait is over.
+          bridge.updateStatus({ laneWait: false });
+          return;
+        case OUTPUT_EVENT.TOKEN_USAGE:
+          usage = {
+            promptTokens: ev.sessionPromptTokens,
+            cachedTokens: ev.sessionCachedTokens,
+            completionTokens: ev.sessionCompletionTokens,
+          };
+          bridge.updateStatus({ cost: sessionCost() });
+          return;
+        case OUTPUT_EVENT.QUEUE_UPDATE:
+          bridge.setQueueChip(ev.pending, ev.preview);
+          return;
+      }
+    });
   } else {
     const legacyRl = rl as readline.Interface;
     legacyRl.on("line", lineHandler);

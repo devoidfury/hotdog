@@ -1074,6 +1074,9 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
     execute: [] as string[],
     interrupt: 0,
   };
+  // Session-event fan-out stub: stores handlers so tests can fire bus
+  // events (SESSION_STATE/QUEUE_UPDATE/...) at the stage-4 status glue.
+  const sessionHandlers: Array<(ev: unknown) => void> = [];
   const agent = {
     sessionId: "test-session",
     commandRegistry: { names: () => ["test"] },
@@ -1088,7 +1091,13 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
       calls.execute.push(cmdText);
       return undefined;
     },
-    onSessionEvents: () => () => {},
+    onSessionEvents: (_id: string, handler: (ev: unknown) => void) => {
+      sessionHandlers.push(handler);
+      return () => {
+        const i = sessionHandlers.indexOf(handler);
+        if (i >= 0) sessionHandlers.splice(i, 1);
+      };
+    },
     interrupt: () => {
       calls.interrupt++;
     },
@@ -1123,7 +1132,11 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
 
   const screenRows = (): string[] => term.grid.snapshot().screen.map((r) => r.replace(/\s+$/, ""));
   const count = (log: string[], entry: string): number => log.filter((m) => m === entry).length;
-  return { term, clock, sig, bridge, keys, calls, done, screenRows, count };
+  const emitEvent = (ev: unknown): void => {
+    for (const h of [...sessionHandlers]) h(ev);
+    clock.runAll(); // settle the repaint the status/chip update schedules
+  };
+  return { term, clock, sig, bridge, keys, calls, done, screenRows, count, emitEvent };
 }
 
 /** Run fn with process.exit stubbed (same pattern as the legacy suite). */
@@ -2342,5 +2355,116 @@ describe("cursorCol clamp probes (stage 3c, 3b contract §5 leftover)", () => {
     bridge.capture.write("\x1b[999G\x1b[0J");
     expect(bridge.capture.cursor().col).toBeLessThanOrEqual(bridge.capture.columns - 1);
     expect(bridge.capture.frameRows()).toEqual(["(m)> hello"]);
+  });
+});
+
+// ══ Stage 4 (§12, run 20261021): status line + queue chip ═══════════════
+
+import { statusRowText, queueChipText } from "@extensions/ui-interactive-cli/split-bridge.ts";
+
+describe("stage-4 status row: pure shape", () => {
+  it("nothing before the first turn; current turn while working; settled count at idle", () => {
+    expect(statusRowText({ turns: 0, working: false, laneWait: false, cost: null })).toBeNull();
+    expect(statusRowText({ turns: 0, working: true, laneWait: false, cost: null })).toBe("#1 · working");
+    expect(statusRowText({ turns: 0, working: true, laneWait: true, cost: null })).toBe("#1 · waiting for lane");
+    expect(statusRowText({ turns: 2, working: false, laneWait: false, cost: null })).toBe("#2");
+    expect(statusRowText({ turns: 2, working: true, laneWait: false, cost: null })).toBe("#3 · working");
+    // Cost rides only when present (modelPricing-gated upstream, ruling 4).
+    expect(statusRowText({ turns: 2, working: true, laneWait: false, cost: "$0.0021" })).toBe("#3 · working · $0.0021");
+    expect(statusRowText({ turns: 1, working: false, laneWait: false, cost: "$1.23" })).toBe("#1 · $1.23");
+  });
+
+  it("queue chip: 40-rune truncation (codepoint-safe), extra count, blank preview reads 'item'", () => {
+    expect(queueChipText(0, "x")).toBeNull();
+    expect(queueChipText(1, "make it purple")).toBe("↑ queued: make it purple");
+    expect(queueChipText(3, "one")).toBe("↑ queued: one (+2)");
+    expect(queueChipText(1, "")).toBe("↑ queued: item");
+    expect(queueChipText(1, "   ")).toBe("↑ queued: item");
+    // 40 CODEPOINTS, surrogate-pair safe (emoji count as one rune each).
+    expect(queueChipText(1, "🙂".repeat(45))).toBe(`↑ queued: ${"🙂".repeat(40)}…`);
+    // Multi-line previews collapse: the chip is always one frame row.
+    expect(queueChipText(1, "line1\nline2")).toBe("↑ queued: line1 line2");
+  });
+});
+
+describe("stage-4 session frame: status line follows the event sequence", () => {
+  it("bare frame -> working -> lane-wait -> content clears wait -> TURN_END settles", async () => {
+    const hooks = new HookSystem();
+    const rig = makeSessionRig({ hooks });
+    await rig.done;
+    rig.clock.runAll();
+    const status = () => rig.screenRows().filter((r) => r.startsWith("#"));
+
+    // Before any turn: nothing to show, the frame is just the editor.
+    expect(status()).toEqual([]);
+
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    expect(status()).toEqual(["#1 · working"]);
+
+    rig.emitEvent({ type: OUTPUT_EVENT.SYSTEM_MESSAGE, content: "Waiting for provider lane 'openai'..." });
+    expect(status()).toEqual(["#1 · waiting for lane"]);
+
+    // First sign of real work: the lane wait is over.
+    rig.emitEvent({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "hi" });
+    expect(status()).toEqual(["#1 · working"]);
+
+    // TURN_END: counter settles at 1, working drops with the turn.
+    await hooks.notifyHooks(HOOKS.TURN_END, { stopped: true } as never);
+    rig.clock.runAll(); // the repaint TURN_END schedules rides the fake clock
+    expect(status()).toEqual(["#1"]);
+
+    // Second turn reads as the turn in flight (#2), and its end settles.
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    expect(status()).toEqual(["#2 · working"]);
+    await hooks.notifyHooks(HOOKS.TURN_END, { stopped: true } as never);
+    rig.clock.runAll();
+    expect(status()).toEqual(["#2"]);
+  });
+
+  it("cost stays dark without modelPricing and appears with it", async () => {
+    const usage = {
+      type: OUTPUT_EVENT.TOKEN_USAGE,
+      sessionPromptTokens: 2_000_000,
+      sessionCachedTokens: 0,
+      sessionCompletionTokens: 0,
+      sessionTotalTokens: 2_000_000,
+      turns: 1,
+      promptTokens: 1000,
+      cachedTokens: 0,
+      completionTokens: 0,
+      totalTokens: 1000,
+      contextWindow: 200000,
+    };
+
+    // Default (no modelPricing key): the usage event adds no cost to the row.
+    const rig = makeSessionRig();
+    await rig.done;
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    rig.emitEvent(usage);
+    expect(rig.screenRows().filter((r) => r.startsWith("#"))).toEqual(["#1 · working"]);
+
+    // With modelPricing for the session model, the row carries the USD total.
+    const priced = makeSessionRig({
+      resolvedExtra: { modelPricing: { "test-model": { input: 10, output: 20 } } },
+    });
+    await priced.done;
+    priced.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    priced.emitEvent(usage);
+    expect(priced.screenRows().filter((r) => r.startsWith("#"))).toEqual(["#1 · working · $20.00"]);
+  });
+
+  it("QUEUE_UPDATE shows the chip and pending:0 removes it", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    const chips = () => rig.screenRows().filter((r) => r.includes("↑ queued:"));
+
+    rig.emitEvent({ type: OUTPUT_EVENT.QUEUE_UPDATE, pending: 2, preview: "make it purple" });
+    expect(chips()).toEqual(["↑ queued: make it purple (+1)"]);
+
+    rig.emitEvent({ type: OUTPUT_EVENT.QUEUE_UPDATE, pending: 1, preview: "and shorter" });
+    expect(chips()).toEqual(["↑ queued: and shorter"]);
+
+    rig.emitEvent({ type: OUTPUT_EVENT.QUEUE_UPDATE, pending: 0, preview: "" });
+    expect(chips()).toEqual([]);
   });
 });

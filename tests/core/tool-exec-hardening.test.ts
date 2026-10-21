@@ -345,7 +345,7 @@ describe("idle reap (real spawn)", () => {
       const result = await broker.invoke({
         session: "harden-reap-busy",
         tool: "bash",
-        args: { command: "sleep 1 && echo survived" },
+        args: { command: "sleep 0.5 && echo survived" },
         ctx: ctx("harden-reap-busy"),
       });
       expect(text(result)).toContain("survived");

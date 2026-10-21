@@ -8,7 +8,9 @@ export interface ServeHandle {
   stop(): void;
 }
 
-const READY_POLL_MS = 250;
+// 50ms: readiness here is a local listener; 250ms added visible latency to every
+// serve-task start for no benefit (the timeout bound is separate and unchanged).
+const READY_POLL_MS = 50;
 
 /**
  * Spawn `serve.cmd` (bash -lc, detached into its own process group) with the

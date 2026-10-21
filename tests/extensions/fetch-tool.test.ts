@@ -828,7 +828,7 @@ describe("FetchTool integration", () => {
 
   describe("timeouts and large bodies", () => {
     it("aborts slow responses with TransientError when the timeout fires", async () => {
-      const tool = new FetchTool({ timeoutMs: 300, maxBodyLength: 8000, allowPrivateHosts: true });
+      const tool = new FetchTool({ timeoutMs: 120, maxBodyLength: 8000, allowPrivateHosts: true });
       const t0 = Date.now();
       await expect(
         tool.execute(JSON.stringify({ url: `${BASE_URL}/slow` })),
@@ -854,14 +854,14 @@ describe("FetchTool integration", () => {
     // TransientError makes the tool executor retry; that must stay
     // available for idempotent GET/HEAD only.
     it("keeps throwing TransientError on GET timeout (safe to retry)", async () => {
-      const tool = new FetchTool({ timeoutMs: 300, maxBodyLength: 8000, allowPrivateHosts: true });
+      const tool = new FetchTool({ timeoutMs: 120, maxBodyLength: 8000, allowPrivateHosts: true });
       await expect(
         tool.execute(JSON.stringify({ url: `${BASE_URL}/slow`, method: "GET" })),
       ).rejects.toBeInstanceOf(TransientError);
     });
 
     it("resolves with an error (no retry) when a POST times out", async () => {
-      const tool = new FetchTool({ timeoutMs: 300, maxBodyLength: 8000, allowPrivateHosts: true });
+      const tool = new FetchTool({ timeoutMs: 120, maxBodyLength: 8000, allowPrivateHosts: true });
       const t0 = Date.now();
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/slow`, method: "POST", body: "payload" }),

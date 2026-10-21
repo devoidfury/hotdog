@@ -72,7 +72,7 @@ async function settle(fn: () => boolean, what: string, timeoutMs = 3000): Promis
 // fake TaskManager: workers extract run dir + node id from the composed prompt
 // ---------------------------------------------------------------------------
 
-function makeFakeAgents(opts: { slow?: boolean } = {}) {
+function makeFakeAgents(opts: { slow?: boolean; slowMs?: number } = {}) {
   let builds = 0;
   const tasks = new TaskManager({
     buildAgent: async () => {
@@ -83,7 +83,9 @@ function makeFakeAgents(opts: { slow?: boolean } = {}) {
           const id = /node '([a-z0-9-]+)'/.exec(prompt)?.[1] ?? "x";
           const dir = /\.verdict under (.+): first line/.exec(prompt)?.[1];
           if (dir) {
-            if (opts.slow && id === "a") await new Promise((r) => setTimeout(r, 1100));
+            // slowMs only when the test needs a live-node window sized to something
+            // specific (e.g. the CLI's 1s progress poll); default keeps a generous margin.
+            if (opts.slow && id === "a") await new Promise((r) => setTimeout(r, opts.slowMs ?? 1100));
             writeFileSync(join(dir, `${id}.out`), "artifact");
             writeFileSync(join(dir, `${id}.verdict`), "pass");
           }
@@ -645,7 +647,9 @@ nodes:
       ),
     );
     // Make node a slow so the first dispatch is still live when the second arrives.
-    const slow = makeFakeAgents({ slow: true });
+    // The window only needs to cover the gap between the two execute() calls; the
+    // 1100ms default exists for the CLI test that must span the 1s progress poll.
+    const slow = makeFakeAgents({ slow: true, slowMs: 400 });
     const opts = toolOpts(slow.tasks, root, wfDir);
     const dispatch = new WorkflowDispatchTool(opts);
     const first = await dispatch.execute({ file, run_id: "fixed-id" });

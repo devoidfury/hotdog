@@ -64,8 +64,11 @@ describe("buffered-response flood (bounded read buffer)", () => {
       `console.log(JSON.stringify({jsonrpc:"2.0",id:999,result:{data:'buffered'}})); setTimeout(() => {}, 15000);`,
     ]);
     try {
-      // Give the reader a beat to dispatch the line.
-      await new Promise((r) => setTimeout(r, 150));
+      // Poll until the reader dispatches the line (bounded), instead of a fixed nap.
+      const deadline = t0() + 3000;
+      while (client.buffered.length === 0 && t0() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
       expect(client.buffered.length).toBe(1);
       expect(client.transportClosed).toBe(false);
     } finally {
@@ -210,8 +213,11 @@ describe("fail-fast on transport close", () => {
   it("requests after the close fail immediately too (no timeout limbo per call)", async () => {
     const client = await McpClient.forStdio("bun", ["-e", "process.exit(0)"]);
     try {
-      // Let the death notice land.
-      await new Promise((r) => setTimeout(r, 250));
+      // Poll until the death notice lands (bounded), instead of a fixed nap.
+      const deadline = t0() + 3000;
+      while (!client.transportClosed && t0() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
       expect(client.transportClosed).toBe(true);
       const started = t0();
       await expect(

@@ -177,9 +177,14 @@ describe("webui ws maxPayloadLength", () => {
     }) as never;
 
     ws.send(imageFrameWithId(sessionId, DEFAULT_MAX_IMAGE_SIZE));
-    // The parse+decode of a 10 MiB image is well under this window; the
-    // transport bound must not close the socket first.
-    await new Promise((r) => setTimeout(r, 2500));
+    // The transport bound must not close the socket first. Wait for the
+    // enqueue (parse+decode of 10 MiB lands well inside the deadline), then
+    // a short settle so a late ERROR frame or socket close would arrive.
+    const deadline = Date.now() + 20_000;
+    while (enqueued.length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await new Promise((r) => setTimeout(r, 150));
 
     expect(enqueued).toHaveLength(1);
     const opts = enqueued[0]!.opts as { images: Array<{ data: string }> };

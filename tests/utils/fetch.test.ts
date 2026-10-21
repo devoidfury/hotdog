@@ -73,7 +73,7 @@ describe("hotdogFetch", () => {
   it("aborts with TimeoutError when only a timeout is given", async () => {
     const t0 = Date.now();
     await expect(
-      hotdogFetch(`${BASE_URL}/slow`, undefined, 300),
+      hotdogFetch(`${BASE_URL}/slow`, undefined, 120),
     ).rejects.toThrow();
     // Must fire near the timeout, not at the server's 3s delay.
     expect(Date.now() - t0).toBeLessThan(2000);
@@ -94,7 +94,7 @@ describe("hotdogFetch", () => {
     const controller = new AbortController(); // never aborted
     const t0 = Date.now();
     await expect(
-      hotdogFetch(`${BASE_URL}/slow`, { signal: controller.signal }, 300),
+      hotdogFetch(`${BASE_URL}/slow`, { signal: controller.signal }, 120),
     ).rejects.toThrow();
     expect(Date.now() - t0).toBeLessThan(2000);
   });

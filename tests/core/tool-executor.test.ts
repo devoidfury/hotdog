@@ -98,7 +98,7 @@ function createMockDeps(
     workspaceRoots: [process.cwd()],
     workspaceDeny: null,
     maxRetries: 3,
-    toolRetryDelay: 100,
+    toolRetryDelay: 0.001, // seconds; retries here assert attempt counts, never wall time
     isRestoring: () => false,
     agent,
     addedMessages,
@@ -882,7 +882,7 @@ describe('ToolExecutor', () => {
 
     it('should return an error result without retrying when a transient error occurs and maxRetries is 0', async () => {
       let calls = 0;
-      const deps = createMockDeps({ maxRetries: 0, toolRetryDelay: 1 });
+      const deps = createMockDeps({ maxRetries: 0, toolRetryDelay: 0.001 });
       deps.toolRegistry.register('transient', makeTestTool('transient', async () => {
         calls++;
         throw new TransientError('flaky');
@@ -902,7 +902,7 @@ describe('ToolExecutor', () => {
 
     it('maxRetries: 2 makes one initial attempt plus two retries on transient errors', async () => {
       let calls = 0;
-      const deps = createMockDeps({ maxRetries: 2, toolRetryDelay: 1 });
+      const deps = createMockDeps({ maxRetries: 2, toolRetryDelay: 0.001 });
       deps.toolRegistry.register('flaky2', makeTestTool('flaky2', async () => {
         calls++;
         throw new TransientError('still flaky');

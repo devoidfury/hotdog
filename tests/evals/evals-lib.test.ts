@@ -561,12 +561,16 @@ describe("startServe", () => {
       const resp = await fetch("http://127.0.0.1:8799/");
       expect(await resp.text()).toBe("ok");
       handle.stop();
-      await Bun.sleep(300);
+      // stop() escalates TERM->KILL synchronously, so the port should be dead
+      // on return; poll rather than sleep-and-hope (refused immediately when dead).
       let dead = false;
-      try {
-        await fetch("http://127.0.0.1:8799/", { signal: AbortSignal.timeout(1000) });
-      } catch {
-        dead = true;
+      const stopDeadline = Date.now() + 3000;
+      while (!dead && Date.now() < stopDeadline) {
+        try {
+          await fetch("http://127.0.0.1:8799/", { signal: AbortSignal.timeout(1000) });
+        } catch {
+          dead = true;
+        }
       }
       expect(dead).toBe(true);
     } finally {

@@ -80,7 +80,9 @@ export function createFixture(
     config: {
       maxToolCallsPerIteration: 10,
       maxRetries: 5,
-      toolRetryDelay: 1,
+      // Seconds (executor doubles per attempt); keep tiny so a transient retry never
+      // costs real backoff time. Timing of the backoff itself is pinned in tool-executor tests.
+      toolRetryDelay: 0.001,
       maxEmptyRetries: 1,
       ...(options.config as Record<string, unknown> | undefined),
     } as AgentConfig,
@@ -235,7 +237,7 @@ export function createMockCore(
     maxRetries: 3,
     maxIterations: 100,
     maxToolCallsPerIteration: 10,
-    toolRetryDelay: 1,
+    toolRetryDelay: 0.001, // seconds; see Agent config fixture above
     contextLimit: 128000,
     profileName: "default",
     profile: {},

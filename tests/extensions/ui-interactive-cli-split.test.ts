@@ -717,17 +717,51 @@ describe("capture geometry + resize wiring (§6 viewport change)", () => {
   });
 });
 
-describe("question takeover (§8 prompt suppression)", () => {
-  it("lineSubmitted commits the bare answer while question mode is on", () => {
+describe("question takeover (§8 exclusivity, fix-3 echo shape)", () => {
+  it("lineSubmitted commits the answer WITH its question prefix while question mode is on", () => {
     const { bridge, clock } = makeBridge();
     bridge.mount();
     bridge.setPrompt("(m)> ");
     bridge.setQuestionMode(true);
-    bridge.lineSubmitted("blue"); // the answer is not the main prompt's line
+    bridge.setQuestionLabel("  ? Pick a flavor");
+    bridge.lineSubmitted("vanilla"); // the answer is not the main prompt's line
     bridge.setQuestionMode(false);
     bridge.lineSubmitted("next turn");
     clock.runAll();
-    expect(bridge.transcriptLog).toEqual(["blue", "(m)> next turn"]);
+    expect(bridge.transcriptLog).toEqual(["  ? Pick a flavor > vanilla", "(m)> next turn"]);
+  });
+
+  it("a label is per-question: the latest label wins, and exiting clears it", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    bridge.setPrompt("(m)> ");
+    bridge.setQuestionMode(true);
+    bridge.lineSubmitted("unlabeled"); // no label set: bare fallback, never a stale one
+    bridge.setQuestionLabel("  ? Color?");
+    bridge.lineSubmitted("blue");
+    bridge.setQuestionLabel("  ? City?"); // runQuestions retargets per question
+    bridge.lineSubmitted("Oslo");
+    bridge.setQuestionMode(false);
+    bridge.lineSubmitted("back to normal");
+    clock.runAll();
+    expect(bridge.transcriptLog).toEqual([
+      "unlabeled",
+      "  ? Color? > blue",
+      "  ? City? > Oslo",
+      "(m)> back to normal",
+    ]);
+  });
+
+  it("exiting question mode drops the label so a later unlabeled answer echoes bare", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    bridge.setQuestionMode(true);
+    bridge.setQuestionLabel("  ? Pick a flavor");
+    bridge.setQuestionMode(false);
+    bridge.setQuestionMode(true); // re-entry (retry/resume): the old label must not ride along
+    bridge.lineSubmitted("vanilla");
+    clock.runAll();
+    expect(bridge.transcriptLog).toEqual(["vanilla"]);
   });
 });
 
@@ -1330,9 +1364,9 @@ describe("editor session swap: question focus (§8)", () => {
 
       rig.keys.push("2\r"); // menu index -> green
       await tick();
-      // The answer echo commits bare (no prompt prefix) and never reaches
-      // the normal submit handler.
-      expect(rig.bridge.transcriptLog).toContain("2");
+      // The answer echo carries the question prefix (fix-3) and never
+      // reaches the normal submit handler.
+      expect(rig.bridge.transcriptLog).toContain("  ? Pick a color > 2");
       expect(rig.calls.enqueue).toEqual([]);
 
       controller.abort();
@@ -1546,7 +1580,7 @@ describe("editor session swap: blank submit never dirties scrollback (ledger B)"
     expect(nonBlankRows()).toBe(rowsBefore + 1);
   });
 
-  it("an empty answer while a question owns the input resolves silently", async () => {
+  it("an empty answer while a question owns the input commits the (no answer) echo", async () => {
     const rig = makeSessionRig();
     await rig.done;
     const input = new EditorCliInput(rig.bridge);
@@ -1563,8 +1597,8 @@ describe("editor session swap: blank submit never dirties scrollback (ledger B)"
       await tick();
       rig.clock.runAll();
       expect(rig.bridge.questionMode).toBe(true);
-      // The question menu legitimately commits rows; the baseline for "the
-      // empty answer itself stays silent" starts once the menu is up.
+      // The question menu legitimately commits rows; the baseline for the
+      // echo itself starts once the menu is up.
       logAfterMenu = rig.bridge.transcriptLog.length;
       screenAfterMenu = rig.screenRows().filter((r) => r !== "").length;
 
@@ -1576,11 +1610,13 @@ describe("editor session swap: blank submit never dirties scrollback (ledger B)"
 
     expect(answers).toEqual({ note: "" }); // the waiter resolved with the empty line
     expect(rig.bridge.questionMode).toBe(false);
-    // Chosen echo rule (ledger-notes): resolve SILENTLY. No bare prompt row,
-    // not even a blank one, enters write-once scrollback.
-    expect(rig.bridge.transcriptLog.length).toBe(logAfterMenu);
+    // Fix-3 echo ruling (question-echo.md): a blank answer commits exactly
+    // ONE self-describing row -- question prefix plus "(no answer)" -- so
+    // write-once scrollback can tell "answered nothing" from spacing.
+    expect(rig.bridge.transcriptLog.length).toBe(logAfterMenu + 1);
+    expect(rig.bridge.transcriptLog[logAfterMenu]).toBe("  ? Note? > (no answer)");
     rig.clock.runAll();
-    expect(rig.screenRows().filter((r) => r !== "").length).toBe(screenAfterMenu);
+    expect(rig.screenRows().filter((r) => r !== "").length).toBe(screenAfterMenu + 1);
     expect(rig.calls.enqueue).toEqual([]); // an answer never reaches the model queue
   });
 });

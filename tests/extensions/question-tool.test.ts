@@ -376,6 +376,59 @@ describe("execute - run cancellation", () => {
     // No agent, no signal: the input gets null (its legacy path).
     expect(hanging.lastSignal).toBeNull();
   });
+
+  // ── Q-CANCEL-1: the interrupt seam is the run-lifetime ctx signal ──────
+  // interrupt() -> agent.cancel() aborts #runAbort, which the executor wires
+  // onto the tool ctx as "abortSignal"; while tools run the per-iteration
+  // runAbortController is null (nulled in the LLM-call finally). If the tool
+  // read only the controller, collectAnswers got a null signal and the held
+  // question swallowed the next line after Ctrl-C.
+
+  function makeCtxWithAbortSignal(
+    agent: Record<string, unknown> | null,
+    input: unknown,
+    abortSignal: AbortSignal,
+  ): ToolContext {
+    const values: Record<string, unknown> = { abortSignal };
+    if (agent) values.agent = agent;
+    if (input) values.input = input;
+    return { get: (key: string) => values[key] } as unknown as ToolContext;
+  }
+
+  it("Q-CANCEL-1: the ctx run-lifetime signal reaches collectAnswers when the per-iteration controller is null", async () => {
+    const controller = new AbortController();
+    const hanging = makeHangingInput();
+    // The live shape while a tool runs: controller null, ctx carries the run signal.
+    const agent = { emitOutput: () => {}, runAbortController: null };
+
+    const pending = tool.execute(payload, makeCtxWithAbortSignal(agent, hanging.input, controller.signal));
+    await waitFor(() => hanging.calls > 0);
+    expect(hanging.lastSignal).toBe(controller.signal);
+
+    controller.abort(); // the interrupt
+    const result = await pending;
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("cancelled");
+    // The dangling prompt resolves late and must stay swallowed.
+    hanging.resolveCollect({ a: "late" });
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("Q-CANCEL-1: the ctx signal wins over a stale per-iteration controller", async () => {
+    const runController = new AbortController(); // on the ctx: the interrupt fires here
+    const stale = new AbortController(); // per-iteration leftover, never fires after tool start
+    const hanging = makeHangingInput();
+    const agent = { emitOutput: () => {}, runAbortController: stale };
+
+    const pending = tool.execute(payload, makeCtxWithAbortSignal(agent, hanging.input, runController.signal));
+    await waitFor(() => hanging.calls > 0);
+    expect(hanging.lastSignal).toBe(runController.signal);
+
+    runController.abort();
+    const result = await pending;
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("cancelled");
+  });
 });
 
 // ── execute - agent-level abort (task interrupt) ───────────────────────────

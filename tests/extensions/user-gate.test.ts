@@ -333,6 +333,63 @@ describe("fail-closed matrix", () => {
     expect(collected).toBe(false);
   });
 
+  // ── Q-CANCEL-1 twin: the interrupt seam is the run-lifetime ctx signal ──
+  // While a gated tool runs, the per-iteration runAbortController is null;
+  // interrupt() -> agent.cancel() aborts the run-lifetime signal the
+  // executor wires onto the tool ctx as "abortSignal". Without reading it,
+  // a held approval could never be interrupted and blocked the turn.
+
+  /** Wire an extra key into the payload's fake tool context. */
+  function injectCtxKey(p: ToolCallPayload, key: string, value: unknown): void {
+    const ctx = p.toolCtx as unknown as { get(k: string): unknown };
+    const orig = ctx.get.bind(p.toolCtx);
+    (p as unknown as { toolCtx: { get(k: string): unknown } }).toolCtx = {
+      get: (k: string) => (k === key ? value : orig(k)),
+    };
+  }
+
+  it("Q-CANCEL-1: aborting the held approval through the ctx signal, not the stale controller", async () => {
+    const ac = new AbortController();
+    let seenSignal: AbortSignal | null | undefined;
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: (_qs: unknown, signal?: AbortSignal | null) => {
+        seenSignal = signal;
+        return new Promise<Record<string, unknown>>(() => {}); // hangs until abort
+      },
+    };
+    const p = payload({ inputOverride: input } as never);
+    injectCtxKey(p, "abortSignal", ac.signal);
+    // A stale per-iteration controller must NOT mask the ctx signal.
+    (p.agent as { runAbortController?: AbortController }).runAbortController = new AbortController();
+
+    const run_ = run({ enabled: true }, p);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seenSignal).toBe(ac.signal); // askUser got the interruptible signal
+    ac.abort();
+    const r = await run_;
+    expect(r.action).toBe("block");
+    expect(r.result.toLowerCase()).toContain("cancel");
+  });
+
+  it("Q-CANCEL-1: already-aborted ctx signal never prompts", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    let collected = false;
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: () => {
+        collected = true;
+        return { approve: "allow once" };
+      },
+    };
+    const p = payload({ inputOverride: input } as never);
+    injectCtxKey(p, "abortSignal", ac.signal);
+    const r = await run({ enabled: true }, p);
+    expect(r.action).toBe("block");
+    expect(collected).toBe(false);
+  });
+
   it("blocks every call when the config is malformed (fail closed, loudly)", async () => {
     const { input, asked } = answerWith("allow once");
     const r = await run(

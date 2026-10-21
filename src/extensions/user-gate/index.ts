@@ -179,8 +179,16 @@ function blockText(reasons: string[], hint: string | null): string {
   ].join("\n");
 }
 
-/** The agent's per-run abort, when there is one (null in standalone callers). */
-function runSignal(agent: unknown): AbortSignal | null {
+/**
+ * The run's abort, when there is one (null in standalone callers). Q-CANCEL-1
+ * twin: prefer the run-lifetime signal the executor wires onto the tool
+ * context -- interrupt() aborts it. The per-iteration runAbortController is
+ * null while tools run, so a held approval can never be interrupted through
+ * it; kept only as the fallback for callers with an agent but no wired ctx.
+ */
+function runSignal(agent: unknown, toolCtx?: { get(key: string): unknown } | null): AbortSignal | null {
+  const fromCtx = toolCtx?.get("abortSignal") as AbortSignal | null | undefined;
+  if (fromCtx) return fromCtx;
   const controller = (agent as { runAbortController?: AbortController | null } | null)?.runAbortController;
   return controller?.signal ?? null;
 }
@@ -268,7 +276,7 @@ export function create(core: CoreContext): ExtensionInstance {
           decision.reasons,
           payload.input,
           (payload.toolCtx?.get("input") as InputLike | undefined) ?? null,
-          runSignal(payload.agent),
+          runSignal(payload.agent, payload.toolCtx as { get(key: string): unknown } | undefined),
         ),
       );
 

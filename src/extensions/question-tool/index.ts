@@ -173,7 +173,16 @@ export class QuestionTool {
     const agent = ctx?.get("agent") as Agent | undefined;
 
     const signals: AbortSignal[] = [];
-    const runSignal = agent?.runAbortController?.signal ?? null;
+    // Q-CANCEL-1: the signal must be the RUN-lifetime one. The executor wires
+    // the run's #runAbort signal onto the context ("cancellation reaches
+    // inline tools the same way"), and interrupt() aborts THAT; the
+    // per-iteration runAbortController is null while tools run (nulled in
+    // the LLM-call finally), so reading only it left a held question with no
+    // abort race at all -- the interrupt printed its notice while the dead
+    // question ate the next line. The controller read stays as the fallback
+    // for standalone callers that hand in an agent but no wired context.
+    const runSignal =
+      (ctx?.get("abortSignal") as AbortSignal | null | undefined) ?? agent?.runAbortController?.signal ?? null;
     if (runSignal) signals.push(runSignal);
     if (agent?.abortSignal) signals.push(agent.abortSignal);
     if (signals.some((s) => s.aborted)) {

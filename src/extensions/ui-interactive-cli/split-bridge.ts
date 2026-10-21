@@ -255,6 +255,10 @@ export interface EditorInputHandlers {
   unhandled?(key: string): void;
 }
 
+/** What a blank answer echoes as (fix-3 ruling): the trace that says an
+ * answer arrived and it was empty, distinct from ordinary vertical spacing. */
+const NO_ANSWER_MARK = "(no answer)";
+
 /**
  * The mounted side of the split session: commit/arbiter line channels over
  * the core's FIFO (§2 rubric 1/3), the readline capture stream (§2 stage-2
@@ -275,6 +279,10 @@ export class OutputBridge {
   #promptText = "";
   #questionMode = false;
   #questionDraft = "";
+  /** The live question's echoed prefix (see setQuestionLabel); empty until run.
+   * Questions without a label echo bare -- a missing label never strands a
+   * STALE one, because exiting question mode clears it. */
+  #questionLabel = "";
   #mounted = false;
   #suspended = false;
   #repushScheduled = false;
@@ -391,6 +399,7 @@ export class OutputBridge {
     if (on === this.#questionMode) return;
     this.#questionMode = on;
     const view = this.#editor;
+    if (!on) this.#questionLabel = "";
     if (!view) return; // capture/readline path has no editor buffer to park
     if (on) {
       this.#questionDraft = view.text;
@@ -400,6 +409,23 @@ export class OutputBridge {
       this.#questionDraft = "";
       view.setText(draft);
     }
+  }
+
+  /**
+   * The prefix an answer echo carries while question mode is on (fix-3 echo
+   * ruling, question-echo.md): `  ? Pick a flavor > vanilla`. runQuestions
+   * sets it per question to the exact spoof-safe question line it printed,
+   * so a committed answer row in write-once scrollback forever names the
+   * question it answers -- even after a collapse or a stolen post-cancel
+   * line. Exiting question mode clears it (stale labels never echo).
+   */
+  setQuestionLabel(text: string): void {
+    this.#questionLabel = text;
+  }
+
+  /** Answer echo shape: `<label> > <answer>`, or the bare line with no label. */
+  #answerEcho(answer: string): string {
+    return this.#questionLabel === "" ? answer : `${this.#questionLabel} > ${answer}`;
   }
 
   /** True while a question owns the input (the popup is suppressed, §8). */
@@ -464,6 +490,16 @@ export class OutputBridge {
         // reaches the normal submit handler (§8 exclusivity).
         const waiter = this.#lineWaiters.shift();
         if (e.text.trim() === "") {
+          if (waiter) {
+            // An empty answer is legitimate free text (§8), and per the fix-3
+            // echo ruling it commits a self-describing row -- the question
+            // prefix plus `(no answer)` -- instead of resolving silently.
+            // A blank answer now leaves a trace naming its question;
+            // lineSubmitted runs the question prefix, the flush and repaint.
+            this.lineSubmitted(NO_ANSWER_MARK);
+            waiter(e.text);
+            return;
+          }
           // Legacy's lineHandler treats a trimmed-blank line (empty or
           // whitespace-only, either one) as "repaint the prompt, do
           // nothing", and readline writes no scrollback byte for it. The
@@ -471,12 +507,9 @@ export class OutputBridge {
           // scrollback, so a blank submit never echo-commits; the frame
           // repaint (the view already cleared its buffer) and the normal
           // handler still run so lineHandler executes its own blank
-          // early-return like the readline "line" event did. An empty
-          // answer with a waiter open is legitimate (§8 free text) and
-          // resolves silently: no row at all, not even a blank one.
+          // early-return like the readline "line" event did.
           this.#repaint();
-          if (waiter) waiter(e.text);
-          else h.submit(e.text);
+          h.submit(e.text);
           return;
         }
         // Prompt+line become the transcript row; the view has already reset.
@@ -517,11 +550,13 @@ export class OutputBridge {
 
   /**
    * Enter was pressed: today's readline echo (prompt + line + newline)
-   * becomes a committed transcript row, then the frame resets to empty.
+   * becomes a committed transcript row, then the frame resets to empty. In
+   * question mode the row is the fix-3 answer echo (`<question> > <answer>`),
+   * not the main prompt's shape -- the answer names its question forever.
    */
   lineSubmitted(line: string): void {
     this.flushPending();
-    this.#commitLines([this.#questionMode ? line : this.#promptText + line]);
+    this.#commitLines([this.#questionMode ? this.#answerEcho(line) : this.#promptText + line]);
     if (this.#editor) this.#repaint(); // view buffer already cleared by submit
     else this.capture.reset();
   }

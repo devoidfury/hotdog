@@ -46,12 +46,15 @@ function stubBody(raw: string): string {
     return sse({ error: "stub: unparseable request" });
   }
   const messages = parsed.messages ?? [];
-  const hasToolResult = messages.some((m) => m.role === "tool");
-  const askedFruit = messages.some(
-    (m) => m.role === "user" && JSON.stringify(m).includes(STUB_TOOL_MARKER),
-  );
+  // Branch off the request TAIL, not history-membership: after a cancelled
+  // question the history permanently holds a tool result (and the ASKFRUIT
+  // user row), so "some message is a tool result" would hijack every later
+  // turn. What matters is what the NEXT reply is responding to.
+  const last = messages[messages.length - 1];
+  const lastIsTool = last?.role === "tool";
+  const askedFruit = last?.role === "user" && JSON.stringify(last).includes(STUB_TOOL_MARKER);
   const out: string[] = [];
-  if (!hasToolResult && askedFruit) {
+  if (!lastIsTool && askedFruit) {
     // The held-question trigger: a tool call the tool-context question flow
     // answers through runQuestions/collectAnswers. Free-text, optional: the
     // BLANK answer must resolve, not re-prompt.
@@ -83,9 +86,10 @@ function stubBody(raw: string): string {
         choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
       }),
     );
-  } else if (hasToolResult) {
-    // The answer came back through the wire: echo its shape so the
-    // scrollback itself is the round-trip evidence.
+  } else if (lastIsTool) {
+    // The answer came back through the wire (request ends on the tool
+    // result): echo its shape so the scrollback itself is the
+    // round-trip evidence.
     const got = raw.includes("vanilla") ? "vanilla" : "blank";
     out.push(
       sse({
@@ -543,19 +547,19 @@ function questionEvidence(): Scenario[] {
         ? [
             contains("Interrupted", "interrupt notice"),
             {
-              name: "cancel: input released within two lines (Q-CANCEL-1 shape)",
+              name: "cancel: post-cancel line reaches the normal handler (Q-CANCEL-1 gate)",
               run: (c: Buffer) => {
                 const cap = c.toString("latin1");
-                const bye = cap.indexOf("Goodbye");
-                const firstLine = cap.lastIndexOf("/quit", bye >= 0 ? bye : cap.length);
-                const q1 = cap.indexOf("/quit");
+                const note = cap.indexOf("Interrupted");
+                const round = cap.indexOf(STUB_ANSWER_NEEDLE, note >= 0 ? note : 0);
                 return {
-                  pass: bye >= 0,
-                  detail: bye >= 0
-                    ? q1 === firstLine
-                      ? "first /quit exited (question released the input on cancel)"
-                      : "first /quit was consumed by the still-held question; the SECOND /quit exited (Q-CANCEL-1)"
-                    : "never exited",
+                  pass: note >= 0 && round >= 0,
+                  detail:
+                    note < 0
+                      ? "no interrupt notice on the wire"
+                      : round < 0
+                        ? "post-cancel line swallowed by the dead question (Q-CANCEL-1 regression)"
+                        : "post-cancel line reached the normal handler",
                 };
               },
             },
@@ -573,12 +577,12 @@ function questionEvidence(): Scenario[] {
       { op: "sleep", secs: 0.3 },
       { op: "send", data: "\x03" },
       { op: "expect", needle: "Interrupted", timeout: 30 },
-      { op: "sleep", secs: 1.5 },
-      { op: "send", data: "/quit\r" },
-      // Q-CANCEL-1 probe: if the interrupted question still owns the
-      // input, this /quit lands as (another) answer instead of the normal
-      // handler; a second /quit must then reach it and exit.
-      { op: "sleep", secs: 1.5 },
+      { op: "sleep", secs: 1.0 },
+      // Release proof: a fresh ordinary message must round-trip through the
+      // stub. If the dead question still owns the input it is swallowed as
+      // an answer and no STUB_ANSWER ever comes (Q-CANCEL-1).
+      { op: "send", data: "ping after cancel\r" },
+      { op: "expect", needle: STUB_ANSWER_NEEDLE, timeout: 30 },
       { op: "send", data: "/quit\r" },
     ]),
     mk("split", "answer", [{ op: "send", data: "vanilla\r" }, { op: "expect", needle: "STUB_FINAL vanilla", timeout: 30 }, { op: "send", data: "/quit\r" }]),
@@ -589,10 +593,10 @@ function questionEvidence(): Scenario[] {
       { op: "sleep", secs: 0.3 },
       { op: "send", data: "\x03" },
       { op: "expect", needle: "Interrupted", timeout: 30 },
-      { op: "sleep", secs: 1.5 },
-      { op: "send", data: "/quit\r" },
-      // Q-CANCEL-1 probe (see the legacy twin above).
-      { op: "sleep", secs: 1.5 },
+      { op: "sleep", secs: 1.0 },
+      // Release proof (see the legacy twin above).
+      { op: "send", data: "ping after cancel\r" },
+      { op: "expect", needle: STUB_ANSWER_NEEDLE, timeout: 30 },
       { op: "send", data: "/quit\r" },
     ]),
   ];

@@ -119,4 +119,30 @@ describe("AsyncInteractiveCliInput", () => {
     expect(addedHandlers.length).toBe(1);
     expect(addedHandlers[0]).toBe(lineHandler);
   });
+
+  it("Q-CANCEL-1: abort mid-question releases the takeover; the next line reaches the main handler", async () => {
+    const { rl, addedHandlers } = createMockRl([]); // nothing queued: the question hangs
+    const received: string[] = [];
+    const main = (line: string) => {
+      received.push(line);
+    };
+    const ac = new AbortController();
+
+    const pending = new AsyncInteractiveCliInput(rl, main, (h) => rl.on("line", h))
+      .collectAnswers([{ key: "q", prompt: "Q?", required: false }], ac.signal);
+    await new Promise((r) => setTimeout(r, 5)); // let the wait register its one-shot listener
+
+    ac.abort(); // the interrupt: abort must win the race
+    const answers = await pending; // partial answers resolve, never reject
+    expect(answers).toEqual({});
+    // The pending one-shot detached and the main handler re-attached:
+    // exactly one line listener remains, the session's own.
+    expect(addedHandlers.length).toBe(1);
+    expect(addedHandlers[0]).toBe(main);
+
+    // The line typed after the interrupt flows to the normal handler,
+    // never into the dead question loop.
+    (addedHandlers[0] as (line: string) => void)("/quit");
+    expect(received).toEqual(["/quit"]);
+  });
 });

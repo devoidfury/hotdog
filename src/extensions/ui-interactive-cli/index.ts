@@ -290,15 +290,25 @@ async function runQuestions(
         process.stdout.write(`    (default: ${spoofSafe(defaultValue)})\n`);
       }
 
+      // Fix-3 echo ruling (question-echo.md): in split mode the committed
+      // answer row carries this question's text as its prefix, so hand the
+      // bridge the same spoof-safe question line printed above. The live
+      // prompt is the editor frame, so the bare answer-prompt row (`" "` or
+      // `" [default] "`) is legacy-only: split's echo is self-describing and
+      // the default is already shown in its own row above. Legacy never has
+      // a bridge mounted, so uiBridge doubles as the mode gate.
+      const splitEcho = uiBridge !== null;
+      uiBridge?.setQuestionLabel(`  ? ${spoofSafe(promptText)}`);
+
       let answer = "";
       let valid = false;
 
       while (!valid) {
-        const prompt = defaultValue !== "" ? ` [${defaultValue}] ` : " ";
-        process.stdout.write(prompt);
-        // Split mode: the answer prompt carries no newline -- push the
-        // partial row out so the prompt is actually visible before waiting.
-        uiFlush();
+        if (!splitEcho) {
+          const prompt = defaultValue !== "" ? ` [${defaultValue}] ` : " ";
+          process.stdout.write(prompt);
+          uiFlush();
+        }
         const wait = waitLine();
 
         // Race the line against the run abort: a cancelled run must stop
@@ -387,8 +397,9 @@ export class AsyncInteractiveCliInput implements InputInterface {
     // A plain listener we own can be detached when the wait loses the race.
     let pendingLine: ((line: string) => void) | null = null;
     // Split mode: the takeover prints via owned channels (never raw
-    // stdout); the bridge question-mode flag keeps the submit echo prefix off
-    // answer rows.
+    // stdout); the bridge question-mode flag switches the submit echo to the
+    // fix-3 answer shape (question prefix, blanks as "(no answer)") and
+    // suppresses the completion popup.
     uiBridge?.setQuestionMode(true);
     try {
       return await runQuestions(questions, signal, this.#normalize, () => ({

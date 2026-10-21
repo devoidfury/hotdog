@@ -4,7 +4,8 @@
 // §9 (mount rule), §10 (teardown), §12 (stage 2).
 //
 // This file owns POLICY-FREE plumbing only: mount decision, line framing of
-// the routed channels, the readline capture stream, and process-level
+// the routed channels, the readline capture stream (until the 3b swap deletes
+// readline), the stage-3b editor input mount, and process-level
 // install/restore. Every terminal byte goes through the core's TerminalModes
 // (teardown.ts is the sole byte home, §10); the bridge never embeds
 // ?2026/?2004/?25/raw sequences itself.
@@ -15,7 +16,10 @@ import { Grid } from "@utils/cli/renderer/grid.ts";
 import { ProcessTerminal } from "@utils/cli/renderer/terminal.ts";
 import { SystemClock } from "@utils/cli/renderer/clock.ts";
 import { TeardownGuard } from "@utils/cli/renderer/teardown.ts";
-import type { Clock, SignalHost, Terminal } from "@utils/cli/renderer/seams.ts";
+import { StdinBuffer } from "@utils/cli/renderer/stdin-buffer.ts";
+import { EditorView, type EditorEvent } from "@utils/cli/renderer/editor-view.ts";
+import type { Completion } from "@utils/cli/renderer/popup.ts";
+import type { Clock, KeySource, SignalHost, Terminal } from "@utils/cli/renderer/seams.ts";
 
 /**
  * §9 mount rule, verbatim: the renderer attaches iff the knob is "split"
@@ -183,6 +187,21 @@ export interface StdinHandoffHost {
 }
 
 /**
+ * The owner's responses to editor input (stage 3b). submit/interrupt/quit
+ * fire AFTER the bridge has settled the frame (echo committed, buffer
+ * cleared); popup is the synchronous Tab-request hook (async provider wiring
+ * is the next 3b increment); unhandled carries keys outside the editor's map
+ * (ctrl-x dictation toggle binds there).
+ */
+export interface EditorInputHandlers {
+  submit(line: string): void;
+  interrupt(): void;
+  quit(): void;
+  popup?(word: string, from: number, to: number): Completion[] | undefined;
+  unhandled?(key: string): void;
+}
+
+/**
  * The mounted side of the split session: commit/arbiter line channels over
  * the core's FIFO (§2 rubric 1/3), the readline capture stream (§2 stage-2
  * row), and the TeardownGuard paired enable/restore of raw mode + bracketed
@@ -204,6 +223,11 @@ export class OutputBridge {
   #mounted = false;
   #suspended = false;
   #repushScheduled = false;
+  /** The editor input path (stage 3b): owns the frame instead of the capture. */
+  #editor: EditorView | null = null;
+  /** Last editor block the frame showed -- the interrupt echo, since the
+   * view has already cleared its buffer (stash-to-draft) when the event fires. */
+  #lastBlockRows: string[] = [];
 
   constructor(private readonly opts: OutputBridgeOptions) {
     this.core = new RendererCore({
@@ -239,8 +263,10 @@ export class OutputBridge {
     this.opts.terminal.onResize(() => {
       // Frame erase with the OLD geometry is core.handleResize (subscribed by
       // core.mount); here the capture model re-wraps at the new width and
-      // readline repaints its prompt into the fresh frame.
-      this.capture.setGeometry(this.opts.terminal.rows, this.opts.terminal.columns);
+      // readline repaints its prompt into the fresh frame. The editor path
+      // just re-wraps its own block at the new width.
+      if (this.#editor) this.#repaint();
+      else this.capture.setGeometry(this.opts.terminal.rows, this.opts.terminal.columns);
     });
     this.guard.installSignals(this.opts.signalHost);
   }
@@ -287,11 +313,77 @@ export class OutputBridge {
 
   setPrompt(text: string): void {
     this.#promptText = text;
+    // The editor repaints at the bridge's own pace (view.setPrompt's contract).
+    this.#editor?.setPrompt(text);
   }
 
   /** During a question takeover the main prompt is not what the user answers. */
   setQuestionMode(on: boolean): void {
     this.#questionMode = on;
+  }
+
+  /** The mounted editor (stage 3b), or null on the readline/capture path. */
+  get editor(): EditorView | null {
+    return this.#editor;
+  }
+
+  /**
+   * Stage-3b editor input: StdinBuffer decodes the KeySource, EditorView owns
+   * the buffer/history/popup, and the frame becomes popup rows + wrapped
+   * editor block (§4 composer order) instead of the readline capture. The two
+   * input paths never coexist; this replaces the capture as the frame source.
+   * The returned fn detaches input.
+   */
+  mountEditorInput(source: KeySource, handlers: EditorInputHandlers): () => void {
+    if (this.#editor) throw new Error("editor input already mounted");
+    const stdin = new StdinBuffer(source, this.opts.clock);
+    const view = new EditorView({ width: () => this.opts.terminal.columns });
+    view.setPrompt(this.#promptText);
+    view.onEvent((e) => this.#onEditorEvent(e, handlers));
+    const detach = view.attachStdin(stdin);
+    this.#editor = view;
+    this.#repaint();
+    return () => {
+      detach();
+      this.#editor = null;
+    };
+  }
+
+  #onEditorEvent(e: EditorEvent, h: EditorInputHandlers): void {
+    switch (e.type) {
+      case "submit":
+        // Prompt+line become the transcript row; the view has already reset.
+        this.lineSubmitted(e.text);
+        h.submit(e.text);
+        return;
+      case "interrupt":
+        this.flushEcho();
+        h.interrupt();
+        return;
+      case "quit":
+        h.quit();
+        return;
+      case "redraw":
+        // ctrl-l: purge scrollback, reprint the transcript, repaint the frame (§6).
+        this.core.purgeAndReprint();
+        return;
+      case "popup":
+        if (e.phase === "request") {
+          const candidates = h.popup?.(e.word, e.from, e.to);
+          // openPopup/close emit, which repaint; an empty set never opens.
+          if (candidates) this.#editor?.openPopup(candidates, e.from);
+        } else {
+          this.#repaint();
+        }
+        return;
+      case "history":
+      case "change":
+        this.#repaint();
+        return;
+      case "unhandled":
+        h.unhandled?.(e.key);
+        return;
+    }
   }
 
   /**
@@ -301,7 +393,8 @@ export class OutputBridge {
   lineSubmitted(line: string): void {
     this.flushPending();
     this.#commitLines([this.#questionMode ? line : this.#promptText + line]);
-    this.capture.reset();
+    if (this.#editor) this.#repaint(); // view buffer already cleared by submit
+    else this.capture.reset();
   }
 
   /**
@@ -310,6 +403,18 @@ export class OutputBridge {
    * permanent row first, then clear the frame for the fresh prompt.
    */
   flushEcho(): void {
+    if (this.#editor) {
+      // The view cleared its buffer before the interrupt event fired, so
+      // commit what the frame last showed (blank rows trimmed, capture parity).
+      const rows = [...this.#lastBlockRows];
+      while (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
+      this.#repaint();
+      if (rows.length > 0) {
+        this.#commitLines(rows);
+        this.#lineOpen = true;
+      }
+      return;
+    }
     const rows = this.capture.frameRows();
     this.capture.reset();
     if (rows.length > 0) {
@@ -358,7 +463,7 @@ export class OutputBridge {
       this.#suspended = false;
       this.core.modes.setRawMode(true);
       this.core.modes.bracketedPaste(true);
-      this.#paintFrame(this.capture.frameRows());
+      this.#repaint();
       for (const listener of saved) stdin.on("data", listener);
     };
   }
@@ -368,23 +473,47 @@ export class OutputBridge {
     this.core.commit(lines);
   }
 
+  /**
+   * Repaint the frame from whichever input path is live: the editor composer
+   * (popup rows above the wrapped block, §4) or the readline capture.
+   */
+  #repaint(): void {
+    const editor = this.#editor;
+    if (!editor) {
+      this.#paintFrame(this.capture.frameRows());
+      return;
+    }
+    const width = this.opts.terminal.columns;
+    const popup = editor.popupRows(width);
+    const block = editor.view(width, Math.max(1, this.opts.terminal.rows - popup.length));
+    this.#lastBlockRows = block.rows;
+    this.#setFrame([...popup, ...block.rows], {
+      row: popup.length + block.cursorRow,
+      col: block.cursorCol,
+    });
+  }
+
   #paintFrame(rows: string[]): void {
+    this.#setFrame(rows, this.capture.cursor());
+  }
+
+  #setFrame(rows: string[], cursor: { row: number; col: number }): void {
     const before = this.core.droppedMutationCount;
-    this.core.setFrame(rows, this.capture.cursor());
+    this.core.setFrame(rows, cursor);
     if (this.core.droppedMutationCount > before) this.#scheduleRepush();
   }
 
   /**
    * INV-6 drops frame mutations while a commit print is pending; the echo
-   * must not be lost, so re-apply the current capture after the drain (the
-   * core's flush immediate was queued first and runs before this one).
+   * must not be lost, so re-apply the current frame content after the drain
+   * (the core's flush immediate was queued first and runs before this one).
    */
   #scheduleRepush(): void {
     if (this.#repushScheduled) return;
     this.#repushScheduled = true;
     this.opts.clock.setImmediate(() => {
       this.#repushScheduled = false;
-      if (!this.core.isDead) this.#paintFrame(this.capture.frameRows());
+      if (!this.core.isDead) this.#repaint();
     });
   }
 }

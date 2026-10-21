@@ -24,7 +24,7 @@ import { ClipboardPasteInterceptor } from "@extensions/ui-interactive-cli/clipbo
 import { CliOutputSink } from "@utils/cli/cli.ts";
 import { applyFinalResponse } from "@utils/cli/colors.ts";
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
-import { GridTerminal, FakeClock } from "@utils/cli/renderer/index.ts";
+import { GridTerminal, FakeClock, MemoryKeySource } from "@utils/cli/renderer/index.ts";
 import type { SignalHost } from "@utils/cli/renderer/index.ts";
 import extensionMeta from "@extensions/ui-interactive-cli/extension.json" with { type: "json" };
 
@@ -846,4 +846,128 @@ describe("mountSplitRenderer real-process probe", () => {
     expect(out).toContain("\x1b[?2004h");
     expect(out).toContain("\x1b[?2004l"); // the exit hook restored the modes
   }, 20000);
+});
+
+describe("editor input mount (stage 3b)", () => {
+  function makeEditorRig(candidates: { label: string; insert?: string }[] = []) {
+    const { bridge, term, clock } = makeBridge();
+    const source = new MemoryKeySource();
+    const calls = {
+      submit: [] as string[],
+      interrupt: 0,
+      quit: 0,
+      unhandled: [] as string[],
+      popupRequests: [] as { word: string; from: number; to: number }[],
+    };
+    bridge.setPrompt("(m)> ");
+    bridge.mount();
+    clock.runAll();
+    const detach = bridge.mountEditorInput(source, {
+      submit: (line) => calls.submit.push(line),
+      interrupt: () => calls.interrupt++,
+      quit: () => calls.quit++,
+      unhandled: (key) => calls.unhandled.push(key),
+      popup: (word, from, to) => {
+        calls.popupRequests.push({ word, from, to });
+        return candidates;
+      },
+    });
+    clock.runAll();
+    return { bridge, term, clock, source, calls, detach };
+  }
+
+  const screen = (term: GridTerminal): string[] =>
+    term.grid.snapshot().screen.map((r) => r.replace(/\s+$/, ""));
+
+  it("typing renders prompt + buffer into the frame; submit commits and resets", () => {
+    const r = makeEditorRig();
+    r.source.push("hi");
+    r.clock.runAll();
+    expect(screen(r.term)[0]).toBe("(m)> hi");
+
+    r.source.push("\r");
+    r.clock.runAll();
+    expect(r.calls.submit).toEqual(["hi"]);
+    expect(r.bridge.transcriptLog).toEqual(["(m)> hi"]);
+    // Frame shows a fresh prompt; the submitted line lives in the transcript.
+    expect(screen(r.term)[0]).toBe("(m)> hi"); // pinned transcript row is row 0
+    expect(screen(r.term).filter((l) => l === "(m)>").length).toBe(1); // trailing space trimmed
+
+    // History up recalls through the bridge frame (no bridge-internal hooks).
+    r.source.push("\x1b[A");
+    r.clock.runAll();
+    expect(screen(r.term)).toContain("(m)> hi");
+    expect(r.bridge.editor?.text).toBe("hi");
+  });
+
+  it("ctrl-c commits the echo, fires interrupt, and the notice leads without a blank row", () => {
+    const r = makeEditorRig();
+    r.source.push("abc");
+    r.clock.runAll();
+    r.source.push("\x03"); // pure interrupt (Decisions 2)
+    r.clock.runAll();
+    expect(r.calls.interrupt).toBe(1);
+    expect(r.bridge.transcriptLog).toEqual(["(m)> abc"]);
+    expect(r.bridge.editor?.text).toBe(""); // stashed to draft, not destroyed
+
+    r.bridge.commitText("\nInterrupted\n");
+    r.clock.runAll();
+    const rows = screen(r.term);
+    // Echo row directly above the notice: the notice's "\n" was the echo's
+    // terminator (#eatTerminator), not a phantom blank row.
+    expect(rows[0]).toBe("(m)> abc");
+    expect(rows[1]).toBe("Interrupted");
+  });
+
+  it("ctrl-d on the empty buffer quits; with text it deletes forward instead", () => {
+    const r = makeEditorRig();
+    r.source.push("\x04");
+    expect(r.calls.quit).toBe(1);
+  });
+
+  it("tab requests a popup, provider rows paint above the editor, enter accepts", () => {
+    const r = makeEditorRig([{ label: "/model", insert: "/model " }]);
+    r.source.push("/mo");
+    r.clock.runAll();
+    r.source.push("\t");
+    r.clock.runAll();
+    expect(r.calls.popupRequests).toEqual([{ word: "/mo", from: 0, to: 3 }]);
+    expect(r.bridge.editor?.popupOpen).toBe(true);
+    const withPopup = screen(r.term);
+    expect(withPopup[0]).toContain("/model"); // popup row above the prompt row
+    expect(withPopup[1]).toBe("(m)> /mo");
+
+    r.source.push("\r"); // enter accepts the popup instead of submitting
+    r.clock.runAll();
+    expect(r.calls.submit).toEqual([]);
+    expect(r.bridge.editor?.text).toBe("/model ");
+  });
+
+  it("ctrl-l purge-and-reprints the transcript; ctrl-x surfaces as unhandled", () => {
+    const r = makeEditorRig();
+    r.bridge.commitText("persisted line\n");
+    r.clock.runAll();
+    r.source.push("\x0c"); // ctrl-l -> redraw -> purge-and-reprint (§6)
+    r.clock.runAll();
+    const rows = screen(r.term);
+    expect(rows[0]).toBe("persisted line");
+
+    r.source.push("\x18"); // ctrl-x: deliberately unhandled in 3a (dictation binds it)
+    expect(r.calls.unhandled).toEqual(["ctrl-x"]);
+  });
+
+  it("detach stops input; re-mount is allowed", () => {
+    const r = makeEditorRig();
+    r.detach();
+    expect(r.bridge.editor).toBeNull();
+    r.source.push("ghost");
+    r.clock.runAll();
+    expect(r.calls.submit).toEqual([]);
+    expect(r.bridge.transcriptLog).toEqual([]);
+    // The seam released its listener (pitfall 6 posture: detach, never pause).
+    expect(r.source.listenerCount).toBe(0);
+    expect(r.bridge.mountEditorInput(r.source, {
+      submit: () => {}, interrupt: () => {}, quit: () => {},
+    })).toBeTypeOf("function");
+  });
 });

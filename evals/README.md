@@ -1,6 +1,6 @@
 # hotdog evals
 
-A standalone runner for measuring **(model x harness)** performance. Plain Bun scripts, nothing here imports from `src/`. The runner shells out to whatever command a harness spec declares, so hotdog is just one harness among potentially many.
+A standalone runner for measuring **(model x harness)** performance. Plain Bun scripts; the one deliberate `src/` import is `src/utils/exec-plan.ts` (the bwrap planner), so the eval sandbox runs every harness through the same jail code hotdog ships for its own tool exec plane. The runner shells out to whatever command a harness spec declares, so hotdog is just one harness among potentially many.
 
 > Real runs hit live generation endpoints and cost tokens. This is deliberately **not** part of `bun test` (the unit tests in `tests/evals/` are pure and endpoint-free).
 
@@ -23,7 +23,7 @@ bun evals/run.ts --series series/kielbasa-1 --task 003-fix-bug \
   --model ai365/qwen3.8-flash-next --model other/model --repeat 3
 ```
 
-Flags: `--series <dir>` (required), `--harness <id>` (repeatable, required), `--model <id>` (repeatable, required), `--judge-harness <id>` / `--judge-model <id>` (required as a pair when any selected task has a judge), `--gateway-key <k>`, `--gateway-url <url>`, `--harness-dir <dir>`, `--venv-dir <dir>` (see "Runtime config"), `--task <id>` (repeatable), `--repeat <n>`, `--concurrency <n>`, `--dry-run`, `--keep-workspace`.
+Flags: `--series <dir>` (required), `--harness <id>` (repeatable, required), `--model <id>` (repeatable, required), `--judge-harness <id>` / `--judge-model <id>` (required as a pair when any selected task has a judge), `--gateway-key <k>`, `--gateway-url <url>`, `--harness-dir <dir>`, `--venv-dir <dir>` (see "Runtime config"), `--task <id>` (repeatable), `--repeat <n>`, `--concurrency <n>`, `--resume <results-dir>`, `--dry-run`, `--keep-workspace`.
 
 Exit code: 0 if every run passed, 1 otherwise. A matrix that plans zero runs (bad `--repeat`/filters) is an error, not a pass.
 
@@ -36,6 +36,12 @@ Harnesses and models are chosen at run time via `--harness`/`--model`, never dec
 3. deterministic checks evaluated against the workspace + captured stdout/exit code;
 4. optional LLM judge (itself a harness call with `--json-schema`, verdict `{pass, reason}`);
 5. a JSONL record appended to `evals/results/<series>-<timestamp>/runs.jsonl`, `summary.json` at the end.
+
+## Resuming a sweep (`--resume`)
+
+Multi-day matrices on personal hardware die (Ctrl-C for a model swap, a reboot, a power cord). `--resume <results-dir>` continues an existing run instead of paying it again: the prior `runs.jsonl` is read, cells whose `run_id` already has a record are skipped, new records append to the same file, and the printed summary (and exit code) covers the whole matrix, prior records included. The dir may be a path or a bare name under `evals/results/`; a directory that doesn't exist is an error, never a silent fresh sweep. A `runs.jsonl` from a different series is refused. A torn trailing line (crash mid-append) is ignored and its cell re-runs. Resuming with a **wider** `--harness`/`--model` list is supported -- unknown cells just get added to the same dir.
+
+Every record carries `harness_rev` (the hotdog checkout's `git rev-parse HEAD` at process start) and `harness_dirty` (uncommitted/untracked changes present); `summary.json` carries the same as `hotdog_rev`/`hotdog_dirty`. A resumed or long-running sweep can therefore span builds, and `formatSummary` says so loudly (`hotdog rev: N mixed -- cells not comparable`) instead of letting a table silently mix SHAs. For a comparable column, keep the working tree clean and re-run the sweep after merging, or resume only across changes you know don't affect the tasks.
 
 ## Harness specs (`evals/harnesses/<id>.json`)
 

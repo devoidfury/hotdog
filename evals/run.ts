@@ -4,6 +4,7 @@
 //                    [--gateway-key <k>] [--gateway-url <url>]
 //                    [--harness-dir <dir>] [--venv-dir <dir>]
 //                    [--repeat n] [--concurrency n] [--dry-run] [--keep-workspace]
+//                    [--resume <results-dir>]
 // Gateway key/url, the harness-checkout root and the venv root come from the
 // flags above or $HOTDOG_EVAL_GATEWAY_KEY / $HOTDOG_EVAL_GATEWAY_URL /
 // $HOTDOG_EVAL_HARNESS_DIR / $HOTDOG_EVAL_VENV_DIR. Nothing machine-specific
@@ -18,6 +19,8 @@ import { startServe } from "./lib/serve.ts";
 import { bwrapArgv, bwrapBinary, baseRoBinds, hiddenRepoPaths, type BwrapPlan } from "../src/utils/exec-plan.ts";
 import { formatJudgePrompt, parseVerdict, runCheck, tail, VERDICT_SCHEMA } from "./lib/score.ts";
 import { buildMatrix, loadSeries } from "./lib/series.ts";
+import { applyResume, loadPriorRuns, resolveResumeDir } from "./lib/resume.ts";
+import { collectProvenance, type Provenance } from "./lib/provenance.ts";
 import { fmtErr, formatDryRun, formatSummary, resultsDirName } from "./lib/format.ts";
 import type { CheckResult, HarnessSpec, MatrixCell, RunRecord } from "./lib/types.ts";
 
@@ -39,6 +42,7 @@ interface Options {
   venvDir: string;
   repeat?: number;
   concurrency?: number;
+  resume?: string;
   dryRun: boolean;
   keepWorkspace: boolean;
 }
@@ -74,6 +78,7 @@ function parseArgs(argv: string[]): Options {
       case "--venv-dir": opts.venvDir = next(); break;
       case "--repeat": opts.repeat = positiveInt(next(), arg); break;
       case "--concurrency": opts.concurrency = positiveInt(next(), arg); break;
+      case "--resume": opts.resume = next(); break;
       case "--dry-run": opts.dryRun = true; break;
       case "--keep-workspace": opts.keepWorkspace = true; break;
       default: throw new Error(`unknown argument "${arg}"`);
@@ -165,6 +170,7 @@ interface RunOpts {
   sandbox: SandboxBase | null;
   sessionsRoot: string;
   runtime: Runtime;
+  provenance: Provenance;
 }
 
 interface SandboxBase {
@@ -218,6 +224,8 @@ async function executeCell(cell: MatrixCell, opts: RunOpts): Promise<RunRecord> 
     checks: [],
     pass: false,
     sandboxed: opts.sandbox !== null,
+    harness_rev: opts.provenance.rev,
+    harness_dirty: opts.provenance.dirty,
     ...partial,
   });
   try {
@@ -389,9 +397,26 @@ async function main(): Promise<number> {
   const runtime = buildRuntime(opts);
   requireRuntime(opts.harnesses.map(loadHarness).concat(judge ? [judge.harness] : []), runtime.vars);
 
+  // Stamp every record with the checkout under test: a multi-day sweep spans
+  // commits, and unstamped cells from different builds compare silently wrong.
+  const provenance = collectProvenance(REPO_ROOT);
+  console.log(`hotdog build: ${provenance.rev ?? "unknown"}${provenance.dirty ? " (dirty tree)" : ""}`);
+
+  // Resume: keep the existing results dir, skip cells it already recorded.
+  const resultsRoot = join(REPO_ROOT, "evals", "results");
+  const resumeDir = opts.resume ? resolveResumeDir(opts.resume, process.cwd(), resultsRoot) : null;
+  const prior = resumeDir ? loadPriorRuns(join(resumeDir, "runs.jsonl")) : { records: [] as RunRecord[], malformed: 0 };
+  const foreign = prior.records.find((r) => r.series !== loaded.series.name);
+  if (foreign) {
+    throw new Error(`--resume ${resumeDir}: its runs.jsonl holds series "${foreign.series}", not "${loaded.series.name}"`);
+  }
+  if (prior.malformed > 0) console.log(`resume: ignored ${prior.malformed} malformed line(s) in runs.jsonl (their cells re-run)`);
+  const { planned, skipped } = resumeDir ? applyResume(cells, prior.records) : { planned: cells, skipped: [] as MatrixCell[] };
+
   if (opts.dryRun) {
-    console.log(formatDryRun(cells));
-    for (const cell of cells) {
+    if (skipped.length) console.log(`resume ${resumeDir}: skipping ${skipped.length} completed run(s)`);
+    console.log(formatDryRun(planned));
+    for (const cell of planned) {
       const harness = loadHarness(cell.harnessId);
       const argv = expandArgv(harness, { ...runtime.vars, prompt: "<prompt>", model: cell.model, schema_file: "<schema>" });
       console.log(`  ${cell.runId}: ${harness.command} ${argv.map((a) => (a.length > 60 ? a.slice(0, 57) + "..." : a)).join(" ")}`);
@@ -401,13 +426,13 @@ async function main(): Promise<number> {
   }
 
   const now = new Date();
-  const resultsDir = join(REPO_ROOT, "evals", "results", resultsDirName(loaded.series.name, now));
+  const resultsDir = resumeDir ?? join(resultsRoot, resultsDirName(loaded.series.name, now));
   mkdirSync(resultsDir, { recursive: true });
   const runsFile = join(resultsDir, "runs.jsonl");
   const schemaFile = join(resultsDir, "verdict.schema.json");
   writeFileSync(schemaFile, JSON.stringify(VERDICT_SCHEMA));
 
-  console.log(`series "${loaded.series.name}": ${cells.length} runs -> ${resultsDir}`);
+  console.log(`series "${loaded.series.name}": ${planned.length} runs${skipped.length ? ` (${skipped.length} resumed/skipped)` : ""} -> ${resultsDir}`);
   const binary = bwrapBinary();
   const sandbox: SandboxBase | null = binary
     ? {
@@ -417,8 +442,8 @@ async function main(): Promise<number> {
       }
     : null;
   console.log(`sandbox: ${sandbox ? "bwrap (allowlist ro; only workspace + session dirs rw)" : "OFF (bwrap missing or sandbox probe failed)"}`);
-  const records: RunRecord[] = [];
-  await pool(cells, opts.concurrency ?? loaded.series.concurrency, async (cell) => {
+  const fresh: RunRecord[] = [];
+  await pool(planned, opts.concurrency ?? loaded.series.concurrency, async (cell) => {
     const record = await executeCell(cell, {
       seriesName: loaded.series.name,
       timeoutSecs: loaded.series.timeout_secs,
@@ -429,16 +454,20 @@ async function main(): Promise<number> {
       sandbox,
       sessionsRoot: join(resultsDir, "sessions"),
       runtime,
+      provenance,
     });
-    records.push(record);
+    fresh.push(record);
     appendFileSync(runsFile, JSON.stringify(record) + "\n");
     const status = record.pass ? "PASS" : "FAIL";
     const why = record.pass ? "" : ` -> ${record.checks.filter((c) => !c.pass).map((c) => c.name).join(", ")}`;
     console.log(`[${status}] ${record.run_id} (${(record.duration_ms / 1000).toFixed(1)}s)${why}`);
   });
 
+  // Prior records join the verdict: a resumed sweep reports (and exits on)
+  // the whole matrix, not just this invocation's slice.
+  const records = [...prior.records, ...fresh];
   const summary = formatSummary(loaded.series.name, resultsDir, records);
-  writeFileSync(join(resultsDir, "summary.json"), JSON.stringify({ series: loaded.series.name, created_at: now.toISOString(), rows: records.length, passed: records.filter((r) => r.pass).length, records }, null, 2));
+  writeFileSync(join(resultsDir, "summary.json"), JSON.stringify({ series: loaded.series.name, created_at: now.toISOString(), resumed: resumeDir !== null, hotdog_rev: provenance.rev, hotdog_dirty: provenance.dirty, rows: records.length, passed: records.filter((r) => r.pass).length, records }, null, 2));
   console.log("\n" + summary);
   return records.every((r) => r.pass) ? 0 : 1;
 }

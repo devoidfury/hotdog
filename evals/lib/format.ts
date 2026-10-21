@@ -42,6 +42,11 @@ export function formatSummary(
   if (records.length > 0) {
     const sandbox = records.every((r) => r.sandboxed) ? "bwrap" : records.some((r) => r.sandboxed) ? "MIXED" : "off";
     lines.push(`sandbox: ${sandbox}`);
+    // A resumed sweep can span builds; mixed revs means the table is not one
+    // apples-to-apples column, which the reader must not miss.
+    const revs = [...new Set(records.map((r) => r.harness_rev ?? "unknown"))];
+    const dirty = records.some((r) => r.harness_dirty) ? " (dirty)" : "";
+    lines.push(`hotdog rev: ${revs.length === 1 ? `${revs[0]}${dirty}` : `${revs.length} mixed -- cells not comparable`}`);
   }
   lines.push(`runs: ${records.length}  passed: ${passed}  failed: ${records.length - passed}`);
   if (records.length === 0) return lines.join("\n");

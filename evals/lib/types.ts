@@ -104,4 +104,8 @@ export interface RunRecord {
   pass: boolean;
   /** True when the harness spawn ran inside bwrap. */
   sandboxed: boolean;
+  /** hotdog checkout under test (`git rev-parse HEAD`); absent in pre-stamp logs. */
+  harness_rev?: string | null;
+  /** True when that checkout had uncommitted changes at process start. */
+  harness_dirty?: boolean | null;
 }

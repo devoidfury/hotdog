@@ -222,6 +222,7 @@ export class OutputBridge {
   #lineOpen = false;
   #promptText = "";
   #questionMode = false;
+  #questionDraft = "";
   #mounted = false;
   #suspended = false;
   #repushScheduled = false;
@@ -325,9 +326,28 @@ export class OutputBridge {
     }
   }
 
-  /** During a question takeover the main prompt is not what the user answers. */
+  /**
+   * §8 question focus flag, and the prompt draft parked while the question
+   * owns the input. A half-typed draft must not merge into the answer, so
+   * entering question mode stashes the buffer (and clears it); every exit
+   * path restores it. EditorCliInput.collectAnswers flips this flag in a
+   * try/finally, so resolve, abort, and error exits all run the restore --
+   * setText only replaces buffer text and repaints, it never submits, so
+   * the revived draft waits for its own Enter.
+   */
   setQuestionMode(on: boolean): void {
+    if (on === this.#questionMode) return;
     this.#questionMode = on;
+    const view = this.#editor;
+    if (!view) return; // capture/readline path has no editor buffer to park
+    if (on) {
+      this.#questionDraft = view.text;
+      view.setText("");
+    } else {
+      const draft = this.#questionDraft;
+      this.#questionDraft = "";
+      view.setText(draft);
+    }
   }
 
   /** True while a question owns the input (the popup is suppressed, §8). */
@@ -387,15 +407,32 @@ export class OutputBridge {
 
   #onEditorEvent(e: EditorEvent, h: EditorInputHandlers): void {
     switch (e.type) {
-      case "submit":
-        // Prompt+line become the transcript row; the view has already reset.
-        this.lineSubmitted(e.text);
+      case "submit": {
         // A pending question owns the input: the line answers it and never
         // reaches the normal submit handler (§8 exclusivity).
         const waiter = this.#lineWaiters.shift();
+        if (e.text.trim() === "") {
+          // Legacy's lineHandler treats a trimmed-blank line (empty or
+          // whitespace-only, either one) as "repaint the prompt, do
+          // nothing", and readline writes no scrollback byte for it. The
+          // editor echo would freeze the bare "(model)> " into write-once
+          // scrollback, so a blank submit never echo-commits; the frame
+          // repaint (the view already cleared its buffer) and the normal
+          // handler still run so lineHandler executes its own blank
+          // early-return like the readline "line" event did. An empty
+          // answer with a waiter open is legitimate (§8 free text) and
+          // resolves silently: no row at all, not even a blank one.
+          this.#repaint();
+          if (waiter) waiter(e.text);
+          else h.submit(e.text);
+          return;
+        }
+        // Prompt+line become the transcript row; the view has already reset.
+        this.lineSubmitted(e.text);
         if (waiter) waiter(e.text);
         else h.submit(e.text);
         return;
+      }
       case "interrupt":
         this.flushEcho();
         h.interrupt();

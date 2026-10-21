@@ -8,7 +8,6 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import readline from "node:readline";
 import { EventEmitter } from "node:events";
-import { join } from "node:path";
 import { Readable } from "node:stream";
 import {
   shouldMountRenderer,
@@ -1496,6 +1495,211 @@ describe("module-slot release after mounted sessions (sequential-process hygiene
     const after = await sayGoodbye();
     expect(after.join("\n")).toContain("Goodbye!");
     expect(after.join("\n")).toContain("slot-test");
+  });
+});
+
+// ── Stage-3b audit ledger closure (run 20261020-2233): items B, C, G ──
+
+import { create } from "@extensions/ui-interactive-cli/index.ts";
+
+describe("editor session swap: blank submit never dirties scrollback (ledger B)", () => {
+  it("empty and whitespace-only Enter commit no row; typed submits still echo", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    rig.clock.runAll();
+
+    // Legacy treats a trimmed-blank line as "repaint the prompt" (lineHandler's
+    // normalizeLine(line).trim() early return), so neither an empty Enter nor a
+    // whitespace-only one may ever write a scrollback row -- the bare prompt
+    // "(test-model)> " must stay the single prompt row the live frame shows.
+    const promptRows = () => rig.screenRows().filter((r) => r === "(test-model)>").length;
+    const nonBlankRows = () => rig.screenRows().filter((r) => r !== "").length;
+    const rowsBefore = nonBlankRows();
+    const logBefore = rig.bridge.transcriptLog.length;
+    expect(promptRows()).toBe(1);
+
+    rig.keys.push("\r"); // truly empty
+    await tick();
+    rig.clock.runAll();
+    rig.keys.push("   \r"); // whitespace-only: legacy's trim treats it as empty too
+    await tick();
+    rig.clock.runAll();
+
+    expect(rig.screenRows().length).toBe(24); // the viewport itself never grows
+    expect(nonBlankRows()).toBe(rowsBefore); // and neither does visible content
+    expect(promptRows()).toBe(1); // no committed "(test-model)> " row exists
+    expect(rig.bridge.transcriptLog.length).toBe(logBefore); // nothing echoed
+    expect(rig.calls.enqueue).toEqual([]); // and no phantom turn was submitted
+
+    // The non-blank path keeps legacy's echo-commit exactly.
+    rig.keys.push("hello world\r");
+    await tick();
+    rig.clock.runAll();
+    expect(rig.calls.enqueue).toEqual(["hello world"]);
+    expect(rig.bridge.transcriptLog).toContain("(test-model)> hello world");
+    expect(nonBlankRows()).toBe(rowsBefore + 1);
+  });
+
+  it("an empty answer while a question owns the input resolves silently", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    const input = new EditorCliInput(rig.bridge);
+
+    const origOut = process.stdout.write;
+    process.stdout.write = (() => true) as never;
+    let answers: Record<string, string>;
+    let logAfterMenu = 0;
+    let screenAfterMenu = 0;
+    try {
+      // required:false free text: an empty answer is a legitimate answer, so
+      // the blank-submit guard must route it to the waiter, never swallow it.
+      const pending = input.collectAnswers([{ key: "note", prompt: "Note?", required: false }], null);
+      await tick();
+      rig.clock.runAll();
+      expect(rig.bridge.questionMode).toBe(true);
+      // The question menu legitimately commits rows; the baseline for "the
+      // empty answer itself stays silent" starts once the menu is up.
+      logAfterMenu = rig.bridge.transcriptLog.length;
+      screenAfterMenu = rig.screenRows().filter((r) => r !== "").length;
+
+      rig.keys.push("\r");
+      answers = await pending;
+    } finally {
+      process.stdout.write = origOut;
+    }
+
+    expect(answers).toEqual({ note: "" }); // the waiter resolved with the empty line
+    expect(rig.bridge.questionMode).toBe(false);
+    // Chosen echo rule (ledger-notes): resolve SILENTLY. No bare prompt row,
+    // not even a blank one, enters write-once scrollback.
+    expect(rig.bridge.transcriptLog.length).toBe(logAfterMenu);
+    rig.clock.runAll();
+    expect(rig.screenRows().filter((r) => r !== "").length).toBe(screenAfterMenu);
+    expect(rig.calls.enqueue).toEqual([]); // an answer never reaches the model queue
+  });
+});
+
+describe("editor session swap: question entry stashes the draft (ledger C, note 8)", () => {
+  it("the half-typed draft is parked on entry and restored on resolve, without auto-submitting", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+
+    rig.keys.push("draft in progress");
+    rig.clock.runAll();
+    expect(rig.bridge.editor?.text).toBe("draft in progress");
+
+    const origOut = process.stdout.write;
+    process.stdout.write = (() => true) as never;
+    let answers: Record<string, string>;
+    try {
+      const pending = new EditorCliInput(rig.bridge).collectAnswers(
+        [{ key: "ok", prompt: "Proceed?", required: false }],
+        null,
+      );
+      await tick();
+      rig.clock.runAll();
+
+      // Entry stashed: the answer buffer starts clean and the draft left the
+      // frame entirely (no merge into the answer).
+      expect(rig.bridge.editor?.text).toBe("");
+      expect(rig.screenRows().some((r) => r.includes("draft in progress"))).toBe(false);
+
+      rig.keys.push("yes\r");
+      answers = await pending;
+    } finally {
+      process.stdout.write = origOut;
+    }
+
+    expect(answers).toEqual({ ok: "yes" });
+    // Restore on the resolve path: typing survived the interruption...
+    expect(rig.bridge.editor?.text).toBe("draft in progress");
+    rig.clock.runAll();
+    expect(rig.screenRows().some((r) => r.includes("draft in progress"))).toBe(true);
+    // ...and nothing auto-submitted it: the revived draft waits for its own Enter.
+    expect(rig.calls.enqueue).toEqual([]);
+
+    rig.keys.push("\r");
+    await tick();
+    expect(rig.calls.enqueue).toEqual(["draft in progress"]);
+  });
+
+  it("the abort path restores the stashed draft too", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+
+    rig.keys.push("half-typed");
+    rig.clock.runAll();
+
+    const controller = new AbortController();
+    const origOut = process.stdout.write;
+    process.stdout.write = (() => true) as never;
+    let answers: Record<string, string>;
+    try {
+      const pending = new EditorCliInput(rig.bridge).collectAnswers(
+        [{ key: "x", prompt: "X?", options: ["a"] }],
+        controller.signal,
+      );
+      await tick();
+      expect(rig.bridge.editor?.text).toBe(""); // parked
+
+      controller.abort();
+      answers = await pending; // partial answers resolve, never reject
+    } finally {
+      process.stdout.write = origOut;
+    }
+
+    expect(answers).toEqual({});
+    expect(rig.bridge.questionMode).toBe(false);
+    // The finally-block flag release runs the restore on ALL paths, abort included.
+    expect(rig.bridge.editor?.text).toBe("half-typed");
+    expect(rig.calls.enqueue).toEqual([]); // restored, not auto-submitted
+  });
+});
+
+describe("editor session swap: paste-marker answer through the session's own wiring (ledger G)", () => {
+  it("a bracketed-paste answer resolves with the full restored content, not the marker token", async () => {
+    const rig = makeSessionRig({ uiCli: { shellMode: false, pasteMarkerMinChars: 10 } });
+    await rig.done;
+
+    // Fetch the input the SESSION constructed: the default setupInput wired
+    // EditorCliInput(bridge, normalizeLine) into the tool-context slot, and
+    // the extension's AGENT_TOOL_CONTEXT hook is how the tool executor gets
+    // it. A hand-rolled EditorCliInput(bridge) would carry no normalizeLine
+    // and silently skip the marker restore, pinning nothing -- so the
+    // instance under test must come through this seam.
+    const toolCtx = new Map<string, unknown>();
+    create({} as never).hooks![HOOKS.AGENT_TOOL_CONTEXT]!({ toolCtx } as never);
+    const input = toolCtx.get("input");
+    expect(input).toBeInstanceOf(EditorCliInput);
+
+    const origOut = process.stdout.write;
+    process.stdout.write = (() => true) as never;
+    let answers: Record<string, string>;
+    try {
+      const pending = (input as EditorCliInput).collectAnswers(
+        [{ key: "log", prompt: "Paste the failing log?", required: false }],
+        null,
+      );
+      await tick();
+      expect(rig.bridge.questionMode).toBe(true);
+
+      rig.keys.push("\x1b[200~alpha\nbravo\ncharlie\x1b[201~");
+      rig.clock.runAll();
+      expect(rig.bridge.editor?.text).toBe("[Paste #1 - 3 lines]"); // collapsed for the buffer
+
+      rig.keys.push("\r"); // Enter submits the answer with the marker still in it
+      answers = await pending;
+    } finally {
+      process.stdout.write = origOut;
+    }
+
+    // The waiter received the FULL RESTORED CONTENT: only the session's own
+    // normalizeLine can turn the marker back into the paste, so this
+    // assertion is itself the proof the session wiring ran.
+    expect(answers).toEqual({ log: "alpha\nbravo\ncharlie" });
+    expect(JSON.stringify(answers)).not.toContain("Paste #");
+    expect(rig.calls.enqueue).toEqual([]);
+    expect(rig.bridge.questionMode).toBe(false);
   });
 });
 

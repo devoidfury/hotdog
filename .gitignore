@@ -101,6 +101,9 @@ runs/
 # eval run artifacts
 evals/results/
 
+# pty-tests lane run artifacts
+pty-tests/results/
+
 # Big generated eval fixtures -- materialized by `bun run prepare`
 # (evals/tools/prepare.ts), not committed.
 # The l10n batch task JSONs + fixture dirs below are regenerated from evals/tools/l10n-data.ts so localized text lives in one place.

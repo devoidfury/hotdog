@@ -658,8 +658,10 @@ export async function runInteractiveSession(
   });
 
   // Split-renderer kill switch (design note §9/§12): mounts iff the knob says
-  // "split" AND both stdio streams are TTYs. Non-TTY is passthrough
-  // regardless of the knob; "legacy" (the default) never touches a global.
+  // "split" AND both stdio streams are TTYs AND TERM is not the "dumb"
+  // convention string (the exact comparison colors.ts makes). Non-TTY is
+  // passthrough regardless of the knob; "legacy" (the default) never touches a
+  // global.
   // options.bridge injects an already-mounted rig bridge for the split-mode
   // session tests (§11 constructor injection); omitting it keeps the real
   // mount decision untouched.

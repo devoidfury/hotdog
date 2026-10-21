@@ -25,17 +25,68 @@ import type { Completion } from "@utils/cli/renderer/popup.ts";
 import type { Clock, KeySource, SignalHost, Terminal } from "@utils/cli/renderer/seams.ts";
 
 /**
- * §9 mount rule, verbatim: the renderer attaches iff the knob is "split"
- * AND stdin.isTTY AND stdout.isTTY. Any other combination runs today's
- * passthrough path -- non-TTY is a code path that never mounts, not a set
- * of conditionals inside the renderer. Legacy knob = never, byte-identical.
+ * §9 mount rule (stage-3c wording): the renderer attaches iff the knob is
+ * "split" AND stdin.isTTY AND stdout.isTTY AND the environment does not name
+ * itself a dumb terminal. Any other combination runs today's passthrough
+ * path -- non-TTY is a code path that never mounts, not a set of conditionals
+ * inside the renderer. Legacy knob = never, byte-identical.
+ *
+ * The dumb check mirrors the EXACT comparison colors.ts makes in
+ * colorDisabledByEnv(): `env.TERM === "dumb"` -- strict equality against the
+ * lowercase terminfo convention string. That comparison is deliberately
+ * case-sensitive and substring-free here too: "DUMB", "dumb-" or " xterm"
+ * are not the convention and do not decline. NO_COLOR is NOT consulted at
+ * this gate (owner ruling 2026-10-21): frames are geometry, not color; a
+ * NO_COLOR TTY mounts the split renderer and renders with color disabled,
+ * which colors.ts already does for the transcript channels. TERM=dumb
+ * declines because a dumb terminal cannot host cursor-addressed geometry at
+ * all; the session then runs the legacy path unchanged.
  */
 export function shouldMountRenderer(
   knob: unknown,
   stdinIsTTY: unknown,
   stdoutIsTTY: unknown,
+  term: unknown = undefined,
 ): boolean {
-  return knob === "split" && stdinIsTTY === true && stdoutIsTTY === true;
+  return knob === "split" && stdinIsTTY === true && stdoutIsTTY === true && term !== "dumb";
+}
+
+/** What mountSplitRenderer's §9 gate would decide, with the "why" attached. */
+export interface RendererPosture {
+  /** The knob reading: "split", or anything else (the default) = "legacy". */
+  mode: "split" | "legacy";
+  /** True only when EVERY gate is open for this exact environment. */
+  mount: boolean;
+  /** Short honest reason for the decision, shaped for `hotdog info`. */
+  reason: string;
+}
+
+/**
+ * The §9 gate as a pure decision with a reason. It re-derives each condition
+ * of shouldMountRenderer to attach its "why", in the same order; the test
+ * matrix pins mount === shouldMountRenderer on every combination, so the two
+ * can never drift silently. `hotdog info` prints
+ * this projection because info runs OUTSIDE any session: nothing is mounted
+ * at report time, and since the gate reads only knob + TTY + TERM, the
+ * projection is exactly what the next interactive session in this same
+ * environment would do.
+ */
+export function rendererMountPosture(
+  knob: unknown,
+  stdinIsTTY: unknown,
+  stdoutIsTTY: unknown,
+  term: unknown,
+): RendererPosture {
+  if (knob !== "split") {
+    return { mode: "legacy", mount: false, reason: "knob off; split renderer never mounts" };
+  }
+  if (stdinIsTTY !== true || stdoutIsTTY !== true) {
+    return { mode: "split", mount: false, reason: "declines here: stdin/stdout not both a TTY; passthrough" };
+  }
+  if (term === "dumb") {
+    return { mode: "split", mount: false, reason: "declines here: TERM=dumb; session runs the legacy path" };
+  }
+  return { mode: "split", mount: true, reason: "mounts here: TTY pair, TERM not dumb" };
 }
 
 /** SignalHost seam over the real process (TeardownGuard step 7 removes). */
@@ -605,6 +656,13 @@ export interface IoPatchHost {
     log(...args: unknown[]): void;
     error(...args: unknown[]): void;
     warn(...args: unknown[]): void;
+    // Stage-3c routed methods. Optional so rig consoles may stay 3-method
+    // shaped; the real globalThis.console always carries all six. A rig that
+    // omits one still gets it patched while mounted and gets the (undefined)
+    // original back at restore.
+    debug?(...args: unknown[]): void;
+    info?(...args: unknown[]): void;
+    trace?(...args: unknown[]): void;
   };
 }
 
@@ -619,7 +677,16 @@ function consoleArgs(args: unknown[]): string {
  * patching the stream alone would miss it), and neuter stdin.pause --
  * pitfall 6: the shell-exec bracket may stay, but it must never pause the
  * shared stream; the child handoff is OutputBridge.suspend()/resume() (§5).
- * Returns the restore function (registered as a TeardownGuard hook).
+ * Returns the restore function (registered as a TeardownGuard hook, so the
+ * restore runs exactly once on every exit path).
+ *
+ * console.error/warn go to the arbiter; stage 3c (owner ruling) adds
+ * console.debug/info/trace to the SAME arbiter path -- they are diagnostics
+ * exactly like warn/error, and a live frame must not shred them or swallow
+ * them. console.log keeps its PRE-EXISTING commit-channel patch from stage
+ * 2b: it is permanent output (the uiOut default lands here once the session
+ * rebinds), it predates this batch, existing assertions pin it, and this
+ * batch changes its semantics not at all.
  */
 export function installIoPatches(bridge: OutputBridge, host: IoPatchHost): () => void {
   const origOutWrite = host.stdout.write;
@@ -628,6 +695,9 @@ export function installIoPatches(bridge: OutputBridge, host: IoPatchHost): () =>
   const origLog = host.console.log;
   const origError = host.console.error;
   const origWarn = host.console.warn;
+  const origDebug = host.console.debug;
+  const origInfo = host.console.info;
+  const origTrace = host.console.trace;
 
   const routed = (channel: (text: string) => void) => {
     return (chunk: unknown, a2?: unknown, a3?: unknown): boolean => {
@@ -644,6 +714,9 @@ export function installIoPatches(bridge: OutputBridge, host: IoPatchHost): () =>
   host.console.log = (...args: unknown[]): void => bridge.commitText(consoleArgs(args) + "\n");
   host.console.error = (...args: unknown[]): void => bridge.arbiteText(consoleArgs(args) + "\n");
   host.console.warn = (...args: unknown[]): void => bridge.arbiteText(consoleArgs(args) + "\n");
+  host.console.debug = (...args: unknown[]): void => bridge.arbiteText(consoleArgs(args) + "\n");
+  host.console.info = (...args: unknown[]): void => bridge.arbiteText(consoleArgs(args) + "\n");
+  host.console.trace = (...args: unknown[]): void => bridge.arbiteText(consoleArgs(args) + "\n");
 
   return () => {
     host.stdout.write = origOutWrite;
@@ -652,6 +725,9 @@ export function installIoPatches(bridge: OutputBridge, host: IoPatchHost): () =>
     host.console.log = origLog;
     host.console.error = origError;
     host.console.warn = origWarn;
+    host.console.debug = origDebug;
+    host.console.info = origInfo;
+    host.console.trace = origTrace;
   };
 }
 
@@ -660,6 +736,12 @@ export interface SplitMountOptions {
   knob: unknown;
   stdinIsTTY?: unknown;
   stdoutIsTTY?: unknown;
+  /**
+   * Environment the §9 dumb gate reads (TERM). Defaults to process.env;
+   * tests inject. NO_COLOR is deliberately NOT read here -- see the
+   * shouldMountRenderer header (frames are geometry, not color).
+   */
+  env?: Record<string, string | undefined>;
   /** Process surface to patch; defaults to the real process (tests inject). */
   host?: IoPatchHost;
 }
@@ -738,11 +820,22 @@ export function installCrashTeardown(bridge: OutputBridge, host: CrashTeardownHo
  * single global (the legacy/passthrough guarantee). The Terminal writes
  * through handles captured BEFORE the patches land -- writing through
  * process.stdout.write after patching would recurse into the bridge.
+ *
+ * The gate is the full §9 rule (see shouldMountRenderer for the long form):
+ * knob "split" AND both stdio streams TTY AND the environment not naming
+ * itself dumb. A TTY whose TERM is exactly "dumb" (the same strict comparison
+ * colors.ts's colorDisabledByEnv uses) declines HERE, before the Terminal is
+ * constructed and before any console/stream global is patched -- the same
+ * shape as the knob and non-TTY declines, so a declined session emits zero
+ * frame bytes, zero mode bytes and runs today's legacy path byte-identically.
+ * NO_COLOR never declines: frames are geometry, and color-off rendering is
+ * already colors.ts's job on the transcript channels.
  */
 export function mountSplitRenderer(options: SplitMountOptions): OutputBridge | null {
   const stdinIsTTY = options.stdinIsTTY ?? process.stdin.isTTY;
   const stdoutIsTTY = options.stdoutIsTTY ?? process.stdout.isTTY;
-  if (!shouldMountRenderer(options.knob, stdinIsTTY, stdoutIsTTY)) return null;
+  const env = options.env ?? process.env;
+  if (!shouldMountRenderer(options.knob, stdinIsTTY, stdoutIsTTY, env.TERM)) return null;
 
   const realStdout = process.stdout;
   const rawWrite = realStdout.write.bind(realStdout);

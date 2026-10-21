@@ -1841,3 +1841,470 @@ describe("editor session swap: paste-marker answer through the session's own wir
 // sequential `bun test` (and the coverage script) green for every file that
 // runs after this one in the same process.
 afterAll(resetUiSlotsForTesting);
+
+// ══ Stage-3c (run 20261021-0353) ═════════════════════════════════════════
+// §9 dumb-term mount gate (owner ruling 2026-10-21: NO_COLOR must NOT decline,
+// TERM=dumb declines -> legacy path), console.debug/info/trace arbiter routing
+// (ruling: routed while a real mount is live, restorable exactly once), and
+// the cursorCol clamp probes (3b contract §5 leftover: the view documents
+// "cursorCol may equal width; the composer clamps it" -- these probes decide
+// whether an out-of-range col reaches the wire or breaks geometry, and pin
+// what holds).
+
+import { rendererMountPosture } from "@extensions/ui-interactive-cli/split-bridge.ts";
+import { visibleWidth } from "@utils/cli/renderer/width.ts";
+
+/** Identity snapshot of every global installIoPatches can swap. */
+function pristineGlobals(): Record<string, unknown> {
+  return {
+    out: process.stdout.write,
+    err: process.stderr.write,
+    pause: process.stdin.pause,
+    log: console.log,
+    error: console.error,
+    warn: console.warn,
+    debug: console.debug,
+    info: console.info,
+    trace: console.trace,
+  };
+}
+
+function expectPristine(before: Record<string, unknown>): void {
+  const now = pristineGlobals();
+  for (const key of Object.keys(before)) expect(now[key]).toBe(before[key]);
+}
+
+/** IoPatchHost whose six console methods are all present as unique originals. */
+function sixMethodHost(): { host: IoPatchHost; originals: Record<string, unknown> } {
+  const originals: Record<string, unknown> = {};
+  const consoleRig: Record<string, unknown> = {};
+  for (const name of ["log", "error", "warn", "debug", "info", "trace"]) {
+    originals[name] = () => {};
+    consoleRig[name] = originals[name];
+  }
+  const origOut = () => true;
+  const origErr = () => true;
+  const origPause = () => "paused";
+  originals.stdoutWrite = origOut;
+  originals.stderrWrite = origErr;
+  originals.stdinPause = origPause;
+  const host: IoPatchHost = {
+    stdout: { write: origOut as never },
+    stderr: { write: origErr as never },
+    stdin: { pause: origPause },
+    console: consoleRig as never,
+  };
+  return { host, originals };
+}
+
+const PROBE = join(import.meta.dir, "../fixtures/split-mount-probe.ts");
+
+// env entries set to undefined are REMOVED from the child environment --
+// that is how the "NO_COLOR absent" runs are built (the test runner itself
+// may carry NO_COLOR/TERM).
+async function spawnProbe(
+  env: Record<string, string | undefined>,
+): Promise<{ out: string; err: string; code: number }> {
+  const child: Record<string, string> = {};
+  for (const [k, v] of Object.entries({ ...process.env, HOTDOG_LOG_TARGET: "none", ...env })) {
+    if (v !== undefined) child[k] = v;
+  }
+  const proc = Bun.spawn(["bun", PROBE], { stdout: "pipe", stderr: "pipe", env: child });
+  const [out, err] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  return { out, err, code: await proc.exited };
+}
+
+describe("§9 dumb-term mount gate (stage 3c)", () => {
+  it("shouldMountRenderer declines TERM=dumb with the exact comparison colors.ts makes", () => {
+    // colors.ts colorDisabledByEnv compares `env.TERM === "dumb"` -- strict
+    // equality against the lowercase terminfo convention string, no trim, no
+    // case fold, no substring. The gate mirrors THAT comparison:
+    expect(shouldMountRenderer("split", true, true, "dumb")).toBe(false);
+    expect(shouldMountRenderer("split", true, true, "DUMB")).toBe(true);
+    expect(shouldMountRenderer("split", true, true, "dumb-256")).toBe(true);
+    expect(shouldMountRenderer("split", true, true, " xterm-dumb")).toBe(true);
+    // A normal TERM and an UNSET TERM both keep today's behavior (mount).
+    expect(shouldMountRenderer("split", true, true, "xterm-256color")).toBe(true);
+    expect(shouldMountRenderer("split", true, true, undefined)).toBe(true);
+    // The knob and TTY gates are unchanged by the new one:
+    expect(shouldMountRenderer("legacy", true, true, "dumb")).toBe(false);
+    expect(shouldMountRenderer("split", false, true, "screen")).toBe(false);
+    expect(shouldMountRenderer("split", true, false, "screen")).toBe(false);
+  });
+
+  it("rendererMountPosture is the same gate with an honest reason (single predicate)", () => {
+    const combos: [unknown, unknown, unknown, unknown][] = [
+      ["split", true, true, "xterm"],
+      ["split", true, true, "dumb"],
+      ["split", true, true, undefined],
+      ["split", false, true, "xterm"],
+      ["split", true, false, "dumb"],
+      ["legacy", true, true, "xterm"],
+      [undefined, true, true, undefined],
+    ];
+    for (const [k, si, so, t] of combos) {
+      const p = rendererMountPosture(k, si, so, t);
+      expect(p.mount).toBe(shouldMountRenderer(k, si, so, t));
+      expect(p.mode).toBe(k === "split" ? "split" : "legacy");
+      expect(p.reason.length).toBeGreaterThan(0);
+    }
+    // The reasons are the three §9 declines, distinguishable:
+    expect(rendererMountPosture("split", true, true, "dumb").reason).toContain("TERM=dumb");
+    expect(rendererMountPosture("split", false, true, "xterm").reason).toContain("TTY");
+    expect(rendererMountPosture("legacy", true, true, "xterm").reason).toContain("knob");
+  });
+
+  it("a dumb TTY declines the mount before any global is touched (null bridge)", () => {
+    const before = pristineGlobals();
+    expect(
+      mountSplitRenderer({ knob: "split", stdinIsTTY: true, stdoutIsTTY: true, env: { TERM: "dumb" } }),
+    ).toBeNull();
+    // Decline happens BEFORE the Terminal is constructed, so no frame/mode
+    // byte exists to be written, and no global was patched:
+    expectPristine(before);
+  });
+
+  it("TERM=dumb beside NO_COLOR=1 declines too; NO_COLOR alone never declines", () => {
+    const before = pristineGlobals();
+    expect(
+      mountSplitRenderer({
+        knob: "split",
+        stdinIsTTY: true,
+        stdoutIsTTY: true,
+        env: { TERM: "dumb", NO_COLOR: "1" },
+      }),
+    ).toBeNull();
+    expectPristine(before);
+    // NO_COLOR with a working TERM must NOT decline (owner ruling): a colorless
+    // but capable TTY gets the split renderer; color-off is colors.ts's job.
+    const { host, originals } = sixMethodHost();
+    const bridge = mountSplitRenderer({
+      knob: "split",
+      stdinIsTTY: true,
+      stdoutIsTTY: true,
+      env: { TERM: "xterm-256color", NO_COLOR: "1" },
+      host,
+    });
+    expect(bridge).not.toBeNull();
+    // Patches rode the INJECTED host only -- the real process is untouched:
+    expect(host.console.log).not.toBe(originals.log);
+    expect(process.stdout.write).toBe(before.out as never);
+    expect(console.debug).toBe(before.debug as never);
+    bridge!.shutdown();
+    expectPristine(before); // the guard restored the host; nothing lingered
+  });
+
+  it("legacy runs never patch console at all: pristine six-method identity", () => {
+    const before = pristineGlobals();
+    // Knob legacy on a full declared TTY pair, with and without an explicit
+    // env; knob unset; split on non-TTY stdio. None may touch a global.
+    expect(mountSplitRenderer({ knob: "legacy", stdinIsTTY: true, stdoutIsTTY: true })).toBeNull();
+    expect(
+      mountSplitRenderer({ knob: "legacy", stdinIsTTY: true, stdoutIsTTY: true, env: { TERM: "xterm" } }),
+    ).toBeNull();
+    expect(mountSplitRenderer({ knob: undefined, stdinIsTTY: true, stdoutIsTTY: true })).toBeNull();
+    expect(
+      mountSplitRenderer({ knob: "split", stdinIsTTY: false, stdoutIsTTY: true, env: { TERM: "xterm" } }),
+    ).toBeNull();
+    expectPristine(before); // log/error/warn AND debug/info/trace all untouched
+  });
+
+  it("real-process probe: TERM=dumb yields zero frame/mode bytes and plain passthrough", async () => {
+    const { out, err, code } = await spawnProbe({
+      PROBE_MODE: "dumb",
+      TERM: "dumb",
+      NO_COLOR: undefined, // decline stands on dumb alone
+    });
+    expect(code).toBe(0);
+    expect(err).toContain("dumb-passthrough-stderr");
+    expect(err).not.toContain("MOUNT_FAILED"); // decline is the EXPECTED path
+    // Zero cursor-control bytes of any kind: the §9 non-mount contract is the
+    // absence of EVERY escape, and the session's own writes are byte-plain.
+    expect(out).not.toContain("\x1b");
+    expect(out).toBe("dumb-passthrough-stdout\ndumb-passthrough-console\n");
+    expect(err.replace("dumb-passthrough-stderr\n", "")).not.toContain("\x1b");
+  }, 20000);
+
+  it("real-process probe: TERM=dumb + NO_COLOR=1 declines identically", async () => {
+    const { out, err, code } = await spawnProbe({
+      PROBE_MODE: "dumb",
+      TERM: "dumb",
+      NO_COLOR: "1",
+    });
+    expect(code).toBe(0);
+    expect(out).not.toContain("\x1b");
+    expect(out).toBe("dumb-passthrough-stdout\ndumb-passthrough-console\n");
+    expect(err).toContain("dumb-passthrough-stderr");
+  }, 20000);
+
+  it("real-process probe: NO_COLOR=1 with a normal TERM still mounts (frames are geometry)", async () => {
+    const { out, code } = await spawnProbe({ NO_COLOR: "1", TERM: "xterm-256color" });
+    expect(code).toBe(7); // the mounted probe's exit seam
+    expect(out).toContain("\x1b[?2004h"); // the mount enable pair
+    expect(out).toContain("console-routed-line");
+    expect(out).toContain("\x1b[?2004l"); // and the paired restore
+  }, 20000);
+
+  it("real-process probe: unset TERM still mounts (§9 declines ONLY on the exact dumb string)", async () => {
+    const { out, code } = await spawnProbe({ PROBE_MODE: "term-unset", TERM: undefined });
+    expect(out).not.toContain("MOUNT_FAILED");
+    expect(code).toBe(7);
+    expect(out).toContain("\x1b[?2004h");
+    expect(out).toContain("stdout-routed-line");
+  }, 20000);
+});
+
+describe("installIoPatches routes console.debug/info/trace (stage 3c ruling)", () => {
+  it("debug/info/trace go through the arbiter path alongside error/warn", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    const { host } = sixMethodHost();
+    installIoPatches(bridge, host);
+    const con = host.console as Required<IoPatchHost["console"]>;
+
+    con.log("out-1");
+    con.error("err-1");
+    con.debug("dbg-1");
+    con.info("info-1");
+    con.trace("trace-1", { a: 1 });
+    con.warn("warn-1");
+    clock.runAll();
+
+    // All six are permanent rows in call order; the trace args stringify like
+    // the other methods' (never a stack -- the patched method never sees the
+    // real console's trace machinery).
+    expect(bridge.transcriptLog).toEqual([
+      "out-1",
+      "err-1",
+      "dbg-1",
+      "info-1",
+      "trace-1 [object Object]",
+      "warn-1",
+    ]);
+  });
+
+  it("debug/info/trace ride the ARBITER side: they flush an open stdout partial first", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    const { host } = sixMethodHost();
+    installIoPatches(bridge, host);
+
+    host.stdout.write("open-out-partial"); // unterminated stdout row
+    const con = host.console as Required<IoPatchHost["console"]>;
+    con.debug("dbg-then"); // arbiter semantics: out partial commits FIRST
+    con.info("info-then");
+    clock.runAll();
+
+    expect(bridge.transcriptLog).toEqual(["open-out-partial", "dbg-then", "info-then"]);
+  });
+
+  it("restore returns ALL SIX console originals exactly, paired once (TeardownGuard shape)", () => {
+    const { bridge } = makeBridge();
+    bridge.mount();
+    const { host, originals } = sixMethodHost();
+    const restore = installIoPatches(bridge, host);
+
+    const con = host.console as Required<IoPatchHost["console"]>;
+    con.debug("dbg");
+    con.info("info");
+    con.trace("trace");
+    expect(host.console.debug).not.toBe(originals.debug);
+
+    restore();
+    const c = host.console as unknown as Record<string, unknown>;
+    expect(c.log).toBe(originals.log);
+    expect(c.error).toBe(originals.error);
+    expect(c.warn).toBe(originals.warn);
+    expect(c.debug).toBe(originals.debug);
+    expect(c.info).toBe(originals.info);
+    expect(c.trace).toBe(originals.trace);
+    expect(host.stdout.write).toBe(originals.stdoutWrite as never);
+    expect(host.stderr.write).toBe(originals.stderrWrite as never);
+    expect(host.stdin.pause).toBe(originals.stdinPause as never);
+    restore(); // a second run (idempotent guard semantics) changes nothing
+    expect(c.debug).toBe(originals.debug);
+    expect(c.trace).toBe(originals.trace);
+  });
+
+  it("rig-mounted bridges never patch the real console: patches live only on the mountSplitRenderer path", () => {
+    const before = pristineGlobals();
+    const { bridge, clock } = makeBridge();
+    bridge.mount(); // OutputBridge mount alone (what every session rig does)
+    bridge.commitText("rig line\n");
+    clock.runAll();
+    expect(bridge.transcriptLog).toEqual(["rig line"]);
+    expectPristine(before); // the rig path keeps an UNPATCHED console
+    bridge.shutdown();
+    expectPristine(before);
+  });
+
+  it("real-process probe: debug/info/trace route to the arbiter while mounted, and debug is restored after teardown", async () => {
+    const { out, err, code } = await spawnProbe({});
+    expect(code).toBe(7);
+    const enable = out.indexOf("\x1b[?2004h");
+    const disable = out.indexOf("\x1b[?2004l");
+    expect(enable).toBeGreaterThanOrEqual(0);
+    expect(disable).toBeGreaterThan(enable);
+    // Routed while the mount was live -- as permanent rows, before the restore:
+    for (const line of ["debug-routed-line", "info-routed-line", "trace-routed-line"]) {
+      expect(out).toContain(line);
+      expect(out.indexOf(line)).toBeGreaterThan(enable);
+      expect(out.indexOf(line)).toBeLessThan(disable);
+    }
+    // After teardown console.debug is the REAL one again: the post-restore
+    // marker reaches the plain stream (an unrestored patch would have routed
+    // it into the dead bridge and dropped it).
+    expect(out.indexOf("post-restore-debugline")).toBeGreaterThan(disable);
+    expect(err).toBe("");
+  }, 20000);
+});
+
+describe("cursorCol clamp probes (stage 3c, 3b contract §5 leftover)", () => {
+  /** GridTerminal that also keeps the raw byte stream, for wire-level probes. */
+  class RecordingGridTerminal extends GridTerminal {
+    readonly raw: string[] = [];
+    override write(s: string): void {
+      this.raw.push(s);
+      super.write(s);
+    }
+    /** Every CHP (`ESC[<n>G`) column ever emitted to the terminal. */
+    chpColumns(): number[] {
+      const found: number[] = [];
+      for (const m of this.raw.join("").matchAll(/\x1b\[(\d+)G/g)) found.push(parseInt(m[1]!, 10));
+      return found;
+    }
+  }
+
+  function makeClampRig(rows: number, cols: number, candidates: { label: string }[] = []) {
+    const term = new RecordingGridTerminal({ rows, cols });
+    const clock = new FakeClock();
+    const sig = new FakeSignalHost();
+    const bridge = new OutputBridge({ terminal: term, clock, signalHost: sig });
+    const keys = new MemoryKeySource();
+    bridge.setPrompt("(m)> ");
+    bridge.mount();
+    bridge.mountEditorInput(keys, {
+      submit: () => {},
+      interrupt: () => {},
+      quit: () => {},
+      popup: () => candidates,
+    });
+    clock.runAll();
+    return { term, clock, bridge, keys };
+  }
+
+  it("P1 soft-wrapped CJK/emoji corpus: the visual cursor column never exceeds the terminal width", () => {
+    // Corpus ends mid-row: 你好(4)+🚀(2)+world(5)+漢字(4)+🀄(2)+テスト(6)+🎉(2)
+    // = 25 display cells + 5-cell prompt = 30 cells > the 20-column viewport.
+    const r = makeClampRig(10, 20);
+    r.keys.push("你好🚀world漢字🀄テスト🎉");
+    r.clock.runAll();
+    const g = r.term.grid;
+    expect(g.cursorCol).toBeGreaterThanOrEqual(0);
+    expect(g.cursorCol).toBeLessThanOrEqual(g.cols - 1);
+    // Wire level: no paint asked for a column past the width (CHP is 1-based).
+    for (const col of r.term.chpColumns()) expect(col).toBeLessThanOrEqual(20);
+    // The corpus is really there, wrapped across two frame rows, no ghosting.
+    const screen = g.snapshot().screen;
+    expect(screen[0]).toBe("(m)> 你好🚀world漢字"); // 20 cells exactly
+    expect(screen[1]).toBe("🀄テスト🎉");
+  });
+
+  it("P1b cursor parked at the exact row edge (pending-wrap cell) emits no CHP past the width", () => {
+    // 你好世界漢字(12 cells)+abc(3) = 15 + prompt 5 = 20 cells == the viewport
+    // width: line-editor.layout hands cursorCol === width ("the composer
+    // clamps it", 3b contract) -- this probe is that clamp on the wire.
+    const r = makeClampRig(10, 20);
+    r.keys.push("你好世界漢字abc");
+    r.clock.runAll();
+    const g = r.term.grid;
+    for (const col of r.term.chpColumns()) expect(col).toBeLessThanOrEqual(20);
+    expect(g.cursorCol).toBeLessThanOrEqual(g.cols - 1);
+    expect(g.cursorCol).toBe(19); // pending-wrap position: the last cell
+    expect(g.snapshot().screen[0]).toBe("(m)> 你好世界漢字abc");
+  });
+
+  it("P2 resize narrower with the cursor past the new width: in range at every checkpoint, self-healing repaint", () => {
+    const r = makeClampRig(10, 80);
+    r.keys.push("a".repeat(55)); // prompt 5 + 55 = the cursor sits at col 60
+    r.clock.runAll();
+    expect(r.term.grid.cursorCol).toBe(60);
+    r.term.raw.length = 0; // isolate the resize window
+
+    r.term.resize(40, 10); // NARROWER while the frame is live, cursor past the width
+
+    // Checkpoint 1 (synchronous resize listeners): the physical cursor is
+    // inside the NEW width -- and every CHP emitted during the resize paint
+    // honors it too (the stale frameCursor must be clamped where the position
+    // is turned into bytes, core.placeCursor).
+    expect(r.term.grid.cursorCol).toBeLessThanOrEqual(39);
+    for (const col of r.term.chpColumns()) expect(col).toBeLessThanOrEqual(40);
+    // Checkpoint 2 (repaint after the bridge re-derived the view at the new
+    // width): the cursor is back on the real edit cell, frame re-wrapped,
+    // nothing left of the 80-column geometry.
+    r.clock.runAll();
+    expect(r.term.grid.cursorCol).toBe(20); // 60 cells wide -> row 1 col 20
+    expect(r.term.grid.cursorRow).toBe(1);
+    const screen = r.term.grid.snapshot().screen;
+    expect(screen[0]).toBe(`(m)> ${"a".repeat(35)}`);
+    expect(screen[1]).toBe("a".repeat(20));
+  });
+
+  it("P3 popup placement at the boundary columns: rows cut to the width, order preserved on resize", () => {
+    const r = makeClampRig(10, 24, [{ label: "モデル🀄ラベル候補" }, { label: "モデム" }]);
+    r.keys.push("モデ");
+    r.keys.push("\t");
+    r.clock.runAll();
+    expect(r.bridge.editor?.popupOpen).toBe(true);
+    const at = (t: string): number => r.term.grid.snapshot().screen.findIndex((row) => row.includes(t));
+    expect(at("モデル")).toBeLessThan(at("(m)>")); // popup rows ABOVE the editor (§4)
+    for (const row of r.term.grid.snapshot().screen) expect(visibleWidth(row)).toBeLessThanOrEqual(24);
+
+    r.term.resize(12, 10); // narrow past the selected label's width
+    r.clock.runAll();
+    const screen = r.term.grid.snapshot().screen;
+    for (const row of screen) expect(visibleWidth(row)).toBeLessThanOrEqual(12);
+    expect(screen[0]).toBe("> モデル🀄ラ"); // cut at 12 cells: "> "2+モデル6+🀄2+ラ2, no split wide glyph
+    expect(screen[1]).toBe("  モデム"); // the unselected row survives whole
+    expect(screen[2]).toContain("(m)> モデ"); // both popup rows still ABOVE the editor
+    expect(r.term.grid.cursorCol).toBeLessThanOrEqual(11);
+  });
+
+  it("P4 an out-of-range col derives no bad erase: placement clamps, content and commits survive", () => {
+    const { bridge, term, clock } = makeBridge();
+    bridge.mount();
+    clock.runAll();
+
+    // A frame cursor with a wildly out-of-range col (500 on an 80-col rig) --
+    // e.g. a producer that forgot to clamp. The placement must land inside
+    // the geometry, and every later paint/erase is "\r"-anchored, so nothing
+    // derives an erase extent from the bad col.
+    bridge.core.setFrame(["frame-content"], { row: 0, col: 500 });
+    clock.runAll();
+    expect(term.grid.cursorCol).toBeLessThanOrEqual(term.grid.cols - 1);
+    expect(term.grid.snapshot().screen[0]).toContain("frame-content");
+
+    // Commits after the bad placement still land intact above the frame: the
+    // park/restore math never consulted the column.
+    bridge.commitText("committed-row\n");
+    bridge.core.drainCommitsSync();
+    clock.runAll();
+    const all = term.grid.snapshot();
+    const text = [...all.scrollback, ...all.screen];
+    expect(text.filter((row) => row === "committed-row").length).toBe(1);
+    expect(text.filter((row) => row.includes("frame-content")).length).toBe(1);
+    expect(text.indexOf("committed-row")).toBeLessThan(
+      text.findIndex((row) => row.includes("frame-content")),
+    );
+
+    // The capture Grid takes a hostile out-of-range CHP the same way a real
+    // terminal does: clamped, erasing nothing that matters.
+    bridge.capture.write("(m)> hello");
+    bridge.capture.write("\x1b[999G\x1b[0J");
+    expect(bridge.capture.cursor().col).toBeLessThanOrEqual(bridge.capture.columns - 1);
+    expect(bridge.capture.frameRows()).toEqual(["(m)> hello"]);
+  });
+});

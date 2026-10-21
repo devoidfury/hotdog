@@ -26,7 +26,7 @@
           "type": "string",
           "enum": ["legacy", "split"],
           "default": "legacy",
-          "description": "Interactive CLI output renderer. 'legacy' = today's direct stdout/stderr writes (byte-identical default). 'split' mounts the managed bottom-region renderer (commits transcript rows into native scrollback) but only when both stdin and stdout are TTYs; any non-TTY stream falls back to legacy regardless of this knob. This is the stage-2/3 rollback kill-switch."
+          "description": "Interactive CLI output renderer. 'legacy' = today's direct stdout/stderr writes (byte-identical default). 'split' mounts the managed bottom-region renderer (commits transcript rows into native scrollback) but only when both stdin and stdout are TTYs and TERM is not the dumb convention string; any non-TTY stream or dumb terminal falls back to legacy regardless of this knob. This is the stage-2/3 rollback kill-switch."
         }
       },
       "additionalProperties": false,

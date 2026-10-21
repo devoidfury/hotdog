@@ -243,12 +243,25 @@ export class RendererCore {
    * screen bottom would desync parkOffset from the bytes actually written --
    * the next anchor restore then lands a row high and paints over committed
    * content (the submitted row, then the streaming rows that follow it).
+   *
+   * The COLUMN is clamped for the same reason, one axis over (stage-3c, the
+   * 3b contract §5 leftover: line-editor documents "cursorCol may equal
+   * width; the composer clamps it" and this placement IS that composer site).
+   * Two producers overshoot: the line editor's pending-wrap cell (cursorCol
+   * === width by contract) and a stale frameCursor during the resize window
+   * (handleResize repaints with the old geometry's column before the bridge
+   * re-derives the view at the new width). A spec-correct terminal clamps CHP
+   * at the right margin, so an overshoot is invisible there -- but the Grid
+   * model and the terminal must agree on the BYTES, and every clamp to
+   * columns-1 lands exactly where the terminal's own clamp lands (the last
+   * cell), moving the cursor nowhere it was not already.
    */
   private placeCursor(frameHeight: number): void {
     const c = this.frameCursor;
     if (!c) return;
     const row = Math.max(0, Math.min(c.row, frameHeight - 1));
-    const s = toColumn(c.col) + down(row);
+    const col = Math.max(0, Math.min(c.col, this.terminal.columns - 1));
+    const s = toColumn(col) + down(row);
     if (s !== "") this.out.write(s);
     this.parkOffset = row;
   }

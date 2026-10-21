@@ -957,3 +957,32 @@ describe("Info CLI - tool exec plane", () => {
     expect(["bwrap", "none"]).toContain(parsed.config.tools_fence);
   });
 });
+
+// ── stage-3c: renderer posture line (§9 gate projection, "never silent") ──
+
+describe("Info CLI - renderer posture line (stage 3c)", () => {
+  it("prints the split knob with the honest gate decision for this environment", async () => {
+    const run = await infoCliRunner({ coreConfig: { uiInteractiveCli: { renderer: "split" } } });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    // mode rides the knob; the reason names whichever gate decides in the
+    // test process (piped stdio declines at the TTY gate; a TERM=dumb host
+    // declines at the dumb gate). info never claims a mount it cannot have:
+    // it runs outside any session.
+    expect(output).toMatch(/Renderer:        split \((mounts here|declines here: .*)\)/);
+  });
+
+  it("knob default reads legacy; JSON mirrors the posture object", async () => {
+    const run = await infoCliRunner();
+    const { output } = await run("info");
+    expect(output).toContain("Renderer:        legacy");
+
+    const jsonRun = await infoCliRunner({ coreConfig: { uiInteractiveCli: { renderer: "split" } } }, { wantsJson: true });
+    const { output: jsonOut, exitCode } = await jsonRun("info");
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(jsonOut.trim());
+    expect(parsed.config.renderer.mode).toBe("split");
+    expect(typeof parsed.config.renderer.mount).toBe("boolean");
+    expect(typeof parsed.config.renderer.reason).toBe("string");
+  });
+});

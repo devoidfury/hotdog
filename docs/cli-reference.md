@@ -113,6 +113,14 @@ stdin+stdout, TERM not `dumb`):
   provider lane is full. A cost suffix (`· $0.0021`) appears only when the
   `modelPricing` config key exists for the session model. Before the first
   turn the row is hidden.
+- **Streaming text shows above the input.** Output lines commit into the
+  native scrollback as each line completes, exactly as before -- committed
+  rows stay there and scroll naturally. The one in-progress (unterminated)
+  line additionally paints live as the top row of the frame, above the
+  status line, so tokens are visible as they arrive instead of appearing
+  all at once at the line terminator. The partial carries the sink's own
+  coloring (no restyle), and vanishes from the frame the moment its line
+  commits; tool output and previously committed rows are unaffected.
 
 On the legacy renderer (`renderer: "legacy"`, the current default) mid-run
 submissions queue and no status/chip rows appear; the key bindings are the

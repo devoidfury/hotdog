@@ -20,6 +20,7 @@ import { ProcessTerminal } from "@utils/cli/renderer/terminal.ts";
 import { SystemClock } from "@utils/cli/renderer/clock.ts";
 import { TeardownGuard } from "@utils/cli/renderer/teardown.ts";
 import { StdinBuffer } from "@utils/cli/renderer/stdin-buffer.ts";
+import { wrapToWidth } from "@utils/cli/renderer/width.ts";
 import { EditorView, type EditorEvent } from "@utils/cli/renderer/editor-view.ts";
 import type { Completion } from "@utils/cli/renderer/popup.ts";
 import type { Clock, KeySource, SignalHost, Terminal } from "@utils/cli/renderer/seams.ts";
@@ -133,15 +134,29 @@ export function incompleteEscapeStart(data: string): number {
 class LineChannel {
   #partial = "";
 
-  constructor(private readonly onLines: (lines: string[]) => void) {}
+  constructor(
+    private readonly onLines: (lines: string[]) => void,
+    private readonly onChange: () => void = () => {},
+  ) {}
 
   get hasPartial(): boolean {
     return this.#partial !== "";
   }
 
+  /** The unterminated trailing row -- the line being written right now. */
+  get partial(): string {
+    return this.#partial;
+  }
+
   write(text: string): void {
     const parts = (this.#partial + text).split("\n");
     this.#partial = parts.pop() ?? "";
+    // Repaint the frame to the NEW partial BEFORE committing the completed
+    // rows: the commit's frozen-frame paint then already shows the right
+    // in-progress line, so the finished row never appears twice and the old
+    // partial never flashes stale. A chunk that only grows the line commits
+    // nothing and just repaints.
+    this.onChange();
     if (parts.length > 0) this.onLines(parts);
   }
 
@@ -149,6 +164,7 @@ class LineChannel {
     if (this.#partial === "") return;
     const line = this.#partial;
     this.#partial = "";
+    this.onChange();
     this.onLines([line]);
   }
 }
@@ -312,6 +328,8 @@ export class OutputBridge {
 
   readonly #outChannel: LineChannel;
   readonly #errChannel: LineChannel;
+  /** Last streaming row composition painted, to skip no-op repaints. */
+  #lastStreamKey = "";
   /** True right after the bridge commits its own unterminated row (interrupt echo). */
   #lineOpen = false;
   #promptText = "";
@@ -353,8 +371,48 @@ export class OutputBridge {
       opts.terminal.rows,
       opts.terminal.columns,
     );
-    this.#outChannel = new LineChannel((lines) => this.#commitLines(lines));
-    this.#errChannel = new LineChannel((lines) => this.#commitLines(lines));
+    this.#outChannel = new LineChannel(
+      (lines) => this.#commitLines(lines),
+      () => this.#repaintIfStreaming(),
+    );
+    this.#errChannel = new LineChannel(
+      (lines) => this.#commitLines(lines),
+      () => this.#repaintIfStreaming(),
+    );
+  }
+
+  /**
+   * The live streaming line: stdout and stderr share ONE byte stream, and
+   * commitText/arbiteText flush the OTHER channel before writing, so at most
+   * one channel ever holds an unterminated row. That row is the line being
+   * streamed right now -- completed rows already committed into scrollback and
+   * stay there. The partial is already sink-colored, so it needs no restyling.
+   * Returns [] when nothing is mid-line (idle, or every line terminated).
+   */
+  #streamingRows(width: number): string[] {
+    this.#lastStreamKey = this.#streamingOpen();
+    const open = this.#lastStreamKey;
+    if (open === "") return [];
+    return wrapToWidth(open, width);
+  }
+
+  /** The one open (unterminated) row across both channels, "" when none. */
+  #streamingOpen(): string {
+    return this.#outChannel.partial + this.#errChannel.partial;
+  }
+
+  /**
+   * A chunk that only grows the in-progress line commits nothing, so it never
+   * triggers the commit repaint; ask for a frame repaint directly. Cheap and
+   * coalesced by the core scheduler (one paint per burst, §3). Skipped when
+   * the partial is UNCHANGED (e.g. a fully-terminated write): the frame is
+   * then driven by its own editor/capture events, not by an output commit --
+   * a commit must never clobber a frame nothing streamed.
+   */
+  #repaintIfStreaming(): void {
+    if (this.#suspended) return;
+    if (this.#streamingOpen() === this.#lastStreamKey) return;
+    this.#repaint();
   }
 
   /**
@@ -678,8 +736,11 @@ export class OutputBridge {
    */
   suspend(stdin: StdinHandoffHost): () => void {
     if (this.#suspended) return () => {};
-    this.#suspended = true;
+    // Flush FIRST (still unsuspended) so the onChange repaint drops the
+    // streaming partial from the frame once it commits -- otherwise the
+    // frozen-frame drain paints it again above the freshly committed row.
     this.flushPending();
+    this.#suspended = true;
     // §10 order: drain queued commits synchronously BEFORE the erase, or a
     // pending print repaints the frame over the erase (INV-2 machinery
     // restores frame rows around a print).
@@ -711,29 +772,39 @@ export class OutputBridge {
    */
   #repaint(): void {
     const editor = this.#editor;
+    const width = this.opts.terminal.columns;
+    const stream = this.#streamingRows(width);
     if (!editor) {
       this.#paintFrame(this.capture.frameRows());
       return;
     }
-    const width = this.opts.terminal.columns;
     // Status/chip rows are stage-4 editor-path features (split mode only);
     // the block's height budget accounts for every non-block row (INV-2
-    // sees the frame grow).
+    // sees the frame grow). The streaming line sits ABOVE everything: the
+    // transcript above it has already committed into scrollback.
     const status = statusRowText(this.#status);
     const chip = this.#chipText;
     const popup = editor.popupRows(width);
-    const chrome = popup.length + (status ? 1 : 0) + (chip ? 1 : 0);
+    const chrome = stream.length + popup.length + (status ? 1 : 0) + (chip ? 1 : 0);
     const block = editor.view(width, Math.max(1, this.opts.terminal.rows - chrome));
-    const rows = [...(status ? [status] : []), ...popup, ...block.rows, ...(chip ? [chip] : [])];
+    const rows = [
+      ...stream,
+      ...(status ? [status] : []),
+      ...popup,
+      ...block.rows,
+      ...(chip ? [chip] : []),
+    ];
     this.#lastBlockRows = block.rows;
     this.#setFrame(rows, {
-      row: (status ? 1 : 0) + popup.length + block.cursorRow,
+      row: stream.length + (status ? 1 : 0) + popup.length + block.cursorRow,
       col: block.cursorCol,
     });
   }
 
   #paintFrame(rows: string[]): void {
-    this.#setFrame(rows, this.capture.cursor());
+    const stream = this.#streamingRows(this.opts.terminal.columns);
+    const capture = this.capture.cursor();
+    this.#setFrame([...stream, ...rows], { row: capture.row + stream.length, col: capture.col });
   }
 
   #setFrame(rows: string[], cursor: { row: number; col: number }): void {

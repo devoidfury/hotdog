@@ -361,6 +361,11 @@ export class RendererCore {
   }
 
   eraseFrame(): void {
+    // The frame is going away, so any coalesced paint still scheduled is
+    // stale: it would fire after this erase and repaint the frame right back
+    // (the suspend-handoff ghost). Both callers (TeardownGuard, bridge
+    // suspend) want it dead; the next setFrame/resume re-schedules fine.
+    this.scheduler.cancelPending();
     if (!this.mounted || this.paintedHeight === 0) return;
     // INV-5 shrink-to-zero from the anchor: restore the park if a placement
     // left the cursor low, then erase down.

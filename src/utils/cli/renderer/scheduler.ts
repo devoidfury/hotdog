@@ -40,7 +40,6 @@ export class FrameScheduler {
   paintNow(): void {
     this.cancelPending();
     if (this.stopped) return;
-    this.renderRequested = false;
     this.lastPaintAt = this.clock.now();
     this.paint();
   }
@@ -49,7 +48,6 @@ export class FrameScheduler {
   stop(): void {
     this.stopped = true;
     this.cancelPending();
-    this.renderRequested = false;
   }
 
   get isStopped(): boolean {
@@ -73,7 +71,14 @@ export class FrameScheduler {
     this.paintNow();
   }
 
-  private cancelPending(): void {
+  /**
+   * Discard a pending coalesced paint. Public for the erase paths
+   * (RendererCore.eraseFrame: suspend handoff / teardown) -- a stale pending
+   * paint fires AFTER the erase and repaints the frame right back over it.
+   * The next requestRender/paintNow schedules fresh.
+   */
+  cancelPending(): void {
+    this.renderRequested = false;
     if (this.immediateHandle !== null) {
       this.clock.clearImmediate(this.immediateHandle);
       this.immediateHandle = null;

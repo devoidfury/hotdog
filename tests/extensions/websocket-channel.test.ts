@@ -175,6 +175,50 @@ describe("WebSocketChannel - write()", () => {
     expected(msg);
   });
 
+  it("TOOL_CALL carries the hint-driven argsSummary (first-line preview)", () => {
+    const event = {
+      type: OUTPUT_EVENT.TOOL_CALL,
+      toolName: "bash",
+      input: JSON.stringify({ command: "git status\n&& git diff" }),
+      toolCallId: "tc-9",
+    };
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, handler) => {
+        handler(event as any);
+        return () => {};
+      }),
+    });
+    const ws = createMockWs();
+    new WebSocketChannel({
+      sessionManager: sm,
+      ws,
+      sessionId: "session-1",
+      argDisplay: (name) =>
+        name === "bash" ? { command: { preview: "first-line", syntax: "shell" } } : undefined,
+    });
+    const msg = JSON.parse((ws as any)._sentMessages[0]);
+    // The shared fold, ANSI-free (the shell pass is terminal-side only).
+    expect(msg.argsSummary).toBe("git status… (2 lines, 22 chars)");
+  });
+
+  it("TOOL_CALL argsSummary uses the default fold when no hints are wired", () => {
+    const event = {
+      type: OUTPUT_EVENT.TOOL_CALL,
+      toolName: "write",
+      input: JSON.stringify({ path: "a.ts", content: "a\nb" }),
+    };
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, handler) => {
+        handler(event as any);
+        return () => {};
+      }),
+    });
+    const ws = createMockWs();
+    new WebSocketChannel({ sessionManager: sm, ws, sessionId: "session-1" });
+    const msg = JSON.parse((ws as any)._sentMessages[0]);
+    expect(msg.argsSummary).toBe("path: a.ts · content: 2 lines, 3 chars");
+  });
+
   // More event types in the same parameterized pattern
   it.each([
     {

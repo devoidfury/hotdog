@@ -24,8 +24,8 @@ export interface ArgDisplay {
   preview?: "count" | "first-line";
   /**
    * Syntax highlighter hint for sinks that can render it: `"shell"` lights
-   * command words and operators in the value. Terminals only for now; the
-   * webui ignores it (its follow-up may not).
+   * command words and operators in the value. Terminal sinks only; the webui
+   * consumes the folding (`preview`) but not the coloring.
    */
   syntax?: "shell";
 }

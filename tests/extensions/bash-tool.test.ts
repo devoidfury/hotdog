@@ -199,6 +199,12 @@ describe('BashTool', () => {
     expect(display).toContain('ls -la');
   });
 
+  it('callDisplay previews multi-line commands, never a wall of text', () => {
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    const display = tool.callDisplay(JSON.stringify({ command: 'git status\n&& git diff' }));
+    expect(display).toBe('bash: git status… (2 lines, 22 chars)');
+  });
+
   it('limits output lines', async () => {
     const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 2 });
     const result = await tool.execute(JSON.stringify({ command: 'printf "line1\\nline2\\nline3\\nline4\\nline5"' }), {} as any);

@@ -146,6 +146,34 @@ describe("replaySessionHistory", () => {
     expect(call.display).toBeUndefined();
   });
 
+  it("carries a hint-driven argsSummary from the registry's metadata", () => {
+    const registry = {
+      get: () => undefined,
+      getMetadata: (name: string) =>
+        name === "bash"
+          ? { argDisplay: { command: { preview: "first-line", syntax: "shell" } } }
+          : undefined,
+    };
+    const out = replay(
+      [
+        new Message({
+          role: "assistant",
+          content: "x",
+          toolCalls: [
+            {
+              id: "c1",
+              type: "function",
+              function: { name: "bash", arguments: JSON.stringify({ command: "git status\n&& git diff" }) },
+            },
+          ],
+        }),
+      ],
+      { toolRegistry: registry },
+    );
+    const call = out.find((m) => m.type === S2C.TOOL_CALL)!;
+    expect(call.argsSummary).toBe("git status… (2 lines, 22 chars)");
+  });
+
   it("flattens tool-result parts (output, hint, meta) and flags orphaned results", () => {
     const out = replay([
       new Message({

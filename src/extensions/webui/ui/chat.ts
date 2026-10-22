@@ -258,6 +258,8 @@ interface ToolCallMessage {
   name: string;
   args: string;
   display?: string;
+  /** Server-computed hint-driven fold (see ToolBlockState.argsSummary). */
+  argsSummary?: string;
   toolCallId?: string;
 }
 

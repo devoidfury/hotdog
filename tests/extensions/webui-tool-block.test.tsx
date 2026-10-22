@@ -107,6 +107,26 @@ describe("ToolBlock SSR", () => {
     expect(html).not.toContain("tool-result-section");
   });
 
+  it("prefers display, then the server argsSummary, then the local heuristic", () => {
+    const render = (state: Record<string, unknown>) =>
+      renderToString(
+        ToolBlock({
+          state: { name: "read", args: '{"path":"src/deep/x.ts"}', ...base, ...state } as never,
+          onToggle: () => {},
+          onToggleRaw: () => {},
+          onShowFull: () => {},
+        }),
+      );
+    // display wins (semantic header beats the fold).
+    expect(render({ display: "DIS", argsSummary: "SUM" })).toContain(
+      '<span class="tool-call-display">DIS</span>',
+    );
+    // no display -> the server's hint-driven fold, not the basename heuristic.
+    expect(render({ argsSummary: "FOLD" })).toContain('<span class="tool-call-display">FOLD</span>');
+    // neither -> the old heuristic (basename) still covers old servers.
+    expect(render({})).toContain('<span class="tool-call-display">x.ts</span>');
+  });
+
   it("escapes hostile headers and args (never injects markup)", () => {
     const html = renderToString(
       ToolBlock({

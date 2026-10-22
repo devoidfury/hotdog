@@ -3,6 +3,8 @@
 import { Channel, ChannelSessionManager } from "@core/channel.ts";
 import { OUTPUT_EVENT, OutputEvent, OutputEventType } from "@core/context/output.ts";
 import { toolContentText } from "@utils/tool-content.ts";
+import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
+import type { ArgDisplay } from "@core/extensions/tool-registry.ts";
 import { S2C, S2CType, wireImages } from "./protocol.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
@@ -34,6 +36,14 @@ export interface WebSocketChannelOptions {
   ws: HotdogServerSocket<unknown>;
   sessionId: string;
   broadcastCallback?: (msg: Record<string, unknown>) => void;
+  /**
+   * Resolves a tool's per-parameter display hints (its metadata's
+   * argDisplay); the TOOL_CALL wire message carries the SAME args summary
+   * the terminal prints (ANSI-free): hint-driven folding when declared,
+   * the default fold otherwise. Omitting the resolver just means every
+   * tool gets the default fold.
+   */
+  argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
 }
 
 export class WebSocketChannel extends Channel {
@@ -41,6 +51,7 @@ export class WebSocketChannel extends Channel {
   #sessionId: string;
   #ready: boolean;
   #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;
+  #argDisplay: ((toolName: string) => Record<string, ArgDisplay> | undefined) | undefined;
 
   constructor(options: WebSocketChannelOptions) {
     super({ sessionManager: options.sessionManager });
@@ -48,6 +59,7 @@ export class WebSocketChannel extends Channel {
     this.#sessionId = options.sessionId;
     this.#ready = true;
     this.#broadcastCallback = options.broadcastCallback;
+    this.#argDisplay = options.argDisplay;
     this.attach(options.sessionId);
   }
 
@@ -81,9 +93,15 @@ export class WebSocketChannel extends Channel {
         msg.name = event.toolName;
         msg.args = event.input;
         // The call id lets clients pair results to calls; display is the
-        // tool's own header (see ToolCallEvent).
+        // tool's own header (see ToolCallEvent). argsSummary is the shared
+        // hint-driven fold (ToolMetadata.argDisplay): the same shape the
+        // terminal's template args slot prints, ANSI-free.
         if (event.toolCallId) msg.toolCallId = event.toolCallId;
         if (event.display !== undefined) msg.display = event.display;
+        {
+          const summary = summarizeToolArgs(event.input, undefined, this.#argDisplay?.(event.toolName));
+          if (summary) msg.argsSummary = summary;
+        }
         break;
       case OUTPUT_EVENT.TOOL_RESULT:
         msg.name = event.toolName;

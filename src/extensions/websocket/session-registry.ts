@@ -498,6 +498,10 @@ export class SessionRegistry {
       ws,
       sessionId,
       broadcastCallback: (msg: Record<string, unknown>) => this.broadcast(msg),
+      // Live TOOL_CALL args summaries read the tool's display hints off the
+      // session agent's registry (same metadata the terminal sink consults).
+      argDisplay: (toolName) =>
+        (session.agent as Partial<Pick<Agent, "toolRegistry">> | null)?.toolRegistry?.getMetadata?.(toolName)?.argDisplay,
     });
 
     if (!this.#channels.has(sessionId)) {

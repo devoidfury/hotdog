@@ -59,7 +59,7 @@ interface UserMessage { content: string; images?: UiImage[]; files?: Array<{ pat
 interface AssistantMessage { content: string; }
 interface StreamingChunk { content: string; }
 interface ThinkingMessage { content: string; }
-interface ToolCallMessage { name: string; args: string; display?: string; toolCallId?: string; }
+interface ToolCallMessage { name: string; args: string; display?: string; argsSummary?: string; toolCallId?: string; }
 interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; toolCallId?: string; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
@@ -395,14 +395,14 @@ export function createMessageList(
     el.innerHTML = mdTreeToHtml(tree);
   }
 
-  function handleToolCall({ name, args, display, toolCallId }: ToolCallMessage): void {
+  function handleToolCall({ name, args, display, argsSummary, toolCallId }: ToolCallMessage): void {
     // Finalize the current assistant message so tool calls appear as
     // separate blocks after the user message, not nested inside the assistant.
     finalizeAssistant();
 
     const host = document.createElement("div");
     container.appendChild(host);
-    const block = new ToolBlockController(host as unknown as DomNode, { name, args, display });
+    const block = new ToolBlockController(host as unknown as DomNode, { name, args, display, argsSummary });
     if (toolCallId) toolBlocksById.set(toolCallId, block);
     const queue = pendingToolCallsByName.get(name);
     if (queue) queue.push(block);

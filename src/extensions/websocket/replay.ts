@@ -6,11 +6,26 @@ import type { AgentLike } from "@core/session/index.ts";
 import { conversationContent, LOG_SOURCE, type LogEntry } from "@core/session/session-log.ts";
 import type { Agent } from "@core/agent.ts";
 import { safeCallDisplay, type ToolRegistry } from "@core/extensions/tool-registry.ts";
+import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
 import { S2C, wireImages } from "./protocol.ts";
 import { splitFileIncludes, toolContentText, wrapperContentText } from "@utils/tool-content.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import type { HotdogServerSocket } from "./socket.ts";
+
+/**
+ * Hint-driven args fold for TOOL_CALL messages: the same
+ * ToolMetadata.argDisplay summary the terminal sink prints (ANSI-free).
+ * Empty summaries ride no field; clients fall back to their own header.
+ */
+function argsSummaryField(
+  registry: ToolRegistry | undefined,
+  name: string,
+  args: string,
+): Record<string, string> {
+  const summary = summarizeToolArgs(args, undefined, registry?.getMetadata?.(name)?.argDisplay);
+  return summary ? { argsSummary: summary } : {};
+}
 
 /**
  * Replay a slice of a session's FULL log as S2C messages. `startIdx` is the
@@ -80,6 +95,7 @@ export function replayLogSlice(
                 args,
                 ...(tc.id ? { toolCallId: tc.id } : {}),
                 ...(display !== undefined ? { display } : {}),
+                ...argsSummaryField(toolRegistry, name, args),
               }),
             );
           }
@@ -174,6 +190,7 @@ export function replaySessionHistory(
                   args,
                   ...(tc.id ? { toolCallId: tc.id } : {}),
                   ...(display !== undefined ? { display } : {}),
+                  ...argsSummaryField((agent as Agent).toolRegistry, name, args),
                 }),
               );
             }

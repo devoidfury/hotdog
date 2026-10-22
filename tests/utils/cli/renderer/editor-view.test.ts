@@ -403,3 +403,54 @@ describe("EditorView -- grid harness (frame composer contract)", () => {
     expect(v.top).toBe(2);
   });
 });
+
+describe("EditorView -- cursor-motion emits change (arrow-key cursor regression)", () => {
+  // Regression: cursor-only motion (arrows/home/end/word) updated the virtual
+  // cursor but emitted nothing, so the bridge never repainted and the physical
+  // cursor block stayed on the old cell. Each real move must emit a change;
+  // a no-op move at an edge must stay silent (no gratuitous repaint).
+  it("left/right/home/end emit change when the cursor moves", () => {
+    const h = make();
+    h.feed("hello world");
+    h.events.length = 0; // drop the typing changes
+    h.feed("\x1b[D"); // left
+    expect(h.view.cursor).toBe(10);
+    expect(h.types()).toEqual(["change"]);
+    h.events.length = 0;
+    h.feed("\x1b[C"); // right
+    expect(h.view.cursor).toBe(11);
+    expect(h.types()).toEqual(["change"]);
+    h.events.length = 0;
+    h.feed("\x1b[H"); // home
+    expect(h.view.cursor).toBe(0);
+    expect(h.types()).toEqual(["change"]);
+    h.events.length = 0;
+    h.feed("\x1b[F"); // end
+    expect(h.view.cursor).toBe(11);
+    expect(h.types()).toEqual(["change"]);
+  });
+
+  it("word motions emit change", () => {
+    const h = make();
+    h.feed("one two three");
+    h.events.length = 0;
+    h.feed("\x1bb"); // alt-b
+    expect(h.view.cursor).toBe(8);
+    expect(h.types()).toEqual(["change"]);
+    h.events.length = 0;
+    h.feed("\x1bf"); // alt-f
+    expect(h.view.cursor).toBe(13);
+    expect(h.types()).toEqual(["change"]);
+  });
+
+  it("a motion key at the buffer edge is a no-op move -- no change emitted", () => {
+    const h = make();
+    h.feed("hi");
+    h.feed("\x1b[F"); // end (already there)
+    h.events.length = 0;
+    h.feed("\x1b[C"); // right at the end: cannot move
+    h.feed("\x1bf"); // alt-f at the end: cannot move
+    expect(h.view.cursor).toBe(2);
+    expect(h.types()).toEqual([]);
+  });
+});

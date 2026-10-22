@@ -225,36 +225,26 @@ export class EditorView {
         this.kill(this.editor.killWordForward(), false);
         return;
       case "left":
-        this.closePopupOnCursorMove();
-        if (this.editor.moveLeft()) this.lastOpWasKill = false;
+        this.moveCursor(() => this.editor.moveLeft());
         return;
       case "right":
-        this.closePopupOnCursorMove();
-        if (this.editor.moveRight()) this.lastOpWasKill = false;
+        this.moveCursor(() => this.editor.moveRight());
         return;
       case "home":
       case "ctrl-a":
-        this.closePopupOnCursorMove();
-        this.editor.moveToStart();
-        this.lastOpWasKill = false;
+        this.moveCursor(() => this.editor.moveToStart());
         return;
       case "end":
       case "ctrl-e":
-        this.closePopupOnCursorMove();
-        this.editor.moveToEnd();
-        this.lastOpWasKill = false;
+        this.moveCursor(() => this.editor.moveToEnd());
         return;
       case "alt-b":
       case "ctrl-left":
-        this.closePopupOnCursorMove();
-        this.editor.backwardWord();
-        this.lastOpWasKill = false;
+        this.moveCursor(() => this.editor.backwardWord());
         return;
       case "alt-f":
       case "ctrl-right":
-        this.closePopupOnCursorMove();
-        this.editor.forwardWord();
-        this.lastOpWasKill = false;
+        this.moveCursor(() => this.editor.forwardWord());
         return;
       case "ctrl-k":
         this.kill(this.editor.killLine(), false);
@@ -384,6 +374,24 @@ export class EditorView {
   /** Cursor motion outside the popup flow invalidates the replace span. */
   private closePopupOnCursorMove(): void {
     this.closePopup("edit");
+  }
+
+  /**
+   * Cursor-only motion: close the popup, and emit a change ONLY when the
+   * cursor actually moved. A motion key that paints nothing is the bug this
+   * fixes: the bridge repaints on "change" and repaint places the physical
+   * cursor block (commit.ts placeCursor), so a silent cursor move left the
+   * on-screen cursor parked at the old cell while the virtual cursor moved.
+   * No-move keys (arrow at buffer edge) stay silent -- no gratuitous repaint.
+   */
+  private moveCursor(move: () => void): void {
+    this.closePopupOnCursorMove();
+    const before = this.editor.cursorOffset;
+    move();
+    if (this.editor.cursorOffset !== before) {
+      this.lastOpWasKill = false;
+      this.emit({ type: "change" });
+    }
   }
 
   private kill(killed: string, backward: boolean): void {

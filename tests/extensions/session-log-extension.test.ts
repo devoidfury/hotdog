@@ -651,3 +651,133 @@ describe("write ordering serialization", () => {
     }
   });
 });
+
+describe("system prompt recording", () => {
+  // The prompt is built by run() before the first message reaches the
+  // context, so the turn-1 record must land above the first input row;
+  // dedupe is per session and content-based (model rebuilds re-record).
+
+  it("CONTEXT_MESSAGE records the built prompt above the first message", async () => {
+    const sessionId = `test-prompt-first-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const agent = { sessionId, context: { getSystemPrompt: () => "You are terse." } };
+
+      await hook({ message: { sessionId, role: "user", content: "hello" }, agent });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(2);
+      expect(entries[0]!.source).toBe(LOG_SOURCE.SYSTEM_PROMPT);
+      expect(entries[0]!.content).toBe("You are terse.");
+      expect(entries[0]!.v).toBe(2);
+      expect(entries[1]!.source).toBe(LOG_SOURCE.INPUT);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("records once: unchanged prompt does not repeat, changed prompt re-records", async () => {
+    const sessionId = `test-prompt-dedupe-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      let prompt = "prompt v1";
+      const agent = { sessionId, context: { getSystemPrompt: () => prompt } };
+
+      await hook({ message: { sessionId, role: "user", content: "one" }, agent });
+      await hook({ message: { sessionId, role: "assistant", content: "uno" }, agent });
+      // Model switch rebuilds the prompt; next message carries the new text.
+      prompt = "prompt v2";
+      await hook({ message: { sessionId, role: "user", content: "two" }, agent });
+      await hook({ message: { sessionId, role: "assistant", content: "dos" }, agent });
+
+      const entries = await readSessionEntries(sessionId);
+      const prompts = entries.filter((e) => e.source === LOG_SOURCE.SYSTEM_PROMPT);
+      expect(prompts).toHaveLength(2);
+      expect(prompts[0]!.content).toBe("prompt v1");
+      expect(prompts[1]!.content).toBe("prompt v2");
+      // Each prompt sits directly above the message it precedes.
+      expect(entries[1]!.content).toBe("one");
+      expect(entries.indexOf(prompts[1]!)).toBe(3);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("TURN_START records a changed prompt even with no message event (continuation)", async () => {
+    const sessionId = `test-prompt-turn-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const contextHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const turnHook = ext.hooks[HOOKS.TURN_START] as (ctx: any) => Promise<void>;
+      const agent = { sessionId, context: { getSystemPrompt: () => "prompt A" } };
+
+      await contextHook({ message: { sessionId, role: "user", content: "go" }, agent });
+      // Mid-run model switch: rebuilt prompt, no new user message -- only
+      // TURN_START fires (here at iteration 2: no turn_started record).
+      const agent2 = { sessionId, context: { getSystemPrompt: () => "prompt B" } };
+      await turnHook({ turnIndex: 2, agent: agent2 });
+
+      const entries = await readSessionEntries(sessionId);
+      const prompts = entries.filter((e) => e.source === LOG_SOURCE.SYSTEM_PROMPT);
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1]!.content).toBe("prompt B");
+      expect(entries.some((e) => e.source === LOG_SOURCE.TURN_STARTED)).toBe(false);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("rewind clears the dedupe so the next turn re-records below the reset", async () => {
+    const sessionId = `test-prompt-rewind-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const contextHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const rewindHook = ext.hooks[HOOKS.CONTEXT_REWOUND] as (ctx: any) => Promise<void>;
+      const turnHook = ext.hooks[HOOKS.TURN_START] as (ctx: any) => Promise<void>;
+      const agent = { sessionId, context: { getSystemPrompt: () => "same prompt" } };
+
+      await contextHook({ message: { sessionId, role: "user", content: "one" }, agent });
+      await rewindHook({ agent, newContext: [{ sessionId, role: "user", content: "one" }] });
+      // Same prompt text, but the reset sliced it out of the replay window.
+      await turnHook({ turnIndex: 1, agent });
+
+      const entries = await readSessionEntries(sessionId, { full: true });
+      const resetIdx = entries.findIndex((e) => e.source === LOG_SOURCE.RESET);
+      expect(resetIdx).toBeGreaterThan(0);
+      const promptsAfterReset = entries
+        .slice(resetIdx)
+        .filter((e) => e.source === LOG_SOURCE.SYSTEM_PROMPT);
+      expect(promptsAfterReset).toHaveLength(1);
+      expect(promptsAfterReset[0]!.content).toBe("same prompt");
+      // Epoch view: resume sees the prompt inside its own window (re-recorded
+      // after the re-appended kept history).
+      const epoch = await readSessionEntries(sessionId);
+      expect(epoch.some((e) => e.source === LOG_SOURCE.SYSTEM_PROMPT)).toBe(true);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("agents without a built prompt write nothing", async () => {
+    const sessionId = `test-prompt-absent-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const contextHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+
+      // Plain agent (no context) and empty prompt: message logs, prompt rows do not.
+      await contextHook({ message: { sessionId, role: "user", content: "hi" }, agent: { sessionId } });
+      await contextHook({
+        message: { sessionId, role: "user", content: "hi again" },
+        agent: { sessionId, context: { getSystemPrompt: () => null } },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries.every((e) => e.source !== LOG_SOURCE.SYSTEM_PROMPT)).toBe(true);
+      expect(entries).toHaveLength(2);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+});

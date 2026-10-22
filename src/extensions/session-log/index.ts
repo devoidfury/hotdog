@@ -146,6 +146,11 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // marker below the reset. Compaction never reaches this path: it fires only
   // CONTEXT_REPLACED, which writes nothing (in-memory-only by design).
   const openTurns = new Map<string, "input" | "continuation">();
+  // Last system prompt written per session. The prompt is audit content, so
+  // it records once and re-records only when it actually changes (mid-run
+  // /model rebuild, profile switch) or after a rewind checkpoint (the map
+  // entry drops so the post-reset slice carries the prompt again).
+  const loggedPrompts = new Map<string, string>();
   // Track the most recent session ID so readEntries/getLogPath work correctly.
   let lastSessionId: string | null = null;
 
@@ -266,6 +271,38 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     await queuedAppend(logPath, JSON.stringify(entry) + "\n");
   };
 
+  /**
+   * Record the built system prompt when it is new for this session. Fires at
+   * message-entry and turn-start points because run() builds the prompt
+   * before the first user message reaches the context, so the turn-1 record
+   * lands above the first input row; TURN_START catches the rest (continuation
+   * turns with no new input, and mid-run rebuilds after a model switch).
+   * The prompt is never re-derived on replay (regenerated dynamically), so
+   * this is pure audit -- plain append, not the durability fsync class.
+   */
+  const recordSystemPrompt = (agent: {
+    sessionId?: string;
+    context?: { getSystemPrompt?: () => string | null };
+  }): Promise<void> | undefined => {
+    const prompt = agent.context?.getSystemPrompt?.();
+    if (typeof prompt !== "string" || prompt === "") return;
+    const sessionId = agent.sessionId || "unknown";
+    if (loggedPrompts.get(sessionId) === prompt) return;
+    const logPath = resolveLogPath(sessionId);
+    if (!logPath) return;
+    // Remember before returning: concurrent dispatches of the same prompt
+    // must not both enqueue.
+    loggedPrompts.set(sessionId, prompt);
+    const entry = stripNulls({
+      ts: new Date().toISOString(),
+      session_id: sessionId,
+      source: LOG_SOURCE.SYSTEM_PROMPT,
+      v: LOG_VERSION,
+      content: prompt,
+    });
+    return queuedAppend(logPath, JSON.stringify(entry) + "\n");
+  };
+
   return {
     hooks: {
       [HOOKS.SESSION_CREATE]: async ({
@@ -307,11 +344,16 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         agent,
       }: {
         message: SessionLogMessage;
-        agent: { sessionId?: string };
+        agent: { sessionId?: string; context?: { getSystemPrompt?: () => string | null } };
       }) => {
         // Skip logging during session restoration to avoid duplicate entries
         if (isRestoring) return;
+        // Both records enter the write queue synchronously (prompt first);
+        // awaiting before the message enqueue would break dispatch-order
+        // serialization for floating dispatches.
+        const promptWrite = recordSystemPrompt(agent);
         await appendMessageEntry(agent, message);
+        if (promptWrite) await promptWrite;
         // A tool_result closes its mirrored durability call (and can clear
         // awaiting_question). Index-only: no new log record here.
         if (message.role === "tool" && message.toolCallId) {
@@ -346,6 +388,10 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           return;
         }
         lastSessionId = sessionId;
+        // The reset slices the replay window, and kept history re-appends skip
+        // system messages -- drop the dedupe entry so the next turn's event
+        // records the prompt again below the checkpoint.
+        loggedPrompts.delete(sessionId);
 
         const resetEntry = stripNulls({
           ts: new Date().toISOString(),
@@ -474,13 +520,23 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         kind,
       }: {
         turnIndex: number;
-        agent: { sessionId?: string };
+        agent: { sessionId?: string; context?: { getSystemPrompt?: () => string | null } };
         kind?: "input" | "continuation";
       }) => {
-        if (turnIndex !== 1) return; // one record per turn, not per iteration
+        // Fires per iteration: catches prompt rebuilds (model switch) and
+        // continuation turns, where no CONTEXT_MESSAGE may ever arrive.
+        // The enqueue is synchronous; the turn_started fsync chains after it.
+        const promptWrite = recordSystemPrompt(agent);
+        if (turnIndex !== 1) {
+          if (promptWrite) await promptWrite;
+          return;
+        }
         const sessionId = agent.sessionId || "unknown";
         const logPath = resolveLogPath(sessionId);
-        if (!logPath) return;
+        if (!logPath) {
+          if (promptWrite) await promptWrite;
+          return;
+        }
         const entry = stripNulls({
           ts: new Date().toISOString(),
           session_id: sessionId,
@@ -488,7 +544,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           v: LOG_VERSION,
           content: { kind: kind ?? "input" },
         });
-        await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+        const turnRecord = queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+        if (promptWrite) await promptWrite;
+        await turnRecord;
         openTurns.set(sessionId, kind ?? "input");
       },
 

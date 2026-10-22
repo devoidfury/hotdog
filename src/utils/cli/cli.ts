@@ -25,6 +25,7 @@ import {
   applyThinking,
   applyToolCall,
   applyToolCallArgs,
+  applyShellHighlight,
   applyToolResult,
   applyFinalResponse,
   applyCompacting,
@@ -334,8 +335,13 @@ export class CliOutputSink extends OutputSink {
     // template -- its text may legitimately contain "{}".
     // Segments get the spoof pass individually and the grey args wrap rides
     // AFTER it (spoofSafe neutralizes ESC); the line-wide tool_call color
-    // lands later via the mode applier in _flushText.
-    const args = applyToolCallArgs(spoofSafe(summarizeToolArgs(event.input)), this.palette);
+    // lands later via the mode applier in _flushText. The bash tool's args
+    // ARE a shell command, so they also get the internal shell highlight.
+    const summarized = spoofSafe(summarizeToolArgs(event.input));
+    const args = applyToolCallArgs(
+      event.toolName === "bash" ? applyShellHighlight(summarized, this.palette) : summarized,
+      this.palette,
+    );
     const text = this.toolCallDisplayFormat
       ? formatToolCall(spoofSafe(event.toolName), args, this.toolCallDisplayFormat)
       : event.display !== undefined

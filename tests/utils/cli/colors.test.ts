@@ -15,6 +15,7 @@ import {
   applyCompacting,
   colorDisabledByEnv,
   applyProgress,
+  applyShellHighlight,
 } from '../../../src/utils/cli/colors.ts';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
@@ -198,5 +199,41 @@ describe('colorDisabledByEnv', () => {
   it('normal environments pass', () => {
     expect(colorDisabledByEnv({})).toBe(false);
     expect(colorDisabledByEnv({ TERM: 'xterm-256color' })).toBe(false);
+  });
+});
+
+describe('applyShellHighlight', () => {
+  const on = new ColorPalette({ use_colors: true });
+  const off = new ColorPalette({ use_colors: false });
+
+  it('is a no-op with colors off', () => {
+    expect(applyShellHighlight('cd /tmp && ls', off)).toBe('cd /tmp && ls');
+  });
+
+  it('highlights command words red and re-opens segment grey after each token', () => {
+    expect(applyShellHighlight('ls -la', on)).toBe('\x1b[31mls\x1b[0m\x1b[90m -la');
+  });
+
+  it('arms the command position after &&, ||, | and ;', () => {
+    const out = applyShellHighlight('a && b || c | d ; e', on);
+    for (const cmd of ['a', 'b', 'c', 'd', 'e']) {
+      expect(out).toContain(`\x1b[31m${cmd}\x1b[0m`);
+    }
+    for (const op of ['&&', '||', '|', ';']) {
+      expect(out).toContain(`\x1b[1m${op}\x1b[0m`);
+    }
+  });
+
+  it('never touches quoted text and carries stray quotes verbatim (no char loss)', () => {
+    expect(applyShellHighlight('grep "a && b" src', on)).toBe(
+      '\x1b[31mgrep\x1b[0m\x1b[90m "a && b" src',
+    );
+    expect(applyShellHighlight("echo don't", on)).toBe("\x1b[31mecho\x1b[0m\x1b[90m don't");
+  });
+
+  it('keeps env prefixes grey and the command position armed', () => {
+    expect(applyShellHighlight('FOO=1 cmd arg', on)).toBe(
+      'FOO=1 \x1b[31mcmd\x1b[0m\x1b[90m arg',
+    );
   });
 });

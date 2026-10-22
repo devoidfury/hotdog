@@ -94,6 +94,7 @@ const COLOR_MAP: Record<string, string> = {
   bold_cyan: "1;36",
   bold_white: "1;37",
   bright_black: "90",
+  bold: "1",
   dim: "2",
   underline: "4",
 };
@@ -198,6 +199,46 @@ export function applyToolCallArgs(text: string, palette: ColorPalette): string {
   const lineCode = COLOR_MAP[palette.tool_call];
   const restore = lineCode ? `\x1b[${lineCode}m` : RESET;
   return `${applyColor(text, "bright_black", true)}${restore}`;
+}
+
+/**
+ * Shell-syntax highlighting for the grey tool-args segment (the bash tool's
+ * command): command words (line start, after &&, ||, | or ;) red, control
+ * operators bold, everything else stays segment grey. Quote-aware -- nothing
+ * inside '...' or "..." is touched, a stray quote rides through verbatim,
+ * and an env-assignment prefix (`FOO=1 cmd`) stays grey while keeping the
+ * command position. Backticks/$(...)/glued operators (`a|b`) are NOT parsed:
+ * this is display candy, not a shell. Colors off -> text unchanged.
+ *
+ * Highlighted tokens close with RESET + segment grey because a bare RESET
+ * inside the applyToolCallArgs wrap would drop the following text to the
+ * terminal default instead of back to grey.
+ */
+export function applyShellHighlight(text: string, palette: ColorPalette): string {
+  if (!palette.use_colors || text === "") return text;
+  const gray = COLOR_MAP.bright_black!;
+  const red = COLOR_MAP.red!;
+  const bold = COLOR_MAP.bold!;
+  const wrap = (t: string, code: string): string => `\x1b[${code}m${t}${RESET}\x1b[${gray}m`;
+  let out = "";
+  let cmdPos = true;
+  for (const [t] of text.matchAll(/('[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"]+|\s+|['"])/g)) {
+    if (t === "&&" || t === "||" || t === "|" || t === ";") {
+      out += wrap(t, bold);
+      cmdPos = true;
+    } else if (cmdPos && /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
+      out += t; // env prefix: grey, still command position
+    } else if (cmdPos && /^["']/.test(t)) {
+      out += t; // quoted word reads as itself; the command position is spent
+      cmdPos = false;
+    } else if (cmdPos && !/^\s/.test(t)) {
+      out += wrap(t, red);
+      cmdPos = false;
+    } else {
+      out += t;
+    }
+  }
+  return out;
 }
 
 export function applyToolResult(text: string, palette: ColorPalette): string {

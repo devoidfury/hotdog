@@ -120,7 +120,45 @@ describe("CliOutputSink", () => {
       const written = stdoutWrites.join("");
       // Whole line rides the tool_call yellow; the grey args segment re-opens
       // the line color so template postfixes stay in the line's own color.
-      expect(written).toContain("\x1b[33m 🔧 bash \x1b[90mls\x1b[0m\x1b[33m\x1b[0m");
+      // bash args are a shell command, so the command word lights red inside
+      // the grey (token closes re-open the grey).
+      expect(written).toContain(
+        "\x1b[33m 🔧 bash \x1b[90m\x1b[31mls\x1b[0m\x1b[90m\x1b[0m\x1b[33m\x1b[0m",
+      );
+    });
+
+    it("shell-highlights bash args: commands red, operators bold, quotes untouched", () => {
+      const bright = new CliOutputSink({
+        palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
+        toolCallDisplayFormat: " 🔧 {} {}",
+      });
+      bright.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "bash",
+        input: JSON.stringify({ command: 'cd /tmp && grep -rn "a|b" src | head -3' }),
+        toolCallId: "1",
+      });
+      expect(stdoutWrites.join("")).toContain(
+        "\x1b[33m 🔧 bash \x1b[90m" +
+          '\x1b[31mcd\x1b[0m\x1b[90m /tmp \x1b[1m&&\x1b[0m\x1b[90m \x1b[31mgrep\x1b[0m\x1b[90m -rn "a|b" src ' +
+          '\x1b[1m|\x1b[0m\x1b[90m \x1b[31mhead\x1b[0m\x1b[90m -3\x1b[0m\x1b[33m\x1b[0m',
+      );
+    });
+
+    it("shell highlighting is bash-only; other tools stay plain grey", () => {
+      const bright = new CliOutputSink({
+        palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
+        toolCallDisplayFormat: " 🔧 {} {}",
+      });
+      bright.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "read",
+        input: '{"path":"a.ts","limit":10}',
+        toolCallId: "1",
+      });
+      const written = stdoutWrites.join("");
+      expect(written).toContain("\x1b[33m 🔧 read \x1b[90mpath: a.ts · limit: 10\x1b[0m\x1b[33m\x1b[0m");
+      expect(written).not.toContain("\x1b[31m");
     });
 
     it("display is never run through a template (brace-safe)", () => {

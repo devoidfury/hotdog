@@ -8,6 +8,7 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import readline from "node:readline";
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import {
   shouldMountRenderer,

@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import {
   formatCompacting,
   formatToolCall,
+  summarizeToolArgs,
   formatToolResult,
   formatTokenUsage,
   formatThinking,
@@ -33,6 +34,41 @@ describe("formatToolCall", () => {
     expect(formatToolCall("bash", '{"cmd":"ls"}', "[{}] -> {}")).toBe(
       '[bash] -> {"cmd":"ls"}',
     );
+  });
+});
+
+describe("summarizeToolArgs", () => {
+  it("bares the value of a single-key call", () => {
+    expect(summarizeToolArgs('{"command":"ls -la"}')).toBe("ls -la");
+  });
+
+  it("renders multi-key calls as k: v pairs", () => {
+    expect(summarizeToolArgs('{"path":"a.ts","limit":10}')).toBe("path: a.ts · limit: 10");
+  });
+
+  it("summarizes multi-line string values as size, not walls of text", () => {
+    expect(summarizeToolArgs('{"path":"a.ts","content":"1\\n2\\n3"}')).toBe(
+      "path: a.ts · content: 3 lines, 5 chars",
+    );
+  });
+
+  it("compacts nested values and truncates long ones", () => {
+    expect(summarizeToolArgs('{"opts":{"deep":true,"x":[1,2,3]}}')).toBe('{"deep":true,"x":[1,2,3]}');
+    const long = JSON.stringify({ list: Array.from({ length: 40 }, (_, i) => i) });
+    const out = summarizeToolArgs(long);
+    expect(out.length).toBe(60);
+    expect(out.endsWith("…")).toBe(true);
+  });
+
+  it("passes unparseable input through (a malformed call shows what it sent)", () => {
+    expect(summarizeToolArgs("not json {{")).toBe("not json {{");
+  });
+
+  it("handles empty input and non-object JSON", () => {
+    expect(summarizeToolArgs("")).toBe("");
+    expect(summarizeToolArgs('"hi"')).toBe("hi");
+    expect(summarizeToolArgs("42")).toBe("42");
+    expect(summarizeToolArgs("null")).toBe("null");
   });
 });
 

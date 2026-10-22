@@ -205,10 +205,10 @@ Format string for thinking/reasoning output. `{}` is replaced with the thinking 
 
 - **Type:** `string`
 - **CLI flag:** `--toolfmt`
-- **Default:** unset — tool calls print the tool's own semantic header (e.g. `bash: ls -la`, `src/a.ts (lines 200-402)`), falling back to `  → name {args}` when a tool cannot summarize the call
+- **Default:** unset — tool calls print the tool's own semantic header (e.g. `bash: ls -la`, `src/a.ts (lines 200-402)`), falling back to `  → name args` when a tool cannot summarize the call
 - **Resolution:** CLI > config > built-in fallback
 
-Format string for tool call display. First `{}` is the tool name, second `{}` is the arguments. Setting it opts out of the per-tool semantic headers entirely. The legacy `toolfmt` config key is still honored as a fallback for pre-rename config files.
+Format string for tool call display -- layout only: the first `{}` is the tool name, the second `{}` is the arguments. The args slot always carries a human-readable summary, never raw JSON: a single-key call bares the value (`{"command":"ls"}` -> `ls`), multi-key calls read `key: value · ...`, multi-line values collapse to `N lines, M chars`, and unparseable args pass through verbatim. Setting the template opts out of the per-tool semantic headers. Line coloring is internal, not configurable: the line rides the palette `tool_call` color with the args segment greyed, all off under `NO_COLOR`/`TERM=dumb`. The legacy `toolfmt` config key is still honored as a fallback for pre-rename config files.
 
 ```json
 { "toolCallDisplayFormat": "🔧 {} {}" }

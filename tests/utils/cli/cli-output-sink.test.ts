@@ -93,14 +93,34 @@ describe("CliOutputSink", () => {
       });
       const written = stdoutWrites.join("");
       expect(written).toContain("→ bash");
-      expect(written).toContain('{"command":"ls"}');
+      // Template wins the layout; the args slot carries the human summary,
+      // never raw JSON, and the tool's display header is not consulted.
+      expect(written).toContain("bash ls");
+      expect(written).not.toContain('"command"');
       expect(written).not.toContain("bash: ls");
     });
 
     it("falls back to the default template when display is absent", () => {
       const plain = new CliOutputSink({ palette: new ColorPalette({ use_colors: false }) });
       plain.emit({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: '{"command":"ls"}', toolCallId: "1" });
-      expect(stdoutWrites.join("")).toContain("→ bash {\"command\":\"ls\"}");
+      expect(stdoutWrites.join("")).toContain("→ bash ls");
+    });
+
+    it("colors the args segment grey and re-opens the tool color after it", () => {
+      const bright = new CliOutputSink({
+        palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
+        toolCallDisplayFormat: " 🔧 {} {}",
+      });
+      bright.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "bash",
+        input: '{"command":"ls"}',
+        toolCallId: "1",
+      });
+      const written = stdoutWrites.join("");
+      // Whole line rides the tool_call yellow; the grey args segment re-opens
+      // the line color so template postfixes stay in the line's own color.
+      expect(written).toContain("\x1b[33m 🔧 bash \x1b[90mls\x1b[0m\x1b[33m\x1b[0m");
     });
 
     it("display is never run through a template (brace-safe)", () => {

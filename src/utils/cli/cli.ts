@@ -23,6 +23,7 @@ import {
   ColorPalette,
   applyThinking,
   applyToolCall,
+  applyToolCallArgs,
   applyToolResult,
   applyFinalResponse,
   applyCompacting,
@@ -100,6 +101,41 @@ const TOOL_CALL_PREFIX = "  \u2192 ";
  */
 export function formatToolCall(toolName: string, input: string, toolFmt: string): string {
   return toolFmt.replace("{}", toolName).replace("{}", input);
+}
+
+/**
+ * Human-readable rendering of the raw tool-call JSON for the template's
+ * arguments slot and the no-display fallback -- raw JSON never reaches the
+ * terminal. Single-key objects bare the value (`{"command":"ls"}` -> `ls`),
+ * multi-key objects read `k: v · k: v`, multi-line string values summarize
+ * to their size (a write tool's content is a count, not a wall of text),
+ * nested values compact to truncated JSON, and unparseable input passes
+ * through (a malformed model call shows what it sent).
+ */
+export function summarizeToolArgs(input: string): string {
+  const raw = (input ?? "").trim();
+  if (raw === "") return "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+  if (parsed === null || typeof parsed !== "object") return String(parsed);
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (entries.length === 1) return summarizeToolValue(entries[0]![1]);
+  return entries.map(([k, v]) => `${k}: ${summarizeToolValue(v)}`).join(" · ");
+}
+
+/** One summarized argument value; see summarizeToolArgs. */
+function summarizeToolValue(value: unknown): string {
+  if (typeof value === "string") {
+    const lines = value.split("\n");
+    return lines.length > 1 ? `${lines.length} lines, ${value.length} chars` : value;
+  }
+  if (value === null || typeof value !== "object") return String(value);
+  const json = JSON.stringify(value);
+  return json.length > 60 ? `${json.slice(0, 59)}…` : json;
 }
 
 /**
@@ -327,14 +363,19 @@ export class CliOutputSink extends OutputSink {
     // Precedence: explicit user template (the schema carries no default for
     // toolCallDisplayFormat, so an unset option really means "user chose
     // nothing") > the tool's semantic header (Tool.callDisplay) > name +
-    // raw args. display never passes through a template -- its text may
-    // legitimately contain "{}".
+    // args. The template is LAYOUT only -- its args slot always carries the
+    // human-readable summary, never raw JSON. display never passes through a
+    // template -- its text may legitimately contain "{}".
+    // Segments get the spoof pass individually and the grey args wrap rides
+    // AFTER it (spoofSafe neutralizes ESC); the line-wide tool_call color
+    // lands later via the mode applier in _flushText.
+    const args = applyToolCallArgs(spoofSafe(summarizeToolArgs(event.input)), this.palette);
     const text = this.toolCallDisplayFormat
-      ? formatToolCall(event.toolName, event.input, this.toolCallDisplayFormat)
+      ? formatToolCall(spoofSafe(event.toolName), args, this.toolCallDisplayFormat)
       : event.display !== undefined
-        ? `${TOOL_CALL_PREFIX}${event.display}`
-        : formatToolCall(event.toolName, event.input, `${TOOL_CALL_PREFIX}{} {}`);
-    this._processContent(spoofSafe(text));
+        ? `${TOOL_CALL_PREFIX}${spoofSafe(event.display)}`
+        : formatToolCall(spoofSafe(event.toolName), args, `${TOOL_CALL_PREFIX}{} {}`);
+    this._processContent(text);
   }
 
   override emitToolResult(event: ToolResultEvent): void {

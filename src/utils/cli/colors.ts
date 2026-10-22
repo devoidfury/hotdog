@@ -185,6 +185,21 @@ export function applyToolCall(text: string, palette: ColorPalette): string {
   return applyColor(text, palette.tool_call, palette.use_colors);
 }
 
+/**
+ * The arguments segment of a tool-call line: grey painted OVER the line-wide
+ * tool_call color (the mode applier wraps the whole line later in _flushText),
+ * so the line color is re-opened after the grey to keep any postfix text
+ * (template tails) in the line's own color. Colors off -> text unchanged.
+ * Call AFTER the spoof pass: ESC is itself a neutralized code point, so
+ * embedding ANSI before spoofSafe would shred it.
+ */
+export function applyToolCallArgs(text: string, palette: ColorPalette): string {
+  if (!palette.use_colors || text === "") return text;
+  const lineCode = COLOR_MAP[palette.tool_call];
+  const restore = lineCode ? `\x1b[${lineCode}m` : RESET;
+  return `${applyColor(text, "bright_black", true)}${restore}`;
+}
+
 export function applyToolResult(text: string, palette: ColorPalette): string {
   return applyColor(text, palette.tool_result, palette.use_colors);
 }

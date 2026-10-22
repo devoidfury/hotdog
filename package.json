@@ -26,7 +26,6 @@
     "test:pty": "bun pty-tests/pty-renderer-3c/run-pty-suite.ts",
     "coverage": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --coverage",
     "check": "bun x tsc --noEmit",
-    "preview": "bun tools/preview.ts",
     "gen-fixtures": "bun evals/tools/prepare.ts"
   },
   "files": ["bin", "src", "examples", "tsconfig.json"],

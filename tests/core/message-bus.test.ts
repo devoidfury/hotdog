@@ -113,17 +113,20 @@ describe("MessageBus steering (enqueue with steering: true)", () => {
     expect(bus.queue).toEqual(["nope"]);
   });
 
-  it("emits QUEUE_UPDATE on a steering enqueue and again on chain drain (§8 chip signal)", async () => {
+  it("holds the QUEUE_UPDATE chip pending until the agent injects steering into context (§8)", async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => {
       release = r;
     });
-    const steered: string[] = [];
+    // The mock parks the onDelivered callback like the real Agent does:
+    // steer() acceptance is a queue push; delivery is the drain into context.
+    const accepted: Array<{ content: string; settle: () => void }> = [];
     const agent = {
       ...createMockAgent({
         hooks: { runHookPipeline: async () => { await gate; return {}; } },
       }),
-      steer: (c: string) => steered.push(c),
+      steer: (c: string, onDelivered?: () => void) =>
+        accepted.push({ content: c, settle: () => onDelivered?.() }),
     };
     const sink = createMockSink();
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
@@ -147,8 +150,24 @@ describe("MessageBus steering (enqueue with steering: true)", () => {
 
     release();
     await bus.steeringPending;
-    expect(steered).toEqual(["make it purple", "and shorter"]);
-    // The last update reports the chain fully drained: the chip goes away.
+    expect(accepted.map((a) => a.content)).toEqual(["make it purple", "and shorter"]);
+    // The chain has drained but nothing reached the model yet: acceptance is
+    // NOT delivery. The chip must stay up for the whole acceptance->injection
+    // gap (an LLM call or tool run in progress), the window it exists for.
+    expect(updates()[updates().length - 1]).toEqual({
+      type: OUTPUT_EVENT.QUEUE_UPDATE,
+      pending: 2,
+      preview: "make it purple",
+    });
+
+    // #prepareIteration drains FIFO: each context append settles its entry.
+    accepted[0]?.settle();
+    expect(updates()[updates().length - 1]).toEqual({
+      type: OUTPUT_EVENT.QUEUE_UPDATE,
+      pending: 1,
+      preview: "and shorter",
+    });
+    accepted[1]?.settle();
     expect(updates()[updates().length - 1]).toEqual({
       type: OUTPUT_EVENT.QUEUE_UPDATE,
       pending: 0,

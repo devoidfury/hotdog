@@ -705,4 +705,35 @@ describe('Agent — lifecycle and state', () => {
     expect(userMessageEvents.length).toBe(2);
     expect((userMessageEvents[1]?.content as string)).toBe('Queued message');
   });
+
+  it('settles steer onDelivered at context injection, not at acceptance', async () => {
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'Done.',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+      ],
+    });
+
+    const { agent } = createAgentFixture({ mockLLM });
+
+    let fired = 0;
+    let inContextAtFire = false;
+    agent.steer('parked steer', () => {
+      fired++;
+      // "Delivered" means the model has seen it: the append must precede
+      // the settle (the bus queue chip clears on this callback).
+      inContextAtFire = agent.context.log
+        .getAll()
+        .some((m) => m.role === 'user' && (m.content as string) === 'parked steer');
+    });
+    // Acceptance is a queue push -- it must NOT settle the callback.
+    expect(fired).toBe(0);
+
+    await agent.run('Initial');
+    // The #prepareIteration drain settles it: exactly once, after the append.
+    expect(fired).toBe(1);
+    expect(inContextAtFire).toBe(true);
+  });
 });

@@ -39,7 +39,7 @@ export interface MessageBusAgent {
    * real Agent; optional so test fakes can stay minimal. Submission goes
    * through enqueue(..., { steering: true }), not this method directly.
    */
-  steer?(content: string | Array<Record<string, unknown>>): void;
+  steer?(content: string | Array<Record<string, unknown>>, onDelivered?: () => void): void;
   /**
    * Tool-call repair seam: present on the real Agent, optional so test fakes
    * can stay minimal. Used to heal interrupted tool calls after a cancelled
@@ -125,11 +125,15 @@ export class MessageBus {
   // Serializes mid-run steering delivery: pipelines are async, so per-item
   // fire-and-forget would let a later submission overtake an earlier one.
   #steerChain: Promise<void> = Promise.resolve();
-  // Previews of steering items accepted but not yet delivered (chain order).
-  // Drives the QUEUE_UPDATE chip: pushed at enqueue, shifted when the chain
-  // delivers. Interrupt/cancel do NOT clear it -- the chain still drains,
-  // and shifting a cleared list would drift the count off the deliveries.
-  #pendingSteers: string[] = [];
+  // Steering items accepted but not yet injected into the model's context.
+  // Drives the QUEUE_UPDATE chip: pushed at enqueue, removed when the agent
+  // appends the item (#prepareIteration fires steer()'s onDelivered) or
+  // immediately when the input pipeline handles/drops it. Removal is by
+  // entry handle, not FIFO shift: pipeline-handled items never reach
+  // steer(), so settle order can differ from push order.
+  // Interrupt/cancel do NOT clear it: leftovers stay in the agent's
+  // steering queue and deliver next turn; the chip tells the truth until then.
+  #pendingSteers: Array<{ preview: string }> = [];
   readonly #lanes: TurnLanes | null;
   // Active lane wait (null when not waiting). cancel()/interrupt() abort it so
   // a lane-blocked turn unwinds without leaking the slot it might land on.
@@ -168,9 +172,12 @@ export class MessageBus {
       // The chain preserves submission order across async pipelines.
       // Items carrying images never take this path: steering has no images
       // seam, so they queue and ride the next Agent.run instead of being dropped.
-      this.#pendingSteers.push(typeof clean === "string" ? clean : "");
+      const entry = { preview: typeof clean === "string" ? clean : "" };
+      this.#pendingSteers.push(entry);
       this.#emitQueueUpdate();
-      this.#steerChain = this.#steerChain.then(() => this.#deliverSteering(agent, clean, opts?.source));
+      this.#steerChain = this.#steerChain.then(() =>
+        this.#deliverSteering(agent, clean, entry, opts?.source),
+      );
       return;
     }
     this.#queue.push({ content: clean, source: opts?.source, images: opts?.images });
@@ -427,23 +434,37 @@ export class MessageBus {
   async #deliverSteering(
     agent: MessageBusAgent,
     content: string | Array<Record<string, unknown>>,
+    entry: { preview: string },
     source: MessageSource | undefined,
   ): Promise<void> {
     try {
       const piped = await this.#runInputPipeline(agent, content, source);
-      if (piped.handled) return;
-      agent.steer!(piped.content);
+      if (piped.handled) {
+        // Never reaches the agent: the pipeline consumed it (slash command),
+        // so it is settled immediately.
+        this.#settleSteer(entry);
+        return;
+      }
+      // The chip stays pending until the model actually sees the message --
+      // #prepareIteration fires this callback when it appends the item to
+      // context -- NOT when steer() accepts the push. Acceptance can lead
+      // injection by a whole LLM call or tool run, and that gap is exactly
+      // the window the chip exists to cover.
+      agent.steer!(piped.content, () => this.#settleSteer(entry));
     } catch (e: unknown) {
       this.#sink.emit({
         type: OUTPUT_EVENT.COMMAND_RESULT,
         content: isExpectedError(e) ? (e as Error).message : formatError(e),
       });
-    } finally {
-      // Chain order == push order, so the head of the preview list is this
-      // delivery; the chip updates on every settle (delivered or errored).
-      this.#pendingSteers.shift();
-      this.#emitQueueUpdate();
+      this.#settleSteer(entry);
     }
+  }
+
+  /** Settles one steering entry (injected, pipeline-handled, or errored): chip updates. */
+  #settleSteer(entry: { preview: string }): void {
+    const i = this.#pendingSteers.indexOf(entry);
+    if (i >= 0) this.#pendingSteers.splice(i, 1);
+    this.#emitQueueUpdate();
   }
 
   /** Steer-default chip signal (§8): pending count + first pending preview. */
@@ -451,7 +472,7 @@ export class MessageBus {
     this.#sink.emit({
       type: OUTPUT_EVENT.QUEUE_UPDATE,
       pending: this.#pendingSteers.length,
-      preview: this.#pendingSteers[0] ?? "",
+      preview: this.#pendingSteers[0]?.preview ?? "",
     });
   }
 

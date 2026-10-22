@@ -178,7 +178,11 @@ export class Agent implements AgentLike {
   /** True when the active profile is a manager (controls managerOnly tools). */
   managerProfile: boolean;
   /** Steering messages (see steer()): injected between LLM calls by #prepareIteration. */
-  steeringQueue: Array<string | Array<Record<string, unknown>>>;
+  steeringQueue: Array<{
+    content: string | Array<Record<string, unknown>>;
+    /** Fired when the item is appended to context (see steer()). */
+    onDelivered?: () => void;
+  }>;
   runAbortController: AbortController | null;
   /**
    * Run-lifetime cancellation signal: live for the whole of run(),
@@ -359,9 +363,12 @@ export class Agent implements AgentLike {
    * This is the in-core append seam (sibling of the tool-result/system-notice appends);
    * user submission runs the INPUT pipeline first via MessageBus.enqueue(..., { steering: true });
    * task follow-ups use this seam directly (task agents have no bus).
+   * `onDelivered` (optional) fires when #prepareIteration actually appends
+   * the item to context -- "accepted" is a queue push; "delivered" is the
+   * model seeing it. The bus uses it to clear the queue chip honestly.
    */
-  steer(content: string | Array<Record<string, unknown>>): void {
-    this.steeringQueue.push(content);
+  steer(content: string | Array<Record<string, unknown>>, onDelivered?: () => void): void {
+    this.steeringQueue.push({ content, onDelivered });
   }
 
   // ── Run Loop ──────────────────────────────────────────────────────────────
@@ -611,13 +618,17 @@ export class Agent implements AgentLike {
     if (this.abortSignal?.aborted) throw LlmError.Cancelled("Agent aborted");
 
     while (this.steeringQueue.length > 0) {
-      const steering = this.steeringQueue.shift()!;
+      const { content: steering, onDelivered } = this.steeringQueue.shift()!;
       this.addMessage(new Message({ role: "user", content: steering, source: "user" }));
       const display = splitFileIncludes(steering);
       this.emitOutput("user_message", {
         content: display.text,
         ...(display.files.length > 0 ? { files: display.files } : {}),
       });
+      // The model has now seen this steering message: settle whoever parked
+      // a callback on it (the bus's queue chip). After the context append so
+      // "delivered" never leads the truth.
+      onDelivered?.();
     }
 
     let messages = this.buildMessages();

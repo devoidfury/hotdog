@@ -118,16 +118,16 @@ describe("CliOutputSink", () => {
         toolCallId: "1",
       });
       const written = stdoutWrites.join("");
-      // Whole line rides the tool_call yellow; the grey args segment re-opens
-      // the line color so template postfixes stay in the line's own color.
-      // bash args are a shell command, so the command word lights red inside
-      // the grey (token closes re-open the grey).
+      // Whole line rides the tool_call yellow; args print in the terminal
+      // default (the yellow re-opens after the segment so template postfixes
+      // stay yellow). bash args are a shell command, so the command word
+      // lights red inside the default text.
       expect(written).toContain(
-        "\x1b[33m 🔧 bash \x1b[90m\x1b[31mls\x1b[0m\x1b[90m\x1b[0m\x1b[33m\x1b[0m",
+        "\x1b[33m 🔧 bash \x1b[0m\x1b[31mls\x1b[0m\x1b[33m\x1b[0m",
       );
     });
 
-    it("shell-highlights bash args: commands red, operators bold, quotes untouched", () => {
+    it("shell-highlights bash args: commands red, operators default, quotes untouched", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
@@ -139,13 +139,13 @@ describe("CliOutputSink", () => {
         toolCallId: "1",
       });
       expect(stdoutWrites.join("")).toContain(
-        "\x1b[33m 🔧 bash \x1b[90m" +
-          '\x1b[31mcd\x1b[0m\x1b[90m /tmp \x1b[1m&&\x1b[0m\x1b[90m \x1b[31mgrep\x1b[0m\x1b[90m -rn "a|b" src ' +
-          '\x1b[1m|\x1b[0m\x1b[90m \x1b[31mhead\x1b[0m\x1b[90m -3\x1b[0m\x1b[33m\x1b[0m',
+        "\x1b[33m 🔧 bash \x1b[0m" +
+          '\x1b[31mcd\x1b[0m /tmp \x1b[35m&&\x1b[0m \x1b[31mgrep\x1b[0m -rn "a|b" src \x1b[35m|\x1b[0m \x1b[31mhead\x1b[0m -3' +
+          "\x1b[33m\x1b[0m",
       );
     });
 
-    it("shell highlighting is bash-only; other tools stay plain grey", () => {
+    it("non-bash args light key labels cyan inside the grey segment", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
@@ -157,7 +157,10 @@ describe("CliOutputSink", () => {
         toolCallId: "1",
       });
       const written = stdoutWrites.join("");
-      expect(written).toContain("\x1b[33m 🔧 read \x1b[90mpath: a.ts · limit: 10\x1b[0m\x1b[33m\x1b[0m");
+      expect(written).toContain(
+        "\x1b[33m 🔧 read \x1b[0m\x1b[36mpath:\x1b[0m a.ts · \x1b[36mlimit:\x1b[0m 10\x1b[33m\x1b[0m",
+      );
+      // Shell highlighting stays bash-only.
       expect(written).not.toContain("\x1b[31m");
     });
 

@@ -187,52 +187,64 @@ export function applyToolCall(text: string, palette: ColorPalette): string {
 }
 
 /**
- * The arguments segment of a tool-call line: grey painted OVER the line-wide
- * tool_call color (the mode applier wraps the whole line later in _flushText),
- * so the line color is re-opened after the grey to keep any postfix text
- * (template tails) in the line's own color. Colors off -> text unchanged.
- * Call AFTER the spoof pass: ESC is itself a neutralized code point, so
- * embedding ANSI before spoofSafe would shred it.
+ * The arguments segment of a tool-call line: the terminal's DEFAULT
+ * foreground, painted over the line-wide tool_call color (the mode applier
+ * wraps the whole line later in _flushText). The line color is re-opened
+ * after the segment so any postfix text (template tails) stays in the
+ * line's own color. Colors off -> text unchanged. Call AFTER the spoof
+ * pass: ESC is itself a neutralized code point, so embedding ANSI before
+ * spoofSafe would shred it.
  */
 export function applyToolCallArgs(text: string, palette: ColorPalette): string {
   if (!palette.use_colors || text === "") return text;
   const lineCode = COLOR_MAP[palette.tool_call];
   const restore = lineCode ? `\x1b[${lineCode}m` : RESET;
-  return `${applyColor(text, "bright_black", true)}${restore}`;
+  return `${RESET}${text}${restore}`;
+}
+
+/**
+ * Cyan for the key labels of summarized k: v args (non-bash tools): a key
+ * counts only at a pair boundary -- line start or right after the " · "
+ * separator -- so a value that happens to contain ": " never lights up
+ * (worst case with a hostile-looking value is a cosmetic miss either way;
+ * the text is spoof-neutralized upstream). Tokens close with RESET back to
+ * the default args color. Colors off -> text unchanged.
+ */
+export function applyArgKeyHighlight(text: string, palette: ColorPalette): string {
+  if (!palette.use_colors || text === "") return text;
+  const cyan = COLOR_MAP.cyan!;
+  return text.replace(
+    /(^| · )([A-Za-z_][A-Za-z0-9_]*)(: )/g,
+    (_m: string, lead: string, key: string) => `${lead}\x1b[${cyan}m${key}:${RESET} `,
+  );
 }
 
 /**
  * Shell-syntax highlighting for the grey tool-args segment (the bash tool's
  * command): command words (line start, after &&, ||, | or ;) red, control
- * operators bold, everything else stays segment grey. Quote-aware -- nothing
+ * operators magenta, everything else in the default args color. Quote-aware -- nothing
  * inside '...' or "..." is touched, a stray quote rides through verbatim,
- * and an env-assignment prefix (`FOO=1 cmd`) stays grey while keeping the
+ * and an env-assignment prefix (`FOO=1 cmd`) stays default while keeping the
  * command position. Backticks/$(...)/glued operators (`a|b`) are NOT parsed:
  * this is display candy, not a shell. Colors off -> text unchanged.
- *
- * Highlighted tokens close with RESET + segment grey because a bare RESET
- * inside the applyToolCallArgs wrap would drop the following text to the
- * terminal default instead of back to grey.
  */
 export function applyShellHighlight(text: string, palette: ColorPalette): string {
   if (!palette.use_colors || text === "") return text;
-  const gray = COLOR_MAP.bright_black!;
   const red = COLOR_MAP.red!;
-  const bold = COLOR_MAP.bold!;
-  const wrap = (t: string, code: string): string => `\x1b[${code}m${t}${RESET}\x1b[${gray}m`;
   let out = "";
   let cmdPos = true;
   for (const [t] of text.matchAll(/('[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"]+|\s+|['"])/g)) {
     if (t === "&&" || t === "||" || t === "|" || t === ";") {
-      out += wrap(t, bold);
+      // Purple so the glue between commands reads as structure, not text.
+      out += `\x1b[${COLOR_MAP.magenta!}m${t}${RESET}`;
       cmdPos = true;
     } else if (cmdPos && /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
-      out += t; // env prefix: grey, still command position
+      out += t; // env prefix: default, still command position
     } else if (cmdPos && /^["']/.test(t)) {
       out += t; // quoted word reads as itself; the command position is spent
       cmdPos = false;
     } else if (cmdPos && !/^\s/.test(t)) {
-      out += wrap(t, red);
+      out += `\x1b[${red}m${t}${RESET}`;
       cmdPos = false;
     } else {
       out += t;

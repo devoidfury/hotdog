@@ -16,6 +16,7 @@ import {
   colorDisabledByEnv,
   applyProgress,
   applyShellHighlight,
+  applyArgKeyHighlight,
 } from '../../../src/utils/cli/colors.ts';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
@@ -210,8 +211,8 @@ describe('applyShellHighlight', () => {
     expect(applyShellHighlight('cd /tmp && ls', off)).toBe('cd /tmp && ls');
   });
 
-  it('highlights command words red and re-opens segment grey after each token', () => {
-    expect(applyShellHighlight('ls -la', on)).toBe('\x1b[31mls\x1b[0m\x1b[90m -la');
+  it('highlights command words red; everything else rides the default', () => {
+    expect(applyShellHighlight('ls -la', on)).toBe('\x1b[31mls\x1b[0m -la');
   });
 
   it('arms the command position after &&, ||, | and ;', () => {
@@ -219,21 +220,49 @@ describe('applyShellHighlight', () => {
     for (const cmd of ['a', 'b', 'c', 'd', 'e']) {
       expect(out).toContain(`\x1b[31m${cmd}\x1b[0m`);
     }
-    for (const op of ['&&', '||', '|', ';']) {
-      expect(out).toContain(`\x1b[1m${op}\x1b[0m`);
+    for (const [op, next] of [['&&', 'b'], ['||', 'c'], ['|', 'd'], [';', 'e']]) {
+      // Operators glow magenta and arm the next command word.
+      expect(out).toContain(`\x1b[35m${op}\x1b[0m \x1b[31m${next}\x1b[0m`);
     }
   });
 
   it('never touches quoted text and carries stray quotes verbatim (no char loss)', () => {
     expect(applyShellHighlight('grep "a && b" src', on)).toBe(
-      '\x1b[31mgrep\x1b[0m\x1b[90m "a && b" src',
+      '\x1b[31mgrep\x1b[0m "a && b" src',
     );
-    expect(applyShellHighlight("echo don't", on)).toBe("\x1b[31mecho\x1b[0m\x1b[90m don't");
+    expect(applyShellHighlight("echo don't", on)).toBe("\x1b[31mecho\x1b[0m don't");
   });
 
-  it('keeps env prefixes grey and the command position armed', () => {
+  it('keeps env prefixes default-colored and the command position armed', () => {
     expect(applyShellHighlight('FOO=1 cmd arg', on)).toBe(
-      'FOO=1 \x1b[31mcmd\x1b[0m\x1b[90m arg',
+      'FOO=1 \x1b[31mcmd\x1b[0m arg',
+    );
+  });
+});
+
+describe('applyArgKeyHighlight', () => {
+  const on = new ColorPalette({ use_colors: true });
+  const off = new ColorPalette({ use_colors: false });
+
+  it('is a no-op with colors off', () => {
+    expect(applyArgKeyHighlight('path: a.ts · limit: 10', off)).toBe('path: a.ts · limit: 10');
+  });
+
+  it('lights keys cyan at pair boundaries', () => {
+    expect(applyArgKeyHighlight('path: a.ts · limit: 10', on)).toBe(
+      '\x1b[36mpath:\x1b[0m a.ts · \x1b[36mlimit:\x1b[0m 10',
+    );
+  });
+
+  it('never lights a value that merely contains ": " mid-stream', () => {
+    expect(applyArgKeyHighlight('note: a: b', on)).toBe(
+      '\x1b[36mnote:\x1b[0m a: b',
+    );
+  });
+
+  it('skips keys with spaces or punctuation (cosmetic miss, never mangled)', () => {
+    expect(applyArgKeyHighlight('odd key: x · fine: y', on)).toBe(
+      'odd key: x · \x1b[36mfine:\x1b[0m y',
     );
   });
 });

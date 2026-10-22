@@ -122,6 +122,6 @@ stdin+stdout, TERM not `dumb`):
   coloring (no restyle), and vanishes from the frame the moment its line
   commits; tool output and previously committed rows are unaffected.
 
-On the legacy renderer (`renderer: "legacy"`, the current default) mid-run
+On the legacy renderer (`renderer: "legacy"`, the kill-switch) mid-run
 submissions queue and no status/chip rows appear; the key bindings are the
 same.

@@ -52,6 +52,17 @@ describe("summarizeToolArgs", () => {
     );
   });
 
+  it("first-line preview hint folds to the first non-blank line + size stub", () => {
+    const hints = { command: { preview: "first-line" as const } };
+    expect(summarizeToolArgs('{"command":"git status\\n&& git diff"}', undefined, hints)).toBe(
+      "git status… (2 lines, 22 chars)",
+    );
+    // Blank leading line skipped; single-line values are already one line.
+    expect(summarizeToolArgs('{"command":"\\n  echo hi"}', undefined, hints)).toBe("echo hi… (2 lines, 10 chars)");
+    // Other keys keep the count stub; a hint for a different key changes nothing.
+    expect(summarizeToolArgs('{"path":"a\\nb"}', undefined, hints)).toBe("2 lines, 3 chars");
+  });
+
   it("compacts nested values and truncates long ones", () => {
     expect(summarizeToolArgs('{"opts":{"deep":true,"x":[1,2,3]}}')).toBe('{"deep":true,"x":[1,2,3]}');
     const long = JSON.stringify({ list: Array.from({ length: 40 }, (_, i) => i) });

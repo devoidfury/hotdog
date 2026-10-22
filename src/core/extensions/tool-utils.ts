@@ -1,5 +1,5 @@
 import { ToolError } from "../error.ts";
-import { ToolDef, ToolMetadata } from "./tool-registry.ts";
+import { ArgDisplay, ToolDef, ToolMetadata } from "./tool-registry.ts";
 import type { ToolResultPart } from "../context/wrappers.ts";
 
 export type { ToolMetadata };
@@ -316,6 +316,13 @@ export function defaultCallDisplay(
  * and unparseable input passes through (a malformed model call shows what
  * it sent). Shared by the CLI sink's template args slot and tool
  * `callDisplay`s that have nothing more semantic to say (MCP passthrough).
+ *
+ * `argDisplay` is the tool's per-parameter display hints (see ArgDisplay):
+ * a value whose hint says `preview: "first-line"` collapses to a preview of
+ * its first non-blank line plus the size stub, instead of the bare count.
+ * Hints are display-only metadata declared next to the tool (never in the
+ * provider-bound schema); omit them and the output is byte-identical to the
+ * old behavior.
  */
 export function summarizeToolArgs(
   input: string | Record<string, unknown> | null,
@@ -333,6 +340,8 @@ export function summarizeToolArgs(
    * Omitted (every non-terminal sink) -> byte-identical output, ANSI-free.
    */
   valueTransform?: (key: string, rendered: string, value: unknown) => string,
+  /** Per-parameter display hints, keyed by parameter name (see ArgDisplay). */
+  argDisplay?: Record<string, ArgDisplay>,
 ): string {
   if (input === null) return "";
   let value: unknown = input;
@@ -348,18 +357,40 @@ export function summarizeToolArgs(
   if (value === null || typeof value !== "object") return String(value);
   const entries = Object.entries(value as Record<string, unknown>);
   const render = (k: string, v: unknown): string => {
-    const rendered = summarizeToolValue(v);
+    const rendered = summarizeToolValue(v, argDisplay?.[k]);
     return valueTransform ? valueTransform(k, rendered, v) : rendered;
   };
   if (entries.length === 1) return render(entries[0]![0], entries[0]![1]);
   return entries.map(([k, v]) => `${k}: ${render(k, v)}`).join(" · ");
 }
 
+/** Rune cap on a first-line preview (shared by the summarizer and the shell seam). */
+const PREVIEW_RUNES = 80;
+
+/**
+ * Collapse a multi-line string to its first non-blank line (trimmed,
+ * rune-capped) plus `…`, and the size stub, kept split so a renderer can
+ * shell-light the preview while the stub rides plain (a `5` at shell-command
+ * position would light up as a red command word). Joined:
+ * `git status --porcelain… (12 lines, 431 chars)`.
+ */
+export function firstLinePreview(value: string, lines: string[]): { preview: string; stub: string } {
+  const first = (lines.find((l) => l.trim() !== "") ?? "").trim();
+  const runes = Array.from(first);
+  const head = runes.length > PREVIEW_RUNES ? runes.slice(0, PREVIEW_RUNES).join("") : first;
+  return { preview: `${head}\u2026`, stub: `(${lines.length} lines, ${value.length} chars)` };
+}
+
 /** One summarized argument value; see summarizeToolArgs. */
-function summarizeToolValue(value: unknown): string {
+function summarizeToolValue(value: unknown, hint?: ArgDisplay): string {
   if (typeof value === "string") {
     const lines = value.split("\n");
-    return lines.length > 1 ? `${lines.length} lines, ${value.length} chars` : value;
+    if (lines.length === 1) return value;
+    if (hint?.preview === "first-line") {
+      const { preview, stub } = firstLinePreview(value, lines);
+      return `${preview} ${stub}`;
+    }
+    return `${lines.length} lines, ${value.length} chars`;
   }
   if (value === null || typeof value !== "object") return String(value);
   const json = JSON.stringify(value);

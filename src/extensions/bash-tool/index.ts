@@ -94,7 +94,12 @@ export function resolveBashTimeout(
 
 export class BashTool {
   static readonly TOOL_NAME = "bash";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 2, execution: "worker" };
+  metadata: ToolMetadata = {
+    sideEffects: true,
+    difficulty: 2,
+    execution: "worker",
+    argDisplay: { command: { preview: "first-line", syntax: "shell" } },
+  };
 
   readonly timeoutMs: number;
   readonly maxOutputLines: number;

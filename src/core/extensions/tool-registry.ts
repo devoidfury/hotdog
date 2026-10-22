@@ -7,6 +7,30 @@ import type { ToolContext, DefaultToolContext } from "./tool-context.ts";
 import { formatError } from "../error.ts";
 
 /**
+ * Display hints for one tool argument, declared by the tool next to its
+ * metadata (never inside the JSON Schema: the schema goes to the provider
+ * verbatim, and display policy must not cost prompt tokens or trip strict
+ * schema validation). Sinks consult the hint for the entry's parameter name
+ * when summarizing a call's args; unknown hint values are ignored, so a
+ * renderer only ever consumes what it knows how to draw.
+ */
+export interface ArgDisplay {
+  /**
+   * How a multi-line string value collapses. `"count"` (default):
+   * `N lines, M chars`. `"first-line"`: preview of the first non-blank
+   * line (trimmed, rune-capped, ellipsized) plus the size stub, so a long
+   * command still shows what it starts with.
+   */
+  preview?: "count" | "first-line";
+  /**
+   * Syntax highlighter hint for sinks that can render it: `"shell"` lights
+   * command words and operators in the value. Terminals only for now; the
+   * webui ignores it (its follow-up may not).
+   */
+  syntax?: "shell";
+}
+
+/**
  * Metadata describing a tool's behavior characteristics.
  * Used for sandbox mode filtering and difficulty-based tool hiding.
  */
@@ -30,6 +54,11 @@ export interface ToolMetadata {
    * bash, file ops, network) run in a pooled out-of-process executor.
    */
   execution?: "local" | "worker";
+  /**
+   * Per-parameter display hints (keyed by schema parameter name). Read by
+   * display sinks via ToolRegistry.getMetadata; never sent to the provider.
+   */
+  argDisplay?: Record<string, ArgDisplay>;
 }
 
 export interface ToolDef {

@@ -673,6 +673,10 @@ export async function runInteractiveSession(
     toolCallDisplayFormat: resolved.toolCallDisplayFormat,
     toolOutputFmt: resolved.toolOutputFmt,
     hideUserMessage: true,
+    // Tools declare per-argument display hints in their metadata (folding,
+    // syntax); the sink stays generic and asks the registry per call.
+    // Optional chain: test rigs hand in bare core doubles.
+    argDisplay: (toolName) => core.toolRegistry?.getMetadata(toolName)?.argDisplay,
   });
 
   // Split-renderer kill switch (design note §9/§12): mounts iff the knob says
@@ -1058,8 +1062,17 @@ export async function runInteractiveSession(
           return;
         case OUTPUT_EVENT.TOOL_CALL_DELTA:
           // In-flight tool call: one frame row per wire index, composed with
-          // the sink's summarizer/highlighters (palette decides color).
-          bridge.setInflightCall(ev.index, inflightCallText(ev.name, ev.args, palette));
+          // the sink's summarizer/highlighters (palette decides color, the
+          // tool's metadata argDisplay drives folding and shell syntax).
+          bridge.setInflightCall(
+            ev.index,
+            inflightCallText(
+              ev.name,
+              ev.args,
+              palette,
+              core.toolRegistry?.getMetadata(ev.name)?.argDisplay,
+            ),
+          );
           bridge.updateStatus({ laneWait: false });
           return;
         case OUTPUT_EVENT.TOOL_CALL:

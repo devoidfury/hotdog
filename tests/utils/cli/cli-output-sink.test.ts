@@ -5,6 +5,17 @@ import {
 } from "@utils/cli/cli.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { ColorPalette } from "@utils/cli/colors.ts";
+import type { ArgDisplay } from "@core/extensions/tool-registry.ts";
+
+/**
+ * Bash's metadata display hints as the registry would hand them to the
+ * sink. Sinks are hint-driven now (no bash hardcoding), so tests that
+ * assert shell coloring wire these explicitly.
+ */
+const BASH_ARG_DISPLAY: Record<string, ArgDisplay> = {
+  command: { preview: "first-line", syntax: "shell" },
+};
+const bashHints = () => BASH_ARG_DISPLAY;
 
 describe("CliOutputSink", () => {
   let sink: CliOutputSink;
@@ -111,6 +122,7 @@ describe("CliOutputSink", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
+        argDisplay: bashHints,
       });
       bright.emit({
         type: OUTPUT_EVENT.TOOL_CALL,
@@ -132,6 +144,7 @@ describe("CliOutputSink", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
+        argDisplay: bashHints,
       });
       bright.emit({
         type: OUTPUT_EVENT.TOOL_CALL,
@@ -150,6 +163,7 @@ describe("CliOutputSink", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
+        argDisplay: bashHints,
       });
       bright.emit({
         type: OUTPUT_EVENT.TOOL_CALL,
@@ -171,10 +185,11 @@ describe("CliOutputSink", () => {
       expect(written).not.toContain("\x1b[31mtimeoutMs");
     });
 
-    it("multi-line bash command: the collapse stub rides plain, not shell-lit", () => {
+    it("multi-line bash command: first line previews shell-lit, size stub plain in parens", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
+        argDisplay: bashHints,
       });
       bright.emit({
         type: OUTPUT_EVENT.TOOL_CALL,
@@ -184,10 +199,28 @@ describe("CliOutputSink", () => {
       });
       const written = stdoutWrites.join("");
       expect(written).toContain(
-        "\x1b[33m 🔧 bash \x1b[0m\x1b[36mcommand:\x1b[0m 3 lines, 5 chars · \x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
+        "\x1b[33m 🔧 bash \x1b[0m\x1b[36mcommand:\x1b[0m \x1b[31ma…\x1b[0m (3 lines, 5 chars) · \x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
       );
-      // `5` at command position would have been a red shell word.
-      expect(written).not.toContain("\x1b[31m");
+      // The stub's `5` at command position would have been a red shell word.
+      expect(written).not.toContain("\x1b[31m5");
+    });
+
+    it("multi-line preview: leading blank lines skipped, first line rune-capped at 80", () => {
+      const sink = new CliOutputSink({
+        palette: new ColorPalette({ use_colors: false }),
+        toolCallDisplayFormat: " 🔧 {} {}",
+        argDisplay: bashHints,
+      });
+      sink.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "bash",
+        input: JSON.stringify({ command: "\n  echo " + "y".repeat(100) + "\nsecond" }),
+        toolCallId: "1",
+      });
+      const written = stdoutWrites.join("");
+      const expected =
+        " 🔧 bash echo " + "y".repeat(75) + "\u2026 (3 lines, 115 chars)";
+      expect(written).toContain(expected);
     });
 
     it("unparseable bash args pass through plain (raw JSON chrome is not shell)", () => {
@@ -511,8 +544,20 @@ describe("inflightCallText (in-flight frame row)", () => {
   });
 
   it("multi-key bash: cyan labels plus shell-lit command (same seams as the committed line)", () => {
-    expect(inflightCallText("bash", '{"command":"ls -l","timeoutMs":5000}', bright)).toBe(
+    expect(inflightCallText("bash", '{"command":"ls -l","timeoutMs":5000}', bright, BASH_ARG_DISPLAY)).toBe(
       "\x1b[33m  \u2192 bash \x1b[0m\x1b[36mcommand:\x1b[0m \x1b[31mls\x1b[0m -l · \x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
+    );
+  });
+
+  it("no argDisplay = no shell pass: a tool named bash rides the plain summary path", () => {
+    expect(inflightCallText("bash", '{"command":"ls -l && echo hi"}', bright)).toBe(
+      "\x1b[33m  \u2192 bash \x1b[0mls -l && echo hi\x1b[33m\x1b[0m",
+    );
+  });
+
+  it("multi-line command previews first line + size stub with the first-line hint", () => {
+    expect(inflightCallText("bash", '{"command":"git status\\n&& git diff"}', bright, BASH_ARG_DISPLAY)).toBe(
+      "\x1b[33m  \u2192 bash \x1b[0m\x1b[31mgit\x1b[0m status… (2 lines, 22 chars)\x1b[33m\x1b[0m",
     );
   });
 

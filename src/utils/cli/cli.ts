@@ -19,7 +19,8 @@ import {
 } from "@core/context/output.ts";
 import { toolContentText } from "@utils/tool-content.ts";
 import { spoofSafe } from "@utils/spoof.ts";
-import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
+import { summarizeToolArgs, firstLinePreview } from "@core/extensions/tool-utils.ts";
+import type { ArgDisplay } from "@core/extensions/tool-registry.ts";
 import {
   ColorPalette,
   applyThinking,
@@ -83,6 +84,13 @@ export interface CliOutputSinkOptions {
   hideThinking?: boolean;
   hideUserMessage?: boolean;
   showTokenUse?: boolean;
+  /**
+   * Resolves a tool's per-parameter display hints (its metadata's
+   * argDisplay). Unwired = plain summarization for every tool. The
+   * interactive UI wires this from the tool registry so tools can declare
+   * value folding (first-line previews) and syntax highlighters.
+   */
+  argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
 }
 
 /**
@@ -102,6 +110,34 @@ const TOOL_CALL_PREFIX = "  \u2192 ";
 /** Rune cap on the raw preview of an in-flight call's unparseable partial args. */
 const INFLIGHT_PREVIEW_RUNES = 80;
 
+/** True if any of these argDisplay hints asks for the shell highlighter. */
+function hasShellSyntax(argDisplay?: Record<string, ArgDisplay>): boolean {
+  return argDisplay !== undefined && Object.values(argDisplay).some((h) => h.syntax === "shell");
+}
+
+/**
+ * Sink-side value seam for tools whose argDisplay declares `syntax:
+ * "shell"` (bash's command): single-line values ride the shell pass whole;
+ * multi-line values arrive from the summarizer already preview-folded, and
+ * here the preview half gets shell-lit with the size stub kept plain (a
+ * `5` at shell-command position would light as a red command word). The
+ * preview is recomputed from the raw value with the shared
+ * firstLinePreview so policy lives once; hints without shell syntax pass
+ * through.
+ * The value arrives from an already-spoofed input (both call sites spoof
+ * before parsing), so the segments it splices are ANSI-safe to wrap.
+ */
+function shellArgSeam(palette: ColorPalette, argDisplay: Record<string, ArgDisplay>) {
+  return (key: string, rendered: string, value: unknown): string => {
+    if (argDisplay[key]?.syntax !== "shell" || typeof value !== "string") return rendered;
+    const lines = value.split("\n");
+    if (lines.length === 1) return applyShellHighlight(rendered, palette);
+    if (argDisplay[key]?.preview !== "first-line") return rendered;
+    const { preview, stub } = firstLinePreview(value, lines);
+    return `${applyShellHighlight(preview, palette)} ${stub}`;
+  };
+}
+
 /**
  * The in-flight tool-call row for the split frame (streaming-call display):
  * the final tool-call line's shape (prefix + name + args summary) composed
@@ -111,24 +147,27 @@ const INFLIGHT_PREVIEW_RUNES = 80;
  * into the final shape before the commit lands); an unparseable partial
  * folds to one single-line preview (newlines collapsed, rune-capped).
  * Same segment invariant as emitToolCall: spoofSafe before any ANSI
- * embedding; summarized keys read cyan for every tool, and bash lights its
- * single-line command value through the shell pass.
+ * embedding; summarized keys read cyan for every tool, and `argDisplay`
+ * (the tool's metadata hints, resolved by the caller) drives value folding
+ * and the shell highlighter.
  */
-export function inflightCallText(name: string, args: string, palette: ColorPalette): string {
-  const bash = name === "bash";
+export function inflightCallText(
+  name: string,
+  args: string,
+  palette: ColorPalette,
+  argDisplay?: Record<string, ArgDisplay>,
+): string {
+  const shell = hasShellSyntax(argDisplay);
   let argBody: string;
   try {
     JSON.parse(args);
-    // Complete args: the committed line's summarizer, same bash seam (only
-    // the command value sees the shell pass).
+    // Complete args: the committed line's summarizer and seams (only
+    // shell-syntax values see the shell pass; preview folding comes from
+    // the hints).
     argBody = summarizeToolArgs(
       spoofSafe(args),
-      bash
-        ? (key, rendered, value) =>
-            key === "command" && typeof value === "string" && !value.includes("\n")
-              ? applyShellHighlight(rendered, palette)
-              : rendered
-        : undefined,
+      shell && argDisplay ? shellArgSeam(palette, argDisplay) : undefined,
+      argDisplay,
     );
     argBody = applyArgKeyHighlight(argBody, palette);
   } catch {
@@ -206,6 +245,7 @@ export class CliOutputSink extends OutputSink {
   hideThinking?: boolean;
   hideUserMessage?: boolean;
   showTokenUse: boolean;
+  argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
   [key: string]: unknown;
 
   // ── Newline buffer for streaming output ────────────────────────────────
@@ -233,6 +273,7 @@ export class CliOutputSink extends OutputSink {
     this.hideThinking = options.hideThinking;
     this.hideUserMessage = options.hideUserMessage;
     this.showTokenUse = options.showTokenUse !== false;
+    this.argDisplay = options.argDisplay;
 
     // ── Newline buffer for streaming output ────────────────────────────────
     // Buffers trailing newlines to normalize spacing between reasoning and
@@ -384,23 +425,20 @@ export class CliOutputSink extends OutputSink {
     // Segments get the spoof pass individually and the grey args wrap rides
     // AFTER it (spoofSafe neutralizes ESC); the line-wide tool_call color
     // lands later via the mode applier in _flushText. Summarized arg keys
-    // read cyan for every tool, bash included. Bash additionally lights the
-    // command through the summarizer's value seam (single-line command
-    // VALUE only): a shell pass over the assembled `command: X ·
-    // timeoutMs: N` would light the key label red and leave the command
-    // plain, and the multi-line collapse stub (`5 lines, 211 chars`) is not
-    // shell text either. Unparseable bash input passes through plain. The
-    // key pass runs after the shell ANSI injected it (its `(^| · ) key: `
-    // anchors cannot match inside shell segments; both passes are
-    // post-spoof).
-    const bash = event.toolName === "bash";
-    const shellLit = (key: string, rendered: string, value: unknown): string =>
-      key === "command" && typeof value === "string" && !value.includes("\n")
-        ? applyShellHighlight(rendered, this.palette)
-        : rendered;
-    const summarized = bash
-      ? summarizeToolArgs(spoofSafe(event.input), shellLit)
-      : spoofSafe(summarizeToolArgs(event.input));
+    // read cyan for every tool. The tool's metadata argDisplay hints drive
+    // value folding (preview: "first-line", resolved by the summarizer,
+    // ANSI-free) and the sink-side shell highlighter (syntax: "shell",
+    // shellArgSeam): shell tools spoof BEFORE parsing so the seam composes
+    // from already-spoofed values; every other tool keeps the legacy
+    // spoof-after-summarize byte path. Unparseable input passes through
+    // plain. The key pass runs after the shell ANSI injected here (its
+    // `(^| · ) key: ` anchors cannot match inside shell segments; both
+    // passes are post-spoof).
+    const hints = this.argDisplay?.(event.toolName);
+    const shell = hasShellSyntax(hints);
+    const summarized = shell
+      ? summarizeToolArgs(spoofSafe(event.input), shellArgSeam(this.palette, hints!), hints)
+      : spoofSafe(summarizeToolArgs(event.input, undefined, hints));
     const args = applyToolCallArgs(applyArgKeyHighlight(summarized, this.palette), this.palette);
     const text = this.toolCallDisplayFormat
       ? formatToolCall(spoofSafe(event.toolName), args, this.toolCallDisplayFormat)

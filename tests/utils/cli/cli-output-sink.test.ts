@@ -146,7 +146,7 @@ describe("CliOutputSink", () => {
       );
     });
 
-    it("multi-key bash: key labels stay plain, only the command value is shell-lit", () => {
+    it("multi-key bash: cyan key labels coexist with the shell-lit command value", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
@@ -160,11 +160,11 @@ describe("CliOutputSink", () => {
       const written = stdoutWrites.join("");
       // Regression (owner screenshot 2026-10-22): the shell pass used to run
       // over the assembled summary, lighting `command:` red as a command
-      // word and leaving the real command plain. Chrome stays default;
-      // only the value carries shell color.
+      // word and leaving the real command plain. Labels read cyan like every
+      // other tool's; only the value carries shell color.
       expect(written).toContain(
         "\x1b[33m 🔧 bash \x1b[0m" +
-          "command: \x1b[31mls\x1b[0m -l \x1b[35m&&\x1b[0m \x1b[31mecho\x1b[0m hi · timeoutMs: 5000" +
+          "\x1b[36mcommand:\x1b[0m \x1b[31mls\x1b[0m -l \x1b[35m&&\x1b[0m \x1b[31mecho\x1b[0m hi · \x1b[36mtimeoutMs:\x1b[0m 5000" +
           "\x1b[33m\x1b[0m",
       );
       expect(written).not.toContain("\x1b[31mcommand");
@@ -184,7 +184,7 @@ describe("CliOutputSink", () => {
       });
       const written = stdoutWrites.join("");
       expect(written).toContain(
-        "\x1b[33m 🔧 bash \x1b[0mcommand: 3 lines, 5 chars · timeoutMs: 5000\x1b[33m\x1b[0m",
+        "\x1b[33m 🔧 bash \x1b[0m\x1b[36mcommand:\x1b[0m 3 lines, 5 chars · \x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
       );
       // `5` at command position would have been a red shell word.
       expect(written).not.toContain("\x1b[31m");
@@ -510,9 +510,9 @@ describe("inflightCallText (in-flight frame row)", () => {
     );
   });
 
-  it("multi-key bash: chrome plain, command value shell-lit (same seam as the committed line)", () => {
+  it("multi-key bash: cyan labels plus shell-lit command (same seams as the committed line)", () => {
     expect(inflightCallText("bash", '{"command":"ls -l","timeoutMs":5000}', bright)).toBe(
-      "\x1b[33m  \u2192 bash \x1b[0mcommand: \x1b[31mls\x1b[0m -l · timeoutMs: 5000\x1b[33m\x1b[0m",
+      "\x1b[33m  \u2192 bash \x1b[0m\x1b[36mcommand:\x1b[0m \x1b[31mls\x1b[0m -l · \x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
     );
   });
 

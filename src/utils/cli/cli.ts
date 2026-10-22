@@ -111,7 +111,8 @@ const INFLIGHT_PREVIEW_RUNES = 80;
  * into the final shape before the commit lands); an unparseable partial
  * folds to one single-line preview (newlines collapsed, rune-capped).
  * Same segment invariant as emitToolCall: spoofSafe before any ANSI
- * embedding; bash args get shell highlighting, everything else arg keys.
+ * embedding; summarized keys read cyan for every tool, and bash lights its
+ * single-line command value through the shell pass.
  */
 export function inflightCallText(name: string, args: string, palette: ColorPalette): string {
   const bash = name === "bash";
@@ -129,7 +130,7 @@ export function inflightCallText(name: string, args: string, palette: ColorPalet
               : rendered
         : undefined,
     );
-    argBody = bash ? argBody : applyArgKeyHighlight(spoofSafe(argBody), palette);
+    argBody = applyArgKeyHighlight(argBody, palette);
   } catch {
     // Partial JSON: one-line preview. Raw JSON chrome is not shell text
     // (and not `k: v` summary shape either), so the fold rides plain.
@@ -382,14 +383,16 @@ export class CliOutputSink extends OutputSink {
     // template -- its text may legitimately contain "{}".
     // Segments get the spoof pass individually and the grey args wrap rides
     // AFTER it (spoofSafe neutralizes ESC); the line-wide tool_call color
-    // lands later via the mode applier in _flushText. The bash tool's args
-    // ARE a shell command (shell highlight); other tools' summarized k: v
-    // args get their key labels cyan. Bash highlights through the
-    // summarizer's value seam (single-line command VALUE only): a shell
-    // pass over the assembled `command: X · timeoutMs: N` would light the
-    // key label red and leave the command plain, and the multi-line
-    // collapse stub (`5 lines, 211 chars`) is not shell text either.
-    // Unparseable bash input passes through plain.
+    // lands later via the mode applier in _flushText. Summarized arg keys
+    // read cyan for every tool, bash included. Bash additionally lights the
+    // command through the summarizer's value seam (single-line command
+    // VALUE only): a shell pass over the assembled `command: X ·
+    // timeoutMs: N` would light the key label red and leave the command
+    // plain, and the multi-line collapse stub (`5 lines, 211 chars`) is not
+    // shell text either. Unparseable bash input passes through plain. The
+    // key pass runs after the shell ANSI injected it (its `(^| · ) key: `
+    // anchors cannot match inside shell segments; both passes are
+    // post-spoof).
     const bash = event.toolName === "bash";
     const shellLit = (key: string, rendered: string, value: unknown): string =>
       key === "command" && typeof value === "string" && !value.includes("\n")
@@ -398,10 +401,7 @@ export class CliOutputSink extends OutputSink {
     const summarized = bash
       ? summarizeToolArgs(spoofSafe(event.input), shellLit)
       : spoofSafe(summarizeToolArgs(event.input));
-    const args = applyToolCallArgs(
-      bash ? summarized : applyArgKeyHighlight(summarized, this.palette),
-      this.palette,
-    );
+    const args = applyToolCallArgs(applyArgKeyHighlight(summarized, this.palette), this.palette);
     const text = this.toolCallDisplayFormat
       ? formatToolCall(spoofSafe(event.toolName), args, this.toolCallDisplayFormat)
       : event.display !== undefined

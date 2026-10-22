@@ -972,10 +972,12 @@ describe("Info CLI - renderer posture line (stage 3c)", () => {
     expect(output).toMatch(/Renderer:        split \((mounts here|declines here: .*)\)/);
   });
 
-  it("knob default reads legacy; JSON mirrors the posture object", async () => {
+  it("knob default reads split; JSON mirrors the posture object", async () => {
     const run = await infoCliRunner();
     const { output } = await run("info");
-    expect(output).toContain("Renderer:        legacy");
+    // Default-on: unset knob reads split; the reason names whichever gate
+    // decides in the test process (piped stdio declines at the TTY gate).
+    expect(output).toMatch(/Renderer:        split \((mounts here|declines here: .*)\)/);
 
     const jsonRun = await infoCliRunner({ coreConfig: { uiInteractiveCli: { renderer: "split" } } }, { wantsJson: true });
     const { output: jsonOut, exitCode } = await jsonRun("info");

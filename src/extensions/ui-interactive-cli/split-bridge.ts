@@ -26,11 +26,13 @@ import type { Completion } from "@utils/cli/renderer/popup.ts";
 import type { Clock, KeySource, SignalHost, Terminal } from "@utils/cli/renderer/seams.ts";
 
 /**
- * §9 mount rule (stage-3c wording): the renderer attaches iff the knob is
- * "split" AND stdin.isTTY AND stdout.isTTY AND the environment does not name
- * itself a dumb terminal. Any other combination runs today's passthrough
- * path -- non-TTY is a code path that never mounts, not a set of conditionals
- * inside the renderer. Legacy knob = never, byte-identical.
+ * §9 mount rule (stage-3c wording, default-on since the flip): the renderer
+ * attaches iff the knob is NOT "legacy" AND stdin.isTTY AND stdout.isTTY AND
+ * the environment does not name itself a dumb terminal. Any other combination
+ * runs today's passthrough path -- non-TTY is a code path that never mounts,
+ * not a set of conditionals inside the renderer. The knob is a kill-switch:
+ * only the explicit "legacy" value turns the renderer off, and legacy is then
+ * never mounted, byte-identical.
  *
  * The dumb check mirrors the EXACT comparison colors.ts makes in
  * colorDisabledByEnv(): `env.TERM === "dumb"` -- strict equality against the
@@ -49,12 +51,14 @@ export function shouldMountRenderer(
   stdoutIsTTY: unknown,
   term: unknown = undefined,
 ): boolean {
-  return knob === "split" && stdinIsTTY === true && stdoutIsTTY === true && term !== "dumb";
+  // Default-on: the knob is a kill-switch, only the explicit "legacy" value
+  // turns the renderer off (unset reads as the "split" default).
+  return knob !== "legacy" && stdinIsTTY === true && stdoutIsTTY === true && term !== "dumb";
 }
 
 /** What mountSplitRenderer's §9 gate would decide, with the "why" attached. */
 export interface RendererPosture {
-  /** The knob reading: "split", or anything else (the default) = "legacy". */
+  /** The knob reading: "legacy", or anything else (the default) = "split". */
   mode: "split" | "legacy";
   /** True only when EVERY gate is open for this exact environment. */
   mount: boolean;
@@ -78,8 +82,8 @@ export function rendererMountPosture(
   stdoutIsTTY: unknown,
   term: unknown,
 ): RendererPosture {
-  if (knob !== "split") {
-    return { mode: "legacy", mount: false, reason: "knob off; split renderer never mounts" };
+  if (knob === "legacy") {
+    return { mode: "legacy", mount: false, reason: "knob off (legacy); split renderer never mounts" };
   }
   if (stdinIsTTY !== true || stdoutIsTTY !== true) {
     return { mode: "split", mount: false, reason: "declines here: stdin/stdout not both a TTY; passthrough" };
@@ -952,7 +956,7 @@ export function installIoPatches(bridge: OutputBridge, host: IoPatchHost): () =>
 }
 
 export interface SplitMountOptions {
-  /** The uiInteractiveCli.renderer knob value (anything but "split" is legacy). */
+  /** The uiInteractiveCli.renderer knob value (only "legacy" opts out; unset is the split default). */
   knob: unknown;
   stdinIsTTY?: unknown;
   stdoutIsTTY?: unknown;
@@ -1042,7 +1046,7 @@ export function installCrashTeardown(bridge: OutputBridge, host: CrashTeardownHo
  * process.stdout.write after patching would recurse into the bridge.
  *
  * The gate is the full §9 rule (see shouldMountRenderer for the long form):
- * knob "split" AND both stdio streams TTY AND the environment not naming
+ * knob not "legacy" AND both stdio streams TTY AND the environment not naming
  * itself dumb. A TTY whose TERM is exactly "dumb" (the same strict comparison
  * colors.ts's colorDisabledByEnv uses) declines HERE, before the Terminal is
  * constructed and before any console/stream global is patched -- the same

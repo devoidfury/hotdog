@@ -28,7 +28,7 @@ import { GridTerminal, FakeClock, MemoryKeySource } from "@utils/cli/renderer/in
 import type { SignalHost } from "@utils/cli/renderer/index.ts";
 import extensionMeta from "@extensions/ui-interactive-cli/extension.json" with { type: "json" };
 
-describe("kill-switch config (DEFAULT legacy)", () => {
+describe("kill-switch config (DEFAULT split)", () => {
   const schema = extensionMeta.configSchema as unknown as {
     uiInteractiveCli: { properties: { renderer?: { type?: string; enum?: string[]; default?: string } } };
   };
@@ -39,8 +39,8 @@ describe("kill-switch config (DEFAULT legacy)", () => {
     expect(renderer?.enum).toEqual(["legacy", "split"]);
   });
 
-  it("defaults to legacy", () => {
-    expect(renderer?.default).toBe("legacy");
+  it("defaults to split", () => {
+    expect(renderer?.default).toBe("split");
   });
 
   it("mountSplitRenderer returns null and touches no global when the gate is shut", () => {
@@ -110,9 +110,11 @@ function makeBridge(): { bridge: OutputBridge; term: GridTerminal; clock: FakeCl
   return { bridge, term, clock, sig };
 }
 
-describe("mount rule (§9)", () => {
-  it("mounts iff split knob AND stdin.isTTY AND stdout.isTTY", () => {
+describe("mount rule (§9, default-on)", () => {
+  it("mounts iff the knob is not legacy AND stdin.isTTY AND stdout.isTTY", () => {
     expect(shouldMountRenderer("split", true, true)).toBe(true);
+    // Unset reads as the split default (the knob is a kill-switch).
+    expect(shouldMountRenderer(undefined, true, true)).toBe(true);
     // Every non-TTY combination is passthrough regardless of the knob.
     expect(shouldMountRenderer("split", false, true)).toBe(false);
     expect(shouldMountRenderer("split", true, false)).toBe(false);
@@ -121,12 +123,8 @@ describe("mount rule (§9)", () => {
     expect(shouldMountRenderer("split", undefined, undefined)).toBe(false);
   });
 
-  it("legacy knob never mounts, even on a full TTY pair (byte-identity default)", () => {
+  it("legacy knob never mounts, even on a full TTY pair (byte-identity kill-switch)", () => {
     expect(shouldMountRenderer("legacy", true, true)).toBe(false);
-    expect(shouldMountRenderer(undefined, true, true)).toBe(false);
-    expect(shouldMountRenderer("", true, true)).toBe(false);
-    // A typo'd value is not "split" either -- fail-safe to legacy.
-    expect(shouldMountRenderer("SPLIT", true, true)).toBe(false);
   });
 });
 
@@ -1998,7 +1996,7 @@ describe("§9 dumb-term mount gate (stage 3c)", () => {
     for (const [k, si, so, t] of combos) {
       const p = rendererMountPosture(k, si, so, t);
       expect(p.mount).toBe(shouldMountRenderer(k, si, so, t));
-      expect(p.mode).toBe(k === "split" ? "split" : "legacy");
+      expect(p.mode).toBe(k === "legacy" ? "legacy" : "split");
       expect(p.reason.length).toBeGreaterThan(0);
     }
     // The reasons are the three §9 declines, distinguishable:

@@ -679,10 +679,10 @@ export async function runInteractiveSession(
     argDisplay: (toolName) => core.toolRegistry?.getMetadata(toolName)?.argDisplay,
   });
 
-  // Split-renderer kill switch (design note §9/§12): mounts iff the knob says
-  // "split" AND both stdio streams are TTYs AND TERM is not the "dumb"
-  // convention string (the exact comparison colors.ts makes). Non-TTY is
-  // passthrough regardless of the knob; "legacy" (the default) never touches a
+  // Split-renderer mount gate (design note §9/§12, default-on): mounts iff the
+  // knob is NOT "legacy" AND both stdio streams are TTYs AND TERM is not the
+  // "dumb" convention string (the exact comparison colors.ts makes). Non-TTY
+  // is passthrough regardless of the knob; only "legacy" never touches a
   // global.
   // options.bridge injects an already-mounted rig bridge for the split-mode
   // session tests (§11 constructor injection); omitting it keeps the real

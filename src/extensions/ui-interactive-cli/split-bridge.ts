@@ -353,6 +353,8 @@ export class OutputBridge {
   #status: FrameStatus = { turns: 0, working: false, laneWait: false, cost: null };
   /** Precomposed queue-chip text (§8), or null for no chip. */
   #chipText: string | null = null;
+  /** In-flight tool-call rows by wire index (streaming-call display). */
+  #inflightCalls = new Map<number, string>();
 
   constructor(private readonly opts: OutputBridgeOptions) {
     this.core = new RendererCore({
@@ -551,6 +553,36 @@ export class OutputBridge {
     if (next === this.#chipText) return;
     this.#chipText = next;
     this.#repaint();
+  }
+
+  /**
+   * The in-flight tool-call rows (streaming-call display): one sink-composed
+   * row per wire index, painted directly BELOW the streaming line (the
+   * transcript above has already committed; these calls are still being
+   * generated). Rows are the sink's policy -- the bridge only holds and
+   * wraps them. Same-text updates skip the repaint (delta storms coalesce
+   * in the core scheduler; this keeps the no-change case free).
+   */
+  setInflightCall(index: number, text: string): void {
+    if (this.#inflightCalls.get(index) === text) return;
+    this.#inflightCalls.set(index, text);
+    this.#repaint();
+  }
+
+  /** Drop all in-flight rows (final tool_call commit, TOOL_RESULT, turn end). Idempotent. */
+  clearInflightCalls(): void {
+    if (this.#inflightCalls.size === 0) return;
+    this.#inflightCalls.clear();
+    this.#repaint();
+  }
+
+  /** In-flight rows composed for the frame: each entry ANSI-wrapped to width. */
+  #inflightRows(width: number): string[] {
+    const rows: string[] = [];
+    for (const text of this.#inflightCalls.values()) {
+      rows.push(...wrapToWidth(text, width));
+    }
+    return rows;
   }
 
   /** True while a question owns the input (the popup is suppressed, §8). */
@@ -784,11 +816,14 @@ export class OutputBridge {
     // transcript above it has already committed into scrollback.
     const status = statusRowText(this.#status);
     const chip = this.#chipText;
+    const inflight = this.#inflightRows(width);
     const popup = editor.popupRows(width);
-    const chrome = stream.length + popup.length + (status ? 1 : 0) + (chip ? 1 : 0);
+    const chrome =
+      stream.length + inflight.length + popup.length + (status ? 1 : 0) + (chip ? 1 : 0);
     const block = editor.view(width, Math.max(1, this.opts.terminal.rows - chrome));
     const rows = [
       ...stream,
+      ...inflight,
       ...(status ? [status] : []),
       ...popup,
       ...block.rows,
@@ -796,15 +831,19 @@ export class OutputBridge {
     ];
     this.#lastBlockRows = block.rows;
     this.#setFrame(rows, {
-      row: stream.length + (status ? 1 : 0) + popup.length + block.cursorRow,
+      row: stream.length + inflight.length + (status ? 1 : 0) + popup.length + block.cursorRow,
       col: block.cursorCol,
     });
   }
 
   #paintFrame(rows: string[]): void {
     const stream = this.#streamingRows(this.opts.terminal.columns);
+    const inflight = this.#inflightRows(this.opts.terminal.columns);
     const capture = this.capture.cursor();
-    this.#setFrame([...stream, ...rows], { row: capture.row + stream.length, col: capture.col });
+    this.#setFrame([...stream, ...inflight, ...rows], {
+      row: capture.row + stream.length + inflight.length,
+      col: capture.col,
+    });
   }
 
   #setFrame(rows: string[], cursor: { row: number; col: number }): void {

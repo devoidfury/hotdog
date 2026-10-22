@@ -99,6 +99,52 @@ export function formatCompacting(messageCount: number, keepRecent: number): stri
  */
 const TOOL_CALL_PREFIX = "  \u2192 ";
 
+/** Rune cap on the raw preview of an in-flight call's unparseable partial args. */
+const INFLIGHT_PREVIEW_RUNES = 80;
+
+/**
+ * The in-flight tool-call row for the split frame (streaming-call display):
+ * the final tool-call line's shape (prefix + name + args summary) composed
+ * without the sink's mode pipeline, so the line-wide tool_call color wraps
+ * here instead of in _flushText. Args: once the streamed partial parses as
+ * JSON it gets the SAME summarizer the committed line uses (the row morphs
+ * into the final shape before the commit lands); an unparseable partial
+ * folds to one single-line preview (newlines collapsed, rune-capped).
+ * Same segment invariant as emitToolCall: spoofSafe before any ANSI
+ * embedding; bash args get shell highlighting, everything else arg keys.
+ */
+export function inflightCallText(name: string, args: string, palette: ColorPalette): string {
+  const bash = name === "bash";
+  let argBody: string;
+  try {
+    JSON.parse(args);
+    // Complete args: the committed line's summarizer, same bash seam (only
+    // the command value sees the shell pass).
+    argBody = summarizeToolArgs(
+      spoofSafe(args),
+      bash
+        ? (key, rendered, value) =>
+            key === "command" && typeof value === "string" && !value.includes("\n")
+              ? applyShellHighlight(rendered, palette)
+              : rendered
+        : undefined,
+    );
+    argBody = bash ? argBody : applyArgKeyHighlight(spoofSafe(argBody), palette);
+  } catch {
+    // Partial JSON: one-line preview. Raw JSON chrome is not shell text
+    // (and not `k: v` summary shape either), so the fold rides plain.
+    const runes = Array.from(args.replace(/\s+/g, " ").trim());
+    argBody =
+      runes.length > INFLIGHT_PREVIEW_RUNES
+        ? `${runes.slice(0, INFLIGHT_PREVIEW_RUNES).join("")}\u2026`
+        : runes.join("");
+    argBody = spoofSafe(argBody);
+  }
+  const argSeg = applyToolCallArgs(argBody, palette);
+  const body = argSeg === "" ? spoofSafe(name) : `${spoofSafe(name)} ${argSeg}`;
+  return applyToolCall(`${TOOL_CALL_PREFIX}${body}`, palette);
+}
+
 /**
  * Format a tool call display using the tool formatter.
  */

@@ -362,6 +362,22 @@ describe("WebSocketChannel - write()", () => {
     expect(msg.value).toBe("gpt-4");
     expect(broadcastCallback).toHaveBeenCalledWith(msg);
   });
+
+  it("drops frame-only events (QUEUE_UPDATE / TOOL_CALL_DELTA stay off the wire)", () => {
+    let savedHandler: ((event: OutputEvent) => void) | null = null;
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, handler) => {
+        savedHandler = handler;
+        return () => {};
+      }),
+    });
+    const ws = createMockWs();
+    new WebSocketChannel({ sessionManager: sm, ws, sessionId: "session-1" });
+
+    savedHandler!({ type: OUTPUT_EVENT.QUEUE_UPDATE, pending: 1, preview: "steer" });
+    savedHandler!({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: '{"comm' });
+    expect((ws as any)._sentMessages).toEqual([]);
+  });
 });
 
 describe("WebSocketChannel - write error handling", () => {

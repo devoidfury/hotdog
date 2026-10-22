@@ -565,4 +565,104 @@ describe("StreamProcessor", () => {
       expect(result.fullText).toBe("ab");
     });
   });
+
+  describe("onToolCallDelta (in-flight tool calls)", () => {
+    it("carries the accumulated name and args per index", async () => {
+      const processor = createStreamProcessor();
+      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      await processEvents(
+        processor,
+        [
+          { type: "toolName", index: 0, name: "bash", toolCallId: "c1" },
+          { type: "toolArgument", index: 0, arguments: '{"comm' },
+          { type: "toolArgument", index: 0, arguments: 'and":"ls"}' },
+        ],
+        { onToolCallDelta: (tc) => deltas.push(tc) },
+      );
+
+      expect(deltas).toEqual([
+        { index: 0, name: "bash", args: "" },
+        { index: 0, name: "bash", args: '{"comm' },
+        { index: 0, name: "bash", args: '{"command":"ls"}' },
+      ]);
+    });
+
+    it("keeps parallel call indexes independent", async () => {
+      const processor = createStreamProcessor();
+      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      await processEvents(
+        processor,
+        [
+          { type: "toolName", index: 0, name: "read", toolCallId: "c1" },
+          { type: "toolArgument", index: 0, arguments: '{"path"' },
+          { type: "toolName", index: 1, name: "bash", toolCallId: "c2" },
+          { type: "toolArgument", index: 1, arguments: '{"command"' },
+          { type: "toolArgument", index: 0, arguments: ':"a.ts"}' },
+        ],
+        { onToolCallDelta: (tc) => deltas.push(tc) },
+      );
+
+      // Each delta reports only ITS index's accumulated args, mid-stream.
+      expect(deltas[1]).toEqual({ index: 0, name: "read", args: '{"path"' });
+      expect(deltas[2]).toEqual({ index: 1, name: "bash", args: "" });
+      expect(deltas[4]).toEqual({ index: 0, name: "read", args: '{"path":"a.ts"}' });
+    });
+
+    it("resurrects buffered args on a resent name delta (merge, never replace)", async () => {
+      const processor = createStreamProcessor();
+      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      await processEvents(
+        processor,
+        [
+          { type: "toolName", index: 0, name: "read", toolCallId: "c1" },
+          { type: "toolArgument", index: 0, arguments: '{"path"' },
+          // llama.cpp-family resend: name again, no id, no args.
+          { type: "toolName", index: 0, name: "read", toolCallId: "" },
+        ],
+        { onToolCallDelta: (tc) => deltas.push(tc) },
+      );
+
+      expect(deltas[2]).toEqual({ index: 0, name: "read", args: '{"path"' });
+    });
+
+    it("display-unescapes the whole accumulated args, self-healing a split alias", async () => {
+      const mangler = new MarkerMangler();
+      const marker = "<" + "tool-call" + ">";
+      const wireArgs = mangler.escape(JSON.stringify({ note: `<${marker}>` })) ?? "";
+      const aliasStart = wireArgs.indexOf("m_");
+      const aliasEnd = wireArgs.indexOf(">", aliasStart);
+      const mid = aliasStart + Math.floor((aliasEnd - aliasStart) / 2);
+
+      const processor = createStreamProcessor();
+      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      await processEvents(
+        processor,
+        [
+          { type: "toolName", index: 0, name: "write", toolCallId: "c1" },
+          { type: "toolArgument", index: 0, arguments: wireArgs.slice(0, mid) },
+          { type: "toolArgument", index: 0, arguments: wireArgs.slice(mid) },
+        ],
+        { onToolCallDelta: (tc) => deltas.push(tc) },
+        mangler,
+      );
+
+      // The complete args land unescaped; the split partial may briefly show
+      // an alias fragment (accepted transient, same doctrine as onChunk).
+      expect(deltas[2]!.args).toBe(JSON.stringify({ note: `<${marker}>` }));
+      // The final (longest) delta never carries a raw alias.
+      expect(deltas[2]!.args).not.toContain("m_");
+    });
+
+    it("fires for toolName-only calls (no arguments ever streamed)", async () => {
+      const processor = createStreamProcessor();
+      const deltas: Array<{ index: number; name: string; args: string }> = [];
+      await processEvents(
+        processor,
+        [{ type: "toolName", index: 0, name: "now", toolCallId: "c1" }],
+        { onToolCallDelta: (tc) => deltas.push(tc) },
+      );
+
+      expect(deltas).toEqual([{ index: 0, name: "now", args: "" }]);
+    });
+  });
 });

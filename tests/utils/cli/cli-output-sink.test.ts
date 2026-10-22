@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   CliOutputSink,
+  inflightCallText,
 } from "@utils/cli/cli.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { ColorPalette } from "@utils/cli/colors.ts";
@@ -492,5 +493,76 @@ describe("CliOutputSink spoof neutralization (SPF-1)", () => {
     expect(out).toContain("[U+001B]");
     expect(out).toContain("[U+FEFF]");
     expect(out).not.toContain("\u202e");
+  });
+});
+
+describe("inflightCallText (in-flight frame row)", () => {
+  const plain = new ColorPalette({ use_colors: false });
+  const bright = new ColorPalette({ use_colors: true, tool_call: "yellow" });
+
+  it("complete args take the committed line's summarizer shape (single key bares)", () => {
+    expect(inflightCallText("read", '{"path":"a.ts"}', plain)).toBe("  \u2192 read a.ts");
+  });
+
+  it("multi-key non-bash summarizes k: v", () => {
+    expect(inflightCallText("read", '{"path":"a.ts","offset":1}', plain)).toBe(
+      "  \u2192 read path: a.ts · offset: 1",
+    );
+  });
+
+  it("multi-key bash: chrome plain, command value shell-lit (same seam as the committed line)", () => {
+    expect(inflightCallText("bash", '{"command":"ls -l","timeoutMs":5000}', bright)).toBe(
+      "\x1b[33m  \u2192 bash \x1b[0mcommand: \x1b[31mls\x1b[0m -l · timeoutMs: 5000\x1b[33m\x1b[0m",
+    );
+  });
+
+  it("partial (unparseable) args fold to one line: newlines collapse to spaces", () => {
+    expect(inflightCallText("write", '{"path":"src/a.ts","content":"a\nb', plain)).toBe(
+      '  \u2192 write {"path":"src/a.ts","content":"a b',
+    );
+  });
+
+  it("the raw preview is rune-capped with an ellipsis", () => {
+    const out = inflightCallText("write", '{"a":"' + "x".repeat(200), plain);
+    const preview = out.slice("  \u2192 write ".length);
+    expect(preview).toHaveLength(81); // 80 runes + ellipsis
+    expect(preview).toBe('{"a":"' + "x".repeat(74) + "\u2026");
+  });
+
+  it("empty args render the name alone (no trailing space)", () => {
+    expect(inflightCallText("now", "", plain)).toBe("  \u2192 now");
+  });
+
+  it("spoof lands before any ANSI: ESC-laden name/args never emit raw escapes", () => {
+    const out = inflightCallText("ba\x1b[31msh", 'a\x1b]0;pwn', plain);
+    expect(out).not.toContain("\x1b");
+    expect(out).toContain("[U+001B]");
+  });
+
+  it("colors follow the palette only: use_colors false emits zero escapes", () => {
+    const out = inflightCallText("bash", '{"command":"ls && echo hi"}', plain);
+    expect(out).toBe("  \u2192 bash ls && echo hi");
+    expect(out).not.toContain("\x1b");
+  });
+
+  it("base sink ignores TOOL_CALL_DELTA (frame-only event, byte identity)", () => {
+    const writes: string[] = [];
+    const out = spyOn(process.stdout, "write").mockImplementation((s: string) => {
+      writes.push(s);
+      return true;
+    });
+    const err = spyOn(process.stderr, "write").mockImplementation((s: string) => {
+      writes.push(s);
+      return true;
+    });
+    try {
+      const sink2 = new CliOutputSink({ palette: new ColorPalette({ use_colors: false }) });
+      sink2.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: '{"command":"ls' });
+      sink2.emit({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: '{"command":"ls"}' });
+      expect(writes.join("")).toBe("");
+    } finally {
+      out.mockRestore();
+      err.mockRestore();
+    }
   });
 });

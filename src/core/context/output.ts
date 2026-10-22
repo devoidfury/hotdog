@@ -19,6 +19,7 @@ export const OUTPUT_EVENT = {
   SESSION_STATE: 14,
   SYSTEM_MESSAGE: 15,
   QUEUE_UPDATE: 16,
+  TOOL_CALL_DELTA: 17,
 } as const;
 
 export type OutputEventType = (typeof OUTPUT_EVENT)[keyof typeof OUTPUT_EVENT];
@@ -39,6 +40,7 @@ export const EVENT_NAME_MAP: Record<string, OutputEventType> = {
   compaction_result: OUTPUT_EVENT.COMPACTION_RESULT,
   session_state: OUTPUT_EVENT.SESSION_STATE,
   queue_update: OUTPUT_EVENT.QUEUE_UPDATE,
+  tool_call_delta: OUTPUT_EVENT.TOOL_CALL_DELTA,
 };
 
 export type EventName = keyof typeof EVENT_NAME_MAP;
@@ -186,6 +188,25 @@ export interface QueueUpdateEvent {
   preview: string;
 }
 
+/**
+ * A tool call growing mid-stream (streaming-path design 2026-10-22): the
+ * accumulated partial, emitted per wire delta. Frame content for the split
+ * renderer's in-flight row -- NOT printable output: the base sink ignores it
+ * (no switch case) and WebSocket drops it (unmapped in EVENT_TO_PROTOCOL),
+ * the QueueUpdateEvent precedent. `args` carries raw text that is usually
+ * NOT valid JSON yet; sinks present it as-is (the summarizer's unparseable
+ * passthrough is the fallback). Live-only: never persisted, never replayed.
+ */
+export interface ToolCallDeltaEvent {
+  type: typeof OUTPUT_EVENT.TOOL_CALL_DELTA;
+  /** The wire's tool-call slot index (parallel calls interleave deltas). */
+  index: number;
+  /** Tool name once known ("" until the first toolName delta lands). */
+  name: string;
+  /** Accumulated arguments so far, display-unescaped. */
+  args: string;
+}
+
 export type OutputEvent =
   | UserMessageEvent
   | AssistantMessageEvent
@@ -202,7 +223,8 @@ export type OutputEvent =
   | CompactionResultEvent
   | SessionStateEvent
   | SystemMessageEvent
-  | QueueUpdateEvent;
+  | QueueUpdateEvent
+  | ToolCallDeltaEvent;
 
 /** Base sink; the Agent only depends on this interface, never on a specific UI. */
 export class OutputSink {

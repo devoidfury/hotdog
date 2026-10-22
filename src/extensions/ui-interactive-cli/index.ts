@@ -1,7 +1,7 @@
 import pkg from "@package.json" with { type: "json" };
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { CliOutputSink } from "@utils/cli/cli.ts";
+import { CliOutputSink, inflightCallText } from "@utils/cli/cli.ts";
 import { resolveQuestionAnswer } from "@utils/question-answer.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
@@ -1043,6 +1043,9 @@ export async function runInteractiveSession(
         case OUTPUT_EVENT.SESSION_STATE:
           if (ev.key === "working") {
             bridge.updateStatus({ working: ev.value === true });
+            // Turn over (done, cancelled, errored): any call still "in
+            // flight" on the frame is a dead stream -- drop the row.
+            if (ev.value === false) bridge.clearInflightCalls();
           } else if (ev.key === "model") {
             pricedModel = String(ev.value ?? "");
             bridge.updateStatus({ cost: sessionCost() });
@@ -1053,10 +1056,28 @@ export async function runInteractiveSession(
             bridge.updateStatus({ laneWait: true });
           }
           return;
+        case OUTPUT_EVENT.TOOL_CALL_DELTA:
+          // In-flight tool call: one frame row per wire index, composed with
+          // the sink's summarizer/highlighters (palette decides color).
+          bridge.setInflightCall(ev.index, inflightCallText(ev.name, ev.args, palette));
+          bridge.updateStatus({ laneWait: false });
+          return;
+        case OUTPUT_EVENT.TOOL_CALL:
+          // The committed line is about to print through the sink; the
+          // in-flight row would duplicate it -- clear first (idempotent).
+          bridge.clearInflightCalls();
+          // First sign the turn is actually running: the lane wait is over.
+          bridge.updateStatus({ laneWait: false });
+          return;
+        case OUTPUT_EVENT.TOOL_RESULT:
+          // Covers the paths that answer a call without ever emitting
+          // TOOL_CALL (invalid name, unavailable tool). Idempotent after
+          // the TOOL_CALL clear.
+          bridge.clearInflightCalls();
+          return;
         case OUTPUT_EVENT.STREAMING_CHUNK:
         case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
         case OUTPUT_EVENT.THINKING:
-        case OUTPUT_EVENT.TOOL_CALL:
         case OUTPUT_EVENT.ASSISTANT_MESSAGE:
           // First sign the turn is actually running: the lane wait is over.
           bridge.updateStatus({ laneWait: false });

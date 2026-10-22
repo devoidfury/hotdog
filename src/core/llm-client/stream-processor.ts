@@ -21,6 +21,12 @@ export interface StreamResult {
 export interface StreamCallbacks {
   onChunk?: (content: string) => void;
   onReasoning?: (content: string) => void;
+  /**
+   * Per tool-call wire delta, with the ACCUMULATED name/args so far (the
+   * args are usually a partial JSON string mid-stream). Display-only
+   * unescaping, same doctrine as onChunk.
+   */
+  onToolCallDelta?: (tc: { index: number; name: string; args: string }) => void;
   onToolCalls?: (toolCalls: ToolCall[] | null) => void;
   onUsage?: (usage: RawUsage) => void;
   onFinish?: (reason: string | null) => void;
@@ -102,6 +108,21 @@ export class StreamProcessor {
     const unescape = (s: string): string =>
       mangler ? (mangler.unescape(s) ?? s) : s;
 
+    // In-flight display row data: the buffer merged up to THIS event, with
+    // the whole accumulated partial unescaped (an alias split across two
+    // deltas self-heals on the next one -- transient fragment, same
+    // doctrine as the per-chunk onChunk unescape).
+    const emitToolCallDelta = (index: number): void => {
+      if (!callbacks.onToolCallDelta) return;
+      const tc = toolCallsBuffer.get(index);
+      if (!tc) return;
+      callbacks.onToolCallDelta({
+        index,
+        name: unescape(tc.name),
+        args: unescape(tc.args.join("")),
+      });
+    };
+
     this.#currentStreamingContent = "";
     this.#currentStreamingReasoning = "";
 
@@ -144,6 +165,7 @@ export class StreamProcessor {
             args: existing?.args ?? [],
             id: event.toolCallId || existing?.id || "",
           });
+          emitToolCallDelta(event.index);
           break;
         }
 
@@ -156,6 +178,7 @@ export class StreamProcessor {
             };
           existing.args.push(event.arguments);
           toolCallsBuffer.set(event.index, existing);
+          emitToolCallDelta(event.index);
           break;
         }
 

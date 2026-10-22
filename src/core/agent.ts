@@ -866,6 +866,7 @@ export class Agent implements AgentLike {
     return this.#streamProcessor.process(stream, {
       onChunk: (content) => this.emitOutput("streaming_chunk", { content }),
       onReasoning: (content) => this.emitOutput("streaming_reasoning_chunk", { content }),
+      onToolCallDelta: (tc) => this.emitOutput("tool_call_delta", { ...tc }),
       shouldCancel: () => this.cancelled,
     }, this.llmClient.markerMangler);
   }

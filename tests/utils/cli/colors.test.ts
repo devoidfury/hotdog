@@ -238,6 +238,24 @@ describe('applyShellHighlight', () => {
     }
   });
 
+  it('splits glued operators without surrounding spaces', () => {
+    // `;` glued to the previous word is the common shape: `echo hi; ls`.
+    expect(applyShellHighlight('echo hi; ls -la', on)).toBe(
+      '\x1b[31mecho\x1b[0m hi\x1b[35m;\x1b[0m \x1b[31mls\x1b[0m -la',
+    );
+    expect(applyShellHighlight('a&&b||c|d;e', on)).toBe(
+      '\x1b[31ma\x1b[0m\x1b[35m&&\x1b[0m\x1b[31mb\x1b[0m\x1b[35m||\x1b[0m\x1b[31mc\x1b[0m\x1b[35m|\x1b[0m\x1b[31md\x1b[0m\x1b[35m;\x1b[0m\x1b[31me\x1b[0m',
+    );
+    // A lone `&` (background, `2>&1`) is not an operator and rides through.
+    expect(applyShellHighlight('make -j 2>&1 & wait', on)).toBe(
+      '\x1b[31mmake\x1b[0m -j 2>&1 & wait',
+    );
+    // Quoted operators still split nothing.
+    expect(applyShellHighlight("grep 'a;b' f;wc -l f", on)).toBe(
+      '\x1b[31mgrep\x1b[0m \'a;b\' f\x1b[35m;\x1b[0m\x1b[31mwc\x1b[0m -l f',
+    );
+  });
+
   it('never touches quoted text and carries stray quotes verbatim (no char loss)', () => {
     expect(applyShellHighlight('grep "a && b" src', on)).toBe(
       '\x1b[36mgrep\x1b[0m "a && b" src',

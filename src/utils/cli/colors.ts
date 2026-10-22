@@ -265,8 +265,10 @@ export function applyArgKeyHighlight(text: string, palette: ColorPalette): strin
  * (monochrome themes bold commands, dim the glue). Quote-aware -- nothing
  * inside '...' or "..." is touched, a stray quote rides through verbatim,
  * and an env-assignment prefix (`FOO=1 cmd`) stays default while keeping the
- * command position. Backticks/$(...)/glued operators (`a|b`) are NOT parsed:
- * this is display candy, not a shell. Colors off -> text unchanged.
+ * command position. Operators split commands even glued without spaces
+ * (`a&&b;c`); a lone `&` (background, `2>&1`) rides through verbatim.
+ * Backticks/$(...) are NOT parsed: this is display candy, not a shell.
+ * Colors off -> text unchanged.
  */
 export function applyShellHighlight(text: string, palette: ColorPalette): string {
   if (!palette.use_colors || text === "") return text;
@@ -274,7 +276,10 @@ export function applyShellHighlight(text: string, palette: ColorPalette): string
   const op = COLOR_MAP[palette.shell_operator];
   let out = "";
   let cmdPos = true;
-  for (const [t] of text.matchAll(/('[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"]+|\s+|['"])/g)) {
+  // Token order: quoted strings, then the two-word operators (before their
+  // one-word prefixes), then | ; & singly, then whitespace, then plain words
+  // (&|; excluded so glued operators split), then a stray quote.
+  for (const [t] of text.matchAll(/('[^']*'|"(?:[^"\\]|\\.)*"|\|\||&&|[|;&]|\s+|[^\s'";|&]+|['"])/g)) {
     if (t === "&&" || t === "||" || t === "|" || t === ";") {
       out += op ? `\x1b[${op}m${t}${RESET}` : t;
       cmdPos = true;

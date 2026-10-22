@@ -307,6 +307,45 @@ export function defaultCallDisplay(
   return templateFn(args);
 }
 
+/**
+ * Human-readable rendering of a tool call's arguments -- raw JSON never
+ * reaches a display surface. Single-key objects bare the value
+ * (`{"command":"ls"}` -> `ls`), multi-key objects read `k: v · k: v`,
+ * multi-line string values summarize to their size (a write tool's content
+ * is a count, not a wall of text), nested values compact to truncated JSON,
+ * and unparseable input passes through (a malformed model call shows what
+ * it sent). Shared by the CLI sink's template args slot and tool
+ * `callDisplay`s that have nothing more semantic to say (MCP passthrough).
+ */
+export function summarizeToolArgs(input: string | Record<string, unknown> | null): string {
+  if (input === null) return "";
+  let value: unknown = input;
+  if (typeof input === "string") {
+    const raw = input.trim();
+    if (raw === "") return "";
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+  if (value === null || typeof value !== "object") return String(value);
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 1) return summarizeToolValue(entries[0]![1]);
+  return entries.map(([k, v]) => `${k}: ${summarizeToolValue(v)}`).join(" · ");
+}
+
+/** One summarized argument value; see summarizeToolArgs. */
+function summarizeToolValue(value: unknown): string {
+  if (typeof value === "string") {
+    const lines = value.split("\n");
+    return lines.length > 1 ? `${lines.length} lines, ${value.length} chars` : value;
+  }
+  if (value === null || typeof value !== "object") return String(value);
+  const json = JSON.stringify(value);
+  return json.length > 60 ? `${json.slice(0, 59)}…` : json;
+}
+
 export function generateDiff(
   oldText: string,
   newText: string,

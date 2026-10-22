@@ -1,4 +1,4 @@
-import { toolDef } from "@core/extensions/tool-utils.ts";
+import { toolDef, summarizeToolArgs } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { validateParams, formatValidationErrors } from "@utils/json-schema.ts";
 import { McpConnectionHandle } from "./connection.ts";
@@ -92,11 +92,10 @@ export class McpTool {
   }
 
   callDisplay(input: string | Record<string, unknown> | null): string {
-    // Object input (the common case) must be stringified, not interpolated,
-    // or it renders as "[object Object]" in the CLI.
-    const raw = typeof input === "string" ? input : input === null ? "null" : JSON.stringify(input);
-    const text = raw.length > 80 ? raw.slice(0, 77) + "..." : raw;
-    return `MCP [${this.#serverName}] ${text}`;
+    // Object input must be summarized, not interpolated (would render as
+    // "[object Object]") and raw JSON is never display-worthy.
+    const args = summarizeToolArgs(input);
+    return args === "" ? `MCP [${this.#serverName}]` : `MCP [${this.#serverName}] ${args}`;
   }
 
   get registeredName(): string {

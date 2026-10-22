@@ -2,12 +2,12 @@ import { describe, it, expect } from "bun:test";
 import {
   formatCompacting,
   formatToolCall,
-  summarizeToolArgs,
   formatToolResult,
   formatTokenUsage,
   formatThinking,
   formatTaskProgress,
 } from "@utils/cli/cli.ts";
+import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
 
 describe("formatCompacting", () => {
   it("formats compacting message", () => {
@@ -69,6 +69,12 @@ describe("summarizeToolArgs", () => {
     expect(summarizeToolArgs('"hi"')).toBe("hi");
     expect(summarizeToolArgs("42")).toBe("42");
     expect(summarizeToolArgs("null")).toBe("null");
+  });
+
+  it("accepts the callDisplay input shape (object or null)", () => {
+    expect(summarizeToolArgs({ command: "ls" })).toBe("ls");
+    expect(summarizeToolArgs({ a: 1, b: 2 })).toBe("a: 1 · b: 2");
+    expect(summarizeToolArgs(null)).toBe("");
   });
 });
 

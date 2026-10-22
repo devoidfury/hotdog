@@ -103,7 +103,7 @@ describe("CliOutputSink", () => {
       expect(stdoutWrites.join("")).not.toContain('"command"');
     });
 
-    it("colors the args segment grey and re-opens the tool color after it", () => {
+    it("colors the args segment terminal-default and re-opens the tool color after it", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
@@ -119,13 +119,14 @@ describe("CliOutputSink", () => {
       // Whole line rides the tool_call yellow; args print in the terminal
       // default (the yellow re-opens after the segment so template postfixes
       // stay yellow). bash args are a shell command, so the command word
-      // lights red inside the default text.
+      // lights in the palette's shell_command color (cyan) inside the
+      // default text.
       expect(written).toContain(
-        "\x1b[33m 🔧 bash \x1b[0m\x1b[31mls\x1b[0m\x1b[33m\x1b[0m",
+        "\x1b[33m 🔧 bash \x1b[0m\x1b[36mls\x1b[0m\x1b[33m\x1b[0m",
       );
     });
 
-    it("shell-highlights bash args: commands red, operators default, quotes untouched", () => {
+    it("shell-highlights bash args: commands cyan, operators dim, quotes untouched", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
@@ -139,7 +140,7 @@ describe("CliOutputSink", () => {
       });
       expect(stdoutWrites.join("")).toContain(
         "\x1b[33m 🔧 bash \x1b[0m" +
-          '\x1b[31mcd\x1b[0m /tmp \x1b[35m&&\x1b[0m \x1b[31mgrep\x1b[0m -rn "a|b" src \x1b[35m|\x1b[0m \x1b[31mhead\x1b[0m -3' +
+          '\x1b[36mcd\x1b[0m /tmp \x1b[90m&&\x1b[0m \x1b[36mgrep\x1b[0m -rn "a|b" src \x1b[90m|\x1b[0m \x1b[36mhead\x1b[0m -3' +
           "\x1b[33m\x1b[0m",
       );
     });
@@ -158,12 +159,12 @@ describe("CliOutputSink", () => {
       });
       const written = stdoutWrites.join("");
       // Regression (owner screenshot 2026-10-22): the shell pass used to run
-      // over the assembled summary, lighting `command:` red as a command
+      // over the assembled summary, lighting `command:` as a command
       // word and leaving the real command plain. Labels read cyan like every
       // other tool's; only the value carries shell color.
       expect(written).toContain(
         "\x1b[33m 🔧 bash \x1b[0m" +
-          "\x1b[36mcommand:\x1b[0m \x1b[31mls\x1b[0m -l \x1b[35m&&\x1b[0m \x1b[31mecho\x1b[0m hi · \x1b[36mtimeoutMs:\x1b[0m 5000" +
+          "\x1b[36mcommand:\x1b[0m \x1b[36mls\x1b[0m -l \x1b[90m&&\x1b[0m \x1b[36mecho\x1b[0m hi\x1b[90m · \x1b[0m\x1b[36mtimeoutMs:\x1b[0m 5000" +
           "\x1b[33m\x1b[0m",
       );
       expect(written).not.toContain("\x1b[31mcommand");
@@ -184,10 +185,10 @@ describe("CliOutputSink", () => {
       });
       const written = stdoutWrites.join("");
       expect(written).toContain(
-        "\x1b[33m 🔧 bash \x1b[0m\x1b[36mcommand:\x1b[0m \x1b[31ma…\x1b[0m (3 lines, 5 chars) · \x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
+        "\x1b[33m 🔧 bash \x1b[0m\x1b[36mcommand:\x1b[0m \x1b[36ma…\x1b[0m (3 lines, 5 chars)\x1b[90m · \x1b[0m\x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
       );
-      // The stub's `5` at command position would have been a red shell word.
-      expect(written).not.toContain("\x1b[31m5");
+      // The stub's `5` at command position would have been a lit shell word.
+      expect(written).not.toContain("\x1b[36m5");
     });
 
     it("multi-line preview: leading blank lines skipped, first line rune-capped at 80", () => {
@@ -224,7 +225,7 @@ describe("CliOutputSink", () => {
       expect(written).not.toContain("\x1b[31m");
     });
 
-    it("non-bash args light key labels cyan inside the grey segment", () => {
+    it("non-bash args light key labels cyan with dimmed separators", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
         toolCallDisplayFormat: " 🔧 {} {}",
@@ -237,7 +238,7 @@ describe("CliOutputSink", () => {
       });
       const written = stdoutWrites.join("");
       expect(written).toContain(
-        "\x1b[33m 🔧 read \x1b[0m\x1b[36mpath:\x1b[0m a.ts · \x1b[36mlimit:\x1b[0m 10\x1b[33m\x1b[0m",
+        "\x1b[33m 🔧 read \x1b[0m\x1b[36mpath:\x1b[0m a.ts\x1b[90m · \x1b[0m\x1b[36mlimit:\x1b[0m 10\x1b[33m\x1b[0m",
       );
       // Shell highlighting stays bash-only.
       expect(written).not.toContain("\x1b[31m");
@@ -518,7 +519,7 @@ describe("inflightCallText (in-flight frame row)", () => {
 
   it("multi-key bash: cyan labels plus shell-lit command (same seams as the committed line)", () => {
     expect(inflightCallText("bash", '{"command":"ls -l","timeoutMs":5000}', bright, BASH_ARG_DISPLAY)).toBe(
-      "\x1b[33m 🔧 bash \x1b[0m\x1b[36mcommand:\x1b[0m \x1b[31mls\x1b[0m -l · \x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
+      "\x1b[33m 🔧 bash \x1b[0m\x1b[36mcommand:\x1b[0m \x1b[36mls\x1b[0m -l\x1b[90m · \x1b[0m\x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
     );
   });
 
@@ -530,7 +531,7 @@ describe("inflightCallText (in-flight frame row)", () => {
 
   it("multi-line command previews first line + size stub with the first-line hint", () => {
     expect(inflightCallText("bash", '{"command":"git status\\n&& git diff"}', bright, BASH_ARG_DISPLAY)).toBe(
-      "\x1b[33m 🔧 bash \x1b[0m\x1b[31mgit\x1b[0m status… (2 lines, 22 chars)\x1b[33m\x1b[0m",
+      "\x1b[33m 🔧 bash \x1b[0m\x1b[36mgit\x1b[0m status… (2 lines, 22 chars)\x1b[33m\x1b[0m",
     );
   });
 

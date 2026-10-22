@@ -208,7 +208,7 @@ Format string for thinking/reasoning output. `{}` is replaced with the thinking 
 - **Default:** unset — tool calls print the tool's own semantic header (e.g. `bash: ls -la`, `src/a.ts (lines 200-402)`), falling back to `  → name args` when a tool cannot summarize the call
 - **Resolution:** CLI > config > built-in fallback
 
-Format string for tool call display -- layout only: the first `{}` is the tool name, the second `{}` is the arguments. The args slot always carries a human-readable summary, never raw JSON: a single-key call bares the value (`{"command":"ls"}` -> `ls`), multi-key calls read `key: value · ...`, multi-line values collapse to `N lines, M chars`, and unparseable args pass through verbatim. Setting the template opts out of the per-tool semantic headers. Line coloring is internal, not configurable: the tool name rides the palette `tool_call` color and the args print in the terminal's default foreground, all off under `NO_COLOR`/`TERM=dumb`. bash commands get internal shell highlighting -- command words red, `&&`/`||`/`|`/`;` purple, quote-aware -- and other tools' summarized args get their key labels cyan. The legacy `toolfmt` config key is still honored as a fallback for pre-rename config files.
+Format string for tool call display -- layout only: the first `{}` is the tool name, the second `{}` is the arguments. The args slot always carries a human-readable summary, never raw JSON: a single-key call bares the value (`{"command":"ls"}` -> `ls`), multi-key calls read `key: value · ...`, multi-line values collapse to `N lines, M chars`, and unparseable args pass through verbatim. Setting the template opts out of the per-tool semantic headers. The tool name rides the palette `tool_call` color and the args print in the terminal's default foreground, all off under `NO_COLOR`/`TERM=dumb`; the arg classes are palette knobs: `arg_key` (summarized `key:` labels, default cyan), `shell_command` (bash command words, quote-aware, default cyan), `shell_operator` (`&&`/`||`/`|`/`;`, default bright_black), and `arg_separator` (the ` · ` between arg pairs, default bright_black). The legacy `toolfmt` config key is still honored as a fallback for pre-rename config files.
 
 ```json
 { "toolCallDisplayFormat": "🔧 {} {}" }
@@ -465,7 +465,11 @@ Trace hook execution. Requires `HOTDOG_LOG_LEVEL=debug`.
 - **Default:** `"dark"`
 - **Resolution:** CLI > config > default
 
-UI theme. Built-in options: `dark`, `light`, `monochrome`. Also accepts a file path to a custom theme.
+UI theme. Built-in options: `dark`, `light`, `monochrome`. Also accepts a file path to a custom theme
+-- a JSON file of `ColorPalette` overrides (merged over `dark`): `thinking`, `tool_call`, `tool_result`,
+`final_response`, `compacting`, `progress`, `arg_key`, `shell_command`, `shell_operator`, `arg_separator`.
+Color names are ANSI classes (`cyan`, `bright_black`, `bold_white`, ...); an empty or unknown name leaves
+that class unstyled.
 
 ```json
 { "theme": "light" }

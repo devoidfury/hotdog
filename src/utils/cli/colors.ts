@@ -7,6 +7,14 @@ export interface PaletteOptions {
   final_response?: string;
   compacting?: string;
   progress?: string;
+  /** Key labels of summarized `k: v` tool-call args. */
+  arg_key?: string;
+  /** Command words in the bash tool-call highlight. */
+  shell_command?: string;
+  /** Shell control operators (`&&`, `||`, `|`, `;`) -- the glue between commands. */
+  shell_operator?: string;
+  /** The ` · ` separator between summarized arg pairs. */
+  arg_separator?: string;
   use_colors?: boolean;
 }
 
@@ -17,6 +25,10 @@ export class ColorPalette {
   final_response: string;
   compacting: string;
   progress: string;
+  arg_key: string;
+  shell_command: string;
+  shell_operator: string;
+  arg_separator: string;
   use_colors: boolean;
 
   constructor(options: PaletteOptions = {}) {
@@ -26,6 +38,10 @@ export class ColorPalette {
     this.final_response = options.final_response ?? "bold_white";
     this.compacting = options.compacting ?? "bold_red";
     this.progress = options.progress ?? "bright_black";
+    this.arg_key = options.arg_key ?? "cyan";
+    this.shell_command = options.shell_command ?? "cyan";
+    this.shell_operator = options.shell_operator ?? "bright_black";
+    this.arg_separator = options.arg_separator ?? "bright_black";
     this.use_colors = options.use_colors ?? true;
   }
 
@@ -48,6 +64,10 @@ export function dark_palette(): PaletteOptions {
     final_response: "bold_white",
     compacting: "bold_red",
     progress: "bright_black",
+    arg_key: "cyan",
+    shell_command: "cyan",
+    shell_operator: "bright_black",
+    arg_separator: "bright_black",
     use_colors: true,
   };
 }
@@ -60,6 +80,11 @@ export function light_palette(): PaletteOptions {
     final_response: "black",
     compacting: "red",
     progress: "bright_black",
+    // Basic cyan washes out on light backgrounds; the arg accent darkens to blue.
+    arg_key: "blue",
+    shell_command: "blue",
+    shell_operator: "bright_black",
+    arg_separator: "bright_black",
     use_colors: true,
   };
 }
@@ -72,6 +97,11 @@ export function monochrome_palette(): PaletteOptions {
     final_response: "",
     compacting: "bold",
     progress: "bright_black",
+    // Styles carry the structure; no hue survives the monochrome theme.
+    arg_key: "bold",
+    shell_command: "bold",
+    shell_operator: "dim",
+    arg_separator: "dim",
     use_colors: true,
   };
 }
@@ -116,6 +146,10 @@ export function mergePalette(base: ColorPalette, custom: PaletteOptions): ColorP
     final_response: custom.final_response || base.final_response,
     compacting: custom.compacting || base.compacting,
     progress: custom.progress || base.progress,
+    arg_key: custom.arg_key || base.arg_key,
+    shell_command: custom.shell_command || base.shell_command,
+    shell_operator: custom.shell_operator || base.shell_operator,
+    arg_separator: custom.arg_separator || base.arg_separator,
     use_colors:
       custom.use_colors !== undefined ? custom.use_colors : base.use_colors,
   });
@@ -203,16 +237,19 @@ export function applyToolCallArgs(text: string, palette: ColorPalette): string {
 }
 
 /**
- * Cyan for the key labels of summarized k: v args (non-bash tools): a key
- * counts only at a pair boundary -- line start or right after the " · "
- * separator -- so a value that happens to contain ": " never lights up
- * (worst case with a hostile-looking value is a cosmetic miss either way;
- * the text is spoof-neutralized upstream). Tokens close with RESET back to
- * the default args color. Colors off -> text unchanged.
+ * The palette color (default cyan) for the key labels of summarized k: v args
+ * (non-bash tools): a key counts only at a pair boundary -- line start or
+ * right after the " · " separator -- so a value that happens to contain
+ * ": " never lights up (worst case with a hostile-looking value is a cosmetic
+ * miss either way; the text is spoof-neutralized upstream). Tokens close with
+ * RESET back to the default args color. An empty or unknown `arg_key` name
+ * passes the text through unstyled (monochrome themes use "bold"). Colors
+ * off -> text unchanged.
  */
 export function applyArgKeyHighlight(text: string, palette: ColorPalette): string {
   if (!palette.use_colors || text === "") return text;
-  const cyan = COLOR_MAP.cyan!;
+  const cyan = COLOR_MAP[palette.arg_key];
+  if (!cyan) return text;
   return text.replace(
     /(^| · )([A-Za-z_][A-Za-z0-9_]*)(: )/g,
     (_m: string, lead: string, key: string) => `${lead}\x1b[${cyan}m${key}:${RESET} `,
@@ -220,9 +257,12 @@ export function applyArgKeyHighlight(text: string, palette: ColorPalette): strin
 }
 
 /**
- * Shell-syntax highlighting for the grey tool-args segment (the bash tool's
- * command): command words (line start, after &&, ||, | or ;) red, control
- * operators magenta, everything else in the default args color. Quote-aware -- nothing
+ * Shell-syntax highlighting for the default-fg args segment (the bash tool's
+ * command): command words (line start, after &&, ||, | or ;) get the palette's
+ * `shell_command` color, control operators get `shell_operator` (the glue
+ * recedes; it is punctuation, not content), everything else rides the default
+ * args color. An empty or unknown color name leaves that class unstyled
+ * (monochrome themes bold commands, dim the glue). Quote-aware -- nothing
  * inside '...' or "..." is touched, a stray quote rides through verbatim,
  * and an env-assignment prefix (`FOO=1 cmd`) stays default while keeping the
  * command position. Backticks/$(...)/glued operators (`a|b`) are NOT parsed:
@@ -230,13 +270,13 @@ export function applyArgKeyHighlight(text: string, palette: ColorPalette): strin
  */
 export function applyShellHighlight(text: string, palette: ColorPalette): string {
   if (!palette.use_colors || text === "") return text;
-  const red = COLOR_MAP.red!;
+  const cmd = COLOR_MAP[palette.shell_command];
+  const op = COLOR_MAP[palette.shell_operator];
   let out = "";
   let cmdPos = true;
   for (const [t] of text.matchAll(/('[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"]+|\s+|['"])/g)) {
     if (t === "&&" || t === "||" || t === "|" || t === ";") {
-      // Purple so the glue between commands reads as structure, not text.
-      out += `\x1b[${COLOR_MAP.magenta!}m${t}${RESET}`;
+      out += op ? `\x1b[${op}m${t}${RESET}` : t;
       cmdPos = true;
     } else if (cmdPos && /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
       out += t; // env prefix: default, still command position
@@ -244,13 +284,27 @@ export function applyShellHighlight(text: string, palette: ColorPalette): string
       out += t; // quoted word reads as itself; the command position is spent
       cmdPos = false;
     } else if (cmdPos && !/^\s/.test(t)) {
-      out += `\x1b[${red}m${t}${RESET}`;
+      out += cmd ? `\x1b[${cmd}m${t}${RESET}` : t;
       cmdPos = false;
     } else {
       out += t;
     }
   }
   return out;
+}
+
+/**
+ * Dim the ` · ` separator between summarized arg pairs (palette
+ * `arg_separator`). Runs AFTER the key pass, whose `(^| · )` anchor needs the
+ * bare separator, and like every pass here, after the spoof pass. A value
+ * that itself contains " · " gets dimmed too -- the same ambiguity the
+ * summarizer and the key anchor already accept. Colors off -> text unchanged.
+ */
+export function applyArgSeparator(text: string, palette: ColorPalette): string {
+  if (!palette.use_colors || text === "") return text;
+  const code = COLOR_MAP[palette.arg_separator];
+  if (!code) return text;
+  return text.replace(/ \u00b7 /g, `\x1b[${code}m \u00b7 ${RESET}`);
 }
 
 export function applyToolResult(text: string, palette: ColorPalette): string {

@@ -17,6 +17,7 @@ import {
   applyProgress,
   applyShellHighlight,
   applyArgKeyHighlight,
+  applyArgSeparator,
 } from '../../../src/utils/cli/colors.ts';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
@@ -29,6 +30,10 @@ describe('ColorPalette', () => {
     expect(p.use_colors).toBe(true);
     expect(p.thinking).toBe('cyan');
     expect(p.tool_call).toBe('yellow');
+    expect(p.arg_key).toBe('cyan');
+    expect(p.shell_command).toBe('cyan');
+    expect(p.shell_operator).toBe('bright_black');
+    expect(p.arg_separator).toBe('bright_black');
   });
 
   it('accepts custom values overriding defaults', () => {
@@ -48,6 +53,9 @@ describe('Named themes', () => {
   it('dark and light themes produce different palettes', () => {
     expect(dark_palette().thinking).not.toBe(light_palette().thinking);
     expect(dark_palette().final_response).not.toBe(light_palette().final_response);
+    // Basic cyan washes out on light backgrounds; the arg accent must darken.
+    expect(dark_palette().arg_key).not.toBe(light_palette().arg_key);
+    expect(dark_palette().shell_command).not.toBe(light_palette().shell_command);
   });
 
   it('monochrome uses text styles instead of colors', () => {
@@ -55,6 +63,10 @@ describe('Named themes', () => {
     expect(mono.thinking).toBe('dim');
     expect(mono.tool_call).toBe('bold');
     expect(mono.tool_result).toBe('underline');
+    expect(mono.arg_key).toBe('bold');
+    expect(mono.shell_command).toBe('bold');
+    expect(mono.shell_operator).toBe('dim');
+    expect(mono.arg_separator).toBe('dim');
   });
 });
 
@@ -211,31 +223,50 @@ describe('applyShellHighlight', () => {
     expect(applyShellHighlight('cd /tmp && ls', off)).toBe('cd /tmp && ls');
   });
 
-  it('highlights command words red; everything else rides the default', () => {
-    expect(applyShellHighlight('ls -la', on)).toBe('\x1b[31mls\x1b[0m -la');
+  it('highlights command words cyan; everything else rides the default', () => {
+    expect(applyShellHighlight('ls -la', on)).toBe('\x1b[36mls\x1b[0m -la');
   });
 
   it('arms the command position after &&, ||, | and ;', () => {
     const out = applyShellHighlight('a && b || c | d ; e', on);
     for (const cmd of ['a', 'b', 'c', 'd', 'e']) {
-      expect(out).toContain(`\x1b[31m${cmd}\x1b[0m`);
+      expect(out).toContain(`\x1b[36m${cmd}\x1b[0m`);
     }
     for (const [op, next] of [['&&', 'b'], ['||', 'c'], ['|', 'd'], [';', 'e']]) {
-      // Operators glow magenta and arm the next command word.
-      expect(out).toContain(`\x1b[35m${op}\x1b[0m \x1b[31m${next}\x1b[0m`);
+      // Operators dim and arm the next command word.
+      expect(out).toContain(`\x1b[90m${op}\x1b[0m \x1b[36m${next}\x1b[0m`);
     }
   });
 
   it('never touches quoted text and carries stray quotes verbatim (no char loss)', () => {
     expect(applyShellHighlight('grep "a && b" src', on)).toBe(
-      '\x1b[31mgrep\x1b[0m "a && b" src',
+      '\x1b[36mgrep\x1b[0m "a && b" src',
     );
-    expect(applyShellHighlight("echo don't", on)).toBe("\x1b[31mecho\x1b[0m don't");
+    expect(applyShellHighlight("echo don't", on)).toBe("\x1b[36mecho\x1b[0m don't");
   });
 
   it('keeps env prefixes default-colored and the command position armed', () => {
     expect(applyShellHighlight('FOO=1 cmd arg', on)).toBe(
-      'FOO=1 \x1b[31mcmd\x1b[0m arg',
+      'FOO=1 \x1b[36mcmd\x1b[0m arg',
+    );
+  });
+
+  it('takes command and operator colors from the palette', () => {
+    const p = new ColorPalette({ use_colors: true, shell_command: 'green', shell_operator: 'bold' });
+    expect(applyShellHighlight('ls && pwd', p)).toBe(
+      '\x1b[32mls\x1b[0m \x1b[1m&&\x1b[0m \x1b[32mpwd\x1b[0m',
+    );
+  });
+
+  it('leaves a class unstyled when its palette color is empty or unknown', () => {
+    const p = new ColorPalette({ use_colors: true, shell_command: 'nonexistent', shell_operator: '' });
+    expect(applyShellHighlight('ls && pwd', p)).toBe('ls && pwd');
+  });
+
+  it('monochrome lights styles, never hues', () => {
+    const mono = new ColorPalette(monochrome_palette());
+    expect(applyShellHighlight('ls && pwd', mono)).toBe(
+      '\x1b[1mls\x1b[0m \x1b[2m&&\x1b[0m \x1b[1mpwd\x1b[0m',
     );
   });
 });
@@ -263,6 +294,53 @@ describe('applyArgKeyHighlight', () => {
   it('skips keys with spaces or punctuation (cosmetic miss, never mangled)', () => {
     expect(applyArgKeyHighlight('odd key: x · fine: y', on)).toBe(
       'odd key: x · \x1b[36mfine:\x1b[0m y',
+    );
+  });
+
+  it('takes the key color from the palette', () => {
+    const p = new ColorPalette({ use_colors: true, arg_key: 'magenta' });
+    expect(applyArgKeyHighlight('path: a.ts · limit: 10', p)).toBe(
+      '\x1b[35mpath:\x1b[0m a.ts · \x1b[35mlimit:\x1b[0m 10',
+    );
+  });
+
+  it('passes the text through when the palette color is empty or unknown', () => {
+    const p = new ColorPalette({ use_colors: true, arg_key: '' });
+    expect(applyArgKeyHighlight('path: a.ts · limit: 10', p)).toBe('path: a.ts · limit: 10');
+    const q = new ColorPalette({ use_colors: true, arg_key: 'nonexistent' });
+    expect(applyArgKeyHighlight('path: a.ts', q)).toBe('path: a.ts');
+  });
+});
+
+describe('applyArgSeparator', () => {
+  const on = new ColorPalette({ use_colors: true });
+  const off = new ColorPalette({ use_colors: false });
+
+  it('is a no-op with colors off', () => {
+    expect(applyArgSeparator('path: a.ts · limit: 10', off)).toBe('path: a.ts · limit: 10');
+  });
+
+  it('dims the pair separator between summarized args', () => {
+    expect(applyArgSeparator('a: 1 · b: 2', on)).toBe('a: 1\x1b[90m · \x1b[0mb: 2');
+  });
+
+  it('leaves single-pair lines untouched', () => {
+    expect(applyArgSeparator('path: a.ts', on)).toBe('path: a.ts');
+  });
+
+  it('takes the dim color from the palette; empty or unknown stays plain', () => {
+    const p = new ColorPalette({ use_colors: true, arg_separator: 'dim' });
+    expect(applyArgSeparator('a: 1 · b: 2', p)).toBe('a: 1\x1b[2m · \x1b[0mb: 2');
+    const q = new ColorPalette({ use_colors: true, arg_separator: '' });
+    expect(applyArgSeparator('a: 1 · b: 2', q)).toBe('a: 1 · b: 2');
+  });
+
+  it('runs after the key pass without breaking its pair-boundary anchor', () => {
+    // The anchor needs the bare separator; composing key-then-separator is
+    // the sink order, and it lights both keys and both separators.
+    const composed = applyArgSeparator(applyArgKeyHighlight('path: a.ts · limit: 10', on), on);
+    expect(composed).toBe(
+      '\x1b[36mpath:\x1b[0m a.ts\x1b[90m · \x1b[0m\x1b[36mlimit:\x1b[0m 10',
     );
   });
 });

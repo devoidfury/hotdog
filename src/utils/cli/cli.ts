@@ -28,6 +28,7 @@ import {
   applyToolCallArgs,
   applyShellHighlight,
   applyArgKeyHighlight,
+  applyArgSeparator,
   applyToolResult,
   applyFinalResponse,
   applyCompacting,
@@ -122,7 +123,7 @@ function hasShellSyntax(argDisplay?: Record<string, ArgDisplay>): boolean {
  * "shell"` (bash's command): single-line values ride the shell pass whole;
  * multi-line values arrive from the summarizer already preview-folded, and
  * here the preview half gets shell-lit with the size stub kept plain (a
- * `5` at shell-command position would light as a red command word). The
+ * `5` at shell-command position would light as a command word). The
  * preview is recomputed from the raw value with the shared
  * firstLinePreview so policy lives once; hints without shell syntax pass
  * through.
@@ -149,7 +150,8 @@ function shellArgSeam(palette: ColorPalette, argDisplay: Record<string, ArgDispl
  * into the final shape before the commit lands); an unparseable partial
  * folds to one single-line preview (newlines collapsed, rune-capped).
  * Same segment invariant as emitToolCall: spoofSafe before any ANSI
- * embedding; summarized keys read cyan for every tool, and `argDisplay`
+ * embedding; summarized keys read the palette's `arg_key` color for every
+ * tool, pair separators dim via `arg_separator`, and `argDisplay`
  * (the tool's metadata hints, resolved by the caller) drives value folding
  * and the shell highlighter.
  */
@@ -172,6 +174,7 @@ export function inflightCallText(
       argDisplay,
     );
     argBody = applyArgKeyHighlight(argBody, palette);
+    argBody = applyArgSeparator(argBody, palette);
   } catch {
     // Partial JSON: one-line preview. Raw JSON chrome is not shell text
     // (and not `k: v` summary shape either), so the fold rides plain.
@@ -434,14 +437,18 @@ export class CliOutputSink extends OutputSink {
     // from already-spoofed values; every other tool keeps the legacy
     // spoof-after-summarize byte path. Unparseable input passes through
     // plain. The key pass runs after the shell ANSI injected here (its
-    // `(^| · ) key: ` anchors cannot match inside shell segments; both
+    // `(^| · ) key: ` anchors cannot match inside shell segments; the
+    // separator dim runs last, once no anchor needs the bare ` · `; all
     // passes are post-spoof).
     const hints = this.argDisplay?.(event.toolName);
     const shell = hasShellSyntax(hints);
     const summarized = shell
       ? summarizeToolArgs(spoofSafe(event.input), shellArgSeam(this.palette, hints!), hints)
       : spoofSafe(summarizeToolArgs(event.input, undefined, hints));
-    const args = applyToolCallArgs(applyArgKeyHighlight(summarized, this.palette), this.palette);
+    const args = applyToolCallArgs(
+      applyArgSeparator(applyArgKeyHighlight(summarized, this.palette), this.palette),
+      this.palette,
+    );
     const text = this.toolCallDisplayFormat
       ? formatToolCall(spoofSafe(event.toolName), args, this.toolCallDisplayFormat)
       : formatToolCall(spoofSafe(event.toolName), args, `${TOOL_CALL_PREFIX}{} {}`);

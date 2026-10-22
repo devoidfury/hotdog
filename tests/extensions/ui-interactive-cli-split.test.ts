@@ -2075,12 +2075,16 @@ describe("§9 dumb-term mount gate (stage 3c)", () => {
   it("legacy runs never patch console at all: pristine six-method identity", () => {
     const before = pristineGlobals();
     // Knob legacy on a full declared TTY pair, with and without an explicit
-    // env; knob unset; split on non-TTY stdio. None may touch a global.
+    // env; unset knob on a dumb TTY (default-on: unset only declines via the
+    // dumb gate); split on non-TTY stdio. None may touch a global. Explicit
+    // envs only -- a decline case must not read the ambient TERM of the runner.
     expect(mountSplitRenderer({ knob: "legacy", stdinIsTTY: true, stdoutIsTTY: true })).toBeNull();
     expect(
       mountSplitRenderer({ knob: "legacy", stdinIsTTY: true, stdoutIsTTY: true, env: { TERM: "xterm" } }),
     ).toBeNull();
-    expect(mountSplitRenderer({ knob: undefined, stdinIsTTY: true, stdoutIsTTY: true })).toBeNull();
+    expect(
+      mountSplitRenderer({ knob: undefined, stdinIsTTY: true, stdoutIsTTY: true, env: { TERM: "dumb" } }),
+    ).toBeNull();
     expect(
       mountSplitRenderer({ knob: "split", stdinIsTTY: false, stdoutIsTTY: true, env: { TERM: "xterm" } }),
     ).toBeNull();

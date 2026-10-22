@@ -16,6 +16,7 @@
 //   ctrl-k/u/w     kill line/start/word      ctrl-y yank (ring merges consecutive kills)
 //   ctrl-l         REDRAW (frame repaint)
 //   tab / shift-tab  popup next / prev; Tab with no popup requests one
+//                  (a unique match completes immediately, no popup)
 //   up/down        popup open -> cycle; visual rows first; history at the edges
 //   ctrl-x         UNHANDLED (stage 3b: dictation toggle binds it)
 // Any other key is UNHANDLED so the bridge can extend bindings without an
@@ -173,12 +174,21 @@ export class EditorView {
    * popup with candidates that match nothing closes it, reason "no-match".
    * "open" reports matchCount -- the rows the composer paints -- not the raw
    * candidate count the bridge handed in.
+   *
+   * A unique match is accepted straight into the buffer instead of painting
+   * a one-row popup: the popup exists to choose, and there is nothing to
+   * choose. Both callers are Tab answers (sync, or the deferred provider
+   * round still matching its word), so this never fires under live typing.
    */
   openPopup(candidates: Completion[], from?: number): void {
     const spanFrom = from ?? this.editor.wordStartBackward();
     const prefix = this.editor.buffer.slice(spanFrom, this.editor.cursorOffset);
     const wasOpen = this.popup.isOpen;
     this.popup.openPopup(candidates, spanFrom, prefix);
+    if (this.popup.isOpen && this.popup.matchCount === 1) {
+      this.acceptPopup();
+      return;
+    }
     if (this.popup.isOpen) this.emit({ type: "popup", phase: "open", count: this.popup.matchCount });
     else if (wasOpen) this.emit({ type: "popup", phase: "close", reason: "no-match" });
   }

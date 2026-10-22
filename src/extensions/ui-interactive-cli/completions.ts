@@ -256,12 +256,29 @@ export function buildEditorCompleter(
   };
 }
 
-function mergeCandidates(a: Completion[], b: Completion[]): Completion[] {
+/**
+ * Merge two candidate lists by label, first-list-first order. Directory
+ * names ignore a trailing slash for equality: compgen offers `data` for a
+ * directory while the readdir completer offers `data/` -- one thing gets one
+ * row (and one unique-match auto-complete). The slash form wins the slot:
+ * it is the canonical directory completion (bash inserts it that way too).
+ * Exported for the merge-contract tests.
+ */
+export function mergeCandidates(a: Completion[], b: Completion[]): Completion[] {
   if (b.length === 0) return a;
-  const seen = new Set(a.map((c) => c.label));
-  const out = [...a];
-  for (const c of b) {
-    if (!seen.has(c.label)) out.push(c);
+  if (a.length === 0) return b;
+  const strip = (label: string) => (label.endsWith("/") ? label.slice(0, -1) : label);
+  const at = new Map<string, number>();
+  const out: Completion[] = [];
+  for (const c of [...a, ...b]) {
+    const key = strip(c.label);
+    const slot = at.get(key);
+    if (slot === undefined) {
+      at.set(key, out.length);
+      out.push(c);
+    } else if (!out[slot]!.label.endsWith("/") && c.label.endsWith("/")) {
+      out[slot] = c; // directory form replaces the slash-less twin, in place
+    }
   }
   return out;
 }

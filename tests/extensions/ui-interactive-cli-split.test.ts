@@ -958,7 +958,7 @@ describe("editor input mount (stage 3b)", () => {
   });
 
   it("tab requests a popup, provider rows paint above the editor, enter accepts", () => {
-    const r = makeEditorRig([{ label: "/model", insert: "/model " }]);
+    const r = makeEditorRig([{ label: "/model", insert: "/model " }, { label: "/mount" }]);
     r.source.push("/mo");
     r.clock.runAll();
     r.source.push("\t");
@@ -966,13 +966,27 @@ describe("editor input mount (stage 3b)", () => {
     expect(r.calls.popupRequests).toEqual([{ word: "/mo", from: 0, to: 3 }]);
     expect(r.bridge.editor?.popupOpen).toBe(true);
     const withPopup = screen(r.term);
-    expect(withPopup[0]).toContain("/model"); // popup row above the prompt row
-    expect(withPopup[1]).toBe("(m)> /mo");
+    expect(withPopup[0]).toContain("/model"); // popup rows above the prompt row
+    expect(withPopup[1]).toContain("/mount");
+    expect(withPopup[2]).toBe("(m)> /mo");
 
     r.source.push("\r"); // enter accepts the popup instead of submitting
     r.clock.runAll();
     expect(r.calls.submit).toEqual([]);
     expect(r.bridge.editor?.text).toBe("/model ");
+  });
+
+  it("a unique tab candidate completes on the spot: no popup, enter submits", () => {
+    const r = makeEditorRig([{ label: "/model", insert: "/model " }]);
+    r.source.push("/mo");
+    r.clock.runAll();
+    r.source.push("\t");
+    r.clock.runAll();
+    expect(r.bridge.editor?.popupOpen).toBe(false); // the one-row detour is skipped
+    expect(r.bridge.editor?.text).toBe("/model ");
+    r.source.push("\r");
+    r.clock.runAll();
+    expect(r.calls.submit).toEqual(["/model "]);
   });
 
   it("ctrl-l purge-and-reprints the transcript; ctrl-x surfaces as unhandled", () => {
@@ -1402,6 +1416,7 @@ describe("editor session swap: question focus (§8)", () => {
   it("the completion popup is suppressed while a question owns the input", async () => {
     const dir = mkdtempSync(join(tmpdir(), "hotdog-3b-qpopup-"));
     writeFileSync(join(dir, "alpha.txt"), "a");
+    writeFileSync(join(dir, "alt.txt"), "b"); // keep the "al" span multi-match
     const rig = makeSessionRig();
     try {
       await rig.done;
@@ -1411,12 +1426,14 @@ describe("editor session swap: question focus (§8)", () => {
       const pending = input.collectAnswers([{ key: "note", prompt: "Note?", required: false }], null);
       await tick();
 
-      // A path word + Tab opens the SYNCHRONOUS readdir popup in normal
-      // mode; while the question owns the input it must not appear.
+      // A path word + Tab would complete in normal mode (popup on the two
+      // "al" matches); while the question owns the input nothing may touch
+      // the buffer.
       rig.keys.push(`cat ${dir}/al`);
       rig.keys.push("\t");
       rig.clock.runAll();
       expect(rig.bridge.editor?.popupOpen).toBe(false);
+      expect(rig.bridge.editor?.text).toBe(`cat ${dir}/al`); // not even auto-completed
 
       rig.keys.push("\r"); // the typed text goes to the question as free text
       const answers = await pending;
@@ -1458,7 +1475,7 @@ describe("editor session swap: MODEL_CHANGE retargets the mounted prompt", () =>
 });
 
 describe("editor session swap: completion popup sources", () => {
-  it("async provider degrades cold, then opens (and accepts) on cache/refresh", async () => {
+  it("async provider degrades cold, then auto-completes a unique match on cache/refresh", async () => {
     const completion = createCompletionService();
     completion.register(
       (ctx) => ctx.line.slice(0, ctx.cursorPos).startsWith("hel"),
@@ -1476,12 +1493,10 @@ describe("editor session swap: completion popup sources", () => {
 
     await tick(); // the provider round resolves and refreshes the open span
     rig.clock.runAll();
-    expect(rig.bridge.editor?.popupOpen).toBe(true);
-
-    rig.keys.push("\r"); // enter accepts the popup instead of submitting
-    rig.clock.runAll();
+    // The one match auto-completes in place: no popup, buffer rewritten.
+    expect(rig.bridge.editor?.popupOpen).toBe(false);
     expect(rig.bridge.editor?.text).toBe("hello");
-    expect(rig.calls.enqueue).toEqual([]);
+    expect(rig.calls.enqueue).toEqual([]); // completion never enqueues
   });
 
   it("readdir path completer answers synchronously at Tab", async () => {
@@ -1492,13 +1507,25 @@ describe("editor session swap: completion popup sources", () => {
     const rig = makeSessionRig();
     try {
       await rig.done;
-      rig.keys.push(`cat ${dir}/al`);
+      rig.keys.push(`cat ${dir}/`);
       rig.keys.push("\t");
       rig.clock.runAll();
       expect(rig.bridge.editor?.popupOpen).toBe(true); // NO await: readdir is sync
       const rows = rig.screenRows();
       expect(rows.some((r) => r.includes("alpha.txt"))).toBe(true);
-      expect(rows.some((r) => r.includes("beta.txt"))).toBe(false);
+      expect(rows.some((r) => r.includes("beta.txt"))).toBe(true);
+      // A narrowed span with one match completes on the spot (same sync path,
+      // no popup detour). Esc closes first -- Tab while a popup is open
+      // cycles, it does not re-request.
+      rig.keys.push("\x1b");
+      rig.clock.runAll();
+      expect(rig.bridge.editor?.popupOpen).toBe(false);
+      rig.keys.push("al");
+      rig.clock.runAll();
+      rig.keys.push("\t");
+      rig.clock.runAll();
+      expect(rig.bridge.editor?.popupOpen).toBe(false);
+      expect(rig.bridge.editor?.text).toBe(`cat ${dir}/alpha.txt`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

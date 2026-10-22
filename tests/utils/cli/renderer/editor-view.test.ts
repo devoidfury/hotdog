@@ -367,6 +367,32 @@ describe("EditorView -- completion popup lifecycle", () => {
     );
     expect(close).toEqual({ type: "popup", phase: "close", reason: "no-match" });
   });
+
+  it("a unique match completes without a popup (no one-row detour)", () => {
+    const h = make();
+    h.feed("/mode");
+    h.events.length = 0;
+    h.view.openPopup([{ label: "/model" }, { label: "/mount" }], 0); // only /model matches "/mode"
+    expect(h.view.popupOpen).toBe(false);
+    expect(h.view.text).toBe("/model");
+    const evs = [...h.events];
+    expect(evs.some((e) => e.type === "popup" && e.phase === "open")).toBe(false);
+    expect(evs.some((e) => e.type === "popup" && e.phase === "accept")).toBe(true);
+    // Enter after the completion submits; it was never eaten by a popup.
+    h.events.length = 0;
+    h.feed("\r");
+    expect(h.submitTexts()).toEqual(["/model"]);
+  });
+
+  it("single-candidate accept honors insert text and replaces only the span", () => {
+    const h = make();
+    h.feed("cat /mode x");
+    h.feed("\x1b[D\x1b[D"); // cursor back before " x" -> right after "/mode"
+    h.events.length = 0;
+    h.view.openPopup([{ label: "/model.fmt", insert: "/model.fmt" }], 4);
+    expect(h.view.popupOpen).toBe(false);
+    expect(h.view.text).toBe("cat /model.fmt x");
+  });
 });
 
 describe("EditorView -- grid harness (frame composer contract)", () => {

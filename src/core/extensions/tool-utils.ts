@@ -317,7 +317,23 @@ export function defaultCallDisplay(
  * it sent). Shared by the CLI sink's template args slot and tool
  * `callDisplay`s that have nothing more semantic to say (MCP passthrough).
  */
-export function summarizeToolArgs(input: string | Record<string, unknown> | null): string {
+export function summarizeToolArgs(
+  input: string | Record<string, unknown> | null,
+  /**
+   * Sink-side seam over each ENTRY VALUE (single-key case included), after
+   * folding/capping, before the join; the original entry value rides along
+   * so a renderer can tell a real string from a summary stub. Lets a
+   * renderer style one value's syntax (the bash `command`) without
+   * re-scanning the assembled text -- a shell pass over
+   * `command: ls · timeoutMs: 5000` would light the key label red and
+   * leave the real command plain. Keys and separators never pass through
+   * it (the transform must not rewrite chrome); ANSI injected here is the
+   * caller's responsibility and must come after their spoof pass, so call
+   * with an already-spoofed input when injecting ANSI.
+   * Omitted (every non-terminal sink) -> byte-identical output, ANSI-free.
+   */
+  valueTransform?: (key: string, rendered: string, value: unknown) => string,
+): string {
   if (input === null) return "";
   let value: unknown = input;
   if (typeof input === "string") {
@@ -331,8 +347,12 @@ export function summarizeToolArgs(input: string | Record<string, unknown> | null
   }
   if (value === null || typeof value !== "object") return String(value);
   const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.length === 1) return summarizeToolValue(entries[0]![1]);
-  return entries.map(([k, v]) => `${k}: ${summarizeToolValue(v)}`).join(" · ");
+  const render = (k: string, v: unknown): string => {
+    const rendered = summarizeToolValue(v);
+    return valueTransform ? valueTransform(k, rendered, v) : rendered;
+  };
+  if (entries.length === 1) return render(entries[0]![0], entries[0]![1]);
+  return entries.map(([k, v]) => `${k}: ${render(k, v)}`).join(" · ");
 }
 
 /** One summarized argument value; see summarizeToolArgs. */

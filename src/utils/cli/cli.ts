@@ -338,12 +338,22 @@ export class CliOutputSink extends OutputSink {
     // AFTER it (spoofSafe neutralizes ESC); the line-wide tool_call color
     // lands later via the mode applier in _flushText. The bash tool's args
     // ARE a shell command (shell highlight); other tools' summarized k: v
-    // args get their key labels cyan.
-    const summarized = spoofSafe(summarizeToolArgs(event.input));
+    // args get their key labels cyan. Bash highlights through the
+    // summarizer's value seam (single-line command VALUE only): a shell
+    // pass over the assembled `command: X · timeoutMs: N` would light the
+    // key label red and leave the command plain, and the multi-line
+    // collapse stub (`5 lines, 211 chars`) is not shell text either.
+    // Unparseable bash input passes through plain.
+    const bash = event.toolName === "bash";
+    const shellLit = (key: string, rendered: string, value: unknown): string =>
+      key === "command" && typeof value === "string" && !value.includes("\n")
+        ? applyShellHighlight(rendered, this.palette)
+        : rendered;
+    const summarized = bash
+      ? summarizeToolArgs(spoofSafe(event.input), shellLit)
+      : spoofSafe(summarizeToolArgs(event.input));
     const args = applyToolCallArgs(
-      event.toolName === "bash"
-        ? applyShellHighlight(summarized, this.palette)
-        : applyArgKeyHighlight(summarized, this.palette),
+      bash ? summarized : applyArgKeyHighlight(summarized, this.palette),
       this.palette,
     );
     const text = this.toolCallDisplayFormat

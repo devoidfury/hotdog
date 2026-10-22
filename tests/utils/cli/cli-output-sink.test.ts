@@ -145,6 +145,66 @@ describe("CliOutputSink", () => {
       );
     });
 
+    it("multi-key bash: key labels stay plain, only the command value is shell-lit", () => {
+      const bright = new CliOutputSink({
+        palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
+        toolCallDisplayFormat: " 🔧 {} {}",
+      });
+      bright.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "bash",
+        input: JSON.stringify({ command: "ls -l && echo hi", timeoutMs: 5000 }),
+        toolCallId: "1",
+      });
+      const written = stdoutWrites.join("");
+      // Regression (owner screenshot 2026-10-22): the shell pass used to run
+      // over the assembled summary, lighting `command:` red as a command
+      // word and leaving the real command plain. Chrome stays default;
+      // only the value carries shell color.
+      expect(written).toContain(
+        "\x1b[33m 🔧 bash \x1b[0m" +
+          "command: \x1b[31mls\x1b[0m -l \x1b[35m&&\x1b[0m \x1b[31mecho\x1b[0m hi · timeoutMs: 5000" +
+          "\x1b[33m\x1b[0m",
+      );
+      expect(written).not.toContain("\x1b[31mcommand");
+      expect(written).not.toContain("\x1b[31mtimeoutMs");
+    });
+
+    it("multi-line bash command: the collapse stub rides plain, not shell-lit", () => {
+      const bright = new CliOutputSink({
+        palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
+        toolCallDisplayFormat: " 🔧 {} {}",
+      });
+      bright.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "bash",
+        input: JSON.stringify({ command: "a\nb\nc", timeoutMs: 5000 }),
+        toolCallId: "1",
+      });
+      const written = stdoutWrites.join("");
+      expect(written).toContain(
+        "\x1b[33m 🔧 bash \x1b[0mcommand: 3 lines, 5 chars · timeoutMs: 5000\x1b[33m\x1b[0m",
+      );
+      // `5` at command position would have been a red shell word.
+      expect(written).not.toContain("\x1b[31m");
+    });
+
+    it("unparseable bash args pass through plain (raw JSON chrome is not shell)", () => {
+      const bright = new CliOutputSink({
+        palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),
+        toolCallDisplayFormat: " 🔧 {} {}",
+      });
+      bright.emit({
+        type: OUTPUT_EVENT.TOOL_CALL,
+        toolName: "bash",
+        input: '{"command":"ls',
+        toolCallId: "1",
+      });
+      const written = stdoutWrites.join("");
+      expect(written).toContain('\x1b[33m 🔧 bash \x1b[0m{"command":"ls\x1b[33m\x1b[0m');
+      expect(written).not.toContain("\x1b[31m");
+    });
+
     it("non-bash args light key labels cyan inside the grey segment", () => {
       const bright = new CliOutputSink({
         palette: new ColorPalette({ use_colors: true, tool_call: "yellow" }),

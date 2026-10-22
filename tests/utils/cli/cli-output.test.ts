@@ -76,6 +76,31 @@ describe("summarizeToolArgs", () => {
     expect(summarizeToolArgs({ a: 1, b: 2 })).toBe("a: 1 · b: 2");
     expect(summarizeToolArgs(null)).toBe("");
   });
+
+  it("routes entry values through the sink-side transform; chrome untouched", () => {
+    const out = summarizeToolArgs('{"command":"ls -l","timeoutMs":5000}', (k, r, v) =>
+      k === "command" ? `[${r}]` : `${r}<${typeof v}>`,
+    );
+    // Keys and the " · " separator bypass the transform; it sees each
+    // value (post-fold) plus the original entry value.
+    expect(out).toBe("command: [ls -l] · timeoutMs: 5000<number>");
+  });
+
+  it("bares a single key but still routes its value through the transform", () => {
+    expect(summarizeToolArgs('{"command":"ls"}', (k, r) => `${k}=${r}`)).toBe("command=ls");
+  });
+
+  it("never calls the transform on passthrough, scalar, or null input", () => {
+    let calls = 0;
+    const t = (_k: string, r: string): string => {
+      calls++;
+      return r;
+    };
+    expect(summarizeToolArgs("not json {{", t)).toBe("not json {{");
+    expect(summarizeToolArgs("42", t)).toBe("42");
+    expect(summarizeToolArgs(null, t)).toBe("");
+    expect(calls).toBe(0);
+  });
 });
 
 describe("formatToolResult", () => {

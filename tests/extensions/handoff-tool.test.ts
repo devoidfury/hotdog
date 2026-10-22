@@ -55,30 +55,6 @@ describe("HandoffTool", () => {
     });
   });
 
-  describe("callDisplay", () => {
-    it("shows title when provided", () => {
-      const input = JSON.stringify({
-        content: "My plan",
-        title: "Implementation Phase",
-      });
-      expect(tool.callDisplay(input)).toBe("handoff: Implementation Phase");
-    });
-
-    it("shows default when no title", () => {
-      const input = JSON.stringify({
-        content: "My plan",
-      });
-      expect(tool.callDisplay(input)).toBe("handoff: handoff");
-    });
-
-    it("handles empty input with fallback", () => {
-      expect(tool.callDisplay("")).toContain("handoff");
-    });
-
-    it("handles invalid JSON with fallback", () => {
-      expect(tool.callDisplay("not json")).toContain("handoff");
-    });
-  });
 
   describe("execute", () => {
     it("stores handoff payload in state", async () => {

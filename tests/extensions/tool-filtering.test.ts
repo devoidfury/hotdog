@@ -168,7 +168,6 @@ describe("Tool Filtering (Agent.getToolDefs)", () => {
         type: "function",
         function: { name: "no_meta_tool", description: "no meta", parameters: {} },
       }),
-      callDisplay: () => "no_meta_tool",
       execute: async () => "ok",
       // no metadata
     };
@@ -185,7 +184,6 @@ describe("Tool Filtering (Agent.getToolDefs)", () => {
         type: "function",
         function: { name: "x", description: "x", parameters: {} },
       }),
-      callDisplay: () => "x",
       execute: async () => "ok",
       metadata: { sideEffects: false, difficulty: 1 },
     };

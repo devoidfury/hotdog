@@ -47,23 +47,6 @@ describe('ProjectInfoTool', () => {
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
-  it('generates call display with path', () => {
-    const tool = new ProjectInfoTool();
-    const display = tool.callDisplay(JSON.stringify({ path: '/project' }));
-    expect(display).toContain('path=/project');
-  });
-
-  it('generates call display with max_depth', () => {
-    const tool = new ProjectInfoTool();
-    const display = tool.callDisplay(JSON.stringify({ path: '/project', max_depth: 3 }));
-    expect(display).toContain('depth=3');
-  });
-
-  it('generates call display with max_files', () => {
-    const tool = new ProjectInfoTool();
-    const display = tool.callDisplay(JSON.stringify({ path: '/project', max_files: 50 }));
-    expect(display).toContain('files=50');
-  });
 
   it('handles object input', async () => {
     const tool = new ProjectInfoTool();

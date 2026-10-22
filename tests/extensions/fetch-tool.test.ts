@@ -244,29 +244,7 @@ describe("FetchTool", () => {
     expect((props.showOriginal as Record<string, unknown>).type).toBe("boolean");
   });
 
-  it("generates call display for GET request", () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
-    const display = tool.callDisplay(
-      JSON.stringify({ url: "https://example.com", method: "GET" }),
-    );
-    expect(display).toContain("GET");
-    expect(display).toContain("example.com");
-  });
 
-  it("generates call display for POST request", () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
-    const display = tool.callDisplay(
-      JSON.stringify({ url: "https://api.example.com/data", method: "POST" }),
-    );
-    expect(display).toContain("POST");
-  });
-
-  it("truncates long URLs in display", () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
-    const longUrl = "https://example.com/" + "a".repeat(50);
-    const display = tool.callDisplay(JSON.stringify({ url: longUrl }));
-    expect(display).toContain("...");
-  });
 });
 
 // ── Input validation ───────────────────────────────────────────────────────

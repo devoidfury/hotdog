@@ -40,25 +40,6 @@ describe("QuestionTool", () => {
     });
   });
 
-  describe("callDisplay", () => {
-    it("shows question count", () => {
-      const input = JSON.stringify({
-        questions: [
-          { key: "a", prompt: "Q1" },
-          { key: "b", prompt: "Q2" },
-        ],
-      });
-      expect(tool.callDisplay(input)).toBe("asking 2 question(s)...");
-    });
-
-    it("handles empty input with fallback", () => {
-      expect(tool.callDisplay("")).toBe("asking questions...");
-    });
-
-    it("handles invalid JSON with fallback", () => {
-      expect(tool.callDisplay("not json")).toBe("asking questions...");
-    });
-  });
 
   describe("execute - no input mounted (one-shot / piped / CI)", () => {
     const payload = JSON.stringify({

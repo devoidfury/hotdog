@@ -37,22 +37,6 @@ describe('ReadTool.toToolDef', () => {
   });
 });
 
-// ── callDisplay ─────────────────────────────────────────────────────────────
-
-describe('ReadTool.callDisplay', () => {
-  it('shows path and pagination range', () => {
-    const display = new ReadTool({ readLimit: 500, maxImageSize: 102400 }).callDisplay({ path: 'foo.txt', limit: 10, offset: 5 });
-    expect(display).toContain('foo.txt');
-    expect(display).toContain('5');
-    expect(display).toContain('15');
-  });
-
-  it('handles invalid input gracefully', () => {
-    expect(new ReadTool({ readLimit: 500, maxImageSize: 102400 }).callDisplay('not json')).toBe('not json');
-    expect(new ReadTool({ readLimit: 500, maxImageSize: 102400 }).callDisplay({})).toContain('no path');
-    expect(new ReadTool({ readLimit: 500, maxImageSize: 102400 }).callDisplay(null)).toContain('no path');
-  });
-});
 
 // ── execute: read lines ─────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, defaultCallDisplay, parseToolInput } from "@core/extensions/tool-utils.ts";
+import { toolDef, param, ToolResult, parseToolInput } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { DEFAULT_GREP_MAX_RESULTS } from "./defaults.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
@@ -39,18 +39,6 @@ export class ProjectInfoTool {
         required: [],
       },
     );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args: Record<string, unknown>) => {
-      const p = args.path || ".";
-      const d = args.max_depth;
-      const f = args.max_files;
-      if (d && f) return `(path=${p}, depth=${d}, files=${f})`;
-      if (d) return `(path=${p}, depth=${d})`;
-      if (f) return `(path=${p}, files=${f})`;
-      return `(path=${p})`;
-    });
   }
 
   async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {

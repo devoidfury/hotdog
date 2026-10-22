@@ -7,7 +7,6 @@ import {
   param,
   ToolResult,
   parseToolInput,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
@@ -78,19 +77,6 @@ export class ReadTool {
         required: ["path"],
       },
     );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args: Record<string, unknown>) => {
-      const filePath = args.path as string;
-      const limit = args.limit as number;
-      const offset = args.offset as number;
-      if (!filePath) {
-        return typeof input === "string" ? input : "(no path)";
-      }
-      const end = offset + limit;
-      return `${filePath} (lines ${offset}-${end})`;
-    }, typeof input === "string" ? input : "(no path)");
   }
 
   async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {

@@ -176,17 +176,8 @@ describe("tool calls and results", () => {
     expect(block.querySelector(".tool-result-pre")!.textContent).toHaveLength(2500);
   });
 
-  it("prefers the server display header and never shows raw JSON there", () => {
-    ml.handleToolCall({
-      name: "read",
-      args: '{"path":"src/a.ts","offset":200,"limit":202}',
-      display: "src/a.ts (lines 200-402)",
-    });
-    const header = container.querySelector(".tool-call-header")!;
-    expect(header.querySelector(".tool-call-display")!.textContent).toBe("src/a.ts (lines 200-402)");
-  });
 
-  it("falls back to a compact summary when no display is sent", () => {
+  it("falls back to a compact summary when no argsSummary is sent", () => {
     ml.handleToolCall({ name: "weird", args: '{"alpha":"beta","gamma":{"deep":1}}' });
     const header = container.querySelector(".tool-call-header")!;
     expect(header.querySelector(".tool-call-display")!.textContent).toBe("beta");

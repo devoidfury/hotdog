@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fsSync from "node:fs";
 import path from "node:path";
 import { FindTool } from "@extensions/core-tools/find.ts";
-import { DEFAULT_FIND_MAX_RESULTS } from "@extensions/core-tools/defaults.ts";
 import { getDisplay, tmpDir, toolCtx, cleanupDir } from "../helpers.ts";
 
 let dir: string;
@@ -30,37 +29,6 @@ describe("FindTool.toToolDef", () => {
   });
 });
 
-// ── callDisplay ─────────────────────────────────────────────────────────────
-
-describe("FindTool.callDisplay", () => {
-  it("shows pattern and path with default max", () => {
-    const display = new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay({
-      pattern: "*.js",
-      path: "src",
-    });
-    expect(display).toContain("*.js");
-    expect(display).toContain("src");
-    expect(display).toContain(`max ${DEFAULT_FIND_MAX_RESULTS}`);
-  });
-
-  it("shows file type filter", () => {
-    const display = new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay({
-      pattern: "*.js",
-      file_type: "f",
-      max_results: 100,
-    });
-    expect(display).toContain("*.js");
-    expect(display).toContain("f");
-    expect(display).toContain("max 100");
-  });
-
-  it("handles invalid input gracefully", () => {
-    const fallback = `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`;
-    expect(new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay("not json")).toContain(fallback);
-    expect(new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay({})).toContain(fallback);
-    expect(new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay(null)).toContain(fallback);
-  });
-});
 
 // ── execute: basic find ─────────────────────────────────────────────────────
 

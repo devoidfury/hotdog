@@ -50,7 +50,6 @@ function makeTestTool(
         parameters: { type: 'object', properties: {}, required: [] },
       },
     })),
-    callDisplay: (_input: string | Record<string, unknown> | null) => `${name}()`,
     execute,
   };
 }
@@ -1074,75 +1073,7 @@ describe('ToolExecutor', () => {
   });
 
   describe('tool_call display wiring', () => {
-    it('attaches the tool callDisplay output to the tool_call event', async () => {
-      const deps = createMockDeps();
-      const tool: Tool = {
-        metadata: { sideEffects: false, difficulty: 1 },
-        toToolDef: () => ({
-          type: 'function',
-          function: { name: 'readish', description: 'd', parameters: {} },
-        }),
-        callDisplay: (input) => `shown.ts (input=${typeof input === 'string' ? input.slice(0, 5) : 'obj'})`,
-        execute: async () => 'ok',
-      };
-      deps.toolRegistry.register('readish', tool);
-      const executor = createToolExecutor(deps);
 
-      await executor.execute([{
-        id: 'call-1',
-        type: 'function',
-        function: { name: 'readish', arguments: '{"path":"shown.ts"}' },
-      }]);
 
-      const call = deps.outputs.find((o) => o.type === 'tool_call');
-      expect(call?.data.display).toBe('shown.ts (input={"pat)');
-      expect(call?.data.toolName).toBe('readish');
-      expect(call?.data.toolCallId).toBe('call-1');
-    });
-
-    it('display is undefined when callDisplay throws (tool still executes)', async () => {
-      const deps = createMockDeps();
-      const tool: Tool = {
-        metadata: { sideEffects: false, difficulty: 1 },
-        toToolDef: () => ({
-          type: 'function',
-          function: { name: 'cranky', description: 'd', parameters: {} },
-        }),
-        callDisplay: () => {
-          throw new Error('formatter blew up');
-        },
-        execute: async () => 'ran fine',
-      };
-      deps.toolRegistry.register('cranky', tool);
-      const executor = createToolExecutor(deps);
-
-      const { toolResults } = await executor.execute([{
-        id: 'call-1',
-        type: 'function',
-        function: { name: 'cranky', arguments: '{}' },
-      }]);
-
-      expect(toolContentText(toolResults[0]!.content)).toContain('ran fine');
-      const call = deps.outputs.find((o) => o.type === 'tool_call');
-      expect(call?.data.display).toBeUndefined();
-    });
-
-    it('display is undefined for an offered-but-unregistered tool', async () => {
-      const deps = createMockDeps();
-      const executor = createToolExecutor(deps);
-
-      await executor.execute(
-        [{
-          id: 'call-1',
-          type: 'function',
-          function: { name: 'ghost', arguments: '{}' },
-        }],
-        ['ghost'],
-      );
-
-      const call = deps.outputs.find((o) => o.type === 'tool_call');
-      expect(call).toBeDefined();
-      expect(call?.data.display).toBeUndefined();
-    });
   });
 });

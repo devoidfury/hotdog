@@ -15,7 +15,6 @@ import {
   param,
   parseToolInput,
   ToolResult,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolDef, ToolMetadata } from "@core/extensions/tool-registry.ts";
 import type { ToolContext } from "@core/extensions/types.ts";
@@ -288,12 +287,6 @@ abstract class WorkflowTool {
 
   abstract toToolDef(): ToolDef;
 
-  callDisplay(_input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      _input,
-      () => (this.constructor as { TOOL_NAME?: string }).TOOL_NAME ?? this.constructor.name,
-    );
-  }
 }
 
 // ── workflow_validate ───────────────────────────────────────────────────────

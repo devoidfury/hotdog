@@ -5,7 +5,6 @@ import {
   param,
   parseToolInput,
   ToolResult,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolDef, ToolMetadata } from "@core/extensions/tool-registry.ts";
 import type { ToolContext } from "@core/extensions/types.ts";
@@ -79,16 +78,6 @@ export class SubagentTool {
     return null;
   }
 
-  /**
-   * Default callDisplay: parse args and show tool name with task_id.
-   * Override in subclasses for custom display.
-   */
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      input,
-      (args: Record<string, unknown>) => `${this.constructor.name}(${args?.task_id as string || "?"})`,
-    );
-  }
 }
 
 // ── delegate_task ───────────────────────────────────────────────────────────
@@ -166,11 +155,6 @@ export class DelegateTaskTool extends SubagentTool {
     );
   }
 
-  override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolInput(input) ?? {};
-    const display = ((args.description as string) || "...").slice(0, 40);
-    return `delegate_task(${args.task_id || "?"} -> ${display})`;
-  }
 }
 
 // ── task_status ─────────────────────────────────────────────────────────────
@@ -228,10 +212,6 @@ export class TaskStatusTool extends SubagentTool {
     );
   }
 
-  override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolInput(input) ?? {};
-    return `task_status(${args.task_id || "?"})`;
-  }
 }
 
 // ── task_followup ───────────────────────────────────────────────────────────
@@ -278,11 +258,6 @@ export class TaskFollowupTool extends SubagentTool {
     );
   }
 
-  override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolInput(input) ?? {};
-    const display = ((args.message as string) || "...").slice(0, 40);
-    return `task_followup(${args.task_id || "?"} -> ${display})`;
-  }
 }
 
 // ── task_interrupt ──────────────────────────────────────────────────────────
@@ -325,10 +300,6 @@ export class TaskInterruptTool extends SubagentTool {
     );
   }
 
-  override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolInput(input) ?? {};
-    return `task_interrupt(${args.task_id || "?"})`;
-  }
 }
 
 // ── plan_status ─────────────────────────────────────────────────────────────
@@ -447,10 +418,6 @@ export class PlanStatusTool extends SubagentTool {
     );
   }
 
-  override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolInput(input) ?? {};
-    return `plan_status(task=${args.task_id || "all"})`;
-  }
 }
 
 // ── wait ────────────────────────────────────────────────────────────────────
@@ -487,11 +454,6 @@ export class WaitTool extends SubagentTool {
     );
   }
 
-  override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolInput(input) ?? {};
-    const message = args.message as string;
-    return `wait(${message || "no-op"})`;
-  }
 }
 
 // ── Subagent tool names and constructors ────────────────────────────────────

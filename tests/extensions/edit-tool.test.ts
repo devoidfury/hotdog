@@ -37,37 +37,6 @@ describe('EditTool.toToolDef', () => {
   });
 });
 
-// ── callDisplay ─────────────────────────────────────────────────────────────
-
-describe('EditTool.callDisplay', () => {
-  it('shows old and new string previews', () => {
-    const display = new EditTool({ maxEditInputSize: 16000 }).callDisplay({
-      path: 'foo.js',
-      oldString: 'hello',
-      newString: 'world',
-    });
-    expect(display).toContain('hello');
-    expect(display).toContain('world');
-    expect(display).toContain('foo.js');
-  });
-
-  it('truncates long strings', () => {
-    const longStr = 'a'.repeat(50);
-    const display = new EditTool({ maxEditInputSize: 16000 }).callDisplay({
-      path: 'foo.js',
-      oldString: longStr,
-      newString: 'replaced',
-    });
-    expect(display).toContain('...');
-    expect(display).toContain('foo.js:');
-  });
-
-  it('handles invalid input gracefully', () => {
-    expect(new EditTool({ maxEditInputSize: 16000 }).callDisplay('not json')).toBe('not json');
-    expect(new EditTool({ maxEditInputSize: 16000 }).callDisplay({})).toBe('');
-    expect(new EditTool({ maxEditInputSize: 16000 }).callDisplay(null)).toBe('');
-  });
-});
 
 // ── execute: exact match ────────────────────────────────────────────────────
 

@@ -3,7 +3,6 @@ import {
   toolDef,
   param,
   ToolResult,
-  parseToolInput,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { writeWithinWorkspace, detectFileStyleAt, applyFileStyle } from "@utils/file-utils.ts";
@@ -25,17 +24,6 @@ export class OverwriteTool {
         required: ["path", "content"],
       },
     );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolInput(input);
-    if (!args || !args.path || args.content === undefined) {
-      return typeof input === "string" ? input : "";
-    }
-    const filePath = args.path as string;
-    const content = args.content as string;
-    const lines = content.split("\n").length;
-    return `${filePath} overwrite (${lines} lines)`;
   }
 
   async execute(

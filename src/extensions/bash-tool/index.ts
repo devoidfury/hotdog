@@ -4,9 +4,7 @@ import {
   param,
   ToolResult,
   parseToolInput,
-  defaultCallDisplay,
   truncateOutput,
-  firstLinePreview,
 } from "@core/extensions/tool-utils.ts";
 import { HOOKS } from "@core/hooks.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
@@ -134,18 +132,6 @@ export class BashTool {
         }),
       },
       required: ["command"],
-    });
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args: Record<string, unknown>) => {
-      const command = args.command as string;
-      if (typeof command !== "string" || !command.includes("\n")) return `bash: ${command}`;
-      // Multi-line commands preview their first line (the shared fold): a
-      // header is one line, and sinks that show display verbatim (webui)
-      // must not get a wall of text. Matches the terminal's summary shape.
-      const { preview, stub } = firstLinePreview(command, command.split("\n"));
-      return `bash: ${preview} ${stub}`;
     });
   }
 

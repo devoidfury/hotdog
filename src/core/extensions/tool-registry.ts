@@ -4,7 +4,6 @@ import {
 } from "@utils/json-schema.ts";
 import { logger } from "@utils/logger.ts";
 import type { ToolContext, DefaultToolContext } from "./tool-context.ts";
-import { formatError } from "../error.ts";
 
 /**
  * Display hints for one tool argument, declared by the tool next to its
@@ -74,7 +73,6 @@ export interface ToolDef {
  * Base Tool interface — all tools must implement these methods.
  *
  * - `toToolDef()` returns the tool's OpenAI function-calling schema.
- * - `callDisplay()` formats a human-readable description of a tool call.
  * - `execute()` runs the tool and returns a result.
  * - `metadata` describes tool characteristics (sideEffects, difficulty).
  *
@@ -83,7 +81,6 @@ export interface ToolDef {
  */
 export interface Tool<TCtx extends Record<string, unknown> = DefaultToolContext> {
   toToolDef(): ToolDef | Promise<ToolDef> | null;
-  callDisplay(input: string | Record<string, unknown> | null): string;
   execute(
     input: string | Record<string, unknown> | null,
     ctx?: ToolContext<TCtx>,
@@ -100,24 +97,6 @@ export interface Tool<TCtx extends Record<string, unknown> = DefaultToolContext>
  * `^[a-zA-Z0-9_-]+$`; a name with other characters fails the whole request.
  */
 const TOOL_NAME_RE = /^[a-zA-Z0-9_-]+$/;
-
-/**
- * Invoke a tool's callDisplay defensively: the display header is decoration
- * for output sinks, so an unknown tool or a throwing formatter yields
- * undefined (sinks fall back to raw args) instead of breaking the event.
- */
-export function safeCallDisplay(
-  tool: Tool | undefined,
-  input: string | Record<string, unknown> | null,
-): string | undefined {
-  if (!tool) return undefined;
-  try {
-    return tool.callDisplay(input);
-  } catch (e: unknown) {
-    logger.debug(`[tool:display] ${formatError(e)}`);
-    return undefined;
-  }
-}
 
 export class ToolRegistry {
   tools: Map<string, Tool>;

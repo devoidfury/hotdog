@@ -27,26 +27,6 @@ describe("GrepTool.toToolDef", () => {
   });
 });
 
-describe("GrepTool.callDisplay", () => {
-  it("shows pattern and path", () => {
-    const display = new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay({
-      pattern: "hello",
-      path: "src",
-    });
-    expect(display).toBe("'hello' in src");
-  });
-
-  it("shows dot for default path", () => {
-    const display = new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay({ pattern: "foo" });
-    expect(display).toBe("'foo' in .");
-  });
-
-  it("handles invalid input gracefully", () => {
-    expect(new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay("not json")).toBe("not json");
-    expect(new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay({})).toBe("");
-    expect(new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay(null)).toBe("");
-  });
-});
 
 describe("GrepTool.execute", () => {
   it("finds matches in files", async () => {

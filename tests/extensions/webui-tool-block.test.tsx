@@ -91,10 +91,10 @@ describe("editDiff", () => {
 describe("ToolBlock SSR", () => {
   const base = { expanded: false, raw: false, fullResult: false };
 
-  it("renders the display header and pending status collapsed", () => {
+  it("renders the header and pending status collapsed", () => {
     const html = renderToString(
       ToolBlock({
-        state: { name: "read", args: '{"path":"a.ts"}', display: "a.ts (lines 1-5)", ...base },
+        state: { name: "read", args: '{"path":"a.ts"}', argsSummary: "a.ts (lines 1-5)", ...base },
         onToggle: () => {},
         onToggleRaw: () => {},
         onShowFull: () => {},
@@ -107,7 +107,7 @@ describe("ToolBlock SSR", () => {
     expect(html).not.toContain("tool-result-section");
   });
 
-  it("prefers display, then the server argsSummary, then the local heuristic", () => {
+  it("prefers the server argsSummary over the local heuristic", () => {
     const render = (state: Record<string, unknown>) =>
       renderToString(
         ToolBlock({
@@ -117,13 +117,9 @@ describe("ToolBlock SSR", () => {
           onShowFull: () => {},
         }),
       );
-    // display wins (semantic header beats the fold).
-    expect(render({ display: "DIS", argsSummary: "SUM" })).toContain(
-      '<span class="tool-call-display">DIS</span>',
-    );
-    // no display -> the server's hint-driven fold, not the basename heuristic.
+    // The server's hint-driven fold wins.
     expect(render({ argsSummary: "FOLD" })).toContain('<span class="tool-call-display">FOLD</span>');
-    // neither -> the old heuristic (basename) still covers old servers.
+    // No fold -> the old heuristic (basename) still covers old servers.
     expect(render({})).toContain('<span class="tool-call-display">x.ts</span>');
   });
 

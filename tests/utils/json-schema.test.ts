@@ -201,7 +201,6 @@ describe("ToolRegistry.validateToolArgs", () => {
       toToolDef() {
         return { type: "function", function: { name, description: "test", parameters: params } };
       },
-      callDisplay() { return `${name}()`; },
       execute: async () => "ok",
     });
   }
@@ -213,7 +212,6 @@ describe("ToolRegistry.validateToolArgs", () => {
     registry.register("no-def", {
       metadata: { sideEffects: false, difficulty: 1 },
       toToolDef: () => null,
-      callDisplay: () => "no-def()",
       execute: async () => "ok",
     });
     expect(await registry.validateToolArgs("no-def", "{}")).toBeNull();

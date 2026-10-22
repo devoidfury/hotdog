@@ -8,7 +8,6 @@ import {
   param,
   ToolResult,
   parseToolInput,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { HOOKS } from "@core/hooks.ts";
@@ -113,17 +112,6 @@ export class QuestionTool {
         },
         required: ["questions"],
       },
-    );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      input,
-      (args: Record<string, unknown>) => {
-        const qs = args.questions as Question[] | undefined;
-        return `asking ${Array.isArray(qs) ? qs.length : 0} question(s)...`;
-      },
-      { fallback: "asking questions...", returnRawOnParseError: false },
     );
   }
 

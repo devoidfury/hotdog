@@ -6,7 +6,6 @@ import {
   toolDef,
   param,
   ToolResult,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { logger } from "@utils/logger.ts";
@@ -43,18 +42,6 @@ export class ExploreTool {
         },
         required: ["path", "outline"],
       },
-    );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      input,
-      (args: Record<string, unknown>) => {
-        const p = args.path || ".";
-        const o = args.outline || "";
-        return `path=${p} -> ${o}`;
-      },
-      { fallback: "path=.", returnRawOnParseError: true },
     );
   }
 

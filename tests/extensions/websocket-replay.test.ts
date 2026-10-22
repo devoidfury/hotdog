@@ -19,22 +19,6 @@ function received(ws: { messages: string[] }): Array<Record<string, unknown>> {
   return ws.messages.map((m) => JSON.parse(m) as Record<string, unknown>);
 }
 
-/** A registry stub: `bash` renders a display header, `boom` throws (the
- *  display hook must not take replay down), anything else is unknown now. */
-const fakeRegistry = {
-  get: (name: string) => {
-    if (name === "bash") return { callDisplay: (input: unknown) => `bash: ${input}` };
-    if (name === "boom") {
-      return {
-        callDisplay: () => {
-          throw new Error("display exploded");
-        },
-      };
-    }
-    return undefined;
-  },
-};
-
 function fakeAgent(
   messages: unknown[],
   extras: Record<string, unknown> = {},
@@ -63,7 +47,6 @@ describe("replaySessionHistory", () => {
         }),
         new Message({ role: "tool", content: "file1\nfile2", toolCallId: "c1" }),
       ],
-      { toolRegistry: fakeRegistry },
     );
 
     expect(out.map((m) => m.type)).toEqual([
@@ -79,7 +62,6 @@ describe("replaySessionHistory", () => {
       name: "bash",
       args: '{"command":"ls"}',
       toolCallId: "c1",
-      display: 'bash: {"command":"ls"}',
     });
     expect(out[3]).toMatchObject({ content: "listing done" });
     expect(out[4]).toMatchObject({
@@ -113,7 +95,7 @@ describe("replaySessionHistory", () => {
       new Message({ role: "user", content: "pic", images: [img] }),
       new Message({ role: "assistant", content: "seen", toolCalls: [{ id: "c1", type: "function", function: { name: "bash", arguments: "{}" } }] }),
       new Message({ role: "tool", content: "ok", toolCallId: "c1", images: [img] }),
-    ], { toolRegistry: fakeRegistry });
+    ]);
 
     expect(out[0]!.images).toEqual([wire]);
     const toolResult = out.find((m) => m.type === S2C.TOOL_RESULT)!;
@@ -132,19 +114,10 @@ describe("replaySessionHistory", () => {
     const call = out.find((m) => m.type === S2C.TOOL_CALL)!;
     expect(call).toMatchObject({ name: "mystery", args: "{}" });
     expect(call.toolCallId).toBeUndefined();
-    // Unknown tool: no live display, and the text was empty so no ASSISTANT_MESSAGE.
-    expect(call.display).toBeUndefined();
+    // The text was empty, so no ASSISTANT_MESSAGE.
     expect(out.some((m) => m.type === S2C.ASSISTANT_MESSAGE)).toBe(false);
   });
 
-  it("omits display when the tool's callDisplay throws", () => {
-    const out = replay([
-      new Message({ role: "assistant", content: "x", toolCalls: [{ id: "c9", type: "function", function: { name: "boom", arguments: "{}" } }] }),
-    ], { toolRegistry: fakeRegistry });
-    const call = out.find((m) => m.type === S2C.TOOL_CALL)!;
-    expect(call).toMatchObject({ name: "boom", args: "{}" });
-    expect(call.display).toBeUndefined();
-  });
 
   it("carries a hint-driven argsSummary from the registry's metadata", () => {
     const registry = {

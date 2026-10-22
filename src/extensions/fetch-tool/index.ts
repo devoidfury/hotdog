@@ -8,7 +8,6 @@ import {
   param,
   ToolResult,
   parseToolInput,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { modelAcceptsImages } from "@core/config/providers.ts";
@@ -124,14 +123,6 @@ export class FetchTool {
         required: ["url"],
       },
     );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args: Record<string, unknown>) => {
-      const url = args.url as string;
-      const urlDisplay = url.length > 60 ? url.slice(0, 60) + "..." : url;
-      return `[${args.method}] ${urlDisplay}`;
-    });
   }
 
   async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {

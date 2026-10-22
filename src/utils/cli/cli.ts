@@ -102,10 +102,12 @@ export function formatCompacting(messageCount: number, keepRecent: number): stri
 
 /**
  * Visual cue for an unconfigured tool-call line. Kept in the sink (not the
- * schema) so the schema default cannot shadow the tool's own callDisplay:
- * template > display > `prefix + name args`.
+ * schema) so a schema default cannot shadow the CLI's own choice:
+ * template > `prefix + name args`. The value matches the historic
+ * `toolCallDisplayFormat: " 🔧 {} {}"` default, so an unset knob renders
+ * exactly what that template rendered.
  */
-const TOOL_CALL_PREFIX = "  \u2192 ";
+const TOOL_CALL_PREFIX = " 🔧 ";
 
 /** Rune cap on the raw preview of an in-flight call's unparseable partial args. */
 const INFLIGHT_PREVIEW_RUNES = 80;
@@ -418,10 +420,10 @@ export class CliOutputSink extends OutputSink {
     this._transitionTo(Modes.ToolCall);
     // Precedence: explicit user template (the schema carries no default for
     // toolCallDisplayFormat, so an unset option really means "user chose
-    // nothing") > the tool's semantic header (Tool.callDisplay) > name +
-    // args. The template is LAYOUT only -- its args slot always carries the
-    // human-readable summary, never raw JSON. display never passes through a
-    // template -- its text may legitimately contain "{}".
+    // nothing") > `TOOL_CALL_PREFIX + name + args`, which is byte-identical
+    // to the historic " 🔧 {} {}" template default. The template is LAYOUT
+    // only -- its args slot always carries the human-readable summary,
+    // never raw JSON.
     // Segments get the spoof pass individually and the grey args wrap rides
     // AFTER it (spoofSafe neutralizes ESC); the line-wide tool_call color
     // lands later via the mode applier in _flushText. Summarized arg keys
@@ -442,9 +444,7 @@ export class CliOutputSink extends OutputSink {
     const args = applyToolCallArgs(applyArgKeyHighlight(summarized, this.palette), this.palette);
     const text = this.toolCallDisplayFormat
       ? formatToolCall(spoofSafe(event.toolName), args, this.toolCallDisplayFormat)
-      : event.display !== undefined
-        ? `${TOOL_CALL_PREFIX}${spoofSafe(event.display)}`
-        : formatToolCall(spoofSafe(event.toolName), args, `${TOOL_CALL_PREFIX}{} {}`);
+      : formatToolCall(spoofSafe(event.toolName), args, `${TOOL_CALL_PREFIX}{} {}`);
     this._processContent(text);
   }
 

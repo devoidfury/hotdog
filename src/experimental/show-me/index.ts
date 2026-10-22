@@ -22,7 +22,6 @@ import { ToolError, formatError } from "@core/error.ts";
 import { Workspace } from "@utils/workspace.ts";
 import { findModelEntry, resolveModelConfig, type ModelConfig } from "@core/config/providers.ts";
 import {
-  defaultCallDisplay,
   param,
   parseToolInput,
   ToolResult,
@@ -384,10 +383,6 @@ class ShowMeTool {
         required: ["description"],
       },
     );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args) => `show_me: ${(args as ShowMeToolInput).description}`);
   }
 
   async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {

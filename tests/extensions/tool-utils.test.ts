@@ -445,53 +445,6 @@ describe("parseToolInput", () => {
   });
 });
 
-describe("defaultCallDisplay", () => {
-  let defaultCallDisplay: (
-    input: string | Record<string, unknown> | null,
-    templateFn: (args: Record<string, unknown>) => string,
-    options?: string | ((input: string | Record<string, unknown> | null) => string) | { fallback?: string | ((input: string | Record<string, unknown> | null) => string); returnRawOnParseError?: boolean } | undefined,
-  ) => string;
-
-  beforeAll(async () => {
-    const mod = await import("@core/extensions/tool-utils.ts");
-    defaultCallDisplay = mod.defaultCallDisplay;
-  });
-
-  it("renders template from valid JSON input", () => {
-    const result = defaultCallDisplay('{"path": "/tmp"}', (args) => args.path as string);
-    expect(result).toBe("/tmp");
-  });
-
-  it("renders template from object input", () => {
-    const result = defaultCallDisplay({ path: "/tmp" }, (args) => args.path as string);
-    expect(result).toBe("/tmp");
-  });
-
-  it("returns fallback string on parse error", () => {
-    const result = defaultCallDisplay("not json", () => "template", "fallback");
-    expect(result).toBe("fallback");
-  });
-
-  it("returns fallback function result on parse error", () => {
-    const result = defaultCallDisplay("not json", () => "template", (input) => `raw: ${input}`);
-    expect(result).toBe("raw: not json");
-  });
-
-  it("returns raw input on parse error when returnRawOnParseError is true", () => {
-    const result = defaultCallDisplay("not json", () => "template", { returnRawOnParseError: true });
-    expect(result).toBe("not json");
-  });
-
-  it("returns empty string for null input", () => {
-    const result = defaultCallDisplay(null, () => "template");
-    expect(result).toBe("");
-  });
-
-  it("returns empty string for empty string input", () => {
-    const result = defaultCallDisplay("", () => "template");
-    expect(result).toBe("");
-  });
-});
 
 describe("formatToolResult", () => {
   let formatToolResult: (

@@ -79,10 +79,6 @@ export class StructuredOutputTool {
     };
   }
 
-  callDisplay(): string {
-    return `${STRUCTURED_OUTPUT_TOOL_NAME} called`;
-  }
-
   async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     if (this.captured) {
       return ToolResult.err("Final output was already provided; nothing more to do.");

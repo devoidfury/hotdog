@@ -269,43 +269,6 @@ export function parseToolInput(
   return json as Record<string, unknown>;
 }
 
-export function defaultCallDisplay(
-  input: string | Record<string, unknown> | null,
-  templateFn: (args: Record<string, unknown>) => string,
-  options?:
-    | string
-    | ((input: string | Record<string, unknown> | null) => string)
-    | { fallback?: string | ((input: string | Record<string, unknown> | null) => string); returnRawOnParseError?: boolean }
-    | undefined,
-): string {
-  let fallback: string | ((input: string | Record<string, unknown> | null) => string) | undefined;
-  let returnRawOnParseError = false;
-  if (typeof options === "string") {
-    fallback = options;
-  } else if (typeof options === "function") {
-    fallback = options;
-  } else if (typeof options === "object" && options !== null) {
-    fallback = options.fallback;
-    returnRawOnParseError = options.returnRawOnParseError === true;
-  }
-
-  if (!input || (typeof input === "string" && input.trim().length === 0)) {
-    return typeof fallback === "function"
-      ? fallback(input)
-      : (fallback ?? (typeof input === "string" ? input : ""));
-  }
-
-  const args = parseToolInput(input);
-  if (!args) {
-    if (returnRawOnParseError) {
-      return typeof input === "string" ? input : "";
-    }
-    return typeof fallback === "function"
-      ? fallback(input)
-      : ((fallback as string) ?? (typeof input === "string" ? input : ""));
-  }
-  return templateFn(args);
-}
 
 /**
  * Human-readable rendering of a tool call's arguments -- raw JSON never
@@ -314,8 +277,8 @@ export function defaultCallDisplay(
  * multi-line string values summarize to their size (a write tool's content
  * is a count, not a wall of text), nested values compact to truncated JSON,
  * and unparseable input passes through (a malformed model call shows what
- * it sent). Shared by the CLI sink's template args slot and tool
- * `callDisplay`s that have nothing more semantic to say (MCP passthrough).
+ * it sent). Shared by the CLI sink's template args slot, the in-flight
+ * frame row, and the websocket argsSummary field.
  *
  * `argDisplay` is the tool's per-parameter display hints (see ArgDisplay):
  * a value whose hint says `preview: "first-line"` collapses to a preview of

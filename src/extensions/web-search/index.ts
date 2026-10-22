@@ -5,7 +5,6 @@ import {
   ToolResult,
   truncateOutput,
   parseToolInput,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 
@@ -39,11 +38,6 @@ interface WebSearchConfig {
   braveApiKey: string;
   tavilyApiKey: string;
   searxngInstanceUrl: string;
-}
-
-interface ToolInput {
-  query?: string;
-  [key: string]: unknown;
 }
 
 // ── Provider Implementations ────────────────────────────────────────────────
@@ -291,10 +285,6 @@ export class WebSearchTool {
         required: ["query"],
       },
     );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args) => `web_search: ${(args as ToolInput).query}`);
   }
 
   async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {

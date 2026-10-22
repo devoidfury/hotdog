@@ -8,17 +8,15 @@ export class MockTool implements Tool {
   metadata: ToolMetadata;
   _executeFn: (input: string | Record<string, unknown> | null, ctx: unknown) => unknown | Promise<unknown>;
   _toToolDefFn: () => ToolDef;
-  _callDisplayFn: ((input: string | Record<string, unknown> | null) => string) | null;
   executeCount: number;
   lastInput: string | Record<string, unknown> | null;
   lastContext: unknown;
   [key: string]: unknown;
 
-  constructor({ name, execute, toToolDef, callDisplay, metadata }: {
+  constructor({ name, execute, toToolDef, metadata }: {
     name?: string;
     execute?: (input: string | Record<string, unknown> | null, ctx: unknown) => unknown | Promise<unknown>;
     toToolDef?: () => ToolDef;
-    callDisplay?: (input: string | Record<string, unknown> | null) => string;
     metadata?: ToolMetadata;
   } = {}) {
     this.name = name || 'mock-tool';
@@ -32,7 +30,6 @@ export class MockTool implements Tool {
         parameters: { type: 'object', properties: {}, required: [] },
       },
     }));
-    this._callDisplayFn = callDisplay || null;
     this.executeCount = 0;
     this.lastInput = null;
     this.lastContext = null;
@@ -47,11 +44,6 @@ export class MockTool implements Tool {
     this.lastInput = input;
     this.lastContext = ctx;
     return this._executeFn(input, ctx);
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    if (this._callDisplayFn) return this._callDisplayFn(input);
-    return `mock-tool(${JSON.stringify(input)})`;
   }
 }
 

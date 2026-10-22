@@ -25,12 +25,10 @@ export interface ToolResultData {
 export interface ToolBlockState {
   name: string;
   args: string;
-  /** Server-provided human header (Tool.callDisplay). Wins over argsSummary. */
-  display?: string;
   /**
    * Server-computed hint-driven fold (ToolMetadata.argDisplay, shared with
-   * the terminal). Used when the tool declares no semantic display header;
-   * the local argsSummary heuristic covers older servers that send neither.
+   * the terminal). The local argsSummary heuristic covers older servers
+   * that send neither.
    */
   argsSummary?: string;
   result?: ToolResultData;
@@ -57,9 +55,9 @@ function basename(path: string): string {
 }
 
 /**
- * Fallback header when the server sent no display: a compact one-liner built
- * from well-known arg keys (path basename, command/pattern text, then any
- * string value). NEVER a raw JSON line.
+ * Fallback header when the server sent no argsSummary: a compact one-liner
+ * built from well-known arg keys (path basename, command/pattern text, then
+ * any string value). NEVER a raw JSON line.
  */
 export function argsSummary(args: string): string {
   let parsed: Record<string, unknown> | null = null;
@@ -212,7 +210,7 @@ interface BlockProps {
 
 export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull }: BlockProps) {
   const status = statusOf(state);
-  const header = state.display ?? state.argsSummary ?? argsSummary(state.args);
+  const header = state.argsSummary ?? argsSummary(state.args);
   const diff = editDiff(state.name, state.args);
   const result = state.result;
   const resultText = result ? result.error ? `Error: ${result.error}` : result.output ?? "" : "";
@@ -270,7 +268,7 @@ export class ToolBlockController {
   #state: ToolBlockState;
   #mounted: Mounted;
 
-  constructor(host: DomNode, init: { name: string; args: string; display?: string; argsSummary?: string }) {
+  constructor(host: DomNode, init: { name: string; args: string; argsSummary?: string }) {
     this.#state = { ...init, expanded: false, raw: false, fullResult: false };
     this.#mounted = mount(this.#el(), host);
   }

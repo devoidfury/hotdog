@@ -5,7 +5,7 @@
 import type { AgentLike } from "@core/session/index.ts";
 import { conversationContent, LOG_SOURCE, type LogEntry } from "@core/session/session-log.ts";
 import type { Agent } from "@core/agent.ts";
-import { safeCallDisplay, type ToolRegistry } from "@core/extensions/tool-registry.ts";
+import { type ToolRegistry } from "@core/extensions/tool-registry.ts";
 import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
 import { S2C, wireImages } from "./protocol.ts";
@@ -84,9 +84,8 @@ export function replayLogSlice(
           for (const tc of toolCalls) {
             const name = tc.function?.name || "unknown";
             const args = tc.function?.arguments || "{}";
-            // Replay has no live tool object: resolve the display header from
-            // the registry by name (undefined when the tool is unknown now).
-            const display = safeCallDisplay(toolRegistry?.get(name), args);
+            // Replay has no live tool object; the wire carries name, args and
+            // the registry-resolved argsSummary fold.
             ws.send(
               JSON.stringify({
                 type: S2C.TOOL_CALL,
@@ -94,7 +93,6 @@ export function replayLogSlice(
                 name,
                 args,
                 ...(tc.id ? { toolCallId: tc.id } : {}),
-                ...(display !== undefined ? { display } : {}),
                 ...argsSummaryField(toolRegistry, name, args),
               }),
             );
@@ -181,7 +179,6 @@ export function replaySessionHistory(
             for (const tc of toolCalls) {
               const name = tc.function?.name || "unknown";
               const args = tc.function?.arguments || "{}";
-              const display = safeCallDisplay((agent as Agent).toolRegistry?.get(name), args);
               ws.send(
                 JSON.stringify({
                   type: S2C.TOOL_CALL,
@@ -189,7 +186,6 @@ export function replaySessionHistory(
                   name,
                   args,
                   ...(tc.id ? { toolCallId: tc.id } : {}),
-                  ...(display !== undefined ? { display } : {}),
                   ...argsSummaryField((agent as Agent).toolRegistry, name, args),
                 }),
               );

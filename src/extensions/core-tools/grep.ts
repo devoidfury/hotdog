@@ -9,7 +9,6 @@ import {
   ToolResult,
   truncateOutput,
   parseToolInput,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
@@ -414,18 +413,6 @@ export class GrepTool {
         },
         required: ["pattern"],
       },
-    );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      input,
-      (args: Record<string, unknown>) => {
-        if (!args.pattern) return "";
-        const path = args.path || ".";
-        return `'${args.pattern}' in ${path}`;
-      },
-      typeof input === "string" ? input : "",
     );
   }
 

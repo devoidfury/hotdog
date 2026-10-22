@@ -80,25 +80,6 @@ describe('ReviewTool', () => {
     expect(Array.isArray(parsed)).toBe(true);
   });
 
-  it('generates call display for list', () => {
-    const tool = new ReviewTool();
-    expect(tool.callDisplay(JSON.stringify({ operation: 'list' }))).toContain('list');
-  });
-
-  it('generates call display for get', () => {
-    const tool = new ReviewTool();
-    expect(tool.callDisplay(JSON.stringify({ operation: 'get', session_id: 'abc123' }))).toContain('abc123');
-  });
-
-  it('generates call display for tool_index', () => {
-    const tool = new ReviewTool();
-    expect(tool.callDisplay(JSON.stringify({ operation: 'tool_index', session_id: 'xyz' }))).toContain('xyz');
-  });
-
-  it('generates call display with unknown operation', () => {
-    const tool = new ReviewTool();
-    expect(tool.callDisplay(JSON.stringify({ operation: 'unknown' }))).toContain('unknown');
-  });
 
   it('handles invalid JSON gracefully (defaults to list)', async () => {
     const tool = new ReviewTool();
@@ -330,17 +311,6 @@ describe('ReviewTool', () => {
     }
   });
 
-  it('generates call display for read_context', () => {
-    const tool = new ReviewTool();
-    const display = tool.callDisplay(JSON.stringify({
-      operation: 'read_context',
-      session_id: 'xyz',
-      message_start: 1,
-      message_end: 4,
-    }));
-    expect(display).toContain('xyz');
-    expect(display).toContain('1-4');
-  });
 
   it('tool_index returns empty array for session with no tool calls', async () => {
     const TEST_SESSION_ID = `test-review-no-tools-${Date.now()}`;

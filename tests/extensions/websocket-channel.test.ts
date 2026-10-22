@@ -115,17 +115,16 @@ describe("WebSocketChannel - write()", () => {
       },
     },
     {
-      name: "TOOL_CALL with display + toolCallId",
+      name: "TOOL_CALL with argsSummary + toolCallId",
       event: {
         type: OUTPUT_EVENT.TOOL_CALL,
         toolName: "read",
         input: '{"path":"a.ts"}',
         toolCallId: "tc-1",
-        display: "a.ts",
       },
       expected: (msg: any) => {
         expect(msg.type).toBe(S2C.TOOL_CALL);
-        expect(msg.display).toBe("a.ts");
+        expect(msg.argsSummary).toBe("a.ts");
         expect(msg.toolCallId).toBe("tc-1");
       },
     },

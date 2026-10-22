@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "@core/extensions/tool-utils.ts";
+import { toolDef, param, ToolResult, truncateOutput, parseToolInput } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
 import { PathEscapeError } from "@utils/workspace.ts";
@@ -168,19 +168,6 @@ export class FindTool {
         required: ["pattern"],
       },
     );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args: Record<string, unknown>) => {
-      if (!args.pattern) return `* in . (max ${this.maxResults})`;
-      const { file_type, path, max_results } = args;
-      const pathStr = path || ".";
-      const max = max_results ?? this.maxResults;
-      if (!file_type) {
-        return `${args.pattern} in ${pathStr} (max ${max})`;
-      }
-      return `${args.pattern} in ${pathStr} (${file_type}, max ${max})`;
-    }, { fallback: `* in . (max ${this.maxResults})` });
   }
 
   async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {

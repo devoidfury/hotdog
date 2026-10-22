@@ -88,7 +88,6 @@ describe('ExtensionLoader', () => {
             registry.register('my-tool', {
               metadata: { sideEffects: false, difficulty: 1 },
               toToolDef: () => ({ type: 'function', function: { name: 'my-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
-              callDisplay: () => 'my-tool()',
               execute: () => 'result',
             });
           },
@@ -222,13 +221,11 @@ describe('ExtensionLoader', () => {
               registry.register('my-tool', {
                 metadata: { sideEffects: false, difficulty: 1 },
                 toToolDef: () => ({ type: 'function', function: { name: 'my-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
-                callDisplay: () => 'my-tool()',
                 execute: () => 'result',
               });
               registry.register('another-tool', {
                 metadata: { sideEffects: false, difficulty: 1 },
                 toToolDef: () => ({ type: 'function', function: { name: 'another-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
-                callDisplay: () => 'another-tool()',
                 execute: () => 'result2',
               });
             },
@@ -244,7 +241,6 @@ describe('ExtensionLoader', () => {
       core.toolRegistry.register('shared-tool', {
         metadata: { sideEffects: false, difficulty: 1 },
         toToolDef: () => ({ type: 'function', function: { name: 'shared-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
-        callDisplay: () => 'shared-tool()',
         execute: async () => 'shared',
       });
       expect(core.toolRegistry.has('shared-tool')).toBe(true);

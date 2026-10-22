@@ -22,10 +22,6 @@ class TestTool implements Tool {
     };
   }
 
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return `${this.name}(${input})`;
-  }
-
   async execute(_input: string | Record<string, unknown> | null): Promise<unknown> {
     return { executed: this.name };
   }
@@ -78,7 +74,6 @@ describe("ToolRegistry.register metadata validation", () => {
             },
           };
         },
-        callDisplay() { return "no-meta()"; },
         execute: async () => "ok",
       } as any);
     }).toThrow('Tool "no-meta" is missing required metadata');
@@ -99,7 +94,6 @@ describe("ToolRegistry.register metadata validation", () => {
             },
           };
         },
-        callDisplay() { return "bad-side-effects()"; },
         execute: async () => "ok",
       });
     }).toThrow('Tool "bad-side-effects" metadata.sideEffects must be explicitly defined as true or false');
@@ -120,7 +114,6 @@ describe("ToolRegistry.register metadata validation", () => {
             },
           };
         },
-        callDisplay() { return "bad-difficulty()"; },
         execute: async () => "ok",
       });
     }).toThrow('Tool "bad-difficulty" metadata.difficulty must be between 1 and 5');

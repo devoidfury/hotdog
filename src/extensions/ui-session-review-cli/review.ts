@@ -7,7 +7,6 @@ import {
 } from "@core/session/session-log.ts";
 import {
   ToolResult,
-  defaultCallDisplay,
   toolDef,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
@@ -177,23 +176,6 @@ export class ReviewTool {
         required: ["operation"],
       },
     );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args: Record<string, unknown>) => {
-      switch (args.operation) {
-        case "list":
-          return `(list, limit=${args.limit})`;
-        case "get":
-          return `(get, session_id=${args.session_id || "?"})`;
-        case "read_context":
-          return `(read_context, session_id=${args.session_id || "?"}, ${args.message_start}-${args.message_end})`;
-        case "tool_index":
-          return `(tool_index, session_id=${args.session_id || "?"})`;
-        default:
-          return `(unknown op=${args.operation})`;
-      }
-    });
   }
 
   async execute(input: string | null): Promise<ToolResult> {

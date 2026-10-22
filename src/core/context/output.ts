@@ -82,12 +82,6 @@ export interface ToolCallEvent {
   toolName: string;
   input: string;
   toolCallId: string;
-  /**
-   * The tool's own human-readable header (Tool.callDisplay), e.g.
-   * `path (lines 200-402)`. Present unless the tool is unknown or its
-   * callDisplay threw; sinks fall back to raw args when absent.
-   */
-  display?: string;
 }
 
 export interface ToolResultEvent {

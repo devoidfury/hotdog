@@ -28,24 +28,6 @@ describe('OverwriteTool.toToolDef', () => {
   });
 });
 
-// ── OverwriteTool: callDisplay ──────────────────────────────────────────────
-
-describe('OverwriteTool.callDisplay', () => {
-  const tool = new OverwriteTool();
-
-  it('displays path and line count', () => {
-    const display = tool.callDisplay({ path: 'foo.txt', content: 'hello\nworld' });
-    expect(display).toContain('foo.txt');
-    expect(display).toContain('overwrite');
-    expect(display).toContain('2 lines');
-  });
-
-  it('handles invalid input gracefully', () => {
-    expect(tool.callDisplay('not json')).toBe('not json');
-    expect(tool.callDisplay({})).toBe('');
-    expect(tool.callDisplay(null)).toBe('');
-  });
-});
 
 // ── OverwriteTool: execute ──────────────────────────────────────────────────
 
@@ -188,24 +170,6 @@ describe('AppendTool.toToolDef', () => {
   });
 });
 
-// ── AppendTool: callDisplay ─────────────────────────────────────────────────
-
-describe('AppendTool.callDisplay', () => {
-  const tool = new AppendTool();
-
-  it('displays path and line count', () => {
-    const display = tool.callDisplay({ path: 'foo.txt', content: 'hello\nworld' });
-    expect(display).toContain('foo.txt');
-    expect(display).toContain('append');
-    expect(display).toContain('2 lines');
-  });
-
-  it('handles invalid input gracefully', () => {
-    expect(tool.callDisplay('not json')).toBe('not json');
-    expect(tool.callDisplay({})).toBe('');
-    expect(tool.callDisplay(null)).toBe('');
-  });
-});
 
 // ── AppendTool: execute ─────────────────────────────────────────────────────
 

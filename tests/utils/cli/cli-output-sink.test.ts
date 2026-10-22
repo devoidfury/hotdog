@@ -78,44 +78,29 @@ describe("CliOutputSink", () => {
     expect(stdoutWrites.some((w) => w.includes("bash"))).toBe(true);
   });
 
-  describe("emitToolCall display precedence", () => {
-    it("uses the event display when no template is configured", () => {
-      const plain = new CliOutputSink({ palette: new ColorPalette({ use_colors: false }) });
-      plain.emit({
-        type: OUTPUT_EVENT.TOOL_CALL,
-        toolName: "read",
-        input: '{"path":"src/a.ts","offset":200,"limit":202}',
-        toolCallId: "1",
-        display: "src/a.ts (lines 200-402)",
-      });
-      const written = stdoutWrites.join("");
-      // Arrow cue retained even without a template.
-      expect(written).toContain("→ src/a.ts (lines 200-402)");
-      // Raw args JSON never reaches the header when display is present.
-      expect(written).not.toContain('"path"');
-    });
-
-    it("explicit toolCallDisplayFormat wins over display", () => {
+  describe("emitToolCall format precedence", () => {
+    it("explicit toolCallDisplayFormat wins the layout", () => {
       sink.emit({
         type: OUTPUT_EVENT.TOOL_CALL,
         toolName: "bash",
         input: '{"command":"ls"}',
         toolCallId: "1",
-        display: "bash: ls",
       });
       const written = stdoutWrites.join("");
+      // The fixture's arrow template wins; the args slot carries the human
+      // summary, never raw JSON.
       expect(written).toContain("→ bash");
-      // Template wins the layout; the args slot carries the human summary,
-      // never raw JSON, and the tool's display header is not consulted.
       expect(written).toContain("bash ls");
       expect(written).not.toContain('"command"');
-      expect(written).not.toContain("bash: ls");
     });
 
-    it("falls back to the default template when display is absent", () => {
+    it("unset format renders the wrench cue with name and args", () => {
       const plain = new CliOutputSink({ palette: new ColorPalette({ use_colors: false }) });
       plain.emit({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: '{"command":"ls"}', toolCallId: "1" });
-      expect(stdoutWrites.join("")).toContain("→ bash ls");
+      // Byte-identical to what the historic " 🔧 {} {}" template rendered:
+      // the sink's own default cue IS the wrench.
+      expect(stdoutWrites.join("")).toContain(" 🔧 bash ls");
+      expect(stdoutWrites.join("")).not.toContain('"command"');
     });
 
     it("colors the args segment grey and re-opens the tool color after it", () => {
@@ -256,18 +241,6 @@ describe("CliOutputSink", () => {
       );
       // Shell highlighting stays bash-only.
       expect(written).not.toContain("\x1b[31m");
-    });
-
-    it("display is never run through a template (brace-safe)", () => {
-      const plain = new CliOutputSink({ palette: new ColorPalette({ use_colors: false }) });
-      plain.emit({
-        type: OUTPUT_EVENT.TOOL_CALL,
-        toolName: "edit",
-        input: "{}",
-        toolCallId: "1",
-        display: "a.ts: '{}' → '{}'",
-      });
-      expect(stdoutWrites.join("")).toContain("a.ts: '{}' → '{}'");
     });
   });
 
@@ -534,48 +507,48 @@ describe("inflightCallText (in-flight frame row)", () => {
   const bright = new ColorPalette({ use_colors: true, tool_call: "yellow" });
 
   it("complete args take the committed line's summarizer shape (single key bares)", () => {
-    expect(inflightCallText("read", '{"path":"a.ts"}', plain)).toBe("  \u2192 read a.ts");
+    expect(inflightCallText("read", '{"path":"a.ts"}', plain)).toBe(" 🔧 read a.ts");
   });
 
   it("multi-key non-bash summarizes k: v", () => {
     expect(inflightCallText("read", '{"path":"a.ts","offset":1}', plain)).toBe(
-      "  \u2192 read path: a.ts · offset: 1",
+      " 🔧 read path: a.ts · offset: 1",
     );
   });
 
   it("multi-key bash: cyan labels plus shell-lit command (same seams as the committed line)", () => {
     expect(inflightCallText("bash", '{"command":"ls -l","timeoutMs":5000}', bright, BASH_ARG_DISPLAY)).toBe(
-      "\x1b[33m  \u2192 bash \x1b[0m\x1b[36mcommand:\x1b[0m \x1b[31mls\x1b[0m -l · \x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
+      "\x1b[33m 🔧 bash \x1b[0m\x1b[36mcommand:\x1b[0m \x1b[31mls\x1b[0m -l · \x1b[36mtimeoutMs:\x1b[0m 5000\x1b[33m\x1b[0m",
     );
   });
 
   it("no argDisplay = no shell pass: a tool named bash rides the plain summary path", () => {
     expect(inflightCallText("bash", '{"command":"ls -l && echo hi"}', bright)).toBe(
-      "\x1b[33m  \u2192 bash \x1b[0mls -l && echo hi\x1b[33m\x1b[0m",
+      "\x1b[33m 🔧 bash \x1b[0mls -l && echo hi\x1b[33m\x1b[0m",
     );
   });
 
   it("multi-line command previews first line + size stub with the first-line hint", () => {
     expect(inflightCallText("bash", '{"command":"git status\\n&& git diff"}', bright, BASH_ARG_DISPLAY)).toBe(
-      "\x1b[33m  \u2192 bash \x1b[0m\x1b[31mgit\x1b[0m status… (2 lines, 22 chars)\x1b[33m\x1b[0m",
+      "\x1b[33m 🔧 bash \x1b[0m\x1b[31mgit\x1b[0m status… (2 lines, 22 chars)\x1b[33m\x1b[0m",
     );
   });
 
   it("partial (unparseable) args fold to one line: newlines collapse to spaces", () => {
     expect(inflightCallText("write", '{"path":"src/a.ts","content":"a\nb', plain)).toBe(
-      '  \u2192 write {"path":"src/a.ts","content":"a b',
+      ' 🔧 write {"path":"src/a.ts","content":"a b',
     );
   });
 
   it("the raw preview is rune-capped with an ellipsis", () => {
     const out = inflightCallText("write", '{"a":"' + "x".repeat(200), plain);
-    const preview = out.slice("  \u2192 write ".length);
+    const preview = out.slice(" 🔧 write ".length);
     expect(preview).toHaveLength(81); // 80 runes + ellipsis
     expect(preview).toBe('{"a":"' + "x".repeat(74) + "\u2026");
   });
 
   it("empty args render the name alone (no trailing space)", () => {
-    expect(inflightCallText("now", "", plain)).toBe("  \u2192 now");
+    expect(inflightCallText("now", "", plain)).toBe(" 🔧 now");
   });
 
   it("spoof lands before any ANSI: ESC-laden name/args never emit raw escapes", () => {
@@ -586,7 +559,7 @@ describe("inflightCallText (in-flight frame row)", () => {
 
   it("colors follow the palette only: use_colors false emits zero escapes", () => {
     const out = inflightCallText("bash", '{"command":"ls && echo hi"}', plain);
-    expect(out).toBe("  \u2192 bash ls && echo hi");
+    expect(out).toBe(" 🔧 bash ls && echo hi");
     expect(out).not.toContain("\x1b");
   });
 

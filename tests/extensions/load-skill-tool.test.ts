@@ -49,11 +49,6 @@ describe('LoadSkillTool', () => {
     expect(getDisplay(result)).toContain('Skill not found');
   });
 
-  it('generates call display', () => {
-    const tool = new LoadSkillTool({ loader });
-    const display = tool.callDisplay(JSON.stringify({ name: 'my-skill' }));
-    expect(display).toBe('load_skill: my-skill');
-  });
 
   it('handles object input', async () => {
     const skillDir = path.join(tmpDir, 'object-input');

@@ -37,7 +37,6 @@ function makeTool(name: string, execute: Tool["execute"], execution?: "local" | 
       type: "function",
       function: { name, description: "test tool", parameters: { type: "object", properties: {}, required: [] } },
     }),
-    callDisplay: () => `${name}()`,
     execute,
   };
 }

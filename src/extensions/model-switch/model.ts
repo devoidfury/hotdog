@@ -3,7 +3,6 @@ import {
   param,
   ToolResult,
   parseToolInput,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import type { ModelRegistry } from "@core/agent.ts";
@@ -41,13 +40,6 @@ export class ModelTool {
       },
       required: ["name"],
     });
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      input,
-      (args: Record<string, unknown>) => `-> ${args.name as string}`,
-    );
   }
 
   async execute(

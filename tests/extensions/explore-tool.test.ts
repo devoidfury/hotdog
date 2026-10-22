@@ -85,32 +85,6 @@ describe("ExploreTool", () => {
   });
 });
 
-describe("ExploreTool > callDisplay", () => {
-  const tool = new ExploreTool();
-
-  it("returns path=. for empty input", () => {
-    expect(tool.callDisplay("")).toBe("path=.");
-    expect(tool.callDisplay("  ")).toBe("path=.");
-    expect(tool.callDisplay(null)).toBe("path=.");
-  });
-
-  it("formats path and outline", () => {
-    expect(
-      tool.callDisplay(JSON.stringify({ path: "/tmp", outline: "src files" })),
-    ).toBe("path=/tmp -> src files");
-  });
-
-  it("handles malformed JSON gracefully", () => {
-    const result = tool.callDisplay("not-json");
-    expect(result).toBe("not-json");
-  });
-
-  it("handles object input for callDisplay", () => {
-    expect(
-      tool.callDisplay({ path: "/project", outline: "find tests" }),
-    ).toBe("path=/project -> find tests");
-  });
-});
 
 // ── Input parsing tests ─────────────────────────────────────────────────────
 

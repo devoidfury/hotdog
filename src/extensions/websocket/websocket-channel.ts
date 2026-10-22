@@ -92,12 +92,10 @@ export class WebSocketChannel extends Channel {
       case OUTPUT_EVENT.TOOL_CALL:
         msg.name = event.toolName;
         msg.args = event.input;
-        // The call id lets clients pair results to calls; display is the
-        // tool's own header (see ToolCallEvent). argsSummary is the shared
-        // hint-driven fold (ToolMetadata.argDisplay): the same shape the
-        // terminal's template args slot prints, ANSI-free.
+        // The call id lets clients pair results to calls. argsSummary is the
+        // shared hint-driven fold (ToolMetadata.argDisplay): the same shape
+        // the terminal's template args slot prints, ANSI-free.
         if (event.toolCallId) msg.toolCallId = event.toolCallId;
-        if (event.display !== undefined) msg.display = event.display;
         {
           const summary = summarizeToolArgs(event.input, undefined, this.#argDisplay?.(event.toolName));
           if (summary) msg.argsSummary = summary;

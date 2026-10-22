@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  SubagentTool,
+
   DelegateTaskTool,
   TaskStatusTool,
   TaskFollowupTool,
@@ -30,18 +30,7 @@ function makeMockTM(overrides: Partial<Record<string, any>> = {}): any {
 }
 
 describe("SubagentTool base class", () => {
-  it("callDisplay returns formatted string", () => {
-    const tool = new SubagentTool({});
-    const display = tool.callDisplay(JSON.stringify({ task_id: "task-1" }));
-    expect(display).toContain("SubagentTool");
-    expect(display).toContain("task-1");
-  });
 
-  it("callDisplay handles missing task_id", () => {
-    const tool = new SubagentTool({});
-    const display = tool.callDisplay(JSON.stringify({}));
-    expect(display).toContain("?");
-  });
 });
 
 describe("DelegateTaskTool", () => {
@@ -179,16 +168,6 @@ describe("DelegateTaskTool", () => {
     expect(def!.function.parameters.required).toContain("description");
   });
 
-  it("callDisplay formats correctly", () => {
-    const tool = new DelegateTaskTool({});
-    const display = tool.callDisplay(
-      JSON.stringify({
-        task_id: "t1",
-        description: "Build the new feature for v2.0 release",
-      }),
-    );
-    expect(display).toContain("t1");
-  });
 });
 
 describe("TaskStatusTool", () => {
@@ -241,13 +220,6 @@ describe("TaskStatusTool", () => {
     expect(def.function.description).toContain("DO NOT USE for polling");
   });
 
-  it("callDisplay formats correctly", () => {
-    const tool = new TaskStatusTool({});
-    const display = tool.callDisplay(
-      JSON.stringify({ task_id: "t1" }),
-    );
-    expect(display).toBe("task_status(t1)");
-  });
 });
 
 describe("TaskFollowupTool", () => {
@@ -309,16 +281,6 @@ describe("TaskFollowupTool", () => {
     expect(def.function.parameters.required).toContain("message");
   });
 
-  it("callDisplay truncates long messages", () => {
-    const tool = new TaskFollowupTool({});
-    const display = tool.callDisplay(
-      JSON.stringify({
-        task_id: "t1",
-        message: "This is a very long message that should be truncated in the display output",
-      }),
-    );
-    expect(display).toContain("t1");
-  });
 });
 
 describe("TaskInterruptTool", () => {
@@ -368,13 +330,6 @@ describe("TaskInterruptTool", () => {
     expect(def.function.name).toBe("task_interrupt");
   });
 
-  it("callDisplay formats correctly", () => {
-    const tool = new TaskInterruptTool({});
-    const display = tool.callDisplay(
-      JSON.stringify({ task_id: "t1" }),
-    );
-    expect(display).toBe("task_interrupt(t1)");
-  });
 });
 
 describe("PlanStatusTool", () => {
@@ -442,19 +397,7 @@ describe("PlanStatusTool", () => {
     expect(def.function.parameters.required).toEqual([]);
   });
 
-  it("callDisplay shows 'all' when no task_id", () => {
-    const tool = new PlanStatusTool({});
-    const display = tool.callDisplay(JSON.stringify({}));
-    expect(display).toContain("all");
-  });
 
-  it("callDisplay shows task_id when provided", () => {
-    const tool = new PlanStatusTool({});
-    const display = tool.callDisplay(
-      JSON.stringify({ task_id: "t1" }),
-    );
-    expect(display).toContain("t1");
-  });
 });
 
 describe("WaitTool", () => {
@@ -485,11 +428,6 @@ describe("WaitTool", () => {
     expect(def.function.parameters.required).toEqual([]);
   });
 
-  it("callDisplay formats correctly", () => {
-    const tool = new WaitTool({});
-    const display = tool.callDisplay(JSON.stringify({}));
-    expect(display).toBe("wait(no-op)");
-  });
 });
 
 describe("SUBAGENT_TOOL_NAMES", () => {

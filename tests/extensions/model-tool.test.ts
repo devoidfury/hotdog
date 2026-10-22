@@ -131,16 +131,6 @@ describe('ModelTool', () => {
     expect(result.metadata?.get('model_count')).toBe('0');
   });
 
-  it('generates call display', () => {
-    const tool = new ModelTool({});
-    const display = tool.callDisplay(JSON.stringify({ name: 'model-1' }));
-    expect(display).toBe('-> model-1');
-  });
-
-  it('generates empty call display for null input', () => {
-    const tool = new ModelTool({});
-    expect(tool.callDisplay(null)).toBe('');
-  });
 
   it('sorts models alphabetically in definition', () => {
     const registry = {

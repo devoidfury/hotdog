@@ -82,7 +82,7 @@ describe("summarizeToolArgs", () => {
     expect(summarizeToolArgs("null")).toBe("null");
   });
 
-  it("accepts the callDisplay input shape (object or null)", () => {
+  it("accepts object and null input shapes", () => {
     expect(summarizeToolArgs({ command: "ls" })).toBe("ls");
     expect(summarizeToolArgs({ a: 1, b: 2 })).toBe("a: 1 · b: 2");
     expect(summarizeToolArgs(null)).toBe("");

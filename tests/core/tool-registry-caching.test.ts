@@ -12,7 +12,6 @@ function mkTool(execute: () => unknown | Promise<unknown>, name = "test"): Tool 
   return {
     metadata: { sideEffects: false, difficulty: 1 },
     toToolDef: () => ({ type: "function", function: { name, description: name, parameters: { type: "object", properties: {} } } }),
-    callDisplay: () => `${name}()`,
     execute: async () => execute(),
   };
 }
@@ -131,7 +130,6 @@ describe("ToolRegistry — validateToolArgs", () => {
   const searchTool = {
     metadata: { sideEffects: false, difficulty: 1 },
     toToolDef: searchToolDef,
-    callDisplay: () => "search()",
     execute: async () => "ok",
   };
 
@@ -190,7 +188,6 @@ describe("ToolRegistry — validateToolArgs", () => {
           parameters: { type: "object", properties: {} },
         },
       }),
-      callDisplay: () => "simple()",
       execute: async () => "ok",
     });
     const err = await registry.validateToolArgs("simple", '{"anything": "goes"}');
@@ -206,7 +203,6 @@ describe("ToolRegistry — caching", () => {
         counter.value++;
         return { type: "function", function: { name, description: desc, parameters: { type: "object", properties: {} } } };
       },
-      callDisplay: () => `${name}()`,
       execute: async () => "ok",
     } as Tool;
   }
@@ -289,7 +285,6 @@ describe("ToolRegistry — caching", () => {
           },
         };
       },
-      callDisplay: () => "test()",
       execute: async () => "ok",
     };
 
@@ -329,7 +324,6 @@ describe("ToolRegistry — getToolDefs error handling", () => {
       toToolDef: () => {
         throw new Error("boom");
       },
-      callDisplay: () => "broken()",
       execute: async () => "ok",
     });
 
@@ -370,7 +364,6 @@ describe("Agent model setter clears tool def cache", () => {
           },
         };
       },
-      callDisplay: () => "test()",
       execute: async () => "ok",
     };
     toolRegistry.register("test", tool);

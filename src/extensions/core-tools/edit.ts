@@ -4,7 +4,6 @@ import {
   param,
   ToolResult,
   parseToolInput,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { PathEscapeError } from "@utils/workspace.ts";
@@ -62,17 +61,6 @@ export class EditTool {
         required: ["path", "oldString", "newString"],
       },
     );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (op: Record<string, unknown>) => {
-      if (!op || !op.path) {
-        return typeof input === "string" ? input : "";
-      }
-      const oldPreview = truncateString((op.oldString as string) || "", 40);
-      const newPreview = truncateString((op.newString as string) || "", 40);
-      return `${op.path}: '${oldPreview}' → '${newPreview}'`;
-    });
   }
 
   async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
@@ -187,10 +175,6 @@ function parseArgs(input: string | Record<string, unknown> | null): EditArgs | n
   };
 }
 
-function truncateString(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen) + "...";
-}
 
 function findAndReplace(content: string, old: string, newStr: string, all: boolean): FindReplaceResult {
   if (old.length === 0) {

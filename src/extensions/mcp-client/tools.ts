@@ -1,4 +1,4 @@
-import { toolDef, summarizeToolArgs } from "@core/extensions/tool-utils.ts";
+import { toolDef } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { validateParams, formatValidationErrors } from "@utils/json-schema.ts";
 import { McpConnectionHandle } from "./connection.ts";
@@ -28,7 +28,6 @@ function sanitizeToolNamePart(part: string): string {
 }
 
 export class McpTool {
-  readonly #serverName: string;
   readonly #toolName: string;
   readonly #toolDef: McpToolDefinitionInput;
   readonly #connection: McpConnectionHandle;
@@ -37,7 +36,6 @@ export class McpTool {
   metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
   constructor(serverName: string, toolDef: McpToolDefinitionInput, connectionHandle: McpConnectionHandle) {
-    this.#serverName = serverName;
     this.#toolName = toolDef.name;
     this.#toolDef = toolDef;
     this.#connection = connectionHandle;
@@ -89,13 +87,6 @@ export class McpTool {
       properties,
       required,
     });
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    // Object input must be summarized, not interpolated (would render as
-    // "[object Object]") and raw JSON is never display-worthy.
-    const args = summarizeToolArgs(input);
-    return args === "" ? `MCP [${this.#serverName}]` : `MCP [${this.#serverName}] ${args}`;
   }
 
   get registeredName(): string {

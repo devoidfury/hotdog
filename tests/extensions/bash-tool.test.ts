@@ -193,17 +193,6 @@ describe('BashTool', () => {
     expect(resultStr(result)).toContain('object-input');
   });
 
-  it('generates call display', () => {
-    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
-    const display = tool.callDisplay(JSON.stringify({ command: 'ls -la' }));
-    expect(display).toContain('ls -la');
-  });
-
-  it('callDisplay previews multi-line commands, never a wall of text', () => {
-    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
-    const display = tool.callDisplay(JSON.stringify({ command: 'git status\n&& git diff' }));
-    expect(display).toBe('bash: git status… (2 lines, 22 chars)');
-  });
 
   it('limits output lines', async () => {
     const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 2 });

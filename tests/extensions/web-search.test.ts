@@ -27,11 +27,6 @@ describe("WebSearchTool", () => {
     expect((props.query as Record<string, string>).type).toBe("string");
   });
 
-  it("generates call display", () => {
-    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
-    const display = tool.callDisplay(JSON.stringify({ query: "test query" }));
-    expect(display).toContain("test query");
-  });
 });
 
 describe("WebSearchTool input validation", () => {

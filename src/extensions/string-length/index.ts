@@ -6,7 +6,6 @@ import {
   param,
   ToolResult,
   parseToolInput,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { HOOKS } from "@core/hooks.ts";
@@ -62,14 +61,6 @@ export class StringLengthTool {
         properties: { string: param("string", "The string to measure.") },
         required: ["string"],
       },
-    );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      input,
-      () => "measuring string length...",
-      { fallback: "measuring string length..." },
     );
   }
 

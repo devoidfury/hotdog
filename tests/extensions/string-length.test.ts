@@ -34,18 +34,6 @@ describe("StringLengthTool.toToolDef", () => {
   });
 });
 
-// ── callDisplay ─────────────────────────────────────────────────────────────
-
-describe("StringLengthTool.callDisplay", () => {
-  it("shows a short label regardless of input size", () => {
-    const display = tool.callDisplay({ string: "x".repeat(10_000) });
-    expect(display).toBe("measuring string length...");
-  });
-
-  it("falls back for null input", () => {
-    expect(tool.callDisplay(null)).toBe("measuring string length...");
-  });
-});
 
 // ── execute ─────────────────────────────────────────────────────────────────
 

@@ -2475,12 +2475,12 @@ describe("in-flight tool-call rows (streaming-call display)", () => {
     const screen = () => term.grid.snapshot().screen.map((r) => r.replace(/\s+$/, ""));
 
     bridge.commitText("streaming thought"); // unterminated: the live streaming row
-    bridge.setInflightCall(0, "  \u2192 write partial");
+    bridge.setInflightCall(0, " 🔧 write partial");
     clock.runAll();
 
     const rows = screen();
     const si = rows.findIndex((r) => r.includes("streaming thought"));
-    const ii = rows.findIndex((r) => r.includes("\u2192 write partial"));
+    const ii = rows.findIndex((r) => r.includes("🔧 write partial"));
     expect(si).toBeGreaterThanOrEqual(0);
     expect(ii).toBe(si + 1);
 
@@ -2489,7 +2489,7 @@ describe("in-flight tool-call rows (streaming-call display)", () => {
     clock.runAll();
     const snap = term.grid.snapshot();
     expect([...snap.scrollback, ...snap.screen].join("\n")).toContain("streaming thought done");
-    expect(screen().some((r) => r.includes("\u2192 write partial"))).toBe(true);
+    expect(screen().some((r) => r.includes("🔧 write partial"))).toBe(true);
 
     bridge.clearInflightCalls();
     clock.runAll();
@@ -2504,31 +2504,31 @@ describe("in-flight tool-call rows (streaming-call display)", () => {
     bridge.mount();
     const screen = () => term.grid.snapshot().screen.map((r) => r.replace(/\s+$/, ""));
 
-    bridge.setInflightCall(0, "  \u2192 read a");
-    bridge.setInflightCall(1, "  \u2192 bash ls");
+    bridge.setInflightCall(0, " 🔧 read a");
+    bridge.setInflightCall(1, " 🔧 bash ls");
     clock.runAll();
-    expect(screen().filter((r) => r.includes("\u2192 "))).toEqual([
-      "  \u2192 read a",
-      "  \u2192 bash ls",
+    expect(screen().filter((r) => r.includes("🔧 "))).toEqual([
+      " 🔧 read a",
+      " 🔧 bash ls",
     ]);
 
-    bridge.setInflightCall(0, "  \u2192 read a.ts");
+    bridge.setInflightCall(0, " 🔧 read a.ts");
     clock.runAll();
     const rows = screen();
-    expect(rows.filter((r) => r.includes("\u2192 "))).toEqual([
-      "  \u2192 read a.ts",
-      "  \u2192 bash ls",
+    expect(rows.filter((r) => r.includes("🔧 "))).toEqual([
+      " 🔧 read a.ts",
+      " 🔧 bash ls",
     ]);
 
     // Same text again: no-op (delta storms must not storm paints).
-    bridge.setInflightCall(0, "  \u2192 read a.ts");
+    bridge.setInflightCall(0, " 🔧 read a.ts");
     clock.runAll();
-    expect(screen().filter((r) => r.includes("\u2192 "))).toHaveLength(2);
+    expect(screen().filter((r) => r.includes("🔧 "))).toHaveLength(2);
   });
 });
 
 describe("in-flight rows through the session event glue (stage 4)", () => {
-  const arrowRows = (rows: string[]): string[] => rows.filter((r) => r.includes("\u2192 "));
+  const cueRows = (rows: string[]): string[] => rows.filter((r) => r.includes("🔧 "));
 
   it("deltas paint rows under the streaming line, above the status row", async () => {
     const rig = makeSessionRig();
@@ -2539,7 +2539,7 @@ describe("in-flight rows through the session event glue (stage 4)", () => {
     rig.emitEvent({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "read", args: '{"path":"a' });
     const rows = rig.screenRows();
     const si = rows.findIndex((r) => r.includes("half a thought"));
-    const ii = rows.findIndex((r) => r.includes("\u2192 read"));
+    const ii = rows.findIndex((r) => r.includes("🔧 read"));
     const st = rows.findIndex((r) => r.startsWith("#"));
     expect(si).toBeGreaterThanOrEqual(0);
     expect(ii).toBe(si + 1);
@@ -2552,7 +2552,7 @@ describe("in-flight rows through the session event glue (stage 4)", () => {
       name: "read",
       args: '{"path":"a.ts"}',
     });
-    expect(arrowRows(rig.screenRows())).toEqual(["  \u2192 read a.ts"]);
+    expect(cueRows(rig.screenRows())).toEqual([" 🔧 read a.ts"]);
   });
 
   it("parallel calls each get a row (no cap)", async () => {
@@ -2560,7 +2560,7 @@ describe("in-flight rows through the session event glue (stage 4)", () => {
     await rig.done;
     rig.emitEvent({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "read", args: '{"path":"a.ts"}' });
     rig.emitEvent({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 1, name: "bash", args: '{"command":"ls"}' });
-    expect(arrowRows(rig.screenRows())).toEqual(["  \u2192 read a.ts", "  \u2192 bash ls"]);
+    expect(cueRows(rig.screenRows())).toEqual([" 🔧 read a.ts", " 🔧 bash ls"]);
   });
 
   it("TOOL_CALL commit clears every row", async () => {
@@ -2568,17 +2568,17 @@ describe("in-flight rows through the session event glue (stage 4)", () => {
     await rig.done;
     rig.emitEvent({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "read", args: '{"path":"a' });
     rig.emitEvent({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 1, name: "bash", args: '{"comm' });
-    expect(arrowRows(rig.screenRows())).toHaveLength(2);
+    expect(cueRows(rig.screenRows())).toHaveLength(2);
 
     rig.emitEvent({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "read", input: "{}", toolCallId: "c1" });
-    expect(arrowRows(rig.screenRows())).toEqual([]);
+    expect(cueRows(rig.screenRows())).toEqual([]);
   });
 
   it("TOOL_RESULT clears without a TOOL_CALL (invalid/unavailable paths)", async () => {
     const rig = makeSessionRig();
     await rig.done;
     rig.emitEvent({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "gone", args: "{}" });
-    expect(arrowRows(rig.screenRows())).toHaveLength(1);
+    expect(cueRows(rig.screenRows())).toHaveLength(1);
 
     rig.emitEvent({
       type: OUTPUT_EVENT.TOOL_RESULT,
@@ -2587,7 +2587,7 @@ describe("in-flight rows through the session event glue (stage 4)", () => {
       content: "unavailable",
       toolCallId: "c1",
     });
-    expect(arrowRows(rig.screenRows())).toEqual([]);
+    expect(cueRows(rig.screenRows())).toEqual([]);
   });
 
   it("turn end (working:false) clears dead streams", async () => {
@@ -2595,10 +2595,10 @@ describe("in-flight rows through the session event glue (stage 4)", () => {
     await rig.done;
     rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
     rig.emitEvent({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "read", args: '{"path":"a' });
-    expect(arrowRows(rig.screenRows())).toHaveLength(1);
+    expect(cueRows(rig.screenRows())).toHaveLength(1);
 
     // Cancel / error / length-stop all land here without a TOOL_CALL.
     rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
-    expect(arrowRows(rig.screenRows())).toEqual([]);
+    expect(cueRows(rig.screenRows())).toEqual([]);
   });
 });

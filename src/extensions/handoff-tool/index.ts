@@ -6,7 +6,6 @@ import {
   param,
   ToolResult,
   parseToolInput,
-  defaultCallDisplay,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig } from "@core/extensions/types.ts";
@@ -60,17 +59,6 @@ export class HandoffTool {
         },
         required: ["content"],
       },
-    );
-  }
-
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      input,
-      (args: Record<string, unknown>) => {
-        const title = (args.title as string) || "handoff";
-        return `handoff: ${title}`;
-      },
-      { fallback: "handoff: preparing phase transition..." },
     );
   }
 

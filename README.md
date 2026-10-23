@@ -5,6 +5,8 @@
 **Zero dependencies** - bring your own [Bun](https://bun.sh) and hotdog will run from source code. No `npm install`, no `node_modules`, no build step, no postinstall hooks. The whole runtime is the TypeScript in this repo. Prefer a package manager? The same source tree is published as [`@read-receipt/hotdog`](https://www.npmjs.com/package/@read-receipt/hotdog) -- still zero dependencies, see [Install from npm](#install-from-npm-optional).  
 *More info @ [supply chain rationale](docs/supply-chain.md).*
 
+![hotdog interactive CLI demo](docs/demo.gif)
+
 ## Quick Start
 
 First, get your bun ready - you can snag one here if you don't have one already: [Bun](https://bun.sh)  

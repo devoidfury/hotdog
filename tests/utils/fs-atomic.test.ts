@@ -102,6 +102,73 @@ describe("createExclusive vs external deletion", () => {
   const rounds = 60;
   const creators = 4;
 
+  // The poll-based strikes above only sometimes land between the temp write
+  // and the link -- under `bun run coverage` the timing shifts can starve the
+  // repair path completely (the rounds then pass vacuously). These two
+  // deterministic-strike rounds hold writeFile long enough (multi-MB) that
+  // the sweeper is guaranteed to see the temp sibling mid-create, so the
+  // classify/repair/retry path and its warn always execute at least once per
+  // suite -- for the coverage threshold AND as a sharp regression pin.
+  it("deterministic strike: a mid-write unlink of the temp sibling repairs to a full create", async () => {
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const payload = "p".repeat(4 * 1024 * 1024);
+      let repaired = false;
+      for (let attempt = 0; attempt < 10 && !repaired; attempt++) {
+        warnSpy.mockClear();
+        const dir = freshDir();
+        const path = join(dir, "claim");
+        const sweeper = unlinkTempOnce(dir);
+        const result = await createExclusive(path, payload);
+        await sweeper;
+        repaired = warnSpy.mock.calls.some((c) => String(c[0]).includes("repair"));
+        expect(result).toBe(true);
+      }
+      expect(repaired).toBe(true);
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("temp sibling unlinked"))).toBe(true);
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("repaired, created"))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("deterministic strike: a mid-write rmdir of the parent repairs via mkdir -p and rewrites", async () => {
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const payload = "d".repeat(4 * 1024 * 1024);
+      let repaired = false;
+      for (let attempt = 0; attempt < 10 && !repaired; attempt++) {
+        warnSpy.mockClear();
+        const dir = freshDir();
+        const path = join(dir, "claim");
+        const sweeper = removeDirOnce(dir);
+        const result = await createExclusive(path, payload).catch((e: unknown) => e);
+        await sweeper;
+        repaired = warnSpy.mock.calls.some((c) => String(c[0]).includes("repair"));
+        // Same tolerance as the rounds below: rm -rf's rmdir can land after
+        // the repair's mkdir and consume the single documented repair. Either
+        // way the strike fired and classify/repair/retry executed.
+        if (result === true) {
+          if (existsSync(path)) expect(readFileSync(path, "utf8")).toBe(payload);
+        } else {
+          expectRepairConsumedBySecondStrike(result, warnSpy);
+        }
+      }
+      expect(repaired).toBe(true);
+      // The strike hit the dir path: rmdir usually takes temp and parent
+      // together ("parent dir vanished"), but a link landing between rm's
+      // unlink and its rmdir classifies as "temp sibling unlinked" while
+      // still exercising the mkdir -p repair. Either is the honest verdict.
+      expect(
+        warnSpy.mock.calls.some(
+          (c) => String(c[0]).includes("parent dir vanished") || String(c[0]).includes("temp sibling unlinked"),
+        ),
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   /**
    * Tolerated residual race: one strike can consume the single documented
    * repair. `rm -rf` is readdir + unlink + rmdir on the PATH, so its rmdir can

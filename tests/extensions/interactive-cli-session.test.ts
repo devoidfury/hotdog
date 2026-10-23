@@ -1,7 +1,7 @@
 // Tests for ui-interactive-cli/index.ts — runInteractiveSession function.
 // Covers the main uncovered function (lines 279-519).
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { HOOKS } from "@core/hooks.ts";
 import { HookSystem } from "@core/hooks.ts";
 import { createCompletionService } from "@core/completion.ts";
@@ -13,6 +13,21 @@ import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-m
 const testRoleReg = createRoleMappingRegistry();
 testRoleReg.register(systemFirstRoleMapping);
 testRoleReg.register(developerRoleMapping);
+
+// Same non-TTY pin as ui-interactive-cli.test.ts: these rigs drive the real
+// §9 mount gate, and a TTY-pair + non-dumb-TERM host (running the suite or
+// `bun run coverage` straight in a terminal) would mount the real split
+// renderer on the shared process instead of exercising the legacy path.
+const origStdinIsTTY = process.stdin.isTTY;
+const origStdoutIsTTY = process.stdout.isTTY;
+beforeAll(() => {
+  Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+  Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+});
+afterAll(() => {
+  Object.defineProperty(process.stdin, "isTTY", { value: origStdinIsTTY, configurable: true });
+  Object.defineProperty(process.stdout, "isTTY", { value: origStdoutIsTTY, configurable: true });
+});
 
 
 /** Poll a condition until true (deterministic replacement for fixed sleeps). */

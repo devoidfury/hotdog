@@ -30,6 +30,25 @@ const testRoleReg = createRoleMappingRegistry();
 testRoleReg.register(systemFirstRoleMapping);
 testRoleReg.register(developerRoleMapping);
 
+// The runInteractiveSession rigs in this file drive the real mount gate (no
+// options.bridge injection), and the §9 gate opens on any host with a TTY
+// pair and a non-dumb TERM: a direct `bun run coverage` in a terminal would
+// mount the real split renderer (raw mode, bracketed paste, signal handlers)
+// on the shared process and bleed into every later file in the single-process
+// run. Pin stdio to the piped shape the CI runners always have, so the gate
+// declines and no test can take over the terminal. Same defineProperty
+// pattern as session-review-cli.test.ts.
+const origStdinIsTTY = process.stdin.isTTY;
+const origStdoutIsTTY = process.stdout.isTTY;
+beforeAll(() => {
+  Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+  Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+});
+afterAll(() => {
+  Object.defineProperty(process.stdin, "isTTY", { value: origStdinIsTTY, configurable: true });
+  Object.defineProperty(process.stdout, "isTTY", { value: origStdoutIsTTY, configurable: true });
+});
+
 
 
 // ── SEND_TO_ASSISTANT_SUFFIX_RE ────────────────────────────────────────────

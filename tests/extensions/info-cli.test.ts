@@ -966,18 +966,19 @@ describe("Info CLI - renderer posture line (stage 3c)", () => {
     const { exitCode, output } = await run("info");
     expect(exitCode).toBe(0);
     // mode rides the knob; the reason names whichever gate decides in the
-    // test process (piped stdio declines at the TTY gate; a TERM=dumb host
-    // declines at the dumb gate). info never claims a mount it cannot have:
-    // it runs outside any session.
-    expect(output).toMatch(/Renderer:        split \((mounts here|declines here: .*)\)/);
+    // test process. The decision is host-honest, so both shapes are valid:
+    // piped stdio declines at the TTY gate, a TERM=dumb host declines at the
+    // dumb gate, and a real terminal mounts. info never claims a mount it
+    // cannot have: it runs outside any session.
+    expect(output).toMatch(/Renderer:        split \((mounts here|declines here)(: [^)]*)?\)/);
   });
 
   it("knob default reads split; JSON mirrors the posture object", async () => {
     const run = await infoCliRunner();
     const { output } = await run("info");
     // Default-on: unset knob reads split; the reason names whichever gate
-    // decides in the test process (piped stdio declines at the TTY gate).
-    expect(output).toMatch(/Renderer:        split \((mounts here|declines here: .*)\)/);
+    // decides in this test process (see the mount-gate note above).
+    expect(output).toMatch(/Renderer:        split \((mounts here|declines here)(: [^)]*)?\)/);
 
     const jsonRun = await infoCliRunner({ coreConfig: { uiInteractiveCli: { renderer: "split" } } }, { wantsJson: true });
     const { output: jsonOut, exitCode } = await jsonRun("info");

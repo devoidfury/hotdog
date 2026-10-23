@@ -8,6 +8,7 @@ describe('parseCommand', () => {
     expect(parseCommand('quit')).toEqual({ type: Command.Quit, value: null });
     expect(parseCommand('exit')).toEqual({ type: Command.Quit, value: null });
     expect(parseCommand('clear')).toEqual({ type: Command.Clear, value: null });
+    expect(parseCommand('redraw')).toEqual({ type: Command.Redraw, value: null });
   });
 
   it('parses clear with profile name', () => {

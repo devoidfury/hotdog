@@ -186,6 +186,23 @@ describe("transcript commit (§2 rubric 1)", () => {
     expect(all).toContain("(m)> half-typed");
     expect(bridge.capture.frameRows().length).toBe(0);
   });
+
+  it("redraw() purges scrollback and re-emits the transcript (§6, /redraw entry)", () => {
+    const { bridge, term, clock } = makeBridge();
+    bridge.mount();
+    bridge.commitText("row one\nrow two\n");
+    clock.runAll();
+
+    bridge.redraw();
+    clock.runAll();
+
+    const snap = term.grid.snapshot();
+    // Purge cleared the old page; the re-emitted transcript now sits in a
+    // fresh scrollback -- rows intact, both present, nothing orphaned.
+    const all = [...snap.scrollback, ...snap.screen].join("\n");
+    expect(all).toContain("row one");
+    expect(all).toContain("row two");
+  });
 });
 
 describe("arbiter on a mid-frame stderr write (§2 rubric 3)", () => {

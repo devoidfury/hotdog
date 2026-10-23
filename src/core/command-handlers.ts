@@ -49,6 +49,16 @@ export function handleHelp(): CommandResult {
   return { action: ACTIONS.DISPLAY, content: "Help (use /help for commands)" };
 }
 
+/**
+ * Handler for /redraw — handled at the interactive-UI level (purge scrollback,
+ * reprint the transcript, repaint the frame -- split renderer recovery, §6).
+ * This fallback exists for direct agent command execution and UIs without a
+ * managed renderer, where there is nothing to purge.
+ */
+export function handleRedraw(): CommandResult {
+  return { action: ACTIONS.DISPLAY, content: "Redraw (handled by the interactive renderer)" };
+}
+
 /** "$1.23" for real amounts; 4 decimals below a cent, so a cheap local run reads $0.0021 rather than $0.00. */
 function formatUsd(value: number): string {
   return `$${Math.abs(value) >= 0.01 ? value.toFixed(2) : value.toFixed(4)}`;
@@ -285,6 +295,7 @@ export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
   [Command.Clear]: { handler: handleClear, description: "Clear context", mutatesSession: true },
   [Command.Quit]: { handler: handleQuit, description: "Exit" },
   [Command.Help]: { handler: handleHelp, description: "Show help" },
+  [Command.Redraw]: { handler: handleRedraw, description: "Repaint the terminal (purge and reprint transcript)" },
   [Command.Tokens]: { handler: handleTokens, description: "Show token usage" },
   [Command.Tools]: {
     handler: handleTools,

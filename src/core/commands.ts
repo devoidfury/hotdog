@@ -9,6 +9,7 @@ export type { ParsedCommand } from "./extensions/registries.ts";
 export const Command = {
   Help: "help",
   Quit: "quit",
+  Redraw: "redraw",
   Clear: "clear",
   Tools: "tools",
   Thinking: "thinking",
@@ -73,6 +74,8 @@ export function parseCommand(
     case "quit":
     case "exit":
       return { type: Command.Quit, value: null };
+    case "redraw":
+      return { type: Command.Redraw, value: null };
     case "clear":
       return { type: Command.Clear, value: null };
   }

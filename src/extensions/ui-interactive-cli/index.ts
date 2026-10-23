@@ -55,6 +55,7 @@ const HELP_TEXT = `
 Commands:
   /quit, /exit  - Exit
   /help         - Show help
+  /redraw       - Purge scrollback and reprint the transcript (split renderer; also ctrl-l)
   /clear        - Clear context
   /undo         - Undo the last turn
   /rewind [N]   - Rewind the last N turns (default 1)
@@ -859,7 +860,7 @@ export async function runInteractiveSession(
   // live editor row on screen) and close() performs the bridge teardown that
   // readline's "close" event used to trigger on /quit.
   const uiHost: PromptUi = bridge
-    ? { prompt: () => {}, close: () => bridge.shutdown() }
+    ? { prompt: () => {}, close: () => bridge.shutdown(), redraw: () => bridge.redraw() }
     : (rl as readline.Interface);
 
   // Listen for model changes and update the prompt: the mounted editor's
@@ -1155,6 +1156,8 @@ export async function runInteractiveSession(
 export interface PromptUi {
   prompt(): unknown;
   close(): unknown;
+  /** Split renderer only: purge scrollback and reprint the transcript (§6). Absent on legacy. */
+  redraw?(): unknown;
 }
 
 export function handleSlashCommand(
@@ -1176,6 +1179,15 @@ export function handleSlashCommand(
     case Command.Quit:
       ui.close();
       onQuit();
+      return;
+
+    case Command.Redraw:
+      // Split renderer only (§6 recovery, same path as ctrl-l): purge
+      // scrollback, reprint the transcript, repaint the frame. Legacy has no
+      // managed region to recover -- say so instead of silently re-prompting.
+      if (ui.redraw) ui.redraw();
+      else uiOut("/redraw needs the split renderer (uiInteractiveCli.renderer: \"split\").");
+      ui.prompt();
       return;
   }
 

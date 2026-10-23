@@ -70,6 +70,7 @@ hotdog workflow cancel <run-id>  # Finished runs: idempotent report; live runs o
 ```
 /help              Show available commands
 /quit, /exit       Exit
+/redraw            Purge scrollback and reprint the transcript (split renderer; ctrl-l also works)
 /clear             Clear conversation history
 /undo              Undo the last turn (user message + everything after it)
 /rewind [N]        Rewind the last N turns (default 1)

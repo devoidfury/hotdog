@@ -551,6 +551,12 @@ export class OutputBridge {
     this.updateStatus({ turns: this.#status.turns + 1, working: false, laneWait: false });
   }
 
+  /** Explicit purge-and-reprint (§6 recovery): the /redraw command's entry,
+   * the same path as the ctrl-l key binding. */
+  redraw(): void {
+    this.core.purgeAndReprint();
+  }
+
   /** The QUEUE_UPDATE chip row (§8): pending undelivered steering. */
   setQueueChip(pending: number, preview: string): void {
     const next = queueChipText(pending, preview);

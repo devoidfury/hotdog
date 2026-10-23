@@ -66,6 +66,31 @@ describe("handleSlashCommand", () => {
     }
   });
 
+  it("handles /redraw via the ui host, never delegating to executeCommand", async () => {
+    let redraws = 0;
+    let prompted = 0;
+    let executed = 0;
+    const mockSessionManager = {
+      sessionId: () => "test-session",
+      executeCommand: async () => { executed += 1; return 0; },
+    } as any;
+    const mockChannel = {} as any;
+
+    // Split path: the ui host carries redraw(); it runs, then re-prompts.
+    handleSlashCommand("redraw", mockSessionManager, mockChannel,
+      { prompt: () => { prompted += 1; }, close: () => {}, redraw: () => { redraws += 1; } }, () => {});
+    expect(redraws).toBe(1);
+    expect(prompted).toBe(1);
+
+    // Legacy path (no redraw on the host): a clear note, no silent no-op.
+    handleSlashCommand("redraw", mockSessionManager, mockChannel,
+      { prompt: () => {}, close: () => {} }, () => {});
+    expect(capturedOutput).toContain("/redraw needs the split renderer");
+
+    await Promise.resolve();
+    expect(executed).toBe(0);
+  });
+
   it("delegates commands to sessionManager.executeCommand", async () => {
     const { rl } = createMockRl();
     const executedCommands: string[] = [];

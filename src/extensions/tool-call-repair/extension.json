@@ -1,7 +1,7 @@
 {
   "name": "tool-call-repair",
   "loadOrder": 10,
-  "description": "Repairs malformed tool calls leaked into text by local backends",
+  "description": "Repairs malformed tool calls leaked into text by local backends; hard-blocks hallucinated file-proxy artifact URLs in tool arguments",
   "configSchema": {
     "toolCallRepair": {
       "type": "object",

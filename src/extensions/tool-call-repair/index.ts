@@ -9,6 +9,9 @@
 // holds a tool call with truncated (unparseable) arguments -- the classic state after interrupting a
 // hung call -- it drops the corrupt calls and their orphaned tool results, then asks for one retry.
 //
+// And it registers a TOOL_CALL gate fence that hard-blocks hallucinated file-proxy artifact URLs before any tool dials out
+// (core logic ported from wtogami/qwen-block-proxy-artifacts, credited in ./block-proxy-artifacts.ts).
+//
 // Disable the extension(config or autoload list) for strict tool - calling enforcement.
 
 import { HOOKS } from "@core/hooks.ts";
@@ -17,6 +20,7 @@ import { logger } from "@utils/logger.ts";
 import type { Message } from "@core/context/message.ts";
 import { getExtensionConfig, type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
 import { repairCallsInText } from "./grammar.ts";
+import { verdict as artifactVerdict } from "./block-proxy-artifacts.ts";
 
 interface RepairConfig {
   enabled: boolean;
@@ -86,6 +90,9 @@ export function create(core: CoreContext): ExtensionInstance {
 
   // sessionId -> repairs used this user turn. iterationCount is 1 on each run()'s first LLM call, so seeing iteration 1 is the turn boundary.
   const repairsUsed = new Map<string, number>();
+
+  // sessionId -> has received the full proxy-artifact guidance; repeats get the one-liner.
+  const warnedArtifacts = new Map<string, boolean>();
 
   return {
     hooks: {
@@ -168,6 +175,18 @@ export function create(core: CoreContext): ExtensionInstance {
           content: `Dropped ${droppedCalls} tool call(s) with corrupted (truncated) arguments from history and retried the request.`,
         });
         return { retry: true };
+      },
+
+      // Hard fence (block-proxy-artifacts policy): fabricated relay URLs never reach the network.
+      // Gate contract: no opinion returns NOTHING -- a no-op `continue` would disarm an earlier block.
+      [HOOKS.TOOL_CALL]: ({ toolName, input, agent }) => {
+        const message = artifactVerdict(input, warnedArtifacts, agent?.sessionId ?? "unknown");
+        if (!message) return;
+        logger.info(
+          `[tool-call-repair] blocked a fabricated file-proxy artifact URL in a ${toolName} call ` +
+            `(session ${agent?.sessionId ?? "unknown"})`,
+        );
+        return { action: "block", result: message };
       },
     },
   };

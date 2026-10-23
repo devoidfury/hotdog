@@ -1350,6 +1350,8 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 
 Parsing is fail-closed: the call block must run to the end of the text (prose after the last block means the model is showing markup, not calling a tool); a truncated block (missing closes) still repairs; stray fences, commas, and whitespace are tolerated; plain numbers and booleans in parameter values are coerced. Never repairs on the final iteration of a run.
 
+Also registers a `TOOL_CALL` gate fence that hard-blocks hallucinated file-proxy artifact URLs (fabricated signed Aliyun OSS relay links, e.g. from Qwen3.8-Flash-Next builds) before any tool dials out, answering the model with do-not-retry guidance. Core logic ported from [wtogami/qwen-block-proxy-artifacts](https://github.com/wtogami/qwen-block-proxy-artifacts) (MIT); see [block-proxy-artifacts.ts](../src/extensions/tool-call-repair/block-proxy-artifacts.ts). The fence shares this extension's `enabled` switch.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable repair. Set `false` for strict structured-tool-call enforcement (a leaked call then strands in the turn's text). |

@@ -104,7 +104,7 @@ describe("environment extension — workspace roots", () => {
         config: { workspaceRoots: ["/a/root", "/b/root", "/c/root"] },
       } as any,
     });
-    expect((result as any).content).toContain("Workspace roots: /a/root, /b/root, /c/root");
+    expect((result as any).content).toContain("Workspace roots, accessible paths: /a/root, /b/root, /c/root");
   });
 
   it("does not mention roots when only the default single root is configured", async () => {

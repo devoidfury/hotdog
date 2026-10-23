@@ -44,7 +44,7 @@
   },
   "mcp-servers": [
     {
-      "enabled": true,
+      "enabled": false,
       "name": "bun-docs-mcp",
       "url": "https://bun.com/docs/mcp"
     }
@@ -62,12 +62,6 @@
       "fetch-models": true,
       "apiKey": "$HOTDOG_ALT_KEY",
       "url": "$HOTDOG_ALT_URL"
-    },
-    {
-      "name": "home",
-      "fetch-models": true,
-      "apiKey": "$HOTDOG_ALT_KEY",
-      "url": "http://mini.home:9292"
     },
     {
       "name": "openrouter",

@@ -39,7 +39,6 @@
     "tests/**/*.tsx",
     "bin/**/*",
     "evals/**/*.ts",
-    "pty-tests/**/*.ts",
   ],
   "exclude": ["node_modules", "coverage", "tmp", "examples"],
 }

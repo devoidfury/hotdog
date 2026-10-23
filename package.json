@@ -23,7 +23,6 @@
     "start": "bun bin/hotdog",
     "loud-test": "bun test --parallel",
     "test": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --parallel",
-    "test:pty": "bun pty-tests/pty-renderer-3c/run-pty-suite.ts",
     "coverage": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --coverage",
     "check": "bun x tsc --noEmit",
     "gen-fixtures": "bun evals/tools/prepare.ts"

@@ -736,4 +736,32 @@ describe('Agent — lifecycle and state', () => {
     expect(fired).toBe(1);
     expect(inContextAtFire).toBe(true);
   });
+
+  it('drains harness-sourced steering as a trusted harness message with no echo', async () => {
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'Done.',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+      ],
+    });
+
+    const { agent, outputEvents } = createAgentFixture({ mockLLM });
+
+    // Mid-run /skill body: provenance "harness", not a user turn.
+    agent.steer('SKILL BODY', undefined, { source: 'harness' });
+
+    await agent.run('Initial');
+
+    const all = agent.context.log.getAll();
+    const injected = all.find((m) => m.role === 'harness' && (m.content as string) === 'SKILL BODY');
+    expect(injected).toBeDefined();
+    expect(injected!.source).toBe('harness');
+    // No user turn was fabricated from it, and no transcript echo fired:
+    // only 'Initial' and the assistant reply.
+    expect(all.filter((m) => m.role === 'user').length).toBe(1);
+    const userMessageEvents = outputEvents.filter((e) => e.type === OUTPUT_EVENT.USER_MESSAGE);
+    expect(userMessageEvents.length).toBe(1);
+  });
 });

@@ -888,6 +888,47 @@ Inject body text.
     expect(added[0].content).toContain("Inject body text");
   });
 
+  it("skill command mid-run routes the body through steer instead of appending", async () => {
+    await createTempSkill("midrun-skill", `---
+name: Midrun Skill
+description: Steered
+---
+
+Midrun body text.
+`);
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    const registry: any = {
+      register: mock((_name: string, opts: any) => { registry.registeredCmd = opts; }),
+      registeredCmd: null,
+    };
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]({ registry, agent: {} });
+
+    const added: any[] = [];
+    const steered: { content: any; source?: string }[] = [];
+    const agent = {
+      isRunning: true,
+      context: { getMessages: () => [{ role: "user", content: "earlier turn" }] },
+      addMessage: (m: any) => added.push(m),
+      steer: (content: any, _onDelivered?: () => void, opts?: { source?: string }) =>
+        steered.push({ content, source: opts?.source }),
+    };
+
+    const result = await registry.registeredCmd.handler(agent, "skill:Midrun Skill");
+    expect(result.content).toContain("activated");
+    expect(result.content).toContain("delivers before the model's next call");
+
+    // No direct append -- it would wedge between tool calls and results.
+    expect(added).toHaveLength(0);
+    expect(steered).toHaveLength(1);
+    expect(steered[0]!.content).toContain("Midrun body text");
+    expect(steered[0]!.source).toBe("harness");
+    // Activation itself is still immediate: tool patterns apply from now on.
+    expect(ext.loader.getSkill("Midrun Skill")!.loaded).toBe(true);
+  });
+
   it("skill command skips injection when the conversation has no turns", async () => {
     await createTempSkill("quiet-skill", `---
 name: Quiet Skill

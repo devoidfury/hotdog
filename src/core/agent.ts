@@ -182,6 +182,8 @@ export class Agent implements AgentLike {
     content: string | Array<Record<string, unknown>>;
     /** Fired when the item is appended to context (see steer()). */
     onDelivered?: () => void;
+    /** Provenance of the queued item; defaults to "user". "harness" appends a trusted harness message. */
+    source?: MessageSource;
   }>;
   runAbortController: AbortController | null;
   /**
@@ -366,9 +368,22 @@ export class Agent implements AgentLike {
    * `onDelivered` (optional) fires when #prepareIteration actually appends
    * the item to context -- "accepted" is a queue push; "delivered" is the
    * model seeing it. The bus uses it to clear the queue chip honestly.
+   * `opts.source` sets the appended message's provenance: "harness" (trusted,
+   * no transcript echo) for harness-initiated injections -- e.g. a mid-run
+   * `/skill` body, which must not wedge between tool calls and results by
+   * appending directly. Default "user" mirrors a live steering submission.
    */
-  steer(content: string | Array<Record<string, unknown>>, onDelivered?: () => void): void {
-    this.steeringQueue.push({ content, onDelivered });
+  steer(
+    content: string | Array<Record<string, unknown>>,
+    onDelivered?: () => void,
+    opts?: { source?: MessageSource },
+  ): void {
+    this.steeringQueue.push({ content, onDelivered, source: opts?.source });
+  }
+
+  /** True while the run loop is active; harness seams (e.g. /skill) pick steer vs. direct append on this. */
+  get isRunning(): boolean {
+    return this.#running;
   }
 
   // ── Run Loop ──────────────────────────────────────────────────────────────
@@ -618,13 +633,25 @@ export class Agent implements AgentLike {
     if (this.abortSignal?.aborted) throw LlmError.Cancelled("Agent aborted");
 
     while (this.steeringQueue.length > 0) {
-      const { content: steering, onDelivered } = this.steeringQueue.shift()!;
-      this.addMessage(new Message({ role: "user", content: steering, source: "user" }));
-      const display = splitFileIncludes(steering);
-      this.emitOutput("user_message", {
-        content: display.text,
-        ...(display.files.length > 0 ? { files: display.files } : {}),
-      });
+      const { content: steering, onDelivered, source } = this.steeringQueue.shift()!;
+      const harness = source === "harness";
+      this.addMessage(
+        new Message({
+          role: harness ? "harness" : "user",
+          content: steering,
+          source: harness ? "harness" : "user",
+        }),
+      );
+      if (!harness) {
+        // Harness-sourced items (mid-run /skill bodies) are context fuel, not
+        // user turns: no transcript echo, no file-include split -- the
+        // command's own confirmation row already told the user.
+        const display = splitFileIncludes(steering);
+        this.emitOutput("user_message", {
+          content: display.text,
+          ...(display.files.length > 0 ? { files: display.files } : {}),
+        });
+      }
       // The model has now seen this steering message: settle whoever parked
       // a callback on it (the bus's queue chip). After the context append so
       // "delivered" never leads the truth.

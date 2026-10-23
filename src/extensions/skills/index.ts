@@ -124,6 +124,12 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             // If the conversation already has messages, inject the skill content
             // as a system message so the agent sees it immediately without
             // reloading the system prompt (which would bust the cached prefix).
+            // Mid-run the append goes through the steer queue instead of
+            // addMessage: a direct append from the UI event path can land at
+            // any await point -- wedged between an assistant(tool_calls) and
+            // its tool results (strict providers 400 the split) or out of
+            // order with queued steering. steer() drains only at the
+            // #prepareIteration boundary, before the next LLM call.
             const messages = agent.context?.getMessages?.();
             const hasConversationTurns = messages?.some(
               (m) => m.role === "user" || m.role === "harness",
@@ -132,21 +138,27 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
               const skill = loader.getSkill(name);
               if (skill) {
                 const renderedContent = await loader.renderSkillContent(skill);
-                agent.addMessage(
-                  new Message({
-                    role: "harness",
-                    content: renderedContent,
-                    // Skill body is local file content (trusted layer, same as
-                    // the system prompt it also feeds), so no inner escaping.
-                    source: "harness",
-                  }),
-                );
+                if (agent.isRunning) {
+                  agent.steer(renderedContent, undefined, { source: "harness" });
+                } else {
+                  agent.addMessage(
+                    new Message({
+                      role: "harness",
+                      content: renderedContent,
+                      // Skill body is local file content (trusted layer, same as
+                      // the system prompt it also feeds), so no inner escaping.
+                      source: "harness",
+                    }),
+                  );
+                }
               }
             }
 
             return {
               action: ACTIONS.DISPLAY,
-              content: `Skill '${name}' activated.`,
+              content: agent.isRunning
+                ? `Skill '${name}' activated (delivers before the model's next call).`
+                : `Skill '${name}' activated.`,
             };
           },
           completion: createCompletionHandler(() => loader.allSkills()),

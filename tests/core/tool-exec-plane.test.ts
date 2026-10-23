@@ -17,7 +17,9 @@ import {
   type ToolExecLink,
   type WireToolResult,
 } from "@core/tool-exec-protocol.ts";
+import { tmpdir } from "node:os";
 import {
+  createFencePlanner,
   postureDrift,
   sharedToolExecBroker,
   toolExecPlaneSettings,
@@ -524,5 +526,24 @@ describe("shared broker posture pinning", () => {
     const first = sharedToolExecBroker();
     expect(sharedToolExecBroker({ fence: "off" })).toBe(first);
     expect(sharedToolExecBroker()).toBe(first);
+  });
+});
+
+// ── Fence planning ──────────────────────────────────────────────────────────
+
+describe("createFencePlanner", () => {
+  it("off returns no planner at all", () => {
+    expect(createFencePlanner("off")).toBeNull();
+  });
+
+  it("probe plans once per (session, class, roots) and memoizes the answer", () => {
+    const plan = createFencePlanner("probe");
+    expect(plan).not.toBeNull();
+    const roots = [tmpdir()];
+    const first = plan!("unit:probe", "rw", roots);
+    expect(first === null || (first.id !== "" && first.prefix.length > 0)).toBe(true);
+    expect(plan!("unit:probe", "rw", roots)).toBe(first); // memoized, same identity
+    // A different class replans (null hosts stay null on every tuple).
+    expect(plan!("unit:probe", "net", roots) === null || first !== null).toBe(true);
   });
 });

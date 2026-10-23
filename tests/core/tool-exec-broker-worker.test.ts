@@ -1,7 +1,7 @@
-// Broker-child unit tests: the worker half of tool-exec-broker.ts runs in a
-// spawned `bun <file>` child whose coverage never reports back to the test
-// process, so these tests drive the exported seams in-process instead. Real
-// behavior (wire protocol, pooling, cancel, reap) stays covered end-to-end by
+// Broker-child unit tests: the worker half runs in a spawned `bun <file>`
+// child whose coverage never reports back to the test process, so these
+// tests drive tool-exec-broker-main.ts's exported seams in-process instead.
+// Real behavior (wire protocol, pooling, cancel, reap) stays covered end-to-end by
 // tool-exec-broker-spawn.test.ts and tool-exec-hardening.test.ts; no LLM
 // endpoints, and real spawns are only the few short-lived processes needed to
 // exercise spawnEntry's stdio plumbing.
@@ -15,10 +15,9 @@ import {
   poolKey,
   relayRunnerLine,
   spawnEntry,
-  createFencePlanner,
   type BrokerState,
   type PoolEntry,
-} from "@core/tool-exec-broker.ts";
+} from "@core/tool-exec-broker-main.ts";
 
 const TOOL_CONFIG = {
   bashTool: { bashTimeoutMs: 5000, maxToolOutputLines: 100, maxTimeoutMs: 10000 },
@@ -479,22 +478,5 @@ describe("spawnEntry stdio plumbing (real short-lived processes)", () => {
     } finally {
       stopCapture();
     }
-  });
-});
-
-describe("createFencePlanner", () => {
-  it("off returns no planner at all", () => {
-    expect(createFencePlanner("off")).toBeNull();
-  });
-
-  it("probe plans once per (session, class, roots) and memoizes the answer", () => {
-    const plan = createFencePlanner("probe");
-    expect(plan).not.toBeNull();
-    const roots = [tmpdir()];
-    const first = plan!("unit:probe", "rw", roots);
-    expect(first === null || (first.id !== "" && first.prefix.length > 0)).toBe(true);
-    expect(plan!("unit:probe", "rw", roots)).toBe(first); // memoized, same identity
-    // A different class replans (null hosts stay null on every tuple).
-    expect(plan!("unit:probe", "net", roots) === null || first !== null).toBe(true);
   });
 });

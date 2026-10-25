@@ -43,12 +43,9 @@ const V4_REFUSED: ReadonlyArray<readonly [string, number]> = [
   ["198.18.0.0", 15], // benchmarking
   ["198.51.100.0", 24], // TEST-NET-2
   ["203.0.113.0", 24], // TEST-NET-3
+  ["224.0.0.0", 4], // multicast (SSDP/mDNS LAN targets)
   ["240.0.0.0", 4], // reserved + broadcast
 ];
-// Intended policy lists multicast as refused and the v6 side (ff00::/8) IS
-// refused, but isPrivateAddress never checks 224/4. Flagged as a policy
-// question for the owner; asserted as neither private nor public.
-const V4_MULTICAST: readonly [string, number] = ["224.0.0.0", 4];
 
 function toU32(p: readonly number[]): number {
   return ((p[0]! << 24) | (p[1]! << 16) | (p[2]! << 8) | p[3]!) >>> 0;
@@ -76,7 +73,6 @@ function parseStrictV4(s: string): number[] | null {
 
 function v4Verdict(n: number): Verdict {
   for (const [base, bits] of V4_REFUSED) if (inCidr(n, base, bits)) return "private";
-  if (inCidr(n, V4_MULTICAST[0], V4_MULTICAST[1])) return "gap";
   return "public";
 }
 
@@ -87,7 +83,11 @@ interface ParsedV6 {
 
 function parseV6(s: string): ParsedV6 | null {
   const pct = s.indexOf("%");
-  const bare = pct >= 0 ? s.slice(0, pct) : s; // zone id is delimiter-only
+  // A trailing delimiter with an empty zone ("...::%") is rejected by the
+  // parsers, so the oracle fails closed on it too; delimiter-only zones
+  // are otherwise inert.
+  if (pct >= 0 && pct === s.length - 1) return null;
+  const bare = pct >= 0 ? s.slice(0, pct) : s;
   if (!bare.includes(":")) return null;
   const group = (t: string): number | null =>
     /^[0-9a-fA-F]{1,4}$/.test(t) ? parseInt(t, 16) : null;
@@ -162,6 +162,11 @@ function v6Verdict(g: readonly number[], dotted: boolean): Verdict {
     // reading here is a doc-vs-code gap; see run notes.
     return dotted ? "gap" : v;
   }
+  if (
+    zero(0) && zero(1) && zero(2) && zero(3) && g[4] === 0xffff && g[5] === 0
+  ) {
+    return "private"; // ::ffff:0:0/96 translator-local, unroutable, refused whole
+  }
   if (g[0] === 0x2001 && g[1] === 0x0db8) return "private"; // documentation
   if (g[0] === 0x2002) return "private"; // 6to4, whole prefix
   if (g[0] === 0x0064 && g[1] === 0xff9b) {
@@ -205,7 +210,7 @@ const V4_PUBLIC: number[][] = [
   [192, 88, 98, 255], [198, 17, 255, 255], [198, 20, 0, 1], [203, 0, 114, 1],
   [223, 255, 255, 255],
 ];
-const V4_MULTICAST_GAP: number[][] = [
+const V4_MULTICAST_REFUSED: number[][] = [
   [224, 0, 0, 1], [239, 255, 255, 250], [224, 0, 0, 251], [231, 69, 176, 1],
 ];
 
@@ -223,6 +228,8 @@ const V6_PRIVATE: number[][] = [
   [0x0064, 0xff9b, 0, 0, 0, 0, 0x0808, 0x0808], // NAT64 /96
   [0x2001, 0, 0x4500, 0, 0, 0, 0x7f00, 1], // Teredo /32
   [0x2001, 0, 0, 0, 0, 0, 0x7f00, 1],
+  [0, 0, 0, 0, 0xffff, 0, 0x7f00, 1], // ::ffff:0:0/96 embedding loopback
+  [0, 0, 0, 0, 0xffff, 0, 0x0808, 0x0808], // same /96 with public v4: prefix refused
   [0, 0, 0, 0, 0, 0xffff, 0x7f00, 1], // mapped loopback
   [0, 0, 0, 0, 0, 0xffff, 0x0a00, 0x0001],
   [0, 0, 0, 0, 0, 0xffff, 0xa9fe, 0xa9fe],
@@ -369,7 +376,7 @@ function seamHost(text: string): string | null {
 function* allAddressTexts(): Generator<{ text: string; tag: string }> {
   for (const p of V4_PRIVATE) for (const t of v4Renders(p)) yield { text: t, tag: "v4-private" };
   for (const p of V4_PUBLIC) for (const t of v4Renders(p)) yield { text: t, tag: "v4-public" };
-  for (const p of V4_MULTICAST_GAP) for (const t of v4Renders(p)) yield { text: t, tag: "v4-mcast" };
+  for (const p of V4_MULTICAST_REFUSED) for (const t of v4Renders(p)) yield { text: t, tag: "v4-mcast" };
   for (const g of V6_PRIVATE) for (const t of v6Renders(g)) yield { text: t, tag: "v6-private" };
   for (const g of V6_PUBLIC) for (const t of v6Renders(g)) yield { text: t, tag: "v6-public" };
   for (const g of V6_GAP) for (const t of v6Renders(g)) yield { text: t, tag: "v6-gap" };
@@ -429,11 +436,29 @@ describe("fetch-ssrf isPrivateAddress fuzz", () => {
   });
 
   it("agreement tallies hold with zero failures", () => {
-    // Corpus must actually exercise the recorded gap families (multicast v4,
-    // dotted-embedded public, NAT64 /32-minus-/96, JS-trim mime nit).
+    // Corpus must actually exercise the remaining gap families
+    // (dotted-embedded public, NAT64 /32-minus-/96, JS-trim mime nit).
+    // Multicast v4 left the gap list 2026-10-25 when the guard learned 224/4.
     expect(tally.gaps.length).toBeGreaterThan(10);
     expect(tally.failures).toEqual([]);
   });
+});
+
+describe("fetch-ssrf tightening (owner ruling 2026-10-25)", () => {
+  // 224.0.0.0/4 was the batch-2 fuzz run's W1 flag: intended policy refused
+  // multicast, the guard only checked ff00::/8. Now refused both sides.
+  // ::ffff:0:0/96 (RFC 6052 translator-local) serializes past the mapped
+  // unwrap as ::ffff:0:x:y; unroutable prefix, refused whole.
+  const REFUSED = [
+    "224.0.0.1", "231.69.176.1", "239.255.255.250", "239.0.0.1",
+    "::ffff:0:7f00:1", "::ffff:0:127.0.0.1", "0:0:0:0:ffff:0:7f00:1",
+    "::ffff:0:808:808",
+  ];
+  for (const text of REFUSED) {
+    it(`refuses ${text}`, () => {
+      expect(isPrivateAddress(text)).toBe(true);
+    });
+  }
 });
 
 function checkAll(tally: Tally, texts: string[], tag: string): void {

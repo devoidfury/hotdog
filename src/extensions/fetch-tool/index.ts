@@ -500,6 +500,7 @@ export function isPrivateAddress(ip: string): boolean {
       (a === 198 && (b === 18 || b === 19)) || // benchmarking (RFC2544)
       (a === 198 && b === 51 && c === 100) || // TEST-NET-2 (documentation)
       (a === 203 && b === 0 && c === 113) || // TEST-NET-3 (documentation)
+      (a >= 224 && a <= 239) || // 224.0.0.0/4 multicast (SSDP/mDNS LAN targets)
       a >= 240 // 240.0.0.0/4 reserved + 255.255.255.255 broadcast
     );
   }
@@ -528,6 +529,22 @@ export function isPrivateAddress(ip: string): boolean {
     ) {
       const v4 = `${(groups[6] >> 8) & 0xff}.${groups[6] & 0xff}.${(groups[7] >> 8) & 0xff}.${groups[7] & 0xff}`;
       return isPrivateAddress(v4);
+    }
+
+    // ::ffff:0:0/96 IPv4-translatable (RFC 6052 translator-local form):
+    // WHATWG serializes [::ffff:0:127.0.0.1] to ::ffff:0:7f00:1, whose
+    // groups sit just outside the unwrap shape above. The prefix is
+    // unroutable on the public internet -- refuse it whole, same
+    // fail-closed doctrine as the 6to4/NAT64 embedded-v4 prefixes.
+    if (
+      groups[0] === 0 &&
+      groups[1] === 0 &&
+      groups[2] === 0 &&
+      groups[3] === 0 &&
+      groups[4] === 0xffff &&
+      groups[5] === 0
+    ) {
+      return true;
     }
 
     // 2001:db8::/32 documentation

@@ -1,7 +1,7 @@
 ---
 name: zengine
 description: The Zengine, when you're feeling funky
-aspects: []
+aspects: ["disagree"]
 preload-skills: []
 ---
 

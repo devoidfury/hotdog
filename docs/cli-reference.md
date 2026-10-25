@@ -106,7 +106,7 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
 /models            List available models
 /profile           List profiles (current marked)
 /profile <name>    Switch profile (also: /profile:<name>)
-/tokens            Show token usage stats
+/tokens            Show token usage stats + context-window fill gauge
 /tools             Toggle tool call display
 /compact [n]       Compact context
 /compact <strategy>  Switch compaction strategy (also: /compact:<strategy>)

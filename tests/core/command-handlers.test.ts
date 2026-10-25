@@ -125,6 +125,36 @@ describe("handleTokens", () => {
     expect(result.content).not.toContain("cache hit");
   });
 
+  it("appends a context gauge line: last-call input vs contextLimit", () => {
+    const agent = makeMockAgent({
+      contextLimit: 200_000,
+      context: {
+        getTokenUsage: mock((): TokenUsage => ({
+          sessionPromptTokens: 60_000, sessionCachedTokens: 8_000, sessionCompletionTokens: 500, sessionTotalTokens: 68_500,
+          turns: 1, promptTokens: 60_000, cachedTokens: 8_000,
+          completionTokens: 500, totalTokens: 68_500,
+        })),
+      },
+    });
+    const result = handleTokens(agent as any);
+    expect(result.content).toContain("◔ 34% (68,000/200,000)");
+  });
+
+  it("omits the context gauge line without a positive contextLimit", () => {
+    const agent = makeMockAgent({
+      contextLimit: 0,
+      context: {
+        getTokenUsage: mock((): TokenUsage => ({
+          sessionPromptTokens: 60_000, sessionCachedTokens: 8_000, sessionCompletionTokens: 500, sessionTotalTokens: 68_500,
+          turns: 1, promptTokens: 60_000, cachedTokens: 8_000,
+          completionTokens: 500, totalTokens: 68_500,
+        })),
+      },
+    });
+    const result = handleTokens(agent as any);
+    expect(result.content).not.toContain("context:");
+  });
+
   // ── Cost lines (opt-in `modelPricing`) ────────────────────────────────────
 
   // session: 1,200 net prompt / 800 cached / 400 completion; last call: 1,000 / 400 / 200.

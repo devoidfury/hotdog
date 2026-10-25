@@ -4,6 +4,7 @@ import { Command, ACTIONS } from "./commands.ts";
 import { trimTurns } from "./context/rewind.ts";
 import { formatError } from "./error.ts";
 import { computeTokenCost, findModelPrice, isPricingConfigured } from "./token-pricing.ts";
+import { contextGaugeSegment } from "./context-gauge.ts";
 import type {
   CommandDefinition,
   CommandHandler,
@@ -132,6 +133,17 @@ export function handleTokens(agent: Agent): CommandResult {
   lines.push(`  total:       ${(u.totalTokens || 0).toLocaleString()} tokens`);
   if (lastCallCost) {
     lines.push(`  cost:        ${formatUsd(lastCallCost.total)}`);
+  }
+
+  // Context gauge: what the last call occupied of the window (prompt tokens
+  // are already net of cached; cached added back = full input). Without a
+  // contextLimit there is nothing honest to measure against: line omitted.
+  const contextGauge = contextGaugeSegment(
+    (u.promptTokens || 0) + (u.cachedTokens || 0),
+    agent.contextLimit,
+  );
+  if (contextGauge) {
+    lines.push(`  context:     ${contextGauge}`);
   }
 
   return { action: ACTIONS.DISPLAY, content: lines.join("\n") };

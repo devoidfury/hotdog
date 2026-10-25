@@ -202,8 +202,9 @@ describe("resolveConfigDirChain", () => {
 
   it("implicit chain falls back to the bundled examples config when nothing else exists", () => {
     // Isolate every implicit candidate: HOME -> temp (no ~/.config/hotdog),
-    // CWD -> temp (no ./config), and /etc/hotdog mocked absent via the
-    // fs.accessSync the dirExists helper calls (it exists on dev hosts).
+    // and /etc/hotdog mocked absent via the fs.accessSync the dirExists helper
+    // calls (it exists on dev hosts). CWD is temp too: a repo-local ./config
+    // is no longer even a chain candidate.
     // Bun's os.homedir() ignores runtime HOME changes, so patch it directly.
     const savedEnv = process.env.HOTDOG_CONFIG_DIR;
     const savedCwd = process.cwd();
@@ -225,7 +226,6 @@ describe("resolveConfigDirChain", () => {
 
       const chain = resolveConfigDirChain(null);
       expect(chain.map((c) => c.source)).toEqual([
-        "./config",
         "/etc/hotdog",
         "fallback ~/.config/hotdog",
         "bundled example fallback",
@@ -237,6 +237,53 @@ describe("resolveConfigDirChain", () => {
       expect(chosen[0]!.exists).toBe(true);
       expect(resolveConfigDir(null)).toBe(chosen[0]!.path);
       expect(fsSync.existsSync(path.join(chosen[0]!.path, "defaults.json"))).toBe(true);
+    } finally {
+      (os as { homedir: typeof os.homedir }).homedir = realHomedir;
+      (fsSync as { accessSync: typeof fsSync.accessSync }).accessSync = realAccessSync;
+      process.chdir(savedCwd);
+      if (savedEnv === undefined) delete process.env.HOTDOG_CONFIG_DIR;
+      else process.env.HOTDOG_CONFIG_DIR = savedEnv;
+      fsSync.rmSync(tmpHome, { recursive: true, force: true });
+      fsSync.rmSync(tmpCwd, { recursive: true, force: true });
+    }
+  });
+
+  it("an existing ./config directory is ignored by the implicit chain", () => {
+    // Removed repo-local auto-discovery, security regression test: a cloned
+    // repo's config/ must never win the chain unflagged. Same isolation as the
+    // bundled-fallback test, with tmpCwd/config created on disk.
+    const savedEnv = process.env.HOTDOG_CONFIG_DIR;
+    const savedCwd = process.cwd();
+    const tmpHome = fsSync.mkdtempSync(path.join(os.tmpdir(), "hotdog-home-"));
+    const tmpCwd = fsSync.mkdtempSync(path.join(os.tmpdir(), "hotdog-cwd-"));
+    fsSync.mkdirSync(path.join(tmpCwd, "config"));
+    const realHomedir = os.homedir;
+    const realAccessSync = fsSync.accessSync;
+    try {
+      delete process.env.HOTDOG_CONFIG_DIR;
+      (os as { homedir: typeof os.homedir }).homedir = () => tmpHome;
+      (fsSync as { accessSync: typeof fsSync.accessSync }).accessSync = ((
+        p: fsSync.PathLike,
+        ...rest: unknown[]
+      ) => {
+        if (String(p) === "/etc/hotdog") throw new Error("absent (mocked)");
+        return (realAccessSync as (...args: unknown[]) => void).call(fsSync, p, ...rest);
+      }) as typeof fsSync.accessSync;
+      process.chdir(tmpCwd);
+
+      const chain = resolveConfigDirChain(null);
+      expect(chain.map((c) => c.source)).toEqual([
+        "/etc/hotdog",
+        "fallback ~/.config/hotdog",
+        "bundled example fallback",
+      ]);
+      const chosen = resolveConfigDir(null);
+      expect(chosen).not.toBe(path.join(tmpCwd, "config"));
+      expect(chosen).toBe(path.resolve(
+        new URL("../../examples/minimal-config/config", import.meta.url).pathname,
+      ));
+      // The explicit opt-in path still works for trusted directories.
+      expect(resolveConfigDir(path.join(tmpCwd, "config"))).toBe(path.join(tmpCwd, "config"));
     } finally {
       (os as { homedir: typeof os.homedir }).homedir = realHomedir;
       (fsSync as { accessSync: typeof fsSync.accessSync }).accessSync = realAccessSync;

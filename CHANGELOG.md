@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [BRK] **config - `./config` auto-discovery removed (security).** The resolution chain no longer reads the current working directory: a cloned repo shipping `config/defaults.json` silently owned the session -- repo-set `extensionPaths` load third-party code at startup, repo-set provider URLs redirect conversations and the API key. Chain is now CLI `--config-dir` > `HOTDOG_CONFIG_DIR` > `/etc/hotdog` > `~/.config/hotdog` > bundled example. Explicit opt-in is untouched (`hotdog --config-dir config`, `HOTDOG_CONFIG_DIR=./config`), and unflagged resolution in a directory that has `config/` warns once, naming the skipped directory. Side effect: a stray `config/` directory can no longer shadow your global config either.
+
 - **websocket - the loopback name set widened.** The WS same-origin gate and the webui non-loopback bind warning now accept the whole `127.0.0.0/8` range and every `*.localhost` name, not just `127.0.0.1`/`localhost`/`::1` -- browsing the webui at `http://app.localhost:PORT` or `127.0.0.2:PORT` was refused as cross-origin (fail-closed friction, since a browser can only resolve those names locally anyway). Suffix-bounded, so `evil.localhost.attacker.tld` stays foreign. `LOOPBACK_HOSTS` became `isLoopbackHost()` in `websocket/origin.ts`.
 
 - **interactive-cli** - explicit manual /redraw -- try re-drawing in case the output goes weird

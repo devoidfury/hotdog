@@ -3,7 +3,12 @@
  *
  * This module exports static path constants, runtime fallback values, and resolveConfigDir().
  * config-dir resolution chain:
- *  CLI arg > HOTDOG_CONFIG_DIR env > CWD config/ > /etc/hotdog > ~/.config/hotdog > bundled examples/minimal-config/config
+ *  CLI arg > HOTDOG_CONFIG_DIR env > /etc/hotdog > ~/.config/hotdog > bundled examples/minimal-config/config
+ *
+ * The CWD `config/` directory is NOT auto-discovered: a cloned repo could ship
+ * config/defaults.json and silently own the session (repo-set extensionPaths load
+ * code at startup). Project-local configs opt in explicitly via --config-dir or
+ * HOTDOG_CONFIG_DIR; an existing ./config under an unflagged resolution warns once.
  *
  * All configurable defaults are resolved by the config layer directly from the schema.
  */
@@ -43,6 +48,7 @@ function dirExists(dir: string): boolean {
 
 const BUNDLED_EXAMPLE_SOURCE = "bundled example fallback";
 let bundledFallbackWarned = false;
+let cwdConfigIgnoredWarned = false;
 
 /**
  * Use the minimal example config shipped with the package as last-resort fallback.
@@ -77,7 +83,16 @@ export function resolveConfigDirChain(cliConfigDir?: string | null): ConfigDirCa
       wins: true,
     });
   } else {
-    candidates.push({ source: "./config", path: path.resolve(cwd(), "config"), wins: dirExists(path.resolve(cwd(), "config")) });
+    // No ./config candidate: repo-local auto-discovery was removed (a cloned
+    // repo's config/ would own the session, and extensionPaths from it is code
+    // execution). Warn once if one sits right here, so the silence is explainable.
+    const cwdConfig = path.resolve(cwd(), "config");
+    if (dirExists(cwdConfig) && !cwdConfigIgnoredWarned) {
+      cwdConfigIgnoredWarned = true;
+      logger.warn(
+        `Ignoring ${cwdConfig}: project-local config auto-discovery was removed (an untrusted repo's config/ would silently own your session). Use --config-dir config or HOTDOG_CONFIG_DIR=./config in directories you trust.`,
+      );
+    }
     candidates.push({ source: "/etc/hotdog", path: "/etc/hotdog", wins: dirExists("/etc/hotdog") });
     // XDG-style directory fallback. When it also does not exist, fallback to the bundled minimal-config example
     const xdgExists = dirExists(xdg);
@@ -96,7 +111,7 @@ export function resolveConfigDirChain(cliConfigDir?: string | null): ConfigDirCa
   if (chain.some((c) => c.chosen && c.source === BUNDLED_EXAMPLE_SOURCE) && !bundledFallbackWarned) {
     bundledFallbackWarned = true;
     logger.warn(
-      `No config directory found (checked ./config, /etc/hotdog, ${xdg}); running on the bundled example config at ${chain.find((c) => c.chosen)!.path}. It lives inside the hotdog package/checkout; set HOTDOG_CONFIG_DIR to use a real config dir.`,
+      `No config directory found (checked /etc/hotdog, ${xdg}); running on the bundled example config at ${chain.find((c) => c.chosen)!.path}. It lives inside the hotdog package/checkout; set HOTDOG_CONFIG_DIR to use a real config dir.`,
     );
   }
 

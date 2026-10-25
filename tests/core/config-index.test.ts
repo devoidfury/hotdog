@@ -28,10 +28,10 @@ describe("resolveConfigDir", () => {
     delete process.env.HOTDOG_CONFIG_DIR;
     try {
       const result = resolveConfigDir();
-      // fallback chain: CWD config/ -> /etc/hotdog -> ~/.config/hotdog,
+      // fallback chain: /etc/hotdog -> ~/.config/hotdog,
       // with the bundled examples dir as last resort when all of those are absent.
+      // (CWD ./config is not a candidate: repo-local auto-discovery was removed.)
       const candidates = [
-        path.resolve(process.cwd(), "config"),
         "/etc/hotdog",
         path.join(os.homedir(), ".config", "hotdog"),
         path.resolve(new URL("../../examples/minimal-config/config", import.meta.url).pathname),

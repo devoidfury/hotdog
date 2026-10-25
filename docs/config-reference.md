@@ -24,14 +24,15 @@ The config directory is resolved in the following order:
 |----------|--------|---------|
 | 1 | CLI flag `--config-dir` | `hotdog --config-dir /custom/config` |
 | 2 | `HOTDOG_CONFIG_DIR` env var | `export HOTDOG_CONFIG_DIR=~/.hotdog` |
-| 3 | `./config` (CWD-relative) | `<project>/config/defaults.json` |
-| 4 | `/etc/hotdog` (system-wide) | `/etc/hotdog/defaults.json` |
-| 5 | XDG: `~/.config/hotdog` (user-specific, recommended) | `~/.config/hotdog/defaults.json` |
-| 6 | Bundled example fallback: `examples/minimal-config/config` (shipped with hotdog) | `<hotdog>/examples/minimal-config/config/defaults.json` |
+| 3 | `/etc/hotdog` (system-wide) | `/etc/hotdog/defaults.json` |
+| 4 | XDG: `~/.config/hotdog` (user-specific, recommended) | `~/.config/hotdog/defaults.json` |
+| 5 | Bundled example fallback: `examples/minimal-config/config` (shipped with hotdog) | `<hotdog>/examples/minimal-config/config/defaults.json` |
 
 The config file itself is always named `defaults.json`.
 
-Sources 1-2 are explicit: the directory must exist, or hotdog fails at startup instead of silently falling through. An existing explicit directory without a `defaults.json` is legal and means pure built-in defaults plus CLI flags (the isolation pattern). Only the unflagged chain (3-6) falls through, ending in the bundled example with a warning.
+Sources 1-2 are explicit: the directory must exist, or hotdog fails at startup instead of silently falling through. An existing explicit directory without a `defaults.json` is legal and means pure built-in defaults plus CLI flags (the isolation pattern). Only the unflagged chain (3-5) falls through, ending in the bundled example with a warning.
+
+**Removed: `./config` (CWD-relative) auto-discovery.** A cloned repository shipping a `config/defaults.json` used to silently own the session -- repo-set `extensionPaths` load third-party code at startup, repo-set provider URLs redirect your conversations and API key. Resolution no longer touches the current working directory; an existing `./config` under unflagged resolution logs a one-time warning naming the skipped directory. Project-local configs are still available as an explicit opt-in for trusted directories: `hotdog --config-dir config` or `HOTDOG_CONFIG_DIR=./config`.
 
 Copy the bundled `examples/minimal-config/config` to `~/.config/hotdog` or `/etc/hotdog` to persist your config, or use `HOTDOG_CONFIG_DIR`/`--config-dir` to keep this folder wherever you want it.
 

@@ -14,10 +14,12 @@ First, get your bun ready - you can snag one here if you don't have one already:
 
 ```sh
 git clone https://github.com/devoidfury/hotdog.git && cd hotdog
-# initialize your own config directory by copying minimal config.
-# copy to ~/.config/hotdog or /etc/hotdog instead if you want it to work from anywhere.
-cp -r examples/minimal-config/config config
-# alternatively configure "providers" in the config
+# initialize your config in the user-wide location hotdog always finds.
+# (hotdog never auto-loads a config from the current directory; point
+#  HOTDOG_CONFIG_DIR or --config-dir at a folder to keep one elsewhere.)
+mkdir -p ~/.config
+cp -r examples/minimal-config/config ~/.config/hotdog
+# alternatively configure "providers" in ~/.config/hotdog/defaults.json
 export HOTDOG_AI_URL="http://localhost:8080"   # your llama.cpp / llama-swap / vllm server
 export HOTDOG_API_KEY="api-key-here"
 
@@ -91,7 +93,7 @@ Then point it at your inference server (`HOTDOG_AI_URL`/`HOTDOG_API_KEY` or `pro
 
 ## Configuration
 
-Copy [the minimal config example](./examples/minimal-config/config) directory to `~/.config/hotdog` (user-wide) or `/etc/hotdog` (system-wide). For project-local config, copy it to `./config` and run hotdog from that directory. Edit `<config-dir>/defaults.json` with your AI provider settings:
+Copy [the minimal config example](./examples/minimal-config/config) directory to `~/.config/hotdog` (user-wide) or `/etc/hotdog` (system-wide). hotdog never reads a config from the current working directory; to keep one elsewhere (e.g. per project) point `HOTDOG_CONFIG_DIR` or `--config-dir` at it. Edit `<config-dir>/defaults.json` with your AI provider settings:
 
 ```json
 {

@@ -110,6 +110,18 @@ export function sessionIndexPath(): string {
   return join(sessionsDir(), "sessions.sqlite");
 }
 
+/**
+ * True when a bun:sqlite error means the index BYTES are corrupt and
+ * quarantine-and-rebuild is the right repair. Environmental failures
+ * (SQLITE_BUSY from a sibling hotdog process, READONLY/CANTOPEN from
+ * permissions or a full disk) are NOT corruption: a healthy shared index
+ * renamed aside over a lock timeout would split a live WAL off its owner.
+ */
+export function isIndexCorruption(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" && (code.startsWith("SQLITE_CORRUPT") || code === "SQLITE_NOTADB");
+}
+
 /** Open + prepare one index file. Any throw (corrupt header, WAL failure,
  *  schema refusal) closes the handle before propagating, so a quarantined
  *  file never stays pinned by a half-open connection. */
@@ -172,6 +184,13 @@ export function openSessionIndex(): Database {
   try {
     next = openPrepared(path);
   } catch (err) {
+    if (!isIndexCorruption(err)) {
+      // Environmental failure (BUSY from a sibling hotdog process,
+      // READONLY/CANTOPEN from permissions or a full disk): propagate
+      // honestly. Renaming a healthy index aside over a lock timeout would
+      // destroy a mirror another live process owns.
+      throw err;
+    }
     // Corrupt index: quarantine aside and rebuild empty. The logs are the
     // system of record, so this only costs re-reads -- reconcile (boot, or
     // the row-missing sync in atCommitPoint) repopulates every row. Without
@@ -192,6 +211,47 @@ export function openSessionIndex(): Database {
   db = next;
   dbFile = path;
   return db;
+}
+
+/**
+ * Quarantine + close + rebuild after corruption is DISCOVERED ON AN OPEN
+ * HANDLE. SQLite is lazy: an index with damaged leaf pages opens fine and
+ * throws only when a query reads the bad page; without this the throw
+ * repeats for the life of the process. Order matters: close BEFORE moving
+ * files so no WAL checkpoint writes into the evidence. The rebuild is
+ * empty -- reconcile and the writer's row-missing path repopulate it from
+ * the JSONL logs, the system of record.
+ */
+function recoverIndexCorruption(err: unknown): void {
+  const path = sessionIndexPath();
+  closeSessionIndex();
+  const quarantined = quarantineIndexFiles(path);
+  logger.error(
+    `[session-index] index corrupted mid-run (${formatError(err)}); ` +
+      (quarantined
+        ? `quarantined the corrupt file to ${quarantined}`
+        : "no index file was in the way") +
+      " -- rebuilt an empty index; the session logs repopulate it",
+  );
+}
+
+/**
+ * Run a synchronous index operation with corruption recovery: if the
+ * operation throws a corruption error, quarantine + rebuild and retry
+ * exactly once on the fresh handle. Callers' ops must be re-runnable
+ * against a rebuilt empty index (reads, upserts, delete+insert txns --
+ * first-attempt transactions roll back, so a retry never double-applies).
+ * A second failure propagates honestly (it is no longer recoverable
+ * corruption: the file is brand new). Environmental errors never retry.
+ */
+function withIndex<T>(op: (d: Database) => T): T {
+  try {
+    return op(openSessionIndex());
+  } catch (err) {
+    if (!isIndexCorruption(err)) throw err;
+    recoverIndexCorruption(err);
+    return op(openSessionIndex());
+  }
 }
 
 export function closeSessionIndex(): void {
@@ -311,10 +371,10 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
   // derived value only ever fills an absent column.
   const derived = deriveModelProfileFromLog(full);
 
-  const d = openSessionIndex();
-  const write = d.transaction(() => {
-    d.run(
-      `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title, profile, model)
+  withIndex((d) => {
+    const write = d.transaction(() => {
+      d.run(
+        `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title, profile, model)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_id) DO UPDATE SET
          path = excluded.path,
@@ -327,39 +387,40 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
          title = COALESCE(excluded.title, sessions.title),
          profile = COALESCE(sessions.profile, excluded.profile),
          model = COALESCE(sessions.model, excluded.model)`,
-      [
-        sessionId,
-        path,
-        st.mtimeMs,
-        state,
-        entries.length,
-        st.size,
-        st.mtimeMs,
-        lifetime.resumeAttempts,
-        title,
-        derived.profile,
-        derived.model,
-      ],
-    );
-    d.run("DELETE FROM open_calls WHERE session_id = ?", [sessionId]);
-    const ins = d.query(
-      "INSERT INTO open_calls (session_id, tool_call_id, kind) VALUES (?, ?, ?)",
-    );
-    for (const id of facts.started) {
-      if (!facts.answered.has(id)) ins.run(sessionId, id, OPEN_CALL_KIND.STARTED);
-    }
-    for (const q of facts.asked) {
-      if (!facts.answered.has(q.toolCallId)) ins.run(sessionId, q.toolCallId, OPEN_CALL_KIND.QUESTION);
-    }
+        [
+          sessionId,
+          path,
+          st.mtimeMs,
+          state,
+          entries.length,
+          st.size,
+          st.mtimeMs,
+          lifetime.resumeAttempts,
+          title,
+          derived.profile,
+          derived.model,
+        ],
+      );
+      d.run("DELETE FROM open_calls WHERE session_id = ?", [sessionId]);
+      const ins = d.query(
+        "INSERT INTO open_calls (session_id, tool_call_id, kind) VALUES (?, ?, ?)",
+      );
+      for (const id of facts.started) {
+        if (!facts.answered.has(id)) ins.run(sessionId, id, OPEN_CALL_KIND.STARTED);
+      }
+      for (const q of facts.asked) {
+        if (!facts.answered.has(q.toolCallId)) ins.run(sessionId, q.toolCallId, OPEN_CALL_KIND.QUESTION);
+      }
+    });
+    write();
   });
-  write();
   return getSessionRow(sessionId);
 }
 
 export function getSessionRow(sessionId: string): SessionRow | null {
-  return openSessionIndex()
-    .query<SessionRow, [string]>("SELECT * FROM sessions WHERE session_id = ?")
-    .get(sessionId);
+  return withIndex((d) =>
+    d.query<SessionRow, [string]>("SELECT * FROM sessions WHERE session_id = ?").get(sessionId),
+  );
 }
 
 export interface ReconcileStats {
@@ -386,7 +447,6 @@ export interface ReconcileStats {
 export async function reconcileSessionIndex(
   opts: { full?: boolean } = {},
 ): Promise<ReconcileStats> {
-  const d = openSessionIndex();
   const stats: ReconcileStats = {
     scanned: 0,
     unchanged: 0,
@@ -406,9 +466,6 @@ export async function reconcileSessionIndex(
   }
 
   const seen = new Set<string>();
-  const rowStmt = d.query<{ size: number; mtime: number }, [string]>(
-    "SELECT size, mtime FROM sessions WHERE session_id = ?",
-  );
 
   for (const file of files) {
     if (!file.endsWith(".jsonl")) continue;
@@ -429,7 +486,10 @@ export async function reconcileSessionIndex(
       continue;
     }
 
-    const row = rowStmt.get(sessionId);
+    // getSessionRow (not a hoisted statement) so every read is corruption-
+    // self-healing: recovery closes the handle, and a cached statement from
+    // the dead connection would throw on its next use.
+    const row = getSessionRow(sessionId);
     if (!opts.full && row && row.size === st.size && row.mtime === st.mtimeMs) {
       stats.unchanged++;
       continue; // the stat-only fast path: fresh row, no read
@@ -446,17 +506,19 @@ export async function reconcileSessionIndex(
     }
   }
 
-  for (const row of d.query<{ session_id: string }, []>(
-    "SELECT session_id FROM sessions",
-  ).all()) {
-    if (seen.has(row.session_id)) continue;
-    stats.quarantined++;
-    logger.warn(
-      `[session-index] quarantining index row for missing session log: ${row.session_id} (dropped; the log is the source of truth)`,
-    );
-    d.run("DELETE FROM open_calls WHERE session_id = ?", [row.session_id]);
-    d.run("DELETE FROM sessions WHERE session_id = ?", [row.session_id]);
-  }
+  withIndex((d) => {
+    for (const row of d.query<{ session_id: string }, []>(
+      "SELECT session_id FROM sessions",
+    ).all()) {
+      if (seen.has(row.session_id)) continue;
+      stats.quarantined++;
+      logger.warn(
+        `[session-index] quarantining index row for missing session log: ${row.session_id} (dropped; the log is the source of truth)`,
+      );
+      d.run("DELETE FROM open_calls WHERE session_id = ?", [row.session_id]);
+      d.run("DELETE FROM sessions WHERE session_id = ?", [row.session_id]);
+    }
+  });
 
   return stats;
 }
@@ -495,29 +557,33 @@ async function atCommitPoint(
   mutate?: (d: Database) => void,
   idempotentOnMissing = false,
 ): Promise<void> {
-  const d = openSessionIndex();
-  const existing = d
-    .query("SELECT 1 AS x FROM sessions WHERE session_id = ?")
-    .get(sessionId);
-  if (!existing) {
-    await syncSessionFromLog(sessionId);
-    if (mutate && idempotentOnMissing) {
+  const rowPresent = withIndex((d) => {
+    const existing = d
+      .query("SELECT 1 AS x FROM sessions WHERE session_id = ?")
+      .get(sessionId);
+    if (!existing) return false;
+    const path = sessionPath(sessionId);
+    const run = d.transaction(() => {
+      const st = statSync(path);
+      d.run(
+        `UPDATE sessions SET last_seq = last_seq + ?, size = ?, mtime = ?, updated_at = ?
+         WHERE session_id = ?`,
+        [delta, st.size, st.mtimeMs, st.mtimeMs, sessionId],
+      );
+      mutate?.(d);
+    });
+    run();
+    return true;
+  });
+  if (rowPresent) return;
+  // Row-missing path: the sync re-derives the honest position from the log.
+  await syncSessionFromLog(sessionId);
+  if (mutate && idempotentOnMissing) {
+    withIndex((d) => {
       const fix = d.transaction(() => mutate(d));
       fix();
-    }
-    return;
+    });
   }
-  const path = sessionPath(sessionId);
-  const run = d.transaction(() => {
-    const st = statSync(path);
-    d.run(
-      `UPDATE sessions SET last_seq = last_seq + ?, size = ?, mtime = ?, updated_at = ?
-       WHERE session_id = ?`,
-      [delta, st.size, st.mtimeMs, st.mtimeMs, sessionId],
-    );
-    mutate?.(d);
-  });
-  run();
 }
 
 /** tool_started fsynced: mirror the open call; state stays honest (untouched). */

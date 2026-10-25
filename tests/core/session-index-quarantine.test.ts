@@ -12,9 +12,11 @@
 //      resumed session onto the boot-default model; where the log attests
 //      nothing, resume says so loudly instead of defaulting quietly.
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import {
   appendFileSync,
+  chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -27,11 +29,13 @@ import os from "node:os";
 import {
   openSessionIndex,
   closeSessionIndex,
+  isIndexCorruption,
   sessionIndexPath,
   reconcileSessionIndex,
   syncSessionFromLog,
   getSessionRow,
   indexSessionModel,
+  indexToolStarted,
   deriveModelProfileFromLog,
 } from "@core/session/session-index.ts";
 import { LOG_SOURCE, type LogEntry } from "@core/session/session-log.ts";
@@ -272,6 +276,173 @@ describe("session-log MODEL_CHANGE record (model timeline rides the log)", () =>
       expect(getSessionRow(sessionId)?.model).toBe("m2");
     } finally {
       dropLog(sessionId);
+    }
+  });
+});
+
+describe("corruption classification (only corrupt bytes get quarantined)", () => {
+  it("isIndexCorruption: true for the SQLITE_CORRUPT family and NOTADB", () => {
+    expect(isIndexCorruption(Object.assign(new Error("database disk image is malformed"), { code: "SQLITE_CORRUPT" }))).toBe(true);
+    expect(isIndexCorruption(Object.assign(new Error("file is not a database"), { code: "SQLITE_NOTADB" }))).toBe(true);
+    // extended sub-codes ride the same prefix
+    expect(isIndexCorruption({ code: "SQLITE_CORRUPT_PAGE" })).toBe(true);
+  });
+
+  it("isIndexCorruption: false for environmental failures, foreign errors, nullish", () => {
+    expect(isIndexCorruption({ code: "SQLITE_BUSY" })).toBe(false);
+    expect(isIndexCorruption({ code: "SQLITE_READONLY" })).toBe(false);
+    expect(isIndexCorruption({ code: "SQLITE_CANTOPEN" })).toBe(false);
+    expect(isIndexCorruption(new Error("boom"))).toBe(false);
+    expect(isIndexCorruption(null)).toBe(false);
+    expect(isIndexCorruption(undefined)).toBe(false);
+  });
+});
+
+describe("environmental open failures never quarantine a healthy index", () => {
+  const RO_DIR = join(os.tmpdir(), `hotdog-index-ro-${Date.now()}`);
+
+  beforeEach(() => {
+    try { rmSync(RO_DIR, { recursive: true, force: true }); } catch {}
+    mkdirSync(RO_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    closeSessionIndex();
+    try { chmodSync(RO_DIR, 0o700); rmSync(RO_DIR, { recursive: true, force: true }); } catch {}
+    process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
+  });
+
+  it("a CANTOPEN failure propagates without quarantining or claiming a rebuild", () => {
+    // Read-only sessions dir: the index cannot be created or opened. That is
+    // an environment problem, not corrupt bytes -- the process must hear the
+    // real error, and nothing may be renamed "corrupt".
+    process.env.HOTDOG_SESSIONS_DIR = join(RO_DIR, "sessions");
+    mkdirSync(join(RO_DIR, "sessions"));
+    chmodSync(join(RO_DIR, "sessions"), 0o500);
+    closeSessionIndex();
+
+    const logged = captureLoggedErrors();
+    try {
+      let threw: unknown = null;
+      try {
+        openSessionIndex();
+      } catch (e) {
+        threw = e;
+      }
+      expect(threw).not.toBeNull();
+      expect((threw as { code?: string }).code).toBe("SQLITE_CANTOPEN");
+      // No false postmortem: nothing was quarantined...
+      expect(readdirSync(join(RO_DIR, "sessions")).some((f) => f.includes(".corrupt-"))).toBe(false);
+      // ...and no misleading "quarantined / rebuilding an empty index" claim.
+      expect(logged.some((l) => /quarantin|rebuild/i.test(l))).toBe(false);
+    } finally {
+      resetLoggerForTesting();
+      chmodSync(join(RO_DIR, "sessions"), 0o700);
+    }
+  });
+});
+
+// Mid-run corruption: SQLite is lazy, so an index whose leaf pages are
+// damaged OPENS FINE and throws only when a query reads the bad page. The
+// existing open-time quarantine never sees it, and without recovery the
+// handle stays poisoned for the life of the process. Recovery here means:
+// quarantine (bytes preserved), rebuild empty, complete the operation on
+// the fresh handle -- and the JSONL logs repopulate everything after.
+describe("mid-run corruption recovery", () => {
+  beforeEach(() => {
+    resetIndex();
+  });
+
+  it("a corrupt page hit mid-query quarantines, rebuilds, and completes the read", async () => {
+    const sessionId = uniqueId("midrun");
+    fixtureLog(sessionId, [
+      line({ session_id: sessionId, source: LOG_SOURCE.SESSION_START, content: "", model: "m-midrun", profile: "p-midrun" }),
+      line({ session_id: sessionId, content: "u" }),
+    ]);
+    await syncSessionFromLog(sessionId);
+    expect(getSessionRow(sessionId)).not.toBeNull();
+
+    // Damage the index out-of-band with the handle CLOSED (page cache gone),
+    // so the corruption surfaces on the next query, not on the open.
+    closeSessionIndex();
+    const dbPath = sessionIndexPath();
+    const buf = Buffer.from(readFileSync(dbPath));
+    buf.fill(0xff, 4096, 8192); // page 2 = sessions table root
+    writeFileSync(dbPath, buf);
+
+    const logged = captureLoggedErrors();
+    try {
+      // Must NOT throw: the operation completes on a rebuilt (empty) index.
+      expect(getSessionRow(sessionId)).toBeNull();
+
+      // The damaged bytes were quarantined aside, never deleted.
+      const quarantined = readdirSync(SESSIONS_DIR).filter((f) => f.includes("sessions.sqlite.corrupt-"));
+      expect(quarantined.length).toBe(1);
+      const kept = quarantined.find((f) => !f.endsWith("-wal") && !f.endsWith("-shm"))!;
+      expect(readFileSync(join(SESSIONS_DIR, kept))).toEqual(buf);
+
+      // Loud, never silent.
+      expect(logged.some((l) => /corrupt/i.test(l))).toBe(true);
+    } finally {
+      resetLoggerForTesting();
+    }
+  });
+
+  it("reconcile repopulates the rebuilt index from the logs; no data was lost", async () => {
+    const sessionId = uniqueId("midrun-reconcile");
+    fixtureLog(sessionId, [
+      line({ session_id: sessionId, source: LOG_SOURCE.SESSION_START, content: "", model: "m-midrun", profile: "p-midrun" }),
+      line({ session_id: sessionId, content: "u" }),
+    ]);
+    await syncSessionFromLog(sessionId);
+    closeSessionIndex();
+    const dbPath = sessionIndexPath();
+    const buf = Buffer.from(readFileSync(dbPath));
+    buf.fill(0xff, 4096, 8192);
+    writeFileSync(dbPath, buf);
+
+    // Discovery on a read, then the log-driven repair.
+    expect(getSessionRow(sessionId)).toBeNull(); // triggers recovery
+    const stats = await reconcileSessionIndex();
+    expect(stats.errors).toBe(0);
+    const row = getSessionRow(sessionId);
+    expect(row).not.toBeNull();
+    expect(row!.model).toBe("m-midrun"); // model-faithful rebuild on the new path too
+    expect(row!.profile).toBe("p-midrun");
+  });
+
+  it("the writer commit point self-heals: a mirror write on a poisoned page rebuilds instead of throwing", async () => {
+    const sessionId = uniqueId("midrun-writer");
+    fixtureLog(sessionId, [
+      line({ session_id: sessionId, source: LOG_SOURCE.SESSION_START, content: "", model: "m-w", profile: "p-w" }),
+      line({ session_id: sessionId, content: "u" }),
+    ]);
+    await syncSessionFromLog(sessionId);
+    closeSessionIndex();
+    const buf = Buffer.from(readFileSync(sessionIndexPath()));
+    buf.fill(0xff, 4096, 8192);
+    writeFileSync(sessionIndexPath(), buf);
+
+    // indexToolStarted runs mid-session after an fsynced record; it must
+    // survive the bad page (best-effort mirror by design, but a lifetime of
+    // loud failures is not "best effort").
+    const logged = captureLoggedErrors();
+    try {
+      await indexToolStarted(sessionId, "tc-1", { model: "m-w2", profile: "p-w" });
+
+      // The row is back (log-rebuilt during recovery), not silently absent,
+      // and the pending idempotent mirror meta was applied on top of the log
+      // attestation (live truth outranks a rebuild, per the COALESCE rule).
+      const row = getSessionRow(sessionId);
+      expect(row).not.toBeNull();
+      expect(row!.model).toBe("m-w2");
+
+      // Guard against a vacuous pass: prove recovery actually fired (the
+      // corruption surfaced on the writer's query and was quarantined).
+      expect(logged.some((l) => /corrupt/i.test(l))).toBe(true);
+      expect(readdirSync(SESSIONS_DIR).some((f) => f.includes("sessions.sqlite.corrupt-"))).toBe(true);
+    } finally {
+      resetLoggerForTesting();
     }
   });
 });

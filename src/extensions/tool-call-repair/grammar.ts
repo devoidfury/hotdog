@@ -134,7 +134,9 @@ function parseParams(text: string, from: number): { args: Record<string, unknown
       // Junk between parameters is tolerated (stray fences/commas/newlines).
       const p = parseParam(text, paramOpen, pos);
       if (p === null) return null; // unterminated parameter -- fail closed
-      args[p.name] = p.value;
+      // defineProperty, not assignment: a parameter literally named "__proto__" would hit the
+      // Object.prototype accessor and be silently dropped, losing an argument the model did emit.
+      Object.defineProperty(args, p.name, { value: p.value, enumerable: true, writable: true, configurable: true });
       pos = p.end;
       continue;
     }

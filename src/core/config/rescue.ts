@@ -95,16 +95,21 @@ export function stripJsonc(src: string): { text: string; issues: JsoncIssue[] } 
   return { text: out, issues };
 }
 
+/** Recursion ceiling for findJsonError; config files nest in the tens. */
+const MAX_SCAN_DEPTH = 2000;
+
 /**
  * Engine-independent syntax locator: returns the index of the first token
- * that violates JSON grammar, or null when the text parses. JSON.parse error
- * messages carry no position, so rescue needs its own scan to point at the
- * offending line.
+ * that violates JSON grammar, or null when the text parses (or nests too
+ * deeply to scan). JSON.parse error messages carry no position, so rescue
+ * needs its own scan to point at the offending line.
  */
 export function findJsonError(text: string): number | null {
   const n = text.length;
   let i = text.charCodeAt(0) === 0xfeff ? 1 : 0;
   let failAt = i;
+  let depth = 0;
+  let gaveUp = false;
 
   const note = (pos: number): false => {
     if (pos >= failAt) failAt = pos;
@@ -178,6 +183,21 @@ export function findJsonError(text: string): number | null {
   };
 
   const parseValue = (): boolean => {
+    // Depth guard: recursive descent blows the JS stack somewhere past 10k
+    // levels, while JSON.parse handles 20k+ fine -- a broken file this deep
+    // RangeError'd out of rescue instead of reporting. Treat "too deep to
+    // scan" like any other unlocatable grammar: give up, verdict null.
+    if (depth >= MAX_SCAN_DEPTH) {
+      gaveUp = true;
+      return true;
+    }
+    depth++;
+    const ok = parseNested();
+    depth--;
+    return ok;
+  };
+
+  const parseNested = (): boolean => {
     ws();
     const c = text[i];
     if (c === undefined) return note(n);
@@ -240,7 +260,9 @@ export function findJsonError(text: string): number | null {
     }
   };
 
-  if (!parseValue()) return failAt;
+  const parsed = parseValue();
+  if (gaveUp) return null;
+  if (!parsed) return failAt;
   ws();
   if (i < n) {
     note(i); // trailing garbage

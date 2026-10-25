@@ -83,8 +83,14 @@ export function validate(value: unknown, schema: unknown, path: string = ""): st
       errors.push(`${path || "root"}: string length ${value.length} exceeds maximum ${schemaObj.maxLength}`);
     }
     if (schemaObj.pattern !== undefined) {
-      const regex = new RegExp(schemaObj.pattern as string);
-      if (!regex.test(value)) {
+      let regex: RegExp | null = null;
+      try {
+        regex = new RegExp(schemaObj.pattern as string);
+      } catch {
+        // Invalid pattern source: fail closed -- a pattern that cannot be evaluated cannot certify validity.
+        errors.push(`${path || "root"}: invalid pattern regex ${JSON.stringify(String(schemaObj.pattern))}`);
+      }
+      if (regex !== null && !regex.test(value)) {
         errors.push(`${path || "root"}: must match pattern "${schemaObj.pattern}"`);
       }
     }

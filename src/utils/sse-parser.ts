@@ -39,18 +39,38 @@ export class SseParser {
     let buffer = "";
     let jsonBuffer = "";
     let currentEvent = "message";
+    // A CR at the stream tail is held here (not in `buffer`) one read: it may
+    // be the first half of a CRLF split across chunks. Re-prepending it to the
+    // buffer would re-split it as a standalone terminator and inject a phantom
+    // blank line, prematurely ending a non-"message" event block.
+    let pendingCR = false;
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        let text = decoder.decode(value, { stream: true });
+        if (pendingCR) {
+          // The held CR already terminated its line. An LF right after it is
+          // the tail of the split CRLF: consume it. While the decoder emits
+          // nothing (mid code-point) the question stays open.
+          if (text.length === 0) continue;
+          if (text.startsWith("\n")) text = text.slice(1);
+          pendingCR = false;
+        }
+        buffer += text;
         // WHATWG HTML 9.2.6: lines end with CRLF, a lone LF, or a lone CR.
-        // A CR at the buffer tail is held one read: it may be the first half
-        // of a CRLF split across chunks (the split consumes it otherwise).
         const lines = buffer.split(/\r\n|\r|\n/);
-        buffer = (buffer.endsWith("\r") ? "\r" : "") + (lines.pop() || "");
+        if (buffer.endsWith("\r")) {
+          // The trailing CR terminates the last complete line, but might be
+          // half of a CRLF: hold it out of `buffer` until the next read.
+          pendingCR = true;
+          lines.pop();
+          buffer = "";
+        } else {
+          buffer = lines.pop() || "";
+        }
 
         for (const line of lines) {
           const trimmed = line.trim();

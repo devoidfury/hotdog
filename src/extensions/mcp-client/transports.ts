@@ -54,6 +54,66 @@ export interface McpTransport {
   readonly isStreaming: boolean;
 }
 
+/**
+ * Newline framing for stdio streams, extracted from StdioTransport's read
+ * loop so the byte-feed seam is testable without spawning a process.
+ * @internal
+ */
+export class StdioLineFramer {
+  readonly #onLine: (line: string) => void;
+  readonly #maxChars: number;
+  // Stateful decoder: a multibyte UTF-8 sequence split across two read
+  // boundaries would decode to U+FFFD with per-chunk toString().
+  readonly #decoder = new TextDecoder();
+  #buffer: string = "";
+  // While set, incoming bytes are drained (not buffered) until the next
+  // line boundary: the previous line exceeded the char cap. Draining
+  // instead of tearing down keeps framing aligned for the subsequent
+  // messages, and a truncated line is never dispatched (a cut-off JSON
+  // prefix could still parse as a different, valid value).
+  #discarding: boolean = false;
+
+  constructor(onLine: (line: string) => void, maxChars: number) {
+    this.#onLine = onLine;
+    this.#maxChars = maxChars;
+  }
+
+  /** Chars held for the current unflushed partial line. @internal */
+  get bufferedChars(): number { return this.#buffer.length; }
+
+  /** Feed one raw read chunk; complete lines (without the \n) go to onLine. */
+  feed(chunk: Uint8Array): void {
+    let data = this.#decoder.decode(chunk, { stream: true });
+
+    if (this.#discarding) {
+      const newlineIdx = data.indexOf("\n");
+      if (newlineIdx === -1) return; // still draining the oversized line
+      data = data.slice(newlineIdx + 1);
+      this.#discarding = false;
+    }
+
+    this.#buffer += data;
+
+    let newlineIdx: number;
+    while ((newlineIdx = this.#buffer.indexOf("\n")) !== -1) {
+      const line = this.#buffer.slice(0, newlineIdx);
+      this.#buffer = this.#buffer.slice(newlineIdx + 1);
+      this.#onLine(line);
+    }
+
+    // Only the unflushed partial line can grow unbounded (pipe reads are
+    // chunked, so a complete line is always dispatched as it is flushed).
+    // If it alone exceeds the cap, drop it and drain to the next boundary.
+    if (this.#buffer.length > this.#maxChars) {
+      logger.error(
+        `MCP stdio line exceeds ${this.#maxChars} chars; discarding until the next line boundary`,
+      );
+      this.#discarding = true;
+      this.#buffer = "";
+    }
+  }
+}
+
 export class StdioTransport implements McpTransport {
   readonly isStreaming = true;
 
@@ -191,47 +251,14 @@ export class StdioTransport implements McpTransport {
   #startReader(): void {
     const readStream = this.#readStream;
     if (!readStream) return;
-    let buffer = "";
-    // While set, incoming bytes are drained (not buffered) until the next
-    // line boundary: the previous line exceeded MAX_TRANSPORT_BUFFER_CHARS.
-    // Draining instead of destroying keeps framing aligned for the
-    // subsequent messages, and a truncated line is never dispatched (a
-    // cut-off JSON prefix could still parse as a different, valid value).
-    let discarding = false;
-    // Stateful decoder: a multibyte UTF-8 sequence split across two read
-    // boundaries would decode to U+FFFD with per-chunk toString().
-    const decoder = new TextDecoder();
+    const framer = new StdioLineFramer(
+      (line) => this.#dispatchMessage(line),
+      MAX_TRANSPORT_BUFFER_CHARS,
+    );
 
     readStream.on("data", (chunk: Buffer) => {
       if (this.#destroyed) return;
-      let data = decoder.decode(chunk, { stream: true });
-
-      if (discarding) {
-        const newlineIdx = data.indexOf("\n");
-        if (newlineIdx === -1) return; // still draining the oversized line
-        data = data.slice(newlineIdx + 1);
-        discarding = false;
-      }
-
-      buffer += data;
-
-      let newlineIdx: number;
-      while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, newlineIdx);
-        buffer = buffer.slice(newlineIdx + 1);
-        this.#dispatchMessage(line);
-      }
-
-      // Only the unflushed partial line can grow unbounded (pipe reads are
-      // chunked, so a complete line is always dispatched as it is flushed).
-      // If it alone exceeds the cap, drop it and drain to the next boundary.
-      if (buffer.length > MAX_TRANSPORT_BUFFER_CHARS) {
-        logger.error(
-          `MCP stdio line exceeds ${MAX_TRANSPORT_BUFFER_CHARS} chars; discarding until the next line boundary`,
-        );
-        discarding = true;
-        buffer = "";
-      }
+      framer.feed(chunk);
     });
 
     readStream.on("error", (e: Error) => {

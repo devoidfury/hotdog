@@ -265,7 +265,10 @@ export class Workspace {
    * @throws PathEscapeError if the path escapes the workspace or is denylisted.
    */
   resolveSafe(path: string): string {
-    if (!path || typeof path !== "string") {
+    // NUL is a literal filename character on Linux, so path.resolve keeps it; a returned
+    // path containing one crashes every downstream fs call with a raw TypeError instead of
+    // a clean PathEscapeError. Reject it as invalid input.
+    if (!path || typeof path !== "string" || path.includes("\u0000")) {
       throw PathEscapeError.invalidInput(path);
     }
 

@@ -41,6 +41,25 @@ hotdog workflow cancel <run-id>  # Finished runs: idempotent report; live runs o
                                  # process must be stopped there (Ctrl-C / '/workflow cancel')
 ```
 
+## Exit Codes
+
+```
+0    success. Also what `webui` exits with after a graceful SIGINT/SIGTERM
+     drain: its handler intercepts the signal, so a completed shutdown is
+     reported as success
+1    runtime failure (includes subcommands reporting problems, e.g. rescue findings)
+2    usage error in the parse phase (unknown flag, unknown subcommand,
+       missing or non-numeric flag value) -- getopt convention, so scripts
+       can tell "invoked wrong" from "run failed"
+130  killed by SIGINT during a one-shot run (Bun default signal death: no
+       SIGINT handler is registered there). Interactive Ctrl-C cancels the
+       turn instead of exiting
+143  killed by SIGTERM (same default semantics, outside webui's drain)
+```
+
+Rejected argv tokens are echoed spoof-safe: terminal escapes and bidi marks
+render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
+
 ## CLI Options
 
 ```

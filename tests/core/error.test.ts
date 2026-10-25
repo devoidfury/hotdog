@@ -99,6 +99,28 @@ describe("Error types", () => {
       expect(err.message).toContain("--help");
       expect(err.flag).toBe("--zzzzz");
     });
+
+    // The rejected arg is attacker-shaped input echoed to a real terminal:
+    // the message renders spoof-safe ([U+XXXX] tokens), while the data
+    // fields keep the raw bytes for suggestion matching.
+    it("echoes hostile args spoof-safe while keeping raw data on the fields", () => {
+      const hostile = "fo\u001B[5moobar\u202E";
+      const sub = CliError.UnknownSubcommand(hostile);
+      expect(sub.message).toBe("Unknown subcommand: fo[U+001B][5moobar[U+202E]");
+      expect(sub.message).not.toContain("\u001B");
+      expect(sub.subcommand).toBe(hostile);
+
+      const flag = CliError.UnknownFlag("--x\u0007y", ["--help"]);
+      expect(flag.message).toContain("Unknown flag: --x[U+0007]y");
+      expect(flag.message).not.toContain("\u0007");
+      expect(flag.flag).toBe("--x\u0007y");
+
+      const mv = CliError.MissingValue("--mod\u200Bel");
+      expect(mv.message).toBe("--mod[U+200B]el requires a value");
+
+      const iv = CliError.InvalidValue("--t\u0008imeout");
+      expect(iv.message).toBe("--t[U+0008]imeout requires a numeric value");
+    });
   });
 
   describe("ExtensionError factories", () => {

@@ -218,6 +218,25 @@ describe("Model-switch extension > edge cases", () => {
     expect(agent.model).toBe(originalModel);
   });
 
+  it("/model error echo renders a hostile model name spoof-safe", async () => {
+    const core = createMockCore({
+      coreConfig: { modelSwitch: { commandEnabled: true } },
+    });
+    const ext = createModelSwitchExtension(core);
+
+    const registry = createCommandRegistry();
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry } as any);
+
+    const def = registry.get("model")!;
+    const agent = createMockAgent(core.resolved.modelRegistry) as any;
+    const result = await def.handler!(agent, "model glauc\u001B[2Jo\u202E");
+
+    expect((result as any).content).toContain("not found in registry");
+    expect((result as any).content).toContain("[U+001B]");
+    expect((result as any).content).toContain("[U+202E]");
+    expect((result as any).content).not.toContain("\u001B");
+  });
+
   it("/model command with extra whitespace in model name", async () => {
     const core = createMockCore({
       coreConfig: { modelSwitch: { commandEnabled: true } },

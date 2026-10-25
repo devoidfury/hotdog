@@ -10,6 +10,7 @@ import { AgentError, CliError, formatError } from "../error.ts";
 import { HOOKS } from "../hooks.ts";
 import { parseJsonLines } from "@utils/json-lines.ts";
 import { logger } from "@utils/logger.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 
 export const LOG_SOURCE = {
   SYSTEM_PROMPT: "system_prompt",
@@ -379,7 +380,7 @@ export async function restoreSessionIntoAgent(
     return { replayed: 0, pendingQuestions: [], profile: null, openTurn: false };
   }
   if (!(await sessionExists(explicitSessionId))) {
-    throw new CliError(`Invalid session id: ${explicitSessionId} (no such session)`);
+    throw new CliError(`Invalid session id: ${spoofSafe(explicitSessionId)} (no such session)`);
   }
 
   // FULL log: the cap's counter is an audit trail a mid-turn RESET must not

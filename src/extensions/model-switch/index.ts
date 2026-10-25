@@ -9,6 +9,7 @@ import {
 import { type Agent } from "@core/agent.ts";
 import { matcher, completion } from "./completions.ts";
 import { selectableModelKeys, isTextGenerative } from "@core/config/providers.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 
 interface ModelSwitchExtConfig {
   toolEnabled?: boolean;
@@ -75,13 +76,14 @@ export function create(core: CoreContext): ExtensionInstance {
             if (!agent.modelRegistry[modelName]) {
               return {
                 action: ACTIONS.DISPLAY,
-                content: `Error: model "${modelName}" not found in registry. Use /models to see available models.`,
+                // The typed name is echoed to the terminal: render spoof-safe.
+                content: `Error: model "${spoofSafe(modelName)}" not found in registry. Use /models to see available models.`,
               };
             }
             if (!isTextGenerative(agent.modelRegistry[modelName])) {
               return {
                 action: ACTIONS.DISPLAY,
-                content: `Error: model "${modelName}" is not text-in/text-out and cannot be used as the main model.`,
+                content: `Error: model "${spoofSafe(modelName)}" is not text-in/text-out and cannot be used as the main model.`,
               };
             }
 

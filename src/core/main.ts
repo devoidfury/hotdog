@@ -25,7 +25,8 @@ import type { ProviderDef } from "./config/providers.ts";
 import { getLayerDefault } from "./config/schema-loader.ts";
 import { cliFlagsFromSchema, CONFIG_SCHEMA, type CoreConfigWithExtensions } from "./config/schema-loader.ts";
 import { ConfigRegistry } from "./extensions/config.ts";
-import { CliError, formatError } from "./error.ts";
+import { CliError, USAGE_ERROR_EXIT_CODE, formatError } from "./error.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 import { createSubcommandRegistry, type CliSubcommandRegistry } from "./extensions/registries.ts";
 import {
   createWireFormatRegistry,
@@ -277,22 +278,30 @@ export async function main(): Promise<number> {
   try {
     cli = parseArgs(configRegistry, cliSubcommandRegistry.names());
   } catch (e: unknown) {
-    if (e instanceof CliError && e.subcommand !== undefined) {
-      const knownSubcommands = cliSubcommandRegistry.names();
-      const posLower = e.subcommand.toLowerCase();
-      const similar = suggestCandidates(posLower, knownSubcommands, {
-        normalize: (s) => s.toLowerCase(),
-      });
-      if (similar.length === 1) {
-        logger.error(`Unknown subcommand: ${posLower}\n` + `Did you mean: ${similar[0]}?`);
+    if (e instanceof CliError) {
+      // Parse-phase usage failure: getopt-style exit 2 so scripts can tell
+      // "invoked wrong" from runtime failures (1). The offending token goes
+      // through spoofSafe (escapes/bidi must not reach the terminal).
+      if (e.subcommand !== undefined) {
+        const knownSubcommands = cliSubcommandRegistry.names();
+        const posLower = e.subcommand.toLowerCase();
+        const echo = spoofSafe(posLower);
+        const similar = suggestCandidates(posLower, knownSubcommands, {
+          normalize: (s) => s.toLowerCase(),
+        });
+        if (similar.length === 1) {
+          logger.error(`Unknown subcommand: ${echo}\n` + `Did you mean: ${similar[0]}?`);
+        } else {
+          logger.error(
+            `Unknown subcommand: ${echo}\n` +
+              `Available subcommands: ${knownSubcommands.join(", ")}\n` +
+              `To send a prompt, use -p or --prompt: hotdog -p "your prompt"`,
+          );
+        }
       } else {
-        logger.error(
-          `Unknown subcommand: ${posLower}\n` +
-            `Available subcommands: ${knownSubcommands.join(", ")}\n` +
-            `To send a prompt, use -p or --prompt: hotdog -p "your prompt"`,
-        );
+        logger.error(formatError(e));
       }
-      return 1;
+      return USAGE_ERROR_EXIT_CODE;
     }
     throw e;
   }

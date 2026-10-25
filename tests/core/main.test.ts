@@ -164,7 +164,7 @@ describe("main -- unknown subcommand", () => {
       HOTDOG_AI_URL: "",
     });
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(2)  // usage error: getopt convention;
     expect(stderr).toContain("Unknown subcommand");
     expect(stderr).toContain("Did you mean: info");
   });
@@ -175,7 +175,7 @@ describe("main -- unknown subcommand", () => {
       HOTDOG_AI_URL: "",
     });
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(2)  // usage error: getopt convention;
     expect(stderr).toContain("Unknown subcommand");
     expect(stderr).toContain("Available subcommands");
     expect(stderr).toContain("-p or --prompt");

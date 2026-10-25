@@ -7,6 +7,8 @@
 // from unexpected errors (bugs, iteration errors, null derefs) so that
 // the latter always include a stack trace and context.
 
+import { spoofSafe } from "@utils/spoof.ts";
+
 export type ErrorType =
   | "unknown"
   | "cancelled"
@@ -32,6 +34,10 @@ export class AppError extends Error {
 
 // ── Domain-specific error classes ───────────────────────────────────────
 
+// Protocol constant, not user-config: getopt convention, like the static
+// path constants. Scripts branch on it (1 stays "runtime failure").
+export const USAGE_ERROR_EXIT_CODE = 2;
+
 export class CliError extends AppError {
   /** Set by UnknownSubcommand/UnknownFlag: the offending positional/flag text. */
   subcommand?: string;
@@ -41,16 +47,20 @@ export class CliError extends AppError {
     super(message, "cli");
   }
 
+  // The rejected argv token is attacker-shaped input echoed to a real
+  // terminal (escapes clear the screen, bidi rewrites the line): the message
+  // renders it spoof-safe. The data fields keep raw bytes for matching.
+
   static MissingValue(arg: string): CliError {
-    return new CliError(`${arg} requires a value`);
+    return new CliError(`${spoofSafe(arg)} requires a value`);
   }
 
   static InvalidValue(arg: string): CliError {
-    return new CliError(`${arg} requires a numeric value`);
+    return new CliError(`${spoofSafe(arg)} requires a numeric value`);
   }
 
   static UnknownSubcommand(arg: string): CliError {
-    const err = new CliError(`Unknown subcommand: ${arg}`);
+    const err = new CliError(`Unknown subcommand: ${spoofSafe(arg)}`);
     err.subcommand = arg;
     return err;
   }
@@ -61,10 +71,11 @@ export class CliError extends AppError {
    * typo self-corrects without a --help round trip.
    */
   static UnknownFlag(arg: string, suggestions?: string[]): CliError {
+    const echo = spoofSafe(arg);
     const err = new CliError(
       suggestions && suggestions.length > 0
-        ? `Unknown flag: ${arg}\nDid you mean: ${suggestions.join(", ")}?`
-        : `Unknown flag: ${arg}\nRun hotdog --help to see available flags.`,
+        ? `Unknown flag: ${echo}\nDid you mean: ${suggestions.join(", ")}?`
+        : `Unknown flag: ${echo}\nRun hotdog --help to see available flags.`,
     );
     err.flag = arg;
     return err;

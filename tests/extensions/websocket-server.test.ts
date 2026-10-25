@@ -13,7 +13,7 @@ import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { LlmError } from "@core/error.ts";
 import { MessageLog } from "@core/context/message-log.ts";
 import type { AgentLike } from "@core/session/index.ts";
-import { TASK_STATUS } from "@core/session/task-manager.ts";
+import { TASK_STATUS } from "@core/session/task-types.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 import { createFixture, simpleTool } from "../helpers.ts";
 import { Message } from "@core/context/message.ts";

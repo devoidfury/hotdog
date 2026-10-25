@@ -2,11 +2,8 @@
 // websocket/webui subagents relay.
 
 import { describe, it, expect } from "bun:test";
-import {
-  TaskManager,
-  TASK_STATUS,
-  type TaskObserverEvent,
-} from "@core/session/task-manager.ts";
+import { TaskManager } from "@core/session/task-manager.ts";
+import { TASK_STATUS, type TaskObserverEvent } from "@core/session/task-types.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
 
 type Sink = { emit: (event: unknown) => void; onTaskComplete: (result: string) => void };

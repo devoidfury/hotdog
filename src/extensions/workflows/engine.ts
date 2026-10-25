@@ -28,7 +28,7 @@ import type {
   TaskStatus,
   TurnPrompt,
   TurnResult,
-} from "@core/session/task-manager.ts";
+} from "@core/session/task-types.ts";
 import type { Workflow, WorkflowLimits, WorkflowNode } from "./workflow.ts";
 import { DEFAULT_WORKFLOW_LIMITS, nodeDeps } from "./workflow.ts";
 

@@ -9,7 +9,7 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import { createWsServer } from "@extensions/websocket/server.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
-import { TASK_STATUS } from "@core/session/task-manager.ts";
+import { TASK_STATUS } from "@core/session/task-types.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import {
   createWsMockCore,

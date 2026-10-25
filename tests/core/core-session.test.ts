@@ -11,7 +11,7 @@ import { createServiceRegistry } from '../../src/core/extensions/service-registr
 import { ConfigRegistry } from '../../src/core/extensions/config.ts';
 import { createSubcommandRegistry } from '../../src/core/extensions/registries.ts';
 import { createCompletionService } from '../../src/core/completion.ts';
-import { TASK_STATUS } from '../../src/core/session/task-manager.ts';
+import { TASK_STATUS } from '../../src/core/session/task-types.ts';
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { ACTIONS } from '../../src/core/commands.ts';
 import { MockLLMClient } from '../helpers.ts';

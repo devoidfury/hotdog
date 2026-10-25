@@ -6,13 +6,15 @@ import { describe, it, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, truncateSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { TASK_STATUS, TaskHandle, TaskManager } from "@core/session/task-manager.ts";
-import type {
-  SpawnTaskOptions,
-  TaskCompletion,
-  TurnPrompt,
-  TurnResult,
-} from "@core/session/task-manager.ts";
+import { TaskManager } from "@core/session/task-manager.ts";
+import {
+  TASK_STATUS,
+  TaskHandle,
+  type SpawnTaskOptions,
+  type TaskCompletion,
+  type TurnPrompt,
+  type TurnResult,
+} from "@core/session/task-types.ts";
 import { LlmError } from "@core/error.ts";
 import { contentToText } from "@core/context/message.ts";
 import { parseWorkflow, type Workflow } from "@extensions/workflows/workflow.ts";

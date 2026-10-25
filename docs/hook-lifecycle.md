@@ -237,7 +237,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
 | `SESSION_CREATE` | `session:create` | awaited notify | New agent created via SessionManager |
-| `SESSION_END` | `session:end` | notify (fire-and-forget) | Session deleted (`SessionManager.deleteSession`) or task agent released (`TaskManager._runTask`, fired on the agent's own hooks) |
+| `SESSION_END` | `session:end` | notify (fire-and-forget) | Session deleted (`SessionManager.deleteSession`) or task agent released (`TaskExecution.finalizeTurn`/`launch`, fired on the agent's own hooks) |
 | `SESSION_SWAP` | `session:swap` | awaited notify | Agent swapped (`swap()` awaits it; the sync `switchSession()` path fires it unawaited) |
 | `SESSION_RESTORE_ACTIVE` | `session:restoreActive` | notify (fire-and-forget) | Restore flag changes on agent (sync setter) |
 | `SESSION_RESUME_ATTEMPT` | `session:resumeAttempt` | awaited notify | `restoreSessionIntoAgent()` resumes a session by explicit id; session-log fsyncs a `resume_attempt` record (livelock-cap counter, logged so it survives index deletion) before the replay reads. `origin` is `"auto"` (non-user: webui reconnect, future gateway dial-back -- the only resumes the livelock cap counts) or `"manual"` (Continue, CLI `-s` -- never capped); `consecutiveAutoResumes` is the counter AFTER this record lands, so the index can park the row when the cap is reached |

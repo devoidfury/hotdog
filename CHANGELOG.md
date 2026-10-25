@@ -2,9 +2,25 @@
 
 ## Unreleased
 
+- **interactive-cli** - explicit manual /redraw -- try re-drawing in case the output goes weird
+
+- **skills** -  mid-run /skill activation steers instead of appending to context mid-await
+
+- **tool-call-repair** - block and guide for hallucinated QFN proxy urls
+
+- **rescue `--json` envelope.** Fatal-config guidance stays off stdout so the envelope stays parseable.
+
+- **cli - usage errors exit 2**, and rejected argv echoes back spoof-safe.
+
+- **tokens - context-window fill gauge** against the model's `contextLimit`.
+
+- **sessions cleanup/delete - reclaim leaked baton mirrors** (paired plus age-gated orphans).
+
+- **fuzz suites.** added fuzz suites covering SSE framing, stream-processor deltas, session-log and workflow-journal replay, MCP stdio framing, spoof neutralization, workspace path policy, gitignore, brace expansion, html-to-markdown, the tool-call repair grammar, the JSON-Schema validator, wire-format-xml, rescue/jsonc, output truncation, the fetch SSRF guard, renderer input parsing and widths, tool diffs, json-lines, and CLI arg parsing. The fixes below came out of this sweep.
+
 - **fetch - SSRF guard tightened.** Private-address refusal now covers IPv4 multicast `224.0.0.0/4` (`239.255.255.250` and friends read as public before), the translator-local `::ffff:0:0/96` prefix (`http://[::ffff:0:127.0.0.1]/` serializes to `::ffff:0:7f00:1`, which walked past the old check), and the deprecated IPv4-compatible IPv6 form (`[::127.0.0.1]` serializes as `::7f00:1` and is now unwrapped and re-checked as v4).
 
-- **gitignore - a crafted `.gitignore` can no longer hang hotdog.** Pattern compilation moved from regex to a linear token matcher: patterns with several `*` runs (`*a*a*a*a*a*b`) backtracked exponentially -- seconds on a 200-char path, never for ten-plus stars -- and `.gitignore` arrives with cloned repos. The rewrite also aligns matching with git: a leading `/` anchors (`/build` no longer matches a nested `build`), `a/**` matches again (it previously matched nothing), and malformed classes like `[z-a]` never-match instead of throwing out of `new RegExp`.
+- **gitignore** - a crafted `.gitignore` can no longer hang hotdog. patterns with several `*` runs (`*a*a*a*a*a*b`) backtracked exponentially -- seconds on a 200-char path, never for ten-plus stars. The rewrite also better aligns git: `/build` no longer matches a nested `build`, `a/**` matches work as expected, and malformed classes like `[z-a]` never match instead of throwing out of `new RegExp`.
 
 - **context repair - unmatchable tool_calls are stripped.** A tool call with an empty id, a duplicate id, or a non-object entry can never legally receive a tool result; repair drops them before the pairing walk instead of leaving a dangling call that 400s the provider request.
 
@@ -14,15 +30,7 @@
 
 - **session-index - quarantine gates on corruption codes** and self-heals mid-run instead of quarantining on anything unexpected.
 
-- **sessions cleanup/delete - reclaim leaked baton mirrors** (paired plus age-gated orphans).
-
-- **rescue `--json` envelope.** Fatal-config guidance stays off stdout so the envelope stays parseable.
-
-- **cli - usage errors exit 2**, and rejected argv echoes back spoof-safe.
-
-- **tokens - context-window fill gauge** against the model's `contextLimit`.
-
-- **Seeded fuzz suites.** 22 fuzz suites on a shared deterministic PRNG harness (`tests/fuzz/prng.ts`) cover SSE framing, stream-processor deltas, session-log and workflow-journal replay, MCP stdio framing, spoof neutralization, workspace path policy, gitignore, brace expansion, html-to-markdown, the tool-call repair grammar, the JSON-Schema validator, wire-format-xml, rescue/jsonc, output truncation, the fetch SSRF guard, renderer input parsing and widths, tool diffs, json-lines, and CLI arg parsing. Suites are seeded-deterministic, budget-gated, and their invariants check against independently transcribed oracles where the policy is well-defined. The product fixes above came out of this sweep.
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.14.0...main
 
 ## [v0.14.0] - 2026-10-22
 

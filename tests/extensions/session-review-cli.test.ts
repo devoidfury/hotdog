@@ -424,6 +424,118 @@ describe("Session Review CLI - sessions cleanup", () => {
   });
 });
 
+// ── baton mirrors ───────────────────────────────────────────────────────────
+
+describe("Session Review CLI - baton mirror cleanup", () => {
+  const sessionsDirPath = sessionsDir();
+  const ID = `test-cleanup-baton-${Date.now()}`;
+
+  function batonPath(id: string) {
+    return join(sessionsDirPath, `${id}.baton.json`);
+  }
+
+  function ageFile(path: string, days: number) {
+    const when = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    utimesSync(path, when, when);
+  }
+
+  function writeBaton(id: string) {
+    writeFileSync(
+      batonPath(id),
+      JSON.stringify({ ts: new Date().toISOString(), session_id: id, messages: [] }) + "\n",
+    );
+  }
+
+  afterEach(() => {
+    for (const f of readdirSync(sessionsDirPath)) {
+      if (f.includes(ID) || f === "dangling.baton.json") {
+        try { rmSync(join(sessionsDirPath, f)); } catch {}
+      }
+    }
+  });
+
+  it("delete removes the session's baton mirror too", async () => {
+    await setupSession(ID, [
+      { type: "input", content: "hello" },
+      { type: "assistant", content: "world" },
+    ]);
+    writeBaton(ID);
+
+    const cli = { args: ["delete", ID], yes: true, colors: false, theme: "dark" };
+    const { result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(0);
+    expect(existsSync(batonPath(ID))).toBe(false);
+  });
+
+  it("cleanup removes an old session together with its fresh baton mirror", async () => {
+    await setupSession(ID, [
+      { type: "input", content: "old" },
+      { type: "assistant", content: "data" },
+    ]);
+    writeBaton(ID); // fresh mirror; the stale log selects the pair
+
+    const oldPath = join(sessionsDirPath, `${ID}.jsonl`);
+    ageFile(oldPath, 60);
+
+    const cli = { args: ["cleanup"], olderThan: 30, yes: true, colors: false, theme: "dark" };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Deleted 1 session(s), 1 baton file(s).");
+    expect(existsSync(join(sessionsDirPath, `${ID}.jsonl`))).toBe(false);
+    expect(existsSync(batonPath(ID))).toBe(false);
+  });
+
+  it("cleanup removes orphaned baton files older than the cutoff", async () => {
+    // Its log is gone (deleted directly, or by an older cleanup); the mirror leaked.
+    writeBaton("dangling");
+    ageFile(batonPath("dangling"), 60);
+
+    const cli = { args: ["cleanup"], olderThan: 30, yes: true, colors: false, theme: "dark" };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Deleted 0 session(s), 1 baton file(s).");
+    expect(existsSync(batonPath("dangling"))).toBe(false);
+  });
+
+  it("cleanup keeps a recent orphaned baton (replay may still be pending)", async () => {
+    writeBaton("dangling"); // fresh: no session older than the cutoff either
+
+    const cli = { args: ["cleanup"], olderThan: 30, yes: true, colors: false, theme: "dark" };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(0);
+    expect(output).toContain("No sessions older than 30 days.");
+    expect(existsSync(batonPath("dangling"))).toBe(true);
+  });
+
+  it("cleanup keeps the baton of a session that is kept", async () => {
+    await setupSession(ID, [
+      { type: "input", content: "hello" },
+      { type: "assistant", content: "world" },
+    ]);
+    writeBaton(ID);
+
+    const cli = { args: ["cleanup"], olderThan: 30, yes: true, colors: false, theme: "dark" };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(0);
+    expect(output).toContain("No sessions older than 30 days.");
+    expect(existsSync(batonPath(ID))).toBe(true);
+  });
+
+  it("preview (no --yes) lists orphaned baton files before confirming", async () => {
+    writeBaton("dangling");
+    ageFile(batonPath("dangling"), 60);
+
+    const cli = { args: ["cleanup"], olderThan: 30, colors: false, theme: "dark" };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    // Non-TTY confirm answers no: nothing is deleted, but the preview must
+    // disclose the orphaned mirrors it is about to take.
+    expect(exitCode).toBe(0);
+    expect(output).toContain("dangling.baton.json");
+    expect(output).toContain("Aborted.");
+    expect(existsSync(batonPath("dangling"))).toBe(true);
+  });
+});
+
 // ── review tool registration ────────────────────────────────────────────────
 
 describe("Session Review CLI - registers review tool", () => {

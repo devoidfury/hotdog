@@ -111,6 +111,12 @@ async function runDelete(
     console.error(`Session '${sessionId}' not found.`);
     return 1;
   }
+  // Best-effort: the session's pass-the-baton mirror would otherwise leak.
+  try {
+    await unlink(join(getSessionsDir(), `${sessionId}.baton.json`));
+  } catch {
+    // No mirror (the common case): nothing to clean.
+  }
   console.log(`Deleted session '${sessionId}'.`);
   return 0;
 }
@@ -130,15 +136,12 @@ async function runCleanup(
     return 0;
   }
 
-  const files = (await readdir(sessionsDir)).filter((f: string) =>
-    f.endsWith(".jsonl"),
-  );
+  const names = await readdir(sessionsDir);
 
   const toDelete: Array<{ id: string; last_modified: string }> = [];
 
-  for (const file of files) {
-    const filePath = join(sessionsDir, file);
-    const metadata = await stat(filePath);
+  for (const file of names.filter((f: string) => f.endsWith(".jsonl"))) {
+    const metadata = await stat(join(sessionsDir, file));
     if (metadata.mtime.getTime() < cutoffMs) {
       toDelete.push({
         id: file.replace(/\.jsonl$/, ""),
@@ -147,7 +150,31 @@ async function runCleanup(
     }
   }
 
-  if (toDelete.length === 0) {
+  // Baton mirrors (`<id>.baton.json`, written by pass-the-baton compaction,
+  // unlinked when replayed or dropped): a crash between pop and replay leaks
+  // them. Two rules, both age-gated by the same cutoff so a live session's
+  // fresh mirror is never taken:
+  //  - paired: deleting a session deletes its mirror (whatever its age);
+  //  - orphaned: a mirror whose session log no longer exists is unreplayable,
+  //    so once it is older than the cutoff it goes too.
+  const batonNames = new Set(
+    names.filter((f: string) => f.endsWith(".baton.json")),
+  );
+  const paired = toDelete
+    .map((s) => `${s.id}.baton.json`)
+    .filter((f) => batonNames.has(f));
+  const orphans: Array<{ file: string; last_modified: string }> = [];
+  for (const file of batonNames) {
+    if (paired.includes(file)) continue;
+    const stem = file.slice(0, -".baton.json".length);
+    if (names.includes(`${stem}.jsonl`)) continue;
+    const metadata = await stat(join(sessionsDir, file));
+    if (metadata.mtime.getTime() < cutoffMs) {
+      orphans.push({ file, last_modified: new Date(metadata.mtime).toISOString() });
+    }
+  }
+
+  if (toDelete.length === 0 && orphans.length === 0) {
     console.log(`No sessions older than ${olderThanDays} days.`);
     return 0;
   }
@@ -157,6 +184,12 @@ async function runCleanup(
     for (const s of toDelete) {
       console.log(`  ${s.id}  (${s.last_modified})`);
     }
+    if (paired.length > 0) {
+      console.log(`  (+${paired.length} baton mirror(s) of the above)`);
+    }
+    for (const o of orphans) {
+      console.log(`  ${o.file}  (orphaned baton mirror, ${o.last_modified})`);
+    }
     const ok = await confirm("Delete these sessions?");
     if (!ok) {
       console.log("Aborted.");
@@ -165,16 +198,31 @@ async function runCleanup(
   }
 
   let deleted = 0;
+  const batonsToRemove = [...orphans.map((o) => o.file)];
   for (const s of toDelete) {
     try {
       await unlink(join(sessionsDir, `${s.id}.jsonl`));
       deleted++;
+      if (batonNames.has(`${s.id}.baton.json`)) {
+        batonsToRemove.push(`${s.id}.baton.json`);
+      }
     } catch {
-      // Ignore failures; keep cleaning up the rest
+      // Ignore failures; keep cleaning up the rest. The session survived,
+      // so its mirror stays with it.
     }
   }
 
-  console.log(`Deleted ${deleted} session(s).`);
+  let batons = 0;
+  for (const file of batonsToRemove) {
+    try {
+      await unlink(join(sessionsDir, file));
+      batons++;
+    } catch {
+      // Ignore failures; keep cleaning up the rest.
+    }
+  }
+
+  console.log(`Deleted ${deleted} session(s), ${batons} baton file(s).`);
   return 0;
 }
 

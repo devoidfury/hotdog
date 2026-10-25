@@ -12,8 +12,11 @@ hotdog info                      # System diagnostics
 hotdog show-prompt               # Render system prompt to stdout
 hotdog profiles                  # List all available profiles
 hotdog sessions show             # Show session logs
-hotdog sessions delete <id>      # Delete a session
-hotdog sessions cleanup          # Remove old sessions
+hotdog sessions delete <id>      # Delete a session (+ its baton mirror)
+hotdog sessions cleanup          # Remove old sessions; also reclaims leaked
+                                 # <id>.baton.json mirrors (paired mirrors go
+                                 # with their session; orphaned mirrors whose log
+                                 # is gone go once past the same --older-than cutoff)
 hotdog rescue                    # Diagnose config files (paths, syntax, unknown keys)
 hotdog rescue fix                # ...and repair comments/trailing commas (.bak kept)
 hotdog webui                     # Start the web UI server

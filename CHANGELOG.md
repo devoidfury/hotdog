@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- **fetch - SSRF guard tightened.** Private-address refusal now covers IPv4 multicast `224.0.0.0/4` (`239.255.255.250` and friends read as public before), the translator-local `::ffff:0:0/96` prefix (`http://[::ffff:0:127.0.0.1]/` serializes to `::ffff:0:7f00:1`, which walked past the old check), and the deprecated IPv4-compatible IPv6 form (`[::127.0.0.1]` serializes as `::7f00:1` and is now unwrapped and re-checked as v4).
+
+- **gitignore - a crafted `.gitignore` can no longer hang hotdog.** Pattern compilation moved from regex to a linear token matcher: patterns with several `*` runs (`*a*a*a*a*a*b`) backtracked exponentially -- seconds on a 200-char path, never for ten-plus stars -- and `.gitignore` arrives with cloned repos. The rewrite also aligns matching with git: a leading `/` anchors (`/build` no longer matches a nested `build`), `a/**` matches again (it previously matched nothing), and malformed classes like `[z-a]` never-match instead of throwing out of `new RegExp`.
+
+- **context repair - unmatchable tool_calls are stripped.** A tool call with an empty id, a duplicate id, or a non-object entry can never legally receive a tool result; repair drops them before the pairing walk instead of leaving a dangling call that 400s the provider request.
+
+- **workflows - garbage journals are tolerated.** Scalar and torn lines in `run.jsonl` are inert noise for resume and interruption scans instead of crashing them.
+
+- **md-parser - adversarial nesting capped** and inline scans linearized, so pathological markdown from a fetched page or model output cannot stall the renderer.
+
+- **session-index - quarantine gates on corruption codes** and self-heals mid-run instead of quarantining on anything unexpected.
+
+- **sessions cleanup/delete - reclaim leaked baton mirrors** (paired plus age-gated orphans).
+
+- **rescue `--json` envelope.** Fatal-config guidance stays off stdout so the envelope stays parseable.
+
+- **cli - usage errors exit 2**, and rejected argv echoes back spoof-safe.
+
+- **tokens - context-window fill gauge** against the model's `contextLimit`.
+
+- **Seeded fuzz suites.** 22 fuzz suites on a shared deterministic PRNG harness (`tests/fuzz/prng.ts`) cover SSE framing, stream-processor deltas, session-log and workflow-journal replay, MCP stdio framing, spoof neutralization, workspace path policy, gitignore, brace expansion, html-to-markdown, the tool-call repair grammar, the JSON-Schema validator, wire-format-xml, rescue/jsonc, output truncation, the fetch SSRF guard, renderer input parsing and widths, tool diffs, json-lines, and CLI arg parsing. Suites are seeded-deterministic, budget-gated, and their invariants check against independently transcribed oracles where the policy is well-defined. The product fixes above came out of this sweep.
+
 ## [v0.14.0] - 2026-10-22
 
 - **interactive-cli - Enter steers mid-run.** A submitted line while the agent is running is injected as steering -- delivered before the model's next call instead of waiting for the turn to end -- and a still-undelivered submission shows a `↑ queued: ...` chip row in the frame. The frame's top row is now a status line: turn count with state (`#3 · working`, `#3 · waiting for lane`), plus a cost suffix only when `modelPricing` covers the session model. Esc/Ctrl-C interrupt, Ctrl-D on an empty buffer quits. On legacy, mid-run submissions still queue and no status/chip rows appear.

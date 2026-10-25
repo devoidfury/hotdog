@@ -112,7 +112,18 @@ export type MdInline =
   | MdLink
   | MdImage;
 
+// Stack-safety caps for untrusted input. Recursive descent over adversarial nesting
+// (a `[](u)` chain 20k deep, one line with 20k `>` prefixes) overflows the JS stack and
+// RangeErrors mid-render. Past the cap, further nesting renders as literal text
+// (markdown-it's maxNesting behavior) -- far below any real document, far above any stack.
+const MAX_INLINE_NESTING = 100;
+const MAX_BLOCK_NESTING = 100;
+
 export function parseMarkdown(markdown: string): MdDocument {
+  return parseDocument(markdown, 0);
+}
+
+function parseDocument(markdown: string, depth: number): MdDocument {
   // CRLF is a line ending, not a spoof. Splitting here keeps a Windows-y code block from rendering
   // [U+000D] on every line (token noise teaches people to ignore the tokens); a lone CR -- the
   // line-rewind trick -- survives to render and gets tokenized there.
@@ -153,7 +164,7 @@ export function parseMarkdown(markdown: string): MdDocument {
     }
 
     if (trimmed.startsWith(">")) {
-      const blockquote = parseBlockquote(lines, i);
+      const blockquote = parseBlockquote(lines, i, depth);
       blocks.push(blockquote);
       i = blockquote._nextIndex;
       continue;
@@ -498,6 +509,7 @@ function parseCodeBlock(
 function parseBlockquote(
   lines: string[],
   start: number,
+  depth: number,
 ): MdBlockquote & { _nextIndex: number } {
   const contentLines: string[] = [];
   let i = start;
@@ -515,10 +527,16 @@ function parseBlockquote(
     }
   }
 
-  const innerDoc = parseMarkdown(contentLines.join("\n"));
+  // At the cap the remaining `>` run becomes literal paragraph text instead of
+  // recursing -- parseParagraph would break on `>`, so flatten via parseInline directly.
+  const inner = contentLines.join("\n");
+  const children =
+    depth + 1 >= MAX_BLOCK_NESTING
+      ? [{ type: "paragraph" as const, children: parseInline(inner) }]
+      : parseDocument(inner, depth + 1).children;
   return {
     type: "blockquote",
-    children: innerDoc.children,
+    children,
     _nextIndex: i,
   };
 }
@@ -711,7 +729,54 @@ function findClosingUnderscore(
   return -1;
 }
 
-function parseInline(text: string): MdInline[] {
+// Linear per-call index replacing three per-position forward scans (the bracket-depth
+// walk, the special-char hop, and the url `)` search) that each restarted from scratch:
+// on adversarial runs (unmatched `[`, `![`, `](` with no `)`) they made parsing
+// quadratic -- 100KB of `[` took ~8s, enough for one fetched page to wedge the
+// webui/CLI renderer.
+interface InlineScanIndex {
+  /** Stack-matched `]` for each `[`, -1 when unclosed. Same result as the depth-1
+   *  walk from each `[`: a single-start walk is exactly what stack matching computes. */
+  closeBracket: Int32Array;
+  /** Next inline special ( ` ! [ * ~ _ \ ) at or after i; text.length when none. */
+  nextSpecial: Int32Array;
+  /** Next `)` at or after i; text.length when none. */
+  nextParen: Int32Array;
+}
+
+const INLINE_SPECIALS = "`![*~_\\";
+
+function buildInlineScanIndex(text: string): InlineScanIndex {
+  const n = text.length;
+  const closeBracket = new Int32Array(n).fill(-1);
+  const nextSpecial = new Int32Array(n + 1);
+  const nextParen = new Int32Array(n + 1);
+  nextSpecial[n] = n;
+  nextParen[n] = n;
+
+  const stack: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const ch = text[i];
+    if (ch === "[") stack.push(i);
+    else if (ch === "]" && stack.length > 0) closeBracket[stack.pop()!] = i;
+  }
+
+  let sp = n;
+  let rp = n;
+  for (let i = n - 1; i >= 0; i--) {
+    const ch = text[i]!;
+    if (INLINE_SPECIALS.includes(ch)) sp = i;
+    else if (ch === ")") rp = i;
+    nextSpecial[i] = sp;
+    nextParen[i] = rp;
+  }
+  return { closeBracket, nextSpecial, nextParen };
+}
+
+function parseInline(text: string, depth = 0): MdInline[] {
+  // Past the cap, the rest renders as literal text instead of recursing.
+  if (depth >= MAX_INLINE_NESTING) return [{ type: "text", content: text }];
+  const scan = buildInlineScanIndex(text);
   const result: MdInline[] = [];
   let i = 0;
 
@@ -751,7 +816,7 @@ function parseInline(text: string): MdInline[] {
     }
 
     if (text[i] === "!" && text[i + 1] === "[") {
-      const img = parseImageOrLink(text, i, true);
+      const img = parseImageOrLink(text, i, true, depth, scan);
       if (img) {
         result.push(img.node);
         i = img.endIndex;
@@ -760,7 +825,7 @@ function parseInline(text: string): MdInline[] {
     }
 
     if (text[i] === "[") {
-      const link = parseImageOrLink(text, i, false);
+      const link = parseImageOrLink(text, i, false, depth, scan);
       if (link) {
         result.push(link.node);
         i = link.endIndex;
@@ -769,7 +834,7 @@ function parseInline(text: string): MdInline[] {
     }
 
     if (text.slice(i, i + 3) === "***") {
-      const boldItalic = parseEmphasis(text, i, 3, "bold_italic");
+      const boldItalic = parseEmphasis(text, i, 3, "bold_italic", depth);
       if (boldItalic) {
         result.push(boldItalic.node);
         i = boldItalic.endIndex;
@@ -778,7 +843,7 @@ function parseInline(text: string): MdInline[] {
     }
 
     if (text.slice(i, i + 2) === "~~") {
-      const strike = parseEmphasis(text, i, 2, "strikethrough");
+      const strike = parseEmphasis(text, i, 2, "strikethrough", depth);
       if (strike) {
         result.push(strike.node);
         i = strike.endIndex;
@@ -787,7 +852,7 @@ function parseInline(text: string): MdInline[] {
     }
 
     if (text.slice(i, i + 2) === "**") {
-      const bold = parseEmphasis(text, i, 2, "bold");
+      const bold = parseEmphasis(text, i, 2, "bold", depth);
       if (bold) {
         result.push(bold.node);
         i = bold.endIndex;
@@ -802,7 +867,7 @@ function parseInline(text: string): MdInline[] {
         i++;
         continue;
       }
-      const italic = parseEmphasis(text, i, 1, "italic");
+      const italic = parseEmphasis(text, i, 1, "italic", depth);
       if (italic) {
         result.push(italic.node);
         i = italic.endIndex;
@@ -810,24 +875,15 @@ function parseInline(text: string): MdInline[] {
       }
     }
 
-    const specialChars = "`![*~_\\";
-    let nextSpecial = text.length;
-    for (const ch of specialChars) {
-      const idx = text.indexOf(ch, i);
-      if (idx !== -1 && idx < nextSpecial) {
-        nextSpecial = idx;
-      }
-    }
-
+    // Nothing consumed at i. nextSpecial[i] is i itself only when text[i] is a
+    // special the branches above declined (unmatched `*`, failed link, ...).
+    const nextSpecial = scan.nextSpecial[i]!;
     if (nextSpecial > i) {
       result.push({ type: "text", content: text.slice(i, nextSpecial) });
       i = nextSpecial;
-    } else if (nextSpecial === i) {
+    } else {
       result.push({ type: "text", content: text[i]! });
       i++;
-    } else {
-      result.push({ type: "text", content: text.slice(i) });
-      i = text.length;
     }
   }
 
@@ -838,25 +894,20 @@ function parseImageOrLink(
   text: string,
   start: number,
   isImage: boolean,
+  depth: number,
+  scan: InlineScanIndex,
 ): { node: MdImage | MdLink; endIndex: number } | null {
   const prefixLen = isImage ? 2 : 1; // "![" vs "["
   const openBracket = start + prefixLen;
 
-  let bracketDepth = 1;
-  let closeBracket = openBracket;
-  while (closeBracket < text.length && bracketDepth > 0) {
-    if (text[closeBracket] === "[") bracketDepth++;
-    if (text[closeBracket] === "]") bracketDepth--;
-    if (bracketDepth > 0) closeBracket++;
-  }
-
-  if (bracketDepth !== 0) return null;
+  const closeBracket = scan.closeBracket[openBracket - 1]!;
+  if (closeBracket === -1) return null;
 
   if (text[closeBracket + 1] !== "(") return null;
 
   const parenStart = closeBracket + 2;
-  const closeParen = text.indexOf(")", parenStart);
-  if (closeParen === -1) return null;
+  const closeParen = scan.nextParen[parenStart]!;
+  if (closeParen >= text.length) return null;
 
   const label = text.slice(openBracket, closeBracket);
   const url = text.slice(parenStart, closeParen);
@@ -869,7 +920,7 @@ function parseImageOrLink(
   }
 
   return {
-    node: { type: "link", url, children: parseInline(label) },
+    node: { type: "link", url, children: parseInline(label, depth + 1) },
     endIndex: closeParen + 1,
   };
 }
@@ -884,6 +935,7 @@ function parseEmphasis(
   start: number,
   markerLen: number,
   kind: "bold" | "italic" | "strikethrough" | "bold_italic",
+  depth: number,
 ): EmphasisResult | null {
   const openMarker = text.slice(start, start + markerLen);
   const closeMarker = openMarker;
@@ -900,7 +952,7 @@ function parseEmphasis(
   if (closeIdx === -1) return null;
 
   const innerText = text.slice(openEnd, closeIdx);
-  const inner = parseInline(innerText);
+  const inner = parseInline(innerText, depth + 1);
 
   let node: MdBold | MdItalic | MdStrikethrough;
 

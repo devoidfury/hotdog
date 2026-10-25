@@ -61,6 +61,7 @@ function createAgentFixture(options: {
   contextLimit?: number;
   toolWhitelist?: string[] | null;
   abortSignal?: AbortSignal | null;
+  enqueueCallback?: (content: string | Array<Record<string, unknown>>, opts?: { source?: string; piped?: boolean }) => void;
 } = {}) {
   const outputEvents: OutputEvent[] = [];
   const fixture = createFixture({
@@ -735,6 +736,32 @@ describe('Agent — lifecycle and state', () => {
     // The #prepareIteration drain settles it: exactly once, after the append.
     expect(fired).toBe(1);
     expect(inContextAtFire).toBe(true);
+  });
+
+  it('hands an idle steer to the host queue instead of parking it forever', async () => {
+    const enqueued: Array<{ content: unknown; opts?: { source?: string; piped?: boolean } }> = [];
+    const { agent } = createAgentFixture({
+      enqueueCallback: (content, opts) => enqueued.push({ content, opts }),
+    });
+
+    let settled = 0;
+    agent.steer('do it now', () => { settled++; }, { source: 'harness' });
+
+    // Nothing parks when no run is in flight: the item goes straight to the
+    // owning bus as a piped turn (the INPUT pipeline ran at submission), and
+    // the settle -- the bus queue chip -- fires at the handoff.
+    expect(agent.steeringQueue).toEqual([]);
+    expect(enqueued).toEqual([{ content: 'do it now', opts: { source: 'harness', piped: true } }]);
+    expect(settled).toBe(1);
+  });
+
+  it('keeps parking an idle steer for bus-less agents (task workers)', async () => {
+    // No enqueueCallback wired: there is no host queue to hand to. The item
+    // parks as before and the next run's #prepareIteration drains it.
+    const { agent } = createAgentFixture({});
+    agent.steer('task follow-up');
+    expect(agent.steeringQueue.length).toBe(1);
+    expect(agent.steeringQueue[0]?.content).toBe('task follow-up');
   });
 
   it('drains harness-sourced steering as a trusted harness message with no echo', async () => {

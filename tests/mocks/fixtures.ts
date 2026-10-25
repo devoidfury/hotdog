@@ -9,7 +9,7 @@ import { Agent, ModelRegistry, AgentConfig } from "@core/agent.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
 import { MessageLog } from "@core/context/message-log.ts";
-import type { Message } from "@core/context/message.ts";
+import type { Message, MessageSource } from "@core/context/message.ts";
 import { HookSystem } from "@core/hooks.ts";
 import {
   ToolRegistry,
@@ -51,6 +51,8 @@ export function createFixture(
     abortSignal?: AbortSignal | null;
     toolWhitelist?: string[] | null;
     managerProfile?: boolean;
+    /** Host wiring (the owning bus); absent means a bus-less agent (task workers). */
+    enqueueCallback?: (content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource; piped?: boolean }) => void;
   } = {},
 ): {
   hooks: HookSystem;
@@ -90,6 +92,7 @@ export function createFixture(
     abortSignal: options.abortSignal || null,
     toolWhitelist: options.toolWhitelist || null,
     managerProfile: options.managerProfile === true,
+    enqueueCallback: options.enqueueCallback,
   });
 
   return { hooks, toolRegistry, mockLLM, agent };

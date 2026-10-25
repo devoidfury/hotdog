@@ -26,7 +26,7 @@ export interface AgentLike {
   sink: OutputSink | null;
   toolWhitelist: string[] | null;
   profileBody: string | undefined;
-  enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
+  enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource; piped?: boolean }) => void) | null;
   /** Branch this session (/fork). Set by the owning SessionManager; absent on sessionless agents. */
   forkSession?: ForkSessionFn | null;
   serialize(): Record<string, unknown>;

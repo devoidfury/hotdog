@@ -244,6 +244,104 @@ describe("MessageBus steering (enqueue with steering: true)", () => {
     await bus.steeringPending;
     expect(steered).toEqual(["slow", "fast"]);
   });
+
+  it("hands a missed steering injection back as a queued turn instead of parking it", async () => {
+    // The reported bug: steering arrives during the FINAL response's streaming
+    // -- after the run's last #prepareIteration drain. Nothing injects it; the
+    // run completes with the item stuck in the agent's steering seam, invisible
+    // until some future submission starts a run that drains it. The bus must
+    // take the leftovers at run end and turn them into a real turn, without
+    // re-running the INPUT pipeline (a second transform pass would double-apply).
+    const runs: Array<{ content: unknown; opts?: { source?: string } }> = [];
+    const parked: Array<{ content: unknown; source?: string; onDelivered?: () => void }> = [];
+    const inputTexts: string[] = [];
+    let bus: MessageBus;
+
+    const agent = {
+      ...createMockAgent({
+        run: async (content, _images, opts) => {
+          runs.push({ content, opts });
+          if (runs.length === 1) {
+            // Mid-run steering submit, after this iteration's drain. The fake
+            // -- unlike the real Agent -- never drains it: #handleLlmResponse
+            // returned final text, so there is no next #prepareIteration.
+            bus.enqueue("turn the page", { steering: true });
+            await bus.steeringPending;
+          }
+        },
+      }),
+      hooks: {
+        runHookPipeline: async (_hook: string, data: unknown) => {
+          const d = data as { text?: string; action?: string; content?: string };
+          inputTexts.push(d.text ?? "");
+          d.action = "transform";
+          d.content = `[w] ${d.text}`;
+          return {};
+        },
+      },
+      steer: (content: unknown, onDelivered?: () => void) =>
+        parked.push({ content, onDelivered }),
+      takeUndeliveredSteering: () => parked.splice(0),
+    };
+    const sink = createMockSink();
+    bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
+
+    const loop = bus.run();
+    bus.enqueue("first message");
+    // Turn 1 (run + handoff) then turn 2 (the parked steer).
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(runs.map((r) => r.content)).toEqual(["[w] first message", "[w] turn the page"]);
+    // The pipeline saw each submission exactly once: the handoff turn is piped.
+    expect(inputTexts).toEqual(["first message", "turn the page"]);
+    // The chip settled at the handoff instead of hanging at pending: 1.
+    const updates = () =>
+      sink._emitted.filter((e) => (e as { type: number }).type === OUTPUT_EVENT.QUEUE_UPDATE);
+    expect(updates()[updates().length - 1]).toEqual({
+      type: OUTPUT_EVENT.QUEUE_UPDATE,
+      pending: 0,
+      preview: "",
+    });
+
+    bus.cancel();
+    await loop;
+    expect(bus.queue).toEqual([]);
+  });
+
+  it("handoff preserves the parked item's harness provenance", async () => {
+    // A mid-run /skill body parked past the last drain rides back as a
+    // harness-sourced turn, not a user message.
+    const runs: Array<{ content: unknown; opts?: { source?: string } }> = [];
+    const parked: Array<{ content: unknown; source?: string; onDelivered?: () => void }> = [];
+    let bus: MessageBus;
+    const agent = {
+      ...createMockAgent({
+        run: async (content, _images, opts) => {
+          runs.push({ content, opts });
+          if (runs.length === 1) {
+            // Park a harness-sourced item the way a mid-run /skill would.
+            parked.push({ content: "SKILL BODY", source: "harness" });
+          }
+        },
+      }),
+      steer: (content: unknown, _onDelivered?: () => void, opts?: { source?: string }) =>
+        parked.push({ content, source: opts?.source }),
+      takeUndeliveredSteering: () => parked.splice(0),
+    };
+    bus = new MessageBus({
+      sessionManager: createMockSessionManager(() => agent),
+      sink: createMockSink(),
+    });
+
+    const loop = bus.run();
+    bus.enqueue("go");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    bus.cancel();
+    await loop;
+
+    expect(runs.length).toBe(2);
+    expect(runs[1]!.content).toBe("SKILL BODY");
+    expect(runs[1]!.opts).toEqual({ source: "harness" });
+  });
 });
 
 describe("MessageBus.cancel()", () => {

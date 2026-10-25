@@ -147,7 +147,9 @@ export interface AgentOptions {
   toolExecLink?: ToolExecLink | null;
   toolExecConfig?: WireToolConfig;
   // Set by the owning MessageBus after construction; lets the agent (and extensions via hooks) queue messages.
-  enqueueCallback?: (content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void;
+  // `piped: true` marks content that already ran the bus INPUT pipeline (steering handoffs),
+  // so the run loop must not run it a second time.
+  enqueueCallback?: (content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource; piped?: boolean }) => void;
 }
 
 export class Agent implements AgentLike {
@@ -177,7 +179,11 @@ export class Agent implements AgentLike {
   toolWhitelist: string[] | null;
   /** True when the active profile is a manager (controls managerOnly tools). */
   managerProfile: boolean;
-  /** Steering messages (see steer()): injected between LLM calls by #prepareIteration. */
+  /**
+   * Steering items queued for this agent, drained by #prepareIteration before
+   * every LLM call. Items still parked when the run ends are handed back to the
+   * owning bus (see takeUndeliveredSteering) instead of waiting for a future run.
+   */
   steeringQueue: Array<{
     content: string | Array<Record<string, unknown>>;
     /** Fired when the item is appended to context (see steer()). */
@@ -199,7 +205,7 @@ export class Agent implements AgentLike {
   #streamProcessor: StreamProcessor;
   /** This run's kind for the TURN_START payload (session-log turn records). */
   #turnKind: "input" | "continuation" | null = null;
-  enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
+  enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource; piped?: boolean }) => void) | null;
   /** See ForkSessionFn. Injected by SessionManager; null when no session hosts this agent. */
   forkSession: ForkSessionFn | null;
 
@@ -354,7 +360,7 @@ export class Agent implements AgentLike {
     return this.context.getMessages();
   }
 
-  enqueue(content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }): void {
+  enqueue(content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource; piped?: boolean }): void {
     this.enqueueCallback?.(content, opts);
   }
 
@@ -365,9 +371,12 @@ export class Agent implements AgentLike {
    * This is the in-core append seam (sibling of the tool-result/system-notice appends);
    * user submission runs the INPUT pipeline first via MessageBus.enqueue(..., { steering: true });
    * task follow-ups use this seam directly (task agents have no bus).
-   * `onDelivered` (optional) fires when #prepareIteration actually appends
-   * the item to context -- "accepted" is a queue push; "delivered" is the
-   * model seeing it. The bus uses it to clear the queue chip honestly.
+   * `onDelivered` (optional) settles when the item leaves the steering seam:
+   * #prepareIteration fires it when the append reaches context -- "accepted"
+   * is a queue push; "delivered" is the model seeing it. When the agent is
+   * idle the item never enters the queue at all (see the idle branch below):
+   * it is handed straight to the host, and the callback settles at that
+   * handoff. The bus uses these settles to clear the queue chip honestly.
    * `opts.source` sets the appended message's provenance: "harness" (trusted,
    * no transcript echo) for harness-initiated injections -- e.g. a mid-run
    * `/skill` body, which must not wedge between tool calls and results by
@@ -378,7 +387,35 @@ export class Agent implements AgentLike {
     onDelivered?: () => void,
     opts?: { source?: MessageSource },
   ): void {
+    // Idle handoff: with no run in flight there is no #prepareIteration to
+    // drain this item, and a parked item would only surface when some future
+    // submission happened to start a run -- the steer-during-final-streaming
+    // drop. Hand it to the owning bus as a normal queued turn instead
+    // (piped: the bus INPUT pipeline already ran at submission, steering or
+    // not; a second pass would double-transform). Agents without a bus
+    // (task workers) keep the parked behavior: their next run drains it.
+    if (!this.#running && this.enqueueCallback) {
+      this.enqueueCallback(content, { source: opts?.source, piped: true });
+      onDelivered?.();
+      return;
+    }
     this.steeringQueue.push({ content, onDelivered, source: opts?.source });
+  }
+
+  /**
+   * Take (and clear) steering items that no #prepareIteration drained --
+   * pushed while the loop was running, after its final drain (a submission
+   * arriving during the final response's streaming has no LLM call left to
+   * inject it before). The owning MessageBus calls this after every run and
+   * re-queues the items as normal turns, so a steer can never park in the
+   * agent waiting for someone to send another message.
+   */
+  takeUndeliveredSteering(): Array<{
+    content: string | Array<Record<string, unknown>>;
+    onDelivered?: () => void;
+    source?: MessageSource;
+  }> {
+    return this.steeringQueue.splice(0);
   }
 
   /** True while the run loop is active; harness seams (e.g. /skill) pick steer vs. direct append on this. */

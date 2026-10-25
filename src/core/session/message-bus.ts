@@ -41,6 +41,17 @@ export interface MessageBusAgent {
    */
   steer?(content: string | Array<Record<string, unknown>>, onDelivered?: () => void): void;
   /**
+   * Take steering items the agent's run never drained (present on the real
+   * Agent). The bus re-queues them as normal turns after every run so a
+   * submission that missed the loop's final drain cannot park until some
+   * later message. Optional: fakes without it keep the plain queue path.
+   */
+  takeUndeliveredSteering?(): Array<{
+    content: string | Array<Record<string, unknown>>;
+    onDelivered?: () => void;
+    source?: MessageSource;
+  }>;
+  /**
    * Tool-call repair seam: present on the real Agent, optional so test fakes
    * can stay minimal. Used to heal interrupted tool calls after a cancelled
    * turn (an assistant message whose calls never got results is a guaranteed
@@ -68,6 +79,13 @@ export interface BusQueueItem {
    *  tail IS the input. The INPUT pipeline skips these -- commands cannot
    *  hide in an empty message. */
   continuation?: boolean;
+  /**
+   * Content that already ran the INPUT pipeline (steering handoffs: the
+   * steering seam ran it at submission, and the agent hands back what the
+   * loop never injected). The run loop must not run it a second time --
+   * transforms like file-attachment would double-apply.
+   */
+  piped?: boolean;
 }
 
 export interface Sink {
@@ -125,14 +143,14 @@ export class MessageBus {
   // Serializes mid-run steering delivery: pipelines are async, so per-item
   // fire-and-forget would let a later submission overtake an earlier one.
   #steerChain: Promise<void> = Promise.resolve();
-  // Steering items accepted but not yet injected into the model's context.
+  // Steering items accepted but not yet handed off (injected into context, or
+  // returned by the agent and re-queued as a turn -- see the run-end handoff).
   // Drives the QUEUE_UPDATE chip: pushed at enqueue, removed when the agent
-  // appends the item (#prepareIteration fires steer()'s onDelivered) or
-  // immediately when the input pipeline handles/drops it. Removal is by
-  // entry handle, not FIFO shift: pipeline-handled items never reach
-  // steer(), so settle order can differ from push order.
-  // Interrupt/cancel do NOT clear it: leftovers stay in the agent's
-  // steering queue and deliver next turn; the chip tells the truth until then.
+  // appends the item (#prepareIteration fires steer()'s onDelivered), when the
+  // idle steer() hands straight to the queue, or immediately when the input
+  // pipeline handles/drops it. Removal is by entry handle, not FIFO shift:
+  // pipeline-handled items never reach steer(), so settle order can differ
+  // from push order.
   #pendingSteers: Array<{ preview: string }> = [];
   readonly #lanes: TurnLanes | null;
   // Active lane wait (null when not waiting). cancel()/interrupt() abort it so
@@ -156,7 +174,7 @@ export class MessageBus {
 
   enqueue(
     content: string | Array<Record<string, unknown>>,
-    opts?: { source?: MessageSource; steering?: boolean; images?: ImageAttachment[]; continuation?: boolean },
+    opts?: { source?: MessageSource; steering?: boolean; images?: ImageAttachment[]; continuation?: boolean; piped?: boolean },
   ): void {
     // Continuation: nothing to sanitize, no steering -- just a queue slot.
     if (opts?.continuation) {
@@ -165,6 +183,16 @@ export class MessageBus {
       return;
     }
     const clean = sanitizeQueuedContent(content, opts?.source);
+    // Steering handoff (piped): content that already ran the INPUT pipeline
+    // -- either the steering seam's transform before the agent injected it,
+    // or the agent returning items the run never drained. Queue it as a
+    // normal turn WITHOUT re-running the pipeline; a second pass would
+    // double-transform (file-attachment expands twice, etc.).
+    if (opts?.piped) {
+      this.#queue.push({ content: clean, source: opts?.source, piped: true });
+      this._wakeWaiter();
+      return;
+    }
     const agent = this.#sessionManager.getAgent();
     if (opts?.steering && !opts?.images && this.#isRunning && agent?.steer) {
       // Same processing as any other message only the delivery slot differs:
@@ -498,11 +526,14 @@ export class MessageBus {
     agent.resetCancel();
 
     const continuation = typeof item !== "string" && item.continuation === true;
+    // Steering handoff: the INPUT pipeline already ran at submission; this
+    // content is final and just needs its turn (see BusQueueItem.piped).
+    const isPiped = typeof item !== "string" && item.piped === true;
 
     // INPUT pipelines and commands see user messages only; a continuation
     // turn carries no content and goes straight to the model.
     let images: ImageAttachment[] | undefined;
-    if (!continuation) {
+    if (!continuation && !isPiped) {
       const piped = await this.#runInputPipeline(agent, content, source);
       if (piped.handled) {
         this.#isRunning = false;
@@ -555,6 +586,22 @@ export class MessageBus {
     } finally {
       // Release on every settle path: success, error, or cancel.
       await releaseLane();
+    }
+
+    // Steering handoff: a submission that arrived after this run's final
+    // #prepareIteration drain (during the last response's streaming, say)
+    // sits in the agent's steering queue with no LLM call left to inject it.
+    // Parked-there is message loss dressed as patience -- hand the items back
+    // as normal queued turns (piped: the INPUT pipeline ran at submission) so
+    // the loop keeps working without waiting for someone to send a message.
+    // The chip settles at the handoff; the items surface as user_message
+    // echoes when their turns start. On cancel the loop exits and the items
+    // ride the queue like any other pending message (kept, or run under a
+    // drain); interrupt cleared the queue before this, so a parked steer
+    // lands as a fresh submission rather than vanishing.
+    for (const parked of agent.takeUndeliveredSteering?.() ?? []) {
+      this.enqueue(parked.content, { source: parked.source, piped: true });
+      parked.onDelivered?.();
     }
 
     this.#isRunning = false;

@@ -11,8 +11,24 @@
 // browsers always send it; this host has no legitimate non-browser WS clients
 // to accommodate.
 
-/** Hostnames that name "this machine" for a loopback-bound server. */
-export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+/**
+ * Does this hostname name "this machine"? Covers all of 127.0.0.0/8 (the
+ * whole range is loopback; systemd-resolved answers on 127.0.0.53), ::1, and
+ * localhost plus every *.localhost subdomain -- browsers resolve .localhost
+ * to loopback locally (RFC 6761) and never query DNS for it, so a rebound
+ * page cannot hold one of these names. Input must be a normalized host:
+ * lowercased, port and IPv6 brackets stripped (hostnameOf and Bun's bind
+ * config supply that).
+ */
+export function isLoopbackHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return (
+    h === "localhost" ||
+    h.endsWith(".localhost") ||
+    h === "::1" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)
+  );
+}
 
 /** Addresses that bind every interface (no enumerable own-name set). */
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
@@ -50,8 +66,8 @@ export function upgradeOriginAllowed(
   const bound = hostnameOf(boundHost) ?? boundHost.toLowerCase();
   if (!originHost || !hostName) return false;
 
-  if (LOOPBACK_HOSTS.has(bound)) {
-    return LOOPBACK_HOSTS.has(originHost) && LOOPBACK_HOSTS.has(hostName);
+  if (isLoopbackHost(bound)) {
+    return isLoopbackHost(originHost) && isLoopbackHost(hostName);
   }
   if (WILDCARD_HOSTS.has(bound)) {
     return originHost === hostName;

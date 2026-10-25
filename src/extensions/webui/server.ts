@@ -1,7 +1,7 @@
 import { createWsServer, type CreateWsServerOptions } from "../websocket/server.ts";
 import { WS_MAX_PAYLOAD_BYTES } from "../websocket/constants.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
-import { upgradeOriginAllowed, LOOPBACK_HOSTS } from "../websocket/origin.ts";
+import { upgradeOriginAllowed, isLoopbackHost } from "../websocket/origin.ts";
 import { logger } from "@utils/logger.ts";
 import { CoreContext } from "@core/extensions/types.ts";
 
@@ -93,7 +93,7 @@ export async function createWebuiServer(
   // session tokens travel in cleartext over plain HTTP, so exposing the
   // WebUI beyond localhost puts a live agent behind a shared-key check only.
   const effectiveHost = host ?? "127.0.0.1";
-  if (!LOOPBACK_HOSTS.has(effectiveHost)) {
+  if (!isLoopbackHost(effectiveHost)) {
     logger.warn(
       `[webui] binding to non-loopback host '${effectiveHost}' -- ` +
         "reachable from other machines over unencrypted HTTP. " +

@@ -3,7 +3,27 @@
 // policy is a pure header comparison -- no server, no sockets.
 
 import { describe, it, expect } from "bun:test";
-import { upgradeOriginAllowed } from "@extensions/websocket/origin.ts";
+import { upgradeOriginAllowed, isLoopbackHost } from "@extensions/websocket/origin.ts";
+
+describe("isLoopbackHost -- raw host contract", () => {
+  // webui/server.ts feeds this raw config values; upgradeOriginAllowed falls
+  // back to the raw bound string when URL parsing fails (e.g. "::").
+  it("keeps wildcard addresses out of the loopback set", () => {
+    expect(isLoopbackHost("0.0.0.0")).toBe(false);
+    expect(isLoopbackHost("::")).toBe(false);
+  });
+
+  it("treats a *.localhost bind as a loopback bind", () => {
+    expect(isLoopbackHost("app.localhost")).toBe(true);
+    // So loopback names stay interchangeable through a named-loopback bind.
+    expect(upgradeOriginAllowed("http://127.0.0.1:3000", "127.0.0.1:3000", "app.localhost")).toBe(true);
+  });
+
+  it("normalizes case", () => {
+    expect(isLoopbackHost("LOCALHOST")).toBe(true);
+    expect(isLoopbackHost("App.LocalHost")).toBe(true);
+  });
+});
 
 describe("upgradeOriginAllowed -- loopback bind", () => {
   it("accepts loopback origins naming the local host", () => {
@@ -12,6 +32,24 @@ describe("upgradeOriginAllowed -- loopback bind", () => {
     expect(upgradeOriginAllowed("http://[::1]:3000", "[::1]:3000", "::1")).toBe(true);
     // Loopback names are interchangeable on a loopback bind.
     expect(upgradeOriginAllowed("http://localhost:3000", "127.0.0.1:3000", "127.0.0.1")).toBe(true);
+  });
+
+  it("accepts the whole 127.0.0.0/8 range, not just 127.0.0.1", () => {
+    // 127.0.0.0/8 is loopback in its entirety (systemd-resolved answers on
+    // 127.0.0.53); browsers reach a loopback-bound server through any of it.
+    expect(upgradeOriginAllowed("http://127.0.0.53:3000", "127.0.0.53:3000", "127.0.0.1")).toBe(true);
+    expect(upgradeOriginAllowed("http://127.2.3.4:3000", "127.2.3.4:3000", "localhost")).toBe(true);
+    // Dotted-quad lookalikes are names, not addresses.
+    expect(upgradeOriginAllowed("http://127.evil.example", "127.0.0.1:3000", "127.0.0.1")).toBe(false);
+  });
+
+  it("accepts every *.localhost name, which browsers resolve to loopback themselves", () => {
+    expect(upgradeOriginAllowed("http://app.localhost:3000", "app.localhost:3000", "127.0.0.1")).toBe(true);
+    expect(upgradeOriginAllowed("http://hotdog.localhost:3000", "hotdog.localhost:3000", "localhost")).toBe(true);
+    // Lookalikes: not suffix-bounded, so not loopback.
+    expect(upgradeOriginAllowed("http://evil.localhost.attacker.tld", "127.0.0.1:3000", "127.0.0.1")).toBe(false);
+    expect(upgradeOriginAllowed("http://notlocalhost:3000", "127.0.0.1:3000", "127.0.0.1")).toBe(false);
+    expect(upgradeOriginAllowed("http://localhost.attacker.tld:3000", "127.0.0.1:3000", "127.0.0.1")).toBe(false);
   });
 
   it("refuses a foreign origin", () => {

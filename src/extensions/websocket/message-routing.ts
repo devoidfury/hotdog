@@ -171,7 +171,13 @@ export async function routeMessage(
             if (!ws.activeSessionId && !ws.attachStarted) {
               ws.attachStarted = true;
               if (ws.resumeSessionId) {
-                attachResumedSession(
+                // Await the attach-or-fallback chain: routeMessage's promise
+                // is the caller's settle signal for this message's replies,
+                // and the attach reads real disk. Fire-and-forget made the
+                // fallback burst (sessionCreated, cursor, error) unobservable
+                // -- a starved runner resolved the handler before the EACCES
+                // read even completed (the CI [authOk]-only flake).
+                await attachResumedSession(
                   ws,
                   registry,
                   bridge,
@@ -180,14 +186,14 @@ export async function routeMessage(
                   true,
                 ).catch((err: unknown) => {
                   logger.error(`[websocket] resumed attach failed: ${formatError(err)}`);
-                  void fallbackAttach(ws, registry, bridge, "Session resume failed.");
+                  return fallbackAttach(ws, registry, bridge, "Session resume failed.");
                 });
               } else if (registry.size > 0) {
-                void attachToMostRecentSession(ws, registry, bridge).catch((err: unknown) => {
+                await attachToMostRecentSession(ws, registry, bridge).catch((err: unknown) => {
                   logger.error(`[websocket] attach to most recent failed: ${formatError(err)}`);
                 });
               } else {
-                createAndAttachSession(ws, registry);
+                await createAndAttachSession(ws, registry);
               }
             }
           } else {
@@ -565,7 +571,9 @@ export async function routeMessage(
     }
 
     case C2S.LIST_LOGS: {
-      listSessionLogs()
+      // Awaited so the reply has settled when routeMessage resolves (the
+      // directory read is real I/O; fire-and-forget raced the caller).
+      await listSessionLogs()
         .then((logs) => {
           // Only return cold logs, not sessions that are still live.
           const activeIds = new Set(registry.list().map((s) => s.id));
@@ -599,7 +607,8 @@ export async function routeMessage(
       // its resume_attempt records as manual. If the log is already live
       // (another tab on it), this is just an attach.
       if (msg.logId) {
-        attachResumedSession(ws, registry, bridge, msg.logId as string, 0, false).catch(
+        // Awaited for the settle contract: the attach reads the real log.
+        await attachResumedSession(ws, registry, bridge, msg.logId as string, 0, false).catch(
           (err: unknown) => {
             logger.error(`[websocket] loadLog failed: ${formatError(err)}`);
             SessionRegistry.sendSafe(ws, {
@@ -614,7 +623,8 @@ export async function routeMessage(
 
     case C2S.VIEW_LOG: {
       if (msg.logId) {
-        readSessionEntries(msg.logId as string)
+        // Awaited so the caller sees LOG_VIEWED/ERROR on return (real log read).
+        await readSessionEntries(msg.logId as string)
           .then((entries) => {
             // Log entries carry raw images; put them through the same wire cap so a huge base64 can't flood the socket.
             const capped = entries.map((entry) => {
@@ -640,7 +650,8 @@ export async function routeMessage(
 
     case C2S.DELETE_LOG: {
       if (msg.logId) {
-        deleteSessionLog(msg.logId as string)
+        // Awaited so the caller sees the confirm/error on return (real unlink).
+        await deleteSessionLog(msg.logId as string)
           .then((deleted) => {
             if (deleted) {
               SessionRegistry.sendSafe(ws, {

@@ -138,6 +138,41 @@ describe("adoptSessionLog model fidelity", () => {
   });
 });
 
+// ── The adoption seam is idempotent ─────────────────────────────────────
+// pendingAdoptions only dedupes adoptions that are IN FLIGHT. The attach
+// flow's live-session check runs before its log reads, so a slow read (the
+// 2-core CI race behind "enqueues exactly once for concurrent adopters")
+// can land after the first adoption settled and the map cleared. A late
+// joiner must never re-adopt a live session: that forks a second writer
+// onto one JSONL and double-fires the open-turn continuation.
+
+describe("adoptSessionLog idempotency", () => {
+  it("never re-adopts a session that is already live under its id", async () => {
+    const sessionId = uniqueId("adopt-twice");
+    writeLog(sessionId, [line({ session_id: sessionId, content: "u" })]);
+    const entries = await reconcileAndRead(sessionId);
+    const { registry, configs } = recordingRegistry();
+    try {
+      captureLoggedErrors(); // the unattested-model warning is expected here
+      try {
+        const first = await adoptSessionLog(sessionId, registry, false, entries);
+        expect(first.adopted).toBe(true);
+        expect(registry.get(sessionId)).not.toBeNull();
+        // The map is empty again (settled) and the session is live: the
+        // exact state the racing second tab observes.
+        const second = await adoptSessionLog(sessionId, registry, false, entries);
+        expect(second.adopted).toBe(false);
+        expect(configs).toHaveLength(1); // no second agent for one id
+      } finally {
+        resetLoggerForTesting();
+      }
+    } finally {
+      registry.stopCleanupLoop();
+      rmSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), { force: true });
+    }
+  });
+});
+
 // ── The warning must reach the resuming client ─────────────────────────────
 // The pre-attach sink emit died unheard: output events are neither persisted
 // nor replayed, and the resuming socket only subscribes during attach. The

@@ -288,10 +288,12 @@ export async function attachToMostRecentSession(
   }
 
   if (!mostRecent) {
-    createAndAttachSession(ws, registry);
+    // Awaited: a caller that settles this chain (fallbackAttach) must see
+    // the sessionCreated burst before it appends anything of its own.
+    await createAndAttachSession(ws, registry);
     return;
   }
 
   const attached = await attachLiveSession(ws, registry, bridge, mostRecent.id);
-  if (!attached) createAndAttachSession(ws, registry);
+  if (!attached) await createAndAttachSession(ws, registry);
 }

@@ -50,6 +50,14 @@ export async function adoptSessionLog(
     const result = await inFlight;
     return { ...result, adopted: false };
   }
+  // Late joiner: an adoption already settled (the map clears on settle)
+  // while this caller's pre-adoption log read was still queued, so the
+  // attach flow's live-session check went stale. The session is live under
+  // this id; adopting again would fork a second writer onto one JSONL and
+  // double-fire the open-turn continuation. The caller attaches live instead.
+  if (registry.get(sessionId)) {
+    return { pendingQuestions: [], openTurn: false, adopted: false, modelWarning: null };
+  }
   const attempt = (async () => {
     // Restore persisted model and profile so the resumed session runs with
     // the tool set it ended on. The index is the source of truth for cold
@@ -240,8 +248,12 @@ export function parseResumeParams(url: URL): { sessionId: string; cursor: number
 export function createAndAttachSession(
   ws: HotdogServerSocket<unknown>,
   registry: SessionRegistry,
-): void {
-  registry
+): Promise<void> {
+  // The chain is returned (not fire-and-forget) so callers like
+  // fallbackAttach can await the sessionCreated burst: with a real agent
+  // build the create is slow, and an unawaited reason error would race
+  // AHEAD of the sessionCreated the client needs first.
+  return registry
     .create({})
     .then(({ sessionId, agent }) => {
       const channel = registry.createChannel(sessionId, ws);

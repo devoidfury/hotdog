@@ -525,14 +525,24 @@ describe("Session Review CLI - baton mirror cleanup", () => {
     writeBaton("dangling");
     ageFile(batonPath("dangling"), 60);
 
-    const cli = { args: ["cleanup"], olderThan: 30, colors: false, theme: "dark" };
-    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
-    // Non-TTY confirm answers no: nothing is deleted, but the preview must
-    // disclose the orphaned mirrors it is about to take.
-    expect(exitCode).toBe(0);
-    expect(output).toContain("dangling.baton.json");
-    expect(output).toContain("Aborted.");
-    expect(existsSync(batonPath("dangling"))).toBe(true);
+    // Force non-TTY: when run in a terminal the inherited stdin is a TTY and
+    // confirm() would block forever waiting for input. Same stub the other
+    // confirmation tests use.
+    const origIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+
+    try {
+      const cli = { args: ["cleanup"], olderThan: 30, colors: false, theme: "dark" };
+      const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+      // Non-TTY confirm answers no: nothing is deleted, but the preview must
+      // disclose the orphaned mirrors it is about to take.
+      expect(exitCode).toBe(0);
+      expect(output).toContain("dangling.baton.json");
+      expect(output).toContain("Aborted.");
+      expect(existsSync(batonPath("dangling"))).toBe(true);
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTTY, configurable: true });
+    }
   });
 });
 

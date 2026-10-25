@@ -1318,12 +1318,15 @@ async function scanRunDirForInterruption(
   let lastEv: string | null = null;
   const state = new Map<string, string>();
   for (const ev of parseJsonLines(journal.text, "skip")) {
+    // Same shape guard as readRunLog: garbage journals can hold valid-JSON
+    // scalar lines; they are inert noise, never a crash on property access.
+    if (typeof ev !== "object" || ev === null) continue;
     if (typeof ev.ev === "string") lastEv = ev.ev;
     if (ev.ev === "started") {
       started = {
         runId: String(ev.runId ?? ""),
         workflow: String(ev.workflow ?? ""),
-        nodes: (ev.nodes as string[]) ?? [],
+        nodes: Array.isArray(ev.nodes) ? (ev.nodes as string[]) : [],
       };
     } else if (ev.ev === "finished") {
       finished = true;
@@ -1511,6 +1514,11 @@ async function readRunLog(runDir: string): Promise<RunLogEvents | null> {
   const lastState = new Map<string, string>();
   const succeeded = new Map<string, SucceededClaim>();
   for (const ev of parseJsonLines(text, "skip")) {
+    // Shape guard: parseJsonLines guarantees valid JSON only; a garbage
+    // journal can hold scalar lines (bare `null` throws on property access),
+    // skipped like unknown ev values. The array guards cover garbage-shaped
+    // object fields (`{"ev":"started","nodes":5}`) that later folds dereference.
+    if (typeof ev !== "object" || ev === null) continue;
     // Unknown ev values (interrupted markers, anything a future writer adds)
     // fall through ignored: node state derives from node/finished events only,
     // so an annotated journal resumes exactly like an unmarked one.
@@ -1518,7 +1526,7 @@ async function readRunLog(runDir: string): Promise<RunLogEvents | null> {
       started = {
         runId: String(ev.runId),
         workflow: String(ev.workflow),
-        nodes: (ev.nodes as string[]) ?? [],
+        nodes: Array.isArray(ev.nodes) ? (ev.nodes as string[]) : [],
         startedAt: Number(ev.startedAt),
       };
     } else if (ev.ev === "finished") {
@@ -1534,7 +1542,7 @@ async function readRunLog(runDir: string): Promise<RunLogEvents | null> {
           attempt: Number(ev.attempt ?? 0),
           verdict: ev.verdict == null ? null : String(ev.verdict),
           summary: String(ev.summary ?? ""),
-          deps: (ev.deps as string[]) ?? [],
+          deps: Array.isArray(ev.deps) ? (ev.deps as string[]) : [],
           files: (ev.files as Record<string, FileClaim>) ?? {},
         });
       } else {

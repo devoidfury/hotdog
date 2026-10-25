@@ -514,15 +514,17 @@ export function isPrivateAddress(ip: string): boolean {
       return true;
     }
 
-    // IPv4-mapped ::ffff:a.b.c.d -- the last 32 bits carry a v4 address.
-    // WHATWG URL parsing normalizes embedded-IPv4 forms to this shape.
+    // IPv4-mapped ::ffff:a.b.c.d and deprecated IPv4-compatible ::a.b.c.d carry a v4
+    // address in the last 32 bits, so both must be unwrapped. WHATWG URL parsing
+    // normalizes dotted embedded-IPv4 forms to these numeric shapes (e.g.
+    // [::127.0.0.1] serializes as ::7f00:1).
     if (
       groups[0] === 0 &&
       groups[1] === 0 &&
       groups[2] === 0 &&
       groups[3] === 0 &&
       groups[4] === 0 &&
-      groups[5] === 0xffff
+      (groups[5] === 0xffff || groups[5] === 0)
     ) {
       const v4 = `${(groups[6] >> 8) & 0xff}.${groups[6] & 0xff}.${(groups[7] >> 8) & 0xff}.${groups[7] & 0xff}`;
       return isPrivateAddress(v4);
@@ -531,8 +533,10 @@ export function isPrivateAddress(ip: string): boolean {
     // 2001:db8::/32 documentation
     if (groups[0] === 0x2001 && groups[1] === 0x0db8) return true;
 
-    // 2002::/16 6to4 and 64:ff9b::/96 NAT64 embed a v4 address in the low
-    // bits, which may itself be private -- refuse the whole prefix.
+    // 2002::/16 6to4 and 64:ff9b:: NAT64 embed a v4 address in the low
+    // bits, which may itself be private -- refuse the whole prefix. The
+    // NAT64 well-known prefix is /96; this check covers the full /32, so
+    // the unallocated 64:ff9b::/32 remainder is over-blocked fail-closed.
     if (groups[0] === 0x2002) return true;
     if (groups[0] === 0x0064 && groups[1] === 0xff9b) return true;
 

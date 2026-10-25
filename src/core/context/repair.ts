@@ -71,7 +71,10 @@ export function repairToolCalls(
 
   let i = 0;
   while (i < messages.length) {
-    const msg = messages[i]!;
+    let msg = messages[i]!;
+    // Structurally unmatchable tool_calls can never be given a legal result;
+    // strip them before the block walk (see sanitizeToolCalls).
+    if (msg.role === "assistant") msg = sanitizeToolCalls(msg);
     const calls =
       msg.role === "assistant" && Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0
         ? msg.toolCalls
@@ -151,4 +154,42 @@ export function repairToolCalls(
 
 function toolResultLabel(toolCallId: string | null): string {
   return toolCallId && toolCallId !== "" ? toolCallId : "(missing id)";
+}
+
+/**
+ * Strip tool_call entries that can never appear on a legal wire request:
+ * non-object entries, missing/empty/non-string ids, a missing function object,
+ * and repeat ids within one message (first occurrence wins). Rationale:
+ *  - an entry without a usable id is unanswerable -- serialize.ts only emits
+ *    `tool_call_id` when truthy, so no legal tool result can reference it, and
+ *    it stays a dangling tool_use the provider 400s on;
+ *  - two tool_use entries sharing one id cannot both be answered: the repair
+ *    invariant is exactly-one-result-per-id, so the repeat entry is stripped.
+ * Cloned (the input message is never mutated) only when something is removed;
+ * healthy messages pass through as the same instance.
+ */
+function sanitizeToolCalls(msg: Message): Message {
+  const tcs = msg.toolCalls;
+  if (!Array.isArray(tcs) || tcs.length === 0) return msg;
+  const seen = new Set<string>();
+  const kept: ToolCall[] = [];
+  for (const tc of tcs) {
+    if (!tc || typeof tc !== "object" || Array.isArray(tc)) continue;
+    const id = tc.id;
+    const fn = tc.function;
+    if (typeof id !== "string" || id === "" || seen.has(id)) continue;
+    if (!fn || typeof fn !== "object" || Array.isArray(fn)) continue;
+    seen.add(id);
+    kept.push(tc);
+  }
+  if (kept.length === tcs.length) return msg;
+  return new Message({
+    role: msg.role,
+    content: msg.content,
+    reasoningContent: msg.reasoningContent,
+    toolCalls: kept.length > 0 ? kept : null,
+    toolCallId: msg.toolCallId,
+    images: msg.images,
+    source: msg.source,
+  });
 }

@@ -415,10 +415,38 @@ export interface RescueOptions {
   configFileArg?: string | null;
   fix: boolean;
   configParams?: ConfigParamDef[];
+  /** Machine mode: stdout carries only the JSON envelope; the prose renderer is silenced. */
+  json?: boolean;
+}
+
+/** One structured problem from the key/schema stages (file-level state lives in RescueFileEntry). */
+export interface RescueFinding {
+  type: "missing-config-dir" | "config-file-missing" | "unknown-key" | "duplicate-key" | "schema";
+  message: string;
+  key?: string;
+  line?: number;
+  did_you_mean?: string[];
+}
+
+/** Per-config-file verdict in the --json envelope. */
+export interface RescueFileEntry {
+  path: string;
+  in_use: boolean;
+  status: "missing" | "ok" | "broken";
+  parse_error?: string;
+  jsonc_issues?: Array<{ kind: string; lines: number[] }>;
+  fixable?: boolean;
+  fixed?: boolean;
+  backup?: string | null;
 }
 
 export async function runRescue(opts: RescueOptions): Promise<number> {
-  const log = (s = "") => console.log(s);
+  // Envelope mode silences the prose renderer instead of restructuring it:
+  // every diagnostic also lands in `findings`/`fileEntries`, so nothing is
+  // gained by threading two formatters through one pass.
+  const log = opts.json ? (_s?: string) => {} : (s = "") => console.log(s);
+  const findings: RescueFinding[] = [];
+  const fileEntries: RescueFileEntry[] = [];
   let problems = 0;
   let fixed = 0;
 
@@ -443,6 +471,11 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
       chosenCandidate.source.startsWith("HOTDOG_CONFIG_DIR"))
   ) {
     problems++;
+    findings.push({
+      type: "missing-config-dir",
+      message:
+        "the explicit config directory does not exist; startup never falls through to defaults",
+    });
     log(`  PROBLEM: the explicit config directory does not exist.`);
     log("  Startup will fail here: an explicit --config-dir / HOTDOG_CONFIG_DIR never falls through to defaults.");
   }
@@ -461,9 +494,16 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
   for (const file of files) {
     const report = await diagnoseConfigFile(file);
     const tag = file === inUse ? " [in use]" : "";
+    const entry: RescueFileEntry = {
+      path: file,
+      in_use: file === inUse,
+      status: report.status === "missing" ? "missing" : report.status === "ok" ? "ok" : "broken",
+    };
+    fileEntries.push(entry);
     if (report.status === "missing") {
       if (explicit) {
         problems++;
+        findings.push({ type: "config-file-missing", message: "the --config path is unreadable" });
         log(`${file}${tag}: NOT FOUND - the --config path is unreadable`);
       } else {
         log(`${file}: no file (defaults apply)`);
@@ -477,6 +517,7 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
       continue;
     }
 
+    entry.parse_error = report.parseErrorMessage ?? "invalid JSON";
     log(`  BROKEN: ${report.parseErrorMessage ?? "invalid JSON"}`);
     if (report.errorIndex !== null) {
       log(errorExcerpt(report.rawText, report.errorIndex));
@@ -491,6 +532,7 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
         list.push(iss.line);
         byKind.set(iss.kind, list);
       }
+      entry.jsonc_issues = Array.from(byKind.entries()).map(([kind, lines]) => ({ kind, lines }));
       for (const [kind, lines] of byKind) {
         const label =
           kind === "trailing-comma"
@@ -499,11 +541,14 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
         log(`  found ${lines.length} ${label} (lines ${lines.join(", ")})`);
       }
     }
+    entry.fixable = report.fixable === true;
     if (report.fixable) {
       if (opts.fix) {
-        const ok = await repairFile(file, report.parsedText!, log);
-        if (ok) {
+        const backup = await repairFile(file, report.parsedText!, log);
+        if (backup) {
           fixed++;
+          entry.fixed = true;
+          entry.backup = backup;
           if (file === inUse) usableText = report.parsedText;
         } else {
           problems++;
@@ -521,9 +566,13 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
 
   // 3-4. Key and schema checks on the effective config (only when we have JSON
   // that parses, original or just-repaired).
+  let paths: {
+    system_prompt: { path: string; exists: boolean };
+    profiles_dir: { path: string; exists: boolean };
+  } | null = null;
   if (usableText !== null) {
-    problems += await checkKeys(usableText, opts.configParams ?? [], log);
-    problems += checkSchema(usableText, opts.configParams ?? [], log);
+    problems += await checkKeys(usableText, opts.configParams ?? [], log, findings);
+    problems += checkSchema(usableText, opts.configParams ?? [], log, findings);
     log();
   }
 
@@ -539,9 +588,34 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
       }
     } catch {}
     const sysPrompt = path.join(configDir, DEFAULT_SYSTEM_PROMPT_FILENAME);
-    log(`System prompt template: ${sysPrompt}${(await exists(sysPrompt)) ? "" : " (absent - built-in template used)"}`);
-    log(`Profiles directory:     ${profileDir}${(await exists(profileDir)) ? "" : " (absent)"}`);
+    const sysPromptExists = await exists(sysPrompt);
+    const profileDirExists = await exists(profileDir);
+    paths = {
+      system_prompt: { path: sysPrompt, exists: sysPromptExists },
+      profiles_dir: { path: profileDir, exists: profileDirExists },
+    };
+    log(`System prompt template: ${sysPrompt}${sysPromptExists ? "" : " (absent - built-in template used)"}`);
+    log(`Profiles directory:     ${profileDir}${profileDirExists ? "" : " (absent)"}`);
     log();
+  }
+
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        {
+          config_dir: configDir,
+          resolution: chain,
+          files: fileEntries,
+          findings,
+          paths,
+          problems,
+          fixed,
+        },
+        null,
+        2,
+      ),
+    );
+    return problems === 0 ? 0 : 1;
   }
 
   if (fixed > 0) {
@@ -568,14 +642,14 @@ async function repairFile(
   file: string,
   fixedText: string,
   log: (s?: string) => void,
-): Promise<boolean> {
+): Promise<string | null> {
   const original = await fs.readFile(file, "utf-8");
   let backup = `${file}.bak`;
   for (let n = 1; await exists(backup); n++) backup = `${file}.bak.${n}`;
   await fs.writeFile(backup, original, "utf-8");
   await fs.writeFile(file, fixedText, "utf-8");
   log(`  FIXED ${file} (backup: ${backup})`);
-  return true;
+  return backup;
 }
 
 function normalizeKey(s: string): string {
@@ -586,6 +660,7 @@ async function checkKeys(
   text: string,
   configParams: ConfigParamDef[],
   log: (s?: string) => void,
+  findings?: RescueFinding[],
 ): Promise<number> {
   let problems = 0;
   const allowed = [
@@ -600,7 +675,9 @@ async function checkKeys(
     const first = seen.get(norm);
     if (first !== undefined) {
       problems++;
-      log(`UNKNOWN/DUPLICATE key: "${key}" (line ${line}) duplicates line ${first} - the later value silently wins`);
+      const message = `UNKNOWN/DUPLICATE key: "${key}" (line ${line}) duplicates line ${first} - the later value silently wins`;
+      findings?.push({ type: "duplicate-key", key, line, message });
+      log(message);
       continue;
     }
     seen.set(norm, line);
@@ -608,10 +685,11 @@ async function checkKeys(
       const hints = suggestCandidates(norm, allowed.map(normalizeKey), { limit: 3 });
       const real = hints.map((h) => allowed.find((a) => normalizeKey(a) === h)!);
       problems++;
-      log(
+      const message =
         `UNKNOWN key: "${key}" (line ${line}) - hotdog ignores it` +
-          (real.length > 0 ? `; did you mean ${real.map((r) => `"${r}"`).join(", ")}?` : ""),
-      );
+        (real.length > 0 ? `; did you mean ${real.map((r) => `"${r}"`).join(", ")}?` : "");
+      findings?.push({ type: "unknown-key", key, line, did_you_mean: real, message });
+      log(message);
     }
   }
   return problems;
@@ -621,6 +699,7 @@ function checkSchema(
   text: string,
   configParams: ConfigParamDef[],
   log: (s?: string) => void,
+  findings?: RescueFinding[],
 ): number {
   let raw: unknown;
   try {
@@ -633,6 +712,7 @@ function checkSchema(
   // (unmerged) file is the right input -- defaults would mask nothing but add noise.
   const result = validateConfig(normalized as never, configParams.filter((p) => p.schema).map((p) => ({ key: p.key, schema: p.schema })));
   for (const err of result.errors) {
+    findings?.push({ type: "schema", message: err });
     log(`SCHEMA: ${err}`);
   }
   return result.errors.length;

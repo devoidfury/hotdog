@@ -19,6 +19,7 @@ hotdog sessions cleanup          # Remove old sessions; also reclaims leaked
                                  # is gone go once past the same --older-than cutoff)
 hotdog rescue                    # Diagnose config files (paths, syntax, unknown keys)
 hotdog rescue fix                # ...and repair comments/trailing commas (.bak kept)
+hotdog rescue --json             # ...as a JSON envelope (stdout pure JSON; findings, files, totals)
 hotdog webui                     # Start the web UI server
 hotdog workflow validate <f> [--param key=value]...
                                  # Validate a .workflow.yaml graph (errors + warnings, exit code).
@@ -58,7 +59,8 @@ hotdog workflow cancel <run-id>  # Finished runs: idempotent report; live runs o
     --shell-mode             Execute lines starting with a recognized system command directly in interactive mode
                                Tip: append | @ to send command output to the agent (e.g., "ls -la | @", "ls -la | @ show me the permissions")
 -l, --loud                   Print full JSON API responses
---json                       Output as JSON
+--json                       Output as JSON for the subcommands that support it (info, profiles,
+                               sessions, rescue); stdout carries only the JSON, diagnostics go to stderr
     --json-schema <json|path>  One-shot structured output: a JSON Schema (inline or file path); the run ends when the model returns a valid payload, printed as bare JSON
 --show-tools                 Show tool calls in output
 --show-thinking              Show reasoning/thinking output

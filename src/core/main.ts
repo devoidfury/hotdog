@@ -259,6 +259,7 @@ export async function main(): Promise<number> {
       configDirArg: cliArgs.configDir ?? null,
       configFileArg: cliArgs.config ?? null,
       fix: Array.isArray(cliArgs.args) && (cliArgs.args as string[]).includes("fix"),
+      json: cliArgs.wantsJson === true,
       configParams: configRegistry.getConfigParams(),
     });
   cliSubcommandRegistry.register("rescue", {
@@ -317,7 +318,7 @@ export async function main(): Promise<number> {
 
   if (earlyConfigError) {
     logger.error(formatError(earlyConfigError));
-    console.log(
+    console.error(
       "The config file is broken, so nothing else can start. Run `hotdog rescue` for the exact line,\n" +
         "or `hotdog rescue fix` to automatically repair comments and trailing commas (keeps a .bak).",
     );
@@ -329,7 +330,7 @@ export async function main(): Promise<number> {
     built = await buildConfig(cli as CliArgv, configRegistry);
   } catch (e) {
     logger.error(formatError(e));
-    console.log("Run `hotdog rescue` for config diagnostics (paths, syntax, unknown keys).");
+    console.error("Run `hotdog rescue` for config diagnostics (paths, syntax, unknown keys).");
     return 1;
   }
   const { resolved, config } = built;

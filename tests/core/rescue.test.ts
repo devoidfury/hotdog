@@ -350,7 +350,11 @@ async function runMain(
     return true;
   }) as typeof process.stderr.write;
   const origLog = console.log;
+  const origConsoleErr = console.error;
+  // Bun's console.log/console.error bind to fd handles, so patching the
+  // stream .write alone misses them; route both through the captured streams.
   console.log = (...a: unknown[]) => process.stdout.write(a.join(" ") + "\n");
+  console.error = (...a: unknown[]) => process.stderr.write(a.join(" ") + "\n");
 
   try {
     const exitCode = await main();
@@ -360,6 +364,7 @@ async function runMain(
     process.stdout.write = origOut;
     process.stderr.write = origErr;
     console.log = origLog;
+    console.error = origConsoleErr;
     process.env = origEnv;
     resetLoggerForTesting();
   }
@@ -455,7 +460,9 @@ describe("main rescue subcommand", () => {
       );
       expect(exitCode).toBe(1);
       expect(stderr).toContain("Error loading config");
-      expect(stdout).toContain("hotdog rescue");
+      // Guidance rides stderr: stdout stays empty for consumers of piped output.
+      expect(stdout).toBe("");
+      expect(stderr).toContain("hotdog rescue");
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -491,6 +498,122 @@ describe("main rescue subcommand", () => {
       const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"]);
       expect(exitCode).toBe(0);
       expect(stdout).toContain("No problems found.");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── rescue --json ────────────────────────────────────────────────────────────
+
+describe("main rescue --json", () => {
+  it("valid config prints a pure JSON envelope and exits 0", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-json-ok-"));
+    try {
+      await fs.writeFile(path.join(dir, "defaults.json"), '{ "maxIterations": 30 }\n');
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue", "--json"]);
+      expect(exitCode).toBe(0);
+      const env = JSON.parse(stdout); // proves no prose leaked to stdout
+      expect(env.problems).toBe(0);
+      expect(env.fixed).toBe(0);
+      expect(env.config_dir).toBe(path.resolve(dir));
+      const chosen = env.resolution.filter((r: any) => r.chosen);
+      expect(chosen.length).toBe(1);
+      expect(chosen[0].path).toBe(path.resolve(dir));
+      expect(env.files.find((f: any) => f.in_use).status).toBe("ok");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("broken fixable file: structured status, jsonc issues, exit 1, file untouched", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-json-broken-"));
+    try {
+      const cfg = path.join(dir, "defaults.json");
+      const broken = '{\n  // oops\n  "maxIterations": 30,\n}\n';
+      await fs.writeFile(cfg, broken);
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue", "--json"]);
+      expect(exitCode).toBe(1);
+      const env = JSON.parse(stdout);
+      expect(env.problems).toBeGreaterThan(0);
+      const file = env.files.find((f: any) => f.path === path.resolve(cfg));
+      expect(file.in_use).toBe(true);
+      expect(file.status).toBe("broken");
+      expect(file.fixable).toBe(true);
+      expect(file.fixed).toBeFalsy();
+      const kinds = file.jsonc_issues.map((i: any) => `${i.kind}@${i.lines.join(",")}`).sort();
+      expect(kinds).toEqual(["comment@2", "trailing-comma@3"]);
+      expect(await fs.readFile(cfg, "utf-8")).toBe(broken);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("unknown and duplicate keys surface as findings with did-you-mean", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-json-keys-"));
+    try {
+      await fs.writeFile(
+        path.join(dir, "defaults.json"),
+        '{\n  "defailt_provider": "x",\n  "maxIterations": 2,\n  "maxIterations": 3\n}\n',
+      );
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue", "--json"]);
+      expect(exitCode).toBe(1);
+      const env = JSON.parse(stdout);
+      const unknown = env.findings.find((f: any) => f.type === "unknown-key" && f.key === "defailt_provider");
+      expect(unknown).toBeDefined();
+      expect(unknown.line).toBe(2);
+      expect(unknown.did_you_mean.length).toBeGreaterThan(0);
+      expect(env.findings.some((f: any) => f.type === "duplicate-key" && f.key === "maxIterations")).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fix mode: envelope reports the repair and the backup path", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-json-fix-"));
+    try {
+      const cfg = path.join(dir, "defaults.json");
+      const broken = '{\n  // oops\n  "maxIterations": 30,\n}\n';
+      await fs.writeFile(cfg, broken);
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue", "fix", "--json"]);
+      expect(exitCode).toBe(0);
+      const env = JSON.parse(stdout);
+      expect(env.fixed).toBe(1);
+      expect(env.problems).toBe(0);
+      const file = env.files.find((f: any) => f.path === path.resolve(cfg));
+      expect(file.fixed).toBe(true);
+      expect(file.backup).toBe(cfg + ".bak");
+      expect(JSON.parse(await fs.readFile(cfg, "utf-8"))).toEqual({ maxIterations: 30 });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("missing explicit config dir surfaces a missing-config-dir finding", async () => {
+    const missing = path.join(os.tmpdir(), `rescue-json-missing-${Date.now()}`);
+    const { exitCode, stdout } = await runMain(["--config-dir", missing, "rescue", "--json"]);
+    expect(exitCode).toBe(1);
+    const env = JSON.parse(stdout);
+    expect(env.findings.some((f: any) => f.type === "missing-config-dir")).toBe(true);
+  });
+});
+
+// ── stdout discipline on fatal failures ──────────────────────────────────────
+
+describe("fatal config failures keep stdout clean", () => {
+  it("a broken config under a JSON-consuming subcommand puts guidance on stderr, not stdout", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-json-fatal-"));
+    try {
+      await fs.writeFile(path.join(dir, "defaults.json"), "{ broken\n");
+      const { exitCode, stdout, stderr } = await runMain(
+        ["--config-dir", dir, "info", "--json"],
+      );
+      expect(exitCode).toBe(1);
+      // Guidance is diagnostics, not a result: stdout stays empty so scripts
+      // never have to distinguish prose from envelopes.
+      expect(stdout).toBe("");
+      expect(stderr).toContain("nothing else can start");
+      expect(stderr).toContain("hotdog rescue");
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

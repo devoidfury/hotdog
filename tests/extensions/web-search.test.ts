@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { WebSearchTool } from "@extensions/web-search/index.ts";
-import { resultStr, withMockFetch, jsonResponse } from "../helpers.ts";
+import { resultStr, withMockFetch, jsonResponse, textResponse } from "../helpers.ts";
+import { TransientError } from "@core/error.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
 
 const defaultWebSearchOptions = {
@@ -250,6 +251,23 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(false);
       expect(resultStr(result)).toContain("Web search failed");
+    });
+  });
+
+  it("throws TransientError on 202 bot challenge instead of reporting no results", async () => {
+    // DDG anomaly detection: HTTP 202 + CAPTCHA page parses to zero results.
+    // It must surface as a rate-limit error, not as "No results found".
+    const challenge = `<html><body>Please complete the following challenge to confirm this search was made by a human. Select all squares containing a duck.</body></html>`;
+    await withMockFetch(async () => textResponse(challenge, 202, "text/html"), async () => {
+      const tool = new WebSearchTool({ ...defaultWebSearchOptions });
+      let caught: unknown;
+      try {
+        await tool.execute(JSON.stringify({ query: "test" }));
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(TransientError);
+      expect((caught as Error).message).toContain("rate-limiting");
     });
   });
 

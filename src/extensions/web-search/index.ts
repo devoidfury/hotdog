@@ -50,6 +50,20 @@ async function searchDuckDuckGo(query: string, maxResults: number, timeout: numb
     signal: AbortSignal.timeout(timeout * 1000),
   });
 
+  // DDG's anomaly-detection answers rate-limited clients with HTTP 202 and a
+  // CAPTCHA page (confirmed on html. and lite. endpoints, any UA). The page
+  // parses to zero results, so without this check a flagged IP is reported to
+  // the model as "No results found" -- indistinguishable from a real empty
+  // query. TransientError gives executor-side backoff a chance to ride out a
+  // brief burst flag; a longer flag surfaces as an explicit error.
+  if (response.status === 202) {
+    await response.body?.cancel().catch(() => {});
+    throw new TransientError(
+      "DuckDuckGo is rate-limiting this machine (bot challenge, HTTP 202), not returning real results. " +
+        "Retry later or configure another webSearch provider (brave, tavily, or searxng) in defaults.json.",
+    );
+  }
+
   if (!response.ok) {
     throw new ToolError(`DuckDuckGo search failed with status ${response.status}`);
   }
@@ -329,6 +343,9 @@ export class WebSearchTool {
         results: String(results.length),
       });
     } catch (err) {
+      // Let provider-detected transient failures (e.g. DDG bot challenge)
+      // reach the executor so its retry/backoff applies.
+      if (err instanceof TransientError) throw err;
       const msg = (err as Error).message;
       if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("AbortError")) {
         throw new TransientError(`Web search timed out: ${msg}`);

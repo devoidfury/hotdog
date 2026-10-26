@@ -371,6 +371,63 @@ describe("tool-call-repair extension", () => {
   });
 });
 
+// ── Length-stop refusal (policy: WHEN to refuse; core owns the mechanism) ───
+
+describe("length-stop refusal", () => {
+  const truncatedCalls = () => [
+    // Args cut off mid-JSON, exactly what a length-truncated stream yields.
+    { id: "call_1", type: "function", function: { name: "read", arguments: '{"path": "/tmp/trun' } },
+  ];
+
+  function lengthStoppedResponse() {
+    const response = streamResult();
+    response.finalToolCalls = truncatedCalls();
+    return response;
+  }
+
+  for (const finishReason of ["length", "max_tokens"]) {
+    it(`refuses every call when finish_reason is ${finishReason}, without mutating the response`, () => {
+      const hook = loadExtension();
+      const response = lengthStoppedResponse();
+      response.finishReason = finishReason;
+      const patch = hook!({ response, modelConfig: {}, agent: fakeAgent() }) as {
+        refuseToolCalls?: { reason: string; trailingNotice?: string };
+      };
+      expect(patch?.refuseToolCalls?.reason).toContain("NOT executed");
+      expect(patch?.refuseToolCalls?.reason).toContain("Re-issue");
+      expect(patch?.refuseToolCalls?.trailingNotice).toContain("truncated");
+      // Policy is a patch, not a mutation: core applies the refusal.
+      expect(response.finalToolCalls).toHaveLength(1);
+    });
+  }
+
+  it("does not refuse a complete tool-call round", () => {
+    const hook = loadExtension();
+    const response = lengthStoppedResponse();
+    response.finalToolCalls = [
+      { id: "call_1", type: "function", function: { name: "read", arguments: '{"path":"f"}' } },
+    ];
+    response.finishReason = "tool_calls";
+    expect(hook!({ response, modelConfig: {}, agent: fakeAgent() })).toBeUndefined();
+  });
+
+  it("does not refuse an empty completion (that nudge is core's)", () => {
+    const hook = loadExtension();
+    const response = streamResult();
+    response.finishReason = "length";
+    expect(hook!({ response, modelConfig: {}, agent: fakeAgent() })).toBeUndefined();
+  });
+
+  it("skips a cancelled run", () => {
+    const hook = loadExtension();
+    const response = lengthStoppedResponse();
+    response.finishReason = "length";
+    expect(
+      hook!({ response, modelConfig: {}, agent: fakeAgent({ cancelled: true }) }),
+    ).toBeUndefined();
+  });
+});
+
 // ── Agent loop integration ──────────────────────────────────────────────────
 // The hook above is exercised through the REAL Agent, as loaded by the
 // extension loader: handler on the agent's hooks, repaired calls executed,
@@ -450,6 +507,74 @@ describe("tool-call-repair in the agent loop", () => {
     const completion = expectCompletion(await agent.run("check f.txt"));
     expect(mockLLM.callCount).toBe(1); // no repair, no tool call, loop stopped
     expect(completion.content).toContain("|"); // raw markup stranded in the turn
+  });
+
+  // The length-stop refusal, end to end: the policy here, the mechanism in core
+  // (tests/core/core-agent.test.ts "refused tool-call mechanism").
+  describe("length-stop refusal in the agent loop", () => {
+    const truncatedSeq = (id: string, finishReason: string) =>
+      buildStreamResponse({
+        // Args cut off mid-JSON, exactly what a length-truncated stream yields.
+        toolCalls: [{ index: 0, name: "worker", arguments: '{"path": "/tmp/trun', id }],
+        finishReason,
+        usage: { total_tokens: 5 },
+      });
+
+    for (const finishReason of ["length", "max_tokens"]) {
+      it(`fails all tool calls without executing when finish_reason is ${finishReason}`, async () => {
+        const tool = simpleTool("worker", "should not run");
+        const mockLLM = new MockLLMClient({
+          responseSequences: [
+            truncatedSeq("call_1", finishReason),
+            buildStreamResponse({ content: "Re-issued cleanly.", usage: { total_tokens: 5 } }),
+          ],
+        });
+        const { agent, hooks, toolRegistry } = createFixture({ mockLLM });
+        attachRepair(hooks);
+        toolRegistry.register("worker", tool);
+
+        const result = await agent.run("Do work");
+
+        expect(expectCompletion(result).content).toBe("Re-issued cleanly.");
+        expect(tool.executeCount).toBe(0);
+
+        // Wire validity: the assistant tool_call still gets a result, carrying the re-issue instruction.
+        const toolMsgs = agent.context.log.getAll().filter((m) => m.role === "tool");
+        expect(toolMsgs).toHaveLength(1);
+        expect(toolMsgs[0]!.toolCallId).toBe("call_1");
+        expect(toolContentText(toolMsgs[0]!.content)).toContain("NOT executed");
+        expect(toolContentText(toolMsgs[0]!.content)).toContain("Re-issue");
+
+        // The persisted harness notice breaks the assistant-tail collapse.
+        const harnessMsgs = agent.context.log.getAll().filter((m) => m.role === "harness");
+        expect(harnessMsgs).toHaveLength(1);
+        const noticeParts = harnessMsgs[0]!.content as Array<Record<string, unknown>>;
+        expect(String(noticeParts[0]!.text)).toContain("truncated");
+      });
+    }
+
+    it("without the extension, a truncated call is not rescued", async () => {
+      // Strict-mode stance: disabling tool-call-repair means no refusal --
+      // the call reaches the executor as-is and dies on schema validation with
+      // a generic parameter error, and no re-issue notice breaks the tail.
+      const tool = simpleTool("worker", "should not run");
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          truncatedSeq("call_1", "length"),
+          buildStreamResponse({ content: "Done.", usage: { total_tokens: 5 } }),
+        ],
+      });
+      const { agent, toolRegistry } = createFixture({ mockLLM });
+      toolRegistry.register("worker", tool);
+
+      await agent.run("Do work");
+
+      expect(tool.executeCount).toBe(0);
+      const toolMsgs = agent.context.log.getAll().filter((m) => m.role === "tool");
+      expect(toolMsgs).toHaveLength(1);
+      expect(toolContentText(toolMsgs[0]!.content)).toContain("Parameter validation error");
+      expect(agent.context.log.getAll().filter((m) => m.role === "harness")).toHaveLength(0);
+    });
   });
 });
 

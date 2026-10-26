@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **provider:response - `refuseToolCalls` patch.** A handler can now make core refuse every tool call in a response: each call is paired with a tool result carrying the refusal's `reason` without executing, an optional `trailingNotice` persists after them as a harness system-notice, and the loop continues. The length-truncated refusal moved from the agent loop into `tool-call-repair`, which already owns truncated tool calls everywhere else (leaked-in-text repair, corrupt-history recovery); core keeps the mechanism, the extension keeps the policy. The assistant-tail backstop stays unconditional in core with its own generic notice (it used to reuse the length-stop text, which lied about an empty-completion tail). With `toolCallRepair.enabled: false` a length-stopped call is no longer refused and fails schema validation generically.
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.15.0...main
 
 ## [v0.15.0] - 2026-10-26

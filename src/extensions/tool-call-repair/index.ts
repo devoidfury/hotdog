@@ -9,10 +9,17 @@
 // holds a tool call with truncated (unparseable) arguments -- the classic state after interrupting a
 // hung call -- it drops the corrupt calls and their orphaned tool results, then asks for one retry.
 //
+// And it refuses length-truncated tool calls through core's `refuseToolCalls`
+// mechanism: a response that hit the output token limit carries arguments that are
+// unparseable or silently short, so nothing from it may execute -- core pairs every
+// refused call with the refusal reason and continues the loop.
+//
 // And it registers a TOOL_CALL gate fence that hard-blocks hallucinated file-proxy artifact URLs before any tool dials out
 // (core logic ported from wtogami/qwen-block-proxy-artifacts, credited in ./block-proxy-artifacts.ts).
 //
-// Disable the extension(config or autoload list) for strict tool - calling enforcement.
+// Disable the extension(config or autoload list) for strict tool - calling enforcement:
+// leaked calls stay text, corrupt stored calls brick the backend, and truncated calls
+// reach the executor unrefused (generic schema-validation failure, no re-issue instruction).
 
 import { HOOKS } from "@core/hooks.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
@@ -26,6 +33,31 @@ interface RepairConfig {
   enabled: boolean;
   maxRepairsPerTurn: number;
 }
+
+/** True when finish_reason says the response was cut off by the token limit. */
+function isLengthStop(reason: string | null): boolean {
+  return reason === "length" || reason === "max_tokens";
+}
+
+/**
+ * Tool-result body for calls on a length-stopped response (refusal reason).
+ * Streaming accumulates arguments verbatim; a call cut off mid-JSON is unparseable or silently short, so executing it is worse than failing.
+ */
+const TRUNCATED_STOP_TOOL_TEXT =
+  "This response hit the output token limit (finish_reason=length), so its tool " +
+  "calls were NOT executed -- their arguments may be truncated mid-stream. " +
+  "Re-issue the intended tool call now with complete arguments.";
+
+/**
+ * Harness notice after a length-stop refusal's skipped tool results.
+ * Why a trailing user-shaped message is required: strict llama.cpp-style gateways collapse an assistant+tool pair
+ * into ONE assistant turn, so two consecutive length stops leave the wire tail [assistant, tool, assistant, tool] == [assistant, assistant]
+ * and the next request 400s with "Cannot have 2+ assistant messages at the end". A trailing user-role message breaks the collapse.
+ * The tool result above already carries the re-issue instruction; this text stays short -- its job is the conversation shape, not the instruction.
+ */
+const TRUNCATED_STOP_NUDGE_TEXT =
+  "The previous response was truncated by the output token limit, so its tool " +
+  "call was not executed. Re-issue that tool call now with complete arguments.";
 
 /**
  * True if the error is the llama.cpp-family backend rejecting the whole request
@@ -100,6 +132,18 @@ export function create(core: CoreContext): ExtensionInstance {
         if (!agent || agent.cancelled) return;
 
         if (agent.iterationCount <= 1) repairsUsed.delete(agent.sessionId);
+
+        // Length-stop refusal: before any repair logic -- a truncated response's
+        // calls must never reach execution, and there is nothing to repair there.
+        if (isLengthStop(response.finishReason) && response.finalToolCalls && response.finalToolCalls.length > 0) {
+          logger.info(
+            `[tool-call-repair] refusing ${response.finalToolCalls.length} tool call(s) on a length-stopped ` +
+              `response (session ${agent.sessionId}); not executed`,
+          );
+          return {
+            refuseToolCalls: { reason: TRUNCATED_STOP_TOOL_TEXT, trailingNotice: TRUNCATED_STOP_NUDGE_TEXT },
+          };
+        }
 
         if (response.finalToolCalls && response.finalToolCalls.length > 0) return;
         // Never repair on the final iteration -- the loop could not run tools anyway.

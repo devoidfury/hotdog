@@ -227,23 +227,41 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
   }
 
   if (startLineIdx === -1) {
-    const near = closestMatches(content, old);
+    // Same size ceiling as closestMatches: past 2 MB, suggestion work stops
+    // paying for itself and the preview stands.
+    const region =
+      content.length <= CLOSEST_MATCH_MAX_FILE_CHARS
+        ? nearestRegion(contentLines, oldTrimmed)
+        : null;
     let detail: string;
-    if (near.length > 0) {
-      detail =
-        "Closest matches (1-based line numbers; copy the exact text):\n" +
-        near
-          .map(
-            (m) =>
-              `  line ${m.line} (differs by ${m.distance} char${m.distance !== 1 ? "s" : ""}):\n    ${m.text}`,
-          )
-          .join("\n");
+    if (region) {
+      detail = region.ranOffFile
+        ? `Nearest region: lines ${region.fileStart}-${region.fileEnd}; the file ends at line ${region.fileEnd}.\n` +
+          `oldString line ${region.diffOldLine} has no counterpart in the file: ${JSON.stringify(region.oldText)}`
+        : `Nearest region: lines ${region.fileStart}-${region.fileEnd}; first difference at file line ${region.diffFileLine} (oldString line ${region.diffOldLine}):\n` +
+          `  file:      ${JSON.stringify(region.fileText)}\n` +
+          `  oldString: ${JSON.stringify(region.oldText)}\n` +
+          (region.allOthersMatch
+            ? "All other in-file lines of the region match modulo indentation."
+            : "More differences follow after this line.");
     } else {
-      const contextLines =
-        contentLines.length <= 10
-          ? contentLines
-          : [...contentLines.slice(0, 3), "...", ...contentLines.slice(Math.max(0, contentLines.length - 4))];
-      detail = `File content:\n${contextLines.join("\n")}`;
+      const near = closestMatches(content, old);
+      if (near.length > 0) {
+        detail =
+          "Closest matches (1-based line numbers; copy the exact text):\n" +
+          near
+            .map(
+              (m) =>
+                `  line ${m.line} (differs by ${m.distance} char${m.distance !== 1 ? "s" : ""}):\n    ${m.text}`,
+            )
+            .join("\n");
+      } else {
+        const contextLines =
+          contentLines.length <= 10
+            ? contentLines
+            : [...contentLines.slice(0, 3), "...", ...contentLines.slice(Math.max(0, contentLines.length - 4))];
+        detail = `File content:\n${contextLines.join("\n")}`;
+      }
     }
     throw AssistantRetryableError.WithHint(
       `text not found in file.\n\nSearched for: ${JSON.stringify(old)}\n\n${detail}`,
@@ -275,15 +293,20 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
   };
 }
 
-// ── Nearest-match suggestions ──────────────────────────────────────────────
+// ── Miss recovery: nearest region, then nearest lines ─────────────────────
 //
 // When oldString misses (even after the trimmed-line fallback), the model is
 // stranded: a head/tail preview of a large file rarely contains the target.
-// Report the closest actual lines so the corrected edit needs no read
-// round-trip. Anchors on the first non-blank line of oldString — intra-line
-// drift (typos, renames, reformatting) is what the trimmed fallback can't
-// recover; reordered multi-line blocks won't suggest well, but they don't
-// match either, so behavior is no worse.
+// Report where the miss actually is so the corrected edit needs no read
+// round-trip. Two shapes:
+// - nearestRegion: a block that still aligns with the file but drifted inside
+//   (the stale-context case -- an earlier edit renamed one interior line).
+//   Windowing the file on an anchor-like line and reporting the first
+//   divergence points at the exact line to fix; one retry, no re-read.
+// - closestMatches: single lines near oldString's first non-blank line.
+//   Intra-line drift (typos, renames) is what the trimmed fallback can't
+//   recover; reordered multi-line blocks won't suggest well, but they don't
+//   match either, so behavior is no worse.
 
 interface ClosestMatch {
   line: number; // 1-based
@@ -295,19 +318,22 @@ const CLOSEST_MATCH_MAX_FILE_CHARS = 2 * 1024 * 1024;
 const CLOSEST_MATCH_CANDIDATE_CAP = 200;
 const CLOSEST_MATCH_LIMIT = 3;
 
-function closestMatches(content: string, old: string): ClosestMatch[] {
-  if (content.length > CLOSEST_MATCH_MAX_FILE_CHARS) return [];
+/** A file line whose trimmed text lies within the anchor's distance threshold. */
+interface AnchorCandidate {
+  idx: number; // 0-based
+  distance: number;
+}
 
-  const anchor = old
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.length > 0);
-  if (!anchor) return [];
-
-  // Prefilter on the anchor's longest tokens keeps the scan O(lines)
-  // substring checks per attempt; the longest token is the most distinctive
-  // but may itself be the typo, so try up to 3 (longest first) until one
-  // yields candidates.
+/**
+ * File lines whose trimmed text is within edit distance of `anchor`, sorted
+ * best first. Prefilter on the anchor's longest tokens keeps the scan
+ * O(lines) substring checks per attempt; the longest token is the most
+ * distinctive but may itself be the typo, so try up to 3 (longest first)
+ * until one yields candidates. Shared by both miss reports so they can never
+ * disagree on what "anchor-like" means. Capped, not display-limited: the
+ * region scan needs the pool, the line list takes the top few.
+ */
+function anchorCandidates(lines: string[], anchor: string): AnchorCandidate[] {
   const tokens = Array.from(
     new Set(anchor.split(/[^A-Za-z0-9_$]+/).filter((t) => t.length >= 4)),
   )
@@ -316,9 +342,7 @@ function closestMatches(content: string, old: string): ClosestMatch[] {
   if (tokens.length === 0) return [];
 
   const threshold = Math.max(2, Math.floor(anchor.length * 0.4));
-  const lines = content.split("\n");
-  const scored: ClosestMatch[] = [];
-
+  const scored: AnchorCandidate[] = [];
   for (const needle of tokens) {
     let candidates = 0;
     for (let i = 0; i < lines.length && candidates < CLOSEST_MATCH_CANDIDATE_CAP; i++) {
@@ -330,15 +354,97 @@ function closestMatches(content: string, old: string): ClosestMatch[] {
       // (minified bundles) before the quadratic distance computation.
       if (Math.abs(trimmed.length - anchor.length) > threshold) continue;
       const distance = editDistance(trimmed, anchor);
-      if (distance <= threshold) {
-        scored.push({ line: i + 1, text: line, distance });
-      }
+      if (distance <= threshold) scored.push({ idx: i, distance });
     }
     if (scored.length > 0) break;
   }
+  scored.sort((a, b) => a.distance - b.distance || a.idx - b.idx);
+  return scored;
+}
 
-  scored.sort((a, b) => a.distance - b.distance || a.line - b.line);
-  return scored.slice(0, CLOSEST_MATCH_LIMIT);
+function closestMatches(content: string, old: string): ClosestMatch[] {
+  if (content.length > CLOSEST_MATCH_MAX_FILE_CHARS) return [];
+  const anchor = old
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!anchor) return [];
+  const lines = content.split("\n");
+  return anchorCandidates(lines, anchor)
+    .slice(0, CLOSEST_MATCH_LIMIT)
+    .map((m) => ({ line: m.idx + 1, text: lines[m.idx]!, distance: m.distance }));
+}
+
+interface NearestRegion {
+  fileStart: number; // 1-based, inclusive
+  fileEnd: number; // 1-based, inclusive; clamped to the file's last line
+  diffFileLine: number | null; // 1-based; null when the divergence is EOF
+  diffOldLine: number; // 1-based within oldString
+  fileText: string | null; // trimmed -- copy it verbatim and the trimmed fallback matches
+  oldText: string; // trimmed
+  ranOffFile: boolean;
+  allOthersMatch: boolean;
+}
+
+/**
+ * Localize a multi-line miss. Windows the file at each anchor-like line --
+ * aligning the anchor's offset inside oldString, so leading blank lines
+ * don't shift the window -- and counts trimmed-equal lines from the anchor
+ * on; the best window is the region, its first trimmed mismatch the line
+ * the model must fix. The region starts AT the anchor: leading blank lines
+ * carry no signal and reporting against them would point the model at
+ * unrelated file lines. Requires at least two agreeing lines -- one line of
+ * agreement is the closest-line list's job, and a coincidental window would
+ * only mislead. Ties go to the better anchor candidate, then the earliest
+ * window, so duplicated blocks report deterministically.
+ */
+function nearestRegion(lines: string[], oldTrimmed: string[]): NearestRegion | null {
+  const anchorIdx = oldTrimmed.findIndex((l) => l.length > 0);
+  if (anchorIdx === -1 || oldTrimmed.length < 2 || lines.length === 0) return null;
+
+  let best: { start: number; equal: number } | null = null;
+  for (const cand of anchorCandidates(lines, oldTrimmed[anchorIdx]!)) {
+    if (cand.idx < anchorIdx) continue; // block head would hang above line 1
+    const start = cand.idx - anchorIdx;
+    let equal = 0;
+    for (let j = anchorIdx; j < oldTrimmed.length; j++) {
+      const fl = lines[start + j];
+      if (fl !== undefined && fl.trim() === oldTrimmed[j]) equal++;
+    }
+    if (equal >= 2 && (best === null || equal > best.equal)) {
+      best = { start, equal };
+    }
+  }
+  if (!best) return null;
+
+  const { start, equal } = best;
+  const contentStart = start + anchorIdx;
+  const compared = Math.min(oldTrimmed.length - anchorIdx, lines.length - contentStart);
+  let diff = -1;
+  for (let j = anchorIdx; j < oldTrimmed.length; j++) {
+    const fl = lines[start + j];
+    if (fl === undefined || fl.trim() !== oldTrimmed[j]) {
+      diff = j;
+      break;
+    }
+  }
+  // Every line agreed: strategy 2 would have edited this window already, so
+  // there is nothing to report. Belt-and-suspenders -- unreachable.
+  if (diff === -1) return null;
+
+  const fileLine = lines[start + diff];
+  const ranOffFile = fileLine === undefined;
+  return {
+    fileStart: contentStart + 1,
+    fileEnd: contentStart + compared,
+    diffFileLine: ranOffFile ? null : start + diff + 1,
+    diffOldLine: diff + 1,
+    fileText: ranOffFile ? null : fileLine!.trim(),
+    oldText: oldTrimmed[diff]!,
+    ranOffFile,
+    // ranOffFile: every in-file line agreed (the mismatch is past EOF).
+    allOthersMatch: ranOffFile ? true : equal === compared - 1,
+  };
 }
 
 /** Levenshtein distance, two-row DP. */

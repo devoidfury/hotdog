@@ -622,3 +622,167 @@ describe("EditTool.execute — BOM/CRLF fidelity", () => {
     expect(buf.toString("utf-8")).toBe("\uFEFFgoodbye");
   });
 });
+
+
+// ── Nearest-region recovery (stale-context block edits) ───────────────────
+
+describe("EditTool.execute — nearest-region recovery", () => {
+  const block = (drifted: string) => [
+    "function render(state) {",
+    "  const nodes = layout(state);",
+    drifted,
+    "  paint(nodes);",
+    "}",
+  ].join("\n");
+  const padded = (blockText: string) =>
+    Array.from({ length: 40 }, (_, i) => `padding ${i}`).join("\n") + "\n" + blockText;
+
+  // "state" must stay out of padding so the anchor token scan lands only on
+  // the block itself.
+
+  it("pinpoints the interior line and the retry from the report succeeds", async () => {
+    const filePath = path.join(dir, "region-interior.txt");
+    fsSync.writeFileSync(filePath, padded(block("  const scale = zoom(state);")));
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    // Stale context: interior line renamed, indentation off (so strategy 2 can't match).
+    const stale =
+      "  function render(state) {\n" +
+      "    const nodes = layout(state);\n" +
+      "    const scale = computeZoom(state);\n" +
+      "    paint(nodes);\n" +
+      "  }";
+    const err = await tool
+      .execute({ path: "region-interior.txt", oldString: stale, newString: "x" }, toolCtx({ workspaceRoots: [dir] }))
+      .then(() => null, (e: unknown) => e as Error);
+
+    expect(err).not.toBeNull();
+    expect(err!.message).toContain("Nearest region: lines 41-45");
+    expect(err!.message).toContain("first difference at file line 43 (oldString line 3)");
+    expect(err!.message).toContain('file:      "const scale = zoom(state);"');
+    expect(err!.message).toContain('oldString: "const scale = computeZoom(state);"');
+    expect(err!.message).toContain("All other in-file lines of the region match");
+    expect(err!.message).not.toContain("Closest matches");
+
+    // The acceptance property: one retry assembled from the reported line, no re-read.
+    const fixed = stale.replace("computeZoom(state)", "zoom(state)");
+    const ok = await tool.execute(
+      { path: "region-interior.txt", oldString: fixed, newString: "rendered()" },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+    expect(resultStr(ok)).toContain("Successfully edited");
+    expect(fsSync.readFileSync(filePath, "utf-8")).toContain("rendered()");
+  });
+
+  it("reports the anchor line itself when only it is stale", async () => {
+    const filePath = path.join(dir, "region-anchor.txt");
+    fsSync.writeFileSync(filePath, padded(block("  const scale = zoom(state);")));
+
+    const stale =
+      "funtion render(state) {\n" +
+      "  const nodes = layout(state);\n" +
+      "  const scale = zoom(state);\n" +
+      "  paint(nodes);\n" +
+      "}";
+    const err = await new EditTool({ maxEditInputSize: 16000 })
+      .execute({ path: "region-anchor.txt", oldString: stale, newString: "x" }, toolCtx({ workspaceRoots: [dir] }))
+      .then(() => null, (e: unknown) => e as Error);
+
+    expect(err!.message).toContain("first difference at file line 41 (oldString line 1)");
+    expect(err!.message).toContain('file:      "function render(state) {"');
+  });
+
+  it("reports EOF when the file ends mid-block", async () => {
+    const filePath = path.join(dir, "region-eof.txt");
+    fsSync.writeFileSync(
+      filePath,
+      Array.from({ length: 40 }, (_, i) => `padding ${i}`).join("\n") +
+        "\nalpha block one\nalpha block two\nalpha block three"
+    );
+
+    const stale = "alpha block one\nalpha block two\nalpha block three\nalpha block four\nalpha block five";
+    const err = await new EditTool({ maxEditInputSize: 16000 })
+      .execute({ path: "region-eof.txt", oldString: stale, newString: "x" }, toolCtx({ workspaceRoots: [dir] }))
+      .then(() => null, (e: unknown) => e as Error);
+
+    expect(err!.message).toContain("Nearest region: lines 41-43; the file ends at line 43.");
+    expect(err!.message).toContain('oldString line 4 has no counterpart in the file: "alpha block four"');
+  });
+
+  it("warns when more differences follow the first", async () => {
+    const filePath = path.join(dir, "region-multi.txt");
+    fsSync.writeFileSync(filePath, padded(block("  const scale = zoom(state);\n  return scale;")));
+
+    const stale =
+      "function render(state) {\n" +
+      "  const nodes = layout(state);\n" +
+      "  const scale = computeZoom(state);\n" +
+      "  return nodes;\n" +
+      "}";
+    const err = await new EditTool({ maxEditInputSize: 16000 })
+      .execute({ path: "region-multi.txt", oldString: stale, newString: "x" }, toolCtx({ workspaceRoots: [dir] }))
+      .then(() => null, (e: unknown) => e as Error);
+
+    expect(err!.message).toContain("first difference at file line 43");
+    expect(err!.message).toContain("More differences follow after this line.");
+  });
+
+  it("falls back to the closest-line list when no window has two agreeing lines", async () => {
+    const filePath = path.join(dir, "region-single.txt");
+    fsSync.writeFileSync(
+      filePath,
+      Array.from({ length: 10 }, (_, i) => `padding ${i}`).join("\n") + "\nconst needleValue = 1;"
+    );
+
+    const stale = "const needleValue = 1;\nconst unrelatedLine = compute();\nreturn unrelatedLine;";
+    const err = await new EditTool({ maxEditInputSize: 16000 })
+      .execute({ path: "region-single.txt", oldString: stale, newString: "x" }, toolCtx({ workspaceRoots: [dir] }))
+      .then(() => null, (e: unknown) => e as Error);
+
+    expect(err!.message).toContain("Closest matches");
+    expect(err!.message).not.toContain("Nearest region");
+  });
+
+  it("reports the first of two identical drifted blocks", async () => {
+    const filePath = path.join(dir, "region-dupe.txt");
+    fsSync.writeFileSync(
+      filePath,
+      [
+        "const markerValue = init();",
+        "process(markerValue);",
+        "finish(markerValue);",
+        ...Array.from({ length: 10 }, (_, i) => `padding ${i}`),
+        "const markerValue = init();",
+        "process(markerValue);",
+        "finish(markerValue);",
+      ].join("\n")
+    );
+
+    const stale = "const markerValue = initX();\nprocess(markerValue);\nfinish(markerValue);";
+    const err = await new EditTool({ maxEditInputSize: 16000 })
+      .execute({ path: "region-dupe.txt", oldString: stale, newString: "x" }, toolCtx({ workspaceRoots: [dir] }))
+      .then(() => null, (e: unknown) => e as Error);
+
+    expect(err!.message).toContain("Nearest region: lines 1-3");
+  });
+
+  it("aligns the window when oldString starts with a blank line", async () => {
+    const filePath = path.join(dir, "region-blank.txt");
+    fsSync.writeFileSync(filePath, padded(block("  const scale = zoom(state);")));
+
+    const stale =
+      "\n  function render(state) {\n" +
+      "    const nodes = layout(state);\n" +
+      "    const scale = computeZoom(state);\n" +
+      "    paint(nodes);\n" +
+      "  }";
+    const err = await new EditTool({ maxEditInputSize: 16000 })
+      .execute({ path: "region-blank.txt", oldString: stale, newString: "x" }, toolCtx({ workspaceRoots: [dir] }))
+      .then(() => null, (e: unknown) => e as Error);
+
+    // Anchor is oldString line 2; the region starts at the anchor line,
+    // not at the blank line dangling above it.
+    expect(err!.message).toContain("Nearest region: lines 41-45");
+    expect(err!.message).toContain("first difference at file line 43");
+  });
+});

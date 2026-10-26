@@ -53,6 +53,17 @@ describe("mcpInitializeRequest", () => {
     expect((req.capabilities as Record<string, unknown>).sampling).toBeDefined();
     expect((req.clientInfo as Record<string, unknown>).name).toBe("hotdog");
   });
+
+  it("advertises the elicitation form capability only on bidirectional transports", () => {
+    // Stdio (isStreaming): the server can push elicitation/create back to us.
+    const stdio = mcpInitializeRequest(true) as Record<string, unknown>;
+    expect((stdio.capabilities as Record<string, unknown>).elicitation).toEqual({ form: {} });
+    // HTTP: no server->client channel, so advertising would invite requests
+    // we could never answer. Default (no argument) stays silent too.
+    for (const req of [mcpInitializeRequest(false), mcpInitializeRequest()]) {
+      expect("elicitation" in (req.capabilities as Record<string, unknown>)).toBe(false);
+    }
+  });
 });
 
 describe("mcpToolCallRequest", () => {

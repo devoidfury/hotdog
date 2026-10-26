@@ -1245,6 +1245,8 @@ Notes on `pass-the-baton`:
 
 An array of MCP server definitions. Each server can use either HTTP transport (`url`) or stdio transport (`command`).
 
+Stdio servers may send `elicitation/create` requests mid-tool-call (confirmations, credential prompts). Hotdog advertises the `elicitation` form capability on stdio connections only (HTTP transports carry no server→client channel, so an elicitation could never be delivered there) and bridges these onto the question seam: the ask is presented like a `question` tool call (prompt prefixed `[mcp:<server>]` so third-party text is attributed at the human boundary) and recorded as a durable `question_asked`, so a held elicitation re-presents after a restart and the answer lands as the tool result. While a human holds the elicitation, stdio request timeouts (`mcpClient.requestTimeoutSecs`) are suspended, including for requests armed mid-hold. Elicitations are declined when no interactive input seam is reachable. MCP does not tie an elicitation to the tool call that triggered it: with concurrent calls on one connection the ask attaches to the most recent call. URL-mode elicitations are declined.
+
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | `string` | yes | — | Unique server name. |

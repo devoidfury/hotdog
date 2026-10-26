@@ -4,13 +4,17 @@ import {
   parseMcpToolCallResponse,
   jsonRpcRequest,
   jsonRpcNotification,
+  jsonRpcResponse,
+  jsonRpcError,
   mcpToolCallRequest,
   mcpInitializeRequest,
   MCP_PROTOCOL_VERSION,
   McpError,
 } from "./types.ts";
 import { logger } from "@utils/logger.ts";
+import { formatError } from "@core/error.ts";
 import { McpTransport, StdioTransport, HttpTransport, DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
+import type { ElicitationHandler } from "./elicitation.ts";
 
 class PendingRequest {
   readonly id: number;
@@ -61,6 +65,28 @@ export class McpClient {
   // Set when the transport closed (server process died or destroy()): new
   // requests fail fast instead of waiting out the response timeout.
   #transportClosed: boolean = false;
+
+  // Server-initiated elicitation handlers, one per in-flight callTool. MCP
+  // does not correlate an elicitation request to the tools/call that caused
+  // it, so elicitations route to the most recent active handler (the stack);
+  // an elicitation with no active call gets an honest cancel response.
+  // CONSEQUENCE: with concurrent calls on one connection, the question the
+  // human sees -- and the question_asked durability record -- are written
+  // under the MOST RECENT call's tool_call_id, which may not be the call
+  // that triggered the ask. Forensics reads the server attribution (the
+  // [mcp:<server>] prompt prefix), not the tool_call_id, to see the source.
+  #elicitations: ElicitationHandler[] = [];
+
+  // In-flight elicitations: >0 means a human holds an ask and the pending
+  // request timeouts are suspended (see #suspendedTimeouts).
+  #elicitInFlight = 0;
+
+  // Suspension of pending-request timeouts while an elicitation awaits a
+  // human: pending id -> restore closure (re-arms the full response budget;
+  // thinking time must not burn it -- the MCP spec forbids the server from
+  // timing out mid-elicitation, and our own timer would be the hang this
+  // feature exists to avoid).
+  #suspendedTimeouts = new Map<number, () => void>();
 
   #messageCleanup: (() => void) | null = null;
 
@@ -224,6 +250,11 @@ export class McpClient {
             void this.#transport.destroy().catch(() => {});
           }
         }
+      } else if (typeof msg.method === "string") {
+        // Server-initiated request (id + method, no result/error): MUST be
+        // answered. Routed asynchronously -- a held elicitation must not
+        // block the read loop from delivering later messages.
+        void this.#handleServerRequest(msg);
       }
     }
   }
@@ -238,6 +269,14 @@ export class McpClient {
    */
   #failAllPending(reason: Error): void {
     this.#transportClosed = true;
+    // A human wait outliving the connection: drop the restore bookkeeping;
+    // the guarded closures become no-ops and the pending requests reject now.
+    // KNOWN GAP: the human's own prompt stays on screen -- the answer they
+    // eventually type resolves into a tool call that has already failed.
+    // Acceptable because the interrupt that kills a server usually aborts
+    // the run right behind it (question-tool cancel path); a stale answer
+    // just goes unanswered from the server's side.
+    this.#suspendedTimeouts.clear();
     for (const [id, pending] of this.#pending) {
       this.#pending.delete(id);
       if (pending.timer) clearTimeout(pending.timer);
@@ -286,10 +325,7 @@ export class McpClient {
     const result = await new Promise<unknown>((resolve, reject) => {
       pending.resolve = resolve;
       pending.reject = reject;
-      pending.timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new McpError("Timeout waiting for response"));
-      }, this.#requestTimeoutMs);
+      this.#armTimeout(pending);
     });
 
     this.#pending.delete(id);
@@ -299,7 +335,10 @@ export class McpClient {
   }
 
   async initialize(): Promise<unknown> {
-    const result = await this._sendRequest("initialize", mcpInitializeRequest());
+    // Elicitation is advertised only when a server->client channel exists
+    // (isStreaming: the onMessage handler routes elicitation/create). Over
+    // HTTP there is no channel, so the capability stays unadvertised.
+    const result = await this._sendRequest("initialize", mcpInitializeRequest(this.#transport.isStreaming));
     const response = parseMcpInitializeResponse(result as Record<string, unknown>);
 
     // MCP lifecycle "Version Negotiation": a client that does not support the
@@ -338,9 +377,117 @@ export class McpClient {
     return parseMcpToolsListResponse(result as Record<string, unknown>);
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-    const result = await this._sendRequest("tools/call", mcpToolCallRequest(name, args));
-    return parseMcpToolCallResponse(result as Record<string, unknown>);
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+    onElicitation?: ElicitationHandler | null,
+  ): Promise<unknown> {
+    if (onElicitation) this.#elicitations.push(onElicitation);
+    try {
+      const result = await this._sendRequest("tools/call", mcpToolCallRequest(name, args));
+      return parseMcpToolCallResponse(result as Record<string, unknown>);
+    } finally {
+      if (onElicitation) {
+        const idx = this.#elicitations.indexOf(onElicitation);
+        if (idx !== -1) this.#elicitations.splice(idx, 1);
+      }
+    }
+  }
+
+  // ── Server-initiated requests (elicitation, ping) ─────────────────────────
+
+  /**
+   * Arm (or re-arm) a pending request's response timeout. Extracted so an
+   * in-flight elicitation can suspend it: the wait for a human answer must
+   * not consume the server's response budget. Requests armed WHILE a human
+   * hold is active are never armed live either: the server is blocked on the
+   * whole connection during an elicitation, so any concurrent call (another
+   * agent, background compaction) would spuriously time out. Restore only
+   * fires when the hold count returns to zero.
+   */
+  #armTimeout(pending: PendingRequest): void {
+    if (pending.timer) clearTimeout(pending.timer);
+    if (this.#elicitInFlight > 0) {
+      this.#suspendedTimeouts.set(pending.id, () => {
+        if (this.#pending.get(pending.id) === pending) this.#armTimeout(pending);
+      });
+      return;
+    }
+    pending.timer = setTimeout(() => {
+      this.#pending.delete(pending.id);
+      pending.reject?.(new McpError("Timeout waiting for response"));
+    }, this.#requestTimeoutMs);
+  }
+
+  /** Handle a JSON-RPC request from the server: MUST be answered, or the
+   *  server waits its own timeout before failing the tool call. */
+  async #handleServerRequest(msg: Record<string, unknown>): Promise<void> {
+    const id = msg.id;
+    const method = msg.method as string;
+
+    if (method === "elicitation/create") {
+      const handler = this.#elicitations[this.#elicitations.length - 1];
+      if (!handler) {
+        // Not attached to any live tool call: no human context to ask in.
+        this.#respondToServer(jsonRpcResponse(id, { action: "cancel" }));
+        return;
+      }
+      // Suspend pending response timers for the human wait; restore the full
+      // budget when the elicitation settles.
+      this.#elicitInFlight++;
+      if (this.#elicitInFlight === 1) {
+        for (const [pendingId, pending] of this.#pending) {
+          if (!pending.timer) continue;
+          clearTimeout(pending.timer);
+          pending.timer = null;
+          this.#suspendedTimeouts.set(
+            pendingId,
+            () => {
+              // Skip a pending that settled or failed while suspended.
+              if (this.#pending.get(pendingId) === pending) this.#armTimeout(pending);
+            },
+          );
+        }
+      }
+      let result: Record<string, unknown>;
+      try {
+        result = await handler((msg.params as Record<string, unknown>) || {});
+      } catch (e: unknown) {
+        logger.error(`[mcp] elicitation handler threw: ${formatError(e)}`);
+        result = { action: "cancel" };
+      } finally {
+        this.#elicitInFlight--;
+        if (this.#elicitInFlight === 0) {
+          for (const restore of this.#suspendedTimeouts.values()) restore();
+          this.#suspendedTimeouts.clear();
+        }
+      }
+      this.#respondToServer(jsonRpcResponse(id, result));
+      return;
+    }
+
+    if (method === "ping") {
+      // JSON-RPC liveness check: empty success result.
+      this.#respondToServer(jsonRpcResponse(id, {}));
+      return;
+    }
+
+    // Anything else (sampling/createMessage, roots/list, ...) is not
+    // implemented; answer Method not found so the server fails fast.
+    logger.warn(`[mcp] unsupported server request '${method}'; replying Method not found`);
+    this.#respondToServer(jsonRpcError(id, -32601, `Method not found: ${method}`));
+  }
+
+  /** Send one message (response or error envelope) to a server-initiated
+   *  request. sendNotification is the transport's fire-and-forget write (a
+   *  response is not a request); a broken pipe must never surface as an
+   *  unhandled rejection on the read loop. */
+  #respondToServer(message: Record<string, unknown>): void {
+    try {
+      this.#transport.sendNotification(JSON.stringify(message));
+    } catch (e: unknown) {
+      logger.error(`[mcp] failed to respond to server request: ${formatError(e)}`);
+    }
   }
 
   /** Get server capabilities (after initialize). */

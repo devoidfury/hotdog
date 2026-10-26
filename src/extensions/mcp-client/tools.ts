@@ -1,7 +1,9 @@
 import { toolDef } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import type { ToolContext } from "@core/extensions/tool-context.ts";
 import { validateParams, formatValidationErrors } from "@utils/json-schema.ts";
 import { McpConnectionHandle } from "./connection.ts";
+import { createElicitationHandler } from "./elicitation.ts";
 
 /**
  * Raw MCP tool definition at the McpTool boundary. `name` is required; the
@@ -44,7 +46,10 @@ export class McpTool {
     this.#registeredName = `${sanitizeToolNamePart(serverName)}__${sanitizeToolNamePart(toolDef.name)}`;
   }
 
-  async execute(input: string | Record<string, unknown> | null): Promise<Record<string, unknown>> {
+  async execute(
+    input: string | Record<string, unknown> | null,
+    ctx?: ToolContext,
+  ): Promise<Record<string, unknown>> {
     let args: Record<string, unknown>;
     try {
       args = typeof input === "string" ? JSON.parse(input) : (input as Record<string, unknown>);
@@ -71,7 +76,17 @@ export class McpTool {
     }
 
     try {
-      const result = await this.#connection.callTool(this.#toolName, args);
+      // The elicitation seam rides the tool context: when the server sends
+      // elicitation/create during this call, it becomes a question through
+      // the same input seam (and question_asked durability) as question-tool,
+      // attributed to this server so third-party text never masquerades as a
+      // harness prompt at the human boundary.
+      const elicitation = ctx
+        ? createElicitationHandler(ctx, this.#connection.serverName || "mcp")
+        : null;
+      const result = elicitation
+        ? await this.#connection.callTool(this.#toolName, args, elicitation)
+        : await this.#connection.callTool(this.#toolName, args);
       return { success: true, output: result };
     } catch (e: unknown) {
       return { success: false, output: ``, error: `MCP tool call failed: ${(e as Error).message}` };

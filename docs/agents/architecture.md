@@ -270,7 +270,7 @@ Each extension has:
 | `question-tool` | Question tool -- ask interactive questions |
 | `model-switch` | Model switching tool + `/model` slash commands |
 | `compaction` | Compaction strategies: pass-the-baton, summarize, summarize-short, drop, token-aware, trim |
-| `mcp-client` | MCP server connections (HTTP + stdio) |
+| `mcp-client` | MCP server connections (HTTP + stdio); server-initiated elicitations bridge onto the question seam (`elicitation.ts`) |
 | `skills` | Skills discovery and loading |
 | `prompts` | Prompt template loading |
 | `session-log` | JSONL session logging |

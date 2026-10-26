@@ -1,5 +1,6 @@
 import { McpClient } from "./client.ts";
 import { McpContentBlock, McpError } from "./types.ts";
+import type { ElicitationHandler } from "./elicitation.ts";
 import { DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "./client.ts";
 
@@ -13,8 +14,12 @@ export class McpConnectionHandle {
     this.#serverName = serverName;
   }
 
-  async callTool(name: string, arguments_: Record<string, unknown>): Promise<string> {
-    const response = await this.#client.callTool(name, arguments_) as Record<string, unknown>;
+  async callTool(
+    name: string,
+    arguments_: Record<string, unknown>,
+    onElicitation?: ElicitationHandler | null,
+  ): Promise<string> {
+    const response = await this.#client.callTool(name, arguments_, onElicitation) as Record<string, unknown>;
     const output = contentBlocksToString((response.content as Array<{ type: string; text?: string }>) || []);
 
     if (response.isError) {

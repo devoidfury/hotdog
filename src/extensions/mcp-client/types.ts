@@ -1,5 +1,6 @@
 // Minimal MCP protocol types: only the JSON-RPC 2.0 and MCP message types
-// needed for connecting to MCP servers, listing tools, and calling tools.
+// needed for connecting to MCP servers, listing tools, calling tools, and
+// answering server-initiated requests (elicitation, ping).
 
 import pkg from "@package.json" with { type: "json" };
 import { ExtensionError } from "@core/error.ts";
@@ -12,15 +13,32 @@ export function jsonRpcNotification(method: string, params?: unknown): Record<st
   return { jsonrpc: "2.0", method, ...(params != null ? { params } : {}) };
 }
 
+/** Response to a server-initiated request (elicitation, ping, ...). */
+export function jsonRpcResponse(id: unknown, result: unknown): Record<string, unknown> {
+  return { jsonrpc: "2.0", id, result };
+}
+
+export function jsonRpcError(id: unknown, code: number, message: string): Record<string, unknown> {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
 /** The MCP protocol version this client implements and requires. */
 export const MCP_PROTOCOL_VERSION = "2025-11-25";
 
-export function mcpInitializeRequest(): Record<string, unknown> {
+export function mcpInitializeRequest(bidirectional: boolean = false): Record<string, unknown> {
   return {
     protocolVersion: MCP_PROTOCOL_VERSION,
     capabilities: {
       roots: { listChanged: false },
       sampling: {},
+      // Servers only send elicitation/create to clients that advertise it.
+      // The form flow is bridged to the question seam (elicitation.ts);
+      // url-mode elicitations are declined (no out-of-band browser flow).
+      // Advertised only over bidirectional transports (stdio): HTTP has no
+      // server->client channel (the message handler is not even wired), so
+      // an elicitation could never be delivered -- advertising it there
+      // would invite servers to make requests we cannot answer.
+      ...(bidirectional ? { elicitation: { form: {} } } : {}),
     },
     clientInfo: {
       name: "hotdog",

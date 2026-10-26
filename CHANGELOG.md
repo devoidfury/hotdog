@@ -2,13 +2,17 @@
 
 ## Unreleased
 
-- **edit - a miss now reports the nearest region and the first divergent line.** A zero-match multi-line `edit` windows the file on oldString's first non-blank line and answers with `Nearest region: lines N-M; first difference at file line X (oldString line Y)` plus both texts quoted -- the stale-context case (an earlier edit renamed one line inside the block) self-corrects on the next retry instead of costing a full re-read; past EOF the report says the file ends mid-block. Windows need two trimmed-agreeing lines to qualify; below that the previous closest-line list and file-preview reports stand unchanged. The quoted file text is trimmed, so a verbatim copy matches through the existing line-trimmed fallback.
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.15.0...main
 
-- **bug - steering during the final response's streaming no longer drops the message.** A steer that arrived after the run's last pre-call drain had no injection slot left: it sat in the agent's steering queue until some later submission happened to start a run, invisible meanwhile (the queue chip showed it pending, the model never saw it, the turn was over). The bus now takes undrained steering at every run end (`agent.takeUndeliveredSteering()`) and re-queues it as a normal turn, marked piped so the INPUT pipeline -- already run at submission -- never runs twice; a steer accepted while the agent is idle goes straight to the host queue instead of parking. The chip settles at the handoff and the message surfaces as its user-message echo when the follow-on turn starts. Cancel keeps handed-off items on the queue like any other pending message; interrupt lands them as fresh submissions. Bus-less agents (task workers) keep the parked-until-next-run behavior; they have no queue to hand to.
+## [v0.15.0] - 2026-10-26
 
-- [BRK] **config - `./config` auto-discovery removed (security).** The resolution chain no longer reads the current working directory: a cloned repo shipping `config/defaults.json` silently owned the session -- repo-set `extensionPaths` load third-party code at startup, repo-set provider URLs redirect conversations and the API key. Chain is now CLI `--config-dir` > `HOTDOG_CONFIG_DIR` > `/etc/hotdog` > `~/.config/hotdog` > bundled example. Explicit opt-in is untouched (`hotdog --config-dir config`, `HOTDOG_CONFIG_DIR=./config`), and unflagged resolution in a directory that has `config/` warns once, naming the skipped directory. Side effect: a stray `config/` directory can no longer shadow your global config either.
+- [BRK] **config - `./config` auto-discovery removed (security).** The config resolution no longer reads the current working directory: a cloned repo shipping `config/defaults.json` silently owned the session -- repo-set `extensionPaths` load third-party code at startup, repo-set provider URLs redirect conversations and the API key. Chain is now CLI `--config-dir` > `HOTDOG_CONFIG_DIR` > `/etc/hotdog` > `~/.config/hotdog` > bundled example. Explicit opt-in is still available (`hotdog --config-dir config`, `HOTDOG_CONFIG_DIR=./config`), and unflagged resolution in a directory that has `config/` warns once, naming the skipped directory. Side effect: a stray `config/` directory can no longer shadow your global config either.
 
-- **websocket - the loopback name set widened.** The WS same-origin gate and the webui non-loopback bind warning now accept the whole `127.0.0.0/8` range and every `*.localhost` name, not just `127.0.0.1`/`localhost`/`::1` -- browsing the webui at `http://app.localhost:PORT` or `127.0.0.2:PORT` was refused as cross-origin (fail-closed friction, since a browser can only resolve those names locally anyway). Suffix-bounded, so `evil.localhost.attacker.tld` stays foreign. `LOOPBACK_HOSTS` became `isLoopbackHost()` in `websocket/origin.ts`.
+- **edit tool** - a miss now reports the nearest region and the first divergent line.
+
+- bugfix - steering during the final response's streaming no longer drops the message.
+
+- **websocket - loopback set widened.** now accepts the whole `127.0.0.0/8` range and every `*.localhost` name, not just `127.0.0.1`/`localhost`/`::1` -- browsing the webui at `http://app.localhost:PORT` or `127.0.0.2:PORT` was refused as cross-origin. Suffix-bounded, so `evil.localhost.attacker.tld` stays foreign. `LOOPBACK_HOSTS` became `isLoopbackHost()` in `websocket/origin.ts`.
 
 - **interactive-cli** - explicit manual /redraw -- try re-drawing in case the output goes weird
 
@@ -38,7 +42,7 @@
 
 - **session-index - quarantine gates on corruption codes** and self-heals mid-run instead of quarantining on anything unexpected.
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.14.0...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.14.0...v0.15.0
 
 ## [v0.14.0] - 2026-10-22
 

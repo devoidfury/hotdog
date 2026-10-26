@@ -8,6 +8,13 @@ console.warn = () => {};
 console.error = () => {};
 console.info = () => {};
 
+// Suppress direct stream writes (OutputSink, the CLI renderer, split-bridge
+// passthroughs, prompt echoes). bun's reporter writes to the fd directly and
+// is unaffected, so failures still print. Tests that capture stdout patch
+// process.stdout/stderr.write themselves and restore over these no-ops.
+process.stdout.write = () => true;
+process.stderr.write = () => true;
+
 // Suppress logger output during tests.
 // The logger checks HOTDOG_LOG_LEVEL and HOTDOG_LOG_TARGET env vars.
 // Tests that need the logger can override these in their own beforeEach.

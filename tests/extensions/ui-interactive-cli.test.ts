@@ -950,7 +950,10 @@ describe("runInteractiveSession integration", () => {
 
     const lineHandlers = get("line") as Array<(line: string) => Promise<void>>;
     expect(lineHandlers.length).toBeGreaterThan(0);
-    await runWithSuppressedStdout(() => lineHandlers[0]!("echo hello from shellmode"));
+    // "grep x /dev/null" is a real system command that exits 1 silently; the
+    // child spawns with stdio:inherit, so an echoing command would print to
+    // the test fd directly and no stream patch could catch it.
+    await runWithSuppressedStdout(() => lineHandlers[0]!("grep x /dev/null"));
   });
 });
 

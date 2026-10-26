@@ -1341,7 +1341,10 @@ describe("editor session swap: submit routing (stage 3b)", () => {
     const rig = makeSessionRig({ uiCli: { shellMode: true, pasteMarkerMinChars: 80 } });
     await rig.done;
 
-    rig.keys.push("echo hi\r");
+    // Silent real command (stdio:inherit child; an echo would print to the
+    // test fd where no stream patch reaches). Exits fast so the resume-on-
+    // child-exit waitFor settles.
+    rig.keys.push("grep x /dev/null\r");
     // Asserted with no tick: everything the user types after Enter belongs
     // to the child, so the suspend must have released raw mode inside the
     // submit macrotask itself. Any await in the decision path (e.g. the old

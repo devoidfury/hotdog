@@ -2,6 +2,8 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { createWebuiServer } from "@extensions/webui/server.ts";
+import { DDG_SOLVE_SERVICE } from "@extensions/web-search/index.ts";
+import { ServiceRegistry } from "@core/extensions/service-registry.ts";
 import { logger } from "@utils/logger.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { createMockCore as createBaseMockCore } from "../test-helpers.ts";
@@ -93,6 +95,35 @@ describe("createWebuiServer", () => {
       server = result.server;
       wsServer = result.wsServer;
       expect(result.server.port).toBeGreaterThan(0);
+    });
+
+    it("mounts extension solve routes and reports its base URL", async () => {
+      // web-search's captcha solve routes ride the webui port; webui reports
+      // the base URL back so challenge hints are reachable addresses.
+      const core = createMockCore();
+      const seenBaseUrls: string[] = [];
+      const registry = new ServiceRegistry();
+      registry.register(DDG_SOLVE_SERVICE as any, {
+        routes: {
+          "/solve/*": () => new Response("solved"),
+          "/tiles/*": () => new Response("tiles"),
+        },
+        setBaseUrl: (u: string) => seenBaseUrls.push(u),
+      } as any);
+      (core as any).services = registry;
+      const result = await createWebuiServer(core, {
+        port: 0,
+        host: "127.0.0.1",
+        apiKey: "test-key",
+        sessionTokenTtlMin: 60,
+      });
+      server = result.server;
+      wsServer = result.wsServer;
+
+      const resp = await fetch(`http://127.0.0.1:${result.server.port}/solve/deadbeef`);
+      expect(resp.status).toBe(200);
+      expect(await resp.text()).toBe("solved");
+      expect(seenBaseUrls).toContain(`http://127.0.0.1:${result.server.port}`);
     });
   });
 

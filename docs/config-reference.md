@@ -1534,6 +1534,8 @@ CLI flag: `--shell-mode`.
 | `tavilyApiKey` | `string` | `""` | Tavily API key (required when `provider=tavily`). Also from env `TAVILY_API_KEY`. |
 | `searxngInstanceUrl` | `string` | `""` | SearXNG instance URL (required when `provider=searxng`). Also from env `SEARXNG_INSTANCE_URL`. |
 
+When DuckDuckGo serves a CAPTCHA challenge (rate limiting), the tile solve page is mounted on the **webui server's** existing port at `/solve/<nonce>` (via the `ddgSolveRoutes` service) -- no extra port or firewall rule. Without a running webui server the model relays the challenge as text and accepts picks through the `web_search` `tiles` argument.
+
 ```json
 {
   "webSearch": {

@@ -6,6 +6,7 @@ import { create } from "@extensions/webui/index.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { logger } from "@utils/logger.ts";
 import { createMockCore, createMockRegistry } from "../test-helpers.ts";
+import { ServiceRegistry } from "@core/extensions/service-registry.ts";
 
 describe("WebUI Extension", () => {
   it("registers the 'webui' subcommand with correct metadata", async () => {
@@ -31,6 +32,7 @@ describe("WebUI Extension", () => {
         resolved: { profileManager: { getProfilesForSwitch: () => ({}) } },
         toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
         extensions: { cleanup: async () => {} },
+        services: new ServiceRegistry(),
         createLlmClient: () => ({}),
       } as never;
     }

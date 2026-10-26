@@ -2,6 +2,7 @@ import { createWsServer, type CreateWsServerOptions } from "../websocket/server.
 import { WS_MAX_PAYLOAD_BYTES } from "../websocket/constants.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { upgradeOriginAllowed, isLoopbackHost } from "../websocket/origin.ts";
+import { DDG_SOLVE_SERVICE } from "../web-search/index.ts";
 import { logger } from "@utils/logger.ts";
 import { CoreContext } from "@core/extensions/types.ts";
 
@@ -104,11 +105,22 @@ export async function createWebuiServer(
   authMiddleware.startCleanup();
   wsServer.startCleanupLoop();
 
+  // Optional extension routes: web-search mounts its DDG captcha solve page
+  // here so challenges are solvable over the webui's existing port (and its
+  // existing firewall/VPN reach) instead of a second server. The service is
+  // unauthenticated by design: access control is the per-challenge nonce.
+  const solveService = core.services.has(DDG_SOLVE_SERVICE)
+    ? (core.services.get(DDG_SOLVE_SERVICE) as
+        | { routes: Record<string, (req: Request) => Response | Promise<Response>>; setBaseUrl(url: string): void }
+        | undefined)
+    : undefined;
+
   let server = Bun.serve<WebuiWsData>({
     port,
     hostname: effectiveHost,
     routes: {
       "/": webuiFrontend,
+      ...(solveService?.routes ?? {}),
 
       "/verify": async function (req: BunRequest) {
         const token = req.headers.get("x-hotdog-token");
@@ -177,6 +189,7 @@ export async function createWebuiServer(
   });
 
   logger.info(`WebUI server listening on http://${effectiveHost}:${server.port}`);
+  solveService?.setBaseUrl(`http://${effectiveHost}:${server.port}`);
 
   return { server, wsServer, authMiddleware };
 }

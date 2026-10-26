@@ -3,6 +3,7 @@
 
 import { expect, mock } from 'bun:test';
 import type { AgentRunResult } from '../src/core/agent.ts';
+import { ServiceRegistry } from '@core/extensions/service-registry.ts';
 
 /** Assert result is a completion and return it narrowed. */
 export function expectCompletion(result: AgentRunResult | undefined | null): { type: 'completion'; content: string } {
@@ -88,6 +89,10 @@ export function createMockCore(
     extensions: {
       cleanup: async () => {},
     },
+    // Real CoreContext always carries the service registry (core wires it in
+    // before extension load); mocks must provide one or extensions that
+    // read/write services (webui solve routes, subagents task manager) crash.
+    services: overrides.services ?? new ServiceRegistry(),
     ...rest,
   };
 }

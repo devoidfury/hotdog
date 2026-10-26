@@ -1,4 +1,4 @@
-import { ToolError, TransientError } from "@core/error.ts";
+import { ToolError, TransientError, AssistantRetryableError } from "@core/error.ts";
 import {
   toolDef,
   param,
@@ -40,28 +40,260 @@ interface WebSearchConfig {
   searxngInstanceUrl: string;
 }
 
+// ── DDG captcha challenge relay ─────────────────────────────────────────────
+//
+// DDG answers rate-limited hosts with HTTP 202 + an image challenge (verified
+// live): solving it from the SAME host clears the flag -- the pass is
+// IP-bound, no cookies involved. The user may be remote (VPN), so the tiles
+// cannot come from their browser; they are proxied from our host. The solve
+// page is mounted as routes on the webui server (DDG_SOLVE_SERVICE) -- no
+// second port to firewall. Text-only UIs skip the page entirely: the model
+// passes the user's picks through the `tiles` argument.
+
+const CHALLENGE_TTL_MS = 10 * 60 * 1000; // observed valid >= 10 min after issue
+
+/** Service key: webui mounts `routes` on its own Bun.serve and calls
+ *  `setBaseUrl` once listening, so challenge hints carry a reachable URL. */
+export const DDG_SOLVE_SERVICE = "ddgSolveRoutes";
+
+interface DdgSolveService {
+  routes: Record<string, (req: Request) => Response | Promise<Response>>;
+  setBaseUrl(url: string): void;
+}
+
+/** Base URL of the hosting webui server, e.g. http://192.168.1.5:3000. */
+let solveBaseUrl: string | null = null;
+
+export const ddgSolveService: DdgSolveService = {
+  routes: { "/solve/*": handleSolve, "/tiles/*": handleSolve },
+  setBaseUrl(url: string) {
+    solveBaseUrl = url;
+  },
+};
+
+interface PendingChallenge {
+  nonce: string;
+  action: string;
+  gk: string;
+  tiles: string[]; // tile hashes in page order
+  tileBytes: (Uint8Array | null)[];
+  createdAt: number;
+  answer: string[] | null; // hashes picked via the solve page
+}
+
+const challenges = new Map<string, PendingChallenge>();
+
+function parseChallenge(html: string): { action: string; gk: string; tiles: string[] } | null {
+  const action = html.match(/<form id="challenge-form" action="([^"]+)"/)?.[1]?.replace(/^\/\//, "https://");
+  const gk = html.match(/name="challenge-submit"[^>]*value="([0-9a-f]+)"/)?.[1];
+  const tiles = [...html.matchAll(/anomaly-modal__image" alt=" " id="image-([0-9a-f]+)"/g)].map((m) => m[1]!);
+  if (!action || !gk || tiles.length === 0) return null;
+  return { action, gk, tiles };
+}
+
+function pruneChallenges(): void {
+  const now = Date.now();
+  for (const [nonce, c] of challenges) {
+    if (now - c.createdAt > CHALLENGE_TTL_MS) challenges.delete(nonce);
+  }
+}
+
+function liveChallenges(): PendingChallenge[] {
+  pruneChallenges();
+  return [...challenges.values()].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+async function registerChallenge(parsed: { action: string; gk: string; tiles: string[] }, timeout: number): Promise<PendingChallenge> {
+  pruneChallenges();
+  // Fetch tile images now so the solve page serves them from our host; a
+  // failed fetch just renders a placeholder for that tile.
+  const tileBytes = await Promise.all(
+    parsed.tiles.map(async (hash) => {
+      try {
+        const r = await hotdogFetch(`https://duckduckgo.com/assets/anomaly/images/challenge/${hash}.jpg`, {
+          signal: AbortSignal.timeout(timeout * 1000),
+        });
+        if (!r.ok) return null;
+        return new Uint8Array(await r.arrayBuffer());
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const challenge: PendingChallenge = {
+    nonce: crypto.randomUUID().replace(/-/g, "").slice(0, 16),
+    action: parsed.action,
+    gk: parsed.gk,
+    tiles: parsed.tiles,
+    tileBytes,
+    createdAt: Date.now(),
+    answer: null,
+  };
+  challenges.set(challenge.nonce, challenge);
+  return challenge;
+}
+
+function solvePageHtml(c: PendingChallenge): string {
+  const tiles = c.tiles
+    .map((hash, i) => {
+      const img = c.tileBytes[i]
+        ? `<img src="/tiles/${c.nonce}/${i}" alt="tile ${i + 1}">`
+        : `<div style="width:150px;height:150px;background:#eee;line-height:150px">?</div>`;
+      return `<label class="tile"><input type="checkbox" name="image-check_${hash}">${img}<div>${i + 1}</div></label>`;
+    })
+    .join("\n");
+  return `<!doctype html><meta charset=utf-8><title>hotdog: DDG captcha relay</title>
+<style>body{font-family:sans-serif;max-width:720px;margin:2rem auto}.tile{display:inline-block;margin:8px;text-align:center;cursor:pointer}.tile img{width:150px;height:150px;display:block}button{font-size:1.2rem;padding:.5em 2em;margin-top:1rem}</style>
+<h3>DuckDuckGo challenged hotdog's web search.</h3>
+<p>Select <b>all squares containing a duck</b>, then Submit. Your answer is sent to this machine only; hotdog relays it to DuckDuckGo on the next search retry.</p>
+<form method="post">
+${tiles}
+<p><button type="submit">Submit</button></p>
+</form>`;
+}
+
+const SUBMITTED_HTML = `<!doctype html><meta charset=utf-8><title>submitted</title>
+<p style="font-family:sans-serif">Answer recorded. Return to hotdog and retry the search.</p>`;
+
+async function handleSolve(req: Request): Promise<Response> {
+  const path = new URL(req.url).pathname;
+  const solve = path.match(/^\/solve\/([0-9a-f]{16})$/);
+  if (solve) {
+    const c = challenges.get(solve[1]!);
+    if (!c || Date.now() - c.createdAt > CHALLENGE_TTL_MS) {
+      return new Response("challenge expired or unknown; start a new search from hotdog", { status: 404 });
+    }
+    if (req.method === "POST") {
+      if (Number(req.headers.get("content-length") || 0) > 64 * 1024) {
+        return new Response("too large", { status: 413 });
+      }
+      const form = new URLSearchParams(await req.text());
+      // Only hashes belonging to this challenge are accepted.
+      c.answer = c.tiles.filter((t) => form.get(`image-check_${t}`) !== null);
+      return new Response(SUBMITTED_HTML);
+    }
+    return new Response(solvePageHtml(c), { headers: { "content-type": "text/html; charset=utf-8" } });
+  }
+  const tile = path.match(/^\/tiles\/([0-9a-f]{16})\/(\d+)$/);
+  if (tile && req.method === "GET") {
+    const c = challenges.get(tile[1]!);
+    const bytes = c?.tileBytes[Number(tile[2])];
+    if (!bytes) return new Response("not found", { status: 404 });
+    return new Response(bytes as unknown as BodyInit, { headers: { "content-type": "image/jpeg" } });
+  }
+  return new Response("not found", { status: 404 });
+}
+
+/** POST picked tile hashes to the challenge's anomaly.js action. */
+async function postChallengeAnswer(c: PendingChallenge, hashes: string[]): Promise<boolean> {
+  const body = new URLSearchParams();
+  for (const t of hashes) body.append(`image-check_${t}`, "on");
+  body.append("challenge-submit", c.gk);
+  const resp = await hotdogFetch(c.action, {
+    method: "POST",
+    headers: {
+      // Verified live: the anomaly endpoint answers 200 for a plain form POST.
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Referer": "https://html.duckduckgo.com/html/",
+      "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0",
+    },
+    body: body.toString(),
+  });
+  const ok = resp.status === 200;
+  await resp.body?.cancel().catch(() => {});
+  if (ok) challenges.delete(c.nonce);
+  return ok;
+}
+
+/** Relay an answer: explicit `tiles` arg first, then the solve page's picks. */
+async function relayChallengeAnswer(tilesArg: string | undefined): Promise<boolean> {
+  const open = liveChallenges();
+  if (open.length === 0) return false;
+
+  if (tilesArg) {
+    const nums = tilesArg.split(",").map((s) => s.trim()).filter(Boolean).map(Number);
+    if (nums.some((n) => !Number.isInteger(n))) {
+      throw new ToolError(`Invalid tiles argument "${tilesArg}"; expected comma-separated tile numbers like "3,5,6".`);
+    }
+    const c = open[0]!;
+    const hashes = nums.map((n) => c.tiles[n - 1]).filter((t): t is string => !!t);
+    if (hashes.length !== nums.length) {
+      throw new ToolError(`tiles argument out of range: this challenge has ${c.tiles.length} tiles.`);
+    }
+    return await postChallengeAnswer(c, hashes);
+  }
+
+  const answered = open.find((c) => c.answer !== null);
+  if (!answered || answered.answer!.length === 0) return false;
+  const ok = await postChallengeAnswer(answered, answered.answer!);
+  if (!ok) answered.answer = null; // expired or rejected; let the user re-pick
+  return ok;
+}
+
+function challengeErrorHint(c: PendingChallenge): string {
+  const parts: string[] = [];
+  if (solveBaseUrl) {
+    parts.push(
+      `Relay the challenge to the user: ask them (question tool) to open ${solveBaseUrl}/solve/${c.nonce} ` +
+        `(served by this machine's webui server, so it works over VPN without extra ports), select all squares containing a duck, and press Submit. ` +
+        `Then retry this search with no extra arguments; hotdog relays the answer to DuckDuckGo from this host.`,
+    );
+    parts.push(`Text-only UI: ask (question tool) which numbered tiles contain ducks and retry with the tiles argument, e.g. tiles="3,5,6".`);
+  } else {
+    // No webui server mounted our routes (plain interactive-cli). The tile
+    // images are static assets the user's browser can fetch from anywhere.
+    const tileList = c.tiles.map((t, i) => `${i + 1}=https://duckduckgo.com/assets/anomaly/images/challenge/${t}.jpg`).join(" ");
+    parts.push(
+      `Relay the challenge to the user: ask (question tool) which tiles contain a duck; the tile images are: ${tileList}. ` +
+        `Then retry this search with their picks as the tiles argument, e.g. tiles="3,5,6"; hotdog relays the answer from this host.`,
+    );
+  }
+  parts.push(`If the user cannot or will not solve it, suggest switching the webSearch provider (brave, tavily, or searxng) in defaults.json.`);
+  return parts.join(" ");
+}
+
 // ── Provider Implementations ────────────────────────────────────────────────
 
 // No API key required; results are parsed from DDG's HTML endpoint.
-async function searchDuckDuckGo(query: string, maxResults: number, timeout: number): Promise<SearchResult[]> {
+async function searchDuckDuckGo(
+  query: string,
+  maxResults: number,
+  timeout: number,
+  relay: { tiles?: string },
+): Promise<SearchResult[]> {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-  const response = await hotdogFetch(url, {
+  let response = await hotdogFetch(url, {
     method: "GET",
     signal: AbortSignal.timeout(timeout * 1000),
   });
 
   // DDG's anomaly-detection answers rate-limited clients with HTTP 202 and a
   // CAPTCHA page (confirmed on html. and lite. endpoints, any UA). The page
-  // parses to zero results, so without this check a flagged IP is reported to
-  // the model as "No results found" -- indistinguishable from a real empty
-  // query. TransientError gives executor-side backoff a chance to ride out a
-  // brief burst flag; a longer flag surfaces as an explicit error.
+  // parses to zero results, so it must never be reported as "No results
+  // found". Order: clear the flag with a user answer (tiles arg > solve-page
+  // picks), else register the challenge and hand it to the user.
   if (response.status === 202) {
-    await response.body?.cancel().catch(() => {});
-    throw new TransientError(
-      "DuckDuckGo is rate-limiting this machine (bot challenge, HTTP 202), not returning real results. " +
-        "Retry later or configure another webSearch provider (brave, tavily, or searxng) in defaults.json.",
-    );
+    let body202 = await response.text();
+    if (await relayChallengeAnswer(relay.tiles)) {
+      response = await hotdogFetch(url, { method: "GET", signal: AbortSignal.timeout(timeout * 1000) });
+      body202 = response.status === 202 ? await response.text() : "";
+    }
+    if (response.status === 202) {
+      const parsed = parseChallenge(body202);
+      if (!parsed) {
+        throw new TransientError(
+          "DuckDuckGo is rate-limiting this host (HTTP 202) and the challenge format changed; " +
+            "configure another webSearch provider (brave, tavily, or searxng) in defaults.json.",
+        );
+      }
+      // Re-present the existing live challenge rather than churning tiles.
+      let c = liveChallenges().find((x) => !x.answer);
+      if (!c) c = await registerChallenge(parsed, timeout);
+      throw new AssistantRetryableError(
+        "DuckDuckGo presented a CAPTCHA challenge (HTTP 202); no real results were returned.",
+        challengeErrorHint(c),
+      );
+    }
   }
 
   if (!response.ok) {
@@ -295,6 +527,10 @@ export class WebSearchTool {
       {
         properties: {
           query: param("string", "The search query. Be specific for better results."),
+          tiles: param(
+            "string",
+            'Answer to a pending DuckDuckGo image challenge: comma-separated tile numbers, e.g. "3,5,6". Only used when a previous call reported a CAPTCHA challenge and the user gave you their picks instead of using the solve page.',
+          ),
         },
         required: ["query"],
       },
@@ -312,13 +548,14 @@ export class WebSearchTool {
       return ToolResult.err("Error: query is required and cannot be empty");
     }
 
+    const tiles = typeof args.tiles === "string" && args.tiles.trim() ? args.tiles.trim() : undefined;
     const provider = this.provider.toLowerCase().trim();
 
     try {
       let results: SearchResult[];
       switch (provider) {
         case "duckduckgo":
-          results = await searchDuckDuckGo(query, this.maxResults, this.timeout);
+          results = await searchDuckDuckGo(query, this.maxResults, this.timeout, { tiles });
           break;
         case "brave":
           results = await searchBrave(query, this.maxResults, this.timeout, this.braveApiKey);
@@ -343,9 +580,9 @@ export class WebSearchTool {
         results: String(results.length),
       });
     } catch (err) {
-      // Let provider-detected transient failures (e.g. DDG bot challenge)
-      // reach the executor so its retry/backoff applies.
-      if (err instanceof TransientError) throw err;
+      // Let provider-detected control-flow errors (DDG bot challenge,
+      // transient failures) reach the executor so its hint/retry semantics apply.
+      if (err instanceof TransientError || err instanceof AssistantRetryableError) throw err;
       const msg = (err as Error).message;
       if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("AbortError")) {
         throw new TransientError(`Web search timed out: ${msg}`);
@@ -357,6 +594,11 @@ export class WebSearchTool {
 
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<WebSearchConfig>(core, "webSearch");
+
+  // Offer the captcha solve routes to any HTTP front end that wants them
+  // (the webui server mounts them on its own port). Plain interactive-cli
+  // never registers anything to consume this; the tiles argument path covers it.
+  core.services.register(DDG_SOLVE_SERVICE, ddgSolveService);
 
   return {
     hooks: {

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "bun:test";
-import { WebSearchTool } from "@extensions/web-search/index.ts";
+import { WebSearchTool, ddgSolveService } from "@extensions/web-search/index.ts";
 import { resultStr, withMockFetch, jsonResponse, textResponse } from "../helpers.ts";
-import { TransientError } from "@core/error.ts";
+import { AssistantRetryableError } from "@core/error.ts";
+import { ServiceRegistry } from "@core/extensions/service-registry.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
 
 const defaultWebSearchOptions = {
@@ -12,6 +13,26 @@ const defaultWebSearchOptions = {
   tavilyApiKey: "",
   searxngInstanceUrl: "",
 };
+
+// Minimal real-shape DDG challenge page (9 tiles would be noisy; 3 suffice).
+function challengeHtml(gk = "abcd"): string {
+  const action = `//duckduckgo.com/anomaly.js?sv=html&cc=sre&st=1793012753&gk=${gk}&p=f1-f2-f3&q=test`;
+  const tile = (h: string) =>
+    `<div class="anomaly-modal__box"><input type="checkbox" name="image-check_${h}" id="image-check_${h}"><img class="anomaly-modal__image" alt=" " id="image-${h}" src="../assets/anomaly/images/challenge/${h}.jpg"></div>`;
+  return `<html><body>
+    <form id="img-form" action="${action.replace("st=", "ti=")}" target="ifr" method="POST"></form>
+    <form id="challenge-form" action="${action}" method="POST">
+      ${tile("f1")}${tile("f2")}${tile("f3")}
+      <button name="challenge-submit" value="${gk}">Submit</button>
+    </form></body></html>`;
+}
+
+function resultsHtml(): string {
+  return `<html><body>
+    <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com">Whittles Pub &amp; Grub</a>
+    <a class="result__snippet">Restaurant, Bar</a>
+  </body></html>`;
+}
 
 describe("WebSearchTool", () => {
   it("has correct tool name", () => {
@@ -146,7 +167,7 @@ describe("WebSearchTool extension create", () => {
     const { createToolRegistry } =
       await import("@core/extensions/tool-registry.ts");
 
-    const ext = create({ config: {} } as unknown as CoreContext);
+    const ext = create({ config: {}, services: new ServiceRegistry() } as unknown as CoreContext);
     const registry = createToolRegistry();
     await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry);
     expect(registry.has("web_search")).toBe(true);
@@ -160,6 +181,7 @@ describe("WebSearchTool extension create", () => {
 
     const ext = create({
       config: { webSearch: { provider: "duckduckgo", maxResults: 3, timeout: 10 } },
+      services: new ServiceRegistry(),
     } as unknown as CoreContext);
     const registry = createToolRegistry();
     await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry);
@@ -181,6 +203,7 @@ describe("WebSearchTool extension create", () => {
       config: {
         webSearch: { provider: "tavily", maxResults: 5, timeout: 15, tavilyApiKey: "test-api-key" },
       },
+      services: new ServiceRegistry(),
     } as unknown as CoreContext);
     const registry = createToolRegistry();
     await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry);
@@ -254,21 +277,135 @@ describe("WebSearchTool DuckDuckGo parser", () => {
     });
   });
 
-  it("throws TransientError on 202 bot challenge instead of reporting no results", async () => {
-    // DDG anomaly detection: HTTP 202 + CAPTCHA page parses to zero results.
-    // It must surface as a rate-limit error, not as "No results found".
-    const challenge = `<html><body>Please complete the following challenge to confirm this search was made by a human. Select all squares containing a duck.</body></html>`;
-    await withMockFetch(async () => textResponse(challenge, 202, "text/html"), async () => {
-      const tool = new WebSearchTool({ ...defaultWebSearchOptions });
-      let caught: unknown;
-      try {
-        await tool.execute(JSON.stringify({ query: "test" }));
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(TransientError);
-      expect((caught as Error).message).toContain("rate-limiting");
-    });
+  it("throws AssistantRetryableError with text-relay hint on 202 (no webui mounted)", async () => {
+    // No webui base URL set: hint must carry the tile image URLs + tiles arg
+    // flow instead of a solve page.
+    await withMockFetch(
+      async (url) =>
+        url.includes("/assets/anomaly/") ? new Response(new Uint8Array([0xff]), { status: 200 }) : textResponse(challengeHtml(), 202, "text/html"),
+      async () => {
+        const tool = new WebSearchTool({ ...defaultWebSearchOptions });
+        let caught: unknown;
+        try {
+          await tool.execute(JSON.stringify({ query: "test query" }));
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught).toBeInstanceOf(AssistantRetryableError);
+        expect((caught as Error).message).toContain("CAPTCHA");
+        const hint = (caught as AssistantRetryableError).hint || "";
+        expect(hint).toContain("tiles");
+        expect(hint).toContain("assets/anomaly/images/challenge/f1.jpg");
+      },
+    );
+  });
+
+  it("relays a solve-page answer on the next search (webui-mounted)", async () => {
+    ddgSolveService.setBaseUrl("http://webui.test:3000");
+    try {
+      // Round 1: 202 -> challenge registered; hint carries the webui solve URL.
+      let solvePath = "";
+      await withMockFetch(
+        async (url) =>
+          url.includes("/assets/anomaly/") ? new Response(new Uint8Array([0xff]), { status: 200 }) : textResponse(challengeHtml(), 202, "text/html"),
+        async () => {
+          const tool = new WebSearchTool({ ...defaultWebSearchOptions });
+          try {
+            await tool.execute(JSON.stringify({ query: "test query" }));
+            throw new Error("expected challenge error");
+          } catch (e) {
+            if (!(e instanceof AssistantRetryableError)) throw e;
+            solvePath = ((e.hint || "").match(/\/solve\/[0-9a-f]{16}/) || [""])[0];
+          }
+        },
+      );
+      expect(solvePath).toMatch(/^\/solve\/[0-9a-f]{16}$/);
+
+      // User picks tiles 1 and 3 on the mounted solve route (the real handler,
+      // exactly as the webui server would invoke it).
+      const solveHandler = ddgSolveService.routes["/solve/*"]!;
+      const pageResp = await solveHandler(new Request(`http://webui.test:3000${solvePath}`));
+      const pageHtml = await pageResp.text();
+      expect(pageResp.status).toBe(200);
+      expect(pageHtml).toContain("image-check_f1");
+      expect(pageHtml).toContain("/tiles/"); // images proxied from our host
+
+      const post = await solveHandler(
+        new Request(`http://webui.test:3000${solvePath}`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: "image-check_f1=on&image-check_f3=on",
+        }),
+      );
+      expect(post.status).toBe(200);
+
+      // Round 2: retry. First GET still 202 -> relay POSTs answer (200) -> GET returns results.
+      let firstGet = true;
+      await withMockFetch(
+        async (url, opts) => {
+          if ((opts?.method ?? "GET") === "POST" && url.includes("anomaly.js")) return textResponse("ok", 200);
+          if (url.includes("html.duckduckgo.com")) return firstGet ? ((firstGet = false), textResponse(challengeHtml(), 202, "text/html")) : textResponse(resultsHtml(), 200);
+          return new Response("unexpected " + url, { status: 599 });
+        },
+        async () => {
+          const tool = new WebSearchTool({ ...defaultWebSearchOptions });
+          const result = await tool.execute(JSON.stringify({ query: "test query" }));
+          expect(result.success).toBe(true);
+          expect(resultStr(result)).toContain("Whittles Pub");
+        },
+      );
+    } finally {
+      ddgSolveService.setBaseUrl("");
+    }
+  });
+
+  it("relays a text-only tiles argument without the solve page", async () => {
+    // Register a challenge via a 202, then answer it via the tiles arg.
+    await withMockFetch(
+      async (url) =>
+        url.includes("/assets/anomaly/") ? new Response(new Uint8Array([0xff]), { status: 200 }) : textResponse(challengeHtml(), 202, "text/html"),
+      async () => {
+        const tool = new WebSearchTool({ ...defaultWebSearchOptions });
+        try {
+          await tool.execute(JSON.stringify({ query: "test query" }));
+        } catch {
+          /* challenge error expected */
+        }
+      },
+    );
+
+    await withMockFetch(
+      async (url, opts) => {
+        if ((opts?.method ?? "GET") === "POST" && url.includes("anomaly.js")) return textResponse("ok", 200);
+        if (url.includes("html.duckduckgo.com")) return textResponse(resultsHtml(), 200, "text/html");
+        return new Response("unexpected " + url, { status: 599 });
+      },
+      async () => {
+        const tool = new WebSearchTool({ ...defaultWebSearchOptions });
+        const result = await tool.execute(JSON.stringify({ query: "test query", tiles: "1,3" }));
+        expect(result.success).toBe(true);
+        expect(resultStr(result)).toContain("Whittles Pub");
+      },
+    );
+  });
+
+  it("rejects out-of-range tiles", async () => {
+    await withMockFetch(
+      async (url) =>
+        url.includes("/assets/anomaly/") ? new Response(new Uint8Array([0xff]), { status: 200 }) : textResponse(challengeHtml(), 202, "text/html"),
+      async () => {
+        const tool = new WebSearchTool({ ...defaultWebSearchOptions });
+        try {
+          await tool.execute(JSON.stringify({ query: "test query", tiles: "1,99" }));
+        } catch {
+          /* register challenge (or error out) either way */
+        }
+        // Second call with an out-of-range pick against the live challenge.
+        const r = await tool.execute(JSON.stringify({ query: "test query", tiles: "99" }));
+        expect(r.success).toBe(false);
+        expect(resultStr(r)).toContain("out of range");
+      },
+    );
   });
 
   it("handles malformed HTML gracefully", async () => {

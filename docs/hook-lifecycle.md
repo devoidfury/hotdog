@@ -283,7 +283,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
 | `PROVIDER_REQUEST` | `provider:request` | pipeline | Before LLM HTTP request — modify messages/model/tools |
-| `PROVIDER_RESPONSE` | `provider:response` | pipeline | After LLM response fully received — handler may return `{ response }` to replace it (e.g. tool-call-repair reconstructing tool calls a local backend leaked as text) |
+| `PROVIDER_RESPONSE` | `provider:response` | pipeline | After LLM response fully received — handler may return `{ response }` to replace it (e.g. tool-call-repair reconstructing tool calls a local backend leaked as text), or `{ refuseToolCalls }` to make core refuse every call in the response: each is paired with a tool result carrying the refusal's `reason` without executing, an optional `trailingNotice` persists as a harness system-notice after them, and the loop continues (tool-call-repair refuses length-truncated calls this way) |
 | `PROVIDER_ERROR` | `provider:error` | pipeline | After an LLM call throws — payload carries the failed call's `params`; a handler that repairs request/context state may return `{ retry: true }` to retry the call exactly once (e.g. tool-call-repair dropping a stored tool call with truncated JSON arguments a llama.cpp-style backend rejects on every request) |
 
 The `LlmProtocol` (selected by the `protocol` field on the model or provider entry, default `"openai"`) owns the wire format itself: request building, stream parsing, auth headers. The hooks above are the override hatch -- a hook can still replace the fully-built request or the parsed response without writing a new protocol. In short: **protocol = format, hooks = override**.

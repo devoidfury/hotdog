@@ -1,6 +1,6 @@
 // Contract between core and extensions.
 
-import type { HookSystem } from "../hooks.ts";
+import type { HookSystem, ToolCallRefusal } from "../hooks.ts";
 import type { CliSubcommandRegistryLike } from "./registries.ts";
 
 export type {
@@ -8,6 +8,7 @@ export type {
   ContextHookResult,
   ProviderRequestHookResult,
   ToolResultHookResult,
+  ToolCallRefusal,
   InputHookResult,
   SystemPromptChunk,
 } from "../hooks.ts";
@@ -196,7 +197,15 @@ export interface HookPayloads {
   "provider:request": ProviderRequestPayload,
 
   // A handler returns { response } to replace the streamed response.
-  "provider:response": { response: StreamResult; modelConfig: ModelConfig; agent: Agent };
+  // A handler returns { refuseToolCalls } to make core refuse every tool call the
+  // response carries: each is paired with a tool result carrying `reason` without
+  // executing, `trailingNotice` persists after them as a harness notice, loop continues.
+  "provider:response": {
+    response: StreamResult;
+    modelConfig: ModelConfig;
+    agent: Agent;
+    refuseToolCalls?: ToolCallRefusal;
+  };
 
   // Fired when an LLM call throws. `params` is the failed call's request, passed
   // through so a handler can mutate it before a retry (the retry reads params back).

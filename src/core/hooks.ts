@@ -38,6 +38,16 @@ export type ProviderRequestHookResult = {
 export type ToolResultHookResult = { result: unknown };
 
 /**
+ * A `provider:response` handler's verdict that the response's tool calls must
+ * not execute (e.g. tool-call-repair refusing a length-truncated response).
+ * Core owns the mechanism: every call is paired with a tool result carrying
+ * `reason` (nothing runs), `trailingNotice` is persisted after those results
+ * as a harness system-notice, and the loop continues. Which responses get
+ * refused, and what the model is told, is the handler's policy.
+ */
+export type ToolCallRefusal = { reason: string; trailingNotice?: string };
+
+/**
  * Result of an INPUT hook. `transform` REPLACES the queued content; it may
  * be plain text or structured content parts (e.g. wrapper parts from
  * file-attachment). For structured results the trust marking is the hook's

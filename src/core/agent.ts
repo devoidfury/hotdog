@@ -10,7 +10,7 @@ import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
 import { createStreamProcessor, StreamProcessor, type StreamResult } from "./llm-client/stream-processor.ts";
 import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from "./extensions/registries.ts";
 import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
-import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
+import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult, type ToolCallRefusal } from "./hooks.ts";
 import { type RawUsage } from "./token-tracker.ts";
 import { logger } from "@utils/logger.ts";
 import { splitFileIncludes } from "@utils/tool-content.ts";
@@ -41,30 +41,18 @@ export type AgentRunResult =
   /** Empty-completion budget spent; the run did not complete normally. */
   | { type: 'empty_response' };
 
-/** True when finish_reason says the response was cut off by the token limit. */
-function isLengthStop(reason: string | null): boolean {
-  return reason === "length" || reason === "max_tokens";
-}
-
 /**
- * Tool-result body for calls on a length-stopped response.
- * Streaming accumulates arguments verbatim; a call cut off mid-JSON is unparseable or silently short, so executing it is worse than failing.
- */
-const TRUNCATED_STOP_TOOL_TEXT =
-  "This response hit the output token limit (finish_reason=length), so its tool " +
-  "calls were NOT executed -- their arguments may be truncated mid-stream. " +
-  "Re-issue the intended tool call now with complete arguments.";
-
-/**
- * Harness notice after a length-stop response's skipped tool results (and the backstop in #prepareIteration).
+ * Harness notice for the assistant-tail backstop in #prepareIteration.
  * Why a trailing user-shaped message is required: strict llama.cpp-style gateways collapse an assistant+tool pair
- * into ONE assistant turn, so two consecutive length stops leave the wire tail [assistant, tool, assistant, tool] == [assistant, assistant]
- * and the next request 400s with "Cannot have 2+ assistant messages at the end". A trailing user-role message breaks the collapse.
- * The tool result above already carries the re-issue instruction; this text stays short -- its job is the conversation shape, not the instruction.
+ * into ONE assistant turn, so two consecutive assistant turns arrive as [assistant, assistant] and the request 400s
+ * with "Cannot have 2+ assistant messages at the end". The backstop catches any assistant tail the loop leaves behind
+ * (e.g. consecutive empty completions when maxEmptyRetries >= 2); the refused-call path carries its own
+ * `refuseToolCalls.trailingNotice` instead. The text is deliberately generic -- the backstop cannot know why the
+ * previous turn came up empty, only that the wire shape needs breaking.
  */
-const TRUNCATED_STOP_NUDGE_TEXT =
-  "The previous response was truncated by the output token limit, so its tool " +
-  "call was not executed. Re-issue that tool call now with complete arguments.";
+const ASSISTANT_TAIL_NOTICE_TEXT =
+  "The previous turn ended with no final response and no tool call. " +
+  "Continue the task now -- make the next tool call or respond to the user.";
 
 /**
  * Nudge for the empty-response-after-tools stall: the model returned neither text nor tool calls after
@@ -703,14 +691,10 @@ export class Agent implements AgentLike {
     messages = contextResult.data.messages;
 
     // Backstop: never issue a request whose last two non-system messages are
-    // both internal role "assistant" (the only internal role that serializes
-    // to wire "assistant" -- harness maps to user/developer). A strict
-    // llama.cpp-style gateway collapses each assistant+tool pair into one
-    // assistant turn, so [assistant, tool, assistant, tool] arrives as two
-    // consecutive assistant messages and 400s. The length-stop branch
-    // appends its own notice; this catches any other assistant tail (e.g.
-    // consecutive empty completions when maxEmptyRetries >= 2). addMessage
-    // persists it; the local `messages` must carry it for this request too.
+    // both internal role "assistant" -- the wire invariant explained on
+    // ASSISTANT_TAIL_NOTICE_TEXT. Refused-call rounds bring their own trailing
+    // notice; this catches every other assistant tail. addMessage persists the
+    // nudge; the local `messages` must carry it for this request too.
     const nonSystemTail = messages.filter((m) => m.role !== "system");
     if (
       nonSystemTail.length >= 2 &&
@@ -720,7 +704,7 @@ export class Agent implements AgentLike {
       const nudge = new Message({
         role: "harness",
         source: "harness",
-        content: [{ type: "system-notice", text: TRUNCATED_STOP_NUDGE_TEXT }],
+        content: [{ type: "system-notice", text: ASSISTANT_TAIL_NOTICE_TEXT }],
       });
       this.addMessage(nudge);
       messages = [...messages, nudge];
@@ -790,11 +774,18 @@ export class Agent implements AgentLike {
     const { modelConfig } = params;
     // handlers may repair/replace the response before it becomes an assistant message and its tool calls execute
     // (e.g.tool - call - repair recovering markup the backend failed to parse into real tool calls).
-    const resPayload = { response, modelConfig, agent: this };
-    await this.hooks.runHookPipeline<{ response?: StreamResult }, "provider:response">(
-      HOOKS.PROVIDER_RESPONSE,
-      resPayload,
-    );
+    // A handler may also set `refuseToolCalls`: the response's tool calls are then not executed at all
+    // (mechanism below); which responses get refused is handler policy.
+    const resPayload: {
+      response: StreamResult;
+      modelConfig: ModelConfig;
+      agent: Agent;
+      refuseToolCalls?: ToolCallRefusal;
+    } = { response, modelConfig, agent: this };
+    await this.hooks.runHookPipeline<
+      { response?: StreamResult; refuseToolCalls?: ToolCallRefusal },
+      "provider:response"
+    >(HOOKS.PROVIDER_RESPONSE, resPayload);
     response = resPayload.response;
     await this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.context.getMessages(), agent: this });
 
@@ -813,17 +804,18 @@ export class Agent implements AgentLike {
     if (response.finalToolCalls) {
       let toolCallsToExecute = response.finalToolCalls;
       let skippedToolResults: ToolResult[] = [];
-      let lengthStopped = false;
+      const refusal = resPayload.refuseToolCalls;
+      let refused: ToolCallRefusal | null = null;
 
-      if (isLengthStop(response.finishReason)) {
-        // Streamed args may be silently truncated; nothing from this response is safe to run.
-        // Fail every call with a re-issue instruction so the wire stays valid (paired tool call & result).
-        lengthStopped = true;
+      if (refusal && toolCallsToExecute.length > 0) {
+        // Handler refusal (see ToolCallRefusal): nothing from this response runs.
+        // Fail every call with the refusal's reason so the wire stays valid (paired tool call & result).
+        refused = refusal;
         toolCallsToExecute = [];
         skippedToolResults = response.finalToolCalls.map((tc) => ({
           toolName: tc.function?.name || "(unknown)",
           input: tc.function?.arguments || "{}",
-          content: TRUNCATED_STOP_TOOL_TEXT,
+          content: refusal.reason,
           toolCallId: tc.id,
         }));
       } else if (toolCallsToExecute.length > this.maxToolCallsPerIteration) {
@@ -861,15 +853,14 @@ export class Agent implements AgentLike {
         });
       }
 
-      if (lengthStopped) {
-        // Trailing user-shaped notice: without it the context tail is [assistant, tool],
-        // which strict gateways collapse to one assistant turn; a second consecutive
-        // length stop ends the wire with two assistant messages and 400s (see TRUNCATED_STOP_NUDGE_TEXT).
-        // Persisted so it rides every later request.
+      if (refused?.trailingNotice) {
+        // Persisted so it rides every later request: without a trailing user-shaped
+        // notice the context tail is [assistant, tool], which strict gateways collapse
+        // to one assistant turn (wire invariant explained on ASSISTANT_TAIL_NOTICE_TEXT).
         this.addMessage(new Message({
           role: "harness",
           source: "harness",
-          content: [{ type: "system-notice", text: TRUNCATED_STOP_NUDGE_TEXT }],
+          content: [{ type: "system-notice", text: refused.trailingNotice }],
         }));
       }
 

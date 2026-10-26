@@ -2055,59 +2055,93 @@ describe('empty response after tool results — nudge', () => {
   });
 });
 
-describe('length-stop tool-call guard', () => {
-  const truncatedSeq = (id: string, finishReason: string) =>
+// Core owns the refused-call MECHANISM: a provider:response handler returns
+// { refuseToolCalls } and core pairs every call in the response with a tool
+// result carrying the refusal reason (nothing executes), persists the optional
+// trailing notice, and continues the loop. The POLICY -- which responses get
+// refused and what the text says -- lives in extensions; the end-to-end policy
+// test (length-stop refusal) is in tests/extensions/tool-call-repair.test.ts.
+describe('refused tool-call mechanism (provider:response)', () => {
+  const callSeq = (id: string, finishReason = 'refuse-me') =>
     buildStreamResponse({
-      // Args cut off mid-JSON, exactly what a length-truncated stream yields.
-      toolCalls: [{ index: 0, name: 'worker', arguments: '{"path": "/tmp/trun', id }],
+      toolCalls: [{ index: 0, name: 'worker', arguments: '{"path": "/tmp/x"}', id }],
       finishReason,
       usage: { total_tokens: 5 },
     });
 
-  for (const finishReason of ['length', 'max_tokens']) {
-    it(`fails all tool calls without executing when finish_reason is ${finishReason}`, async () => {
-      const tool = simpleTool('worker', 'should not run');
-      const mockLLM = new MockLLMClient({
-        responseSequences: [
-          truncatedSeq('call_1', finishReason),
-          buildStreamResponse({ content: 'Re-issued cleanly.', usage: { total_tokens: 5 } }),
-        ],
-      });
-      const { agent, toolRegistry } = createFixture({ mockLLM });
-      toolRegistry.register('worker', tool);
+  const REFUSAL = {
+    reason: 'Handler verdict: this call was NOT executed. Re-issue only if still intended.',
+    trailingNotice: 'The last round was refused -- continue from the tool results.',
+  };
 
-      const result = await agent.run('Do work');
-
-      expect(expectCompletion(result).content).toBe('Re-issued cleanly.');
-      expect(tool.executeCount).toBe(0);
-
-      // Wire validity: the assistant tool_call still gets a result, carrying the re-issue instruction.
-      const toolMsgs = agent.context.log.getAll().filter((m) => m.role === 'tool');
-      expect(toolMsgs).toHaveLength(1);
-      expect(toolMsgs[0]!.toolCallId).toBe('call_1');
-      expect(text(toolMsgs[0]!.content)).toContain('NOT executed');
-      expect(text(toolMsgs[0]!.content)).toContain('Re-issue');
-    });
+  function refuseOn(data: { response: { finishReason: string | null } }) {
+    return data.response.finishReason === 'refuse-me' ? { refuseToolCalls: REFUSAL } : undefined;
   }
 
-  it('executes tool calls normally when the stop is not a length stop', async () => {
+  it('skips execution, pairs every refused call with its result, and continues', async () => {
+    const tool = simpleTool('worker', 'should not run');
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        callSeq('call_1'),
+        buildStreamResponse({ content: 'Re-issued cleanly.', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const { agent, hooks, toolRegistry } = createFixture({ mockLLM });
+    hooks.on(HOOKS.PROVIDER_RESPONSE, refuseOn);
+    toolRegistry.register('worker', tool);
+
+    const result = await agent.run('Do work');
+
+    expect(expectCompletion(result).content).toBe('Re-issued cleanly.');
+    expect(tool.executeCount).toBe(0);
+
+    // Wire validity: the assistant tool_call still gets a result, carrying the refusal reason.
+    const toolMsgs = agent.context.log.getAll().filter((m) => m.role === 'tool');
+    expect(toolMsgs).toHaveLength(1);
+    expect(toolMsgs[0]!.toolCallId).toBe('call_1');
+    expect(text(toolMsgs[0]!.content)).toContain('NOT executed');
+    expect(text(toolMsgs[0]!.content)).toContain('Re-issue');
+
+    // The trailing notice persists as a harness system-notice after the skipped result.
+    const harnessMsgs = agent.context.log.getAll().filter((m) => m.role === 'harness');
+    expect(harnessMsgs).toHaveLength(1);
+    expect(harnessMsgs[0]!.source).toBe('harness');
+    const parts = harnessMsgs[0]!.content as Array<Record<string, unknown>>;
+    expect(parts[0]!.type).toBe('system-notice');
+    expect(String(parts[0]!.text)).toContain('refused');
+  });
+
+  it('executes tool calls normally when no handler refuses', async () => {
     const tool = simpleTool('worker', 'ran');
     const mockLLM = new MockLLMClient({
       responseSequences: [
-        buildStreamResponse({
-          toolCalls: [{ index: 0, name: 'worker', arguments: '{}', id: 'call_1' }],
-          finishReason: 'tool_calls',
-          usage: { total_tokens: 5 },
-        }),
+        callSeq('call_1', 'tool_calls'),
         buildStreamResponse({ content: 'Done.', usage: { total_tokens: 5 } }),
       ],
     });
-    const { agent, toolRegistry } = createFixture({ mockLLM });
+    const { agent, hooks, toolRegistry } = createFixture({ mockLLM });
+    hooks.on(HOOKS.PROVIDER_RESPONSE, refuseOn);
     toolRegistry.register('worker', tool);
 
     await agent.run('Do work');
 
     expect(tool.executeCount).toBe(1);
+  });
+
+  it('a refusal on a response without tool calls is inert', async () => {
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({ content: 'Plain answer.', finishReason: 'refuse-me', usage: { total_tokens: 5 } }),
+      ],
+    });
+    const { agent, hooks } = createFixture({ mockLLM });
+    hooks.on(HOOKS.PROVIDER_RESPONSE, refuseOn);
+
+    const result = await agent.run('Do work');
+
+    expect(expectCompletion(result).content).toBe('Plain answer.');
+    // No synthetic tool result, no trailing notice -- nothing to refuse.
+    expect(agent.context.log.getAll().map((m) => m.role)).toEqual(['user', 'assistant']);
   });
 });
 
@@ -2151,6 +2185,26 @@ describe('gateway assistant-tail invariant', () => {
       usage: { total_tokens: 5 },
     });
 
+  // Refusing length stops is extension policy (tool-call-repair), not core.
+  // Register a stand-in with the same verdict shape so this invariant runs
+  // against the core mechanism plus a refusal source.
+  function attachLengthStopRefusal(hooks: ReturnType<typeof createFixture>['hooks']) {
+    hooks.on(HOOKS.PROVIDER_RESPONSE, (data) =>
+      (data.response.finishReason === 'length' || data.response.finishReason === 'max_tokens') &&
+      data.response.finalToolCalls &&
+      data.response.finalToolCalls.length > 0
+        ? {
+            refuseToolCalls: {
+              reason:
+                'This response hit the output token limit, so its tool calls were NOT executed. Re-issue with complete arguments.',
+              trailingNotice:
+                'The previous response was truncated by the output token limit, so its tool call was not executed. Re-issue that tool call now with complete arguments.',
+            },
+          }
+        : undefined,
+    );
+  }
+
   it('two consecutive length stops never leave a request ending in two assistant messages', async () => {
     const tool = simpleTool('worker', 'should not run');
     const mockLLM = new MockLLMClient({
@@ -2161,7 +2215,8 @@ describe('gateway assistant-tail invariant', () => {
       ],
     });
     const requests = captureRequests(mockLLM);
-    const { agent, toolRegistry } = createFixture({ mockLLM });
+    const { agent, hooks, toolRegistry } = createFixture({ mockLLM });
+    attachLengthStopRefusal(hooks);
     toolRegistry.register('worker', tool);
 
     const result = await agent.run('Do work');
@@ -2169,9 +2224,10 @@ describe('gateway assistant-tail invariant', () => {
     expect(tool.executeCount).toBe(0);
     expect(requests.length).toBe(3);
 
-    // (a) No provider request ends with two assistant messages: the length-stop
-    // branch appends a harness notice (wire role "user") after the skipped tool
-    // result, so even the request issued right after the second stop is clean.
+    // (a) No provider request ends with two assistant messages: the refusal
+    // mechanism appends the handler's trailing notice (wire role "user") after
+    // the skipped tool result, so even the request issued right after the
+    // second stop is clean.
     for (const req of requests) {
       const [prev, last] = tailRoles(req);
       expect(last === 'assistant' && prev === 'assistant').toBe(false);

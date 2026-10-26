@@ -258,6 +258,9 @@ export interface StdinHandoffHost {
   rawListeners(event: "data"): ((chunk: unknown) => void)[];
   removeAllListeners(event: "data"): unknown;
   on(event: "data", listener: (chunk: unknown) => void): unknown;
+  /** Real (never neutered) resume(); the resume thunk calls it explicitly
+   * rather than trusting on("data") to restart the poller under Bun. */
+  resume(): unknown;
 }
 
 /**
@@ -345,6 +348,10 @@ export class OutputBridge {
   #questionLabel = "";
   #mounted = false;
   #suspended = false;
+  /** The pre-neuter stdin.pause, handed over by installIoPatches. suspend()
+   * is the ONE legitimate pause while mounted (§5); null when no patches
+   * were installed (rig bridges, unmounted paths). */
+  #realStdinPause: (() => void) | null = null;
   #repushScheduled = false;
   /** The editor input path (stage 3b): owns the frame instead of the capture. */
   #editor: EditorView | null = null;
@@ -440,6 +447,14 @@ export class OutputBridge {
       else this.capture.setGeometry(this.opts.terminal.rows, this.opts.terminal.columns);
     });
     this.guard.installSignals(this.opts.signalHost);
+  }
+
+  /** installIoPatches hands over the pre-neuter stdin.pause; suspend()
+   * consults it (§5 handoff pause). Not cleared at restore: after restore
+   * the stash is the live pause again, so the handoff stays correct either
+   * way. */
+  setRealStdinPause(fn: (() => void) | null): void {
+    this.#realStdinPause = fn;
   }
 
   /** stdout channel (§2 rubric 1): permanent output -> committed clean rows. */
@@ -765,16 +780,18 @@ export class OutputBridge {
 
   /**
    * §5 Suspend()/Resume(): hand the terminal to a stdio:"inherit" child
-   * (shell exec). While mounted, stdin.pause is neutered (§2, pitfall 6), so
-   * the legacy rl.pause() bracket does nothing to input -- hotdog's stdin
-   * listener and the child race for the tty byte stream, shredding arrow-key
-   * escapes (application-cursor-mode `\x1bOB` arrives as "BO" debris and the
-   * child eats the rest). The handoff instead: commit the tail, erase the
-   * frame (INV-5), `?2004l`, raw off, and RELEASE all stdin "data" listeners
-   * (readline's, clipboard-paste's interceptor -- whoever is attached).
-   * Removing the listeners is what stops input; the stream is never paused.
-   * The returned thunk is Resume(): modes back on, frame repainted, listeners
-   * re-attached. Repeated suspend while suspended is a no-op.
+   * (shell exec). While mounted, stray stdin.pause is neutered (§2, pitfall
+   * 6) -- but releasing the "data" listeners does NOT stop input under Bun:
+   * the stream's native poller keeps pulling tty bytes into the JS buffer,
+   * starving the child (measured: a 1-byte reader under hotdog received a
+   * third of an `ESC O B` burst; the tail arrived as "BO" debris or never).
+   * The handoff therefore: commit the tail, erase the frame (INV-5),
+   * `?2004l`, raw off, RELEASE all stdin "data" listeners (readline's,
+   * clipboard-paste's interceptor -- whoever is attached), then PAUSE the
+   * stream via the real pause installIoPatches stashed on the bridge. The
+   * returned thunk is Resume(): modes back on, frame repainted, listeners
+   * re-attached BEFORE the stream is resumed, so a byte arriving the instant
+   * flow returns has a home. Repeated suspend while suspended is a no-op.
    */
   suspend(stdin: StdinHandoffHost): () => void {
     if (this.#suspended) return () => {};
@@ -792,6 +809,10 @@ export class OutputBridge {
     this.core.modes.setRawMode(false);
     const saved = stdin.rawListeners("data");
     stdin.removeAllListeners("data");
+    // Detach FIRST, then the real pause: with no listeners left, the stream
+    // has nothing to feed, and the pause takes the poller off the tty so
+    // the child reads it uncontended.
+    this.#realStdinPause?.();
     return () => {
       if (!this.#suspended) return;
       this.#suspended = false;
@@ -799,6 +820,7 @@ export class OutputBridge {
       this.core.modes.bracketedPaste(true);
       this.#repaint();
       for (const listener of saved) stdin.on("data", listener);
+      stdin.resume();
     };
   }
 
@@ -872,7 +894,11 @@ export class OutputBridge {
     this.#repushScheduled = true;
     this.opts.clock.setImmediate(() => {
       this.#repushScheduled = false;
-      if (!this.core.isDead) this.#repaint();
+      // Skipped while suspended: the frame is erased (INV-5) and the child
+      // owns the screen -- repainting here paints the ghost prompt row over
+      // it (the erase's scheduler.cancelPending does not reach this
+      // immediate). Resume's repaint re-applies the frame content anyway.
+      if (!this.core.isDead && !this.#suspended) this.#repaint();
     });
   }
 }
@@ -905,8 +931,11 @@ function consoleArgs(args: unknown[]): string {
  * stdout -> commit channel, stderr -> arbiter, console.* -> the same two
  * channels (Bun's console bypasses process.stdout.write at the fd level, so
  * patching the stream alone would miss it), and neuter stdin.pause --
- * pitfall 6: the shell-exec bracket may stay, but it must never pause the
- * shared stream; the child handoff is OutputBridge.suspend()/resume() (§5).
+ * pitfall 6: no stray caller may pause the shared stream while mounted. The
+ * pre-neuter pause is handed to the bridge (setRealStdinPause): the ONE
+ * legitimate pause owner is the §5 child handoff, because releasing the
+ * data listeners alone does not stop Bun's poller from starving an
+ * stdio-inherit child.
  * Returns the restore function (registered as a TeardownGuard hook, so the
  * restore runs exactly once on every exit path).
  *
@@ -941,6 +970,7 @@ export function installIoPatches(bridge: OutputBridge, host: IoPatchHost): () =>
   host.stdout.write = routed((t) => bridge.commitText(t));
   host.stderr.write = routed((t) => bridge.arbiteText(t));
   host.stdin.pause = (): unknown => host.stdin;
+  bridge.setRealStdinPause(origStdinPause.bind(host.stdin));
   host.console.log = (...args: unknown[]): void => bridge.commitText(consoleArgs(args) + "\n");
   host.console.error = (...args: unknown[]): void => bridge.arbiteText(consoleArgs(args) + "\n");
   host.console.warn = (...args: unknown[]): void => bridge.arbiteText(consoleArgs(args) + "\n");

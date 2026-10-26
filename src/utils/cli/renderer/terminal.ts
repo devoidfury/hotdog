@@ -53,7 +53,9 @@ export class ProcessTerminal implements Terminal {
   }
 }
 
-/** Raw stdin chunks. Unsubscribing is the ONLY way input stops -- never stdin.pause() (pitfall 6, §5). */
+/** Raw stdin chunks. Unsubscribing is how input stops; the KeySource never
+ * pauses (pitfall 6) -- the sole stream pause is OutputBridge.suspend()'s §5
+ * child handoff, which detaches every listener first. */
 export class StdinKeySource implements KeySource {
   constructor(private readonly stdin: StdinLike = process.stdin) {}
 

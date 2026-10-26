@@ -141,21 +141,18 @@ interface InteractiveSessionOptions {
   dictation?: { capture?: CaptureFactory; transcribe?: (audio: Uint8Array) => Promise<string> };
 }
 
-export async function isSystemCommand(cmd: string): Promise<boolean> {
-  if (cmdLookupCache.has(cmd)) {
-    return cmdLookupCache.get(cmd)!;
-  }
-  return new Promise((resolve) => {
-    const proc = spawn("which", [cmd], { stdio: ["pipe", "pipe", "pipe"] });
-    proc.on("close", (code: number) => {
-      cmdLookupCache.set(cmd, code === 0);
-      resolve(code === 0);
-    });
-    proc.on("error", () => {
-      cmdLookupCache.set(cmd, false);
-      resolve(false);
-    });
-  });
+// Sync on purpose: handleShellMode must reach the suspend() that detaches
+// stdin in the SAME macrotask as the line submit. A spawn-based lookup left
+// an await window where the editor was still attached and ate the bytes the
+// user was already typing to the child (autorepeat arrows pressed right
+// after Enter vanished, or landed as ESC debris in a pager). Bun.which is a
+// PATH scan: no spawn, no macrotask.
+export function isSystemCommand(cmd: string): boolean {
+  const cached = cmdLookupCache.get(cmd);
+  if (cached !== undefined) return cached;
+  const found = Bun.which(cmd) !== null;
+  cmdLookupCache.set(cmd, found);
+  return found;
 }
 const cmdLookupCache = new Map<string, boolean>();
 
@@ -895,18 +892,22 @@ export async function runInteractiveSession(
 
     const firstWord = cmd.split(/\s+/)[0];
 
-    if (!firstWord || firstWord.length < MIN_CMD_LEN || IGNORED_CMDS.has(firstWord) || !(await isSystemCommand(firstWord))) {
+    // Everything above the suspend below must stay synchronous (no await,
+    // no spawn): keystrokes that arrive after submit belong to the child,
+    // and the editor may not eat any of them.
+    if (!firstWord || firstWord.length < MIN_CMD_LEN || IGNORED_CMDS.has(firstWord) || !isSystemCommand(firstWord)) {
       return false;
     }
     
     // The child handoff (§5): rl.pause() is the legacy half of the bracket
     // and a no-op on the editor path, which has no readline; while the
-    // renderer is mounted the real work is bridge.suspend() -- stdin.pause is
-    // neutered there (pitfall 6), so releasing the input listeners is what
-    // stops hotdog racing a stdio-inherit child for tty bytes (arrow escapes
-    // arrive shredded otherwise). The paired restore repaints and re-attaches
-    // on child close; settled shell output lands before the rows printed
-    // below.
+    // renderer is mounted the real work is bridge.suspend() -- it releases
+    // the input listeners AND pauses the stream with the real pause
+    // installIoPatches stashed (detaching alone is not enough: Bun's stdin
+    // poller keeps pulling tty bytes into the JS buffer and the child
+    // starves, shredding arrow escapes). The paired restore resumes the
+    // stream, re-attaches the listeners and repaints on child exit; settled
+    // shell output lands before the rows printed below.
     rl?.pause();
     const resumeChildTerminal = bridge?.suspend(process.stdin);
     const result = await executeShellCommand(cmd, {
@@ -998,7 +999,8 @@ export async function runInteractiveSession(
     // unhandled keys carry the ctrl-x dictation toggle. The KeySource attaches
     // HERE, after bridge.mount() established raw mode + bracketed paste (§5;
     // mount() is idempotent), and stopping input only ever means detaching
-    // listeners -- the shared stream is never paused (pitfall 6).
+    // listeners -- stray pauses stay neutered (pitfall 6); the one pause that
+    // does land is suspend()'s real pause during a §5 child handoff.
     bridge.mount();
     const editorCompleter = buildEditorCompleter(sessionManager, core, () => bridge.editor, !!shellMode);
     bridge.mountEditorInput(options.keySource ?? new StdinKeySource(process.stdin), {

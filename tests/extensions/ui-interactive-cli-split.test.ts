@@ -315,13 +315,18 @@ describe("teardown pairing (§10)", () => {
 });
 
 describe("suspend/resume child handoff (§5)", () => {
+  // Suspend-handoff stdin: EventEmitter plus the resume() the resume thunk
+  // calls (real streams carry it; a bare EventEmitter does not).
+  const handoffStdin = (): EventEmitter & { resume(): void } =>
+    Object.assign(new EventEmitter(), { resume: () => {} });
+
   it("suspend commits the tail, unwinds modes in order, erases the frame, releases stdin listeners", () => {
     const { bridge, term, clock } = makeBridge();
     bridge.mount();
     bridge.capture.write("(m)> half-typed");
     clock.runAll();
     bridge.commitText("dangling tail"); // unterminated partial line
-    const stdin = new EventEmitter();
+    const stdin = handoffStdin();
     stdin.on("data", () => {}); // readline stand-in
     term.grid.modeLog.length = 0;
 
@@ -335,8 +340,9 @@ describe("suspend/resume child handoff (§5)", () => {
     const log = term.grid.modeLog;
     expect(log.indexOf("?2004l")).toBeGreaterThanOrEqual(0);
     expect(log.indexOf("?2004l")).toBeLessThan(log.indexOf("raw:off"));
-    // Input stops ONLY via listener release (pitfall 6) -- the child gets a
-    // cooked, uncontended terminal.
+    // Listeners released (the real-pause half of the handoff is pinned in
+    // the installIoPatches wiring test below) -- the child gets a cooked,
+    // uncontended terminal.
     expect(stdin.listenerCount("data")).toBe(0);
     // Frame erased with the live geometry: no ghost of the echo.
     expect(term.grid.snapshot().screen.join("")).not.toContain("half-typed");
@@ -348,7 +354,7 @@ describe("suspend/resume child handoff (§5)", () => {
     bridge.capture.write("(m)> still-typing");
     clock.runAll();
     const listener = () => {};
-    const stdin = new EventEmitter();
+    const stdin = handoffStdin();
     stdin.on("data", listener);
 
     const resume = bridge.suspend(stdin as never);
@@ -370,7 +376,7 @@ describe("suspend/resume child handoff (§5)", () => {
   it("double suspend is inert; the listener returns exactly once via the outer resume", () => {
     const { bridge, clock } = makeBridge();
     bridge.mount();
-    const stdin = new EventEmitter();
+    const stdin = handoffStdin();
     stdin.on("data", () => {});
 
     const outer = bridge.suspend(stdin as never);
@@ -381,6 +387,112 @@ describe("suspend/resume child handoff (§5)", () => {
     outer();
     clock.runAll();
     expect(stdin.listenerCount("data")).toBe(1);
+  });
+
+  it("suspend runs the real pause installIoPatches stashed; resume resumes AFTER re-attaching", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    const calls: string[] = [];
+    const host: IoPatchHost = {
+      stdout: { write: () => true } as never,
+      stderr: { write: () => true } as never,
+      stdin: {
+        pause(): unknown {
+          calls.push("realPause");
+          return host.stdin;
+        },
+      },
+      console: { log: () => {}, error: () => {}, warn: () => {} } as never,
+    };
+    installIoPatches(bridge, host);
+    const listener = () => {};
+    const stdin = {
+      attached: [] as unknown[],
+      rawListeners: () => [listener],
+      removeAllListeners(): unknown {
+        calls.push("detach");
+        return stdin;
+      },
+      on(_ev: string, l: unknown): unknown {
+        calls.push("attach");
+        stdin.attached.push(l);
+        return stdin;
+      },
+      resume(): unknown {
+        calls.push("resume");
+        return stdin;
+      },
+    };
+
+    const resume = bridge.suspend(stdin as never);
+    clock.runAll();
+    // Detach THEN the real pause -- and only the REAL one: the mounted-mode
+    // neuter means nothing else on this host can pause the shared stream.
+    expect(calls).toEqual(["detach", "realPause"]);
+    calls.length = 0;
+
+    resume();
+    clock.runAll();
+    // Listener back on BEFORE the stream restarts: a byte arriving the
+    // instant flow returns has a home (Bun does not guarantee on("data")
+    // implicitly resumes a paused poller).
+    expect(calls).toEqual(["attach", "resume"]);
+    expect(stdin.attached).toEqual([listener]);
+  });
+
+  it("suspend without installIoPatches never pauses (rig bridge, legacy posture)", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+    let resumed = 0;
+    const stdin = Object.assign(new EventEmitter(), {
+      resume: () => {
+        resumed++;
+      },
+    });
+    stdin.on("data", () => {});
+
+    const resume = bridge.suspend(stdin as never);
+    clock.runAll();
+    expect(stdin.listenerCount("data")).toBe(0); // detach-only, no throw
+    resume();
+    clock.runAll();
+    expect(stdin.listenerCount("data")).toBe(1);
+    expect(resumed).toBe(1);
+  });
+
+  it("a queued INV-6 repush firing mid-suspend paints nothing; resume restores the frame", () => {
+    // The ghost-prompt regression: submit's echo commit makes a print
+    // pending, the follow-up frame mutation is dropped (INV-6) and a repush
+    // immediate is queued; suspend erases the frame (the erase's
+    // scheduler.cancelPending does not reach the bridge's own repush
+    // immediate), and the repush then painted the frame right back over the
+    // child's screen.
+    const { bridge, term, clock } = makeBridge();
+    bridge.mount();
+    bridge.capture.write("(m)> typing");
+    clock.runAll();
+    bridge.commitText("committed row\n"); // flush immediate pending -> printPending
+    bridge.commitText("stream tail"); // streaming repaint -> DROPPED -> repush queued
+    const stdin = handoffStdin();
+    stdin.on("data", () => {});
+
+    const resume = bridge.suspend(stdin as never); // drains, erases, detaches
+    term.grid.modeLog.length = 0; // watch the child window only
+    clock.runAll(); // the repush immediate fires here
+
+    // Nothing painted while the child holds the screen: no synchronized
+    // window opened, no ghost of the frame repainted below the committed
+    // rows (unguarded, this run logs ?2026h/?25l/?25h/?2026l and the frame
+    // reappears -- the INV-5 violation).
+    expect(term.grid.modeLog).not.toContain("?2026h");
+    expect(term.grid.snapshot().screen.join("\n")).not.toContain("typing");
+
+    resume();
+    clock.runAll();
+    // Resume's repaint re-applies what the dropped repush would have shown.
+    const screen = term.grid.snapshot().screen.join("\n");
+    expect(screen).toContain("typing");
+    expect(screen).toContain("stream tail");
   });
 });
 
@@ -1223,6 +1335,21 @@ describe("editor session swap: submit routing (stage 3b)", () => {
     rig.keys.push("please respond\r");
     await waitFor(() => rig.calls.enqueue.length === 1);
     expect(rig.calls.enqueue).toEqual(["please respond"]);
+  });
+
+  it("shell handoff detaches input in the submit macrotask (no window to eat child keys)", async () => {
+    const rig = makeSessionRig({ uiCli: { shellMode: true, pasteMarkerMinChars: 80 } });
+    await rig.done;
+
+    rig.keys.push("echo hi\r");
+    // Asserted with no tick: everything the user types after Enter belongs
+    // to the child, so the suspend must have released raw mode inside the
+    // submit macrotask itself. Any await in the decision path (e.g. the old
+    // spawn-`which` lookup) reopens a window where hotdog's editor eats the
+    // child's keystrokes before the handoff lands.
+    expect(rig.term.rawMode).toBe(false);
+
+    await waitFor(() => rig.term.rawMode); // resumed on child exit
   });
 });
 

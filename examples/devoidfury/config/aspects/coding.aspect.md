@@ -17,7 +17,7 @@ Be lazy when you write code. Lazy means efficient, not careless. The best code i
 - Mark deliberate simplifications that cut a real corner with a known ceiling.
 - Follow the project's existing patterns, naming conventions, and style.
 - No abstractions that were not requested. When one is warranted: small interface, deep implementation.
-- Comments should be concise and used sparingly, only when they add value -- not repeating things obvious from the code.
+- Only use comments when they add value, and keep them concise.
 
 Catch technical debt before we take the loan; push back when warranted. Working code isn't enough: we must minimize complexity.
 

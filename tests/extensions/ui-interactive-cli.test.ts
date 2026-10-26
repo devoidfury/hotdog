@@ -408,7 +408,7 @@ describe("isSystemCommand", () => {
     expect(await isSystemCommand("nonexistent_cmd_xyz_12345")).toBe(false);
   });
 
-  it("handles spawn error for non-existent shell", async () => {
+  it("returns false when PATH contains no match", async () => {
     const originalPath = process.env.PATH;
     process.env.PATH = "/completely/nonexistent";
     try {

@@ -7,7 +7,21 @@ import {
 } from "./defaults.ts";
 import { logger } from "@utils/logger.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
-import { formatError } from "../error.ts";
+import { formatError, LlmError } from "../error.ts";
+
+/**
+ * Wrap a raw fetch failure as an expected (http) error before formatError.
+ * Connection-level failures (ENOTFOUND, ECONNREFUSED, resets) are operational
+ * states, not bugs -- but a bare TypeError carries no `type`, so isExpectedError
+ * calls it unexpected and formatError appends a full stack to every log line
+ * and provider-health reason that carries it. Same doctrine as
+ * LlmClient.classifyStreamError: typed errors pass through, everything else
+ * from a fetch boundary is "http".
+ */
+function asOperationalError(e: unknown): LlmError {
+  if (e instanceof LlmError) return e;
+  return LlmError.Http(e instanceof Error ? e.message : String(e));
+}
 
 export interface ModelConfig {
   name: string;
@@ -222,7 +236,7 @@ async function fetchLlamaCppProps(
     return (await response.json()) as LlamaCppProps;
   } catch (e) {
     // Modality detection is progressive enhancement; a missing/failed /props is not fatal.
-    logger.debug(`llama.cpp /props probe failed for ${baseUrl}: ${formatError(e)}`);
+    logger.debug(`llama.cpp /props probe failed for ${baseUrl}: ${formatError(asOperationalError(e))}`);
     return null;
   }
 }
@@ -283,12 +297,20 @@ export async function fetchRemoteModelsOutcome(
       return { reachable: true, entries };
     } catch (e) {
       if (!controller.signal.aborted) {
-        return { reachable: true, entries: [], reason: `bad /v1/models payload: ${formatError(e)}` };
+        // Unparseable body on a live socket: record the why message-only (a raw
+        // SyntaxError would otherwise format with a stack).
+        const msg = e instanceof Error ? e.message : String(e);
+        return { reachable: true, entries: [], reason: formatError(LlmError.InvalidResponse(`bad /v1/models payload: ${msg}`)) };
       }
       throw e;
     }
   } catch (e) {
-    return { reachable: false, entries: [], reason: formatError(e) };
+    // Only this function's own timer aborts the controller, so an aborted
+    // signal here means the request timed out; everything else is network.
+    const err = controller.signal.aborted
+      ? LlmError.Timeout(`timed out after ${timeoutMs}ms`)
+      : asOperationalError(e);
+    return { reachable: false, entries: [], reason: formatError(err) };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -386,15 +408,21 @@ export async function buildModelRegistry(
   contextLimit: number,
 ): Promise<Record<string, ModelConfig>> {
   const registry: Record<string, ModelConfig> = {};
-
-  for (const provider of config.providers || []) {
-    Object.assign(
-      registry,
-      await buildProviderModels(provider, contextLimit, {
+  // Probes concurrent, same doctrine as the health sweep: a dead backend
+  // burns its timeout in parallel with the others, so a cold boot costs one
+  // timeout, not N. The merge keeps the sequential precedence -- providers
+  // later in config order still win duplicate keys -- because results are
+  // assigned in order after all settle.
+  const results = await Promise.all(
+    (config.providers || []).map((provider) =>
+      buildProviderModels(provider, contextLimit, {
         baseUrl: config.baseUrl,
         apiKey: config.apiKey,
       }),
-    );
+    ),
+  );
+  for (const models of results) {
+    Object.assign(registry, models);
   }
 
   return registry;

@@ -10,6 +10,9 @@ import { resetLoggerForTesting } from "@utils/logger.ts";
 import pkg from "@package.json" with { type: "json" };
 import { ConfigRegistry } from "@core/extensions/config.ts";
 import { xmlWireFormat } from "@extensions/wire-format-xml/index.ts";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 /**
  * Run main() with given CLI args, capturing stdout and stderr output.
@@ -378,5 +381,51 @@ describe("createCore.createLlmClient (modelWireFormat layering)", () => {
     const { createSubcommandRegistry } = await import("@core/extensions/registries.ts");
     const core = createCore({} as never, new ConfigRegistry(), createSubcommandRegistry());
     expect(core.createLlmClient().maxRetries).toBe(5);
+  });
+});
+
+
+describe("main -- single-flight config build", () => {
+  it("subcommand handlers reuse the boot build instead of re-fetching /v1/models", async () => {
+    // Regression: boot built the config, then the profiles handler called
+    // core.buildConfig(cli) with the same argv and rebuilt everything --
+    // second /v1/models round included, so every dead fetchModels provider
+    // burned its timeout twice per offline invocation.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "hotdog-single-flight-"));
+    const configDir = path.join(dir, "config");
+    mkdirSync(path.join(configDir, "profiles"), { recursive: true });
+    writeFileSync(
+      path.join(configDir, "defaults.json"),
+      JSON.stringify({
+        log_level: "error",
+        providers: [{ name: "slow", url: "http://slow.test", fetch_models: true }],
+      }),
+    );
+
+    let modelsFetches = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/v1/models")) modelsFetches++;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [] }),
+      } as Response;
+    }, { preconnect: async () => {} });
+
+    try {
+      const { exitCode } = await runMain(["profiles"], {
+        HOTDOG_CONFIG_DIR: configDir,
+        AI_URL: "",
+        HOTDOG_AI_URL: "",
+        HOTDOG_API_KEY: "",
+      });
+      expect(exitCode).toBe(0);
+      // One round (the boot build) -- the handler reuses it.
+      expect(modelsFetches).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

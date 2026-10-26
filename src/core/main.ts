@@ -334,9 +334,22 @@ export async function main(): Promise<number> {
     return 1;
   }
 
+  // Single-flight buildConfig: boot builds once, and subcommand handlers
+  // (info/profiles/show-prompt) receive the exact same argv object that main
+  // just built with (dispatch calls handler(cli, core)). Without memoization
+  // their core.buildConfig call rebuilds everything -- including a second
+  // /v1/models round for every fetchModels provider, doubling cold-boot cost
+  // and doubling offline timeout pain. The memo lives inside main(), so
+  // repeated main() calls (tests, embedded hosts) each build fresh.
+  let bootBuild: ReturnType<typeof buildConfig> | null = null;
+  const buildConfigOnce = (cliArgv: CliArgv) => {
+    bootBuild ??= buildConfig(cliArgv, configRegistry);
+    return bootBuild;
+  };
+
   let built;
   try {
-    built = await buildConfig(cli as CliArgv, configRegistry);
+    built = await buildConfigOnce(cli as CliArgv);
   } catch (e) {
     logger.error(formatError(e));
     console.error("Run `hotdog rescue` for config diagnostics (paths, syntax, unknown keys).");
@@ -369,8 +382,9 @@ export async function main(): Promise<number> {
     profileName: resolved.profileName,
     profile: resolved.profileDef,
     // Bound so the extension-facing core.buildConfig runs the same full
-    // pipeline (incl. extension config resolution + validation) as main().
-    buildConfig: (cli) => buildConfig(cli as CliArgv, configRegistry),
+    // pipeline (incl. extension config resolution + validation) as main();
+    // single-flight, so a handler rebuild reuses boot's build (see buildConfigOnce).
+    buildConfig: (cli) => buildConfigOnce(cli as CliArgv),
   });
 
   core.resolved = resolved as ResolvedConfig;

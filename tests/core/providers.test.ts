@@ -350,6 +350,8 @@ describe("buildModelRegistry with fetchModels", () => {
     expect(outcome.reachable).toBe(true);
     expect(outcome.entries).toEqual([]);
     expect(outcome.reason).toContain("bad /v1/models payload");
+    // The SyntaxError must not format as "unexpected": one line, no stack.
+    expect(outcome.reason?.split("\n")).toHaveLength(1);
   });
 
   it("a mid-read timeout is a connection-level failure (not reachable)", async () => {
@@ -364,6 +366,55 @@ describe("buildModelRegistry with fetchModels", () => {
     );
     const outcome = await fetchRemoteModelsOutcome("http://test.com", undefined, 20);
     expect(outcome.reachable).toBe(false);
+    // Own-timer abort formats message-only, never with the abort stack.
+    expect(outcome.reason).toContain("timed out");
+    expect(outcome.reason?.split("\n")).toHaveLength(1);
+  });
+
+  it("connection failures report message-only, no stack (getaddrinfo regression)", async () => {
+    // Bun rejects fetch() with a type-less TypeError (cause: ENOTFOUND/ECONNREFUSED).
+    // formatError used to see "unexpected" and embed the full stack in the reason,
+    // so every offline boot printed a trace on stderr for a dead provider.
+    globalThis.fetch = Object.assign(async () => {
+      // Exact shape Bun throws here: a plain TypeError whose message is the
+      // resolver failure (observed live: "getaddrinfo ENOTFOUND <host>").
+      throw new TypeError("getaddrinfo ENOTFOUND mf-ai.home");
+    }, { preconnect: async () => {} });
+    const outcome = await fetchRemoteModelsOutcome("http://mf-ai.home", undefined, 1000);
+    expect(outcome.reachable).toBe(false);
+    expect(outcome.reason).toBe("getaddrinfo ENOTFOUND mf-ai.home");
+    expect(outcome.reason).not.toContain("TypeError");
+    expect(outcome.reason).not.toContain("    at ");
+  });
+
+  it("builds provider catalogs concurrently, one dead socket does not block the others", async () => {
+    // Same doctrine as the health sweep: a dead backend burns its timeout in
+    // parallel, so a cold boot costs one timeout, not N. The in-flight gauge
+    // (not wall-clock) pins it: a sequential implementation never exceeds 1.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    globalThis.fetch = Object.assign(async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Bun.sleep(30);
+      inFlight--;
+      return {
+        ok: true,
+        json: async () => ({ data: [{ id: "remote", context_length: 4096 }] }),
+      } as Response;
+    }, { preconnect: async () => {} });
+
+    const config = {
+      providers: [
+        { name: "p1", url: "http://p1.test", fetchModels: true, models: [] },
+        { name: "p2", url: "http://p2.test", fetchModels: true, models: [] },
+        { name: "p3", url: "http://p3.test", fetchModels: true, models: [] },
+      ],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(maxInFlight).toBeGreaterThan(1);
+    // Keys are provider-namespaced, so concurrency cannot collide them.
+    expect(Object.keys(registry).sort()).toEqual(["p1/remote", "p2/remote", "p3/remote"]);
   });
 
   it("handles fetch failure gracefully without crashing", async () => {

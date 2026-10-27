@@ -3,7 +3,7 @@
 // bracketed-paste, cursor-visibility, and synchronized-output bytes in the
 // renderer -- the FrameScheduler/commit engine go through TerminalModes
 // instead of embedding escape literals (contract-tested in
-// tests/utils/cli/renderer/architecture.test.ts).
+// tests/lints/ui-renderer-architecture.test.ts).
 //
 // Step order is normative (§10): scheduler first, then commit-or-drop, then
 // the frame erase, then mode unwinding -- kilocode's lesson: hand stdout back

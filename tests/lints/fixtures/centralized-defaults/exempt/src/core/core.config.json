@@ -1,0 +1,3 @@
+{
+  "repeatLimit": { "type": "number", "layers": [{ "default": 5 }] }
+}

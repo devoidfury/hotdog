@@ -1,0 +1,42 @@
+[
+  {
+    "file": "src/core/completion.ts",
+    "snippet": "`[completion] Handler error from ${handlerName}: ${(e as Error).message}`,"
+  },
+  {
+    "file": "src/core/completion.ts",
+    "snippet": "`[completion] Matcher error from ${r.source ?? \"unknown\"}: ${(e as Error).message}`,"
+  },
+  {
+    "file": "src/core/extensions/tool-registry.ts",
+    "snippet": "`[tools] Failed to get tool def for \"${name}\": ${(err as Error).message}`,"
+  },
+  {
+    "file": "src/core/session/session-log.ts",
+    "snippet": "logger.warn(`[session-log] failed to delete session log ${sessionId}: ${error.message}`);"
+  },
+  {
+    "file": "src/extensions/file-attachment/completions.ts",
+    "snippet": "logger.debug(`file-attachment: completion error: ${(e as Error).message}`);"
+  },
+  {
+    "file": "src/extensions/ui-interactive-cli/completions.ts",
+    "snippet": "logger.debug(`ui-interactive-cli: shell completion error: ${(e as Error).message}`);"
+  },
+  {
+    "file": "src/extensions/ui-interactive-cli/completions.ts",
+    "snippet": "logger.error(`[completion] error: ${(e as Error).message}`);"
+  },
+  {
+    "file": "src/extensions/ui-interactive-cli/index.ts",
+    "snippet": "() => { uiOut(\"\"); ui.prompt(); },"
+  },
+  {
+    "file": "src/extensions/workflows/engine.ts",
+    "snippet": "() => { if (nr.gate === gate) { gate.deliver({ status: \"failed\", result: \"warm turn rejected: task no longer accepting turns\" }); } },"
+  },
+  {
+    "file": "src/utils/file-utils.ts",
+    "snippet": "error: (e as Error).message,"
+  }
+]

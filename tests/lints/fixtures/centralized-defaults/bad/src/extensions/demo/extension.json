@@ -1,0 +1,11 @@
+{
+  "name": "demo",
+  "configSchema": {
+    "demo": {
+      "type": "object",
+      "properties": {
+        "pingLimit": { "type": "number" }
+      }
+    }
+  }
+}

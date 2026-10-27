@@ -17,12 +17,13 @@ import { Glob } from "bun";
 import { readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 
-const ROOT = resolve(import.meta.dir, "../../../..");
+const ROOT = resolve(import.meta.dir, "../..");
 const RENDERER = join(ROOT, "src/utils/cli/renderer");
+const RENDERER_TESTS = join(ROOT, "tests/utils/cli/renderer");
 const SRC = join(ROOT, "src");
 
 // Matches static imports, side-effect imports, re-exports, and dynamic imports
-// (same shape as tests/core/architecture-core-no-extensions.test.ts).
+// (same shape as tests/lints/architecture-core-no-extensions.test.ts).
 const SPEC_RE = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*["']([^"']+)["']/g;
 
 function scan(dir: string): Promise<string[]> {
@@ -108,7 +109,9 @@ describe("architecture: mode bytes have exactly one home (§10)", () => {
   });
 
   it("the renderer tests mock no modules (AGENTS.md ban)", async () => {
-    const files = await scan(import.meta.dir);
+    // Scans the renderer test directory, not import.meta.dir (this file moved
+    // to tests/lints/).
+    const files = await scan(RENDERER_TESTS);
     expect(files.length).toBeGreaterThanOrEqual(5);
     // A real call site has a dot then an open paren between the words; the
     // pattern stays split here so this scanner never flags its own source.

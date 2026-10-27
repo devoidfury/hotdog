@@ -1,0 +1,1 @@
+{ "name": "dev-only", "dependencies": {}, "devDependencies": { "typescript": "^7.0.0" } }

@@ -64,6 +64,9 @@ export function createWsMockCore(): any {
     // stands in for a resolved host, so it carries them like resolveAll does.
     toolExec: "inline",
     execFence: "probe",
+    // Root uploadLimits (schema defaults as plain literals): the websocket
+    // upload path enforces them regardless of which extensions load.
+    uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 },
   };
   return {
     hooks: {
@@ -79,12 +82,7 @@ export function createWsMockCore(): any {
       },
     },
     _registeredHooks: registeredHooks,
-    // Resolved fileAttachment block (schema defaults as plain literals):
-    // the websocket upload path consumes it and declares dependsOn
-    // ["file-attachment"], so a real resolved host always carries it.
-    config: {
-      fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 },
-    },
+    config: {},
     completion: createCompletionService(),
     resolved,
     toolRegistry: {

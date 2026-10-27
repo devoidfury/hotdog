@@ -286,7 +286,7 @@ describe("C2S SEND with uploads", () => {
 
   it("rejects an oversized upload with a visible error and enqueues nothing", async () => {
     const core = createWsMockCore();
-    core.config.fileAttachment = { maxFileSize: 64, maxImageSize: 10485760, maxFiles: 2 };
+    core.resolved.uploadLimits = { maxFileSize: 64, maxImageSize: 10485760, maxFiles: 2 };
     const ws = await connect({ core });
     const sessionId = ws.activeSessionId!;
     const calls = spyOnEnqueue();
@@ -312,7 +312,7 @@ describe("C2S SEND with uploads", () => {
 
   it("accepts an image over maxFileSize but under maxImageSize", async () => {
     const core = createWsMockCore();
-    core.config.fileAttachment = { maxFileSize: 64, maxImageSize: 4096, maxFiles: 2 };
+    core.resolved.uploadLimits = { maxFileSize: 64, maxImageSize: 4096, maxFiles: 2 };
     const ws = await connect({ core, buildAgent: visionAgent() });
     const sessionId = ws.activeSessionId!;
     const calls = spyOnEnqueue();
@@ -333,9 +333,9 @@ describe("C2S SEND with uploads", () => {
     expect(opts.images[0]!.mimeType).toBe("image/png");
   });
 
-  it("honors the fileAttachment maxFiles limit", async () => {
+  it("honors the uploadLimits maxFiles limit", async () => {
     const core = createWsMockCore();
-    core.config.fileAttachment = { maxFileSize: 1024, maxImageSize: 10485760, maxFiles: 1 };
+    core.resolved.uploadLimits = { maxFileSize: 1024, maxImageSize: 10485760, maxFiles: 1 };
     const ws = await connect({ core });
     const sessionId = ws.activeSessionId!;
     const calls = spyOnEnqueue();

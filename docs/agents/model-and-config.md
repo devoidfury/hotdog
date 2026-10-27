@@ -28,7 +28,7 @@ only static path constants (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_CONFIG_FILENAME
 and runtime fallbacks (`DEFAULT_SYSTEM_PROMPT_TEMPLATE`) that are not schema-configurable.
 The skills path is computed dynamically via the config schema's `joinConfigDir:skills` compute function.
 
-Extension-specific defaults (e.g., `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, compaction settings) are defined in each extension's `extension.json` configSchema.
+Extension-specific defaults (e.g., `bashTool` timeouts, `coreTools` search limits, compaction settings) are defined in each extension's `extension.json` configSchema.
 
 ### Config Resolution
 - **`loadConfig(configPath, cliConfigDir, extParams)`**: loads config from file, falls back to resolved config dir (CLI `--config-dir` > `HOTDOG_CONFIG_DIR` env > `./config` > `/etc/hotdog` > XDG). Merges extension defaults.

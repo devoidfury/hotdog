@@ -5,6 +5,8 @@ import {
   CONFIG_SCHEMA as CONFIG_KEYS,
   type ResolutionContext,
 } from "@core/config/schema-loader.ts";
+import { uploadLimits } from "@core/config/upload-limits.ts";
+import { ConfigError } from "@core/error.ts";
 
 // ── CONFIG_KEYS schema ───────────────────────────────────────────────────
 
@@ -339,5 +341,77 @@ describe("toolExec / execFence", () => {
     expect(resolveKey("toolExec", CONFIG_KEYS.toolExec, { ...baseContext, cli: { toolExec: "inline" }, config: { toolExec: "worker" } })).toBe("inline");
     expect(resolveKey("execFence", CONFIG_KEYS.execFence, { ...baseContext, config: { execFence: "off" } })).toBe("off");
     expect(resolveKey("execFence", CONFIG_KEYS.execFence, { ...baseContext, cli: { execFence: "off" }, config: { execFence: "probe" } })).toBe("off");
+  });
+});
+
+// ── Root upload ceilings (uploadLimits + legacy fileAttachment alias) ────
+
+describe("uploadLimits", () => {
+  const baseContext: ResolutionContext = {
+    cli: {},
+    config: {},
+    provider: null,
+    profile: null,
+    profileName: "default",
+    profilesPath: "./config/profiles",
+  };
+
+  const DEFAULTS = { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 };
+
+  it("resolves the schema defaults with no config at all", () => {
+    expect(resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, baseContext)).toEqual(DEFAULTS);
+  });
+
+  it("legacy fileAttachment.* keys alias in, per-field, siblings stay default", () => {
+    expect(
+      resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, {
+        ...baseContext,
+        config: { fileAttachment: { maxFileSize: 123 } },
+      }),
+    ).toEqual({ ...DEFAULTS, maxFileSize: 123 });
+  });
+
+  it("root uploadLimits wins per-field over the legacy alias", () => {
+    expect(
+      resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, {
+        ...baseContext,
+        config: {
+          uploadLimits: { maxFileSize: 5 },
+          fileAttachment: { maxFileSize: 999, maxFiles: 3 },
+        },
+      }),
+    ).toEqual({ ...DEFAULTS, maxFileSize: 5, maxFiles: 3 });
+  });
+
+  it("casts numeric strings from either layer; junk falls through to the next", () => {
+    expect(
+      resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, {
+        ...baseContext,
+        config: { uploadLimits: { maxFiles: "20" }, fileAttachment: { maxFileSize: "42" } },
+      }),
+    ).toEqual({ ...DEFAULTS, maxFileSize: 42, maxFiles: 20 });
+
+    expect(
+      resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, {
+        ...baseContext,
+        config: { uploadLimits: { maxFileSize: "abc" }, fileAttachment: { maxFileSize: 7 } },
+      }),
+    ).toEqual({ ...DEFAULTS, maxFileSize: 7 });
+  });
+
+  it("the accessor hands out resolved values and fails loud when resolution never ran", () => {
+    // The upload path (websocket SEND, file-attachment @refs) enforces these
+    // numbers; a resolved bag without them means sizes would be compared
+    // against undefined, so the accessor throws instead of papering over.
+    const core = { resolved: { uploadLimits: { ...DEFAULTS } } } as any;
+    expect(uploadLimits(core)).toEqual(DEFAULTS);
+    expect(() => uploadLimits({} as any)).toThrow(ConfigError);
+    expect(() => uploadLimits({ resolved: {} } as any)).toThrow(ConfigError);
+    // Partial garbage (post-cast values missing) must throw too: the schema
+    // guarantees the shape, a hand-built core bag that lacks it is a bug.
+    expect(() => uploadLimits({ resolved: { uploadLimits: { maxFiles: 1 } } } as any)).toThrow(ConfigError);
+    // The message echoes the offending value so the diagnosis points at the
+    // config (e.g. uploadLimits given a string), not at resolveAll.
+    expect(() => uploadLimits({ resolved: { uploadLimits: "nope" } } as any)).toThrow(/got "nope"/);
   });
 });

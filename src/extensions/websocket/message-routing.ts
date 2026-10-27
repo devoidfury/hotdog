@@ -1,13 +1,12 @@
 // C2S message routing, split out of server.ts: the auth gate and the
 // per-type handlers (sessions, send/uploads, commands/fork, tasks,
-// questions, logs, completions, transcribe) plus the upload-limit resolver
-// the send path and @refs share.
+// questions, logs, completions, transcribe).
 
 import { getSessionRow } from "@core/session/session-index.ts";
 import { deleteSessionLog, listSessionLogs, readSessionEntries } from "@core/session/session-log.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
-import { getExtensionConfig } from "@core/extensions/types.ts";
 import { modelAcceptsImages } from "@core/config/providers.ts";
+import { uploadLimits } from "@core/config/upload-limits.ts";
 import { parseUploadedFiles } from "./uploads.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import type { HotdogServerSocket } from "./socket.ts";
@@ -32,28 +31,6 @@ import { replaySessionHistory } from "./replay.ts";
 import { createAndAttachSession, dismissResumedQuestions } from "./resume.ts";
 import { attachLiveSession, attachResumedSession, attachToMostRecentSession, fallbackAttach } from "./attach.ts";
 import { MAX_COMPLETE_LINE, MAX_TRANSCRIBE_AUDIO_BYTES, MAX_TRANSCRIBE_BASE64_CHARS } from "./constants.ts";
-
-/**
- * Upload size limits, reused from the fileAttachment extension config
- * (its schema defaults: 100KB per text file, 10MB per image, 10 files per message).
- * uploads and @refs share one ceiling, including the separate image budget (fileAttachment.maxImageSize).
- * websocket declares dependsOn: ["file-attachment"], so the load set always
- * carries the resolved fileAttachment block; excluding the dependency is a
- * config error (the loader drops unresolved deps from ordering), surfaced as
- * missing keys here rather than papered over with backup defaults.
- */
-export function uploadLimits(core: CoreContext): { maxFileSize: number; maxImageSize: number; maxFiles: number } {
-  const cfg = getExtensionConfig<{ maxFileSize: number; maxImageSize: number; maxFiles: number }>(
-    core,
-    "fileAttachment",
-  );
-
-  return {
-    maxFileSize: cfg.maxFileSize,
-    maxImageSize: cfg.maxImageSize,
-    maxFiles: cfg.maxFiles,
-  };
-}
 
 /**
  * Parses (never casts) one `transcribe` off an untrusted socket into

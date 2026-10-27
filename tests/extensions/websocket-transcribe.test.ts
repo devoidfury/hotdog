@@ -148,10 +148,18 @@ describe("websocket transcribe", () => {
     // recordings die at the transport again instead of answering "audio too
     // large" -- the exact failure this alignment fixed. Same 1 MiB envelope
     // headroom the 10 MB image upload enjoys.
-    // 10485760 = the resolved fileAttachment.maxImageSize default, handed as
+    // 10485760 = the resolved uploadLimits.maxImageSize default, handed as
     // the plain literal the frame bound is computed from.
     expect(MAX_TRANSCRIBE_BASE64_CHARS).toBe(wsMaxPayloadBytes(10485760) - 1024 * 1024);
     expect(MAX_TRANSCRIBE_AUDIO_BYTES).toBe(10 * 1024 * 1024);
+  });
+
+  it("a lowered image ceiling cannot shrink the frame bound below the transcribe cap", () => {
+    // The bound covers the larger of the image ceiling and the fixed audio
+    // ceiling: any maxImageSize must still carry a max-size recording so the
+    // app-level rejection beats a silent socket close.
+    expect(wsMaxPayloadBytes(1024 * 1024)).toBe(wsMaxPayloadBytes(MAX_TRANSCRIBE_AUDIO_BYTES));
+    expect(MAX_TRANSCRIBE_BASE64_CHARS).toBeLessThanOrEqual(wsMaxPayloadBytes(1) - 1024 * 1024);
   });
 
   it("replies ok:false when the backend fails", async () => {

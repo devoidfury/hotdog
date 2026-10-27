@@ -254,6 +254,9 @@ export function createMockCore(
     // (resolveAll always carries them); fixture bags mirror that.
     toolExec: "inline",
     execFence: "probe",
+    // Root uploadLimits (schema defaults as plain literals): uploads/@refs
+    // consumers read it from the resolved bag, never from an extension block.
+    uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 },
     ...config.resolved,
   };
 

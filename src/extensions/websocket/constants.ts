@@ -29,31 +29,39 @@ export const MAX_COMPLETE_LINE = 10_000;
 /**
  * Transport frame bound for upgraded sockets -- enforced on the `websocket:`
  * handler of the host's Bun.serve (see webui/server.ts, which applies it;
- * Bun quirk: a root-level maxPayloadLength is ignored in 1.4.2). The biggest
- * legitimate frame is a webui upload: one image at the resolved
- * fileAttachment.maxImageSize ceiling riding base64 on a C2S send (~4/3
- * expansion) plus its JSON envelope. The bound sits just above that so the
- * app-level parsers stay the last line of defense, and stays under Bun's
- * 16 MiB default (a genuine tightening). Computed from the same resolved
- * ceiling the upload path enforces (message-routing uploadLimits) -- one
- * ceiling, one home (no drift).
+ * Bun quirk: a root-level maxPayloadLength is ignored in 1.4.2). Sized for
+ * the largest legitimate single blob on one frame: a webui upload of one
+ * file at the resolved uploadLimits.maxImageSize ceiling (root config;
+ * legacy fileAttachment alias) riding base64 on a C2S send (~4/3 expansion)
+ * plus its JSON envelope -- or a max-size transcribe recording, whose cap is
+ * fixed. The bound sits just above the larger of the two so a single
+ * max-size blob always reaches the app-level parsers, whatever the image
+ * ceiling resolves to; at the defaults it stays under Bun's 16 MiB default
+ * (a genuine tightening). Known gap: multi-file sends ride one frame too, so
+ * an aggregate send larger than this bound dies at the socket instead of
+ * answering "too many files" (chunked uploads are out of scope). Computed
+ * from the same resolved ceiling the upload path enforces
+ * (@core/config/upload-limits.ts) -- one ceiling, one home (no drift).
  */
 export function wsMaxPayloadBytes(maxImageSize: number): number {
-  return 4 * Math.ceil(maxImageSize / 3) + 1024 * 1024;
+  // Audio rides the same frames as images; the bound must never undershoot
+  // the transcribe cap, or an oversized recording dies at the socket instead
+  // of answering with the app-level "audio too large" (the original bug).
+  const biggestBlob = Math.max(maxImageSize, MAX_TRANSCRIBE_AUDIO_BYTES);
+  return 4 * Math.ceil(biggestBlob / 3) + 1024 * 1024;
 }
 
 // Ceiling on one transcribe upload. It USED to mirror OpenAI's whisper 25MB
-// limit -- unreachable: audio rides the same WS frames as image uploads, and
-// a 25 MB blob base64's past the frame bound (see wsMaxPayloadBytes), so the
-// socket closed at
-// the transport instead of answering with the app-level "audio too large".
-// Now derived from the frame bound: 10 MiB audio base64's to exactly the
-// frame bound minus its 1 MiB envelope headroom (same shape as an image
-// upload), so any recording the transport can carry at all gets the explicit
-// app-level rejection; a recording so large its FRAME exceeds the bound dies
-// at the socket like any oversized frame (chunked uploads are out of scope).
-// Checked against the base64 string length before decoding, so an oversized
-// blob never costs a decode.
+// limit -- unreachable: audio rides the same WS frames as uploads, and a
+// 25 MB blob base64's past the frame bound, so the socket closed at the
+// transport instead of answering with the app-level "audio too large".
+// It is now a fixed 10 MiB and wsMaxPayloadBytes guarantees the frame bound
+// always carries it (same ~4/3 + envelope shape as an image upload), so any
+// recording the transport accepts gets the explicit app-level rejection; a
+// recording so large its FRAME exceeds the bound dies at the socket like any
+// oversized frame (chunked uploads are out of scope). Checked against the
+// base64 string length before decoding, so an oversized blob never costs a
+// decode.
 export const MAX_TRANSCRIBE_AUDIO_BYTES = 10 * 1024 * 1024;
 /** @internal Exposed for testing (bound-alignment pin against the frame cap). */
 export const MAX_TRANSCRIBE_BASE64_CHARS = Math.ceil(MAX_TRANSCRIBE_AUDIO_BYTES / 3) * 4;

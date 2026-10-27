@@ -494,6 +494,40 @@
       }
     }
   },
+  "uploadLimits": {
+    "type": "object",
+    "description": "Size ceilings for user-supplied content (webui uploads, @refs). Core posture: resolved regardless of which extensions are enabled. Legacy fileAttachment.maxFileSize/maxImageSize/maxFiles act as an alias layer (uploadLimits wins).",
+    "layers": [
+      { "source": "config", "key": "uploadLimits" },
+      { "default": {} }
+    ],
+    "properties": {
+      "maxFileSize": {
+        "type": "integer",
+        "layers": [
+          { "source": "config", "key": "uploadLimits.maxFileSize", "cast": "number" },
+          { "source": "config", "key": "fileAttachment.maxFileSize", "cast": "number" },
+          { "default": 102400 }
+        ]
+      },
+      "maxImageSize": {
+        "type": "integer",
+        "layers": [
+          { "source": "config", "key": "uploadLimits.maxImageSize", "cast": "number" },
+          { "source": "config", "key": "fileAttachment.maxImageSize", "cast": "number" },
+          { "default": 10485760 }
+        ]
+      },
+      "maxFiles": {
+        "type": "integer",
+        "layers": [
+          { "source": "config", "key": "uploadLimits.maxFiles", "cast": "number" },
+          { "source": "config", "key": "fileAttachment.maxFiles", "cast": "number" },
+          { "default": 10 }
+        ]
+      }
+    }
+  },
   "hookTrace": {
     "type": "boolean",
     "cliFlag": {

@@ -23,7 +23,7 @@ import type { LlmProtocolRegistry } from "../llm-client/protocol.ts";
 import type { ConfigRegistry } from "./config.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
 import type { BuildAgentConfig } from "../config/index.ts";
-import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
+import type { CoreConfigWithExtensions, UploadLimits } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
 import type { AgentLike } from "../session/index.ts";
 import type { ImageAttachment, Message, MessageSource } from "../context/message.ts";
@@ -318,6 +318,12 @@ export interface ResolvedConfig {
   taskProfile?: string;
   /** Concurrent task agents allowed per provider lane. */
   taskLanesPerProvider?: number;
+  /**
+   * Size ceilings for user-supplied content (webui uploads, @refs). Root schema
+   * key (core.config.json uploadLimits; legacy fileAttachment.* alias): always
+   * resolved by resolveAll, independent of which extensions are enabled.
+   */
+  uploadLimits: UploadLimits;
   /** Execution plane for tools tagged `execution: "worker"`. */
   toolExec?: "worker" | "inline";
   /** Fence policy for pooled executors: probe = jail when the platform supports it (bwrap), off = plain spawn. */

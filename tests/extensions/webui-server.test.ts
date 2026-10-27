@@ -24,13 +24,12 @@ function createMockCore(config: Record<string, unknown> = {}) {
         questionStrategy: "wait",
       },
       webui: {},
-      // Resolved fileAttachment block (schema defaults as plain literals):
-      // the transport frame bound reads it at server construction.
-      fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 },
       ...config,
     },
     // profilesPath makes createWebuiServer build a ProfileManager from the
     // repo's own profile directory (mirrors the real resolution chain).
+    // Root uploadLimits (schema defaults as plain literals) come from the
+    // base fixture's resolved bag; the transport frame bound reads it there.
     resolved: {
       profilesPath: "./config/profiles",
       maxToolCallsPerIteration: 10,

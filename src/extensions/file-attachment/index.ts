@@ -4,7 +4,8 @@ import { cwd } from "node:process";
 import { HOOKS } from "@core/hooks.ts";
 import { logger } from "@utils/logger.ts";
 import { formatError } from "@core/error.ts";
-import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
+import { type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
+import { uploadLimits } from "@core/config/upload-limits.ts";
 import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 
 import { matcher, completion } from "./completions.ts";
@@ -195,14 +196,11 @@ async function expandFileReferences(
 }
 
 export function create(core: CoreContext): ExtensionInstance {
-  const config = getExtensionConfig<{
-    maxFileSize: number;
-    maxImageSize: number;
-    maxFiles: number;
-  }>(core, "fileAttachment");
-  const maxFileSize = config.maxFileSize;
-  const maxImageSize = config.maxImageSize;
-  const maxFiles = config.maxFiles;
+  // The ceilings are the root uploadLimits key (legacy fileAttachment.*
+  // alias), not this extension's block: @refs and webui uploads enforce one
+  // resolved number, and the posture survives this extension being disabled
+  // (the upload path reads the same resolved values).
+  const { maxFileSize, maxImageSize, maxFiles } = uploadLimits(core);
 
   core.completion.register(matcher, completion, "file-attachment:path-completion");
 

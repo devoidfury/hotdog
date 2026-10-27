@@ -1,1 +1,0 @@
-export const DEFAULT_FIND_MAX_RESULTS = 200;

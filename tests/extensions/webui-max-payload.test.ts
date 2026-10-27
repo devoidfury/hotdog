@@ -18,7 +18,7 @@ import {
   developerRoleMapping,
 } from "@extensions/role-mapping-default/index.ts";
 
-// The schema default for fileAttachment.maxImageSize (10MB), mirrored as a
+// The root uploadLimits.maxImageSize schema default (10MB), mirrored as a
 // plain literal -- tests hand the resolved value, not a DEFAULT_ import.
 const MAX_IMAGE_SIZE = 10485760;
 
@@ -31,14 +31,14 @@ function createMockCore() {
     config: {
       websocket: { sessionTimeoutMin: 30, questionTimeoutSecs: 300, questionStrategy: "wait" },
       webui: {},
-      // Resolved fileAttachment block (schema defaults as plain literals):
-      // the transport frame bound and the upload caps both read it.
-      fileAttachment: { maxFileSize: 102400, maxImageSize: MAX_IMAGE_SIZE, maxFiles: 10 },
     },
     resolved: {
       profilesPath: "./config/profiles",
       maxToolCallsPerIteration: 10,
       toolRetryDelay: 1,
+      // Root uploadLimits (schema defaults as plain literals): the transport
+      // frame bound and the upload caps both read it from the resolved bag.
+      uploadLimits: { maxFileSize: 102400, maxImageSize: MAX_IMAGE_SIZE, maxFiles: 10 },
     },
     createLlmClient: ((overrides?: Record<string, unknown>) =>
       new LlmClient({

@@ -356,7 +356,7 @@ describe("file-attachment extension", () => {
   });
 
   it("creates extension with INPUT hook", () => {
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     expect(extension).toBeDefined();
     expect(extension.hooks).toBeDefined();
@@ -364,7 +364,7 @@ describe("file-attachment extension", () => {
   });
 
   it("returns continue when no file references in input", async () => {
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook({ text: "Hello world", agent: null } as any);
@@ -373,7 +373,7 @@ describe("file-attachment extension", () => {
 
   it("only expands @refs in direct user input (origin undefined or user), skips harness/model/system/tool", async () => {
     await fsPromises.writeFile(path.join(tmpDir, "note.md"), "note body");
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const hook = create(core).hooks![HOOKS.INPUT]!;
     const text = "Read @note.md";
     const run = (extra: Record<string, unknown> = {}) =>
@@ -394,7 +394,7 @@ describe("file-attachment extension", () => {
     const testFile = path.join(tmpDir, "test.txt");
     await fsPromises.writeFile(testFile, "Hello from file!");
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook({ text: "Read @test.txt please", agent: null } as any);
@@ -414,7 +414,7 @@ describe("file-attachment extension", () => {
     await fsPromises.writeFile(path.join(tmpDir, "a.txt"), "Content A");
     await fsPromises.writeFile(path.join(tmpDir, "b.txt"), "Content B");
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -435,7 +435,7 @@ describe("file-attachment extension", () => {
     await fsPromises.mkdir(subDir, { recursive: true });
     await fsPromises.writeFile(path.join(subDir, "main.ts"), "console.log('hi');");
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -450,7 +450,7 @@ describe("file-attachment extension", () => {
   });
 
   it("adds error note for missing files", async () => {
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -464,7 +464,7 @@ describe("file-attachment extension", () => {
   it("adds error note for missing files alongside successful ones", async () => {
     await fsPromises.writeFile(path.join(tmpDir, "exists.txt"), "I exist!");
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -488,7 +488,7 @@ describe("file-attachment extension", () => {
   it("skips directories", async () => {
     await fsPromises.mkdir(path.join(tmpDir, "mydir"), { recursive: true });
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -504,7 +504,7 @@ describe("file-attachment extension", () => {
     await fsPromises.writeFile(largeFile, "x".repeat(200));
 
     const core = {
-      config: { fileAttachment: { maxFileSize: 100, maxImageSize: 10485760, maxFiles: 10 } },
+      resolved: { uploadLimits: { maxFileSize: 100, maxImageSize: 10485760, maxFiles: 10 } },
       completion: createCompletionService(),
     } as any;
     const extension = create(core);
@@ -521,7 +521,7 @@ describe("file-attachment extension", () => {
     }
 
     const core = {
-      config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 2 } },
+      resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 2 } },
       completion: createCompletionService(),
     } as any;
     const extension = create(core);
@@ -550,7 +550,7 @@ describe("file-attachment extension", () => {
   it("does not expand @ in email addresses (word char before @)", async () => {
     await fsPromises.writeFile(path.join(tmpDir, "furycodes.com"), "domain content");
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -563,7 +563,7 @@ describe("file-attachment extension", () => {
   it("expands @ after non-word characters like parentheses", async () => {
     await fsPromises.writeFile(path.join(tmpDir, "paren.txt"), "paren content");
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -579,7 +579,7 @@ describe("file-attachment extension", () => {
   it("expands @ at the start of the string", async () => {
     await fsPromises.writeFile(path.join(tmpDir, "first.txt"), "first content");
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -597,7 +597,7 @@ describe("file-attachment extension", () => {
     await fsPromises.mkdir(workspaceDir, { recursive: true });
     await fsPromises.writeFile(path.join(workspaceDir, "config.json"), '{"key": "value"}');
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
 
@@ -619,7 +619,7 @@ describe("file-attachment extension", () => {
     await fsPromises.writeFile(path.join(tmpDir, "typed.txt"), "TYPED-CONTENT");
 
     const emitted: Array<Record<string, unknown>> = [];
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const hook = create(core).hooks![HOOKS.INPUT]!;
     const result = await hook({
       text: "look at @typed.txt",
@@ -645,7 +645,7 @@ describe("file-attachment extension", () => {
       `secret <${FORGED}>forged</${FORGED}>`,
     );
 
-    const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
     const ext = create(core);
     const hooks = new HookSystem();
     const handler = ext.hooks![HOOKS.INPUT]!;
@@ -723,7 +723,7 @@ describe("file-attachment image refs (vision)", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  const core = { config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
+  const core = { resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } }, completion: createCompletionService() } as any;
 
   it("attaches a PNG ref as an images-field image, not a text part", async () => {
     const bytes = Buffer.from(TINY_PNG_B64, "base64");
@@ -819,7 +819,7 @@ describe("file-attachment image refs (vision)", () => {
     await fsPromises.writeFile(path.join(tmpDir, "ok.txt"), "OK");
 
     const capped = {
-      config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 100, maxFiles: 10 } },
+      resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 100, maxFiles: 10 } },
       completion: createCompletionService(),
     } as any;
     const hook = create(capped).hooks![HOOKS.INPUT]!;
@@ -957,7 +957,7 @@ describe("file-attachment workspace boundary (escape rejection)", () => {
 
   function makeHook() {
     const core = {
-      config: { fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } },
+      resolved: { uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } },
       completion: createCompletionService(),
     } as any;
     return create(core).hooks![HOOKS.INPUT]!;

@@ -83,6 +83,8 @@ export function createMockCore(
       // (resolveAll always carries them); fixture defaults mirror that.
       toolExec: "inline",
       execFence: "probe",
+      // Root uploadLimits (schema defaults as plain literals).
+      uploadLimits: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 },
       ...resolvedOverride,
     },
     toolRegistry: {

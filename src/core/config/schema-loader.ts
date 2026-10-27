@@ -372,6 +372,16 @@ export function resolveKey(
   return undefined;
 }
 
+/**
+ * Size ceilings for user-supplied content (webui uploads, @refs). Schema key
+ * `uploadLimits` (core.config.json); legacy fileAttachment.* alias layer.
+ */
+export interface UploadLimits {
+  maxFileSize: number;
+  maxImageSize: number;
+  maxFiles: number;
+}
+
 // Manually mirrors core.config.json; extension keys are not included (use CoreConfigWithExtensions).
 export interface CoreConfig {
   baseUrl?: string;
@@ -414,6 +424,8 @@ export interface CoreConfig {
   prompt?: string;
   taskProfile?: string;
   coreTools?: Record<string, unknown>;
+  /** Upload ceilings (webui uploads, @refs); legacy fileAttachment.* alias layer. */
+  uploadLimits?: UploadLimits;
   compaction?: Record<string, unknown>;
   /** Workspace roots config: { paths: string[] } -- see expandWorkspacePaths. */
   workspace?: Record<string, unknown>;

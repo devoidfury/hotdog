@@ -750,6 +750,24 @@ Denylist of sensitive paths rejected by `resolveSafe` (and therefore by all file
 { "workspace": { "paths": ["."], "deny": [".ssh", ".env*", "!.env.example"] } }
 ```
 
+### `uploadLimits`
+
+- **Type:** `object`
+- **Default:** `{ "maxFileSize": 102400, "maxImageSize": 10485760, "maxFiles": 10 }`
+- **Resolution:** `uploadLimits.*` > legacy `fileAttachment.*` > default
+
+Size ceilings for user-supplied content: webui upload parsing and `@file` reference expansion. A core posture, not an extension's private business: the values resolve with or without the `file-attachment`/`websocket`/`webui` extensions enabled, and every consumer reads the same resolved numbers. The websocket transport frame bound derives from `maxImageSize`, so raising it widens the frame bound too; lowering it never tightens the bound below the fixed 10 MiB transcribe audio ceiling (a max-size recording must always reach the app-level rejection, not die at the socket).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `maxFileSize` | `number` | `102400` | Per-file byte ceiling for non-image files (after base64 decode). |
+| `maxImageSize` | `number` | `10485760` | Per-file byte ceiling for images (default: 10MB). |
+| `maxFiles` | `number` | `10` | Maximum number of files per message/input. |
+
+```json
+{ "uploadLimits": { "maxFileSize": 204800, "maxImageSize": 4194304, "maxFiles": 20 } }
+```
+
 ### `envScrub`
 
 Env-var scrubbing for subprocesses spawned on the agent's behalf (bash tool, MCP stdio servers).
@@ -1105,12 +1123,12 @@ Extensions register their own configuration namespaces. Each extension's config 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
-| `maxFileSize` | `number` | `102400` | Maximum size in bytes for inlined **text** files (@-refs and webui uploads; default: 100KB). |
-| `maxImageSize` | `number` | `10485760` | Maximum size in bytes for images on a vision model (@-refs and webui uploads; default: 10MB, matching the `read` tool). |
-| `maxFiles` | `number` | `10` | Maximum number of files to expand per input. |
+| `maxFileSize` | `number` | — | **Deprecated** alias for root [`uploadLimits.maxFileSize`](#uploadlimits) (the root key wins when both are set). |
+| `maxImageSize` | `number` | — | **Deprecated** alias for root [`uploadLimits.maxImageSize`](#uploadlimits). |
+| `maxFiles` | `number` | — | **Deprecated** alias for root [`uploadLimits.maxFiles`](#uploadlimits). |
 
 ```json
-{ "fileAttachment": { "maxFileSize": 204800, "maxImageSize": 4194304, "maxFiles": 20 } }
+{ "fileAttachment": { "maxFileSize": 204800 } }
 ```
 
 ### `fileWatch`

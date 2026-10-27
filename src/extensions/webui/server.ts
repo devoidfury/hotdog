@@ -1,6 +1,6 @@
 import { createWsServer, type CreateWsServerOptions } from "../websocket/server.ts";
 import { wsMaxPayloadBytes } from "../websocket/constants.ts";
-import { uploadLimits } from "../websocket/message-routing.ts";
+import { uploadLimits } from "@core/config/upload-limits.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { upgradeOriginAllowed, isLoopbackHost } from "../websocket/origin.ts";
 import { DDG_SOLVE_SERVICE } from "../web-search/index.ts";
@@ -20,10 +20,11 @@ interface WebuiWsData {
 }
 
 // Transport frame cap for upgraded sockets: wsMaxPayloadBytes() is derived
-// from the resolved fileAttachment.maxImageSize ceiling -- the same value the
-// upload path enforces (single source, see websocket/constants.ts). The bound
-// is applied below on the `websocket:` handler because Bun's root-level
-// maxPayloadLength is ignored in 1.4.2.
+// from the resolved uploadLimits.maxImageSize ceiling (root config; legacy
+// fileAttachment alias) -- the same value the upload path enforces (single
+// source, see websocket/constants.ts). The bound is applied below on the
+// `websocket:` handler because Bun's root-level maxPayloadLength is ignored
+// in 1.4.2.
 
 export interface WebuiConfig {
   port?: number;

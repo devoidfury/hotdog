@@ -82,7 +82,7 @@ Each config value is resolved by walking a priority chain **defined per key** in
 | **Provider** | Active provider | `aiUrl`/`apiKey` only: the provider's URL and API key. |
 | **Default** | Schema defaults | Fallbacks declared in `core.config.json` / extension schemas. |
 
-A numeric schema property may declare `"minimum"`. A layer value that casts to a number below the bound is rejected like a failed cast: resolution skips that layer and continues to the next (legacy alias, then default), so one out-of-bounds value can never override a sane default. Defaults are repo-authored and not bounds-checked. Example: `uploadLimits.*` declare `"minimum": 0` (0 is a coherent "reject everything" posture; negatives are nonsense).
+A numeric schema property may declare `"minimum"`. A layer value that casts to a number below the bound is rejected like a failed cast: resolution skips that layer and continues to the next (legacy alias, then default), so one out-of-bounds value can never override a sane default. Defaults are repo-authored and not bounds-checked. A config-file violation is also a hard startup error (the JSON-Schema validator enforces `minimum` on the merged config); the fall-through covers the CLI/env layers validation never sees. Bounds follow consumer semantics: `0` is kept legal where it is a coherent posture (`uploadLimits.*` reject-all, `maxToolCallsPerIteration: 0` = no tools, `bashTool.maxTimeoutMs: 0` = cap disabled) and illegal where it misfires (`bashTool.bashTimeoutMs: 0` arms a ~1ms kill timer, `contextLimit: 0` poisons compaction math). `taskLanesPerProvider` is deliberately unbounded: below 1 means unlimited.
 
 ---
 

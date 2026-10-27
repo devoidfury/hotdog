@@ -12,6 +12,8 @@ import {
   validateConfig,
   failOnInvalidConfig,
 } from "@core/config/index.ts";
+import bashToolManifest from "@extensions/bash-tool/extension.json" with { type: "json" };
+import coreToolsManifest from "@extensions/core-tools/extension.json" with { type: "json" };
 
 describe("resolveConfigDir", () => {
   it("returns CLI config-dir when provided", () => {
@@ -192,6 +194,35 @@ describe("validateConfig", () => {
     );
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("rejects below-minimum values on bounded core numeric keys", () => {
+    const result = validateConfig({ maxIterations: -1, contextLimit: -5 });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.stringMatching(/maxIterations.*less than minimum/));
+    expect(result.errors).toContainEqual(expect.stringMatching(/contextLimit.*less than minimum/));
+    // Boundary: 1 iteration is legal; 0 tool calls is the "no tools" posture
+    expect(validateConfig({ maxIterations: 1 }).valid).toBe(true);
+    expect(validateConfig({ maxToolCallsPerIteration: 0 }).valid).toBe(true);
+  });
+
+  it("bashTool and coreTools schemas bound their numeric ceilings", () => {
+    const extSchemas = [
+      { key: "bashTool", schema: bashToolManifest.configSchema.bashTool },
+      { key: "coreTools", schema: coreToolsManifest.configSchema.coreTools },
+    ];
+    // bashTimeoutMs 0 would arm a ~1ms kill timer via Math.max(1, ...): nonsense
+    expect(validateConfig({ bashTool: { bashTimeoutMs: 0 } }, extSchemas).valid).toBe(false);
+    // maxTimeoutMs 0 is the documented falsy "no cap"; 0 lines = suppress all
+    expect(validateConfig({ bashTool: { maxTimeoutMs: 0, maxToolOutputLines: 0 } }, extSchemas).valid).toBe(true);
+    // Negative result ceilings would slice-wrap and silently disable the limit
+    expect(validateConfig({ coreTools: { grepMaxResults: -1 } }, extSchemas).valid).toBe(false);
+    expect(
+      validateConfig(
+        { coreTools: { readToolLimit: 0, findMaxResults: 0, maxEditInputSize: 0, maxImageSize: 0, maxToolOutputLines: 0 } },
+        extSchemas,
+      ).valid,
+    ).toBe(true);
   });
 });
 describe("failOnInvalidConfig", () => {

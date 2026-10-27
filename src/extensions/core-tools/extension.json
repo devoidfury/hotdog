@@ -14,31 +14,37 @@
         },
         "readToolLimit": {
           "type": "number",
+          "minimum": 0,
           "default": 500,
           "description": "Default maximum lines for the read tool"
         },
         "maxImageSize": {
           "type": "number",
+          "minimum": 0,
           "default": 10485760,
           "description": "Maximum image file size in bytes the read tool will inline"
         },
         "findMaxResults": {
           "type": "number",
+          "minimum": 0,
           "default": 200,
           "description": "Maximum number of results for the find tool"
         },
         "grepMaxResults": {
           "type": "number",
+          "minimum": 0,
           "default": 100,
           "description": "Maximum number of results for the grep tool"
         },
         "maxEditInputSize": {
           "type": "number",
+          "minimum": 0,
           "default": 16000,
           "description": "Maximum edit input size in characters (oldString + newString combined)"
         },
         "maxToolOutputLines": {
           "type": "number",
+          "minimum": 0,
           "default": 600,
           "description": "Maximum number of output lines for tool results"
         }

@@ -344,6 +344,47 @@ describe("toolExec / execFence", () => {
   });
 });
 
+// ── Core numeric bounds (minimum fall-through) ─────────────────────────
+
+describe("core numeric minimums", () => {
+  const baseContext: ResolutionContext = {
+    cli: {},
+    config: {},
+    provider: null,
+    profile: null,
+    profileName: "default",
+    profilesPath: "./config/profiles",
+  };
+
+  it("maxIterations: negative CLI/config falls through to the default; 1 is legal", () => {
+    expect(resolveKey("maxIterations", CONFIG_KEYS.maxIterations, { ...baseContext, cli: { maxIterations: -1 } })).toBe(1000);
+    expect(resolveKey("maxIterations", CONFIG_KEYS.maxIterations, { ...baseContext, config: { maxIterations: -5 } })).toBe(1000);
+    expect(resolveKey("maxIterations", CONFIG_KEYS.maxIterations, { ...baseContext, cli: { maxIterations: 1 } })).toBe(1);
+  });
+
+  it("maxToolCallsPerIteration: negative falls through; 0 is the no-tools posture", () => {
+    expect(resolveKey("maxToolCallsPerIteration", CONFIG_KEYS.maxToolCallsPerIteration, { ...baseContext, config: { maxToolCallsPerIteration: -3 } })).toBe(10);
+    expect(resolveKey("maxToolCallsPerIteration", CONFIG_KEYS.maxToolCallsPerIteration, { ...baseContext, config: { maxToolCallsPerIteration: 0 } })).toBe(0);
+  });
+
+  it("contextLimit: negatives and zero fall through (0 poisons the compaction math)", () => {
+    expect(resolveKey("contextLimit", CONFIG_KEYS.contextLimit, { ...baseContext, config: { contextLimit: -5 } })).toBe(128000);
+    expect(resolveKey("contextLimit", CONFIG_KEYS.contextLimit, { ...baseContext, config: { contextLimit: "0" } })).toBe(128000);
+    expect(resolveKey("contextLimit", CONFIG_KEYS.contextLimit, { ...baseContext, config: { contextLimit: 8192 } })).toBe(8192);
+  });
+
+  it("maxEmptyRetries: negative falls through; 0 means no retries", () => {
+    expect(resolveKey("maxEmptyRetries", CONFIG_KEYS.maxEmptyRetries, { ...baseContext, config: { maxEmptyRetries: -1 } })).toBe(1);
+    expect(resolveKey("maxEmptyRetries", CONFIG_KEYS.maxEmptyRetries, { ...baseContext, config: { maxEmptyRetries: 0 } })).toBe(0);
+  });
+
+  it("taskLanesPerProvider is deliberately unbounded: below 1 means unlimited", () => {
+    // makeLaneCaps normalizes <1 to POSITIVE_INFINITY; a bound here would
+    // break the documented "unlimited" knob.
+    expect(resolveKey("taskLanesPerProvider", CONFIG_KEYS.taskLanesPerProvider, { ...baseContext, config: { taskLanesPerProvider: 0 } })).toBe(0);
+  });
+});
+
 // ── Root upload ceilings (uploadLimits + legacy fileAttachment alias) ────
 
 describe("uploadLimits", () => {

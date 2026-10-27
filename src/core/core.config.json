@@ -289,6 +289,7 @@
   },
   "maxIterations": {
     "type": "number",
+    "minimum": 1,
     "cliFlag": {
       "long": "--max-iterations",
       "type": "number",
@@ -302,6 +303,7 @@
   },
   "maxToolCallsPerIteration": {
     "type": "number",
+    "minimum": 0,
     "cliFlag": {
       "long": "--max-tool-calls",
       "type": "number",
@@ -315,6 +317,7 @@
   },
   "contextLimit": {
     "type": "number",
+    "minimum": 1,
     "layers": [
       { "source": "config", "key": "contextLimit", "cast": "number" },
       { "default": 128000 }
@@ -330,6 +333,7 @@
   },
   "maxEmptyRetries": {
     "type": "number",
+    "minimum": 0,
     "layers": [
       { "source": "config", "key": "maxEmptyRetries", "cast": "number" },
       { "default": 1 }

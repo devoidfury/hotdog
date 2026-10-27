@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- interactive cli - forground apps in shellMode handle input/output better, no longer eats half the keypresses or renders strangely
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.15.1...main
+
+## [v0.15.1] - 2026-10-27
+
+- interactive cli - foreground interactive programs called in shellMode handle input/output better, no longer eats half the keypresses and renders strangely.
 
 - **provider:response - `refuseToolCalls` patch.** A handler can now make core refuse every tool call in a response: each call is paired with a tool result carrying the refusal's `reason` without executing, an optional `trailingNotice` persists after them as a harness system-notice, and the loop continues. The length-truncated refusal moved from the agent loop into `tool-call-repair`. With `toolCallRepair.enabled: false` a length-stopped call is no longer refused and fails schema validation generically.
 
@@ -19,7 +23,15 @@
 
   `taskLanesPerProvider` is deliberately unbounded: below 1 means unlimited.
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.15.0...main
+- **config - root `uploadLimits` key.** The upload size ceilings (`maxFileSize` / `maxImageSize` / `maxFiles`) moved from `fileAttachment.*` to a core root key, so the upload posture resolves with or without the `file-attachment` / `websocket` / `webui` extensions enabled and every consumer reads the same resolved numbers. The old `fileAttachment.*` keys keep working as deprecated aliases (root wins when both are set).
+
+- **mcp-client - `elicitation/create` now asks instead of failing.** A stdio MCP server's mid-tool-call request (payment confirmations, credential prompts, out-of-band approvals) now uses the same path the question tool uses: a held elicitation re-presents after a restart exactly like a question-tool call and the answer lands as that call's real tool result. Interrupting answers `cancel`; nobody available to answer answers `decline`.
+
+- **web-search - DDG captcha challenges are relayed to user.** When DuckDuckGo's anomaly detection fires, the challenge reaches a human: a tile-solve page mounted on the webui's existing port or inline tile URLs plus a `tiles="3,5,6"` argument in the text-only CLI; the next search relays the picks and retries. The pass is IP-bound, so the answer has to originate from the challenged host.
+
+- **config - booting with a dead provider is faster and quieter.** `/v1/models` fetch failures surface as one clean typed error line instead of a stack dump per reason, `info` / `profiles` / `show-prompt` build config once per invocation instead of rebuilding (and re-probing) per subcommand, and the model registry probes providers in parallel -- one timeout burned, not N.
+
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.15.0...v0.15.1
 
 ## [v0.15.0] - 2026-10-26
 

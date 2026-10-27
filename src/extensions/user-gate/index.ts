@@ -29,7 +29,7 @@ import {
   decide,
   type ApprovalCall,
   type ApprovalRules,
-  type UserGateConfig,
+  type ResolvedUserGateConfig,
 } from "@utils/approvals/rules.ts";
 import { extractTargets, suggestRuleLine } from "@utils/approvals/index.ts";
 import { spoofSafe } from "@utils/spoof.ts";
@@ -194,7 +194,7 @@ function runSignal(agent: unknown, toolCtx?: { get(key: string): unknown } | nul
 }
 
 export function create(core: CoreContext): ExtensionInstance {
-  const raw = getExtensionConfig<UserGateConfig>(core, "userGate");
+  const raw = getExtensionConfig<ResolvedUserGateConfig>(core, "userGate");
   // OFF by default: with `default: "ask"` an on-by-default gate would prompt
   // every existing user on every tool call.
   if (raw.enabled !== true) return {};

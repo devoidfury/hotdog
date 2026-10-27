@@ -7,7 +7,7 @@
 //      process is discovered at close, not at timeout.
 
 import { describe, it, expect } from "bun:test";
-import { McpClient, DEFAULT_REQUEST_TIMEOUT_MS, MAX_BUFFERED_RESPONSES } from "@extensions/mcp-client/client.ts";
+import { McpClient, MAX_BUFFERED_RESPONSES, resolveRequestTimeoutMs } from "@extensions/mcp-client/client.ts";
 import { McpConnection } from "@extensions/mcp-client/connection.ts";
 import { create } from "@extensions/mcp-client/index.ts";
 import type { McpConnectionHandle } from "@extensions/mcp-client/connection.ts";
@@ -26,14 +26,11 @@ describe("buffered-response flood (bounded read buffer)", () => {
     // Server spews unmatched responses continuously (ids no request owns).
     // A continuous drip is deliberate: a single synchronous burst can sit in
     // the pipe unflushed, which would test the harness instead of the cap.
-    const client = await McpClient.forStdio(
-      "bun",
-      [
-        "-e",
-        `const seen = new Set(); let n = 0; ` +
-          `setInterval(() => { n++; console.log(JSON.stringify({jsonrpc:"2.0",id:900000+n,result:{x:n}})); }, 0);`,
-      ],
-    );
+    const client = await McpClient.forStdio("bun", 30_000, [
+      "-e",
+      `const seen = new Set(); let n = 0; ` +
+        `setInterval(() => { n++; console.log(JSON.stringify({jsonrpc:"2.0",id:900000+n,result:{x:n}})); }, 0);`,
+    ]);
     try {
       // The request in flight must reject with the flood error -- not sit
       // until the response timeout, and never buffer past the cap.
@@ -59,7 +56,7 @@ describe("buffered-response flood (bounded read buffer)", () => {
   });
 
   it("a normal unmatched response still buffers (the cap is not the door)", async () => {
-    const client = await McpClient.forStdio("bun", [
+    const client = await McpClient.forStdio("bun", 30_000, [
       "-e",
       `console.log(JSON.stringify({jsonrpc:"2.0",id:999,result:{data:'buffered'}})); setTimeout(() => {}, 15000);`,
     ]);
@@ -79,24 +76,24 @@ describe("buffered-response flood (bounded read buffer)", () => {
 
 describe("stdio request timeout is config, default 30s", () => {
   it("the default is the historic 30_000 ms", async () => {
-    const client = await McpClient.forStdio("bun", ["-e", "setTimeout(() => {}, 5000);"]);
+    const client = await McpClient.forStdio("bun", resolveRequestTimeoutMs(undefined), [
+      "-e",
+      "setTimeout(() => {}, 5000);",
+    ]);
     try {
-      expect(client.requestTimeoutMs).toBe(DEFAULT_REQUEST_TIMEOUT_MS);
-      expect(DEFAULT_REQUEST_TIMEOUT_MS).toBe(30_000);
+      expect(client.requestTimeoutMs).toBe(30_000);
+      expect(resolveRequestTimeoutMs(undefined)).toBe(30_000); // the sanitized-default home
     } finally {
       await client.shutdown();
     }
   });
 
   it("a short resolved timeout fires promptly on a silent server", async () => {
-    const client = await McpClient.forStdio(
-      "bun",
-      ["-e", "setTimeout(() => {}, 15000);"],
-      {},
-      undefined,
-      true,
-      250, // resolved from mcpClient.requestTimeoutSecs (0.25 here)
-    );
+    // requestTimeoutMs as the extension would pass it: resolved 0.25s -> 250ms
+    const client = await McpClient.forStdio("bun", resolveRequestTimeoutMs(0.25), [
+      "-e",
+      "setTimeout(() => {}, 15000);",
+    ]);
     try {
       const started = t0();
       await expect(
@@ -116,11 +113,11 @@ describe("stdio request timeout is config, default 30s", () => {
       static async connectStdio(
         _name: string,
         _command: string,
-        _args: string[],
-        _env: Record<string, string>,
+        requestTimeoutMs?: number,
+        _args?: string[],
+        _env?: Record<string, string>,
         _extra?: readonly string[],
         _scrubbing?: boolean,
-        requestTimeoutMs?: number,
       ): Promise<McpConnection> {
         seenTimeout = requestTimeoutMs;
         return {
@@ -153,11 +150,11 @@ describe("stdio request timeout is config, default 30s", () => {
         static async connectStdio(
           _name: string,
           _command: string,
-          _args: string[],
-          _env: Record<string, string>,
+          requestTimeoutMs?: number,
+          _args?: string[],
+          _env?: Record<string, string>,
           _extra?: readonly string[],
           _scrubbing?: boolean,
-          requestTimeoutMs?: number,
         ): Promise<McpConnection> {
           seenTimeout = requestTimeoutMs;
           return {
@@ -188,7 +185,7 @@ describe("fail-fast on transport close", () => {
   it("a pending request rejects when the server process dies, long before timeout", async () => {
     // The server exits after 100ms without ever answering. The response
     // timeout stays at the 30s default -- the rejection must NOT wait for it.
-    const client = await McpClient.forStdio("bun", [
+    const client = await McpClient.forStdio("bun", 30_000, [
       "-e",
       "setTimeout(() => process.exit(0), 100);",
     ]);
@@ -211,7 +208,7 @@ describe("fail-fast on transport close", () => {
   });
 
   it("requests after the close fail immediately too (no timeout limbo per call)", async () => {
-    const client = await McpClient.forStdio("bun", ["-e", "process.exit(0)"]);
+    const client = await McpClient.forStdio("bun", 30_000, ["-e", "process.exit(0)"]);
     try {
       // Poll until the death notice lands (bounded), instead of a fixed nap.
       const deadline = t0() + 3000;

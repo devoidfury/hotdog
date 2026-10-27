@@ -37,7 +37,7 @@ import {
   workflowsPreamble,
   type ManagedRun,
 } from "./workflow-tools.ts";
-import type { WorkflowLimits } from "./workflow.ts";
+import { resolveWorkflowLimits, type WorkflowLimits } from "./workflow.ts";
 import { buildTaskConfigOptions } from "@core/session/index.ts";
 
 interface WorkflowsExtensionConfig {
@@ -49,12 +49,15 @@ interface WorkflowsExtensionConfig {
 
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
   const wfConfig = getExtensionConfig<WorkflowsExtensionConfig>(core, "workflows");
-  const limits: Partial<WorkflowLimits> = {
+  // Only the schema-owned config fields (maxNodes, maxRuntimeMins) override;
+  // the non-raisable ceilings (hardMaxNodes, maxAttempts) come from
+  // workflow.ts via the normalizer.
+  const limits: WorkflowLimits = resolveWorkflowLimits({
     ...(typeof wfConfig.maxNodes === "number" ? { maxNodes: wfConfig.maxNodes } : {}),
     ...(typeof wfConfig.maxRuntimeMins === "number"
       ? { maxRuntimeMins: wfConfig.maxRuntimeMins }
       : {}),
-  };
+  });
   const workflowsDir = wfConfig.path?.trim() ? wfConfig.path.trim() : null;
   const runsRoot = workflowsDir ? join(workflowsDir, "runs") : null;
   // Resolved at extension load like limits; the engine ctor re-freezes it per run.

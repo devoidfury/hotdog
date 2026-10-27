@@ -96,6 +96,15 @@ export interface UserGateConfig {
   deny?: string[];
 }
 
+/** The RESOLVED userGate block: the config layer merges the schema-owned
+ *  `default`, so it is always present in production (the only production
+ *  caller passes getExtensionConfig's block). Hand-built test bags must
+ *  supply `default` explicitly -- compileApprovalRules fails loudly without
+ *  it, it never mirrors the schema default in code. */
+export interface ResolvedUserGateConfig extends UserGateConfig {
+  default: ApprovalDefault;
+}
+
 /** `*` = anything, `?` = one char, everything else literal. Shared with the
  * extractor so `userGate.tools` patterns and rule tool-parts mean one thing. */
 export function matchesGlob(glob: string, value: string): boolean {
@@ -151,15 +160,24 @@ function asRuleList(value: unknown, key: "allow" | "deny"): unknown[] {
   return value;
 }
 
-/** Validate + compile the raw config. Throws ConfigError on anything malformed. */
-export function compileApprovalRules(cfg: UserGateConfig | undefined | null): ApprovalRules {
-  const def = cfg?.default ?? "ask";
+/**
+ * Validate + compile the RESOLVED config. Throws ConfigError on anything
+ * malformed -- including a missing block or a missing/invalid `default`:
+ * the enum check below fails loudly rather than silently mirroring the
+ * schema default, which keeps hand-built hosts honest and (via user-gate's
+ * catch) fails closed.
+ */
+export function compileApprovalRules(cfg: ResolvedUserGateConfig): ApprovalRules {
+  if (cfg === undefined || cfg === null) {
+    throw new ConfigError("userGate: resolved config block is required (the caller must pass getExtensionConfig's block)");
+  }
+  const def = cfg.default;
   if (def !== "ask" && def !== "allow" && def !== "deny") {
-    throw new ConfigError(`userGate.default must be "ask", "allow" or "deny", got: ${JSON.stringify(cfg?.default)}`);
+    throw new ConfigError(`userGate.default must be "ask", "allow" or "deny", got: ${JSON.stringify(cfg.default)}`);
   }
 
   const tools: Array<{ glob: string; params: string[] }> = [];
-  if (cfg?.tools !== undefined) {
+  if (cfg.tools !== undefined) {
     if (typeof cfg.tools !== "object" || cfg.tools === null || Array.isArray(cfg.tools)) {
       throw new ConfigError("userGate.tools must be an object mapping tool patterns to param-name lists");
     }
@@ -175,8 +193,8 @@ export function compileApprovalRules(cfg: UserGateConfig | undefined | null): Ap
   return {
     default: def,
     tools,
-    allow: asRuleList(cfg?.allow, "allow").map((e) => parseRule(e as string)),
-    deny: asRuleList(cfg?.deny, "deny").map((e) => parseRule(e as string)),
+    allow: asRuleList(cfg.allow, "allow").map((e) => parseRule(e as string)),
+    deny: asRuleList(cfg.deny, "deny").map((e) => parseRule(e as string)),
   };
 }
 

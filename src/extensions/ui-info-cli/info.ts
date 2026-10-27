@@ -2,7 +2,7 @@
 // sweep (through the same module the TaskManager uses, one-shot with no
 // session so it probes its own view), the extension status section, and the
 // text/JSON renderers. `--config-debug` delegates to config-trace.ts.
-import { loadConfig, ProviderDef, resolveConfigDir, type CliArgv } from "@core/config/index.ts";
+import { CONFIG_SCHEMA, getLayerDefault, loadConfig, ProviderDef, resolveConfigDir, type CliArgv } from "@core/config/index.ts";
 import { CoreConfigWithExtensions } from "@core/config/index.ts";
 import { discoverExtensions, isExtensionEnabled } from "@core/extensions/extensions.ts";
 import { collectInfoPanels, CoreContext, ExtensionInfoPanel, InfoValue } from "@core/extensions/types.ts";
@@ -71,7 +71,8 @@ export async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> 
       providers: sweepProviders,
       globals: { baseUrl, apiKey: resolved.apiKey },
       intervalMs: 0,
-      timeoutMs: (resolved.healthCheckTimeout ?? 5) * 1000,
+      timeoutMs:
+        (resolved.healthCheckTimeout ?? (getLayerDefault(CONFIG_SCHEMA.healthCheckTimeout) as number)) * 1000,
     });
     await health.sweep();
     health.stop();

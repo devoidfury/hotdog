@@ -1,8 +1,6 @@
 import { McpClient } from "./client.ts";
 import { McpContentBlock, McpError } from "./types.ts";
 import type { ElicitationHandler } from "./elicitation.ts";
-import { DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
-import { DEFAULT_REQUEST_TIMEOUT_MS } from "./client.ts";
 
 /** Shared client handle for use by McpTool instances. */
 export class McpConnectionHandle {
@@ -39,13 +37,13 @@ export class McpConnection {
   static async connectStdio(
     serverName: string,
     command: string,
+    requestTimeoutMs: number,
     args: string[] = [],
     env: Record<string, string> = {},
     extraScrubKeys?: readonly string[],
     envScrubbing: boolean = true,
-    requestTimeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
   ): Promise<McpConnection> {
-    const client = await McpClient.forStdio(command, args, env, extraScrubKeys, envScrubbing, requestTimeoutMs);
+    const client = await McpClient.forStdio(command, requestTimeoutMs, args, env, extraScrubKeys, envScrubbing);
     const conn = new McpConnection(client, serverName);
     await conn._initialize();
     return conn;
@@ -54,10 +52,10 @@ export class McpConnection {
   static async connectHttp(
     serverName: string,
     url: string,
+    timeoutMs: number,
     headers: Record<string, string> = {},
-    timeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
   ): Promise<McpConnection> {
-    const client = await McpClient.forHttp(url, headers, timeoutMs);
+    const client = await McpClient.forHttp(url, timeoutMs, headers);
     const conn = new McpConnection(client, serverName);
     await conn._initialize();
     return conn;

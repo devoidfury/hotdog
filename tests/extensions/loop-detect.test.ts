@@ -104,7 +104,10 @@ describe("detectLoop / escalationLevel", () => {
 function createMockCore(config: Record<string, unknown> = {}) {
   return {
     hooks: new HookSystem(),
-    config,
+    // Resolved-block shape: loopDetect carries its schema defaults as
+    // explicit literals (Centralized Defaults -- the extension consumes them
+    // directly, no code-side mirrors).
+    config: { loopDetect: { enabled: true, repeatThreshold: 3, pingPongThreshold: 4 }, ...config },
     resolved: {},
     toolRegistry: { getAll: () => [], register: () => {}, has: () => false, remove: () => {} },
     extensions: { get: () => undefined },
@@ -153,7 +156,7 @@ function contextOf(ext: { hooks?: unknown }, agent: ReturnType<typeof createMock
 
 describe("loop-detect extension", () => {
   it("returns no hooks when disabled", () => {
-    const ext = createLoopDetect(createMockCore({ loopDetect: { enabled: false } }));
+    const ext = createLoopDetect(createMockCore({ loopDetect: { enabled: false, repeatThreshold: 3, pingPongThreshold: 4 } }));
     expect(ext.hooks).toBeUndefined();
   });
 
@@ -346,7 +349,7 @@ describe("loop-detect extension", () => {
   });
 
   it("honors a configured threshold", async () => {
-    const core = createMockCore({ loopDetect: { repeatThreshold: 2 } });
+    const core = createMockCore({ loopDetect: { enabled: true, repeatThreshold: 2, pingPongThreshold: 4 } });
     const ext = createLoopDetect(core);
     const agent = createMockAgent();
     const detections: any[] = [];

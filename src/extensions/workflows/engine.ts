@@ -30,7 +30,7 @@ import type {
   TurnResult,
 } from "@core/session/task-types.ts";
 import type { Workflow, WorkflowLimits, WorkflowNode } from "./workflow.ts";
-import { DEFAULT_WORKFLOW_LIMITS, nodeDeps } from "./workflow.ts";
+import { nodeDeps, resolveWorkflowLimits } from "./workflow.ts";
 
 export const NODE_STATE = {
   PENDING: "pending",
@@ -233,7 +233,9 @@ export class WorkflowRun {
 
   constructor(cfg: RunConfig) {
     this.#cfg = cfg;
-    this.#limits = { ...DEFAULT_WORKFLOW_LIMITS, ...cfg.limits };
+    // Full limits resolved by workflow.ts's normalizer (no engine-side merge
+    // of a constant): absent fragments take the module-owned defaults.
+    this.#limits = resolveWorkflowLimits(cfg.limits);
     // Effective caps freeze at construction (dispatch): a mid-flight config flip must not re-arm a live run.
     this.#timeoutsEnabled = cfg.enableRuntimeTimeouts === true || cfg.maxRuntimeMsOverride !== undefined;
     this.#runStartedMs = Date.now();

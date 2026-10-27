@@ -13,7 +13,7 @@ import {
 } from "./types.ts";
 import { logger } from "@utils/logger.ts";
 import { formatError } from "@core/error.ts";
-import { McpTransport, StdioTransport, HttpTransport, DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
+import { McpTransport, StdioTransport, HttpTransport } from "./transports.ts";
 import type { ElicitationHandler } from "./elicitation.ts";
 
 class PendingRequest {
@@ -30,10 +30,25 @@ class PendingRequest {
 /**
  * Default per-request response timeout for streaming (stdio) transports.
  * A wedged server must not hang a tool call forever. Callers pass the
- * resolved `mcpClient.requestTimeoutSecs` config instead (house rule:
- * components take resolved values; this is the direct-construction default).
+ * resolved `mcpClient.requestTimeoutSecs` config through
+ * resolveRequestTimeoutMs() instead (house rule: components take resolved
+ * values; this backs the normalizer below for direct-construction callers).
  */
-export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Sanitize a config-supplied stdio request timeout (seconds) to ms: a finite
+ * positive number wins; anything else (missing, zero, negative, NaN,
+ * non-number) takes DEFAULT_REQUEST_TIMEOUT_MS. Junk must mean "the default
+ * timeout", never "no timeout" -- a wedged stdio server must fail the tool
+ * call, not pin it forever. The schema default (30s) is merged by the config
+ * layer; this guard covers malformed or hand-built blocks.
+ */
+export function resolveRequestTimeoutMs(requestTimeoutSecs: unknown): number {
+  return typeof requestTimeoutSecs === "number" && Number.isFinite(requestTimeoutSecs) && requestTimeoutSecs > 0
+    ? Math.round(requestTimeoutSecs * 1000)
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+}
 
 /**
  * Hard cap on responses buffered ahead of their request. Buffered entries are
@@ -92,7 +107,7 @@ export class McpClient {
 
   #closeCleanup: (() => void) | null = null;
 
-  constructor(transport: McpTransport, requestTimeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS) {
+  constructor(transport: McpTransport, requestTimeoutMs: number) {
     this.#transport = transport;
     this.#requestTimeoutMs = requestTimeoutMs;
 
@@ -116,11 +131,11 @@ export class McpClient {
 
   static async forStdio(
     command: string,
+    requestTimeoutMs: number,
     args: string[] = [],
     env: Record<string, string> = {},
     extraScrubKeys?: readonly string[],
     envScrubbing: boolean = true,
-    requestTimeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
   ): Promise<McpClient> {
     const transport = new StdioTransport(command, args, env, extraScrubKeys, envScrubbing);
 
@@ -149,13 +164,13 @@ export class McpClient {
 
   static async forHttp(
     url: string,
+    timeoutMs: number,
     headers: Record<string, string> = {},
-    timeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
   ): Promise<McpClient> {
     const transport = new HttpTransport(url, headers, timeoutMs);
     // HTTP answers ride send(): the per-request timeout is the transport's;
-    // the client's streaming timeout does not apply.
-    return new McpClient(transport);
+    // the client's streaming timeout does not apply (pass the module default).
+    return new McpClient(transport, DEFAULT_REQUEST_TIMEOUT_MS);
   }
 
   /** @internal Exposed for testing. */

@@ -8,7 +8,7 @@ import { extractTargets, suggestRuleLine } from "@utils/approvals/index.ts";
 import { compileApprovalRules } from "@utils/approvals/rules.ts";
 
 const ws = new Workspace("/ws");
-const rules = compileApprovalRules({});
+const rules = compileApprovalRules({ default: "ask" });
 
 function extract(tool: string, args: Record<string, unknown>, cfg = rules) {
   return extractTargets(tool, args, ws, cfg);
@@ -31,14 +31,14 @@ describe("recognition", () => {
   });
 
   it("userGate.tools declares both recognition and which params are targets", () => {
-    const declared = compileApprovalRules({ tools: { "mcp__*": ["statement"], exact_tool: ["body"] } });
+    const declared = compileApprovalRules({ default: "ask", tools: { "mcp__*": ["statement"], exact_tool: ["body"] } });
     const sql = extract("mcp__db__query", { statement: "DELETE FROM t" }, declared);
     expect(sql.recognized).toBe(true);
     expect(sql.targets).toEqual([{ param: "statement", value: "DELETE FROM t" }]);
     // A tool the pattern does not name stays unrecognized.
     expect(extract("other_tool", { body: "x" }, declared).recognized).toBe(false);
     // Declared path-shaped params keep path semantics under their own name.
-    const note = extract("exact_tool", { notebook_path: "nb/one.ipynb" }, compileApprovalRules({ tools: { exact_tool: ["notebook_path"] } }));
+    const note = extract("exact_tool", { notebook_path: "nb/one.ipynb" }, compileApprovalRules({ default: "ask", tools: { exact_tool: ["notebook_path"] } }));
     expect(note.targets[0]).toMatchObject({ param: "notebook_path", value: "/ws/nb/one.ipynb", pathy: true });
   });
 });

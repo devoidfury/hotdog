@@ -2,6 +2,7 @@
 // restrictions, and (for manager profiles) their available subagents.
 import path from "node:path";
 import type { BuildAgentConfig, CliArgv } from "@core/config/index.ts";
+import { CONFIG_SCHEMA, getLayerDefault } from "@core/config/index.ts";
 import { ProfileDef, ProfileManager } from "@core/config/profiles.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
 
@@ -38,7 +39,7 @@ export async function runProfileList(cli: CliArgv, core: CoreContext): Promise<n
       profileFiles,
       configProfiles,
       allNames,
-      resolved.profileName ?? "default",
+      resolved.profileName ?? (getLayerDefault(CONFIG_SCHEMA.profileName) as string),
       profilesPath,
       visibleWorkerNames,
     );
@@ -48,7 +49,7 @@ export async function runProfileList(cli: CliArgv, core: CoreContext): Promise<n
     profileFiles,
     configProfiles,
     allNames,
-    resolved.profileName ?? "default",
+    resolved.profileName ?? (getLayerDefault(CONFIG_SCHEMA.profileName) as string),
     profilesPath,
     visibleWorkerNames,
   );

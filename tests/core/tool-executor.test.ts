@@ -537,7 +537,7 @@ describe('ToolExecutor', () => {
       deps.hooks.on('agent:toolContext', (data: { toolCtx: { set: (k: string, v: unknown) => void } }) => {
         data.toolCtx.set('input', fakeInput);
       });
-      const instance = createUserGate({ hooks: deps.hooks, config: { userGate: { enabled: true } } } as never);
+      const instance = createUserGate({ hooks: deps.hooks, config: { userGate: { enabled: true, default: "ask" } } } as never);
       for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
         deps.hooks.on(name, handler as never, 'user-gate');
       }

@@ -132,7 +132,7 @@ describe("JSON-RPC 2.0 outbound shapes (jsonrpc.org spec)", () => {
 describe("MCP initialize (lifecycle spec, official response example)", () => {
   it("MCP 2.6: initialize response parses protocolVersion / serverInfo / tools.listChanged from the official example", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const resp = (await initializeWith(t, client, initRespEnvelope)) as Record<string, any>;
     expect(resp.protocolVersion).toBe("2025-11-25");
     expect(resp.serverInfo.name).toBe("ExampleServer");
@@ -143,14 +143,14 @@ describe("MCP initialize (lifecycle spec, official response example)", () => {
 
   it("MCP lifecycle: client sends notifications/initialized verbatim per the spec example", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     await initializeWith(t, client, initRespEnvelope);
     expect(t.notifications.map((n) => JSON.parse(n))).toEqual([initedNotif]);
   });
 
   it("MCP lifecycle Version Negotiation: unsupported server version -> warn, do not throw (owner decision 2026-09-21: warn-and-continue; spec: SHOULD disconnect)", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const resp = (await initializeWith(t, client, initRespMismatch)) as Record<string, any>;
     expect(resp.protocolVersion).toBe("2024-11-05");
     const warns = logEvents.filter((e) => e.level === "warn" && /protocol version/i.test(e.message));
@@ -159,14 +159,14 @@ describe("MCP initialize (lifecycle spec, official response example)", () => {
 
   it("MCP lifecycle Version Negotiation: matching version -> no warning", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     await initializeWith(t, client, initRespEnvelope);
     expect(logEvents.filter((e) => e.level === "warn")).toHaveLength(0);
   });
 
   it("Forward compat: unknown result members are ignored, not errors (JSON-RPC 5 leaves them unspecified)", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const resp = (await initializeWith(t, client, initRespUnknown)) as Record<string, any>;
     expect(resp.protocolVersion).toBe("2025-11-25");
     expect(resp.serverInfo.name).toBe("ExampleServer");
@@ -176,7 +176,7 @@ describe("MCP initialize (lifecycle spec, official response example)", () => {
 describe("MCP tools (server/tools spec, official examples)", () => {
   it("MCP tools/list: official response example parses name/title/description/inputSchema/nextCursor", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const p = client.listTools();
     await tick();
     const sentId = JSON.parse(t.sent[0]!).id;
@@ -198,7 +198,7 @@ describe("MCP tools (server/tools spec, official examples)", () => {
 
   it("MCP tools/call: official text-content response parses, isError false", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const p = client.callTool("get_weather", { location: "New York" });
     await tick();
     const sentId = JSON.parse(t.sent[0]!).id;
@@ -211,7 +211,7 @@ describe("MCP tools (server/tools spec, official examples)", () => {
 
   it("MCP tools Error Handling: execution error is isError:true INSIDE a JSON-RPC result, not a protocol error", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const p = client.callTool("book_flight", { date: "2020-01-01" });
     await tick();
     const sentId = JSON.parse(t.sent[0]!).id;
@@ -264,7 +264,7 @@ describe("MCP content blocks (server/tools 'Tool Result' examples)", () => {
 describe("MCP JSON-RPC error + stdio framing", () => {
   it("JSON-RPC 5.1: a -32601 error response rejects the pending request with McpError carrying the code", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const p = client.listTools();
     await tick();
     const sentId = JSON.parse(t.sent[0]!).id;
@@ -284,7 +284,7 @@ describe("MCP JSON-RPC error + stdio framing", () => {
   it("MCP lifecycle error example: 'Unsupported protocol version' (-32602) surfaces as McpError", async () => {
     const { data: versionError } = await loadJsonFixture("mcp/initialize-version-error.json");
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const p = client.initialize();
     await tick();
     t.deliver(JSON.stringify({ ...(versionError as Record<string, any>), id: JSON.parse(t.sent[0]!).id }));
@@ -293,7 +293,7 @@ describe("MCP JSON-RPC error + stdio framing", () => {
 
   it("stdio framing (MCP transports): non-JSON lines are ignored between messages (server logs on stdout)", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const p = client.listTools();
     await tick();
     t.deliver("this is not JSON");
@@ -306,7 +306,7 @@ describe("MCP JSON-RPC error + stdio framing", () => {
 
   it("JSON-RPC 5: responses must carry result XOR error; a message with neither is not treated as a response", async () => {
     const t = new FakeTransport();
-    const client = new McpClient(t);
+    const client = new McpClient(t, 30_000);
     const p = client.listTools();
     await tick();
     const sentId = JSON.parse(t.sent[0]!).id;
@@ -344,7 +344,7 @@ describe("MCP HTTP transport (transports spec, Protocol Version Header)", () => 
     }) as typeof fetch;
 
     try {
-      const client = new McpClient(new HttpTransport("http://mcp.test/rpc"));
+      const client = new McpClient(new HttpTransport("http://mcp.test/rpc"), 30_000);
       await client.initialize();
       await client.listTools();
 

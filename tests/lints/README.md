@@ -66,7 +66,7 @@ whoever edits around it).
 | Test file | AGENTS.md rule | Baseline entries |
 |---|---|---|
 | `format-error.test.ts` | Error Handling: catches route through `formatError()` | 0 |
-| `centralized-defaults.test.ts` | Centralized Defaults: no `DEFAULT_*` imports in components; no `?? <literal>` fallbacks for schema-owned keys | 13 |
+| `centralized-defaults.test.ts` | Centralized Defaults: no `DEFAULT_*` imports in components; no `?? <literal>` fallbacks for schema-owned keys | 0 |
 | `module-imports.test.ts` | Module Imports: no relative climbs across alias scopes | 0 |
 | `mock-module.test.ts` | Never use `mock.module` | 0 |
 | `zero-deps.test.ts` | Do not add dependencies (`"dependencies": {}`) | 0 |
@@ -95,5 +95,6 @@ violation list is empty), so they have no `baselines/` entries and are not
 listed in `regenerate.ts`.
 
 The frozen entries came from the 2026-10-26 audit (`tmp/review-2026-10-26/`);
-fixing them is follow-up work — each fixed site must be pruned from its
-baseline in the same change that fixes it.
+that punch list is now fully worked off -- both baselines are empty. The
+workflow stands: each fixed site is pruned from its baseline in the same
+change that fixes it, and the baseline may only shrink.

@@ -26,13 +26,13 @@ describe("McpError", () => {
 
 describe("McpClient", () => {
   it("starts with no server info", () => {
-    const client = new McpClient(new HttpTransport("http://localhost:3000/mcp"));
+    const client = new McpClient(new HttpTransport("http://localhost:3000/mcp"), 30_000);
     expect(client.serverCapabilities).toBeNull();
     expect(client.serverInfo).toBeNull();
   });
 
   it("forHttp creates a client with the given url and headers", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp", { "X-Custom": "header" });
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 30_000, { "X-Custom": "header" });
     const transport = client.transport as HttpTransport;
     expect(transport.url).toBe("http://localhost:3000/mcp");
     expect(transport.headers).toEqual({ "X-Custom": "header" });
@@ -141,7 +141,7 @@ describe("HttpTransport — timeout and body cap", () => {
   });
 
   it("forHttp threads the timeout into the transport", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp", {}, 4500);
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 4500);
     try {
       expect((client.transport as HttpTransport).timeoutMs).toBe(4500);
     } finally {
@@ -212,7 +212,7 @@ describe("McpConnection", () => {
     };
 
     await withMockFetch(handler, async () => {
-      const conn = await McpConnection.connectHttp("test-server", "http://localhost:3000/mcp");
+      const conn = await McpConnection.connectHttp("test-server", "http://localhost:3000/mcp", 30_000);
       try {
         expect(methods).toContain("initialize");
         expect(methods).toContain("tools/list");
@@ -238,7 +238,7 @@ describe("McpConnection", () => {
     };
 
     await withMockFetch(handler, async () => {
-      const conn = await McpConnection.connectHttp("test-server", "http://localhost:3000/mcp", { Authorization: "Bearer token" });
+      const conn = await McpConnection.connectHttp("test-server", "http://localhost:3000/mcp", 30_000, { Authorization: "Bearer token" });
       try {
         expect(headersSeen["Authorization"]).toBe("Bearer token");
       } finally {
@@ -289,7 +289,7 @@ describe("McpConnection", () => {
     };
 
     await withMockFetch(handler, async () => {
-      const conn = await McpConnection.connectHttp("test-server", "http://localhost:3000/mcp");
+      const conn = await McpConnection.connectHttp("test-server", "http://localhost:3000/mcp", 30_000);
       try {
         expect(conn.tools.map((t) => t.name)).toEqual(["tool1", "tool2"]);
         expect(listCalls).toBe(2);
@@ -323,7 +323,7 @@ describe("McpConnectionHandle", () => {
       return jsonResponse({ jsonrpc: "2.0", id: body.id, result: toolCallResult });
     };
     return withMockFetch(handler, async () => {
-      const conn = await McpConnection.connectHttp("test-server", "http://localhost:3000/mcp");
+      const conn = await McpConnection.connectHttp("test-server", "http://localhost:3000/mcp", 30_000);
       try {
         return await withHandle(conn.handle());
       } finally {

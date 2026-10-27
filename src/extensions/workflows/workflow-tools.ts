@@ -21,7 +21,7 @@ import type { ToolContext } from "@core/extensions/types.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
-import { DEFAULT_WORKFLOW_LIMITS, parseWorkflow, type WorkflowLimits } from "./workflow.ts";
+import { parseWorkflow, resolveWorkflowLimits, type WorkflowLimits } from "./workflow.ts";
 import {
   claimRunDir,
   isSafeRunId,
@@ -561,7 +561,7 @@ export class WorkflowDispatchTool extends WorkflowTool {
     ];
     // Cap guidance only exists when caps are enforced -- off costs zero prompt bytes.
     if (this.opts.enableRuntimeTimeouts === true) {
-      const defaultMax = this.opts.limits.maxRuntimeMins ?? DEFAULT_WORKFLOW_LIMITS.maxRuntimeMins;
+      const defaultMax = resolveWorkflowLimits(this.opts.limits).maxRuntimeMins;
       lines.push(
         `A node over its maxRuntimeMins (default: ${defaultMax}) is interrupted and fails immediately, remaining attempts not retried.`,
       );

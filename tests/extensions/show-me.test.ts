@@ -431,14 +431,14 @@ describe("show-me extension", () => {
     }
   });
 
-  it("omitting the imageModel key entirely (no default injected) still enables auto mode", async () => {
+  it("the schema-default empty imageModel (hand-built resolved block) enables auto mode", async () => {
     const dir = await mkdtemp(join(tmpdir(), "show-me-"));
     try {
       const outPath = join(dir, "bare.png");
       const client = makeFakeClient(imagePayload(), {});
       const { agent } = makeAgent(client);
 
-      const inst = createShowMe({ config: { showMe: { enabled: true } } } as any);
+      const inst = createShowMe({ config: { showMe: { enabled: true, imageModel: "" } } } as any);
       const registered = new Map<string, any>();
       await inst.hooks![HOOKS.TOOLS_REGISTER]!({
         register: (name: string, tool: unknown) => registered.set(name, tool),

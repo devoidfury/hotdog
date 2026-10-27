@@ -2,6 +2,8 @@ import { HOOKS } from "@core/hooks.ts";
 import { logger } from "@utils/logger.ts";
 import { formatError } from "@core/error.ts";
 import { McpConnection } from "./connection.ts";
+import { resolveRequestTimeoutMs } from "./client.ts";
+import { resolveHttpTimeoutMs } from "./transports.ts";
 import { McpTool } from "./tools.ts";
 import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
 import { envScrubExtraKeys } from "@utils/env.ts";
@@ -17,18 +19,11 @@ interface McpServerConfig {
   blacklistTools?: string[];
 }
 
-/** Fallback when config is absent or malformed (both schema defaults are 30). */
-const DEFAULT_TIMEOUT_SECS = 30;
-
-/**
- * Sanitize a config-supplied timeout: a missing or non-positive value
- * must mean "use the default", never "no timeout" (an unbounded timeout is
- * exactly the hang these settings exist to prevent).
- */
-function resolveTimeoutSecs(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : DEFAULT_TIMEOUT_SECS;
+/** Config shape of the resolved mcpClient block. The config layer merges the
+ *  schema-owned defaults (extension.json: 30/30), so both keys are present. */
+interface McpClientConfig {
+  httpTimeoutSecs: number;
+  requestTimeoutSecs: number;
 }
 
 /** @param options - Loader options; `Connection` overrides the McpConnection class (test seam). */
@@ -42,12 +37,17 @@ export function create(core: CoreContext, options: { Connection?: typeof McpConn
     return null;
   }
 
-  const clientConfig = getExtensionConfig<{ httpTimeoutSecs?: number; requestTimeoutSecs?: number }>(core, "mcpClient");
-  const httpTimeoutMs = Math.round(resolveTimeoutSecs(clientConfig.httpTimeoutSecs) * 1000);
+  // Junk block values (0, -5, non-number -- resolution merges but does not
+  // clamp) sanitize against the timeout owners' module defaults
+  // (transports.ts / client.ts): "never no timeout" holds for hand-built or
+  // malformed blocks without a code-resident constant here (Centralized
+  // Defaults).
+  const clientConfig = getExtensionConfig<McpClientConfig>(core, "mcpClient");
+  const httpTimeoutMs = resolveHttpTimeoutMs(clientConfig.httpTimeoutSecs);
   // Stdio request-response timeout (config: mcpClient.requestTimeoutSecs).
   // A wedged stdio server must fail the tool call, not pin it for 30s per
   // request with no way to tune it.
-  const requestTimeoutMs = Math.round(resolveTimeoutSecs(clientConfig.requestTimeoutSecs) * 1000);
+  const requestTimeoutMs = resolveRequestTimeoutMs(clientConfig.requestTimeoutSecs);
   const envScrubExtra = envScrubExtraKeys(core.config);
   const envScrubbing = core.resolved?.envScrubbing !== false;
 
@@ -103,9 +103,9 @@ async function _connectServer(
 ): Promise<McpConnection | null> {
   try {
     if (server.url) {
-      return await Connection.connectHttp(server.name, server.url, server.headers || {}, httpTimeoutMs);
+      return await Connection.connectHttp(server.name, server.url, httpTimeoutMs, server.headers || {});
     } else if (server.command) {
-      return await Connection.connectStdio(server.name, server.command, server.args || [], server.env || {}, envScrubExtra, envScrubbing, requestTimeoutMs);
+      return await Connection.connectStdio(server.name, server.command, requestTimeoutMs, server.args || [], server.env || {}, envScrubExtra, envScrubbing);
     }
     return null;
   } catch (e: unknown) {

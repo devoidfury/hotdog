@@ -13,7 +13,7 @@ import { tmpDir, cleanupDir, processAlive, waitForExit, withMockFetch, jsonRespo
 describe("McpClient._sendRequest", () => {
 
   it("increments id counter for each request", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 30_000);
     await withMockFetch(async () => jsonResponse({ result: "ok" }), async () => {
       const initialId = client.idCounter;
       await (client as any)._sendRequest("method1", {});
@@ -26,7 +26,7 @@ describe("McpClient._sendRequest", () => {
 
   it("throws McpError when cancelled", async () => {
     const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
+    const client = new McpClient(transport, 30_000);
     client.cancelled = true;
 
     await expect((client as any)._sendRequest("test", {})).rejects.toThrow("Client is cancelled");
@@ -34,7 +34,7 @@ describe("McpClient._sendRequest", () => {
 
   it("HTTP mode sends correct headers", async () => {
     let capturedHeaders: Record<string, string> | null = null;
-    const client = await McpClient.forHttp("http://localhost:3000/mcp", {
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 30_000, {
       "X-Custom-Header": "custom-value",
       "Authorization": "Bearer token",
     });
@@ -56,7 +56,7 @@ describe("McpClient._sendRequest", () => {
 
   it("HTTP mode sends correct request body", async () => {
     let capturedBody: string | null = null;
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 30_000);
 
     await withMockFetch(async (_url, opts) => {
       capturedBody = opts?.body as string;
@@ -78,7 +78,7 @@ describe("McpClient._sendRequest", () => {
 
 describe("McpClient.initialize", () => {
   it("sends initialize request and stores server info", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 30_000);
     await withMockFetch(async () => jsonResponse({
       jsonrpc: "2.0",
       id: 1,
@@ -100,7 +100,7 @@ describe("McpClient.initialize", () => {
   });
 
   it("initialize works without a streaming transport (no initialized notification)", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 30_000);
     await withMockFetch(async () => jsonResponse({
       jsonrpc: "2.0",
       id: 1,
@@ -125,7 +125,7 @@ describe("McpClient.initialize", () => {
 
 describe("McpClient.listTools", () => {
   it("returns parsed tools list", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 30_000);
     await withMockFetch(async () => jsonResponse({
       jsonrpc: "2.0",
       id: 1,
@@ -147,7 +147,7 @@ describe("McpClient.listTools", () => {
 
 describe("McpClient.callTool", () => {
   it("returns tool call result", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 30_000);
     await withMockFetch(async () => jsonResponse({
       jsonrpc: "2.0",
       id: 1,
@@ -195,7 +195,7 @@ describe("Transport basics", () => {
   });
 
   it("client.transport accessor returns the underlying transport", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", 30_000);
     expect(client.transport).toBeInstanceOf(HttpTransport);
     await client.shutdown();
   });
@@ -205,7 +205,7 @@ describe("Transport basics", () => {
 
 describe("McpClient.forStdio", () => {
   it("creates client with stdio transport", async () => {
-    const client = await McpClient.forStdio("bun", [
+    const client = await McpClient.forStdio("bun", 30_000, [
       "--preload",
       "./tests/setup.ts",
       "./tests/fixtures/mcp-test-server.ts",
@@ -216,7 +216,7 @@ describe("McpClient.forStdio", () => {
 
   it("throws when command fails to start", async () => {
     await expect(
-      McpClient.forStdio("/nonexistent/command/xyz"),
+      McpClient.forStdio("/nonexistent/command/xyz", 30_000),
     ).rejects.toThrow("Failed to spawn");
   });
 
@@ -516,7 +516,10 @@ describe("StdioTransport", () => {
 describe("McpClient stdio integration", () => {
   it("buffers unsolicited responses (no matching pending request)", async () => {
     // A response whose id matches no pending request is buffered for later.
-    const client = await McpClient.forStdio("bun", ["-e", "console.log(JSON.stringify({jsonrpc:'2.0',id:999,result:{data:'buffered'}}))"]);
+    const client = await McpClient.forStdio("bun", 30_000, [
+      "-e",
+      "console.log(JSON.stringify({jsonrpc:'2.0',id:999,result:{data:'buffered'}}))",
+    ]);
 
     const start = Date.now();
     while (client.buffered.length === 0 && Date.now() - start < 5000) {
@@ -533,7 +536,7 @@ describe("McpClient stdio integration", () => {
   it("tolerates empty, non-JSON, and notification lines from the subprocess", async () => {
     // A misbehaving server must not crash the client: empty lines,
     // non-JSON lines, and id-less notifications are all ignored.
-    const client = await McpClient.forStdio("bun", [
+    const client = await McpClient.forStdio("bun", 30_000, [
       "-e",
       "console.log(''); console.log('not valid json'); console.log(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'}));",
     ]);
@@ -581,7 +584,7 @@ describe("HttpTransport onClose", () => {
 
 describe("McpConnection connectStdio", () => {
   it("connects via stdio and initializes", async () => {
-    const conn = await McpConnection.connectStdio("test", "bun", ["./tests/fixtures/mcp-test-server.ts"]);
+    const conn = await McpConnection.connectStdio("test", "bun", 30_000, ["./tests/fixtures/mcp-test-server.ts"]);
     expect(conn.serverName).toBe("test");
     expect(conn.tools).toEqual([]);
     await conn.shutdown();

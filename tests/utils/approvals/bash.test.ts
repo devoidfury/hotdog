@@ -168,6 +168,7 @@ describe("happy paths", () => {
 
   it("bare filenames reach path deny rules (deny never misses)", () => {
     const rules = compileApprovalRules({
+      default: "ask",
       allow: ["bash.cmd=rm"],
       deny: ["bash.path=secrets.env"],
     });
@@ -221,7 +222,7 @@ describe("path-shaped argv[0] is a path target (planted-binary guard)", () => {
   });
 
   it("a cmd:git allow no longer admits /tmp/git (the bypass is closed)", () => {
-    const rules = compileApprovalRules({ allow: ["bash.cmd=git"] });
+    const rules = compileApprovalRules({ default: "ask", allow: ["bash.cmd=git"] });
     const verdictOf = (command: string) => {
       const r = parse(command);
       if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
@@ -234,14 +235,14 @@ describe("path-shaped argv[0] is a path target (planted-binary guard)", () => {
   });
 
   it("a path allow for the exact location closes the loop", () => {
-    const rules = compileApprovalRules({ allow: ["bash.cmd=git", "bash.path=/usr/bin/git"] });
+    const rules = compileApprovalRules({ default: "ask", allow: ["bash.cmd=git", "bash.path=/usr/bin/git"] });
     const r = parse("/usr/bin/git status");
     if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
     expect(decide({ tool: "bash", recognized: true, targets: r.targets }, rules).verdict).toBe("allow");
   });
 
   it("a path deny reaches argv[0] (a quarantine dir stays quarantined)", () => {
-    const rules = compileApprovalRules({ allow: ["bash.cmd=git", "bash.path=**"], deny: ["bash.path=/tmp/**"] });
+    const rules = compileApprovalRules({ default: "ask", allow: ["bash.cmd=git", "bash.path=**"], deny: ["bash.path=/tmp/**"] });
     const r = parse("/tmp/git status");
     if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
     expect(decide({ tool: "bash", recognized: true, targets: r.targets }, rules).verdict).toBe("deny");
@@ -257,7 +258,7 @@ describe("path-shaped argv[0] is a path target (planted-binary guard)", () => {
   it("a tool-level bash allow still covers path-shaped invocations", () => {
     // decide() short-circuits on a whole-tool allow; pinning that this fix
     // did not sneak a path demand in front of the human's explicit "yes".
-    const rules = compileApprovalRules({ allow: ["bash"] });
+    const rules = compileApprovalRules({ default: "ask", allow: ["bash"] });
     const r = parse("/tmp/git status");
     if (!r.ok) throw new Error(`unexpected bail: ${r.reason}`);
     expect(decide({ tool: "bash", recognized: true, targets: r.targets }, rules).verdict).toBe("allow");

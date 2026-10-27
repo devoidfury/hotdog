@@ -9,7 +9,7 @@ import type { McpConnection, McpConnectionHandle } from "@extensions/mcp-client/
 
 /** Create a mock McpConnection class for testing. */
 function createMockConnectionClass(config: {
-  connectHttp?: (name: string, url: string, headers: Record<string, string>, timeoutMs?: number) => Promise<McpConnection> | never;
+  connectHttp?: (name: string, url: string, timeoutMs?: number, headers?: Record<string, string>) => Promise<McpConnection> | never;
   connectStdio?: (name: string, command: string, args: string[], env: Record<string, string>) => Promise<McpConnection> | never;
 }): typeof McpConnection {
   class MockMcpConnection {
@@ -19,16 +19,17 @@ function createMockConnectionClass(config: {
     static async connectHttp(
       serverName: string,
       url: string,
-      headers: Record<string, string> = {},
       timeoutMs?: number,
+      headers?: Record<string, string>,
     ): Promise<McpConnection> {
-      if (config.connectHttp) return config.connectHttp(serverName, url, headers, timeoutMs);
+      if (config.connectHttp) return config.connectHttp(serverName, url, timeoutMs, headers);
       throw new Error("connectHttp not mocked");
     }
 
     static async connectStdio(
       serverName: string,
       command: string,
+      _requestTimeoutMs?: number,
       args: string[] = [],
       env: Record<string, string> = {},
     ): Promise<McpConnection> {
@@ -347,7 +348,7 @@ describe("MCP extension — HTTP timeout config", () => {
     const mockConnection = createMockConnection({ tools: [] });
     let seenTimeout: number | undefined;
     const MockConnection = createMockConnectionClass({
-      connectHttp: async (_n: string, _u: string, _h: Record<string, string>, timeoutMs?: number) => {
+      connectHttp: async (_n: string, _u: string, timeoutMs?: number, _h?: Record<string, string>) => {
         seenTimeout = timeoutMs;
         return mockConnection;
       },

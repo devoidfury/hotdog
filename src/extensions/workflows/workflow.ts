@@ -10,15 +10,36 @@
 import { YAML } from "bun";
 import { resolveModelGroup } from "@core/session/model-resolver.ts";
 
-/** Defaults when no config overrides are passed via opts (configSchema
- *  defaults live in extension.json). hardMaxNodes and maxAttempts are
- *  absolute ceilings a workflow may not raise. */
-export const DEFAULT_WORKFLOW_LIMITS = {
+/** Resolution defaults for WorkflowLimits. hardMaxNodes and maxAttempts are
+ *  absolute ceilings a workflow may not raise; they live here, not in the
+ *  configSchema (extension.json owns only maxNodes / maxRuntimeMins).
+ *  Consumers resolve overrides through resolveWorkflowLimits(). */
+const DEFAULT_WORKFLOW_LIMITS = {
   maxNodes: 8,
   hardMaxNodes: 32,
   maxAttempts: 3,
   maxRuntimeMins: 60,
 };
+
+/**
+ * Normalize override fragments into a complete WorkflowLimits (later
+ * fragments win; unset fields take this module's defaults). Callers pass
+ * the resolved-config fragment (workflows.maxNodes / workflows.maxRuntimeMins
+ * -- the only schema-owned limit keys) and optionally narrower fragments;
+ * the non-raisable ceilings (hardMaxNodes, maxAttempts) ride along from
+ * DEFAULT_WORKFLOW_LIMITS, so a hand-built block never runs without them
+ * (house rule: components receive resolved values, never code-side merges of
+ * an imported constant).
+ */
+export function resolveWorkflowLimits(
+  ...overrides: readonly (Partial<WorkflowLimits> | undefined)[]
+): WorkflowLimits {
+  const limits: WorkflowLimits = { ...DEFAULT_WORKFLOW_LIMITS };
+  for (const override of overrides) {
+    if (override) Object.assign(limits, override);
+  }
+  return limits;
+}
 
 export const WORKFLOW_SCHEMA_VERSION = 1;
 

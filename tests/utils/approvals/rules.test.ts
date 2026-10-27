@@ -10,7 +10,7 @@ import {
   parseRule,
   type ApprovalCall,
   type ApprovalTarget,
-  type UserGateConfig,
+  type ResolvedUserGateConfig,
 } from "@utils/approvals/rules.ts";
 
 function call(
@@ -54,21 +54,27 @@ describe("parseRule", () => {
 });
 
 describe("compileApprovalRules", () => {
-  it("defaults to ask with empty rule lists", () => {
-    const rules = compileApprovalRules(undefined);
+  it("compiles empty rule lists around the resolved default", () => {
+    const rules = compileApprovalRules({ default: "ask" });
     expect(rules.default).toBe("ask");
     expect(rules.allow).toEqual([]);
     expect(rules.deny).toEqual([]);
   });
 
+  it("rejects a missing config block and a missing default (no code-side fallback)", () => {
+    expect(() => compileApprovalRules(undefined as never)).toThrow(ConfigError);
+    expect(() => compileApprovalRules(null as never)).toThrow(ConfigError);
+    expect(() => compileApprovalRules({} as never)).toThrow(ConfigError);
+  });
+
   it("rejects a bad default, bad tools map, and non-array lists", () => {
     expect(() => compileApprovalRules({ default: "yes" as never })).toThrow(ConfigError);
-    expect(() => compileApprovalRules({ allow: "bash" as never })).toThrow(ConfigError);
-    expect(() => compileApprovalRules({ deny: { a: 1 } as never })).toThrow(ConfigError);
-    expect(() => compileApprovalRules({ tools: [] as never })).toThrow(ConfigError);
-    expect(() => compileApprovalRules({ tools: { mcp: "path" as never } })).toThrow(ConfigError);
-    expect(() => compileApprovalRules({ tools: { mcp: [""] } })).toThrow(ConfigError);
-    expect(() => compileApprovalRules({ allow: ["nope."] })).toThrow(ConfigError);
+    expect(() => compileApprovalRules({ default: "ask", allow: "bash" as never })).toThrow(ConfigError);
+    expect(() => compileApprovalRules({ default: "ask", deny: { a: 1 } as never })).toThrow(ConfigError);
+    expect(() => compileApprovalRules({ default: "ask", tools: [] as never })).toThrow(ConfigError);
+    expect(() => compileApprovalRules({ default: "ask", tools: { mcp: "path" as never } })).toThrow(ConfigError);
+    expect(() => compileApprovalRules({ default: "ask", tools: { mcp: [""] } })).toThrow(ConfigError);
+    expect(() => compileApprovalRules({ default: "ask", allow: ["nope."] })).toThrow(ConfigError);
   });
 });
 
@@ -76,7 +82,7 @@ describe("decide precedence", () => {
   const bashGit = call("bash", [{ param: "cmd", value: "git" }]);
 
   it("ask is the default for a recognized tool with no rules", () => {
-    expect(decide(bashGit, compileApprovalRules({})).verdict).toBe("ask");
+    expect(decide(bashGit, compileApprovalRules({ default: "ask" })).verdict).toBe("ask");
   });
 
   it('userGate.default "allow" silences the ask for recognized tools', () => {
@@ -84,22 +90,22 @@ describe("decide precedence", () => {
   });
 
   it("a matching allow entry allows; a non-matching one does not", () => {
-    expect(decide(bashGit, compileApprovalRules({ allow: ["bash.cmd=git"] })).verdict).toBe("allow");
-    expect(decide(bashGit, compileApprovalRules({ allow: ["bash.cmd=jj"] })).verdict).toBe("ask");
-    expect(decide(bashGit, compileApprovalRules({ allow: ["bash"] })).verdict).toBe("allow");
+    expect(decide(bashGit, compileApprovalRules({ default: "ask", allow: ["bash.cmd=git"] })).verdict).toBe("allow");
+    expect(decide(bashGit, compileApprovalRules({ default: "ask", allow: ["bash.cmd=jj"] })).verdict).toBe("ask");
+    expect(decide(bashGit, compileApprovalRules({ default: "ask", allow: ["bash"] })).verdict).toBe("allow");
   });
 
   it("deny beats allow (same target, tool-level allow, tool-level deny)", () => {
-    const rules = compileApprovalRules({ allow: ["bash.cmd=git"], deny: ["bash.cmd=git"] });
+    const rules = compileApprovalRules({ default: "ask", allow: ["bash.cmd=git"], deny: ["bash.cmd=git"] });
     expect(decide(bashGit, rules).verdict).toBe("deny");
 
     // Tool-level allow does not rescue a param-level deny hit.
     expect(
-      decide(bashGit, compileApprovalRules({ allow: ["bash"], deny: ["bash.cmd=git"] })).verdict,
+      decide(bashGit, compileApprovalRules({ default: "ask", allow: ["bash"], deny: ["bash.cmd=git"] })).verdict,
     ).toBe("deny");
     // Tool-level deny beats tool-level allow.
     expect(
-      decide(bashGit, compileApprovalRules({ allow: ["bash"], deny: ["bash"] })).verdict,
+      decide(bashGit, compileApprovalRules({ default: "ask", allow: ["bash"], deny: ["bash"] })).verdict,
     ).toBe("deny");
   });
 
@@ -113,9 +119,9 @@ describe("decide precedence", () => {
       { param: "cmd", value: "git" },
       { param: "path", value: "/ws/.env", relative: ".env", pathy: true },
     ]);
-    expect(decide(two, compileApprovalRules({ allow: ["bash.cmd=git"] })).verdict).toBe("ask");
+    expect(decide(two, compileApprovalRules({ default: "ask", allow: ["bash.cmd=git"] })).verdict).toBe("ask");
     expect(
-      decide(two, compileApprovalRules({ allow: ["bash.cmd=git", "bash.path=.env*"] })).verdict,
+      decide(two, compileApprovalRules({ default: "ask", allow: ["bash.cmd=git", "bash.path=.env*"] })).verdict,
     ).toBe("allow");
   });
 
@@ -124,26 +130,26 @@ describe("decide precedence", () => {
       { param: "cmd", value: "git" },
       { param: "arg", value: "--force", denyOnly: true },
     ];
-    expect(decide(call("bash", targets), compileApprovalRules({ allow: ["bash.cmd=git"] })).verdict).toBe(
+    expect(decide(call("bash", targets), compileApprovalRules({ default: "ask", allow: ["bash.cmd=git"] })).verdict).toBe(
       "allow",
     );
     expect(
-      decide(call("bash", targets), compileApprovalRules({ allow: ["bash.cmd=git"], deny: ["bash.arg=*force*"] }))
+      decide(call("bash", targets), compileApprovalRules({ default: "ask", allow: ["bash.cmd=git"], deny: ["bash.arg=*force*"] }))
         .verdict,
     ).toBe("deny");
   });
 
   it("unrecognized tools ask unless an allow entry names them", () => {
     const unknown = call("mcp__github__create", [{ param: "query", value: "hi" }], { recognized: false });
-    expect(decide(unknown, compileApprovalRules({})).verdict).toBe("ask");
+    expect(decide(unknown, compileApprovalRules({ default: "ask" })).verdict).toBe("ask");
     // default "allow" does not rescue an unrecognized tool.
     expect(decide(unknown, compileApprovalRules({ default: "allow" })).verdict).toBe("ask");
-    expect(decide(unknown, compileApprovalRules({ allow: ["mcp__*"] })).verdict).toBe("allow");
-    expect(decide(unknown, compileApprovalRules({ allow: ["mcp__github__create.query=hi"] })).verdict).toBe(
+    expect(decide(unknown, compileApprovalRules({ default: "ask", allow: ["mcp__*"] })).verdict).toBe("allow");
+    expect(decide(unknown, compileApprovalRules({ default: "ask", allow: ["mcp__github__create.query=hi"] })).verdict).toBe(
       "allow",
     );
     // ...and a param-scoped allow for another value does not.
-    expect(decide(unknown, compileApprovalRules({ allow: ["mcp__github__create.query=bye"] })).verdict).toBe(
+    expect(decide(unknown, compileApprovalRules({ default: "ask", allow: ["mcp__github__create.query=bye"] })).verdict).toBe(
       "ask",
     );
   });
@@ -156,22 +162,22 @@ describe("decide precedence", () => {
   });
 
   it("a recognized tool with no targets follows the default", () => {
-    expect(decide(call("info"), compileApprovalRules({})).verdict).toBe("ask");
+    expect(decide(call("info"), compileApprovalRules({ default: "ask" })).verdict).toBe("ask");
     expect(decide(call("info"), compileApprovalRules({ default: "allow" })).verdict).toBe("allow");
   });
 
   it("a bail asks, but a tool-level rule still decides", () => {
     const bail = call("bash", [], { bailReason: "command substitution" });
-    const d = decide(bail, compileApprovalRules({}));
+    const d = decide(bail, compileApprovalRules({ default: "ask" }));
     expect(d.verdict).toBe("ask");
     expect(d.reasons[0]).toContain("command substitution");
-    expect(decide(bail, compileApprovalRules({ allow: ["bash"] })).verdict).toBe("allow");
-    expect(decide(bail, compileApprovalRules({ deny: ["bash"] })).verdict).toBe("deny");
+    expect(decide(bail, compileApprovalRules({ default: "ask", allow: ["bash"] })).verdict).toBe("allow");
+    expect(decide(bail, compileApprovalRules({ default: "ask", deny: ["bash"] })).verdict).toBe("deny");
   });
 
   it("rules for other tools never apply", () => {
-    expect(decide(bashGit, compileApprovalRules({ allow: ["write"] })).verdict).toBe("ask");
-    expect(decide(bashGit, compileApprovalRules({ deny: ["write.paths=.env"] })).verdict).toBe("ask");
+    expect(decide(bashGit, compileApprovalRules({ default: "ask", allow: ["write"] })).verdict).toBe("ask");
+    expect(decide(bashGit, compileApprovalRules({ default: "ask", deny: ["write.paths=.env"] })).verdict).toBe("ask");
   });
 });
 
@@ -238,41 +244,46 @@ describe('userGate.default "deny" (allowlist-only)', () => {
 describe("path matching in the workspace.deny dialect", () => {
   it("matches a rule at any depth of the absolute path", () => {
     const t = call("read", [pathTarget("/home/u/project/.ssh/id_rsa")]);
-    expect(decide(t, compileApprovalRules({ deny: ["read.paths=.ssh"] })).verdict).toBe("deny");
+    expect(decide(t, compileApprovalRules({ default: "ask", deny: ["read.paths=.ssh"] })).verdict).toBe("deny");
   });
 
   it("matches the root-relative form too", () => {
     const t = call("edit", [pathTarget("/ws/src/app.ts", "src/app.ts")]);
-    expect(decide(t, compileApprovalRules({ allow: ["edit.paths=src"] })).verdict).toBe("allow");
+    expect(decide(t, compileApprovalRules({ default: "ask", allow: ["edit.paths=src"] })).verdict).toBe("allow");
     const outside = call("edit", [pathTarget("/ws/app.ts", "app.ts")]);
-    expect(decide(outside, compileApprovalRules({ allow: ["edit.paths=src"] })).verdict).toBe("ask");
+    expect(decide(outside, compileApprovalRules({ default: "ask", allow: ["edit.paths=src"] })).verdict).toBe("ask");
   });
 
   it("'*' stays inside one component, so 'src/*.ts' does not match nested files", () => {
     const nested = call("write", [pathTarget("/ws/src/deep/a.ts", "src/deep/a.ts")]);
-    expect(decide(nested, compileApprovalRules({ allow: ["write.paths=src/*.ts"] })).verdict).toBe("ask");
+    expect(decide(nested, compileApprovalRules({ default: "ask", allow: ["write.paths=src/*.ts"] })).verdict).toBe("ask");
     const direct = call("write", [pathTarget("/ws/src/a.ts", "src/a.ts")]);
-    expect(decide(direct, compileApprovalRules({ allow: ["write.paths=src/*.ts"] })).verdict).toBe("allow");
+    expect(decide(direct, compileApprovalRules({ default: "ask", allow: ["write.paths=src/*.ts"] })).verdict).toBe("allow");
   });
 
   it("non-path values match as plain globs over the whole value", () => {
     const t = call("fetch", [{ param: "url", value: "https://example.com/x" }]);
-    expect(decide(t, compileApprovalRules({ allow: ["fetch.url=https://example.com/*"] })).verdict).toBe("allow");
-    expect(decide(t, compileApprovalRules({ deny: ["fetch.url=*evil*"] })).verdict).toBe("ask");
+    expect(decide(t, compileApprovalRules({ default: "ask", allow: ["fetch.url=https://example.com/*"] })).verdict).toBe("allow");
+    expect(decide(t, compileApprovalRules({ default: "ask", deny: ["fetch.url=*evil*"] })).verdict).toBe("ask");
   });
 });
 
 describe("decision reporting", () => {
   it("reports the matched rule lines and readable reasons", () => {
     const t = call("bash", [{ param: "cmd", value: "rm" }]);
-    const d = decide(t, compileApprovalRules({ deny: ["bash.cmd=rm"] }));
+    const d = decide(t, compileApprovalRules({ default: "ask", deny: ["bash.cmd=rm"] }));
     expect(d.matched).toEqual(["bash.cmd=rm"]);
     expect(d.reasons[0]).toContain("bash.cmd=rm");
     expect(d.reasons[0]).toContain("rm");
   });
 
   it("every verdict carries at least one reason", () => {
-    for (const cfg of [{}, { default: "allow" }, { allow: ["bash"] }, { deny: ["bash"] }] as UserGateConfig[]) {
+    for (const cfg of [
+      { default: "ask" },
+      { default: "allow" },
+      { default: "ask", allow: ["bash"] },
+      { default: "ask", deny: ["bash"] },
+    ] as ResolvedUserGateConfig[]) {
       const d = decide(call("bash", [{ param: "cmd", value: "git" }]), compileApprovalRules(cfg));
       expect(d.reasons.length).toBeGreaterThan(0);
       expect(d.reasons[0]!.length).toBeGreaterThan(0);

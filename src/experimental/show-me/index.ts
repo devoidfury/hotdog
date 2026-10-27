@@ -38,7 +38,9 @@ const DEFAULT_OUTPUT_DIR = "generated";
 
 interface ShowMeConfig {
   enabled?: boolean;
-  imageModel?: string;
+  /** Schema-owned (showMe.imageModel, default "" = auto-select); the config
+   *  layer merges the default, so a resolved block always carries it. */
+  imageModel: string;
 }
 
 // ── Size Parsing ────────────────────────────────────────────────────────────
@@ -432,7 +434,7 @@ export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<ShowMeConfig>(core, "showMe");
   if (config.enabled === false) return {};
 
-  const imageModel = (config.imageModel ?? "").trim();
+  const imageModel = config.imageModel.trim();
 
   // Containment boundary for the slash-command path too. A command invocation
   // carries no tool ctx, so the Workspace is built from the resolved config;

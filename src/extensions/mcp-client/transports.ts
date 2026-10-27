@@ -302,9 +302,23 @@ export class StdioTransport implements McpTransport {
 /**
  * Default per-request timeout for HTTP transports (ms), used when a caller
  * constructs one directly. Extension sessions pass the resolved
- * `mcpClient.httpTimeoutSecs` config value instead.
+ * `mcpClient.httpTimeoutSecs` config value through resolveHttpTimeoutMs().
  */
-export const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+
+/**
+ * Sanitize a config-supplied HTTP timeout (seconds) to ms: a finite positive
+ * number wins; anything else (missing, zero, negative, NaN, non-number)
+ * takes this module's default. Junk must mean "the default timeout", never
+ * "no timeout" -- an unbounded timeout is exactly the hang this setting
+ * exists to prevent. The schema default (30s) is merged by the config layer;
+ * this guard covers malformed or hand-built blocks.
+ */
+export function resolveHttpTimeoutMs(httpTimeoutSecs: unknown): number {
+  return typeof httpTimeoutSecs === "number" && Number.isFinite(httpTimeoutSecs) && httpTimeoutSecs > 0
+    ? Math.round(httpTimeoutSecs * 1000)
+    : DEFAULT_HTTP_TIMEOUT_MS;
+}
 
 export class HttpTransport implements McpTransport {
   readonly isStreaming = false;

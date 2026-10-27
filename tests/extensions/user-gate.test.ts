@@ -76,7 +76,7 @@ describe("user-gate TOOL_CALL handler", () => {
 
   it("asks the human and allows (no verdict adopted) on 'allow once'", async () => {
     const { input, asked } = answerWith("allow once");
-    const r = await run({ enabled: true }, payload({ inputOverride: input } as never));
+    const r = await run({ enabled: true, default: "ask" }, payload({ inputOverride: input } as never));
     // Allow returns no opinion: nothing is adopted onto the payload.
     expect(r.action).toBeUndefined();
     expect(asked).toHaveLength(1);
@@ -92,7 +92,7 @@ describe("user-gate TOOL_CALL handler", () => {
     // the Unicode controls that survive into the echo, and those tokenize.)
     const { input, asked } = answerWith("deny");
     const evil = JSON.stringify({ command: "git di\u202eff\u200bx \u001b[2K" });
-    const r = await run({ enabled: true }, payload({ inputOverride: input, input: evil } as never));
+    const r = await run({ enabled: true, default: "ask" }, payload({ inputOverride: input, input: evil } as never));
     expect(r.action).toBe("block");
     expect(asked[0]).toContain("[U+202E]");
     expect(asked[0]).toContain("[U+200B]");
@@ -101,7 +101,7 @@ describe("user-gate TOOL_CALL handler", () => {
 
   it("blocks on 'deny' with the reason and the config line", async () => {
     const { input } = answerWith("deny");
-    const r = await run({ enabled: true }, payload({ inputOverride: input } as never));
+    const r = await run({ enabled: true, default: "ask" }, payload({ inputOverride: input } as never));
     expect(r.action).toBe("block");
     expect(r.result).toContain("user denied");
     expect(r.result).toContain('"userGate": { "allow": [');
@@ -121,7 +121,7 @@ describe("user-gate TOOL_CALL handler", () => {
       input: JSON.stringify({ command: "rm -rf /tmp/x" }),
       inputOverride: input,
     } as never);
-    const r = await run({ enabled: true, deny: ["bash.cmd=rm"] }, p);
+    const r = await run({ enabled: true, default: "ask", deny: ["bash.cmd=rm"] }, p);
     expect(r.action).toBe("block");
     expect(asked).toBe(0);
     expect(r.result).toContain("bash.cmd=rm");
@@ -138,7 +138,7 @@ describe("user-gate TOOL_CALL handler", () => {
       },
     };
     const r = await run(
-      { enabled: true, allow: ["bash.cmd=git"] },
+      { enabled: true, default: "ask", allow: ["bash.cmd=git"] },
       payload({ inputOverride: input } as never),
     );
     expect(r.action).toBeUndefined();
@@ -151,7 +151,7 @@ describe("user-gate TOOL_CALL handler", () => {
       ["allow once", true],
     ] as const) {
       const hooks = new HookSystem();
-      const core = { hooks, config: { userGate: { enabled: true } } } as unknown as CoreContext;
+      const core = { hooks, config: { userGate: { enabled: true, default: "ask" } } } as unknown as CoreContext;
       const instance = create(core);
       for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
         hooks.on(name, handler as never, "user-gate");
@@ -175,7 +175,7 @@ describe("user-gate TOOL_CALL handler", () => {
 
   it("the session memo is per target set, not per tool", async () => {
     const hooks = new HookSystem();
-    const core = { hooks, config: { userGate: { enabled: true } } } as unknown as CoreContext;
+    const core = { hooks, config: { userGate: { enabled: true, default: "ask" } } } as unknown as CoreContext;
     const instance = create(core);
     for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
       hooks.on(name, handler as never, "user-gate");
@@ -250,7 +250,7 @@ describe("fail-closed matrix", () => {
   ];
   for (const [name, over, mentions] of cases) {
     it(`blocks when there is ${name}`, async () => {
-      const r = await run({ enabled: true }, payload(over as never));
+      const r = await run({ enabled: true, default: "ask" }, payload(over as never));
       expect(r.action).toBe("block");
       expect(r.result).toContain(mentions);
     });
@@ -265,7 +265,7 @@ describe("fail-closed matrix", () => {
         return {};
       },
     };
-    const r = await run({ enabled: true }, payload({ inputOverride: input } as never));
+    const r = await run({ enabled: true, default: "ask" }, payload({ inputOverride: input } as never));
     expect(r.action).toBe("block");
     expect(collected).toBe(false);
     expect(r.result).toContain("no interactive UI");
@@ -278,7 +278,7 @@ describe("fail-closed matrix", () => {
         throw new Error("readline exploded");
       },
     };
-    const r = await run({ enabled: true }, payload({ inputOverride: input } as never));
+    const r = await run({ enabled: true, default: "ask" }, payload({ inputOverride: input } as never));
     expect(r.action).toBe("block");
     expect(r.result).toContain("readline exploded");
   });
@@ -288,14 +288,14 @@ describe("fail-closed matrix", () => {
       isInteractive: () => true,
       collectAnswers: () => Promise.reject(new Error("async boom")),
     };
-    const r = await run({ enabled: true }, payload({ inputOverride: input } as never));
+    const r = await run({ enabled: true, default: "ask" }, payload({ inputOverride: input } as never));
     expect(r.action).toBe("block");
     expect(r.result).toContain("async boom");
   });
 
   it("blocks on an empty answer", async () => {
     const input = { isInteractive: () => true, collectAnswers: () => ({ approve: "" }) };
-    const r = await run({ enabled: true }, payload({ inputOverride: input } as never));
+    const r = await run({ enabled: true, default: "ask" }, payload({ inputOverride: input } as never));
     expect(r.action).toBe("block");
     expect(r.result).toContain("no answer");
   });
@@ -308,7 +308,7 @@ describe("fail-closed matrix", () => {
     };
     const p = payload({ inputOverride: input } as never);
     (p.agent as { runAbortController: AbortController }).runAbortController = ac;
-    const run_ = run({ enabled: true }, p);
+    const run_ = run({ enabled: true, default: "ask" }, p);
     setTimeout(() => ac.abort(), 20);
     const r = await run_;
     expect(r.action).toBe("block");
@@ -328,7 +328,7 @@ describe("fail-closed matrix", () => {
     };
     const p = payload({ inputOverride: input } as never);
     (p.agent as { runAbortController: AbortController }).runAbortController = ac;
-    const r = await run({ enabled: true }, p);
+    const r = await run({ enabled: true, default: "ask" }, p);
     expect(r.action).toBe("block");
     expect(collected).toBe(false);
   });
@@ -363,7 +363,7 @@ describe("fail-closed matrix", () => {
     // A stale per-iteration controller must NOT mask the ctx signal.
     (p.agent as { runAbortController?: AbortController }).runAbortController = new AbortController();
 
-    const run_ = run({ enabled: true }, p);
+    const run_ = run({ enabled: true, default: "ask" }, p);
     await new Promise((r) => setTimeout(r, 10));
     expect(seenSignal).toBe(ac.signal); // askUser got the interruptible signal
     ac.abort();
@@ -385,7 +385,7 @@ describe("fail-closed matrix", () => {
     };
     const p = payload({ inputOverride: input } as never);
     injectCtxKey(p, "abortSignal", ac.signal);
-    const r = await run({ enabled: true }, p);
+    const r = await run({ enabled: true, default: "ask" }, p);
     expect(r.action).toBe("block");
     expect(collected).toBe(false);
   });
@@ -393,7 +393,7 @@ describe("fail-closed matrix", () => {
   it("blocks every call when the config is malformed (fail closed, loudly)", async () => {
     const { input, asked } = answerWith("allow once");
     const r = await run(
-      { enabled: true, allow: ["oops."] } as unknown as UserGateConfig,
+      { enabled: true, default: "ask", allow: ["oops."] } as unknown as UserGateConfig,
       payload({ inputOverride: input } as never),
     );
     expect(r.action).toBe("block");
@@ -407,7 +407,7 @@ describe("fail-closed matrix", () => {
     // argument objects, so each must bail -- never treated as a call whose
     // targets could be matched against rules.
     for (const input of ['[{"command": "git status"}]', "null", "42", '"git status"']) {
-      const r = await run({ enabled: true }, payload({ input } as never));
+      const r = await run({ enabled: true, default: "ask" }, payload({ input } as never));
       expect(r.action).toBe("block");
       expect(r.result).toContain("not a JSON object");
     }
@@ -423,7 +423,7 @@ describe("fail-closed matrix", () => {
         },
       },
     } as never);
-    const r = await run({ enabled: true }, p);
+    const r = await run({ enabled: true, default: "ask" }, p);
     expect(r.action).toBe("block");
     expect(r.result).toContain("the approvals layer failed");
     expect(r.result).toContain("ctx exploded");
@@ -447,7 +447,7 @@ describe("fail-closed matrix", () => {
 describe("prompt queue", () => {
   it("runs exactly one prompt at a time", async () => {
     const hooks = new HookSystem();
-    const core = { hooks, config: { userGate: { enabled: true } } } as unknown as CoreContext;
+    const core = { hooks, config: { userGate: { enabled: true, default: "ask" } } } as unknown as CoreContext;
     const instance = create(core);
     for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
       hooks.on(name, handler as never, "user-gate");
@@ -506,7 +506,7 @@ describe("gate composition (DM-3)", () => {
     hooks.on(HOOKS.TOOL_CALL, () => ({ action: "block", result: "log-integrity barrier" }), "session-log");
     const core = {
       hooks,
-      config: { userGate: { enabled: true, allow: ["bash.cmd=git"] } },
+      config: { userGate: { enabled: true, default: "ask", allow: ["bash.cmd=git"] } },
     } as unknown as CoreContext;
     const instance = create(core);
     for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
@@ -525,7 +525,7 @@ describe("session grants are keyed by session (no cross-session silencing)", () 
     // The webui/ws host serves many sessions per process: a grant made while
     // talking to session A must not answer for session B.
     const hooks = new HookSystem();
-    const core = { hooks, config: { userGate: { enabled: true } } } as unknown as CoreContext;
+    const core = { hooks, config: { userGate: { enabled: true, default: "ask" } } } as unknown as CoreContext;
     const instance = create(core);
     for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
       hooks.on(name, handler as never, "user-gate");
@@ -558,7 +558,7 @@ describe("session grants are keyed by session (no cross-session silencing)", () 
     // webui/ws host that outlives every session, a finished session's Set
     // must be reclaimed at SESSION_END -- and only that session's grants.
     const hooks = new HookSystem();
-    const core = { hooks, config: { userGate: { enabled: true } } } as unknown as CoreContext;
+    const core = { hooks, config: { userGate: { enabled: true, default: "ask" } } } as unknown as CoreContext;
     const instance = create(core);
     for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
       hooks.on(name, handler as never, "user-gate");
@@ -597,7 +597,7 @@ describe("session grants are keyed by session (no cross-session silencing)", () 
   it('an "allow for session" with no session id degrades to "allow once"', async () => {
     // No key to remember by -> no memo. The gate fails toward prompting.
     const hooks = new HookSystem();
-    const core = { hooks, config: { userGate: { enabled: true } } } as unknown as CoreContext;
+    const core = { hooks, config: { userGate: { enabled: true, default: "ask" } } } as unknown as CoreContext;
     const instance = create(core);
     for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
       hooks.on(name, handler as never, "user-gate");

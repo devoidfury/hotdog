@@ -75,9 +75,10 @@ export function create(core: CoreContext): ExtensionInstance {
     return {};
   }
 
-  // Schema defaults mirrored here so a bare config (tests, standalone hosts) behaves.
-  const repeatThreshold = config.repeatThreshold ?? 3;
-  const pingPongThreshold = config.pingPongThreshold ?? 4;
+  // Both thresholds are schema-owned (extension.json defaults 3 and 4); the
+  // config layer merges them into the resolved block, so consume directly.
+  const repeatThreshold = config.repeatThreshold;
+  const pingPongThreshold = config.pingPongThreshold;
   // Streaks longer than the stop band (3t) are all level 3; no need to remember more.
   const window = 3 * Math.max(repeatThreshold, pingPongThreshold);
 

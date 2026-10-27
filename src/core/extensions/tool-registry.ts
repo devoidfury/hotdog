@@ -3,6 +3,7 @@ import {
   formatValidationErrors,
 } from "@utils/json-schema.ts";
 import { logger } from "@utils/logger.ts";
+import { formatError } from "../error.ts";
 import type { ToolContext, DefaultToolContext } from "./tool-context.ts";
 
 /**
@@ -196,7 +197,7 @@ export class ToolRegistry {
         // so a failed tool's stale getToolDef() entry stays until register()/
         // remove() clears it.
         logger.warn(
-          `[tools] Failed to get tool def for "${name}": ${(err as Error).message}`,
+          `[tools] Failed to get tool def for "${name}": ${formatError(err)}`,
         );
         hadError = true;
       }

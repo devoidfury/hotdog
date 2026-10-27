@@ -1216,7 +1216,10 @@ export function handleSlashCommand(
         ui.prompt();
       }
     },
-    () => {
+    (err: unknown) => {
+      // Surface the failure before restoring the prompt (same shape as the
+      // resume-continuation catch: formatted error, then prompt).
+      uiOut(`Command failed: ${formatError(err)}`);
       uiOut("");
       ui.prompt();
     },

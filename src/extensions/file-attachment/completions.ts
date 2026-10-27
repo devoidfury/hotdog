@@ -2,6 +2,7 @@ import fsPromises from "node:fs/promises";
 import { isAbsolute, dirname } from "node:path";
 import { cwd } from "node:process";
 import { logger } from "@utils/logger.ts";
+import { formatError } from "@core/error.ts";
 import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 import type { CompletionContext } from "@core/completion.ts";
 
@@ -92,7 +93,7 @@ export async function completion(ctx: CompletionContext) {
 
     return matches;
   } catch (e) {
-    logger.debug(`file-attachment: completion error: ${(e as Error).message}`);
+    logger.debug(`file-attachment: completion error: ${formatError(e)}`);
     return [];
   }
 }

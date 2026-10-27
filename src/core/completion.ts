@@ -1,6 +1,7 @@
 // Designed to be extensible via hooks and reusable by future UIs (web UI).
 
 import { logger } from "@utils/logger.ts";
+import { formatError } from "./error.ts";
 import type { AgentLike } from "./session/index.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -81,7 +82,7 @@ export class CompletionService {
         return r.matcher(ctx);
       } catch (e) {
         logger.debug(
-          `[completion] Matcher error from ${r.source ?? "unknown"}: ${(e as Error).message}`,
+          `[completion] Matcher error from ${r.source ?? "unknown"}: ${formatError(e)}`,
         );
         return false;
       }
@@ -103,7 +104,7 @@ export class CompletionService {
         return null;
       } catch (e) {
         logger.debug(
-          `[completion] Handler error from ${handlerName}: ${(e as Error).message}`,
+          `[completion] Handler error from ${handlerName}: ${formatError(e)}`,
         );
         return null;
       }

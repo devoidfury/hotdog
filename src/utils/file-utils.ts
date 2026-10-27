@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
 import { logger } from "./logger.ts";
+import { formatError } from "@core/error.ts";
 import { ToolResult, parseToolInput } from "@core/extensions/tool-utils.ts";
 import { PathEscapeError } from "./workspace.ts";
 import type { Workspace } from "./workspace.ts";
@@ -42,9 +43,7 @@ export async function loadAspects(
         return { name, content: trimmed };
       }
     } catch (e) {
-      logger.warn(`Failed to load aspect '${name}' from '${filePath}'`, {
-        error: (e as Error).message,
-      });
+      logger.warn(`Failed to load aspect '${name}' from '${filePath}': ${formatError(e)}`);
     }
     return null;
   });

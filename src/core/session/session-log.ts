@@ -321,7 +321,7 @@ export async function deleteSessionLog(sessionId: string): Promise<boolean> {
     if (error.code === "ENOENT") {
       return false;
     }
-    logger.warn(`[session-log] failed to delete session log ${sessionId}: ${error.message}`);
+    logger.warn(`[session-log] failed to delete session log ${sessionId}: ${formatError(err)}`);
     return false;
   }
 }

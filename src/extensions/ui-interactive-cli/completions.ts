@@ -109,7 +109,7 @@ fi
         const completions = await runCompletion(line);
         return completions.map((c) => ({ value: c }));
       } catch (e) {
-        logger.debug(`ui-interactive-cli: shell completion error: ${(e as Error).message}`);
+        logger.debug(`ui-interactive-cli: shell completion error: ${formatError(e)}`);
         return [];
       }
     },
@@ -144,7 +144,7 @@ export function buildReadlineCompleter(
         callback(null, [matches, prefix]);
       })
       .catch((e) => {
-        logger.error(`[completion] error: ${(e as Error).message}`);
+        logger.error(`[completion] error: ${formatError(e)}`);
         callback(null, [[], prefix]);
       });
   };

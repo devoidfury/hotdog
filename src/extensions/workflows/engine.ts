@@ -471,9 +471,9 @@ export class WorkflowRun {
               // attempt's gate can never hang.
               if (nr.gate === gate) gate.deliver(t);
             },
-            () => {
+            (err: unknown) => {
               if (nr.gate === gate) {
-                gate.deliver({ status: "failed", result: "warm turn rejected: task no longer accepting turns" });
+                gate.deliver({ status: "failed", result: `warm turn rejected: task no longer accepting turns: ${formatError(err)}` });
               }
             },
           );

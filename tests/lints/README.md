@@ -65,7 +65,7 @@ whoever edits around it).
 
 | Test file | AGENTS.md rule | Baseline entries |
 |---|---|---|
-| `format-error.test.ts` | Error Handling: catches route through `formatError()` | 10 |
+| `format-error.test.ts` | Error Handling: catches route through `formatError()` | 0 |
 | `centralized-defaults.test.ts` | Centralized Defaults: no `DEFAULT_*` imports in components; no `?? <literal>` fallbacks for schema-owned keys | 34 |
 | `module-imports.test.ts` | Module Imports: no relative climbs across alias scopes | 0 |
 | `mock-module.test.ts` | Never use `mock.module` | 0 |

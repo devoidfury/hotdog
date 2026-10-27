@@ -363,6 +363,14 @@ export function resolveKey(
       resolved = value;
     }
 
+    // Out-of-bounds values behave like a failed cast: skip this layer and let
+    // the next one (alias, then default) speak. Bounds apply to every layer;
+    // the "default" layer above returns early, so repo-authored defaults are
+    // trusted without checking.
+    if (typeof resolved === "number" && schema.minimum !== undefined && resolved < schema.minimum) {
+      continue;
+    }
+
     if (properties && typeof resolved === "object" && resolved !== null) {
       return resolveNestedProperties(keyName, resolved as Record<string, unknown>, properties, context);
     }

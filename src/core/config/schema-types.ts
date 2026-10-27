@@ -14,6 +14,9 @@ export interface SchemaLayer {
 
 export interface SchemaProperty {
   type?: string;
+  /** Lower bound for numeric values. A present-but-violating layer value is
+   * treated like a failed cast: skip the layer, fall through to the next. */
+  minimum?: number;
   description?: string;
   default?: unknown;
   layers?: SchemaLayer[];

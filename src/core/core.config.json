@@ -504,6 +504,7 @@
     "properties": {
       "maxFileSize": {
         "type": "integer",
+        "minimum": 0,
         "layers": [
           { "source": "config", "key": "uploadLimits.maxFileSize", "cast": "number" },
           { "source": "config", "key": "fileAttachment.maxFileSize", "cast": "number" },
@@ -512,6 +513,7 @@
       },
       "maxImageSize": {
         "type": "integer",
+        "minimum": 0,
         "layers": [
           { "source": "config", "key": "uploadLimits.maxImageSize", "cast": "number" },
           { "source": "config", "key": "fileAttachment.maxImageSize", "cast": "number" },
@@ -520,6 +522,7 @@
       },
       "maxFiles": {
         "type": "integer",
+        "minimum": 0,
         "layers": [
           { "source": "config", "key": "uploadLimits.maxFiles", "cast": "number" },
           { "source": "config", "key": "fileAttachment.maxFiles", "cast": "number" },

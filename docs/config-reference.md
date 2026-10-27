@@ -82,6 +82,8 @@ Each config value is resolved by walking a priority chain **defined per key** in
 | **Provider** | Active provider | `aiUrl`/`apiKey` only: the provider's URL and API key. |
 | **Default** | Schema defaults | Fallbacks declared in `core.config.json` / extension schemas. |
 
+A numeric schema property may declare `"minimum"`. A layer value that casts to a number below the bound is rejected like a failed cast: resolution skips that layer and continues to the next (legacy alias, then default), so one out-of-bounds value can never override a sane default. Defaults are repo-authored and not bounds-checked. Example: `uploadLimits.*` declare `"minimum": 0` (0 is a coherent "reject everything" posture; negatives are nonsense).
+
 ---
 
 ## Core Settings
@@ -754,7 +756,7 @@ Denylist of sensitive paths rejected by `resolveSafe` (and therefore by all file
 
 - **Type:** `object`
 - **Default:** `{ "maxFileSize": 102400, "maxImageSize": 10485760, "maxFiles": 10 }`
-- **Resolution:** `uploadLimits.*` > legacy `fileAttachment.*` > default
+- **Resolution:** `uploadLimits.*` > legacy `fileAttachment.*` > default (each field declares `"minimum": 0`; negative values are rejected like failed casts and fall through)
 
 Size ceilings for user-supplied content: webui upload parsing and `@file` reference expansion. A core posture, not an extension's private business: the values resolve with or without the `file-attachment`/`websocket`/`webui` extensions enabled, and every consumer reads the same resolved numbers. The websocket transport frame bound derives from `maxImageSize`, so raising it widens the frame bound too; lowering it never tightens the bound below the fixed 10 MiB transcribe audio ceiling (a max-size recording must always reach the app-level rejection, not die at the socket).
 

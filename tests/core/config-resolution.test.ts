@@ -399,6 +399,49 @@ describe("uploadLimits", () => {
     ).toEqual({ ...DEFAULTS, maxFileSize: 7 });
   });
 
+  it("schema minimum: negative values fall through like a failed cast", () => {
+    // Negative at the top layer falls through to the alias layer
+    expect(
+      resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, {
+        ...baseContext,
+        config: { uploadLimits: { maxFileSize: -5 }, fileAttachment: { maxFileSize: 7 } },
+      }),
+    ).toEqual({ ...DEFAULTS, maxFileSize: 7 });
+
+    // Negative at every layer lands on the default
+    expect(
+      resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, {
+        ...baseContext,
+        config: { uploadLimits: { maxFiles: -1 }, fileAttachment: { maxFiles: -2 } },
+      }),
+    ).toEqual(DEFAULTS);
+
+    // The legacy alias is bounds-checked too: a negative fileAttachment value
+    // must NOT alias in
+    expect(
+      resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, {
+        ...baseContext,
+        config: { fileAttachment: { maxFileSize: -5 } },
+      }),
+    ).toEqual(DEFAULTS);
+
+    // Negative numeric string is rejected after the cast
+    expect(
+      resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, {
+        ...baseContext,
+        config: { uploadLimits: { maxImageSize: "-1" } },
+      }),
+    ).toEqual(DEFAULTS);
+
+    // Boundary: exactly at the minimum passes; 0 is a coherent "reject all"
+    expect(
+      resolveKey("uploadLimits", CONFIG_KEYS.uploadLimits, {
+        ...baseContext,
+        config: { uploadLimits: { maxFiles: 0 } },
+      }),
+    ).toEqual({ ...DEFAULTS, maxFiles: 0 });
+  });
+
   it("the accessor hands out resolved values and fails loud when resolution never ran", () => {
     // The upload path (websocket SEND, file-attachment @refs) enforces these
     // numbers; a resolved bag without them means sizes would be compared

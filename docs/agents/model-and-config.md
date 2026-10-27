@@ -36,6 +36,7 @@ Extension-specific defaults (e.g., `bashTool` timeouts, `coreTools` search limit
 - **`mergeExtensionConfigDefaults(defaultConfig, extParams)`**: merges extension-registered config defaults into base config
 - **`normalizeConfigKeys(obj)`**: converts snake_case to camelCase
 - **`validateConfig(config, extensionSchemas)`**: validates config against core schema and extension schemas
+- Schema numeric properties may declare `"minimum"`: a layer value below the bound is treated like a failed cast and resolution falls through to the next layer (see `uploadLimits.*` in `core.config.json`)
 
 ### Providers
 Models are declared inside providers. Each provider has `name`, `url`, optional `api_key`, and a list of `models`. The active provider is selected via `--provider` CLI flag or `default_provider` config key.

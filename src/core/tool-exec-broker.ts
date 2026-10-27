@@ -21,7 +21,7 @@ import { logger } from "@utils/logger.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
 import { execFenceBackend, planFor } from "@utils/exec-plan.ts";
 import { formatError, ConfigError, ToolError } from "./error.ts";
-import { DEFAULT_IDLE_REAP_MS, PROJECT_ROOT, RUNNER_ENTRY } from "./tool-exec-layout.ts";
+import { idleReapMsOrDefault, PROJECT_ROOT, RUNNER_ENTRY } from "./tool-exec-layout.ts";
 import {
   encodeFrame,
   LineDecoder,
@@ -51,13 +51,17 @@ export interface ToolExecPlaneSettings {
 }
 
 /**
- * Validate the plane config values. An unset key means the host never opted
- * into the plane (hand-built resolved bags in tests/embedded hosts); garbage
- * is a hard config error -- a security posture must never fail open silently.
+ * Validate the plane config values. Both keys are schema-owned
+ * (core.config.json); production resolution (resolveAll) always populates
+ * them, so an unset key means the host never ran resolution -- a hard config
+ * error, like garbage: a security posture must never pick a mode silently.
+ * (Deliberately no getLayerDefault fallback either: the schema default is
+ * "worker", which would boot broker machinery in hosts that never opted in;
+ * the old unset-means-inline reading was a code-resident backup default.)
  */
 export function toolExecPlaneSettings(resolved: Record<string, unknown>): ToolExecPlaneSettings {
-  const mode = resolved.toolExec ?? "inline";
-  const fence = resolved.execFence ?? "probe";
+  const mode = resolved.toolExec;
+  const fence = resolved.execFence;
   if (mode !== "worker" && mode !== "inline") {
     throw new ConfigError(`toolExec must be "worker" or "inline", got ${JSON.stringify(resolved.toolExec)}`);
   }
@@ -233,7 +237,7 @@ export interface ToolExecBrokerOptions {
   /**
    * Idle time before the broker drops a pool entry. Passed to the child as
    * argv (the fence is argv; so is every knob the child needs). Test seam --
-   * production uses DEFAULT_IDLE_REAP_MS via sharedToolExecBroker().
+   * unset takes tool-exec-layout's default via idleReapMsOrDefault().
    */
   idleReapMs?: number;
   /** See DEFAULT_RESPAWN_CAP. Test seam. */
@@ -469,7 +473,7 @@ export class ToolExecBroker implements ToolExecLink {
         this.#opts.execPath ?? process.execPath,
         [
           this.#opts.brokerEntry ?? BROKER_ENTRY,
-          `--idle-reap-ms=${this.#opts.idleReapMs ?? DEFAULT_IDLE_REAP_MS}`,
+          `--idle-reap-ms=${idleReapMsOrDefault(this.#opts.idleReapMs)}`,
         ],
         {
           stdio: ["pipe", "pipe", "pipe"],

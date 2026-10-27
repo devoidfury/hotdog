@@ -1,7 +1,6 @@
 import { logger } from "@utils/logger.ts";
 import { formatError } from "../error.ts";
 import { loadProfileFile, type ProfileManager } from "../config/profiles.ts";
-import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { ModelConfig } from "../config/providers.ts";
 import {
   modelInCatalog,
@@ -39,7 +38,7 @@ export class TaskScheduler {
   #env: SchedulerEnv;
   #taskProfile: string;
   #profileManager: ProfileManager | undefined;
-  #config: CoreConfigWithExtensions;
+  #profilesPath?: string;
   #modelRegistry: Record<string, ModelConfig>;
   /** Per-lane caps: global taskLanesPerProvider default + provider taskLanes overrides (shared resolution with session turns). */
   #laneCaps: LaneCaps;
@@ -61,7 +60,8 @@ export class TaskScheduler {
     env: SchedulerEnv;
     taskProfile: string;
     profileManager: ProfileManager | undefined;
-    config: CoreConfigWithExtensions;
+    /** Profiles dir from the resolved config (composition-supplied; no code-side fallback). */
+    profilesPath?: string;
     modelRegistry: Record<string, ModelConfig>;
     laneCaps: LaneCaps;
     buildDefaultModel: string;
@@ -75,7 +75,7 @@ export class TaskScheduler {
     this.#env = options.env;
     this.#taskProfile = options.taskProfile;
     this.#profileManager = options.profileManager;
-    this.#config = options.config;
+    this.#profilesPath = options.profilesPath;
     this.#modelRegistry = options.modelRegistry;
     this.#laneCaps = options.laneCaps;
     this.#buildDefaultModel = options.buildDefaultModel;
@@ -152,7 +152,10 @@ export class TaskScheduler {
     const profileName = options.profile || this.#taskProfile;
     const taskProfile = this.#profileManager
       ? this.#profileManager.getProfile(profileName)
-      : await loadProfileFile(this.#config.profilesPath ?? "", profileName);
+      : // profilesPath is schema-owned (core.config.json, compute default): the
+        // composition chain hands it down resolved. Unset means a hand-built
+        // host with no file-profile layer -- read nothing, never join against "".
+        (this.#profilesPath ? await loadProfileFile(this.#profilesPath, profileName) : null);
 
     // Model admission -> placement plan. pin/group/requires validate against
     // the catalog and fail loud before registration; the legacy chain expands

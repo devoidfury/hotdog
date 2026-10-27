@@ -250,6 +250,10 @@ export function createMockCore(
     profileBody: "",
     activeProvider: null,
     configDir: path.join(os.homedir(), ".config", "hotdog"),
+    // Tool-exec plane keys are schema-owned and required on a resolved bag
+    // (resolveAll always carries them); fixture bags mirror that.
+    toolExec: "inline",
+    execFence: "probe",
     ...config.resolved,
   };
 

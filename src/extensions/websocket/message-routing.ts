@@ -7,7 +7,6 @@ import { getSessionRow } from "@core/session/session-index.ts";
 import { deleteSessionLog, listSessionLogs, readSessionEntries } from "@core/session/session-log.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
 import { getExtensionConfig } from "@core/extensions/types.ts";
-import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import { modelAcceptsImages } from "@core/config/providers.ts";
 import { parseUploadedFiles } from "./uploads.ts";
 import type { AuthMiddleware } from "./auth.ts";
@@ -38,17 +37,21 @@ import { MAX_COMPLETE_LINE, MAX_TRANSCRIBE_AUDIO_BYTES, MAX_TRANSCRIBE_BASE64_CH
  * Upload size limits, reused from the fileAttachment extension config
  * (its schema defaults: 100KB per text file, 10MB per image, 10 files per message).
  * uploads and @refs share one ceiling, including the separate image budget (fileAttachment.maxImageSize).
+ * websocket declares dependsOn: ["file-attachment"], so the load set always
+ * carries the resolved fileAttachment block; excluding the dependency is a
+ * config error (the loader drops unresolved deps from ordering), surfaced as
+ * missing keys here rather than papered over with backup defaults.
  */
-function uploadLimits(core: CoreContext): { maxFileSize: number; maxImageSize: number; maxFiles: number } {
-  const cfg = getExtensionConfig<{ maxFileSize?: number; maxImageSize?: number; maxFiles?: number }>(
+export function uploadLimits(core: CoreContext): { maxFileSize: number; maxImageSize: number; maxFiles: number } {
+  const cfg = getExtensionConfig<{ maxFileSize: number; maxImageSize: number; maxFiles: number }>(
     core,
     "fileAttachment",
   );
 
   return {
-    maxFileSize: typeof cfg.maxFileSize === "number" ? cfg.maxFileSize : 102400,
-    maxImageSize: typeof cfg.maxImageSize === "number" ? cfg.maxImageSize : DEFAULT_MAX_IMAGE_SIZE,
-    maxFiles: typeof cfg.maxFiles === "number" ? cfg.maxFiles : 10,
+    maxFileSize: cfg.maxFileSize,
+    maxImageSize: cfg.maxImageSize,
+    maxFiles: cfg.maxFiles,
   };
 }
 

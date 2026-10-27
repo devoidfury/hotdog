@@ -235,6 +235,12 @@ export interface SpawnTaskOptions {
 export interface TaskManagerOptions {
   modelRegistry: Record<string, ModelConfig>;
   config: CoreConfigWithExtensions;
+  /**
+   * Resolved profiles dir (resolved config: profilesPath, compute default).
+   * Used when no ProfileManager is injected: task profiles load from this dir.
+   * Hand-built hosts may carry it on the config bag instead.
+   */
+  profilesPath?: string;
   sessionManager?: TaskManagerSessionManager | null;
   profileManager?: ProfileManager;
   /** Override the llama-swap /running peek (tests, exotic transports). */

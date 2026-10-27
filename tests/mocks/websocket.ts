@@ -60,6 +60,10 @@ export function createWsMockCore(): any {
     showTokenUse: true,
     profileName: "default",
     modelRegistry: { "test-model": {} },
+    // Plane keys are schema-owned and required on a resolved bag; the mock
+    // stands in for a resolved host, so it carries them like resolveAll does.
+    toolExec: "inline",
+    execFence: "probe",
   };
   return {
     hooks: {
@@ -75,7 +79,12 @@ export function createWsMockCore(): any {
       },
     },
     _registeredHooks: registeredHooks,
-    config: {},
+    // Resolved fileAttachment block (schema defaults as plain literals):
+    // the websocket upload path consumes it and declares dependsOn
+    // ["file-attachment"], so a real resolved host always carries it.
+    config: {
+      fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 },
+    },
     completion: createCompletionService(),
     resolved,
     toolRegistry: {

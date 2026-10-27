@@ -39,6 +39,10 @@ const resolved = {
   toolRetryDelay: 1,
   workspaceRoots: ["/tmp"],
   workspaceDeny: ["secrets*"],
+  // Tool-exec plane keys are schema-owned and required on the resolved bag
+  // (production resolveAll always carries them); hand-built bags set them.
+  toolExec: "inline",
+  execFence: "probe",
 };
 
 describe("createAgentFactory", () => {

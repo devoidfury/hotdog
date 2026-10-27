@@ -157,8 +157,12 @@ export function createCore(
       return new LlmClient({
         baseUrl: resolved?.baseUrl ?? null,
         apiKey: resolved?.apiKey ?? null,
-        chatTimeoutSecs: resolved?.chatTimeout ?? 30,
-        healthCheckTimeoutSecs: resolved?.healthCheckTimeout ?? 5,
+        // Schema-default fallbacks (core.config.json layers), same doctrine as
+        // maxRetries below: hand-built resolved bags stay valid without
+        // code-resident literals. Note: the chatTimeout schema default is 600.
+        chatTimeoutSecs: resolved?.chatTimeout ?? (getLayerDefault(CONFIG_SCHEMA.chatTimeout) as number),
+        healthCheckTimeoutSecs:
+          resolved?.healthCheckTimeout ?? (getLayerDefault(CONFIG_SCHEMA.healthCheckTimeout) as number),
         streamIdleTimeoutSecs: resolved?.streamIdleTimeout as number | undefined,
         // Schema default (core.config.json) as fallback when resolved is
         // unset; ?? so an explicit 0 (no retries) survives.

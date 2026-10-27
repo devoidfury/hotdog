@@ -9,7 +9,6 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import { createWebuiServer } from "@extensions/webui/server.ts";
 import type { createWsServer } from "@extensions/websocket/server.ts";
-import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
 import { createMockCore as createBaseMockCore } from "../test-helpers.ts";
@@ -18,6 +17,10 @@ import {
   systemFirstRoleMapping,
   developerRoleMapping,
 } from "@extensions/role-mapping-default/index.ts";
+
+// The schema default for fileAttachment.maxImageSize (10MB), mirrored as a
+// plain literal -- tests hand the resolved value, not a DEFAULT_ import.
+const MAX_IMAGE_SIZE = 10485760;
 
 const testRoleReg = createRoleMappingRegistry();
 testRoleReg.register(systemFirstRoleMapping);
@@ -28,6 +31,9 @@ function createMockCore() {
     config: {
       websocket: { sessionTimeoutMin: 30, questionTimeoutSecs: 300, questionStrategy: "wait" },
       webui: {},
+      // Resolved fileAttachment block (schema defaults as plain literals):
+      // the transport frame bound and the upload caps both read it.
+      fileAttachment: { maxFileSize: 102400, maxImageSize: MAX_IMAGE_SIZE, maxFiles: 10 },
     },
     resolved: {
       profilesPath: "./config/profiles",
@@ -176,7 +182,7 @@ describe("webui ws maxPayloadLength", () => {
       enqueued.push({ sid, content, opts });
     }) as never;
 
-    ws.send(imageFrameWithId(sessionId, DEFAULT_MAX_IMAGE_SIZE));
+    ws.send(imageFrameWithId(sessionId, MAX_IMAGE_SIZE));
     // The transport bound must not close the socket first. Wait for the
     // enqueue (parse+decode of 10 MiB lands well inside the deadline), then
     // a short settle so a late ERROR frame or socket close would arrive.
@@ -188,7 +194,7 @@ describe("webui ws maxPayloadLength", () => {
 
     expect(enqueued).toHaveLength(1);
     const opts = enqueued[0]!.opts as { images: Array<{ data: string }> };
-    expect(opts.images[0]!.data).toHaveLength(4 * Math.ceil(DEFAULT_MAX_IMAGE_SIZE / 3));
+    expect(opts.images[0]!.data).toHaveLength(4 * Math.ceil(MAX_IMAGE_SIZE / 3));
     expect(received.some((m) => m.type === S2C.ERROR)).toBe(false);
     expect(ws.readyState).toBe(WebSocket.OPEN);
     ws.close();
@@ -201,7 +207,7 @@ describe("webui ws maxPayloadLength", () => {
     // (the app-level image cap expanded + envelope headroom): the frame must
     // die at the transport. Pre-bound, this arrived and the app parser
     // answered "Upload rejected ... too large" on a live socket.
-    const overBound = Math.ceil(DEFAULT_MAX_IMAGE_SIZE * 1.16);
+    const overBound = Math.ceil(MAX_IMAGE_SIZE * 1.16);
     ws.send(imageFrameWithId(sessionId, overBound));
 
     const deadline = Date.now() + 5000;

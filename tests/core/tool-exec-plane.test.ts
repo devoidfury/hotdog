@@ -236,20 +236,25 @@ describe("ToolExecutor plane fork", () => {
 // ── Config-surface validation ─────────────────────────────────────
 
 describe("toolExecPlaneSettings", () => {
-  it("treats unset as inline (hosts without the plane) and validates values loudly", () => {
-    expect(toolExecPlaneSettings({})).toEqual({ mode: "inline", fence: "probe" });
+  it("requires the schema-owned keys and validates values loudly (no code-side defaults)", () => {
+    // Unset keys are a resolution failure, not an opt-out: loud ConfigError.
+    expect(() => toolExecPlaneSettings({})).toThrow(/toolExec/);
+    expect(() => toolExecPlaneSettings({ toolExec: "inline" })).toThrow(/execFence/);
     expect(toolExecPlaneSettings({ toolExec: "worker", execFence: "off" })).toEqual({
       mode: "worker",
       fence: "off",
     });
-    expect(() => toolExecPlaneSettings({ toolExec: "workers" })).toThrow(/toolExec/);
-    expect(() => toolExecPlaneSettings({ execFence: "require" })).toThrow(/execFence/);
+    expect(toolExecPlaneSettings({ toolExec: "inline", execFence: "probe" })).toEqual({
+      mode: "inline",
+      fence: "probe",
+    });
+    expect(() => toolExecPlaneSettings({ toolExec: "workers", execFence: "probe" })).toThrow(/toolExec/);
+    expect(() => toolExecPlaneSettings({ toolExec: "inline", execFence: "require" })).toThrow(/execFence/);
   });
 
   it("labels the posture without silence: inline is 'unfenced', worker is 'fence: none' until increment 3", () => {
-    expect(toolExecModeLabel({})).toBe("inline (unfenced)");
-    expect(toolExecModeLabel({ toolExec: "inline" })).toBe("inline (unfenced)");
-    expect(toolExecModeLabel({ toolExec: "worker" })).toBe("worker (fence: none)");
+    expect(toolExecModeLabel({ toolExec: "inline", execFence: "probe" })).toBe("inline (unfenced)");
+    expect(toolExecModeLabel({ toolExec: "worker", execFence: "probe" })).toBe("worker (fence: none)");
   });
 });
 
@@ -257,7 +262,7 @@ describe("toolExecPlaneSettings", () => {
 
 describe("pilot tool tags", () => {
   it("tags only the increment-1 pilots: bash, read, grep", () => {
-    const read = new ReadTool({ readLimit: 10 });
+    const read = new ReadTool({ readLimit: 10, maxImageSize: 10485760 });
     const grep = new GrepTool({ maxResults: 10, maxOutputLines: 10 });
     const bash = new BashTool({ timeoutMs: 1000, maxOutputLines: 10 });
     expect(bash.metadata.execution).toBe("worker");
@@ -441,11 +446,11 @@ describe("ToolExecutor inline abortSignal", () => {
 
 describe("toolExecModeLabel degraded flag", () => {
   it("marks a degraded worker plane and keeps inline honest but unmarked", () => {
-    expect(toolExecModeLabel({ toolExec: "worker" }, true)).toContain("degraded");
-    expect(toolExecModeLabel({ toolExec: "worker" }, true)).toContain("worker (fence: none)");
+    expect(toolExecModeLabel({ toolExec: "worker", execFence: "probe" }, true)).toContain("degraded");
+    expect(toolExecModeLabel({ toolExec: "worker", execFence: "probe" }, true)).toContain("worker (fence: none)");
     // Inline has no broker, so it can never be degraded.
-    expect(toolExecModeLabel({ toolExec: "inline" }, true)).toBe("inline (unfenced)");
-    expect(toolExecModeLabel({ toolExec: "worker" })).toBe("worker (fence: none)");
+    expect(toolExecModeLabel({ toolExec: "inline", execFence: "probe" }, true)).toBe("inline (unfenced)");
+    expect(toolExecModeLabel({ toolExec: "worker", execFence: "probe" })).toBe("worker (fence: none)");
   });
 });
 

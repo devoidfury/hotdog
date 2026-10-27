@@ -17,6 +17,11 @@
           "default": 500,
           "description": "Default maximum lines for the read tool"
         },
+        "maxImageSize": {
+          "type": "number",
+          "default": 10485760,
+          "description": "Maximum image file size in bytes the read tool will inline"
+        },
         "findMaxResults": {
           "type": "number",
           "default": 200,

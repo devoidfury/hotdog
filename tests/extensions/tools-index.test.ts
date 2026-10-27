@@ -8,6 +8,7 @@ import { ToolRegistry } from "@core/extensions/tool-registry.ts";
 // Mirrors the configSchema defaults in core-tools/extension.json
 const config = {
   readToolLimit: 500,
+  maxImageSize: 10485760,
   maxEditInputSize: 16000,
   grepMaxResults: 100,
   findMaxResults: 200,

@@ -22,7 +22,7 @@ describe('ProjectInfoTool', () => {
   });
 
   it('generates tool definition', () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const def = tool.toToolDef();
     expect(def.function.name).toBe('project_info');
     // No required fields
@@ -30,46 +30,46 @@ describe('ProjectInfoTool', () => {
   });
 
   it('returns directory not found for non-existent path inside the workspace', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: path.join(tmpDir, 'no-such-dir') }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('Directory not found');
   });
 
   it('rejects paths that escape the workspace', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: '/etc' }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('Path escape rejected');
   });
 
   it('returns info for current directory', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
 
   it('handles object input', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute({ path: tmpDir }, toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('handles non-git directory (falls back to partial info)', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     // Should return partial info since tmpDir is not a git repo
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('returns a clean parse error for unparseable input', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute('not json at all', toolCtx({ workspaceRoots: [tmpDir] }));
     expect(result.success).toBe(false);
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
 
   it('returns a clean parse error for null input instead of throwing', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(null, toolCtx({ workspaceRoots: [tmpDir] }));
     expect(result.success).toBe(false);
     expect(resultStr(result)).toContain('Error parsing arguments');
@@ -80,7 +80,7 @@ describe('ProjectInfoTool', () => {
     fs.mkdirSync(sub, { recursive: true });
     fs.writeFileSync(path.join(sub, 'a.txt'), 'x');
 
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(
       JSON.stringify({ path: tmpDir, max_depth: 'abc', max_files: -5 }),
       toolCtx({ workspaceRoots: [tmpDir] })
@@ -108,21 +108,21 @@ describe('ProjectInfoTool language detection', () => {
 
   it('detects JavaScript files', async () => {
     fs.writeFileSync(path.join(tmpDir, 'test.js'), '');
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('JavaScript');
   });
 
   it('detects TypeScript files', async () => {
     fs.writeFileSync(path.join(tmpDir, 'test.ts'), '');
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('TypeScript');
   });
 
   it('detects Markdown files', async () => {
     fs.writeFileSync(path.join(tmpDir, 'readme.md'), '');
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('Markdown');
   });
@@ -131,7 +131,7 @@ describe('ProjectInfoTool language detection', () => {
 // Test git-related behavior through public API
 describe('ProjectInfoTool > git behavior', () => {
   it('shows git repo info when run in a git repo', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: process.cwd() }), toolCtx({ workspaceRoots: [process.cwd()] }));
     const output = resultStr(result);
     expect(output).toContain('git');
@@ -141,7 +141,7 @@ describe('ProjectInfoTool > git behavior', () => {
   it('shows partial info for non-git directory', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-git-'));
     try {
-      const tool = new ProjectInfoTool();
+      const tool = new ProjectInfoTool({ maxFiles: 100 });
       const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
       const output = resultStr(result);
       expect(output).toContain('not a git repo');
@@ -169,7 +169,7 @@ describe('ProjectInfoTool > directory walking', () => {
     fs.mkdirSync(path.join(tmpDir, 'subdir'));
     fs.writeFileSync(path.join(tmpDir, 'subdir', 'file3.ts'), '');
 
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     const output = resultStr(result);
     expect(output).toContain('file1.ts');
@@ -182,7 +182,7 @@ describe('ProjectInfoTool > directory walking', () => {
       fs.writeFileSync(path.join(tmpDir, `file${i}.ts`), '');
     }
 
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: tmpDir, max_files: 3 }), toolCtx({ workspaceRoots: [tmpDir] }));
     const output = resultStr(result);
     // In non-git mode, max_files limits files collected (no "and X more" since total unknown)
@@ -202,7 +202,7 @@ describe('ProjectInfoTool > directory walking', () => {
     const prevCwd = process.cwd();
     process.chdir(otherDir);
     try {
-      const tool = new ProjectInfoTool();
+      const tool = new ProjectInfoTool({ maxFiles: 100 });
       const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
       const output = resultStr(result);
       expect(output).toContain('  rel1.ts');
@@ -228,7 +228,7 @@ describe('ProjectInfoTool > directory sizes', () => {
       fs.writeFileSync(path.join(repoDir, 'sub', 'file.txt'), 'x');
       execSync('git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm init', { cwd: repoDir });
 
-      const tool = new ProjectInfoTool();
+      const tool = new ProjectInfoTool({ maxFiles: 100 });
       const result = await tool.execute(JSON.stringify({ path: repoDir }), toolCtx({ workspaceRoots: [repoDir] }));
       expect(resultStr(result)).toContain('Directories');
     } finally {
@@ -250,25 +250,25 @@ describe('ProjectInfoTool > execute edge cases', () => {
   });
 
   it('handles object input with path', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute({ path: tmpDir }, toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('handles empty object input', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute({}, toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('handles max_depth parameter', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: tmpDir, max_depth: 2 }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('handles max_files parameter', async () => {
-    const tool = new ProjectInfoTool();
+    const tool = new ProjectInfoTool({ maxFiles: 100 });
     const result = await tool.execute(JSON.stringify({ path: tmpDir, max_files: 10 }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });

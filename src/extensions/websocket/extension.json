@@ -2,6 +2,7 @@
   "name": "websocket",
   "provides": [],
   "loadOrder": 10,
+  "dependsOn": ["file-attachment"],
   "description": "WebSocket server for agent session management — provides core backend utility for UI extensions",
   "autoload": true,
   "configSchema": {

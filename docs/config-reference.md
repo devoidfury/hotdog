@@ -1167,6 +1167,7 @@ Bash commands run with the user's own permissions -- nothing mediates a running 
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `maxBodyLength` | `number` | `20000` | Maximum number of characters to return before truncating responses. |
+| `maxImageSize` | `number` | `10485760` | Maximum image response size in bytes returned as an attachment (default: 10MB). Larger images are rejected outright. |
 | `fetchTimeoutMs` | `number` | `30000` | Timeout in milliseconds for requests (headers and body). Slow or dead hosts abort instead of hanging the agent. |
 | `allowedSchemes` | `string[]` | `["http", "https"]` | URL schemes the fetch tool may use. Blocks `file://` (local file reads) and other schemes by default. |
 | `allowPrivateHosts` | `boolean` | `false` | Allow hosts that are, or resolve to, private/reserved addresses (localhost, RFC1918, link-local/metadata, ULA, CGNAT). Default `false` blocks SSRF against local and cloud-internal services. Env `HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS` (truthy/falsy cast: `1`/`0`/`true`/`false`/`on`/`off`) overrides the config file for a single process; used by eval tasks that fetch a local fixture webapp. |
@@ -1207,6 +1208,7 @@ Notes on `pass-the-baton`:
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `readToolLimit` | `number` | `500` | Max lines for the `read` tool. |
+| `maxImageSize` | `number` | `10485760` | Maximum image file size in bytes the `read` tool will inline (default: 10MB). |
 | `findMaxResults` | `number` | `200` | Max results for the `find` tool. |
 | `grepMaxResults` | `number` | `100` | Max results for the `grep` tool. |
 | `maxEditInputSize` | `number` | `16000` | Max edit input size (oldString + newString) in characters. |

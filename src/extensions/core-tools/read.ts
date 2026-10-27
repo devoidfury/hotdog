@@ -13,7 +13,6 @@ import { correctCommonPathMistakes } from "@utils/file-utils.ts";
 import { PathEscapeError } from "@utils/workspace.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { AssistantRetryableError } from "@core/error.ts";
-import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.ts";
 import { ToolContext } from "@core/extensions/types.ts";
 
 /**
@@ -32,7 +31,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 
 interface ReadToolOptions {
   readLimit: number;
-  maxImageSize?: number;
+  maxImageSize: number;
 }
 
 
@@ -50,9 +49,8 @@ export class ReadTool {
   private readonly maxImageSize: number;
 
   constructor(options: ReadToolOptions) {
-
     this.readLimit = options.readLimit;
-    this.maxImageSize = options.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
+    this.maxImageSize = options.maxImageSize;
   }
 
   toToolDef() {

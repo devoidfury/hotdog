@@ -79,6 +79,10 @@ export function createMockCore(
       showTokenUse: true,
       profileName: "default",
       modelRegistry: {},
+      // Tool-exec plane keys are schema-owned and required on a resolved bag
+      // (resolveAll always carries them); fixture defaults mirror that.
+      toolExec: "inline",
+      execFence: "probe",
       ...resolvedOverride,
     },
     toolRegistry: {

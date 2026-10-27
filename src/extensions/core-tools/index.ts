@@ -24,7 +24,6 @@ import { GrepTool } from "./grep.ts";
 import { FindTool } from "./find.ts";
 import { ProjectInfoTool } from "./project-info.ts";
 import { ExploreTool } from "./explore.ts";
-import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.ts";
 
 interface ToolDescriptor {
   name: string;
@@ -48,6 +47,7 @@ export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
 
 interface CoreToolConfig {
   readToolLimit: number;
+  maxImageSize: number;
   maxEditInputSize: number;
   grepMaxResults: number;
   findMaxResults: number;
@@ -60,7 +60,7 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
   read: (config) =>
     new ReadTool({
       readLimit: config.readToolLimit,
-      maxImageSize: DEFAULT_MAX_IMAGE_SIZE,
+      maxImageSize: config.maxImageSize,
     }),
   edit: (config) =>
     new EditTool({
@@ -77,7 +77,9 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
       maxOutputLines: config.maxToolOutputLines,
     }),
   explore: () => new ExploreTool(),
-  project_info: () => new ProjectInfoTool(),
+  // project_info's file-listing ceiling reuses grepMaxResults (it was the
+  // shared grep cap constant; the schema-owned value plumbs through now).
+  project_info: (config) => new ProjectInfoTool({ maxFiles: config.grepMaxResults }),
 };
 
 interface ToolFactory {
@@ -153,9 +155,5 @@ export function create(core: CoreContext): ExtensionInstance {
     // Expose for external use
     TOOL_DESCRIPTORS,
     CORE_TOOL_NAMES,
-    // Re-export defaults for tools that need them (non-configurable)
-    defaults: {
-      DEFAULT_MAX_IMAGE_SIZE,
-    },
   };
 }

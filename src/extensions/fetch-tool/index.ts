@@ -11,7 +11,6 @@ import {
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { modelAcceptsImages } from "@core/config/providers.ts";
-import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import { htmlToMarkdown } from "@utils/html-to-markdown.ts";
 import { TransientError } from "@core/error.ts";
 import { HOOKS } from "@core/hooks.ts";
@@ -21,8 +20,6 @@ import {
   type ToolContext,
   getExtensionConfig,
 } from "@core/extensions/types.ts";
-
-const DEFAULT_ALLOWED_SCHEMES = ["http", "https"];
 
 /**
  * Content negotiation: hotdog converts HTML to markdown, but servers that
@@ -67,8 +64,13 @@ interface ParseResult {
 interface FetchToolOptions {
   timeoutMs: number;
   maxBodyLength: number;
-  /** URL schemes permitted by the fetch tool. Defaults to http/https. */
-  allowedSchemes?: string[];
+  /**
+   * Image response cap in bytes; larger images are rejected. Schema-owned:
+   * fetchTool.maxImageSize.
+   */
+  maxImageSize: number;
+  /** URL schemes permitted by the fetch tool (schema-owned: fetchTool.allowedSchemes). */
+  allowedSchemes: string[];
   /**
    * When false (default), hosts that are -- or resolve to -- private or
    * reserved addresses (loopback, RFC1918, link-local/metadata, ULA, CGNAT,
@@ -83,13 +85,15 @@ export class FetchTool {
 
   readonly timeoutMs: number;
   readonly maxBodyLength: number;
+  readonly maxImageSize: number;
   readonly allowedSchemes: string[];
   readonly allowPrivateHosts: boolean;
 
   constructor(options: FetchToolOptions) {
     this.timeoutMs = options.timeoutMs;
     this.maxBodyLength = options.maxBodyLength;
-    this.allowedSchemes = (options.allowedSchemes ?? DEFAULT_ALLOWED_SCHEMES).map((s) => s.toLowerCase());
+    this.maxImageSize = options.maxImageSize;
+    this.allowedSchemes = options.allowedSchemes.map((s) => s.toLowerCase());
     this.allowPrivateHosts = options.allowPrivateHosts ?? false;
   }
 
@@ -168,7 +172,7 @@ export class FetchTool {
       // Must run before readCappedBody (utf-8 decoding corrupts binary) and before any bytes are read the vision gate rejects
       const imageMime = imageMimeFor(contentType);
       if (imageMime) {
-        return await readImageResponse(resp, imageMime, url, method, reason, ctx);
+        return await readImageResponse(resp, imageMime, url, method, reason, this.maxImageSize, ctx);
       }
 
       // Hard cap on what we read, so a huge or never-ending response cannot exhaust memory before the display cap applies.
@@ -342,6 +346,7 @@ async function readImageResponse(
   url: string,
   method: string,
   reason: string,
+  maxImageSize: number,
   ctx?: ToolContext,
 ): Promise<ToolResult> {
   const baseEntries = {
@@ -362,10 +367,10 @@ async function readImageResponse(
     ).withEntries(baseEntries);
   }
 
-  const { bytes } = await readCappedBytes(resp, DEFAULT_MAX_IMAGE_SIZE);
+  const { bytes } = await readCappedBytes(resp, maxImageSize);
   if (!bytes) {
     return ToolResult.err(
-      `Image response too large (max ${Math.round(DEFAULT_MAX_IMAGE_SIZE / 1024 / 1024)}MB): ${url}`,
+      `Image response too large (max ${Math.round(maxImageSize / 1024 / 1024)}MB): ${url}`,
     ).withEntries(baseEntries);
   }
 
@@ -615,14 +620,16 @@ export function create(core: CoreContext): ExtensionInstance {
   // (allowPrivateHosts carries the HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS env layer there)
   const config = getExtensionConfig<{
     maxBodyLength: number;
+    maxImageSize: number;
     fetchTimeoutMs: number;
-    allowedSchemes?: string[];
+    allowedSchemes: string[];
     allowPrivateHosts?: boolean;
   }>(core, "fetchTool");
   const fetchTool = new FetchTool({
     maxBodyLength: config.maxBodyLength,
     timeoutMs: config.fetchTimeoutMs,
-    allowedSchemes: config.allowedSchemes ?? DEFAULT_ALLOWED_SCHEMES,
+    maxImageSize: config.maxImageSize,
+    allowedSchemes: config.allowedSchemes,
     allowPrivateHosts: config.allowPrivateHosts ?? false,
   });
 

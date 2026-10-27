@@ -16,7 +16,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { logger } from "@utils/logger.ts";
 import { formatError } from "./error.ts";
-import { DEFAULT_IDLE_REAP_MS, PROJECT_ROOT, RUNNER_ENTRY } from "./tool-exec-layout.ts";
+import { idleReapMsOrDefault, PROJECT_ROOT, RUNNER_ENTRY } from "./tool-exec-layout.ts";
 import {
   encodeFrame,
   LineDecoder,
@@ -60,12 +60,15 @@ function writeSupervisor(frame: unknown): void {
  * broker child.
  */
 function parseBrokerArgs(argv: string[]): { idleReapMs: number } {
-  let idleReapMs = DEFAULT_IDLE_REAP_MS;
+  let idleReapMs: number | undefined;
   for (const arg of argv) {
     const m = /^--idle-reap-ms=(\d+)$/.exec(arg);
     if (m) idleReapMs = Number(m[1]);
   }
-  return { idleReapMs };
+  // The supervisor always emits the flag; a missing one (older supervisor,
+  // hand-spawned child) takes the layout module's shared default rather than
+  // dying before the "ready" frame -- same leniency as ignoring unknown flags.
+  return { idleReapMs: idleReapMsOrDefault(idleReapMs) };
 }
 
 function runBroker(): void {

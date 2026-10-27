@@ -129,6 +129,8 @@ export interface SessionManagerOptions {
     healthCheckTimeoutSecs?: number;
     /** Resolved contextLimit: fallback for the health catalog piggyback's new entries. */
     healthContextLimit?: number;
+    /** Resolved profilesPath: profiles dir for task profile loads without a ProfileManager. */
+    profilesPath?: string;
   } | null;
   extensions?: unknown;
   profileManager?: ProfileManager;
@@ -217,6 +219,7 @@ export class SessionManager {
         healthIntervalSecs: options.taskConfig.healthIntervalSecs,
         healthCheckTimeoutSecs: options.taskConfig.healthCheckTimeoutSecs,
         healthContextLimit: options.taskConfig.healthContextLimit,
+        profilesPath: options.taskConfig.profilesPath,
         profileManager: options.profileManager,
       });
 
@@ -550,5 +553,6 @@ export function buildTaskConfigOptions(resolved: ResolvedConfig): SessionManager
     healthIntervalSecs: resolved.providerHealthCheckIntervalSecs,
     healthCheckTimeoutSecs: resolved.healthCheckTimeout,
     healthContextLimit: resolved.contextLimit,
+    profilesPath: resolved.profilesPath,
   }
 }

@@ -13,7 +13,7 @@ import {
 } from "./model-resolver.ts";
 import { LaneLedger } from "./lane-ledger.ts";
 import { SpawnLog, type OrphanedTask } from "./spawn-log.ts";
-import { DEFAULT_LANES_RETRY_MS } from "./turn-lanes.ts";
+import { resolveLanesRetryMs } from "./turn-lanes.ts";
 import { makeProviderHealth, type ProviderHealth } from "./provider-health.ts";
 import { TaskScheduler } from "./task-scheduler.ts";
 import { TaskExecution } from "./task-execution.ts";
@@ -102,10 +102,7 @@ export class TaskManager {
             .join(",") || "none"
         }`,
     );
-    const lanesRetryMs =
-      typeof options.lanesRetryMs === "number" && options.lanesRetryMs >= 1
-        ? options.lanesRetryMs
-        : DEFAULT_LANES_RETRY_MS;
+    const lanesRetryMs = resolveLanesRetryMs(options);
     this.#tasks = new Map();
     this.#spawnLog = options.spawnLogPath
       ? new SpawnLog(options.spawnLogPath, options.spawnLogPidAlive)
@@ -139,7 +136,9 @@ export class TaskManager {
       },
       taskProfile: options.taskProfile,
       profileManager: options.profileManager,
-      config: this.#config,
+      // The scheduler's profile-file branch needs the resolved profiles dir;
+      // the explicit option wins, else the value riding the config bag.
+      profilesPath: options.profilesPath ?? this.#config.profilesPath,
       modelRegistry,
       laneCaps,
       buildDefaultModel,

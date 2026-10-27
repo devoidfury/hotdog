@@ -5,7 +5,7 @@
 import { describe, it, expect, afterEach, afterAll, beforeEach } from "bun:test";
 import { createWsServer } from "@extensions/websocket/server.ts";
 import {
-  WS_MAX_PAYLOAD_BYTES,
+  wsMaxPayloadBytes,
   MAX_TRANSCRIBE_AUDIO_BYTES,
   MAX_TRANSCRIBE_BASE64_CHARS,
 } from "@extensions/websocket/constants.ts";
@@ -148,7 +148,9 @@ describe("websocket transcribe", () => {
     // recordings die at the transport again instead of answering "audio too
     // large" -- the exact failure this alignment fixed. Same 1 MiB envelope
     // headroom the 10 MB image upload enjoys.
-    expect(MAX_TRANSCRIBE_BASE64_CHARS).toBe(WS_MAX_PAYLOAD_BYTES - 1024 * 1024);
+    // 10485760 = the resolved fileAttachment.maxImageSize default, handed as
+    // the plain literal the frame bound is computed from.
+    expect(MAX_TRANSCRIBE_BASE64_CHARS).toBe(wsMaxPayloadBytes(10485760) - 1024 * 1024);
     expect(MAX_TRANSCRIBE_AUDIO_BYTES).toBe(10 * 1024 * 1024);
   });
 

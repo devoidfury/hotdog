@@ -27,7 +27,6 @@ import { Workspace } from "@utils/workspace.ts";
 import { BashTool } from "@extensions/bash-tool/index.ts";
 import { ReadTool } from "@extensions/core-tools/read.ts";
 import { GrepTool } from "@extensions/core-tools/grep.ts";
-import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 
 /**
  * Tool name -> constructor from wire ctx scalars. Mirrors each extension's
@@ -51,7 +50,7 @@ const TOOL_FACTORIES: Record<string, (cfg: WireToolConfig) => Tool> = {
     const c = cfg.coreTools ?? {};
     return new ReadTool({
       readLimit: reqNum(c.readToolLimit, "coreTools.readToolLimit"),
-      maxImageSize: DEFAULT_MAX_IMAGE_SIZE,
+      maxImageSize: reqNum(c.maxImageSize, "coreTools.maxImageSize"),
     });
   },
   grep: (cfg) => {

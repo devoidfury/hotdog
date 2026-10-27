@@ -34,7 +34,19 @@ import { LaneLedger, type LaneLease } from "./lane-ledger.ts";
 import { laneKeyOf, makeLaneCaps } from "./model-resolver.ts";
 
 /** Default interval between full-lane retry attempts (shared with TaskManager). */
-export const DEFAULT_LANES_RETRY_MS = 2000;
+const DEFAULT_LANES_RETRY_MS = 2000;
+
+/**
+ * Normalize a `lanesRetryMs` option to the retry interval this module owns:
+ * a number >= 1 wins, anything else (unset, < 1, non-number) takes the
+ * default. Single home for the guard so consumers (createTurnLanes,
+ * TaskManager) apply identical behavior without importing the constant.
+ */
+export function resolveLanesRetryMs(options: { lanesRetryMs?: number }): number {
+  return typeof options.lanesRetryMs === "number" && options.lanesRetryMs >= 1
+    ? options.lanesRetryMs
+    : DEFAULT_LANES_RETRY_MS;
+}
 
 export interface TurnLanesOptions {
   /** Cross-process ledger dir (resolved taskLanesDir); null/unset disables coordination. */
@@ -82,10 +94,7 @@ function sleepOrAbort(ms: number, signal: AbortSignal): Promise<void> {
 export function createTurnLanes(options: TurnLanesOptions): TurnLanes {
   const caps = makeLaneCaps(options.lanesPerProvider, options.providerDefs ?? []);
   const ledger = options.lanesDir ? new LaneLedger({ dir: options.lanesDir }) : null;
-  const retryMs =
-    typeof options.lanesRetryMs === "number" && options.lanesRetryMs >= 1
-      ? options.lanesRetryMs
-      : DEFAULT_LANES_RETRY_MS;
+  const retryMs = resolveLanesRetryMs(options);
   const noopRelease = async (): Promise<void> => {};
 
   const releaseSafe = async (lease: LaneLease): Promise<void> => {

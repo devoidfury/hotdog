@@ -687,6 +687,8 @@ function createMockCore(overrides: Record<string, unknown> = {}): never {
       profileBody: undefined,
       taskProfile: "task-default",
       modelRegistry: {},
+      toolExec: "inline",
+      execFence: "probe",
       ...(resolved as Record<string, unknown> ?? {}),
     },
     config: {
@@ -1061,6 +1063,8 @@ describe("buildInteractiveAgent", () => {
     maxToolCallsPerIteration: 10,
     maxRetries: 5,
     toolRetryDelay: 1,
+    toolExec: "inline",
+    execFence: "probe",
   };
 
   async function buildAgent(

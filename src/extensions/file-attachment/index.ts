@@ -9,9 +9,6 @@ import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 
 import { matcher, completion } from "./completions.ts";
 import { modelAcceptsImages } from "@core/config/providers.ts";
-// Same 10MB image cap as the read tool: keeping one constant means @refs and
-// read never disagree on which images are attachable.
-import { DEFAULT_MAX_IMAGE_SIZE } from "@extensions/core-tools/defaults.ts";
 import type { ImageAttachment } from "@core/context/message.ts";
 
 // Lookbehind so "tom@furycodes.com" doesn't match; only bare @path refs do.
@@ -200,13 +197,11 @@ async function expandFileReferences(
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
     maxFileSize: number;
-    maxImageSize?: number;
+    maxImageSize: number;
     maxFiles: number;
   }>(core, "fileAttachment");
   const maxFileSize = config.maxFileSize;
-  // Config resolution fills the schema default; the ?? covers standalone
-  // callers (tests) that hand create() a bare core without resolution.
-  const maxImageSize = config.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
+  const maxImageSize = config.maxImageSize;
   const maxFiles = config.maxFiles;
 
   core.completion.register(matcher, completion, "file-attachment:path-completion");

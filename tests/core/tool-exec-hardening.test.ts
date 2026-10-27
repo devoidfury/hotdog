@@ -19,7 +19,7 @@ import { tmpDir, cleanupDir, processAlive, waitForExit } from "../helpers.ts";
 
 const TOOL_CONFIG = {
   bashTool: { bashTimeoutMs: 20000, maxToolOutputLines: 100, maxTimeoutMs: 20000 },
-  coreTools: { readToolLimit: 500, grepMaxResults: 50, maxToolOutputLines: 600 },
+  coreTools: { readToolLimit: 500, maxImageSize: 10485760, grepMaxResults: 50, maxToolOutputLines: 600 },
   envScrubbing: true,
   envScrubExtra: [],
 };

@@ -1,5 +1,6 @@
 import { createWsServer, type CreateWsServerOptions } from "../websocket/server.ts";
-import { WS_MAX_PAYLOAD_BYTES } from "../websocket/constants.ts";
+import { wsMaxPayloadBytes } from "../websocket/constants.ts";
+import { uploadLimits } from "../websocket/message-routing.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { upgradeOriginAllowed, isLoopbackHost } from "../websocket/origin.ts";
 import { DDG_SOLVE_SERVICE } from "../web-search/index.ts";
@@ -18,11 +19,11 @@ interface WebuiWsData {
   url: string;
 }
 
-// Transport frame cap for upgraded sockets: WS_MAX_PAYLOAD_BYTES is derived
-// in the websocket extension (single source: it must stay aligned with the
-// app-level caps -- see there). The bound is applied below on the
-// `websocket:` handler because Bun's root-level maxPayloadLength is ignored
-// in 1.4.2.
+// Transport frame cap for upgraded sockets: wsMaxPayloadBytes() is derived
+// from the resolved fileAttachment.maxImageSize ceiling -- the same value the
+// upload path enforces (single source, see websocket/constants.ts). The bound
+// is applied below on the `websocket:` handler because Bun's root-level
+// maxPayloadLength is ignored in 1.4.2.
 
 export interface WebuiConfig {
   port?: number;
@@ -45,6 +46,10 @@ export async function createWebuiServer(
   options: Pick<CreateWsServerOptions, "buildAgent"> = {},
 ): Promise<WebuiServerResult> {
   const { port, host, apiKey, sessionTokenTtlMin } = config;
+
+  // Frame bound for upgraded sockets, from the same resolved image ceiling
+  // the upload path enforces (see wsMaxPayloadBytes).
+  const frameBound = wsMaxPayloadBytes(uploadLimits(core).maxImageSize);
 
   if (!apiKey) {
     throw ExtensionError.ConfigFailed(
@@ -170,8 +175,8 @@ export async function createWebuiServer(
     },
 
     websocket: {
-      // Frame bound for upgraded sockets (see WS_MAX_PAYLOAD_BYTES).
-      maxPayloadLength: WS_MAX_PAYLOAD_BYTES,
+      // Frame bound for upgraded sockets (see wsMaxPayloadBytes).
+      maxPayloadLength: frameBound,
       open(ws) {
         const { url } = ws.data;
         wsServer.onUpgrade(

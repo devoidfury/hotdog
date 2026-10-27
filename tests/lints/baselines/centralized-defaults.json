@@ -1,67 +1,7 @@
 [
   {
-    "file": "src/core/main.ts",
-    "snippet": "chatTimeoutSecs: resolved?.chatTimeout ?? 30,"
-  },
-  {
-    "file": "src/core/main.ts",
-    "snippet": "healthCheckTimeoutSecs: resolved?.healthCheckTimeout ?? 5,"
-  },
-  {
-    "file": "src/core/session/task-manager.ts",
-    "snippet": "import { DEFAULT_LANES_RETRY_MS } from \"./turn-lanes.ts\";"
-  },
-  {
-    "file": "src/core/session/task-scheduler.ts",
-    "snippet": ": await loadProfileFile(this.#config.profilesPath ?? \"\", profileName);"
-  },
-  {
-    "file": "src/core/tool-exec-broker-main.ts",
-    "snippet": "import { DEFAULT_IDLE_REAP_MS, PROJECT_ROOT, RUNNER_ENTRY } from \"./tool-exec-layout.ts\";"
-  },
-  {
-    "file": "src/core/tool-exec-broker.ts",
-    "snippet": "const fence = resolved.execFence ?? \"probe\";"
-  },
-  {
-    "file": "src/core/tool-exec-broker.ts",
-    "snippet": "const mode = resolved.toolExec ?? \"inline\";"
-  },
-  {
-    "file": "src/core/tool-exec-broker.ts",
-    "snippet": "import { DEFAULT_IDLE_REAP_MS, PROJECT_ROOT, RUNNER_ENTRY } from \"./tool-exec-layout.ts\";"
-  },
-  {
     "file": "src/experimental/show-me/index.ts",
     "snippet": "const imageModel = (config.imageModel ?? \"\").trim();"
-  },
-  {
-    "file": "src/extensions/core-tools/index.ts",
-    "snippet": "import { DEFAULT_MAX_IMAGE_SIZE } from \"./defaults.ts\";"
-  },
-  {
-    "file": "src/extensions/core-tools/project-info.ts",
-    "snippet": "import { DEFAULT_GREP_MAX_RESULTS } from \"./defaults.ts\";"
-  },
-  {
-    "file": "src/extensions/core-tools/read.ts",
-    "snippet": "import { DEFAULT_MAX_IMAGE_SIZE } from \"./defaults.ts\";"
-  },
-  {
-    "file": "src/extensions/fetch-tool/index.ts",
-    "snippet": "allowedSchemes: config.allowedSchemes ?? DEFAULT_ALLOWED_SCHEMES,"
-  },
-  {
-    "file": "src/extensions/fetch-tool/index.ts",
-    "snippet": "import { DEFAULT_MAX_IMAGE_SIZE } from \"@extensions/core-tools/defaults.ts\";"
-  },
-  {
-    "file": "src/extensions/file-attachment/index.ts",
-    "snippet": "const maxImageSize = config.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;"
-  },
-  {
-    "file": "src/extensions/file-attachment/index.ts",
-    "snippet": "import { DEFAULT_MAX_IMAGE_SIZE } from \"@extensions/core-tools/defaults.ts\";"
   },
   {
     "file": "src/extensions/loop-detect/index.ts",
@@ -100,26 +40,6 @@
     "snippet": "resolved.profileName ?? \"default\","
   },
   {
-    "file": "src/extensions/websocket/constants.ts",
-    "snippet": "import { DEFAULT_MAX_IMAGE_SIZE } from \"@extensions/core-tools/defaults.ts\";"
-  },
-  {
-    "file": "src/extensions/websocket/message-routing.ts",
-    "snippet": "import { DEFAULT_MAX_IMAGE_SIZE } from \"@extensions/core-tools/defaults.ts\";"
-  },
-  {
-    "file": "src/extensions/websocket/message-routing.ts",
-    "snippet": "maxFileSize: typeof cfg.maxFileSize === \"number\" ? cfg.maxFileSize : 102400,"
-  },
-  {
-    "file": "src/extensions/websocket/message-routing.ts",
-    "snippet": "maxFiles: typeof cfg.maxFiles === \"number\" ? cfg.maxFiles : 10,"
-  },
-  {
-    "file": "src/extensions/websocket/message-routing.ts",
-    "snippet": "maxImageSize: typeof cfg.maxImageSize === \"number\" ? cfg.maxImageSize : DEFAULT_MAX_IMAGE_SIZE,"
-  },
-  {
     "file": "src/extensions/workflows/engine.ts",
     "snippet": "import { DEFAULT_WORKFLOW_LIMITS, nodeDeps } from \"./workflow.ts\";"
   },
@@ -130,9 +50,5 @@
   {
     "file": "src/utils/approvals/rules.ts",
     "snippet": "const def = cfg?.default ?? \"ask\";"
-  },
-  {
-    "file": "src/workers/tool-exec.ts",
-    "snippet": "import { DEFAULT_MAX_IMAGE_SIZE } from \"@extensions/core-tools/defaults.ts\";"
   }
 ]

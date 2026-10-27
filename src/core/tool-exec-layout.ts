@@ -20,4 +20,14 @@ export const PROJECT_ROOT = fileURLToPath(new URL("../..", import.meta.url));
  * Generous: re-spawn costs ~100ms and only a session that went
  * quiet pays it, so the cheap direction is to keep entries.
  */
-export const DEFAULT_IDLE_REAP_MS = 5 * 60_000;
+const DEFAULT_IDLE_REAP_MS = 5 * 60_000;
+
+/**
+ * Resolve the idle-reap knob: the value the supervisor has (option / argv
+ * flag), else this module's default. The constant stays private here (the
+ * owning-module precedent) so the spawn argv and the child's parse of it
+ * share one default with no drift.
+ */
+export function idleReapMsOrDefault(idleReapMs?: number): number {
+  return idleReapMs ?? DEFAULT_IDLE_REAP_MS;
+}

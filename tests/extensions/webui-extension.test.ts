@@ -28,7 +28,9 @@ describe("WebUI Extension", () => {
     function makeCore(webui: Record<string, unknown>) {
       return {
         hooks: { notifyHooks: () => {}, notifyHooksAsync: async () => {} },
-        config: { webui },
+        // Resolved fileAttachment block (schema defaults as plain literals):
+        // the transport frame bound reads it at server construction.
+        config: { webui, fileAttachment: { maxFileSize: 102400, maxImageSize: 10485760, maxFiles: 10 } },
         resolved: { profileManager: { getProfilesForSwitch: () => ({}) } },
         toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
         extensions: { cleanup: async () => {} },

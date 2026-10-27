@@ -57,6 +57,8 @@ describe("ui-one-shot extension", () => {
       taskProfile: "task-default",
       profileBody: "",
       theme: "dark",
+      toolExec: "inline",
+      execFence: "probe",
     };
 
     return {

@@ -75,6 +75,8 @@ describe("runInteractiveSession", () => {
       taskProfile: "task-default",
       profileBody: "",
       theme: "dark",
+      toolExec: "inline",
+      execFence: "probe",
     };
 
     return {

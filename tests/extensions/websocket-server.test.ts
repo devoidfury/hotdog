@@ -2613,22 +2613,22 @@ describe("tool-exec posture on sessionCreated", () => {
   }
 
   it("advertises the posture on the same payload as sttEnabled (no new channel)", async () => {
-    // A host whose resolved bag never opted into the plane is inline, and says so.
+    // The mock core resolves to inline (no opt-in), and says so.
     expect((await attach()).toolExec).toBe("inline (unfenced)");
     expect((await attach({ toolExec: "worker", execFence: "off" })).toolExec).toBe(
       "worker (fence: off)",
     );
     // Probe policy reports the probe outcome -- jail or honest failure, never silence.
-    expect((await attach({ toolExec: "worker" })).toolExec).toMatch(
+    expect((await attach({ toolExec: "worker", execFence: "probe" })).toolExec).toMatch(
       /^worker \(fence: (bwrap|none -- probe failed)\)$/,
     );
   });
 
   it("SessionRegistry labels the posture from resolved values only", () => {
     const buildAgent = async () => makeWsMockAgent({});
-    const plain = new SessionRegistry({ buildAgent });
+    const plain = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "inline", execFence: "probe" } });
     const off = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "worker", execFence: "off" } });
-    const probe = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "worker" } });
+    const probe = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "worker", execFence: "probe" } });
     expect(plain.toolExecLabel).toBe("inline (unfenced)");
     expect(off.toolExecLabel).toBe("worker (fence: off)");
     expect(probe.toolExecLabel).toMatch(/^worker \(fence: (bwrap|none -- probe failed)\)$/);

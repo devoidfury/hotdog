@@ -2,7 +2,22 @@
 
 ## Unreleased
 
-- **provider:response - `refuseToolCalls` patch.** A handler can now make core refuse every tool call in a response: each call is paired with a tool result carrying the refusal's `reason` without executing, an optional `trailingNotice` persists after them as a harness system-notice, and the loop continues. The length-truncated refusal moved from the agent loop into `tool-call-repair`, which already owns truncated tool calls everywhere else (leaked-in-text repair, corrupt-history recovery); core keeps the mechanism, the extension keeps the policy. The assistant-tail backstop stays unconditional in core with its own generic notice (it used to reuse the length-stop text, which lied about an empty-completion tail). With `toolCallRepair.enabled: false` a length-stopped call is no longer refused and fails schema validation generically.
+- interactive cli - forground apps in shellMode handle input/output better, no longer eats half the keypresses or renders strangely
+
+- **provider:response - `refuseToolCalls` patch.** A handler can now make core refuse every tool call in a response: each call is paired with a tool result carrying the refusal's `reason` without executing, an optional `trailingNotice` persists after them as a harness system-notice, and the loop continues. The length-truncated refusal moved from the agent loop into `tool-call-repair`. With `toolCallRepair.enabled: false` a length-stopped call is no longer refused and fails schema validation generically.
+
+- **config - schema `minimum` bounds** A schema property can declare `"minimum"`; the bound applies to every resolution layer, and a violating value is treated like a failed cast (fall through to the next layer, then the default). Config-file violations are a hard startup error via config validation; CLI/env values fall through silently, so one bad number can no longer override a sane default. Fields now bounded:
+
+  - `uploadLimits.maxFileSize` / `maxImageSize` / `maxFiles` -- min `0` (0 = reject-all posture; negatives rejected every upload)
+  - `maxIterations` -- min `1` (0 reads as "unlimited" but actually ended the run at the wrap-up call)
+  - `maxToolCallsPerIteration` -- min `0` (0 = no tools)
+  - `contextLimit` -- min `1` (0 poisons the compaction math)
+  - `maxEmptyRetries` -- min `0` (0 = no retries)
+  - `bashTool.bashTimeoutMs` -- min `1` (0 arms a ~1ms kill timer via the timeout clamp)
+  - `bashTool.maxTimeoutMs` / `maxToolOutputLines` -- min `0` (falsy "cap disabled" / suppress-all stay legal)
+  - `coreTools.readToolLimit` / `maxImageSize` / `findMaxResults` / `grepMaxResults` / `maxEditInputSize` / `maxToolOutputLines` -- min `0`
+
+  `taskLanesPerProvider` is deliberately unbounded: below 1 means unlimited.
 
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.15.0...main
 

@@ -450,7 +450,27 @@ describe("spawnEntry stdio plumbing (real short-lived processes)", () => {
       await waitForFrame((f) => f.op === "log" && f.msg.includes("malformed frame dropped"));
       // EOF drains the runner; its exit must surface as a warn and evict it.
       entry.proc.stdin!.end();
-      await waitForFrame((f) => f.op === "log" && f.msg.includes("executor exited"));
+      const exitFrame = await waitForFrame((f) => f.op === "log" && f.msg.includes("executor exited"));
+      expect(exitFrame.level).toBe("warn");
+      expect(state.pool.size).toBe(0);
+    } finally {
+      stopCapture();
+    }
+  });
+
+  it("a reaped entry logs its graceful exit at debug, not warn", async () => {
+    startCapture();
+    try {
+      const state = makeState();
+      handleFrame(JSON.stringify({ op: "warm", session: "s", class: "rw" }), state);
+      expect(state.pool.size).toBe(1);
+      // A reap frame is the idle-reaper's path: dropEntry ends stdin, the
+      // runner drains and exits 0. The exit handler sees dead === true and
+      // must demote the frame to debug -- a clean reap is lifecycle, not a
+      // crash, and warn-level noise drowns real failures.
+      handleFrame(JSON.stringify({ op: "reap", session: "s", class: "rw" }), state);
+      const reapFrame = await waitForFrame((f) => f.op === "log" && f.msg.includes("executor reaped"));
+      expect(reapFrame.level).toBe("debug");
       expect(state.pool.size).toBe(0);
     } finally {
       stopCapture();

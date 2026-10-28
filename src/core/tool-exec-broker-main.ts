@@ -286,7 +286,16 @@ function spawnEntry(key: string, state: BrokerState, fence?: WireFence): PoolEnt
     failEntry(entry, key, state, `executor spawn failed: ${formatError(e)}`);
   });
   proc.on("exit", (code) => {
-    failEntry(entry, key, state, `executor exited (code ${code ?? "signal"})`);
+    // entry.dead is set by dropEntry BEFORE the graceful EOF drain, so a code-0 exit after
+    // that is the reap's own consequence, not a crash, demote it to debug
+    const reaped = entry.dead && code === 0;
+    failEntry(
+      entry,
+      key,
+      state,
+      reaped ? "executor reaped" : `executor exited (code ${code ?? "signal"})`,
+      reaped ? "debug" : "warn",
+    );
   });
   return entry;
 }
@@ -342,8 +351,9 @@ function failEntry(
   key: string,
   state: BrokerState,
   message: string,
+  level: "debug" | "warn" = "warn",
 ): void {
-  writeSupervisor({ op: "log", level: "warn", msg: `runner[${key}]: ${message}` });
+  writeSupervisor({ op: "log", level, msg: `runner[${key}]: ${message}` });
   dropEntry(entry, key, state);
 }
 

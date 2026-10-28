@@ -41,27 +41,25 @@ apiKeys:
 healthCheckTimeout: 600
 
 models:
-  dsv4:
-    # Minimum context for max reasoning effort is 393216
+  deepseek-v4:
     cmd: |
-      ${software}/ds4/ds4-server
-      --chdir ${software}/ds4
-      --rocm
-      -m gguf/DeepSeek-V4-Flash-Layers37-42Q4KExperts-OtherExpertLayersIQ2XXSGateUp-Q2KDown-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-fixed-0731.gguf
-      --port ${PORT}
-      --ctx 200000
-      --power 100
-      --kv-disk-dir /tmp/ds4-kv
-      --kv-disk-space-mb 8192
-    # --ctx 393216
-    checkEndpoint: /v1/models
+      ${gufo} llm
+      --sessions 1
+      --served-model-name deepseek-v4
+      --model /storage/models/deepseek-v4-flash/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf
+      --cache-disk /storage/cache
+      --log-progress
+      --speculative dspark
+      --dspark-model /storage/models/deepseek-v4-flash/DeepSeek-V4-Flash-DSpark-support-0731.gguf
+      --context 262144
+    useModelName: deepseek-v4
     capabilities:
       in:
         - text
       out:
         - text
       tools: true
-      context: 200000
+      context: 262144
   glm4.7-flash:
     cmd: |
       ${llama-server}

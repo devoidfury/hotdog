@@ -13,6 +13,19 @@ export {
 import { spoofSafe } from "@utils/spoof.ts";
 
 
+// ── Sidebar resize ──────────────────────────────────────────────────────────
+
+export const SIDEBAR_MIN_WIDTH = 200;
+export const SIDEBAR_MAX_WIDTH = 520;
+export const SIDEBAR_DEFAULT_WIDTH = 300;
+
+/** Sidebar width clamp: 200px .. min(520px, half the viewport). */
+export function clampSidebarWidth(width: number, viewportWidth: number): number {
+  // Min beats max on degenerate (sub-400px) viewports.
+  const max = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, viewportWidth / 2));
+  return Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), max);
+}
+
 // ── Formatting & sanitisation ───────────────────────────────────────────────
 
 export function formatTime(ts: number): string {

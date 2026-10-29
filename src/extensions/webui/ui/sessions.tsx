@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // Session/log sidebar
 
-import { formatTime, shortId } from "./utils.ts";
+import { formatTime, shortId, SIDEBAR_MIN_WIDTH } from "./utils.ts";
 import type { Ref } from "@utils/jsx";
 
 export interface SessionInfo {
@@ -43,6 +43,8 @@ interface SidebarProps {
   workingMap: Map<string, boolean>;
   logs: LogInfo[];
   activeLogId: string | null;
+  sidebarWidth: number;
+  sidebarMax: number;
   onCreate: () => void;
   onSwitch: (sessionId: string) => void;
   onCancel: (sessionId: string) => void;
@@ -50,6 +52,11 @@ interface SidebarProps {
   onViewLog: (logId: string) => void;
   onSessionMenu: (e: MouseEvent, session: SessionInfo) => void;
   onLogMenu: (e: MouseEvent, logId: string) => void;
+  onResizeStart: (e: PointerEvent) => void;
+  onResizeMove: (e: PointerEvent) => void;
+  onResizeEnd: (e: PointerEvent) => void;
+  onResizeKey: (e: KeyboardEvent) => void;
+  onResizeReset: (e: MouseEvent) => void;
 }
 
 export function Sidebar(p: SidebarProps) {
@@ -154,6 +161,25 @@ export function Sidebar(p: SidebarProps) {
           ))
         )}
       </div>
+
+      {/* Drag/keyboard resize handle straddling the right border. The logic
+          lives in app.tsx; hidden by CSS in the mobile drawer media query. */}
+      <div
+        id="sidebar-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-valuenow={p.sidebarWidth}
+        aria-valuemin={SIDEBAR_MIN_WIDTH}
+        aria-valuemax={p.sidebarMax}
+        tabindex="0"
+        onPointerdown={p.onResizeStart}
+        onPointermove={p.onResizeMove}
+        onPointerup={p.onResizeEnd}
+        onPointercancel={p.onResizeEnd}
+        onKeydown={p.onResizeKey}
+        onDblclick={p.onResizeReset}
+      />
     </aside>
   );
 }

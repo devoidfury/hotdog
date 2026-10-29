@@ -4,7 +4,7 @@
 // message list container is handed to the imperative renderer via ref.
 
 import { mount, type Mounted, type Ref, type DomNode } from "@utils/jsx";
-import { reactiveState, effect, shortId } from "./utils.ts";
+import { reactiveState, effect, shortId, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, clampSidebarWidth } from "./utils.ts";
 import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
 import {
   LoginScreen,
@@ -313,6 +313,93 @@ document.addEventListener("mousedown", (e: MouseEvent) => {
   if (contextMenuEl && contextMenuEl.contains(e.target as Node)) return;
   dismissContextMenu();
 });
+
+// ── Sidebar resize ──────────────────────────────────────────────────────────
+
+const SIDEBAR_WIDTH_KEY = "hotdog.sidebarWidth";
+
+// Live width; App reads it per render for aria-valuenow. Drags update it
+// imperatively (CSS var + aria attr) so pointermove never re-renders the tree.
+let sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
+let resizeDrag: { pointerId: number; startX: number; startWidth: number } | null = null;
+
+function sidebarMaxWidth(): number {
+  // Same floor as clampSidebarWidth: on sub-400px viewports min wins.
+  return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, window.innerWidth / 2));
+}
+
+function applySidebarWidth(el: HTMLElement | null, width: number): void {
+  sidebarWidth = clampSidebarWidth(width, window.innerWidth);
+  document.documentElement.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
+  el?.setAttribute("aria-valuenow", String(sidebarWidth));
+}
+
+function persistSidebarWidth(): void {
+  try {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+  } catch {
+    // Storage disabled (private mode / blocked): the session still resizes.
+  }
+}
+
+function restoreSidebarWidth(): void {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+  } catch {
+    return;
+  }
+  if (raw === null) return;
+  const saved = Number(raw);
+  if (!Number.isFinite(saved)) return;
+  // Clamp against the current viewport, not the one it was saved on.
+  applySidebarWidth(null, saved);
+}
+
+function onSidebarResizeStart(e: PointerEvent): void {
+  const el = e.currentTarget as HTMLElement;
+  if (el.offsetParent === null) return; // mobile drawer: width is CSS-only
+  el.focus();
+  resizeDrag = { pointerId: e.pointerId, startX: e.clientX, startWidth: sidebarWidth };
+  el.setPointerCapture(e.pointerId);
+  document.body.classList.add("sidebar-resizing");
+}
+
+function onSidebarResizeMove(e: PointerEvent): void {
+  if (!resizeDrag || e.pointerId !== resizeDrag.pointerId) return;
+  applySidebarWidth(e.currentTarget as HTMLElement, resizeDrag.startWidth + (e.clientX - resizeDrag.startX));
+}
+
+function onSidebarResizeEnd(e: PointerEvent): void {
+  if (!resizeDrag || e.pointerId !== resizeDrag.pointerId) return;
+  resizeDrag = null;
+  document.body.classList.remove("sidebar-resizing");
+  persistSidebarWidth();
+}
+
+// Home/End jump to min/max (standard slider semantics); arrows step 16px,
+// or 48px with Shift for a coarse step.
+function onSidebarResizeKey(e: KeyboardEvent): void {
+  let next: number | null = null;
+  if (e.key === "ArrowRight") next = sidebarWidth + (e.shiftKey ? 48 : 16);
+  else if (e.key === "ArrowLeft") next = sidebarWidth - (e.shiftKey ? 48 : 16);
+  else if (e.key === "Home") next = SIDEBAR_MIN_WIDTH;
+  else if (e.key === "End") next = SIDEBAR_MAX_WIDTH;
+  if (next === null) return;
+  e.preventDefault();
+  applySidebarWidth(e.currentTarget as HTMLElement, next);
+  persistSidebarWidth();
+}
+
+function onSidebarResizeReset(e: MouseEvent): void {
+  // Double-click: back to the default and forget the stored preference.
+  applySidebarWidth(e.currentTarget as HTMLElement, SIDEBAR_DEFAULT_WIDTH);
+  try {
+    localStorage.removeItem(SIDEBAR_WIDTH_KEY);
+  } catch {
+    // ignore storage failures
+  }
+}
 
 // ── Chat wiring ─────────────────────────────────────────────────────────────
 
@@ -714,6 +801,13 @@ function App() {
           onViewLog={(id) => chat?.viewLog(id)}
           onSessionMenu={onSessionMenu}
           onLogMenu={onLogMenu}
+          sidebarWidth={sidebarWidth}
+          sidebarMax={sidebarMaxWidth()}
+          onResizeStart={onSidebarResizeStart}
+          onResizeMove={onSidebarResizeMove}
+          onResizeEnd={onSidebarResizeEnd}
+          onResizeKey={onSidebarResizeKey}
+          onResizeReset={onSidebarResizeReset}
         />
 
         <main id="chat-area">
@@ -918,6 +1012,7 @@ function App() {
 async function init(): Promise<void> {
   const root = document.getElementById("app");
   if (!root) return;
+  restoreSidebarWidth();
   mounted = mount(<App />, root as unknown as DomNode);
   effect(render, [
     screenAtom,

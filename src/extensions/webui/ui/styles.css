@@ -274,7 +274,49 @@ body {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    position: relative; /* anchor for #sidebar-resize */
     transition: transform 0.3s var(--ease-out);
+}
+
+/* Sidebar resize handle: a 6px strip straddling the right border, with a
+   ::after hit pad widening the touch target to ~14px. Keyboard-operable
+   (see onSidebarResizeKey in app.tsx). */
+#sidebar-resize {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    touch-action: none;
+    z-index: 10;
+}
+
+#sidebar-resize::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    right: -4px;
+}
+
+#sidebar-resize:hover,
+body.sidebar-resizing #sidebar-resize {
+    background: var(--accent-soft);
+}
+
+#sidebar-resize:focus-visible {
+    background: var(--accent-soft);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+/* While dragging: consistent cursor everywhere, no accidental selection. */
+body.sidebar-resizing {
+    cursor: col-resize;
+    user-select: none;
 }
 
 .sidebar-header {
@@ -1593,6 +1635,11 @@ body {
         bottom: 0;
         z-index: 100;
         box-shadow: var(--shadow-lg);
+    }
+
+    /* Drawer mode: width is CSS-controlled, no resizing. */
+    #sidebar-resize {
+        display: none;
     }
 
     #sidebar.open {

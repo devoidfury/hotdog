@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- webui - sidebar now resizable
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.15.1...main
 
 ## [v0.15.1] - 2026-10-27

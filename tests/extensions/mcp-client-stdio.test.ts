@@ -1,11 +1,12 @@
 // Tests for mcp-client — stdio mode, message handling, _sendRequest,
 // and other paths.
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import fs from "node:fs";
 import { McpClient } from "@extensions/mcp-client/client.ts";
 import { McpConnection } from "@extensions/mcp-client/connection.ts";
 import { HttpTransport, StdioTransport } from "@extensions/mcp-client/transports.ts";
+import { setSpawnEnvProvider } from "@utils/spawn-env.ts";
 import { tmpDir, cleanupDir, processAlive, waitForExit, withMockFetch, jsonResponse, textResponse } from "../helpers.ts";
 
 // ── McpClient._sendRequest Tests ─────────────────────────────────────────────
@@ -588,5 +589,67 @@ describe("McpConnection connectStdio", () => {
     expect(conn.serverName).toBe("test");
     expect(conn.tools).toEqual([]);
     await conn.shutdown();
+  });
+});
+
+// ── Spawn policy env (fetch-policy proxy lane) ───────────────────────────────
+
+describe("stdio spawn policy env", () => {
+  afterEach(() => setSpawnEnvProvider(null));
+
+  async function childEnvOf(script: string, env: Record<string, string>, policy: Record<string, string> | null) {
+    const transport = new StdioTransport("bun", ["-e", script], env, undefined, true, policy);
+    try {
+      let line = "";
+      transport.onMessage((l) => { line += l; });
+      const t0 = Date.now();
+      while (!line && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 10));
+      expect(line.length).toBeGreaterThan(0);
+      return JSON.parse(line) as Record<string, string | null>;
+    } finally {
+      await transport.destroy();
+    }
+  }
+
+  it("the server child sees the policy env, winning over its own config env", async () => {
+    const seen = await childEnvOf(
+      'console.log(JSON.stringify({a: process.env.MCP_POLICY_ONLY ?? null, b: process.env.MCP_CONFLICT ?? null}))',
+      { MCP_CONFLICT: "server-config" },
+      { MCP_POLICY_ONLY: "policy", MCP_CONFLICT: "policy" },
+    );
+    expect(seen.a).toBe("policy");
+    expect(seen.b).toBe("policy");
+  });
+
+  it("no policy env: the child keeps only base + server env", async () => {
+    const seen = await childEnvOf(
+      'console.log(JSON.stringify({b: process.env.MCP_CONFLICT ?? null, p: process.env.MCP_POLICY_ONLY ?? null}))',
+      { MCP_CONFLICT: "server-config" },
+      null,
+    );
+    expect(seen.b).toBe("server-config");
+    expect(seen.p).toBeNull();
+  });
+
+  it("connectStdio attributes the policy lookup to the server's owner id", async () => {
+    const sessions: string[] = [];
+    setSpawnEnvProvider(async (sid) => {
+      sessions.push(sid);
+      return { MCP_POLICY_ONLY: "policy" };
+    });
+    const conn = await McpConnection.connectStdio("files", "bun", 30_000, [
+      "./tests/fixtures/mcp-test-server.ts",
+    ]);
+    expect(sessions).toEqual(["mcp:files"]);
+    await conn.shutdown();
+  });
+
+  it("a refusing provider fails the connection before the server spawns", async () => {
+    setSpawnEnvProvider(async () => {
+      throw new Error("policy proxy could not bind");
+    });
+    await expect(
+      McpConnection.connectStdio("files", "bun", 30_000, ["./tests/fixtures/mcp-test-server.ts"]),
+    ).rejects.toThrow(/Spawn refused.*policy proxy could not bind/);
   });
 });

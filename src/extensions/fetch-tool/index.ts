@@ -44,6 +44,13 @@ export function withDefaultAccept(
 /** 3xx statuses with a Location header we may follow (after re-validation). */
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
+/**
+ * Seam for an external origin gate (the fetch-policy extension): given a
+ * request URL and the tool context (input seam, agent, abort signal), return
+ * model-facing block text, or null to let it through.
+ */
+export type OriginGate = (url: string, ctx?: ToolContext) => Promise<string | null>;
+
 /** Cap on manual redirect hops; deeper chains are almost never legitimate. */
 const MAX_REDIRECTS = 5;
 
@@ -77,6 +84,8 @@ interface FetchToolOptions {
    * IPv4-mapped) are refused.
    */
   allowPrivateHosts?: boolean;
+  /** External origin gate (fetch-policy). Checked on the request URL and every redirect hop. */
+  originGate?: OriginGate;
 }
 
 export class FetchTool {
@@ -88,6 +97,8 @@ export class FetchTool {
   readonly maxImageSize: number;
   readonly allowedSchemes: string[];
   readonly allowPrivateHosts: boolean;
+  /** Set after construction by the fetch-policy extension (TOOLS_REGISTER); null when no policy is active. */
+  originGate: OriginGate | null = null;
 
   constructor(options: FetchToolOptions) {
     this.timeoutMs = options.timeoutMs;
@@ -95,6 +106,12 @@ export class FetchTool {
     this.maxImageSize = options.maxImageSize;
     this.allowedSchemes = options.allowedSchemes.map((s) => s.toLowerCase());
     this.allowPrivateHosts = options.allowPrivateHosts ?? false;
+    this.originGate = options.originGate ?? null;
+  }
+
+  /** Attach (or detach with null) the origin gate. */
+  setOriginGate(gate: OriginGate | null): void {
+    this.originGate = gate;
   }
 
   toToolDef() {
@@ -138,6 +155,14 @@ export class FetchTool {
     const { url, method, showOriginal, host } = args;
     const fetchArgs = { ...args, headers: withDefaultAccept(args.headers, showOriginal) };
 
+    // Origin policy first: its verdict is about the whole request, and its
+    // block text is richer than a transport error would be.
+    const gate = this.originGate;
+    if (gate) {
+      const blocked = await gate(url, ctx);
+      if (blocked) return ToolResult.err(blocked);
+    }
+
     if (!this.allowPrivateHosts && host) {
       const hostError = await assertPublicHost(host);
       if (hostError) {
@@ -146,15 +171,18 @@ export class FetchTool {
     }
 
     try {
-      // Default fetch() follows redirects blindly, so a public host that 302s
-      // to a private one would bypass the private-host gate. With protection
-      // on, follow redirects manually and re-validate every hop.
-      const resp = this.allowPrivateHosts
-        ? await hotdogFetch(url, fetchArgs, this.timeoutMs)
-        : await fetchWithSafeRedirects(url, fetchArgs, this.timeoutMs, {
+      // Manual redirect following exists for the private-host gate (default
+      // fetch() follows redirects blindly, so a public host that 302s to a
+      // private one would bypass it). An origin gate demands the same: no
+      // hop may move the request to a new origin without re-passing policy.
+      const manualRedirects = !this.allowPrivateHosts || gate !== null;
+      const resp = manualRedirects
+        ? await fetchWithSafeRedirects(url, fetchArgs, this.timeoutMs, {
             allowedSchemes: this.allowedSchemes,
-            checkHost: assertPublicHost,
-          });
+            checkHost: this.allowPrivateHosts ? null : assertPublicHost,
+            checkOrigin: gate ? (u: string) => gate(u, ctx) : null,
+          })
+        : await hotdogFetch(url, fetchArgs, this.timeoutMs);
       const contentType = resp.headers.get("content-type") || "";
       const isJson = contentType.includes("application/json");
       const reason = resp.statusText || "Unknown";
@@ -237,13 +265,15 @@ export class FetchTool {
 export interface SafeRedirectOptions {
   allowedSchemes: string[];
   /** Returns a refusal message for a host that must not be fetched, or null when allowed. */
-  checkHost: (host: string) => Promise<string | null>;
+  checkHost: ((host: string) => Promise<string | null>) | null;
+  /** Origin gate re-run on every redirect target; returns block text or null. */
+  checkOrigin?: ((url: string) => Promise<string | null>) | null;
   maxRedirects?: number;
 }
 
 /**
  * Like hotdogFetch(), but follows redirects manually so every hop's target
- * passes the same scheme + host gate as the original URL.
+ * passes the same scheme + origin + host gates as the original URL.
  *
  * fetch() follows redirects by default, so a public host that 302s to a
  * private one (cloud metadata, localhost services) would bypass the
@@ -254,7 +284,7 @@ export async function fetchWithSafeRedirects(
   url: string,
   args: FetchArgs,
   timeoutMs: number,
-  { allowedSchemes, checkHost, maxRedirects = MAX_REDIRECTS }: SafeRedirectOptions,
+  { allowedSchemes, checkHost, checkOrigin, maxRedirects = MAX_REDIRECTS }: SafeRedirectOptions,
 ): Promise<Response> {
   let current = url;
   let method = args.method;
@@ -290,8 +320,14 @@ export async function fetchWithSafeRedirects(
       throw new Error(`Redirect to disallowed scheme '${scheme}' refused: ${next.href}`);
     }
 
+    // Origin policy re-runs on every hop: block text is model-facing already.
+    if (checkOrigin) {
+      const originError = await checkOrigin(next.href);
+      if (originError) throw new Error(originError);
+    }
+
     const nextHost = next.hostname.replace(/^\[|\]$/g, "");
-    if (nextHost) {
+    if (nextHost && checkHost) {
       const hostError = await checkHost(nextHost);
       if (hostError) {
         throw new Error(`Redirect refused: ${hostError}`);

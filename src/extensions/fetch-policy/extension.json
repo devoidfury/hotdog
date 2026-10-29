@@ -1,0 +1,58 @@
+{
+  "name": "fetch-policy",
+  "provides": [],
+  "loadOrder": 3,
+  "description": "Origin policy for model-triggered HTTP: allow/ask/deny per scheme://host[:port], with persisted approvals",
+  "configSchema": {
+    "fetchPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the origin policy is active. Set false to remove the layer entirely."
+        },
+        "default": {
+          "type": "string",
+          "enum": ["ask", "allow", "deny"],
+          "default": "ask",
+          "description": "What an origin no rule matches does. \"ask\" prompts: allow once / allow origin for session / always allow (persisted to <config-dir>/fetch-policy.json) / deny; fail-closed deny with the exact allow-line when no interactive UI can answer (one-shot, CI). \"allow\" is the permissive posture plus explicit denies; \"deny\" is allowlist-only."
+        },
+        "allow": {
+          "type": "array",
+          "default": [],
+          "description": "Origins to allow without asking. Grammar: 'scheme://host[:port]' -- '*' globs (a leading '*.example.com' also matches the bare apex, never evil-example.com); an omitted port means the scheme's default port, ':*' any port. No paths: HTTPS paths are invisible without MITM, so path rules would be a lie. Merged with persisted approvals from <config-dir>/fetch-policy.json.",
+          "items": { "type": "string" }
+        },
+        "deny": {
+          "type": "array",
+          "default": [],
+          "description": "Origins to block without asking. Deny beats allow and cannot be overridden from a prompt or the state file -- denies live here only.",
+          "items": { "type": "string" }
+        },
+        "proxyEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Expose the policy proxy for child-process injection (tool exec plane, stdio MCP servers). Loopback-only and token-authenticated; binds only once a spawn actually asks for it. False = never expose it."
+        },
+        "proxyAskTimeoutMs": {
+          "type": "number",
+          "default": 60000,
+          "description": "How long a child-process connection waits at an approval prompt before being denied. A prompt nobody answers must not hang the child forever."
+        },
+        "hardEgress": {
+          "type": "boolean",
+          "default": false,
+          "description": "Kernel-enforce the policy for children instead of merely injecting it: exec-plane entries and stdio MCP servers boot in a private network namespace whose ONLY exit is the policy proxy (a fixed jail-loopback port piped over a unix socket). Tools that ignore proxy env then get no network at all, and deny means denied for raw sockets too. Requires Linux with working bwrap AND unprivileged user namespaces; when either is missing every child spawn is REFUSED (it never degrades to the cooperative proxy). Costs: host loopback (dev servers on 127.0.0.1) is unreachable from children, and inline-mode (toolExec: inline) spawns are refused while it is on."
+        },
+        "hardEgressLoopback": {
+          "type": "boolean",
+          "default": false,
+          "description": "Under hardEgress, whether connects to loopback origins are denied outright (false, the default) or enter the normal allow/ask/deny flow like any other origin (true). With true, a child's connect to http://127.0.0.1:3000 asks -- and reachability is restored for approved loopback services."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [{ "source": "config", "key": "fetchPolicy" }, { "default": {} }]
+    }
+  }
+}

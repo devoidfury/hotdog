@@ -9,6 +9,7 @@ import { collectInfoPanels, CoreContext, ExtensionInfoPanel, InfoValue } from "@
 import { makeProviderHealth } from "@core/session/provider-health.ts";
 import {
   execFenceDisplay,
+  netBlockDisplay,
   toolExecModeLabel,
   toolExecPlaneSettings,
   sharedToolExecDegraded,
@@ -162,6 +163,9 @@ function printInfoText(
   // The degraded flag is runtime state on the shared broker, so it is passed
   // in rather than read from the resolved config.
   console.log(`  Tools Exec:      ${toolExecModeLabel(resolved, sharedToolExecDegraded(), execFenceDisplay(resolved))}`);
+  // Hard net-block tier posture (--unshare-net): whether a no-egress jail
+  // is actually runnable here, never silent.
+  console.log(`  Net Block:       ${netBlockDisplay(resolved)}`);
   // Split-renderer posture, same never-silent style as the fence line: the §9
   // gate is pure knob + TTY + TERM, so what it would decide in THIS
   // environment is exactly what the next interactive session does. `info`
@@ -320,6 +324,7 @@ function printInfoJson(
   const plane = toolExecPlaneSettings(resolved);
   const planeDegraded = sharedToolExecDegraded();
   const fenceDisplay = execFenceDisplay(resolved);
+  const netBlockPosture = netBlockDisplay(resolved);
   const json = {
     config: {
       ai_url: resolved.baseUrl,
@@ -338,6 +343,15 @@ function printInfoJson(
       // Runtime flag: crash-respawn budget exhausted, never an
       // inline downgrade -- a degraded plane still rejects loudly.
       tools_exec_degraded: planeDegraded,
+      // Hard net-block tier (--unshare-net / hardEgress): "bwrap" jailed,
+      // "off" no-jail policy, "unavailable" fence wanted but egress cannot
+      // be blocked, "hard-armed"/"hard-unavailable" for fetchPolicy.hardEgress.
+      net_block:
+        netBlockPosture === "bwrap" || netBlockPosture === "off" || netBlockPosture === "hard-armed"
+          ? netBlockPosture
+          : netBlockPosture.startsWith("hard")
+            ? "hard-unavailable"
+            : "unavailable",
       // Split-renderer §9 gate projection for this environment (mirror of the
       // text line; info never runs inside a mounted session, so "mount" is
       // what the next interactive session would decide, never a live state).

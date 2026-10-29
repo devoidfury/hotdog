@@ -9,6 +9,13 @@ import { fileURLToPath } from "node:url";
 export const RUNNER_ENTRY = fileURLToPath(new URL("../workers/tool-exec.ts", import.meta.url));
 
 /**
+ * The hard-egress netns shim (fetchPolicy.hardEgress). Part of the fence
+ * argv for hardened entries: it builds the private user+net namespace and
+ * raises the jail's loopback before exec-ing the rest of the chain.
+ */
+export const NETNS_SHIM_ENTRY = fileURLToPath(new URL("../utils/netns-shim.ts", import.meta.url));
+
+/**
  * Hotdog's repo root (where tsconfig.json lives). Child processes are spawned
  * with this cwd so Bun resolves the `@core`/`@extensions`/`@utils` path
  * aliases no matter where the user launched hotdog from.

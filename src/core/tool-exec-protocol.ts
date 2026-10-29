@@ -17,9 +17,14 @@ import {
   TransientError,
 } from "./error.ts";
 import { ToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
+import { NO_EGRESS_CLASS } from "@utils/exec-plan.ts";
 
-/** Capability class of a pool entry. v1 ships `rw`; `net` lands with the MCP relay. */
-export type ExecClass = "rw" | "net";
+/**
+ * Capability class of a pool entry. v1 ships `rw`; `net` lands with the MCP
+ * relay; `no-egress` is the hard net-block tier (utils/exec-plan.ts -- the
+ * fence adds --unshare-net and a missing jail refuses the spawn).
+ */
+export type ExecClass = "rw" | "net" | typeof NO_EGRESS_CLASS;
 
 // ── Per-call context ─────────────────────────────────────────────────────────
 
@@ -45,6 +50,22 @@ export interface WireToolCtx {
   session: string;
   workspace: WireWorkspace;
   toolConfig: WireToolConfig;
+  /**
+   * Env a spawned child must carry because a network policy demands it
+   * (fetch-policy's proxy vars). Resolved supervisor-side, per call, where the
+   * policy layer lives: the pooled runner is a separate process with no policy
+   * layer of its own. Rides stdin -- never argv, so the per-session proxy
+   * token stays out of the process listing.
+   */
+  spawnEnv?: Record<string, string>;
+  /**
+   * Hard egress tier (fetchPolicy.hardEgress): host path of the policy proxy's
+   * UNIX socket for this session. The supervisor uses it to plan the fence
+   * (netns shim prefix + socket bind); its presence tells the runner to start
+   * the egress bridge on the jail loopback. Children never see the host path:
+   * inside the jail the socket lives at the fixed JAIL_EGRESS_SOCKET.
+   */
+  egress?: { socketPath: string };
 }
 
 // ── Serialized results ───────────────────────────────────────────────────────

@@ -962,6 +962,27 @@ describe("Info CLI - tool exec plane", () => {
     // (that is policy, not capability).
     expect(["bwrap", "none"]).toContain(parsed.config.tools_fence);
   });
+
+  it("shows the hard net-block tier posture, honestly either way", async () => {
+    const run = await infoCliRunner({ resolved: { toolExec: "worker", execFence: "probe" } });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    // "bwrap" where a --unshare-net jail runs, "unavailable..." where the
+    // platform cannot block egress. Never silent, never a false claim.
+    expect(output).toMatch(/Net Block:\s+(bwrap|unavailable)/);
+  });
+
+  it("net block is off with no jail policy (text + JSON mirror)", async () => {
+    const textRun = await infoCliRunner({ resolved: { toolExec: "worker", execFence: "off" } });
+    const text = await textRun("info");
+    expect(text.output).toContain("Net Block:       off");
+    const jsonRun = await infoCliRunner(
+      { resolved: { toolExec: "worker", execFence: "off" } },
+      { wantsJson: true },
+    );
+    const json = await jsonRun("info");
+    expect(JSON.parse(json.output.trim()).config.net_block).toBe("off");
+  });
 });
 
 // ── stage-3c: renderer posture line (§9 gate projection, "never silent") ──

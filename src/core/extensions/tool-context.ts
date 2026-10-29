@@ -6,6 +6,15 @@ import { Workspace } from "@utils/workspace.ts";
  */
 export interface DefaultToolContext extends Record<string, unknown> {
   agent: unknown; // Agent — avoid circular import
+  /**
+   * Env a spawned child must carry because a network policy demands it
+   * (today: the fetch-policy proxy vars). Set by the host on both planes --
+   * inline from the spawn-env provider, worker-plane from the invoke frame --
+   * and merged by spawning tools LAST, over their config env: a child must
+   * not be able to buy its way out of the policy. Tools that spawn nothing
+   * ignore it.
+   */
+  spawnEnv?: Record<string, string>;
   isSessionRestoring: boolean;
   /** Multi-root workspace boundary; relative paths resolve against roots[0]. */
   workspace: Workspace;

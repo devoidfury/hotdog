@@ -55,6 +55,13 @@ export interface ToolMetadata {
    */
   execution?: "local" | "worker";
   /**
+   * True if the tool spawns child processes. The executor resolves the
+   * spawn-env policy (see `utils/spawn-env.ts`) only for these tools, so a
+   * policy that binds a loopback proxy is not bound by a session that only
+   * reads files.
+   */
+  spawnsChildren?: boolean;
+  /**
    * Per-parameter display hints (keyed by schema parameter name). Read by
    * display sinks via ToolRegistry.getMetadata; never sent to the provider.
    */

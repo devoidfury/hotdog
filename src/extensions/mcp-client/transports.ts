@@ -132,7 +132,20 @@ export class StdioTransport implements McpTransport {
   #destroyed: boolean = false;
   #closeNotified: boolean = false;
 
-  constructor(command: string, args: string[] = [], env: Record<string, string> = {}, extraScrubKeys?: readonly string[], envScrubbing: boolean = true) {
+  /**
+   * `spawnPolicyEnv` (from the spawn-env seam, resolved by the caller under
+   * this server's owner id) merges LAST -- over the scrubbed base and over
+   * the server's own config env: a server must not be able to buy its way
+   * out of the network policy by keeping its own proxy variables.
+   */
+  constructor(
+    command: string,
+    args: string[] = [],
+    env: Record<string, string> = {},
+    extraScrubKeys?: readonly string[],
+    envScrubbing: boolean = true,
+    spawnPolicyEnv?: Record<string, string> | null,
+  ) {
     this.#command = command;
     this.#args = args;
     this.#env = env;
@@ -142,7 +155,7 @@ export class StdioTransport implements McpTransport {
     this.#child = spawn(command, args, {
       ...OWN_PROCESS_GROUP,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...copyScrubbedEnv(process.env, extraScrubKeys, envScrubbing), ...env },
+      env: { ...copyScrubbedEnv(process.env, extraScrubKeys, envScrubbing), ...env, ...(spawnPolicyEnv ?? {}) },
     });
 
     this.#writeStream = this.#child.stdin;

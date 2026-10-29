@@ -7,7 +7,14 @@ import { describe, it, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { baseRoBinds, planFor } from "@utils/exec-plan.ts";
+import {
+  baseRoBinds,
+  bwrapAvailable,
+  findBwrap,
+  NO_EGRESS_CLASS,
+  noEgressBinary,
+  planFor,
+} from "@utils/exec-plan.ts";
 
 function tmpRoot(label: string): string {
   return mkdtempSync(join(tmpdir(), `exec-plan-${label}-`));
@@ -230,5 +237,74 @@ describe("baseRoBinds config chain", () => {
     if (existsSync(join("/home/tester", ".config", "hotdog"))) {
       expect(binds).toContain(join("/home/tester", ".config", "hotdog"));
     }
+  });
+});
+
+// ── Hard net-block tier ──────────────────────────────────────────────────────
+
+describe("planFor hard net-block tier (NO_EGRESS_CLASS)", () => {
+  it("a missing jail refuses the hard tier and degrades the soft ones", () => {
+    const root = tmpRoot("hard-refuse");
+    try {
+      const soft = planFor({
+        roots: [root],
+        cls: "rw",
+        scratch: root,
+        command: "/usr/bin/bun",
+        args: ["runner.ts"],
+        binary: null,
+      });
+      expect(soft.prefixArgv).toBeNull();
+      expect(soft.refusal).toBeNull(); // today's degrade path, unchanged
+      const hard = planFor({
+        roots: [root],
+        cls: NO_EGRESS_CLASS,
+        scratch: root,
+        command: "/usr/bin/bun",
+        args: ["runner.ts"],
+        binary: null,
+      });
+      expect(hard.prefixArgv).toBeNull();
+      expect(hard.refusal).toContain("Spawn refused");
+      expect(hard.refusal).toContain("--unshare-net");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("the no-egress plan adds --unshare-net; rw/net plans do not", () => {
+    const root = tmpRoot("hard-argv");
+    try {
+      const common = {
+        roots: [root],
+        scratch: root,
+        command: "/usr/bin/bun",
+        args: ["runner.ts"],
+        execPath: "/usr/bin/bun",
+        repoRoot: "/repo",
+        binary: "/x/bwrap",
+      };
+      const hard = planFor({ ...common, cls: NO_EGRESS_CLASS });
+      expect(hard.probe).toBe("bwrap");
+      expect(hard.refusal).toBeNull();
+      expect(hard.prefixArgv!).toContain("--unshare-net");
+      for (const cls of ["rw", "net"]) {
+        expect(planFor({ ...common, cls }).prefixArgv!).not.toContain("--unshare-net");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // Probe-backed: graceful when this host has no bwrap at all (the dev/CI
+  // box). The contract is superset: the no-egress probe can only pass where
+  // the base probe passes too.
+  it("the no-egress probe implies the base probe", () => {
+    if (findBwrap() === null) {
+      expect(noEgressBinary()).toBeNull();
+      return;
+    }
+    const noNet = noEgressBinary(true);
+    if (noNet !== null) expect(bwrapAvailable(true)).toBe(true);
   });
 });

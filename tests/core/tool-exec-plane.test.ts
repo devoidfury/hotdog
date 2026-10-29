@@ -2,7 +2,7 @@
 // processes (real-spawn coverage lives in tool-exec-broker-spawn.test.ts).
 // Also covers toolExecPlaneSettings/toolExecModeLabel and the pilot tags.
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { createToolExecutor, type ToolExecutorDeps } from "@core/tool-executor.ts";
 import { Agent } from "@core/agent.ts";
 import { createToolRegistry, type Tool, type ToolDef } from "@core/extensions/tool-registry.ts";
@@ -20,21 +20,34 @@ import {
 import { tmpdir } from "node:os";
 import {
   createFencePlanner,
+  netBlockDisplay,
   postureDrift,
   sharedToolExecBroker,
   toolExecPlaneSettings,
   toolExecModeLabel,
 } from "@core/tool-exec-broker.ts";
+import { NO_EGRESS_CLASS, noEgressBinary } from "@utils/exec-plan.ts";
 import { BashTool } from "@extensions/bash-tool/index.ts";
+import { setSpawnEnvProvider } from "@utils/spawn-env.ts";
 import { ReadTool } from "@extensions/core-tools/read.ts";
 import { GrepTool } from "@extensions/core-tools/grep.ts";
 import { toolContentText } from "@utils/tool-content.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeTool(name: string, execute: Tool["execute"], execution?: "local" | "worker"): Tool {
+function makeTool(
+  name: string,
+  execute: Tool["execute"],
+  execution?: "local" | "worker",
+  spawnsChildren?: boolean,
+): Tool {
   return {
-    metadata: { sideEffects: false, difficulty: 1, ...(execution ? { execution } : {}) },
+    metadata: {
+      sideEffects: false,
+      difficulty: 1,
+      ...(execution ? { execution } : {}),
+      ...(spawnsChildren ? { spawnsChildren: true } : {}),
+    },
     toToolDef: (): ToolDef => ({
       type: "function",
       function: { name, description: "test tool", parameters: { type: "object", properties: {}, required: [] } },
@@ -550,5 +563,135 @@ describe("createFencePlanner", () => {
     expect(plan!("unit:probe", "rw", roots)).toBe(first); // memoized, same identity
     // A different class replans (null hosts stay null on every tuple).
     expect(plan!("unit:probe", "net", roots) === null || first !== null).toBe(true);
+  });
+
+  it("no-egress refuses to plan on a host that cannot jail -- never degrades to plain spawn", () => {
+    const plan = createFencePlanner("probe");
+    expect(plan).not.toBeNull();
+    const roots = [tmpdir()];
+    if (noEgressBinary() !== null) {
+      // Host CAN run the tier: a real fence comes back, no refusal.
+      expect(plan!("unit:no-egress", NO_EGRESS_CLASS, roots)).not.toBeNull();
+      return;
+    }
+    expect(() => plan!("unit:no-egress", NO_EGRESS_CLASS, roots)).toThrow(/Spawn refused/);
+    // The soft classes keep their degrade-to-null path on the same host.
+    expect(plan!("unit:no-egress", "rw", roots)).toBeNull();
+  });
+});
+
+// ── Net-block posture display ────────────────────────────────────────────────
+
+describe("netBlockDisplay", () => {
+  it("off when the plane jails nothing (no probe on these paths)", () => {
+    expect(netBlockDisplay({ toolExec: "inline", execFence: "probe" })).toBe("off");
+    expect(netBlockDisplay({ toolExec: "worker", execFence: "off" })).toBe("off");
+  });
+
+  it("capability-honest when a jail is wanted: bwrap or unavailable, never silent", () => {
+    const display = netBlockDisplay({ toolExec: "worker", execFence: "probe" });
+    expect(display === "bwrap" || display.startsWith("unavailable")).toBe(true);
+  });
+});
+
+// ── Spawn-env policy (fetch-policy proxy lane) ───────────────────────────────
+
+describe("ToolExecutor spawn-env policy", () => {
+  const POLICY = { HTTP_PROXY: "http://sess-42:tok@127.0.0.1:5999", NO_PROXY: "127.0.0.1,localhost,::1" };
+
+  function fakeProvider(answer: Record<string, string> | null): {
+    sessions: string[];
+    provider: (sessionId: string) => Promise<Record<string, string> | null>;
+  } {
+    const sessions: string[] = [];
+    return {
+      sessions,
+      provider: async (sessionId) => {
+        sessions.push(sessionId);
+        return answer;
+      },
+    };
+  }
+
+  afterEach(() => setSpawnEnvProvider(null));
+
+  it("resolves per-session env and rides it on the invoke frame", async () => {
+    const { provider, sessions } = fakeProvider(POLICY);
+    setSpawnEnvProvider(provider);
+    const link = fakeLink(okText("ok"));
+    const { executor } = setup(
+      [makeTool("planned", async () => "local", "worker", true)],
+      { toolExec: "worker", toolExecLink: link },
+    );
+    await executor.execute([call("planned")]);
+    expect(sessions).toEqual(["sess-42"]);
+    const ctx = link.calls[0]!.ctx as { spawnEnv?: Record<string, string> };
+    expect(ctx.spawnEnv).toEqual(POLICY);
+  });
+
+  it("untagged tools never resolve (and the frame carries no spawnEnv key)", async () => {
+    const { provider, sessions } = fakeProvider(POLICY);
+    setSpawnEnvProvider(provider);
+    const link = fakeLink(okText("ok"));
+    const { executor } = setup(
+      [makeTool("planned", async () => "local", "worker")],
+      { toolExec: "worker", toolExecLink: link },
+    );
+    await executor.execute([call("planned")]);
+    expect(sessions).toHaveLength(0);
+    expect("spawnEnv" in (link.calls[0]!.ctx as object)).toBe(false);
+  });
+
+  it("no provider: no injection, frame shape unchanged", async () => {
+    const link = fakeLink(okText("ok"));
+    const { executor } = setup(
+      [makeTool("planned", async () => "local", "worker", true)],
+      { toolExec: "worker", toolExecLink: link },
+    );
+    await executor.execute([call("planned")]);
+    expect("spawnEnv" in (link.calls[0]!.ctx as object)).toBe(false);
+  });
+
+  it("a provider refusal kills the call before the frame is sent (never fail-open)", async () => {
+    setSpawnEnvProvider(async () => {
+      throw new Error("proxy bind refused");
+    });
+    const link = fakeLink(okText("should never run"));
+    let localRan = false;
+    const { executor } = setup(
+      [makeTool("planned", async () => { localRan = true; return "local"; }, "worker", true)],
+      { toolExec: "worker", toolExecLink: link },
+    );
+    const { toolResults } = await executor.execute([call("planned")]);
+    expect(localRan).toBe(false);
+    expect(link.calls).toHaveLength(0);
+    const part = toolContentText(toolResults[0]!.content);
+    expect(part).toContain("Spawn refused");
+    expect(part).toContain("proxy bind refused");
+  });
+
+  it("inline mode mounts the policy env on the tool context", async () => {
+    const { provider } = fakeProvider(POLICY);
+    setSpawnEnvProvider(provider);
+    let seen: unknown = "unset";
+    const { executor } = setup([
+      makeTool("inliney", async (_input, ctx) => {
+        seen = ctx?.get("spawnEnv");
+        return ToolResult.ok("ok");
+      }, undefined, true),
+    ], {});
+    await executor.execute([call("inliney")]);
+    expect(seen).toEqual(POLICY);
+  });
+
+  it("end to end: a fake provider's proxy URL reaches a real inline bash child", async () => {
+    const { provider, sessions } = fakeProvider(POLICY);
+    setSpawnEnvProvider(provider);
+    const bash = new BashTool({ timeoutMs: 15000, maxOutputLines: 100 });
+    // The default test roots do not exist; bash spawns from the workspace root.
+    const { executor } = setup([bash], { workspaceRoots: [tmpdir()], workspaceDeny: null });
+    const { toolResults } = await executor.execute([call("bash", '{"command":"printenv HTTP_PROXY"}')]);
+    expect(sessions).toEqual(["sess-42"]);
+    expect(toolContentText(toolResults[0]!.content)).toContain(POLICY.HTTP_PROXY);
   });
 });

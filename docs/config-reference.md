@@ -1489,6 +1489,85 @@ failure text.
 }
 ```
 
+### `fetchPolicy`
+
+[fetch-policy](../src/extensions/fetch-policy) — Origin policy for model-triggered HTTP: allow/ask/deny per
+`scheme://host[:port]`. One evaluator (deny > allow > `default`), two enforcement points: the `fetch` tool (the request
+URL **and every redirect hop**), and a loopback policy proxy that children reach through injected
+`HTTP_PROXY`/`HTTPS_PROXY` -- so `curl` run by the model inside `bash` (inline, the exec plane, or a stdio MCP server)
+answers to the same policy, and its asks surface in the same UI. Per-session tokens in the proxy URL attribute each
+connection to the session that spawned the child; grants land in the right memo and unrelated local processes cannot
+ride the relay.
+
+**On by default with `default: "ask"`**: every origin the rules do not match prompts (allow once / allow origin for
+session / always allow (persist) / deny). Fail-closed means every non-allow path blocks with the reason and the exact
+config line that would have allowed it: no interactive UI (one-shot `-p`, no TTY), a cancelled run, a proxy connection
+nobody answers within `proxyAskTimeoutMs`. A `deny` rule has no in-session remedy -- it lives in the config only, and
+neither a prompt nor the state file can outvote it. Invalid `fetchPolicy` config blocks **every** fetch and every
+proxied connect until fixed, rather than running an audit trail of a policy nobody configured right.
+
+Origin grammar (same for `allow` and `deny`): `scheme://host[:port]`, `*` globs (a leading `*.example.com` also
+matches the bare apex, never `evil-example.com`), an omitted port means the scheme's default, `:*` means any port.
+No paths: HTTPS paths are invisible without MITM, so path rules would be a lie.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Set `false` to remove the layer entirely. |
+| `default` | `"ask"` \| `"allow"` \| `"deny"` | `"ask"` | What an unmatched origin does. `deny` is allowlist-only. |
+| `allow` | `string[]` | `[]` | Origins allowed without asking. Merged with persisted approvals from `<config-dir>/fetch-policy.json`. |
+| `deny` | `string[]` | `[]` | Blocked without asking. Deny beats allow and cannot be overridden. |
+| `proxyEnabled` | `boolean` | `true` | Inject the proxy env into spawned children. Loopback-only, token-authenticated, binds lazily on the first spawn that asks. `false` also opts out on a machine that already has its own proxy (this relay dials origins directly; it does not chain upstream proxies). |
+| `proxyAskTimeoutMs` | `number` | `60000` | How long a child-process connection waits at an approval prompt before being denied. |
+| `hardEgress` | `boolean` | `false` | Kernel-enforced egress tier: the plane runners and stdio MCP servers spawn inside a private network-namespace jail whose ONLY exit is this policy proxy (per-session UNIX socket). Implies the proxy; refuses the spawn rather than degrade when the jail cannot exist. |
+| `hardEgressLoopback` | `boolean` | `false` | While `hardEgress` is on, loopback destinations are refused (there is no host loopback through the jail). `true` lets loopback origins into the normal allow/ask/deny flow. |
+
+```json
+{
+  "fetchPolicy": {
+    "default": "ask",
+    "allow": ["https://docs.example.com", "https://*.pypi.org:*"],
+    "deny": ["http://169.254.169.254"]
+  }
+}
+```
+
+"Always allow (persist)" appends to `<config-dir>/fetch-policy.json`; "allow origin for session" is memory-only and
+dies with the session. A child whose policy-proxy ask cannot be answered (no live UI) is denied, never held open.
+
+**`hardEgress`: the kernel tier.** Setting `"fetchPolicy": { "hardEgress": true }` moves enforcement from
+cooperative to the kernel, and it is on the policy side too: the jail's only door is *this* proxy, over a per-session
+UNIX socket. Each fenced child (the pooled plane's runner, and stdio MCP servers) spawns under the netns shim: a
+private user+network namespace created **before exec**, `lo` raised, nothing else -- no routes, no physical
+interface, no path to any host or neighbor. Inside the jail the injected proxy URL points at the jail's loopback, a
+bridge pipes that port to the policy proxy's socket, and a same-uid process borrowing another session's socket is
+still refused: attribution requires the socket AND the session's token to agree. Consequences worth knowing:
+
+- **The only egress is the policy.** `--noproxy`, raw sockets, an interpreter that never reads env -- all inert in an
+  empty netns. Ignoring the proxy stops meaning "open network" and starts meaning "no network".
+- **Loopback joins the policy.** The injected `NO_PROXY` is empty under `hardEgress` (there is no host loopback to
+  protect), so loopback connects genuinely arrive -- and are refused unless `hardEgressLoopback: true` lets them ask
+  like any origin.
+- **Never fail-open, never degrade.** A host without unprivileged user namespaces or bwrap (the jail bind-mounts the
+  socket), or a spawn that would run inline where no jail exists, gets a refusal, not a cooperative-lane child.
+  `hotdog info` reports the posture (`Net Block: bwrap | off | hard-armed | hard-unavailable ...`); the shim probes
+  the full chain (userns, uid/gid maps, netns, `lo`) so probe and spawn agree on what the platform offers.
+- **`proxyEnabled: false` is not a state that exists here.** `hardEgress` implies the proxy: the jail's only exit IS
+  the policy proxy.
+
+**The ceiling -- read before trusting it.** With `hardEgress` off, this is a cooperative policy, not enforcement.
+Proxy environment variables are a request, not a boundary: a script can ignore them (`--noproxy`, raw sockets) or
+unset them, and a determined script will. `NO_PROXY` deliberately covers loopback (`127.0.0.1,localhost,::1`) so local
+dev services stay reachable -- which also means the policy never sees loopback traffic. The kernel-enforced tiers
+(both refuse the spawn rather than degrade, both reported by `hotdog info`) are the fence's hard `no-egress` class
+(`--unshare-net`: a fresh netns with no routes at all -- egress dies entirely) and `fetchPolicy.hardEgress` above
+(egress survives only through the policy proxy). Full isolation stays what [SECURITY.md](../SECURITY.md) and
+`docs/postmortems/sysbox.md` say it is: a container or a VM.
+
+Overlap with `userGate`: the gates decide different questions and compose. `userGate` sits above the spawn boundary --
+whether a tool call runs at all (its `fetch.url=` rules glob the raw URL the model typed). `fetchPolicy` sits at the
+network boundary -- which origin a call may actually talk to, including redirect hops `userGate` cannot see and child
+processes it never inspects. With both configured, a request must pass the call gate and the origin policy.
+
 ### `skills`
 
 [Skills](../src/extensions/skills) — Skills loading, activation, and system prompt integration.

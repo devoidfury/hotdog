@@ -8,6 +8,7 @@ import { type ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
 import type { HookPayloads } from "./extensions/types.ts";
 import { Workspace } from "@utils/workspace.ts";
+import { spawnEnvFor, hardEgressFor } from "@utils/spawn-env.ts";
 import { suggestCandidates } from "@utils/strings.ts";
 import type { ToolResultContent } from "./context/wrappers.ts";
 import {
@@ -250,18 +251,44 @@ export class ToolExecutor {
     let stopLoop = false;
     let hint: string | undefined;
 
+    // Spawn-env policy, resolved AFTER the gate pipeline and validation: a call
+    // that never runs must never spawn, so it must not resolve (or bind) the
+    // policy proxy either. Only tools that spawn children ask -- see
+    // `ToolMetadata.spawnsChildren`. A rejection propagates (the child is not
+    // spawned outside a policy that could not be resolved), and the inline tool
+    // gets the answer on its context while the plane gets it on the frame.
+    const plane = this.#execPlane && tool.metadata.execution === "worker" ? this.#execPlane : null;
+    let spawnEnv: Record<string, string> | null = null;
+    let egress: { socketPath: string } | null = null;
+    if (tool.metadata.spawnsChildren) {
+      spawnEnv = await spawnEnvFor(agent.sessionId);
+      if (spawnEnv) toolCtx.set("spawnEnv", spawnEnv);
+      // Hard egress tier: the jail exists on the plane only. When a strict
+      // directive is active and this call would run outside it, refuse --
+      // an inline child that was supposed to be netns-caged is exactly the
+      // hole the tier closes.
+      const hard = await hardEgressFor(agent.sessionId);
+      if (hard) {
+        if (plane) egress = { socketPath: hard.socketPath };
+        else if (hard.strict) {
+          throw new ToolError(
+            `Spawn refused: fetchPolicy.hardEgress jails children on the worker plane, and ${toolName} would run inline, outside the jail. ` +
+              'Set toolExec to "worker" (Linux, jail probe ok) or fetchPolicy.hardEgress to false.',
+          );
+        }
+      }
+    }
+
     // maxRetries counts retries AFTER the initial attempt (total attempts = 1 + maxRetries).
     const maxAttempts = 1 + Math.max(0, this.#deps.maxRetries);
     let attempts = 0;
     // The plane fork: tagged tools leave the process when the
     // plane is on; untagged tools and inline mode never touch the link.
-    const plane = this.#execPlane && tool.metadata.execution === "worker" ? this.#execPlane : null;
-
     while (attempts < maxAttempts) {
       attempts++;
       try {
         result = plane
-          ? await this.#executeViaPlane(plane, toolName, input, toolCallId)
+          ? await this.#executeViaPlane(plane, toolName, input, toolCallId, spawnEnv, egress)
           : await tool.execute(input, toolCtx);
         success = true;
         // Check for stop-loop sentinel on ToolResult
@@ -385,6 +412,8 @@ export class ToolExecutor {
     toolName: string,
     input: string,
     toolCallId?: string,
+    spawnEnv?: Record<string, string> | null,
+    egress?: { socketPath: string } | null,
   ): Promise<unknown> {
     const workspace = this.#workspaceSpec();
     const session = this.#deps.agent.sessionId;
@@ -399,7 +428,13 @@ export class ToolExecutor {
       session,
       tool: toolName,
       args: input,
-      ctx: { session, workspace, toolConfig: plane.config },
+      ctx: {
+        session,
+        workspace,
+        toolConfig: plane.config,
+        ...(spawnEnv ? { spawnEnv } : {}),
+        ...(egress ? { egress } : {}),
+      },
       toolCallId,
     });
     // If the cancel wins, nothing is left listening for this rejection.

@@ -17,14 +17,17 @@
 //
 // Caveats (unchanged from the eval original): Nix-style layouts (everything
 // under /nix/store) are not supported by the allowlist; the probe failing
-// there means those hosts run unfenced, flagged. Network stays shared --
-// `--unshare-net` is reserved for the future `no-net` class, not a v1 policy.
+// there means those hosts run unfenced, flagged. The `rw`/`net` classes share
+// the network by design; the hard net-block tier is `NO_EGRESS_CLASS` below,
+// which adds `--unshare-net` and REFUSES to spawn when no jail is available
+// (that class never takes the degrade path -- no jail means no child).
 //
 // The shape is deliberately backend-agnostic: a future seatbelt (macOS) or
 // container backend implements the same plan/probe surface.
 
 import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { JAIL_EGRESS_SOCKET } from "./spawn-env.ts";
 
 const SYS_DIRS = ["/usr", "/bin", "/sbin", "/lib", "/lib64"];
 // Curated /etc: DNS + TLS + name resolution + locale + shell startup, so
@@ -66,6 +69,8 @@ export function bwrapArgv(opts: {
   plan: BwrapPlan;
   /** Env set INSIDE the jail via --setenv (jails have no inherited $HOME by design). */
   setEnv?: Record<string, string>;
+  /** Hard net-block tier: kernel-enforced no egress (see NO_EGRESS_CLASS). */
+  noEgress?: boolean;
 }): string[] {
   const pre = [
     opts.binary ?? "bwrap",
@@ -82,6 +87,10 @@ export function bwrapArgv(opts: {
     // hostname leaking through the default namespaces.
     "--unshare-ipc",
     "--unshare-uts",
+    // The hard tier's whole point: a fresh empty netns has no routes at all
+    // (not even loopback), so the child cannot dial out or reach local
+    // services -- the kernel-enforced layer the cooperative proxy is not.
+    ...(opts.noEgress ? ["--unshare-net"] : []),
     "--tmpfs", "/",
   ];
   if (opts.setEnv) {
@@ -159,11 +168,66 @@ export function hiddenRepoPaths(repoRoot: string): string[] {
 
 // ── Plane plan ────────────────────────────────
 
+/**
+ * The hard net-block class name for `planFor({ cls })`: planned with
+ * `--unshare-net`, and when no jail exists the plan REFUSES (see
+ * `PlanePlanResult.refusal`) instead of degrading to a plain spawn. The
+ * plane's wire ExecClass adopts this value when a producer wires the tier;
+ * until then exec-plan is the only place the class means anything.
+ */
+export const NO_EGRESS_CLASS = "no-egress";
+
+/** The refusal every no-egress spawner must surface when the jail is gone. */
+export function noEgressRefusal(): string {
+  return (
+    "Spawn refused: the hard net-block tier needs a working bwrap jail with --unshare-net, " +
+    "and this host has none (no binary, or the sandbox probe failed). " +
+    "Children are not spawned outside it; execFence \"off\" or the proxy policy are the opt-outs."
+  );
+}
+
+/** The refusal the hard-egress tier (fetchPolicy.hardEgress) surfaces when the shim cannot run. */
+export function hardEgressRefusal(): string {
+  return (
+    "Spawn refused: fetchPolicy.hardEgress requires the netns shim (unprivileged user + network " +
+    "namespaces) and the bwrap jail, and this host cannot provide them (userns disabled/restricted, " +
+    "or the sandbox probe failed). Children are not started outside the jail; " +
+    "set fetchPolicy.hardEgress to false to opt out."
+  );
+}
+
+let cachedHardEgress: string | null | undefined;
+
+/**
+ * Does the netns shim actually work here (userns + maps + netns + lo)?
+ * One probe per process; the shim runs its full setup chain, so probe and
+ * spawn agree on what the platform offers.
+ */
+export function hardEgressProbe(shimPath: string, force = false): string | null {
+  if (cachedHardEgress !== undefined && !force) return cachedHardEgress;
+  try {
+    const r = Bun.spawnSync([process.execPath, shimPath, "--probe"], {
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    cachedHardEgress = r.exitCode === 0 ? shimPath : null;
+  } catch {
+    cachedHardEgress = null;
+  }
+  return cachedHardEgress;
+}
+
 export interface PlanePlanResult {
   /** Full spawn argv (bwrap ... -- command args), or null when the fence is unavailable. */
   prefixArgv: string[] | null;
   /** Backend the probe allowed, mirrored into the status line; null = plain spawn. */
   probe: "bwrap" | null;
+  /**
+   * Non-null when a class that MUST be fenced got no jail: the caller must
+   * NOT spawn (and must not retry unfenced). Null on every degrade path a
+   * soft class may take.
+   */
+  refusal: string | null;
 }
 
 /**
@@ -178,9 +242,10 @@ export interface PlanePlanResult {
  * over the ro bind by mount order); everywhere else the repo's `.git` stays
  * ro. The evals harness keeps hiding git history via `hiddenRepoPaths()`.
  *
- * `cls` is carried for the backend contract: today `rw` and `net` plan
- * identically (bwrap shares network by default; `--unshare-net` arrives with
- * the future `no-net` class). `scratch` must exist host-side -- bwrap bind
+ * `cls` is the capability class: `rw`/`net` plan identically (bwrap shares
+ * network by default) while `NO_EGRESS_CLASS` plans with `--unshare-net` and
+ * returns a refusal instead of a plain-spawn null when no jail exists --
+ * the hard tier never degrades. `scratch` must exist host-side -- bwrap bind
  * sources must be real directories (the caller creates it).
  */
 export function planFor(opts: {
@@ -193,9 +258,33 @@ export function planFor(opts: {
   repoRoot?: string;
   /** Override the bwrap binary (undefined = probe, null = force plain spawn). */
   binary?: string | null;
+  /**
+   * Hard egress tier (fetchPolicy.hardEgress): the prefix is wrapped in the
+   * netns shim (private user+net namespace, loopback raised), the policy
+   * proxy's unix socket is bind-mounted at JAIL_EGRESS_SOCKET, and the jail
+   * gets NO --unshare-net -- the netns is the shim's, and raising a second
+   * one would throw away the loopback the bridge listens on. The shim probe
+   * gates availability; a missing shim refuses (never plain spawn).
+   */
+  egress?: { socketPath: string; shim: string };
 }): PlanePlanResult {
-  const binary = opts.binary === undefined ? bwrapBinary() : opts.binary;
-  if (!binary) return { prefixArgv: null, probe: null };
+  const noEgress = opts.cls === NO_EGRESS_CLASS;
+  if (opts.egress && opts.binary === null) {
+    // Forced plain spawn is never a hard-egress spawn.
+    return { prefixArgv: null, probe: null, refusal: hardEgressRefusal() };
+  }
+  const binary =
+    opts.binary === undefined ? (noEgress ? noEgressBinary() : bwrapBinary()) : opts.binary;
+  if (!binary) {
+    // Soft classes degrade to a plain spawn (flagged posture); the hard tier
+    // refuses: a net-block child spawned unfenced is the exact hole the
+    // tier exists to close.
+    return {
+      prefixArgv: null,
+      probe: null,
+      refusal: noEgress || opts.egress ? (opts.egress ? hardEgressRefusal() : noEgressRefusal()) : null,
+    };
+  }
   const repoRoot = opts.repoRoot ?? process.cwd();
   const plan: BwrapPlan = {
     roBinds: baseRoBinds({
@@ -209,15 +298,27 @@ export function planFor(opts: {
     rwBinds: opts.roots.filter((p) => existsSync(p)),
     binds: [[opts.scratch, "/tmp"]],
   };
+  if (opts.egress) {
+    // The policy proxy socket rides into the jail as a plain file bind; the
+    // runner's egress bridge is the only thing allowed to connect to it, and
+    // the only thing the child can reach at all.
+    plan.binds!.push([opts.egress.socketPath, JAIL_EGRESS_SOCKET]);
+  }
   // The jail has no home; point HOME/TMPDIR at the per-entry scratch bind.
-  const prefixArgv = bwrapArgv({
+  const inner = bwrapArgv({
     binary,
     command: opts.command,
     args: opts.args,
     plan,
     setEnv: { HOME: "/tmp", TMPDIR: "/tmp" },
+    // noEgress only for the pure deny class: under the shim the netns is
+    // already private (with loopback), and --unshare-net would replace it.
+    noEgress: noEgress && !opts.egress,
   });
-  return { prefixArgv, probe: "bwrap" };
+  const prefixArgv = opts.egress
+    ? [process.execPath, opts.egress.shim, "--", ...inner]
+    : inner;
+  return { prefixArgv, probe: "bwrap", refusal: null };
 }
 
 // ── Probe (shared by both consumers) ─────────────────────────────────────────
@@ -242,12 +343,26 @@ export function findBwrap(): string | null {
 }
 
 let cachedBinary: string | null | undefined;
+let cachedNoEgress: string | null | undefined;
 
 /** Resolved bwrap path if it exists and a trivial sandbox actually runs; null otherwise. Cached. */
 export function bwrapBinary(force = false): string | null {
   if (cachedBinary !== undefined && !force) return cachedBinary;
   cachedBinary = probeBwrap();
   return cachedBinary;
+}
+
+/**
+ * Like `bwrapBinary` but for the hard net-block tier: the probe additionally
+ * requires `--unshare-net` to work, so a host whose policy allows pidns but
+ * forbids new network namespaces reports unavailable here (and the tier
+ * refuses to spawn) rather than shipping a "net-block" jail that shares the
+ * network. Implies the base probe (same flags, a superset). Cached.
+ */
+export function noEgressBinary(force = false): string | null {
+  if (cachedNoEgress !== undefined && !force) return cachedNoEgress;
+  cachedNoEgress = probeBwrap(["--unshare-net"]);
+  return cachedNoEgress;
 }
 
 export function bwrapAvailable(force = false): boolean {
@@ -259,7 +374,12 @@ export function execFenceBackend(force = false): "bwrap" | null {
   return bwrapBinary(force) ? "bwrap" : null;
 }
 
-function probeBwrap(): string | null {
+/** Status-line backend label for the hard net-block tier. */
+export function netBlockBackend(force = false): "bwrap" | null {
+  return noEgressBinary(force) ? "bwrap" : null;
+}
+
+function probeBwrap(extraFlags: readonly string[] = []): string | null {
   const bin = findBwrap();
   if (!bin) return null;
   // Probe the real recipe's core: a fresh tmpfs root must mount and a
@@ -275,11 +395,13 @@ function probeBwrap(): string | null {
       // The probe tests AVAILABILITY, and pidns specifically: a host whose
       // kernel/userns policy cannot create a PID namespace must probe-fail
       // and run unfenced (loudly), rather than ship a pid-sharing "jail"
-      // that Security.md does not describe. Same flags as the real plan,
-      // so probe and plan can never disagree on what the platform offers.
+      // that Security.md does not describe. Same flags as the real plan
+      // (plus the class's own, e.g. --unshare-net), so probe and plan can
+      // never disagree on what the platform offers.
       const argv = [
         bin,
         "--unshare-pid", "--unshare-ipc", "--unshare-uts",
+        ...extraFlags,
         "--tmpfs", "/", "--dev", "/dev", "--proc", "/proc",
         ...roBinds.flatMap((p) => ["--ro-bind", p, p]),
         "--", cmd,

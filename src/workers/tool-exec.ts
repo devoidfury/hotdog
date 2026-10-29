@@ -24,6 +24,8 @@ import {
   type WireToolConfig,
 } from "@core/tool-exec-protocol.ts";
 import { Workspace } from "@utils/workspace.ts";
+import { startEgressBridge } from "@utils/egress-bridge.ts";
+import { HARD_EGRESS_PROXY_PORT, JAIL_EGRESS_SOCKET } from "@utils/spawn-env.ts";
 import { BashTool } from "@extensions/bash-tool/index.ts";
 import { ReadTool } from "@extensions/core-tools/read.ts";
 import { GrepTool } from "@extensions/core-tools/grep.ts";
@@ -87,10 +89,37 @@ function writeFrame(frame: unknown): void {
  */
 const inFlight = new Map<string, AbortController>();
 
+/**
+ * Hard egress tier: this entry's netns has exactly one way out -- a fixed
+ * loopback port piped to the policy proxy's bind-mounted UNIX socket. Start
+ * the bridge on the first caged invoke; it lives with the runner (no orphan
+ * is possible) and the fixed port keeps the injected proxy URL stable for
+ * the entry's whole life. A bridge that cannot start fails every subsequent
+ * caged call loudly; nothing runs with a silently dead proxy lane.
+ */
+let bridgePromise: Promise<void> | null = null;
+function ensureEgressBridge(): Promise<void> {
+  if (!bridgePromise) {
+    bridgePromise = startEgressBridge({
+      unixPath: JAIL_EGRESS_SOCKET,
+      port: HARD_EGRESS_PROXY_PORT,
+    })
+      .then(() => undefined)
+      .catch((e) => {
+        bridgePromise = null; // allow the next invoke to retry
+        throw e;
+      });
+  }
+  return bridgePromise;
+}
+
 async function handleInvoke(frame: InvokeFrame): Promise<void> {
   const controller = new AbortController();
   inFlight.set(frame.id, controller);
   try {
+    if (frame.ctx.egress) {
+      await ensureEgressBridge();
+    }
     const factory = TOOL_FACTORIES[frame.tool];
     if (!factory) {
       throw new ToolError(`tool-exec: tool "${frame.tool}" is not registered in the runner`);
@@ -109,6 +138,10 @@ async function handleInvoke(frame: InvokeFrame): Promise<void> {
       // attributes when the host never sent one (standalone broker clients).
       toolCallId: frame.toolCallId ?? frame.id,
       abortSignal: controller.signal,
+      // Resolved supervisor-side where the policy layer lives: this process is
+      // a jail with no policy of its own, and the frame is a private pipe (the
+      // per-session proxy token never enters argv).
+      ...(frame.ctx.spawnEnv ? { spawnEnv: frame.ctx.spawnEnv } : {}),
     });
     const tool = factory(frame.ctx.toolConfig ?? {});
     const result = await tool.execute(frame.args, toolCtx);

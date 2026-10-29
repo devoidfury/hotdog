@@ -1,6 +1,8 @@
 import { McpClient } from "./client.ts";
 import { McpContentBlock, McpError } from "./types.ts";
 import type { ElicitationHandler } from "./elicitation.ts";
+import { hardEgressFor, mcpOwnerSession, spawnEnvFor } from "@utils/spawn-env.ts";
+import { NETNS_SHIM_ENTRY } from "@core/tool-exec-layout.ts";
 
 /** Shared client handle for use by McpTool instances. */
 export class McpConnectionHandle {
@@ -43,7 +45,30 @@ export class McpConnection {
     extraScrubKeys?: readonly string[],
     envScrubbing: boolean = true,
   ): Promise<McpConnection> {
-    const client = await McpClient.forStdio(command, requestTimeoutMs, args, env, extraScrubKeys, envScrubbing);
+    // Resolved BEFORE the client is built: the stdio transport spawns in its
+    // constructor, so the policy env must be in hand (and a refusal must fail
+    // the connection here, never spawn the server outside the policy). The
+    // server is a child of the process, not of a session, so it answers to
+    // its own owner id -- see utils/spawn-env.ts.
+    const owner = mcpOwnerSession(serverName);
+    const [policyEnv, hard] = await Promise.all([spawnEnvFor(owner), hardEgressFor(owner)]);
+    if (hard) {
+      // Hard egress tier: the server boots inside a private netns (netns
+      // shim), with a bridge pipcing its loopback proxy port to the policy
+      // proxy socket. The server keeps its real argv/env on the far side of
+      // the exec; ignoring the injected proxy now means having no network.
+      args = [NETNS_SHIM_ENTRY, "--bridge", hard.socketPath, "--", command, ...args];
+      command = process.execPath;
+    }
+    const client = await McpClient.forStdio(
+      command,
+      requestTimeoutMs,
+      args,
+      env,
+      extraScrubKeys,
+      envScrubbing,
+      policyEnv,
+    );
     const conn = new McpConnection(client, serverName);
     await conn._initialize();
     return conn;

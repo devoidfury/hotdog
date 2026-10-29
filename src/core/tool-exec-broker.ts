@@ -19,9 +19,9 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { logger } from "@utils/logger.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
-import { execFenceBackend, planFor } from "@utils/exec-plan.ts";
+import { execFenceBackend, hardEgressProbe, hardEgressRefusal, netBlockBackend, NO_EGRESS_CLASS, noEgressBinary, noEgressRefusal, planFor } from "@utils/exec-plan.ts";
 import { formatError, ConfigError, ToolError } from "./error.ts";
-import { idleReapMsOrDefault, PROJECT_ROOT, RUNNER_ENTRY } from "./tool-exec-layout.ts";
+import { idleReapMsOrDefault, NETNS_SHIM_ENTRY, PROJECT_ROOT, RUNNER_ENTRY } from "./tool-exec-layout.ts";
 import {
   encodeFrame,
   LineDecoder,
@@ -82,6 +82,32 @@ export function execFenceDisplay(resolved: Record<string, unknown>): string {
   // is no reason to touch the platform.
   if (mode === "inline" || fence === "off") return "off";
   return execFenceBackend() ?? "none -- probe failed";
+}
+
+/**
+ * Hard net-block tier posture (the `--unshare-net` class): "off" when the
+ * plane jails nothing (nothing can be classed), "bwrap" when this host can
+ * run a jail WITH a private empty netns (a net-block child would truly have
+ * no egress), "unavailable" when a fence is wanted but the platform cannot
+ * block egress -- children share the network. Probes only when the policy
+ * would ask for a jail; spawns at most one cached probe process.
+ */
+export function netBlockDisplay(resolved: Record<string, unknown>): string {
+  const { mode, fence } = toolExecPlaneSettings(resolved);
+  const hard =
+    (resolved.fetchPolicy as { hardEgress?: boolean } | undefined)?.hardEgress === true;
+  if (hard) {
+    // The operator asked for kernel-enforced child egress: report whether
+    // the jail (bwrap + netns shim) is actually there, and never let an
+    // inline plane pretend it is armed.
+    if (mode === "inline") return "hard-inline -- refuses inline children (worker plane required)";
+    if (fence === "off") return "hard-unavailable -- execFence is off, so no jail exists";
+    return hardEgressProbe(NETNS_SHIM_ENTRY) !== null
+      ? "hard-armed"
+      : "hard-unavailable -- children refused (no bwrap or unprivileged userns here)";
+  }
+  if (mode === "inline" || fence === "off") return "off";
+  return netBlockBackend() ?? "unavailable -- no --unshare-net jail";
 }
 
 /** One-line status label: `hotdog info` and the webui strip read the posture here. */
@@ -163,6 +189,8 @@ export type FencePlanner = (
   session: string,
   cls: ExecClass,
   roots: string[],
+  /** Hard egress tier directive (fetchPolicy.hardEgress); null/absent = today. */
+  hardEgress?: { socketPath: string } | null,
 ) => WireFence | null;
 
 /** Sessions ride the scratch dir name; uuids pass untouched, anything else is flattened. */
@@ -179,10 +207,22 @@ function sanitizeForPath(s: string): string {
 export function createFencePlanner(fence: "off" | "probe"): FencePlanner | null {
   if (fence === "off") return null;
   const memo = new Map<string, WireFence | null>();
-  return (session, cls, roots) => {
-    const key = `${session}\u0000${cls}\u0000${roots.join("\u0000")}`;
+  return (session, cls, roots, hardEgress) => {
+    const key = `${session}\u0000${cls}\u0000${hardEgress ? hardEgress.socketPath : ""}\u0000${roots.join("\u0000")}`;
     const hit = memo.get(key);
     if (hit !== undefined) return hit;
+    // Hard egress tier: netns shim AND bwrap are both mandatory -- a host
+    // missing either refuses (pre-scratch, so no tmp dir is left behind),
+    // never plans the cooperative plain jail.
+    if (hardEgress) {
+      if (hardEgressProbe(NETNS_SHIM_ENTRY) === null || execFenceBackend() === null) {
+        throw new ToolError(hardEgressRefusal());
+      }
+    } else if (cls === NO_EGRESS_CLASS && noEgressBinary() === null) {
+      // Hard net-block tier: no jail means NO spawn -- this class never takes
+      // the degrade path below either. planFor's refusal is belt-and-suspenders.
+      throw new ToolError(noEgressRefusal());
+    }
     // Probe first (cached): on a host with no working jail there is nothing
     // to plan and no scratch dir to create.
     if (execFenceBackend() === null) {
@@ -193,14 +233,16 @@ export function createFencePlanner(fence: "off" | "probe"): FencePlanner | null 
       `${join(tmpdir(), `hotdog-exec-${sanitizeForPath(session)}-${cls}-`)}`,
     );
     let spec: WireFence | null = null;
-    const { prefixArgv, probe } = planFor({
+    const { prefixArgv, probe, refusal } = planFor({
       roots,
       cls,
       scratch,
       command: process.execPath,
       args: [RUNNER_ENTRY],
       repoRoot: PROJECT_ROOT,
+      egress: hardEgress ? { socketPath: hardEgress.socketPath, shim: NETNS_SHIM_ENTRY } : undefined,
     });
+    if (refusal) throw new ToolError(refusal);
     if (prefixArgv && probe) {
       const joined = prefixArgv.join("\u0000");
       spec = { id: Bun.hash(joined).toString(36), prefix: prefixArgv };
@@ -328,7 +370,7 @@ export class ToolExecBroker implements ToolExecLink {
     await this.#ensureStarted();
     const proc = this.#proc!;
     const id = req.id ?? `x${++this.#seq}`;
-    const fence = this.#fencePlan?.(req.session, "rw", req.ctx.workspace.roots);
+    const fence = this.#fencePlan?.(req.session, "rw", req.ctx.workspace.roots, req.ctx.egress ?? null);
     const frame: InvokeFrame = {
       id,
       op: "invoke",

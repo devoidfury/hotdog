@@ -41,13 +41,18 @@ interface BashToolOptions {
 /**
  * Env for agent-spawned commands. Scrubbed base: the model-reachable child
  * must not carry hotdog's own secrets (see utils/env.ts). `extraVars` are the
- * user's bashTool.env config vars, merged last over the agent defaults (same
- * trust model as mcpServers[].env: user config is trusted).
+ * user's bashTool.env config vars, merged over the agent defaults (same trust
+ * model as mcpServers[].env: user config is trusted). `spawnPolicyEnv` merges
+ * LAST: it is what a network policy requires the child to carry (the
+ * fetch-policy proxy), and the child must not be able to opt out of it by
+ * keeping its own proxy variable. `fetchPolicy.proxyEnabled: false` is the
+ * documented way to leave the shell's proxy configuration alone.
  */
 export function agentSpawnEnv(
   extraScrubKeys?: readonly string[],
   extraVars?: Record<string, string>,
   envScrubbing: boolean = true,
+  spawnPolicyEnv?: Record<string, string> | null,
 ): Record<string, string> {
   return {
     ...copyScrubbedEnv(process.env, extraScrubKeys, envScrubbing),
@@ -69,6 +74,7 @@ export function agentSpawnEnv(
     // https://bun.com/docs/test#ai-agent-integration
     CLAUDECODE: "1",
     ...(extraVars ?? {}),
+    ...(spawnPolicyEnv ?? {}),
   } as Record<string, string>;
 }
 
@@ -97,6 +103,7 @@ export class BashTool {
     sideEffects: true,
     difficulty: 2,
     execution: "worker",
+    spawnsChildren: true,
     argDisplay: { command: { preview: "first-line", syntax: "shell" } },
   };
 
@@ -178,7 +185,15 @@ export class BashTool {
       ...OWN_PROCESS_GROUP,
       // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
       stdio: ["ignore", "pipe", "pipe"],
-      env: agentSpawnEnv(this.envScrubExtra, this.env, this.envScrubbing),
+      // Spawn-env policy last (see agentSpawnEnv): the host mounts it on the
+      // context when a network policy is active -- inline from the executor,
+      // worker-plane from the invoke frame.
+      env: agentSpawnEnv(
+        this.envScrubExtra,
+        this.env,
+        this.envScrubbing,
+        ctx?.get?.("spawnEnv") as Record<string, string> | undefined,
+      ),
     });
 
     return new Promise((resolve, reject) => {

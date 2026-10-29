@@ -164,3 +164,38 @@ describe("broker env posture (envScrubbing)", () => {
     }
   });
 });
+
+// ── spawnEnv rides the frame into the runner's child (policy proxy lane) ────
+
+describe("broker spawnEnv (real spawn)", () => {
+  const POLICY = { HTTP_PROXY: "http://spawn-test:tok@127.0.0.1:5999", NO_PROXY: "127.0.0.1,localhost,::1" };
+
+  it("the runner merges frame.ctx.spawnEnv into the bash child, last", async () => {
+    const result = await broker.invoke({
+      session: "spawn-test",
+      tool: "bash",
+      args: { command: 'echo "h=$HTTP_PROXY n=$NO_PROXY"' },
+      ctx: { ...ctx(), spawnEnv: POLICY },
+    });
+    expect(result.kind).toBe("tool-result");
+    if (result.kind !== "tool-result") return;
+    expect(result.output).toContain(`h=${POLICY.HTTP_PROXY}`);
+    expect(result.output).toContain(`n=${POLICY.NO_PROXY}`);
+  });
+
+  it("per-call: the reused pool entry injects nothing once the frame stops carrying it", async () => {
+    // Same (session, class) entry as above. hotdog must ADD nothing, so the
+    // child keeps whatever the host env had (pass-through, not injection).
+    const probe =
+      'bun -e "console.log(JSON.stringify({h: process.env.HTTP_PROXY ?? null}))"';
+    const result = await broker.invoke({
+      session: "spawn-test",
+      tool: "bash",
+      args: { command: probe },
+      ctx: ctx(),
+    });
+    expect(result.kind).toBe("tool-result");
+    if (result.kind !== "tool-result") return;
+    expect(JSON.parse(result.output.trim()).h).toBe(process.env.HTTP_PROXY ?? null);
+  });
+});

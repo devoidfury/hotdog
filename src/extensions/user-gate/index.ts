@@ -32,6 +32,7 @@ import {
   type ResolvedUserGateConfig,
 } from "@utils/approvals/rules.ts";
 import { extractTargets, suggestRuleLine } from "@utils/approvals/index.ts";
+import { enqueuePrompt } from "@utils/prompt-queue.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 
 type ToolCallPayload = HookPayloads["tool:call"];
@@ -55,19 +56,6 @@ const MAX_ARGS_ECHO = 400;
 type AskOutcome =
   | { action: "allow"; session: boolean }
   | { action: "deny"; reason: string };
-
-/**
- * Process-wide one-at-a-time prompt queue. Anything that decides to prompt
- * (any session, any parallel tool call) takes its turn here, so the UI never
- * has two live questions.
- */
-let queueTail: Promise<unknown> = Promise.resolve();
-
-export function enqueuePrompt<T>(task: () => Promise<T>): Promise<T> {
-  const run = queueTail.then(task, task);
-  queueTail = run.catch(() => {});
-  return run;
-}
 
 /** Parse the call's JSON arguments; a bail reason on anything else. */
 function parseToolArgs(

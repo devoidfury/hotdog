@@ -12,7 +12,7 @@
 // not replacement. Exits on stdin EOF (the broker going away).
 
 import { ToolContext } from "@core/extensions/tool-context.ts";
-import { ConfigError, ToolError } from "@core/error.ts";
+import { ConfigError, formatError, ToolError } from "@core/error.ts";
 import type { Tool } from "@core/extensions/tool-registry.ts";
 import {
   encodeFrame,
@@ -127,7 +127,25 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("error", () => {});
 process.stdout.on("error", () => {});
 process.stdin.on("data", (chunk: string) => {
-  for (const line of decoder.push(chunk)) {
+  let lines: string[];
+  try {
+    lines = decoder.push(chunk);
+  } catch (e) {
+    // The broker's frame stream is unresyncable past an overflow: nothing
+    // left to serve. Drain exactly as an EOF does (abort in-flight so the
+    // bash SIGKILL escalation still lands), and leave -- the broker's exit
+    // handler answers every pending call with the executor-died contract.
+    if (!draining) {
+      writeFrame({
+        op: "log",
+        level: "error",
+        msg: `frame overflow from broker: ${formatError(e)}; draining`,
+      });
+    }
+    drain();
+    return;
+  }
+  for (const line of lines) {
     let frame: OutboundFrame;
     try {
       frame = JSON.parse(line) as OutboundFrame;

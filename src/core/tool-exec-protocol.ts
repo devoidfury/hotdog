@@ -200,21 +200,72 @@ export function encodeFrame(frame: unknown): string {
 }
 
 /**
+ * Hard ceiling on one frame, in UTF-8 bytes. The layering: per-tool output
+ * caps (~1 MB) < the planned central result seam < this wire cap, so a legal
+ * result never trips it; frames are JSON and escaping inflates raw output.
+ * Runner stdout is the defined adversary's channel, so the bound is enforced
+ * on the accumulated pre-newline BUFFER BYTES, not characters and not the
+ * parsed size -- the memory is the thing under attack.
+ */
+export const MAX_FRAME_BYTES = 4_000_000;
+
+/** Distinct protocol error every hop maps onto ITS peer's death path. */
+export class FrameOverflowError extends Error {
+  constructor(maxBytes: number) {
+    super(`frame overflow: no newline within ${maxBytes} bytes (cap); decoder stopped`);
+    this.name = "FrameOverflowError";
+  }
+}
+
+/**
  * Reassembles newline-delimited records across arbitrary chunk boundaries
  * (the child-process stdio reality). CRLF-terminated lines are accepted.
+ *
+ * Bounded-resource contract: once buffered-but-unterminated bytes exceed the
+ * cap, the buffer is dropped and every later `push` throws
+ * `FrameOverflowError` -- the stream is corrupt or adversarial, and only the
+ * consumer knows which death that means (kill the pool entry, die as broker,
+ * drain as runner). Every call site reads through a `setEncoding("utf8")`
+ * stream, so chunks never split a codepoint and the running byte count is
+ * exact for valid UTF-8 (counting bytes, not UTF-16 units).
  */
 export class LineDecoder {
   #buf = "";
+  #bytes = 0;
+  #maxBytes: number;
+  #failed = false;
+
+  /**
+   * `maxFrameBytes` is a private test seam (precedent: mcp-client's
+   * killGraceMs), never a config knob; production always takes the default.
+   */
+  constructor(maxFrameBytes: number = MAX_FRAME_BYTES) {
+    this.#maxBytes = maxFrameBytes;
+  }
 
   push(chunk: string): string[] {
+    if (this.#failed) throw new FrameOverflowError(this.#maxBytes);
     this.#buf += chunk;
+    this.#bytes += Buffer.byteLength(chunk);
     const lines: string[] = [];
     let idx: number;
     while ((idx = this.#buf.indexOf("\n")) !== -1) {
+      const consumed = this.#buf.slice(0, idx + 1);
+      const consumedBytes = Buffer.byteLength(consumed);
+      // A whole oversized line delivered in one chunk never escapes the cap.
+      if (consumedBytes - 1 > this.#maxBytes) {
+        this.#fail();
+        throw new FrameOverflowError(this.#maxBytes);
+      }
       let line = this.#buf.slice(0, idx);
       this.#buf = this.#buf.slice(idx + 1);
+      this.#bytes -= consumedBytes;
       if (line.endsWith("\r")) line = line.slice(0, -1);
       if (line.length > 0) lines.push(line);
+    }
+    if (this.#bytes > this.#maxBytes) {
+      this.#fail();
+      throw new FrameOverflowError(this.#maxBytes);
     }
     return lines;
   }
@@ -223,7 +274,15 @@ export class LineDecoder {
   end(): string[] {
     const rest = this.#buf;
     this.#buf = "";
+    this.#bytes = 0;
     return rest.length > 0 ? [rest] : [];
+  }
+
+  /** Latch the failure and drop the buffer: an overflowed stream is never flushed. */
+  #fail(): void {
+    this.#failed = true;
+    this.#buf = "";
+    this.#bytes = 0;
   }
 }
 

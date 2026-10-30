@@ -517,12 +517,42 @@ export class ToolExecBroker implements ToolExecLink {
       const decoder = new LineDecoder();
       proc.stdout!.setEncoding("utf8");
       proc.stdout!.on("data", (chunk: string) => {
-        for (const line of decoder.push(chunk)) this.#handleLine(line);
+        let lines: string[];
+        try {
+          lines = decoder.push(chunk);
+        } catch (e) {
+          // A broker child that emits an oversized (or hostile) frame has a
+          // frame stream we cannot trust past it -- so it is broker death:
+          // the existing crash path fails pending calls, consumes respawn
+          // budget, and degrades once the caps run out. The kill is the piece
+          // a real crash performed on its own; the exit handler that follows
+          // is identity-checked, so it no-ops.
+          if (this.#proc === proc) {
+            this.#handleDeath(
+              proc,
+              new Error(`[tool-exec] broker frame overflow: ${formatError(e)}`),
+            );
+            try {
+              proc.kill();
+            } catch {
+              // already gone
+            }
+          }
+          return;
+        }
+        for (const line of lines) this.#handleLine(line);
       });
-      const errDecoder = new LineDecoder();
+      // stderr is a log channel: an oversized line loses only itself; drop it
+      // and resume with a fresh decoder at the next chunk.
+      let errDecoder = new LineDecoder();
       proc.stderr!.setEncoding("utf8");
       proc.stderr!.on("data", (chunk: string) => {
-        for (const line of errDecoder.push(chunk)) logger.warn(`[tool-exec:broker] ${line}`);
+        try {
+          for (const line of errDecoder.push(chunk)) logger.warn(`[tool-exec:broker] ${line}`);
+        } catch (e) {
+          logger.warn(`[tool-exec:broker] stderr frame overflow dropped: ${formatError(e)}`);
+          errDecoder = new LineDecoder();
+        }
       });
       proc.on("error", (e: Error) => {
         this.#handleDeath(proc, new Error(`[tool-exec] broker process error: ${e.message}`));

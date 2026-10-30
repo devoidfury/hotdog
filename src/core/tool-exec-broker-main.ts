@@ -78,7 +78,23 @@ function runBroker(): void {
   const decoder = new LineDecoder();
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk: string) => {
-    for (const line of decoder.push(chunk)) handleFrame(line, state);
+    let lines: string[];
+    try {
+      lines = decoder.push(chunk);
+    } catch (e) {
+      // The supervisor's frame stream is unresyncable past an overflow and a
+      // broker that cannot hear orders is worse than a dead one: EOF the pool
+      // (runners drain, same as the "end" path) and exit non-zero. The
+      // supervisor counts that as broker death on its existing respawn path.
+      writeSupervisor({
+        op: "log",
+        level: "error",
+        msg: `frame overflow from supervisor: ${formatError(e)}; broker exiting`,
+      });
+      endRunnerPipes(state);
+      process.exit(1);
+    }
+    for (const line of lines) handleFrame(line, state);
   });
   process.stdin.on("end", () => {
     // Supervisor gone: EOF every runner and exit. The runners cancel their
@@ -88,15 +104,20 @@ function runBroker(): void {
     // unfenced path: fenced entries go down with their jail either way --
     // --die-with-parent takes the runner, and --unshare-pid takes setsid'd
     // grandchildren down with the namespace.)
-    for (const entry of state.pool.values()) {
-      try {
-        entry.proc.stdin?.end();
-      } catch {
-        // already gone
-      }
-    }
+    endRunnerPipes(state);
     process.exit(0);
   });
+}
+
+/** End every runner's stdin: EOF is the drain signal (see the "end" handler). */
+function endRunnerPipes(state: BrokerState): void {
+  for (const entry of state.pool.values()) {
+    try {
+      entry.proc.stdin?.end();
+    } catch {
+      // already gone
+    }
+  }
 }
 
 function handleFrame(line: string, state: BrokerState): void {
@@ -273,13 +294,40 @@ function spawnEntry(key: string, state: BrokerState, fence?: WireFence): PoolEnt
   const out = new LineDecoder();
   proc.stdout!.setEncoding("utf8");
   proc.stdout!.on("data", (chunk: string) => {
-    for (const line of out.push(chunk)) relayRunnerLine(key, entry, line, state);
+    let lines: string[];
+    try {
+      lines = out.push(chunk);
+    } catch (e) {
+      // Runner frame overflow: the stdout stream is untrustworthy from here
+      // on, so treat it exactly like any other runner death -- failEntry ->
+      // dropEntry answers every pending call with the executor-died shape and
+      // ends the runner's stdin (with the hard-kill fallback). The guard
+      // against a repeated throw once the entry is already dead keeps the
+      // log honest (no duplicate warn per chunk).
+      if (!entry.dead) {
+        failEntry(entry, key, state, `frame overflow from runner: ${formatError(e)}`);
+      }
+      return;
+    }
+    for (const line of lines) relayRunnerLine(key, entry, line, state);
   });
-  const err = new LineDecoder();
+  // stderr is a log channel, not a frame stream: a runaway line only loses
+  // itself. Drop it, tell the supervisor once, and resume at the next chunk
+  // with a fresh decoder (newline-delimited logs are line-independent).
+  let err = new LineDecoder();
   proc.stderr!.setEncoding("utf8");
   proc.stderr!.on("data", (chunk: string) => {
-    for (const line of err.push(chunk)) {
-      writeSupervisor({ op: "log", level: "warn", msg: `runner[${key}]: ${line}` });
+    try {
+      for (const line of err.push(chunk)) {
+        writeSupervisor({ op: "log", level: "warn", msg: `runner[${key}]: ${line}` });
+      }
+    } catch (e) {
+      writeSupervisor({
+        op: "log",
+        level: "warn",
+        msg: `runner[${key}] stderr frame overflow dropped: ${formatError(e)}`,
+      });
+      err = new LineDecoder();
     }
   });
   proc.on("error", (e: Error) => {

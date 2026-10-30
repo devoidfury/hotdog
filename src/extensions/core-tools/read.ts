@@ -65,6 +65,7 @@ export class ReadTool {
           ),
           limit: param("integer", `Maximum number of lines to return`, {
             minimum: 1,
+            maximum: 10000,
             default: this.readLimit,
           }),
           offset: param("integer", "Number of lines to skip", {

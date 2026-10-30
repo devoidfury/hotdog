@@ -29,6 +29,23 @@ export const EXTRA_KNOWN_KEYS = [
   "skillsPath",
 ];
 
+/**
+ * Config keys that once existed and were removed. They are not UNKNOWN (a
+ * did-you-mean would mislead); they get a tombstone verdict that names the
+ * replacement, with a caret at the offending line. Checked at every nesting
+ * depth: `maxToolOutputLines` lived inside the bashTool/coreTools blocks, so
+ * a top-level-only scan would miss exactly what users carry.
+ */
+export const REMOVED_KEYS: Array<{ key: string; replacement: string; note?: string }> = [
+  {
+    key: "maxToolOutputLines",
+    replacement: "maxToolResultChars",
+    note:
+      "line-shaping knobs retired for one central char cap on every tool result " +
+      "(the tools keep internal line shaping below it)",
+  },
+];
+
 export interface JsoncIssue {
   kind: "comment" | "trailing-comma" | "bom";
   line: number;
@@ -285,6 +302,15 @@ export function findJsonError(text: string): number | null {
 
 /** Quoted keys at object depth 1 (string-aware); used for unknown/duplicate checks. */
 export function scanTopLevelKeys(text: string): Array<{ key: string; line: number }> {
+  return scanKeys(text, 1);
+}
+
+/**
+ * Quoted keys at object depth 1..maxDepth (string-aware). maxDepth > 1 feeds
+ * the REMOVED_KEYS tombstone stage: retired keys lived nested inside the
+ * bashTool/coreTools blocks, so a top-level-only scan would miss them.
+ */
+export function scanKeys(text: string, maxDepth: number): Array<{ key: string; line: number }> {
   const keys: Array<{ key: string; line: number }> = [];
   const n = text.length;
   let i = 0;
@@ -313,7 +339,7 @@ export function scanTopLevelKeys(text: string): Array<{ key: string; line: numbe
       }
       let k = j + 1;
       while (k < n && /\s/.test(text[k]!)) k++;
-      if (depth === 1 && text[k] === ":") {
+      if (depth >= 1 && depth <= maxDepth && text[k] === ":") {
         keys.push({ key: text.slice(i + 1, j), line: startLine });
       }
       i = j + 1;
@@ -433,7 +459,7 @@ export interface RescueOptions {
 
 /** One structured problem from the key/schema stages (file-level state lives in RescueFileEntry). */
 export interface RescueFinding {
-  type: "missing-config-dir" | "config-file-missing" | "unknown-key" | "duplicate-key" | "schema";
+  type: "missing-config-dir" | "config-file-missing" | "unknown-key" | "duplicate-key" | "removed-key" | "schema";
   message: string;
   key?: string;
   line?: number;
@@ -681,6 +707,8 @@ async function checkKeys(
     ...EXTRA_KNOWN_KEYS,
     ...configParams.map((p) => p.key),
   ];
+  const removedHit = (key: string) =>
+    REMOVED_KEYS.find((r) => normalizeKey(r.key) === normalizeKey(key));
   const seen = new Map<string, number>();
   for (const { key, line } of scanTopLevelKeys(text)) {
     const norm = normalizeKey(key);
@@ -693,6 +721,8 @@ async function checkKeys(
       continue;
     }
     seen.set(norm, line);
+    // A removed key gets the tombstone verdict below, not an UNKNOWN guess.
+    if (removedHit(key)) continue;
     if (!allowed.some((a) => normalizeKey(a) === norm)) {
       const hints = suggestCandidates(norm, allowed.map(normalizeKey), { limit: 3 });
       const real = hints.map((h) => allowed.find((a) => normalizeKey(a) === h)!);
@@ -704,7 +734,29 @@ async function checkKeys(
       log(message);
     }
   }
+  // Tombstone stage: REMOVED_KEYS occurrences at any nesting depth, each with
+  // a caret under the key (same pointing style as the JSON-error excerpt).
+  for (const hit of scanKeys(text, Number.POSITIVE_INFINITY)) {
+    const r = removedHit(hit.key);
+    if (!r) continue;
+    problems++;
+    const message =
+      `REMOVED key: "${hit.key}" (line ${hit.line}) - no longer read; ` +
+      `replaced by "${r.replacement}". ${r.note ?? ""}` +
+      caretExcerptAtKey(text, hit.key, hit.line);
+    findings?.push({ type: "removed-key", key: hit.key, line: hit.line, message });
+    log(message);
+  }
   return problems;
+}
+
+/** The key's source line with a caret under it (errorExcerpt's pointing style). */
+function caretExcerptAtKey(text: string, key: string, line: number): string {
+  const lines = text.split("\n");
+  const snippet = (lines[line - 1] ?? "").replace(/\t/g, " ");
+  const col = snippet.indexOf(`"${key}"`);
+  if (col < 0) return "";
+  return `\n  ${snippet}\n  ${" ".repeat(Math.max(0, col))}^`;
 }
 
 function checkSchema(

@@ -213,13 +213,13 @@ describe("validateConfig", () => {
     ];
     // bashTimeoutMs 0 would arm a ~1ms kill timer via Math.max(1, ...): nonsense
     expect(validateConfig({ bashTool: { bashTimeoutMs: 0 } }, extSchemas).valid).toBe(false);
-    // maxTimeoutMs 0 is the documented falsy "no cap"; 0 lines = suppress all
-    expect(validateConfig({ bashTool: { maxTimeoutMs: 0, maxToolOutputLines: 0 } }, extSchemas).valid).toBe(true);
+    // maxTimeoutMs 0 is the documented falsy "no cap"
+    expect(validateConfig({ bashTool: { maxTimeoutMs: 0 } }, extSchemas).valid).toBe(true);
     // Negative result ceilings would slice-wrap and silently disable the limit
     expect(validateConfig({ coreTools: { grepMaxResults: -1 } }, extSchemas).valid).toBe(false);
     expect(
       validateConfig(
-        { coreTools: { readToolLimit: 0, findMaxResults: 0, maxEditInputSize: 0, maxImageSize: 0, maxToolOutputLines: 0 } },
+        { coreTools: { readToolLimit: 0, findMaxResults: 0, maxEditInputSize: 0, maxImageSize: 0 } },
         extSchemas,
       ).valid,
     ).toBe(true);

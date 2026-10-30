@@ -10,6 +10,7 @@ import type { HookPayloads } from "./extensions/types.ts";
 import { Workspace } from "@utils/workspace.ts";
 import { suggestCandidates } from "@utils/strings.ts";
 import type { ToolResultContent } from "./context/wrappers.ts";
+import { capToolResult, capToolResultPart } from "./tool-result-cap.ts";
 import {
   reviveToolResult,
   type ToolExecLink,
@@ -61,15 +62,26 @@ export interface ToolExecutorDeps {
   toolExecLink?: ToolExecLink | null;
   /** Per-tool config scalars the runner needs (bash caps, coreTools limits, env policy). */
   toolExecConfig?: WireToolConfig;
+  /**
+   * Central char cap (resolved `maxToolResultChars`) enforced on every
+   * finalized tool result: once before the TOOL_RESULT pipeline (in-pipeline
+   * observers see capped bytes) and once, binding, on the stored part after
+   * hook replacement. 0/unset (hand-built callers) disables enforcement;
+   * production plumbing is agent-factory -> Agent config -> here.
+   */
+  maxToolResultChars?: number;
 }
 
 export class ToolExecutor {
   #deps: ToolExecutorDeps;
   /** Non-null only when toolExec is "worker" AND a link was provided: the one fork point. */
   #execPlane: { link: ToolExecLink; config: WireToolConfig } | null;
+  /** Resolved maxToolResultChars; 0 disables the seam cap (see ToolExecutorDeps). */
+  #maxResultChars: number;
 
   constructor(deps: ToolExecutorDeps) {
     this.#deps = deps;
+    this.#maxResultChars = deps.maxToolResultChars ?? 0;
     this.#execPlane =
       deps.toolExec === "worker" && deps.toolExecLink
         ? { link: deps.toolExecLink, config: deps.toolExecConfig ?? {} }
@@ -306,7 +318,18 @@ export class ToolExecutor {
       success,
     });
 
-    const resultPayload = { toolCallId, toolName, result, success, input, agent };
+    // Seam cap pass 1 (maxToolResultChars): everything the TOOL_RESULT
+    // pipeline observes -- loop-detect's resultDigest included -- sees
+    // capped output. The binding pass runs on the part below, after the
+    // { result } swaps land, so no replacement escapes the cap either.
+    const resultPayload = {
+      toolCallId,
+      toolName,
+      result: capToolResult(result, this.#maxResultChars),
+      success,
+      input,
+      agent,
+    };
     await hooks.runHookPipeline<ToolResultHookResult | undefined, "tool:result">(
       HOOKS.TOOL_RESULT,
       resultPayload,
@@ -318,7 +341,12 @@ export class ToolExecutor {
     // The tool's answer is stored as a PART, never as model-facing text: the
     // request's WireFormat shapes it when this message reaches the wire, and
     // everything at rest (context, log, hooks, UI) sees the fields.
-    const content: ToolResultContent = [formatToolResult(result, toolName, success, hint)];
+    // Seam cap pass 2 (binding): every text field of the finalized part is
+    // bounded before #writeToolResult hands it to context / the session log /
+    // the UI sink; idempotent, so an already-capped part passes through.
+    const content: ToolResultContent = [
+      capToolResultPart(formatToolResult(result, toolName, success, hint), this.#maxResultChars),
+    ];
     const durationMs = Date.now() - t0;
     const resultSize = toolContentSize(content);
     await hooks.notifyHooks(HOOKS.TOOL_METRICS, {

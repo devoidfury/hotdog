@@ -96,6 +96,8 @@ export interface AgentConfig {
   toolRetryDelay?: number;
   /** Re-invokes allowed after a completion with neither text nor tool calls. */
   maxEmptyRetries?: number;
+  /** Central tool-result char cap (resolved maxToolResultChars); unset/0 = no seam cap. */
+  maxToolResultChars?: number;
   maxToolDifficulty?: number | null;
   defaultMaxToolDifficulty?: number | null;
   sandboxMode?: boolean;
@@ -275,6 +277,7 @@ export class Agent implements AgentLike {
       workspaceDeny: options.config?.workspaceDeny ?? null,
       maxRetries: options.config.maxRetries,
       toolRetryDelay: options.config.toolRetryDelay,
+      maxToolResultChars: options.config?.maxToolResultChars,
       isRestoring: () => this.#isRestoring,
       agent: this,
       runSignal: () => this.#runAbort?.signal ?? null,

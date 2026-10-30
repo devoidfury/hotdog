@@ -7,6 +7,7 @@ import type { CoreContext, ResolvedConfig } from "./extensions/types.ts";
 import type { SwitchProfile } from "./config/profiles.ts";
 import { sharedToolExecBroker, toolExecPlaneSettings } from "./tool-exec-broker.ts";
 import type { WireToolConfig } from "./tool-exec-protocol.ts";
+import { INTERNAL_MAX_OUTPUT_LINES } from "./extensions/tool-utils.ts";
 import { envScrubExtraKeys } from "@utils/env.ts";
 
 export interface AgentFactoryOptions {
@@ -70,9 +71,20 @@ export function createAgentFactory(
     // and hands the pooled runners the merged tool-config scalars they are
     // not allowed to resolve themselves (the runner never boots the config).
     const plane = toolExecPlaneSettings(resolved);
+    // The maxToolOutputLines config keys are removed (the seam char cap is the
+    // binding constraint), but the pooled runner still reqNums the scalar, so
+    // the tool's internal line-shaping default is injected AFTER the spread: a
+    // stale user key in the raw config bag can never drift the plane away from
+    // what the inline tool factories do with the same constant.
     const toolExecConfig: WireToolConfig = {
-      bashTool: baseConfig.bashTool as Record<string, unknown> | undefined,
-      coreTools: baseConfig.coreTools as Record<string, unknown> | undefined,
+      bashTool: {
+        ...(baseConfig.bashTool as Record<string, unknown> | undefined),
+        maxToolOutputLines: INTERNAL_MAX_OUTPUT_LINES,
+      },
+      coreTools: {
+        ...(baseConfig.coreTools as Record<string, unknown> | undefined),
+        maxToolOutputLines: INTERNAL_MAX_OUTPUT_LINES,
+      },
       envScrubbing: resolved.envScrubbing !== false,
       envScrubExtra: envScrubExtraKeys(baseConfig),
     };
@@ -114,6 +126,11 @@ export function createAgentFactory(
         maxEmptyRetries:
           (resolved.maxEmptyRetries as number) ??
           (getLayerDefault(CONFIG_SCHEMA.maxEmptyRetries) as number),
+        // Hand-built resolved bags (tests, embedded hosts) fall back to the
+        // schema default layer, same posture as maxEmptyRetries above.
+        maxToolResultChars:
+          (resolved.maxToolResultChars as number) ??
+          (getLayerDefault(CONFIG_SCHEMA.maxToolResultChars) as number),
         workspaceRoots: (resolved.workspaceRoots as string[]) || [process.cwd()],
         // Carry the resolved deny list through verbatim, including an
         // explicit [] (denylist disabled by config). null means unresolved

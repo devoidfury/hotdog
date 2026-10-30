@@ -5,6 +5,7 @@ import {
   ToolResult,
   parseToolInput,
   truncateOutput,
+  INTERNAL_MAX_OUTPUT_LINES,
 } from "@core/extensions/tool-utils.ts";
 import { HOOKS } from "@core/hooks.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
@@ -333,12 +334,13 @@ export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema
   const config = getExtensionConfig<{
     bashTimeoutMs: number;
-    maxToolOutputLines: number;
     maxTimeoutMs?: number;
     env?: Record<string, unknown>;
   }>(core, "bashTool");
   const timeoutMs = config.bashTimeoutMs;
-  const maxOutputLines = config.maxToolOutputLines;
+  // maxToolOutputLines config key removed: line shaping keeps the internal
+  // default (the seam's maxToolResultChars char cap is the binding constraint).
+  const maxOutputLines = INTERNAL_MAX_OUTPUT_LINES;
   const maxTimeoutMs = config.maxTimeoutMs;
   const envScrubExtra = envScrubExtraKeys(core.config);
   const envScrubbing = core.resolved?.envScrubbing !== false;

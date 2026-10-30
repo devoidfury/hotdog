@@ -370,6 +370,9 @@ export function resolveKey(
     if (typeof resolved === "number" && schema.minimum !== undefined && resolved < schema.minimum) {
       continue;
     }
+    if (typeof resolved === "number" && schema.maximum !== undefined && resolved > schema.maximum) {
+      continue;
+    }
 
     if (properties && typeof resolved === "object" && resolved !== null) {
       return resolveNestedProperties(keyName, resolved as Record<string, unknown>, properties, context);

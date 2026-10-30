@@ -12,7 +12,6 @@ const config = {
   maxEditInputSize: 16000,
   grepMaxResults: 100,
   findMaxResults: 200,
-  maxToolOutputLines: 600,
 };
 
 describe("CORE_TOOL_NAMES", () => {

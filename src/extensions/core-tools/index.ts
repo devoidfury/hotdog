@@ -6,6 +6,7 @@ import {
   getExtensionConfig,
 } from "@core/extensions/types.ts";
 import { Tool } from "@core/extensions/tool-registry.ts";
+import { INTERNAL_MAX_OUTPUT_LINES } from "@core/extensions/tool-utils.ts";
 
 export * from "./overwrite.ts";
 export * from "./append.ts";
@@ -51,7 +52,6 @@ interface CoreToolConfig {
   maxEditInputSize: number;
   grepMaxResults: number;
   findMaxResults: number;
-  maxToolOutputLines: number;
 }
 
 const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
@@ -69,12 +69,14 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
   grep: (config) =>
     new GrepTool({
       maxResults: config.grepMaxResults,
-      maxOutputLines: config.maxToolOutputLines,
+      // maxToolOutputLines config key removed; internal line-shaping default
+      // (the seam's maxToolResultChars char cap is the binding constraint).
+      maxOutputLines: INTERNAL_MAX_OUTPUT_LINES,
     }),
   find: (config) =>
     new FindTool({
       maxResults: config.findMaxResults,
-      maxOutputLines: config.maxToolOutputLines,
+      maxOutputLines: INTERNAL_MAX_OUTPUT_LINES,
     }),
   explore: () => new ExploreTool(),
   // project_info's file-listing ceiling reuses grepMaxResults (it was the

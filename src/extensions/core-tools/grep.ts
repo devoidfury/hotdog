@@ -394,6 +394,7 @@ export class GrepTool {
           ),
           max_results: param("integer", `Maximum results to return.`, {
             minimum: 1,
+            maximum: 10000,
             default: this.maxResults,
           }),
           context: param(

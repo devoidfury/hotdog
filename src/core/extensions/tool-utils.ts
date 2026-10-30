@@ -248,6 +248,17 @@ export function truncateOutput(text: string, maxLines: number): string {
   return `${truncated}\n--- [truncated, ${lines.length - maxLines} more lines] ---`;
 }
 
+/**
+ * Internal line-shaping default for tool output (bash/grep/find). Formerly the
+ * `maxToolOutputLines` config keys (bashTool/coreTools), removed: the central
+ * `maxToolResultChars` char cap at the executor seam is the binding constraint
+ * on huge outputs, and line shaping still applies below it at this fixed
+ * value. Not config: resolved knobs must not import this (Centralized
+ * Defaults); agent-factory mirrors it into the wire tool-config blocks so the
+ * pooled runner (which still consumes the scalar) matches inline behavior.
+ */
+export const INTERNAL_MAX_OUTPUT_LINES = 600;
+
 export function parseToolInput(
   input: string | Record<string, unknown> | null,
 ): Record<string, unknown> | null {

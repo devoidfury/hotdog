@@ -293,6 +293,8 @@ export interface ResolvedConfig {
   maxRetries: number;
   maxIterations: number;
   contextLimit: number;
+  /** Central tool-result char cap enforced at the executor seam (0 = disabled). */
+  maxToolResultChars?: number;
 
   /** Resolved model, or null when no layer supplies one (agent creation fails with a ConfigError). */
   model: string | null;

@@ -36,6 +36,7 @@ export class ProjectInfoTool {
             "Path to the directory to analyze. Defaults to current directory. Path relative to the workspace root, or an absolute path inside a configured workspace root.",
           ),
           max_depth: param("integer", "Max directory depth for du.", {
+            maximum: 5,
             default: DEFAULT_DU_DEPTH,
           }),
           max_files: param("integer", "Max files to list.", {

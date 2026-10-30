@@ -24,12 +24,6 @@
           "default": 600000,
           "description": "Hard cap on a model-requested timeoutMs in milliseconds"
         },
-        "maxToolOutputLines": {
-          "type": "number",
-          "minimum": 0,
-          "default": 600,
-          "description": "Maximum number of output lines for tool results"
-        },
         "env": {
           "type": "object",
           "additionalProperties": {

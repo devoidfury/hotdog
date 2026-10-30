@@ -339,6 +339,15 @@
       { "default": 1 }
     ]
   },
+  "maxToolResultChars": {
+    "type": "number",
+    "maximum": 2000000,
+    "description": "Central char cap on every finalized tool result (UTF-16 units), applied at the executor seam after the tool:result hook replacement and before the session log / context see it. Each text field over the cap keeps a codepoint-safe prefix plus a '--- [output truncated, N chars elided] ---' marker. Ceiling pinned below the tool-exec wire frame bound (MAX_FRAME_BYTES = 4000000) so a maxed knob can never trip the frame-overflow path; 0 disables the cap.",
+    "layers": [
+      { "source": "config", "key": "maxToolResultChars", "cast": "number" },
+      { "default": 1000000 }
+    ]
+  },
   "sandboxMode": {
     "type": "boolean",
     "cliFlag": {

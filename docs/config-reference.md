@@ -601,6 +601,29 @@ this budget; 0 disables re-invoke entirely.
 { "maxEmptyRetries": 2 }
 ```
 
+### `maxToolResultChars`
+
+- **Type:** `number`
+- **Default:** `1000000`
+- **Maximum:** `2000000`
+- **Resolution:** config > default
+
+Central character cap (UTF-16 units) on every finalized tool result, enforced at
+the executor seam after the `tool:result` hook replacement and before the session
+log, context, and the model request see it. Each text field over the cap keeps a
+codepoint-safe prefix plus a trailing `--- [output truncated, N chars elided] ---`
+marker; images pass through untouched. This replaces the per-tool
+`maxToolOutputLines` knobs (bashTool/coreTools), which are retired: the tools keep
+their internal line shaping below the cap, and the char cap is the binding
+constraint on huge outputs. The ceiling is pinned below the tool-execution wire
+frame bound (4 MB) so a maxed knob can never trip the frame-overflow path; `0`
+disables the cap. A `maxToolOutputLines` key left in `defaults.json` is flagged by
+`hotdog rescue` with a pointer to this key.
+
+```json
+{ "maxToolResultChars": 500000 }
+```
+
 ### `contextLimit`
 
 - **Type:** `number`
@@ -1170,7 +1193,6 @@ Extensions register their own configuration namespaces. Each extension's config 
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `bashTimeoutMs` | `number` | `60000` | Timeout for bash commands (ms). |
 | `maxTimeoutMs` | `number` | `600000` | Hard cap on a model-requested `timeoutMs` (ms). Model-supplied timeouts above this are clamped; invalid values fall back to `bashTimeoutMs`. |
-| `maxToolOutputLines` | `number` | `600` | Max output lines for tool results. When a command's output is cut, the result element carries `truncated="true"` so the model sees the cut in the header instead of only in the marker after the kept lines. |
 | `env` | `object` | `{}` | Extra environment variables for commands the model runs. Variable names are preserved verbatim (not camel-cased); values must be strings. Merged over the scrubbed base env and the agent's own defaults, so they can override e.g. `CI`. |
 
 ```json
@@ -1232,7 +1254,6 @@ Notes on `pass-the-baton`:
 | `findMaxResults` | `number` | `200` | Max results for the `find` tool. |
 | `grepMaxResults` | `number` | `100` | Max results for the `grep` tool. |
 | `maxEditInputSize` | `number` | `16000` | Max edit input size (oldString + newString) in characters. |
-| `maxToolOutputLines` | `number` | `600` | Max output lines for tool results. |
 
 ```json
 {

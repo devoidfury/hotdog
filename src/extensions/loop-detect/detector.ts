@@ -1,9 +1,11 @@
 // Pure tool-loop detection -- no I/O, no hooks, no state.
 //
-// callSignature(toolName, input) reduces a tool call to a canonical hash:
-// JSON arguments are re-serialized with object keys sorted, so cosmetic
+// callSignature(toolName, input, resultDigest) reduces a tool call to a
+// canonical hash of (tool name, canonicalized args, result digest): JSON
+// arguments are re-serialized with object keys sorted, so cosmetic
 // differences (whitespace, {"a":1,"b":2} vs {"b":2,"a":1}) share one hash;
-// non-JSON arguments fall back to the trimmed string.
+// non-JSON arguments fall back to the trimmed string. The result digest makes
+// a loop "same call AND same result" -- changing output is progress.
 //
 // detectLoop() inspects the tail of the signature history for the two spin
 // patterns: k consecutive identical calls, or strict two-call alternation
@@ -38,7 +40,23 @@ function canonicalize(value: unknown): string {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalize(obj[k])}`).join(",")}}`;
 }
 
-export function callSignature(toolName: string, input: string): string {
+/**
+ * Cheap bounded fingerprint of a tool result: success flag + total length +
+ * an 8 KiB prefix. Full stringify per call is fine at tool-call cadence; the
+ * prefix and length keep the hash input bounded while catching both content
+ * change and growth (append-only output still flips the length field).
+ */
+export function resultDigest(success: boolean, result: unknown): string {
+  let full: string;
+  try {
+    full = typeof result === "string" ? result : (JSON.stringify(result) ?? String(result));
+  } catch {
+    full = "<unstringifiable>";
+  }
+  return fnv1a(`${success ? 1 : 0}|${full.length}|${full.slice(0, 8192)}`);
+}
+
+export function callSignature(toolName: string, input: string, resultDigest?: string): string {
   const trimmed = (input ?? "").trim();
   let norm = trimmed;
   if (trimmed) {
@@ -49,8 +67,9 @@ export function callSignature(toolName: string, input: string): string {
       norm = trimmed;
     }
   }
-  // NUL separator: no tool name can contain it, so (name, args) can't collide.
-  return fnv1a([toolName, norm].join("\u0000"));
+  // NUL separator: no field can contain it, so (name, args, digest) can't collide.
+  // Omitted digest is a constant empty third field: legacy (name, args) shape.
+  return fnv1a([toolName, norm, resultDigest ?? ""].join("\u0000"));
 }
 
 /** Length of the identical-suffix run (0 for empty, 1 for a non-looping tail). */
@@ -104,6 +123,6 @@ export function escalationLevel(verdict: LoopVerdict): 1 | 2 | 3 {
 /** One-line loop description shared by the model-facing notice and the stop message. */
 export function describeLoop(kind: LoopKind, streak: number, toolName: string): string {
   return kind === "repeat"
-    ? `\`${toolName}\` was called ${streak} times in a row with identical arguments`
-    : `tool calls ping-ponged for ${streak} calls in a strict A/B/A/B pattern (last call: \`${toolName}\`)`;
+    ? `\`${toolName}\` was called ${streak} times in a row with identical arguments and output`
+    : `tool calls ping-ponged for ${streak} calls in a strict A/B/A/B pattern with repeated outputs (last call: \`${toolName}\`)`;
 }

@@ -1,9 +1,15 @@
 // Loop detector -- catches stuck tool-call spins, the classic local-model failure.
 //
 // Observes every tool result (the TOOL_RESULT seam), reducing each call to a
-// signature of (tool name, canonicalized arguments). When the tail of the
-// session's signature history shows k consecutive identical calls or strict
-// two-call ping-pong, escalation follows the streak:
+// signature of (tool name, canonicalized arguments, result digest). A loop is
+// the same call AND the same output: volatile output (timestamps, status
+// polling, flaky-test retries) changes the signature and reads as progress by
+// design. Tradeoff, accepted: a genuinely stuck loop whose environment keeps
+// producing fresh output (e.g. `date`) will not fire -- it is indistinguishable
+// from legitimate polling.
+//
+// When the tail of the session's signature history shows k consecutive
+// identical calls or strict two-call ping-pong, escalation follows the streak:
 //
 //   streak >= t    -> inject a system-notice nudge before the next request
 //   streak >= 2t   -> a stronger notice (the first nudge was ignored)
@@ -27,6 +33,7 @@ import {
   detectLoop,
   describeLoop,
   escalationLevel,
+  resultDigest,
   type LoopKind,
 } from "./detector.ts";
 
@@ -95,11 +102,11 @@ export function create(core: CoreContext): ExtensionInstance {
 
   return {
     hooks: {
-      [HOOKS.TOOL_RESULT]: ({ toolName, input, agent }) => {
+      [HOOKS.TOOL_RESULT]: ({ toolName, input, result, success, agent }) => {
         if (!agent || agent.isRestoring) return;
 
         const st = getState(agent.sessionId);
-        st.history.push(callSignature(toolName, input));
+        st.history.push(callSignature(toolName, input, resultDigest(success, result)));
         if (st.history.length > window) st.history.shift();
 
         const verdict = detectLoop(st.history, { repeatThreshold, pingPongThreshold });

@@ -9,6 +9,8 @@ import {
   alternatingRun,
   detectLoop,
   escalationLevel,
+  resultDigest,
+  describeLoop,
 } from "@extensions/loop-detect/detector.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
 
@@ -46,6 +48,56 @@ describe("callSignature", () => {
   it("falls back to the raw string for non-JSON args", () => {
     expect(callSignature("bash", "ls -l")).toBe(callSignature("bash", "ls -l"));
     expect(callSignature("bash", "ls -l")).not.toBe(callSignature("bash", "ls -a"));
+  });
+
+  it("folds the result digest in: same name+args, different digest -> different signature", () => {
+    const a = callSignature("read", '{"p":1}', resultDigest(true, "out-1"));
+    const b = callSignature("read", '{"p":1}', resultDigest(true, "out-2"));
+    expect(a).not.toBe(b);
+  });
+
+  it("omitted digest is stable across calls (legacy shape)", () => {
+    expect(callSignature("read", '{"p":1}')).toBe(callSignature("read", '{"p":1}'));
+    // The constant empty third field keeps no-digest calls in their own space.
+    expect(callSignature("read", '{"p":1}')).not.toBe(
+      callSignature("read", '{"p":1}', resultDigest(true, "")),
+    );
+  });
+});
+
+describe("resultDigest", () => {
+  it("is deterministic for the same result and success flag", () => {
+    expect(resultDigest(true, { a: 1, b: "x" })).toBe(resultDigest(true, { a: 1, b: "x" }));
+  });
+
+  it("changes when content changes", () => {
+    expect(resultDigest(true, "run 1: 3 passed")).not.toBe(resultDigest(true, "run 1: 4 passed"));
+  });
+
+  it("changes when length changes but the prefix does not", () => {
+    expect(resultDigest(true, "output")).not.toBe(resultDigest(true, "outputAPPENDED"));
+  });
+
+  it("changes on a success flip with an identical payload", () => {
+    expect(resultDigest(true, "boom")).not.toBe(resultDigest(false, "boom"));
+  });
+
+  it("does not throw on non-stringifyable input", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() => resultDigest(false, cyclic)).not.toThrow();
+    expect(typeof resultDigest(false, cyclic)).toBe("string");
+    expect(() => resultDigest(true, 42n as unknown)).not.toThrow();
+  });
+});
+
+describe("describeLoop", () => {
+  it("mentions identical arguments and output for repeats", () => {
+    expect(describeLoop("repeat", 9, "read")).toContain("identical arguments and output");
+  });
+
+  it("mentions repeated outputs for ping-pong", () => {
+    expect(describeLoop("ping_pong", 4, "bash")).toContain("repeated outputs");
   });
 });
 
@@ -139,13 +191,20 @@ function hook(ext: { hooks?: unknown }, name: string): (payload: any) => unknown
   return fn;
 }
 
-function feed(ext: { hooks?: unknown }, agent: ReturnType<typeof createMockAgent>, toolName: string, input = "{}") {
+function feed(
+  ext: { hooks?: unknown },
+  agent: ReturnType<typeof createMockAgent>,
+  toolName: string,
+  input = "{}",
+  result: unknown = "ok",
+  success = true,
+) {
   return hook(ext, HOOKS.TOOL_RESULT)({
     toolCallId: "tc",
     toolName,
     input,
-    success: true,
-    result: "ok",
+    success,
+    result,
     agent,
   });
 }
@@ -359,5 +418,53 @@ describe("loop-detect extension", () => {
     await feed(ext, agent, "read");
     expect(detections).toHaveLength(1);
     expect(detections[0]).toMatchObject({ level: 1, streak: 2 });
+  });
+
+  it("polling with changing output never fires, even far past the stop band", async () => {
+    const core = createMockCore();
+    const ext = createLoopDetect(core);
+    const agent = createMockAgent();
+    const detections: any[] = [];
+    core.hooks.on(HOOKS.LOOP_DETECTED, ((p: any) => detections.push(p)) as any);
+
+    // Same tool, same args, 12 > 3t times -- but each result differs: progress, not a spin.
+    for (let i = 0; i < 12; i++) {
+      await feed(ext, agent, "bash", '{"command":"curl status"}', `tick ${i}`);
+    }
+    expect(detections).toHaveLength(0);
+    expect(agent.cancelled).toBe(false);
+    expect(contextOf(ext, agent, [])).toBeUndefined();
+  });
+
+  it("a success flip with identical args resets the episode", async () => {
+    const core = createMockCore();
+    const ext = createLoopDetect(core);
+    const agent = createMockAgent();
+    const detections: any[] = [];
+    core.hooks.on(HOOKS.LOOP_DETECTED, ((p: any) => detections.push(p)) as any);
+
+    await feed(ext, agent, "bash", '{"command":"make"}', "fail", false);
+    await feed(ext, agent, "bash", '{"command":"make"}', "fail", false);
+    await feed(ext, agent, "bash", '{"command":"make"}', "ok", true); // error->success: new signature
+    await feed(ext, agent, "bash", '{"command":"make"}', "ok", true);
+    expect(detections).toHaveLength(0); // the flip broke the streak: run is 2, not 4
+    await feed(ext, agent, "bash", '{"command":"make"}', "ok", true);
+    expect(detections).toHaveLength(1); // fresh ladder starts at level 1
+    expect(detections[0]).toMatchObject({ level: 1, streak: 3 });
+  });
+
+  it("ping-pong with changing outputs does not fire", async () => {
+    const core = createMockCore();
+    const ext = createLoopDetect(core);
+    const agent = createMockAgent();
+    const detections: any[] = [];
+    core.hooks.on(HOOKS.LOOP_DETECTED, ((p: any) => detections.push(p)) as any);
+
+    for (let i = 0; i < 6; i++) {
+      await feed(ext, agent, "read", '{"p":"x"}', `read ${i}`);
+      await feed(ext, agent, "bash", '{"command":"ls"}', `ls ${i}`);
+    }
+    expect(detections).toHaveLength(0);
+    expect(agent.cancelled).toBe(false);
   });
 });

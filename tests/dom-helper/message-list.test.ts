@@ -135,6 +135,80 @@ describe("streaming markdown", () => {
   });
 });
 
+describe("stream reset (mid-stream provider-failure retry)", () => {
+  it("drops the in-flight assistant AND thinking accumulators; the retry renders alone, fragment-free", () => {
+    ml.handleStreamingReasoningChunk({ content: "DEAD-THINK" });
+    ml.handleStreamingChunk({ content: "DEAD" });
+    // Sanity: the dead attempt is live on screen before the reset.
+    expect(container.textContent).toContain("DEAD");
+
+    ml.handleStreamReset();
+
+    expect(container.textContent).not.toContain("DEAD");
+    expect(container.querySelectorAll(".message.assistant")).toHaveLength(0);
+    expect(container.querySelectorAll(".thinking-block")).toHaveLength(0);
+
+    ml.handleStreamingChunk({ content: "clean " });
+    ml.handleStreamingChunk({ content: "answer" });
+    ml.handleStreamingReasoningChunk({ content: "live think" });
+    expect(container.querySelector(".message.assistant .content")!.textContent).toContain("clean answer");
+    expect(container.querySelector(".thinking-block")!.textContent).toContain("live think");
+    // Nothing dead leaks into what the browser finally shows.
+    expect(container.textContent).not.toContain("DEAD");
+  });
+
+  it("unlike finalizeAssistant, dead content is removed, never kept as a message", () => {
+    ml.handleStreamingChunk({ content: "DEAD" });
+    ml.handleStreamReset();
+    // finalizeAssistant would KEEP a content-bearing element; a reset must
+    // not leave a committed message behind.
+    expect(container.children).toHaveLength(0);
+  });
+
+  it("committed messages survive a reset; only in-flight state is dropped", () => {
+    ml.handleAssistantMessage({ content: "earlier turn" });
+    ml.handleStreamingChunk({ content: "DEAD" });
+    ml.handleStreamReset();
+    const assistants = container.querySelectorAll(".message.assistant");
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0]!.textContent).toContain("earlier turn");
+    expect(container.textContent).not.toContain("DEAD");
+  });
+
+  it("post-reset chunks keep flowing through the sanitizer path (escaped, no raw markup)", () => {
+    ml.handleStreamingChunk({ content: "DEAD" });
+    ml.handleStreamReset();
+    // Same ingestion as before the reset: markdown parser + escaped render.
+    ml.handleStreamingChunk({ content: "<script>alert(1)</script>" });
+    expect(container.innerHTML).not.toContain("<script>alert");
+    expect(container.querySelector(".message.assistant .content")!.textContent).toContain("<script>alert(1)</script>");
+  });
+
+  it("reset with nothing in flight is a no-op", () => {
+    expect(() => ml.handleStreamReset()).not.toThrow();
+    expect(container.children).toHaveLength(0);
+  });
+
+  it("retracts the in-flight attempt only; committed rows stay (write-once)", () => {
+    // A committed row (text finalized by a tool call, which really ran) is
+    // history and survives -- mid-stream failures never emit TOOL_CALL, so
+    // the dead attempt's rows are always still in flight. Only in-flight
+    // state is retracted here, mirroring the TUI scrollback ceiling.
+    ml.handleStreamingChunk({ content: "kept" });
+    ml.handleToolCall({ name: "bash", args: "{}" });
+    ml.handleStreamingChunk({ content: "DEAD" });
+    ml.handleStreamReset();
+    expect(container.textContent).toContain("kept");
+    expect(container.textContent).not.toContain("DEAD");
+
+    // And the retry renders into one fresh assistant element.
+    ml.handleStreamingChunk({ content: "retry" });
+    const assistants = container.querySelectorAll(".message.assistant");
+    expect(assistants).toHaveLength(2); // kept history + the live retry
+    expect(assistants[1]!.textContent).toContain("retry");
+  });
+});
+
 describe("thinking", () => {
   it("renders markdown thinking blocks", () => {
     ml.handleThinking({ content: "reasoning **hard**" });

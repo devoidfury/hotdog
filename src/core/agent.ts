@@ -506,6 +506,14 @@ export class Agent implements AgentLike {
             errPayload,
           );
           if (!errPayload.retry) throw err;
+          // Cancellation re-check at the retry point: the failed attempt and
+          // the whole hook pipeline are async, so Esc (cancel()) or a host
+          // abort can land AFTER the failure and BEFORE this re-issue.
+          // #performLlmCall builds a fresh request -- never fire real HTTP
+          // for a run the user has killed. `cancelled` is the cancel()-owned
+          // flag; runAbort.signal covers the host-abort race (onHostAbort
+          // aborts the run signal without ever touching `cancelled`).
+          if (this.cancelled || runAbort.signal.aborted) throw err;
           response = await this.#performLlmCall(params);
         }
         // Snapshot the context tail before the assistant message lands: the
@@ -933,6 +941,10 @@ export class Agent implements AgentLike {
       onChunk: (content) => this.emitOutput("streaming_chunk", { content }),
       onReasoning: (content) => this.emitOutput("streaming_reasoning_chunk", { content }),
       onToolCallDelta: (tc) => this.emitOutput("tool_call_delta", { ...tc }),
+      // Mid-stream retry: the buffers are already cleared (see the onReset
+      // ordering contract), so sinks told here can drop their in-flight
+      // fragments knowing nothing dead can replay behind them.
+      onReset: () => this.emitOutput("stream_reset", {}),
       shouldCancel: () => this.cancelled,
     }, this.llmClient.markerMangler);
   }

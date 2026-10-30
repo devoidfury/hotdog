@@ -76,6 +76,28 @@ function upsertTask(info: TaskInfoWire): void {
 }
 
 function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
+  if (activity.kind === "reset") {
+    // Mid-stream retry of the task agent (the panel's counterpart of
+    // message-list.handleStreamReset): the trailing text/reasoning blocks
+    // are the dead attempt's streamed fragments -- drop them so the
+    // retry's deltas start a fresh block instead of merging into dead
+    // text. Tool blocks stay (a reset precedes tool execution), and a
+    // reset with nothing in flight is a no-op that must not even create
+    // the map entry: it would blind the seedTaskActivity guard and strand
+    // a later history replay. Sentinels never arrive via replay -- the
+    // server buffer consumes them (see recordTaskActivity).
+    const inFlight = taskActivity.get(taskId);
+    if (!inFlight) return;
+    let dropped = 0;
+    while (inFlight.length > 0) {
+      const kind = inFlight[inFlight.length - 1]!.kind;
+      if (kind !== "text" && kind !== "reasoning") break;
+      inFlight.pop();
+      dropped++;
+    }
+    if (dropped > 0) activityVersionAtom(activityVersionAtom() + 1);
+    return;
+  }
   let blocks = taskActivity.get(taskId);
   if (!blocks) {
     blocks = [];
@@ -332,6 +354,17 @@ interface StreamingReasoningChunkMessage {
   content: string;
 }
 
+/**
+ * Mid-stream provider-failure retry (S2C streamReset): the in-flight
+ * assistant text/thinking accumulation must be dropped before the retry's
+ * deltas arrive. Carries no payload beyond sessionId. Deliberately NOT in
+ * CONVERSATION_EVENT_TYPES: it discards live-only render state and appends
+ * nothing to the session transcript, so it must not dirty the replay cursor.
+ */
+interface StreamResetMessage {
+  type: "streamReset";
+}
+
 interface TaskProgressMessage {
   type: "taskProgress";
   taskId: string;
@@ -421,6 +454,7 @@ type ServerMessage =
   | TaskControlWire
   | StreamingChunkMessage
   | StreamingReasoningChunkMessage
+  | StreamResetMessage
   | TaskProgressMessage
   | TokenUsageMessage
   | CompactionResultMessage
@@ -799,6 +833,11 @@ export function createChat({
         break;
       case "streamingReasoningChunk":
         messageList.handleStreamingReasoningChunk(data);
+        break;
+      case "streamReset":
+        // Drop the dead attempt's in-flight text/thinking before the
+        // retry's deltas stream in (see message-list.handleStreamReset).
+        messageList.handleStreamReset();
         break;
       case "taskProgress":
         messageList.handleTaskProgress(data);

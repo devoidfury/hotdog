@@ -2780,3 +2780,61 @@ describe("in-flight rows through the session event glue (stage 4)", () => {
     expect(cueRows(rig.screenRows())).toEqual([]);
   });
 });
+
+// ── STREAM_RESET: retract the dead attempt's in-flight frame state ─────────
+
+describe("stream reset through the session event glue (mid-stream retry, H-3)", () => {
+  const cueRows = (rows: string[]): string[] => rows.filter((r) => r.includes("\u{1F527} "));
+
+  it("drops the unterminated streaming row AND in-flight call rows; committed scrollback is untouched", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    rig.bridge.commitText("a completed line\n"); // committed -> scrollback
+    rig.bridge.commitText("half a thou"); // dead attempt's partial line
+    rig.emitEvent({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "read", args: '{"path":"a' });
+    expect(rig.screenRows().join("|")).toContain("half a thou");
+    expect(cueRows(rig.screenRows())).toHaveLength(1);
+
+    rig.emitEvent({ type: OUTPUT_EVENT.STREAM_RESET });
+
+    const rows = rig.screenRows().join("|");
+    expect(rows).not.toContain("half a thou"); // partial retracted, never committed
+    expect(cueRows(rig.screenRows())).toEqual([]); // dead call rows gone
+    expect(rows).toContain("a completed line"); // scrollback stays write-once
+    expect(bridgeTranscript(rig)).not.toContain("half a thou");
+
+    // The retry streams clean into the same frame.
+    rig.bridge.commitText("fresh thou");
+    rig.clock.runAll(); // the repaint the streaming write schedules rides the fake clock
+    expect(rig.screenRows().join("|")).toContain("fresh thou");
+  });
+
+  it("resetStream on a bare bridge: partial discarded without a commit, idempotent", () => {
+    const { bridge, term, clock } = makeBridge();
+    // Mounted: the frame only paints after mount (RendererCore.setFrame is
+    // inert until then), so the retraction asserts against the terminal the
+    // rows were painted on -- an unmounted bridge rendered "" no matter what.
+    bridge.mount();
+    bridge.commitText("dead partial");
+    bridge.setInflightCall(0, " \u{1F527} read a.ts");
+    clock.runAll();
+
+    const before = term.grid.snapshot().screen.join("|");
+    expect(before).toContain("dead partial"); // the frame genuinely holds the dead state
+    expect(before).toContain("\u{1F527} read a.ts");
+
+    bridge.resetStream();
+    clock.runAll();
+    bridge.resetStream(); // idempotent, no throw
+
+    expect(bridge.transcriptLog).toEqual([]); // nothing was committed
+    const painted = term.grid.snapshot().screen.join("|");
+    expect(painted).not.toContain("dead partial"); // partial discarded, never committed
+    expect(painted).not.toContain("\u{1F527} read a.ts"); // in-flight rows retracted
+  });
+});
+
+function bridgeTranscript(rig: { bridge: OutputBridge }): string {
+  return rig.bridge.transcriptLog.join("\n");
+}

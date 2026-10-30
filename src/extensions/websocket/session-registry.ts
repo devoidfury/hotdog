@@ -146,8 +146,26 @@ export class SessionRegistry {
   }
 
   /** Buffer activity for reconnect replay (C2S TASK_ACTIVITY_REQUEST).
-   * Bounded: items per task, tasks per server (oldest-inserted evicted). */
+   * Bounded: items per task, tasks per server (oldest-inserted evicted).
+   * The live-only `reset` sentinel is consumed here as a trim, never stored:
+   * the retry replaces the dead attempt, so its trailing streamed items leave
+   * the buffer too -- a panel rebuilt after reconnect must not resurrect text
+   * the live panel already dropped. */
   recordTaskActivity(taskId: string, activity: TaskActivityWire): void {
+    if (activity.kind === "reset") {
+      const buffered = this.#taskActivityHistory.get(taskId);
+      // Trim trailing streamed items (the dead attempt's text/reasoning);
+      // tool blocks are untouched, mirroring handleStreamReset. No entry for
+      // an unknown task means nothing streamed: nothing to trim.
+      if (buffered) {
+        while (buffered.length > 0) {
+          const kind = buffered[buffered.length - 1]!.kind;
+          if (kind !== "text" && kind !== "reasoning") break;
+          buffered.pop();
+        }
+      }
+      return;
+    }
     let items = this.#taskActivityHistory.get(taskId);
     if (!items) {
       items = [];

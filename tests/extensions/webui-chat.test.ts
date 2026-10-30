@@ -336,6 +336,47 @@ describe("createChat subagent task feed", () => {
     expect(chat.getTaskActivity("h1")).toHaveLength(2);
   });
 
+  it("taskActivity reset drops trailing streamed blocks; tool blocks and re-seeding stay safe", () => {
+    const { chat, ws } = makeTaskChat();
+    const feed = (activity: Record<string, unknown>) =>
+      ws.emit({ type: "taskActivity", taskId: "r", activity });
+
+    feed({ kind: "text", content: "kept " });
+    feed({ kind: "tool_call", name: "bash", args: "" });
+    feed({ kind: "text", content: "dead " });
+    feed({ kind: "reasoning", content: "dead-think" });
+    const vBefore = chat.activityVersionAtom();
+    feed({ kind: "reset" });
+
+    // The dead attempt's streamed fragments retract; the earlier tool
+    // boundary stops the trim (mirrors message-list.handleStreamReset).
+    expect(chat.getTaskActivity("r")).toEqual([
+      { kind: "text", text: "kept " },
+      { kind: "tool_call", name: "bash", args: "" },
+    ]);
+    expect(chat.activityVersionAtom()).toBe(vBefore + 1);
+
+    // The retry opens a fresh block instead of merging into dead text.
+    feed({ kind: "text", content: "fresh take" });
+    expect(chat.getTaskActivity("r")[2]).toEqual({ kind: "text", text: "fresh take" });
+  });
+
+  it("a taskActivity reset with nothing in flight is a pure no-op (history re-seed still lands)", () => {
+    const { chat, ws } = makeTaskChat();
+    const v0 = chat.activityVersionAtom();
+    ws.emit({ type: "taskActivity", taskId: "z", activity: { kind: "reset" } });
+    expect(chat.getTaskActivity("z")).toEqual([]);
+    expect(chat.activityVersionAtom()).toBe(v0);
+    // The stray reset must not have created the map entry: the seedTaskActivity
+    // skip guard stays honest, so a reconnect racing a reset still gets its replay.
+    ws.emit({
+      type: "taskActivityHistory",
+      taskId: "z",
+      activity: [{ kind: "text", content: "seeded" }],
+    });
+    expect(chat.getTaskActivity("z")).toEqual([{ kind: "text", text: "seeded" }]);
+  });
+
   it("getTaskActivity returns [] for unknown ids", () => {
     const { chat } = makeTaskChat();
     expect(chat.getTaskActivity("nope")).toEqual([]);

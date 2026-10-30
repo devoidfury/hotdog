@@ -183,7 +183,7 @@ Centralized error formatting. Key exports:
 
 ### Output Events (`src/core/context/output.ts`)
 Output event types and OutputSink base class. Key exports:
-- `OUTPUT_EVENT` — enum with 15 event types (USER_MESSAGE, ASSISTANT_MESSAGE, THINKING, TOOL_CALL, TOOL_RESULT, COMPACTING, COMMAND_RESULT, QUESTION, STREAMING_CHUNK, STREAMING_REASONING_CHUNK, TASK_PROGRESS, TOKEN_USAGE, COMPACTION_RESULT, SESSION_STATE, SYSTEM_MESSAGE)
+- `OUTPUT_EVENT` — enum with 18 event types (USER_MESSAGE, ASSISTANT_MESSAGE, THINKING, TOOL_CALL, TOOL_RESULT, COMPACTING, COMMAND_RESULT, QUESTION, STREAMING_CHUNK, STREAMING_REASONING_CHUNK, TASK_PROGRESS, TOKEN_USAGE, COMPACTION_RESULT, SESSION_STATE, SYSTEM_MESSAGE, QUEUE_UPDATE, TOOL_CALL_DELTA, STREAM_RESET)
 - `EVENT_HANDLERS` — maps event types to handler method names on OutputSink
 - `OutputSink` — base class with `emit()` plus convenience methods
 - `NoopSink` — no-op implementation for testing
@@ -212,7 +212,7 @@ Tab-completion service. Completion providers register matchers + handlers; when 
 - `openai-protocol.ts` — the built-in default protocol (OpenAI chat completions: Bearer auth, `data:` SSE). Lives in core because it is the zero-config default
 - `serialize.ts` — wire serialization of internal `Message`s to the OpenAI-compatible wire shape, per-model chat-template format (system-first vs developer), including provenance-based marker mangling at the wire boundary and rendering of semantic wrapper parts (file-include, system-notice) via `context/wrappers.ts`
 - `retry.ts` — retry classification and wait primitives: `shouldRetryLlmError(e, attempt, maxRetries)` (http/timeout always transient; api only on retryable status; cancelled never) and `retryDelay(ms, signal)` (aborts early on user cancellation, detaches its listener when done). `LlmClient.chatStreamCancellable` drives its own backoff loop with these. `maxRetries` counts retries *after* the initial attempt (total attempts = `1 + maxRetries`); `0`/negative means one attempt, no retries. `ToolExecutor` uses the same convention.
-- `stream-processor.ts` — `StreamProcessor` accumulates streamed content/reasoning/tool calls into a `StreamResult`
+- `stream-processor.ts` — `StreamProcessor` accumulates streamed content/reasoning/tool calls into a `StreamResult`. On a `reset` event it clears the assembly AND replay buffers, then fires `StreamCallbacks.onReset` (last, so display sinks wake to already-clean state) -- the seam every live surface uses to drop the failed attempt's fragments (`stream_reset` OutputEvent → `CliOutputSink`, the split bridge's frame rows, the additive `streamReset` S2C for browsers, and the subagent activity relay's `{kind:"reset"}` sentinel, which trims the replay buffer instead of storing).
 - `LlmError` class (with `Http`, `Api`, `Timeout`, `Cancelled`, `InvalidResponse` static constructors) is defined in `src/core/error.ts`
 
 ### Session (`src/core/session/`)

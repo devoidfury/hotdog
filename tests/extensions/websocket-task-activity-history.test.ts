@@ -6,7 +6,7 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import { createWsServer } from "@extensions/websocket/server.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
-import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import {
   createWsMockCore,
@@ -20,10 +20,17 @@ function messages(ws: MockWs): any[] {
   return ws.messages.map((m) => JSON.parse(m));
 }
 
-// buildAgent whose task run streams text + reasoning + a tool call through
-// the sink. Parent (non-sink) agents get unique session ids so scoping can
-// be tested against the ids the sockets actually attach to.
-function makeServer(): WsServer {
+// buildAgent whose task run streams the given event script through the sink
+// (default: text + reasoning + a tool call). Parent (non-sink) agents get
+// unique session ids so scoping can be tested against the ids the sockets
+// actually attach to.
+const DEFAULT_TASK_SCRIPT: OutputEvent[] = [
+  { type: OUTPUT_EVENT.STREAMING_CHUNK, content: "working" },
+  { type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "hmm" },
+  { type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: "ls", toolCallId: "c1" },
+];
+
+function makeServer(streamEvents?: OutputEvent[]): WsServer {
   const core = createWsMockCore();
   let sessionSeq = 0;
   const buildAgent = async (cfg: Record<string, unknown>) => {
@@ -32,14 +39,7 @@ function makeServer(): WsServer {
       sessionId: sink ? `task-agent-${sessionSeq}` : `sess-${++sessionSeq}`,
       model: "test-model",
       run: async () => {
-        sink?.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "working" });
-        sink?.emit({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "hmm" });
-        sink?.emit({
-          type: OUTPUT_EVENT.TOOL_CALL,
-          toolName: "bash",
-          input: "ls",
-          toolCallId: "c1",
-        });
+        for (const ev of streamEvents ?? DEFAULT_TASK_SCRIPT) sink?.emit(ev);
         return { type: "completion", content: "done" };
       },
       notifyCompletion: () => {},
@@ -233,6 +233,51 @@ describe("subagent feed session scoping", () => {
     expect(replies[0].activity[0].content).toBe("working");
     // The reply goes to the requester only.
     expect(ws2.messages.length).toBe(before);
+  });
+
+  it("trims the dead attempt's partials out of the replay buffer on a mid-stream reset", async () => {
+    // A real mid-stream retry shape: streamed text, a completed tool call,
+    // the next attempt streams a partial, dies, resets, and the retry
+    // re-streams from scratch.
+    wsServer = makeServer([
+      { type: OUTPUT_EVENT.STREAMING_CHUNK, content: "kept " },
+      { type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: "ls", toolCallId: "c1" },
+      { type: OUTPUT_EVENT.STREAMING_CHUNK, content: "dead " },
+      { type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "dead-think" },
+      { type: OUTPUT_EVENT.STREAM_RESET },
+      { type: OUTPUT_EVENT.STREAMING_CHUNK, content: "fresh take" },
+    ]);
+    const ws1 = openSocket(wsServer);
+    const sid = await attachedSessionId(ws1);
+
+    const tm = wsServer.sessionRegistry.getTaskManager();
+    const handle = await tm!.spawnTask("task-1", "retry me", {
+      managerAgent: { sessionId: sid },
+    });
+    await Promise.race([handle.done, new Promise((r) => setTimeout(r, 1000))]);
+
+    // Live feed: the sentinel rides the same envelope between the dead
+    // partial and the retry's deltas (that is what clears the panel).
+    const kinds = messages(ws1)
+      .filter((m) => m.type === S2C.TASK_ACTIVITY)
+      .map((m) => m.activity.kind);
+    expect(kinds).toEqual(["text", "tool_call", "text", "reasoning", "reset", "text"]);
+
+    // Replay buffer: the sentinel is consumed as a trim, never stored, and
+    // the trim stops at the tool block -- a rebuilt panel cannot see the
+    // dead partial, and cannot receive a reset that would clear it.
+    ws1.messages.length = 0;
+    wsServer.onMessage(
+      ws1,
+      JSON.stringify({ type: C2S.TASK_ACTIVITY_REQUEST, taskId: "task-1" }),
+    );
+    const replies = messages(ws1).filter((m) => m.type === S2C.TASK_ACTIVITY_HISTORY);
+    expect(replies).toHaveLength(1);
+    expect(replies[0].activity).toEqual([
+      { kind: "text", content: "kept " },
+      { kind: "tool_call", name: "bash", args: "ls" },
+      { kind: "text", content: "fresh take" },
+    ]);
   });
 
   it("refuses cross-session and unknown task replays with an empty history", async () => {

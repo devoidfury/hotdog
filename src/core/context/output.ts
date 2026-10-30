@@ -20,6 +20,7 @@ export const OUTPUT_EVENT = {
   SYSTEM_MESSAGE: 15,
   QUEUE_UPDATE: 16,
   TOOL_CALL_DELTA: 17,
+  STREAM_RESET: 18,
 } as const;
 
 export type OutputEventType = (typeof OUTPUT_EVENT)[keyof typeof OUTPUT_EVENT];
@@ -41,6 +42,7 @@ export const EVENT_NAME_MAP: Record<string, OutputEventType> = {
   session_state: OUTPUT_EVENT.SESSION_STATE,
   queue_update: OUTPUT_EVENT.QUEUE_UPDATE,
   tool_call_delta: OUTPUT_EVENT.TOOL_CALL_DELTA,
+  stream_reset: OUTPUT_EVENT.STREAM_RESET,
 };
 
 export type EventName = keyof typeof EVENT_NAME_MAP;
@@ -201,6 +203,19 @@ export interface ToolCallDeltaEvent {
   args: string;
 }
 
+/**
+ * The transport is re-issuing a request after a mid-stream failure: every
+ * streamed fragment from the failed attempt (text, reasoning, in-flight tool
+ * calls) is DEAD -- the retry re-streams the response from scratch and the
+ * assembled result will contain none of it. Sinks that accumulate streamed
+ * content for rendering must drop that state on this event; the processor's
+ * assembly/replay buffers are already cleared when it is emitted. Live-only:
+ * never persisted, never replayed. No payload -- the event IS the instruction.
+ */
+export interface StreamResetEvent {
+  type: typeof OUTPUT_EVENT.STREAM_RESET;
+}
+
 export type OutputEvent =
   | UserMessageEvent
   | AssistantMessageEvent
@@ -218,7 +233,8 @@ export type OutputEvent =
   | SessionStateEvent
   | SystemMessageEvent
   | QueueUpdateEvent
-  | ToolCallDeltaEvent;
+  | ToolCallDeltaEvent
+  | StreamResetEvent;
 
 /** Base sink; the Agent only depends on this interface, never on a specific UI. */
 export class OutputSink {
@@ -269,6 +285,9 @@ export class OutputSink {
       case OUTPUT_EVENT.SYSTEM_MESSAGE:
         this.emitSystemMessage(event);
         break;
+      case OUTPUT_EVENT.STREAM_RESET:
+        this.emitStreamReset(event);
+        break;
     }
   }
 
@@ -311,6 +330,14 @@ export class OutputSink {
   }
 
   emitTaskProgress(_event: TaskProgressEvent): void {}
+
+  /**
+   * Mid-stream failure being retried: drop whatever the failed attempt put
+   * into live render state. The base sink streams through without buffering
+   * (written bytes are unretractable on a print stream), so the default is a
+   * no-op; surfaces that hold an in-flight row/element override.
+   */
+  emitStreamReset(_event: StreamResetEvent): void {}
 
   emitTokenUsage(_event: TokenUsageEvent): void {}
 

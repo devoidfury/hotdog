@@ -12,6 +12,7 @@ import {
   QuestionEvent,
   StreamingChunkEvent,
   StreamingReasoningChunkEvent,
+  StreamResetEvent,
   TaskProgressEvent,
   TokenUsageEvent,
   SessionStateEvent,
@@ -515,6 +516,18 @@ export class CliOutputSink extends OutputSink {
       this._transitionTo(Modes.Thinking);
     }
     this._processContent(event.content);
+  }
+
+  override emitStreamReset(_event: StreamResetEvent): void {
+    // The transport re-issued the request after a mid-stream failure: the
+    // dead attempt's buffering is dead formatting. Drop the pending
+    // separator newlines it left behind and reset transition detection so
+    // the retry's first segment starts from a clean mode boundary. Bytes
+    // already written to the terminal live in scrollback and cannot be
+    // retracted -- that is the honest, accepted ceiling of a print stream;
+    // the assembled response never contains them (the processor cleared it).
+    this.#nlBuf = 0;
+    this.#outputMode = null;
   }
 
   override emitTaskProgress(event: TaskProgressEvent): void {

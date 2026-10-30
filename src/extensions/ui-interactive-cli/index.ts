@@ -1091,6 +1091,13 @@ export async function runInteractiveSession(
           // the TOOL_CALL clear.
           bridge.clearInflightCalls();
           return;
+        case OUTPUT_EVENT.STREAM_RESET:
+          // Mid-stream provider failure being retried: the dead attempt's
+          // partial line and in-flight call rows must not sit under the
+          // retry's fresh deltas. (The legacy sink clears its own buffers
+          // via its emitStreamReset override.)
+          bridge.resetStream();
+          return;
         case OUTPUT_EVENT.STREAMING_CHUNK:
         case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
         case OUTPUT_EVENT.THINKING:

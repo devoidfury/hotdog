@@ -15,7 +15,9 @@
 //   * the consumer contract: the payload carries the thrown error, the
 //     live request params (mutations ride the retry), the agent, and
 //     retry:false by default;
-//   * the capped-finish wrap-up call is NOT wrapped: it never fires the hook.
+//   * the capped-finish wrap-up call is NOT wrapped: it never fires the hook;
+//   * a cancel (Esc) or host abort landing after the failure but before the
+//     retry point KILLS the retry -- no second request ever reaches the client.
 
 import { describe, it, expect } from "bun:test";
 import { HOOKS } from "@core/hooks.ts";
@@ -230,5 +232,73 @@ describe("Agent PROVIDER_ERROR pipeline", () => {
     await expect(agent.run("use the tool then summarize")).rejects.toBeInstanceOf(AgentError);
     expect(payloads).toHaveLength(0); // the wrap-up failure is not a provider:error path
     expect(client.callCount).toBe(2); // iteration + single wrap-up attempt, no retry
+  });
+
+  // ── Cancellation re-check at the retry point (H-2) ──────────────────────
+  // retry:true says "a handler repaired the history", not "the user still
+  // wants a request". The failed attempt AND the hook pipeline are async,
+  // so a cancel can land between the failure and the re-issue; the loop
+  // must die with the original error and never touch the transport again.
+
+  it("a cancel landing inside the hook pipeline kills the retry: no second request, run settles cancelled", async () => {
+    const err = LlmError.Http("503 upstream");
+    const client = new ScriptedLLMClient([err, okSeq("must never stream")]);
+    const { agent } = createFixture({ mockLLM: client as unknown as MockLLMClient });
+    const turnEnds: Array<{ cancelled: boolean; reason: string }> = [];
+    agent.hooks.on(HOOKS.TURN_END, (p) => {
+      turnEnds.push(p as unknown as { cancelled: boolean; reason: string });
+    });
+    // Esc DURING the pipeline: cancelled flips after the failure and before
+    // the retry point. The handler's verdict must not overrule the user.
+    agent.hooks.on(HOOKS.PROVIDER_ERROR, () => {
+      agent.cancel();
+      return { retry: true };
+    });
+
+    let caught: unknown = null;
+    try {
+      await agent.run("hi");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err); // surfaces the original error, unmasked
+    expect(client.callCount).toBe(1); // the second request is NEVER made
+    expect(agent.cancelled).toBe(true);
+    const end = turnEnds[turnEnds.length - 1]!;
+    expect(end.cancelled).toBe(true);
+    expect(end.reason).toBe("cancelled");
+  });
+
+  it("a host abort landing inside the hook pipeline kills the retry too (the run signal covers the race)", async () => {
+    // Host aborts deliberately do NOT touch `cancelled` (see the run-setup
+    // comment in agent.ts), so this pins the guard's second half in isolation.
+    const ac = new AbortController();
+    const err = LlmError.Timeout("stalled");
+    const client = new ScriptedLLMClient([err, okSeq("must never stream")]);
+    const { agent } = createFixture({
+      mockLLM: client as unknown as MockLLMClient,
+      abortSignal: ac.signal,
+    });
+    agent.hooks.on(HOOKS.PROVIDER_ERROR, () => {
+      ac.abort();
+      return { retry: true };
+    });
+
+    await expect(agent.run("hi")).rejects.toBe(err);
+    expect(client.callCount).toBe(1); // signal alone gates the re-issue
+  });
+
+  it("positive control: nothing cancelled means the retry still fires exactly once", async () => {
+    // The guard must be inert for the uncancelled case: same contract the
+    // tests above pin, restated beside it so a future guard tweak that
+    // also kills healthy retries goes red right here.
+    const client = new ScriptedLLMClient([LlmError.Http("503 upstream"), okSeq("recovered")]);
+    const { agent } = createFixture({ mockLLM: client as unknown as MockLLMClient });
+    agent.hooks.on(HOOKS.PROVIDER_ERROR, () => ({ retry: true }));
+
+    const result = await agent.run("hi");
+    expect(client.callCount).toBe(2); // initial + exactly one retry, unchanged
+    expect((result as { content?: string }).content).toBe("recovered");
+    expect(agent.cancelled).toBe(false);
   });
 });

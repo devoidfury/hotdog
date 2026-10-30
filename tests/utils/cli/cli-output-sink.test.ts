@@ -360,6 +360,34 @@ describe("CliOutputSink", () => {
     expect(stderrWrites).toHaveLength(0);
   });
 
+  it("emitStreamReset writes nothing itself", () => {
+    sink.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(stdoutWrites).toHaveLength(0);
+    expect(stderrWrites).toHaveLength(0);
+  });
+
+  it("emitStreamReset drops the dead attempt's buffered separator so the retry starts clean", () => {
+    // A content chunk ending in a newline buffers that newline (pending
+    // separator). A mid-stream retry reset discards it: the retry's first
+    // segment must NOT inherit the dead attempt's spacing.
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "dead\n" });
+    sink.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "retry" });
+
+    // "dead" is unretractable scrollback (accepted ceiling), but no lone
+    // separator newline was flushed between it and the retry.
+    expect(stdoutWrites.join("")).toContain("dead");
+    expect(stdoutWrites.join("")).toContain("retry");
+    expect(stdoutWrites).not.toContain("\n");
+  });
+
+  it("control: WITHOUT a reset the buffered newline separates the segments", () => {
+    // Pins the opposite behavior so the reset test above proves a real drop.
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "first\n" });
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "second" });
+    expect(stdoutWrites).toContain("\n");
+  });
+
   it("emitTaskProgress writes progress to stderr", () => {
     sink.emit({ type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "task-1", status: "running", message: "2/5 tasks" });
     expect(stderrWrites.some((w) => w.includes("task"))).toBe(true);

@@ -68,6 +68,10 @@ export const S2C = {
   QUESTION: "question",
   STREAMING_CHUNK: "streamingChunk",
   STREAMING_REASONING_CHUNK: "streamingReasoningChunk",
+  // Mid-stream provider failure being retried: drop the in-flight assistant
+  // text/thinking accumulation (the retry re-streams from scratch). Additive;
+  // no fields beyond type + sessionId.
+  STREAM_RESET: "streamReset",
   TASK_PROGRESS: "taskProgress",
   TOKEN_USAGE: "tokenUsage",
   COMPACTION_RESULT: "compactionResult",
@@ -251,12 +255,20 @@ export interface TaskInfoWire {
  * One task-agent activity item. Text arrives as deltas (streaming chunks and
  * final assistant messages land in the same lane; the client appends). Tool
  * inputs/outputs are summaries -- see MAX_TASK_ACTIVITY_CHARS.
+ *
+ * `reset` is the STREAM_RESET sentinel (mid-stream provider failure being
+ * retried): live-only, payload-free. The client drops the dead attempt's
+ * trailing streamed blocks on receiving it, and the server buffer consumes it
+ * as a trim instead of storing it (see SessionRegistry.recordTaskActivity),
+ * so a replayed taskActivityHistory can never carry one and can never clear
+ * a rebuilt panel view.
  */
 export type TaskActivityWire =
   | { kind: "text"; content: string }
   | { kind: "reasoning"; content: string }
   | { kind: "tool_call"; name: string; args: string }
-  | { kind: "tool_result"; name: string; output: string; error?: string };
+  | { kind: "tool_result"; name: string; output: string; error?: string }
+  | { kind: "reset" };
 
 /**
  * Ceiling on relayed tool args/output per activity item. Task agents can emit
@@ -283,6 +295,10 @@ export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | nu
       return event.content ? { kind: "text", content: event.content } : null;
     case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
       return event.content ? { kind: "reasoning", content: event.content } : null;
+    case OUTPUT_EVENT.STREAM_RESET:
+      // The relay's counterpart of the main-chat streamReset S2C: the dead
+      // attempt's streamed fragments must retract in the task panel too.
+      return { kind: "reset" };
     case OUTPUT_EVENT.TOOL_CALL:
       return { kind: "tool_call", name: event.toolName, args: truncateActivity(event.input) };
     case OUTPUT_EVENT.TOOL_RESULT: {

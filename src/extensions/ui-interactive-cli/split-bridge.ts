@@ -171,6 +171,16 @@ class LineChannel {
     this.onChange();
     this.onLines([line]);
   }
+
+  /**
+   * Throw away the unterminated row WITHOUT committing it (stream reset:
+   * the bytes belong to a failed attempt the transport already re-issued;
+   * committing them would put dead text in permanent scrollback). No
+   * repaint here -- the caller repaints once for the whole reset.
+   */
+  discardPartial(): void {
+    this.#partial = "";
+  }
 }
 
 /**
@@ -599,6 +609,24 @@ export class OutputBridge {
     if (this.#inflightCalls.size === 0) return;
     this.#inflightCalls.clear();
     this.#repaint();
+  }
+
+  /**
+   * STREAM_RESET (mid-stream provider failure being retried): retract the
+   * failed attempt's in-flight render state -- the unterminated streaming
+   * row on either channel (it must NOT commit; the retry re-streams its own
+   * text) and every in-flight tool-call row (the processor cleared its call
+   * buffer, and the retry re-emits deltas from zero). Completed rows already
+   * committed to scrollback stay: the frame surface is write-once there, and
+   * a terminal cannot retrace it -- the same honest ceiling the legacy sink
+   * has, scoped now to only what the frame still holds. Idempotent.
+   */
+  resetStream(): void {
+    const hadPartial = this.#streamingOpen() !== "";
+    this.#outChannel.discardPartial();
+    this.#errChannel.discardPartial();
+    this.clearInflightCalls();
+    if (hadPartial) this.#repaint();
   }
 
   /** In-flight rows composed for the frame: each entry ANSI-wrapped to width. */

@@ -707,3 +707,61 @@ describe("wireImages()", () => {
     ]);
   });
 });
+
+// ── Mid-stream reset wire contract (finding H-3) ─────────────────────────────
+// The additive S2C `streamReset` message and, critically, its WIRE ORDER: a
+// browser must receive the clear strictly before the retry's deltas, so its
+// in-flight assistant/thinking accumulators never show a dead attempt.
+
+describe("WebSocketChannel - streamReset (mid-stream retry)", () => {
+  function makeLiveChannel(): { emit: (event: OutputEvent) => void; sent: () => any[] } {
+    let savedHandler: ((event: OutputEvent) => void) | null = null;
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, handler) => {
+        savedHandler = handler;
+        return () => {};
+      }),
+    });
+    const ws = createMockWs();
+    new WebSocketChannel({ sessionManager: sm, ws, sessionId: "session-1" });
+    return {
+      emit: (event) => savedHandler!(event),
+      // Live view: JSON-parsed on read, since sends happen after construction.
+      sent: () => (ws as any)._sentMessages.map((s: string) => JSON.parse(s)),
+    };
+  }
+
+  it("maps STREAM_RESET to a payload-free streamReset carrying only type + sessionId", () => {
+    const { emit, sent } = makeLiveChannel();
+    emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    const msgs = sent();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toEqual({ type: S2C.STREAM_RESET, sessionId: "session-1" });
+    // No content/name/etc. ride along -- the event IS the instruction.
+    expect(Object.keys(msgs[0]).sort()).toEqual(["sessionId", "type"]);
+  });
+
+  it("the S2C sequence clears before the retry's deltas (browser receives reset between dead and live chunks)", () => {
+    const { emit, sent } = makeLiveChannel();
+    emit({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "DEAD-T" });
+    emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "DEAD" });
+    emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "clean " });
+    emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "answer" });
+
+    const msgs = sent();
+    expect(msgs.map((m) => m.type)).toEqual([
+      S2C.STREAMING_REASONING_CHUNK,
+      S2C.STREAMING_CHUNK,
+      S2C.STREAM_RESET,
+      S2C.STREAMING_CHUNK,
+      S2C.STREAMING_CHUNK,
+    ]);
+    // The reset sits at index 2: every dead chunk precedes it, every live
+    // chunk follows. A client that drops state on reset shows only "clean answer".
+    const resetIdx = msgs.findIndex((m) => m.type === S2C.STREAM_RESET);
+    const liveIdx = msgs.findIndex((m) => m.type === S2C.STREAMING_CHUNK && m.content === "clean ");
+    expect(resetIdx).toBeLessThan(liveIdx);
+    expect(msgs.slice(resetIdx + 1).some((m) => typeof m.content === "string" && m.content.includes("DEAD"))).toBe(false);
+  });
+});

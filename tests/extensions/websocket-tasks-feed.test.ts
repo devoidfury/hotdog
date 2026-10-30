@@ -73,6 +73,18 @@ describe("taskActivityFromEvent", () => {
     expect(err!.kind === "tool_result" && err!.error).toBe("nope");
   });
 
+  it("maps STREAM_RESET to the live-only reset sentinel", () => {
+    expect(taskActivityFromEvent({ type: OUTPUT_EVENT.STREAM_RESET })).toEqual({
+      kind: "reset",
+    });
+    // Same envelope as every other activity item; carries no payload.
+    expect(taskActivityMessage("task-7", { type: OUTPUT_EVENT.STREAM_RESET })).toEqual({
+      type: S2C.TASK_ACTIVITY,
+      taskId: "task-7",
+      activity: { kind: "reset" },
+    });
+  });
+
   it("skips events that are not part of the panel view", () => {
     const skipped: OutputEvent[] = [
       { type: OUTPUT_EVENT.THINKING, content: "hmm" },

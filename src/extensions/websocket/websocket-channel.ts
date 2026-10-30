@@ -24,6 +24,7 @@ const EVENT_TO_PROTOCOL: Partial<Record<OutputEventType, S2CType>> = {
   [OUTPUT_EVENT.QUESTION]: S2C.QUESTION,
   [OUTPUT_EVENT.STREAMING_CHUNK]: S2C.STREAMING_CHUNK,
   [OUTPUT_EVENT.STREAMING_REASONING_CHUNK]: S2C.STREAMING_REASONING_CHUNK,
+  [OUTPUT_EVENT.STREAM_RESET]: S2C.STREAM_RESET,
   [OUTPUT_EVENT.TASK_PROGRESS]: S2C.TASK_PROGRESS,
   [OUTPUT_EVENT.TOKEN_USAGE]: S2C.TOKEN_USAGE,
   [OUTPUT_EVENT.COMPACTION_RESULT]: S2C.COMPACTION_RESULT,
@@ -124,6 +125,9 @@ export class WebSocketChannel extends Channel {
         break;
       case OUTPUT_EVENT.SYSTEM_MESSAGE:
         msg.content = event.content;
+        break;
+      case OUTPUT_EVENT.STREAM_RESET:
+        // Payload-free: { type, sessionId } is the whole instruction.
         break;
       case OUTPUT_EVENT.TASK_PROGRESS:
         msg.taskId = event.taskId;

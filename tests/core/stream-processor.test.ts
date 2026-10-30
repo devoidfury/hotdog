@@ -603,6 +603,110 @@ describe("StreamProcessor", () => {
       ]);
       expect(result.fullText).toBe("ab");
     });
+
+    it("onReset fires once per reset event, after buffers clear and before the retry's first chunk", async () => {
+      const processor = createStreamProcessor();
+      const calls: string[] = [];
+
+      async function* stream(): AsyncGenerator<StreamEvent> {
+        yield { type: "content", content: "fail-1 " };
+        yield { type: "reasoning", content: "fail-think" };
+        yield { type: "reset" };
+        // Runs when the consumer asks for the NEXT event, i.e. once the
+        // transport has moved past reset (its re-issue point).
+        calls.push("transport-resumes");
+        yield { type: "content", content: "ok" };
+      }
+
+      const result = await processor.process(
+        stream() as unknown as AsyncIterable<StreamEvent>,
+        {
+          onChunk: (c) => calls.push(`chunk:${c}`),
+          onReasoning: (c) => calls.push(`reason:${c}`),
+          onReset: () => {
+            // The ordering contract: by the time a display sink is told to
+            // clear, the replay buffers are ALREADY empty -- so a reconnect
+            // racing the reset can never read the dead attempt back.
+            expect(processor.streamingContent).toBe("");
+            expect(processor.streamingReasoning).toBe("");
+            calls.push("clear");
+          },
+        },
+      );
+
+      // Display order: dead chunks shown, the clear, and only THEN the
+      // transport moves on -- the clear provably lands between the failure
+      // and the retry's first chunk, never after it.
+      expect(calls).toEqual([
+        "chunk:fail-1 ",
+        "reason:fail-think",
+        "clear",
+        "transport-resumes",
+        "chunk:ok",
+      ]);
+      expect(result.fullText).toBe("ok");
+    });
+
+    it("onReset fires once per reset event (two resets -> two clears)", async () => {
+      const processor = createStreamProcessor();
+      let resets = 0;
+      const result = await processEvents(
+        processor,
+        [
+          { type: "content", content: "a1 " },
+          { type: "reset" },
+          { type: "content", content: "a2 " },
+          { type: "reset" },
+          { type: "content", content: "final" },
+        ],
+        { onReset: () => resets++ },
+      );
+      expect(resets).toBe(2);
+      expect(result.fullText).toBe("final");
+    });
+
+    it("a reset with no onReset callback still clears state (no crash)", async () => {
+      const processor = createStreamProcessor();
+      const result = await processEvents(processor, [
+        { type: "content", content: "dead" },
+        { type: "reset" },
+        { type: "content", content: "live" },
+      ]);
+      expect(result.fullText).toBe("live");
+      expect(processor.streamingContent).toBe("");
+    });
+
+    // Persistence pin (finding H-3d): a reset mid-stream whose retry succeeds
+    // must yield a final assembled message with NO fragment of the failed
+    // attempt -- text, reasoning and tool calls alike. This is the storage
+    // guarantee that lets every display surface trust a single reset signal.
+    it("the assembled result carries zero fragment of the failed attempt", async () => {
+      const processor = createStreamProcessor();
+      const result = await processEvents(processor, [
+        { type: "content", content: "DEAD" },
+        { type: "content", content: "-FRAGMENT" },
+        { type: "reasoning", content: "DEAD-THINK" },
+        { type: "toolName", index: 0, name: "deadTool", toolCallId: "c-dead" },
+        { type: "toolArgument", index: 0, arguments: '{"dead":true}' },
+        { type: "reset" },
+        { type: "content", content: "LIVE" },
+        { type: "reasoning", content: "LIVE-THINK" },
+        { type: "toolName", index: 0, name: "liveTool", toolCallId: "c-live" },
+        { type: "toolArgument", index: 0, arguments: '{"live":true}' },
+        { type: "usage", data: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 } },
+      ]);
+
+      const json = JSON.stringify(result);
+      expect(result.fullText).toBe("LIVE");
+      expect(result.fullReasoning).toBe("LIVE-THINK");
+      expect(result.finalToolCalls).toHaveLength(1);
+      expect(result.finalToolCalls![0]!.function.name).toBe("liveTool");
+      // Not one byte of the dead attempt survives into the assembled result.
+      expect(json).not.toContain("DEAD");
+      expect(json).not.toContain("FRAGMENT");
+      expect(json).not.toContain("deadTool");
+      expect(json).not.toContain("c-dead");
+    });
   });
 
   describe("onToolCallDelta (in-flight tool calls)", () => {

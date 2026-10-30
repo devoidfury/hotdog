@@ -31,6 +31,24 @@ export interface StreamCallbacks {
   onUsage?: (usage: RawUsage) => void;
   onFinish?: (reason: string | null) => void;
 
+  /**
+   * Mid-stream failure being retried (the client yields a `reset` event when
+   * it re-issues a request from scratch): fired ONCE per reset event, at the
+   * seam where the assembly and replay buffers are cleared. Sinks that render
+   * streamed content live (onChunk/onReasoning consumers) MUST drop the dead
+   * attempt's fragments here, or the retry's full re-stream will read as an
+   * append to them.
+   *
+   * Ordering contract: the processor's internal buffers are cleared BEFORE
+   * this fires (so streamingContent/streamingReasoning already read empty
+   * when the callback runs), and the whole reset case completes before the
+   * loop awaits the next event -- the transport re-issues only after yielding
+   * reset, so every display clear provably lands before the retry's first
+   * onChunk/onReasoning. Throwing from here aborts processing like any other
+   * callback.
+   */
+  onReset?: () => void;
+
   /** Called to check if processing should be cancelled. Return true to abort the stream. */
   shouldCancel?(): boolean;
 }
@@ -216,6 +234,12 @@ export class StreamProcessor {
           finishReason = null;
           this.#currentStreamingContent = "";
           this.#currentStreamingReasoning = "";
+          // Display reset LAST inside the case: internal state is already
+          // clean, so what live surfaces see when they wake up is the truth
+          // (see StreamCallbacks.onReset for the ordering contract).
+          if (callbacks.onReset) {
+            callbacks.onReset();
+          }
           break;
         }
       }

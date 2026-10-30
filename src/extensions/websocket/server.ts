@@ -172,8 +172,9 @@ export function createWsServer(
       }
       const activityMsg = taskActivityMessage(ev.taskId, ev.event);
       if (!activityMsg) return;
-      // Buffer always for replay; live delivery only to the owning session
-      // (orphan tasks belong to no tab).
+      // Buffer always for replay (the reset sentinel trims instead of
+      // storing; see recordTaskActivity); live delivery only to the owning
+      // session (orphan tasks belong to no tab).
       registry.recordTaskActivity(ev.taskId, activityMsg.activity);
       const owner = tm.getTaskSession(ev.taskId);
       if (owner) registry.broadcastScoped(owner, activityMsg);

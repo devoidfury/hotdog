@@ -123,6 +123,9 @@ export interface MessageListManager {
   handleAssistantMessage: (data: AssistantMessage) => void;
   handleStreamingChunk: (data: StreamingChunk) => void;
   handleStreamingReasoningChunk: (data: StreamingChunk) => void;
+  /** Mid-stream provider-failure retry: drop the in-flight text/thinking
+   * accumulators so the retry's deltas render into fresh renderers. */
+  handleStreamReset: () => void;
   handleThinking: (data: ThinkingMessage) => void;
   handleToolCall: (data: ToolCallMessage) => void;
   handleToolResult: (data: ToolResultMessage) => void;
@@ -387,6 +390,35 @@ export function createMessageList(
     updateMdDom(el, result, { count: thinkingBlockCount });
     thinkingBlockCount = result.tree.children.length;
     scrollBottom();
+  }
+
+  /**
+   * The transport re-issued a request after a mid-stream failure: everything
+   * the failed attempt streamed (assistant text AND thinking, plus any
+   * hasToolCallsSinceLastAssistant flag from its tool-call phase) is dead --
+   * the retry re-streams from scratch and the assembled message will contain
+   * none of it. Drop both in-flight renderers outright (NOT
+   * finalizeAssistant: dead text must not be committed as a kept message).
+   * Sanitizer path untouched: the retry's chunks still flow through
+   * StreamingMdParser + renderBlocksToHtml exactly as before; nothing here
+   * writes markup. Tool blocks are untouched (a reset precedes tool results).
+   */
+  function handleStreamReset(): void {
+    dbg("handleStreamReset", {
+      hadAssistant: !!currentAssistantEl,
+      hadThinking: !!currentThinkingEl,
+      streamingBlockCount,
+      thinkingBlockCount,
+    });
+    if (currentAssistantEl) currentAssistantEl.remove();
+    currentAssistantEl = null;
+    if (currentThinkingEl) currentThinkingEl.remove();
+    currentThinkingEl = null;
+    hasToolCallsSinceLastAssistant = false;
+    streamingParser = null;
+    thinkingParser = null;
+    streamingBlockCount = 0;
+    thinkingBlockCount = 0;
   }
 
   function handleThinking({ content }: ThinkingMessage): void {
@@ -913,6 +945,7 @@ export function createMessageList(
     handleAssistantMessage,
     handleStreamingChunk,
     handleStreamingReasoningChunk,
+    handleStreamReset,
     handleThinking,
     handleToolCall,
     handleToolResult,

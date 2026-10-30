@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { openaiProtocol } from "@core/llm-client/openai-protocol.ts";
+import { StreamProcessor } from "@core/llm-client/stream-processor.ts";
 import { MarkerMangler } from "@core/marker-mangler.ts";
 import type { ProtocolContext } from "@core/llm-client/protocol.ts";
 import type { StreamEvent } from "@core/llm-client/client.ts";
@@ -28,16 +29,90 @@ async function collect(stream: AsyncIterable<StreamEvent>): Promise<StreamEvent[
   return events;
 }
 
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 describe("openaiProtocol.parseStream", () => {
-  it("parses non-SSE JSON responses", async () => {
-    const resp = new Response(
-      JSON.stringify({ choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] }),
-      { status: 200, headers: {"content-type": "application/json"} },
-    );
+  it("parses a real non-streaming JSON completion (message shape)", async () => {
+    // The shape an OpenAI-compatible gateway actually returns for a
+    // non-streaming body: choices[].message, NOT choices[].delta.
+    const resp = jsonResponse({
+      choices: [{
+        index: 0,
+        message: { role: "assistant", content: "hello" },
+        finish_reason: "stop",
+      }],
+      usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+    });
     expect(await collect(openaiProtocol.parseStream(resp, ctx()))).toEqual([
       { type: "content", content: "hello" },
       { type: "finish", reason: "stop" },
+      { type: "usage", data: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } },
     ]);
+  });
+
+  it("emits reasoning events from a message with reasoning_content (JSON body)", async () => {
+    const resp = jsonResponse({
+      choices: [{
+        message: { role: "assistant", reasoning_content: "thinking hard", content: "answer" },
+        finish_reason: "stop",
+      }],
+    });
+    expect(await collect(openaiProtocol.parseStream(resp, ctx()))).toEqual([
+      { type: "reasoning", content: "thinking hard" },
+      { type: "content", content: "answer" },
+      { type: "finish", reason: "stop" },
+    ]);
+  });
+
+  it("prefers delta over message when a body oddly carries both", async () => {
+    const resp = jsonResponse({
+      choices: [{
+        delta: { content: "from delta" },
+        message: { content: "from message" },
+        finish_reason: "stop",
+      }],
+    });
+    expect(await collect(openaiProtocol.parseStream(resp, ctx()))).toEqual([
+      { type: "content", content: "from delta" },
+      { type: "finish", reason: "stop" },
+    ]);
+  });
+
+  it("assembles two index-less message tool_calls end-to-end into two distinct calls", async () => {
+    // Non-streaming tool_calls are COMPLETE entries (id + full arguments)
+    // with NO index field. Keying them all at 0 would collapse the pair.
+    const resp = jsonResponse({
+      choices: [{
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            { id: "call_a", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } },
+            { id: "call_b", type: "function", function: { name: "read", arguments: '{"path":"a.ts"}' } },
+          ],
+        },
+        finish_reason: "tool_calls",
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+    });
+    const result = await new StreamProcessor().process(
+      openaiProtocol.parseStream(resp, ctx()),
+    );
+    expect(result.finalToolCalls).toEqual([
+      { id: "call_a", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } },
+      { id: "call_b", type: "function", function: { name: "read", arguments: '{"path":"a.ts"}' } },
+    ]);
+    for (const tc of result.finalToolCalls!) {
+      expect(() => JSON.parse(tc.function.arguments)).not.toThrow();
+    }
+    expect(result.finishReason).toBe("tool_calls");
+    expect(result.usage).toEqual({ prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 });
+    expect(result.fullText).toBe("");
   });
 
   it("throws InvalidResponse for non-SSE bodies that are not JSON", async () => {

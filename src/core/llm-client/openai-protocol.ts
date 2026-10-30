@@ -111,7 +111,11 @@ function* parseStreamData(
   const usage = data.usage as Record<string, unknown> | undefined;
 
   for (const choice of choices) {
-    const delta = (choice.delta as Record<string, unknown>) || {};
+    // Streaming chunks carry the payload in `delta`; a non-streaming JSON
+    // body carries it in `message` (same field names: content,
+    // reasoning_content, tool_calls). delta wins if a body oddly has both.
+    const fromMessage = choice.delta == null;
+    const delta = ((fromMessage ? choice.message : choice.delta) as Record<string, unknown> | undefined) || {};
 
     const reasoningContent = delta.reasoning_content as string | null | undefined;
     if (reasoningContent) {
@@ -124,16 +128,22 @@ function* parseStreamData(
     }
 
     const toolCalls = (delta.tool_calls as Array<Record<string, unknown>>) || [];
-    for (const tc of toolCalls) {
-      if (tc.function) {
+    for (let i = 0; i < toolCalls.length; i++) {
+      const tc = toolCalls[i];
+      if (tc?.function) {
+        // message tool_calls are COMPLETE entries with no `index`; keying
+        // them all at 0 would collapse N calls into one, so the JSON-fallback
+        // path falls back to array position. Delta fragments keep the
+        // historical Number(index) || 0 semantics untouched.
+        const index = !fromMessage || tc.index != null ? Number(tc.index) || 0 : i;
         const fn = tc.function as Record<string, unknown>;
         const name = fn.name as string | null | undefined;
         const args = fn.arguments as string | null | undefined;
         if (name) {
-          events.push({ type: "toolName", index: Number(tc.index) || 0, name, toolCallId: (tc.id as string) || "" });
+          events.push({ type: "toolName", index, name, toolCallId: (tc.id as string) || "" });
         }
         if (args) {
-          events.push({ type: "toolArgument", index: Number(tc.index) || 0, arguments: args });
+          events.push({ type: "toolArgument", index, arguments: args });
         }
       }
     }

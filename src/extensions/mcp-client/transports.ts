@@ -114,6 +114,14 @@ export class StdioLineFramer {
   }
 }
 
+/**
+ * Grace period between the SIGTERM and the SIGKILL escalation on destroy,
+ * mirroring the bash tool's KILL_GRACE_MS. MCP servers are third-party
+ * binaries spawned in their own (detached) process group: one that traps
+ * SIGTERM would otherwise survive shutdown with nothing left to reap it.
+ */
+const KILL_GRACE_MS = 2000;
+
 export class StdioTransport implements McpTransport {
   readonly isStreaming = true;
 
@@ -131,11 +139,14 @@ export class StdioTransport implements McpTransport {
   #stderrTruncated: boolean = false;
   #destroyed: boolean = false;
   #closeNotified: boolean = false;
+  readonly #killGraceMs: number;
+  #killTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(command: string, args: string[] = [], env: Record<string, string> = {}, extraScrubKeys?: readonly string[], envScrubbing: boolean = true) {
+  constructor(command: string, args: string[] = [], env: Record<string, string> = {}, extraScrubKeys?: readonly string[], envScrubbing: boolean = true, killGraceMs: number = KILL_GRACE_MS) {
     this.#command = command;
     this.#args = args;
     this.#env = env;
+    this.#killGraceMs = killGraceMs;
 
     // Own process group on POSIX so destroy() can kill the whole tree.
     // An MCP server that spawns workers could otherwise leak them.
@@ -199,6 +210,9 @@ export class StdioTransport implements McpTransport {
    */
   get exited(): boolean { return this.#closeNotified; }
 
+  /** True while the SIGKILL escalation timer is armed. @internal Exposed for testing. */
+  get killTimerArmed(): boolean { return this.#killTimer !== null; }
+
   async send(serialized: string): Promise<undefined> {
     if (this.#destroyed) {
       throw new McpError("Transport is destroyed");
@@ -242,9 +256,30 @@ export class StdioTransport implements McpTransport {
     // Falls back to the direct child on Windows (no process groups).
     killProcessGroup(this.#child, "SIGTERM");
 
+    // A third-party server may trap SIGTERM (the bash tool hit exactly this).
+    // Arm an unref'd escalation to SIGKILL after the grace period, cleared on
+    // child exit so no dangling timer or signal-after-death noise remains.
+    // A dead group also makes the escalation itself a swallowed ESRCH no-op.
+    if (this.#child.exitCode === null && this.#child.signalCode === null) {
+      this.#child.once("exit", () => this.#clearKillTimer());
+      this.#killTimer = setTimeout(() => {
+        this.#killTimer = null;
+        killProcessGroup(this.#child, "SIGKILL");
+      }, this.#killGraceMs);
+      // Shutdown must not be held open by the escalation timer.
+      this.#killTimer.unref();
+    }
+
     if (this.#stderrOutput && this.#stderrOutput.trim()) {
       const truncNote = this.#stderrTruncated ? ` [truncated at ${MAX_TRANSPORT_BUFFER_CHARS} chars]` : "";
       logger.error(`MCP server stderr: ${this.#stderrOutput.trim()}${truncNote}`);
+    }
+  }
+
+  #clearKillTimer(): void {
+    if (this.#killTimer) {
+      clearTimeout(this.#killTimer);
+      this.#killTimer = null;
     }
   }
 

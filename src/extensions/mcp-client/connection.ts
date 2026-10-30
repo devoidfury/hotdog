@@ -2,6 +2,14 @@ import { McpClient } from "./client.ts";
 import { McpContentBlock, McpError } from "./types.ts";
 import type { ElicitationHandler } from "./elicitation.ts";
 
+/**
+ * Hard caps on tools/list pagination against a buggy or hostile server:
+ * a constant or oscillating nextCursor otherwise means infinite round-trips
+ * with monotonically growing memory, before a single tool is usable.
+ */
+export const MAX_TOOL_LIST_PAGES = 100;
+export const MAX_DISCOVERED_TOOLS = 1000;
+
 /** Shared client handle for use by McpTool instances. */
 export class McpConnectionHandle {
   readonly #client: McpClient;
@@ -45,7 +53,14 @@ export class McpConnection {
   ): Promise<McpConnection> {
     const client = await McpClient.forStdio(command, requestTimeoutMs, args, env, extraScrubKeys, envScrubbing);
     const conn = new McpConnection(client, serverName);
-    await conn._initialize();
+    try {
+      await conn._initialize();
+    } catch (e: unknown) {
+      // Discovery/init failure must not orphan the spawned server: tear the
+      // transport down (the error itself propagates to the caller's catch).
+      try { await conn.shutdown(); } catch { /* best-effort teardown */ }
+      throw e;
+    }
     return conn;
   }
 
@@ -57,7 +72,12 @@ export class McpConnection {
   ): Promise<McpConnection> {
     const client = await McpClient.forHttp(url, timeoutMs, headers);
     const conn = new McpConnection(client, serverName);
-    await conn._initialize();
+    try {
+      await conn._initialize();
+    } catch (e: unknown) {
+      try { await conn.shutdown(); } catch { /* best-effort teardown */ }
+      throw e;
+    }
     return conn;
   }
 
@@ -77,12 +97,36 @@ export class McpConnection {
 
   private async _discoverTools(): Promise<void> {
     const allTools: Record<string, unknown>[] = [];
+    const seenCursors = new Set<string>();
     let cursor: string | null = null;
+    let pages = 0;
 
     do {
       const result = await this.#client.listTools(cursor) as Record<string, unknown>;
       allTools.push(...(result.tools as Record<string, unknown>[]));
-      cursor = result.nextCursor as string | null;
+      pages++;
+      if (allTools.length > MAX_DISCOVERED_TOOLS) {
+        throw new McpError(
+          `MCP server '${this.#serverName}' exceeded the ${MAX_DISCOVERED_TOOLS}-tool discovery cap (${allTools.length} tools across ${pages} pages); aborting`,
+        );
+      }
+      cursor = (result.nextCursor as string | null) ?? null;
+      if (cursor) {
+        if (pages >= MAX_TOOL_LIST_PAGES) {
+          throw new McpError(
+            `MCP server '${this.#serverName}' kept paginating past the ${MAX_TOOL_LIST_PAGES}-page tools/list cap; aborting`,
+          );
+        }
+        // A cursor already seen this pass (constant or oscillating) means the
+        // server is looping: no sane server revisits a cursor within one
+        // traversal, and revisiting one never terminates.
+        if (seenCursors.has(cursor)) {
+          throw new McpError(
+            `MCP server '${this.#serverName}' returned the repeated tools/list cursor "${cursor}"; aborting pagination loop`,
+          );
+        }
+        seenCursors.add(cursor);
+      }
     } while (cursor);
 
     this.#tools = allTools;

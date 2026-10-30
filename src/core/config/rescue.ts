@@ -14,8 +14,20 @@ import { suggestCandidates } from "@utils/strings.ts";
 import type { ConfigParamDef } from "@core/extensions/config.ts";
 
 // Keys a defaults.json may carry that are not in CONFIG_SCHEMA: the providers
-// block and the legacy workspace passthroughs buildAgentConfig reads directly.
-const EXTRA_KNOWN_KEYS = ["providers", "cwdBoundary", "workspaceRoot"];
+// block, the legacy workspace passthroughs buildAgentConfig reads directly,
+// the env-scrub addition (utils/env.ts), the service-provider override map the
+// extension loader reads straight off the config (getExtensionsToLoad), and
+// the legacy top-level skillsPath still resolved by the skills extension's
+// `skills.path` config layer. (tests/lints/doc-config-keys.test.ts guards this
+// list against the docs.)
+export const EXTRA_KNOWN_KEYS = [
+  "providers",
+  "cwdBoundary",
+  "workspaceRoot",
+  "services",
+  "envScrub",
+  "skillsPath",
+];
 
 export interface JsoncIssue {
   kind: "comment" | "trailing-comma" | "bom";

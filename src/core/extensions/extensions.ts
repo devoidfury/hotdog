@@ -1,6 +1,6 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { HOOKS, EXTENSION_PROVIDES, type HookSystem, type HookHandlerAny } from "../hooks.ts";
 import { ConfigError, ExtensionError } from "../error.ts";
 import { logger } from "@utils/logger.ts";
@@ -651,7 +651,15 @@ export class ExtensionLoader {
   ): Promise<ExtensionInstance | null> {
     let extModule: ExtensionInstance;
     if (typeof entryPoint === "string") {
-      extModule = (await import(entryPoint)) as Record<string, unknown>;
+      // Alias specifiers ("@extensions/...", "@experimental/...") resolve via
+      // the tsconfig paths mapping. Everything else from discovery is a
+      // ROOT_DIR-relative ("./x/index.ts") or ROOT_DIR-escaping ("../x/...")
+      // path; a bare relative specifier would resolve against THIS module's
+      // directory, not src/, so resolve here and hand import() a file URL.
+      const specifier = entryPoint.startsWith("@")
+        ? entryPoint
+        : pathToFileURL(path.resolve(ROOT_DIR, entryPoint)).href;
+      extModule = (await import(specifier)) as Record<string, unknown>;
     } else {
       extModule = entryPoint;
     }

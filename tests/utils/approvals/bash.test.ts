@@ -95,6 +95,58 @@ describe("bail table (anything unanalyzable is an ASK)", () => {
     expect(parse("ruby --version").ok).toBe(true);
   });
 
+  it("bails on node print-as-code and perl/ruby flag bundlings (bypass corpus, round 2)", () => {
+    // `--print`/`-p` eval their operand like `-e` does; `-pe` bundles both.
+    expectBail(`node --print "require('child_process').execSync('id')"`, "inline code");
+    expectBail("node -p 'process.exit(0)'", "inline code");
+    expectBail("node -pe 'process.exit(0)'", "inline code");
+    // perl bundles its code flag (`-le`, `-lE`, the `-ane` idiom); ruby bundles
+    // lowercase `e` (`-ne`, `-pe`) and has the `--eval` long form.
+    expectBail("perl -le 'system(q/id/)'", "inline code");
+    expectBail("perl -lE 'say 1'", "inline code");
+    expectBail("perl -ane 'print $F[0]'", "inline code");
+    expectBail("ruby -ne 'puts 1'", "inline code");
+    expectBail("ruby -pe 'puts 1'", "inline code");
+    expectBail("ruby --eval 'puts 1'", "inline code");
+    // Honest use of the same binaries stays parseable. Ruby's `-E` is the
+    // encoding flag, not a code runner, so the ruby bundle regex stays lowercase.
+    expect(parse("node --check index.js").ok).toBe(true);
+    expect(parse("ruby -E utf-8 script.rb").ok).toBe(true);
+    expect(parse("perl -v").ok).toBe(true);
+  });
+
+  it("bails on command wrappers that hide the real program", () => {
+    // Wrappers skip every argv[1]-level check and evade cmd denies: an allowed
+    // `node` for build.js plus `nohup` would otherwise run anything unprompted.
+    expectBail("nohup perl -e 'system(q/id/)'", "nohup");
+    expectBail("time make", "time");
+    expectBail("sudo rm -rf /", "sudo");
+    expectBail("timeout 5 bash -c 'sleep 1'", "timeout");
+    expectBail("watch -n 1 git status", "watch");
+    expectBail("nice -n 10 python script.py", "nice");
+    expectBail("command git status", "command");
+  });
+
+  it("wrappers and print-as-code: cmd allows stop covering them (decide-level)", () => {
+    const rules = compileApprovalRules({
+      default: "ask",
+      allow: ["bash.cmd=node", "bash.cmd=make", "bash.cmd=git"],
+      deny: ["bash.cmd=perl"],
+    });
+    const verdictOf = (command: string) => {
+      const r = parse(command);
+      if (!r.ok) return "ask"; // unanalyzable => ask under default ask
+      return decide({ tool: "bash", recognized: true, targets: r.targets }, rules).verdict;
+    };
+    // The plain commands still ride their cmd allows.
+    expect(verdictOf("node build.js")).toBe("allow");
+    expect(verdictOf("make test")).toBe("allow");
+    // The bypasses now ask instead of riding those allows.
+    expect(verdictOf(`node --print "1+1"`)).toBe("ask");
+    expect(verdictOf("time make install")).toBe("ask");
+    expect(verdictOf("nohup make")).toBe("ask");
+  });
+
   it("bails on quoting tricks around the command name and on cd escapes", () => {
     expectBail('"git" status', "quoted");
     expectBail("cd / && ls", "leaves the workspace");

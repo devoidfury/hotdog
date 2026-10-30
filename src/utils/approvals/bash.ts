@@ -15,8 +15,17 @@ import type { ApprovalTarget } from "./rules.ts";
 
 export type BashParse = { ok: true; targets: ApprovalTarget[] } | { ok: false; reason: string };
 
-/** Commands that run programs or rewrite the command stream: always bail. */
-const ALWAYS_BAIL = new Set(["eval", "env", "xargs"]);
+/**
+ * Commands that run programs, or that hide the real argv[0] behind themselves: always bail.
+ * The wrappers (`time`, `nohup`, `sudo`, ...) belong here because every check below inspects
+ * only argv[0]'s family: `nohup perl -e '...'` must not parse as a clean `nohup` when `perl`
+ * is denied, and a `node` allow for `node build.js` must not admit a wrapped payload.
+ */
+const ALWAYS_BAIL = new Set([
+  "eval", "env", "xargs",
+  "time", "nohup", "command", "exec", "sudo", "doas", "nice",
+  "setsid", "timeout", "stdbuf", "watch", "parallel",
+]);
 
 /** Commands that bail when handed an inline-program flag. */
 const INLINE_CODE_FLAGS: Record<string, string[]> = {
@@ -27,9 +36,11 @@ const INLINE_CODE_FLAGS: Record<string, string[]> = {
   python: ["-c"],
   python2: ["-c"],
   python3: ["-c"],
-  node: ["-e", "--eval"],
+  // `-p`/`--print` eval their argument like `-e` does; startsWith("-p") also
+  // catches the bundled `node -pe '...'` form.
+  node: ["-e", "--eval", "-p", "--print"],
   perl: ["-e", "-E"],
-  ruby: ["-e"],
+  ruby: ["-e", "--eval"],
 };
 
 /** `awk` takes its program as an argument, always. */
@@ -42,18 +53,25 @@ const FIND_BAIL_FLAGS = new Set(["-exec", "-execdir", "-ok", "-okdir", "-delete"
 const SH_FAMILY = new Set(["sh", "bash", "zsh", "dash"]);
 /** Any bundled sh flag word containing `c` runs the argument as a program. */
 const SH_C_BUNDLE = /^-[a-zA-Z]*c/;
+/** perl bundles its code flags too: `-le`, `-lE`, `-MPOSIX -e`-style words ending in a bare `e`/`E`. */
+const PERL_E_BUNDLE = /^-[a-zA-Z]*[eE]/;
+/** ruby bundles `e` (`-ne`, `-pe`) but only lowercase: `-E` sets the encoding, not the program. */
+const RUBY_E_BUNDLE = /^-[a-zA-Z]*e/;
 
 /**
  * Does this argument word turn the interpreter into a code runner? Catches the
- * exact flag, bundled sh forms (`bash -lc '...'`), and flags glued to their
- * operand (`python -c'print(1)'`, `node -e'...'` -- the tokenizer quotes the
- * glued tail, exact matching alone misses both). Unknown bundlings of these
+ * exact flag, bundled sh forms (`bash -lc '...'`), bundled perl/ruby forms
+ * (`perl -le '...'`, `ruby -ne '...'`), and flags glued to their operand
+ * (`python -c'print(1)'`, `node -e'...'` -- the tokenizer quotes the glued
+ * tail, exact matching alone misses both). Unknown bundlings of these
  * commands bail too: an honest allow-rule workflow never needs them, and when
  * unsure this layer asks.
  */
 function runsInlineCode(cmd: string, inlineFlags: string[], text: string): boolean {
   if (!text.startsWith("-")) return false;
   if (SH_FAMILY.has(cmd) && SH_C_BUNDLE.test(text)) return true;
+  if (cmd === "perl" && PERL_E_BUNDLE.test(text)) return true;
+  if (cmd === "ruby" && RUBY_E_BUNDLE.test(text)) return true;
   return inlineFlags.some((flag) => text.startsWith(flag));
 }
 

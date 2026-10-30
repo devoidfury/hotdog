@@ -1442,9 +1442,11 @@ enabled on a one-shot run (`-p`) every tool call blocks -- that is the fail-clos
 Bash command lines are segmented on `;`, `&&`, `||`, `|`, `&` and newlines (every segment must pass; `cd` retargets the
 base for later segments and bails when it leaves the workspace roots). The analysis **bails -- which means ask --** on
 `$(...)`, backticks, `${...}`/`$VAR`, `(`/`)`, `{`/`}`, unquoted globs, here-documents/here-strings, `xargs`, `eval`,
-`env`, `find -exec`/`-execdir`/`-delete`, and inline-code interpreters (`sh -c`, `bash -c`, `python -c`, `node -e`,
-`perl -e`/`-E`, `ruby -e`, `awk`) in every shape: bundled one-letter flags (`bash -lc '...'`) and flags glued to their
-operand (`python -c'print(1)'`) bail like the plain flag. Flags and non-path words never demand an allow. A bare filename
+`env`, command wrappers that hide the real program (`time`, `nohup`, `command`, `exec`, `sudo`, `doas`, `nice`, `setsid`,
+`timeout`, `stdbuf`, `watch`, `parallel`), `find -exec`/`-execdir`/`-delete`, and inline-code interpreters (`sh -c`,
+`bash -c`, `python -c`, `node -e`/`-p`/`--print`, `perl -e`/`-E`, `ruby -e`, `awk`) in every shape: bundled one-letter
+flags (`bash -lc '...'`, `perl -le '...'`, `ruby -ne '...'`) and flags glued to their operand (`python -c'print(1)'`)
+bail like the plain flag. Flags and non-path words never demand an allow. A bare filename
 (a word with no `/`) is not an allow-demanded path -- `git checkout main` needs no rule for `main` -- but it IS matched,
 resolved against the segment's directory, by `bash.path` deny rules: deny is the one verdict that must never miss a file
 name.

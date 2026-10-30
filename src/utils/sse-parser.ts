@@ -75,8 +75,26 @@ export class SseParser {
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) {
-            // SSE spec: `event:` applies only to the next event; reset at the
-            // blank-line event boundary.
+            // SSE spec: a blank line terminates the event, so any jsonBuffer
+            // leftover must be resolved here -- a legit multi-line-split
+            // payload completes on flush; garbage dropped now cannot poison
+            // every later split payload until the overflow guard trips.
+            if (jsonBuffer) {
+              try {
+                const data = JSON.parse(jsonBuffer);
+                if (isObjectData(data)) yield data;
+                else
+                  this.#onWarning(
+                    `[sse] non-object JSON at event boundary: ${jsonBuffer.slice(0, 80)}`,
+                  );
+              } catch {
+                this.#onWarning(
+                  `[sse] malformed JSON at event boundary (${jsonBuffer.length} chars): ${jsonBuffer.slice(0, 100)}...`,
+                );
+              }
+              jsonBuffer = "";
+            }
+            // `event:` applies only to the next event; reset at the boundary.
             currentEvent = "message";
             continue;
           }

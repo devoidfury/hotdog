@@ -425,7 +425,8 @@ describe("stream-processor malformed deltas", () => {
     const tcs = res.result.finalToolCalls!;
     expect(tcs.length).toBe(4); // indices 0, "s", 1, NaN -- string/number/NaN are distinct keys
     expect(tcs[0]!.function.name).toBe(""); // undefined name -> ""
-    expect(tcs[0]!.id as unknown).toBe(42); // truthy non-string id passes through untouched
+    expect(typeof tcs[0]!.id).toBe("string"); // non-string id replaced with a fresh uuid (repair.ts drops non-strings on replay)
+    expect(tcs[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(tcs[0]!.function.arguments).toBe("");
     expect(tcs[1]!.function.arguments).toBe("42"); // null -> "", 42 -> "42"
     expect(tcs[2]!.function.arguments).toBe("[object Object]");

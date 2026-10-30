@@ -10,8 +10,9 @@
 // Plus the kill -9 definition-of-done: a process SIGKILLed mid-side-effect
 // leaves exactly one side effect on disk and replays as outcome-unknown.
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, spyOn } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
+import { open as openHandle } from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
 
@@ -1057,5 +1058,141 @@ describe("turn lifecycle records (protocol v2)", () => {
         cleanup(v1);
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rewind checkpoint durability (SS-06): the block's tail record must ride the
+// fsync class. CONTEXT.md promises "Rewinds are persisted" -- the RESET is
+// meaning-carrying, so power loss must not drop it while the kept-history
+// lines land (an undone history would resurrect on resume).
+// Seam: queuedFsyncAppend is the only caller of FileHandle#sync in these
+// flows; named fs imports are read-only bindings and mock.module is banned,
+// so spy the prototype taken off a live handle. The sink records the raw log
+// length at sync time: a tail-fsync sees the whole block appended, a
+// head/mid-block fsync would not.
+// ---------------------------------------------------------------------------
+
+async function spyOnHandleSync(sink: () => void) {
+  const probe = await openHandle(join(SESSIONS_DIR, `sync-probe-${Date.now()}`), "a");
+  const proto = Object.getPrototypeOf(probe) as { sync: () => Promise<void> };
+  await probe.close();
+  return spyOn(proto, "sync").mockImplementation(async () => {
+    sink();
+  });
+}
+
+function rawLog(sessionId: string): { source: string; content: unknown }[] {
+  return readFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), "utf-8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l));
+}
+
+describe("rewind checkpoint durability (SS-06)", () => {
+  it("between-turn rewind: one fsync, fired only after the whole block is appended", async () => {
+    const sessionId = uniqueId("rewind-fsync");
+    try {
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: { role: "user", content: "u1" }, agent: { sessionId },
+      });
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: { role: "assistant", content: "a1" }, agent: { sessionId },
+      });
+
+      const snapshots: number[] = [];
+      const spy = await spyOnHandleSync(() => snapshots.push(rawLog(sessionId).length));
+      try {
+        await ext.hooks[HOOKS.CONTEXT_REWOUND]!({
+          agent: { sessionId },
+          newContext: [
+            { role: "system", content: "sys prompt" },
+            { role: "user", content: "u1" },
+            { role: "assistant", content: "a1" },
+          ],
+        });
+      } finally {
+        spy.mockRestore();
+      }
+
+      // Exactly one fsync for the checkpoint (the tail kept-message record),
+      // fired when all 5 lines (2 pre-existing + reset + 2 kept) are on disk;
+      // a reset-entry (head) fsync would have snapshotted 3.
+      expect(snapshots).toEqual([5]);
+      // Block content and order unchanged: RESET, kept messages minus system.
+      expect(rawLog(sessionId).slice(2).map((e) => e.source)).toEqual([
+        LOG_SOURCE.RESET,
+        LOG_SOURCE.INPUT,
+        LOG_SOURCE.LLM,
+      ]);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("mid-turn rewind: the re-emitted turn_started marker is the fsynced tail", async () => {
+    const sessionId = uniqueId("rewind-fsync-turn");
+    try {
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      await ext.hooks[HOOKS.TURN_START]!({
+        turnIndex: 1, kind: "input", agent: { sessionId },
+      });
+
+      const snapshots: number[] = [];
+      const spy = await spyOnHandleSync(() => snapshots.push(rawLog(sessionId).length));
+      try {
+        await ext.hooks[HOOKS.CONTEXT_REWOUND]!({
+          agent: { sessionId },
+          newContext: [{ role: "user", content: "u1" }],
+        });
+      } finally {
+        spy.mockRestore();
+      }
+
+      // The sync fires with the marker (block tail) already appended: 4
+      // lines = turn_started + reset + kept u1 + re-emitted marker.
+      expect(snapshots).toEqual([4]);
+      expect(rawLog(sessionId).map((e) => e.source)).toEqual([
+        LOG_SOURCE.TURN_STARTED,
+        LOG_SOURCE.RESET,
+        LOG_SOURCE.INPUT,
+        LOG_SOURCE.TURN_STARTED,
+      ]);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+
+  it("bare-reset rewind (/clear): the reset entry itself is fsynced", async () => {
+    const sessionId = uniqueId("rewind-fsync-clear");
+    try {
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      await ext.hooks[HOOKS.CONTEXT_MESSAGE]!({
+        message: { role: "user", content: "u1" }, agent: { sessionId },
+      });
+
+      const snapshots: number[] = [];
+      const spy = await spyOnHandleSync(() => snapshots.push(rawLog(sessionId).length));
+      try {
+        await ext.hooks[HOOKS.CONTEXT_REWOUND]!({ agent: { sessionId }, newContext: [] });
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(snapshots).toEqual([2]); // sync fired after the reset line landed
+      expect(rawLog(sessionId).map((e) => e.source)).toEqual([
+        LOG_SOURCE.INPUT,
+        LOG_SOURCE.RESET,
+      ]);
+    } finally {
+      cleanup(sessionId);
+    }
   });
 });

@@ -227,7 +227,10 @@ export class StreamProcessor {
     let finalToolCalls: ToolCall[] | null = null;
     if (toolCallsBuffer.size > 0) {
       finalToolCalls = Array.from(toolCallsBuffer.values()).map((tc) => ({
-        id: tc.id || crypto.randomUUID(),
+        // Non-string ids pass live but get dropped by sanitizeToolCalls on
+        // resume (repair.ts treats them as impossible on a legal wire), so
+        // sloppy provider ids must be replaced here, not shipped.
+        id: typeof tc.id === "string" && tc.id ? tc.id : crypto.randomUUID(),
         type: "function",
         function: {
           name: unescape(tc.name),

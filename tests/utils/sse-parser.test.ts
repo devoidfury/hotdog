@@ -209,6 +209,20 @@ data: {"explicit":true}
       expect(warnings[0]).toContain("malformed JSON on [DONE] flush");
     });
 
+    it("resolves jsonBuffer at the blank-line event boundary (no cross-event poisoning)", async () => {
+      // A stray malformed line must not poison the split-payload accumulator:
+      // the blank line ends that event, so the garbage flushes there and the
+      // next event's legitimately split payload still reassembles cleanly.
+      const warnings: string[] = [];
+      const sse = 'data: {bad\n\ndata: {"partial"\ndata::1}\n\n';
+      const results = await collect(
+        parseSse(streamFromText(sse), { onWarning: (msg) => warnings.push(msg) }),
+      );
+      expect(results).toEqual([{ partial: 1 }]); // no garbage leaks, no concatenation
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain("malformed JSON at event boundary");
+    });
+
     it("warns and discards on buffer overflow", async () => {
       const warnings: string[] = [];
       const bigChunk = '{"x":"' + "a".repeat(1000) + '"';

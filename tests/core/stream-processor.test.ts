@@ -9,6 +9,8 @@ import {
 } from "@core/llm-client/stream-processor.ts";
 import type { StreamEvent } from "@core/llm-client/client.ts";
 import { MarkerMangler } from "@core/marker-mangler.ts";
+import { Message } from "@core/context/message.ts";
+import { repairToolCalls } from "@core/context/repair.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -211,6 +213,43 @@ describe("StreamProcessor", () => {
           function: { name: "bash", arguments: '{"cmd": "ls"}' },
         },
       ]);
+    });
+
+    it("should replace non-string and empty ids with fresh uuids, keep valid strings", async () => {
+      // repair.ts's sanitizeToolCalls drops non-string ids on resume, so the
+      // live wire must never carry one: numeric/empty ids become uuids.
+      const processor = createStreamProcessor();
+      const result = await processEvents(processor, [
+        { type: "toolName", index: 0, name: "a", toolCallId: 42 as unknown as string },
+        { type: "toolArgument", index: 0, arguments: "{}" },
+        { type: "toolName", index: 1, name: "b", toolCallId: "" },
+        { type: "toolArgument", index: 1, arguments: "{}" },
+        { type: "toolName", index: 2, name: "c", toolCallId: "call-keep" },
+        { type: "toolArgument", index: 2, arguments: "{}" },
+      ]);
+
+      const ids = result.finalToolCalls!.map((tc) => tc.id);
+      expect(ids[2]).toBe("call-keep"); // valid string preserved verbatim
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+      expect(ids[0]).toMatch(uuid); // numeric id -> fresh uuid
+      expect(ids[1]).toMatch(uuid); // empty id -> fresh uuid
+    });
+
+    it("assembled tool calls survive sanitizeToolCalls on a replay round-trip", async () => {
+      // The whole point of the id coercion: repair's sanitizer treats a
+      // non-string id as an illegal-wire call and drops the call entirely.
+      const processor = createStreamProcessor();
+      const result = await processEvents(processor, [
+        { type: "toolName", index: 0, name: "bash", toolCallId: 42 as unknown as string },
+        { type: "toolArgument", index: 0, arguments: '{"cmd": "ls"}' },
+      ]);
+      const assistant = new Message({
+        role: "assistant",
+        content: "",
+        toolCalls: result.finalToolCalls,
+      });
+      const { messages } = repairToolCalls([assistant]);
+      expect(messages[0]!.toolCalls).toEqual(result.finalToolCalls); // nothing dropped
     });
   });
 

@@ -245,6 +245,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   const appendMessageEntry = async (
     agent: { sessionId?: string },
     message: SessionLogMessage,
+    fsync = false, // durability class for tail records (see queuedFsyncAppend)
   ): Promise<void> => {
     const sessionId = agent.sessionId || "unknown";
     let logPath: string;
@@ -268,7 +269,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       },
       logSourceForRole(message.role),
     );
-    await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+    await (fsync
+      ? queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n")
+      : queuedAppend(logPath, JSON.stringify(entry) + "\n"));
   };
 
   /**
@@ -404,17 +407,34 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         // Enqueue the whole checkpoint synchronously (no await in between): the
         // block must be atomic in queue order, or a message dispatched mid-checkpoint
         // would replay between the reset marker and the kept history.
-        let done = queuedAppend(logPath, JSON.stringify(resetEntry) + "\n");
-        for (const message of newContext || []) {
-          if (message.role === "system") continue;
-          // appendMessageEntry queues synchronously before its first await.
-          done = appendMessageEntry(agent, message);
+        //
+        // The LAST record of the block is an fsync-class write (see
+        // queuedFsyncAppend): the RESET is meaning-carrying -- CONTEXT.md
+        // promises "Rewinds are persisted" -- and a plain append only survives
+        // kill -9. On power loss the RESET could be lost while the kept-history
+        // lines survive... worse, on a replay the undone history above the
+        // (missing) reset would resurrect. One trailing fsync lands the record
+        // and everything appended before it in the same queue, so the whole
+        // block becomes power-loss durable without extra syncs per line.
+        const keptMessages = (newContext || []).filter((m) => m.role !== "system");
+        const openKind = openTurns.get(sessionId);
+        let done: Promise<void>;
+        // Tail determination: marker if re-emitted, else last kept message,
+        // else the reset entry alone.
+        if (keptMessages.length === 0 && openKind === undefined) {
+          done = queuedFsyncAppend(logPath, JSON.stringify(resetEntry) + "\n");
+        } else {
+          done = queuedAppend(logPath, JSON.stringify(resetEntry) + "\n");
+          for (let i = 0; i < keptMessages.length; i++) {
+            // appendMessageEntry queues synchronously before its first await.
+            const isTail = openKind === undefined && i === keptMessages.length - 1;
+            done = appendMessageEntry(agent, keptMessages[i]!, isTail);
+          }
         }
         // A mid-turn checkpoint truncates the epoch view: the original
         // turn_started sits above the reset and would vanish, hiding the open
         // turn. Re-emit the marker (same kind) in the same atomic block.
         // Between-turn rewinds have no open turn and add nothing.
-        const openKind = openTurns.get(sessionId);
         if (openKind !== undefined) {
           const marker = stripNulls({
             ts: new Date().toISOString(),
@@ -423,7 +443,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             v: LOG_VERSION,
             content: { kind: openKind },
           });
-          done = queuedAppend(logPath, JSON.stringify(marker) + "\n");
+          done = queuedFsyncAppend(logPath, JSON.stringify(marker) + "\n");
         }
         await done;
         // The reset moved the replay window and wiped all durability facts:

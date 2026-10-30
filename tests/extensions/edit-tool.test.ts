@@ -87,17 +87,20 @@ describe('EditTool.execute — exact match', () => {
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('qux bar qux baz qux');
   });
 
-  it('replaces only first by default', async () => {
+  it('fails with a multi-match error instead of silently replacing the first occurrence', async () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'foo bar foo baz foo');
 
     const tool = new EditTool({ maxEditInputSize: 16000 });
-    await tool.execute(
+    const result = await tool.execute(
       { path: 'file.txt', oldString: 'foo', newString: 'qux' },
       toolCtx({ workspaceRoots: [dir] })
     );
 
-    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('qux bar foo baz foo');
+    expect(result.success).toBe(false);
+    expect(resultStr(result)).toContain('matched 3 times');
+    // Nothing was written: the file keeps all three occurrences.
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('foo bar foo baz foo');
   });
 
   it('replaces multi-line content', async () => {
@@ -131,7 +134,7 @@ describe('EditTool.execute — exact match', () => {
 
   it('does not expand $-replacement patterns in newString (single and replace_all)', async () => {
     const filePath = path.join(dir, 'file.txt');
-    fsSync.writeFileSync(filePath, 'price: 100 price: 100');
+    fsSync.writeFileSync(filePath, 'price: 100 total: 200');
 
     const tool = new EditTool({ maxEditInputSize: 16000 });
     // $& = matched text, $$ = literal $, $' = text after match — all must stay literal.
@@ -139,7 +142,7 @@ describe('EditTool.execute — exact match', () => {
       { path: 'file.txt', oldString: '100', newString: '$&$$100$\'$`' },
       toolCtx({ workspaceRoots: [dir] })
     );
-    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe("price: $&$$100$'$` price: 100");
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe("price: $&$$100$'$` total: 200");
 
     fsSync.writeFileSync(filePath, 'foo bar foo');
     await tool.execute(
@@ -784,5 +787,121 @@ describe("EditTool.execute — nearest-region recovery", () => {
     // not at the blank line dangling above it.
     expect(err!.message).toContain("Nearest region: lines 41-45");
     expect(err!.message).toContain("first difference at file line 43");
+  });
+});
+
+// ── Multi-match guard (TL-03 / H5) ─────────────────────────────────────────
+
+describe('EditTool.execute — multi-match guard', () => {
+  it('exact path: multi-match error names the count and the 1-based line numbers', async () => {
+    const filePath = path.join(dir, 'mm-exact.txt');
+    fsSync.writeFileSync(
+      filePath,
+      'header\nuse the thing;\nfiller filler filler\nuse the thing;\ntrailer'
+    );
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'mm-exact.txt', oldString: 'use the thing;', newString: 'x' },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(result.success).toBe(false);
+    const msg = resultStr(result);
+    expect(msg).toContain('matched 2 times');
+    expect(msg).toContain('lines 2, 4');
+    expect(msg).toContain('more surrounding context');
+    expect(msg).toContain('replace_all=true');
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toContain('use the thing;');
+  });
+
+  it('exact path: multi-line oldString counts its own newlines for later line numbers', async () => {
+    const filePath = path.join(dir, 'mm-multiline.txt');
+    fsSync.writeFileSync(filePath, 'x\naaa\nbbb\ny\naaa\nbbb\nz');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'mm-multiline.txt', oldString: 'aaa\nbbb', newString: 'c' },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(result.success).toBe(false);
+    expect(resultStr(result)).toContain('matched 2 times');
+    expect(resultStr(result)).toContain('lines 2, 5');
+  });
+
+  it('exact path: a single match still edits and reports one match', async () => {
+    const filePath = path.join(dir, 'mm-single.txt');
+    fsSync.writeFileSync(filePath, 'alpha\nbeta unique gamma\ndelta');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'mm-single.txt', oldString: 'unique', newString: 'ONLY' },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('alpha\nbeta ONLY gamma\ndelta');
+    expect(resultStr(result)).toContain('found 1 match');
+  });
+
+  it('exact path: replace_all still replaces every occurrence', async () => {
+    const filePath = path.join(dir, 'mm-all.txt');
+    fsSync.writeFileSync(filePath, 'a\nb\na\nb\na');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'mm-all.txt', oldString: 'a', newString: 'c', replace_all: true },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('c\nb\nc\nb\nc');
+    expect(resultStr(result)).toContain('found 3 matches');
+  });
+
+  it('zero-match error is unchanged (still throws text-not-found)', async () => {
+    const filePath = path.join(dir, 'mm-miss.txt');
+    fsSync.writeFileSync(filePath, 'line1\nline2\nline3');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await expect(
+      tool.execute(
+        { path: 'mm-miss.txt', oldString: 'nothing here at all', newString: 'x' },
+        toolCtx({ workspaceRoots: [dir] })
+      )
+    ).rejects.toThrow(/text not found in file/);
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('line1\nline2\nline3');
+  });
+
+  it('trimmed-fallback path: multi-match fails with the matched line numbers', async () => {
+    const filePath = path.join(dir, 'mm-fallback.txt');
+    // Exact match misses (indentation differs); two windows match trimmed.
+    fsSync.writeFileSync(filePath, '  aaa\n    bbb\nsep\n  aaa\n    bbb\n');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'mm-fallback.txt', oldString: 'aaa\nbbb', newString: 'c' },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(result.success).toBe(false);
+    const msg = resultStr(result);
+    expect(msg).toContain('matched 2 times');
+    expect(msg).toContain('lines 1, 4');
+    expect(msg).toContain('replace_all=true');
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('  aaa\n    bbb\nsep\n  aaa\n    bbb\n');
+  });
+
+  it('trimmed-fallback path: a single window still edits', async () => {
+    const filePath = path.join(dir, 'mm-fallback1.txt');
+    fsSync.writeFileSync(filePath, '  aaa\n    bbb\nend');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'mm-fallback1.txt', oldString: 'aaa\nbbb', newString: 'c' },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('  c\nend');
+    expect(resultStr(result)).toContain('found 1 match');
   });
 });

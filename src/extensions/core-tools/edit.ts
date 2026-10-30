@@ -48,7 +48,7 @@ export class EditTool {
   toToolDef() {
     return toolDef(
       EditTool.TOOL_NAME,
-      "Replaces exact occurrences of oldString with newString in existing file. Fails with an error if oldString matches nothing. Read the file before editing -- whitespace and indentation must match.",
+      "Replaces exact occurrences of oldString with newString in existing file. Fails with an error if oldString matches nothing. When replace_all is false, oldString must match exactly once; multiple matches fail with an error listing the matched line numbers. Read the file before editing -- whitespace and indentation must match.",
       {
         properties: {
           path: param("string", "File path. Path relative to the workspace root, or an absolute path inside a configured workspace root."),
@@ -188,10 +188,17 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
       };
     }
 
-    const matchPos = content.indexOf(old);
-    const startLine = content.slice(0, matchPos).split("\n").length;
+    // Single pass over the content: every non-overlapping match's 1-based
+    // start line. Without replace_all, more than one match is ambiguous --
+    // silently editing the first one is a wrong-file-edit class of bug.
+    const matchLines = matchLineNumbers(content, old);
+    if (!all && matchLines.length > 1) {
+      return { error: ambiguousEditError(matchLines) };
+    }
+
+    const startLine = matchLines[0]!;
     const endLine = startLine + old.split("\n").length - 1;
-    const matchCount = all ? content.split(old).length - 1 : 1;
+    const matchCount = matchLines.length;
     // Empty oldString is rejected above, so split() always has a non-empty
     // pattern and replace_all deletion cannot degenerate into an empty match.
     const newContent = all ? content.split(old).join(newStr) : content.replace(old, () => newStr);
@@ -214,8 +221,11 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
   const oldTrimmed = oldLines.map((l: string) => l.trim());
   const contentLines = content.split("\n");
 
-  let startLineIdx = -1;
-  for (let i = 0; i + oldTrimmed.length <= contentLines.length && startLineIdx === -1; i++) {
+  // Collect non-overlapping trimmed-line matches. Without replace_all, a
+  // second match is as ambiguous as on the exact path; replace_all keeps the
+  // historical fallback behavior of editing only the first window.
+  const matchStarts: number[] = [];
+  for (let i = 0; i + oldTrimmed.length <= contentLines.length; i++) {
     let matches = true;
     for (let j = 0; j < oldTrimmed.length; j++) {
       if (contentLines[i + j]!.trim() !== oldTrimmed[j]) {
@@ -223,8 +233,18 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
         break;
       }
     }
-    if (matches) startLineIdx = i;
+    if (matches) {
+      matchStarts.push(i);
+      if (all) break;
+      i += oldTrimmed.length - 1;
+    }
   }
+
+  if (!all && matchStarts.length > 1) {
+    return { error: ambiguousEditError(matchStarts.map((i) => i + 1)) };
+  }
+
+  const startLineIdx = matchStarts[0] ?? -1;
 
   if (startLineIdx === -1) {
     // Same size ceiling as closestMatches: past 2 MB, suggestion work stops
@@ -291,6 +311,38 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
     newContent,
     matchInfo: { startLine, endLine, matchCount: 1 },
   };
+}
+
+// 1-based start line of every non-overlapping occurrence of `old` in
+// `content`. One pass: each character is scanned for newlines at most once,
+// including the interior of previous matches (a multi-line oldString's own
+// newlines advance the line counter for later matches).
+function matchLineNumbers(content: string, old: string): number[] {
+  const lines: number[] = [];
+  let line = 1;
+  let scanned = 0;
+  for (let pos = content.indexOf(old); pos !== -1; pos = content.indexOf(old, pos + old.length)) {
+    for (let i = scanned; i < pos; i++) {
+      if (content.charCodeAt(i) === 10) line++;
+    }
+    scanned = pos;
+    lines.push(line);
+  }
+  return lines;
+}
+
+// Caps report bloat when a short oldString hits hundreds of times; the
+// count above is always exact, only the line list is truncated.
+const AMBIGUOUS_MATCH_LINE_LIMIT = 10;
+
+function ambiguousEditError(matchLines: number[]): string {
+  const shown = matchLines.slice(0, AMBIGUOUS_MATCH_LINE_LIMIT);
+  const more = matchLines.length - shown.length;
+  const where = `lines ${shown.join(", ")}${more > 0 ? ` (+${more} more)` : ""}`;
+  return (
+    `oldString matched ${matchLines.length} times (at ${where}) and replace_all is false. ` +
+    "Refusing to guess which occurrence to edit: add more surrounding context so oldString matches exactly once, or set replace_all=true to replace every occurrence."
+  );
 }
 
 // ── Miss recovery: nearest region, then nearest lines ─────────────────────

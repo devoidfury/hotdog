@@ -122,6 +122,15 @@ function mangleToolCalls(
   });
 }
 
+/**
+ * Reasoning echoes through the same gate as tool_calls: the caller resolves
+ * trust to a null mangler, so a trusted message passes through byte-identical.
+ */
+function mangleReasoning(reasoning: string, mangler: MarkerMangler | null): string {
+  if (!mangler) return reasoning;
+  return mangler.escape(reasoning) ?? reasoning;
+}
+
 function serializeMessage(
   msg: Message,
   mangler: MarkerMangler | null,
@@ -142,7 +151,12 @@ function serializeMessage(
   );
   if (msg.role === "tool") content = collapseToolContent(content);
   const wire: WireMessage = { role: wireRole, content };
-  if (msg.reasoningContent) wire.reasoning_content = msg.reasoningContent;
+  // Same trust rule as content/tool_calls: model-authored reasoning is echoed
+  // back on replay, so it must not carry real protected markers onto the wire.
+  // Stored bytes stay real (aliases are per-session wire artifacts).
+  if (msg.reasoningContent) {
+    wire.reasoning_content = mangleReasoning(msg.reasoningContent, trusted ? null : mangler);
+  }
   const toolCalls = mangleToolCalls(msg.toolCalls, trusted ? null : mangler);
   if (toolCalls) wire.tool_calls = toolCalls;
   if (msg.toolCallId) wire.tool_call_id = msg.toolCallId;

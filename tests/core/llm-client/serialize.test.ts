@@ -587,4 +587,64 @@ describe("wire-format characterization (phase 0)", () => {
       ]);
     });
   });
+
+  describe("reasoning_content mangling (untrusted echo must not carry real markers)", () => {
+    // Tag name is derived from the exported protected list, never hand-typed:
+    // protected marker text seen in tool output may be aliased in transit.
+    const R_NAME = CORE_PROTECTED_PREFIXES.find((p) => p.includes("summary")) ?? CORE_PROTECTED_PREFIXES[0]!;
+    const R_TEXT = `step one ${tag(R_NAME)}weigh both sides</${R_NAME}> step two`;
+
+    function clientWith(markerMangler: MarkerMangler | null): LlmClient {
+      return new LlmClient({ wireFormat: "xml", wireFormatRegistry: fmtReg, roleMapping: "system-first", roleMappingRegistry: roleReg, chatTimeoutSecs: 600, maxRetries: 12, markerMangler });
+    }
+
+    function wireOf(msg: Message, mangler: MarkerMangler | null): Record<string, unknown> {
+      return (clientWith(mangler).buildChatRequest([msg], mc(), null, false).messages as Array<Record<string, unknown>>)[0]!;
+    }
+
+    it("model reasoning is mangled to the session alias, identical to content mangling", () => {
+      const mangler = sessionMangler();
+      const msg = new Message({ role: "assistant", source: "model", content: "answer", reasoningContent: R_TEXT });
+      const wire = wireOf(msg, mangler);
+
+      const escaped = wire.reasoning_content as string;
+      expect(escaped).not.toContain(tag(R_NAME));
+      expect(escaped).not.toContain(`</${R_NAME}>`);
+      expect(escaped.match(buildAliasPattern())).not.toBeNull();
+      // Doctrine equality: reasoning and content take the same route, so the
+      // same text must come out byte-identical either way.
+      const asContent = wireOf(new Message({ role: "assistant", source: "model", content: R_TEXT }), mangler).content as string;
+      expect(escaped).toBe(asContent);
+      // And with the real mangler applied directly.
+      expect(escaped).toBe(mangler.escape(R_TEXT) ?? R_TEXT);
+    });
+
+    it("trusted harness reasoning passes through byte-identical", () => {
+      const mangler = sessionMangler();
+      const wire = wireOf(new Message({ role: "harness", source: "harness", content: "note", reasoningContent: R_TEXT }), mangler);
+      expect(wire.reasoning_content).toBe(R_TEXT);
+    });
+
+    it("null mangler passes reasoning through", () => {
+      const wire = wireOf(new Message({ role: "assistant", source: "model", content: "answer", reasoningContent: R_TEXT }), null);
+      expect(wire.reasoning_content).toBe(R_TEXT);
+    });
+
+    it("absent or empty reasoning emits no reasoning_content key", () => {
+      for (const reasoningContent of [undefined, null, ""]) {
+        const wire = wireOf(new Message({ role: "assistant", source: "model", content: "answer", reasoningContent }), sessionMangler());
+        expect(wire).not.toHaveProperty("reasoning_content");
+      }
+    });
+
+    it("serialize never mutates the stored message (real markers stay at rest)", () => {
+      const mangler = sessionMangler();
+      const msg = new Message({ role: "assistant", source: "model", content: R_TEXT, reasoningContent: R_TEXT });
+      wireOf(msg, mangler);
+      expect(msg.reasoningContent).toBe(R_TEXT);
+      expect(msg.content).toBe(R_TEXT);
+      // Replay of the untouched message mangles again from the real bytes.
+      expect(wireOf(msg, mangler).reasoning_content).toBe(mangler.escape(R_TEXT));
+    });
+  });
 });

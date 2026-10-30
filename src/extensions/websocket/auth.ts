@@ -5,15 +5,23 @@
 import crypto from "node:crypto";
 
 // ── Login rate limiting ─────────────────────────────────────────────────────
-// Per-IP: once an IP has accumulated RATE_LIMIT_MAX_FAILURES consecutive
-// failed attempts it is locked out. Each further failure (observed after a
-// lockout expires) doubles the next lockout, capped. A successful login
-// resets the counter for that IP. Blocked (429) attempts do not count.
+// Per-IP barrier: after RATE_LIMIT_MAX_FAILURES consecutive failed attempts
+// the IP is locked out for a 60 s base that doubles per further counted
+// failure, capped at 15 min. Blocked (429) attempts count too: they slide
+// lastFailedAt, so active probing extends the lockout and escalates the
+// ladder toward the lifetime cap. Once an IP racks up
+// RATE_LIMIT_LIFETIME_CAP_FAILURES counted attempts inside the entry TTL it
+// stays locked until the entry ages out (24 h without a counted attempt).
+// A successful login resets the entry. The sliding lastFailedAt keeps
+// actively-probed entries alive against cleanup(); idle ones age out.
 
 const RATE_LIMIT_MAX_FAILURES = 5;
-const RATE_LIMIT_BASE_LOCKOUT_MS = 1_000;
+const RATE_LIMIT_BASE_LOCKOUT_MS = 60_000;
 const RATE_LIMIT_MAX_LOCKOUT_MS = 15 * 60_000;
 const RATE_LIMIT_ENTRY_TTL_MS = 24 * 60 * 60_000;
+const RATE_LIMIT_LIFETIME_CAP_FAILURES = 100;
+// The login body is { apiKey }; anything bigger is not a login.
+const MAX_LOGIN_BODY_BYTES = 8192;
 
 interface RateLimitEntry {
   failures: number;
@@ -30,6 +38,10 @@ function lockoutRemainingMs(
   now: number,
 ): number {
   if (entry.failures < RATE_LIMIT_MAX_FAILURES) return 0;
+  if (entry.failures >= RATE_LIMIT_LIFETIME_CAP_FAILURES) {
+    // Lifetime cap reached: locked until the entry ages out past its TTL.
+    return Math.max(0, entry.lastFailedAt + RATE_LIMIT_ENTRY_TTL_MS - now);
+  }
   const excess = entry.failures - (RATE_LIMIT_MAX_FAILURES - 1); // 1 at the threshold
   const lockout = Math.min(
     RATE_LIMIT_BASE_LOCKOUT_MS * 2 ** (excess - 1),
@@ -93,7 +105,7 @@ export function createAuthMiddleware({
     rateLimits.set(ip, entry);
   }
 
-  /** POST /login — expects JSON { apiKey }; returns { token } (401 on bad key, 429 when rate-limited). */
+  /** POST /login — expects JSON { apiKey }; returns { token } (401 on bad key, 413 on oversize body, 429 when rate-limited). */
   async function loginHandler(req: Request): Promise<Response> {
     const ip = clientIp(req);
     const now = Date.now();
@@ -102,6 +114,10 @@ export function createAuthMiddleware({
     if (entry) {
       const remaining = lockoutRemainingMs(entry, now);
       if (remaining > 0) {
+        // Blocked attempts still count: probing slides the lockout end and
+        // escalates the ladder toward the lifetime cap.
+        entry.failures++;
+        entry.lastFailedAt = now;
         return Response.json(
           { error: "Too many failed login attempts. Try again later." },
           {
@@ -112,9 +128,21 @@ export function createAuthMiddleware({
       }
     }
 
+    // Reject oversize bodies before reading them (an oversize request is
+    // not an auth failure, so it neither records nor resets anything).
+    const declared = Number(req.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_LOGIN_BODY_BYTES) {
+      return Response.json({ error: "Request body too large" }, { status: 413 });
+    }
+
     let response: Response;
     try {
-      const body = (await req.json()) as { apiKey?: string };
+      const text = await req.text();
+      // Chunked bodies arrive without a content-length; catch them here.
+      if (text.length > MAX_LOGIN_BODY_BYTES) {
+        return Response.json({ error: "Request body too large" }, { status: 413 });
+      }
+      const body = JSON.parse(text) as { apiKey?: string };
       const apiKey = body?.apiKey || "";
 
       if (!apiKey || typeof apiKey !== "string") {

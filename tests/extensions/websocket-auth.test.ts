@@ -117,6 +117,76 @@ describe("createAuthMiddleware", () => {
     });
   });
 
+  describe("login body size cap", () => {
+    function capReq(headers: Record<string, string>, body: BodyInit): Request {
+      return new Request("http://localhost/login", {
+        method: "POST",
+        body,
+        headers: { "Content-Type": "application/json", ...headers },
+      });
+    }
+
+    it("rejects oversize Content-Length with 413, reading nothing and recording nothing", async () => {
+      let keyChecks = 0;
+      const mw = createAuthMiddleware({
+        validateApiKey: async (key) => {
+          keyChecks++;
+          return key === "valid-api-key";
+        },
+        tokenTtlMin: 1,
+      });
+      try {
+        const body = JSON.stringify({ apiKey: "x".repeat(20_000) });
+        const req = capReq({ "content-length": String(body.length), "x-forwarded-for": "10.1.0.1" }, body);
+        // Bun keeps an explicitly-set content-length on constructed Requests.
+        expect(req.headers.get("content-length")).toBe(String(body.length));
+
+        const res = await mw.loginHandler(req);
+        expect(res.status).toBe(413);
+        expect(((await res.json()) as { error?: string }).error).toBe("Request body too large");
+        expect(keyChecks).toBe(0);
+
+        // No failure recorded: four more wrong keys then a valid login all
+        // succeed (a recorded 413 would have made the valid attempt a 429).
+        const wrong = () => capReq({ "x-forwarded-for": "10.1.0.1" }, JSON.stringify({ apiKey: "nope" }));
+        for (let i = 0; i < 4; i++) {
+          expect((await mw.loginHandler(wrong())).status).toBe(401);
+        }
+        expect(keyChecks).toBe(4);
+        const ok = await mw.loginHandler(
+          capReq({ "x-forwarded-for": "10.1.0.1" }, JSON.stringify({ apiKey: "valid-api-key" })),
+        );
+        expect(ok.status).toBe(200);
+      } finally {
+        mw.stopCleanup();
+      }
+    });
+
+    it("rejects an oversize stream body (no Content-Length) via the text-length check", async () => {
+      const payload = JSON.stringify({ apiKey: "x".repeat(20_000) });
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(payload));
+          c.close();
+        },
+      });
+      const req = new Request("http://localhost/login", { method: "POST", body: stream });
+      // Bun sets no content-length for stream bodies, so the guard that
+      // fires here must be the post-read text-length check.
+      expect(req.headers.get("content-length")).toBeNull();
+
+      const res = await middleware.loginHandler(req);
+      expect(res.status).toBe(413);
+      expect(((await res.json()) as { error?: string }).error).toBe("Request body too large");
+    });
+
+    it("small-but-invalid JSON still draws 400, not 413", async () => {
+      const res = await middleware.loginHandler(capReq({}, "not json"));
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error?: string }).error).toBe("Invalid request body");
+    });
+  });
+
   describe("validateToken", () => {
     it("validates a token returned from login", async () => {
       const req = new Request("http://localhost/login", {
@@ -303,7 +373,8 @@ describe("login rate limiting", () => {
     expect(res.status).toBe(429);
     const retryAfter = res.headers.get("Retry-After");
     expect(retryAfter).not.toBeNull();
-    expect(Number(retryAfter)).toBeGreaterThanOrEqual(1);
+    // First lockout is the 60 s base (ceil of what remains of it).
+    expect(Number(retryAfter)).toBe(60);
   });
 
   it("tracks failures per IP", async () => {
@@ -322,8 +393,8 @@ describe("login rate limiting", () => {
     let fake = realNow();
     const spy = spyOn(Date, "now").mockImplementation(() => fake);
     try {
-      await failTimes(middleware, "10.0.0.5", 5); // 1s lockout
-      fake += 2_000; // wait out lockout
+      await failTimes(middleware, "10.0.0.5", 5); // 60 s lockout
+      fake += 61_000; // wait out the lockout
 
       // Successful login resets the counter...
       expect((await middleware.loginHandler(loginReq("valid-api-key", "10.0.0.5"))).status).toBe(200);
@@ -343,26 +414,92 @@ describe("login rate limiting", () => {
     let fake = realNow();
     const spy = spyOn(Date, "now").mockImplementation(() => fake);
     try {
-      // 5 real failures → first lockout (1s).
+      // 5 real failures → first lockout (60 s base).
       await failTimes(middleware, ip, 5);
       let res = await middleware.loginHandler(loginReq("wrong-key", ip));
       expect(res.status).toBe(429);
-      expect(Number(res.headers.get("Retry-After"))).toBe(1);
+      expect(Number(res.headers.get("Retry-After"))).toBe(60);
 
-      // Blocked attempts don't count; wait out the 1s lockout, land a 6th
-      // real failure → next lockout is 2s.
-      fake += 2_000;
+      // The blocked attempt above counted (now 6 failures → 120 s ladder).
+      // Wait it out, land a real 7th failure → next lockout is 240 s.
+      fake += 120_001;
       expect((await middleware.loginHandler(loginReq("wrong-key", ip))).status).toBe(401);
       res = await middleware.loginHandler(loginReq("wrong-key", ip));
       expect(res.status).toBe(429);
-      expect(Number(res.headers.get("Retry-After"))).toBe(2);
+      expect(Number(res.headers.get("Retry-After"))).toBe(240);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 
-      // Wait out the 2s lockout, land a 7th real failure → next lockout 4s.
-      fake += 3_000;
+  it("blocked 429 attempts count: probing slides the lockout and escalates the ladder", async () => {
+    const ip = "10.0.0.8";
+    const realNow = Date.now.bind(Date);
+    let fake = realNow();
+    const spy = spyOn(Date, "now").mockImplementation(() => fake);
+    try {
+      await failTimes(middleware, ip, 5); // locked 60 s from `fake`
+
+      // Two probes at the same instant, both blocked; each counts.
+      expect((await middleware.loginHandler(loginReq("valid-api-key", ip))).status).toBe(429); // → 6 failures
+      const probe2 = await middleware.loginHandler(loginReq("valid-api-key", ip)); // → 7 failures
+      expect(probe2.status).toBe(429);
+      expect(Number(probe2.headers.get("Retry-After"))).toBe(120); // ladder at 6 failures
+
+      // Past the original 60 s window the IP is STILL locked: the probes
+      // slid lastFailedAt and pushed the ladder to 240 s from their stamp.
+      fake += 60_001;
+      const probe3 = await middleware.loginHandler(loginReq("valid-api-key", ip));
+      expect(probe3.status).toBe(429);
+      expect(Number(probe3.headers.get("Retry-After"))).toBe(180);
+
+      // Stop probing, wait out the lockout probe3 left (480 s ladder from
+      // its stamp). The next real failure is the 9th counted attempt and
+      // the ladder has already hit the 15-min cap — with non-counting
+      // blocked attempts it would be nowhere near this.
+      fake += 480_001;
       expect((await middleware.loginHandler(loginReq("wrong-key", ip))).status).toBe(401);
-      res = await middleware.loginHandler(loginReq("wrong-key", ip));
+      const res = await middleware.loginHandler(loginReq("wrong-key", ip));
       expect(res.status).toBe(429);
-      expect(Number(res.headers.get("Retry-After"))).toBe(4);
+      expect(Number(res.headers.get("Retry-After"))).toBe(900);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("lifetime cap: 100 counted failures lock the IP until the entry TTL expires", async () => {
+    const ip = "10.0.0.9";
+    const realNow = Date.now.bind(Date);
+    let fake = realNow();
+    const spy = spyOn(Date, "now").mockImplementation(() => fake);
+    try {
+      await failTimes(middleware, ip, 5);
+      // Pure probing drives the counter to 100 with the clock frozen.
+      for (let i = 0; i < 95; i++) {
+        expect((await middleware.loginHandler(loginReq("valid-api-key", ip))).status).toBe(429);
+      }
+      const res = await middleware.loginHandler(loginReq("valid-api-key", ip));
+      expect(res.status).toBe(429);
+      // Lifetime cap engaged: Retry-After reflects the full remaining TTL.
+      expect(Number(res.headers.get("Retry-After"))).toBe(86400);
+
+      // After the TTL window the entry lets one attempt through, and a
+      // successful login resets it: five later failures buy only the fresh
+      // 60 s base, not another 86400 s lifetime lock.
+      fake += 24 * 60 * 60_000;
+      expect((await middleware.loginHandler(loginReq("valid-api-key", ip))).status).toBe(200);
+      await failTimes(middleware, ip, 5);
+      const reset = await middleware.loginHandler(loginReq("valid-api-key", ip));
+      expect(reset.status).toBe(429);
+      expect(Number(reset.headers.get("Retry-After"))).toBe(60);
+
+      // cleanup() purges the entry past the entry TTL: the following wrong
+      // key starts the counter at 1, so the next valid login succeeds (an
+      // unpurged entry would be re-lifetimed by that failure → 429).
+      fake += 24 * 60 * 60_000 + 1;
+      middleware.cleanup();
+      expect((await middleware.loginHandler(loginReq("wrong-key", ip))).status).toBe(401);
+      expect((await middleware.loginHandler(loginReq("valid-api-key", ip))).status).toBe(200);
     } finally {
       spy.mockRestore();
     }

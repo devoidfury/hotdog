@@ -15,6 +15,7 @@ coveragePathIgnorePatterns = [
     "evals/**",
     "experiments/**",
     "tmp/**",
+    "**/tmp/**",
     "secret-sauce/**",
 ]
 coverageThreshold = 0.80

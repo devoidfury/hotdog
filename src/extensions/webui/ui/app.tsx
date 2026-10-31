@@ -13,6 +13,7 @@ import {
   clearStoredToken,
   loginAtoms,
 } from "./login.tsx";
+import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
 import { Sidebar, ContextMenu, type ContextMenuState, type SessionInfo, type LogInfo } from "./sessions.tsx";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
 import { createCoalescer } from "./batch.ts";
@@ -119,10 +120,30 @@ let messageListEl: HTMLElement | null = null;
 let contextMenuEl: HTMLDivElement | null = null;
 let fileInputEl: HTMLInputElement | null = null;
 
+// pagehide fires reliably everywhere modern; beforeunload only as the legacy
+// fallback so an unload still flushes a pending draft save.
+const DRAFT_LEAVE_EVENT = "onpagehide" in window ? "pagehide" : "beforeunload";
+function flushDraftOnLeave(): void {
+  flushDraftSave();
+}
+
 // Stable ref identities. Inline closures would be new every render, making
 // patch() detach (null) and re-attach every ref on every render.
 const chatInputRef = domRef<HTMLTextAreaElement>((el) => {
   chatInputEl = el;
+  if (el) {
+    // Composer mount: bring back the previous visit's draft (never clobber
+    // text already in the box) and hook the unload flush to the composer's
+    // own lifecycle.
+    const draft = loadDraft();
+    if (draft !== null && el.value === "") {
+      el.value = draft;
+      autoResize(el);
+    }
+    window.addEventListener(DRAFT_LEAVE_EVENT, flushDraftOnLeave);
+  } else {
+    window.removeEventListener(DRAFT_LEAVE_EVENT, flushDraftOnLeave);
+  }
 });
 const profileSelectRef = domRef<HTMLSelectElement>((el) => {
   profileSelectEl = el;
@@ -503,6 +524,10 @@ function onChatSubmit(e: Event): void {
   if (!text && attachments.length === 0) return;
   el.value = "";
   autoResize(el);
+  // Send consumes the draft: drop the pending save too, or a later unload
+  // flush would resurrect text that already went out.
+  cancelDraftSave();
+  clearDraft();
   dismissCompletion();
 
   const files =
@@ -909,6 +934,13 @@ function App() {
                 onInput={() => {
                   if (chatInputEl) autoResize(chatInputEl);
                   dismissCompletion();
+                  if (chatInputEl && chatInputEl.value === "") {
+                    // An emptied box must not come back as empty-string noise.
+                    cancelDraftSave();
+                    clearDraft();
+                  } else {
+                    scheduleDraftSave(() => chatInputEl?.value ?? "");
+                  }
                 }}
                 onBlur={dismissCompletion}
                 onKeydown={onChatKeydown}

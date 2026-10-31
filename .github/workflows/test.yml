@@ -45,3 +45,64 @@ jobs:
 
       - name: "Run type check"
         run: bun i --no-save && bun run check
+
+  macos:
+    name: "bun test + seatbelt fence (macOS)"
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      # Same bootstrap checkout as the linux job (see note there).
+      - name: "Checkout"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global advice.defaultBranchName false
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          echo "::add-mask::${GITHUB_TOKEN}"
+          CRED=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          echo "::add-mask::${CRED}"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${CRED}" \
+            fetch --depth 1 --no-tags origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+
+      # No third-party setup action: same doctrine as bun-install.sh (same release host, own installer)
+      # bun-install.sh itself is linux-only (wget, /proc/cpuinfo), so this is its darwin sibling.
+      - name: "Install bun"
+        run: |
+          case "$(uname -m)" in
+            arm64)  BUN_ARCH=darwin-aarch64 ;;
+            x86_64) BUN_ARCH=darwin-x64 ;;
+            *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;
+          esac
+          curl -fsSL -o /tmp/bun.zip \
+            "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-${BUN_ARCH}.zip"
+          mkdir -p "$HOME/.local/bin"
+          unzip -q -j -o /tmp/bun.zip "bun-${BUN_ARCH}/bun" -d "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # The fence posture on Apple hardware is this job's reason to exist.
+      # sandbox-exec gone must fail HERE, loudly, not degrade to a green unfenced run.
+      - name: "Fence posture: expect seatbelt"
+        run: |
+          bun bin/hotdog info | tee /tmp/hotdog-info.txt
+          grep -q "fence: seatbelt" /tmp/hotdog-info.txt || {
+            echo "::error::expected 'fence: seatbelt' on the macOS runner -- probe failed or mediation is off"
+            exit 1
+          }
+          
+      - name: "Run tests"
+        run: bun run loud-test
+        
+      - name: "Seatbelt live jail suite"
+        run: bun test tests/utils/exec-plan-seatbelt-live.test.ts
+
+      # when a jail test fails, the sandboxd denials are the diagnosis.
+      - name: "Dump sandboxd denials (on failure)"
+        if: failure()
+        run: |
+          log show --last 15m \
+            --predicate 'process == "sandboxd" or sender == "Sandbox"' 2>/dev/null \
+            | grep -E "deny|violation" | tail -300 || echo "no sandboxd denials captured"
+
+    # Coverage and tsc stay on the linux job: platform-independent

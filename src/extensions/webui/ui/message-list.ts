@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // Per-session message list: renders OUTPUT_EVENTs, incl. streaming markdown.
 
-import { sanitize, resolveQuestionAnswer } from "./utils.ts";
+import { sanitize, resolveQuestionAnswer, formatTokenCount } from "./utils.ts";
 import {
   parseMarkdown,
   mdTreeToHtml,
@@ -106,6 +106,7 @@ interface TokenUsageMessage {
   cachedTokens: number;
   completionTokens: number;
   totalTokens: number;
+  contextWindow?: number;
 }
 
 interface CompactionResultMessage { summary?: string; messagesCompacted: number; }
@@ -711,12 +712,16 @@ export function createMessageList(
     cachedTokens,
     completionTokens,
     totalTokens,
+    contextWindow,
   }: TokenUsageMessage): void {
     const el = document.createElement("div");
     el.className = "message token-usage";
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.textContent = `(tokens cached: ${cachedTokens} prompt:${promptTokens} completion:${completionTokens} total:${totalTokens})`;
+    const denom = typeof contextWindow === "number" && Number.isFinite(contextWindow)
+      ? "/" + formatTokenCount(contextWindow)
+      : "";
+    bubble.textContent = `(tokens cached: ${formatTokenCount(cachedTokens)} prompt:${formatTokenCount(promptTokens)} completion:${formatTokenCount(completionTokens)} total:${formatTokenCount(totalTokens)}${denom})`;
     el.appendChild(bubble);
     container.appendChild(el);
     scrollBottom();

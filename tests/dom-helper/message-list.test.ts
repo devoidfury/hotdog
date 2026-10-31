@@ -348,6 +348,26 @@ describe("misc message kinds", () => {
     expect(container.querySelector(".message.assistant.streaming")).toBeNull();
   });
 
+  it("renders token usage with k-notation and a /contextWindow denominator", () => {
+    ml.handleTokenUsage({
+      promptTokens: 1959,
+      cachedTokens: 148453,
+      completionTokens: 2869,
+      totalTokens: 153281,
+      contextWindow: 200000,
+    });
+    expect(texts(".token-usage .bubble")[0]).toBe(
+      "(tokens cached: 148k prompt:2k completion:2.9k total:153k/200k)",
+    );
+  });
+
+  it("token usage without contextWindow renders total with no denominator", () => {
+    ml.handleTokenUsage({ promptTokens: 950, cachedTokens: 2, completionTokens: 5, totalTokens: 957 });
+    expect(texts(".token-usage .bubble")[0]).toBe(
+      "(tokens cached: 2 prompt:950 completion:5 total:957)",
+    );
+  });
+
   it("task progress updates in place per task id", () => {
     ml.handleTaskProgress({ taskId: "t1", status: "running" });
     ml.handleTaskProgress({ taskId: "t1", status: "done", message: "all good" });

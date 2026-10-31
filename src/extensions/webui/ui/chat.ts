@@ -378,6 +378,7 @@ interface TokenUsageMessage {
   cachedTokens: number;
   completionTokens: number;
   totalTokens: number;
+  contextWindow?: number;
 }
 
 interface CompactionResultMessage {

@@ -35,6 +35,15 @@ export function formatTime(ts: number): string {
   return `${h}:${m}`;
 }
 
+export function formatTokenCount(n: number): string {
+  // Non-finite/negative pass through as-is; toFixed's trailing ".0" is stripped (1959 -> "2k").
+  if (!Number.isFinite(n) || n < 0) return String(n);
+  if (n < 1000) return String(Math.round(n));
+  if (n < 10_000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+  if (n < 1_000_000) return Math.round(n / 1000) + "k";
+  return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+}
+
 export function shortId(sessionId: string | null | undefined): string {
   return sessionId ? sessionId.slice(0, 8) : "???";
 }

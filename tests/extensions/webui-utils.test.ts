@@ -5,6 +5,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   formatTime,
+  formatTokenCount,
   shortId,
   sanitize,
   escapeJson,
@@ -30,6 +31,47 @@ describe("formatTime", () => {
     const parts = result.split(":");
     expect(parts[0]!.length).toBe(2);
     expect(parts[1]!.length).toBe(2);
+  });
+});
+
+describe("formatTokenCount", () => {
+  it("renders plain integers below 1000", () => {
+    expect(formatTokenCount(0)).toBe("0");
+    expect(formatTokenCount(15)).toBe("15");
+    expect(formatTokenCount(999)).toBe("999");
+  });
+
+  it("uses one-decimal k below 10k, stripping a trailing .0", () => {
+    expect(formatTokenCount(1000)).toBe("1k");
+    expect(formatTokenCount(1900)).toBe("1.9k");
+    expect(formatTokenCount(2869)).toBe("2.9k");
+    // 1.959 rounds to 2.0 at one decimal, then the .0 is stripped.
+    expect(formatTokenCount(1959)).toBe("2k");
+    // 9.999 rounds to 10.0 across the band edge.
+    expect(formatTokenCount(9999)).toBe("10k");
+  });
+
+  it("uses integer k below 1M", () => {
+    expect(formatTokenCount(10_000)).toBe("10k");
+    expect(formatTokenCount(12_000)).toBe("12k");
+    expect(formatTokenCount(153_281)).toBe("153k");
+    expect(formatTokenCount(200_000)).toBe("200k");
+    // 999.999 rounds up across the band edge: 1000k, not 1M.
+    expect(formatTokenCount(999_999)).toBe("1000k");
+  });
+
+  it("uses one-decimal M at 1M and above, stripping a trailing .0", () => {
+    expect(formatTokenCount(1_000_000)).toBe("1M");
+    expect(formatTokenCount(1_234_567)).toBe("1.2M");
+    expect(formatTokenCount(1_500_000)).toBe("1.5M");
+    expect(formatTokenCount(12_000_000)).toBe("12M");
+  });
+
+  it("passes non-finite and negative values through unchanged", () => {
+    expect(formatTokenCount(NaN)).toBe("NaN");
+    expect(formatTokenCount(Infinity)).toBe("Infinity");
+    expect(formatTokenCount(-Infinity)).toBe("-Infinity");
+    expect(formatTokenCount(-5)).toBe("-5");
   });
 });
 

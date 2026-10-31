@@ -142,6 +142,7 @@ export class WebSocketChannel extends Channel {
         msg.completionTokens = event.completionTokens || 0;
         msg.totalTokens = event.totalTokens || 0;
         msg.cachedTokens = event.cachedTokens || 0;
+        if (Number.isFinite(event.contextWindow)) msg.contextWindow = event.contextWindow;
         break;
       case OUTPUT_EVENT.COMPACTION_RESULT:
         msg.summary = event.summary;

@@ -281,6 +281,7 @@ describe("WebSocketChannel - write()", () => {
         completionTokens: 40,
         totalTokens: 120,
         cachedTokens: 10,
+        contextWindow: 200000,
       },
       expected: (msg: any) => {
         expect(msg.type).toBe(S2C.TOKEN_USAGE);
@@ -291,6 +292,7 @@ describe("WebSocketChannel - write()", () => {
         expect(msg.completionTokens).toBe(40);
         expect(msg.totalTokens).toBe(120);
         expect(msg.cachedTokens).toBe(10);
+        expect(msg.contextWindow).toBe(200000);
       },
     },
     {
@@ -379,6 +381,29 @@ describe("WebSocketChannel - write()", () => {
     expect(msg.completionTokens).toBe(0);
     expect(msg.totalTokens).toBe(0);
     expect(msg.cachedTokens).toBe(0);
+    expect(msg.contextWindow).toBeUndefined();
+  });
+
+  it("omits a non-finite contextWindow from TOKEN_USAGE", () => {
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, handler) => {
+        handler({ type: OUTPUT_EVENT.TOKEN_USAGE, totalTokens: 120, contextWindow: NaN });
+        return () => {};
+      }),
+    });
+    const ws = createMockWs();
+
+    new WebSocketChannel({
+      sessionManager: sm,
+      ws,
+      sessionId: "session-1",
+    });
+
+    const sent = (ws as any)._sentMessages;
+    const msg = JSON.parse(sent[0]);
+    expect(msg.totalTokens).toBe(120);
+    // Field omitted entirely, not serialized as null/NaN.
+    expect("contextWindow" in msg).toBe(false);
   });
 
   it("maps SESSION_STATE events to protocol with broadcast", () => {

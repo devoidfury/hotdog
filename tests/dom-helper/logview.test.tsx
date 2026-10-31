@@ -230,3 +230,53 @@ describe("webui log-view round trip (real app wiring)", () => {
     expect(list).not.toContain("L1 cold line");
   });
 });
+
+// Owner-ruled 2026-10-31: Cancel lives in the composer action row immediately
+// left of Send, carrying the spinner; there is no standalone working row.
+// Pinned here on the real app wiring.
+describe("working state: spinnered composer Cancel (real app wiring)", () => {
+  beforeAll(async () => {
+    // Land on a known live session regardless of the previous suite's exit state.
+    fireAttachBurst("working hello");
+    await tick();
+    expect(composerDisabled()).toBe(false);
+  });
+
+  const composerButtonIds = (): (string | null)[] =>
+    Array.from(el("#composer-actions").children).map((c) => c.getAttribute("id"));
+
+  it("idle: no indicator, no Cancel in the composer", () => {
+    expect(document.querySelector("#working-indicator")).toBeNull();
+    expect(document.querySelector("#cancel-btn")).toBeNull();
+  });
+
+  it("working: Cancel (carrying the spinner) sits inside #composer-actions left of Send", async () => {
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+
+    // The standalone working row is gone; the busy tell is the button itself.
+    expect(document.querySelector("#working-indicator")).toBeNull();
+    const cancel = el("#composer-actions #cancel-btn");
+    expect(cancel.querySelector(".spinner")).toBeTruthy();
+    expect(cancel.textContent).toContain("Cancel");
+    const ids = composerButtonIds();
+    const cancelAt = ids.indexOf("cancel-btn");
+    expect(cancelAt).toBeGreaterThanOrEqual(0);
+    expect(ids[cancelAt + 1]).toBe("send-btn");
+  });
+
+  it("clicking Cancel sends {type:cancel} and drops the button", async () => {
+    ws.sent.length = 0;
+    el("#cancel-btn").click();
+    const cancelMsg = ws.sent
+      .map((m) => JSON.parse(m) as { type: string; sessionId?: string })
+      .find((m) => m.type === "cancel");
+    expect(cancelMsg?.sessionId).toBe(SID);
+    await tick();
+    expect(document.querySelector("#working-indicator")).toBeNull();
+    expect(document.querySelector("#cancel-btn")).toBeNull();
+    // Send keeps its slot as the row's last control with Cancel gone.
+    const ids = composerButtonIds();
+    expect(ids[ids.length - 1]).toBe("send-btn");
+  });
+});

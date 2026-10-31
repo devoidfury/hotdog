@@ -882,16 +882,6 @@ function App() {
             onToggleExpanded={() => stripExpandedAtom(!stripExpandedAtom())}
           />
 
-          {working ? (
-            <div id="working-indicator">
-              <span className="spinner"></span>
-              <span>Model is working...</span>
-              <button id="cancel-btn" className="cancel-inline" onClick={() => chat?.cancel()}>
-                Cancel
-              </button>
-            </div>
-          ) : null}
-
           <div id="input-area" className={activeLogId ? "read-only" : undefined}>
             <form id="chat-form" onSubmit={onChatSubmit}>
               {completionMenu ? (
@@ -1010,6 +1000,15 @@ function App() {
                   />
                   Steer
                 </label>
+                {working ? (
+                  // type=button: it lives inside #chat-form; without it the
+                  // click would submit the composer before cancelling. The
+                  // in-button spinner is the chat column's only busy tell.
+                  <button type="button" id="cancel-btn" onClick={() => chat?.cancel()}>
+                    <span className="spinner"></span>
+                    Cancel
+                  </button>
+                ) : null}
                 <button type="submit" id="send-btn">
                   Send
                 </button>

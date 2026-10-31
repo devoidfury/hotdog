@@ -1605,40 +1605,49 @@ body.sidebar-resizing {
     transform: scale(0.96);
 }
 
+/* Composer Cancel (working only): a peer of Send, danger-toned. The auto
+   margin right-anchors the pair; the sibling rule pulls Send flush so
+   Cancel sits immediately left of it. */
+#cancel-btn {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 18px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--error-soft);
+    color: var(--error);
+    font-size: 0.85rem;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    height: 32px;
+}
+
+#cancel-btn + #send-btn {
+    margin-left: 0;
+}
+
+#cancel-btn:hover {
+    background: var(--error);
+    color: var(--text-inverse);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
-   WORKING INDICATOR
+   SPINNER (inside #cancel-btn only; the sidebar row has its own .session-spinner)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-#working-indicator {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
-    margin: 0 16px 12px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text-secondary);
-    font-size: 0.85rem;
-    animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-    0%,
-    100% {
-        opacity: 1;
-    }
-    50% {
-        opacity: 0.7;
-    }
-}
-
+/* currentColor-tracked ring so it survives the button's hover flip
+   (--error on soft -> --text-inverse on error) without a second rule. */
 .spinner {
     display: inline-block;
-    width: 16px;
-    height: 16px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
+    width: 12px;
+    height: 12px;
+    border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-top-color: currentColor;
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
 }
@@ -1647,25 +1656,6 @@ body.sidebar-resizing {
     to {
         transform: rotate(360deg);
     }
-}
-
-.cancel-inline {
-    padding: 5px 12px;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: var(--error-soft);
-    color: var(--error);
-    font-size: 0.78rem;
-    font-weight: 600;
-    font-family: var(--font-sans);
-    cursor: pointer;
-    transition: all 0.15s;
-    margin-left: auto;
-}
-
-.cancel-inline:hover {
-    background: var(--error);
-    color: var(--text-inverse);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -268,6 +268,22 @@ export async function handleFork(
   }
 }
 
+/**
+ * Handler for /fence — handled at the interactive-UI level (per-session
+ * runtime exec-fence toggle; see ui-interactive-cli/fence-command.ts). This
+ * fallback exists for direct agent command execution and UIs without the
+ * command (typing /fence in a webui chat lands here; the webui's toggle is
+ * the dedicated execFence wire message behind the header strip, not this
+ * command), where the boot config cannot honestly stand in for what the
+ * session's effective policy would be under a toggle.
+ */
+export function handleFence(): CommandResult {
+  return {
+    action: ACTIONS.DISPLAY,
+    content: "Fence (per-session runtime toggle handled by the interactive CLI: /fence on|off|status)",
+  };
+}
+
 export function handleReasoning(
   agent: Agent,
   value?: string | null,
@@ -355,5 +371,9 @@ export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
         .filter((l) => l.toLowerCase().startsWith(prefix))
         .map((l) => ({ value: l }));
     },
+  },
+  [Command.Fence]: {
+    handler: handleFence,
+    description: "Toggle the exec-fence policy at runtime (on/off/status, interactive CLI)",
   },
 };

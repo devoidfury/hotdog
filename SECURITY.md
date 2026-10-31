@@ -31,7 +31,17 @@ out-of-process executors, not inside the agent process:
   network shared -- strictly weaker than bwrap (see the list below). Both:
   no `$HOME`, no config chain, no sibling session roots. `hotdog info`
   reports the posture (`fence: bwrap`, `fence: seatbelt`, `off`, or
-  `none -- probe failed`); the plane never fails open silently.
+  `none -- probe failed`); the plane never fails open silently. The posture
+  is runtime-toggleable by the operator (`/fence on|off` in the interactive
+  CLI, or a click on the webui's header posture strip, both per session and
+  never persisted): the toggle applies to the named session only -- other
+  sessions and future subagent sessions follow the boot policy -- and every
+  change is recorded as a logged transcript notice in that session's log. The
+  webui control acts on the client's ATTACHED session behind the same
+  authorization as the other session-scoped websocket controls (an
+  authenticated socket on an accepted origin, the frame naming a live session
+  of this server), and switching a session `off` requires an explicit confirm
+  naming the UNFENCED consequence.
 - Per-session jails: cross-workspace reads via `bash` are structurally
   impossible for tagged tools when the fence is up.
 

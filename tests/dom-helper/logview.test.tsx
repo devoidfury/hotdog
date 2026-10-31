@@ -280,3 +280,147 @@ describe("working state: spinnered composer Cancel (real app wiring)", () => {
     expect(ids[ids.length - 1]).toBe("send-btn");
   });
 });
+
+// Header-strip fence toggle (real app wiring). Worker postures ("fence:") are
+// click-to-toggle FOR THE ATTACHED SESSION: probe -> off confirms with the
+// explicit UNFENCED wording (cancelTask idiom), off -> probe applies without
+// one. The strip repaints ONLY from the server's sessionState(key:"toolExec")
+// push -- never optimistically. Inline/degraded postures and log view stay
+// inert. Pinned with a stubbed global confirm around the real FakeWebSocket.
+describe("header fence toggle (real app wiring)", () => {
+  const g = globalThis as Record<string, unknown>;
+  const prevConfirm = g.confirm;
+  let confirmCalls = 0;
+
+  afterAll(() => {
+    if (prevConfirm === undefined) delete g.confirm;
+    else g.confirm = prevConfirm;
+  });
+
+  function stubConfirm(answer: boolean): void {
+    confirmCalls = 0;
+    g.confirm = () => {
+      confirmCalls++;
+      return answer;
+    };
+  }
+
+  /** Re-attach to the live session carrying a specific posture. */
+  async function attachWithPosture(posture: string | undefined): Promise<void> {
+    ws.fireMessage({
+      type: "sessionCreated",
+      sessionId: SID,
+      profile: "manager",
+      title: null,
+      currentModel: "m1",
+      models: ["m1"],
+      ...(posture !== undefined ? { toolExec: posture } : {}),
+    });
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "cursor", value: 9 });
+    fireSidebarReplies();
+    await tick();
+  }
+
+  const fenceMsgs = () =>
+    ws.sent
+      .map((m) => JSON.parse(m) as Record<string, unknown>)
+      .filter((m) => m.type === "execFence");
+
+  it("worker posture renders the clickable affordance and a naming tooltip", async () => {
+    await attachWithPosture("worker (fence: bwrap)");
+    const strip = el("#tool-exec-status");
+    expect(strip.textContent).toContain("worker (fence: bwrap)");
+    expect(strip.getAttribute("class")).toContain("tool-exec-toggleable");
+    // Button chrome lives in the class, not an inline style attribute.
+    expect(strip.getAttribute("style")).toBeNull();
+    expect(strip.getAttribute("title")).toContain("click to toggle this session's fence");
+  });
+
+  it("probe -> off: confirm->true sends execFence for the ATTACHED session only", async () => {
+    stubConfirm(true);
+    ws.sent.length = 0;
+    el("#tool-exec-status").click();
+    expect(confirmCalls).toBe(1);
+    expect(fenceMsgs()).toEqual([{ type: "execFence", sessionId: SID, policy: "off" }]);
+  });
+
+  it("probe -> off: confirm->false sends NOTHING", async () => {
+    stubConfirm(false);
+    ws.sent.length = 0;
+    el("#tool-exec-status").click();
+    expect(confirmCalls).toBe(1);
+    expect(fenceMsgs()).toEqual([]);
+  });
+
+  it("the confirm states plainly that this session runs UNFENCED", async () => {
+    let seen = "";
+    g.confirm = (msg?: unknown) => {
+      seen = String(msg ?? "");
+      return false;
+    };
+    el("#tool-exec-status").click();
+    expect(seen).toContain("Tool code for this session will run UNFENCED");
+  });
+
+  it("server-pushed posture update repaints the strip; off -> probe flips back WITHOUT confirm", async () => {
+    stubConfirm(true);
+    ws.fireMessage({
+      type: "sessionState",
+      sessionId: SID,
+      key: "toolExec",
+      value: "worker (fence: off)",
+    });
+    await tick();
+    expect(el("#tool-exec-status").textContent).toContain("fence: off");
+    // Still the clickable worker shape: clicking now proposes the tighten.
+    ws.sent.length = 0;
+    el("#tool-exec-status").click();
+    expect(confirmCalls).toBe(0); // off -> probe is never confirm-gated
+    expect(fenceMsgs()).toEqual([{ type: "execFence", sessionId: SID, policy: "probe" }]);
+  });
+
+  it("a push for ANOTHER session never repaints this strip (per-session posture)", async () => {
+    stubConfirm(false);
+    ws.fireMessage({
+      type: "sessionState",
+      sessionId: "s-some-other-session",
+      key: "toolExec",
+      value: "worker (fence: seatbelt)",
+    });
+    await tick();
+    // The strip still carries OUR last server-pushed posture.
+    expect(el("#tool-exec-status").textContent).toContain("fence: off");
+    expect(el("#tool-exec-status").textContent).not.toContain("seatbelt");
+  });
+
+  it("inline posture: inert strip, no class, no click effect", async () => {
+    stubConfirm(true);
+    await attachWithPosture("inline (unfenced)");
+    const strip = el("#tool-exec-status");
+    expect(strip.getAttribute("class") ?? "").not.toContain("tool-exec-toggleable");
+    expect(strip.getAttribute("style")).toBeNull();
+    ws.sent.length = 0;
+    strip.click();
+    expect(fenceMsgs()).toEqual([]);
+    expect(confirmCalls).toBe(0);
+  });
+
+  it("log view (activeLogId set): inert, tooltip says live sessions only", async () => {
+    stubConfirm(true);
+    await attachWithPosture("worker (fence: bwrap)"); // clickable when live
+    viewLog(L1, "fence log line");
+    await tick();
+    expect(el("#log-view-label")).toBeTruthy();
+    const strip = el("#tool-exec-status");
+    expect(strip.getAttribute("class") ?? "").not.toContain("tool-exec-toggleable");
+    expect(strip.getAttribute("title")).toContain("live sessions only");
+    ws.sent.length = 0;
+    strip.click();
+    expect(fenceMsgs()).toEqual([]);
+    expect(confirmCalls).toBe(0);
+    // Leave log view for the next scenario.
+    el("#close-log-view-btn").click();
+    fireAttachBurst("back live");
+    await tick();
+  });
+});

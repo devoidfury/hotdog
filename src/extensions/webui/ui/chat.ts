@@ -497,6 +497,8 @@ export interface ChatController {
   sendMessage: (content: string, files?: UploadFileWire[], steer?: boolean) => void;
   sendSlashCommand: (command: string) => void;
   cancel: () => void;
+  /** Flip the attached session's exec-fence policy (header strip toggle). */
+  setExecFencePolicy: (policy: "off" | "probe") => void;
   createSession: (opts?: Record<string, unknown>) => void;
   switchSession: (sessionId: string) => void;
   deleteSession: (sessionId: string) => void;
@@ -890,6 +892,16 @@ export function createChat({
         if (data.key === "title") {
           sessionTitleAtom(typeof data.value === "string" ? data.value : null);
         }
+        if (data.key === "toolExec") {
+          // Per-session posture push after a webui fence flip. sessionState
+          // is delivered cross-session (sidebar working indicators), so
+          // rebind explicitly: only the client attached to the pushed
+          // session repaints its header strip.
+          const pushSid = (data as { sessionId?: string }).sessionId;
+          if (pushSid && pushSid === sessionIdAtom()) {
+            toolExecAtom(typeof data.value === "string" ? data.value : "");
+          }
+        }
         messageList.handleSessionState(data);
         break;
       case "error":
@@ -1039,6 +1051,17 @@ export function createChat({
     const sid = sessionIdAtom();
     if (sid) sessionWorkingMap.set(sid, false);
     workingAtom(false);
+  }
+
+  /**
+   * Flip the ATTACHED session's runtime exec-fence policy (the header strip's
+   * toggle). Deliberately NOT optimistic like cancel(): the strip repaints
+   * only from the server's sessionState(key:"toolExec") push, so a refused
+   * toggle (inline plane, dead session) can never leave a lying posture.
+   */
+  function setExecFencePolicy(policy: "off" | "probe"): void {
+    if (!sessionIdAtom()) return;
+    send({ type: "execFence", sessionId: sessionIdAtom(), policy });
   }
 
   function createSession(opts: Record<string, unknown> = {}): void {
@@ -1192,6 +1215,7 @@ export function createChat({
     sendMessage,
     sendSlashCommand,
     cancel,
+    setExecFencePolicy,
     createSession,
     switchSession,
     deleteSession,

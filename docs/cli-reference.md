@@ -117,7 +117,35 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
 /theme <name>      Set theme (dark, light, monochrome)
 /regenerate        Regenerate system prompt
 /reasoning <level> Set reasoning effort (none/minimal/low/high/xhigh/max/unset)
+/fence on|off|status  Runtime exec-fence toggle for THIS session (worker plane)
 ```
+
+`/fence` is runtime-only and never written to config, and it is session-scoped:
+it changes the exec-fence policy of the CALLING session only. `on` maps to
+`probe` (jail when the platform supports it), `off` to plain spawn, `status`
+prints this session's live posture plus its override state and what the boot
+config said. Every on/off change is a logged transcript notice on the toggled
+session's log (it stays the audit trail; switching `off` states plainly that
+tool code runs UNFENCED from the next spawn). Sessions that never toggle --
+including future subagent sessions -- follow the boot config; a restart returns
+every session to it. `hotdog info` reports the boot posture and, when runtime
+overrides exist in its process, one extra line enumerating them (session id +
+policy). On an inline plane the toggle refuses -- there is no pool to fence.
+
+The webui carries the same toggle in its header strip: when the attached
+session's posture shows a worker-plane fence, `tools: worker (fence: …)` is
+click-to-toggle for the attached session only. Flipping `off` -> `probe`
+applies directly; `probe` -> `off` requires an explicit confirm naming the
+UNFENCED consequence (the webui's confirm idiom). The click sends a session-
+scoped websocket message that the server authorizes like every other session-
+scoped control -- authenticated socket, and the frame must name a live session
+of this server -- and it lands through the same `/fence` helper, so the
+toggled session's transcript gets the same audit notice. Like `/fence` it is
+runtime-only: nothing is persisted, other sessions follow the boot config, and
+a restart returns everything to it. Inline/degraded postures and log view keep
+the strip inert; typing `/fence` as a chat command in the webui still prints
+the honest fallback pointing at the interactive CLI (the toggle's wire path is
+the header click, not the chat command).
 
 ## Interactive Input Behavior (split renderer)
 

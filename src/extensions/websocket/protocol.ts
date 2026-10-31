@@ -34,6 +34,10 @@ export const C2S = {
   TASK_FOLLOWUP: "taskFollowup",
   // Replay buffered activity for one task (reconnecting panel; see TASK_ACTIVITY_HISTORY)
   TASK_ACTIVITY_REQUEST: "taskActivityRequest",
+  // Per-session exec-fence flip from the webui header strip:
+  // { type, sessionId, policy: "off" | "probe" }. The server answers with a
+  // sessionState frame (key "toolExec") scoped to that session's clients.
+  EXEC_FENCE: "execFence",
 } as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────

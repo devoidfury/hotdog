@@ -348,7 +348,9 @@ runs them in pooled, out-of-process executor entries keyed `(session, class)`;
 `inline` runs everything in-process — the pre-plane code path, with no pool object
 and zero added cycles. Tools without the tag stay inline either way. `hotdog info`
 reports the posture (`tools: worker (fence: …) | inline (unfenced)`), and the webui
-header strip shows the same string; the plane never silently downgrades.
+header strip shows the same string, resolved for the session the client is
+attached to (a per-session `/fence` override shows up there); the plane never
+silently downgrades.
 
 What the worker plane does once it is on:
 
@@ -407,6 +409,27 @@ The posture quadrants:
 ```json
 { "execFence": "off" }
 ```
+
+Runtime: `/fence on|off|status` toggles the policy between `probe` and `off`
+without a restart -- PER SESSION. The override belongs to the calling session;
+other sessions and future subagent sessions keep following the boot value
+above. The boot value itself is unchanged (never persisted; a restart returns
+every session to it), and every change is a logged transcript notice in the
+toggled session's log. `hotdog info` shows the boot posture plus, when runtime
+overrides exist in that process, a compact line enumerating them (session id +
+policy); sessions that never toggled follow the boot config.
+
+The webui carries the same control in its header strip: when the attached
+session's posture shows a worker-plane fence, `tools: worker (fence: …)` is
+click-to-toggle for THAT session (`off` -> `probe` applies directly;
+`probe` -> `off` first requires an explicit confirm naming the UNFENCED
+consequence). It is session-scoped like `/fence` -- the C2S frame names the
+session and the server binds it like every other session-scoped control
+(a live session of this server, on an authenticated socket) -- it is
+runtime-only (nothing is written to config), and the strip repaints only from
+the server's per-session posture push, so a refused toggle never leaves a
+lying posture. On an inline plane, a degraded broker, or in log view the strip
+stays inert.
 
 ### `maxToolDifficulty` (CLI-only)
 

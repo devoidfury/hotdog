@@ -269,7 +269,7 @@ export function createAndAttachSession(
         currentModel: agent.model,
         models: Object.keys(agent.modelRegistry || {}),
         sttEnabled: registry.sttEnabled,
-        toolExec: registry.toolExecLabel,
+        toolExec: registry.toolExecLabel(sessionId),
       });
       // The replay position for the next reconnect (0 = full replay), closing
       // the client's attach bookkeeping like every other attach path.

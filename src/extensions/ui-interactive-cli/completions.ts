@@ -117,6 +117,26 @@ fi
   );
 }
 
+/**
+ * `/fence` argument completion (on|off|status): the command itself is in the
+ * registry (name completion comes from there); this provider supplies the
+ * argument words, same candidate shape as the /reasoning level list.
+ */
+export function registerFenceCompletion(
+  completionService: CoreContext["completion"],
+): void {
+  completionService.register(
+    (ctx: CompletionContext) => ctx.command === "fence",
+    (ctx: CompletionContext) => {
+      const prefix = (ctx.commandArg || "").toLowerCase();
+      return ["on", "off", "status"]
+        .filter((a) => a.startsWith(prefix))
+        .map((a) => ({ value: a }));
+    },
+    "ui-interactive-cli:fence",
+  );
+}
+
 export function buildReadlineCompleter(
   sessionManager: SessionManager,
   core: CoreContext,

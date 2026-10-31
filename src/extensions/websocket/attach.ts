@@ -62,7 +62,7 @@ function sessionCreatedPayload(
     currentModel: agent?.model || meta?.model || "?",
     models: Object.keys(agent?.modelRegistry || {}),
     sttEnabled: registry.sttEnabled,
-    toolExec: registry.toolExecLabel,
+    toolExec: registry.toolExecLabel(sessionId),
   };
 }
 

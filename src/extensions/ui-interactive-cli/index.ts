@@ -28,6 +28,7 @@ import {
 import type { CliArgv } from "@core/config/index.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { CliChannel } from "./cli-channel.ts";
+import { fenceCommand } from "./fence-command.ts";
 import { ClipboardPasteInterceptor } from "./clipboard-paste.ts";
 import { DictationInterceptor, DictationCore, type CaptureFactory } from "./dictation.ts";
 import { EditorPasteMarkers } from "./paste-markers.ts";
@@ -39,6 +40,7 @@ import {
   registerSlashCommandNameCompletion,
   registerCommandCompletions,
   registerShellCompletion,
+  registerFenceCompletion,
   buildReadlineCompleter,
   buildEditorCompleter,
 } from "./completions.ts";
@@ -48,6 +50,7 @@ export {
   registerSlashCommandNameCompletion,
   registerCommandCompletions,
   registerShellCompletion,
+  registerFenceCompletion,
   buildReadlineCompleter,
 };
 
@@ -75,6 +78,7 @@ Commands:
   /theme <name> - Set theme (dark, light, monochrome)
   /regenerate   - Regenerate system prompt
   /reasoning none|minimal|low|high|xhigh|max|unset - Set reasoning effort level
+  /fence on|off|status - Exec-fence toggle for THIS session only (worker plane; not persisted; other sessions and subagents follow the boot config)
 
 Keys:
   Ctrl+X        - Start/stop voice dictation (needs an audio-capable model);
@@ -714,6 +718,7 @@ export async function runInteractiveSession(
   // listener registered afterwards would miss it and command-argument completions
   // (e.g. /reasoning <levels>) would never be registered.
   registerSlashCommandNameCompletion(core.completion);
+  registerFenceCompletion(core.completion);
   core.hooks.on(
     HOOKS.COMMANDS_REGISTER,
     ({ registry }) => {
@@ -945,7 +950,9 @@ export async function runInteractiveSession(
 
     if (trimmed.startsWith("/")) {
       const cmdText = trimmed.slice(1).trim();
-      handleSlashCommand(cmdText, sessionManager, channel, uiHost, exitSession);
+      // `resolved` rides along for /fence: the live plane posture is the one
+      // thing the slash surface cannot derive from the session itself.
+      handleSlashCommand(cmdText, sessionManager, channel, uiHost, exitSession, resolved);
       return;
     }
 
@@ -1175,6 +1182,7 @@ export function handleSlashCommand(
   channel: CliChannel,
   ui: PromptUi,
   onQuit: () => void,
+  resolved?: Record<string, unknown> | null,
 ): void {
   const cmd = parseCommand(cmdText);
 
@@ -1198,6 +1206,32 @@ export function handleSlashCommand(
       else uiOut("/redraw needs the split renderer (uiInteractiveCli.renderer: \"split\").");
       ui.prompt();
       return;
+
+    case Command.Fence: {
+      // Per-session runtime exec-fence toggle: decided and applied in
+      // fence-command.ts (the inline-plane refusal and the transcript notice
+      // live with it). It applies to the CALLING session only; other sessions
+      // and future subagent sessions follow the boot config. The decision
+      // needs the resolved plane posture, so the session hands its resolved
+      // bag in; the notice itself is a logged transcript record (harness
+      // system-notice via agent.addMessage) on this session's log, never just
+      // channel output -- the session log stays the audit trail of posture
+      // changes.
+      const sessionId = sessionManager.sessionId();
+      if (!sessionId) {
+        uiOut("Fence: no active session to toggle. Nothing changed.");
+      } else {
+        const outcome = fenceCommand(
+          cmd.value,
+          resolved ?? null,
+          sessionManager.getAgent() ?? null,
+          sessionId,
+        );
+        uiOut(outcome.output);
+      }
+      ui.prompt();
+      return;
+    }
   }
 
   sessionManager.executeCommand(sessionManager.sessionId()!, cmdText).then(

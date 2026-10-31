@@ -797,6 +797,27 @@ body.sidebar-resizing {
     font-weight: 600;
 }
 
+/* Worker-plane posture is a click-to-toggle control for the session's fence:
+   chip-button chrome (border + fill + hover/active) so the cue is visible
+   before the pointer arrives; still quiet enough to read as status. */
+.tool-exec-toggleable {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.tool-exec-toggleable:hover {
+    border-color: var(--accent);
+    background: var(--bg-hover);
+}
+
+.tool-exec-toggleable:active {
+    background: var(--bg-active);
+}
+
 .status-connected {
     color: var(--success);
     font-size: 0.75rem;

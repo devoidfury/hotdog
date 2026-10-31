@@ -13,7 +13,7 @@ import { WebSocketChannel } from "./websocket-channel.ts";
 import { S2C, type TaskActivityWire } from "./protocol.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
-import { execFenceDisplay, toolExecModeLabel, sharedToolExecDegraded } from "@core/tool-exec-broker.ts";
+import { sharedExecFenceDisplay, toolExecModeLabel, sharedToolExecDegraded } from "@core/tool-exec-broker.ts";
 import type { Agent } from "@core/agent.ts";
 import { AgentError } from "@core/error.ts";
 import type { SttTarget } from "@core/config/stt.ts";
@@ -124,15 +124,20 @@ export class SessionRegistry {
   }
 
   /**
-   * Tool-exec plane posture for the webui status strip. Read per
-   * payload so the degraded flag is current at attach time; a strip that went
-   * stale mid-session refreshes on the next attach or session switch.
+   * Tool-exec plane posture for the webui status strip, resolved PER SESSION:
+   * the label describes the session the client is attached to, so its runtime
+   * `/fence` override (if any) is what the strip shows -- sessions that never
+   * toggled follow the boot config. Read per payload so the degraded flag is
+   * current at attach time. A live toggle pushes the new label to this
+   * session's clients (C2S execFence answers with a sessionState key
+   * "toolExec" via broadcastScoped, built from this method), and the next
+   * attach or session switch re-reads it.
    */
-  get toolExecLabel(): string {
+  toolExecLabel(sessionId: string): string {
     return toolExecModeLabel(
       this.#toolExecResolved,
       sharedToolExecDegraded(),
-      execFenceDisplay(this.#toolExecResolved),
+      sharedExecFenceDisplay(sessionId, this.#toolExecResolved),
     );
   }
 

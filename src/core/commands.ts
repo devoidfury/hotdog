@@ -23,6 +23,7 @@ export const Command = {
   Undo: "undo",
   Rewind: "rewind",
   Fork: "fork",
+  Fence: "fence",
   Unknown: "unknown",
 } as const;
 
@@ -122,6 +123,11 @@ export function parseCommand(
     const parts = cmd.split(/\s+/);
     const effort = parts.slice(1).join(" ").trim();
     return { type: Command.Reasoning, value: effort || null };
+  }
+
+  if (cmd === "fence" || cmd.startsWith("fence ")) {
+    const arg = cmd.slice("fence".length).trim();
+    return { type: Command.Fence, value: arg || null };
   }
 
   if (cmd === "sessions") {

@@ -47,7 +47,8 @@ function stubRegistry(overrides: Record<string, unknown> = {}): any {
     }),
     getTaskManager: () => null,
     sttEnabled: false,
-    toolExecLabel: "inline",
+    // Per-session accessor (the producers pass the attached session id).
+    toolExecLabel: () => "inline",
     sttTarget: null,
     ...overrides,
   } as unknown as any;

@@ -85,6 +85,24 @@ export function execFenceDisplay(resolved: Record<string, unknown>): string {
   return execFenceBackend() ?? "none -- probe failed";
 }
 
+/**
+ * The fence display for one SESSION, for status surfaces that live in a
+ * process which may have runtime overrides (`/fence` is per-session): the
+ * session's override wins over the boot config; with no override for this
+ * session the display is exactly `execFenceDisplay` (the boot posture). Same
+ * vocabulary either way (probe -> backend or "none -- probe failed", off ->
+ * "off"); inline never shows a fence.
+ */
+export function sharedExecFenceDisplay(
+  session: string,
+  resolved: Record<string, unknown>,
+): string {
+  const { mode, fence } = toolExecPlaneSettings(resolved);
+  const live = getExecFencePolicy(session) ?? fence;
+  if (mode === "inline" || live === "off") return "off";
+  return execFenceBackend() ?? "none -- probe failed";
+}
+
 /** One-line status label: `hotdog info` and the webui strip read the posture here. */
 export function toolExecModeLabel(
   resolved: Record<string, unknown>,
@@ -112,13 +130,81 @@ export function sharedToolExecDegraded(): boolean {
 // The first creation pins the posture; later callers with different knobs get
 // the same broker, so name the drift once instead of letting an ignored
 // config mislead its owner (hand-built multi-agent hosts are where this bites).
+// The pin is the BOOT policy: `/fence` overrides are per-session runtime state
+// on the broker instance (see setExecFencePolicy), never a process-wide
+// rewrite of the pinned posture -- postureDrift keeps comparing late callers
+// against the boot value, which is what every session without an override
+// still runs under.
 let sharedBroker: ToolExecBroker | null = null;
 let sharedPosture: SharedPosture | null = null;
 let postureWarned = false;
+/** Per-session overrides set before the shared broker existed; consumed at construction. */
+const pendingFencePolicies = new Map<string, "off" | "probe">();
 
 export interface SharedPosture {
   fence: string;
   envScrubbing: string;
+}
+
+/**
+ * Runtime exec-fence override for ONE SESSION (the `/fence` command): the
+ * override decides that session's plan-time posture (probe -> plan as probe,
+ * off -> no fence); every other session -- and every future subagent session
+ * -- keeps following the boot config. If the shared broker exists the
+ * override lands on its instance map immediately (and that session's memoized
+ * plans are dropped so its next invoke replans); if not, it is pending and
+ * the next `sharedToolExecBroker()` construction consumes it into the broker.
+ * Never persisted -- restart, and the boot config decides again; the command
+ * side logs every change to the toggled session's transcript as the audit
+ * trail.
+ */
+export function setExecFencePolicy(session: string, policy: "off" | "probe"): void {
+  if (sharedBroker) {
+    sharedBroker.setSessionFencePolicy(session, policy);
+    return;
+  }
+  pendingFencePolicies.set(session, policy);
+}
+
+/**
+ * The session's runtime override, or null when the session has none and
+ * follows the boot config. Reads the shared broker's live map first; before
+ * any broker exists, the pending map.
+ */
+export function getExecFencePolicy(session: string): "off" | "probe" | null {
+  if (sharedBroker) return sharedBroker.getSessionFencePolicy(session);
+  return pendingFencePolicies.get(session) ?? null;
+}
+
+/**
+ * Snapshot of every live runtime override, insertion-ordered (what `hotdog
+ * info` enumerates when sessions have toggled). Empty in a virgin process.
+ */
+export function execFenceOverrides(): Array<{ session: string; policy: "off" | "probe" }> {
+  const out: Array<{ session: string; policy: "off" | "probe" }> = [];
+  const seen = new Set<string>();
+  if (sharedBroker) {
+    for (const [session, policy] of sharedBroker.fenceOverrides()) {
+      seen.add(session);
+      out.push({ session, policy });
+    }
+  }
+  for (const [session, policy] of pendingFencePolicies) {
+    if (!seen.has(session)) out.push({ session, policy });
+  }
+  return out;
+}
+
+/**
+ * Test-only: drop every runtime override (pending map and, if one exists, the
+ * shared broker's map) so later files in a shared test process see the
+ * virgin "no override" state (sequential `bun test` runs every file in one
+ * process; cf. resetUiSlotsForTesting). No production path clears an operator
+ * override -- once set it stands until restart.
+ */
+export function resetExecFenceOverridesForTesting(): void {
+  pendingFencePolicies.clear();
+  sharedBroker?.clearSessionFenceOverrides();
 }
 
 /** Posture keys a later caller asks for that differ from the pinned ones ("", ""). */
@@ -135,11 +221,20 @@ export function postureDrift(pinned: SharedPosture, opts: ToolExecBrokerOptions)
 
 export function sharedToolExecBroker(opts?: ToolExecBrokerOptions): ToolExecBroker {
   if (!sharedBroker) {
+    // Constructor: boot fence = opts.fence > "probe"; then the pending
+    // per-session overrides are CONSUMED into the new broker (per-key they
+    // outrank the boot fence for their session -- same precedence shape the
+    // process-wide toggle had, now keyed by session id).
+    const fence = opts?.fence ?? "probe";
     sharedPosture = {
-      fence: opts?.fence ?? "probe",
+      fence,
       envScrubbing: String(opts?.envScrubbing ?? true),
     };
-    sharedBroker = new ToolExecBroker(opts);
+    sharedBroker = new ToolExecBroker({ ...opts, fence });
+    for (const [session, policy] of pendingFencePolicies) {
+      sharedBroker.setSessionFencePolicy(session, policy);
+    }
+    pendingFencePolicies.clear();
     return sharedBroker;
   }
   if (!postureWarned && sharedPosture && opts) {
@@ -159,12 +254,19 @@ export function sharedToolExecBroker(opts?: ToolExecBrokerOptions): ToolExecBrok
  * when the platform can jail, null when it cannot (plain spawn, flagged in
  * the posture line). Lives supervisor-side because the broker child is
  * plumbing only: it prepends argv, it never decides policy.
+ *
+ * `dropSession` forgets ONE session's memoized plans (the per-session `/fence`
+ * toggle calls it so the session replans from scratch while siblings' memo
+ * entries survive untouched). Optional: a seam planner with no memo has
+ * nothing to drop.
  */
-export type FencePlanner = (
+export type FencePlanner = ((
   session: string,
   cls: ExecClass,
   roots: string[],
-) => WireFence | null;
+) => WireFence | null) & {
+  dropSession?(session: string): void;
+};
 
 /** Sessions ride the scratch dir name; uuids pass untouched, anything else is flattened. */
 function sanitizeForPath(s: string): string {
@@ -180,7 +282,7 @@ function sanitizeForPath(s: string): string {
 export function createFencePlanner(fence: "off" | "probe"): FencePlanner | null {
   if (fence === "off") return null;
   const memo = new Map<string, WireFence | null>();
-  return (session, cls, roots) => {
+  const plan: FencePlanner = (session, cls, roots) => {
     const key = `${session}\u0000${cls}\u0000${roots.join("\u0000")}`;
     const hit = memo.get(key);
     if (hit !== undefined) return hit;
@@ -209,6 +311,15 @@ export function createFencePlanner(fence: "off" | "probe"): FencePlanner | null 
     memo.set(key, spec);
     return spec;
   };
+  // The memo key starts with `${session}\u0000`, so a prefix drop hits exactly
+  // one session's tuples; sibling memos survive a toggle untouched.
+  plan.dropSession = (session: string) => {
+    const prefix = `${session}\u0000`;
+    for (const key of memo.keys()) {
+      if (key.startsWith(prefix)) memo.delete(key);
+    }
+  };
+  return plan;
 }
 
 /**
@@ -243,7 +354,12 @@ export interface ToolExecBrokerOptions {
   idleReapMs?: number;
   /** See DEFAULT_RESPAWN_CAP. Test seam. */
   respawnCap?: number;
-  /** Fence policy from the resolved config. Default `probe`. */
+  /**
+   * Fence policy from the resolved config: the BOOT posture, what every
+   * session without a runtime override follows. Per-session overrides
+   * (`setExecFencePolicy`, `/fence`) outrank it for their own session only --
+   * see `sharedToolExecBroker`.
+   */
   fence?: "off" | "probe";
   /**
    * Scrub secret-shaped env keys at the broker spawn. Default true. `false`
@@ -286,11 +402,22 @@ export class ToolExecBroker implements ToolExecLink {
   #deaths: number[] = [];
   #degraded = false;
   #degradedReason = "";
+  /** The probe-planning machinery (built-in memoized planner or seam replacement). */
   #fencePlan: FencePlanner | null;
+  /** The BOOT shape: do sessions without an override consult the machinery at all? */
+  #bootFenced: boolean;
+  /** Per-session runtime overrides (the `/fence` command surface). */
+  #sessionFence = new Map<string, "off" | "probe">();
 
   constructor(opts: ToolExecBrokerOptions = {}) {
     this.#opts = opts;
     this.#respawnCap = opts.respawnCap ?? DEFAULT_RESPAWN_CAP;
+    // The seam encodes the boot shape (a function plans, null disables, like
+    // fence: "off"); without it the boot fence option decides, default probe.
+    this.#bootFenced =
+      opts.fencePlan !== undefined
+        ? opts.fencePlan !== null
+        : (opts.fence ?? "probe") !== "off";
     this.#fencePlan =
       opts.fencePlan !== undefined
         ? opts.fencePlan
@@ -312,6 +439,63 @@ export class ToolExecBroker implements ToolExecLink {
   }
 
   /**
+   * Plan-time fence for one (session, class, roots) tuple. Effective policy:
+   * the session's runtime override when it has one (probe -> plan as probe,
+   * off -> null fence), otherwise the boot shape. A session flipped to probe
+   * on a boot-off broker gets the built-in planner lazily (the memo starts
+   * empty; nothing pre-boot is resurrected).
+   */
+  #planFence(session: string, cls: ExecClass, roots: string[]): WireFence | null {
+    const policy = this.#sessionFence.get(session) ?? (this.#bootFenced ? "probe" : "off");
+    if (policy === "off") return null;
+    if (!this.#fencePlan) this.#fencePlan = createFencePlanner("probe");
+    return this.#fencePlan?.(session, cls, roots) ?? null;
+  }
+
+  /**
+   * Set (or replace) ONE session's runtime fence policy. Only that session's
+   * memoized plans are dropped (`dropSession` on the planner memo, keyed by
+   * session id) so its next invoke replans under the new policy -- sibling
+   * sessions' memo entries survive untouched, byte-identical: another
+   * session's toggle must never force-replace their entries. `fencePlan`
+   * mirrors the constructor's test seam (any prefix argv stands in for the
+   * jail backend); production callers pass only the policy.
+   *
+   * No forced reap of existing pool entries: the broker child already
+   * replaces an entry whose fenceId mismatches the fence planned for the
+   * invoke (the executor-replaced machinery is the enforcement; the toggle
+   * leans on it). In-flight entries keep the fence they were born with --
+   * their process is the old argv; the toggled session's entry swaps on its
+   * next invoke, or idles out like any other entry.
+   */
+  setSessionFencePolicy(
+    session: string,
+    policy: "off" | "probe",
+    fencePlan?: FencePlanner | null,
+  ): void {
+    if (fencePlan !== undefined) {
+      this.#fencePlan = fencePlan; // seam replacement (an explicit null disables planning again)
+    }
+    this.#sessionFence.set(session, policy);
+    this.#fencePlan?.dropSession?.(session);
+  }
+
+  /** The session's runtime override, or null (follow the boot config). */
+  getSessionFencePolicy(session: string): "off" | "probe" | null {
+    return this.#sessionFence.get(session) ?? null;
+  }
+
+  /** Live per-session overrides, insertion-ordered (status surfaces enumerate these). */
+  fenceOverrides(): Iterable<[string, "off" | "probe"]> {
+    return this.#sessionFence;
+  }
+
+  /** Drop every override (test reset; production has no clear path by design). */
+  clearSessionFenceOverrides(): void {
+    this.#sessionFence.clear();
+  }
+
+  /**
    * Execute one tool call on the plane. Rejects (never downgrades) when the
    * broker cannot start, dies, or closes with the call in flight; the
    * executor turns that into an error tool result, so the session-log
@@ -329,7 +513,7 @@ export class ToolExecBroker implements ToolExecLink {
     await this.#ensureStarted();
     const proc = this.#proc!;
     const id = req.id ?? `x${++this.#seq}`;
-    const fence = this.#fencePlan?.(req.session, "rw", req.ctx.workspace.roots);
+    const fence = this.#planFence(req.session, "rw", req.ctx.workspace.roots);
     const frame: InvokeFrame = {
       id,
       op: "invoke",
@@ -375,7 +559,7 @@ export class ToolExecBroker implements ToolExecLink {
    * invoke replaces the entry if a fence is expected.
    */
   warm(session: string, cls: ExecClass, workspace?: WireWorkspace): void {
-    const fence = workspace ? this.#fencePlan?.(session, cls, workspace.roots) : undefined;
+    const fence = workspace ? this.#planFence(session, cls, workspace.roots) : undefined;
     void this.#post({
       op: "warm",
       session,

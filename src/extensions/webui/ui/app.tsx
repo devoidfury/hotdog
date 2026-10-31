@@ -786,6 +786,33 @@ function onCancelSession(sessionId: string): void {
   }
 }
 
+/**
+ * Header strip fence toggle: proposes flipping the ATTACHED session's runtime
+ * exec-fence policy. Worker-plane postures only ("fence:" in the display);
+ * inline/degraded and log view stay inert. probe -> off confirms loudly
+ * (cancelTask idiom: the confirm says exactly what opens up), off -> probe
+ * applies without one. The strip repaints ONLY from the server's posture
+ * push -- never optimistically -- so a refusal can never leave it lying.
+ */
+function onFenceToggle(): void {
+  if (activeLogIdAtom()) return; // log view: no live session to act on
+  const sid = chat?.sessionIdAtom() ?? null;
+  const posture = chat?.toolExecAtom() ?? "";
+  if (!sid || !posture.includes("fence:")) return;
+  if (posture.includes("fence: off)")) {
+    chat?.setExecFencePolicy("probe");
+    return;
+  }
+  if (
+    !confirm(
+      `Turn the exec fence OFF? Tool code for this session will run UNFENCED from the next spawn (this session only; other sessions follow the boot config, a restart reverts).`,
+    )
+  ) {
+    return;
+  }
+  chat?.setExecFencePolicy("off");
+}
+
 // ── View ────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -798,6 +825,13 @@ function App() {
   // Tool-exec plane posture: "worker (fence: bwrap | seatbelt | off | none --
   // probe failed)" / "inline (unfenced)", plus anything carrying [degraded: ...].
   const toolExec = chat?.toolExecAtom() ?? "";
+  // The strip becomes a control exactly when the ATTACHED live session shows
+  // a worker-plane fence; inline/degraded postures and log view stay inert.
+  const fenceClickable =
+    toolExec.includes("fence:") &&
+    !toolExec.includes("degraded") &&
+    !activeLogId &&
+    sessionId !== null;
   const menu = contextMenuAtom();
   const completionMenu = completionAtom();
   const attachments = attachmentsAtom();
@@ -857,8 +891,20 @@ function App() {
               {toolExec ? (
                 <span
                   id="tool-exec-status"
-                  className={toolExec.includes("degraded") ? "tool-exec-degraded" : undefined}
-                  title="Tool execution plane (config keys: toolExec, execFence)"
+                  className={[
+                    toolExec.includes("degraded") ? "tool-exec-degraded" : "",
+                    fenceClickable ? "tool-exec-toggleable" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ") || undefined}
+                  title={
+                    fenceClickable
+                      ? `${toolExec} -- click to toggle this session's fence`
+                      : activeLogId
+                        ? `Tool execution plane (config keys: toolExec, execFence). The fence toggle acts on live sessions only, not on a viewed log.`
+                        : "Tool execution plane (config keys: toolExec, execFence)"
+                  }
+                  onClick={fenceClickable ? onFenceToggle : undefined}
                 >
                   tools: {toolExec}
                 </span>

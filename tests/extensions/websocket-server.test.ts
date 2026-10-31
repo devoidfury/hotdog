@@ -2863,9 +2863,9 @@ describe("tool-exec posture on sessionCreated", () => {
     const plain = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "inline", execFence: "probe" } });
     const off = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "worker", execFence: "off" } });
     const probe = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "worker", execFence: "probe" } });
-    expect(plain.toolExecLabel).toBe("inline (unfenced)");
-    expect(off.toolExecLabel).toBe("worker (fence: off)");
-    expect(probe.toolExecLabel).toMatch(/^worker \(fence: (bwrap|seatbelt|none -- probe failed)\)$/);
+    expect(plain.toolExecLabel("s-label")).toBe("inline (unfenced)");
+    expect(off.toolExecLabel("s-label")).toBe("worker (fence: off)");
+    expect(probe.toolExecLabel("s-label")).toMatch(/^worker \(fence: (bwrap|seatbelt|none -- probe failed)\)$/);
     plain.stopCleanupLoop();
     off.stopCleanupLoop();
     probe.stopCleanupLoop();

@@ -382,41 +382,129 @@ body.sidebar-resizing {
     border-color: rgba(124, 92, 255, 0.25);
 }
 
-.session-item .session-name {
+/* ── Sidebar Row Grammar (shared by live sessions and cold logs) ───────────
+   line 1: provider/model [status]        [action]  -- model ellipsizes,
+                                                       action pins right
+   line 2: profile ctx . msgs . client
+   line 3: YYYY-MM-DD HH:MM . <full session id>
+   No literal parens: status is a text badge, profile quiet muted text. */
+
+.session-item .row-l1,
+.log-item .row-l1 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 0.9rem;
     font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 3px;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
 }
 
-.session-item.active .session-name {
+.log-item .row-l1 {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.session-item.active .row-l1 {
     color: var(--accent);
 }
 
-.session-item .session-meta {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    line-height: 1.4;
-    white-space: nowrap;
+.log-item.active .row-l1 {
+    color: var(--success);
+}
+
+.row-model {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.session-item.active .session-meta {
-    color: rgba(124, 92, 255, 0.7);
+.row-status,
+.row-sep,
+.row-action,
+.row-date,
+.row-profile {
+    flex: 0 0 auto;
 }
 
-/* ── Session Working Indicator (sidebar) ─────────────────────────────────── */
+/* Status badge: text alone, small type, faint tint + hairline border,
+   minimal rounding (radius-sm, not a pill). statusClass / log-state-*
+   override color + background; base covers unclassed live rows. */
+.row-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 400;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    padding: 0 6px;
+    line-height: 1.5;
+}
 
-.session-working-indicator {
+.row-sep {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.row-action {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Pins Cancel/Continue to the row's right edge; no separator precedes it. */
+.row-action-right {
+    margin-left: auto;
+}
+
+/* Profile tag: quieter than the status badge -- plain muted text (inherits
+   .row-l2 color), no badge treatment so line-1 status stays the loudest. */
+
+.row-l2 {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: 4px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
 }
+
+.row-l2 .row-metric:last-child,
+.row-l2 .row-profile:last-child {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.row-l3 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.row-id {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+}
+
+/* ── Session Working Indicator (sidebar) ─────────────────────────────────── */
 
 .session-spinner {
     display: inline-block;
@@ -484,43 +572,7 @@ body.sidebar-resizing {
     border-color: rgba(52, 211, 153, 0.3);
 }
 
-.log-item .log-name {
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-bottom: 3px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-family: var(--font-mono);
-}
-
-.log-item.active .log-name {
-    color: var(--success);
-}
-
-.log-item .log-meta {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    line-height: 1.4;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-}
-
-/* Derived index state badge on cold logs (idle is unbadged). */
-.log-state-badge {
-    display: inline-block;
-    margin-left: 8px;
-    padding: 1px 6px;
-    border-radius: 8px;
-    font-size: 0.62rem;
-    font-weight: 600;
-    font-family: var(--font-sans);
-    vertical-align: 1px;
-}
-
+/* State colors for the cold-row status slot (idle is unbadged). */
 .log-state-interrupted {
     color: var(--warning);
     background: rgba(251, 191, 36, 0.12);
@@ -534,12 +586,6 @@ body.sidebar-resizing {
 .log-state-parked {
     color: var(--error);
     background: var(--error-soft);
-}
-
-.log-item .log-actions {
-    display: flex;
-    gap: 4px;
-    flex-shrink: 0;
 }
 
 .log-continue-btn {

@@ -76,6 +76,10 @@ export interface SessionRow {
   title: string | null;
   profile: string | null;
   model: string | null;
+  /** Sidebar ctx display: last token_usage record's per-call totalTokens. */
+  ctx_used: number | null;
+  /** Its contextWindow; absent/0 on pre-window logs. */
+  ctx_total: number | null;
 }
 
 const SCHEMA = `
@@ -90,7 +94,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   resume_count INTEGER NOT NULL DEFAULT 0,
   title        TEXT,
   profile      TEXT,
-  model        TEXT
+  model        TEXT,
+  ctx_used     INTEGER,
+  ctx_total    INTEGER
 );
 CREATE TABLE IF NOT EXISTS open_calls (
   session_id   TEXT NOT NULL,
@@ -133,6 +139,17 @@ function openPrepared(path: string): Database {
     // Multiple hotdog processes share the index (webui + one-shot + CLI).
     next.exec("PRAGMA busy_timeout = 5000;");
     next.exec(SCHEMA);
+    // Column adds for pre-existing DBs (CREATE TABLE IF NOT EXISTS is a
+    // no-op there): ALTER ADD COLUMN is nullable, cheap, and idempotent-
+    // guarded via table_info (sqlite has no IF NOT EXISTS for columns).
+    const cols = new Set(
+      next
+        .query<{ name: string }, []>("PRAGMA table_info(sessions)")
+        .all()
+        .map((c) => c.name),
+    );
+    if (!cols.has("ctx_used")) next.exec("ALTER TABLE sessions ADD COLUMN ctx_used INTEGER");
+    if (!cols.has("ctx_total")) next.exec("ALTER TABLE sessions ADD COLUMN ctx_total INTEGER");
   } catch (err) {
     try { next.close(); } catch {}
     throw err;
@@ -336,6 +353,27 @@ export function deriveModelProfileFromLog(
 }
 
 /**
+ * Ctx display for rebuilds: the LAST token_usage record's per-call
+ * totalTokens (the number the chat's token bubble shows) and its
+ * contextWindow. Absent window/0 means the log attests nothing usable;
+ * resume display omits the segment rather than inventing a denominator.
+ */
+export function deriveCtxFromLog(
+  entries: LogEntry[],
+): { ctxUsed: number | null; ctxTotal: number | null } {
+  let ctxUsed: number | null = null;
+  let ctxTotal: number | null = null;
+  for (const e of entries) {
+    if (e.source !== LOG_SOURCE.TOKEN_USAGE) continue;
+    const used = (e as Record<string, unknown>).totalTokens;
+    const window = (e as Record<string, unknown>).contextWindow;
+    ctxUsed = typeof used === "number" && Number.isFinite(used) && used > 0 ? used : null;
+    ctxTotal = typeof window === "number" && Number.isFinite(window) && window > 0 ? window : null;
+  }
+  return { ctxUsed, ctxTotal };
+}
+
+/**
  * Rebuild one session's row (and its open_calls mirror) from a full log read.
  * This is the adopt/reindex/repair path; returns null when the log file does
  * not exist. Position fields (size/mtime/updated_at) come from a stat taken
@@ -370,12 +408,17 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
   // log's attestation (legacy logs predate model_change records); the
   // derived value only ever fills an absent column.
   const derived = deriveModelProfileFromLog(full);
+  // Ctx is display data whose system of record is the log itself (the last
+  // token_usage record), and this read sees every record the row's mirror
+  // ever mirrored -- so the derived value wins outright; a rewind truncation
+  // must be able to clear a stale one.
+  const ctx = deriveCtxFromLog(full);
 
   withIndex((d) => {
     const write = d.transaction(() => {
       d.run(
-        `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title, profile, model)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title, profile, model, ctx_used, ctx_total)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_id) DO UPDATE SET
          path = excluded.path,
          updated_at = excluded.updated_at,
@@ -386,7 +429,9 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
          resume_count = excluded.resume_count,
          title = COALESCE(excluded.title, sessions.title),
          profile = COALESCE(sessions.profile, excluded.profile),
-         model = COALESCE(sessions.model, excluded.model)`,
+         model = COALESCE(sessions.model, excluded.model),
+         ctx_used = excluded.ctx_used,
+         ctx_total = excluded.ctx_total`,
         [
           sessionId,
           path,
@@ -399,6 +444,8 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
           title,
           derived.profile,
           derived.model,
+          ctx.ctxUsed,
+          ctx.ctxTotal,
         ],
       );
       d.run("DELETE FROM open_calls WHERE session_id = ?", [sessionId]);
@@ -671,6 +718,25 @@ export async function indexSessionProfile(
     d.run(
       `UPDATE sessions SET profile = ? WHERE session_id = ?`,
       [profile, sessionId],
+    );
+  }, true);
+}
+
+/**
+ * Mirror the latest token_usage snapshot (per-call totalTokens + window) so
+ * the sidebar's cold rows carry ctx without a log scan. Same shape as the
+ * model/profile mirrors: the value is absolute (idempotentOnMissing), and
+ * syncSessionFromLog re-derives it from the log on rebuild.
+ */
+export async function indexTokenUsage(
+  sessionId: string,
+  ctxUsed: number | null,
+  ctxTotal: number | null,
+): Promise<void> {
+  await atCommitPoint(sessionId, 0, (d) => {
+    d.run(
+      `UPDATE sessions SET ctx_used = ?, ctx_total = ? WHERE session_id = ?`,
+      [ctxUsed, ctxTotal, sessionId],
     );
   }, true);
 }

@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { routeMessage } from "@extensions/websocket/message-routing.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
+import { syncSessionFromLog, closeSessionIndex } from "@core/session/session-index.ts";
 import type { AuthMiddleware } from "@extensions/websocket/auth.ts";
 import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
@@ -271,5 +272,81 @@ describe("routeMessage: AUTH attach fallbacks", () => {
     expect(registered).toBe(true);
     expect(pendingCleared).toBe(true);
     expect(messages.map((m) => m.type)).toEqual([S2C.AUTH_OK, S2C.SESSION_CREATED, S2C.SESSION_STATE]);
+  });
+});
+
+// ── LIST_LOGS sidebar row fields (index-attested model/profile/ctx) ─────────
+
+describe("routeMessage: LIST_LOGS sidebar fields", () => {
+  const CTX_LOG_ID = "sidebar-ctx-log";
+  const LEGACY_LOG_ID = "sidebar-legacy-log";
+  const NOROW_LOG_ID = "sidebar-norow-log";
+
+  const logLine = (over: Record<string, unknown>): string =>
+    JSON.stringify({
+      ts: "2026-10-20T00:00:00.000Z",
+      session_id: "s",
+      source: "input",
+      content: "hi",
+      ...over,
+    }) + "\n";
+
+  beforeAll(async () => {
+    writeFileSync(
+      join(TMP, `${CTX_LOG_ID}.jsonl`),
+      [
+        logLine({ source: "session_start", content: "", model: "ai365/qwen3.8", profile: "manager" }),
+        logLine({}),
+        logLine({ source: "token_usage", content: "", totalTokens: 69000, contextWindow: 262144 }),
+      ].join(""),
+    );
+    writeFileSync(join(TMP, `${LEGACY_LOG_ID}.jsonl`), logLine({ content: "ancient" }));
+    writeFileSync(join(TMP, `${NOROW_LOG_ID}.jsonl`), logLine({ content: "unreconciled" }));
+    // Reconcile only the first two: the third stays a row-less log on purpose.
+    await syncSessionFromLog(CTX_LOG_ID);
+    await syncSessionFromLog(LEGACY_LOG_ID);
+  });
+
+  afterAll(() => {
+    // Release the index handle before the file-level afterAll sweeps TMP.
+    closeSessionIndex();
+  });
+
+  it("adds model/profile/ctxUsed/ctxTotal from the index row (presence)", async () => {
+    const { messages } = await send({ type: C2S.LIST_LOGS });
+    const listed = messages.find((m) => m.type === S2C.LOGS_LISTED)!;
+    const logs = listed.logs as Array<Record<string, unknown>>;
+    const row = logs.find((l) => l.id === CTX_LOG_ID)!;
+    expect(row.state).toBe("idle");
+    expect(row.model).toBe("ai365/qwen3.8");
+    expect(row.profile).toBe("manager");
+    expect(row.ctxUsed).toBe(69000);
+    expect(row.ctxTotal).toBe(262144);
+    expect(row.messageCount).toBeGreaterThan(0);
+    expect(typeof row.createdAt).toBe("number");
+  });
+
+  it("legacy logs attest no model/profile/ctx: the keys are omitted, not null", async () => {
+    const { messages } = await send({ type: C2S.LIST_LOGS });
+    const listed = messages.find((m) => m.type === S2C.LOGS_LISTED)!;
+    const logs = listed.logs as Array<Record<string, unknown>>;
+    const legacy = logs.find((l) => l.id === LEGACY_LOG_ID)!;
+    expect(legacy.state).toBe("idle");
+    expect("model" in legacy).toBe(false);
+    expect("profile" in legacy).toBe(false);
+    expect("ctxUsed" in legacy).toBe(false);
+    expect("ctxTotal" in legacy).toBe(false);
+  });
+
+  it("a log without an index row keeps the pre-existing payload untouched", async () => {
+    const { messages } = await send({ type: C2S.LIST_LOGS });
+    const listed = messages.find((m) => m.type === S2C.LOGS_LISTED)!;
+    const logs = listed.logs as Array<Record<string, unknown>>;
+    const norow = logs.find((l) => l.id === NOROW_LOG_ID)!;
+    expect("state" in norow).toBe(false);
+    expect("model" in norow).toBe(false);
+    expect("ctxUsed" in norow).toBe(false);
+    // The dir-scan fields stay put.
+    expect(norow.messageCount).toBe(1);
   });
 });

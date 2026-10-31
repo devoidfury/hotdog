@@ -19,6 +19,7 @@ import {
   indexResumeAttempt,
   indexSessionProfile,
   indexSessionModel,
+  indexTokenUsage,
 } from "@core/session/session-index.ts";
 
 interface SessionLogMessage {
@@ -804,6 +805,19 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             contextWindow: d.contextWindow ?? 0,
           });
           await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+          // Mirror the sidebar's ctx numbers into the index so cold-log rows
+          // carry them without a log scan (absolute values: idempotent).
+          // Skip restore replays: re-emitted historical records would churn
+          // the index, and the adopt-time sync re-derives the same value.
+          if (!restoringSessions.has(sessionId)) {
+            await safeIndex("token_usage", () =>
+              indexTokenUsage(
+                sessionId,
+                (d.totalTokens ?? 0) > 0 ? d.totalTokens! : null,
+                (d.contextWindow ?? 0) > 0 ? d.contextWindow! : null,
+              ),
+            );
+          }
           return;
         }
 

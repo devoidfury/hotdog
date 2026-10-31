@@ -1,8 +1,17 @@
 /// <reference lib="dom" />
-// Session/log sidebar
+// Session/log sidebar. Both lists share one row grammar:
+//
+//   provider/model      [status]            [action]
+//   profile  (ctx used / ctx total) . (msg count) . (connected client?)
+//   start date & time . session id
+//
+// No literal parens anywhere: status renders as a text badge, profile as
+// quiet muted text. Missing segments are omitted outright, never rendered
+// empty; " . " is the segment separator between the slots the example
+// dot-joins. The line-1 action pins right (margin-left:auto), no sep.
 
-import { formatTime, shortId, SIDEBAR_MIN_WIDTH } from "./utils.ts";
-import type { Ref } from "@utils/jsx";
+import { formatTokenCount, SIDEBAR_MIN_WIDTH } from "./utils.ts";
+import type { JsxChild, Ref } from "@utils/jsx";
 
 export interface SessionInfo {
   id: string;
@@ -13,6 +22,10 @@ export interface SessionInfo {
   createdAt: number;
   lastActivityAt: number;
   connectedClients: number;
+  /** Sidebar row slots: user-message tally and the last token_usage snapshot. */
+  userMessageCount?: number;
+  ctxUsed?: number;
+  ctxTotal?: number;
 }
 
 export interface LogInfo {
@@ -23,6 +36,11 @@ export interface LogInfo {
   /** Derived index state (idle/awaiting_question/interrupted/parked);
    *  absent when the log has no reconciled row yet. */
   state?: string;
+  /** Index-attested model/profile + ctx; absent on legacy logs (segments omitted). */
+  model?: string;
+  profile?: string;
+  ctxUsed?: number;
+  ctxTotal?: number;
 }
 
 export interface ContextMenuItem {
@@ -35,6 +53,13 @@ export interface ContextMenuState {
   x: number;
   y: number;
   items: ContextMenuItem[];
+}
+
+/** Local "YYYY-MM-DD HH:MM" -- the sidebar line-3 stamp. */
+export function formatDateTime(ts: number): string {
+  const d = new Date(ts);
+  const p = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 interface SidebarProps {
@@ -59,6 +84,94 @@ interface SidebarProps {
   onResizeReset: (e: MouseEvent) => void;
 }
 
+interface SidebarRowProps {
+  /** Slab styling: "session-item" (live) or "log-item" (cold). */
+  kindClass: string;
+  active: boolean;
+  id: string;
+  model?: string | null;
+  /** Line-2 profile tag: display name (title wins), omitted when neither set. */
+  displayName?: string | null;
+  /** Line-1 status badge text, rendered as-is; null/empty omits the segment. */
+  status?: string | null;
+  /** Optional color modifier for the status slot (cold-log derived states). */
+  statusClass?: string;
+  spinner?: boolean;
+  ctxUsed?: number;
+  ctxTotal?: number;
+  messageCount?: number;
+  /** Live rows only; absent on cold logs (structurally 0 clients). */
+  connectedClients?: number;
+  createdAt: number;
+  /** Line-1 trailing action node (Cancel / Continue); null omits the slot. */
+  action?: JsxChild;
+  onSelect: () => void;
+  onContextMenu?: (e: MouseEvent) => void;
+}
+
+function rowClass(kindClass: string, active: boolean): string {
+  return active ? `${kindClass} active` : kindClass;
+}
+
+/** One sidebar row in the shared grammar; the callers decide which slots exist. */
+export function SidebarRow(p: SidebarRowProps) {
+  const line1: JsxChild[] = [];
+  if (p.model) line1.push(<span className="row-model">{p.model}</span>);
+  if (p.status) {
+    line1.push(
+      <span className={p.statusClass ? `row-status ${p.statusClass}` : "row-status"}>
+        {p.spinner ? <span className="session-spinner"></span> : null}
+        {p.status}
+      </span>,
+    );
+  }
+  if (p.action) line1.push(<span className="row-action row-action-right">{p.action}</span>);
+
+  // Profile tag leads; the metric slots dot-join among themselves.
+  const line2: JsxChild[] = [];
+  if (p.displayName) line2.push(<span className="row-profile">{p.displayName}</span>);
+  const ctx =
+    p.ctxUsed != null
+      ? `${formatTokenCount(p.ctxUsed)}${p.ctxTotal != null && Number.isFinite(p.ctxTotal) ? `/${formatTokenCount(p.ctxTotal)}` : ""}`
+      : null;
+  const msgs =
+    p.messageCount != null && p.messageCount > 0
+      ? `${p.messageCount} msg${p.messageCount > 1 ? "s" : ""}`
+      : null;
+  const clients =
+    p.connectedClients != null && p.connectedClients > 0
+      ? `${p.connectedClients} client${p.connectedClients > 1 ? "s" : ""}`
+      : null;
+  let metrics = 0;
+  for (const part of [ctx, msgs, clients]) {
+    if (!part) continue;
+    if (metrics > 0) line2.push(<span className="row-sep">.</span>);
+    line2.push(<span className="row-metric">{part}</span>);
+    metrics++;
+  }
+
+  const line3: JsxChild[] = [
+    <span className="row-date">{formatDateTime(p.createdAt)}</span>,
+    <span className="row-sep">.</span>,
+    <span className="row-id">{p.id}</span>,
+  ];
+
+  return (
+    <div
+      className={rowClass(p.kindClass, p.active)}
+      onClick={p.onSelect}
+      onContextMenu={(e: MouseEvent) => {
+        e.preventDefault();
+        p.onContextMenu?.(e);
+      }}
+    >
+      <div className="row-l1">{line1}</div>
+      {line2.length > 0 ? <div className="row-l2">{line2}</div> : null}
+      <div className="row-l3">{line3}</div>
+    </div>
+  );
+}
+
 export function Sidebar(p: SidebarProps) {
   return (
     <aside id="sidebar">
@@ -69,29 +182,23 @@ export function Sidebar(p: SidebarProps) {
       <div id="session-list">
         {p.sessions.map((s) => {
           const isWorking = p.workingMap.get(s.id) ?? false;
-          const nClients = s.connectedClients;
           return (
-            <div
+            <SidebarRow
               key={s.id}
-              className={`session-item${s.id === p.activeSessionId ? " active" : ""}`}
-              onClick={() => p.onSwitch(s.id)}
-              onContextMenu={(e: MouseEvent) => {
-                e.preventDefault();
-                p.onSessionMenu(e, s);
-              }}
-            >
-              <div className="session-name">
-                {/* An explicit title wins; otherwise the display name is the profile. */}
-                <span className="session-profile-badge">{s.title || s.profile || "default"}</span>
-                {s.model ?? "?"}
-              </div>
-              <div className="session-meta">
-                {formatTime(s.createdAt)}
-                {nClients > 0 ? ` · ${nClients} client${nClients > 1 ? "s" : ""}` : ""}
-              </div>
-              {isWorking ? (
-                <span className="session-working-indicator">
-                  <span className="session-spinner"></span>
+              kindClass="session-item"
+              active={s.id === p.activeSessionId}
+              id={s.id}
+              model={s.model}
+              displayName={s.title || s.profile}
+              status={isWorking ? "working" : "idle"}
+              spinner={isWorking}
+              ctxUsed={s.ctxUsed}
+              ctxTotal={s.ctxTotal}
+              messageCount={s.userMessageCount}
+              connectedClients={s.connectedClients}
+              createdAt={s.createdAt}
+              action={
+                isWorking ? (
                   <button
                     className="session-cancel-btn"
                     title="Cancel"
@@ -102,9 +209,11 @@ export function Sidebar(p: SidebarProps) {
                   >
                     Cancel
                   </button>
-                </span>
-              ) : null}
-            </div>
+                ) : null
+              }
+              onSelect={() => p.onSwitch(s.id)}
+              onContextMenu={(e) => p.onSessionMenu(e, s)}
+            />
           );
         })}
       </div>
@@ -122,42 +231,35 @@ export function Sidebar(p: SidebarProps) {
           </div>
         ) : (
           p.logs.map((log) => (
-            <div
+            <SidebarRow
               key={log.id}
-              className={`log-item${log.id === p.activeLogId ? " active" : ""}`}
-              onClick={() => p.onViewLog(log.id)}
-              onContextMenu={(e: MouseEvent) => {
-                e.preventDefault();
-                p.onLogMenu(e, log.id);
-              }}
-            >
-              <div className="log-name">{shortId(log.id)}</div>
-              <div className="log-meta">
-                <span>
-                  {formatTime(log.lastActivityAt)} ·{" "}
-                  {log.messageCount > 0
-                    ? `${log.messageCount} msg${log.messageCount > 1 ? "s" : ""}`
-                    : "empty"}
-                  {log.state && log.state !== "idle" ? (
-                    <span className={`log-state-badge log-state-${log.state}`}>
-                      {log.state.replace(/_/g, " ")}
-                    </span>
-                  ) : null}
-                </span>
-                <div className="log-actions">
-                  <button
-                    className="log-continue-btn"
-                    title="Continue this session (keeps its session id)"
-                    onClick={(e: MouseEvent) => {
-                      e.stopPropagation();
-                      p.onContinueLog(log.id);
-                    }}
-                  >
-                    Continue
-                  </button>
-                </div>
-              </div>
-            </div>
+              kindClass="log-item"
+              active={log.id === p.activeLogId}
+              id={log.id}
+              model={log.model}
+              displayName={log.profile}
+              // Derived index state badges the row (idle stays unbadged).
+              status={log.state && log.state !== "idle" ? log.state.replace(/_/g, " ") : null}
+              statusClass={log.state ? `log-state-${log.state}` : undefined}
+              ctxUsed={log.ctxUsed}
+              ctxTotal={log.ctxTotal}
+              messageCount={log.messageCount}
+              createdAt={log.createdAt}
+              action={
+                <button
+                  className="log-continue-btn"
+                  title="Continue this session (keeps its session id)"
+                  onClick={(e: MouseEvent) => {
+                    e.stopPropagation();
+                    p.onContinueLog(log.id);
+                  }}
+                >
+                  Continue
+                </button>
+              }
+              onSelect={() => p.onViewLog(log.id)}
+              onContextMenu={(e) => p.onLogMenu(e, log.id)}
+            />
           ))
         )}
       </div>

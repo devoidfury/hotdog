@@ -4,6 +4,7 @@
 
 import crypto from "node:crypto";
 import { HOOKS, createHooks } from "@core/hooks.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { indexSessionModel } from "@core/session/session-index.ts";
 import type { TurnLanes } from "@core/session/turn-lanes.ts";
@@ -42,6 +43,13 @@ interface SessionMetadata {
   questionStrategy: string;
   questionTimeoutSecs: number;
   userMessageCount: number;
+  /**
+   * Last token_usage snapshot (per-call totalTokens + contextWindow), the
+   * same numbers the chat token bubble shows. Cached for the sidebar's ctx
+   * segment; absent until the session's first usage event.
+   */
+  ctxUsed?: number;
+  ctxTotal?: number;
 }
 
 interface CreateSessionOptions {
@@ -311,6 +319,7 @@ export class SessionRegistry {
     });
 
     this.#trackModelChanges(actualSessionId);
+    this.#trackUsage(actualSessionId);
     return { sessionId: actualSessionId, agent };
   }
 
@@ -353,6 +362,7 @@ export class SessionRegistry {
     });
 
     this.#trackModelChanges(newSessionId);
+    this.#trackUsage(newSessionId);
     return { sessionId: newSessionId, agent };
   }
 
@@ -363,6 +373,25 @@ export class SessionRegistry {
       const meta = this.#metadata.get(sessionId);
       if (meta) meta.model = newModel;
       await indexSessionModel(sessionId, newModel);
+    });
+  }
+
+  /**
+   * Cache the last token_usage snapshot per session for the sidebar's ctx
+   * segment (used = the call's totalTokens -- the number the chat bubble
+   * shows; total = contextWindow). Subscribed on the session event bus, so
+   * cold-resume replays seed it too; deleteSession drops the subscription
+   * with the session.
+   */
+  #trackUsage(sessionId: string): void {
+    this.#sessionManager.onSessionEvents(sessionId, (event) => {
+      if (event.type !== OUTPUT_EVENT.TOKEN_USAGE) return;
+      const meta = this.#metadata.get(sessionId);
+      if (!meta) return;
+      meta.ctxUsed = event.totalTokens || 0;
+      if (typeof event.contextWindow === "number" && Number.isFinite(event.contextWindow)) {
+        meta.ctxTotal = event.contextWindow;
+      }
     });
   }
 
@@ -385,6 +414,8 @@ export class SessionRegistry {
     lastActivityAt: number;
     connectedClients: number;
     userMessageCount: number;
+    ctxUsed?: number;
+    ctxTotal?: number;
   }> {
     const result: Array<{
       id: string;
@@ -395,6 +426,8 @@ export class SessionRegistry {
       lastActivityAt: number;
       connectedClients: number;
       userMessageCount: number;
+      ctxUsed?: number;
+      ctxTotal?: number;
     }> = [];
     for (const [id, meta] of this.#metadata) {
       const agent = this.#sessionManager.getAgentBySessionId(id);
@@ -407,6 +440,8 @@ export class SessionRegistry {
         lastActivityAt: meta.lastActivityAt,
         connectedClients: meta.connectedClients,
         userMessageCount: meta.userMessageCount,
+        ...(meta.ctxUsed !== undefined ? { ctxUsed: meta.ctxUsed } : {}),
+        ...(meta.ctxTotal !== undefined ? { ctxTotal: meta.ctxTotal } : {}),
       });
     }
     return result;

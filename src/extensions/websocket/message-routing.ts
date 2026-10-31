@@ -561,10 +561,20 @@ export async function routeMessage(
             .filter((log) => !activeIds.has(log.id))
             .map((log) => {
               // The index row carries the session's derived state (parked,
-              // interrupted, ...) so the sidebar can badge it; missing row
-              // (fresh log, unreconciled) simply has no state.
+              // interrupted, ...) plus the model/profile/ctx the log attests,
+              // so the sidebar row grammar needs no log scan; missing row
+              // (fresh log, unreconciled) simply has no state, and legacy
+              // logs attest no model/profile/ctx (segments omitted).
               const row = getSessionRow(log.id);
-              return row ? { ...log, state: row.state } : log;
+              if (!row) return log;
+              return {
+                ...log,
+                state: row.state,
+                ...(row.model ? { model: row.model } : {}),
+                ...(row.profile ? { profile: row.profile } : {}),
+                ...(row.ctx_used != null ? { ctxUsed: row.ctx_used } : {}),
+                ...(row.ctx_total != null ? { ctxTotal: row.ctx_total } : {}),
+              };
             });
           SessionRegistry.sendSafe(ws, {
             type: S2C.LOGS_LISTED,

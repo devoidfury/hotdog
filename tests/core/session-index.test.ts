@@ -7,6 +7,7 @@
 // its source of record is the resume_attempt record in the log.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
@@ -19,6 +20,8 @@ import {
   syncSessionFromLog,
   getSessionRow,
   deriveSessionState,
+  deriveCtxFromLog,
+  indexTokenUsage,
   indexToolStarted,
   indexQuestionAsked,
   indexToolResult,
@@ -319,3 +322,110 @@ describe("resume_attempt replay", () => {
 function readSessionEntriesSync(lines: string[]): LogEntry[] {
   return lines.map((l) => JSON.parse(l) as LogEntry);
 }
+
+// ── ctx columns (sidebar row grammar) ───────────────────────────────────────
+
+describe("ctx columns", () => {
+  it("rebuild derives ctx_used/ctx_total from the LAST token_usage record", async () => {
+    const sid = fixtureLog(uniqueId("ctx"), [
+      line({ source: LOG_SOURCE.SESSION_START, content: "", model: "ai365/qwen3.8", profile: "manager" }),
+      line({ source: LOG_SOURCE.INPUT, content: "hi" }),
+      line({ source: LOG_SOURCE.TOKEN_USAGE, content: "", totalTokens: 900, contextWindow: 131072 }),
+      line({ source: LOG_SOURCE.LLM, content: "yo" }),
+      line({ source: LOG_SOURCE.TOKEN_USAGE, content: "", totalTokens: 69000, contextWindow: 262144 }),
+    ]);
+    const row = await syncSessionFromLog(sid);
+    expect(row?.ctx_used).toBe(69000);
+    expect(row?.ctx_total).toBe(262144);
+    // The header records keep attesting model/profile through the same read.
+    expect(row?.model).toBe("ai365/qwen3.8");
+    expect(row?.profile).toBe("manager");
+  });
+
+  it("a legacy log attests no ctx: columns stay null (segments omitted)", async () => {
+    const sid = fixtureLog(uniqueId("ctx-legacy"), [line({ content: "ancient" })]);
+    const row = await syncSessionFromLog(sid);
+    expect(row?.ctx_used).toBeNull();
+    expect(row?.ctx_total).toBeNull();
+  });
+
+  it("a rebuild re-derives ctx outright: a truncating rewind clears stale values", async () => {
+    const sid = fixtureLog(uniqueId("ctx-rewind"), [
+      line({ content: "a" }),
+      line({ source: LOG_SOURCE.TOKEN_USAGE, content: "", totalTokens: 5000, contextWindow: 65536 }),
+    ]);
+    await syncSessionFromLog(sid);
+    expect(getSessionRow(sid)?.ctx_used).toBe(5000);
+
+    // Rewind-style rewrite: the ctx record no longer exists in the log.
+    fixtureLog(sid, [line({ content: "a" })]);
+    await syncSessionFromLog(sid);
+    expect(getSessionRow(sid)?.ctx_used).toBeNull();
+    expect(getSessionRow(sid)?.ctx_total).toBeNull();
+  });
+
+  it("indexTokenUsage mirrors absolute values at the writer commit point", async () => {
+    const sid = fixtureLog(uniqueId("ctx-mirror"), [line({ content: "hi" })]);
+    await syncSessionFromLog(sid);
+    await indexTokenUsage(sid, 424242, 1048576);
+    expect(getSessionRow(sid)?.ctx_used).toBe(424242);
+    expect(getSessionRow(sid)?.ctx_total).toBe(1048576);
+    await indexTokenUsage(sid, 10, 20);
+    expect(getSessionRow(sid)?.ctx_used).toBe(10);
+    expect(getSessionRow(sid)?.ctx_total).toBe(20);
+  });
+
+  it("indexTokenUsage on a missing row self-heals via the log sync", async () => {
+    const sid = fixtureLog(uniqueId("ctx-norow"), [
+      line({ content: "hi" }),
+      line({ source: LOG_SOURCE.TOKEN_USAGE, content: "", totalTokens: 777, contextWindow: 888 }),
+    ]);
+    await indexTokenUsage(sid, 777, 888);
+    const row = getSessionRow(sid);
+    expect(row?.ctx_used).toBe(777);
+    expect(row?.ctx_total).toBe(888);
+  });
+
+  it("deriveCtxFromLog ignores non-usage sources and zero/absent windows", () => {
+    const usage = (over: Partial<LogEntry>): LogEntry => ({
+      ts: "2026-01-01T00:00:00.000Z",
+      session_id: "s",
+      source: LOG_SOURCE.TOKEN_USAGE,
+      content: "",
+      ...over,
+    });
+    expect(
+      deriveCtxFromLog([usage({ totalTokens: 50, contextWindow: 1000 })]),
+    ).toEqual({ ctxUsed: 50, ctxTotal: 1000 });
+    expect(
+      deriveCtxFromLog([usage({ totalTokens: 50, contextWindow: 0 })]),
+    ).toEqual({ ctxUsed: 50, ctxTotal: null });
+    expect(deriveCtxFromLog([{ ...usage({}), source: LOG_SOURCE.INPUT }])).toEqual({ ctxUsed: null, ctxTotal: null });
+    expect(deriveCtxFromLog([])).toEqual({ ctxUsed: null, ctxTotal: null });
+  });
+
+  it("an index from the pre-ctx schema gains the columns on open (row preserved)", () => {
+    closeSessionIndex();
+    rmSync(sessionIndexPath(), { force: true });
+    rmSync(`${sessionIndexPath()}-wal`, { force: true });
+    rmSync(`${sessionIndexPath()}-shm`, { force: true });
+    const legacy = new Database(sessionIndexPath());
+    try {
+      legacy.exec(`CREATE TABLE sessions (
+        session_id TEXT PRIMARY KEY, path TEXT NOT NULL, updated_at INTEGER NOT NULL,
+        state TEXT NOT NULL, last_seq INTEGER NOT NULL, size INTEGER NOT NULL, mtime REAL NOT NULL,
+        resume_count INTEGER NOT NULL DEFAULT 0, title TEXT, profile TEXT, model TEXT)`);
+      legacy.run(
+        "INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ["legacy-row", "/p", 1, SESSION_STATE.IDLE, 0, 1, 1.0],
+      );
+    } finally {
+      legacy.close();
+    }
+    const row = getSessionRow("legacy-row"); // opens + migrates on first use
+    expect(row).not.toBeNull();
+    expect(row?.state).toBe(SESSION_STATE.IDLE);
+    expect(row?.ctx_used).toBeNull();
+    expect(row?.ctx_total).toBeNull();
+  });
+});

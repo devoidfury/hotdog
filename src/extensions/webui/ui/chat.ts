@@ -201,6 +201,9 @@ interface SessionsMessage {
     profile?: string;
     title?: string | null;
     userMessageCount?: number;
+    /** Last token_usage snapshot cached server-side (sidebar ctx segment). */
+    ctxUsed?: number;
+    ctxTotal?: number;
   }>;
 }
 
@@ -214,6 +217,11 @@ interface LogsListedMessage {
     /** Derived index state (idle/awaiting_question/interrupted/parked);
      *  absent when the log has no reconciled row yet. */
     state?: string;
+    /** Index-attested model/profile + last usage (absent on legacy logs). */
+    model?: string;
+    profile?: string;
+    ctxUsed?: number;
+    ctxTotal?: number;
   }>;
 }
 

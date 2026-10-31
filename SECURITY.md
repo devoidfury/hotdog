@@ -18,17 +18,20 @@ out-of-process executors, not inside the agent process:
   the "keys never enter" property is exactly as switched-off as it is inline.
 - Session-log records are physically unwritable by tool-executed code when
   the fence is up and the sessions directory lives outside the workspace
-  roots. With the fence down (`toolExec: "inline"`, a failed probe, macOS) or
-  a sessions dir inside a jail's rw roots, the records are ordinary files and
+  roots. With the fence down (`toolExec: "inline"`, a failed probe) or a
+  sessions dir inside a jail's rw roots, the records are ordinary files and
   only the workspace checks stand between tool code and them.
 - Workspace roots and deny patterns become OS-enforced for tagged tools where
-  the platform fence works: on Linux with bubblewrap (`execFence: "probe"`),
+  the platform fence works (`execFence: "probe"`): on Linux with bubblewrap,
   each entry gets a fresh tmpfs root with read-only system dirs and read-write
   ONLY the session's workspace roots, inside its own PID/IPC/UTS namespaces
-  (jailed code sees and can signal no host process) -- no `$HOME`, no config
-  chain, no sibling session roots. `hotdog info` reports the posture
-  (`fence: bwrap`, `off`, or `none -- probe failed`); the plane never fails
-  open silently.
+  (jailed code sees and can signal no host process). On macOS with seatbelt
+  (`sandbox-exec`), each entry gets an allowlist profile: read-only system
+  dirs, read-write ONLY the session's workspace roots plus its scratch dir,
+  network shared -- strictly weaker than bwrap (see the list below). Both:
+  no `$HOME`, no config chain, no sibling session roots. `hotdog info`
+  reports the posture (`fence: bwrap`, `fence: seatbelt`, `off`, or
+  `none -- probe failed`); the plane never fails open silently.
 - Per-session jails: cross-workspace reads via `bash` are structurally
   impossible for tagged tools when the fence is up.
 
@@ -38,9 +41,20 @@ What the plane does NOT buy:
 - In-fence abuse: deleting the workspace, egress over the permitted network,
   or exfiltration through the model channel itself.
 - Allowlist quality is policy: anything bound into the jail is readable.
-- `toolExec: "inline"`, a failed probe, or macOS/Windows (no jail backend yet):
-  the plane is pooled but unfenced, and says so. The general advice stands --
-  a dedicated host, VM, or container is recommended.
+- `toolExec: "inline"` or a failed probe: the plane is pooled but unfenced,
+  and says so. The general advice stands -- a dedicated host, VM, or
+  container is recommended.
+- macOS seatbelt is weaker than bubblewrap by construction: there are no
+  PID/IPC/UTS namespaces, so host pids remain visible and `sysctl-read`
+  (granted; bun and libc need it) leaks process info. The profile denies
+  `process-signal` explicitly, so jailed code cannot kill or signal host
+  processes, but process-info secrecy is not the equivalent of a private
+  namespace. `/usr/bin/sandbox-exec` is a deprecated Apple shim: the backend
+  is probe-guarded (two legs prove mediation is live before any fence is
+  claimed), and its disappearance means pooled-but-unfenced, reported
+  loudly, never silent.
+- Windows has no jail backend: pooled but unfenced there, and the status
+  line says so.
 
 Disclosure shift: for tagged tools behind a working fence, the workspace/deny
 guarantee moves from advisory to enforced. A jail or plane escape is a

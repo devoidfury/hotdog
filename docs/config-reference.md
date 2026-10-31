@@ -380,24 +380,28 @@ What the worker plane does once it is on:
 - **Resolution:** CLI > config > default
 
 Whether pooled executor entries are wrapped in an OS jail plan when the platform
-supports it. The backend is **bubblewrap** (Linux): a probed plan gives the entry
-a fresh tmpfs root, read-only system directories, and read-write access to ONLY
-the session's workspace roots plus a private scratch dir — no `$HOME`, no hotdog
-config files, no sibling session roots. The hotdog checkout itself rides the jail
+supports it. The backend is **bubblewrap** on Linux and **seatbelt** (`/usr/bin/sandbox-exec`)
+on macOS: a probed plan gives the entry read-only system directories and read-write
+access to ONLY the session's workspace roots plus a private scratch dir — no `$HOME`,
+no hotdog config files, no sibling session roots. On Linux it is a fresh tmpfs root in
+its own PID/IPC/UTS namespaces; on macOS it is an SBPL profile with no namespaces (host
+pids visible, `sysctl-read` leaks process info; `process-signal` is denied so tool code
+cannot kill host processes — process-info secrecy, not namespace isolation; see
+SECURITY.md). The hotdog checkout itself rides the jail
 read-only (the pooled runner imports it): its `.git` is readable by tool code but
 never writable, except when the session's workspace roots include the repo.
-The capability probe runs once per process; when bwrap is missing or the probe fails,
+The capability probe runs once per process; when the backend is missing or the probe fails,
 entries spawn plain and the posture says so (`worker (fence: none -- probe failed)`).
-macOS/Windows have no jail backend yet: the plane runs pooled but unfenced there,
-and the status line shows it. Use `off` to skip the probe (dev loop, CI).
+Windows has no jail backend: the plane runs pooled but unfenced there, and the status line
+shows it. Use `off` to skip the probe (dev loop, CI).
 
 The posture quadrants:
 
 | `toolExec` | `execFence` | Behavior |
 |---|---|---|
-| `worker` | `probe` (probe good) | Pooled executors, jailed per (session, class). Shipping default on Linux with bwrap. |
+| `worker` | `probe` (probe good) | Pooled executors, jailed per (session, class). Shipping default on Linux (bwrap) and macOS (seatbelt). |
 | `worker` | `probe` (probe fails) | Pooled executors, plain spawn. Crash isolation + credential-scrubbed plane (while `envScrubbing` is on) + log integrity remain; the fence is flagged absent. |
-| `worker` | `off` | Pooled executors, plain spawn, no probe. Dev loop (macOS), CI. |
+| `worker` | `off` | Pooled executors, plain spawn, no probe. Dev loop, CI. |
 | `inline` | any | Everything in-process, the pre-plane code path. No pool exists. `inline (unfenced)`. |
 
 ```json

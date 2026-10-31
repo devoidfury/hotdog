@@ -2,7 +2,7 @@
 //
 // Two consumers share one probe-and-degrade contract:
 //
-// - The tool exec plane (supervisor side): `planFor()` builds the bwrap prefix
+// - The tool exec plane (supervisor side): `planFor()` builds the jail prefix
 //   that wraps a pooled executor -- tmpfs root, ro system dirs, rw ONLY the
 //   session's workspace roots plus a scratch dir, no $HOME, no config chain,
 //   no sibling session roots. The broker prepends it verbatim at spawn.
@@ -10,8 +10,8 @@
 //   `hiddenRepoPaths()` for grading runs, where the harness may read the
 //   config chain by design (so those dirs cannot be hidden from its jail).
 //
-// Contract everywhere: if bwrap exists AND a real minimal-sandbox probe
-// succeeds, spawns get the allowlisted filesystem; otherwise the caller
+// Contract everywhere: if the backend binary exists AND a real minimal-sandbox
+// probe succeeds, spawns get the allowlisted filesystem; otherwise the caller
 // spawns plain and REPORTS the fence as absent. A security posture must
 // never fail open silently.
 //
@@ -20,11 +20,15 @@
 // there means those hosts run unfenced, flagged. Network stays shared --
 // `--unshare-net` is reserved for the future `no-net` class, not a v1 policy.
 //
-// The shape is deliberately backend-agnostic: a future seatbelt (macOS) or
-// container backend implements the same plan/probe surface.
+// Two backends share this surface: bubblewrap on Linux (built here) and
+// seatbelt on macOS (`exec-plan-seatbelt.ts`, sandbox-exec profiles --
+// strictly weaker guarantees, documented in SECURITY.md). `planFor()` and
+// `execFenceBackend()` dispatch on the platform; probe-and-degrade semantics
+// are identical across both.
 
 import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { probeSeatbelt, seatbeltPlan } from "./exec-plan-seatbelt.ts";
 
 const SYS_DIRS = ["/usr", "/bin", "/sbin", "/lib", "/lib64"];
 // Curated /etc: DNS + TLS + name resolution + locale + shell startup, so
@@ -160,10 +164,10 @@ export function hiddenRepoPaths(repoRoot: string): string[] {
 // ── Plane plan ────────────────────────────────
 
 export interface PlanePlanResult {
-  /** Full spawn argv (bwrap ... -- command args), or null when the fence is unavailable. */
+  /** Full spawn argv (jail binary + plan + command), or null when the fence is unavailable. */
   prefixArgv: string[] | null;
   /** Backend the probe allowed, mirrored into the status line; null = plain spawn. */
-  probe: "bwrap" | null;
+  probe: "bwrap" | "seatbelt" | null;
 }
 
 /**
@@ -191,9 +195,19 @@ export function planFor(opts: {
   args: string[];
   execPath?: string;
   repoRoot?: string;
-  /** Override the bwrap binary (undefined = probe, null = force plain spawn). */
+  /** Override the bwrap binary (undefined = probe, null = force plain spawn).
+   *  Seatbelt's binary is Apple's fixed system shim, so on darwin only the
+   *  null meaning applies: plain spawn, no probe. */
   binary?: string | null;
 }): PlanePlanResult {
+  // Platform dispatch. The bwrap path below stays byte-identical to the
+  // linux behavior this file has always had; seatbelt (probe-gated, pure
+  // profile generation otherwise) lives in exec-plan-seatbelt.ts.
+  if (process.platform === "darwin") {
+    if (opts.binary === null) return { prefixArgv: null, probe: null };
+    if (probeSeatbelt() === null) return { prefixArgv: null, probe: null };
+    return seatbeltPlan(opts);
+  }
   const binary = opts.binary === undefined ? bwrapBinary() : opts.binary;
   if (!binary) return { prefixArgv: null, probe: null };
   const repoRoot = opts.repoRoot ?? process.cwd();
@@ -254,8 +268,9 @@ export function bwrapAvailable(force = false): boolean {
   return bwrapBinary(force) !== null;
 }
 
-/** Status-line backend label for a probed fence: "bwrap" when the probe passes. */
-export function execFenceBackend(force = false): "bwrap" | null {
+/** Status-line backend label for a probed fence: the platform backend whose probe passes ("bwrap" Linux, "seatbelt" macOS), null = no fence. */
+export function execFenceBackend(force = false): "bwrap" | "seatbelt" | null {
+  if (process.platform === "darwin") return probeSeatbelt(force) ? "seatbelt" : null;
   return bwrapBinary(force) ? "bwrap" : null;
 }
 

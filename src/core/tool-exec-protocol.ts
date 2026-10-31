@@ -99,7 +99,7 @@ export interface ExecutorReplacedError {
 export interface WireFence {
   /** Stable identity of the exact prefix; mismatch replaces the entry. */
   id: string;
-  /** Full spawn argv, bwrap flags AND the wrapped command (isolation is argv). */
+  /** Full spawn argv, backend flags (bwrap or seatbelt) AND the wrapped command (isolation is argv). */
   prefix: string[];
 }
 

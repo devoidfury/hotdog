@@ -2854,7 +2854,7 @@ describe("tool-exec posture on sessionCreated", () => {
     );
     // Probe policy reports the probe outcome -- jail or honest failure, never silence.
     expect((await attach({ toolExec: "worker", execFence: "probe" })).toolExec).toMatch(
-      /^worker \(fence: (bwrap|none -- probe failed)\)$/,
+      /^worker \(fence: (bwrap|seatbelt|none -- probe failed)\)$/,
     );
   });
 
@@ -2865,7 +2865,7 @@ describe("tool-exec posture on sessionCreated", () => {
     const probe = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "worker", execFence: "probe" } });
     expect(plain.toolExecLabel).toBe("inline (unfenced)");
     expect(off.toolExecLabel).toBe("worker (fence: off)");
-    expect(probe.toolExecLabel).toMatch(/^worker \(fence: (bwrap|none -- probe failed)\)$/);
+    expect(probe.toolExecLabel).toMatch(/^worker \(fence: (bwrap|seatbelt|none -- probe failed)\)$/);
     plain.stopCleanupLoop();
     off.stopCleanupLoop();
     probe.stopCleanupLoop();

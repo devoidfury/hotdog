@@ -73,8 +73,9 @@ export function toolExecPlaneSettings(resolved: Record<string, unknown>): ToolEx
 
 /**
  * The fence display for a resolved bag: `off` never probes; `probe` runs the
- * cached bwrap probe (once per process). A worker plane must never claim a
- * fence it does not have, and never hide one it does.
+ * cached platform probe (bwrap or seatbelt, once per process). A worker
+ * plane must never claim a fence it does not have, and never hide one it
+ * does.
  */
 export function execFenceDisplay(resolved: Record<string, unknown>): string {
   const { mode, fence } = toolExecPlaneSettings(resolved);
@@ -91,7 +92,7 @@ export function toolExecModeLabel(
   fenceDisplay = "none",
 ): string {
   const { mode } = toolExecPlaneSettings(resolved);
-  // "bwrap" when the probe passed; "off" when policy says plain spawn;
+  // "bwrap"/"seatbelt" when the probe passed; "off" when policy says plain spawn;
   // "none -- probe failed" when policy wants a jail the platform cannot give.
   const label =
     mode === "inline" ? "inline (unfenced)" : `worker (fence: ${fenceDisplay})`;
@@ -172,7 +173,7 @@ function sanitizeForPath(s: string): string {
 
 /**
  * The built-in planner: `off` fences nothing (never probes); `probe` pays the
- * cached bwrap probe on first use, then memoizes per (session, class, roots)
+ * cached platform probe (bwrap or seatbelt) on first use, then memoizes per (session, class, roots)
  * -- the scratch dir is created once and lives under the OS tmp dir (entry
  * death does not delete it; the tmp policy does).
  */
@@ -257,8 +258,8 @@ export interface ToolExecBrokerOptions {
   envScrubExtra?: readonly string[];
   /**
    * Test seam replacing the built-in planner: any prefix argv can stand in
-   * for bwrap (e.g. `env VAR=...`) so the fence plumbing is tested on hosts
-   * without it. `null` disables the fence, like `fence: "off"`.
+   * for the jail backend (e.g. `env VAR=...`) so the fence plumbing is tested
+   * on hosts without it. `null` disables the fence, like `fence: "off"`.
    */
   fencePlan?: FencePlanner | null;
 }

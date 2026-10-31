@@ -795,8 +795,8 @@ function App() {
   const activeLogId = activeLogIdAtom();
   const sessionId = chat?.sessionIdAtom() ?? null;
   const title = chat?.sessionTitleAtom() ?? null;
-  // Tool-exec plane posture: "worker (fence: bwrap | off | none -- probe
-  // failed)" / "inline (unfenced)", plus anything carrying [degraded: ...].
+  // Tool-exec plane posture: "worker (fence: bwrap | seatbelt | off | none --
+  // probe failed)" / "inline (unfenced)", plus anything carrying [degraded: ...].
   const toolExec = chat?.toolExecAtom() ?? "";
   const menu = contextMenuAtom();
   const completionMenu = completionAtom();

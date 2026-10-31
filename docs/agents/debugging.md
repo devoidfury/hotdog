@@ -102,3 +102,31 @@ Each line shows: `hookName — N/M (source) — duration — return summary`
 - For `runHookPipeline` hooks (e.g., `input`), an additional "stopped at handler N/M" line appears when the chain terminates early
 
 **Hooks traced:** All hooks except the internal `log` hook. Trace output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug` (or `HOTDOG_LOG_LEVEL=info` with `--loud`).
+
+## Seatbelt (macOS) Jail Discovery
+
+The exec plane's macOS fence is `sandbox-exec` (seatbelt). When a fenced
+session misbehaves on a mac, the kernel's seatbelt denials are the ground
+truth:
+
+```bash
+log show --predicate 'process == "sandboxd" or sender == "Sandbox"' --last 1m | grep -E "deny|violation"
+```
+
+Two readings from the owner's host (2026-10-31) that explain most surprises:
+
+- **An execvp "Operation not permitted" under `(deny default)` proves mediation
+  is LIVE.** sandbox-exec is not inert on that platform, so a profile that
+  forgets `(allow process-exec* ...)` fails every spawn outright. This is the
+  good failure: loud, immediate, and the probe catches it (posture drops to
+  `none -- probe failed`).
+- **Hangs on name resolution (especially `.local` hostnames) point at missing
+  mach-lookup allows**, not at the network: Bonjour/mDNS lookups go through
+  `com.apple.dnssd.service` mach, and a denied lookup stalls until timeout
+  rather than erroring. The plan allows dnssd (plus logd, the notification
+  center and its shm, lsd/cfprefsd, tccd) precisely to kill these hangs.
+
+Posture checks without guessing: `bun bin/hotdog info` shows
+`worker (fence: seatbelt)` when the two-leg probe passed; the live jail
+assertions are `bun test tests/utils/exec-plan-seatbelt-live.test.ts` (macOS
+only, skipped elsewhere).

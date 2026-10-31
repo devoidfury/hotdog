@@ -315,8 +315,9 @@ function printInfoJson(
   providerHealthMap: Map<string, { down: boolean; reason: string | null }> = new Map(),
 ): number {
   // Tool plane posture in the JSON mirror of the text line above: the fence
-  // is the probe result -- "bwrap" jailed, "off" by policy, "none" wanted but
-  // unavailable (probe failed; the text line carries that wording).
+  // is the probe result -- "bwrap"/"seatbelt" jailed, "off" by policy,
+  // "none" wanted but unavailable (probe failed; the text line carries that
+  // wording).
   const plane = toolExecPlaneSettings(resolved);
   const planeDegraded = sharedToolExecDegraded();
   const fenceDisplay = execFenceDisplay(resolved);
@@ -331,7 +332,7 @@ function printInfoJson(
       tools_exec: plane.mode,
       tools_fence:
         plane.mode === "worker"
-          ? fenceDisplay === "bwrap" || fenceDisplay === "off"
+          ? fenceDisplay === "bwrap" || fenceDisplay === "seatbelt" || fenceDisplay === "off"
             ? fenceDisplay
             : "none"
           : null,

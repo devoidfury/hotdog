@@ -328,7 +328,7 @@ export interface ResolvedConfig {
   uploadLimits: UploadLimits;
   /** Execution plane for tools tagged `execution: "worker"`. */
   toolExec?: "worker" | "inline";
-  /** Fence policy for pooled executors: probe = jail when the platform supports it (bwrap), off = plain spawn. */
+  /** Fence policy for pooled executors: probe = jail when the platform supports it (bwrap on Linux, seatbelt on macOS), off = plain spawn. */
   execFence?: "off" | "probe";
   /** Directory for the cross-process lane slot ledger (taskLanesPerProvider is machine-wide when set). */
   taskLanesDir?: string;

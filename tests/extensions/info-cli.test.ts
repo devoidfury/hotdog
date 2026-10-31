@@ -918,10 +918,10 @@ describe("Info CLI - tool exec plane", () => {
     const run = await infoCliRunner({ resolved: { toolExec: "worker", execFence: "probe" } });
     const { exitCode, output } = await run("info");
     expect(exitCode).toBe(0);
-    // Environment-dependent by nature: "bwrap" where the probe passes,
-    // "none -- probe failed" where the platform has no working jail. What it
-    // must never be is silent or a false claim.
-    expect(output).toMatch(/Tools Exec:\s+worker \(fence: (bwrap|none -- probe failed)\)/);
+    // Environment-dependent by nature: "bwrap"/"seatbelt" where the probe
+    // passes, "none -- probe failed" where the platform has no working jail.
+    // What it must never be is silent or a false claim.
+    expect(output).toMatch(/Tools Exec:\s+worker \(fence: (bwrap|seatbelt|none -- probe failed)\)/);
   });
 
   it("reports fence off without probing", async () => {
@@ -958,9 +958,9 @@ describe("Info CLI - tool exec plane", () => {
     );
     const { output } = await run("info");
     const parsed = JSON.parse(output.trim());
-    // "bwrap" where the jail works, "none" where it does not; never "off"
-    // (that is policy, not capability).
-    expect(["bwrap", "none"]).toContain(parsed.config.tools_fence);
+    // "bwrap"/"seatbelt" where the jail works, "none" where it does not;
+    // never "off" (that is policy, not capability).
+    expect(["bwrap", "seatbelt", "none"]).toContain(parsed.config.tools_fence);
   });
 });
 

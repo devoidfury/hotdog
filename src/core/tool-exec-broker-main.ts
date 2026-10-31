@@ -3,9 +3,11 @@
 // credentials, no user-data access -- tool code lives only in pool entries
 // (`src/workers/tool-exec.ts`). Pool entries are keyed (sessionId, class);
 // an entry is either the supervisor's fence argv (`bwrap <plan> -- bun
-// <runner>`, prepended verbatim at spawnEntry()) or a plain `bun <runner>`,
-// because isolation is argv: the child adds no policy here, and the runner
-// can never tell fenced from unfenced -- same code, degraded path included.
+// <runner>` on Linux, `sandbox-exec -p <profile> /usr/bin/env ... bun
+// <runner>` on macOS; prepended verbatim at spawnEntry()) or a plain
+// `bun <runner>`, because isolation is argv: the child adds no policy here,
+// and the runner can never tell fenced from unfenced -- same code, degraded
+// path included.
 //
 // The client half (the `ToolExecBroker` stub the host imports, fence
 // planning, respawn accounting) lives in `tool-exec-broker.ts`; this module
@@ -263,7 +265,8 @@ function armIdle(entry: PoolEntry, key: string, state: BrokerState): void {
 
 function spawnEntry(key: string, state: BrokerState, fence?: WireFence): PoolEntry {
   // Isolation is argv: a fence is a complete spawn command computed
-  // supervisor-side (`bwrap <plan> -- bun <runner>`). Without one it is the
+  // supervisor-side (`bwrap <plan> -- bun <runner>`, or the seatbelt
+  // equivalent on macOS). Without one it is the
   // plain `bun <runner>`. The child adds no policy here, and the runner can
   // never tell fenced from unfenced -- same code, degraded path included.
   const [fenceCmd, ...fenceArgs] = fence?.prefix ?? [];

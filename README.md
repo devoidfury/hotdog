@@ -183,10 +183,11 @@ Boundaries that remain: the Bun runtime itself (install it from an official sour
 | Setup | Status |
 |-------|--------|
 | Linux | daily-driven, supported |
+| macos | supported (beta) |
+| Windows | untested; PRs to fix or confirm issues very welcome |
 | llama.cpp / llama-swap | daily-driven, supported |
 | vllm / ds4 / other OpenAI-compatible endpoints | supported |
 | Cloud providers | any chat-completions compatible endpoint; openrouter supported, others not personally exercised yet |
-| macOS / Windows | untested; PRs to fix or confirm issues very welcome |
 
 ## Development
 

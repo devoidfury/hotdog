@@ -836,6 +836,25 @@ describe("createWsServer", () => {
     expect(err.message).toBe("Session not found");
   });
 
+  it("SWITCH_SESSION to the already-attached session re-attaches (log-view exit)", async () => {
+    // The webui's "back to the live session" click sends switchSession with
+    // the id the socket is already on: the server must answer with a full
+    // re-attach burst (the client rebuilds its transcript from it), never
+    // treat the same-id switch as a no-op.
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
+
+    ws.messages.length = 0;
+    await wsServer.onMessage(ws, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId }));
+
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(created.sessionId).toBe(sessionId);
+    // Full replay, not a delta: the client cleared its log-view transcript.
+    expect(created.replayDelta).toBeUndefined();
+    expect(messageTypes(ws)).not.toContain(S2C.ERROR);
+    expect((ws as unknown as HotdogServerSocket).activeSessionId).toBe(sessionId);
+  });
+
   it("attaches to most recent session when multiple exist", async () => {
     const ws1 = await connectWithSession();
     const firstSessionId = (ws1 as unknown as HotdogServerSocket).activeSessionId!;

@@ -437,11 +437,15 @@ function startChat(): void {
       chat!.listProfiles();
       clearLogView();
     },
-    onSessionsUpdate: (sessions, activeSessionId) => {
+    onSessionsUpdate: (sessions) => {
+      // The display pointer must not move here: the socket stays attached to
+      // its session while a cold log is being browsed, so a sidebar refresh
+      // is never an attach. (It used to clear log view whenever any session
+      // was attached -- including the refresh that entering log view itself
+      // triggers -- which desynced the pointer from the transcript and made
+      // the live-row click read "same session, nothing to do".) Only the
+      // attach path (sessionCreated) and explicit exits leave log view.
       sessionsAtom(sessions);
-      if (activeSessionId && activeLogIdAtom()) {
-        clearLogView();
-      }
     },
     onLogsUpdate: (logs) => {
       logsAtom(logs);

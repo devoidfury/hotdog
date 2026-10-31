@@ -21,6 +21,9 @@ class DNode {
   parentNode: DNode | null = null;
   childNodes: DNode[] = [];
   ownerDocument: DDocument;
+  // Listener registry shared by elements and the document (app.tsx listens
+  // for document-level mousedown/keydown).
+  listeners = new Map<string, Set<Listener>>();
 
   constructor(doc: DDocument) {
     this.ownerDocument = doc;
@@ -28,6 +31,16 @@ class DNode {
 
   get firstChild(): DNode | null {
     return this.childNodes[0] ?? null;
+  }
+
+  addEventListener(type: string, listener: Listener): void {
+    let set = this.listeners.get(type);
+    if (!set) this.listeners.set(type, (set = new Set()));
+    set.add(listener);
+  }
+
+  removeEventListener(type: string, listener: Listener): void {
+    this.listeners.get(type)?.delete(listener);
   }
 
   get nextSibling(): DNode | null {
@@ -198,7 +211,6 @@ class DElement extends DNode {
   nodeType = 1;
   tagName: string;
   attributes = new Map<string, string>();
-  listeners = new Map<string, Set<Listener>>();
   classList: DClassList;
   dataset: Record<string, string>;
 
@@ -269,16 +281,6 @@ class DElement extends DNode {
     const lower = name.toLowerCase();
     this.attributes.delete(lower);
     if (lower === "class") this.classList = new DClassList(this);
-  }
-
-  addEventListener(type: string, listener: Listener): void {
-    let set = this.listeners.get(type);
-    if (!set) this.listeners.set(type, (set = new Set()));
-    set.add(listener);
-  }
-
-  removeEventListener(type: string, listener: Listener): void {
-    this.listeners.get(type)?.delete(listener);
   }
 
   dispatchEvent(ev: unknown): boolean {
@@ -591,6 +593,14 @@ class DDocument extends DNode {
 
   getElementById(id: string): DElement | null {
     return this.documentElement.querySelector(`#${id}`);
+  }
+
+  querySelector(sel: string): DElement | null {
+    return this.documentElement.querySelector(sel);
+  }
+
+  querySelectorAll(sel: string): DElement[] {
+    return this.documentElement.querySelectorAll(sel);
   }
 }
 

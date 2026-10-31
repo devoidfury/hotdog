@@ -31,12 +31,39 @@ export interface WebuiConfig {
   host?: string;
   apiKey?: string | null;
   sessionTokenTtlMin?: number;
+  /** Reverse proxy IP/CIDR whose x-forwarded-for the login throttle may believe. "" = off. */
+  trustedProxy?: string;
 }
 
 interface WebuiServerResult {
   server: ReturnType<typeof Bun.serve>;
   wsServer: ReturnType<typeof createWsServer>;
   authMiddleware: ReturnType<typeof createAuthMiddleware>;
+}
+
+/**
+ * Attach Bun's direct socket peer address to a login request as `req.ip`
+ * -- the field the login throttle resolves its key from (websocket/auth.ts,
+ * resolveClientIp).
+ *
+ * Version-specific reality, verified on the pinned bun 1.4.2: serve
+ * requests carry NO peer address of their own -- `req.ip` is never
+ * populated and `proxy: true` is a silent no-op (the 1.4 Rust rewrite
+ * dropped the Zig-era forwarded-header/PROXY-protocol mode; bun-types
+ * 1.4.3 declares neither). `server.requestIP(req)` is the only peer
+ * primitive, and unlike `x-forwarded-for` it cannot be spoofed by the
+ * client. This is a shim at the login route, not a server-wide
+ * forwarded-header mode.
+ *
+ * Guarded: an existing `req.ip` is never overwritten, so a future Bun
+ * that populates it natively wins automatically.
+ */
+export function attachSocketPeerIp(
+  req: Request,
+  peer: string | null | undefined,
+): void {
+  const keyed = req as Request & { ip?: string };
+  if (keyed.ip === undefined && peer) keyed.ip = peer;
 }
 
 export async function createWebuiServer(
@@ -46,7 +73,7 @@ export async function createWebuiServer(
   // own agent factory instead of the resolved config's default one.
   options: Pick<CreateWsServerOptions, "buildAgent"> = {},
 ): Promise<WebuiServerResult> {
-  const { port, host, apiKey, sessionTokenTtlMin } = config;
+  const { port, host, apiKey, sessionTokenTtlMin, trustedProxy } = config;
 
   // Frame bound for upgraded sockets, from the same resolved image ceiling
   // the upload path enforces (see wsMaxPayloadBytes).
@@ -59,9 +86,13 @@ export async function createWebuiServer(
     );
   }
 
+  // trustedProxy is validated by createAuthMiddleware at init: a malformed
+  // CIDR throws ExtensionError.ConfigFailed and fails the boot, rather than
+  // silently falling back to "trust nothing".
   const authMiddleware = createAuthMiddleware({
     validateApiKey: async (key: string) => apiKeyEquals(key, apiKey),
     tokenTtlMin: sessionTokenTtlMin,
+    trustedProxy,
   });
 
   const wsConfig = core.config?.websocket as
@@ -99,12 +130,35 @@ export async function createWebuiServer(
   // interfaces otherwise), and warn on non-loopback binds: the API key and
   // session tokens travel in cleartext over plain HTTP, so exposing the
   // WebUI beyond localhost puts a live agent behind a shared-key check only.
+  // The warning also names the throttle consequence of proxying WITHOUT
+  // webui.trustedProxy: one shared login bucket, and probing by any client
+  // escalates the lockout ladder (up to the 24h cap) for every user.
   const effectiveHost = host ?? "127.0.0.1";
   if (!isLoopbackHost(effectiveHost)) {
     logger.warn(
       `[webui] binding to non-loopback host '${effectiveHost}' -- ` +
         "reachable from other machines over unencrypted HTTP. " +
-        "Use a tunnel or a TLS reverse proxy for remote access.",
+        "Use a tunnel or a TLS reverse proxy for remote access. " +
+        "Behind a reverse proxy, set webui.trustedProxy to the proxy's IP " +
+        "or CIDR: without it every user shares one login throttle bucket " +
+        "and one probing client escalates the lockout ladder (up to 24h) " +
+        "for everyone.",
+    );
+  }
+
+  // With trustedProxy set, say what the server actually trusts and where
+  // the peer comes from, so the arrangement is readable in the startup
+  // log (bun 1.4.2 has no forwarded-header server mode to name instead).
+  if (trustedProxy && trustedProxy.trim() !== "") {
+    logger.info(
+      `[webui] trustedProxy '${trustedProxy}': login throttle trusts ` +
+        "x-forwarded-for only from that peer; the direct socket peer is " +
+        "read per request via Bun's server.requestIP() at the /login " +
+        "route (bun 1.4.2 exposes no req.ip and proxy:true is a no-op). " +
+        "The reverse proxy must be the only way to reach this port and " +
+        "must set X-Forwarded-For itself (e.g. nginx `proxy_set_header " +
+        "X-Forwarded-For $remote_addr`, replacing any client-supplied " +
+        "header).",
     );
   }
 
@@ -163,11 +217,20 @@ export async function createWebuiServer(
       },
     },
 
-    fetch: async function fetchHandler(req: Request): Promise<Response | void> {
+    fetch: async function fetchHandler(
+      req: Request,
+      server: Bun.Server<WebuiWsData>,
+    ): Promise<Response | void> {
       const url = new URL(req.url);
       const pathname = url.pathname;
 
       if (req.method === "POST" && pathname === "/login") {
+        // Give the throttle its key: bun 1.4.2 populates no req.ip on
+        // serve requests, so read the direct socket address from the
+        // server (see attachSocketPeerIp). Unconditional, not gated on
+        // trustedProxy -- with the real peer known, the legacy
+        // first-x-forwarded-for fallback can no longer be steered.
+        attachSocketPeerIp(req, server.requestIP(req)?.address);
         const loginResp = await authMiddleware.loginHandler(req);
         return loginResp;
       }

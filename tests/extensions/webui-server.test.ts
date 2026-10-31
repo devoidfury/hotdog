@@ -1,7 +1,8 @@
 // Tests for webui/server.ts — WebUI server creation and configuration.
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { createWebuiServer } from "@extensions/webui/server.ts";
+import net from "node:net";
+import { createWebuiServer, attachSocketPeerIp } from "@extensions/webui/server.ts";
 import { DDG_SOLVE_SERVICE } from "@extensions/web-search/index.ts";
 import { ServiceRegistry } from "@core/extensions/service-registry.ts";
 import { logger } from "@utils/logger.ts";
@@ -69,6 +70,13 @@ describe("createWebuiServer", () => {
       await expect(
         createWebuiServer(core, { port: 0, apiKey: undefined }),
       ).rejects.toThrow("No API key configured");
+    });
+
+    it("throws when trustedProxy is malformed (loud at boot, not silently off)", async () => {
+      const core = createMockCore();
+      await expect(
+        createWebuiServer(core, { port: 0, apiKey: "test-key", trustedProxy: "not-a-cidr" }),
+      ).rejects.toThrow(/webui\.trustedProxy/);
     });
   });
 
@@ -182,6 +190,10 @@ describe("createWebuiServer", () => {
         expect(result.server.hostname).toBe("0.0.0.0");
       });
       expect(warnings.some((w) => w.includes("non-loopback"))).toBe(true);
+      // The warning must name the consequence and the knob, not just the
+      // cleartext risk (H-11: shared throttle bucket / up-to-24h lockout
+      // behind a proxy without webui.trustedProxy).
+      expect(warnings.some((w) => w.includes("webui.trustedProxy"))).toBe(true);
     });
 
     it("does not warn for loopback hosts", async () => {
@@ -464,5 +476,243 @@ describe("createWebuiServer", () => {
       });
       expect(res.status).toBe(403);
     });
+  });
+});
+
+// ── Login peer attachment (bun 1.4.2 requestIP shim) ───────────────────────
+// bun 1.4.2 populates no req.ip on serve requests and proxy:true is a
+// no-op (Rust rewrite), so the webui reads the direct socket peer via
+// server.requestIP() at the /login boundary and attaches it as req.ip.
+// These tests pin the attachment helper and the end-to-end throttle
+// identity over real HTTP; the middleware-level resolution tables live in
+// websocket-auth.test.ts.
+
+describe("attachSocketPeerIp", () => {
+  it("attaches the socket peer as req.ip when req.ip is absent", () => {
+    const req = new Request("http://127.0.0.1/login");
+    attachSocketPeerIp(req, "127.0.0.1");
+    expect((req as Request & { ip?: string }).ip).toBe("127.0.0.1");
+  });
+
+  it("never overwrites an existing req.ip (a future native Bun ip wins)", () => {
+    const req = new Request("http://127.0.0.1/login");
+    Object.defineProperty(req, "ip", { value: "203.0.113.9" });
+    attachSocketPeerIp(req, "127.0.0.1");
+    expect((req as Request & { ip?: string }).ip).toBe("203.0.113.9");
+  });
+
+  it("is a no-op when the peer address is unavailable", () => {
+    const req = new Request("http://127.0.0.1/login");
+    attachSocketPeerIp(req, null);
+    expect((req as Request & { ip?: string }).ip).toBeUndefined();
+  });
+});
+
+describe("login throttle identity over HTTP (requestIP shim)", () => {
+  let server: ReturnType<typeof Bun.serve> | null = null;
+  let wsServer: { stopCleanupLoop: () => void } | null = null;
+
+  afterEach(async () => {
+    if (server) {
+      server.stop(true);
+      server = null;
+    }
+    if (wsServer) {
+      wsServer.stopCleanupLoop();
+      wsServer = null;
+    }
+  });
+
+  async function startLoopback(config: { trustedProxy?: string } = {}) {
+    const result = await createWebuiServer(createMockCore(), {
+      port: 0,
+      host: "127.0.0.1",
+      apiKey: "test-secret",
+      sessionTokenTtlMin: 60,
+      trustedProxy: config.trustedProxy,
+    });
+    server = result.server;
+    wsServer = result.wsServer;
+    return `http://127.0.0.1:${server.port}`;
+  }
+
+  function badLogin(baseUrl: string, xff?: string): Promise<Response> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (xff !== undefined) headers["x-forwarded-for"] = xff;
+    return fetch(`${baseUrl}/login`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ apiKey: "wrong-key" }),
+    });
+  }
+
+  it("knob unset: the bucket is the real socket peer; forged XFF cannot split or dodge it", async () => {
+    const baseUrl = await startLoopback(); // trustedProxy unset
+    // Five failures from rotating forged XFF values land in ONE peer
+    // bucket (127.0.0.1): the socket peer outranks the header.
+    for (const xff of ["203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4", "203.0.113.5"]) {
+      expect((await badLogin(baseUrl, xff)).status).toBe(401);
+    }
+    // The shared bucket is now locked: even a CORRECT key and no header
+    // draws the 429 -- proof the key was the peer, not any XFF value.
+    const locked = await fetch(`${baseUrl}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "test-secret" }),
+    });
+    expect(locked.status).toBe(429);
+  });
+
+  it("trustedProxy set: distinct XFF clients get independent buckets over the wire", async () => {
+    const baseUrl = await startLoopback({ trustedProxy: "127.0.0.1" });
+    // Drive client .7 to the lockout...
+    for (let i = 0; i < 5; i++) {
+      expect((await badLogin(baseUrl, "203.0.113.7")).status).toBe(401);
+    }
+    expect((await badLogin(baseUrl, "203.0.113.7")).status).toBe(429);
+    // ...client .8 is untouched...
+    expect((await badLogin(baseUrl, "203.0.113.8")).status).toBe(401);
+    // ...and the plain peer bucket (no XFF) is untouched too.
+    const ok = await fetch(`${baseUrl}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "test-secret" }),
+    });
+    expect(ok.status).toBe(200);
+    const { token } = (await ok.json()) as { token?: string };
+    expect(typeof token).toBe("string");
+  });
+
+  it("trustedProxy set logs a startup INFO line naming requestIP", async () => {
+    const infos: string[] = [];
+    const loggerAny = logger as unknown as { info: (msg: string) => void };
+    const origInfo = loggerAny.info;
+    loggerAny.info = (msg) => infos.push(msg);
+    try {
+      await startLoopback({ trustedProxy: "10.0.0.0/8" });
+    } finally {
+      loggerAny.info = origInfo;
+    }
+    const line = infos.find((m) => m.includes("trustedProxy"));
+    expect(line).toBeDefined();
+    expect(line).toContain("10.0.0.0/8");
+    expect(line).toContain("requestIP");
+  });
+
+  it("no INFO line when trustedProxy is unset", async () => {
+    const infos: string[] = [];
+    const loggerAny = logger as unknown as { info: (msg: string) => void };
+    const origInfo = loggerAny.info;
+    loggerAny.info = (msg) => infos.push(msg);
+    try {
+      await startLoopback();
+    } finally {
+      loggerAny.info = origInfo;
+    }
+    expect(infos.some((m) => m.includes("trustedProxy"))).toBe(false);
+  });
+});
+
+describe("ws gate and Bun's forwarded-header inertness on a loopback bind", () => {
+  let server: ReturnType<typeof Bun.serve> | null = null;
+  let wsServer: { stopCleanupLoop: () => void } | null = null;
+
+  afterEach(async () => {
+    if (server) {
+      server.stop(true);
+      server = null;
+    }
+    if (wsServer) {
+      wsServer.stopCleanupLoop();
+      wsServer = null;
+    }
+  });
+
+  /** Raw HTTP/1.1 upgrade handshake; resolves once headers are in. */
+  function rawHandshake(
+    port: number | undefined,
+    headers: Record<string, string>,
+  ): Promise<{ statusLine: string }> {
+    return new Promise((resolve, reject) => {
+      if (port === undefined) {
+        reject(new Error("server has no TCP port"));
+        return;
+      }
+      const sock = net.connect(port, "127.0.0.1", () => {
+        const lines = [`GET /ws HTTP/1.1`, `Host: ${headers.host ?? `127.0.0.1:${port}`}`];
+        if (headers.origin) lines.push(`Origin: ${headers.origin}`);
+        lines.push(
+          "Upgrade: websocket",
+          "Connection: Upgrade",
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", // RFC 6455 example key
+          "Sec-WebSocket-Version: 13",
+        );
+        if (headers["x-forwarded-host"]) lines.push(`X-Forwarded-Host: ${headers["x-forwarded-host"]}`);
+        if (headers["x-forwarded-for"]) lines.push(`X-Forwarded-For: ${headers["x-forwarded-for"]}`);
+        sock.write(lines.join("\r\n") + "\r\n\r\n");
+      });
+      let out = "";
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        resolve({ statusLine: out.split("\r\n")[0] ?? "" });
+        sock.destroy();
+      };
+      sock.on("data", (d) => {
+        out += d.toString();
+        // Only the status line is under test; settle once headers end.
+        if (out.includes("\r\n\r\n")) settle();
+      });
+      sock.on("error", reject);
+      setTimeout(settle, 500);
+    });
+  }
+
+  it("nginx-style Host/Origin names pass the gate on a 127.0.0.1 bind (101)", async () => {
+    const result = await createWebuiServer(createMockCore(), {
+      port: 0,
+      host: "127.0.0.1",
+      apiKey: "test-secret",
+      sessionTokenTtlMin: 60,
+      trustedProxy: "127.0.0.1",
+    });
+    server = result.server;
+    wsServer = result.wsServer;
+    // Exactly what the owner's nginx forwards (Host rewritten to
+    // localhost, browser Origin kept): loopback names on a loopback bind
+    // are allowed by the gate.
+    const res = await rawHandshake(server.port, {
+      host: "localhost",
+      origin: "http://localhost:3001",
+    });
+    expect(res.statusLine).toContain("101");
+  });
+
+  it("X-Forwarded-Host is invisible to Bun 1.4.2: the gate still reads the literal Host (101 stays 101, 403 stays 403)", async () => {
+    const result = await createWebuiServer(createMockCore(), {
+      port: 0,
+      host: "127.0.0.1",
+      apiKey: "test-secret",
+      sessionTokenTtlMin: 60,
+    });
+    server = result.server;
+    wsServer = result.wsServer;
+    // Bogus XFH alongside loopback Host/Origin: Bun 1.4.2 consumes no
+    // forwarded headers, so the gate's view is unchanged and the upgrade
+    // still passes.
+    const good = await rawHandshake(server.port, {
+      host: "localhost",
+      origin: "http://localhost:3001",
+      "x-forwarded-host": "attacker.example",
+    });
+    expect(good.statusLine).toContain("101");
+    // And a foreign Host cannot be laundered back to 101 by XFH either.
+    const bad = await rawHandshake(server.port, {
+      host: "attacker.example",
+      origin: "http://attacker.example",
+      "x-forwarded-host": "localhost",
+    });
+    expect(bad.statusLine).toContain("403");
   });
 });

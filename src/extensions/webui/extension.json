@@ -38,6 +38,11 @@
           "type": "number",
           "default": 1440,
           "description": "Session token TTL in minutes (default: 24 hours)"
+        },
+        "trustedProxy": {
+          "type": "string",
+          "default": "",
+          "description": "Reverse proxy IP or CIDR whose x-forwarded-for header the login rate limiter may believe (e.g. \"127.0.0.1\" or \"10.0.0.0/8\"). Empty (default): x-forwarded-for is never believed and the throttle keys on the direct socket peer; see docs/config-reference.md."
         }
       },
       "additionalProperties": false,

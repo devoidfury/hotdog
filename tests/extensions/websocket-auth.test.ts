@@ -4,7 +4,11 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   createAuthMiddleware,
   apiKeyEquals,
+  parseTrustedProxy,
+  resolveClientIp,
+  type TrustedProxy,
 } from "@extensions/websocket/auth.ts";
+import { logger } from "@utils/logger.ts";
 
 /**
  * A zero-TTL token expires as soon as Date.now() advances past its issue
@@ -524,6 +528,266 @@ describe("login rate limiting", () => {
       expect((await middleware.loginHandler(loginReq("valid-api-key", ip))).status).toBe(200);
     } finally {
       spy.mockRestore();
+    }
+  });
+});
+
+// ── Client identity resolution (webui.trustedProxy, H-11) ──────────────────
+// The login throttle keys on resolveClientIp's output; these tests pin the
+// resolution table, the parse rules, and the shared-bucket fix itself.
+
+/** Login request with a controlled direct peer (Bun's req.ip) and x-forwarded-for. */
+function identityReq(opts: { peer?: string; xff?: string; key?: string }): Request {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.xff !== undefined) headers["x-forwarded-for"] = opts.xff;
+  const req = new Request("http://localhost/login", {
+    method: "POST",
+    body: JSON.stringify({ apiKey: opts.key ?? "wrong-key" }),
+    headers,
+  });
+  // Bun leaves req.ip undefined on constructed Requests; shadow it so the
+  // "direct socket peer" side of the resolution rule is testable.
+  if (opts.peer !== undefined) Object.defineProperty(req, "ip", { value: opts.peer });
+  return req;
+}
+
+function mustParse(value: string): TrustedProxy {
+  const p = parseTrustedProxy(value);
+  if (!p) throw new Error(`parseTrustedProxy rejected ${JSON.stringify(value)} in test setup`);
+  return p;
+}
+
+describe("resolveClientIp (trustedProxy resolution table)", () => {
+  const v4net = mustParse("10.0.0.0/8");
+  const v6net = mustParse("2001:db8::/32");
+
+  const cases: Array<{
+    name: string;
+    opts: { peer?: string; xff?: string };
+    trusted: TrustedProxy | null;
+    expected: string;
+  }> = [
+    // trustedProxy unset: legacy semantics, preserved byte-for-byte.
+    { name: "unset: peer only", opts: { peer: "198.51.100.9" }, trusted: null, expected: "198.51.100.9" },
+    { name: "unset: peer wins over XFF", opts: { peer: "198.51.100.9", xff: "203.0.113.7" }, trusted: null, expected: "198.51.100.9" },
+    { name: "unset: no peer -> first XFF entry (legacy, attacker-controlled; pinned honestly)", opts: { xff: "203.0.113.7, 198.51.100.4" }, trusted: null, expected: "203.0.113.7" },
+    { name: "unset: no peer, no XFF -> unknown", opts: {}, trusted: null, expected: "unknown" },
+    // trustedProxy set, direct peer inside the range.
+    { name: "set: trusted peer, single hop", opts: { peer: "10.0.0.1", xff: "203.0.113.7" }, trusted: v4net, expected: "203.0.113.7" },
+    { name: "set: multi-hop, trusted intermediates skipped right-to-left", opts: { peer: "10.0.0.1", xff: "203.0.113.7, 10.2.3.4, 10.5.6.7" }, trusted: v4net, expected: "203.0.113.7" },
+    { name: "set: every hop trusted -> leftmost entry", opts: { peer: "10.0.0.1", xff: "10.9.9.9, 10.8.8.8" }, trusted: v4net, expected: "10.9.9.9" },
+    { name: "set: trusted peer, no XFF -> peer", opts: { peer: "10.0.0.1" }, trusted: v4net, expected: "10.0.0.1" },
+    // trustedProxy set, direct peer OUTSIDE the range: XFF is untrusted noise.
+    { name: "set: untrusted peer -> XFF ignored, bucket = req.ip", opts: { peer: "198.51.100.2", xff: "203.0.113.7" }, trusted: v4net, expected: "198.51.100.2" },
+    { name: "set: no req.ip -> XFF never believed", opts: { xff: "203.0.113.7" }, trusted: v4net, expected: "unknown" },
+    // trustedProxy set, malformed XFF: never throws, deterministic.
+    { name: "set: empty segments skipped", opts: { peer: "10.0.0.1", xff: "203.0.113.7, , 10.0.0.2" }, trusted: v4net, expected: "203.0.113.7" },
+    { name: "set: trailing comma", opts: { peer: "10.0.0.1", xff: "203.0.113.7," }, trusted: v4net, expected: "203.0.113.7" },
+    { name: "set: junk token never matches the range, kept verbatim as key", opts: { peer: "10.0.0.1", xff: "junk, 10.0.0.2" }, trusted: v4net, expected: "junk" },
+    { name: "set: whitespace-only XFF -> peer", opts: { peer: "10.0.0.1", xff: "  " }, trusted: v4net, expected: "10.0.0.1" },
+    // IPv6.
+    { name: "set v6: trusted v6 peer resolves the client hop", opts: { peer: "2001:db8:dead::1", xff: "203.0.113.5" }, trusted: v6net, expected: "203.0.113.5" },
+    { name: "set v4-in-v6: ::ffff-mapped peer matches a v4 CIDR", opts: { peer: "::ffff:10.0.0.1", xff: "203.0.113.5" }, trusted: v4net, expected: "203.0.113.5" },
+  ];
+
+  for (const c of cases) {
+    it(c.name, () => {
+      expect(resolveClientIp(identityReq(c.opts), c.trusted)).toBe(c.expected);
+    });
+  }
+});
+
+describe("parseTrustedProxy", () => {
+  const matchCases: Array<[value: string, probes: Array<[ip: string, expected: boolean]>]> = [
+    [
+      "10.0.0.0/8",
+      [
+        ["10.0.0.1", true],
+        ["10.255.255.255", true],
+        ["9.255.255.255", false],
+        ["11.0.0.0", false],
+        ["junk", false],
+        ["", false],
+        ["2001:db8::1", false], // family mismatch is never a match
+      ],
+    ],
+    ["10.0.0.1", [["10.0.0.1", true], ["10.0.0.2", false]]], // bare v4 = /32
+    ["::1", [["::1", true], ["::2", false], ["0::1", true], ["0:0:0:0:0:0:0:1", true]]], // bare v6 = /128; elision arithmetic
+    [
+      "2001:db8::/32",
+      [
+        ["2001:0db8:0000:1::5", true],
+        ["2001:db9::1", false],
+        ["2001:d7ff:ffff::", false],
+      ],
+    ],
+    [
+      "0.0.0.0/0",
+      [
+        ["1.2.3.4", true],
+        ["255.255.255.255", true],
+        ["2001:db8::1", false], // /0 is family-scoped; v6 needs ::/0
+      ],
+    ],
+    [
+      "::ffff:10.0.0.0/8",
+      [["10.1.1.1", true], ["::ffff:10.1.1.1", true], ["11.1.1.1", false]],
+    ],
+    [
+      // full-form literals and embedded v4 with 6 hex groups (8 groups total)
+      "0:0:0:0:0:0:0:1",
+      [["::1", true], ["::2", false]],
+    ],
+    [
+      "1:2:3:4:5:6:1.2.3.4",
+      [
+        ["1:2:3:4:5:6:1.2.3.4", true],
+        ["::ffff:1.2.3.4", false], // not v4-mapped; distinct 16-byte address
+        ["1:2:3:4:5:7:1.2.3.4", false],
+      ],
+    ],
+  ];
+
+  for (const [value, probes] of matchCases) {
+    it(`matches probes against ${value}`, () => {
+      const p = mustParse(value);
+      for (const [ip, expected] of probes) {
+        expect(`${ip} -> ${p.matches(ip)}`).toBe(`${ip} -> ${expected}`);
+      }
+    });
+  }
+
+  it("rejects malformed values (null), so init can fail loudly", () => {
+    const bad = [
+      "not-an-ip", "10.0.0.256", "10.0.0", "1.2.3.4.5", // bad addresses
+      "10.0.0.0/33", "2001:db8::/129", "10.0.0.0/", "/8", "10.0.0.1/0x8", "10.0.0.1/8/8", // bad prefixes
+      "2001:db8:::1", "1:2:3:4:5:6:7:8:9", "fe80::1%eth0", ":: 1", // bad v6 forms
+    ];
+    for (const v of bad) {
+      expect(`${v} -> ${parseTrustedProxy(v) === null}`).toBe(`${v} -> true`);
+    }
+    expect(parseTrustedProxy("   ")).toBeNull(); // blank = off; handled by the caller, not an error
+  });
+
+  it("createAuthMiddleware rejects a malformed trustedProxy at init, accepts empty", () => {
+    expect(() =>
+      createAuthMiddleware({ validateApiKey: async () => false, trustedProxy: "10.0.0.0/33" }),
+    ).toThrow(/webui\.trustedProxy/);
+    expect(() =>
+      createAuthMiddleware({ validateApiKey: async () => false, trustedProxy: "yesterday" }),
+    ).toThrow(/yesterday/);
+    // Empty/unset is OFF, not an error.
+    const mw = createAuthMiddleware({ validateApiKey: async () => false, trustedProxy: "" });
+    mw.stopCleanup();
+  });
+});
+
+describe("xff-without-trustedProxy warning", () => {
+  function makeMw(trustedProxy?: string) {
+    return createAuthMiddleware({
+      validateApiKey: async (k) => k === "valid-api-key",
+      tokenTtlMin: 1,
+      trustedProxy,
+    });
+  }
+
+  async function withWarnCapture(fn: () => Promise<void>): Promise<string[]> {
+    const warnings: string[] = [];
+    const loggerAny = logger as unknown as { warn: (msg: string) => void };
+    const orig = loggerAny.warn;
+    loggerAny.warn = (msg) => warnings.push(msg);
+    try {
+      await fn();
+      return warnings;
+    } finally {
+      loggerAny.warn = orig;
+    }
+  }
+
+  it("fires once across many proxied requests, never per request", async () => {
+    const mw = makeMw(); // knob unset
+    const warnings = await withWarnCapture(async () => {
+      for (let i = 0; i < 3; i++) {
+        await mw.loginHandler(identityReq({ peer: "198.51.100.2", xff: "203.0.113.7" }));
+      }
+      // A request without XFF adds nothing.
+      await mw.loginHandler(identityReq({ peer: "198.51.100.2" }));
+    });
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("x-forwarded-for");
+    expect(warnings[0]).toContain("webui.trustedProxy");
+    mw.stopCleanup();
+  });
+
+  it("does not fire when trustedProxy is set", async () => {
+    const mw = makeMw("198.51.100.0/24");
+    const warnings = await withWarnCapture(async () => {
+      await mw.loginHandler(identityReq({ peer: "198.51.100.2", xff: "203.0.113.7" }));
+    });
+    expect(warnings.length).toBe(0);
+    mw.stopCleanup();
+  });
+});
+
+describe("login throttle identity: shared-bucket fix (H-11)", () => {
+  function makeMw(trustedProxy?: string) {
+    return createAuthMiddleware({
+      validateApiKey: async (k) => k === "valid-api-key",
+      tokenTtlMin: 1,
+      trustedProxy,
+    });
+  }
+
+  async function failFive(mw: ReturnType<typeof makeMw>, peer: string, xff: string) {
+    for (let i = 0; i < 5; i++) {
+      expect((await mw.loginHandler(identityReq({ peer, xff }))).status).toBe(401);
+    }
+  }
+
+  it("without the knob all proxied users share one bucket: A's probing locks out B", async () => {
+    const mw = makeMw(); // legacy behavior, pinned as the failure mode
+    try {
+      await failFive(mw, "198.51.100.2", "203.0.113.7"); // A probes from behind the proxy
+      // Innocent B arrives from the same proxy with the RIGHT key: the
+      // bucket is the proxy IP, so B gets the 429 meant for A.
+      const victim = await mw.loginHandler(
+        identityReq({ peer: "198.51.100.2", xff: "203.0.113.8", key: "valid-api-key" }),
+      );
+      expect(victim.status).toBe(429);
+    } finally {
+      mw.stopCleanup();
+    }
+  });
+
+  it("with the knob distinct XFF clients get independent buckets", async () => {
+    const mw = makeMw("198.51.100.0/24");
+    try {
+      await failFive(mw, "198.51.100.2", "203.0.113.7"); // A is now locked...
+      expect(
+        (await mw.loginHandler(identityReq({ peer: "198.51.100.2", xff: "203.0.113.7", key: "valid-api-key" }))).status,
+      ).toBe(429);
+      // ...and B logs straight through: bucket = its own resolved client IP.
+      expect(
+        (await mw.loginHandler(identityReq({ peer: "198.51.100.2", xff: "203.0.113.8", key: "valid-api-key" }))).status,
+      ).toBe(200);
+    } finally {
+      mw.stopCleanup();
+    }
+  });
+
+  it("with the knob but an untrusted peer, per-attempt XFF rotation cannot dodge the lockout", async () => {
+    const mw = makeMw("10.0.0.0/8");
+    try {
+      // Peer is outside the trusted range, so XFF is noise: every attempt
+      // whatever it claims lands in the single real-peer bucket.
+      for (let i = 0; i < 5; i++) {
+        expect((await mw.loginHandler(identityReq({ peer: "198.51.100.9", xff: `203.0.113.${i}` }))).status).toBe(401);
+      }
+      expect(
+        (await mw.loginHandler(identityReq({ peer: "198.51.100.9", xff: "203.0.113.250", key: "valid-api-key" }))).status,
+      ).toBe(429);
+    } finally {
+      mw.stopCleanup();
     }
   });
 });

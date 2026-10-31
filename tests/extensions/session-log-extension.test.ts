@@ -634,6 +634,32 @@ describe("write ordering serialization", () => {
     }
   });
 
+  it("token_usage lands AFTER the llm row it summarizes (live dispatch order)", async () => {
+    // The live agent runs addMessage(assistant) then emitOutput("token_usage");
+    // both enter the per-path write queue in that synchronous order, so the
+    // persisted usage row must sit directly behind its llm row -- replayed
+    // bubbles render at that position.
+    const sessionId = `test-usage-order-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const outHook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
+
+      const p1 = msgHook({ message: { role: "assistant", content: "answer" }, agent: { sessionId } });
+      const p2 = outHook({
+        type: "token_usage",
+        data: { promptTokens: 90, cachedTokens: 10, completionTokens: 20, totalTokens: 110, contextWindow: 200000 },
+        agent: { sessionId },
+      });
+      await Promise.all([p1, p2]);
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries.map((e) => e.source)).toEqual([LOG_SOURCE.LLM, LOG_SOURCE.TOKEN_USAGE]);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
   it("OUTPUT_EVENT token_usage rejects traversal session ids without writing", async () => {
     const ext = await create(createMockCore() as any) as any;
     const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;

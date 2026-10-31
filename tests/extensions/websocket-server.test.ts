@@ -7,7 +7,7 @@ import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
 import { createWsServer } from "@extensions/websocket/server.ts";
 import { dismissResumedQuestions, seedResumedQuestions } from "@extensions/websocket/resume.ts";
 import type { HotdogServerSocket } from "@extensions/websocket/socket.ts";
-import { syncSessionFromLog, indexSessionProfile } from "@core/session/session-index.ts";
+import { syncSessionFromLog, indexSessionProfile, getSessionRow } from "@core/session/session-index.ts";
 import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { LlmError } from "@core/error.ts";
@@ -17,7 +17,8 @@ import { TASK_STATUS } from "@core/session/task-types.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 import { createFixture, simpleTool } from "../helpers.ts";
 import { Message } from "@core/context/message.ts";
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { create as createSessionLogExt } from "@extensions/session-log/index.ts";
 import os from "node:os";
 import { join } from "node:path";
 import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
@@ -1076,6 +1077,193 @@ describe("createWsServer - cold log operations", () => {
     expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.profile).toBe("coder");
     // The replayed user message is counted in the resumed metadata.
     expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.userMessageCount).toBe(1);
+  });
+});
+
+// ── cold-log adoption + usage-record corruption (owner repro) ───────────────
+//
+// Restart -> adopt a usage-bearing log -> browse old logs -> switch back to
+// the live session: usage bubbles must come back one per call, in log order,
+// stamped with the session's own id -- and the log file itself must not have
+// grown a single usage row from the adoption replay (re-emit through
+// OUTPUT_EVENT must be suppressed while restoring, like CONTEXT_MESSAGE).
+
+/** Build a ws server whose mock agents carry the real agent's restore
+ *  surface (isRestoring -> SESSION_RESTORE_ACTIVE, emitOutput ->
+ *  OUTPUT_EVENT) wired into a real session-log extension. */
+async function usageReproServer() {
+  const core = createWsMockCore();
+  const ext = (await createSessionLogExt(core as never)) as unknown as {
+    hooks: Record<string, (p: unknown) => Promise<void>>;
+  };
+  const writes: Promise<unknown>[] = [];
+  const server = createWsServer(core, {
+    buildAgent: async (cfg: { sessionId?: string }) => {
+      const log = new MessageLog();
+      const agent: any = makeWsMockAgent({
+        sessionId: cfg.sessionId || "test",
+        getMessages: () => log.getAll(),
+        addMessage: (msg: any) => { log.push(msg as any); },
+      });
+      const notify = (name: string, payload: unknown) => {
+        const h = ext.hooks[name];
+        if (h) writes.push(Promise.resolve(h(payload)));
+      };
+      agent.hooks = { notifyHooks: async (name: string, payload: unknown) => notify(name, payload) };
+      agent.emitOutput = (type: string, data: Record<string, unknown>) =>
+        notify(HOOKS.OUTPUT_EVENT, { type, data, agent });
+      // Mirrors the real agent's setter: restoring flips the suppression flag.
+      let restoring = false;
+      Object.defineProperty(agent, "isRestoring", {
+        configurable: true,
+        get: () => restoring,
+        set: (v: boolean) => {
+          restoring = v;
+          notify(HOOKS.SESSION_RESTORE_ACTIVE, { agent, isRestoring: v });
+        },
+      });
+      return agent;
+    },
+  });
+  return {
+    server,
+    /** Await every extension write dispatched so far (and any chained). */
+    settle: async () => {
+      while (writes.length) await Promise.all(writes.splice(0));
+    },
+  };
+}
+
+/** Poll until the attach burst past `after` closes with a cursor report. */
+async function waitForCursorAfter(ws: MockWs, after: number): Promise<void> {
+  const start = Date.now();
+  for (;;) {
+    const found = ws.messages.slice(after)
+      .some((m) => { try { const p = JSON.parse(m); return p.type === S2C.SESSION_STATE && p.key === "cursor"; } catch { return false; } });
+    if (found) return;
+    if (Date.now() - start > 2000) throw new Error("Timed out waiting for cursor report");
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+describe("usage records survive restart-resume + log detour + switch back", () => {
+  const LOG_A = "usage-repro-a";
+  const LOG_B = "usage-repro-b";
+  let usageServer: ReturnType<typeof createWsServer> | null = null;
+  let usageWs: MockWs;
+
+  afterEach(() => {
+    usageServer?.stopCleanupLoop();
+    for (const id of [LOG_A, LOG_B]) {
+      try { rmSync(join(SESSIONS_DIR, `${id}.jsonl`), { force: true }); } catch {}
+    }
+  });
+
+  /** input, llm, usage(121), input, llm, usage(343) -- totals distinct. */
+  function writeUsageLog(logId: string) {
+    const line = (over: Record<string, unknown>) =>
+      JSON.stringify({ ts: "2024-01-01T00:00:00Z", session_id: logId, source: "input", content: "", ...over });
+    const usage = (n: number) => line({
+      source: "token_usage",
+      sessionPromptTokens: n - 10, sessionCompletionTokens: 10, sessionTotalTokens: n,
+      promptTokens: n - 10, completionTokens: 10, totalTokens: n, cachedTokens: 0, contextWindow: 200000,
+    });
+    writeFileSync(join(SESSIONS_DIR, `${logId}.jsonl`), [
+      line({ source: "input", content: "one" }),
+      line({ source: "llm", content: "first" }),
+      usage(121),
+      line({ source: "input", content: "two" }),
+      line({ source: "llm", content: "second" }),
+      usage(343),
+    ].join("\n") + "\n");
+  }
+
+  function usageRows(logId: string): number[] {
+    return readFileSync(join(SESSIONS_DIR, `${logId}.jsonl`), "utf8")
+      .split("\n").filter(Boolean).map((l) => JSON.parse(l))
+      .filter((e) => e.source === "token_usage").map((e) => e.totalTokens);
+  }
+
+  it("adoption replays usage without re-appending it; switch-back is one bubble per call, in order, stamped with the log id", async () => {
+    writeUsageLog(LOG_A);
+    writeUsageLog(LOG_B);
+    const { server, settle } = await usageReproServer();
+    usageServer = server;
+    usageWs = createWsMockWs();
+
+    // Server restart: the log is resumed under its own id (same adoption
+    // flow the reconnect auto-resume takes).
+    server.onMessage(usageWs, JSON.stringify({ type: C2S.LOAD_LOG, logId: LOG_A }));
+    const created = await waitForMessage(usageWs, S2C.SESSION_CREATED);
+    expect(created.sessionId).toBe(LOG_A);
+    await waitForCursor(usageWs);
+    await settle();
+
+    // The replay wrote NOTHING back: the log still carries exactly its two
+    // original usage rows, in log order.
+    expect(usageRows(LOG_A)).toEqual([121, 343]);
+
+    // Old-log detour: viewing must be read-only on both files.
+    const bytesA = readFileSync(join(SESSIONS_DIR, `${LOG_A}.jsonl`), "utf8");
+    const bytesB = readFileSync(join(SESSIONS_DIR, `${LOG_B}.jsonl`), "utf8");
+    server.onMessage(usageWs, JSON.stringify({ type: C2S.VIEW_LOG, logId: LOG_B }));
+    await waitForMessage(usageWs, S2C.LOG_VIEWED);
+    await settle();
+    expect(readFileSync(join(SESSIONS_DIR, `${LOG_A}.jsonl`), "utf8")).toBe(bytesA);
+    expect(readFileSync(join(SESSIONS_DIR, `${LOG_B}.jsonl`), "utf8")).toBe(bytesB);
+
+    // Back to the live session: full replay, one TOKEN_USAGE per original
+    // call, interleaved at log position, stamped with the session's own id.
+    const n = usageWs.messages.length;
+    server.onMessage(usageWs, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId: LOG_A }));
+    await waitForCursorAfter(usageWs, n);
+    const burst = usageWs.messages.slice(n).map((m) => { try { return JSON.parse(m); } catch { return null; } })
+      .filter(Boolean) as Array<Record<string, unknown>>;
+    const conversation = burst
+      .filter((m) => m.type === S2C.USER_MESSAGE || m.type === S2C.ASSISTANT_MESSAGE || m.type === S2C.TOKEN_USAGE)
+      .map((m) => (m.type === S2C.TOKEN_USAGE ? `usage:${m.totalTokens}` : m.type));
+    expect(conversation).toEqual([
+      S2C.USER_MESSAGE,
+      S2C.ASSISTANT_MESSAGE,
+      "usage:121",
+      S2C.USER_MESSAGE,
+      S2C.ASSISTANT_MESSAGE,
+      "usage:343",
+    ]);
+    const usageMsgs = burst.filter((m) => m.type === S2C.TOKEN_USAGE);
+    expect(usageMsgs.every((m) => m.sessionId === LOG_A)).toBe(true);
+  });
+
+  it("viewing session A never writes to B and never re-keys B's index row", async () => {
+    writeUsageLog(LOG_A);
+    writeUsageLog(LOG_B);
+    const { server, settle } = await usageReproServer();
+    usageServer = server;
+    usageWs = createWsMockWs();
+
+    // B is indexed from its own log: its ctx mirror is 343/200000.
+    await syncSessionFromLog(LOG_B);
+    expect(getSessionRow(LOG_B)?.ctx_used).toBe(343);
+    expect(getSessionRow(LOG_B)?.ctx_total).toBe(200000);
+
+    // Live on A (adopted).
+    server.onMessage(usageWs, JSON.stringify({ type: C2S.LOAD_LOG, logId: LOG_A }));
+    await waitForMessage(usageWs, S2C.SESSION_CREATED);
+    await waitForCursor(usageWs);
+    await settle();
+
+    // Browse A's own log through the cold viewer (activeLogId == live id).
+    const bytesA = readFileSync(join(SESSIONS_DIR, `${LOG_A}.jsonl`), "utf8");
+    const bytesB = readFileSync(join(SESSIONS_DIR, `${LOG_B}.jsonl`), "utf8");
+    server.onMessage(usageWs, JSON.stringify({ type: C2S.VIEW_LOG, logId: LOG_A }));
+    await waitForMessage(usageWs, S2C.LOG_VIEWED);
+    await settle();
+
+    // Zero writes anywhere, and B's mirrored ctx columns untouched.
+    expect(readFileSync(join(SESSIONS_DIR, `${LOG_A}.jsonl`), "utf8")).toBe(bytesA);
+    expect(readFileSync(join(SESSIONS_DIR, `${LOG_B}.jsonl`), "utf8")).toBe(bytesB);
+    expect(getSessionRow(LOG_B)?.ctx_used).toBe(343);
+    expect(getSessionRow(LOG_B)?.ctx_total).toBe(200000);
   });
 });
 

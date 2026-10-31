@@ -1196,3 +1196,83 @@ describe("rewind checkpoint durability (SS-06)", () => {
     }
   });
 });
+
+describe("token_usage restore suppression", () => {
+  it("restore replay re-emits usage through OUTPUT_EVENT without re-appending it", async () => {
+    const sessionId = uniqueId("usage-restore");
+    const logPath = join(SESSIONS_DIR, `${sessionId}.jsonl`);
+    try {
+      const usage = (n: number) =>
+        entry({
+          session_id: sessionId,
+          source: LOG_SOURCE.TOKEN_USAGE,
+          sessionPromptTokens: n,
+          sessionCachedTokens: 0,
+          sessionCompletionTokens: 10,
+          sessionTotalTokens: n + 10,
+          turns: 1,
+          promptTokens: n,
+          cachedTokens: 0,
+          completionTokens: 10,
+          totalTokens: n + 10,
+          contextWindow: 200000,
+        });
+      writeFileSync(
+        logPath,
+        [
+          entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "u" }),
+          entry({ session_id: sessionId, source: LOG_SOURCE.LLM, content: "a" }),
+          usage(100),
+          usage(200),
+        ].map((e) => JSON.stringify(e)).join("\n") + "\n",
+      );
+
+      const ext = (await create(createMockCore() as never)) as never as {
+        hooks: Record<string, (p: unknown) => Promise<void>>;
+      };
+      // Mirrors the real agent's restore surface: emitOutput fires
+      // OUTPUT_EVENT, the isRestoring setter fires SESSION_RESTORE_ACTIVE.
+      const writes: Promise<unknown>[] = [];
+      const agent: any = {
+        sessionId,
+        isRestoring: false,
+        addMessage: () => {},
+        emitOutput: (type: string, data: Record<string, unknown>) => {
+          writes.push(Promise.resolve(ext.hooks[HOOKS.OUTPUT_EVENT]!({ type, data, agent })));
+        },
+        hooks: {
+          notifyHooks: async (name: string, payload: unknown) => {
+            if (name === HOOKS.SESSION_RESTORE_ACTIVE) {
+              return ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE]!(payload);
+            }
+            if (name === HOOKS.SESSION_RESUME_ATTEMPT) {
+              return ext.hooks[HOOKS.SESSION_RESUME_ATTEMPT]!(payload);
+            }
+          },
+        },
+      };
+      let restoring = false;
+      Object.defineProperty(agent, "isRestoring", {
+        configurable: true,
+        get: () => restoring,
+        set: (v: boolean) => {
+          restoring = v;
+          void agent.hooks.notifyHooks(HOOKS.SESSION_RESTORE_ACTIVE, { agent, isRestoring: v });
+        },
+      });
+
+      await restoreSessionIntoAgent(agent, sessionId);
+      await Promise.all(writes);
+      // The replay wrote no usage row back: still exactly the two originals.
+      expect(rawLog(sessionId).filter((e) => e.source === LOG_SOURCE.TOKEN_USAGE)).toHaveLength(2);
+
+      // And again: a second resume must not grow the cluster either.
+      writes.length = 0;
+      await restoreSessionIntoAgent(agent, sessionId);
+      await Promise.all(writes);
+      expect(rawLog(sessionId).filter((e) => e.source === LOG_SOURCE.TOKEN_USAGE)).toHaveLength(2);
+    } finally {
+      cleanup(sessionId);
+    }
+  });
+});

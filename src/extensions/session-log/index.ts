@@ -780,6 +780,11 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             contextWindow?: number;
           };
           const sessionId = agent.sessionId || "unknown";
+          // Restore replays re-emit every historical record through this
+          // same hook: never write one back (per-session suppression, the
+          // same as CONTEXT_MESSAGE) or each resume re-appends the epoch's
+          // usage history at EOF -- duplicated, out-of-order bubbles.
+          if (restoringSessions.has(sessionId)) return;
           let logPath: string;
           try {
             logPath = sessionPath(sessionId);
@@ -807,17 +812,13 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           await queuedAppend(logPath, JSON.stringify(entry) + "\n");
           // Mirror the sidebar's ctx numbers into the index so cold-log rows
           // carry them without a log scan (absolute values: idempotent).
-          // Skip restore replays: re-emitted historical records would churn
-          // the index, and the adopt-time sync re-derives the same value.
-          if (!restoringSessions.has(sessionId)) {
-            await safeIndex("token_usage", () =>
-              indexTokenUsage(
-                sessionId,
-                (d.totalTokens ?? 0) > 0 ? d.totalTokens! : null,
-                (d.contextWindow ?? 0) > 0 ? d.contextWindow! : null,
-              ),
-            );
-          }
+          await safeIndex("token_usage", () =>
+            indexTokenUsage(
+              sessionId,
+              (d.totalTokens ?? 0) > 0 ? d.totalTokens! : null,
+              (d.contextWindow ?? 0) > 0 ? d.contextWindow! : null,
+            ),
+          );
           return;
         }
 

@@ -36,15 +36,43 @@ async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Prom
   }
 }
 
+// Surface hint emitted into the system prompt for WebUI browser sessions. The
+// extension autoloads in every session type, so the chunk is gated on the
+// process actually serving `hotdog webui` (set by the subcommand handler).
+// Keeping the decision a pure function of `serving` makes both branches
+// testable without mutating process-wide state.
+const WEBUI_SURFACE_CHUNK = {
+  name: "webui-surface",
+  priority: 100,
+  content:
+    "Assistant responses are rendered from markdown to html; surface URLs as markdown links ([label](url)) rather than bare text.",
+};
+
+/** WebUI surface chunk when serving, undefined otherwise (CLI sessions). */
+export function webuiSurfaceChunk(serving: boolean) {
+  return serving ? WEBUI_SURFACE_CHUNK : undefined;
+}
+
+let servingWebui = false;
+
+/** Set by the `webui` subcommand handler; separate for testability. */
+export function markServingWebui(): void {
+  servingWebui = true;
+}
+
 export function create(_core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
         registry.register("webui", {
           description: "Start the WebUI server (HTTP + WebSocket + frontend)",
-          handler: handleWebuiSubcommand,
+          handler: async (cliArgs, core) => {
+            markServingWebui();
+            return handleWebuiSubcommand(cliArgs, core);
+          },
         });
       },
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async () => webuiSurfaceChunk(servingWebui),
     },
   };
 }

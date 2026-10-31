@@ -2,7 +2,7 @@
 // registration, and the subcommand handler's run/shutdown lifecycle.
 
 import { describe, it, expect } from "bun:test";
-import { create } from "@extensions/webui/index.ts";
+import { create, webuiSurfaceChunk, markServingWebui } from "@extensions/webui/index.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { logger } from "@utils/logger.ts";
 import { createMockCore, createMockRegistry } from "../test-helpers.ts";
@@ -20,6 +20,27 @@ describe("WebUI Extension", () => {
     expect(registry.registeredOpts!.description).toContain("WebUI");
     expect(registry.registeredOpts!.description).toContain("WebSocket");
     expect(typeof registry.registeredOpts!.handler).toBe("function");
+  });
+
+  describe("system-prompt surface chunk (markdown-link hint)", () => {
+    it("emits no chunk when not serving (CLI sessions unaffected)", () => {
+      expect(webuiSurfaceChunk(false)).toBeUndefined();
+    });
+
+    it("emits the webui-surface chunk when serving", () => {
+      const chunk = webuiSurfaceChunk(true) as any;
+      expect(chunk.name).toBe("webui-surface");
+      expect(chunk.priority).toBe(100);
+      expect(chunk.content).toContain("markdown");
+      expect(chunk.content).toContain("[label](url)");
+    });
+
+    it("handler marks serving, and the created extension's hook then emits the chunk", async () => {
+      markServingWebui();
+      const ext = create({} as any);
+      const result = await ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!({ agent: {} as any });
+      expect((result as any).name).toBe("webui-surface");
+    });
   });
 
   describe("handleWebuiSubcommand", () => {

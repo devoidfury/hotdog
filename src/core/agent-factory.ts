@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
 import { Agent, type ModelRegistry, type OutputSink } from "./agent.ts";
 import type { LlmClient } from "./llm-client/client.ts";
-import { HOOKS } from "./hooks.ts";
+import { HOOKS, type HookSystem } from "./hooks.ts";
 import { getLayerDefault, CONFIG_SCHEMA } from "./config/schema-loader.ts";
 import type { CoreContext, ResolvedConfig } from "./extensions/types.ts";
 import type { SwitchProfile } from "./config/profiles.ts";
 import { sharedToolExecBroker, toolExecPlaneSettings } from "./tool-exec-broker.ts";
-import type { WireToolConfig } from "./tool-exec-protocol.ts";
+import type { ToolExecLink, WireToolConfig } from "./tool-exec-protocol.ts";
 import { INTERNAL_MAX_OUTPUT_LINES } from "./extensions/tool-utils.ts";
 import { envScrubExtraKeys } from "@utils/env.ts";
 
@@ -25,6 +25,32 @@ export interface AgentFactoryOptions {
 }
 
 export type AgentBuildFn = (agentConfig?: Record<string, unknown>) => Promise<Agent>;
+
+/**
+ * Lifecycle closure for pooled tool-exec runners: a session's pool entries
+ * -- live runners with rw binds over its workspace roots -- go with the
+ * session, not with the broker's idle reaper. SESSION_END marks genuine
+ * session end on the shared hook system: task agents release through
+ * task-execution, CLI hosts delete on core.hooks, and the webui registry
+ * re-fires the delete on the agent's hooks (its SessionManager owns a
+ * private hook system). The factory is the caller that knows both sides
+ * (plane posture + host hooks); one handler per hook system, since the
+ * link is the process-shared broker and hosts create several factories.
+ * Exported for tests: a fake link pins the wiring without a plane.
+ */
+const reapWiredHooks = new WeakSet<object>();
+
+export function wireSessionEndReap(hooks: HookSystem, link: ToolExecLink): void {
+  if (reapWiredHooks.has(hooks)) return;
+  reapWiredHooks.add(hooks);
+  hooks.on(
+    HOOKS.SESSION_END,
+    ({ sessionId }: { sessionId?: string }) => {
+      if (typeof sessionId === "string" && sessionId !== "") link.reap?.(sessionId);
+    },
+    "tool-exec-plane",
+  );
+}
 
 function pickBoolean(value: unknown, fallback: boolean | undefined): boolean | undefined {
   return typeof value === "boolean" ? value : fallback;
@@ -71,6 +97,22 @@ export function createAgentFactory(
     // and hands the pooled runners the merged tool-config scalars they are
     // not allowed to resolve themselves (the runner never boots the config).
     const plane = toolExecPlaneSettings(resolved);
+    // The worker plane's pooled runners are keyed by session, so the plane
+    // registers the SESSION_END reaper on the host's hooks (idempotent per
+    // hook system; see wireSessionEndReap).
+    const toolExecLink =
+      plane.mode === "worker"
+        ? sharedToolExecBroker({
+            fence: plane.fence,
+            // The plane's env policy is the resolved one: with scrubbing on,
+            // provider keys never enter it; with `envScrubbing: false`, the
+            // full copy reaches bash, exactly as `--disable-env-scrubbing`
+            // promises. See ToolExecBrokerOptions.envScrubbing.
+            envScrubbing: resolved.envScrubbing !== false,
+            envScrubExtra: envScrubExtraKeys(baseConfig),
+          })
+        : null;
+    if (toolExecLink) wireSessionEndReap(core.hooks, toolExecLink);
     // The maxToolOutputLines config keys are removed (the seam char cap is the
     // binding constraint), but the pooled runner still reqNums the scalar, so
     // the tool's internal line-shaping default is injected AFTER the spread: a
@@ -141,17 +183,7 @@ export function createAgentFactory(
       abortSignal: (agentConfig.abortSignal as AbortSignal | null | undefined) ?? null,
       toolWhitelist,
       toolExec: plane.mode,
-      toolExecLink: plane.mode === "worker"
-        ? sharedToolExecBroker({
-            fence: plane.fence,
-            // The plane's env policy is the resolved one: with scrubbing on,
-            // provider keys never enter it; with `envScrubbing: false`, the
-            // full copy reaches bash, exactly as `--disable-env-scrubbing`
-            // promises. See ToolExecBrokerOptions.envScrubbing.
-            envScrubbing: resolved.envScrubbing !== false,
-            envScrubExtra: envScrubExtraKeys(baseConfig),
-          })
-        : null,
+      toolExecLink,
       toolExecConfig,
       // Precedence: explicit override > profile overlay > resolved profileDef
       // (the profile the config resolution chain picked at startup).

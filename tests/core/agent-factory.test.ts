@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { createAgentFactory } from "@core/agent-factory.ts";
+import { createAgentFactory, wireSessionEndReap } from "@core/agent-factory.ts";
 import { handleTokens } from "@core/command-handlers.ts";
-import { HOOKS } from "@core/hooks.ts";
+import { HookSystem, HOOKS } from "@core/hooks.ts";
 
 function makeCore(overrides: Record<string, unknown> = {}) {
   const calls: [string, unknown][] = [];
@@ -312,5 +312,75 @@ describe("createAgentFactory startup profile filters (regression: --profile ran 
     const auditor = await factory({ profileName: "auditor" });
     expect(auditor.toolWhitelist).toEqual(["read"]);
     expect((auditor.config as Record<string, unknown>).blacklistTools).toEqual(["bash"]);
+  });
+});
+
+// ── M-5: the worker plane wires SESSION_END to the pool reaper ──────────────
+
+describe("wireSessionEndReap", () => {
+  /** A recording link: the pool side is the broker's job, here it is a mock. */
+  function fakeLink() {
+    const reaped: (string | undefined)[] = [];
+    const link = {
+      invoke: async () => {
+        throw new Error("not used");
+      },
+      close: async () => {},
+      reap: (session?: string) => {
+        reaped.push(session);
+      },
+    };
+    return { link: link as never, reaped };
+  }
+
+  it("reaps exactly the session that ended, on every SESSION_END", async () => {
+    const hooks = new HookSystem();
+    const { link, reaped } = fakeLink();
+    wireSessionEndReap(hooks, link);
+
+    await hooks.notifyHooks(HOOKS.SESSION_END, { sessionId: "gone" });
+    expect(reaped).toEqual(["gone"]);
+
+    // A missing or empty id reaps nothing (an unscoped reap would drop
+    // every session's runners).
+    await hooks.notifyHooks(HOOKS.SESSION_END, { sessionId: undefined } as never);
+    await hooks.notifyHooks(HOOKS.SESSION_END, { sessionId: "" });
+    expect(reaped).toEqual(["gone"]);
+  });
+
+  it("registers once per hook system, however many factories share it", () => {
+    const hooks = new HookSystem();
+    const { link: a, reaped: reapedA } = fakeLink();
+    const { link: b, reaped: reapedB } = fakeLink();
+    wireSessionEndReap(hooks, a);
+    wireSessionEndReap(hooks, b); // second factory: no second handler
+    expect(hooks.handlerCount(HOOKS.SESSION_END)).toBe(1);
+
+    hooks.notifyHooks(HOOKS.SESSION_END, { sessionId: "x" });
+    expect(reapedA).toEqual(["x"]);
+    expect(reapedB).toEqual([]);
+  });
+
+  it("a worker-plane build registers the handler on the host hooks; inline does not", async () => {
+    const buildWith = async (toolExec: "worker" | "inline") => {
+      const hooks = new HookSystem();
+      const core = {
+        hooks,
+        toolRegistry: {},
+        config: {},
+      } as never;
+      const factory = createAgentFactory(core, {
+        resolved: { ...resolved, toolExec } as never,
+        llmClient: {} as never,
+      });
+      const agent = await factory();
+      return { hooks, agent };
+    };
+
+    const inline = await buildWith("inline");
+    expect(inline.hooks.handlerCount(HOOKS.SESSION_END)).toBe(0);
+
+    const worker = await buildWith("worker");
+    expect(worker.hooks.handlerCount(HOOKS.SESSION_END)).toBe(1);
   });
 });

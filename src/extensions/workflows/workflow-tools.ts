@@ -49,6 +49,14 @@ export interface ManagedRun {
   error: string | null;
 }
 
+/**
+ * In-memory ceiling on settled runs (precedent: MAX_TERMINAL_TASKS in
+ * core task-types). Each settled entry pins its WorkflowRun and NodeRun
+ * map forever in a long-lived daemon otherwise; run.jsonl is the record.
+ * Hardcoded: this is a housekeeping constant, not a user knob.
+ */
+const MAX_SETTLED_RUNS = 50;
+
 export class RunRegistry {
   #runs = new Map<string, ManagedRun>();
 
@@ -56,6 +64,26 @@ export class RunRegistry {
     // Re-dispatching a settled id (resume/continue) replaces the old entry;
     // history stays in the run dir's run.jsonl, not the registry.
     this.#runs.set(mr.runId, mr);
+    // Eviction rides the single write point (like the TaskManager's
+    // #setStatus): every settle is preceded by an add, so the settled set
+    // stays within one run of the cap.
+    this.#evictSettled();
+  }
+
+  /**
+   * Keep at most MAX_SETTLED_RUNS settled records, oldest first (insertion
+   * order; settled entries are never re-touched so it matches settle order
+   * within a session's dispatches). Live runs are never evicted: their
+   * blocks() guard, node-state views, and completion delivery hang off the
+   * in-memory entry. A settled entry is pure convenience -- history lives
+   * in the run dir's run.jsonl and workflow_status falls through to disk
+   * for ids the registry no longer holds, so an evicted id keeps answering.
+   */
+  #evictSettled(): void {
+    const settled = [...this.#runs].filter(([, m]) => m.finished || m.error);
+    for (let i = 0; i < settled.length - MAX_SETTLED_RUNS; i++) {
+      this.#runs.delete(settled[i]![0]);
+    }
   }
 
   get(runId: string): ManagedRun | null {
@@ -72,9 +100,10 @@ export class RunRegistry {
 
   /**
    * A registry entry only blocks its id while the run is live. Once a run has
-   * settled (finished or crashed) it stays in the map for status/history, but
-   * its id becomes re-dispatchable so `run_id` can resume/continue the same
-   * run dir -- reconcile-resume re-verifies completed nodes against the
+   * settled (finished or crashed) it stays in the map (bounded by
+   * MAX_SETTLED_RUNS) for status/history, but its id becomes re-dispatchable
+   * so `run_id` can resume/continue the same run dir -- reconcile-resume
+   * re-verifies completed nodes against the
    * filesystem, and the .owner claim still guards against live double-driving
    * (in-process races included: see the post-claim re-check in dispatch).
    */

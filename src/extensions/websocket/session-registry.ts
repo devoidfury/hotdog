@@ -424,7 +424,15 @@ export class SessionRegistry {
       this.#channels.delete(sessionId);
     }
 
+    // The manager owns a private hook system, so its delete notice never
+    // reaches extensions; re-fire it on the agent's (shared) hooks so
+    // per-session extension state and tool-exec pool entries are reclaimed
+    // when the session dies -- the same contract deleteSession promises on
+    // hosts whose manager shares core.hooks. Fire-and-forget, after the
+    // removal, mirroring task-execution's terminal-then-notify ordering.
+    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
     this.#sessionManager.deleteSession(sessionId);
+    agent?.hooks?.notifyHooks(HOOKS.SESSION_END, { sessionId });
     // The registry's SessionManager is built without taskConfig (this host's
     // TaskManager is the published one), so its delete cascade cannot reach
     // the tasks -- interrupt them here or a deleted session's delegates run

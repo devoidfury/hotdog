@@ -855,3 +855,117 @@ describe("baton notice prompt default", () => {
     );
   });
 });
+
+// ── M-26: baton stash requires a real sessionId ─────────────────────────────
+
+describe("Compaction Extension -- baton stash requires a real sessionId", () => {
+  it("an agent without a sessionId skips the stash and the tail-pop", async () => {
+    const dir = join(TMP, "nosid");
+    process.env.HOTDOG_SESSIONS_DIR = dir;
+    // A bare factory-built worker / embed: no sessionId at all.
+    const agent = createMockAgent(makeMessages(10));
+    delete agent.sessionId;
+    const ext = createCompactionExtension(createMockCore()) as any;
+
+    const result = await ext.hooks[HOOKS.CONTEXT]!({
+      messages: agent.context.getMessages(),
+      agent,
+    });
+
+    // Popping the tail without a stash to replay it from would LOSE it, so
+    // the pop itself is skipped: context untouched, no stash file, and the
+    // pass-the-baton decline lets the overflow rescue fall through.
+    expect(result).toBeUndefined();
+    expect(agent.log.getAll()).toHaveLength(10);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("a no-sessionId overflow rescue falls through to the next strategy", async () => {
+    const dir = join(TMP, "nosid-rescue");
+    process.env.HOTDOG_SESSIONS_DIR = dir;
+    const agent = createMockAgent(makeMessages(10));
+    delete agent.sessionId;
+    const ext = createCompactionExtension(createMockCore()) as any;
+
+    const overflow = LlmError.Api(
+      'HTTP 500 (body: {"error":"the request exceeds the available context size, try increasing it"})',
+      500,
+    );
+    const result = await ext.hooks[HOOKS.PROVIDER_ERROR]!({
+      error: overflow,
+      params: { messages: [], modelConfig: {}, toolDefs: [] },
+      agent,
+      retry: false,
+    });
+
+    // The rescue happened: the baton declined (no session), trim compacted
+    // instead, and a retry is ordered.
+    expect(result).toMatchObject({ retry: true });
+    expect(agent.log.getAll().length).toBeLessThan(10);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("two sessionId'd agents never see each other's baton", async () => {
+    process.env.HOTDOG_SESSIONS_DIR = join(TMP, "two-agents");
+    const ext = createCompactionExtension(createMockCore()) as any;
+
+    const aOriginal = makeMessages(10);
+    const a = createMockAgent(aOriginal);
+    a.sessionId = "session-alpha";
+    const bOriginal = makeMessages(10);
+    const b = createMockAgent(bOriginal);
+    b.sessionId = "session-beta";
+
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: a.context.getMessages(), agent: a });
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: b.context.getMessages(), agent: b });
+
+    // Both sessions now hold their OWN stashed tail (3 newest each).
+    // A hands off first (narrated completion).
+    await ext.hooks[HOOKS.TURN_END]!({
+      reason: "completion",
+      cancelled: false,
+      stopped: true,
+      toolResults: [],
+      message: "A hands off.",
+      claimTurn: () => true,
+      agent: a,
+    });
+    expect(a.clearedCount).toBe(1);
+
+    // A replays its OWN tail verbatim...
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: a.context.getMessages(), agent: a });
+    const afterA = a.log.getAll();
+    expect(afterA).toHaveLength(4); // plan + A's 3 popped
+    expect(String(afterA[0]!.content)).toContain("# Baton handoff");
+    expect(afterA[1]).toBe(aOriginal[7]);
+    expect(afterA[2]).toBe(aOriginal[8]);
+    expect(afterA[3]).toBe(aOriginal[9]);
+
+    // B then completes: its handoff runs off B's OWN baton, and B's replay
+    // lands B's tail. (Pre-M-26 the "default" fallback only collided for
+    // sessionId-LESS agents; with real ids the keys were already separate
+    // -- the two decline tests above pin the fallback's damage.)
+    await ext.hooks[HOOKS.TURN_END]!({
+      reason: "completion",
+      cancelled: false,
+      stopped: true,
+      toolResults: [],
+      message: "B wraps up.",
+      claimTurn: () => true,
+      agent: b,
+    });
+    expect(b.clearedCount).toBe(1);
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: b.context.getMessages(), agent: b });
+    const afterB = b.log.getAll();
+    expect(afterB).toHaveLength(4);
+    expect(String(afterB[0]!.content)).toContain("B wraps up");
+    expect(afterB[1]).toBe(bOriginal[7]);
+    expect(afterB[2]).toBe(bOriginal[8]);
+    expect(afterB[3]).toBe(bOriginal[9]);
+
+    // A's replay consumed nothing of B's: B's stash is gone after ITS OWN
+    // replay and a second pass adds nothing further.
+    await ext.hooks[HOOKS.CONTEXT]!({ messages: b.context.getMessages(), agent: b });
+    expect(b.log.getAll()).toHaveLength(4);
+  });
+});

@@ -226,6 +226,33 @@ describe("SessionRegistry", () => {
     expect(registry.list()).toHaveLength(0);
   });
 
+  it("fires SESSION_END on the agent's hooks so extensions reclaim on delete", async () => {
+    // The registry's SessionManager owns a private hook system (createHooks),
+    // so deleteSession's own notice never reaches extensions. The registry
+    // must re-fire the end on the agent's (shared) hooks -- that is where
+    // the session-log reclaim and the tool-exec pool reaper are registered.
+    const notified: Array<[string, unknown]> = [];
+    const agentHooks = {
+      notifyHooks: (name: string, data: unknown) => {
+        notified.push([name, data]);
+      },
+      on: () => () => {},
+    };
+    const reg = new SessionRegistry({
+      buildAgent: async (config: { sessionId?: string }) =>
+        makeWsMockAgent({ sessionId: config.sessionId || "ws-end-1", hooks: agentHooks as never }),
+    });
+    try {
+      const { sessionId } = await reg.create();
+      expect(notified).toEqual([]);
+
+      expect(reg.delete(sessionId)).toBe(true);
+      expect(notified).toEqual([[HOOKS.SESSION_END, { sessionId }]]);
+    } finally {
+      reg.stopCleanupLoop();
+    }
+  });
+
   describe("switchProfile", () => {
     it("applies the full profile (model, whitelist, blacklist) and preserves context", async () => {
       const { agent, toolRegistry } = createFixture({

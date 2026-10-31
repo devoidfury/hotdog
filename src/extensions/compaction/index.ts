@@ -70,9 +70,12 @@ export function create(core: CoreContext): ExtensionInstance | null {
    * Live baton state per session: the tail popped by pass-the-baton, plus
    * the flag set once the handoff has happened (via the handoff tool or a
    * narrated final message) and the fresh context awaits the replay.
+   * Keyed by REAL sessionId only (M-26): this instance is shared across
+   * every session, so a fallback key ("default") would let one agent
+   * without a sessionId replay another's popped tail. Agents with no
+   * sessionId are declined the tail-pop entirely (see _performCompaction).
    */
   const batonStash = new Map<string, { popped: Message[]; replayPending: boolean }>();
-  const batonKey = (agent: { sessionId?: string | null }): string => agent.sessionId || "default";
 
   // Helpers are nested in create() so they close over core, settings, and the registry.
 
@@ -227,10 +230,23 @@ export function create(core: CoreContext): ExtensionInstance | null {
       // below). The live map is the in-process path; the file is the
       // cross-process/debug record. Best-effort: a failed write must not
       // abort the baton itself.
+      //
+      // Declined outright without a real sessionId: the pop is only safe
+      // because the stash can hand the tail back, and there is no safe
+      // shared key for sessionId-less agents (bare factory-built workers,
+      // embeds) on this shared instance. Losing the tail unrecoverably is
+      // worse than not compacting; callers degrade onward (the overflow
+      // rescue chains to trim/drop).
+      if (tailCut && compactedCount > 0 && !agent.sessionId) {
+        logger.warn(
+          "[compaction] pass-the-baton declined: agent has no sessionId to stash the popped tail under",
+        );
+        return false;
+      }
       if (tailCut && compactedCount > 0) {
         const popped = messages.slice(messages.length - compactedCount);
         await stashBatonMessages(agent.sessionId, popped);
-        batonStash.set(batonKey(agent), { popped, replayPending: false });
+        batonStash.set(agent.sessionId, { popped, replayPending: false });
       }
 
       const newContext: Message[] = [...keptMessages];
@@ -318,10 +334,10 @@ export function create(core: CoreContext): ExtensionInstance | null {
    * new session) is intentionally not wired here.
    *
    * One file per session (`<session-id>.baton.json`) so concurrent
-   * sessions popping at once cannot clobber each other's stash; the
-   * name follows batonKey's fallback ("default") so write and remove
-   * always target the same file. Unsafe ids skip the mirror (see
-   * batonStashPath) but keep working through the live map.
+   * sessions popping at once cannot clobber each other's stash; the same
+   * guard makes write and remove always target the same file. Missing or
+   * unsafe ids skip the mirror (see batonStashPath) but keep working
+   * through the live map.
    */
   async function stashBatonMessages(
     sessionId: string | null | undefined,
@@ -354,15 +370,15 @@ export function create(core: CoreContext): ExtensionInstance | null {
   }
 
   /**
-   * Path of the per-session stash file, or null when the key is not a
-   * safe file name. Applies the same id guard sessionLog uses for the
+   * Path of the per-session stash file, or null when the id is missing or
+   * not a safe file name. Applies the same id guard sessionLog uses for the
    * .jsonl logs: a crafted session id must not escape the sessions dir
-   * through join(). The "default" fallback key always passes.
+   * through join(). Missing ids get no path: there is no shared "default"
+   * file any more (M-26).
    */
   function batonStashPath(sessionId: string | null | undefined): string | null {
-    const key = batonKey({ sessionId });
-    if (!isSafeSessionId(key)) return null;
-    return join(sessionsDir(), `${key}.baton.json`);
+    if (!sessionId || !isSafeSessionId(sessionId)) return null;
+    return join(sessionsDir(), `${sessionId}.baton.json`);
   }
 
   /** Best-effort removal of the stash file once its tail is replayed or dropped. */
@@ -381,7 +397,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
    * so an abandoned tail cannot outlive the session that popped it.
    */
   async function dropBaton(agent: { sessionId?: string | null }): Promise<void> {
-    batonStash.delete(batonKey(agent));
+    if (agent.sessionId) batonStash.delete(agent.sessionId);
     await removeBatonStashFile(agent.sessionId);
   }
 
@@ -491,7 +507,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // this hook fires, so the order is always plan-then-tail). The
         // boundary rule on the pop side guarantees the tail never starts
         // with a tool result orphaned from its parent assistant turn.
-        const st = agent ? batonStash.get(batonKey(agent)) : undefined;
+        const st = agent?.sessionId ? batonStash.get(agent.sessionId) : undefined;
         if (st?.replayPending) {
           await dropBaton(agent);
           const current = agent.context.getMessages();
@@ -548,8 +564,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
        */
       [HOOKS.TURN_END]: async ({ reason, cancelled, agent, toolResults, claimTurn, message }) => {
         if (!agent) return;
-        const key = batonKey(agent);
-        const st = batonStash.get(key);
+        const st = agent.sessionId ? batonStash.get(agent.sessionId) : undefined;
         if (!st) return;
 
         if (cancelled || reason === "error" || reason === "max_iterations" || reason === "empty_response") {

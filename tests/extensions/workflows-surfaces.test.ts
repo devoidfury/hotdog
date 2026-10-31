@@ -1331,3 +1331,72 @@ describe("extension wiring: provider, runHost, CLI subcommand", () => {
     expect(steered as string | null).toBe("a:go on");
   });
 });
+
+// ---------------------------------------------------------------------------
+// RunRegistry bound: settled runs are evicted oldest-first (live runs never
+// are); an evicted id still answers workflow_status from run.jsonl on disk.
+// ---------------------------------------------------------------------------
+
+describe("RunRegistry settled-run bound", () => {
+  const settledSummary = (runId: string) => ({
+    runId,
+    outcome: "succeeded" as const,
+    states: {},
+  });
+
+  function mkRun(id: string, settled: boolean) {
+    return {
+      runId: id,
+      workflow: "demo",
+      runDir: `/tmp/unused-${id}`,
+      startedAt: 1,
+      run: { status: () => [] } as unknown as WorkflowRun,
+      finished: settled ? settledSummary(id) : null,
+      error: null,
+    };
+  }
+
+  it("keeps the 50 most recent settled entries, oldest settled evicted first, live runs untouched", () => {
+    const reg = new RunRegistry();
+    // Oldest entry is LIVE: eviction keys on settled state, never on age.
+    reg.add(mkRun("live-old", false));
+    for (let i = 0; i < 60; i++) reg.add(mkRun(`s-${String(i).padStart(2, "0")}`, true));
+
+    expect(reg.get("live-old")).not.toBeNull();
+    expect(reg.blocks("live-old")).toBe(true);
+    // The 10 oldest settled entries are gone; the 50 newest remain.
+    expect(reg.get("s-00")).toBeNull();
+    expect(reg.get("s-09")).toBeNull();
+    expect(reg.get("s-10")).not.toBeNull();
+    expect(reg.get("s-59")).not.toBeNull();
+    // Evicted settled ids unblock re-dispatch (nothing in the map blocks).
+    expect(reg.blocks("s-00")).toBe(false);
+    expect(reg.all().filter((r) => !r.finished && !r.error)).toHaveLength(1);
+    // A crashed (error-settled) entry counts as settled too.
+    reg.add({ ...mkRun("crashed", false), error: "boom" });
+    expect(reg.get("s-10")).toBeNull(); // one more settled => one more eviction
+    expect(reg.get("crashed")).not.toBeNull();
+  });
+
+  it("workflow_status still answers from disk for an evicted run", async () => {
+    const root = freshDir();
+    seedRun(root, "evicted-run", { finished: "succeeded", succeededA: true });
+    const reg = new RunRegistry();
+    // Register the run settled, then push it out with 50 newer settled runs.
+    reg.add(mkRun("evicted-run", true));
+    for (let i = 0; i < 50; i++) reg.add(mkRun(`newer-${i}`, true));
+    expect(reg.get("evicted-run")).toBeNull();
+
+    const t = new WorkflowStatusTool({
+      taskManagerProvider: () => null,
+      getRunsRoot: () => root,
+      getWorkflowsDir: () => null,
+      limits: {},
+      registry: reg,
+    });
+    const r = await t.execute({ run_id: "evicted-run" });
+    expect(r.error).toBeNull();
+    expect(r.output).toContain("evicted-run");
+    expect(r.output).toContain("succeeded");
+  });
+});

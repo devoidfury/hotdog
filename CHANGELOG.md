@@ -4,6 +4,8 @@
 
 - webui - sidebar now resizable
 
+- **lifecycle - per-session state now dies with the session.** `session:end` closes the loop: the session-log extension reclaims its per-session maps (prompt dedupe, open turns, write queues, barrier failures) on `SESSION_END`; webui/ws session deletes now re-fire `session:end` on the deleted agent's hook system (the ws `SessionManager` notices land on a private hook system, so extensions never saw a ws delete); the worker plane reaps a dead session's pool runners instead of waiting for the 5-minute idle reaper (`ToolExecLink.reap` finally has a production caller); the workflow `RunRegistry` keeps the 50 most recent settled runs, evicting oldest-first, never touching live runs (`workflow_status` still answers for evicted runs from `run.jsonl` on disk); restore-time log suppression is keyed per session, so replaying session A no longer silences session B's audit trail; and the compaction baton stash requires a real `sessionId` -- pass-the-baton declines outright without one (no shared `"default"` key that could replay one agent's tail into another).
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.15.1...main
 
 ## [v0.15.1] - 2026-10-27

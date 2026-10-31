@@ -386,6 +386,10 @@ export class ToolExecBroker implements ToolExecLink {
 
   /** Drop pool entries: the supervisor's idle/session-delete hook. */
   reap(session?: string, cls?: ExecClass): void {
+    // Pool entries only ever exist inside the broker child: no child,
+    // nothing to reap -- and a teardown hook must never spawn the plane
+    // just to ask it for entries it cannot have.
+    if (!this.#proc) return;
     void this.#post({ op: "reap", session, class: cls });
   }
 

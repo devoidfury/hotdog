@@ -381,6 +381,15 @@ describe("warm and reap frames (real spawn)", () => {
     }
   });
 
+  it("a reap against a plane that never started spawns nothing", () => {
+    // The SESSION_END reaper fires for every host session; a broker that
+    // never served a call has no child and no pool, and the reap frame
+    // must not conjure one just to ask it for entries it cannot have.
+    const broker = new ToolExecBroker({ fence: "off" });
+    broker.reap("ghost-session");
+    expect(broker.pid).toBeNull();
+  });
+
   it("a warmed entry is the one the next call uses", async () => {
     const broker = new ToolExecBroker({ fence: "off" });
     try {

@@ -9,7 +9,7 @@ import { create } from "@extensions/session-log/index.ts";
 import { readSessionEntries, LOG_SOURCE } from "@core/session/session-log.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 
@@ -171,8 +171,9 @@ describe("session-log extension create()", () => {
       const restoreHook = ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE] as (ctx: any) => void;
       const messageHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
 
-      // Activate restoration mode
-      restoreHook({ isRestoring: true });
+      // Activate restoration mode for this session (payload shape matches
+      // the core setter: agent + isRestoring; suppression is per-session).
+      restoreHook({ agent: { sessionId }, isRestoring: true });
 
       await messageHook({
         message: { sessionId, role: "user", content: "Should be skipped" },
@@ -432,9 +433,9 @@ describe("CONTEXT_REWOUND checkpointing", () => {
       const restoreHook = ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE] as (ctx: any) => void;
       const rewindHook = ext.hooks[HOOKS.CONTEXT_REWOUND] as (ctx: any) => Promise<void>;
 
-      restoreHook({ isRestoring: true });
+      restoreHook({ agent: { sessionId }, isRestoring: true });
       await rewindHook({ agent: { sessionId }, newContext: [{ role: "user", content: "u1" }] });
-      restoreHook({ isRestoring: false });
+      restoreHook({ agent: { sessionId }, isRestoring: false });
 
       // Nothing was written at all.
       const { existsSync } = await import("node:fs");
@@ -776,6 +777,217 @@ describe("system prompt recording", () => {
       const entries = await readSessionEntries(sessionId);
       expect(entries.every((e) => e.source !== LOG_SOURCE.SYSTEM_PROMPT)).toBe(true);
       expect(entries).toHaveLength(2);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lifecycle closure (H-4 / M-6): SESSION_END reclaims the per-session maps,
+// and restore-time suppression is keyed per session, never per instance.
+// ---------------------------------------------------------------------------
+
+describe("session-log SESSION_END reclaim", () => {
+  it("reclaims the prompt dedupe: the prompt re-records after delete-then-resume", async () => {
+    const sessionId = `test-reclaim-prompt-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const endHook = ext.hooks[HOOKS.SESSION_END] as (ctx: any) => void;
+      const agent = { sessionId, context: { getSystemPrompt: () => "PROMPT BODY" } };
+
+      await msgHook({ message: { sessionId, role: "user", content: "u1" }, agent });
+      await msgHook({ message: { sessionId, role: "user", content: "u2" }, agent });
+      let entries = await readSessionEntries(sessionId);
+      // Audit dedupe: the unchanged prompt records exactly once per session.
+      expect(entries.filter((e) => e.source === LOG_SOURCE.SYSTEM_PROMPT)).toHaveLength(1);
+
+      endHook({ sessionId });
+
+      // Same instance, same id (the resume-after-delete case): the dedupe
+      // entry is gone, so the prompt is re-recorded below the resumed rows.
+      await msgHook({ message: { sessionId, role: "user", content: "u3" }, agent });
+      entries = await readSessionEntries(sessionId);
+      expect(entries.filter((e) => e.source === LOG_SOURCE.SYSTEM_PROMPT)).toHaveLength(2);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("late writes after reclaim land: the write queue re-chains on demand", async () => {
+    const sessionId = `test-reclaim-queue-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const endHook = ext.hooks[HOOKS.SESSION_END] as (ctx: any) => void;
+      const agent = { sessionId };
+
+      await msgHook({ message: { sessionId, role: "user", content: "before" }, agent });
+      endHook({ sessionId });
+      // A floating write dispatched after the reclaim must still hit the log:
+      // queuedAppend re-creates the chain entry when the map has none.
+      await msgHook({ message: { sessionId, role: "assistant", content: "after" }, agent });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(2);
+      expect(entries[1]!.content).toBe("after");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("reclaims the open turn: a later rewind does not re-emit the marker", async () => {
+    const sessionId = `test-reclaim-openturn-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const turnStart = ext.hooks[HOOKS.TURN_START] as (ctx: any) => Promise<void>;
+      const rewindHook = ext.hooks[HOOKS.CONTEXT_REWOUND] as (ctx: any) => Promise<void>;
+      const endHook = ext.hooks[HOOKS.SESSION_END] as (ctx: any) => void;
+      const agent = { sessionId };
+
+      await turnStart({ turnIndex: 1, kind: "input", agent });
+      endHook({ sessionId });
+      await rewindHook({ agent, newContext: [{ sessionId, role: "user", content: "kept" }] });
+
+      // RAW file read: readSessionEntries replays from the last reset, which
+      // would hide the marker above it. The stale open turn (pre-reclaim)
+      // would re-emit a SECOND marker below the reset.
+      const raw = readFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      const markers = raw.filter((e) => e.source === LOG_SOURCE.TURN_STARTED);
+      expect(markers).toHaveLength(1);
+      expect(raw[raw.length - 1]!.content).toBe("kept");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("reclaims barrier failures of the dead session only", async () => {
+    const sid1 = `test-reclaim-barrier-${Date.now()}`;
+    const sid2 = `test-reclaim-barrier2-${Date.now()}`;
+    // A directory named <session>.jsonl makes every append (and fsync open)
+    // fail: the barrier records failures for both sessions.
+    mkdirSync(join(SESSIONS_DIR, `${sid1}.jsonl`));
+    mkdirSync(join(SESSIONS_DIR, `${sid2}.jsonl`));
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const before = ext.hooks[HOOKS.TOOL_BEFORE_EXECUTE] as (ctx: any) => Promise<void>;
+      const gate = ext.hooks[HOOKS.TOOL_CALL] as (ctx: any) => any;
+      const endHook = ext.hooks[HOOKS.SESSION_END] as (ctx: any) => void;
+
+      await before({ toolCallId: "bf-1", toolName: "bash", input: "{}", agent: { sessionId: sid1 } });
+      await before({ toolCallId: "bf-2", toolName: "bash", input: "{}", agent: { sessionId: sid2 } });
+      // Sanity: both failures are recorded and block their calls.
+      expect(gate({ toolCallId: "bf-1" })?.action).toBe("block");
+      // Re-record (the gate consumes the entry on block).
+      await before({ toolCallId: "bf-1", toolName: "bash", input: "{}", agent: { sessionId: sid1 } });
+
+      endHook({ sessionId: sid1 });
+
+      // The dead session's pending failure is gone (its call can never be
+      // answered again); the other session's barrier is untouched.
+      expect(gate({ toolCallId: "bf-1" })).toBeUndefined();
+      expect(gate({ toolCallId: "bf-2" })?.action).toBe("block");
+    } finally {
+      for (const sid of [sid1, sid2]) {
+        try { rmSync(join(SESSIONS_DIR, `${sid}.jsonl`), { recursive: true, force: true }); } catch {}
+      }
+    }
+  });
+
+  it("reclaims a stuck restoring flag so later messages log without the end dispatch", async () => {
+    const sessionId = `test-reclaim-restore-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const restoreHook = ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE] as (ctx: any) => void;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const endHook = ext.hooks[HOOKS.SESSION_END] as (ctx: any) => void;
+      const agent = { sessionId };
+
+      restoreHook({ agent, isRestoring: true });
+      await msgHook({ message: { sessionId, role: "user", content: "skipped" }, agent });
+      endHook({ sessionId });
+      // Even a missing isRestoring:false cannot strand the flag past the end.
+      await msgHook({ message: { sessionId, role: "user", content: "logged" }, agent });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries.filter((e) => e.role === "user")).toHaveLength(1);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+});
+
+describe("session-log per-session restore suppression (M-6)", () => {
+  it("session B logs CONTEXT_MESSAGE while session A replays", async () => {
+    const idA = `test-restore-A-${Date.now()}`;
+    const idB = `test-restore-B-${Date.now()}`;
+    try {
+      // ONE extension instance serves both sessions.
+      const ext = await create(createMockCore() as any) as any;
+      const restoreHook = ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE] as (ctx: any) => void;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const agentA = { sessionId: idA };
+      const agentB = { sessionId: idB };
+
+      restoreHook({ agent: agentA, isRestoring: true });
+
+      // B's live traffic must keep logging while A replays.
+      await msgHook({ message: { sessionId: idB, role: "user", content: "B live" }, agent: agentB });
+      // A's replayed entries stay suppressed, exactly as before.
+      await msgHook({ message: { sessionId: idA, role: "user", content: "A replayed" }, agent: agentA });
+
+      expect(await readSessionEntries(idB)).toHaveLength(1);
+      expect(await readSessionEntries(idA)).toHaveLength(0);
+
+      restoreHook({ agent: agentA, isRestoring: false });
+      await msgHook({ message: { sessionId: idA, role: "user", content: "A live" }, agent: agentA });
+      expect(await readSessionEntries(idA)).toHaveLength(1);
+    } finally {
+      cleanupTestFile(idA);
+      cleanupTestFile(idB);
+    }
+  });
+
+  it("the restoring set clears when the replay throws (core's try/finally contract)", async () => {
+    const sessionId = `test-restore-throw-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const restoreHook = ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE] as (ctx: any) => void;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const agent = { sessionId };
+
+      // Mirrors core/session-log.ts restoreSessionIntoAgent: true, try,
+      // finally false -- the clear must land even when the replay throws.
+      const withRestore = async (body: () => Promise<void>) => {
+        restoreHook({ agent, isRestoring: true });
+        try {
+          await body();
+        } finally {
+          restoreHook({ agent, isRestoring: false });
+        }
+      };
+
+      let threw = false;
+      try {
+        await withRestore(async () => {
+          await msgHook({ message: { sessionId, role: "user", content: "replayed" }, agent });
+          expect(await readSessionEntries(sessionId)).toHaveLength(0); // suppressed
+          throw new Error("replay blew up");
+        });
+      } catch {
+        threw = true;
+      }
+      expect(threw).toBe(true);
+
+      // The finally dispatched the clear: the session is live again.
+      await msgHook({ message: { sessionId, role: "user", content: "live" }, agent });
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.content).toBe("live");
     } finally {
       cleanupTestFile(sessionId);
     }

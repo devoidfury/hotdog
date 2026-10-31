@@ -131,16 +131,21 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     }
   }
 
-  // Track session state
-  let isRestoring = false;
+  // Sessions currently replaying their log into an agent. One extension
+  // instance serves every session, so suppression must be keyed per session:
+  // a single flag would let A's replay silence B's real messages. The replay
+  // is synchronous today, but the flag was one inserted await away from a
+  // silent audit hole.
+  const restoringSessions = new Set<string>();
   // Durability-barrier failures keyed by tool call id (set when that call's
   // tool_started fsync fails). notifyHooks swallows handler errors, so the
   // failure cannot propagate from TOOL_BEFORE_EXECUTE -- the TOOL_CALL gate
   // below refuses the call instead. Per-call, never a global flag: this
   // instance is shared across webui sessions, and another session's landed
   // write must not rescue a call whose own record is missing (replay would
-  // read it as "never ran, safe to retry" when it may have run).
-  const barrierFailures = new Map<string, string>();
+  // read it as "never ran, safe to retry" when it may have run). Records
+  // carry their session so SESSION_END can reclaim a dead session's ids.
+  const barrierFailures = new Map<string, { sessionId: string; why: string }>();
   // Open turns per session (v2): set on the turn_started record, cleared on
   // turn_end. A rewind checkpoint (CONTEXT_REWOUND) uses this to re-emit the
   // marker below the reset. Compaction never reaches this path: it fires only
@@ -330,11 +335,41 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       },
 
       [HOOKS.SESSION_RESTORE_ACTIVE]: ({
+        agent,
         isRestoring: restoring,
       }: {
+        agent?: { sessionId?: string };
         isRestoring: boolean;
       }) => {
-        isRestoring = restoring;
+        const sessionId = agent?.sessionId;
+        if (!sessionId) return;
+        if (restoring) restoringSessions.add(sessionId);
+        else restoringSessions.delete(sessionId);
+      },
+
+      /**
+       * Per-session reclaim when a session's lifetime ends (task agent
+       * released, or a webui session deleted -- see docs/hook-lifecycle.md).
+       * The maps are caches of live-session bookkeeping: everything they
+       * protect is reconstructed on demand (writeQueues re-chains on the
+       * next append, loggedPrompts re-records the prompt on the next turn),
+       * so a delete-then-resume of the same id only costs one duplicate
+       * audit record, never lost ones.
+       */
+      [HOOKS.SESSION_END]: ({ sessionId }: { sessionId?: string }) => {
+        if (typeof sessionId !== "string" || sessionId === "") return;
+        openTurns.delete(sessionId);
+        loggedPrompts.delete(sessionId);
+        restoringSessions.delete(sessionId);
+        for (const [callId, rec] of barrierFailures) {
+          if (rec.sessionId === sessionId) barrierFailures.delete(callId);
+        }
+        try {
+          writeQueues.delete(sessionPath(sessionId));
+        } catch (err) {
+          // A rejected id never owned a queue entry; nothing to reclaim.
+          logger.debug(`[session-log] rejected session id at session end: ${formatError(err)}`);
+        }
       },
 
       /**
@@ -349,8 +384,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         message: SessionLogMessage;
         agent: { sessionId?: string; context?: { getSystemPrompt?: () => string | null } };
       }) => {
-        // Skip logging during session restoration to avoid duplicate entries
-        if (isRestoring) return;
+        // Skip logging this session's replayed entries (never another
+        // session's: the suppression set is keyed per session).
+        if (agent?.sessionId && restoringSessions.has(agent.sessionId)) return;
         // Both records enter the write queue synchronously (prompt first);
         // awaiting before the message enqueue would break dispatch-order
         // serialization for floating dispatches.
@@ -380,7 +416,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         agent: { sessionId?: string };
         newContext: SessionLogMessage[];
       }) => {
-        if (isRestoring) return;
+        if (agent.sessionId && restoringSessions.has(agent.sessionId)) return;
 
         const sessionId = agent.sessionId || "unknown";
         let logPath: string;
@@ -489,7 +525,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           barrierFailures.delete(toolCallId);
         } catch (err) {
           const why = formatError(err);
-          barrierFailures.set(toolCallId, why);
+          barrierFailures.set(toolCallId, { sessionId, why });
           logger.error(
             `[session-log] durability barrier failed: ${why} -- tool ${toolCallId} is blocked until its record can be written`,
           );
@@ -522,7 +558,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         return {
           action: "block",
           result:
-            `Tool not executed: the session log is unwritable (${failure}), so this call could not be recorded ` +
+            `Tool not executed: the session log is unwritable (${failure.why}), so this call could not be recorded ` +
             "before its side effects. Fix the sessions directory (disk space / permissions) and retry. " +
             "If you accept losing crash-resume safety for this session, disable logging with --no-log.",
         };

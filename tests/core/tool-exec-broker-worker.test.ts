@@ -175,6 +175,20 @@ describe("cancel routing (fake entry)", () => {
 });
 
 describe("reap frames (fake entries)", () => {
+  it("a session-scoped reap drops that session's runner and leaves another session's untouched", () => {
+    startCapture();
+    const state = makeState();
+    const doomed = fakeEntry({ pending: ["d1"] });
+    const other = fakeEntry({ pending: ["o1"] });
+    state.pool.set(poolKey("dead-session", "rw"), doomed.entry);
+    state.pool.set(poolKey("other-session", "rw"), other.entry);
+    handleFrame(JSON.stringify({ op: "reap", session: "dead-session" }), state);
+    expect(doomed.entry.dead).toBe(true);
+    expect(state.pool.has(poolKey("dead-session", "rw"))).toBe(false);
+    expect(other.entry.dead).toBe(false);
+    expect(state.pool.has(poolKey("other-session", "rw"))).toBe(true);
+  });
+
   it("drops matching entries, fails their pending calls as executor-died, keeps the rest", () => {
     startCapture();
     const state = makeState();

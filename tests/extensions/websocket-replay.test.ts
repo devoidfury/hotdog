@@ -2,13 +2,17 @@
 // through the live server; replaySessionHistory (the fork/in-memory path from
 // SWITCH_SESSION) and the partial-stream flush need direct exercise: the
 // message-shape mapping, tool name resolution from the preceding assistant
-// turn, content flattening, and the dropped-connection catch.
+// turn, content flattening, and the dropped-connection catch. replayLogSlice
+// gets direct exercise here for the token_usage case (attach/switch/reconnect
+// all flow through it).
 
 import { describe, it, expect } from "bun:test";
 import {
+  replayLogSlice,
   replayPendingQuestion,
   replaySessionHistory,
 } from "@extensions/websocket/replay.ts";
+import { LOG_SOURCE, type LogEntry } from "@core/session/session-log.ts";
 import { S2C } from "@extensions/websocket/protocol.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import { Message, type ImageAttachment } from "@core/context/message.ts";
@@ -222,6 +226,99 @@ describe("replaySessionHistory", () => {
       ),
     ).not.toThrow();
     expect(sends).toBe(2);
+  });
+});
+
+describe("replayLogSlice token_usage", () => {
+  const entry = (over: Record<string, unknown>) =>
+    ({
+      ts: "2026-10-20T00:00:00.000Z",
+      session_id: "s",
+      source: LOG_SOURCE.INPUT,
+      content: "",
+      ...over,
+    }) as unknown as LogEntry;
+
+  function slice(entries: LogEntry[], startIdx = 0): string[] {
+    const ws = createWsMockWs();
+    replayLogSlice(ws, "s1", entries, startIdx);
+    return ws.messages;
+  }
+
+  it("replays each token_usage record as S2C.TOKEN_USAGE at its log position", () => {
+    const raw = slice([
+      entry({ source: LOG_SOURCE.INPUT, content: "go" }),
+      entry({
+        source: LOG_SOURCE.TOKEN_USAGE,
+        sessionPromptTokens: 150000,
+        sessionCachedTokens: 148000,
+        sessionCompletionTokens: 3000,
+        sessionTotalTokens: 153000,
+        turns: 2,
+        promptTokens: 150000,
+        cachedTokens: 148000,
+        completionTokens: 3000,
+        totalTokens: 153000,
+        contextWindow: 200000,
+      }),
+      entry({ source: LOG_SOURCE.LLM, content: "done" }),
+      entry({
+        source: LOG_SOURCE.TOKEN_USAGE,
+        sessionPromptTokens: 153000,
+        sessionCachedTokens: 150000,
+        sessionCompletionTokens: 3200,
+        sessionTotalTokens: 156200,
+        turns: 3,
+        promptTokens: 152000,
+        cachedTokens: 150000,
+        completionTokens: 200,
+        totalTokens: 152200,
+        contextWindow: 200000,
+      }),
+    ]);
+    const msgs = raw.map((m) => JSON.parse(m) as Record<string, unknown>);
+    // One bubble per record, interleaved where the log puts them.
+    expect(msgs.map((m) => m.type)).toEqual([
+      S2C.USER_MESSAGE,
+      S2C.TOKEN_USAGE,
+      S2C.ASSISTANT_MESSAGE,
+      S2C.TOKEN_USAGE,
+    ]);
+    // Byte-identical to what the live websocket-channel mapper sends for the
+    // same record: same fields, same order, no turns/sessionCachedTokens.
+    expect(raw[1]).toBe(
+      JSON.stringify({
+        type: S2C.TOKEN_USAGE,
+        sessionId: "s1",
+        sessionPromptTokens: 150000,
+        sessionCompletionTokens: 3000,
+        sessionTotalTokens: 153000,
+        promptTokens: 150000,
+        completionTokens: 3000,
+        totalTokens: 153000,
+        cachedTokens: 148000,
+        contextWindow: 200000,
+      }),
+    );
+  });
+
+  it("omits contextWindow for legacy records that predate the field", () => {
+    const raw = slice([
+      entry({
+        source: LOG_SOURCE.TOKEN_USAGE,
+        sessionPromptTokens: 900,
+        sessionCompletionTokens: 60,
+        sessionTotalTokens: 960,
+        promptTokens: 900,
+        completionTokens: 60,
+        totalTokens: 960,
+        cachedTokens: 0,
+      }),
+    ]);
+    const msg = JSON.parse(raw[0]!) as Record<string, unknown>;
+    expect(msg.type).toBe(S2C.TOKEN_USAGE);
+    expect("contextWindow" in msg).toBe(false);
+    expect(msg.totalTokens).toBe(960);
   });
 });
 

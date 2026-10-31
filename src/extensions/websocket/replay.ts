@@ -32,7 +32,8 @@ function argsSummaryField(
  * client's replay cursor: a position in the full log (append-only -- a RESET
  * never moves an earlier entry), so the slice is exactly the tail the
  * client does not hold. Full replays pass the epoch's start as `startIdx`.
- * Only conversation entries are sent; bookkeeping records never surface.
+ * Only conversation entries are sent, plus token_usage snapshots (usage
+ * bubbles); pure bookkeeping records never surface.
  * Tool-result names resolve across the WHOLE log, so a result whose call
  * predates the slice (even across a RESET) carries the right name.
  */
@@ -115,6 +116,29 @@ export function replayLogSlice(
             output: toolContentText(content ?? ""),
             ...(callId ? { toolCallId: callId } : {}),
             ...(toolImgs ? { images: toolImgs } : {}),
+          }),
+        );
+        break;
+      }
+      case LOG_SOURCE.TOKEN_USAGE: {
+        // Not bookkeeping: one record = one usage bubble. Mirror the live
+        // websocket-channel TOKEN_USAGE mapper field-for-field (same order,
+        // same guards) so the client stays one code path.
+        const d = e as unknown as Record<string, unknown>;
+        ws.send(
+          JSON.stringify({
+            type: S2C.TOKEN_USAGE,
+            sessionId,
+            sessionPromptTokens: (d.sessionPromptTokens as number) || 0,
+            sessionCompletionTokens: (d.sessionCompletionTokens as number) || 0,
+            sessionTotalTokens: (d.sessionTotalTokens as number) || 0,
+            promptTokens: (d.promptTokens as number) || 0,
+            completionTokens: (d.completionTokens as number) || 0,
+            totalTokens: (d.totalTokens as number) || 0,
+            cachedTokens: (d.cachedTokens as number) || 0,
+            ...(typeof d.contextWindow === "number" && Number.isFinite(d.contextWindow)
+              ? { contextWindow: d.contextWindow }
+              : {}),
           }),
         );
         break;

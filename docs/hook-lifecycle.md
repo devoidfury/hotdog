@@ -521,7 +521,7 @@ The optional `source` parameter (third argument to `on()`) is used for tracing a
 The hook system has a built-in trace facility for debugging:
 
 ```js
-hooks._trace = true; // enable trace logging
+hooks.trace = true; // enable trace logging (boolean, or a HookTraceOptions object)
 ```
 
 When enabled, every handler invocation is logged with:

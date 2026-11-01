@@ -39,7 +39,7 @@ Manages extension-registered CLI flags and config parameters. Config params and 
 ### Hook System (`src/core/hooks.ts`)
 The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in the `HOOKS` constant (session, tools, context, system prompt, commands, output, provider, turn, CLI, logging). `notifyHooks()` starts all handlers immediately (async ones in parallel) and returns a promise that settles once every handler has settled; core call sites await it wherever later code depends on handler side effects (tool pipeline, turn boundaries, session lifecycle, shutdown). Full per-hook reference — names, patterns, payloads, when each fires: `docs/hook-lifecycle.md`.
 
-**Hook trace:** Set `_trace = true` on the HookSystem instance (via `--hook-trace` CLI flag, `HOTDOG_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug`. See `docs/agents/debugging.md` for details.
+**Hook trace:** Set `trace = true` on the HookSystem instance (`hooks.trace = true`; via the `--hook-trace` CLI flag, `HOTDOG_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug`. See `docs/agents/debugging.md` for details.
 
 ### Extension Loader (`src/core/extensions/extensions.ts`)
 Discovers, loads, and manages extensions. Key exports:
@@ -59,8 +59,6 @@ Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key 
 - Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `profileBody`, `systemPromptTemplate` (loaded template text from the resolved config), `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`, `enqueueCallback`
 - `run(userInput)` — main iteration loop: add user message → build messages → LLM call → process stream → execute tools → repeat
 - `ensureSystemPrompt()` — builds system prompt via hooks (extensions contribute)
-- `_processStream(stream)` — processes streaming LLM response (content, reasoning, tool calls, usage)
-- `_executeTools(toolCalls)` — executes tool calls via the ToolExecutor
 - `executeCommand(cmd)` — executes commands
 - `cancel()` — cancels the running agent loop
 - Properties: `model` (setter emits `MODEL_CHANGE`, clears tool defs and system prompt cache), `context` (`ContextManager`), `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `llmClient`, `reasoningEffort`, `steeringQueue`, `commandRegistry`, `enqueueCallback`

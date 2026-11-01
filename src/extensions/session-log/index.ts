@@ -254,14 +254,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     fsync = false, // durability class for tail records (see queuedFsyncAppend)
   ): Promise<void> => {
     const sessionId = agent.sessionId || "unknown";
-    let logPath: string;
-    try {
-      logPath = sessionPath(sessionId);
-    } catch (err) {
-      logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
-      return;
-    }
-    lastSessionId = sessionId;
+    const logPath = resolveLogPath(sessionId);
+    if (!logPath) return;
 
     const entry = messageToLogEntry(
       {
@@ -420,14 +414,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         if (agent.sessionId && restoringSessions.has(agent.sessionId)) return;
 
         const sessionId = agent.sessionId || "unknown";
-        let logPath: string;
-        try {
-          logPath = sessionPath(sessionId);
-        } catch (err) {
-          logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
-          return;
-        }
-        lastSessionId = sessionId;
+        const logPath = resolveLogPath(sessionId);
+        if (!logPath) return;
         // The reset slices the replay window, and kept history re-appends skip
         // system messages -- drop the dedupe entry so the next turn's event
         // records the prompt again below the checkpoint.
@@ -785,13 +773,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           // same as CONTEXT_MESSAGE) or each resume re-appends the epoch's
           // usage history at EOF -- duplicated, out-of-order bubbles.
           if (restoringSessions.has(sessionId)) return;
-          let logPath: string;
-          try {
-            logPath = sessionPath(sessionId);
-          } catch (err) {
-            logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
-            return;
-          }
+          const logPath = resolveLogPath(sessionId);
+          if (!logPath) return;
           const entry = stripNulls({
             ts: new Date().toISOString(),
             session_id: sessionId,
@@ -826,14 +809,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           const compactionData = data as { summary?: string; messagesCompacted?: number };
           if (compactionData?.summary) {
             const sessionId = agent.sessionId || "unknown";
-            let logPath: string;
-            try {
-              logPath = sessionPath(sessionId);
-            } catch (err) {
-              logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
-              return;
-            }
-            lastSessionId = sessionId;
+            const logPath = resolveLogPath(sessionId);
+            if (!logPath) return;
             // Log the message exactly as it enters the context: harness
             // structure with the real wrapper tag parts around the RAW
             // model-generated summary (`untrusted` part, mangled only at the

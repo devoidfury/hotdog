@@ -14,6 +14,8 @@ import type { WebSocketQuestionBridge } from "./question-input.ts";
 import {
   C2S,
   S2C,
+  errorFrame,
+  errorText,
   taskControlMessage,
   C2SMessage,
   wireImages,
@@ -105,7 +107,7 @@ async function handleTranscribe(
     reply({ ok: true, text });
   } catch (err: unknown) {
     logger.error(`[websocket] transcribe failed: ${formatError(err)}`);
-    reply({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    reply({ ok: false, error: errorText(err) });
   }
 }
 
@@ -216,10 +218,7 @@ export async function routeMessage(
           registry.sendTaskSnapshot(ws);
         })
         .catch((err: unknown) => {
-          SessionRegistry.sendSafe(ws, {
-            type: S2C.ERROR,
-            message: err instanceof Error ? err.message : String(err),
-          });
+          SessionRegistry.sendSafe(ws, errorFrame(err));
         });
       break;
     }
@@ -557,10 +556,7 @@ export async function routeMessage(
               }
             })
             .catch((err: unknown) => {
-              SessionRegistry.sendSafe(ws, {
-                type: S2C.ERROR,
-                message: err instanceof Error ? err.message : String(err),
-              });
+              SessionRegistry.sendSafe(ws, errorFrame(err));
             });
           break;
         }
@@ -637,10 +633,7 @@ export async function routeMessage(
           });
         })
         .catch((err: unknown) => {
-          SessionRegistry.sendSafe(ws, {
-            type: S2C.ERROR,
-            message: err instanceof Error ? err.message : String(err),
-          });
+          SessionRegistry.sendSafe(ws, errorFrame(err));
         });
       break;
     }
@@ -656,10 +649,7 @@ export async function routeMessage(
         await attachResumedSession(ws, registry, bridge, msg.logId as string, 0, false).catch(
           (err: unknown) => {
             logger.error(`[websocket] loadLog failed: ${formatError(err)}`);
-            SessionRegistry.sendSafe(ws, {
-              type: S2C.ERROR,
-              message: err instanceof Error ? err.message : String(err),
-            });
+            SessionRegistry.sendSafe(ws, errorFrame(err));
           },
         );
       }
@@ -684,10 +674,7 @@ export async function routeMessage(
             });
           })
           .catch((err: unknown) => {
-            SessionRegistry.sendSafe(ws, {
-              type: S2C.ERROR,
-              message: err instanceof Error ? err.message : String(err),
-            });
+            SessionRegistry.sendSafe(ws, errorFrame(err));
           });
       }
       break;
@@ -712,10 +699,7 @@ export async function routeMessage(
             }
           })
           .catch((err: unknown) => {
-            SessionRegistry.sendSafe(ws, {
-              type: S2C.ERROR,
-              message: err instanceof Error ? err.message : String(err),
-            });
+            SessionRegistry.sendSafe(ws, errorFrame(err));
           });
       }
       break;

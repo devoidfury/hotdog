@@ -105,6 +105,21 @@ export const S2C = {
 export type C2SType = (typeof C2S)[keyof typeof C2S];
 export type S2CType = (typeof S2C)[keyof typeof S2C];
 
+/**
+ * Wire-safe error text: message only. Deliberately NOT `formatError()` --
+ * unexpected-error stacks stay server-side (log them there); they must never
+ * ride a frame to the client.
+ */
+export function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Build an S2C.ERROR frame from a caught value. */
+export function errorFrame(err: unknown): { type: string; message: string } {
+  return { type: S2C.ERROR, message: errorText(err) };
+}
+
+
 export interface C2SMessage {
   type: C2SType;
   [key: string]: unknown;

@@ -19,7 +19,7 @@ import { formatToolResult } from "@core/extensions/tool-utils.ts";
 import type { QuestionDef } from "@core/context/input.ts";
 import { logger } from "@utils/logger.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
-import { S2C } from "./protocol.ts";
+import { S2C, errorFrame } from "./protocol.ts";
 import { sessionCreatedPayload } from "./session-created.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import type { HotdogServerSocket } from "./socket.ts";
@@ -274,10 +274,7 @@ export function createAndAttachSession(
       registry.sendTaskSnapshot(ws);
     })
     .catch((err: unknown) => {
-      SessionRegistry.sendSafe(ws, {
-        type: S2C.ERROR,
-        message: err instanceof Error ? err.message : String(err),
-      });
+      SessionRegistry.sendSafe(ws, errorFrame(err));
       try {
         ws.close(4003, "Failed to create session");
       } catch {}

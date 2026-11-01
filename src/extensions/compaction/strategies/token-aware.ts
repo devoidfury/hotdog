@@ -12,10 +12,6 @@ export class TokenAwareStrategy extends CompactionStrategy {
   override name = "token-aware";
   override description = "Compact to a target token count. Dynamically determines how many messages to keep based on precise token estimation.";
 
-  constructor() {
-    super();
-  }
-
   override async execute(
     messages: Message[],
     settings: CompactionSettings,

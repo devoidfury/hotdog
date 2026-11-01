@@ -4,7 +4,7 @@
 import { reactiveState, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
 import type { UiImage } from "./message-list.ts";
-import type { SessionInfo } from "./sessions.tsx";
+import type { LogInfo, SessionInfo } from "./sessions.tsx";
 import type {
   UploadFileWire,
   TaskInfoWire,
@@ -209,20 +209,7 @@ interface SessionsMessage {
 
 interface LogsListedMessage {
   type: "logsListed";
-  logs: Array<{
-    id: string;
-    createdAt: number;
-    lastActivityAt: number;
-    messageCount: number;
-    /** Derived index state (idle/awaiting_question/interrupted/parked);
-     *  absent when the log has no reconciled row yet. */
-    state?: string;
-    /** Index-attested model/profile + last usage (absent on legacy logs). */
-    model?: string;
-    profile?: string;
-    ctxUsed?: number;
-    ctxTotal?: number;
-  }>;
+  logs: LogInfo[];
 }
 
 // Image payload type (UiImage) is defined in message-list.ts; the server

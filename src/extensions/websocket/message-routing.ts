@@ -31,6 +31,7 @@ import { SessionRegistry } from "./session-registry.ts";
 import { replaySessionHistory } from "./replay.ts";
 import { createAndAttachSession, dismissResumedQuestions } from "./resume.ts";
 import { attachLiveSession, attachResumedSession, attachToMostRecentSession, fallbackAttach } from "./attach.ts";
+import { sessionCreatedPayload } from "./session-created.ts";
 import { MAX_COMPLETE_LINE, MAX_TRANSCRIBE_AUDIO_BYTES, MAX_TRANSCRIBE_BASE64_CHARS } from "./constants.ts";
 
 /**
@@ -204,22 +205,12 @@ export async function routeMessage(
           questionStrategy: msg.questionStrategy as string | undefined,
           questionTimeoutSecs: msg.questionTimeoutSecs as number | undefined,
         })
-        .then(({ sessionId, agent }) => {
+        .then(({ sessionId }) => {
           const channel = registry.createChannel(sessionId, ws);
           ws.activeSessionId = sessionId;
           ws.activeChannel = channel;
 
-          const sessionCreatedMsg = {
-            type: S2C.SESSION_CREATED,
-            sessionId,
-            profile: agent.profileName || "default",
-            // Fresh session: no explicit title yet, display follows profile.
-            title: null,
-            currentModel: agent.model,
-            models: Object.keys(agent.modelRegistry || {}),
-            sttEnabled: registry.sttEnabled,
-            toolExec: registry.toolExecLabel(sessionId),
-          };
+          const sessionCreatedMsg = sessionCreatedPayload(registry, sessionId);
           SessionRegistry.sendSafe(ws, sessionCreatedMsg);
           registry.broadcast(sessionCreatedMsg);
           registry.sendTaskSnapshot(ws);
@@ -542,17 +533,7 @@ export async function routeMessage(
               ws.activeSessionId = newSessionId;
               ws.activeChannel = registry.createChannel(newSessionId, ws);
 
-              const sessionCreatedMsg = {
-                type: S2C.SESSION_CREATED,
-                sessionId: newSessionId,
-                profile: agent.profileName || "default",
-                // Fresh session (branch): no explicit title yet, display follows profile.
-                title: null,
-                currentModel: agent.model,
-                models: Object.keys(agent.modelRegistry || {}),
-                sttEnabled: registry.sttEnabled,
-                toolExec: registry.toolExecLabel(newSessionId),
-              };
+              const sessionCreatedMsg = sessionCreatedPayload(registry, newSessionId);
               SessionRegistry.sendSafe(ws, sessionCreatedMsg);
               registry.broadcast(sessionCreatedMsg);
               // A fresh fork id owns no tasks, so it inherits none of the source's chips.

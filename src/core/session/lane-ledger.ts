@@ -72,6 +72,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { createExclusive } from "@utils/fs-atomic.ts";
 import { logger } from "@utils/logger.ts";
+import { pidAlive } from "@utils/process-group.ts";
 import { formatError } from "../error.ts";
 
 /** Interval between mtime refreshes on a held slot. */
@@ -149,16 +150,6 @@ export function processSlotCount(): number {
   return processSlots.size;
 }
 
-function pidAliveDefault(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0); // signal 0: existence check only
-    return true;
-  } catch (e: unknown) {
-    return (e as { code?: string }).code === "EPERM"; // exists, not ours
-  }
-}
-
 function parseMarker(text: string): SlotMarker | null {
   try {
     const m = JSON.parse(text) as SlotMarker;
@@ -188,7 +179,7 @@ export class LaneLedger {
     this.#dir = opts.dir;
     this.#pid = opts.pid ?? process.pid;
     this.#host = opts.host ?? hostname();
-    this.#pidAlive = opts.pidAlive ?? pidAliveDefault;
+    this.#pidAlive = opts.pidAlive ?? pidAlive;
     this.#heartbeatMs =
       typeof opts.heartbeatMs === "number" && opts.heartbeatMs >= 1
         ? opts.heartbeatMs

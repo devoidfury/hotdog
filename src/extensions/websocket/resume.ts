@@ -20,6 +20,7 @@ import type { QuestionDef } from "@core/context/input.ts";
 import { logger } from "@utils/logger.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
 import { S2C } from "./protocol.ts";
+import { sessionCreatedPayload } from "./session-created.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
@@ -255,22 +256,12 @@ export function createAndAttachSession(
   // AHEAD of the sessionCreated the client needs first.
   return registry
     .create({})
-    .then(({ sessionId, agent }) => {
+    .then(({ sessionId }) => {
       const channel = registry.createChannel(sessionId, ws);
       ws.activeSessionId = sessionId;
       ws.activeChannel = channel;
 
-      SessionRegistry.sendSafe(ws, {
-        type: S2C.SESSION_CREATED,
-        sessionId,
-        profile: agent.profileName || "default",
-        // Fresh session: no explicit title yet, display follows profile.
-        title: null,
-        currentModel: agent.model,
-        models: Object.keys(agent.modelRegistry || {}),
-        sttEnabled: registry.sttEnabled,
-        toolExec: registry.toolExecLabel(sessionId),
-      });
+      SessionRegistry.sendSafe(ws, sessionCreatedPayload(registry, sessionId));
       // The replay position for the next reconnect (0 = full replay), closing
       // the client's attach bookkeeping like every other attach path.
       SessionRegistry.sendSafe(ws, {

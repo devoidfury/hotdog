@@ -17,6 +17,7 @@ import type { Agent } from "@core/agent.ts";
 import type { QuestionDef } from "@core/context/input.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
 import { S2C } from "./protocol.ts";
+import { sessionCreatedPayload } from "./session-created.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { replayLogSlice, replayPendingQuestion } from "./replay.ts";
 import { adoptSessionLog, createAndAttachSession, seedResumedQuestions } from "./resume.ts";
@@ -46,26 +47,6 @@ import type { HotdogServerSocket } from "./socket.ts";
  * Compaction writes no RESET (replaceContext), so common-case cursors are
  * unaffected.
  */
-/** The sessionCreated payload for a live session (attach + broadcast share it). */
-function sessionCreatedPayload(
-  registry: SessionRegistry,
-  sessionId: string,
-): Record<string, unknown> {
-  const session = registry.get(sessionId);
-  const agent = (session?.agent as Agent) || null;
-  const meta = session?.metadata;
-  return {
-    type: S2C.SESSION_CREATED,
-    sessionId,
-    profile: agent?.profileName || meta?.profile || "default",
-    title: meta?.title ?? null,
-    currentModel: agent?.model || meta?.model || "?",
-    models: Object.keys(agent?.modelRegistry || {}),
-    sttEnabled: registry.sttEnabled,
-    toolExec: registry.toolExecLabel(sessionId),
-  };
-}
-
 export async function attachLiveSession(
   ws: HotdogServerSocket<unknown>,
   registry: SessionRegistry,

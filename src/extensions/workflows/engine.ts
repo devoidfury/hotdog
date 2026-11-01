@@ -22,6 +22,7 @@ import { formatError } from "@core/error.ts";
 import { createExclusive } from "@utils/fs-atomic.ts";
 import { parseJsonLines } from "@utils/json-lines.ts";
 import { logger } from "@utils/logger.ts";
+import { pidAlive } from "@utils/process-group.ts";
 import type {
   SpawnTaskOptions,
   TaskHandle,
@@ -1082,16 +1083,6 @@ export interface ClaimOptions {
   pidAlive?: (pid: number) => boolean;
 }
 
-function pidAliveDefault(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0); // signal 0: existence check only
-    return true;
-  } catch (e: unknown) {
-    return (e as { code?: string }).code === "EPERM"; // exists, not ours
-  }
-}
-
 function parseOwnerJson(text: string): RunOwner | null {
   try {
     const o = JSON.parse(text) as RunOwner;
@@ -1152,7 +1143,7 @@ export async function claimRunDir(
 ): Promise<{ ok: true; reclaimed?: RunOwner } | { ok: false; owner: RunOwner }> {
   const pid = opts?.pid ?? process.pid;
   const host = opts?.host ?? hostname();
-  const alive = opts?.pidAlive ?? pidAliveDefault;
+  const alive = opts?.pidAlive ?? pidAlive;
   const ownerPath = join(runDir, RUN_OWNER_FILE);
   const mineJson = () =>
     `${JSON.stringify({ pid, host, claimedAt: new Date().toISOString() } satisfies RunOwner)}\n`;
@@ -1381,7 +1372,7 @@ export async function scanInterruptedRuns(
   bounded = false,
 ): Promise<InterruptedRunView[]> {
   const host = opts?.host ?? hostname();
-  const alive = opts?.pidAlive ?? pidAliveDefault;
+  const alive = opts?.pidAlive ?? pidAlive;
   let names: string[];
   try {
     names = (await readdir(runsRoot, { withFileTypes: true }))

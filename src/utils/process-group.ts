@@ -38,3 +38,19 @@ export function killProcessGroup(child: ChildProcess, signal: NodeJS.Signals): v
     // ESRCH: the group exited between the check and the signal.
   }
 }
+
+/**
+ * Liveness check for owner/claim records (lane leases, spawn logs, workflow
+ * run ownership): signal 0 probes existence without signaling. EPERM means
+ * the process exists but is not ours. Anything non-integer or <= 0 (a
+ * corrupt record) counts dead, uniformly across all claimants.
+ */
+export function pidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0); // signal 0: existence check only
+    return true;
+  } catch (e: unknown) {
+    return (e as { code?: string }).code === "EPERM"; // exists, not ours
+  }
+}

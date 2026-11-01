@@ -5,8 +5,8 @@ import { suggestCandidates } from "@utils/strings.ts";
 import { createToolRegistry } from "./extensions/tool-registry.ts";
 import {
   createExtensionLoader,
-  getExtensionsToLoad,
   registerExtensionMetadata,
+  resolveExtensionsToLoad,
   validateServiceContracts,
   type LoaderCore,
 } from "./extensions/extensions.ts";
@@ -48,16 +48,7 @@ async function loadExtensions(
 ): Promise<ExtensionInstance[]> {
   const loaded: ExtensionInstance[] = [];
 
-  const extensionPaths = (config?.extensionPaths as string[]) || ["@extensions"];
-  const extensionAutoload = (config?.extensionAutoload as boolean) ?? true;
-  const extensionsList = (config?.extensions as string[]) || [];
-
-  const extensionsToLoad = await getExtensionsToLoad(
-    extensionPaths,
-    extensionAutoload,
-    extensionsList,
-    config,
-  );
+  const extensionsToLoad = await resolveExtensionsToLoad(config);
 
   for (const ext of extensionsToLoad) {
     if (core.extensions.has(ext.name)) continue;

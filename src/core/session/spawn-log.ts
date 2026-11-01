@@ -22,6 +22,7 @@ import { dirname } from "node:path";
 import { hostname } from "node:os";
 import { parseJsonLines } from "@utils/json-lines.ts";
 import { logger } from "@utils/logger.ts";
+import { pidAlive } from "@utils/process-group.ts";
 import { formatError } from "../error.ts";
 
 /** A task spawned by a process lifetime that ended without a terminal record. */
@@ -36,16 +37,6 @@ export interface OrphanedTask {
 /** Upper bound on the orphan list handed to status surfaces (plan_status stays small). */
 const MAX_ORPHANS = 50;
 
-function pidAliveDefault(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0); // signal 0: existence check only
-    return true;
-  } catch (e: unknown) {
-    return (e as { code?: string }).code === "EPERM"; // exists, not ours
-  }
-}
-
 export class SpawnLog {
   #path: string;
   #pidAlive: (pid: number) => boolean;
@@ -54,10 +45,10 @@ export class SpawnLog {
   #dirReady = false;
   #orphans: Promise<OrphanedTask[]> | null = null;
 
-  /** `pidAlive` is the restart-simulation test seam (default: signal-0 check). */
-  constructor(path: string, pidAlive?: (pid: number) => boolean) {
+  /** `pidAliveFn` is the restart-simulation test seam (default: signal-0 check). */
+  constructor(path: string, pidAliveFn?: (pid: number) => boolean) {
     this.#path = path;
-    this.#pidAlive = pidAlive ?? pidAliveDefault;
+    this.#pidAlive = pidAliveFn ?? pidAlive;
   }
 
   recordSpawn(rec: { taskId: string; description: string; sessionId: string | null }): void {

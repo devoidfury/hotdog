@@ -551,21 +551,38 @@ export function resolveExtensionDependencies(
   return Array.from(result.values());
 }
 
+/**
+ * The extension-selection config keys with their single home for fallbacks:
+ * `extensionPaths` -> ["@extensions"], `extensionAutoload` -> true,
+ * `extensions` -> []. Every consumer (loader, metadata registration, the
+ * info surface) reads them through here, so a default change lands once.
+ */
+export function extensionSelection(config?: CoreConfigWithExtensions | null): {
+  extensionPaths: string[];
+  extensionAutoload: boolean;
+  extensions: string[];
+} {
+  return {
+    extensionPaths: (config?.extensionPaths as string[]) || ["@extensions"],
+    extensionAutoload: (config?.extensionAutoload as boolean) ?? true,
+    extensions: (config?.extensions as string[]) || [],
+  };
+}
+
+/** Config -> extensions to load: the one call for main.ts and metadata registration. */
+export async function resolveExtensionsToLoad(
+  config: CoreConfigWithExtensions,
+): Promise<ExtensionMetadata[]> {
+  const { extensionPaths, extensionAutoload, extensions } = extensionSelection(config);
+  return getExtensionsToLoad(extensionPaths, extensionAutoload, extensions, config);
+}
+
 export async function registerExtensionMetadata(
   config: CoreConfigWithExtensions,
   configRegistry: ConfigRegistry,
   cliSubcommandRegistry: CliSubcommandRegistry,
 ): Promise<ExtensionMetadata[]> {
-  const extensionPaths = (config?.extensionPaths as string[]) || ["@extensions"];
-  const extensionAutoload = (config?.extensionAutoload as boolean) ?? true;
-  const extensionsList = (config?.extensions as string[]) || [];
-
-  const extensionsToLoad = await getExtensionsToLoad(
-    extensionPaths,
-    extensionAutoload,
-    extensionsList,
-    config,
-  );
+  const extensionsToLoad = await resolveExtensionsToLoad(config);
 
   for (const ext of extensionsToLoad) {
     if (ext.cliFlags && ext.cliFlags.length > 0) {

@@ -4,7 +4,7 @@
 // text/JSON renderers. `--config-debug` delegates to config-trace.ts.
 import { CONFIG_SCHEMA, getLayerDefault, loadConfig, ProviderDef, resolveConfigDir, type CliArgv } from "@core/config/index.ts";
 import { CoreConfigWithExtensions } from "@core/config/index.ts";
-import { discoverExtensions, isExtensionEnabled } from "@core/extensions/extensions.ts";
+import { discoverExtensions, extensionSelection, isExtensionEnabled } from "@core/extensions/extensions.ts";
 import { collectInfoPanels, CoreContext, ExtensionInfoPanel, InfoValue } from "@core/extensions/types.ts";
 import { makeProviderHealth } from "@core/session/provider-health.ts";
 import {
@@ -125,7 +125,7 @@ async function getExtensionStatuses(
   config: Record<string, unknown>,
   loader: { all(): Iterable<[string, unknown]> } | null | undefined,
 ): Promise<ExtensionStatus[]> {
-  const extensionPaths = (config?.extensionPaths as string[]) || ["@extensions"];
+  const { extensionPaths } = extensionSelection(config as CoreConfigWithExtensions);
   const serviceOverrides = (config?.services as Record<string, string>) || {};
   const discovered = await discoverExtensions(extensionPaths, serviceOverrides);
   const loaded = new Set<string>();

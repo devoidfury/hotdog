@@ -1,4 +1,5 @@
 import { logger } from "@utils/logger.ts";
+import { sleep } from "@utils/promise.ts";
 import { HOOKS } from "../hooks.ts";
 import { Message } from "../context/message.ts";
 import type { OutputEvent } from "../context/output.ts";
@@ -757,7 +758,7 @@ export class TaskManager {
         entry.lease = got.lease;
         return;
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, this.#scheduler.retryMs));
+      await sleep(this.#scheduler.retryMs, entry.abortController.signal);
     }
   }
 

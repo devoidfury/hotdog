@@ -29,6 +29,7 @@
  */
 
 import { logger } from "@utils/logger.ts";
+import { sleep } from "@utils/promise.ts";
 import { formatError } from "../error.ts";
 import { LaneLedger, type LaneLease } from "./lane-ledger.ts";
 import { laneKeyOf, makeLaneCaps } from "./model-resolver.ts";
@@ -73,22 +74,6 @@ export interface TurnLanes {
    * aborted before the slot was handed over.
    */
   acquireTurn(model: string, wait: LaneWait): Promise<(() => Promise<void>) | null>;
-}
-
-/**
- * Sleep that wakes early on abort. Deliberately NOT unref'd: a one-shot run
- * blocked on a lane must keep the process alive until its turn can run.
- */
-function sleepOrAbort(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const done = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", done);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    signal.addEventListener("abort", done, { once: true });
-  });
 }
 
 export function createTurnLanes(options: TurnLanesOptions): TurnLanes {
@@ -146,7 +131,7 @@ export function createTurnLanes(options: TurnLanesOptions): TurnLanes {
           logger.debug(`[lanes] turn parked: lane '${lane || "_"}' full (cap ${cap})`);
           wait.onWaiting?.(lane);
         }
-        await sleepOrAbort(retryMs, wait.signal);
+        await sleep(retryMs, wait.signal);
       }
     },
   };

@@ -2,6 +2,7 @@ import { Message, type ToolCall, type ImageAttachment } from "./context/message.
 import { formatError, AssistantRetryableError, ToolError, TransientError } from "./error.ts";
 import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
 import { logger } from "@utils/logger.ts";
+import { sleep } from "@utils/promise.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import { type ToolRegistry } from "./extensions/tool-registry.ts";
@@ -291,7 +292,9 @@ export class ToolExecutor {
           logger.warn(
             `[tool:retry] ${toolName} failed (transient), retrying attempt ${attempts + 1}/${maxAttempts} after ${delay}ms...`,
           );
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          // Wake early if the run is cancelled: the wait is pure backoff, so
+          // an abort should cut it short instead of idling out the ladder.
+          await sleep(delay, this.#deps.runSignal?.() ?? null);
           continue;
         }
 

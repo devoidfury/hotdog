@@ -314,7 +314,7 @@ describe("LlmClient.chatStreamCancellable — Retry-After", () => {
       markerMangler: null,
       llmProtocolRegistry: registry,
       // Absurd fallback: if the Retry-After hint were ignored, this test
-      // would sit in retryDelay for a minute.
+      // would sit in the retry sleep for a minute.
       retryBaseDelayMs: 60_000,
     });
 

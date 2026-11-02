@@ -14,6 +14,17 @@ const execFileAsync = util.promisify(execFile);
 
 const DEFAULT_DU_DEPTH = 1;
 
+/** du output section: sizes table, leading "./" stripped (root stays "."). */
+function pushDirSection(lines: string[], dirSizes: [string, string][]): void {
+  if (dirSizes.length === 0) return;
+  lines.push("── Directories ────────────────────────");
+  for (const [size, dirPath] of dirSizes) {
+    const displayPath = dirPath === "." ? "." : dirPath.replace(/^\.\//, "");
+    lines.push(`${size}  ${displayPath}`);
+  }
+  lines.push("");
+}
+
 export class ProjectInfoTool {
   static readonly TOOL_NAME = "project_info";
   metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
@@ -154,15 +165,7 @@ export class ProjectInfoTool {
     lines.push("");
 
 
-    if (dirSizes.length > 0) {
-      lines.push("── Directories ────────────────────────");
-      for (const [size, dirPath] of dirSizes) {
-        const displayPath =
-          dirPath === "." ? "." : dirPath.replace(/^\.\//, "");
-        lines.push(`${size}  ${displayPath}`);
-      }
-      lines.push("");
-    }
+    pushDirSection(lines, dirSizes);
 
     if (gitStatus.length > 0) {
       lines.push("── Git Status ─────────────────────────");
@@ -208,15 +211,7 @@ export class ProjectInfoTool {
 
     const gitignoreFilter = await this._loadGitignoreFilter(cwd, []);
     const dirSizes = await this._getDirSizes(maxDepth, cwd, gitignoreFilter);
-    if (dirSizes.length > 0) {
-      lines.push("── Directories ────────────────────────");
-      for (const [size, dirPath] of dirSizes) {
-        const displayPath =
-          dirPath === "." ? "." : dirPath.replace(/^\.\//, "");
-        lines.push(`${size}  ${displayPath}`);
-      }
-      lines.push("");
-    }
+    pushDirSection(lines, dirSizes);
 
 
     if (files.length > 0) {

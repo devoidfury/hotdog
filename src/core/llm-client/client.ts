@@ -1,4 +1,5 @@
-import { retryDelay, resolveRetryDelayMs, parseRetryAfterMs, shouldRetryLlmError, hasQuotaSignal } from "./retry.ts";
+import { resolveRetryDelayMs, parseRetryAfterMs, shouldRetryLlmError, hasQuotaSignal } from "./retry.ts";
+import { sleep } from "@utils/promise.ts";
 import { MarkerMangler } from "../marker-mangler.ts";
 import type { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
@@ -397,7 +398,7 @@ export class LlmClient {
           if (!shouldRetryLlmError(e, attempt, this.maxRetries)) throw e;
           // Server Retry-After wins over the backoff when present; the
           // exponential ladder keeps advancing regardless.
-          await retryDelay(resolveRetryDelayMs(e, delayMs), abortController.signal);
+          await sleep(resolveRetryDelayMs(e, delayMs), abortController.signal);
           delayMs *= 2;
           continue;
         }
@@ -425,7 +426,7 @@ export class LlmClient {
           // (and replay buffers) before the new stream's events arrive.
           yield { type: "reset" };
 
-          await retryDelay(resolveRetryDelayMs(err, delayMs), abortController.signal);
+          await sleep(resolveRetryDelayMs(err, delayMs), abortController.signal);
           delayMs *= 2;
         }
       }

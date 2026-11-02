@@ -1,4 +1,4 @@
-// EditorView end-to-end (§11 suites 3+4): raw byte chunks -> StdinBuffer ->
+// EditorView end-to-end: raw byte chunks -> StdinBuffer ->
 // EditorView, driven against the FakeClock and rendered into the in-memory
 // Grid. Adversarial coverage that spans layers: multibyte split across chunks,
 // combining clusters, CJK wrap row counts and straddle, emoji, the lone-ESC
@@ -76,14 +76,14 @@ describe("EditorView -- submit + interrupt + quit", () => {
     expect(h.submitTexts()).toEqual(["go"]);
   });
 
-  it("0x03 mid-buffer: INTERRUPT emitted, text not submitted, survives to draft (§4)", () => {
+  it("0x03 mid-buffer: INTERRUPT emitted, text not submitted, survives to draft)", () => {
     const h = make();
     h.feed("keep-this");
     h.feed("\x03");
     expect(h.types()).toContain("interrupt");
     expect(h.submitTexts()).toEqual([]); // never submitted
     expect(h.view.text).toBe(""); // blanked like today's handler
-    // ...but recoverable (§4: stash-to-draft, not destructive): Down restores it
+    // ...but recoverable (stash-to-draft, not destructive): Down restores it
     h.feed("\x1b[B"); // down arrow at the empty buffer's only row
     expect(h.view.text).toBe("keep-this");
   });
@@ -94,7 +94,7 @@ describe("EditorView -- submit + interrupt + quit", () => {
     expect(h.types()).toContain("quit");
   });
 
-  it("Ctrl-D with text deletes forward, never quits (§4/Decisions 2)", () => {
+  it("Ctrl-D with text deletes forward, never quits", () => {
     const h = make();
     h.feed("abc");
     h.feed("\x1b[D"); // left once -> cursor before "c"
@@ -123,7 +123,7 @@ describe("EditorView -- submit + interrupt + quit", () => {
     expect(h.view.text).toBe("/mo"); // untouched by the dismiss
   });
 
-  it("Ctrl-L emits redraw; Ctrl-X is UNHANDLED for 3b (dictation)", () => {
+  it("Ctrl-L emits redraw; Ctrl-X is UNHANDLED (dictation)", () => {
     const h = make();
     h.feed("x\x0c\x18"); // text x, Ctrl-L, Ctrl-X
     expect(h.types()).toContain("redraw");
@@ -282,7 +282,7 @@ describe("EditorView -- history navigation with draft", () => {
     expect(h.events.filter((e) => e.type === "history" && e.phase === "prev")).toHaveLength(1);
     h.feed(" typed"); // walk still active (editing breaks it only on submit-side ops)
     h.feed("\x1b[B"); // down past newest -> the walk's draft ("") restores
-    expect(h.view.text).toBe(""); // documented §4 walk semantics: draft was the empty line
+    expect(h.view.text).toBe(""); // documented walk semantics: draft was the empty line
   });
 });
 

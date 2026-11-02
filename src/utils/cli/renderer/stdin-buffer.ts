@@ -1,10 +1,10 @@
-// StdinBuffer (design note §5): raw stdin chunks -> decoded KeyEvents.
+// StdinBuffer: raw stdin chunks -> decoded KeyEvents.
 // Sits between the KeySource seam and the editor; the only code that turns
 // input bytes into text. Responsibilities:
 //
 // - UTF-8 reassembly across chunk boundaries (incremental TextDecoder; a
 //   multi-byte sequence split mid-sequence never corrupts);
-// - escape-sequence state machine with the §5 timers: a lone ESC decodes as
+// - escape-sequence state machine with the decode timers: a lone ESC decodes as
 //   Esc after ESC_KEY_MS (10ms), an incomplete CSI/SS3 prefix holds its bytes
 //   for SEQ_HOLD_MS (50ms). A fragmented arrow key never decodes into
 //   Esc+junk, and a true Esc never waits 50ms;
@@ -31,22 +31,22 @@
 // ending "...\x1b[20") waits SEQ_HOLD_MS, then becomes literal paste text.
 //
 // Unsubscribing the last event listener releases the KeySource listener and
-// discards any in-flight partial state -- teardown-safe (pitfall 6: stopping
-// input means letting go of listeners, never pausing).
+// discards any in-flight partial state -- teardown-safe: stopping input
+// means letting go of listeners, never pausing.
 
 import type { Clock, KeyChunk, KeySource } from "./seams.ts";
 import type { KeyEvent, KeyName } from "./keyevents.ts";
 
-/** §5: lone ESC -> Esc key after this much quiet. pi stdin-buffer.ts parity. */
+/** Decode timer: lone ESC -> Esc key after this much quiet. pi stdin-buffer.ts parity. */
 export const ESC_KEY_MS = 10;
-/** §5: incomplete CSI/SS3 prefix hold window. */
+/** Hold window for an incomplete CSI/SS3 prefix. */
 export const SEQ_HOLD_MS = 50;
 
 const ESC = "\x1b";
 const PASTE_END = "\x1b[201~";
 const DROP_LOG_MAX = 100;
 
-/** control byte -> key name (§4 bindings: a,e,k,u,w,l,y ride the ctrl-* set) */
+/** control byte -> key name (bindings: a,e,k,u,w,l,y ride the ctrl-* set) */
 export function controlName(b: number): KeyName {
   if (b === 0x00) return "ctrl-space";
   if (b === 0x03) return "interrupt"; // Ctrl-C: pure interrupt (Decisions 2)

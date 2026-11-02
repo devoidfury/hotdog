@@ -60,12 +60,3 @@ export function sanitize(str: string | null | undefined): string {
     .replace(/'/g, "&#39;");
 }
 
-export function escapeJson(str: string): string {
-  return str
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r")
-    .replace(/\t/g, "\\t");
-}
-

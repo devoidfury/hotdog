@@ -1,4 +1,4 @@
-// ProcessTerminal + StdinKeySource: the process-backed halves of the §11
+// ProcessTerminal + StdinKeySource: the process-backed halves of the
 // seams. Plumbing only (no frame/escape policy), so the doubles here are bare
 // EventEmitters -- what gets pinned is pass-through fidelity: writes forward,
 // TTY geometry falls back to 80x24, raw mode reaches stdin, and both

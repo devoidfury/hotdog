@@ -126,7 +126,7 @@ export function sharedToolExecDegraded(): boolean {
   return sharedBroker?.degraded ?? false;
 }
 
-// One supervisor, one broker child (user ruling). Agent factories share it.
+// One supervisor, one broker child. Agent factories share it.
 // The first creation pins the posture; later callers with different knobs get
 // the same broker, so name the drift once instead of letting an ignored
 // config mislead its owner (hand-built multi-agent hosts are where this bites).

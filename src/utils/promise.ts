@@ -31,3 +31,43 @@ export function isPromise(value: unknown): value is Promise<unknown> {
     typeof (value as { then?: unknown }).then === "function"
   );
 }
+
+/** Sentinel `raceAbort` resolves with when a signal aborts before the work. */
+export const ABORTED: unique symbol = Symbol("aborted");
+
+/**
+ * Await `work`, but resolve with ABORTED the moment any signal aborts -- for
+ * prompts and waits that must not dangle on a cancelled run. Contract:
+ * - an already-aborted signal resolves ABORTED immediately (a past "abort"
+ *   never re-fires the listener, so the race would hang without the check);
+ * - `work` runs in a microtask, so a synchronous throw and a rejection take
+ *   the same path;
+ * - work keeps running after an abort (collect-style inputs clean up on
+ *   their own); a late rejection once ABORTED has won is swallowed, never an
+ *   unhandled rejection;
+ * - abort listeners are removed whichever way the race ends.
+ */
+export function raceAbort<T>(
+  work: () => Promise<T> | T,
+  signals: Array<AbortSignal | null | undefined>,
+): Promise<Awaited<T> | typeof ABORTED> {
+  const workPromise = Promise.resolve().then(work);
+  let detach: () => void = () => {};
+  const aborted = new Promise<typeof ABORTED>((resolve) => {
+    if (signals.some((s) => s?.aborted)) {
+      resolve(ABORTED);
+      return;
+    }
+    const cleanups: Array<() => void> = [];
+    detach = () => {
+      for (const c of cleanups) c();
+    };
+    for (const s of signals) {
+      if (!s) continue;
+      const onAbort = () => resolve(ABORTED);
+      s.addEventListener("abort", onAbort, { once: true });
+      cleanups.push(() => s.removeEventListener("abort", onAbort));
+    }
+  });
+  return Promise.race([workPromise, aborted]).finally(detach);
+}

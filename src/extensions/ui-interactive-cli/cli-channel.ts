@@ -8,7 +8,7 @@ export interface CliChannelOptions {
   sessionId: string;
   sink: CliOutputSink;
   /**
-   * The readline interface for the legacy input path. The stage-3b editor
+   * The readline interface for the legacy input path. The editor
    * path (split renderer) delivers input through the editor submit handler
    * and quits via onQuit, so it constructs the channel without one: `read()`
    * then yields nothing (the core Channel contract still requires the

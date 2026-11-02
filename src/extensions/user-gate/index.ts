@@ -33,6 +33,7 @@ import {
 } from "@utils/approvals/rules.ts";
 import { extractTargets, suggestRuleLine } from "@utils/approvals/index.ts";
 import { spoofSafe } from "@utils/spoof.ts";
+import { ABORTED, raceAbort } from "@utils/promise.ts";
 
 type ToolCallPayload = HookPayloads["tool:call"];
 
@@ -138,25 +139,10 @@ async function askUser(
       allowOther: false,
     };
 
-    const collect = Promise.resolve().then(() => input.collectAnswers([question], signal));
     // A prompt nobody will answer (run cancelled) must resolve toward deny
     // rather than dangle: race the agent's run abort.
-    let onAbort: (() => void) | null = null;
-    const aborted = signal
-      ? new Promise<"aborted">((resolve) => {
-          onAbort = () => resolve("aborted");
-          signal.addEventListener("abort", onAbort, { once: true });
-        })
-      : null;
-
-    let outcome: unknown;
-    try {
-      outcome = await (aborted ? Promise.race([collect, aborted]) : collect);
-    } finally {
-      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
-    }
-    if (outcome === "aborted") {
-      collect.catch(() => {});
+    const outcome = await raceAbort(() => input.collectAnswers([question], signal), [signal]);
+    if (outcome === ABORTED) {
       return { action: "deny", reason: "cancelled while awaiting approval" };
     }
 

@@ -371,7 +371,7 @@ export async function routeMessage(
       // interrupt bottoms out in the same SessionManager map, so a foreign
       // id can never move state here). Auth is upstream: this point is
       // already past the routeMessage auth gate and the upgrade-time
-      // Origin/Host gate from the P0 batch.
+      // Origin/Host gate.
       const sid = typeof msg.sessionId === "string" ? msg.sessionId : "";
       const policy = msg.policy;
       if (policy !== "off" && policy !== "probe") {

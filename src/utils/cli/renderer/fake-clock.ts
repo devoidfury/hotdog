@@ -1,4 +1,4 @@
-// FakeClock: deterministic test double for the Clock seam (§11). The 16ms
+// FakeClock: deterministic test double for the Clock seam. The 16ms
 // frame interval and the stdin timers advance only when the test says so, and
 // cancellations are observable -- the input-bypass test asserts the pending
 // paint timer was actually cleared, not merely overwritten.

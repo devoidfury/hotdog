@@ -52,7 +52,7 @@ export function handleHelp(): CommandResult {
 
 /**
  * Handler for /redraw — handled at the interactive-UI level (purge scrollback,
- * reprint the transcript, repaint the frame -- split renderer recovery, §6).
+ * reprint the transcript, repaint the frame -- split renderer recovery).
  * This fallback exists for direct agent command execution and UIs without a
  * managed renderer, where there is nothing to purge.
  */

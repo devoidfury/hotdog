@@ -1,6 +1,5 @@
-// Self-contained CLI renderer core (stage 2a of
-// /home/agent/hotdog-cli-renderer-design-2026-10-19.md). Nothing in the
-// running CLI imports this module set yet; wiring lands in stage 2b.
+// Self-contained CLI renderer core. Wired into the interactive CLI by the
+// split-mode bridge (src/extensions/ui-interactive-cli/split-bridge.ts).
 
 export type { Clock, KeyChunk, KeySource, SignalHost, Terminal } from "./seams.ts";
 export { ProcessTerminal, StdinKeySource } from "./terminal.ts";

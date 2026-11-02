@@ -1,11 +1,11 @@
-// Popup (design note §4 steal 13): completion candidate rendering + selection
+// Popup: completion candidate rendering + selection
 // as a PURE model. The data source is injected -- the frame composer draws the
 // rows immediately above the editor block inside the frame (frame h grows;
-// the popup is never committed). No command/file logic lives here; stage 3b
+// the popup is never committed). No command/file logic lives here; the editor wiring
 // wires the existing core.completion providers (slash names, command args,
 // shell-mode) and the path completer through EditorView.openPopup.
 //
-// Navigation choices (the note does not pin keys; documented 3a decisions):
+// Navigation choices (documented decisions):
 // Tab cycles forward, Shift-Tab backward, Up/Down cycle WHILE OPEN (they walk
 // history only when closed), Enter accepts when open and submits when closed,
 // Esc closes when open and interrupts when closed.
@@ -125,7 +125,7 @@ export class Popup {
    * Frame rows: at most maxRows total, one selected, selection kept visible.
    * A "+N more"/"-N more" hint row replaces a candidate slot when the list is
    * truncated. Rows are cut to `width` cells (wide glyphs never split; the
-   * stage-2 wrap utility does the cutting).
+   * the wrap utility does the cutting).
    */
   renderRows(width: number, maxRows = POPUP_MAX_ROWS): string[] {
     if (!this.open || this.filtered.length === 0) return [];
@@ -162,7 +162,7 @@ export class Popup {
   }
 }
 
-/** Hard-cut a row to w cells using the stage-2 width table (no wrap, no padding). */
+/** Hard-cut a row to w cells using the width table (no wrap, no padding). */
 function cutToWidth(s: string, w: number): string {
   if (visibleWidth(s) <= w) return s;
   let out = "";

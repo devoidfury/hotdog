@@ -1,9 +1,9 @@
-// FrameScheduler (design note §3, pi's shape): a renderRequested flag, next-
+// FrameScheduler (pi's shape): a renderRequested flag, next-
 // tick coalescing, MIN_RENDER_INTERVAL_MS between paints, and input that
 // bypasses the throttle -- a keystroke paints immediately and cancels the
 // pending timer first, so typing never waits behind a streaming frame.
 // Stream chunks only mutate frame text and set the flag; per-chunk painting
-// is how token floods freeze UIs (pitfall 4).
+// is how token floods freeze UIs.
 
 import type { Clock } from "./seams.ts";
 
@@ -21,7 +21,7 @@ export class FrameScheduler {
     private readonly paint: () => void,
   ) {}
 
-  /** Coalesced paint request: many calls, one repaint per burst (§3/steal 7). */
+  /** Coalesced paint request: many calls, one repaint per burst. */
   requestRender(): void {
     if (this.stopped) return;
     this.renderRequested = true;
@@ -44,7 +44,7 @@ export class FrameScheduler {
     this.paint();
   }
 
-  /** §10 step 1: no frame timers survive teardown; further requests are dead. */
+  /** Teardown step 1: no frame timers survive; further requests are dead. */
   stop(): void {
     this.stopped = true;
     this.cancelPending();

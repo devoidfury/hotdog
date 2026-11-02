@@ -1,4 +1,4 @@
-// TeardownGuard (§10): idempotent, exact 7-step order, sole home of the
+// TeardownGuard: idempotent, exact 7-step order, sole home of the
 // raw-mode/bracketed-paste/cursor bytes, separate SIGTERM/SIGHUP handlers
 // exiting 128+n. Order is asserted through the Grid mode log and a call-order
 // recorder -- orphaned terminals are this project's worst failure mode.
@@ -54,7 +54,7 @@ function live(rows = 8) {
   return { t, clock, core, modes, guard };
 }
 
-describe("TeardownGuard step order (§10, normative)", () => {
+describe("TeardownGuard step order (normative)", () => {
   it("runs steps 1-3 in order, then unwinds modes as ?2026h ?2004l raw:off ?25h ?2026l", () => {
     const t = new GridTerminal({ rows: 8, cols: 20 });
     const order: string[] = [];
@@ -65,7 +65,7 @@ describe("TeardownGuard step order (§10, normative)", () => {
       eraseFrame: () => order.push("eraseFrame"),
     };
     const guard = new TeardownGuard(deps);
-    // Mount-side modes (stage-2b wiring does this; the log needs them present
+    // Mount-side modes (the bridge wiring does this; the log needs them present
     // so the unwind order below is a real pairing).
     deps.modes.setRawMode(true);
     deps.modes.bracketedPaste(true);
@@ -150,7 +150,7 @@ describe("TeardownGuard idempotency + full-stack behavior", () => {
   });
 });
 
-describe("signal handling (Bun nameless-signal caveat, §5/§10)", () => {
+describe("signal handling (Bun nameless-signal caveat)", () => {
   it("SIGTERM and SIGHUP register separate handlers and exit 128+n", () => {
     const a = live(8);
     const hostA = new FakeSignalHost();

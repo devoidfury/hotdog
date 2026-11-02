@@ -1,4 +1,4 @@
-// Byte-exact golden transcript tests (design note §11 suite 1): the full
+// Byte-exact golden transcript tests: the full
 // session lifecycle, the INV-1 insertAbove recipe, prevDiff/damage tracking
 // (when the shrink-erase fires), INV-6 drops during a LIVE flush, frame
 // composition over OSC 8 / CJK / emoji geometry, and the documented
@@ -120,7 +120,7 @@ describe("golden transcript: full session lifecycle (byte-exact)", () => {
     const snap = inner.grid.snapshot();
     expect(snap.screen).toEqual(["", "", "T1", "", "", ""]); // committed row survives
     for (const row of [...snap.scrollback, ...snap.screen]) expect(row).not.toContain("A2");
-    // Mode pairing across the whole session (§10): every PAINT window hides
+    // Mode pairing across the whole session: every PAINT window hides
     // the cursor right after ?2026h and shows it right before ?2026l; the
     // teardown window shows+sgr without a matching hide (step 6 is the
     // catch-all for exit paths that stopped painting).
@@ -199,7 +199,7 @@ describe("prevDiff tracking: erase only when the frame shrank or was forced", ()
     clock.runAll();
     expect(stream().split("\r" + W.ed).length - 1).toBe(1); // shrink: exactly one, at the anchor
 
-    // Resize forces the old-geometry erase even at equal height (§6).
+    // Resize forces the old-geometry erase even at equal height.
     gt.resize(8, 8);
     clock.runAll();
     expect(stream().split("\r" + W.ed).length - 1).toBe(2);
@@ -221,7 +221,7 @@ describe("INV-6 during a LIVE flush (reentrant), and scheduler bypass paths", ()
     const t: Terminal = {
       write: (s) => {
         bytes.push(s);
-        // The stage-2b arbiter could re-enter from a writer callback; the
+        // The bridge arbiter could re-enter from a writer callback; the
         // freeze-to-insert window must refuse frame mutation mid-flight.
         if (armed && core && s.includes("M1")) {
           armed = false;

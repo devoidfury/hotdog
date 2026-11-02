@@ -1,4 +1,4 @@
-// Golden-grid commit-protocol tests (design note §11 suite 1+2): scripted
+// Golden-grid commit-protocol tests: scripted
 // sequences against the in-memory Grid, no PTY, no mock.module.
 //
 // Harness note: the renderer paints the frame downward from wherever the
@@ -190,7 +190,7 @@ describe("single-flight FIFO commit queue", () => {
   });
 
   it("commits issued from inside a live flush still drain (no stranded queue)", () => {
-    // Reentrancy path the stage-2b arbiter will use: a commit that lands
+    // Reentrancy path the bridge arbiter will use: a commit that lands
     // between drain start and the next tick must schedule its own follow-up.
     const { t, clock, core } = harness(8);
     core.commit(["X1"]);
@@ -201,7 +201,7 @@ describe("single-flight FIFO commit queue", () => {
   });
 });
 
-describe("resize: width read per line at paint time (§6)", () => {
+describe("resize: width read per line at paint time", () => {
   it("pending coalesced paint uses the NEW width; frame rows never exceed it", () => {
     const { t, clock, core } = harness(8, 40);
     core.setFrame(["x".repeat(35)]);
@@ -240,7 +240,7 @@ describe("resize: width read per line at paint time (§6)", () => {
   });
 });
 
-describe("purge-and-reprint recovery (§6, never RIS)", () => {
+describe("purge-and-reprint recovery (never RIS)", () => {
   it("clears screen + scrollback, re-emits the transcript log exactly, repaints the frame", () => {
     const transcript = ["T1", "T2"];
     const { t, clock, core } = harness(8, 20, { transcript: () => transcript });
@@ -257,7 +257,7 @@ describe("purge-and-reprint recovery (§6, never RIS)", () => {
     expect(snap.screen[2]).toBe("F1"); // frame repaints directly under the re-emitted log
 
     // Byte-level: the recipe is ESC[2J ESC[3J ESC[H and NEVER RIS (ESC c) --
-    // iTerm/Terminal.app keep scrollback through RIS (§6 grok caveat).
+    // iTerm/Terminal.app keep scrollback through RIS (grok caveat).
     const inner = new GridTerminal({ rows: 8, cols: 20 });
     const bytes: string[] = [];
     const rec: Terminal = {
@@ -290,7 +290,7 @@ describe("purge-and-reprint recovery (§6, never RIS)", () => {
   });
 });
 
-describe("renderer stop (§10 step 1): writes fall through to passthrough", () => {
+describe("renderer stop (teardown step 1): writes fall through to passthrough", () => {
   it("post-stop commits carry no protocol bytes and paint raw", () => {
     const inner = new GridTerminal({ rows: 8, cols: 20 });
     const bytes: string[] = [];

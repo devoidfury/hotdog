@@ -1,15 +1,13 @@
-// Split-mode bridge: the stage-2b wiring between the stage-2a renderer core
-// (src/utils/cli/renderer) and the interactive CLI. Design note
-// /home/agent/hotdog-cli-renderer-design-2026-10-19.md §2 (ownership),
-// §9 (mount rule), §10 (teardown), §12 (stage 2).
+// Split-mode bridge: the wiring between the renderer core
+// (src/utils/cli/renderer) and the interactive CLI.
 //
 // This file owns POLICY-FREE plumbing only: mount decision, line framing of
 // the routed channels, the readline capture stream (kept as a bridge-level
-// capability; the stage-3b swap means the interactive session no longer
+// capability; the editor-input swap means the interactive session no longer
 // constructs readline at all, so on a mounted session the editor path is the
-// only frame source), the stage-3b editor input mount, and process-level
+// only frame source), the editor input mount, and process-level
 // install/restore. Every terminal byte goes through the core's TerminalModes
-// (teardown.ts is the sole byte home, §10); the bridge never embeds
+// (teardown.ts is the sole byte home); the bridge never embeds
 // ?2026/?2004/?25/raw sequences itself.
 
 import { EventEmitter } from "node:events";
@@ -26,7 +24,7 @@ import type { Completion } from "@utils/cli/renderer/popup.ts";
 import type { Clock, KeySource, SignalHost, Terminal } from "@utils/cli/renderer/seams.ts";
 
 /**
- * §9 mount rule (stage-3c wording, default-on since the flip): the renderer
+ * Mount rule (default-on since the flip): the renderer
  * attaches iff the knob is NOT "legacy" AND stdin.isTTY AND stdout.isTTY AND
  * the environment does not name itself a dumb terminal. Any other combination
  * runs today's passthrough path -- non-TTY is a code path that never mounts,
@@ -39,7 +37,7 @@ import type { Clock, KeySource, SignalHost, Terminal } from "@utils/cli/renderer
  * lowercase terminfo convention string. That comparison is deliberately
  * case-sensitive and substring-free here too: "DUMB", "dumb-" or " xterm"
  * are not the convention and do not decline. NO_COLOR is NOT consulted at
- * this gate (owner ruling 2026-10-21): frames are geometry, not color; a
+ * this gate: frames are geometry, not color; a
  * NO_COLOR TTY mounts the split renderer and renders with color disabled,
  * which colors.ts already does for the transcript channels. TERM=dumb
  * declines because a dumb terminal cannot host cursor-addressed geometry at
@@ -56,7 +54,7 @@ export function shouldMountRenderer(
   return knob !== "legacy" && stdinIsTTY === true && stdoutIsTTY === true && term !== "dumb";
 }
 
-/** What mountSplitRenderer's §9 gate would decide, with the "why" attached. */
+/** What mountSplitRenderer's gate would decide, with the "why" attached. */
 export interface RendererPosture {
   /** The knob reading: "legacy", or anything else (the default) = "split". */
   mode: "split" | "legacy";
@@ -67,7 +65,7 @@ export interface RendererPosture {
 }
 
 /**
- * The §9 gate as a pure decision with a reason. It re-derives each condition
+ * The mount gate as a pure decision with a reason. It re-derives each condition
  * of shouldMountRenderer to attach its "why", in the same order; the test
  * matrix pins mount === shouldMountRenderer on every combination, so the two
  * can never drift silently. `hotdog info` prints
@@ -185,7 +183,7 @@ class LineChannel {
 
 /**
  * readline's output stream, redirected into the frame (kilocode
- * capture-stdout pattern, note §2): every byte readline paints is fed to an
+ * capture-stdout pattern): every byte readline paints is fed to an
  * in-memory Grid and the visible rows become the frame content. readline
  * keeps interpreting input -- only its output destination changes.
  */
@@ -274,7 +272,7 @@ export interface StdinHandoffHost {
 }
 
 /**
- * The owner's responses to editor input (stage 3b). submit/interrupt/quit
+ * The owner's responses to editor input. submit/interrupt/quit
  * fire AFTER the bridge has settled the frame (echo committed, buffer
  * cleared); popup is the synchronous Tab-request hook (async provider wiring
  * is the next 3b increment); unhandled carries keys outside the editor's map
@@ -288,11 +286,11 @@ export interface EditorInputHandlers {
   unhandled?(key: string): void;
 }
 
-/** What a blank answer echoes as (fix-3 ruling): the trace that says an
+/** What a blank answer echoes as: the trace that says an
  * answer arrived and it was empty, distinct from ordinary vertical spacing. */
 const NO_ANSWER_MARK = "(no answer)";
 
-/** Status-line state (§12 stage 4, owner ruling 4): turn count + lane-wait +
+/** Status-line state: turn count + lane-wait +
  * working state by default; `cost` is a preformatted USD string that exists
  * only when `modelPricing` is configured. Context-% stays off. */
 export interface FrameStatus {
@@ -318,7 +316,7 @@ export function statusRowText(s: FrameStatus): string | null {
 }
 
 /**
- * The queue-chip row text (§8 steer affordance): `↑ queued: <first 40 runes>`
+ * The queue-chip row text (steer affordance): `↑ queued: <first 40 runes>`
  * plus the extra count. Null when nothing is pending. Rune-safe truncation
  * (codepoints, surrogate-safe via Array.from); newlines collapse so the chip
  * is always one frame row.
@@ -332,15 +330,14 @@ export function queueChipText(pending: number, preview: string): string | null {
 
 /**
  * The mounted side of the split session: commit/arbiter line channels over
- * the core's FIFO (§2 rubric 1/3), the readline capture stream (§2 stage-2
- * row), and the TeardownGuard paired enable/restore of raw mode + bracketed
- * paste (§5/§10).
+ * the core's FIFO, the readline capture stream, and the TeardownGuard
+ * paired enable/restore of raw mode + bracketed paste.
  */
 export class OutputBridge {
   readonly core: RendererCore;
   readonly guard: TeardownGuard;
   readonly capture: CaptureStream;
-  /** Re-emittable transcript log for purge-and-reprint (§6, day-1 requirement). */
+  /** Re-emittable transcript log for purge-and-reprint (day-1 requirement). */
   readonly transcriptLog: string[] = [];
 
   readonly #outChannel: LineChannel;
@@ -359,20 +356,20 @@ export class OutputBridge {
   #mounted = false;
   #suspended = false;
   /** The pre-neuter stdin.pause, handed over by installIoPatches. suspend()
-   * is the ONE legitimate pause while mounted (§5); null when no patches
+   * is the ONE legitimate pause while mounted; null when no patches
    * were installed (rig bridges, unmounted paths). */
   #realStdinPause: (() => void) | null = null;
   #repushScheduled = false;
-  /** The editor input path (stage 3b): owns the frame instead of the capture. */
+  /** The editor input path: owns the frame instead of the capture. */
   #editor: EditorView | null = null;
-  /** Editor question focus (§8): resolvers waiting for the next submitted line. */
+  /** Editor question focus: resolvers waiting for the next submitted line. */
   #lineWaiters: ((line: string) => void)[] = [];
   /** Last editor block the frame showed -- the interrupt echo, since the
    * view has already cleared its buffer (stash-to-draft) when the event fires. */
   #lastBlockRows: string[] = [];
-  /** Status-line state (§12 stage 4). */
+  /** Status-line state. */
   #status: FrameStatus = { turns: 0, working: false, laneWait: false, cost: null };
-  /** Precomposed queue-chip text (§8), or null for no chip. */
+  /** Precomposed queue-chip text, or null for no chip. */
   #chipText: string | null = null;
   /** In-flight tool-call rows by wire index (streaming-call display). */
   #inflightCalls = new Map<number, string>();
@@ -427,7 +424,7 @@ export class OutputBridge {
   /**
    * A chunk that only grows the in-progress line commits nothing, so it never
    * triggers the commit repaint; ask for a frame repaint directly. Cheap and
-   * coalesced by the core scheduler (one paint per burst, §3). Skipped when
+   * coalesced by the core scheduler (one paint per burst). Skipped when
    * the partial is UNCHANGED (e.g. a fully-terminated write): the frame is
    * then driven by its own editor/capture events, not by an output commit --
    * a commit must never clobber a frame nothing streamed.
@@ -439,7 +436,7 @@ export class OutputBridge {
   }
 
   /**
-   * Paired enable (raw mode + ?2004h, §5); TeardownGuard steps 4-5 are the
+   * Paired enable (raw mode + ?2004h); TeardownGuard steps 4-5 are the
    * exact inverse. Idempotent. The core paints the INV-4 first frame here.
    */
   mount(): void {
@@ -460,14 +457,14 @@ export class OutputBridge {
   }
 
   /** installIoPatches hands over the pre-neuter stdin.pause; suspend()
-   * consults it (§5 handoff pause). Not cleared at restore: after restore
+   * consults it (handoff pause). Not cleared at restore: after restore
    * the stash is the live pause again, so the handoff stays correct either
    * way. */
   setRealStdinPause(fn: (() => void) | null): void {
     this.#realStdinPause = fn;
   }
 
-  /** stdout channel (§2 rubric 1): permanent output -> committed clean rows. */
+  /** stdout channel: permanent output -> committed clean rows. */
   commitText(text: string): void {
     // An in-flight stderr partial would otherwise appear AFTER newer stdout
     // rows; flush it first so the two channels keep their temporal order.
@@ -476,7 +473,7 @@ export class OutputBridge {
     this.#outChannel.write(this.#eatTerminator(text, open));
   }
 
-  /** stderr/arbiter channel (§2 rubric 3): foreign writes become clean permanent rows too. */
+  /** stderr/arbiter channel: foreign writes become clean permanent rows too. */
   arbiteText(text: string): void {
     const open = this.#outChannel.hasPartial;
     this.#outChannel.flush();
@@ -518,7 +515,7 @@ export class OutputBridge {
   }
 
   /**
-   * §8 question focus flag, and the prompt draft parked while the question
+   * The question focus flag, and the prompt draft parked while the question
    * owns the input. A half-typed draft must not merge into the answer, so
    * entering question mode stashes the buffer (and clears it); every exit
    * path restores it. EditorCliInput.collectAnswers flips this flag in a
@@ -543,8 +540,8 @@ export class OutputBridge {
   }
 
   /**
-   * The prefix an answer echo carries while question mode is on (fix-3 echo
-   * ruling, question-echo.md): `  ? Pick a flavor > vanilla`. runQuestions
+   * The prefix an answer echo carries while question mode is on (echo
+   * rule): `  ? Pick a flavor > vanilla`. runQuestions
    * sets it per question to the exact spoof-safe question line it printed,
    * so a committed answer row in write-once scrollback forever names the
    * question it answers -- even after a collapse or a stolen post-cancel
@@ -560,7 +557,7 @@ export class OutputBridge {
   }
 
   /**
-   * Merge a status-line patch (§12 stage 4). Repaint only when the composed
+   * Merge a status-line patch. Repaint only when the composed
    * row text actually changes, so a token-usage tick with an unchanged cost
    * (or an idle working:false on an already-idle frame) never storms paints.
    */
@@ -576,13 +573,13 @@ export class OutputBridge {
     this.updateStatus({ turns: this.#status.turns + 1, working: false, laneWait: false });
   }
 
-  /** Explicit purge-and-reprint (§6 recovery): the /redraw command's entry,
+  /** Explicit purge-and-reprint: the /redraw command's entry,
    * the same path as the ctrl-l key binding. */
   redraw(): void {
     this.core.purgeAndReprint();
   }
 
-  /** The QUEUE_UPDATE chip row (§8): pending undelivered steering. */
+  /** The QUEUE_UPDATE chip row: pending undelivered steering. */
   setQueueChip(pending: number, preview: string): void {
     const next = queueChipText(pending, preview);
     if (next === this.#chipText) return;
@@ -638,13 +635,13 @@ export class OutputBridge {
     return rows;
   }
 
-  /** True while a question owns the input (the popup is suppressed, §8). */
+  /** True while a question owns the input (the popup is suppressed). */
   get questionMode(): boolean {
     return this.#questionMode;
   }
 
   /**
-   * §8 editor question focus: resolves with the NEXT submitted editor line
+   * Editor question focus: resolves with the NEXT submitted editor line
    * instead of delivering it to the normal submit handler, which is what
    * makes the question exclusive. cancel() detaches the wait so a line typed
    * after the caller gave up (run abort) flows back to the normal handler
@@ -666,15 +663,15 @@ export class OutputBridge {
     };
   }
 
-  /** The mounted editor (stage 3b), or null on the readline/capture path. */
+  /** The mounted editor, or null on the readline/capture path. */
   get editor(): EditorView | null {
     return this.#editor;
   }
 
   /**
-   * Stage-3b editor input: StdinBuffer decodes the KeySource, EditorView owns
+   * Editor input: StdinBuffer decodes the KeySource, EditorView owns
    * the buffer/history/popup, and the frame becomes popup rows + wrapped
-   * editor block (§4 composer order) instead of the readline capture. The two
+   * editor block (composer order) instead of the readline capture. The two
    * input paths never coexist; this replaces the capture as the frame source.
    * The returned fn detaches input.
    */
@@ -697,12 +694,12 @@ export class OutputBridge {
     switch (e.type) {
       case "submit": {
         // A pending question owns the input: the line answers it and never
-        // reaches the normal submit handler (§8 exclusivity).
+        // reaches the normal submit handler (question exclusivity).
         const waiter = this.#lineWaiters.shift();
         if (e.text.trim() === "") {
           if (waiter) {
-            // An empty answer is legitimate free text (§8), and per the fix-3
-            // echo ruling it commits a self-describing row -- the question
+            // An empty answer is legitimate free text, and per the echo rule
+            // it commits a self-describing row -- the question
             // prefix plus `(no answer)` -- instead of resolving silently.
             // A blank answer now leaves a trace naming its question;
             // lineSubmitted runs the question prefix, the flush and repaint.
@@ -736,7 +733,7 @@ export class OutputBridge {
         h.quit();
         return;
       case "redraw":
-        // ctrl-l: purge scrollback, reprint the transcript, repaint the frame (§6).
+        // ctrl-l: purge scrollback, reprint the transcript, repaint the frame.
         this.core.purgeAndReprint();
         return;
       case "popup":
@@ -761,7 +758,7 @@ export class OutputBridge {
   /**
    * Enter was pressed: today's readline echo (prompt + line + newline)
    * becomes a committed transcript row, then the frame resets to empty. In
-   * question mode the row is the fix-3 answer echo (`<question> > <answer>`),
+   * question mode the row is the answer echo (`<question> > <answer>`),
    * not the main prompt's shape -- the answer names its question forever.
    */
   lineSubmitted(line: string): void {
@@ -807,9 +804,9 @@ export class OutputBridge {
   }
 
   /**
-   * §5 Suspend()/Resume(): hand the terminal to a stdio:"inherit" child
-   * (shell exec). While mounted, stray stdin.pause is neutered (§2, pitfall
-   * 6) -- but releasing the "data" listeners does NOT stop input under Bun:
+   * Suspend()/Resume(): hand the terminal to a stdio:"inherit" child
+   * (shell exec). While mounted, stray stdin.pause is neutered (the
+   * stray-pause pitfall) -- but releasing the "data" listeners does NOT stop input under Bun:
    * the stream's native poller keeps pulling tty bytes into the JS buffer,
    * starving the child (measured: a 1-byte reader under hotdog received a
    * third of an `ESC O B` burst; the tail arrived as "BO" debris or never).
@@ -828,7 +825,7 @@ export class OutputBridge {
     // frozen-frame drain paints it again above the freshly committed row.
     this.flushPending();
     this.#suspended = true;
-    // §10 order: drain queued commits synchronously BEFORE the erase, or a
+    // Teardown order: drain queued commits synchronously BEFORE the erase, or a
     // pending print repaints the frame over the erase (INV-2 machinery
     // restores frame rows around a print).
     this.core.drainCommitsSync();
@@ -859,7 +856,7 @@ export class OutputBridge {
 
   /**
    * Repaint the frame from whichever input path is live: the editor composer
-   * (status row on top, popup rows immediately above the wrapped block §4,
+   * (status row on top, popup rows immediately above the wrapped block,
    * queue chip below it) or the readline capture.
    */
   #repaint(): void {
@@ -870,7 +867,7 @@ export class OutputBridge {
       this.#paintFrame(this.capture.frameRows());
       return;
     }
-    // Status/chip rows are stage-4 editor-path features (split mode only);
+    // Status/chip rows are editor-path features (split mode only);
     // the block's height budget accounts for every non-block row (INV-2
     // sees the frame grow). The streaming line sits ABOVE everything: the
     // transcript above it has already committed into scrollback.
@@ -940,7 +937,7 @@ export interface IoPatchHost {
     log(...args: unknown[]): void;
     error(...args: unknown[]): void;
     warn(...args: unknown[]): void;
-    // Stage-3c routed methods. Optional so rig consoles may stay 3-method
+    // Routed diagnostic methods. Optional so rig consoles may stay 3-method
     // shaped; the real globalThis.console always carries all six. A rig that
     // omits one still gets it patched while mounted and gets the (undefined)
     // original back at restore.
@@ -955,25 +952,24 @@ function consoleArgs(args: unknown[]): string {
 }
 
 /**
- * The renderer is the only writer during a mounted session (§2): route
+ * The renderer is the only writer during a mounted session: route
  * stdout -> commit channel, stderr -> arbiter, console.* -> the same two
  * channels (Bun's console bypasses process.stdout.write at the fd level, so
- * patching the stream alone would miss it), and neuter stdin.pause --
- * pitfall 6: no stray caller may pause the shared stream while mounted. The
+ * patching the stream alone would miss it), and neuter stdin.pause: no
+ * stray caller may pause the shared stream while mounted. The
  * pre-neuter pause is handed to the bridge (setRealStdinPause): the ONE
- * legitimate pause owner is the §5 child handoff, because releasing the
+ * legitimate pause owner is the child handoff, because releasing the
  * data listeners alone does not stop Bun's poller from starving an
  * stdio-inherit child.
  * Returns the restore function (registered as a TeardownGuard hook, so the
  * restore runs exactly once on every exit path).
  *
- * console.error/warn go to the arbiter; stage 3c (owner ruling) adds
- * console.debug/info/trace to the SAME arbiter path -- they are diagnostics
- * exactly like warn/error, and a live frame must not shred them or swallow
- * them. console.log keeps its PRE-EXISTING commit-channel patch from stage
- * 2b: it is permanent output (the uiOut default lands here once the session
- * rebinds), it predates this batch, existing assertions pin it, and this
- * batch changes its semantics not at all.
+ * console.error/warn go to the arbiter, and console.debug/info/trace ride
+ * the SAME arbiter path -- they are diagnostics exactly like warn/error,
+ * and a live frame must not shred them or swallow them. console.log keeps
+ * its PRE-EXISTING commit-channel patch: it is permanent output (the uiOut
+ * default lands here once the session rebinds), it predates the bridge,
+ * existing assertions pin it, and nothing here changes its semantics.
  */
 export function installIoPatches(bridge: OutputBridge, host: IoPatchHost): () => void {
   const origOutWrite = host.stdout.write;
@@ -1025,7 +1021,7 @@ export interface SplitMountOptions {
   stdinIsTTY?: unknown;
   stdoutIsTTY?: unknown;
   /**
-   * Environment the §9 dumb gate reads (TERM). Defaults to process.env;
+   * Environment the dumb gate reads (TERM). Defaults to process.env;
    * tests inject. NO_COLOR is deliberately NOT read here -- see the
    * shouldMountRenderer header (frames are geometry, not color).
    */
@@ -1034,7 +1030,7 @@ export interface SplitMountOptions {
   host?: IoPatchHost;
 }
 
-/** Process surface the §10 crash route needs; tests inject a fake emitter. */
+/** Process surface the crash route needs; tests inject a fake emitter. */
 export interface CrashTeardownHost {
   /** Register one handler for both crash events; returns the fn that removes both. */
   onCrash(handler: (err: unknown) => void): () => void;
@@ -1065,7 +1061,7 @@ export const processCrashTeardownHost: CrashTeardownHost = {
 export const CRASH_EXIT_CODE = 1;
 
 /**
- * §10 crash teardown for the mounted session. On uncaughtException or
+ * Crash teardown for the mounted session. On uncaughtException or
  * unhandledRejection: report the error (the real host's stderr write lands on
  * the bridge arbiter while the io patches are live, so the row commits above
  * the restored screen instead of shredding a mid-frame paint), run the
@@ -1109,7 +1105,7 @@ export function installCrashTeardown(bridge: OutputBridge, host: CrashTeardownHo
  * through handles captured BEFORE the patches land -- writing through
  * process.stdout.write after patching would recurse into the bridge.
  *
- * The gate is the full §9 rule (see shouldMountRenderer for the long form):
+ * The gate is the full mount rule (see shouldMountRenderer for the long form):
  * knob not "legacy" AND both stdio streams TTY AND the environment not naming
  * itself dumb. A TTY whose TERM is exactly "dumb" (the same strict comparison
  * colors.ts's colorDisabledByEnv uses) declines HERE, before the Terminal is
@@ -1159,12 +1155,12 @@ export function mountSplitRenderer(options: SplitMountOptions): OutputBridge | n
     console: globalThis.console,
   };
   bridge.guard.onTeardown(installIoPatches(bridge, host));
-  // §10 crash route: report + restore + non-zero exit on uncaughtException /
+  // Crash route: report + restore + non-zero exit on uncaughtException /
   // unhandledRejection; the paired unregister is a teardown hook, so a clean
   // session end removes both handlers and leaves nothing behind for other
   // processes' files or legacy runs to trip over.
   installCrashTeardown(bridge, processCrashTeardownHost);
-  // §10 last-chance: anything that exits without an explicit teardown still
+  // Last-chance teardown: anything that exits without an explicit teardown still
   // restores the terminal. Idempotent with onQuit/rl-close/signal paths.
   process.on("exit", () => bridge.guard.run());
   return bridge;

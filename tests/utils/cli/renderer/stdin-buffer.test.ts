@@ -1,7 +1,7 @@
-// StdinBuffer (§5, §11 suite 3): raw chunk replays against MemoryKeySource-style
+// StdinBuffer: raw chunk replays against MemoryKeySource-style
 // feeds and the FakeClock -- UTF-8 fragmentation, the lone-ESC vs CSI-prefix
 // race (10ms/50ms), bracketed paste framing with delimiter splits and
-// lookalikes, control decoding (0x03 INTERRUPT, 0x04 EOF, the §4 ctrl set),
+// lookalikes, control decoding (0x03 INTERRUPT, 0x04 EOF, the ctrl set),
 // and the documented drop policy. Exotica uses explicit \x escapes.
 
 import { describe, it, expect } from "bun:test";
@@ -10,7 +10,7 @@ import type { KeyEvent } from "@utils/cli/renderer/keyevents.ts";
 import type { Clock, KeyChunk, KeySource } from "@utils/cli/renderer/seams.ts";
 import { FakeClock } from "@utils/cli/renderer/fake-clock.ts";
 
-/** KeyChunk-native scripted source: the stage-3 sibling of MemoryKeySource. */
+/** KeyChunk-native scripted source: the sibling of MemoryKeySource. */
 class ChunkSource implements KeySource {
   private subs = new Set<(chunk: KeyChunk) => void>();
   onData(cb: (chunk: KeyChunk) => void): () => void {
@@ -56,7 +56,7 @@ describe("StdinBuffer -- plain decoding", () => {
     expect(h.out()).toEqual(["text:hello", "text: world"]);
   });
 
-  it("decodes the §4 control set: ctrl-a/e/w/u/k/l/y, tab, enter, backspace", () => {
+  it("decodes the control set: ctrl-a/e/w/u/k/l/y, tab, enter, backspace", () => {
     const h = harness();
     h.source.push("\x01\x05\x17\x15\x0b\x19\x0c\t\r\x7f");
     expect(h.out()).toEqual([
@@ -155,7 +155,7 @@ describe("StdinBuffer -- escape decoding", () => {
   });
 });
 
-describe("StdinBuffer -- the ESC race (§5 timers)", () => {
+describe("StdinBuffer -- the ESC race", () => {
   it("a lone ESC decodes as Esc exactly at ESC_KEY_MS", () => {
     const h = harness();
     h.source.push("\x1b");
@@ -289,7 +289,7 @@ describe("StdinBuffer -- subscription discipline", () => {
     expect(() => source.push("hello\x1b")).not.toThrow();
   });
 
-  it("release resets the incremental decoder (3b suspend/resume safety)", () => {
+  it("release resets the incremental decoder (suspend/resume safety)", () => {
     const clock = new FakeClock();
     const source = new ChunkSource();
     const stdin = new StdinBuffer(source, clock);

@@ -15,7 +15,7 @@ testRoleReg.register(systemFirstRoleMapping);
 testRoleReg.register(developerRoleMapping);
 
 // Same non-TTY pin as ui-interactive-cli.test.ts: these rigs drive the real
-// §9 mount gate, and a TTY-pair + non-dumb-TERM host (running the suite or
+// mount gate, and a TTY-pair + non-dumb-TERM host (running the suite or
 // `bun run coverage` straight in a terminal) would mount the real split
 // renderer on the shared process instead of exercising the legacy path.
 const origStdinIsTTY = process.stdin.isTTY;

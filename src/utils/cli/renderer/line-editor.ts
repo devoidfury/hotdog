@@ -1,20 +1,20 @@
-// LineEditor (design note §4): the single logical line. Buffer is one string
+// LineEditor: the single logical line. Buffer is one string
 // that may contain \n (only paste/dictation introduce it); the cursor is a
 // code-unit offset constrained to grapheme-cluster boundaries, never a
-// (row,col). Motion is two-layered per §4: the LOGICAL layer steps clusters
+// (row,col). Motion is two-layered: the LOGICAL layer steps clusters
 // (left/right/home/end/word ops/kill), the VISUAL layer moves across wrapped
 // rows with a best-effort remembered column (up/down at the view edges via
 // editor-view.ts).
 //
-// Width math is the stage-2 table: clusters measure as units, a double-wide
+// Width math is the shared table: clusters measure as units, a double-wide
 // glyph never splits across rows, and a cursor cell may equal the viewport
-// width only as the pending-wrap cell at a row edge (§7 DECAWM ownership).
+// width only as the pending-wrap cell at a row edge (DECAWM ownership).
 //
 // The prompt lives here because it participates in the wrapped view: row 0
 // begins with it and the cursor cannot enter it. Caller-supplied and
-// re-targetable (§4 MODEL_CHANGE); newlines are stripped from it.
+// re-targetable (MODEL_CHANGE); newlines are stripped from it.
 //
-// No undo: §4 pins the readline-default map plus the kill ring (Ctrl-K/U/W +
+// No undo: the binding map keeps the readline defaults plus the kill ring (Ctrl-K/U/W +
 // Ctrl-Y yank) and includes no undo operator, so paste is not an undoable
 // unit either. Kill ops return their text; the VIEW owns the yank ring.
 
@@ -54,7 +54,7 @@ export class LineEditor {
   private text = "";
   private cursor = 0; // code-unit offset into text, always a cluster boundary
   private prompt = "";
-  /** Column remembered across consecutive visual up/down moves (§4). */
+  /** Column remembered across consecutive visual up/down moves. */
   private desiredCol: number | null = null;
 
   get buffer(): string {

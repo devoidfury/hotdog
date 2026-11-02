@@ -8,7 +8,6 @@ import {
   formatTokenCount,
   shortId,
   sanitize,
-  escapeJson,
   resolveQuestionAnswer,
   clampSidebarWidth,
   SIDEBAR_MIN_WIDTH,
@@ -110,41 +109,6 @@ describe("sanitize", () => {
 
   it("handles empty string", () => {
     expect(sanitize("")).toBe("");
-  });
-});
-
-describe("escapeJson", () => {
-  it("escapes backslashes, quotes, and newlines", () => {
-    // Input: line1<newline>line2<tab>"quoted"<backslash>path
-    // Output: line1\nline2\t\"quoted\"\\path (literal backslash sequences)
-    const input = "line1\nline2\t\"quoted\"\\path";
-    const result = escapeJson(input);
-    expect(result).toContain("\\n");
-    expect(result).toContain("\\t");
-    expect(result).toContain("\\\"quoted\\\"");
-    expect(result).toContain("\\\\path");
-  });
-
-  it("handles empty string", () => {
-    expect(escapeJson("")).toBe("");
-  });
-
-  it("handles string with no special chars", () => {
-    expect(escapeJson("hello")).toBe("hello");
-  });
-
-  it("escapes carriage returns", () => {
-    const result = escapeJson("line1\r\nline2");
-    expect(result).toContain("\\r");
-    expect(result).toContain("\\n");
-  });
-
-  it("escapes each special char individually", () => {
-    expect(escapeJson("\\")).toBe("\\\\");
-    expect(escapeJson('"')).toBe('\\"');
-    expect(escapeJson("\n")).toBe("\\n");
-    expect(escapeJson("\r")).toBe("\\r");
-    expect(escapeJson("\t")).toBe("\\t");
   });
 });
 

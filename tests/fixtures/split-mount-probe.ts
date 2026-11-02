@@ -1,4 +1,4 @@
-// Subprocess probe for mountSplitRenderer's real-process path. The §9 gate
+// Subprocess probe for mountSplitRenderer's real-process path. The mount gate
 // needs BOTH stdio streams TTY, and bun test's stdio is piped, so the parent
 // spawns this file and passes the flags explicitly (no PTY needed: the bridge
 // only asks the seams for isTTY/size/write).
@@ -12,7 +12,7 @@
 
 import { mountSplitRenderer, processSignalHost } from "../../src/extensions/ui-interactive-cli/split-bridge.ts";
 
-// stage-3c §9: the mount gate reads TERM, and the pipe host running `bun
+// The mount gate reads TERM, and the pipe host running `bun
 // test` may legitimately carry TERM=dumb (CI, editors). A probe that DECLARES
 // its TTYs also declares its TERM, so the normal modes mount exactly like
 // the xterm they pretend to be. PROBE_MODE=dumb keeps the inherited TERM (the
@@ -42,7 +42,7 @@ if (!bridge) {
 }
 
 console.log("console-routed-line");
-// stage-3c: the routed-diagnostics proof runs through every arbiter-bound
+// The routed-diagnostics proof runs through every arbiter-bound
 // console method (error/warn pre-3c, debug/info/trace added by the ruling).
 console.debug("debug-routed-line");
 console.info("info-routed-line");
@@ -51,7 +51,7 @@ process.stderr.write("stderr-routed-line\n");
 process.stdout.write("stdout-routed-line\n");
 
 if (process.env.PROBE_MODE === "crash") {
-  // §10 crash route (ledger item D): a throw from a timer callback reaches
+  // Crash route: a throw from a timer callback reaches
   // the uncaughtException handler installCrashTeardown put on the process.
   // The handler must report the error, restore raw mode + bracketed paste,
   // and exit non-zero. The second timer is the anti-swallow tripwire: if the
@@ -74,7 +74,7 @@ if (process.env.PROBE_MODE === "exit-handler") {
 }
 
 bridge.shutdown();
-// stage-3c: console.debug is restored to the REAL stream by the teardown --
+// console.debug is restored to the REAL stream by the teardown --
 // this rides the plain post-restore path (the marker deliberately avoids the
 // "after-restore" substring so the existing tail assertion stays exact).
 console.debug("post-restore-debugline");

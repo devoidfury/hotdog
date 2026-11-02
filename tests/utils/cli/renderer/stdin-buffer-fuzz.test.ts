@@ -1,4 +1,4 @@
-// Fuzz suite for StdinBuffer's split-renderer input path (§5): the SSE-style
+// Fuzz suite for StdinBuffer's split-renderer input path: the SSE-style
 // differential between one-feed decoding and arbitrary byte-chunk feeding.
 //
 // Owner-visible stakes: a wedged parser or phantom event lands directly on
@@ -56,7 +56,7 @@ class ChunkSource implements KeySource {
   }
 }
 
-// ── Control contract (§4), written out explicitly and cross-checked ──
+// ── Control contract, written out explicitly and cross-checked ──
 
 const CTRL_NAMES: Record<number, string> = {
   0x00: "ctrl-space",
@@ -368,7 +368,7 @@ describe("StdinBuffer split-feed fuzz", () => {
     expect(failures).toEqual([]);
   });
 
-  it("controlName matches the explicit §4 contract table", () => {
+  it("controlName matches the explicit contract table", () => {
     for (const [b, name] of Object.entries(CTRL_NAMES)) {
       expect(controlName(Number(b))).toBe(name);
     }

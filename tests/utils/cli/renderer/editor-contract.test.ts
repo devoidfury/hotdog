@@ -1,6 +1,6 @@
-// Auditor integration test (stage 3a audit): one full interactive session driven
+// Auditor integration test: one full interactive session driven
 // ONLY through the public surface (index.ts barrel), exactly as the module
-// headers document it -- the proof that stage 3b can wire this stack without touching
+// headers document it -- the proof that the bridge can wire this stack without touching
 // internals. Session: type CJK + edit, submit, history up/enter, popup
 // request/open/filter/accept, Ctrl-C interrupt + draft recovery, Ctrl-D on the
 // empty buffer (the only key-exit). No process/fs access; seams are injected.
@@ -45,13 +45,13 @@ function session(): {
   };
 }
 
-describe("stage 3b contract -- full session through the public surface", () => {
+describe("editor contract -- full session through the public surface", () => {
   it("drives CJK typing, editing, history, popup, interrupt, and quit", () => {
     const s = session();
     const byType = (t: string) => s.events.filter((e) => e.type === t);
     const lastOf = (t: string) => [...s.events].reverse().find((e) => e.type === t);
 
-    // prompt re-target (MODEL_CHANGE, design note §4)
+    // prompt re-target (MODEL_CHANGE)
     s.view.setPrompt("(model)> ");
     expect(s.view.view(40).rows[0]).toBe("(model)> ");
 
@@ -65,7 +65,7 @@ describe("stage 3b contract -- full session through the public surface", () => {
     s.feed("よ"); // retype what the edit removed (cursor sits before the surviving う)
     s.feed("\r");
     expect(lastOf("submit")).toEqual({ type: "submit", text: "おはよう" });
-    expect(s.view.text).toBe(""); // buffer cleared by the EDITOR (contract §2)
+    expect(s.view.text).toBe(""); // buffer cleared by the EDITOR
 
     // 2) history up + enter
     s.feed("\x1b[A"); // up
@@ -86,7 +86,7 @@ describe("stage 3b contract -- full session through the public surface", () => {
       { label: "/model", detail: "switch model" },
       { label: "/mount", detail: "add a path" },
     ];
-    s.view.openPopup(candidates, req.from); // respond exactly as §2 documents
+    s.view.openPopup(candidates, req.from); // respond exactly as the editor-view contract documents
     expect(s.view.popupOpen).toBe(true);
     const rows = s.view.popupRows(40);
     expect(rows.length).toBe(2);
@@ -98,7 +98,7 @@ describe("stage 3b contract -- full session through the public surface", () => {
     expect(s.view.text).toBe("echo /mount");
     expect(byType("submit")).toHaveLength(2); // only the two Enters so far; the accept did NOT add a third
 
-    // 4) Ctrl-C: pure interrupt; buffer stashed and recoverable via Down (§4)
+    // 4) Ctrl-C: pure interrupt; buffer stashed and recoverable via Down
     s.feed("\x03");
     expect(lastOf("interrupt")).toEqual({ type: "interrupt" });
     expect(s.view.text).toBe("");
@@ -112,7 +112,7 @@ describe("stage 3b contract -- full session through the public surface", () => {
     expect(lastOf("quit")).toEqual({ type: "quit" });
   });
 
-  it("frame composer reads a legal EditorBlockView at paint time (contract §2)", () => {
+  it("frame composer reads a legal EditorBlockView at paint time)", () => {
     const s = session();
     s.view.setPrompt("(m)> ");
     s.feed("hello\u4f60\u597d world with some length to wrap around the edge for sure and then some extra words to force three rows");
@@ -125,7 +125,7 @@ describe("stage 3b contract -- full session through the public surface", () => {
     expect(block.rows.join("").startsWith("(m)> ")).toBe(true);
   });
 
-  it("ESC_KEY_MS and SEQ_HOLD_MS are exported and match the documented §5 values", () => {
+  it("ESC_KEY_MS and SEQ_HOLD_MS are exported and match the documented values", () => {
     expect(ESC_KEY_MS).toBe(10);
     // a lone ESC decodes after exactly ESC_KEY_MS
     const s = session();

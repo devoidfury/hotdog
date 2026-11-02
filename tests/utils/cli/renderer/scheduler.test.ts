@@ -1,4 +1,4 @@
-// FrameScheduler (§3, pi's shape): next-tick coalescing, MIN_RENDER_INTERVAL_MS
+// FrameScheduler (pi's shape): next-tick coalescing, MIN_RENDER_INTERVAL_MS
 // between paints, input bypass that cancels the pending timer first. Driven
 // entirely through the injected FakeClock -- no real timers anywhere.
 
@@ -80,7 +80,7 @@ describe("FrameScheduler input bypass", () => {
   });
 });
 
-describe("FrameScheduler stop (§10 step 1)", () => {
+describe("FrameScheduler stop (teardown step 1)", () => {
   it("stop cancels all pending work and kills future requests", () => {
     const { clock, sched, paints } = setup();
     sched.requestRender();

@@ -171,7 +171,7 @@ export interface SystemMessageEvent {
 }
 
 /**
- * Pending mid-run steering count (steer-default, design §8): emitted by the
+ * Pending mid-run steering count (steer-default): emitted by the
  * bus on a steering enqueue and on chain drain. Frame content for the split
  * renderer's queue chip -- NOT printable output: the base sink ignores it
  * (no switch case) and WebSocket drops it (maps to null in toS2CMessage),

@@ -1,12 +1,12 @@
-// EditorView: the stage-3b contract object. Composes LineEditor + Popup +
+// EditorView: the bridge/editor contract object. Composes LineEditor + Popup +
 // History, consumes StdinBuffer KeyEvents, and emits the frame-driver events.
 // No process/global access anywhere in this file set -- the bridge owns the
 // Terminal, the StdinBuffer lifecycle, frame painting, and every response to
 // the events below.
 //
-// Binding map (§4's surviving readline defaults, documented choices):
+// Binding map (surviving readline defaults, documented choices):
 //   enter/ctrl-j   SUBMIT (popup open -> accept instead)
-//   esc            popup open -> close; else INTERRUPT (stash buffer to draft, §4)
+//   esc            popup open -> close; else INTERRUPT (stash buffer to draft)
 //   interrupt      always INTERRUPT (Decisions 2: mirrors Esc, never quits)
 //   eof            buffer empty -> QUIT; else delete-forward (readline default)
 //   ctrl-a/e       buffer start/end          left/right  cluster steps
@@ -18,7 +18,7 @@
 //   tab / shift-tab  popup next / prev; Tab with no popup requests one
 //                  (a unique match completes immediately, no popup)
 //   up/down        popup open -> cycle; visual rows first; history at the edges
-//   ctrl-x         UNHANDLED (stage 3b: dictation toggle binds it)
+//   ctrl-x         UNHANDLED (the dictation toggle binds it)
 // Any other key is UNHANDLED so the bridge can extend bindings without an
 // editor fork.
 
@@ -30,7 +30,7 @@ import { Popup, POPUP_MAX_ROWS, type Completion, type PopupCloseReason } from ".
 
 export interface EditorViewOptions {
   history?: History;
-  /** Viewport width, read at key time (§6 read-per-line posture); bridge passes terminal.columns. */
+  /** Viewport width, read at key time (read-per-line posture); bridge passes terminal.columns. */
   width?: () => number;
 }
 
@@ -61,7 +61,7 @@ export class EditorView {
   private offStdin: (() => void) | null = null;
 
   /**
-   * Bracketed-paste policy delegate (stage 3b). When set, paste events hand
+   * Bracketed-paste policy delegate. When set, paste events hand
    * the raw payload to this function INSTEAD of the default insertText, so
    * the session layer can turn multi-line payloads into [Paste #N] markers;
    * the handler is expected to place text via insertText itself. Dictation
@@ -119,12 +119,12 @@ export class EditorView {
     return this.editor.view(width ?? this.width(), maxRows);
   }
 
-  /** Popup frame rows (composer places them ABOVE the editor block, §4). */
+  /** Popup frame rows (composer places them ABOVE the editor block). */
   popupRows(width?: number, maxRows = POPUP_MAX_ROWS): string[] {
     return this.popup.renderRows(width ?? this.width(), maxRows);
   }
 
-  /** Programmatic insert at the cursor (stage 3b: dictation transcript). */
+  /** Programmatic insert at the cursor (dictation transcript). */
   insertText(text: string): void {
     const clean = sanitizePaste(text);
     if (clean === "") return;
@@ -140,7 +140,7 @@ export class EditorView {
     this.afterEdit();
   }
 
-  /** §4 interrupt stash used by the bridge's own Esc paths (question mode). */
+  /** Interrupt stash used by the bridge's own Esc paths (question mode). */
   stashToDraft(): void {
     const text = this.editor.buffer;
     if (text !== "") this.history.saveDraft(text);
@@ -357,7 +357,7 @@ export class EditorView {
   }
 
   private interrupt(): void {
-    this.stashToDraft(); // §4: recoverable, not destructive
+    this.stashToDraft(); // recoverable, not destructive
     this.lastOpWasKill = false;
     this.emit({ type: "interrupt" });
   }
@@ -449,7 +449,7 @@ export class EditorView {
  * Enter's ONLY job -- a pasted CR must not submit, and inside bracketed paste
  * framing the byte reached us as literal text); other C0/C1 controls and DEL
  * are dropped; U+FFFD is dropped. Paste-marker semantics ([Paste #N]) are a
- * 3b policy layered on top of this buffer text, per §4.
+ * bridge policy layered on top of this buffer text.
  */
 export function sanitizePaste(s: string): string {
   const normalized = s.replaceAll("\r\n", "\n").replaceAll("\r", "\n");

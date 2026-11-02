@@ -1,13 +1,13 @@
 // Grapheme-cluster utilities for the editor. RGI clustering comes from
-// Intl.Segmenter (stdlib, zero-dep); cell width per cluster sums the stage-2
-// charWidth table (§7). Cursor offsets are code-unit offsets (§4) constrained
+// Intl.Segmenter (stdlib, zero-dep); cell width per cluster sums the
+// charWidth table. Cursor offsets are code-unit offsets constrained
 // to cluster boundaries: a cursor must never sit inside a combining sequence.
 
 import { charWidth } from "./width.ts";
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-/** Total cell width of a cluster: the sum over its codepoints (§7 ceiling applies). */
+/** Total cell width of a cluster: the sum over its codepoints (the width ceiling applies). */
 export function clusterWidth(cluster: string): number {
   let w = 0;
   for (const ch of cluster) w += charWidth(ch.codePointAt(0)!);

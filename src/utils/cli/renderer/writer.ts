@@ -1,4 +1,4 @@
-// Bounded final writer (design note §1, pi BoundedTerminalWriter precedent):
+// Bounded final writer (pi BoundedTerminalWriter precedent):
 // oversized strings are flushed in chunks capped at 1 MiB of UTF-8, and a
 // boundary that would land between a surrogate pair backs off one code unit
 // so a pair never straddles a write.

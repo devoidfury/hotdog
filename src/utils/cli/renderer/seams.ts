@@ -1,4 +1,4 @@
-// Seam interfaces for the split-region renderer (design note §11). The whole
+// Seam interfaces for the split-region renderer. The whole
 // renderer is constructor-injected against these; that is what makes the
 // golden-grid tests possible without a PTY and without mock.module.
 
@@ -24,14 +24,14 @@ export interface Clock {
 
 /** Raw stdin chunk. Buffer-backed sources hand bytes (a multi-byte UTF-8
  * sequence may straddle chunks); string chunks pass through untouched.
- * Widened from `string` in stage 3a -- StdinBuffer's incremental decoder is
- * the only correct place to turn bytes into text (§5); per-chunk
+ * Widened from `string` -- StdinBuffer's incremental decoder is
+ * the only correct place to turn bytes into text; per-chunk
  * toString("utf8") corrupts split sequences into U+FFFD. */
 export type KeyChunk = string | Uint8Array;
 
 /** Raw byte chunks from stdin, pre-StdinBuffer. StdinBuffer decodes these. */
 export interface KeySource {
-  /** Subscribe to raw chunks; returns an unsubscribe fn. Never pauses the stream (pitfall 6). */
+  /** Subscribe to raw chunks; returns an unsubscribe fn. Never pauses the stream. */
   onData(cb: (chunk: KeyChunk) => void): () => void;
 }
 

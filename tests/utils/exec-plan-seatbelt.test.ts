@@ -85,7 +85,7 @@ describe("seatbeltProfile (golden)", () => {
         "(deny default)",
         "(allow process-exec* process-fork file-map-executable sysctl-read)",
         `(allow file-read-metadata (literal "/"))`,
-        // owner ruling: NO blanket signal; the deny is stated explicitly.
+        // NO blanket signal; the deny is stated explicitly.
         "(deny process-signal)",
         // nine mach names, incl. dnssd (.local hangs without it).
         '(allow mach-lookup (global-name "com.apple.logd") (global-name "com.apple.system.logger") (global-name "com.apple.system.notification_center") (global-name "com.apple.dnssd.service") (global-name "com.apple.lsd.mapdb") (global-name "com.apple.cfprefsd.daemon") (global-name "com.apple.cfprefsd.agent") (global-name "com.apple.tccd") (global-name "com.apple.tccd.system"))',

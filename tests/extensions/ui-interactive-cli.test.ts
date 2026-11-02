@@ -31,7 +31,7 @@ testRoleReg.register(systemFirstRoleMapping);
 testRoleReg.register(developerRoleMapping);
 
 // The runInteractiveSession rigs in this file drive the real mount gate (no
-// options.bridge injection), and the §9 gate opens on any host with a TTY
+// options.bridge injection), and the mount gate opens on any host with a TTY
 // pair and a non-dumb TERM: a direct `bun run coverage` in a terminal would
 // mount the real split renderer (raw mode, bracketed paste, signal handlers)
 // on the shared process and bleed into every later file in the single-process

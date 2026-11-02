@@ -1,6 +1,5 @@
-// Commit protocol (design note §1, san ADR-0002): the managed frame is the
-// bottom region of the primary screen; settled rows are committed above it
-// into native scrollback, which is write-once -- a bad commit is permanent.
+// Commit protocol: the managed frame is the bottom region of the primary screen;
+// settled rows are committed above it into native scrollback.
 //
 // The cursor bookkeeping is purely relative: every paint and every commit
 // starts and ends with the cursor parked at the frame's top row (the anchor),
@@ -39,7 +38,7 @@ export interface FrameCursor {
 export interface RendererCoreOptions {
   terminal: Terminal;
   clock: Clock;
-  /** Re-emittable transcript log for purge-and-reprint (§6, required day 1). */
+  /** Re-emittable transcript log for purge-and-reprint (required day 1). */
   transcript?: () => string[];
 }
 
@@ -85,7 +84,7 @@ export class RendererCore {
   }
 
   /**
-   * Transient frame content (§2 rubric 2: only the renderer paints these).
+   * Transient frame content (only the renderer paints these).
    * Coalesced through the scheduler normally; DROPPED while a commit print is
    * pending -- INV-6: nothing transient rides in the frame between the freeze
    * and the insert. `cursor`, when given, is the edit position to project onto
@@ -107,14 +106,14 @@ export class RendererCore {
   commit(rows: string[]): void {
     if (rows.length === 0) return;
     if (this.dead) {
-      // §10 step 1: renderer stopped -- plain passthrough, no protocol.
+      // Teardown step 1: renderer stopped -- plain passthrough, no protocol.
       this.out.write(`${rows.join("\r\n")}\r\n`);
       return;
     }
     this.mount(); // permanent output implies a live frame; INV-4 says it is never zero rows
     this.pendingCommits.push(...rows);
     // Schedule even while a flush is mid-flight: rows pushed by a reentrant
-    // writer (the stage-2b arbiter) land in a fresh queue that the current
+    // writer (the bridge arbiter) land in a fresh queue that the current
     // drain will not see, so dropping the schedule would strand them.
     if (!this.flushScheduled) {
       this.flushScheduled = true;
@@ -126,7 +125,7 @@ export class RendererCore {
   }
 
   /**
-   * Keystroke signal: paint immediately, cancelling the pending frame timer first (§3).
+   * Keystroke signal: paint immediately, cancelling the pending frame timer first.
    * Dropped while a print is pending (INV-6): setFrame cannot have mutated the
    * frame in that window, so there is nothing new to paint -- and painting
    * between the drain's chunks would interleave frames into one ?2026 window.
@@ -137,10 +136,10 @@ export class RendererCore {
   }
 
   /**
-   * §6: erase the frame with the OLD geometry (the frame's own rows are ours;
-   * committed rows above are the terminal's reflow problem), then repaint
-   * under the new width. Purge-and-reprint is NOT on this path (shrink
-   * ruling): ESC[3J would destroy pre-session scrollback on every drag.
+   * On resize: erase the frame with the OLD geometry (the frame's own rows
+   * are ours; committed rows above are the terminal's reflow problem), then
+   * repaint under the new width. Purge-and-reprint is NOT on this path:
+   * ESC[3J would destroy pre-session scrollback on every drag.
    * While a print is pending the erase is remembered and the repaint defers
    * through the scheduler -- it lands as the first paint after the drain.
    */
@@ -155,10 +154,10 @@ export class RendererCore {
   }
 
   /**
-   * Purge-and-reprint recovery (desync only, §6): clear screen + scrollback,
+   * Purge-and-reprint recovery (desync only): clear screen + scrollback,
    * home, re-emit the transcript log, repaint the frame. Not ESC[c --
    * iTerm/Terminal.app keep scrollback through RIS, so it would not even
-   * accomplish the clear (§6 grok caveat; recipe is ESC[2J ESC[3J ESC[H).
+   * accomplish the clear (grok caveat; recipe is ESC[2J ESC[3J ESC[H).
    */
   purgeAndReprint(): void {
     if (this.dead || !this.mounted) return;
@@ -183,7 +182,7 @@ export class RendererCore {
     this.modes.endSync();
   }
 
-  /** §10 step 1: stop everything; later writes fall through to plain passthrough. */
+  /** Teardown step 1: stop everything; later writes fall through to plain passthrough. */
   stop(): void {
     this.dead = true;
     this.scheduler.stop();
@@ -208,7 +207,7 @@ export class RendererCore {
     return this.flushScheduled || this.flushing;
   }
 
-  /** Frame rows wrapped for the CURRENT width -- width is read at paint time, never cached (§6). */
+  /** Frame rows wrapped for the CURRENT width -- width is read at paint time, never cached. */
   private wrappedFrame(): string[] {
     const width = this.terminal.columns;
     const wrapped = this.frameRows.flatMap((r) => wrapToWidth(r, width));
@@ -244,9 +243,9 @@ export class RendererCore {
    * the next anchor restore then lands a row high and paints over committed
    * content (the submitted row, then the streaming rows that follow it).
    *
-   * The COLUMN is clamped for the same reason, one axis over (stage-3c, the
-   * 3b contract §5 leftover: line-editor documents "cursorCol may equal
-   * width; the composer clamps it" and this placement IS that composer site).
+   * The COLUMN is clamped for the same reason, one axis over: line-editor
+   * documents "cursorCol may equal width; the composer clamps it" and this
+   * placement IS that composer site.
    * Two producers overshoot: the line editor's pending-wrap cell (cursorCol
    * === width by contract) and a stale frameCursor during the resize window
    * (handleResize repaints with the old geometry's column before the bridge
@@ -355,7 +354,7 @@ export class RendererCore {
     this.out.write(s);
   }
 
-  /** §10 step 2 + step 3 helpers, used through TeardownGuard. */
+  /** Teardown steps 2 + 3 helpers, used through TeardownGuard. */
   drainCommitsSync(): void {
     this.flush();
   }

@@ -1,6 +1,6 @@
-// History (§4 steal 12): dedupe, bounded size, draft-slot walk, and the
+// History: dedupe, bounded size, draft-slot walk, and the
 // corrupt-file tolerance matrix. Persistence is the injected save() -- no fs
-// here, per the inverted-dependency rule; 3b owns the config-dir file.
+// here, per the inverted-dependency rule; the CLI owns the config-dir file.
 
 import { describe, it, expect } from "bun:test";
 import { History, HISTORY_MAX, HISTORY_LINE_MAX } from "@utils/cli/renderer/history.ts";
@@ -61,7 +61,7 @@ describe("History -- navigation walk with draft slot", () => {
     expect(h.walkActive).toBe(false);
   });
 
-  it("an interrupt-saved draft outranks a later beginWalk stash (§4)", () => {
+  it("an interrupt-saved draft outranks a later beginWalk stash", () => {
     const h = new History();
     h.append("cmd");
     h.saveDraft("half-typed-then-esc"); // interrupt stash
@@ -71,7 +71,7 @@ describe("History -- navigation walk with draft slot", () => {
     expect(h.takeDraft()).toBe("half-typed-then-esc");
   });
 
-  it("append during a walk resets navigation (§4: submit clears the draft)", () => {
+  it("append during a walk resets navigation (submit clears the draft)", () => {
     const h = new History();
     h.append("a");
     h.beginWalk("draft");

@@ -1,5 +1,5 @@
-// KeySource seam contract (§11): MemoryKeySource is the scripted stdin the
-// stage-3 StdinBuffer will sit behind. Input stops ONLY by unsubscribing --
+// KeySource seam contract: MemoryKeySource is the scripted stdin the
+// StdinBuffer sits behind. Input stops ONLY by unsubscribing --
 // the seam has no pause path at all, which is the pitfall-6 lesson pinned in
 // the type (steal 20: pin listener state on every path).
 

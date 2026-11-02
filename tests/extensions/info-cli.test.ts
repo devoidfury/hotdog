@@ -964,9 +964,9 @@ describe("Info CLI - tool exec plane", () => {
   });
 });
 
-// ── stage-3c: renderer posture line (§9 gate projection, "never silent") ──
+// ── renderer posture line (mount-gate projection, "never silent") ──
 
-describe("Info CLI - renderer posture line (stage 3c)", () => {
+describe("Info CLI - renderer posture line", () => {
   it("prints the split knob with the honest gate decision for this environment", async () => {
     const run = await infoCliRunner({ coreConfig: { uiInteractiveCli: { renderer: "split" } } });
     const { exitCode, output } = await run("info");

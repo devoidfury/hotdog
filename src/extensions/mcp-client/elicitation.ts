@@ -16,6 +16,7 @@
 // was interrupted (or no tool call was active to attach the ask to).
 
 import { logger } from "@utils/logger.ts";
+import { ABORTED, raceAbort } from "@utils/promise.ts";
 import { formatError } from "@core/error.ts";
 import type { QuestionDef } from "@core/context/input.ts";
 import type { ToolContext } from "@core/extensions/tool-context.ts";
@@ -271,30 +272,15 @@ export function createElicitationHandler(
     if (agent?.abortSignal) signals.push(agent.abortSignal);
     if (signals.some((s) => s.aborted)) return { action: "cancel" };
 
-    const collect = Promise.resolve().then(() => input.collectAnswers(converted.questions, runSignal));
-    const cleanups: Array<() => void> = [];
-    const aborted = signals.length
-      ? new Promise<"aborted">((resolve) => {
-          for (const s of signals) {
-            const onAbort = () => resolve("aborted");
-            s.addEventListener("abort", onAbort, { once: true });
-            cleanups.push(() => s.removeEventListener("abort", onAbort));
-          }
-        })
-      : null;
-
     let outcome: unknown;
     try {
-      outcome = await (aborted ? Promise.race([collect, aborted]) : collect);
+      outcome = await raceAbort(() => input.collectAnswers(converted.questions, runSignal), signals);
     } catch (e: unknown) {
       logger.error(`[mcp] elicitation input failed: ${formatError(e)}`);
       return { action: "cancel" };
-    } finally {
-      for (const cleanup of cleanups) cleanup();
     }
 
-    if (outcome === "aborted") {
-      collect.catch(() => {});
+    if (outcome === ABORTED) {
       return { action: "cancel" };
     }
 

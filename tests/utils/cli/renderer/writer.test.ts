@@ -1,4 +1,4 @@
-// BoundedWriter (§1, pi BoundedTerminalWriter precedent): 1 MiB UTF-8 cap per
+// BoundedWriter (pi BoundedTerminalWriter precedent): 1 MiB UTF-8 cap per
 // write, surrogate pairs never straddle a chunk boundary.
 
 import { describe, it, expect } from "bun:test";

@@ -87,7 +87,7 @@ Every test file in this directory, one line each:
   agent-facing docs must exist. Moved from `tests/docs/` (now folded into this
   directory).
 - `ui-renderer-architecture.test.ts` — the renderer is a dependency leaf, only
-  the stage-2b wiring imports it, mode bytes live in one home, and the 3a input
+  the split-bridge wiring imports it, mode bytes live in one home, and the input
   stack stays pure. Moved from the renderer test directory (`tests/utils/cli/renderer/`).
 
 The three moved tests are self-baselining zero-violation scans (they assert the

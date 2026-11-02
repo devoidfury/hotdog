@@ -1,4 +1,4 @@
-// [Paste #N - M lines] markers for the stage-3b EDITOR input path.
+// [Paste #N - M lines] markers for the EDITOR input path.
 //
 // The legacy readline path implements these semantics inside
 // ./clipboard-paste.ts by swapping readline's raw stdin listener; the editor

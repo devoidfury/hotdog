@@ -63,7 +63,7 @@ export abstract class Channel {
     }
 
     if (this.currentSessionId) {
-      // Steer-default (§8, owner ruling): every user submit asks to steer.
+      // Steer-default: every user submit asks to steer.
       // Safe at idle (the bus queues it normally), mid-run it lands in the
       // agent's steering queue; image-bearing items never steer bus-side.
       // Esc stays the interrupt -- the two have distinct envelopes.

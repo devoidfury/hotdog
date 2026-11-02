@@ -1,4 +1,4 @@
-// Popup (§4 steal 13): pure model -- filtering, selection cycling, accept
+// Popup: pure model -- filtering, selection cycling, accept
 // text, render rows with the selection marker, hidden-count hints, width cut.
 // The data source is always injected here; wiring lands in 3b.
 

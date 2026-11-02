@@ -113,7 +113,7 @@ describe("MessageBus steering (enqueue with steering: true)", () => {
     expect(bus.queue).toEqual(["nope"]);
   });
 
-  it("holds the QUEUE_UPDATE chip pending until the agent injects steering into context (§8)", async () => {
+  it("holds the QUEUE_UPDATE chip pending until the agent injects steering into context)", async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => {
       release = r;

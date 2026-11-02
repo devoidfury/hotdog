@@ -495,7 +495,7 @@ export class MessageBus {
     this.#emitQueueUpdate();
   }
 
-  /** Steer-default chip signal (§8): pending count + first pending preview. */
+  /** Steer-default chip signal: pending count + first pending preview. */
   #emitQueueUpdate(): void {
     this.#sink.emit({
       type: OUTPUT_EVENT.QUEUE_UPDATE,

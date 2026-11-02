@@ -1,6 +1,6 @@
-// Split-mode renderer integration tests (design note §2/§9/§10, stage 2b).
+// Split-mode renderer integration tests.
 // Drives the OutputBridge against the core's in-memory Grid + FakeClock seams
-// (no PTY, no mock.module -- note §11). Covers: the TTY mount rule, a scripted
+// (no PTY, no mock.module). Covers: the TTY mount rule, a scripted
 // transcript commit, arbiter behavior on a mid-frame stderr write, teardown on
 // quit and simulated SIGTERM (paired restore visible in the Grid mode log), and
 // the non-TTY determinism golden for the legacy passthrough path.
@@ -64,7 +64,7 @@ describe("kill-switch config (DEFAULT split)", () => {
   });
 });
 
-describe("readline capture proxy (§2 stage-2 row)", () => {
+describe("readline capture proxy", () => {
   it("real node:readline paints prompt and typed echo into frame rows", () => {
     const painted: string[][] = [];
     const capture = new CaptureStream((rows) => painted.push(rows), 24, 80);
@@ -110,7 +110,7 @@ function makeBridge(): { bridge: OutputBridge; term: GridTerminal; clock: FakeCl
   return { bridge, term, clock, sig };
 }
 
-describe("mount rule (§9, default-on)", () => {
+describe("mount rule (default-on)", () => {
   it("mounts iff the knob is not legacy AND stdin.isTTY AND stdout.isTTY", () => {
     expect(shouldMountRenderer("split", true, true)).toBe(true);
     // Unset reads as the split default (the knob is a kill-switch).
@@ -139,7 +139,7 @@ describe("incompleteEscapeStart (capture feed safety)", () => {
   });
 });
 
-describe("transcript commit (§2 rubric 1)", () => {
+describe("transcript commit", () => {
   it("commits a scripted session transcript into scrollback above the frame", () => {
     const { bridge, term, clock } = makeBridge();
     bridge.mount();
@@ -187,7 +187,7 @@ describe("transcript commit (§2 rubric 1)", () => {
     expect(bridge.capture.frameRows().length).toBe(0);
   });
 
-  it("redraw() purges scrollback and re-emits the transcript (§6, /redraw entry)", () => {
+  it("redraw() purges scrollback and re-emits the transcript (/redraw entry)", () => {
     const { bridge, term, clock } = makeBridge();
     bridge.mount();
     bridge.commitText("row one\nrow two\n");
@@ -205,7 +205,7 @@ describe("transcript commit (§2 rubric 1)", () => {
   });
 });
 
-describe("arbiter on a mid-frame stderr write (§2 rubric 3)", () => {
+describe("arbiter on a mid-frame stderr write", () => {
   it("lands the diagnostic as a clean permanent row, no fragment in the frame", () => {
     const { bridge, term, clock } = makeBridge();
     bridge.mount();
@@ -245,7 +245,7 @@ describe("arbiter on a mid-frame stderr write (§2 rubric 3)", () => {
   });
 });
 
-describe("teardown pairing (§10)", () => {
+describe("teardown pairing", () => {
   it("shutdown runs the restore: paste-off, raw-off, cursor-on in order", () => {
     const { bridge, term } = makeBridge();
     bridge.mount();
@@ -259,7 +259,7 @@ describe("teardown pairing (§10)", () => {
     expect(log).toContain("?2004l");
     expect(log).toContain("raw:off");
     expect(log).toContain("?25h");
-    // Order matters (§10): paste off (step 4) precedes raw off (step 5)
+    // Order matters: paste off (step 4) precedes raw off (step 5)
     // precedes cursor-on (step 6).
     expect(log.indexOf("?2004l")).toBeLessThan(log.indexOf("raw:off"));
     expect(log.indexOf("raw:off")).toBeLessThan(log.indexOf("?25h"));
@@ -314,7 +314,7 @@ describe("teardown pairing (§10)", () => {
   });
 });
 
-describe("suspend/resume child handoff (§5)", () => {
+describe("suspend/resume child handoff", () => {
   // Suspend-handoff stdin: EventEmitter plus the resume() the resume thunk
   // calls (real streams carry it; a bare EventEmitter does not).
   const handoffStdin = (): EventEmitter & { resume(): void } =>
@@ -336,7 +336,7 @@ describe("suspend/resume child handoff (§5)", () => {
     // The tail commits as a permanent row before the handoff (commit-or-drop).
     const snap = term.grid.snapshot();
     expect([...snap.scrollback, ...snap.screen].join("\n")).toContain("dangling tail");
-    // Mode unwind in §5 order: ?2004l precedes raw:off.
+    // Mode unwind in teardown order: ?2004l precedes raw:off.
     const log = term.grid.modeLog;
     expect(log.indexOf("?2004l")).toBeGreaterThanOrEqual(0);
     expect(log.indexOf("?2004l")).toBeLessThan(log.indexOf("raw:off"));
@@ -544,7 +544,7 @@ describe("clipboard-paste absorption (no double bracketed-paste restore)", () =>
   });
 });
 
-describe("installIoPatches routes + restores (§2 ownership)", () => {
+describe("installIoPatches routes + restores", () => {
   it("stdout routes to commit, stderr to arbiter, and restore returns the originals", () => {
     const { bridge, clock } = makeBridge();
     bridge.mount();
@@ -563,7 +563,7 @@ describe("installIoPatches routes + restores (§2 ownership)", () => {
       },
     };
     const restore = installIoPatches(bridge, host);
-    // stdin.pause is neutered while mounted (pitfall 6).
+    // stdin.pause is neutered while mounted.
     expect(host.stdin.pause()).not.toBe("paused");
     host.stdout.write("patched-out\n");
     host.stderr.write("patched-err\n");
@@ -577,7 +577,7 @@ describe("installIoPatches routes + restores (§2 ownership)", () => {
   });
 });
 
-describe("non-TTY determinism golden (§9, legacy passthrough)", () => {
+describe("non-TTY determinism golden (legacy passthrough)", () => {
   // Cursor-control = the motion/private-mode sequences only the renderer
   // emits (CUU/CUD/CUF/CUB, ED/EL, CUP, SCI/DL, ?2026/?2004/?25). SGR (m)
   // styles content and predates the renderer; the golden strips SGR and then
@@ -808,11 +808,11 @@ describe("newline assembly: terminators are not blank rows", () => {
 });
 
 // ── Viewport plumbing: capture geometry + the mount resize subscription ──
-// §6: on a resize the core erases with the OLD geometry (core.handleResize)
+// On a resize the core erases with the OLD geometry (core.handleResize)
 // and the capture model re-wraps at the new width; readline is told to repaint
 // via the capture's own "resize" event.
 
-describe("capture geometry + resize wiring (§6 viewport change)", () => {
+describe("capture geometry + resize wiring (viewport change)", () => {
   it("columns/rows report the capture geometry; setGeometry rebuilds and tells readline", () => {
     const painted: string[][] = [];
     const capture = new CaptureStream((rows) => painted.push(rows), 12, 40);
@@ -845,7 +845,7 @@ describe("capture geometry + resize wiring (§6 viewport change)", () => {
   });
 });
 
-describe("question takeover (§8 exclusivity, fix-3 echo shape)", () => {
+describe("question takeover (exclusivity, echo shape)", () => {
   it("lineSubmitted commits the answer WITH its question prefix while question mode is on", () => {
     const { bridge, clock } = makeBridge();
     bridge.mount();
@@ -955,7 +955,7 @@ describe("processSignalHost (the real SignalHost seam)", () => {
 });
 
 // ── mountSplitRenderer against the real process ─────────────────────────
-// bun test's stdio is piped, so the §9 gate can only open by declaration.
+// bun test's stdio is piped, so the mount gate can only open by declaration.
 // The probe fixture mounts for real (patching ITS stdout/stderr/console) and
 // the parent reads the mounted session's bytes off the pipe -- including the
 // exit code processSignalHost.exit produces, which nothing in-process may
@@ -1009,7 +1009,7 @@ describe("mountSplitRenderer real-process probe", () => {
   }, 20000);
 });
 
-describe("editor input mount (stage 3b)", () => {
+describe("editor input mount", () => {
   function makeEditorRig(candidates: { label: string; insert?: string }[] = []) {
     const { bridge, term, clock } = makeBridge();
     const source = new MemoryKeySource();
@@ -1122,7 +1122,7 @@ describe("editor input mount (stage 3b)", () => {
     const r = makeEditorRig();
     r.bridge.commitText("persisted line\n");
     r.clock.runAll();
-    r.source.push("\x0c"); // ctrl-l -> redraw -> purge-and-reprint (§6)
+    r.source.push("\x0c"); // ctrl-l -> redraw -> purge-and-reprint
     r.clock.runAll();
     const rows = screen(r.term);
     expect(rows[0]).toBe("persisted line");
@@ -1139,7 +1139,7 @@ describe("editor input mount (stage 3b)", () => {
     r.clock.runAll();
     expect(r.calls.submit).toEqual([]);
     expect(r.bridge.transcriptLog).toEqual([]);
-    // The seam released its listener (pitfall 6 posture: detach, never pause).
+    // The seam released its listener (detach, never pause).
     expect(r.source.listenerCount).toBe(0);
     expect(r.bridge.mountEditorInput(r.source, {
       submit: () => {}, interrupt: () => {}, quit: () => {},
@@ -1147,9 +1147,9 @@ describe("editor input mount (stage 3b)", () => {
   });
 });
 
-// ── Stage-3b swap: the editor path IS the session ─────────────────────────
+// ── Editor swap: the editor path IS the session ──────────────────────────
 // runInteractiveSession driven end-to-end on the editor input path with an
-// injected mounted bridge (Grid + FakeClock + MemoryKeySource; note §11, no
+// injected mounted bridge (Grid + FakeClock + MemoryKeySource; no
 // PTY). node:readline is never constructed on this path, so every behavior
 // readline used to provide (submit routing, interrupt, quit, paste markers,
 // dictation, questions, prompt retarget, completion popup, teardown pairing)
@@ -1217,7 +1217,7 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
     interrupt: 0,
   };
   // Session-event fan-out stub: stores handlers so tests can fire bus
-  // events (SESSION_STATE/QUEUE_UPDATE/...) at the stage-4 status glue.
+  // events (SESSION_STATE/QUEUE_UPDATE/...) at the status glue.
   const sessionHandlers: Array<(ev: unknown) => void> = [];
   const agent = {
     sessionId: "test-session",
@@ -1296,7 +1296,7 @@ async function withStubbedExit(fn: (exitCalls: number[]) => Promise<void>): Prom
   }
 }
 
-describe("editor session swap: submit routing (stage 3b)", () => {
+describe("editor session swap: submit routing", () => {
   it("plain line goes through channel.send and pins the prompt echo", async () => {
     const rig = makeSessionRig();
     await rig.done;
@@ -1356,7 +1356,7 @@ describe("editor session swap: submit routing (stage 3b)", () => {
   });
 });
 
-describe("editor session swap: interrupt / quit / exit pairing (§10 suite-6)", () => {
+describe("editor session swap: interrupt / quit / exit pairing", () => {
   it("ctrl-c interrupts once and pins the echo exactly once", async () => {
     const rig = makeSessionRig();
     await rig.done;
@@ -1387,7 +1387,7 @@ describe("editor session swap: interrupt / quit / exit pairing (§10 suite-6)", 
 
     const log = rig.term.grid.modeLog;
     // ?25h rides every frame paint; the pairing that must land exactly once
-    // per exit is the raw-mode + bracketed-paste pair (§10 steps 4-5).
+    // per exit is the raw-mode + bracketed-paste pair (teardown steps 4-5).
     expect(rig.count(log, "?2004l")).toBe(1);
     expect(rig.count(log, "raw:off")).toBe(1);
     expect(rig.term.rawMode).toBe(false);
@@ -1511,7 +1511,7 @@ describe("editor session swap: ctrl-x dictation over unhandled keys", () => {
   });
 });
 
-describe("editor session swap: question focus (§8)", () => {
+describe("editor session swap: question focus", () => {
   it("menu answers resolve, abort mid-question resolves partial, lines return to the normal handler", async () => {
     const rig = makeSessionRig();
     await rig.done;
@@ -1537,7 +1537,7 @@ describe("editor session swap: question focus (§8)", () => {
 
       rig.keys.push("2\r"); // menu index -> green
       await tick();
-      // The answer echo carries the question prefix (fix-3) and never
+      // The answer echo carries the question prefix and never
       // reaches the normal submit handler.
       expect(rig.bridge.transcriptLog).toContain("  ? Pick a color > 2");
       expect(rig.calls.enqueue).toEqual([]);
@@ -1718,7 +1718,7 @@ describe("module-slot release after mounted sessions (sequential-process hygiene
   });
 });
 
-// ── Stage-3b audit ledger closure (run 20261020-2233): items B, C, D, G ──
+// ── Editor-path audit closure: items B, C, D, G ─────────────────────────
 
 import {
   installCrashTeardown,
@@ -1796,7 +1796,7 @@ describe("editor session swap: blank submit never dirties scrollback (ledger B)"
 
     expect(answers).toEqual({ note: "" }); // the waiter resolved with the empty line
     expect(rig.bridge.questionMode).toBe(false);
-    // Fix-3 echo ruling (question-echo.md): a blank answer commits exactly
+    // Echo rule: a blank answer commits exactly
     // ONE self-describing row -- question prefix plus "(no answer)" -- so
     // write-once scrollback can tell "answered nothing" from spacing.
     expect(rig.bridge.transcriptLog.length).toBe(logAfterMenu + 1);
@@ -2064,11 +2064,11 @@ describe("editor session swap: paste-marker answer through the session's own wir
 // runs after this one in the same process.
 afterAll(resetUiSlotsForTesting);
 
-// ══ Stage-3c (run 20261021-0353) ═════════════════════════════════════════
-// §9 dumb-term mount gate (owner ruling 2026-10-21: NO_COLOR must NOT decline,
+// ══ Dumb-term gate, clamps, routed diagnostics ═══════════════════════════
+// Dumb-term mount gate (NO_COLOR must NOT decline,
 // TERM=dumb declines -> legacy path), console.debug/info/trace arbiter routing
-// (ruling: routed while a real mount is live, restorable exactly once), and
-// the cursorCol clamp probes (3b contract §5 leftover: the view documents
+// (routed while a real mount is live, restorable exactly once), and
+// the cursorCol clamp probes (editor contract leftover: the view documents
 // "cursorCol may equal width; the composer clamps it" -- these probes decide
 // whether an out-of-range col reaches the wire or breaks geometry, and pin
 // what holds).
@@ -2139,7 +2139,7 @@ async function spawnProbe(
   return { out, err, code: await proc.exited };
 }
 
-describe("§9 dumb-term mount gate (stage 3c)", () => {
+describe("dumb-term mount gate", () => {
   it("shouldMountRenderer declines TERM=dumb with the exact comparison colors.ts makes", () => {
     // colors.ts colorDisabledByEnv compares `env.TERM === "dumb"` -- strict
     // equality against the lowercase terminfo convention string, no trim, no
@@ -2173,7 +2173,7 @@ describe("§9 dumb-term mount gate (stage 3c)", () => {
       expect(p.mode).toBe(k === "legacy" ? "legacy" : "split");
       expect(p.reason.length).toBeGreaterThan(0);
     }
-    // The reasons are the three §9 declines, distinguishable:
+    // The reasons are the three gate declines, distinguishable:
     expect(rendererMountPosture("split", true, true, "dumb").reason).toContain("TERM=dumb");
     expect(rendererMountPosture("split", false, true, "xterm").reason).toContain("TTY");
     expect(rendererMountPosture("legacy", true, true, "xterm").reason).toContain("knob");
@@ -2200,7 +2200,7 @@ describe("§9 dumb-term mount gate (stage 3c)", () => {
       }),
     ).toBeNull();
     expectPristine(before);
-    // NO_COLOR with a working TERM must NOT decline (owner ruling): a colorless
+    // NO_COLOR with a working TERM must NOT decline: a colorless
     // but capable TTY gets the split renderer; color-off is colors.ts's job.
     const { host, originals } = sixMethodHost();
     const bridge = mountSplitRenderer({
@@ -2247,7 +2247,7 @@ describe("§9 dumb-term mount gate (stage 3c)", () => {
     expect(code).toBe(0);
     expect(err).toContain("dumb-passthrough-stderr");
     expect(err).not.toContain("MOUNT_FAILED"); // decline is the EXPECTED path
-    // Zero cursor-control bytes of any kind: the §9 non-mount contract is the
+    // Zero cursor-control bytes of any kind: the non-mount contract is the
     // absence of EVERY escape, and the session's own writes are byte-plain.
     expect(out).not.toContain("\x1b");
     expect(out).toBe("dumb-passthrough-stdout\ndumb-passthrough-console\n");
@@ -2274,7 +2274,7 @@ describe("§9 dumb-term mount gate (stage 3c)", () => {
     expect(out).toContain("\x1b[?2004l"); // and the paired restore
   }, 20000);
 
-  it("real-process probe: unset TERM still mounts (§9 declines ONLY on the exact dumb string)", async () => {
+  it("real-process probe: unset TERM still mounts (declines ONLY on the exact dumb string)", async () => {
     const { out, code } = await spawnProbe({ PROBE_MODE: "term-unset", TERM: undefined });
     expect(out).not.toContain("MOUNT_FAILED");
     expect(code).toBe(7);
@@ -2283,7 +2283,7 @@ describe("§9 dumb-term mount gate (stage 3c)", () => {
   }, 20000);
 });
 
-describe("installIoPatches routes console.debug/info/trace (stage 3c ruling)", () => {
+describe("installIoPatches routes console.debug/info/trace", () => {
   it("debug/info/trace go through the arbiter path alongside error/warn", () => {
     const { bridge, clock } = makeBridge();
     bridge.mount();
@@ -2388,7 +2388,7 @@ describe("installIoPatches routes console.debug/info/trace (stage 3c ruling)", (
   }, 20000);
 });
 
-describe("cursorCol clamp probes (stage 3c, 3b contract §5 leftover)", () => {
+describe("cursorCol clamp probes (editor contract leftover)", () => {
   /** GridTerminal that also keeps the raw byte stream, for wire-level probes. */
   class RecordingGridTerminal extends GridTerminal {
     readonly raw: string[] = [];
@@ -2442,7 +2442,7 @@ describe("cursorCol clamp probes (stage 3c, 3b contract §5 leftover)", () => {
   it("P1b cursor parked at the exact row edge (pending-wrap cell) emits no CHP past the width", () => {
     // 你好世界漢字(12 cells)+abc(3) = 15 + prompt 5 = 20 cells == the viewport
     // width: line-editor.layout hands cursorCol === width ("the composer
-    // clamps it", 3b contract) -- this probe is that clamp on the wire.
+    // clamps it") -- this probe is that clamp on the wire.
     const r = makeClampRig(10, 20);
     r.keys.push("你好世界漢字abc");
     r.clock.runAll();
@@ -2486,7 +2486,7 @@ describe("cursorCol clamp probes (stage 3c, 3b contract §5 leftover)", () => {
     r.clock.runAll();
     expect(r.bridge.editor?.popupOpen).toBe(true);
     const at = (t: string): number => r.term.grid.snapshot().screen.findIndex((row) => row.includes(t));
-    expect(at("モデル")).toBeLessThan(at("(m)>")); // popup rows ABOVE the editor (§4)
+    expect(at("モデル")).toBeLessThan(at("(m)>")); // popup rows ABOVE the editor
     for (const row of r.term.grid.snapshot().screen) expect(visibleWidth(row)).toBeLessThanOrEqual(24);
 
     r.term.resize(12, 10); // narrow past the selected label's width
@@ -2535,11 +2535,11 @@ describe("cursorCol clamp probes (stage 3c, 3b contract §5 leftover)", () => {
   });
 });
 
-// ══ Stage 4 (§12, run 20261021): status line + queue chip ═══════════════
+// ══ Status line + queue chip ════════════════════════════════════════════
 
 import { statusRowText, queueChipText } from "@extensions/ui-interactive-cli/split-bridge.ts";
 
-describe("stage-4 status row: pure shape", () => {
+describe("status row: pure shape", () => {
   it("nothing before the first turn; current turn while working; settled count at idle", () => {
     expect(statusRowText({ turns: 0, working: false, laneWait: false, cost: null })).toBeNull();
     expect(statusRowText({ turns: 0, working: true, laneWait: false, cost: null })).toBe("#1 · working");
@@ -2564,7 +2564,7 @@ describe("stage-4 status row: pure shape", () => {
   });
 });
 
-describe("stage-4 session frame: status line follows the event sequence", () => {
+describe("session frame: status line follows the event sequence", () => {
   it("bare frame -> working -> lane-wait -> content clears wait -> TURN_END settles", async () => {
     const hooks = new HookSystem();
     const rig = makeSessionRig({ hooks });
@@ -2705,7 +2705,7 @@ describe("in-flight tool-call rows (streaming-call display)", () => {
   });
 });
 
-describe("in-flight rows through the session event glue (stage 4)", () => {
+describe("in-flight rows through the session event glue", () => {
   const cueRows = (rows: string[]): string[] => rows.filter((r) => r.includes("🔧 "));
 
   it("deltas paint rows under the streaming line, above the status row", async () => {

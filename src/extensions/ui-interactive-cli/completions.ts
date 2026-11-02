@@ -169,7 +169,7 @@ export function buildReadlineCompleter(
       });
   };
 }
-// ── Stage-3b editor popup completions ──────────────────────────────────────
+// ── Editor popup completions ─────────────────────────────────────────────
 
 /** Cap on raw directory entries per completion request (popup shows far fewer). */
 const PATH_COMPLETION_LIMIT = 200;

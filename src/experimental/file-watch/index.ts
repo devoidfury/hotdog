@@ -280,7 +280,7 @@ export function create(core: CoreContext): ExtensionInstance {
   const pendingMaps = new Map<string, Map<string, ChangeKind>>();
 
   // Paths whose change notice has already been logged this episode; suppressed
-  // until the path resolves (see the one-shot notice design note).
+  // until the path resolves.
   const notifiedMaps = new Map<string, Set<string>>();
 
   function sessionKey(agent: Agent | undefined): string {

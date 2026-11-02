@@ -1,7 +1,7 @@
-// visibleWidth corpus per design note §7: the zero-width classes (combining
+// visibleWidth corpus: the zero-width classes (combining
 // Mn/Me/Cf/ZWJ), East Asian Wide/Fullwidth, the emoji-presentation ranges,
 // OSC 8/SGR zero geometry, and the codex-style halfwidth-sound-marks
-// regression class (pitfall 5: a naive FF00..FFEF=>2 table reads halfwidth
+// regression class (a naive FF00..FFEF=>2 table reads halfwidth
 // kana/marks as wide). All exotica uses explicit \uXXXX escapes -- literal
 // combining marks in source are invisible landmines.
 
@@ -39,7 +39,7 @@ describe("visibleWidth -- basics", () => {
   });
 
   it("zero-width: variation selectors", () => {
-    // Documented §7 ceiling: VS16 does not promote a text-default glyph.
+    // Documented ceiling: VS16 does not promote a text-default glyph.
     expect(visibleWidth("❤️")).toBe(1); // U+2764 (EAW N) + VS16 (Mn)
     expect(visibleWidth("️")).toBe(0); // VS17 alone
   });
@@ -140,7 +140,7 @@ describe("visibleWidth -- emoji presentation", () => {
     expect(visibleWidth("♠")).toBe(1); // U+2660 spade
   });
 
-  it("ZWJ sequences measure as summed cells (documented §7 ceiling)", () => {
+  it("ZWJ sequences measure as summed cells (documented ceiling)", () => {
     expect(visibleWidth("\u{1f468}‍\u{1f469}‍\u{1f467}")).toBe(6); // family ZWJ sequence
   });
 });

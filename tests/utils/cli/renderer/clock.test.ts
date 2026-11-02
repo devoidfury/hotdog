@@ -1,4 +1,4 @@
-// SystemClock: the real-timer side of the Clock seam (§11). Determinism is
+// SystemClock: the real-timer side of the Clock seam. Determinism is
 // FakeClock's job; this file pins the pass-through wiring instead -- handles
 // round-trip back to clearTimeout/clearImmediate, callbacks land on the real
 // event loop, and now() is wall clock.

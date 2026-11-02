@@ -1,4 +1,4 @@
-// Real Clock: the process timers behind the Clock seam (§11).
+// Real Clock: the process timers behind the Clock seam.
 
 import type { Clock } from "./seams.ts";
 

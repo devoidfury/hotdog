@@ -1,4 +1,4 @@
-// In-memory Grid: the test-side Terminal (design note §11). Implements a
+// In-memory Grid: the test-side Terminal. Implements a
 // parser subset limited to the sequences the renderer emits plus what bun's
 // readline paints into the capture stream -- CUU/CUD/CUF/CUB, CPL/NPL, CUP,
 // CHP (cursor to column; every bun readline refresh leads with `\x1b[1G` and
@@ -10,11 +10,11 @@
 // Documented ceilings (test double, not a terminal):
 // - Pending-wrap models full-width writes the DECAWM way (a glyph landing in
 //   the last column wraps on the NEXT printable, so exact-width rows plus
-//   EL/ED behave as on a real terminal); the app pre-wraps (§7), and BoundedWriter
+//   EL/ED behave as on a real terminal); the app pre-wraps, and BoundedWriter
 //   chunks >1 MiB payloads may split escape sequences mid-stream, which this
 //   parser does not reassemble -- byte-golden those paths with a recorder.
 // - No reflow on resize: rows hard-truncate/pad. The renderer re-erases from
-//   the old frame geometry and repaints (§6), so only the frame's own rows
+//   the old frame geometry and repaints, so only the frame's own rows
 //   must survive a width change intact.
 // - Escape sequences split across feed() calls are not reassembled.
 

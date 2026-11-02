@@ -1,16 +1,16 @@
-// Architecture contract for the stage-2a renderer core:
+// Architecture contract for the renderer core:
 //
 // 1. Inverted-dependency law, renderer side: the renderer is a leaf -- every
 //    import lands inside the renderer directory or on @core/error.ts
 //    (formatError, the house catch rule). No extension imports, no bare
-//    runtime deps (zero-dep law, design note §13).
-// 2. Wiring boundary: only the ui-interactive-cli split bridge (stage 2b) may
+//    runtime deps (zero-dep law).
+// 2. Wiring boundary: only the ui-interactive-cli split bridge may
 //    import the renderer. Any other importer -- an early or accidental one --
 //    must fail this test; the renderer stays extension-agnostic.
 // 3. Sole byte home: the ?2026/?2004/?25 mode bytes and setRawMode live in
 //    teardown.ts (TerminalModes) and the seam/double plumbing that must
 //    implement them. The commit engine and scheduler emit zero mode bytes --
-//    they borrow TerminalModes so pairs cannot drift apart across files (§10).
+//    they borrow TerminalModes so pairs cannot drift apart across files.
 
 import { describe, it, expect } from "bun:test";
 import { Glob } from "bun";
@@ -61,7 +61,7 @@ describe("architecture: renderer is a dependency leaf", () => {
     expect(violations).toEqual([]);
   });
 
-  it("only the ui-interactive-cli wiring may import the renderer (stage 2b)", async () => {
+  it("only the ui-interactive-cli wiring may import the renderer", async () => {
     const WIRING = join(ROOT, "src", "extensions", "ui-interactive-cli");
     const files = await scan(SRC);
     const outside = files.filter(
@@ -85,7 +85,7 @@ describe("architecture: renderer is a dependency leaf", () => {
   });
 });
 
-describe("architecture: mode bytes have exactly one home (§10)", () => {
+describe("architecture: mode bytes have exactly one home", () => {
   it("?2026/?2004/?25 literals appear only in teardown.ts", async () => {
     const MODE_RE = /\?2026|\?2004|\?25[h l]/;
     const violations: string[] = [];
@@ -125,7 +125,7 @@ function basenameIs(file: string, name: string): boolean {
   return file.endsWith("/" + name);
 }
 
-// Appended by the stage-3a audit: the input/editor stack (the modules 3b will
+// The input/editor stack (the modules the bridge will
 // drive) must stay pure -- no fs, no process, no global timers. Persistence,
 // signals, and timing all arrive through the injected seams (Clock, save
 // callback), which is what makes the whole stack testable without a TTY.

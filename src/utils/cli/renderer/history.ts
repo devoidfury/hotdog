@@ -1,14 +1,14 @@
-// History (design note §4, steal 12): file-backed dedup history is an
-// ADDITION of stage 3, not a preservation (today's readline history is
+// History: file-backed dedup history is an
+// ADDITION, not a preservation (today's readline history is
 // in-memory only). This module is the pure model: navigation walks with the
-// draft slot (§4 stash-on-first-navigation, recoverable at the newest
+// draft slot (stash-on-first-navigation, recoverable at the newest
 // position, interrupt stashes too), consecutive-duplicate dedupe,
 // append-on-submit, bounded size, and corrupt-tolerant loading.
 //
 // No fs here: persistence is the injected `save` callback (called on append)
-// and the `load(text)` entry point -- stage 3b owns the config-dir file.
+// and the `load(text)` entry point -- the interactive CLI owns the file.
 // Load NEVER throws: garbage lines are skipped, an unreadable shape reads as
-// empty (§4/§9 degrade posture).
+// empty (degrade posture).
 //
 // Caps (documented, this module is their single owner):
 // - HISTORY_MAX: 1000 entries kept; the oldest are evicted on append.
@@ -58,7 +58,7 @@ export class History {
     if (this.save) this.save(this.serialize());
   }
 
-  // ── navigation (§4 draft-restore walk) ─────────────────────────────────
+  // ── navigation (draft-restore walk) ─────────────────────────────────
 
   /**
    * Start a walk: stashes the in-progress text into the draft slot unless a
@@ -95,7 +95,7 @@ export class History {
     return d;
   }
 
-  /** §4: interrupt stashes the buffer as draft (recoverable, not destructive). */
+  /** Interrupt stashes the buffer as draft (recoverable, not destructive). */
   saveDraft(text: string): void {
     this.draft = text;
     this.nav = this.entries.length;

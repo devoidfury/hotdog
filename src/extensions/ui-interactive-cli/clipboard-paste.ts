@@ -77,7 +77,7 @@ export interface ClipboardPasteInterceptorOptions {
    */
   pasteMarkerMinChars: number;
   /**
-   * Split renderer mode (design note §10): the renderer's TeardownGuard owns
+   * Split renderer mode: the renderer's TeardownGuard owns
    * the paired ?2004h/l enable/disable, so the interceptor emits neither.
    * Its listener swap and teardown stay intact -- this only absorbs the
    * escape-write point so bracketed paste is never restored twice.
@@ -211,7 +211,7 @@ export class ClipboardPasteInterceptor {
 
   #writeEscape(seq: string): void {
     // Split renderer owns the paired ?2004h/l enable/disable (TeardownGuard);
-    // emitting it here would double-toggle bracketed paste (§10 absorption).
+    // emitting it here would double-toggle bracketed paste.
     if (this.#rendererOwnsPasteMode) return;
     if (this.#stdout?.isTTY !== true) return;
     try {

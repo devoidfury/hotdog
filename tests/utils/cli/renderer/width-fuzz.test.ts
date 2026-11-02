@@ -1,6 +1,6 @@
 // Fuzz suite for the width utility (src/utils/cli/renderer/width.ts) that
-// every wrap, pad, and cursor motion in the split renderer goes through
-// (§7). Wrong widths are owner-visible: the editor miswraps or misplaces.
+// every wrap, pad, and cursor motion in the split renderer goes through.
+// Wrong widths are owner-visible: the editor miswraps or misplaces.
 //
 // THE MODULE-DEFINED GEOMETRY (transcribed from the source, pinned here --
 // stated, not invented; the file header calls out its own ceilings):

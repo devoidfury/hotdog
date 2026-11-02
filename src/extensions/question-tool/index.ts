@@ -16,6 +16,7 @@ import {
   ExtensionInstance,
   ToolContext,
 } from "@core/extensions/types.ts";
+import { ABORTED, raceAbort } from "@utils/promise.ts";
 
 interface Question {
   key?: string;
@@ -199,35 +200,17 @@ export class QuestionTool {
       });
     }
 
-    // Wrapped in a microtask so a synchronous result and a promise result take the same path; the race then works for both.
+    // Wrapped in a microtask by raceAbort so a synchronous result and a
+    // promise result take the same path; the race works for both.
     // The input gets the run signal: on abort it bails out of its prompt loop and re-attaches the main readline handler, so a line typed after
     // cancel goes to the next turn, not into a dead question loop.
-    const collect = Promise.resolve().then(() => inputInterface.collectAnswers(questions, runSignal));
-    const abortCleanups: Array<() => void> = [];
-    const aborted = signals.length
-      ? new Promise<"aborted">((resolve) => {
-          for (const s of signals) {
-            const onAbort = () => resolve("aborted");
-            s.addEventListener("abort", onAbort, { once: true });
-            abortCleanups.push(() => s.removeEventListener("abort", onAbort));
-          }
-        })
-      : null;
-
-    let outcome: unknown;
-    try {
-      outcome = await (aborted ? Promise.race([collect, aborted]) : collect);
-    } finally {
-      for (const cleanup of abortCleanups) cleanup();
-    }
-    if (outcome === "aborted") {
-      // The input resolves (partial answers, dropped here) rather than  rejecting on abort, so nothing dangles;
-      // the catch is a safety net for an input that fails for an unrelated reason.
-      collect.catch(() => {});
+    const outcome = await raceAbort(() => inputInterface.collectAnswers(questions, runSignal), signals);
+    if (outcome === ABORTED) {
+      // The input resolves (partial answers, dropped here) rather than rejecting on abort, so nothing dangles.
       return ToolResult.err("Question cancelled: the run was interrupted");
     }
 
-    const answers = outcome as QuestionAnswers;
+    const answers = outcome;
     const mode = inputInterface.isInteractive() ? "interactive" : "non-interactive";
 
     return ToolResult.ok(JSON.stringify(answers, null, 2)).withEntries({

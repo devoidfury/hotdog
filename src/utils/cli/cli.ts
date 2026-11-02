@@ -95,9 +95,6 @@ export interface CliOutputSinkOptions {
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
 }
 
-/**
- * Format a compacting message.
- */
 export function formatCompacting(messageCount: number, keepRecent: number): string {
   return `Compacting: removed ${messageCount} messages, keeping ${keepRecent} recent`;
 }
@@ -191,23 +188,14 @@ export function inflightCallText(
   return applyToolCall(`${TOOL_CALL_PREFIX}${body}`, palette);
 }
 
-/**
- * Format a tool call display using the tool formatter.
- */
 export function formatToolCall(toolName: string, input: string, toolFmt: string): string {
   return toolFmt.replace("{}", toolName).replace("{}", input);
 }
 
-/**
- * Format a tool result display using the tool output formatter.
- */
 export function formatToolResult(result: string, toolOutputFmt: string): string {
   return toolOutputFmt.replace("{}", result);
 }
 
-/**
- * Format token usage display.
- */
 export function formatTokenUsage(
   sessionPromptTokens: number,
   sessionCachedTokens: number,
@@ -218,9 +206,6 @@ export function formatTokenUsage(
   return `Token usage: ${sessionCachedTokens} cached, ${sessionPromptTokens} processed, ${sessionCompletionTokens} generated. (${sessionTotalTokens}/${contextWindow})`;
 }
 
-/**
- * Format a thinking message using the thinker formatter.
- */
 export function formatThinking(content: string, thinkerFmt: string | null | undefined): string {
   if (thinkerFmt) {
     return thinkerFmt.replace("{}", content);
@@ -228,9 +213,6 @@ export function formatThinking(content: string, thinkerFmt: string | null | unde
   return `[Thinking: ${content}]`;
 }
 
-/**
- * Format task progress display.
- */
 export function formatTaskProgress(activeTasks: number, totalTasks: number): string {
   if (activeTasks === 0) return "";
   if (totalTasks === 0) {
@@ -263,7 +245,7 @@ export class CliOutputSink extends OutputSink {
   altStream: NodeJS.WriteStream;
 
   /**
-   * Split renderer commit channel (design note §2 rubric 1), installed by the
+   * Split renderer commit channel, installed by the
    * ui-interactive-cli split bridge. Null = legacy mode: sink.log() falls back
    * to plain console.log, byte-identical to today's behavior.
    */

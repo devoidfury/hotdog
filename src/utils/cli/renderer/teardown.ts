@@ -1,14 +1,14 @@
-// TeardownGuard (design note §10): idempotent, single object, owning the
+// TeardownGuard: idempotent, single object, owning the
 // paired terminal primitives. This file is the ONLY home of raw-mode,
 // bracketed-paste, cursor-visibility, and synchronized-output bytes in the
 // renderer -- the FrameScheduler/commit engine go through TerminalModes
 // instead of embedding escape literals (contract-tested in
 // tests/lints/ui-renderer-architecture.test.ts).
 //
-// Step order is normative (§10): scheduler first, then commit-or-drop, then
+// Step order is normative: scheduler first, then commit-or-drop, then
 // the frame erase, then mode unwinding -- kilocode's lesson: hand stdout back
 // before killing the capture pipeline, nothing may capture into a stopped
-// region (pitfall 8).
+// region.
 
 import { formatError } from "@core/error.ts";
 import type { SignalHost, Terminal } from "./seams.ts";
@@ -76,7 +76,7 @@ export class TeardownGuard {
   /**
    * Separate SIGTERM/SIGHUP handlers: Bun delivers no signal name to a shared
    * handler, so one function registered for both cannot pick its exit code
-   * (§5/§10, minicode TERMINAL_CONTRACT precedent).
+   * (minicode TERMINAL_CONTRACT precedent).
    */
   installSignals(host: SignalHost): void {
     const term = (): void => {
@@ -113,7 +113,7 @@ export class TeardownGuard {
 
   // Teardown is best-effort: a throwing step is reported and skipped, never
   // allowed to skip the mode-unwinding steps behind it. Reporting itself is
-  // wrapped -- a detached/throwing stderr (Bun-on-Windows, §13) must not turn
+  // wrapped -- a detached/throwing stderr (Bun-on-Windows) must not turn
   // a skipped step into a crashed teardown.
   private safe(fn: () => void): void {
     try {

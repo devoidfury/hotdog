@@ -226,7 +226,7 @@ export function seatbeltProfile(opts: {
   const lines = [
     "(version 1)",
     "(deny default)",
-    // Owner rulings distilled from the reference session: exec/fork up
+    // Policy stance: exec/fork up
     // front (mediation blocks execvp under deny default), metadata on
     // literal "/" for path traversal...
     "(allow process-exec* process-fork file-map-executable sysctl-read)",

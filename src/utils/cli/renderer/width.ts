@@ -1,15 +1,15 @@
-// visibleWidth -- the single geometry utility (design note §7). Every wrap,
+// visibleWidth -- the single geometry utility. Every wrap,
 // pad, erase-count, popup placement, and cursor motion goes through this file.
 //
-// Scoped hand table per the §7 ruling (Decisions 5):
+// Scoped hand table (deliberate decisions):
 //   - codepoint width 0 for combining Mn/Me/Cf/ZWJ classes
 //   - 2 for East Asian Wide + Fullwidth ranges (transcribed from Unicode
 //     EastAsianWidth.txt) and the emoji-presentation ranges
 //   - 1 otherwise
 // OSC 8 hyperlink spans are zero-width at measure time; the bytes survive at
-// write time (§7, codex terminal_hyperlinks precedent).
+// write time (codex terminal_hyperlinks precedent).
 //
-// Known ceiling (accepted in §7, no full RGI grapheme clustering): ZWJ
+// Known ceiling (accepted: no full RGI grapheme clustering): ZWJ
 // sequences measure as summed cells and will overflow on some terminals;
 // flags are wrong; combining marks from scripts outside the transcribed
 // blocks below measure as 1.
@@ -71,8 +71,8 @@ const ZERO_RANGES: readonly number[] = [
 ];
 
 // Ranges rendered two cells wide: East Asian Wide (W) + Fullwidth (F), plus
-// the emoji-presentation block U+1F300..U+1FAFF scoped as the note §7 states
-// it (whole block; the precise Unicode W list has text-default gaps we
+// the emoji-presentation block U+1F300..U+1FAFF scoped wide
+// (whole block; the precise Unicode W list has text-default gaps we
 // deliberately fill, matching what terminals actually do). Halfwidth ranges
 // (FF61..FFDC, FFE8..FFEE) are absent by design -- see header.
 const WIDE_RANGES: readonly number[] = [
@@ -167,7 +167,7 @@ const WIDE_RANGES: readonly number[] = [
   0x1f18e, 0x1f18e,
   0x1f191, 0x1f19a,
   0x1f200, 0x1f2ff,
-  0x1f300, 0x1faff, // emoji-presentation block, §7 scoped wording (whole block; subsumes 1F7E0/1F900 et al.)
+  0x1f300, 0x1faff, // emoji-presentation block, scoped wide (whole block; subsumes 1F7E0/1F900 et al.)
   0x20000, 0x2fffd,
   0x30000, 0x3fffd,
 ];
@@ -195,7 +195,7 @@ export function charWidth(cp: number): number {
 }
 
 // OSC (incl. OSC 8 hyperlinks) and CSI (SGR et al.) spans carry zero
-// geometry; §7 mandates OSC 8 stripping inside the utility, and SGR gets the
+// geometry; OSC 8 stripping lives inside the utility, and SGR gets the
 // same treatment because CliOutputSink hands this layer pre-colored rows --
 // measuring escape bytes as printable would miswrap every of them (the same
 // bug kimi-cli hit; the single-utility rule kills it structurally).
@@ -211,7 +211,7 @@ export function visibleWidth(s: string): number {
 }
 
 /**
- * Hard-wrap to a visible width (app owns wrap, §7 DECAWM decision: the
+ * Hard-wrap to a visible width (app owns wrap -- the DECAWM decision: the
  * terminal's autowrap never fires on our content). Newlines in the input
  * split rows; zero-width codepoints attach to the current row; a wide
  * glyph never splits. width < 1 is clamped to 1 (degenerate terminals).

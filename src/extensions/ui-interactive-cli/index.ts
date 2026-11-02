@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { CliOutputSink, inflightCallText } from "@utils/cli/cli.ts";
 import { resolveQuestionAnswer } from "@utils/question-answer.ts";
 import { spoofSafe } from "@utils/spoof.ts";
+import { ABORTED, raceAbort } from "@utils/promise.ts";
 import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
 import { parseForkArg } from "@core/command-handlers.ts";
 import { HOOKS } from "@core/hooks.ts";
@@ -130,7 +131,7 @@ interface InteractiveSessionOptions {
   onSIGINT?: () => void;
   setupInput?: () => void;
   /**
-   * Stage-3b test seams (§11: constructor-injected objects, never
+   * Test seams (constructor-injected objects, never
    * mock.module): inject a mounted bridge built on the Grid/FakeClock rig
    * instead of mountSplitRenderer, and hand the editor input a scripted
    * KeySource instead of process.stdin. Omitted on the legacy path, so
@@ -256,7 +257,7 @@ interface LineWait {
 
 /**
  * The question/approval prompt loop shared by the readline takeover
- * (AsyncInteractiveCliInput) and the stage-3b editor focus (EditorCliInput).
+ * (AsyncInteractiveCliInput) and the editor focus (EditorCliInput).
  * It only knows how to print the model-supplied menu and judge answers;
  * where lines come from is the caller's waitLine(). Abort semantics are the
  * rule: the run's abort signal wins the race, ALREADY-GATHERED answers
@@ -270,105 +271,88 @@ async function runQuestions(
   waitLine: () => LineWait,
 ): Promise<Record<string, string>> {
   const answers: Record<string, string> = {};
-  let onAbort: (() => void) | null = null;
-  try {
-    if (signal?.aborted) return answers;
+  if (signal?.aborted) return answers;
 
-    const aborted = signal
-      ? new Promise<"aborted">((resolve) => {
-          onAbort = () => resolve("aborted");
-          signal.addEventListener("abort", onAbort, { once: true });
-        })
-      : null;
+  for (const q of questions) {
+    const key = q.key;
+    const promptText = q.prompt || "";
+    const options = q.options || [];
+    const defaultValue = q.default ?? "";
 
-    for (const q of questions) {
-      const key = q.key;
-      const promptText = q.prompt || "";
-      const options = q.options || [];
-      const defaultValue = q.default ?? "";
+    // prompt, options and default are model-supplied. spoofSafe is idempotent, so double neutralization upstream is harmless.
+    process.stdout.write(`\n  ? ${spoofSafe(promptText)}\n`);
 
-      // prompt, options and default are model-supplied. spoofSafe is idempotent, so double neutralization upstream is harmless.
-      process.stdout.write(`\n  ? ${spoofSafe(promptText)}\n`);
-
-      if (options.length > 0) {
-        for (let i = 0; i < options.length; i++) {
-          process.stdout.write(`    [${i + 1}] ${spoofSafe(options[i] ?? "")}\n`);
-        }
+    if (options.length > 0) {
+      for (let i = 0; i < options.length; i++) {
+        process.stdout.write(`    [${i + 1}] ${spoofSafe(options[i] ?? "")}\n`);
       }
-
-      if (defaultValue !== "") {
-        process.stdout.write(`    (default: ${spoofSafe(defaultValue)})\n`);
-      }
-
-      // Fix-3 echo ruling (question-echo.md): in split mode the committed
-      // answer row carries this question's text as its prefix, so hand the
-      // bridge the same spoof-safe question line printed above. The live
-      // prompt is the editor frame, so the bare answer-prompt row (`" "` or
-      // `" [default] "`) is legacy-only: split's echo is self-describing and
-      // the default is already shown in its own row above. Legacy never has
-      // a bridge mounted, so uiBridge doubles as the mode gate.
-      const splitEcho = uiBridge !== null;
-      uiBridge?.setQuestionLabel(`  ? ${spoofSafe(promptText)}`);
-
-      let answer = "";
-      let valid = false;
-
-      while (!valid) {
-        if (!splitEcho) {
-          const prompt = defaultValue !== "" ? ` [${defaultValue}] ` : " ";
-          process.stdout.write(prompt);
-          uiFlush();
-        }
-        const wait = waitLine();
-
-        // Race the line against the run abort: a cancelled run must stop
-        // prompting and release the input, not keep owning it. We RESOLVE
-        // (partial answers, dropped by the caller) rather than reject, so
-        // the never-awaited promise can never go unhandled.
-        let line: string;
-        if (aborted) {
-          const outcome = await Promise.race([wait.line, aborted]);
-          if (outcome === "aborted") {
-            wait.cancel();
-            return answers;
-          }
-          line = outcome;
-        } else {
-          line = await wait.line;
-        }
-
-        const trimmed = normalize(line).trim();
-
-        // The CLI renders options as a numbered menu, so index ("2") and
-        // exact option-text input become a selection; anything else stays
-        // free text for the shared resolver to judge.
-        let text = trimmed;
-        let selectedOption: string | null = null;
-        if (trimmed !== "" && options.length > 0) {
-          const idx = parseInt(trimmed, 10);
-          if (!isNaN(idx) && idx >= 1 && idx <= options.length) {
-            selectedOption = options[idx - 1] ?? "";
-            text = "";
-          } else if (options.includes(trimmed)) {
-            selectedOption = trimmed;
-            text = "";
-          }
-        }
-
-        const resolvedAnswer = resolveQuestionAnswer(q, { text, selectedOption });
-        if (resolvedAnswer.error) {
-          process.stderr.write(`  ${spoofSafe(resolvedAnswer.error)}\n`);
-          continue;
-        }
-
-        answer = resolvedAnswer.value;
-        valid = true;
-      }
-
-      answers[key] = answer;
     }
-  } finally {
-    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+
+    if (defaultValue !== "") {
+      process.stdout.write(`    (default: ${spoofSafe(defaultValue)})\n`);
+    }
+
+    // Echo rule: in split mode the committed
+    // answer row carries this question's text as its prefix, so hand the
+    // bridge the same spoof-safe question line printed above. The live
+    // prompt is the editor frame, so the bare answer-prompt row (`" "` or
+    // `" [default] "`) is legacy-only: split's echo is self-describing and
+    // the default is already shown in its own row above. Legacy never has
+    // a bridge mounted, so uiBridge doubles as the mode gate.
+    const splitEcho = uiBridge !== null;
+    uiBridge?.setQuestionLabel(`  ? ${spoofSafe(promptText)}`);
+
+    let answer = "";
+    let valid = false;
+
+    while (!valid) {
+      if (!splitEcho) {
+        const prompt = defaultValue !== "" ? ` [${defaultValue}] ` : " ";
+        process.stdout.write(prompt);
+        uiFlush();
+      }
+      const wait = waitLine();
+
+      // Race the line against the run abort: a cancelled run must stop
+      // prompting and release the input, not keep owning it. We RESOLVE
+      // (partial answers, dropped by the caller) rather than reject, so
+      // the never-awaited promise can never go unhandled.
+      const outcome = await raceAbort(() => wait.line, [signal]);
+      if (outcome === ABORTED) {
+        wait.cancel();
+        return answers;
+      }
+      const line = outcome;
+
+      const trimmed = normalize(line).trim();
+
+      // The CLI renders options as a numbered menu, so index ("2") and
+      // exact option-text input become a selection; anything else stays
+      // free text for the shared resolver to judge.
+      let text = trimmed;
+      let selectedOption: string | null = null;
+      if (trimmed !== "" && options.length > 0) {
+        const idx = parseInt(trimmed, 10);
+        if (!isNaN(idx) && idx >= 1 && idx <= options.length) {
+          selectedOption = options[idx - 1] ?? "";
+          text = "";
+        } else if (options.includes(trimmed)) {
+          selectedOption = trimmed;
+          text = "";
+        }
+      }
+
+      const resolvedAnswer = resolveQuestionAnswer(q, { text, selectedOption });
+      if (resolvedAnswer.error) {
+        process.stderr.write(`  ${spoofSafe(resolvedAnswer.error)}\n`);
+        continue;
+      }
+
+      answer = resolvedAnswer.value;
+      valid = true;
+    }
+
+    answers[key] = answer;
   }
 
   return answers;
@@ -408,7 +392,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
     let pendingLine: ((line: string) => void) | null = null;
     // Split mode: the takeover prints via owned channels (never raw
     // stdout); the bridge question-mode flag switches the submit echo to the
-    // fix-3 answer shape (question prefix, blanks as "(no answer)") and
+    // answer echo shape (question prefix, blanks as "(no answer)") and
     // suppresses the completion popup.
     uiBridge?.setQuestionMode(true);
     try {
@@ -438,9 +422,9 @@ export class AsyncInteractiveCliInput implements InputInterface {
 }
 
 /**
- * Question input for the stage-3b EDITOR path. There is no listener takeover
+ * Question input for the EDITOR path. There is no listener takeover
  * to perform: the bridge routes a submitted editor line to the open
- * question's wait instead of the normal handler, which is exactly the §8
+ * question's wait instead of the normal handler, which is exactly the
  * exclusive question focus (Esc still interrupts, the answer buffer is the
  * editor buffer).
  */
@@ -479,7 +463,7 @@ export class EditorCliInput implements InputInterface {
 let currentInput: InputInterface | null = null;
 
 /**
- * Printer for permanent console.log output sites (design note §2: these rows
+ * Printer for permanent console.log output sites (these rows
  * commit in split mode). Default is plain console.log -- legacy mode keeps
  * today's exact bytes and stays visible to test spies. runInteractiveSession
  * rebinds it to the sink's log channel each session (which itself only
@@ -682,13 +666,13 @@ export async function runInteractiveSession(
     argDisplay: (toolName) => core.toolRegistry?.getMetadata(toolName)?.argDisplay,
   });
 
-  // Split-renderer mount gate (design note §9/§12, default-on): mounts iff the
+  // Split-renderer mount gate (default-on): mounts iff the
   // knob is NOT "legacy" AND both stdio streams are TTYs AND TERM is not the
   // "dumb" convention string (the exact comparison colors.ts makes). Non-TTY
   // is passthrough regardless of the knob; only "legacy" never touches a
   // global.
   // options.bridge injects an already-mounted rig bridge for the split-mode
-  // session tests (§11 constructor injection); omitting it keeps the real
+  // session tests (constructor injection); omitting it keeps the real
   // mount decision untouched.
   const uiCli = (config.uiInteractiveCli as Record<string, unknown>) || {};
   const bridge =
@@ -753,7 +737,7 @@ export async function runInteractiveSession(
 
   const shellMode = uiCli.shellMode;
 
-  // Stage-3b swap: when a bridge is mounted the session runs ENTIRELY on the
+  // Editor swap: when a bridge is mounted the session runs ENTIRELY on the
   // editor input path. node:readline is never constructed there and neither
   // the rl-shaped paste nor dictation interceptor exists; their semantics
   // re-hang off the editor's events (paste markers on the view's paste hook,
@@ -769,7 +753,7 @@ export async function runInteractiveSession(
   const sttTarget = resolveSttTarget(resolved, llmClient);
 
   const onQuit = buildOnQuitHandler(sessionManager, core.extensions);
-  // Teardown pairs with every exit path (§10): restore the terminal first so
+  // Teardown pairs with every exit path: restore the terminal first so
   // the goodbye rows land on a plain screen via passthrough stdout. An
   // in-flight dictation recording exits with the session too.
   const exitSession = bridge
@@ -799,7 +783,7 @@ export async function runInteractiveSession(
     editorPasteHandler = (raw) => pasteMarkers.handlePaste(raw);
 
     // Ctrl+X dictation on the editor path: it binds from the editor's
-    // unhandled-key event (stage 3a deliberately left ctrl-x unhandled) and
+    // unhandled-key event (the first editor mount left ctrl-x unhandled) and
     // the transcript lands at the cursor via the view -- never auto-sent.
     if (sttTarget) {
       const dictationCore = new DictationCore({
@@ -877,7 +861,7 @@ export async function runInteractiveSession(
   // Re-display prompt after agent finishes
   core.hooks.on(HOOKS.TURN_END, ({ stopped }) => {
     if (stopped) {
-      // Status-line turn counter (§12 stage 4): the settled turn is the tick.
+      // Status-line turn counter: the settled turn is the tick.
       bridge?.addTurn();
       setImmediate(() => {
         sink.log("");
@@ -905,7 +889,7 @@ export async function runInteractiveSession(
       return false;
     }
     
-    // The child handoff (§5): rl.pause() is the legacy half of the bracket
+    // The child handoff: rl.pause() is the legacy half of the bracket
     // and a no-op on the editor path, which has no readline; while the
     // renderer is mounted the real work is bridge.suspend() -- it releases
     // the input listeners AND pauses the stream with the real pause
@@ -1002,13 +986,13 @@ export async function runInteractiveSession(
     });
 
   if (bridge) {
-    // Editor input mount (stage 3b): submit/interrupt/quit replace readline's
+    // Editor input mount: submit/interrupt/quit replace readline's
     // line/SIGINT/close listeners, popup answers Tab synchronously, and
     // unhandled keys carry the ctrl-x dictation toggle. The KeySource attaches
-    // HERE, after bridge.mount() established raw mode + bracketed paste (§5;
-    // mount() is idempotent), and stopping input only ever means detaching
-    // listeners -- stray pauses stay neutered (pitfall 6); the one pause that
-    // does land is suspend()'s real pause during a §5 child handoff.
+    // HERE, after bridge.mount() established raw mode + bracketed paste
+    // (mount() is idempotent), and stopping input only ever means detaching
+    // listeners -- stray pauses stay neutered (the stray-pause pitfall); the
+    // one pause that does land is suspend()'s real pause during a child handoff.
     bridge.mount();
     const editorCompleter = buildEditorCompleter(sessionManager, core, () => bridge.editor, !!shellMode);
     bridge.mountEditorInput(options.keySource ?? new StdinKeySource(process.stdin), {
@@ -1023,7 +1007,7 @@ export async function runInteractiveSession(
       quit: options.onClose || exitSession,
       popup: (word, from) => {
         // The completion popup is suppressed while a question owns the
-        // input (§8: numbers + free text need no interference).
+        // input (numbers + free text need no interference).
         if (bridge.questionMode) return undefined;
         return editorCompleter(word, from);
       },
@@ -1037,7 +1021,7 @@ export async function runInteractiveSession(
       bridge.editor.pasteHandler = editorPasteHandler;
     }
 
-    // ── Stage-4 status line + queue chip (§12 stage 4, ruling 4, §8) ──────
+    // ── Status line + queue chip ─────────────────────────────────────────
     // Tap the session's event fan-out (the same seam Channel uses; N
     // subscribers supported). Turn count rides the TURN_END hook below;
     // working/lane-wait come from bus events; cost exists only while the
@@ -1172,7 +1156,7 @@ export async function runInteractiveSession(
 export interface PromptUi {
   prompt(): unknown;
   close(): unknown;
-  /** Split renderer only: purge scrollback and reprint the transcript (§6). Absent on legacy. */
+  /** Split renderer only: purge scrollback and reprint the transcript. Absent on legacy. */
   redraw?(): unknown;
 }
 
@@ -1199,7 +1183,7 @@ export function handleSlashCommand(
       return;
 
     case Command.Redraw:
-      // Split renderer only (§6 recovery, same path as ctrl-l): purge
+      // Split renderer only (recovery, same path as ctrl-l): purge
       // scrollback, reprint the transcript, repaint the frame. Legacy has no
       // managed region to recover -- say so instead of silently re-prompting.
       if (ui.redraw) ui.redraw();

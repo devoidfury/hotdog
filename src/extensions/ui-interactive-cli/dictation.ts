@@ -15,7 +15,7 @@
 //     interceptor, it sits in front of that chain, swallows only the Ctrl+X
 //     byte and forwards everything else untouched, and renders notices on
 //     readline's output stream exactly as before.
-//   - The split-renderer editor path (stage 3b) binds unhandled("ctrl-x") to
+//   - The split-renderer editor path binds unhandled("ctrl-x") to
 //     core.toggle() and inserts transcripts via EditorView.insertText.
 // The whole thing is a no-op unless an STT target resolved (see
 // resolveSttTarget); the readline adapter additionally requires a TTY input.

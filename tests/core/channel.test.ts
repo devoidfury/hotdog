@@ -102,7 +102,7 @@ describe("Channel - send()", () => {
     channel.attach("session-1");
   });
 
-  it("enqueues regular text to current session, steered (§8 steer-default)", async () => {
+  it("enqueues regular text to current session, steered (steer-default)", async () => {
     await channel.send("hello world");
     expect(sm.enqueue).toHaveBeenCalledWith("session-1", "hello world", { steering: true });
   });

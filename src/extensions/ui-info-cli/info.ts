@@ -172,8 +172,8 @@ function printInfoText(
       `  Fence Overrides: ${fenceOverrides.map((o) => `${o.session}=${o.policy}`).join(", ")}`,
     );
   }
-  // Split-renderer posture, same never-silent style as the fence line: the §9
-  // gate is pure knob + TTY + TERM, so what it would decide in THIS
+  // Split-renderer posture, same never-silent style as the fence line: the
+  // mount gate is pure knob + TTY + TERM, so what it would decide in THIS
   // environment is exactly what the next interactive session does. `info`
   // runs outside any session (nothing is mounted at report time), so the
   // line honestly reports the gate decision, not a live mount.
@@ -354,7 +354,7 @@ function printInfoJson(
       // Runtime flag: crash-respawn budget exhausted, never an
       // inline downgrade -- a degraded plane still rejects loudly.
       tools_exec_degraded: planeDegraded,
-      // Split-renderer §9 gate projection for this environment (mirror of the
+      // Split-renderer mount-gate projection for this environment (mirror of the
       // text line; info never runs inside a mounted session, so "mount" is
       // what the next interactive session would decide, never a live state).
       renderer: rendererMountPosture(

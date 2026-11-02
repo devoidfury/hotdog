@@ -1,6 +1,6 @@
-// Process-backed Terminal and KeySource: the real side of the §11 seams.
+// Process-backed Terminal and KeySource: the real side of the seams.
 // This is plumbing only -- no frame/escape policy lives here (mode bytes are
-// owned by TeardownGuard, §10).
+// owned by TeardownGuard).
 
 import type { KeyChunk, KeySource, Terminal } from "./seams.ts";
 
@@ -54,8 +54,8 @@ export class ProcessTerminal implements Terminal {
 }
 
 /** Raw stdin chunks. Unsubscribing is how input stops; the KeySource never
- * pauses (pitfall 6) -- the sole stream pause is OutputBridge.suspend()'s §5
- * child handoff, which detaches every listener first. */
+ * pauses (the stray-pause pitfall) -- the sole stream pause is
+ * OutputBridge.suspend()'s child handoff, which detaches every listener first. */
 export class StdinKeySource implements KeySource {
   constructor(private readonly stdin: StdinLike = process.stdin) {}
 

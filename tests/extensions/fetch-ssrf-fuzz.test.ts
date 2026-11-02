@@ -444,7 +444,7 @@ describe("fetch-ssrf isPrivateAddress fuzz", () => {
   });
 });
 
-describe("fetch-ssrf tightening (owner ruling 2026-10-25)", () => {
+describe("fetch-ssrf tightening", () => {
   // 224.0.0.0/4 was the batch-2 fuzz run's W1 flag: intended policy refused
   // multicast, the guard only checked ff00::/8. Now refused both sides.
   // ::ffff:0:0/96 (RFC 6052 translator-local) serializes past the mapped

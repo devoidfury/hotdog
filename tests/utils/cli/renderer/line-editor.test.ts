@@ -1,4 +1,4 @@
-// LineEditor (§4): grapheme-cluster motion, CJK/emoji cursor math, wrapped
+// LineEditor: grapheme-cluster motion, CJK/emoji cursor math, wrapped
 // view row counts and windowing, kill ops. Exotica uses explicit escapes --
 // literal combining marks in source are invisible landmines.
 
@@ -247,7 +247,7 @@ describe("LineEditor -- wrapped view (CJK math, windowing)", () => {
   });
 });
 
-// ── auditor regression: moveVisual coordinate/render fixes (stage 3a audit) ──
+// ── auditor regression: moveVisual coordinate/render fixes ───────────────
 
 describe("LineEditor -- visual moves: prompt coords and render row invariants (audit)", () => {
   it("visual up/down use BUFFER coords with a non-empty prompt (no prompt leak)", () => {

@@ -1,5 +1,5 @@
 // KeyEvent: the decoded-key currency between StdinBuffer and the editor
-// (design note §5/§11). StdinBuffer turns raw chunks into these; nothing
+// StdinBuffer turns raw chunks into these; nothing
 // downstream sees escape bytes.
 
 /**

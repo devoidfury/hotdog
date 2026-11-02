@@ -117,6 +117,66 @@ describe("dom-helper", () => {
     expect(frag.childNodes).toHaveLength(0);
   });
 
+  // Surface the app-wiring suite (app.test.tsx) added; the composer, the
+  // context-menu dismiss and the sidebar resize all lean on these.
+  describe("form + style + document surface", () => {
+    it("form-associated elements carry a form back-reference; requestSubmit submits it", () => {
+      const form = document.createElement("form");
+      const box = document.createElement("textarea");
+      form.appendChild(box);
+      let submitted = 0;
+      form.addEventListener("submit", () => submitted++);
+      expect((box as unknown as { form: unknown }).form).toBe(form);
+      (form as unknown as { requestSubmit: () => void }).requestSubmit();
+      expect(submitted).toBe(1);
+      // Outside a form: null, and `el.form?.requestSubmit()` stays a no-op.
+      expect((document.createElement("input") as unknown as { form: unknown }).form).toBeNull();
+    });
+
+    it("value and the caret are plain fields; setSelectionRange moves the caret", () => {
+      const box = document.createElement("textarea") as unknown as {
+        value: string;
+        selectionStart: number | null;
+        selectionEnd: number | null;
+        setSelectionRange: (a: number, b: number) => void;
+      };
+      expect(box.value).toBe("");
+      box.value = "hello";
+      box.setSelectionRange(3, 3);
+      expect(box.selectionStart).toBe(3);
+      expect(box.selectionEnd).toBe(3);
+    });
+
+    it("style.setProperty/getProperty round-trips custom properties", () => {
+      const style = (document.documentElement as unknown as {
+        style: { setProperty: (n: string, v: string) => void; getPropertyValue: (n: string) => string };
+      }).style;
+      style.setProperty("--x", "12px");
+      expect(style.getPropertyValue("--x")).toBe("12px");
+      expect(style.getPropertyValue("--nope")).toBe("");
+    });
+
+    it("contains() matches self and descendants only", () => {
+      const outer = document.createElement("div");
+      const inner = document.createElement("span");
+      outer.appendChild(inner);
+      expect(outer.contains(inner as unknown as Node)).toBe(true);
+      expect(outer.contains(outer as unknown as Node)).toBe(true);
+      expect(inner.contains(outer as unknown as Node)).toBe(false);
+    });
+
+    it("document-level listeners fire for direct dispatch, and plain payloads keep their fields", () => {
+      const seen: unknown[] = [];
+      const listener = (e: unknown) => seen.push(e);
+      document.addEventListener("ctrl-shift-l-test", listener);
+      const prevented = document.dispatchEvent({ type: "ctrl-shift-l-test", ctrlKey: true, shiftKey: true } as unknown as Event);
+      document.removeEventListener("ctrl-shift-l-test", listener);
+      expect(seen).toHaveLength(1);
+      expect((seen[0] as { ctrlKey?: boolean }).ctrlKey).toBe(true);
+      expect(prevented).toBe(true);
+    });
+  });
+
   it("FakeWebSocket records sends and fires handlers", () => {
     const ws = new FakeWebSocket("ws://example/ws");
     let opened = false;

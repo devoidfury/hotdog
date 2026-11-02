@@ -43,6 +43,15 @@ class DNode {
     this.listeners.get(type)?.delete(listener);
   }
 
+  // Document-level dispatch (app.tsx registers document listeners): run the
+  // listeners here; there is no tree walk above a document node. Plain event
+  // objects pass through untouched (tests carry ctrlKey &co on them).
+  dispatchEvent(ev: unknown): boolean {
+    const event = ev as { type?: string; defaultPrevented?: boolean };
+    for (const l of [...(this.listeners.get(String(event.type ?? "")) ?? [])]) l(ev);
+    return !event.defaultPrevented;
+  }
+
   get nextSibling(): DNode | null {
     if (!this.parentNode) return null;
     const i = this.parentNode.childNodes.indexOf(this);
@@ -79,6 +88,26 @@ class DNode {
 
   remove(): void {
     this.parentNode?.removeChild(this);
+  }
+
+  contains(node: DNode | null): boolean {
+    for (let n: DNode | null = node; n; n = n.parentNode) {
+      if (n === this) return true;
+    }
+    return false;
+  }
+
+  // Form-associated elements expose their containing form (composer Enter
+  // submits via el.form?.requestSubmit()).
+  get form(): DElement | null {
+    for (let n: DNode | null = this.parentNode; n; n = n.parentNode) {
+      if (n instanceof DElement && n.localName === "form") return n;
+    }
+    return null;
+  }
+
+  requestSubmit(): void {
+    this.dispatchEvent(new DEvent("submit", this));
   }
 
   get textContent(): string {
@@ -219,6 +248,31 @@ class DElement extends DNode {
   scrollHeight = 0;
   clientHeight = 0;
 
+  // Form-field value + caret: real elements always carry these; the app's
+  // composer reads/writes them through the ref handles.
+  value = "";
+  selectionStart: number | null = 0;
+  selectionEnd: number | null = 0;
+  setSelectionRange(start: number, end: number): void {
+    this.selectionStart = start;
+    this.selectionEnd = end;
+  }
+
+  // Minimal CSSStyleDeclaration surface (setProperty/getProperty): app.tsx
+  // drives --sidebar-width here and textarea autoResize writes height.
+  style = {
+    _props: new Map<string, string>(),
+    setProperty(name: string, value: string) {
+      this._props.set(name, String(value));
+    },
+    getPropertyValue(name: string) {
+      return this._props.get(name) ?? "";
+    },
+    removeProperty(name: string) {
+      this._props.delete(name);
+    },
+  };
+
   constructor(tag: string, doc: DDocument) {
     super(doc);
     this.tagName = tag.toUpperCase();
@@ -283,8 +337,19 @@ class DElement extends DNode {
     if (lower === "class") this.classList = new DClassList(this);
   }
 
-  dispatchEvent(ev: unknown): boolean {
-    const event = ev instanceof DEvent ? ev : new DEvent(String((ev as { type?: string })?.type ?? ""));
+  override dispatchEvent(ev: unknown): boolean {
+    let event: DEvent;
+    if (ev instanceof DEvent) {
+      event = ev;
+    } else {
+      // Native Event (target readonly) and plain test payloads get adopted
+      // into a DEvent: type/bubbles are preserved (a plain object defaults to
+      // bubbling) and custom fields (key, ctrlKey, currentTarget, ...) ride
+      // along via assign.
+      const src = ev as { type?: string; bubbles?: boolean };
+      event = new DEvent(String(src.type ?? ""), null, src.bubbles ?? true);
+      Object.assign(event, ev);
+    }
     if (!event.target) event.target = this;
     // Capture-less bubbling walk up the parent chain.
     let node: DNode | null = this;
@@ -335,6 +400,10 @@ class DElement extends DNode {
   click(): void {
     this.dispatchEvent(new DEvent("click", this));
   }
+
+  // The frontend focuses inputs (login screen, composer caret); nothing here
+  // has focus semantics, so this exists only so focus() calls are inert.
+  focus(): void {}
 }
 
 function kebab(s: string): string {

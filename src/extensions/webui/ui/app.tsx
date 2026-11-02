@@ -1105,6 +1105,7 @@ async function init(): Promise<void> {
     completionAtom,
     attachmentsAtom,
     openTasksAtom,
+    stripExpandedAtom,
     nowAtom,
   ]);
 

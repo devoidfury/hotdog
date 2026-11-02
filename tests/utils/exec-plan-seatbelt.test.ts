@@ -8,12 +8,13 @@
 // flags or mach list must fail this test, never silently ride along.
 
 import { describe, it, expect } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { execFenceBackend, planFor } from "@utils/exec-plan.ts";
 import {
   probeSeatbelt,
+  runSeatbeltProbe,
   seatbeltBinary,
   seatbeltPlan,
   seatbeltProfile,
@@ -260,6 +261,106 @@ describe("seatbeltPlan argv (env sandwich)", () => {
       rmSync(base, { recursive: true, force: true });
     }
   });
+
+  it("scratch that cannot be realpath'd keeps HOME/TMPDIR at the requested path", () => {
+    // The planner contract says scratch exists; when it does not, the env
+    // sandwich still points at the requested dir -- and the unresolvable
+    // path never enters the profile's rw allowlist.
+    const r = seatbeltPlan({
+      roots: [],
+      cls: "rw",
+      scratch: "/nonexistent-hotdog-scratch",
+      command: "/usr/bin/bun",
+      args: [],
+      execPath: "/usr/bin/bun",
+      repoRoot: process.cwd(),
+    });
+    expect(r.prefixArgv![4]).toBe("HOME=/nonexistent-hotdog-scratch");
+    expect(r.prefixArgv![5]).toBe("TMPDIR=/nonexistent-hotdog-scratch");
+    expect(r.prefixArgv![2]).not.toContain("nonexistent-hotdog-scratch");
+  });
+});
+
+// ── Two-leg probe logic (seamed) ────────────────────────────────────────────
+// The real legs exec /usr/bin/sandbox-exec; everything else -- probe-file
+// creation, the allow/deny profile pair, the two-leg decision, cleanup -- is
+// OS-independent and pinned here with the tests-only seam. Only the default
+// leg runner's spawn line lives on macOS.
+
+describe("runSeatbeltProbe two-leg logic", () => {
+  const STUB_BIN = "/usr/bin/sandbox-exec";
+  const TOKEN = "hotdog-seatbelt-probe-ok"; // restated on purpose (golden doctrine)
+
+  it("pass: allow leg reads the real probe file back, deny leg is blocked", () => {
+    const seen: string[][] = [];
+    const r = runSeatbeltProbe({
+      bin: STUB_BIN,
+      leg: (argv) => {
+        seen.push(argv);
+        // Non-vacuity: read the REAL probe file the module just wrote.
+        const file = argv[argv.length - 1]!;
+        const text = readFileSync(file, "utf-8");
+        const isDeny = argv[2]!.includes("(deny file-read-data");
+        return isDeny ? { exitCode: 1, stdoutText: "" } : { exitCode: 0, stdoutText: text };
+      },
+    });
+    expect(r).toBe(STUB_BIN);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]![0]).toBe(STUB_BIN);
+    expect(seen[0]![1]).toBe("-p");
+    // Positive leg: mediation baseline + exec granted up front + file literal.
+    expect(seen[0]![2]).toContain("(deny default)");
+    expect(seen[0]![2]).toContain("(allow process-exec*");
+    // Negative leg: the SAME profile plus an explicit deny of the same literal.
+    const probeFile = seen[0]![seen[0]!.length - 1]!;
+    expect(seen[1]![2]).toBe(`${seen[0]![2]}\n(deny file-read-data (literal "${probeFile}"))`);
+    expect(seen[0]!.slice(3)).toEqual(["/bin/cat", probeFile]);
+    expect(seen[1]!.slice(3)).toEqual(["/bin/cat", probeFile]);
+    // Cleanup: the temp dir is gone either way.
+    expect(existsSync(dirname(probeFile))).toBe(false);
+  });
+
+  it("fail: positive leg non-zero is a broken spawn, not mediation", () => {
+    expect(runSeatbeltProbe({ bin: STUB_BIN, leg: () => ({ exitCode: 127, stdoutText: "" }) })).toBeNull();
+  });
+
+  it("fail: positive leg zero without the token is not a pass", () => {
+    expect(
+      runSeatbeltProbe({ bin: STUB_BIN, leg: () => ({ exitCode: 0, stdoutText: "something else" }) }),
+    ).toBeNull();
+  });
+
+  it("fail: deny leg succeeding means an INERT, unmediated shim", () => {
+    // THE security pin: a shim that blocks nothing is exactly a missing
+    // fence -- the pairing is what keeps the posture honest.
+    expect(
+      runSeatbeltProbe({ bin: STUB_BIN, leg: () => ({ exitCode: 0, stdoutText: TOKEN }) }),
+    ).toBeNull();
+  });
+
+  it("fail: a leg that throws (shim vanished mid-probe) degrades to null", () => {
+    expect(
+      runSeatbeltProbe({
+        bin: STUB_BIN,
+        leg: () => {
+          throw new Error("spawn ENOENT");
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("seam bin=null stops at the bin check (no probe file, no legs)", () => {
+    let legs = 0;
+    const r = runSeatbeltProbe({
+      bin: null,
+      leg: () => {
+        legs++;
+        return { exitCode: 0, stdoutText: TOKEN };
+      },
+    });
+    expect(r).toBeNull();
+    expect(legs).toBe(0);
+  });
 });
 
 describe.skipIf(process.platform === "darwin")("on linux (never seatbelt, never spawns)", () => {
@@ -273,6 +374,9 @@ describe.skipIf(process.platform === "darwin")("on linux (never seatbelt, never 
     };
     try {
       expect(probeSeatbelt(true)).toBeNull();
+      // Second, unforced call rides the cached null: recompute never happens
+      // on linux, and the zero-spawn assertion still holds across both.
+      expect(probeSeatbelt()).toBeNull();
       expect(seatbeltBinary()).toBeNull(); // /usr/bin/sandbox-exec is not a linux binary
       expect(calls).toBe(0);
     } finally {

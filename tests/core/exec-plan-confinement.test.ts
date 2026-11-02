@@ -24,6 +24,9 @@
 // scratch over /tmp, so a host-/tmp workspace root would be shadowed inside
 // the jail and the negatives would pass for the wrong reason. Home also keeps
 // the per-test fake $HOME outside every rw root, which is what case (a) needs.
+// Containers exporting HOME=/tmp defeat that rule at the source (os.homedir()
+// trusts $HOME); FENCE_HOME below walks to /var/tmp instead, and skips the
+// file loudly when no fence-safe candidate exists.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fs from "node:fs";
@@ -38,15 +41,45 @@ import { processAlive, waitForExit } from "../helpers.ts";
 // bun test's sequential load runs it before this file on a size-sorted pass.
 // A forced re-probe reads the REAL host state and re-seeds the cache planFor()
 // reads, so gate and plan still agree (the invariant the stale cache breaks).
-const HAS_FENCE = bwrapAvailable(true);
-if (!HAS_FENCE) {
-  // tests/setup.ts no-ops the console; the loud channel is the reporter's
-  // (skip) lines, which carry the describe name below. This warn still lands
-  // in any context that runs the module without the suppression preload.
+const PROBE_OK = bwrapAvailable(true);
+
+/**
+ * Tree home, fence-safe: the plan binds scratch over /tmp AFTER the rw roots,
+ * so a tree under host /tmp is shadowed in-jail (the header's trap).
+ * os.homedir() trusts $HOME, and some containers run with HOME=/tmp; walk the
+ * candidates and keep the first outside /tmp that accepts a mkdir. Null = no
+ * usable placement; the file skips through the same gate as a failed probe
+ * (running it here could only produce false failures, never pinned posture).
+ */
+const FENCE_HOME = (() => {
+  if (!PROBE_OK) return null;
+  for (const cand of [os.homedir(), "/var/tmp"]) {
+    if (cand === "/tmp" || cand.startsWith("/tmp/")) continue;
+    try {
+      const d = fs.mkdtempSync(join(cand, ".hotdog-fence-probe-"));
+      fs.rmSync(d, { recursive: true, force: true });
+      return cand;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return null;
+})();
+const HAS_FENCE = PROBE_OK && FENCE_HOME !== null;
+// tests/setup.ts no-ops the console; the loud channel is the reporter's
+// (skip) lines, which carry the describe name below. These warns still land
+// in any context that runs the module without the suppression preload.
+if (!PROBE_OK) {
   console.warn(
     "[exec-plan-confinement] bwrap fence probe FAILED on this host -- SKIPPING every confinement test. " +
       "The exec plane degrades to plain spawns here (see exec-plan.ts probe contract); " +
       "run this file on a host with working bwrap + pid namespaces to pin the posture.",
+  );
+} else if (!FENCE_HOME) {
+  console.warn(
+    "[exec-plan-confinement] no fence-safe tree home (probe OK, but $HOME is under /tmp " +
+      "and no candidate dir accepts a mkdir) -- SKIPPING: the plan's scratch bind shadows " +
+      "any root under host /tmp, so nothing could be pinned honestly here.",
   );
 }
 
@@ -64,7 +97,7 @@ let scratchSeq = 0;
 const strays = new Set<number>(); // pids we must not leave behind
 
 beforeAll(() => {
-  base = fs.mkdtempSync(join(os.homedir(), ".hotdog-fence-"));
+  base = fs.mkdtempSync(join(FENCE_HOME!, ".hotdog-fence-"));
   wsA = join(base, "ws-a");
   wsB = join(base, "ws-b");
   fakeHome = join(base, "home");

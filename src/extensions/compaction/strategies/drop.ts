@@ -2,6 +2,10 @@ import { findFirstKeptIndex, estimateContextTokens, estimatorFor, type WireRende
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
 
 export class DropStrategy extends CompactionStrategy {
+  // Bun attributes only a declared constructor to callers (synthesized ones
+  // count as a never-covered function); this is otherwise a no-op.
+  constructor() { super(); }
+
   override name = "drop";
   override description =
     "Keep the last N messages and remove older messages without summarizing. Fastest option, no LLM cost, but loses all context from compacted messages.";

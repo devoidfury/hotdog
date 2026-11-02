@@ -13,6 +13,7 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import {
   Sidebar,
+  ContextMenu,
   formatDateTime,
   type SessionInfo,
   type LogInfo,
@@ -234,5 +235,133 @@ describe("formatDateTime", () => {
   it("pads to YYYY-MM-DD HH:MM in local time", () => {
     expect(formatDateTime(new Date(2026, 0, 5, 9, 7).getTime())).toBe("2026-01-05 09:07");
     expect(formatDateTime(STAMP)).toBe("2026-10-31 22:30");
+  });
+});
+
+// ── Row interactions (handler wiring) ───────────────────────────────────────
+// The grammar above is only as good as its routing: each slot must reach
+// exactly the handler that owns it, and inner actions (Cancel/Continue) must
+// not leak through to the row's select -- stopPropagation is the pin here.
+
+function mountInteractive(
+  container: Element,
+  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean> },
+  calls: string[],
+): Mounted {
+  return mount(
+    <Sidebar
+      sessions={opts.sessions ?? []}
+      activeSessionId={null}
+      workingMap={opts.working ?? new Map()}
+      logs={opts.logs ?? []}
+      activeLogId={null}
+      sidebarWidth={300}
+      sidebarMax={520}
+      onCreate={() => calls.push("create")}
+      onSwitch={(id) => calls.push(`switch:${id}`)}
+      onCancel={(id) => calls.push(`cancel:${id}`)}
+      onContinueLog={(id) => calls.push(`continue:${id}`)}
+      onViewLog={(id) => calls.push(`view:${id}`)}
+      onSessionMenu={(_e, s) => calls.push(`sessionMenu:${s.id}`)}
+      onLogMenu={(_e, id) => calls.push(`logMenu:${id}`)}
+      onResizeStart={noop}
+      onResizeMove={noop}
+      onResizeEnd={noop}
+      onResizeKey={noop}
+      onResizeReset={noop}
+    />,
+    container as unknown as DomNode,
+  );
+}
+
+function renderInteractive(
+  opts: Parameters<typeof mountInteractive>[1],
+  calls: string[],
+): Element {
+  const host = document.createElement("div");
+  app = mountInteractive(host, opts, calls);
+  return host;
+}
+
+// The dom-helper implements click() on every element; lib-dom types carry it
+// only on HTMLElement (same cast as logview.test.tsx).
+const clickable = (root: Element, sel: string): HTMLElement =>
+  root.querySelector(sel) as unknown as HTMLElement;
+
+describe("row interactions", () => {
+  it("clicking a session row switches to it; the header + creates", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ sessions: [liveSession()] }, calls);
+    clickable(root, ".session-item").click();
+    expect(calls).toEqual([`switch:${FULL_ID}`]);
+    clickable(root, "#new-session-btn").click();
+    expect(calls).toEqual([`switch:${FULL_ID}`, "create"]);
+  });
+
+  it("Cancel on a working row cancels it without also switching", () => {
+    const calls: string[] = [];
+    const root = renderInteractive(
+      { sessions: [liveSession()], working: new Map([[FULL_ID, true]]) },
+      calls,
+    );
+    clickable(root, ".session-cancel-btn").click();
+    // Exactly one call: the button's stopPropagation keeps the row select off.
+    expect(calls).toEqual([`cancel:${FULL_ID}`]);
+  });
+
+  it("right-clicking a session row opens its menu and suppresses the native one", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ sessions: [liveSession()] }, calls);
+    // dispatchEvent returns !defaultPrevented: false proves SidebarRow's
+    // wrapper called preventDefault before handing the event to the app.
+    const prevented = clickable(root, ".session-item").dispatchEvent(new Event("contextmenu"));
+    expect(calls).toEqual([`sessionMenu:${FULL_ID}`]);
+    expect(prevented).toBe(false);
+  });
+
+  it("Continue on a log row resumes it without opening the log", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ logs: [coldLog()] }, calls);
+    clickable(root, ".log-continue-btn").click();
+    expect(calls).toEqual([`continue:${FULL_ID}`]);
+  });
+
+  it("clicking a log row body opens it; right-click opens the log menu", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ logs: [coldLog()] }, calls);
+    const row = clickable(root, ".log-item");
+    row.click();
+    row.dispatchEvent(new Event("contextmenu"));
+    expect(calls).toEqual([`view:${FULL_ID}`, `logMenu:${FULL_ID}`]);
+  });
+});
+
+// ── ContextMenu ─────────────────────────────────────────────────────────────
+
+describe("ContextMenu", () => {
+  it("renders each item once, marks the danger entry, routes clicks per item", () => {
+    const calls: string[] = [];
+    const host = document.createElement("div");
+    app = mount(
+      <ContextMenu
+        menu={{
+          x: 12,
+          y: 34,
+          items: [
+            { label: "Open", onSelect: () => calls.push("open") },
+            { label: "Delete", danger: true, onSelect: () => calls.push("delete") },
+          ],
+        }}
+        rootRef={() => {}}
+      />,
+      host as unknown as DomNode,
+    );
+    const items = Array.from(host.querySelectorAll(".context-menu-item")) as unknown as HTMLElement[];
+    expect(items.map((n) => n.textContent)).toEqual(["Open", "Delete"]);
+    expect(items[1]!.getAttribute("class")).toContain("context-menu-item-danger");
+    expect(items[0]!.getAttribute("class")).not.toContain("danger");
+    items[0]!.click();
+    items[1]!.click();
+    expect(calls).toEqual(["open", "delete"]);
   });
 });

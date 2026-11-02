@@ -90,11 +90,18 @@ let cachedSeatbelt: string | null | undefined;
  */
 export function probeSeatbelt(force = false): string | null {
   // Platform guard FIRST: a linux host must not spawn sandbox-exec even to
-  // ask. On darwin the cached probe is the only gate planFor() consults.
-  if (process.platform !== "darwin") return null;
+  // ask -- the ternary keeps the guard ahead of runSeatbeltProbe() while the
+  // cache lines stay host-independent. On darwin the cached probe is the
+  // only gate planFor() consults.
   if (cachedSeatbelt !== undefined && !force) return cachedSeatbelt;
-  cachedSeatbelt = runSeatbeltProbe();
+  cachedSeatbelt = process.platform === "darwin" ? runSeatbeltProbe() : null;
   return cachedSeatbelt;
+}
+
+/** One probe leg's outcome: exit code (null = killed) + captured stdout. */
+interface SeatbeltLegResult {
+  exitCode: number | null;
+  stdoutText: string;
 }
 
 /**
@@ -109,9 +116,18 @@ export function probeSeatbelt(force = false): string | null {
  * spawn produces. Only the pair proves the profile's denies actually bite.
  * Any mismatch is probe-fail: the plane runs pooled-but-unfenced and
  * REPORTS it (same semantics as probeBwrap).
+ *
+ * `seam` is a tests-only seam (house precedent: killGraceMs), not config:
+ * the fake `leg` drives the two-leg decision logic on any host and `bin`
+ * substitutes the shim path where /usr/bin/sandbox-exec is absent. Only
+ * the default runner's spawn line truly needs the macOS shim; probeSeatbelt
+ * never passes a seam.
  */
-function runSeatbeltProbe(): string | null {
-  const bin = seatbeltBinary();
+export function runSeatbeltProbe(seam?: {
+  bin?: string | null;
+  leg?: (argv: string[]) => SeatbeltLegResult;
+}): string | null {
+  const bin = seam?.bin !== undefined ? seam.bin : seatbeltBinary();
   if (!bin) return null;
   const base = [
     "(version 1)",
@@ -132,12 +148,16 @@ function runSeatbeltProbe(): string | null {
     // failed leg. The posture line is the reporting surface.
     return null;
   }
+  const run = seam?.leg ?? ((argv: string[]): SeatbeltLegResult => {
+    const p = Bun.spawnSync(argv);
+    return { exitCode: p.exitCode, stdoutText: p.stdout.toString() };
+  });
   try {
     const allow = `${base}\n(allow file-read-data (literal ${seatbeltPath(probeFile)}))`;
-    const pos = Bun.spawnSync([bin, "-p", allow, "/bin/cat", probeFile]);
-    if (pos.exitCode !== 0 || !pos.stdout.toString().includes(PROBE_TOKEN)) return null;
+    const pos = run([bin, "-p", allow, "/bin/cat", probeFile]);
+    if (pos.exitCode !== 0 || !pos.stdoutText.includes(PROBE_TOKEN)) return null;
     const deny = `${allow}\n(deny file-read-data (literal ${seatbeltPath(probeFile)}))`;
-    const neg = Bun.spawnSync([bin, "-p", deny, "/bin/cat", probeFile]);
+    const neg = run([bin, "-p", deny, "/bin/cat", probeFile]);
     if (neg.exitCode === 0) return null;
     return bin;
   } catch {

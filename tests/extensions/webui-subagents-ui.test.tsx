@@ -50,6 +50,22 @@ describe("createCoalescer", () => {
       else g.requestAnimationFrame = saved;
     }
   });
+
+  it("falls back to a frame-rate timer when requestAnimationFrame is absent", async () => {
+    // The guard path: no rAF anywhere (the bun host state) must schedule a
+    // timer flush, never throw. Covers the class of order-dependent
+    // ReferenceErrors a default-scheduled flush causes outside a browser.
+    expect(
+      typeof (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame,
+    ).toBe("undefined");
+    let flushed = 0;
+    const invalidate = createCoalescer(() => flushed++);
+    invalidate();
+    invalidate();
+    expect(flushed).toBe(0); // coalesced onto the timer, not sync
+    await new Promise((r) => setTimeout(r, 60));
+    expect(flushed).toBe(1); // one flush per scheduled tick, timer or rAF
+  });
 });
 
 // ── Harness: real chat feed through a fake socket ───────────────────────────

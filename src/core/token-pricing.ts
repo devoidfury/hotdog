@@ -73,3 +73,8 @@ export function computeTokenCost(usage: CostableUsage, price: ModelPrice): CostB
   const output = (usage.completionTokens / PER_MILLION) * price.output;
   return { input, cached, output, total: input + cached + output };
 }
+
+/** "$1.23" for real amounts; 4 decimals below a cent, so a cheap local run reads $0.0021 rather than $0.00. */
+export function formatUsd(value: number): string {
+  return `$${Math.abs(value) >= 0.01 ? value.toFixed(2) : value.toFixed(4)}`;
+}

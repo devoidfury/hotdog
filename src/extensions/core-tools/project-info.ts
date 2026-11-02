@@ -2,10 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, parseToolInput } from "@core/extensions/tool-utils.ts";
+import { toolDef, param, ToolResult, parseToolInput, resolveToolPath } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
-import { PathEscapeError } from "@utils/workspace.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { compileGitignore } from "@utils/gitignore.ts";
 import { ToolContext } from "@core/extensions/types.ts";
@@ -83,15 +82,9 @@ export class ProjectInfoTool {
 
     const workspace = ctx.get("workspace") as Workspace;
 
-    let workdir: string;
-    try {
-      workdir = workspace.resolveSafe(cwd);
-    } catch (e: unknown) {
-      if (e instanceof PathEscapeError) {
-        return ToolResult.err(e.message);
-      }
-      return ToolResult.err(`Error: invalid path ${cwd}`);
-    }
+    const target = resolveToolPath(cwd, workspace, `Error: invalid path ${cwd}`);
+    if (!target.ok) return target.err;
+    const workdir = target.path;
 
     let dirExists: boolean;
     try {

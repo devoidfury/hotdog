@@ -167,12 +167,7 @@ export class TaskManager {
     return this.#scheduler.providerHealth;
   }
 
-  /**
-   * Re-run the admission pass (health recovery callback, tests). Clears
-   * lane-blocked flags too: a provider coming back invalidates every "whole
-   * candidate set fleet-wide busy" verdict, exactly like a lanes-retry tick --
-   * still-full lanes just re-block themselves on the next pass.
-   */
+  /** Re-run the admission pass (health recovery callback, tests). Semantics in TaskScheduler.retryQueued. */
   retryQueued(): void {
     this.#scheduler.retryQueued();
   }

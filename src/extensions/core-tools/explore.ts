@@ -6,11 +6,12 @@ import {
   toolDef,
   param,
   ToolResult,
+  resolveToolPath,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { logger } from "@utils/logger.ts";
 import { ToolContext } from "@core/extensions/types.ts";
-import { PathEscapeError, Workspace } from "@utils/workspace.ts";
+import { Workspace } from "@utils/workspace.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "hotdog");
@@ -62,21 +63,14 @@ export class ExploreTool {
     // boundary or an LLM-supplied path could relocate the whole sub-agent.
     const workspace = ctx.get("workspace") as Workspace;
 
-    let targetDir: string;
-    try {
-      targetDir = workspace.resolveSafe(args.path);
-    } catch (e: unknown) {
-      if (e instanceof PathEscapeError) {
-        return ToolResult.err(e.message).withEntries({
-          path: args.path,
-          outline: args.outline,
-        });
-      }
-      return ToolResult.err(`Error resolving path: ${(e as Error).message}`).withEntries({
+    const target = resolveToolPath(args.path, workspace);
+    if (!target.ok) {
+      return target.err.withEntries({
         path: args.path,
         outline: args.outline,
       });
     }
+    const targetDir = target.path;
 
     // Fail fast on bad targets instead of letting the sub-agent boot and die.
     let targetStat;

@@ -4,8 +4,7 @@ import { cwd } from "node:process";
 import { YAML } from "bun";
 import { logger } from "./logger.ts";
 import { formatError } from "@core/error.ts";
-import { ToolResult, parseToolInput } from "@core/extensions/tool-utils.ts";
-import { PathEscapeError } from "./workspace.ts";
+import { ToolResult, parseToolInput, resolveToolPath } from "@core/extensions/tool-utils.ts";
 import type { Workspace } from "./workspace.ts";
 import type { ToolContext } from "@core/extensions/types.ts";
 
@@ -125,15 +124,9 @@ export async function writeWithinWorkspace(
   const content = rawArgs.content as string;
   const workspace = ctx.get("workspace") as Workspace;
 
-  let resolvedPath: string;
-  try {
-    resolvedPath = workspace.resolveSafe(filePath);
-  } catch (e: unknown) {
-    if (e instanceof PathEscapeError) {
-      return ToolResult.err(e.message);
-    }
-    return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
-  }
+  const target = resolveToolPath(filePath, workspace);
+  if (!target.ok) return target.err;
+  const resolvedPath = target.path;
 
   const dir = dirname(resolvedPath);
   const mkdirError = await safeMkdir(dir);

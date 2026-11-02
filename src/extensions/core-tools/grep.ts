@@ -9,10 +9,10 @@ import {
   ToolResult,
   truncateOutput,
   parseToolInput,
+  resolveToolPath,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
-import { PathEscapeError } from "@utils/workspace.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { ToolContext } from "@core/extensions/types.ts";
 
@@ -441,14 +441,9 @@ export class GrepTool {
 
     const workspace = ctx.get("workspace") as Workspace | null || null;
     if (workspace) {
-      try {
-        searchDir = workspace.resolveSafe(searchDir);
-      } catch (e: unknown) {
-        if (e instanceof PathEscapeError) {
-          return ToolResult.err(e.message);
-        }
-        return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
-      }
+      const target = resolveToolPath(searchDir, workspace);
+      if (!target.ok) return target.err;
+      searchDir = target.path;
     }
 
     try {

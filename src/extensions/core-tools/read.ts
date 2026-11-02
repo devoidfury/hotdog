@@ -7,10 +7,10 @@ import {
   param,
   ToolResult,
   parseToolInput,
+  resolveToolPath,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
-import { PathEscapeError } from "@utils/workspace.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { AssistantRetryableError } from "@core/error.ts";
 import { ToolContext } from "@core/extensions/types.ts";
@@ -96,15 +96,9 @@ export class ReadTool {
 
     const workspace = ctx.get("workspace") as Workspace;
 
-    let resolved: string;
-    try {
-      resolved = workspace.resolveSafe(filePath);
-    } catch (e: unknown) {
-      if (e instanceof PathEscapeError) {
-        return ToolResult.err(e.message);
-      }
-      return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
-    }
+    const target = resolveToolPath(filePath, workspace);
+    if (!target.ok) return target.err;
+    const resolved = target.path;
 
     let stat: Stats | null = null;
     try {

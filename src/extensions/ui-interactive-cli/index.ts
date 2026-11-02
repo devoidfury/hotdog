@@ -22,6 +22,7 @@ import { OUTPUT_EVENT } from "@core/context/output.ts";
 import {
   computeTokenCost,
   findModelPrice,
+  formatUsd,
   isPricingConfigured,
   type CostableUsage,
 } from "@core/token-pricing.ts";
@@ -1049,8 +1050,7 @@ export async function runInteractiveSession(
       const price = findModelPrice(pricing, pricedModel);
       if (!price) return null;
       const total = computeTokenCost(usage, price).total;
-      // Same reading class as /tokens: 4 decimals below a cent.
-      return `$${Math.abs(total) >= 0.01 ? total.toFixed(2) : total.toFixed(4)}`;
+      return formatUsd(total);
     };
     sessionManager.onSessionEvents(sessionManager.sessionId()!, (ev) => {
       switch (ev.type) {

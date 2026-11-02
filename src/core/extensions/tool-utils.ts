@@ -1,4 +1,5 @@
 import { ToolError } from "../error.ts";
+import { PathEscapeError, type Workspace } from "@utils/workspace.ts";
 import { ArgDisplay, ToolDef, ToolMetadata } from "./tool-registry.ts";
 import type { ToolResultPart } from "../context/wrappers.ts";
 
@@ -256,6 +257,31 @@ export function parseToolInput(
   }
 
   return json as Record<string, unknown>;
+}
+
+/**
+ * Resolve a tool-supplied path through the workspace boundary, shaping the two
+ * failure modes into ToolResults: an escape attempt returns the boundary's own
+ * message; any other resolution failure returns `fallbackMessage` (default
+ * "Error resolving path: <cause>"). The single home of the try/catch every
+ * path-taking tool used to copy verbatim.
+ */
+export function resolveToolPath(
+  filePath: string,
+  workspace: Workspace,
+  fallbackMessage?: string,
+): { ok: true; path: string } | { ok: false; err: ToolResult } {
+  try {
+    return { ok: true, path: workspace.resolveSafe(filePath) };
+  } catch (e: unknown) {
+    if (e instanceof PathEscapeError) {
+      return { ok: false, err: ToolResult.err(e.message) };
+    }
+    return {
+      ok: false,
+      err: ToolResult.err(fallbackMessage ?? `Error resolving path: ${(e as Error).message}`),
+    };
+  }
 }
 
 

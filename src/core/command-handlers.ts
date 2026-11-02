@@ -3,7 +3,7 @@
 import { Command, ACTIONS } from "./commands.ts";
 import { trimTurns } from "./context/rewind.ts";
 import { formatError } from "./error.ts";
-import { computeTokenCost, findModelPrice, isPricingConfigured } from "./token-pricing.ts";
+import { computeTokenCost, findModelPrice, formatUsd, isPricingConfigured } from "./token-pricing.ts";
 import { contextGaugeSegment } from "./context-gauge.ts";
 import type {
   CommandDefinition,
@@ -58,11 +58,6 @@ export function handleHelp(): CommandResult {
  */
 export function handleRedraw(): CommandResult {
   return { action: ACTIONS.DISPLAY, content: "Redraw (handled by the interactive renderer)" };
-}
-
-/** "$1.23" for real amounts; 4 decimals below a cent, so a cheap local run reads $0.0021 rather than $0.00. */
-function formatUsd(value: number): string {
-  return `$${Math.abs(value) >= 0.01 ? value.toFixed(2) : value.toFixed(4)}`;
 }
 
 export function handleTokens(agent: Agent): CommandResult {

@@ -97,6 +97,11 @@ export function estimatorFor(wire?: WireRenderContext | null): ToolResultEstimat
   return fmt ? (part) => fmt.renderToolResult(part) : undefined;
 }
 
+/** Mangle text headed for the wire; identity when no mangler is configured. */
+function wireEscape(s: string, wire?: WireRenderContext | null): string {
+  return wire?.mangler ? (wire.mangler.escape(s) ?? s) : s;
+}
+
 /**
  * Flatten message content for the dump. With a wire context: every
  * non-harness field is mangled and wrapper parts render through
@@ -109,8 +114,7 @@ function dumpContent(
 ): string {
   if (content == null) return "";
   if (!wire) return contentToText(content);
-  const esc = (s: string): string => (wire.mangler ? (wire.mangler.escape(s) ?? s) : s);
-  if (typeof content === "string") return esc(content);
+  if (typeof content === "string") return wireEscape(content, wire);
   const rendered: string[] = [];
   for (const part of content) {
     if (isWrapperPart(part)) {
@@ -118,7 +122,7 @@ function dumpContent(
     } else if (part && typeof part === "object") {
       const p = part as Record<string, unknown>;
       if ((p.type === "text" || p.type === "untrusted") && typeof p.text === "string") {
-        rendered.push(esc(p.text));
+        rendered.push(wireEscape(p.text, wire));
       }
     }
   }
@@ -138,8 +142,6 @@ export function serializeConversation(
   // dumpContent); without one, contentToText() flattens part arrays at rest.
   const getContentStr = (content: string | Array<unknown> | undefined): string =>
     dumpContent(content, wire);
-  const esc = (s: string): string =>
-    wire?.mangler ? (wire.mangler.escape(s) ?? s) : s;
 
   for (const msg of messages) {
     switch (msg.role) {
@@ -149,7 +151,7 @@ export function serializeConversation(
       case "assistant": {
         const reasoning = msg.reasoningContent ?? msg.reasoning_content;
         if (reasoning) {
-          parts.push(`[Assistant thinking]: ${esc(reasoning)}`);
+          parts.push(`[Assistant thinking]: ${wireEscape(reasoning, wire)}`);
         }
         const content = getContentStr(msg.content);
         if (content) {
@@ -160,7 +162,7 @@ export function serializeConversation(
           const calls = toolCalls
             .map(
               (tc) =>
-                `${esc((tc as { function?: { name?: string } }).function?.name ?? "")}(${esc((tc as { function?: { name?: string; arguments?: string } }).function?.arguments || "")})`,
+                `${wireEscape((tc as { function?: { name?: string } }).function?.name ?? "", wire)}(${wireEscape((tc as { function?: { name?: string; arguments?: string } }).function?.arguments || "", wire)})`,
             )
             .join("; ");
           parts.push(`[Assistant tool calls]: ${calls}`);

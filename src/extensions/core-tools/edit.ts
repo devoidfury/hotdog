@@ -4,9 +4,9 @@ import {
   param,
   ToolResult,
   parseToolInput,
+  resolveToolPath,
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
-import { PathEscapeError } from "@utils/workspace.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { AssistantRetryableError } from "@core/error.ts";
 import { ToolContext } from "@core/extensions/types.ts";
@@ -74,15 +74,9 @@ export class EditTool {
     const { path: filePath, oldString, newString, replace_all: replaceAll = false } = op;
     const workspace = ctx.get("workspace") as Workspace;
 
-    let resolvedPath: string;
-    try {
-      resolvedPath = workspace.resolveSafe(filePath);
-    } catch (e: unknown) {
-      if (e instanceof PathEscapeError) {
-        return ToolResult.err(e.message);
-      }
-      return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
-    }
+    const target = resolveToolPath(filePath, workspace);
+    if (!target.ok) return target.err;
+    const resolvedPath = target.path;
 
     const inputSize = oldString.length + newString.length;
     if (inputSize > this.maxEditInputSize) {

@@ -527,8 +527,20 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // the conversation under-counts and the provider overflows before
         // compaction fires. Strategies still see -- and evict -- only the
         // non-system messages.
+        // The last call's provider-reported prompt size (net + cached) rides in
+        // as the second opinion: the local chars/4 estimate loses the race
+        // against the tokenizer on code-heavy sessions, and the window dies at
+        // finish_reason=length before the estimate ever crosses the gate.
+        const usage = agent.context.getTokenUsage?.();
+        const actualPromptTokens = usage ? (usage.promptTokens ?? 0) + (usage.cachedTokens ?? 0) : 0;
         if (
-          !shouldCompact(messages, modelConfig.contextLimit, settings.reserveTokens, wireFor(agent, modelConfig))
+          !shouldCompact(
+            messages,
+            modelConfig.contextLimit,
+            settings.reserveTokens,
+            wireFor(agent, modelConfig),
+            actualPromptTokens,
+          )
         )
           return;
 

@@ -165,6 +165,18 @@ describe("shouldCompact", () => {
     // 2 > -16384 => true
     expect(shouldCompact(messages, 0)).toBe(true);
   });
+
+  it("fires on provider-reported usage even when the local estimate fits", () => {
+    const messages = [{ role: "user", content: "Hello" }];
+    // 2 estimated tokens vs a provider that measured 261814 of a 262144 window
+    // (reserve 8000 -> budget 254144): the estimate says fit, reality says not.
+    expect(shouldCompact(messages, 262144, 8000, null, 261814)).toBe(true);
+  });
+
+  it("ignores provider usage under the budget", () => {
+    const messages = [{ role: "user", content: "Hello" }];
+    expect(shouldCompact(messages, 262144, 8000, null, 1000)).toBe(false);
+  });
 });
 
 // ── Serialization ───────────────────────────────────────────────────────────

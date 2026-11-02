@@ -62,8 +62,11 @@ function createMockAgent(
   };
   // Use a real MessageLog so the extension can call agent.log.getAll()
   const log = new MessageLog(contextArray);
+  // Provider-usage shim the CONTEXT trigger reads; tests overwrite it.
+  const usageShim = { promptTokens: 0, cachedTokens: 0 };
   return {
     get log() { return log; },
+    usageShim,
     // Context manager shim for compaction extension
     get context() {
       return {
@@ -72,6 +75,7 @@ function createMockAgent(
         getSystem: () => log.getSystem(),
         getNonSystem: () => log.getNonSystem(),
         getSystemPrompt: () => null,
+        getTokenUsage: () => ({ ...usageShim }),
       };
     },
     model,
@@ -190,6 +194,30 @@ describe("Hook Integration", () => {
 
     // Context should be unchanged (tokens well under budget)
     expect(agent.log.length).toBe(20);
+  });
+
+  it("triggers on provider-reported usage when the local estimate fits", async () => {
+    // The incident shape: chars/4 says the window fits, but the provider's
+    // last prompt already filled it. The usage second opinion must fire.
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+    });
+    const ext = createCompactionExtension(core);
+
+    const context = makeMessages(20, "x".repeat(50));
+    const agent = createMockAgent(context, "test-model", {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 8000 },
+    });
+    // ~500 est tokens under the 7900 budget; provider says 7950 (net + cached).
+    agent.usageShim.promptTokens = 50;
+    agent.usageShim.cachedTokens = 7900;
+
+    const messages = [{ role: "system", content: "" }, ...context];
+    await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
+
+    expect(agent.log.length).toBeLessThan(context.length);
   });
 
   it("should trigger compaction when context exceeds token budget", async () => {

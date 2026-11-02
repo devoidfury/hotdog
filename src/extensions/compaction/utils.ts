@@ -64,9 +64,17 @@ export function shouldCompact(
   contextLimit: number,
   reserveTokens: number = 16384,
   wire?: WireRenderContext | null,
+  actualPromptTokens?: number,
 ): boolean {
+  const gate = contextLimit - reserveTokens;
   const estimated = estimateContextTokens(messages, estimatorFor(wire));
-  return estimated > contextLimit - reserveTokens;
+  if (estimated > gate) return true;
+  // chars/4 UNDERcounts dense code (real tokenizers run ~3.2 chars/token there),
+  // so the estimate can sit below the gate while the provider is already at 100%.
+  // The provider's own count from the last call is ground truth for the shared
+  // prefix; treat it as a second opinion, not a replacement (a fresh turn's
+  // usage predates whatever was appended since).
+  return (actualPromptTokens ?? 0) > gate;
 }
 
 // ── Model-facing wire render ────────────────────────────────────────────────

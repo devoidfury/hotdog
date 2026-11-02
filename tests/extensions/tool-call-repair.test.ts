@@ -386,7 +386,7 @@ describe("length-stop refusal", () => {
   }
 
   for (const finishReason of ["length", "max_tokens"]) {
-    it(`refuses every call when finish_reason is ${finishReason}, without mutating the response`, () => {
+    it(`refuses every call when finish_reason is ${finishReason}; truncated args are sanitized`, () => {
       const hook = loadExtension();
       const response = lengthStoppedResponse();
       response.finishReason = finishReason;
@@ -396,10 +396,28 @@ describe("length-stop refusal", () => {
       expect(patch?.refuseToolCalls?.reason).toContain("NOT executed");
       expect(patch?.refuseToolCalls?.reason).toContain("Re-issue");
       expect(patch?.refuseToolCalls?.trailingNotice).toContain("truncated");
-      // Policy is a patch, not a mutation: core applies the refusal.
+      // The pair persists (core refuses it), so the truncated args must be
+      // replaced with "{}" -- strict gateways 400 on replaying them verbatim.
       expect(response.finalToolCalls).toHaveLength(1);
+      expect(response.finalToolCalls![0]!.function.arguments).toBe("{}");
     });
   }
+
+  it("sanitizes only the corrupt calls; valid arguments stay verbatim", () => {
+    const hook = loadExtension();
+    const response = lengthStoppedResponse();
+    response.finishReason = "length";
+    response.finalToolCalls = [
+      { id: "call_1", type: "function", function: { name: "read", arguments: '{"path": "/tmp/trun' } },
+      { id: "call_2", type: "function", function: { name: "read", arguments: '{"path":"a.ts"}' } },
+    ];
+    const patch = hook!({ response, modelConfig: {}, agent: fakeAgent() }) as {
+      refuseToolCalls?: unknown;
+    };
+    expect(patch?.refuseToolCalls).toBeDefined();
+    expect(response.finalToolCalls![0]!.function.arguments).toBe("{}");
+    expect(response.finalToolCalls![1]!.function.arguments).toBe('{"path":"a.ts"}');
+  });
 
   it("does not refuse a complete tool-call round", () => {
     const hook = loadExtension();
@@ -585,6 +603,11 @@ const PARSE_ERROR_MSG =
   '[json.exception.parse_error.101] parse error at line 1, column 130: syntax error while parsing value ' +
   '- invalid string: missing closing quote; last read: \'\\"cd /workspace; bun test 2>&1 | tail -\'"}}';
 
+// ai365-style gateway: same root cause (stored truncated args), different phrasing.
+const GATEWAY_PARSE_ERROR_MSG =
+  'HTTP 400 (body: {"error":{"message":"tool arguments are not valid JSON: ' +
+  'JSON parse error: unterminated string","type":"invalid_request_error","code":"invalid_messages"}})';
+
 const corruptCall = (id: string) => ({
   id,
   type: "function",
@@ -739,6 +762,23 @@ describe("PROVIDER_ERROR handler", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe(OUTPUT_EVENT.SYSTEM_MESSAGE);
     expect(events[0]!.content).toContain("Dropped 1 tool call");
+  });
+
+  it("recognizes the gateway phrasing (400 invalid_messages / unterminated string)", () => {
+    const hook = loadErrorHook();
+    const bad = new Message({ role: "assistant", toolCalls: [corruptCall("bad")] });
+    const { agent, replaced } = fakeHistoryAgent([bad]);
+    const payload = {
+      error: new Error(GATEWAY_PARSE_ERROR_MSG),
+      params: { messages: [bad], modelConfig: {}, toolDefs: [] },
+      agent,
+      retry: false,
+    };
+    expect(hook(payload)).toEqual({ retry: true });
+    // No orphan to prune, so no replaceContext -- but the corrupt call is
+    // dropped from the live message and the retry proceeds without it.
+    expect(replaced).toHaveLength(0);
+    expect(bad.toolCalls).toBeNull();
   });
 });
 

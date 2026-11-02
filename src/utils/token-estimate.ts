@@ -1,6 +1,8 @@
 // Token estimation — chars/4 heuristic shared by core (ContextManager) and
-// extensions (compaction). Deliberately overestimates; it only gates
-// decisions, it is never a billing number.
+// extensions (compaction). Heuristic only: it overestimates prose but
+// UNDERcounts dense code (real tokenizers hit ~3.2 chars/token there), so
+// compaction gates on it alongside the provider's reported usage, never on
+// this number alone as a safety margin.
 
 import { contentToText } from "@core/context/message.ts";
 import { isToolResultPart, type ToolResultPart } from "@core/context/wrappers.ts";

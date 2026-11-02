@@ -12,7 +12,9 @@
 // And it refuses length-truncated tool calls through core's `refuseToolCalls`
 // mechanism: a response that hit the output token limit carries arguments that are
 // unparseable or silently short, so nothing from it may execute -- core pairs every
-// refused call with the refusal reason and continues the loop.
+// refused call with the refusal reason and continues the loop. Unparseable arguments
+// are sanitized to "{}" before the refusal round persists, so strict gateways that
+// JSON-parse stored history never reject the replay.
 //
 // And it registers a TOOL_CALL gate fence that hard-blocks hallucinated file-proxy artifact URLs before any tool dials out
 // (core logic ported from wtogami/qwen-block-proxy-artifacts, credited in ./block-proxy-artifacts.ts).
@@ -67,7 +69,17 @@ const TRUNCATED_STOP_NUDGE_TEXT =
  */
 function isToolArgsParseError(error: unknown): boolean {
   const msg = (error instanceof Error ? error.message : String(error ?? "")).toLowerCase();
-  return msg.includes("failed to parse tool call arguments") || msg.includes("missing closing quote");
+  if (
+    msg.includes("failed to parse tool call arguments") ||
+    msg.includes("missing closing quote") ||
+    // ai365-style gateways: "tool arguments are not valid JSON: JSON parse error: unterminated string"
+    msg.includes("tool arguments are not valid json")
+  ) {
+    return true;
+  }
+  // Any JSON complaint about an unterminated string in a tool-args context. The
+  // retry itself stays gated on actually finding corrupt calls in our history.
+  return msg.includes("unterminated string") && msg.includes("tool");
 }
 
 /**
@@ -136,9 +148,22 @@ export function create(core: CoreContext): ExtensionInstance {
         // Length-stop refusal: before any repair logic -- a truncated response's
         // calls must never reach execution, and there is nothing to repair there.
         if (isLengthStop(response.finishReason) && response.finalToolCalls && response.finalToolCalls.length > 0) {
+          // Sanitize unparseable arguments in place BEFORE the refusal persists:
+          // strict gateways JSON-parse every stored call's arguments, and one
+          // unterminated string bricks the session with 400 invalid_messages on
+          // every replay. "{}" keeps the assistant+tool pair parseable; the
+          // refusal text already tells the model to re-issue with real arguments.
+          let sanitized = 0;
+          for (const tc of response.finalToolCalls) {
+            if (tc.function && isCorruptArgs(tc.function.arguments)) {
+              tc.function.arguments = "{}";
+              sanitized++;
+            }
+          }
           logger.info(
             `[tool-call-repair] refusing ${response.finalToolCalls.length} tool call(s) on a length-stopped ` +
-              `response (session ${agent.sessionId}); not executed`,
+              `response (session ${agent.sessionId}); not executed` +
+              (sanitized > 0 ? `; sanitized ${sanitized} truncated argument(s) to "{}"` : ""),
           );
           return {
             refuseToolCalls: { reason: TRUNCATED_STOP_TOOL_TEXT, trailingNotice: TRUNCATED_STOP_NUDGE_TEXT },

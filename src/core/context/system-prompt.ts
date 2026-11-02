@@ -128,7 +128,3 @@ export class SystemPromptBuilder {
     return this.build(hooks, agent, config);
   }
 }
-
-export function createSystemPromptBuilder(template?: string): SystemPromptBuilder {
-  return new SystemPromptBuilder(template);
-}

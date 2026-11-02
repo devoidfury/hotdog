@@ -1,7 +1,7 @@
 // Session-wide accumulated totals plus the most recent call's values.
 // "Net" prompt tokens = raw - cached, since cached tokens are free.
 
-export interface TokenUsage {
+export interface UsageTotals {
   sessionPromptTokens: number;
   sessionCachedTokens: number;
   sessionCompletionTokens: number;
@@ -11,8 +11,11 @@ export interface TokenUsage {
   cachedTokens: number;
   completionTokens: number;
   totalTokens: number;
-  [key: string]: number | undefined;
 }
+
+// The event emitted on OUTPUT_EVENT.TOKEN_USAGE extends this same shape, so
+// the field list lives here once and new stats can't silently miss the UI.
+export type TokenUsage = UsageTotals;
 
 // Shape of the `usage` field in OpenAI-compatible streaming responses.
 export interface RawUsage {

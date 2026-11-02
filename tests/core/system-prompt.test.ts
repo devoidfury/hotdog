@@ -5,7 +5,6 @@ import path from "node:path";
 import {
   buildSystemPrompt,
   SystemPromptBuilder,
-  createSystemPromptBuilder,
   collectSystemPromptChunks,
 } from "@core/context/system-prompt.ts";
 import { loadProfileFile } from "@core/config/profiles.ts";
@@ -179,14 +178,6 @@ describe("SystemPromptBuilder", () => {
     const builder = new SystemPromptBuilder("X: {{ profile_name }}");
     const prompt = await builder.build(mockHooks, {}, mockConfig);
     expect(prompt).toContain("X: test-profile");
-  });
-});
-
-describe("createSystemPromptBuilder", () => {
-  it("creates a new SystemPromptBuilder instance", () => {
-    const builder = createSystemPromptBuilder();
-    expect(builder).toBeInstanceOf(SystemPromptBuilder);
-    expect(builder.getPrompt()).toBeNull();
   });
 });
 

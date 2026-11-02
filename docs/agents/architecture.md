@@ -145,7 +145,6 @@ System prompt building. Key exports:
 - `buildSystemPrompt(body, model, profileName, chunks, template?)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook. `template` is the loaded template **text**; when omitted it is loaded from the config dir via `initSystemPromptTemplate()` (standalone callers only — the agent pipeline always passes the resolved template)
 - `collectSystemPromptChunks(results)` — collects and sorts system prompt chunks from hook results
 - `SystemPromptBuilder` class — manages system prompt lifecycle with caching (`build()`, `ensureBuilt()`, `getPrompt()`, `clear()`). Constructor takes the loaded template **text** (not a path); it is passed in from the resolved config
-- `createSystemPromptBuilder(template?)` — factory for SystemPromptBuilder
 
 There is no process-wide template cache: the resolved template travels explicitly (buildConfig → `AgentOptions.systemPromptTemplate` → `ContextManager` → `SystemPromptBuilder`).
 

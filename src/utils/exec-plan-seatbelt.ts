@@ -23,7 +23,7 @@
 import { existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { PlanePlanResult } from "./exec-plan.ts";
+import type { PlanePlanResult, PlanOptions } from "./exec-plan.ts";
 
 /** Apple fixes the shim's location; it is not a PATH tool, so no PATH search. */
 const SEATBELT_BIN = "/usr/bin/sandbox-exec";
@@ -254,7 +254,7 @@ export function seatbeltProfile(opts: {
 }
 
 /**
- * Pure plan generation (same opts shape as planFor): probe gating lives in
+ * Pure plan generation (takes the shared PlanOptions): probe gating lives in
  * planFor's darwin branch so this stays unit-testable on any host. `cls` is
  * carried for contract parity -- rw and net produce the same profile.
  *
@@ -264,15 +264,7 @@ export function seatbeltProfile(opts: {
  * /tmp bind -- seatbelt has no mount table, so they point at the REAL host
  * scratch dir. sandbox-exec takes its command directly: no "--" separator.
  */
-export function seatbeltPlan(opts: {
-  roots: string[];
-  cls: string;
-  scratch: string;
-  command: string;
-  args: string[];
-  execPath?: string;
-  repoRoot?: string;
-}): PlanePlanResult {
+export function seatbeltPlan(opts: PlanOptions): PlanePlanResult {
   const scratchReal = (() => {
     try {
       return realpathSync(opts.scratch);

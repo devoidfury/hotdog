@@ -1,6 +1,7 @@
 import type { ImageAttachment } from "./message.ts";
 import type { QuestionDef } from "./input.ts";
 import type { ToolResultContent } from "./wrappers.ts";
+import type { UsageTotals } from "../token-tracker.ts";
 
 export const OUTPUT_EVENT = {
   USER_MESSAGE: 1,
@@ -134,17 +135,8 @@ export interface TaskProgressEvent {
   message?: string;
 }
 
-export interface TokenUsageEvent {
+export interface TokenUsageEvent extends UsageTotals {
   type: typeof OUTPUT_EVENT.TOKEN_USAGE;
-  sessionPromptTokens: number;
-  sessionCachedTokens: number;
-  sessionCompletionTokens: number;
-  sessionTotalTokens: number;
-  turns: number;
-  promptTokens: number;
-  cachedTokens: number;
-  completionTokens: number;
-  totalTokens: number;
   /** The model's context window size, shown as total/contextWindow. */
   contextWindow: number;
 }

@@ -170,6 +170,17 @@ export interface PlanePlanResult {
   probe: "bwrap" | "seatbelt" | null;
 }
 
+/** Shared planner input for every backend (planFor and the seatbelt plan). */
+export interface PlanOptions {
+  roots: string[];
+  cls: string;
+  scratch: string;
+  command: string;
+  args: string[];
+  execPath?: string;
+  repoRoot?: string;
+}
+
 /**
  * The per-(session, class) plan for a pooled executor: rw ONLY the session's
  * roots plus `scratch` (mounted as /tmp, so temp files survive across calls
@@ -187,19 +198,14 @@ export interface PlanePlanResult {
  * the future `no-net` class). `scratch` must exist host-side -- bwrap bind
  * sources must be real directories (the caller creates it).
  */
-export function planFor(opts: {
-  roots: string[];
-  cls: string;
-  scratch: string;
-  command: string;
-  args: string[];
-  execPath?: string;
-  repoRoot?: string;
-  /** Override the bwrap binary (undefined = probe, null = force plain spawn).
-   *  Seatbelt's binary is Apple's fixed system shim, so on darwin only the
-   *  null meaning applies: plain spawn, no probe. */
-  binary?: string | null;
-}): PlanePlanResult {
+export function planFor(
+  opts: PlanOptions & {
+    /** Override the bwrap binary (undefined = probe, null = force plain spawn).
+     *  Seatbelt's binary is Apple's fixed system shim, so on darwin only the
+     *  null meaning applies: plain spawn, no probe. */
+    binary?: string | null;
+  },
+): PlanePlanResult {
   // Platform dispatch. The bwrap path below stays byte-identical to the
   // linux behavior this file has always had; seatbelt (probe-gated, pure
   // profile generation otherwise) lives in exec-plan-seatbelt.ts.

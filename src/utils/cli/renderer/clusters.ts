@@ -42,12 +42,3 @@ export function snapForward(s: string, pos: number): number {
   for (const b of clusterStarts(s)) if (b >= pos) return b;
   return s.length;
 }
-
-/** The cluster starting at offset o in s (empty string at end). */
-export function clusterAt(s: string, o: number): string {
-  const starts = clusterStarts(s);
-  for (let i = 0; i < starts.length; i++) {
-    if (starts[i] === o) return s.slice(o, starts[i + 1] ?? s.length);
-  }
-  return "";
-}

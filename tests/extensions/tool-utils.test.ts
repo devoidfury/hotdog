@@ -345,43 +345,43 @@ describe("ToolResult", () => {
     expect(part.output).toBe("42");
   });
 
-  it("ToolResult.from() creates a result with defaults", () => {
-    const r = ToolResult.from({ output: "hello", error: null });
+  it("ToolResult constructor creates a result with defaults", () => {
+    const r = new ToolResult({ output: "hello", error: null });
     expect(r.success).toBe(true);
     expect(r.output).toBe("hello");
     expect(r.error).toBeNull();
   });
 
-  it("ToolResult.from() auto-fails when error provided", () => {
-    const r = ToolResult.from({ output: "", error: "fail" });
+  it("ToolResult constructor auto-fails when error provided", () => {
+    const r = new ToolResult({ output: "", error: "fail" });
     expect(r.success).toBe(false);
     expect(r.error).toBe("fail");
   });
 
-  it("ToolResult.from() overrides success when error provided (even if success=true)", () => {
-    const r = ToolResult.from({ output: "partial", error: "warning", success: true });
+  it("ToolResult constructor overrides success when error provided (even if success=true)", () => {
+    const r = new ToolResult({ output: "partial", error: "warning", success: true });
     expect(r.success).toBe(false); // error overrides success
     expect(r.output).toBe("partial");
     expect(r.error).toBe("warning");
   });
 
-  it("ToolResult.from() preserves success=false with error", () => {
-    const r = ToolResult.from({ output: "partial", error: "warning", success: false });
+  it("ToolResult constructor preserves success=false with error", () => {
+    const r = new ToolResult({ output: "partial", error: "warning", success: false });
     expect(r.success).toBe(false);
     expect(r.output).toBe("partial");
     expect(r.error).toBe("warning");
   });
 
-  it("ToolResult.from() accepts metadata", () => {
+  it("ToolResult constructor accepts metadata", () => {
     const metadata = new Map();
     metadata.set("key", "value");
-    const r = ToolResult.from({ output: "out", error: null, metadata });
+    const r = new ToolResult({ output: "out", error: null, metadata });
     expect(r.metadata).toBe(metadata);
   });
 
-  it("ToolResult.from() accepts images", () => {
+  it("ToolResult constructor accepts images", () => {
     const images = [{ type: "image_url", mimeType: "image/png", data: "base64..." }];
-    const r = ToolResult.from({ output: "img", images });
+    const r = new ToolResult({ output: "img", images });
     expect(r.images).toBe(images);
   });
 });

@@ -1,36 +1,11 @@
 // Maps OutputEvent → S2C wire protocol and sends JSON over WS.
+// The wire shape itself lives in wire-messages.ts, shared with history replay.
 
 import { Channel, ChannelSessionManager } from "@core/channel.ts";
-import { OUTPUT_EVENT, OutputEvent, OutputEventType } from "@core/context/output.ts";
-import { toolContentText } from "@utils/tool-content.ts";
-import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
+import { OUTPUT_EVENT, OutputEvent } from "@core/context/output.ts";
 import type { ArgDisplay } from "@core/extensions/tool-registry.ts";
-import { S2C, S2CType, wireImages } from "./protocol.ts";
+import { toS2CMessage } from "./wire-messages.ts";
 import type { HotdogServerSocket } from "./socket.ts";
-
-// ── OUTPUT_EVENT → S2C mapping ──────────────────────────────────────────────
-
-// Partial: frame-only events (QUEUE_UPDATE) intentionally stay off the
-// wire -- write() drops unmapped types. Adding a key here IS a protocol
-// change; the type no longer forces one.
-const EVENT_TO_PROTOCOL: Partial<Record<OutputEventType, S2CType>> = {
-  [OUTPUT_EVENT.USER_MESSAGE]: S2C.USER_MESSAGE,
-  [OUTPUT_EVENT.ASSISTANT_MESSAGE]: S2C.ASSISTANT_MESSAGE,
-  [OUTPUT_EVENT.THINKING]: S2C.THINKING,
-  [OUTPUT_EVENT.TOOL_CALL]: S2C.TOOL_CALL,
-  [OUTPUT_EVENT.TOOL_RESULT]: S2C.TOOL_RESULT,
-  [OUTPUT_EVENT.COMPACTING]: S2C.COMPACTING,
-  [OUTPUT_EVENT.COMMAND_RESULT]: S2C.COMMAND_RESULT,
-  [OUTPUT_EVENT.QUESTION]: S2C.QUESTION,
-  [OUTPUT_EVENT.STREAMING_CHUNK]: S2C.STREAMING_CHUNK,
-  [OUTPUT_EVENT.STREAMING_REASONING_CHUNK]: S2C.STREAMING_REASONING_CHUNK,
-  [OUTPUT_EVENT.STREAM_RESET]: S2C.STREAM_RESET,
-  [OUTPUT_EVENT.TASK_PROGRESS]: S2C.TASK_PROGRESS,
-  [OUTPUT_EVENT.TOKEN_USAGE]: S2C.TOKEN_USAGE,
-  [OUTPUT_EVENT.COMPACTION_RESULT]: S2C.COMPACTION_RESULT,
-  [OUTPUT_EVENT.SESSION_STATE]: S2C.SESSION_STATE,
-  [OUTPUT_EVENT.SYSTEM_MESSAGE]: S2C.SYSTEM_MESSAGE,
-};
 
 export interface WebSocketChannelOptions {
   sessionManager: ChannelSessionManager;
@@ -67,95 +42,12 @@ export class WebSocketChannel extends Channel {
   protected write(event: OutputEvent): void {
     if (!this.#ready) return;
 
-    const protoType = EVENT_TO_PROTOCOL[event.type];
-    if (!protoType) return;
+    const msg = toS2CMessage(event, this.#sessionId, { argDisplay: this.#argDisplay });
+    if (!msg) return; // frame-only event: stays off the wire
 
-    const msg: Record<string, unknown> = {
-      type: protoType,
-      sessionId: this.#sessionId,
-    };
-
-    switch (event.type) {
-      case OUTPUT_EVENT.USER_MESSAGE:
-      case OUTPUT_EVENT.ASSISTANT_MESSAGE:
-      case OUTPUT_EVENT.STREAMING_CHUNK:
-      case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
-        msg.content = event.content;
-        if (event.type === OUTPUT_EVENT.USER_MESSAGE) {
-          const userImgs = wireImages(event.images);
-          if (userImgs) msg.images = userImgs;
-          if (event.files !== undefined) msg.files = event.files;
-        }
-        break;
-      case OUTPUT_EVENT.THINKING:
-        msg.content = event.content;
-        break;
-      case OUTPUT_EVENT.TOOL_CALL:
-        msg.name = event.toolName;
-        msg.args = event.input;
-        // The call id lets clients pair results to calls. argsSummary is the
-        // shared hint-driven fold (ToolMetadata.argDisplay): the same shape
-        // the terminal's template args slot prints, ANSI-free.
-        if (event.toolCallId) msg.toolCallId = event.toolCallId;
-        {
-          const summary = summarizeToolArgs(event.input, undefined, this.#argDisplay?.(event.toolName));
-          if (summary) msg.argsSummary = summary;
-        }
-        break;
-      case OUTPUT_EVENT.TOOL_RESULT:
-        msg.name = event.toolName;
-        if (event.toolCallId) msg.toolCallId = event.toolCallId;
-        // Content parts travel as text on this transport: the browser has no
-        // part renderer, so flatten the fields here (display, not a format).
-        msg.output = toolContentText(event.content);
-        if (event.error !== undefined) msg.error = event.error;
-        {
-          const imgs = wireImages(event.images);
-          if (imgs) msg.images = imgs;
-        }
-        break;
-      case OUTPUT_EVENT.COMPACTING:
-        msg.message = event.message;
-        break;
-      case OUTPUT_EVENT.COMMAND_RESULT:
-        msg.content = event.content;
-        break;
-      case OUTPUT_EVENT.QUESTION:
-        msg.questions = event.questions;
-        break;
-      case OUTPUT_EVENT.SYSTEM_MESSAGE:
-        msg.content = event.content;
-        break;
-      case OUTPUT_EVENT.STREAM_RESET:
-        // Payload-free: { type, sessionId } is the whole instruction.
-        break;
-      case OUTPUT_EVENT.TASK_PROGRESS:
-        msg.taskId = event.taskId;
-        msg.status = event.status;
-        if (event.message !== undefined) msg.message = event.message;
-        break;
-      case OUTPUT_EVENT.TOKEN_USAGE:
-        msg.sessionPromptTokens = event.sessionPromptTokens || 0;
-        msg.sessionCompletionTokens = event.sessionCompletionTokens || 0;
-        msg.sessionTotalTokens = event.sessionTotalTokens || 0;
-        msg.promptTokens = event.promptTokens || 0;
-        msg.completionTokens = event.completionTokens || 0;
-        msg.totalTokens = event.totalTokens || 0;
-        msg.cachedTokens = event.cachedTokens || 0;
-        if (Number.isFinite(event.contextWindow)) msg.contextWindow = event.contextWindow;
-        break;
-      case OUTPUT_EVENT.COMPACTION_RESULT:
-        msg.summary = event.summary;
-        msg.messagesCompacted = event.messagesCompacted;
-        break;
-      case OUTPUT_EVENT.SESSION_STATE:
-        msg.key = event.key;
-        msg.value = event.value;
-        // Also broadcast session state to all connected clients
-        if (this.#broadcastCallback) {
-          this.#broadcastCallback(msg);
-        }
-        break;
+    // Also broadcast session state to all connected clients
+    if (event.type === OUTPUT_EVENT.SESSION_STATE && this.#broadcastCallback) {
+      this.#broadcastCallback(msg);
     }
 
     try {

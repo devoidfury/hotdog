@@ -11,6 +11,18 @@ export type { ToolMetadata };
 // When set on a ToolResult, tells the run loop to stop after this tool (e.g., "wait", "handoff").
 export const TOOL_STOP_LOOP = Symbol("TOOL_STOP_LOOP");
 
+// Options for constructing a ToolResult directly (ok()/err()/stop() cover the
+// common cases). An error forces success=false: a result that failed is
+// never success, whatever the caller passed.
+export interface ToolResultOptions {
+  output?: string;
+  error?: string | null;
+  metadata?: Map<string, string> | null;
+  success?: boolean;
+  images?: unknown[] | null;
+  hint?: string | null;
+}
+
 export class ToolResult {
   output: string;
   error: string | null;
@@ -27,25 +39,19 @@ export class ToolResult {
   hint: string | null;
   [TOOL_STOP_LOOP]?: boolean;
 
-  constructor({
-    output = "",
-    error = null,
-    metadata = null,
-    success = true,
-    images = null,
-    hint = null,
-  }: {
-    output?: string;
-    error?: string | null;
-    metadata?: Map<string, string> | null;
-    success?: boolean;
-    images?: unknown[] | null;
-    hint?: string | null;
-  } = {}) {
+  constructor(options: ToolResultOptions = {}) {
+    const {
+      output = "",
+      error = null,
+      metadata = null,
+      success = true,
+      images = null,
+      hint = null,
+    } = options;
     this.output = output;
     this.error = error;
     this.metadata = metadata;
-    this.success = success;
+    this.success = error === null ? success : false;
     this.images = images;
     this.hint = hint;
   }
@@ -66,34 +72,6 @@ export class ToolResult {
     const result = new ToolResult({ output, success: true });
     result[TOOL_STOP_LOOP] = true;
     return result;
-  }
-
-  static from({
-    output = "",
-    error = null,
-    metadata = null,
-    success = true,
-    images = null,
-    hint = null,
-  }: {
-    output?: string;
-    error?: string | null;
-    metadata?: Map<string, string> | null;
-    success?: boolean;
-    images?: unknown[] | null;
-    hint?: string | null;
-  } = {}): ToolResult {
-    if (error !== null && success !== false) {
-      success = false;
-    }
-    return new ToolResult({
-      output,
-      error,
-      metadata,
-      success,
-      images,
-      hint,
-    });
   }
 
   withEntry(key: string, value: unknown): this {

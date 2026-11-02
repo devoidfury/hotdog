@@ -1,30 +1,36 @@
 // History replay, split out of server.ts: log-slice replay (the reconnect
 // cursor's coordinate space), in-memory message replay for forks, and the
 // pending-question re-send after attach.
+//
+// Both replay paths normalize their source (log entries / live Messages) and
+// emit through the shared builders in wire-messages.ts -- the same ones the
+// live websocket-channel uses -- so replayed frames cannot drift from live
+// ones as the protocol evolves.
 
 import type { AgentLike } from "@core/session/index.ts";
 import { conversationContent, LOG_SOURCE, type LogEntry } from "@core/session/session-log.ts";
 import type { Agent } from "@core/agent.ts";
-import { type ToolRegistry } from "@core/extensions/tool-registry.ts";
-import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
+import type { ToolRegistry } from "@core/extensions/tool-registry.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
-import { S2C, wireImages } from "./protocol.ts";
-import { splitFileIncludes, toolContentText, wrapperContentText } from "@utils/tool-content.ts";
+import { S2C } from "./protocol.ts";
+import {
+  s2cContent,
+  s2cTokenUsage,
+  s2cToolCall,
+  s2cToolResult,
+  s2cUserMessage,
+  type TokenUsageWireSource,
+} from "./wire-messages.ts";
+import { splitFileIncludes, wrapperContentText } from "@utils/tool-content.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
-/**
- * Hint-driven args fold for TOOL_CALL messages: the same
- * ToolMetadata.argDisplay summary the terminal sink prints (ANSI-free).
- * Empty summaries ride no field; clients fall back to their own header.
- */
-function argsSummaryField(
-  registry: ToolRegistry | undefined,
-  name: string,
-  args: string,
-): Record<string, string> {
-  const summary = summarizeToolArgs(args, undefined, registry?.getMetadata?.(name)?.argDisplay);
-  return summary ? { argsSummary: summary } : {};
+type ToolCallWire = { id?: string; function?: { name?: string; arguments?: string } };
+
+/** Per-tool arg-display hints resolved from the tool registry (replay's only
+ * metadata source; live calls carry their own summary from the channel). */
+function registryArgDisplay(registry: ToolRegistry | undefined) {
+  return (name: string) => registry?.getMetadata?.(name)?.argDisplay;
 }
 
 /**
@@ -44,6 +50,11 @@ export function replayLogSlice(
   startIdx: number,
   toolRegistry?: ToolRegistry,
 ): void {
+  const argDisplay = registryArgDisplay(toolRegistry);
+  const send = (msg: Record<string, unknown>): void => {
+    ws.send(JSON.stringify(msg));
+  };
+
   const callNames = new Map<string, string>();
   for (const e of entries) {
     if (e.source !== LOG_SOURCE.LLM || !Array.isArray(e.tool_calls)) continue;
@@ -59,88 +70,50 @@ export function replayLogSlice(
     switch (e.source) {
       case LOG_SOURCE.INPUT:
       case LOG_SOURCE.PROMPT: {
-        const userImgs = wireImages(e.images);
         const display = splitFileIncludes(content);
-        ws.send(
-          JSON.stringify({
-            type: S2C.USER_MESSAGE,
-            sessionId,
-            content: display.text,
-            ...(display.files.length > 0 ? { files: display.files } : {}),
-            ...(userImgs ? { images: userImgs } : {}),
-          }),
-        );
+        send(s2cUserMessage(sessionId, { content: display.text, files: display.files, images: e.images }));
         break;
       }
       case LOG_SOURCE.LLM: {
         if (e.reasoning_content) {
-          ws.send(
-            JSON.stringify({ type: S2C.THINKING, sessionId, content: e.reasoning_content }),
-          );
+          send(s2cContent(S2C.THINKING, sessionId, e.reasoning_content));
         }
-        const toolCalls = Array.isArray(e.tool_calls)
-          ? (e.tool_calls as Array<{ id: string; function?: { name?: string; arguments?: string } }>)
-          : undefined;
-        if (toolCalls && toolCalls.length > 0) {
-          for (const tc of toolCalls) {
-            const name = tc.function?.name || "unknown";
-            const args = tc.function?.arguments || "{}";
-            // Replay has no live tool object; the wire carries name, args and
-            // the registry-resolved argsSummary fold.
-            ws.send(
-              JSON.stringify({
-                type: S2C.TOOL_CALL,
-                sessionId,
-                name,
-                args,
-                ...(tc.id ? { toolCallId: tc.id } : {}),
-                ...argsSummaryField(toolRegistry, name, args),
-              }),
-            );
-          }
+        const toolCalls = Array.isArray(e.tool_calls) ? (e.tool_calls as ToolCallWire[]) : undefined;
+        for (const tc of toolCalls ?? []) {
+          // Replay has no live tool object; the wire carries name, args and
+          // the registry-resolved argsSummary fold.
+          const name = tc.function?.name || "unknown";
+          send(
+            s2cToolCall(sessionId, {
+              name,
+              args: tc.function?.arguments || "{}",
+              toolCallId: tc.id,
+              argDisplay: argDisplay(name),
+            }),
+          );
         }
         const text = wrapperContentText(content);
         if (text) {
-          ws.send(JSON.stringify({ type: S2C.ASSISTANT_MESSAGE, sessionId, content: text }));
+          send(s2cContent(S2C.ASSISTANT_MESSAGE, sessionId, text));
         }
         break;
       }
       case LOG_SOURCE.TOOL_RESULT: {
-        const toolImgs = wireImages(e.images);
         const callId = typeof e.tool_call_id === "string" ? e.tool_call_id : undefined;
-        ws.send(
-          JSON.stringify({
-            type: S2C.TOOL_RESULT,
-            sessionId,
+        send(
+          s2cToolResult(sessionId, {
             name: (callId ? callNames.get(callId) : undefined) || "unknown",
-            output: toolContentText(content ?? ""),
-            ...(callId ? { toolCallId: callId } : {}),
-            ...(toolImgs ? { images: toolImgs } : {}),
+            content,
+            toolCallId: callId,
+            images: e.images,
           }),
         );
         break;
       }
       case LOG_SOURCE.TOKEN_USAGE: {
-        // Not bookkeeping: one record = one usage bubble. Mirror the live
-        // websocket-channel TOKEN_USAGE mapper field-for-field (same order,
-        // same guards) so the client stays one code path.
-        const d = e as unknown as Record<string, unknown>;
-        ws.send(
-          JSON.stringify({
-            type: S2C.TOKEN_USAGE,
-            sessionId,
-            sessionPromptTokens: (d.sessionPromptTokens as number) || 0,
-            sessionCompletionTokens: (d.sessionCompletionTokens as number) || 0,
-            sessionTotalTokens: (d.sessionTotalTokens as number) || 0,
-            promptTokens: (d.promptTokens as number) || 0,
-            completionTokens: (d.completionTokens as number) || 0,
-            totalTokens: (d.totalTokens as number) || 0,
-            cachedTokens: (d.cachedTokens as number) || 0,
-            ...(typeof d.contextWindow === "number" && Number.isFinite(d.contextWindow)
-              ? { contextWindow: d.contextWindow }
-              : {}),
-          }),
-        );
+        // Not bookkeeping: one record = one usage bubble, mapped by the same
+        // builder as the live websocket-channel TOKEN_USAGE event.
+        send(s2cTokenUsage(sessionId, e as unknown as TokenUsageWireSource));
         break;
       }
       default:
@@ -157,25 +130,24 @@ export function replaySessionHistory(
 ): void {
   const messages = agent.getMessages();
 
+  const argDisplay = registryArgDisplay((agent as Agent).toolRegistry);
+  const send = (msg: Record<string, unknown>): void => {
+    ws.send(JSON.stringify(msg));
+  };
+
   try {
-    let pendingToolCalls: Array<{
-      id: string;
-      function?: { name?: string; arguments?: string };
-    }> = [];
+    let pendingToolCalls: ToolCallWire[] = [];
 
     for (const msg of messages) {
       switch (msg.role) {
         case "user": {
-          const userImgs = wireImages((msg as { images?: unknown }).images);
           // Attachments in `files`; the text excludes file-include parts.
           const display = splitFileIncludes(msg.content);
-          ws.send(
-            JSON.stringify({
-              type: S2C.USER_MESSAGE,
-              sessionId,
+          send(
+            s2cUserMessage(sessionId, {
               content: display.text,
-              ...(display.files.length > 0 ? { files: display.files } : {}),
-              ...(userImgs ? { images: userImgs } : {}),
+              files: display.files,
+              images: (msg as { images?: unknown }).images,
             }),
           );
           break;
@@ -183,69 +155,40 @@ export function replaySessionHistory(
 
         case "assistant": {
           if (msg.reasoningContent) {
-            ws.send(
-              JSON.stringify({
-                type: S2C.THINKING,
-                sessionId,
-                content: msg.reasoningContent,
-              }),
-            );
+            send(s2cContent(S2C.THINKING, sessionId, msg.reasoningContent));
           }
 
-          const toolCalls = msg.toolCalls as
-            | Array<{
-                id: string;
-                function?: { name?: string; arguments?: string };
-              }>
-            | undefined;
+          const toolCalls = msg.toolCalls as ToolCallWire[] | undefined;
           if (toolCalls && toolCalls.length > 0) {
             pendingToolCalls = toolCalls;
             for (const tc of toolCalls) {
               const name = tc.function?.name || "unknown";
-              const args = tc.function?.arguments || "{}";
-              ws.send(
-                JSON.stringify({
-                  type: S2C.TOOL_CALL,
-                  sessionId,
+              send(
+                s2cToolCall(sessionId, {
                   name,
-                  args,
-                  ...(tc.id ? { toolCallId: tc.id } : {}),
-                  ...argsSummaryField((agent as Agent).toolRegistry, name, args),
+                  args: tc.function?.arguments || "{}",
+                  toolCallId: tc.id,
+                  argDisplay: argDisplay(name),
                 }),
               );
             }
           }
           const textContent =
-            typeof msg.getTextContent === "function"
-              ? msg.getTextContent()
-              : msg.content || "";
+            typeof msg.getTextContent === "function" ? msg.getTextContent() : ((msg.content || "") as string);
           if (textContent) {
-            ws.send(
-              JSON.stringify({
-                type: S2C.ASSISTANT_MESSAGE,
-                sessionId,
-                content: textContent,
-              }),
-            );
+            send(s2cContent(S2C.ASSISTANT_MESSAGE, sessionId, textContent));
           }
           break;
         }
 
         case "tool": {
-          const matchedCall = pendingToolCalls.find(
-            (tc) => tc.id === msg.toolCallId,
-          );
-          const toolImgs = wireImages((msg as { images?: unknown }).images);
-          ws.send(
-            JSON.stringify({
-              type: S2C.TOOL_RESULT,
-              sessionId,
+          const matchedCall = pendingToolCalls.find((tc) => tc.id === msg.toolCallId);
+          send(
+            s2cToolResult(sessionId, {
               name: matchedCall?.function?.name || "unknown",
-              // Parts (tool-result) flatten for this string-only transport;
-              // legacy entries are already plain text.
-              output: toolContentText(msg.content ?? ""),
-              ...(msg.toolCallId ? { toolCallId: msg.toolCallId } : {}),
-              ...(toolImgs ? { images: toolImgs } : {}),
+              content: msg.content ?? "",
+              toolCallId: msg.toolCallId,
+              images: (msg as { images?: unknown }).images,
             }),
           );
           break;
@@ -261,22 +204,10 @@ export function replaySessionHistory(
     const partialReasoning = agentImpl.currentStreamingReasoning;
     const partialContent = agentImpl.currentStreamingContent;
     if (partialReasoning) {
-      ws.send(
-        JSON.stringify({
-          type: S2C.STREAMING_REASONING_CHUNK,
-          sessionId,
-          content: partialReasoning,
-        }),
-      );
+      send(s2cContent(S2C.STREAMING_REASONING_CHUNK, sessionId, partialReasoning));
     }
     if (partialContent) {
-      ws.send(
-        JSON.stringify({
-          type: S2C.STREAMING_CHUNK,
-          sessionId,
-          content: partialContent,
-        }),
-      );
+      send(s2cContent(S2C.STREAMING_CHUNK, sessionId, partialContent));
     }
   } catch {
     // Connection dropped mid-replay -- nothing to do.

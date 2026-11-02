@@ -174,7 +174,7 @@ export interface SystemMessageEvent {
  * Pending mid-run steering count (steer-default, design §8): emitted by the
  * bus on a steering enqueue and on chain drain. Frame content for the split
  * renderer's queue chip -- NOT printable output: the base sink ignores it
- * (no switch case) and WebSocket drops it (unmapped in EVENT_TO_PROTOCOL),
+ * (no switch case) and WebSocket drops it (maps to null in toS2CMessage),
  * so no wire protocol is added.
  */
 export interface QueueUpdateEvent {
@@ -188,7 +188,7 @@ export interface QueueUpdateEvent {
  * A tool call growing mid-stream (streaming-path design 2026-10-22): the
  * accumulated partial, emitted per wire delta. Frame content for the split
  * renderer's in-flight row -- NOT printable output: the base sink ignores it
- * (no switch case) and WebSocket drops it (unmapped in EVENT_TO_PROTOCOL),
+ * (no switch case) and WebSocket drops it (maps to null in toS2CMessage),
  * the QueueUpdateEvent precedent. `args` carries raw text that is usually
  * NOT valid JSON yet; sinks present it as-is (the summarizer's unparseable
  * passthrough is the fallback). Live-only: never persisted, never replayed.

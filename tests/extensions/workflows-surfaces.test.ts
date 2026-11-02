@@ -21,9 +21,8 @@ import { TaskManager } from "@core/session/task-manager.ts";
 import { create } from "@extensions/workflows/index.ts";
 import { runWorkflowCommand, runWorkflowCommandOnText } from "@extensions/workflows/workflow-cli.ts";
 import { parseWorkflow } from "@extensions/workflows/workflow.ts";
+import { claimRunDir, nextRunId } from "@extensions/workflows/run-store.ts";
 import {
-  claimRunDir,
-  nextRunId,
   WorkflowRun,
   type EngineTaskPort,
 } from "@extensions/workflows/engine.ts";

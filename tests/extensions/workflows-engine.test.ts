@@ -18,12 +18,8 @@ import {
 import { LlmError } from "@core/error.ts";
 import { contentToText } from "@core/context/message.ts";
 import { parseWorkflow, type Workflow } from "@extensions/workflows/workflow.ts";
-import {
-  NODE_STATE,
-  reconcileRun,
-  WorkflowRun,
-  type EngineTaskPort,
-} from "@extensions/workflows/engine.ts";
+import { NODE_STATE, WorkflowRun, type EngineTaskPort } from "@extensions/workflows/engine.ts";
+import { reconcileRun } from "@extensions/workflows/run-store.ts";
 
 const tmpDirs: string[] = [];
 function freshDir(): string {

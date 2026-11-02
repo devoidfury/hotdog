@@ -27,7 +27,7 @@ import {
 } from "@core/extensions/types.ts";
 import type { Agent } from "@core/agent.ts";
 import { TASK_MANAGER_SERVICE } from "../subagents/index.ts";
-import { markInterruptedRuns } from "./engine.ts";
+import { markInterruptedRuns } from "./run-store.ts";
 import { runWorkflowCommand, type WorkflowCliDeps } from "./workflow-cli.ts";
 import {
   WORKFLOW_TOOL_CONSTRUCTORS,

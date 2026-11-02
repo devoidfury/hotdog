@@ -28,9 +28,8 @@ import {
   reconcileRun,
   scanInterruptedRuns,
   RUN_ID_SHAPE_HINT,
-  WorkflowRun,
-  type EngineTaskPort,
-} from "./engine.ts";
+} from "./run-store.ts";
+import { WorkflowRun, type EngineTaskPort } from "./engine.ts";
 
 export interface CommandOutcome {
   code: number;

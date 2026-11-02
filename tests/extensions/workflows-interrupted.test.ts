@@ -23,8 +23,8 @@ import {
   INTERRUPTED_DETAIL,
   markInterruptedRuns,
   scanInterruptedRuns,
-  WorkflowRun,
-} from "@extensions/workflows/engine.ts";
+} from "@extensions/workflows/run-store.ts";
+import { WorkflowRun } from "@extensions/workflows/engine.ts";
 import { RunRegistry, WorkflowStatusTool } from "@extensions/workflows/workflow-tools.ts";
 
 const tmpDirs: string[] = [];

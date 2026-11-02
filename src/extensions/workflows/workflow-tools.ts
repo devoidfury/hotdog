@@ -29,10 +29,9 @@ import {
   readRunSummary,
   scanInterruptedRuns,
   RUN_ID_SHAPE_HINT,
-  WorkflowRun,
   type InterruptedRunView,
-  type RunSummary,
-} from "./engine.ts";
+} from "./run-store.ts";
+import { WorkflowRun, type RunSummary } from "./engine.ts";
 import { runWorkflowCommandOnText } from "./workflow-cli.ts";
 
 // ---------------------------------------------------------------------------

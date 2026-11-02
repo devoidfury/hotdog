@@ -50,8 +50,8 @@ import {
   readRunSummary,
   reconcileRun,
   scanInterruptedRuns,
-  WorkflowRun,
-} from "@extensions/workflows/engine.ts";
+} from "@extensions/workflows/run-store.ts";
+import { WorkflowRun } from "@extensions/workflows/engine.ts";
 import { makeRng, type Rng } from "../fuzz/prng.ts";
 
 // ── Fixture built by the real write paths ───────────────────────────

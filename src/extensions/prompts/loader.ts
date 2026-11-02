@@ -96,7 +96,11 @@ export class PromptsLoader {
 
     let entries: { isFile: () => boolean; name: string }[];
     try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
+      // Sort for deterministic load order (readdir order is filesystem-dependent,
+      // which makes name-collision resolution a filesystem lottery otherwise).
+      entries = (await fs.readdir(dir, { withFileTypes: true })).sort(
+        (a, b) => a.name.localeCompare(b.name),
+      );
     } catch {
       // Directory doesn't exist — silently skip
       return 0;

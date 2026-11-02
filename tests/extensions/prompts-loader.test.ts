@@ -121,6 +121,23 @@ describe("PromptsLoader", () => {
     }
   });
 
+  it('resolves in-directory name collisions deterministically (sorted order, last wins)', async () => {
+    // Two files with different stems but the same frontmatter name. Entries are
+    // loaded in sorted order, so 'z-*' always wins regardless of readdir order.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-prompt-test-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'z-dup.prompt.md'), `---\nname: dup\ndescription: From z\n---\nZ`);
+      fs.writeFileSync(path.join(tmpDir, 'a-dup.prompt.md'), `---\nname: dup\ndescription: From a\n---\nA`);
+      const loader = new PromptsLoader(tmpDir);
+      await loader.loadPrompts();
+      expect(loader.allPrompts().length).toBe(1);
+      expect(loader.getPrompt('dup')!.description).toBe('From z');
+      expect(loader.getPrompt('dup')!.location).toContain('z-dup.prompt.md');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("handles read errors gracefully (directory with .prompt.md name)", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-prompt-test-'));
     try {

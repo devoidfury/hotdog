@@ -95,7 +95,7 @@ describe("sanitize", () => {
   });
 
   it("escapes all special characters", () => {
-    expect(sanitize('a & b < c > d "e" \'f\'')).toBe("a &amp; b &lt; c &gt; d &#34;e&#34; &#39;f&#39;");
+    expect(sanitize('a & b < c > d "e" \'f\'')).toBe("a &amp; b &lt; c &gt; d &quot;e&quot; &#39;f&#39;");
   });
 
   it("returns empty string for null/undefined", () => {

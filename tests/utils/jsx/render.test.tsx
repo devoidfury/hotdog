@@ -50,7 +50,7 @@ describe("renderToString (real JSX)", () => {
 
   it("escapes text and attribute values", () => {
     expect(renderToString(<div title={'a "b" <c>'}>x & y</div>)).toBe(
-      '<div title="a &#34;b&#34; &lt;c&gt;">x &amp; y</div>',
+      '<div title="a &quot;b&quot; &lt;c&gt;">x &amp; y</div>',
     );
   });
 

@@ -11,6 +11,7 @@ export {
   type QuestionResolution,
 } from "@utils/question-answer.ts";
 import { spoofSafe } from "@utils/spoof.ts";
+import { escapeHtml } from "@utils/html.ts";
 
 
 // ── Sidebar resize ──────────────────────────────────────────────────────────
@@ -52,11 +53,6 @@ export function sanitize(str: string | null | undefined): string {
   if (!str) return "";
   // HTML escaping stops markup, not bidi/zero-width spoofing -- U+202E reorders rendered text inside a safe element too.
   // Neutralize code points first (they become visible [U+XXXX] tokens), then escape.
-  return spoofSafe(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&#34;")
-    .replace(/'/g, "&#39;");
+  return escapeHtml(spoofSafe(str));
 }
 

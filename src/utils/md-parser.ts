@@ -1,4 +1,5 @@
 import { spoofSafe } from "./spoof.ts";
+import { escapeHtml as htmlEscape, isSafeUrl } from "./html.ts";
 
 export interface MdDocument {
   type: "document";
@@ -365,30 +366,15 @@ export function createStreamingParser(): StreamingMdParser {
 // or a zero-width splitting a host in an href. spoofSafe is idempotent (its tokens are ASCII),
 // so this stays correct when a caller already ran it upstream.
 function escapeHtml(text: string): string {
-  return spoofSafe(text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  return htmlEscape(spoofSafe(text));
 }
 
 const SAFE_LINK_SCHEMES = new Set(["http", "https", "mailto"]);
 const SAFE_IMAGE_SCHEMES = new Set(["http", "https"]);
 // data: URLs are only safe for script-less raster image types (svg can carry scripts)
 const SAFE_DATA_IMAGE_RE = /^data:image\/(png|jpe?g|gif|webp)(;|$)/i;
-
-// Blocks script-capable schemes (javascript:, vbscript:, data:text/html).
-// Browsers ignore C0 controls/whitespace when parsing URLs (e.g. `java\tscript:`),
-// so strip them before checking the scheme; no valid URL contains raw C0 controls.
-// Schemeless (relative, protocol-relative) URLs are allowed.
-function isSafeUrl(url: string, allowedSchemes: Set<string>, allowImageData: boolean): boolean {
-  const normalized = url.replace(/[\x00-\x20]/g, "");
-  if (allowImageData && SAFE_DATA_IMAGE_RE.test(normalized)) return true;
-  const m = normalized.match(/^([a-z][a-z0-9+.-]*):/i);
-  if (!m) return true;
-  return allowedSchemes.has(m[1]!.toLowerCase());
-}
+const SAFE_LINK_URL = { allowedSchemes: SAFE_LINK_SCHEMES };
+const SAFE_IMAGE_URL = { allowedSchemes: SAFE_IMAGE_SCHEMES, allowDataImage: SAFE_DATA_IMAGE_RE };
 
 function inlineToHtml(node: MdInline): string {
   switch (node.type) {
@@ -403,14 +389,14 @@ function inlineToHtml(node: MdInline): string {
     case "inline_code":
       return `<code class="inline-code">${escapeHtml(node.content)}</code>`;
     case "link": {
-      if (!isSafeUrl(node.url, SAFE_LINK_SCHEMES, false)) {
+      if (!isSafeUrl(node.url, SAFE_LINK_URL)) {
         // Unsafe scheme (javascript:, etc.) -- render the link text as plain text.
         return node.children.map(inlineToHtml).join("");
       }
       return `<a href="${escapeHtml(node.url)}" target="_blank" rel="noopener noreferrer">${node.children.map(inlineToHtml).join("")}</a>`;
     }
     case "image":
-      if (!isSafeUrl(node.url, SAFE_IMAGE_SCHEMES, true)) return "";
+      if (!isSafeUrl(node.url, SAFE_IMAGE_URL)) return "";
       return `<img src="${escapeHtml(node.url)}" alt="${escapeHtml(node.alt)}" />`;
   }
 }

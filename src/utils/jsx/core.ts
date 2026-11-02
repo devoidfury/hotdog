@@ -5,6 +5,8 @@
  * both entrypoints delegate here. (see tsconfig: `jsx: "react-jsx"`, `jsxImportSource: "@utils/jsx"`)
  */
 
+import { escapeHtml, isSafeUrl as checkSafeUrl } from "../html.ts";
+
 // Shared identity across both runtime entrypoints, even if they end up in separate module instances.
 // Use Symbol.for so every copy resolves to one id.
 // React precedent: React.Fragment is a symbol at runtime but typed as a component so `<Fragment>` typechecks.
@@ -73,18 +75,16 @@ export const ATTR_RENAMES: Record<string, string> = {
 // Note: only these attribute names are checked; a custom element's URL-like prop is the caller's responsibility.
 export const URL_ATTRS = new Set(["href", "src", "action", "formaction", "xlink:href"]);
 
-// Browsers' URL parser strips ASCII whitespace and control chars before resolving, so `jav\tascript:` is live. Scheme-check the stripped form.
-const CONTROL_CHARS = /[\x00-\x20\x7f]+/g;
-const HAS_SCHEME = /^[a-z][a-z\d+.-]*:/i;
 // blob: is same-origin and only resolves against a live object the page itself created, so it is safe in href/src (client-side downloads, previews).
-const SAFE_SCHEMES = /^(?:https?|mailto|tel|blob):/i;
+const SAFE_URL_SCHEMES = new Set(["http", "https", "mailto", "tel", "blob"]);
 
 // One `data:` exception: inline images on <img>, the one common legitimate use.
 // Browsers never run scripts from an <img> src (SVG loaded via <img> is script-disabled),
 // but the same URL on iframe/embed src would be a live document, so the allowance is per-tag, not per-scheme.
 // Known ceiling: data: urls on <picture><source> and <input type="image"> are dropped.
 const SAFE_DATA_IMG_TAGS = new Set(["img"]);
-const DATA_IMAGE = /^data:image\//i;
+const SAFE_URL_POLICY = { allowedSchemes: SAFE_URL_SCHEMES };
+const SAFE_URL_POLICY_IMG = { allowedSchemes: SAFE_URL_SCHEMES, allowDataImage: /^data:image\//i };
 
 // Presence-only HTML attributes: `true` renders the bare name.
 // Everything else renders `attr="true"` (React parity), so `width={true}` does not silently produce a valueless `width`.
@@ -206,12 +206,7 @@ function renderAttrs(props: ComponentProps, tag: string): string {
 
 // `tag` is the host element's name (case-insensitive), needed only for the <img> data: exception.
 export function isSafeUrl(value: string, tag = ""): boolean {
-  const stripped = value.replace(CONTROL_CHARS, "");
-  if (!HAS_SCHEME.test(stripped)) return true;
-  return (
-    SAFE_SCHEMES.test(stripped) ||
-    (SAFE_DATA_IMG_TAGS.has(tag.toLowerCase()) && DATA_IMAGE.test(stripped))
-  );
+  return checkSafeUrl(value, SAFE_DATA_IMG_TAGS.has(tag.toLowerCase()) ? SAFE_URL_POLICY_IMG : SAFE_URL_POLICY);
 }
 
 export function serializeValue(name: string, value: unknown): string {
@@ -230,13 +225,4 @@ export function serializeValue(name: string, value: unknown): string {
 
 function toKebab(s: string): string {
   return s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&#34;")
-    .replace(/'/g, "&#39;");
 }

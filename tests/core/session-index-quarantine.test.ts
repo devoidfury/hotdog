@@ -57,14 +57,13 @@ const SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-index-quarantine-"));
 // corruption-count assertion expects 1. The sidecar-tolerant pick on the
 // next lines already knows sidecars can ride; only the count is host-bound.
 const CLEAN_CLOSE = walLifecycleProbe().cleanClose;
-if (!CLEAN_CLOSE) {
-  console.warn(
-    "[session-index-quarantine] bun:sqlite WAL sidecars survive a clean close on this host " +
-      "(cleanClose=false) -- SKIPPING mid-run corruption recovery. Coverage SKIPPED not passed: the " +
-      "quarantine renames main db + -wal + -shm (3 files) where the corruption-count assertion " +
-      "expects 1; known bun/Apple-SQLite WAL issue on macOS 26 (oven-sh/bun#45171 family).",
-  );
-}
+// tests/setup.ts stubs every console method, so the skip reason rides the
+// describe title -- the reporter prints it on the skip line (house pattern:
+// exec-plan-confinement's bwrap suffix).
+const SKIP_WHY_CLEAN_CLOSE =
+  " [SKIPPED: WAL sidecars survive a clean close on this host -- quarantine renames main db + " +
+  "-wal + -shm (3 files) where the corruption-count assertion expects 1 (oven-sh/bun#45171 " +
+  "family) -- coverage SKIPPED not passed]";
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
@@ -364,7 +363,9 @@ describe("environmental open failures never quarantine a healthy index", () => {
 // handle stays poisoned for the life of the process. Recovery here means:
 // quarantine (bytes preserved), rebuild empty, complete the operation on
 // the fresh handle -- and the JSONL logs repopulate everything after.
-describe.skipIf(!CLEAN_CLOSE)("mid-run corruption recovery", () => {
+describe.skipIf(!CLEAN_CLOSE)(
+  "mid-run corruption recovery" + (CLEAN_CLOSE ? "" : SKIP_WHY_CLEAN_CLOSE),
+  () => {
   beforeEach(() => {
     resetIndex();
   });

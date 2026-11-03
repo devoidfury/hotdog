@@ -44,21 +44,28 @@ import { createMockCore, TMP_PARENT, walLifecycleProbe } from "../helpers.ts";
 const SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-durability-"));
 
 // Host gate: bun on macOS links Apple's proprietary SQLite build whose WAL
-// lifecycle breaks on macOS 26 (oven-sh/bun#45171 family). Everything past
-// the kill -9 crash test reads the index AFTER a SIGKILL-mid-WAL -- on a
-// broken host those opens throw SQLITE_IOERR_VNODE, and the kill test
-// "passing" while recovery is broken is the poisoned-WAL masking pattern,
-// so the crash suite gates as a whole (the kill -9 describe + every
-// describe that touches the index afterward).
+// lifecycle breaks on macOS 26 (oven-sh/bun#45171 family). The kill -9
+// crash test rides the recovery leg alone ("passing" while recovery is
+// broken is the poisoned-WAL masking pattern); every describe that REOPENS
+// the index across a close rides both legs.
 const WAL_OK = walLifecycleProbe();
-if (!WAL_OK.recovery) {
-  console.warn(
-    "[session-durability] bun:sqlite WAL lifecycle BROKEN on this host (recovery=" +
-      WAL_OK.recovery +
-      ") -- SKIPPING crash-recovery suite. Coverage SKIPPED not passed: known bun/Apple-SQLite WAL " +
-      "issue on macOS 26 (oven-sh/bun#45171 family); run on a host where the probe passes.",
-  );
-}
+// Index REOPEN rides both legs, not just recovery: a clean close that
+// leaves -wal/-shm sidecars behind poisons the next open with
+// SQLITE_IOERR_VNODE (6922, stale -shm remap) even when kill -9 recovery
+// itself works -- exactly the macOS 26 runner split (recovery=true,
+// cleanClose=false). The kill -9 describe needs only recovery; everything
+// that reopens the index across a close needs both.
+const WAL_REOPEN_OK = WAL_OK.recovery && WAL_OK.cleanClose;
+// tests/setup.ts stubs every console method, so warns from a test module
+// print nowhere; the reporter-visible channel is the skip line itself,
+// hence the reason rides the describe title (house pattern:
+// exec-plan-confinement's bwrap suffix).
+const SKIP_WHY_RECOVERY =
+  " [SKIPPED: bun:sqlite WAL recovery broken on this host (oven-sh/bun#45171 family) -- " +
+  "coverage SKIPPED not passed]";
+const SKIP_WHY_REOPEN =
+  " [SKIPPED: WAL sidecars survive a clean close on this host, reopen dies on the stale -shm " +
+  "(SQLITE_IOERR_VNODE; oven-sh/bun#45171 family) -- coverage SKIPPED not passed]";
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
@@ -368,7 +375,9 @@ describe("question_asked records and pending questions", () => {
   });
 });
 
-describe.skipIf(!WAL_OK.recovery)("kill -9 mid-side-effect (definition of done)", () => {
+describe.skipIf(!WAL_OK.recovery)(
+  "kill -9 mid-side-effect (definition of done)" + (WAL_OK.recovery ? "" : SKIP_WHY_RECOVERY),
+  () => {
   it("side effect lands exactly once and replays as outcome-unknown", async () => {
     const sessionId = uniqueId("crash");
     const counterPath = join(SESSIONS_DIR, `counter-${sessionId}`);
@@ -427,7 +436,9 @@ function openCallIds(sessionId: string): string[] {
     .map((r) => r.tool_call_id);
 }
 
-describe.skipIf(!WAL_OK.recovery)("session index mirrors durability commit points", () => {
+describe.skipIf(!WAL_REOPEN_OK)(
+  "session index mirrors durability commit points" + (WAL_REOPEN_OK ? "" : SKIP_WHY_REOPEN),
+  () => {
   it("started/question/result flow through the real hooks; interrupted comes only from reconcile", async () => {
     const sessionId = uniqueId("mirror");
     try {
@@ -507,7 +518,9 @@ describe.skipIf(!WAL_OK.recovery)("session index mirrors durability commit point
   });
 });
 
-describe.skipIf(!WAL_OK.recovery)("resume_attempt record (livelock cap counter)", () => {
+describe.skipIf(!WAL_REOPEN_OK)(
+  "resume_attempt record (livelock cap counter)" + (WAL_REOPEN_OK ? "" : SKIP_WHY_REOPEN),
+  () => {
   it("restoreSessionIntoAgent fsyncs the record, mirrors the count, replays it silently", async () => {
     const sessionId = uniqueId("resume");
     const logPath = join(SESSIONS_DIR, `${sessionId}.jsonl`);
@@ -681,7 +694,9 @@ describe("consecutive auto-resume counter", () => {
   });
 });
 
-describe.skipIf(!WAL_OK.recovery)("livelock cap on auto-resume (restoreSessionIntoAgent)", () => {
+describe.skipIf(!WAL_REOPEN_OK)(
+  "livelock cap on auto-resume (restoreSessionIntoAgent)" + (WAL_REOPEN_OK ? "" : SKIP_WHY_REOPEN),
+  () => {
   /** Write a log: one input, then n auto resume attempts. */
   function writeLivelockLog(sessionId: string, autos: number): void {
     const lines = [JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "work" }))];

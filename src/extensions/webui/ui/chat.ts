@@ -149,6 +149,9 @@ function clearTasks(): void {
   tasksAtom([]);
   taskActivity.clear();
   activityVersionAtom(0);
+  // Control notes are per-task replies; forgetting them here leaked a
+  // stale task-1 into the serial-coverage run (shared module registry).
+  taskControlAtom({});
 }
 // Explicit session name for the active session; null = show the short id.
 const sessionTitleAtom = reactiveState<string | null>(null);

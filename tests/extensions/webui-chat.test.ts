@@ -235,6 +235,10 @@ describe("createChat subagent task feed", () => {
       host: "localhost",
       getMessageListContainer: () => null,
     });
+    // Belt for the shared-registry serial runs: wipe any residue another
+    // file left in the module-level task state before this test's exact
+    // assertions run.
+    chat.clearTasks();
     const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
     return { chat, ws };
   }

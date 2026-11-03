@@ -1,6 +1,8 @@
-// LIVE seatbelt jail tests -- macOS only (`bun test
-// tests/utils/exec-plan-seatbelt-live.test.ts` on a real mac; skipped, loudly,
-// everywhere else). This is the macOS verifier's file: it proves the probe's
+// LIVE seatbelt jail tests -- macOS hosts with working seatbelt mediation only
+// (`bun test tests/utils/exec-plan-seatbelt-live.test.ts` on a real mac;
+// skipped, loudly, everywhere else: non-mac hosts AND mac hosts whose
+// probeSeatbelt() fails -- mediation off or shim gone). This is the macOS
+// verifier's file: it proves the probe's
 // two legs pass on the host, that writes outside the rw roots and reads of
 // ~/.ssh are DENIED while scratch stays writable, and that the HOME/TMPDIR
 // env sandwich actually lands.
@@ -8,7 +10,10 @@
 // Anti-vacuity doctrine (same as exec-plan-confinement.test.ts): every
 // negative pairs with a positive control of the SAME operation run
 // unsandboxed, so a wrong path, a missing file or an inert shim shows up as
-// a FAILED CONTROL -- never as a passing negative.
+// a FAILED CONTROL -- never as a passing negative. The probe-gated skip is not
+// a vacuity hole: the skip itself IS the mediation test -- probeSeatbelt() is
+// the same two-leg positive+negative check production uses -- so the suite
+// runs exactly where the fence genuinely jails.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fs from "node:fs";
@@ -17,11 +22,22 @@ import { dirname, join } from "node:path";
 import { probeSeatbelt, seatbeltBinary, seatbeltPlan } from "@utils/exec-plan-seatbelt.ts";
 
 const IS_MAC = process.platform === "darwin";
+// The real cached probe (the extra spawns are acceptable in this live-only
+// file): a darwin host WITHOUT working mediation must skip loudly, not run
+// red. Non-darwin needs no probe call -- probeSeatbelt() is null there by its
+// platform guard, and IS_MAC governs.
+const probeOk = IS_MAC ? probeSeatbelt() !== null : false;
 if (!IS_MAC) {
   console.warn(
     "[seatbelt-live] NOT macOS -- SKIPPING every live seatbelt test. " +
       "The darwin fence is pinned by exec-plan-seatbelt.test.ts (generation) and by this file (mediation); " +
       "run this file on a machine with /usr/bin/sandbox-exec to pin the posture.",
+  );
+} else if (!probeOk) {
+  console.warn(
+    "[seatbelt-live] macOS host WITHOUT working seatbelt mediation (probe failed) -- " +
+      "SKIPPING every live seatbelt test. Coverage SKIPPED, not passed: this host's fence runs " +
+      "pooled-but-unfenced; hotdog info reports 'fence: none'.",
   );
 }
 
@@ -62,7 +78,7 @@ function jail(script: string): Run {
   return run(prefixArgv!);
 }
 
-describe.skipIf(!IS_MAC)("seatbelt live jail (macOS)", () => {
+describe.skipIf(!IS_MAC || !probeOk)("seatbelt live jail (macOS)", () => {
   beforeAll(() => {
     base = fs.mkdtempSync(join(os.tmpdir(), "hotdog-seatbelt-live-"));
     fs.mkdirSync(join(base, "repo"));

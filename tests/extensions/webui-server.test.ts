@@ -550,6 +550,19 @@ describe("webui export route", () => {
     expect(headerOk.status).toBe(200);
   });
 
+  it("the 401 responses stay generic: no log bytes on a missing or garbage token", async () => {
+    const base = await start();
+    writeFileSync(join(TMP, "exp-leak.jsonl"), '{"source":"input","content":"CANARY-LOG-LINE"}\n');
+
+    for (const path of ["/export/exp-leak", "/export/exp-leak?token=", "/export/exp-leak?token=%00garbage"]) {
+      const res = await fetch(`${base}${path}`);
+      expect(res.status).toBe(401);
+      const body = await res.text();
+      expect(body).not.toContain("CANARY-LOG-LINE");
+      expect(body).not.toContain("exp-leak");
+    }
+  });
+
   it("refuses traversal and invalid session ids (400) even with a valid token", async () => {
     const base = await start();
     const token = await getToken(base);

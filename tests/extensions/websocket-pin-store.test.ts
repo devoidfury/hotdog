@@ -1,13 +1,14 @@
 // Server-side pin store suite: the pinned-id set persists to the dedicated
 // JSON file across store reloads (restart simulated by closePinStore +
 // re-read), missing/corrupt files load as empty without crashing, HOTDOG_
-// SESSIONS_DIR relocation repoints the store, delete handlers prune pins,
-// the pinned flag rides the SESSIONS and LOGS_LISTED wires, and a setPinned
-// broadcast reaches a second attached socket. Harness idioms follow
-// websocket-sidebar-rows.test.ts.
+// SESSIONS_DIR relocation repoints the store, an unwritable store home
+// fails loudly without crashing or leaving debris, delete handlers prune
+// pins, the pinned flag rides the SESSIONS and LOGS_LISTED wires, and a
+// setPinned broadcast reaches a second attached socket. Harness idioms
+// follow websocket-sidebar-rows.test.ts.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
 import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
@@ -25,6 +26,8 @@ import type { AgentLike } from "@core/session/index.ts";
 import type { AuthMiddleware } from "@extensions/websocket/auth.ts";
 import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
+import { createHooks } from "@core/hooks.ts";
+import { initializeLogger, resetLoggerForTesting, type LogEvent } from "@utils/logger.ts";
 import { createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 
 const authStub = undefined as unknown as AuthMiddleware;
@@ -78,6 +81,20 @@ function parseMessages(ws: { messages: string[] }): Array<Record<string, unknown
       }
     })
     .filter((m): m is Record<string, unknown> => m !== null);
+}
+
+/** Capture logger.error lines through the real logger plumbing (house
+ *  pattern from session-index-quarantine.test.ts). */
+function captureLoggedErrors(): string[] {
+  resetLoggerForTesting();
+  const hooks = createHooks();
+  const lines: string[] = [];
+  hooks.on("log", (data) => {
+    const ev = data as LogEvent;
+    if (ev.level === "error") lines.push(ev.message);
+  });
+  initializeLogger({ hooks, minLevel: "error", target: "none" });
+  return lines;
 }
 
 // ── The store itself ────────────────────────────────────────────────────────
@@ -149,6 +166,40 @@ describe("pin store: durability", () => {
     expect(setPinned("", true)).toBe(false);
     expect(isPinned("../escape")).toBe(false);
     expect(existsSync(pinStorePath())).toBe(false);
+  });
+
+  it("unwritable store home: honest failure -- no throw, loud log, no debris, memory stays authoritative", () => {
+    // chmod is toothless as root (lane-ledger precedent): skip there rather
+    // than fake a pass. Read-only store home = both the tmp write and the
+    // rename target the EACCES wall inside persistPins.
+    if (typeof process.getuid === "function" && process.getuid() === 0) return;
+    rmSync(pinStorePath(), { force: true });
+    closePinStore();
+    chmodSync(TMP, 0o500);
+    const logged = captureLoggedErrors();
+    try {
+      // The connection survives the flip: no throw out of the store.
+      expect(() => setPinned("pin-ro", true)).not.toThrow();
+      // Loud, never silent: exactly one logger error naming the store path.
+      expect(logged).toHaveLength(1);
+      expect(logged[0]).toContain("[pin-store]");
+      expect(logged[0]).toContain("could not persist");
+      // Documented degradation: the in-memory set stays authoritative for
+      // this process, so the sidebar keeps its pin marks.
+      expect(isPinned("pin-ro")).toBe(true);
+      // Nothing half-landed: no store file, no tmp debris in the dir.
+      expect(existsSync(pinStorePath())).toBe(false);
+      expect(readdirSync(TMP).some((f) => f.includes(".tmp"))).toBe(false);
+    } finally {
+      resetLoggerForTesting();
+      chmodSync(TMP, 0o700);
+    }
+    // The promised recovery: the next successful write re-persists the
+    // whole in-memory set, the pin that failed to land included.
+    expect(setPinned("pin-ro-2", true)).toBe(true);
+    expect(JSON.parse(readFileSync(pinStorePath(), "utf8"))).toEqual(["pin-ro", "pin-ro-2"]);
+    dropPinned("pin-ro");
+    dropPinned("pin-ro-2");
   });
 });
 

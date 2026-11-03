@@ -944,6 +944,41 @@ describe("context menus", () => {
     await tick();
   });
 
+  it("the optimistic flip reverts when the server round-trip fails", async () => {
+    // Pre-click state: the row is unpinned per the server's truth.
+    ws.fireMessage({ type: "sessions", sessions: [sessionRow] });
+    await tick();
+    expect(els(".session-item")[0]!.querySelector(".row-pin")).toBeNull();
+
+    // Click Pin: the icon flips immediately, before any server reply.
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    clearSent();
+    menuButtons().find((b) => b.textContent === "Pin")!.click();
+    await tick();
+    expect(sent("setPinned")).toHaveLength(1);
+    expect(els(".session-item")[0]!.querySelector(".row-pin")).toBeTruthy();
+    document.dispatchEvent({ type: "mousedown", target: document.body } as unknown as Event);
+    await tick();
+
+    // The round-trip FAILED: the reconcile payload disagrees with the flip
+    // (server refused the id / lost the write / store reload says no). The
+    // UI must snap back to the pre-click value -- flags on rows present in
+    // the payload win outright (applyPinnedFlags).
+    ws.fireMessage({ type: "sessions", sessions: [sessionRow] });
+    await tick();
+    expect(els(".session-item")[0]!.querySelector(".row-pin")).toBeNull();
+
+    // No ghost pin: the menu's label reads the same atom as the row icon,
+    // so it offers Pin again, never a lingering Unpin.
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    expect(menuButtons().find((b) => b.textContent === "Pin")).toBeTruthy();
+    expect(menuButtons().find((b) => b.textContent === "Unpin")).toBeUndefined();
+    document.dispatchEvent({ type: "mousedown", target: document.body } as unknown as Event);
+    await tick();
+  });
+
   it("payload flags hydrate pins; a dead row's pin is dropped, no client-side prune", async () => {
     // Another tab's pin arrives as a flagged row and drives this tab's menu.
     ws.fireMessage({ type: "sessions", sessions: [{ ...sessionRow, pinned: true }] });

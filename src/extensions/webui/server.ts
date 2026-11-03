@@ -179,6 +179,13 @@ export async function createWebuiServer(
       return Response.json({ error: "Method not allowed" }, { status: 405 });
     }
     const url = new URL(req.url);
+    // Token-in-query is accepted ONLY because the webui binds loopback by
+    // default: query strings outlive the request (browser history, any
+    // proxy/access log between client and server). If the bind story ever
+    // changes (non-loopback without a TLS-terminating proxy), revisit this
+    // -- header-only auth or a POST-download; the startup warning alone is
+    // not the mitigation. The check itself is the same validateToken /verify
+    // applies, before any log byte is read.
     const token = url.searchParams.get("token") ?? req.headers.get("x-hotdog-token") ?? "";
     if (!authMiddleware.validateToken(token)) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });

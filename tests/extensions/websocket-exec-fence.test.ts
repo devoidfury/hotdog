@@ -238,10 +238,17 @@ const LOOP_CHILD = join(import.meta.dir, "../fixtures/webui-fence-loop-child.ts"
 
 describe("loop close: webui toggle -> per-session store -> next planned fence", () => {
   it("an execFence C2S off removes the toggled session's fence from its next plan; the sibling stays fenced", async () => {
-    const proc = Bun.spawn([process.execPath, LOOP_CHILD], { stdout: "pipe", stderr: "ignore" });
-    const out = await new Response(proc.stdout).text();
+    // stderr piped (not ignored) and both streams drained concurrently: a
+    // crashed child otherwise surfaces here as missing STEP lines with no
+    // cause (and a full stderr pipe buffer could stall the child before it
+    // exits). expect message argument = house pattern, prints on failure.
+    const proc = Bun.spawn([process.execPath, LOOP_CHILD], { stdout: "pipe", stderr: "pipe" });
+    const [out, err] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
     const code = await proc.exited;
-    expect(code).toBe(0);
+    expect(code, `webui-fence-loop-child exited ${code}; child stderr:\n${err}`).toBe(0);
     const steps = new Map<string, Record<string, unknown>>();
     for (const line of out.split("\n")) {
       if (line.startsWith("STEP:")) {

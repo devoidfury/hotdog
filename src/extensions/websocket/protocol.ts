@@ -12,6 +12,11 @@ export const C2S = {
   CREATE_SESSION: "createSession",
   DELETE_SESSION: "deleteSession",
   RENAME_SESSION: "renameSession",
+  // Sidebar pin flip: { type, sessionId, pinned: boolean }. The id may name
+  // a live session OR a cold log (pins span both sidebar sections). The
+  // server persists it (pin-store.ts), then broadcasts refreshed SESSIONS
+  // and LOGS_LISTED payloads so every tab's sidebar updates.
+  SET_PINNED: "setPinned",
   LIST_SESSIONS: "listSessions",
   SWITCH_SESSION: "switchSession",
   SEND: "send",

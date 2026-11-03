@@ -1,10 +1,15 @@
 // Session lifecycle + listing frames: create, delete, rename, list,
-// profiles, and the sidebar's manual switch.
+// profiles, the sidebar's manual switch, and the server-persisted pin flip.
 
+import { isSafeSessionId } from "@core/session/session-log.ts";
+import { formatError } from "@core/error.ts";
+import { logger } from "@utils/logger.ts";
 import { S2C, errorFrame } from "./protocol.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { sessionCreatedPayload } from "./session-created.ts";
 import { attachLiveSession } from "./attach.ts";
+import { dropPinned, setPinned } from "./pin-store.ts";
+import { coldLogsPayload } from "./handlers-logs.ts";
 import type { RouteContext } from "./route-types.ts";
 
 export function handleCreateSession(ctx: RouteContext): void {
@@ -37,6 +42,10 @@ export function handleCreateSession(ctx: RouteContext): void {
 export function handleDeleteSession(ctx: RouteContext): void {
   const { ws, msg, registry } = ctx;
   if (!msg.sessionId) return;
+  // Stale-prune server-side: the pin dies with the session (dropped
+  // unconditionally -- even if the live agent vanished a moment ago, the id
+  // may still ride the cold-log list, and a deleted row must not keep it).
+  dropPinned(msg.sessionId as string);
   registry.delete(msg.sessionId as string);
   const sessionDeletedMsg = {
     type: S2C.SESSION_DELETED,
@@ -44,6 +53,36 @@ export function handleDeleteSession(ctx: RouteContext): void {
   };
   ws.send(JSON.stringify(sessionDeletedMsg));
   registry.broadcast(sessionDeletedMsg);
+}
+
+/**
+ * Flip a row's server-persisted pin (live session OR cold log id; pins
+ * span both sidebar sections). No per-socket ack: the sidebar-refresh
+ * broadcasts below reach the requester too, and the client reconciles its
+ * optimistic flip against them.
+ */
+export async function handleSetPinned(ctx: RouteContext): Promise<void> {
+  const { msg, registry } = ctx;
+  const sessionId = msg.sessionId;
+  const pinned = msg.pinned;
+  // Malformed frames are dropped like the other sidebar messages; the id
+  // carries the core session-id gate (it reaches the filesystem store).
+  if (typeof sessionId !== "string" || !isSafeSessionId(sessionId) || typeof pinned !== "boolean") {
+    return;
+  }
+  setPinned(sessionId, pinned);
+  // The sidebar-refresh broadcast idiom (attach.ts): every tab rehydrates
+  // its pin marks from the payload flags. Live rows first (cheap and sync),
+  // then the cold half -- one directory scan whose payload is shared by all
+  // sockets, so a pin on a Recent Logs row lifts there in every tab too.
+  registry.broadcast({ type: S2C.SESSIONS, sessions: registry.list() });
+  // Awaited per the settle contract. A failed scan must not fail the pin
+  // (it is already persisted): note it and let the next listLogs recover.
+  await coldLogsPayload(registry)
+    .then((logs) => registry.broadcast({ type: S2C.LOGS_LISTED, logs }))
+    .catch((err: unknown) => {
+      logger.error(`[websocket] setPinned logs refresh failed: ${formatError(err)}`);
+    });
 }
 
 export function handleRenameSession(ctx: RouteContext): void {

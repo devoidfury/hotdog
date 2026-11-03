@@ -774,10 +774,19 @@ describe("context menus", () => {
     await attach();
     els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
     await tick();
-    expect(menuButtons().map((b) => b.textContent)).toEqual(["Rename", "Delete"]);
+    // Pin leads; the contextual action (Cancel only while working), the
+    // copies and Export follow; Rename/Delete keep the bottom slots.
+    // The fixture row carries no logPath, so "Copy log file path" is hidden.
+    expect(menuButtons().map((b) => b.textContent)).toEqual([
+      "Pin",
+      "Copy session id",
+      "Export",
+      "Rename",
+      "Delete",
+    ]);
 
     clearSent();
-    menuButtons()[0]!.click(); // rename
+    menuButtons().find((b) => b.textContent === "Rename")!.click();
     await tick();
     expect(sent<{ type: string; sessionId: string; newName: string }>("renameSession")[0]).toEqual({
       type: "renameSession",
@@ -790,13 +799,13 @@ describe("context menus", () => {
     await tick();
     clearSent();
     confirmAnswer = false;
-    menuButtons()[1]!.click();
+    menuButtons().find((b) => b.textContent === "Delete")!.click();
     await tick();
     expect(sent("deleteSession")).toHaveLength(0);
     confirmAnswer = true;
     els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
     await tick();
-    menuButtons()[1]!.click();
+    menuButtons().find((b) => b.textContent === "Delete")!.click();
     await tick();
     expect(sent<{ sessionId: string }>("deleteSession")[0]?.sessionId).toBe(SID);
   });
@@ -806,7 +815,7 @@ describe("context menus", () => {
     await tick();
     promptAnswer = "   ";
     clearSent();
-    menuButtons()[0]!.click();
+    menuButtons().find((b) => b.textContent === "Rename")!.click();
     await tick();
     expect(sent("renameSession")).toHaveLength(0);
     promptAnswer = "renamed";
@@ -821,8 +830,17 @@ describe("context menus", () => {
 
     els(".log-item")[0]!.dispatchEvent(new Event("contextmenu"));
     await tick();
-    expect(menuButtons().map((b) => b.textContent)).toEqual(["Delete"]);
-    menuButtons()[0]!.click();
+    // Pin leads, the inline Continue's twin and the shared tail follow;
+    // Delete takes the bottom slot (no "Copy log file path": the fixture
+    // log row omits it).
+    expect(menuButtons().map((b) => b.textContent)).toEqual([
+      "Pin",
+      "Continue",
+      "Copy session id",
+      "Export",
+      "Delete",
+    ]);
+    menuButtons().find((b) => b.textContent === "Delete")!.click();
     await tick();
     expect(sent<{ logId: string }>("deleteLog")[0]?.logId).toBe(L1);
 
@@ -832,6 +850,47 @@ describe("context menus", () => {
     // Active log vanished: log view exits (label gone) and the list refreshes.
     expect(document.querySelector("#log-view-label")).toBeNull();
     expect(sent("listLogs").length).toBeGreaterThan(0);
+  });
+
+  it("deleting the viewed log restores the live transcript (same exit as closing log view)", async () => {
+    // Enter log view with a different log than the section fixture above.
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [logRow, { id: "l-doomed", createdAt: 1, lastActivityAt: 2, messageCount: 2 }],
+    });
+    await tick();
+    const doomed = els(".log-item").find((r) => r.textContent?.includes("l-doomed"))!;
+    expect(doomed).toBeTruthy();
+    doomed.click(); // onViewLog
+    ws.fireMessage({
+      type: "logViewed",
+      logId: "l-doomed",
+      entries: [{ source: "prompt", content: "gone-log line" }],
+    });
+    await tick();
+    expect(el("#message-list").textContent).toContain("gone-log line");
+
+    clearSent();
+    ws.fireMessage({ type: "logDeleted", logId: "l-doomed" });
+    await tick();
+    // The restore path the normal exit uses: re-switch to the live session
+    // (server replays) with the transcript cleared, never leaving the
+    // deleted log on screen for live events to append beneath.
+    expect(sent<{ sessionId: string }>("switchSession")[0]?.sessionId).toBe(SID);
+    expect(document.querySelector("#log-view-label")).toBeNull();
+
+    // The server's re-attach lands; live events render into the restored
+    // transcript, and the dead log's entries are gone.
+    ws.fireMessage({ type: "sessionCreated", sessionId: SID });
+    ws.fireMessage({ type: "userMessage", sessionId: SID, content: "live tail" });
+    await tick();
+    const text = el("#message-list").textContent ?? "";
+    expect(text).toContain("live tail");
+    expect(text).not.toContain("gone-log line");
+
+    // Leave the transcript clean-ish for the sections below.
+    ws.fireMessage({ type: "logsListed", logs: [logRow] });
+    await tick();
   });
 
   it("mousedown outside the menu dismisses it; inside does not", async () => {
@@ -846,6 +905,110 @@ describe("context menus", () => {
     expect(document.querySelector(".context-menu")).toBeNull();
     // With no menu open, stray mousedowns are ignored (no crash).
     document.dispatchEvent({ type: "mousedown", target: document.body } as unknown as Event);
+  });
+
+  it("Pin sends setPinned; the menu label follows the server payload flag", async () => {
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    const pin = menuButtons().find((b) => b.textContent === "Pin")!;
+    expect(pin).toBeTruthy();
+    clearSent();
+    pin.click();
+    await tick();
+    // Optimistic flip out on the wire; localStorage is gone entirely.
+    expect(sent<{ type: string; sessionId: string; pinned: boolean }>("setPinned")[0]).toEqual({
+      type: "setPinned",
+      sessionId: SID,
+      pinned: true,
+    });
+
+    // The label follows the broadcast, not the click: only a sessions
+    // payload carrying pinned:true moves the toggle to Unpin.
+    ws.fireMessage({ type: "sessions", sessions: [{ ...sessionRow, pinned: true }] });
+    await tick();
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    const unpin = menuButtons().find((b) => b.textContent === "Unpin")!;
+    expect(unpin).toBeTruthy();
+    clearSent();
+    unpin.click();
+    await tick();
+    expect(sent<{ type: string; sessionId: string; pinned: boolean }>("setPinned")[0]).toEqual({
+      type: "setPinned",
+      sessionId: SID,
+      pinned: false,
+    });
+
+    // Reconcile the atom back to the plain fixture state.
+    ws.fireMessage({ type: "sessions", sessions: [sessionRow] });
+    await tick();
+  });
+
+  it("payload flags hydrate pins; a dead row's pin is dropped, no client-side prune", async () => {
+    // Another tab's pin arrives as a flagged row and drives this tab's menu.
+    ws.fireMessage({ type: "sessions", sessions: [{ ...sessionRow, pinned: true }] });
+    await tick();
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    expect(menuButtons().find((b) => b.textContent === "Unpin")).toBeTruthy();
+    document.dispatchEvent({ type: "mousedown", target: document.body } as unknown as Event);
+    await tick();
+
+    // sessionDeleted drops the stale mark immediately (the server store is
+    // already pruned by the delete handler); no list round-trip needed.
+    ws.fireMessage({ type: "sessionDeleted", sessionId: SID });
+    await tick();
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    expect(menuButtons().find((b) => b.textContent === "Pin")).toBeTruthy();
+    document.dispatchEvent({ type: "mousedown", target: document.body } as unknown as Event);
+    await tick();
+  });
+
+  it("menu Cancel mirrors the row affordance: working-only, same cancel path", async () => {
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    expect(menuButtons().map((b) => b.textContent)).toEqual([
+      "Pin",
+      "Cancel",
+      "Copy session id",
+      "Export",
+      "Rename",
+      "Delete",
+    ]);
+    clearSent();
+    menuButtons().find((b) => b.textContent === "Cancel")!.click();
+    await tick();
+    // Same frame as the inline row Cancel, no confirm on either.
+    expect(sent<{ sessionId: string }>("cancel")[0]?.sessionId).toBe(SID);
+    // Reset for the sections below.
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
+    await tick();
+  });
+
+  it("Copy log file path appears when the row carries logPath", async () => {
+    ws.fireMessage({
+      type: "sessions",
+      sessions: [{ ...sessionRow, logPath: "/srv/hotdog/sessions/s-ui-0001.jsonl" }],
+    });
+    await tick();
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    expect(menuButtons().map((b) => b.textContent)).toEqual([
+      "Pin",
+      "Copy session id",
+      "Copy log file path",
+      "Export",
+      "Rename",
+      "Delete",
+    ]);
+    // Dismiss; later menus read the (restored) plain fixture again.
+    document.dispatchEvent({ type: "mousedown", target: document.body } as unknown as Event);
+    await tick();
+    ws.fireMessage({ type: "sessions", sessions: [sessionRow] });
+    await tick();
   });
 });
 

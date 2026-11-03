@@ -3,7 +3,10 @@
 // omission until the session's first usage. Existing LIST_SESSIONS pins in
 // websocket-server.test.ts stay untouched; this file adds the new fields.
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
 import { routeMessage } from "@extensions/websocket/message-routing.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
@@ -113,5 +116,63 @@ describe("SESSIONS rows: sidebar ctx payload", () => {
 
     registry.delete("ctx-direct");
     expect(registry.list().find((s) => s.id === "ctx-direct")).toBeUndefined();
+  });
+});
+
+// ── logPath on both list payloads ──────────────────────────────────────────
+// The sidebar's "Copy log file path" needs the server-side absolute path,
+// computed via the core session-path helper (never re-joined client-side).
+// Live rows (SESSIONS) and cold rows (LOGS_LISTED) both carry it.
+
+describe("SESSIONS/LOGS_LISTED rows: logPath", () => {
+  const TMP = mkdtempSync(join(tmpdir(), "hotdog-sidebar-logpath-"));
+  const COLD_ID = "cold-log-row";
+  let prevSessionsDir: string | undefined;
+
+  beforeAll(() => {
+    prevSessionsDir = process.env.HOTDOG_SESSIONS_DIR;
+    process.env.HOTDOG_SESSIONS_DIR = TMP;
+    writeFileSync(
+      join(TMP, `${COLD_ID}.jsonl`),
+      JSON.stringify({ ts: "2026-10-20T00:00:00.000Z", session_id: COLD_ID, source: "input", content: "hi" }) + "\n",
+    );
+  });
+
+  afterAll(() => {
+    if (prevSessionsDir === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
+    else process.env.HOTDOG_SESSIONS_DIR = prevSessionsDir;
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it("live rows carry logPath on the SESSIONS wire and in registry.list()", async () => {
+    const registry = makeRegistry(makeWsMockAgent({ sessionId: "path-live" }));
+    await registry.create({ profile: "manager" });
+
+    const row = (await listSessionsViaWire(registry)).find((r) => r.id === "path-live")!;
+    expect(row.logPath).toBe(join(TMP, "path-live.jsonl"));
+    expect(registry.list().find((s) => s.id === "path-live")!.logPath).toBe(join(TMP, "path-live.jsonl"));
+
+    registry.delete("path-live");
+  });
+
+  it("cold rows carry logPath on LOGS_LISTED; live ids stay filtered out", async () => {
+    const registry = makeRegistry(makeWsMockAgent({ sessionId: "path-live-2" }));
+    await registry.create({ profile: "manager" });
+
+    const ws = createWsMockWs();
+    await routeMessage(ws, { type: C2S.LIST_LOGS } as never, registry, authStub, bridgeStub, coreStub);
+    await flush();
+    const msg = JSON.parse(ws.messages[ws.messages.length - 1]!) as {
+      type: string;
+      logs: Array<Record<string, unknown>>;
+    };
+    expect(msg.type).toBe(S2C.LOGS_LISTED);
+    const cold = msg.logs.find((l) => l.id === COLD_ID)!;
+    expect(cold.logPath).toBe(join(TMP, `${COLD_ID}.jsonl`));
+    // The dir-scan fields stay put alongside the new one.
+    expect(cold.messageCount).toBe(1);
+    expect(msg.logs.find((l) => l.id === "path-live-2")).toBeUndefined();
+
+    registry.delete("path-live-2");
   });
 });

@@ -15,6 +15,7 @@ import {
   Sidebar,
   ContextMenu,
   formatDateTime,
+  sortPinned,
   type SessionInfo,
   type LogInfo,
 } from "@extensions/webui/ui/sessions.tsx";
@@ -28,7 +29,7 @@ const FULL_ID = "2s34e9825faaf89878923598";
 
 const noop = (): void => {};
 
-function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean> }): Mounted {
+function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string> }): Mounted {
   return mount(
     <Sidebar
       sessions={opts.sessions ?? []}
@@ -36,6 +37,7 @@ function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs
       workingMap={opts.working ?? new Map()}
       logs={opts.logs ?? []}
       activeLogId={null}
+      pinnedIds={opts.pinned ?? new Set()}
       sidebarWidth={300}
       sidebarMax={520}
       onCreate={noop}
@@ -255,6 +257,7 @@ function mountInteractive(
       workingMap={opts.working ?? new Map()}
       logs={opts.logs ?? []}
       activeLogId={null}
+      pinnedIds={new Set()}
       sidebarWidth={300}
       sidebarMax={520}
       onCreate={() => calls.push("create")}
@@ -363,5 +366,56 @@ describe("ContextMenu", () => {
     items[0]!.click();
     items[1]!.click();
     expect(calls).toEqual(["open", "delete"]);
+  });
+});
+
+// ── Pinned rows ─────────────────────────────────────────────────────────────
+// Pinned ids are server-sourced (pin-store.ts via the list payload flags,
+// applied in app.tsx); the Sidebar only sorts and badges: pinned rows lead
+// their own section, relative order preserved on both sides, and the two
+// sections never interleave.
+
+describe("pinned row sorting", () => {
+  it("sortPinned lifts pinned rows, keeps both groups' relative order", () => {
+    const rows = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+    expect(sortPinned(rows, new Set(["c"])).map((r) => r.id)).toEqual(["c", "a", "b", "d"]);
+    expect(sortPinned(rows, new Set(["d", "b"])).map((r) => r.id)).toEqual(["b", "d", "a", "c"]);
+    // Empty pin set is the identity; the input array is not mutated.
+    expect(sortPinned(rows, new Set()).map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+    expect(rows.map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("pinned sessions lead #session-list and pinned logs lead #log-list, independently", () => {
+    const s = (id: string): SessionInfo => ({ ...liveSession(), id });
+    const l = (id: string): LogInfo => ({ ...coldLog(), id });
+    const root = render({
+      sessions: [s("s1"), s("s2"), s("s3")],
+      logs: [l("l1"), l("l2"), l("l3")],
+      pinned: new Set(["s3", "l1"]),
+    });
+    const sessionIds = Array.from(root.querySelectorAll("#session-list .row-id")).map(
+      (n) => n.textContent,
+    );
+    const logIds = Array.from(root.querySelectorAll("#log-list .row-id")).map((n) => n.textContent);
+    expect(sessionIds).toEqual(["s3", "s1", "s2"]);
+    expect(logIds).toEqual(["l1", "l2", "l3"]);
+  });
+
+  it("pinned rows carry the line-1 pin badge; unpinned rows do not", () => {
+    const s = (id: string): SessionInfo => ({ ...liveSession(), id });
+    const l = (id: string): LogInfo => ({ ...coldLog(), id });
+    const root = render({
+      sessions: [s("s1"), s("s2")],
+      logs: [l("l1"), l("l2")],
+      pinned: new Set(["s2", "l1"]),
+    });
+    const badgesIn = (sel: string) =>
+      Array.from(root.querySelectorAll(sel)).map((row) =>
+        Boolean(row.querySelector(".row-pin")),
+      );
+    // The badge follows the pin, not the position (s2 is pinned yet first;
+    // l2 unpinned yet last).
+    expect(badgesIn("#session-list .session-item")).toEqual([true, false]);
+    expect(badgesIn("#log-list .log-item")).toEqual([true, false]);
   });
 });

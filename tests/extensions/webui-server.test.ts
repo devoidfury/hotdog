@@ -1,7 +1,10 @@
 // Tests for webui/server.ts — WebUI server creation and configuration.
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import net from "node:net";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createWebuiServer, attachSocketPeerIp } from "@extensions/webui/server.ts";
 import { DDG_SOLVE_SERVICE } from "@extensions/web-search/index.ts";
 import { ServiceRegistry } from "@core/extensions/service-registry.ts";
@@ -476,6 +479,114 @@ describe("createWebuiServer", () => {
       });
       expect(res.status).toBe(403);
     });
+  });
+});
+
+// ── Export route (GET /export/<sessionId>) ─────────────────────────────────
+// Raw JSONL download for the sidebar Export. Auth is the /verify check
+// (validateToken); the id goes through the core session-path helper, so
+// traversal/invalid ids are refused before any file lookup.
+
+describe("webui export route", () => {
+  let result: Awaited<ReturnType<typeof createWebuiServer>> | null = null;
+  let baseUrl = "";
+  let TMP = "";
+  let prevSessionsDir: string | undefined;
+
+  beforeEach(async () => {
+    TMP = mkdtempSync(join(tmpdir(), "hotdog-export-"));
+  });
+
+  afterEach(async () => {
+    if (result) {
+      result.server.stop(true);
+      result.wsServer.stopCleanupLoop();
+      result.authMiddleware.stopCleanup();
+      result = null;
+    }
+    if (prevSessionsDir === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
+    else process.env.HOTDOG_SESSIONS_DIR = prevSessionsDir;
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  async function start() {
+    prevSessionsDir = process.env.HOTDOG_SESSIONS_DIR;
+    process.env.HOTDOG_SESSIONS_DIR = TMP;
+    const core = createMockCore();
+    result = await createWebuiServer(core, {
+      port: 0,
+      host: "127.0.0.1",
+      apiKey: "test-secret",
+      sessionTokenTtlMin: 60,
+    });
+    baseUrl = `http://127.0.0.1:${result.server.port}`;
+    return baseUrl;
+  }
+
+  async function getToken(base: string): Promise<string> {
+    const res = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "test-secret" }),
+    });
+    const { token } = await res.json();
+    return token as string;
+  }
+
+  it("refuses unauthenticated and wrong-token requests before touching the log", async () => {
+    const base = await start();
+    writeFileSync(join(TMP, "exp-live.jsonl"), '{"source":"input"}\n');
+
+    const anon = await fetch(`${base}/export/exp-live`);
+    expect(anon.status).toBe(401);
+
+    const wrong = await fetch(`${base}/export/exp-live?token=not-a-real-token`);
+    expect(wrong.status).toBe(401);
+
+    // The header route is honored too (API clients).
+    const headerOk = await fetch(`${base}/export/exp-live`, {
+      headers: { "x-hotdog-token": await getToken(base) },
+    });
+    expect(headerOk.status).toBe(200);
+  });
+
+  it("refuses traversal and invalid session ids (400) even with a valid token", async () => {
+    const base = await start();
+    const token = await getToken(base);
+
+    const traversal = await fetch(`${base}/export/${encodeURIComponent("../../etc/passwd")}?token=${token}`);
+    expect(traversal.status).toBe(400);
+
+    const encodedDot = await fetch(`${base}/export/%2e%2e%2fsecret?token=${token}`);
+    expect(encodedDot.status).toBe(400);
+
+    const badChars = await fetch(`${base}/export/bad%20id?token=${token}`);
+    expect(badChars.status).toBe(400);
+
+    const empty = await fetch(`${base}/export/?token=${token}`);
+    expect(empty.status).toBe(400);
+  });
+
+  it("404s a valid-but-unknown session id", async () => {
+    const base = await start();
+    const token = await getToken(base);
+    const res = await fetch(`${base}/export/no-such-session?token=${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("returns the raw JSONL bytes with an attachment Content-Disposition", async () => {
+    const base = await start();
+    const body =
+      '{"ts":"2026-10-20T00:00:00.000Z","source":"input","content":"hi"}\n' +
+      '{"ts":"2026-10-20T00:00:01.000Z","source":"llm","content":"yo"}\n';
+    writeFileSync(join(TMP, "exp-cold.jsonl"), body);
+    const token = await getToken(base);
+
+    const res = await fetch(`${base}/export/exp-cold?token=${token}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="exp-cold.jsonl"');
+    expect(res.headers.get("content-type")).toContain("application/x-ndjson");
+    expect(await res.text()).toBe(body);
   });
 });
 

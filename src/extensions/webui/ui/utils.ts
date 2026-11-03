@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 // Shared utilities for the WebUI frontend.
 // Re-exports reactiveState/effect and the question resolver from the shared
 // utils so the UI doesn't duplicate implementations (Bun bundles the UI,
@@ -54,5 +55,38 @@ export function sanitize(str: string | null | undefined): string {
   // HTML escaping stops markup, not bidi/zero-width spoofing -- U+202E reorders rendered text inside a safe element too.
   // Neutralize code points first (they become visible [U+XXXX] tokens), then escape.
   return escapeHtml(spoofSafe(str));
+}
+
+// ── Clipboard ───────────────────────────────────────────────────────────────
+
+/**
+ * Copy text to the clipboard. navigator.clipboard needs a secure context,
+ * so a plain-HTTP (non-localhost) webui falls back to the legacy
+ * textarea + execCommand path. True when the copy was acknowledged.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the legacy path (permission denied, non-secure context).
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    // Keep it out of the layout and the scroll position.
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
 }
 

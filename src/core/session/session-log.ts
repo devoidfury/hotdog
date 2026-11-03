@@ -171,6 +171,16 @@ export function sessionPath(sessionId: string): string {
   return path;
 }
 
+/** Non-throwing sessionPath for listing payloads: undefined when the id
+ *  fails the same safety gate (the client hides features that need it). */
+export function trySessionPath(sessionId: string): string | undefined {
+  try {
+    return sessionPath(sessionId);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Shape gate for a parsed JSONL value: `null`, numbers, strings and arrays are
  * valid JSON but are not entries. Dropped at the read site, because everything

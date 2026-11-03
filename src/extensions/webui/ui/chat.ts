@@ -172,6 +172,37 @@ const CONVERSATION_EVENT_TYPES: ReadonlySet<string> = new Set([
   "systemMessage",
 ]);
 
+// Stand-in manager while log view is on: every transcript write is dropped.
+// The socket stays attached to its live session while a cold log is on
+// screen, and live events must not append beneath the log entries (see
+// viewedLogId in createChat). Explicit (not a Proxy) so the compiler catches
+// any MessageListManager method added without a no-op here.
+const LOG_VIEW_SINK: MessageListManager = {
+  handleUserMessage: () => {},
+  handleAssistantMessage: () => {},
+  handleStreamingChunk: () => {},
+  handleStreamingReasoningChunk: () => {},
+  handleStreamReset: () => {},
+  handleThinking: () => {},
+  handleToolCall: () => {},
+  handleToolResult: () => {},
+  handleCompacting: () => {},
+  handleCommandResult: () => {},
+  handleQuestion: () => {},
+  handleQuestionAnswered: () => {},
+  handleTaskProgress: () => {},
+  handleTokenUsage: () => {},
+  handleCompactionResult: () => {},
+  handleSessionState: () => {},
+  handleError: () => {},
+  finalizeAssistant: () => {},
+  clear: () => {},
+  addSystemMessage: () => {},
+  handleSystemMessage: () => {},
+  destroy: () => {},
+  renderLogEntries: () => {},
+};
+
 interface SessionCreatedMessage {
   type: "sessionCreated";
   sessionId: string;
@@ -204,6 +235,11 @@ interface SessionsMessage {
     /** Last token_usage snapshot cached server-side (sidebar ctx segment). */
     ctxUsed?: number;
     ctxTotal?: number;
+    /** Server-persisted pin flag (pin-store.ts); the client's pin marks
+     *  hydrate from these. */
+    pinned?: boolean;
+    /** Absolute JSONL log path; omitted when the server withheld it. */
+    logPath?: string;
   }>;
 }
 
@@ -469,11 +505,11 @@ interface ChatConfig {
   getMessageListContainer: () => HTMLElement | null;
   onSessionCreated?: (data: { sessionId: string; replayDelta?: boolean }) => void;
   onSessionsUpdate?: (sessions: SessionInfo[], activeSessionId: string | null) => void;
-  onLogsUpdate?: (
-    logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number; state?: string }>,
-  ) => void;
+  onLogsUpdate?: (logs: LogInfo[]) => void;
   onLogViewed?: (logId: string, entries: LogEntry[]) => void;
   onLogDeleted?: (logId: string) => void;
+  /** Broadcast notice that a session died (the app drops its stale pin). */
+  onSessionDeleted?: (sessionId: string) => void;
   onAuthFailure?: () => void;
   onWorkingMapChange?: () => void;
 }
@@ -490,6 +526,8 @@ export interface ChatController {
   switchSession: (sessionId: string) => void;
   deleteSession: (sessionId: string) => void;
   renameSession: (sessionId: string, newName: string) => void;
+  /** Flip a row's server-persisted pin (id may name a live session or a cold log). */
+  setPinned: (sessionId: string, pinned: boolean) => void;
   listSessions: () => void;
   listLogs: () => void;
   loadLog: (logId: string) => void;
@@ -546,6 +584,7 @@ export function createChat({
   onLogsUpdate,
   onLogViewed,
   onLogDeleted,
+  onSessionDeleted,
   onAuthFailure,
   onWorkingMapChange,
 }: ChatConfig): ChatController {
@@ -589,6 +628,16 @@ export function createChat({
   let attachCursor: number | null = null; // full log length at last attach
   let replayPending = false; // between sessionCreated and its cursor report
   let dirtySinceAttach = false; // live events arrived after the last attach
+
+  // Log-view mode: the cold log on screen, or null in live mode. The socket
+  // stays attached to its live session while a log is browsed (viewLog only
+  // reads entries; it never detaches), so live transcript events keep
+  // arriving and must not append into the log window (LOG_VIEW_SINK). The
+  // cursor bookkeeping is deliberately untouched for suppressed events --
+  // they rendered nowhere, so the transcript the attach cursor describes is
+  // still exactly replayable, and the next delta attach re-delivers the
+  // suppressed tail once (no duplicates, no gaps).
+  let viewedLogId: string | null = null;
 
   function saveSessionId(id: string | null): void {
     savedSessionId = id;
@@ -657,6 +706,10 @@ export function createChat({
         replayPending = true;
         attachCursor = null;
         dirtySinceAttach = false;
+        // An attach (switch-back, resume, or reconnect) replaces the visible
+        // context; log view ends with it (app.onSessionCreated clears its
+        // mirror of this state).
+        viewedLogId = null;
         // On page reload the server can send working state before
         // sessionCreated, so restore it from the map here.
         const createdSid = data.sessionId;
@@ -666,6 +719,9 @@ export function createChat({
         onSessionCreated?.({ sessionId: data.sessionId, replayDelta: data.replayDelta === true });
         return;
       case "sessionDeleted":
+        // Any tab's delete lands here: the app drops the dead row's stale
+        // pin mark (the server store is already pruned by the handler).
+        onSessionDeleted?.(data.sessionId);
         if (data.sessionId === sessionIdAtom()) {
           if (messageList) messageList.clear();
           sessionIdAtom(null);
@@ -699,16 +755,22 @@ export function createChat({
         if (data.success) {
           const switched = data.profile || "default";
           currentProfileAtom(switched);
-          messageList?.addSystemMessage(switched);
+          // The confirm bubble is a transcript write; it stays out of the
+          // log window while one is open (atoms still update either way).
+          if (viewedLogId === null) messageList?.addSystemMessage(switched);
         }
         return;
       case "logsListed":
         onLogsUpdate?.(data.logs);
         return;
       case "logViewed":
+        // Enter log-view mode: from here, live-session transcript events are
+        // dropped (LOG_VIEW_SINK) until the next attach or the log's death.
+        viewedLogId = data.logId;
         onLogViewed?.(data.logId, data.entries);
         return;
       case "logDeleted":
+        if (data.logId === viewedLogId) viewedLogId = null;
         onLogDeleted?.(data.logId);
         return;
       case "authRequired":
@@ -792,62 +854,73 @@ export function createChat({
     // be reconstructed as a delta, so the next reconnect falls back to a
     // full replay. Replay-burst events (replayPending) are exempt: they
     // arrive before the cursor report and are what it was measured for.
-    if (!replayPending && CONVERSATION_EVENT_TYPES.has(data.type)) {
+    // Log-view suppression is exempt too: the events rendered nowhere, so
+    // the cursor still describes the live transcript exactly, and the next
+    // delta attach re-delivers the suppressed tail once (no duplicates, no
+    // gaps). The sidebar spinner (sessionState/working) and the header atoms
+    // keep flowing while suppressed -- only transcript rendering stops.
+    const logViewActive = viewedLogId !== null;
+    if (!replayPending && !logViewActive && CONVERSATION_EVENT_TYPES.has(data.type)) {
       dirtySinceAttach = true;
     }
+    // Transcript writes go to the sink while a log is on screen. The
+    // remaining work in the cases below (working/title/cursor atoms, the
+    // error's optimistic working flip) is live-session state, not the
+    // visible transcript, and runs either way.
+    const list = logViewActive ? LOG_VIEW_SINK : messageList;
 
     switch (data.type) {
       case "userMessage":
-        messageList.handleUserMessage(data);
+        list.handleUserMessage(data);
         break;
       case "assistantMessage":
-        messageList.handleAssistantMessage(data);
+        list.handleAssistantMessage(data);
         break;
       case "thinking":
-        messageList.handleThinking(data);
+        list.handleThinking(data);
         break;
       case "toolCall":
-        messageList.handleToolCall(data);
+        list.handleToolCall(data);
         break;
       case "toolResult":
-        messageList.handleToolResult(data);
+        list.handleToolResult(data);
         break;
       case "compacting":
-        messageList.handleCompacting(data);
+        list.handleCompacting(data);
         break;
       case "commandResult":
-        messageList.handleCommandResult(data);
+        list.handleCommandResult(data);
         break;
       case "question":
-        messageList.handleQuestion(data);
+        list.handleQuestion(data);
         break;
       case "questionAnswered":
         if (!data.sessionId || data.sessionId === sessionIdAtom()) {
-          messageList.handleQuestionAnswered(data);
+          list.handleQuestionAnswered(data);
         }
         break;
       case "streamingChunk":
-        messageList.handleStreamingChunk(data);
+        list.handleStreamingChunk(data);
         break;
       case "streamingReasoningChunk":
-        messageList.handleStreamingReasoningChunk(data);
+        list.handleStreamingReasoningChunk(data);
         break;
       case "streamReset":
         // Drop the dead attempt's in-flight text/thinking before the
         // retry's deltas stream in (see message-list.handleStreamReset).
-        messageList.handleStreamReset();
+        list.handleStreamReset();
         break;
       case "taskProgress":
-        messageList.handleTaskProgress(data);
+        list.handleTaskProgress(data);
         break;
       case "tokenUsage":
-        messageList.handleTokenUsage(data);
+        list.handleTokenUsage(data);
         break;
       case "compactionResult":
-        messageList.handleCompactionResult(data);
+        list.handleCompactionResult(data);
         break;
       case "systemMessage":
-        messageList.handleSystemMessage(data);
+        list.handleSystemMessage(data);
         break;
       case "sessionState":
         if (data.key === "cursor") {
@@ -889,11 +962,11 @@ export function createChat({
             toolExecAtom(typeof data.value === "string" ? data.value : "");
           }
         }
-        messageList.handleSessionState(data);
+        list.handleSessionState(data);
         break;
       case "error":
         workingAtom(false);
-        messageList.handleError(data);
+        list.handleError(data);
         break;
 
       default:
@@ -1075,6 +1148,13 @@ export function createChat({
     listSessions();
   }
 
+  // Server-side pin flip (pin-store.ts). Deliberately no follow-up list:
+  // the handler's SESSIONS/LOGS_LISTED broadcast is the reconcile, and it
+  // covers the cold half too -- a re-list here would race it needlessly.
+  function setPinned(sessionId: string, pinned: boolean): void {
+    send({ type: "setPinned", sessionId, pinned });
+  }
+
   function listSessions(): void {
     send({ type: "listSessions" });
   }
@@ -1207,6 +1287,7 @@ export function createChat({
     switchSession,
     deleteSession,
     renameSession,
+    setPinned,
     listSessions,
     listLogs,
     loadLog,

@@ -430,6 +430,17 @@ body.sidebar-resizing {
     flex: 0 0 auto;
 }
 
+/* Pin marker: leads line-1 on pinned rows (server pin flag). The emoji
+   carries its own color, so no text tint here; borderless and bare to
+   read as a marker, not another status badge. */
+.row-pin {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.7rem;
+    line-height: 1.5;
+}
+
 /* Status badge: text alone, small type, faint tint + hairline border,
    minimal rounding (radius-sm, not a pill). statusClass / log-state-*
    override color + background; base covers unclassed live rows. */
@@ -1795,6 +1806,31 @@ body.sidebar-resizing {
 
 .context-menu-item-danger:hover {
     background: var(--error-soft);
+}
+
+/* ── Copy confirmation toast (app.tsx showCopyToast) ─────────────────────── */
+
+#copy-toast {
+    position: fixed;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    padding: 7px 16px;
+    border-radius: var(--radius);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s var(--ease-out);
+    user-select: none;
+}
+
+#copy-toast.visible {
+    opacity: 1;
 }
 
 /* ── Images in messages (read-tool output, file attachments) ─────────────── */

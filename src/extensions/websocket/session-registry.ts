@@ -7,6 +7,8 @@ import { HOOKS, createHooks } from "@core/hooks.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { indexSessionModel } from "@core/session/session-index.ts";
+import { trySessionPath } from "@core/session/session-log.ts";
+import { getPinnedIds } from "./pin-store.ts";
 import type { TurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
@@ -421,6 +423,12 @@ export class SessionRegistry {
     userMessageCount: number;
     ctxUsed?: number;
     ctxTotal?: number;
+    /** Server-persisted sidebar pin (pin-store.ts); always present so a
+     *  payload rebuilds the client's pin marks outright. */
+    pinned: boolean;
+    /** Absolute JSONL log path (sidebar "Copy log file path"); omitted when
+     *  the id fails the core path helper's safety gate. */
+    logPath?: string;
   }> {
     const result: Array<{
       id: string;
@@ -433,9 +441,13 @@ export class SessionRegistry {
       userMessageCount: number;
       ctxUsed?: number;
       ctxTotal?: number;
+      pinned: boolean;
+      logPath?: string;
     }> = [];
+    const pinnedIds = getPinnedIds();
     for (const [id, meta] of this.#metadata) {
       const agent = this.#sessionManager.getAgentBySessionId(id);
+      const logPath = trySessionPath(id);
       result.push({
         id,
         profile: meta.profile,
@@ -447,6 +459,8 @@ export class SessionRegistry {
         userMessageCount: meta.userMessageCount,
         ...(meta.ctxUsed !== undefined ? { ctxUsed: meta.ctxUsed } : {}),
         ...(meta.ctxTotal !== undefined ? { ctxTotal: meta.ctxTotal } : {}),
+        pinned: pinnedIds.has(id),
+        ...(logPath !== undefined ? { logPath } : {}),
       });
     }
     return result;

@@ -4,10 +4,11 @@ import { uploadLimits } from "@core/config/upload-limits.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { upgradeOriginAllowed, isLoopbackHost } from "../websocket/origin.ts";
 import { DDG_SOLVE_SERVICE } from "../web-search/index.ts";
+import { isSafeSessionId, sessionPath } from "@core/session/session-log.ts";
 import { logger } from "@utils/logger.ts";
 import { CoreContext } from "@core/extensions/types.ts";
 
-import { ExtensionError } from "@core/error.ts";
+import { ExtensionError, formatError } from "@core/error.ts";
 import { ProfileManager, type ProfileDef } from "@core/config/index.ts";
 import { BunRequest } from "bun";
 
@@ -165,6 +166,56 @@ export async function createWebuiServer(
   authMiddleware.startCleanup();
   wsServer.startCleanupLoop();
 
+  // ── Session log export ──────────────────────────────────────────────────
+  // GET /export/<sessionId> streams the raw JSONL as an attachment. The
+  // client triggers it with a hidden-anchor click (a plain navigation), so
+  // the session token rides as ?token= -- validated with exactly the
+  // authMiddleware.validateToken check /verify applies; an unauthenticated
+  // or wrong-token caller gets 401 before any log byte is touched. The id
+  // goes through the core session-path helper, which enforces the id format
+  // and the sessions-dir containment (no re-implementation here).
+  const exportSessionLog = async (req: Request): Promise<Response> => {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return Response.json({ error: "Method not allowed" }, { status: 405 });
+    }
+    const url = new URL(req.url);
+    const token = url.searchParams.get("token") ?? req.headers.get("x-hotdog-token") ?? "";
+    if (!authMiddleware.validateToken(token)) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const rawSegment = url.pathname.slice("/export/".length);
+    let sessionId: string;
+    try {
+      sessionId = decodeURIComponent(rawSegment);
+    } catch {
+      return Response.json({ error: "Invalid session id" }, { status: 400 });
+    }
+    if (!isSafeSessionId(sessionId)) {
+      return Response.json({ error: "Invalid session id" }, { status: 400 });
+    }
+    // The helper re-validates and refuses anything resolving outside the
+    // sessions dir; a throw here can only mean the id was hostile.
+    let path: string;
+    try {
+      path = sessionPath(sessionId);
+    } catch (err) {
+      logger.warn(`[webui] export rejected session id: ${formatError(err)}`);
+      return Response.json({ error: "Invalid session id" }, { status: 400 });
+    }
+    const file = Bun.file(path);
+    if (!(await file.exists())) {
+      return Response.json({ error: "Session log not found" }, { status: 404 });
+    }
+    // The id passed the SESSION_ID_RE gate, so it cannot quote-break the
+    // filename or carry separators.
+    return new Response(file, {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Content-Disposition": `attachment; filename="${sessionId}.jsonl"`,
+      },
+    });
+  };
+
   // Optional extension routes: web-search mounts its DDG captcha solve page
   // here so challenges are solvable over the webui's existing port (and its
   // existing firewall/VPN reach) instead of a second server. The service is
@@ -181,6 +232,9 @@ export async function createWebuiServer(
     routes: {
       "/": webuiFrontend,
       ...(solveService?.routes ?? {}),
+
+      // Raw JSONL log download for the sidebar's Export (see exportSessionLog).
+      "/export/*": exportSessionLog,
 
       "/verify": async function (req: BunRequest) {
         const token = req.headers.get("x-hotdog-token");

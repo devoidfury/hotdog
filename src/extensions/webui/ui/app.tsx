@@ -4,7 +4,7 @@
 // message list container is handed to the imperative renderer via ref.
 
 import { mount, type Mounted, type Ref, type DomNode } from "@utils/jsx";
-import { reactiveState, effect, shortId, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, clampSidebarWidth } from "./utils.ts";
+import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, clampSidebarWidth } from "./utils.ts";
 import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
 import {
   LoginScreen,
@@ -14,7 +14,7 @@ import {
   loginAtoms,
 } from "./login.tsx";
 import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
-import { Sidebar, ContextMenu, type ContextMenuState, type SessionInfo, type LogInfo } from "./sessions.tsx";
+import { Sidebar, ContextMenu, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo } from "./sessions.tsx";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
 import { createCoalescer } from "./batch.ts";
 import { audioBlobToWav } from "./wav.ts";
@@ -227,6 +227,9 @@ function handleAuthFailure(): void {
   logsAtom([]);
   activeLogIdAtom(null);
   contextMenuAtom(null);
+  // Pins are server truth rehydrated from list payloads: start the next
+  // login from an empty set so a dead connection can't keep stale marks.
+  pinnedIdsAtom(new Set());
   showLogin();
 }
 
@@ -277,12 +280,164 @@ function dismissContextMenu(): void {
   contextMenuAtom(null);
 }
 
+// ── Row pins (server-persisted) ─────────────────────────────────────────────
+// Pins live on the server (src/extensions/websocket/pin-store.ts) and ride
+// both list payloads as a per-row `pinned` flag; pinnedIdsAtom hydrates
+// from those flags (no localStorage, no client-side prune). The menu toggle
+// flips the atom optimistically and sends C2S setPinned; the server's
+// broadcast reconciles every tab, and a refused flip reverts on the next
+// payload. Pinned rows sort above unpinned ones within their section (see
+// sessions.tsx sortPinned).
+
+const pinnedIdsAtom = reactiveState<Set<string>>(new Set());
+
+/** Rehydrate pin marks from a list payload: the flags on the rows present
+ *  win outright, so this tab's optimistic flips reconcile and other tabs'
+ *  changes land. Rows absent from a payload are left alone (they belong to
+ *  the other list); rows that died are dropped by the delete broadcasts. */
+function applyPinnedFlags(rows: Array<{ id: string; pinned?: boolean }>): void {
+  const current = pinnedIdsAtom();
+  const next = new Set(current);
+  for (const row of rows) {
+    if (row.pinned === true) next.add(row.id);
+    else next.delete(row.id);
+  }
+  if (next.size !== current.size || [...next].some((id) => !current.has(id))) {
+    pinnedIdsAtom(next);
+  }
+}
+
+/** Forget a pin whose row just died (sessionDeleted / logDeleted). */
+function dropPinnedId(id: string): void {
+  const current = pinnedIdsAtom();
+  if (!current.has(id)) return;
+  const next = new Set(current);
+  next.delete(id);
+  pinnedIdsAtom(next);
+}
+
+function togglePinned(id: string): void {
+  const pinned = !pinnedIdsAtom().has(id);
+  const next = new Set(pinnedIdsAtom());
+  if (pinned) next.add(id);
+  else next.delete(id);
+  pinnedIdsAtom(next);
+  chat?.setPinned(id, pinned);
+}
+
+// ── Row menu shared actions ─────────────────────────────────────────────────
+
+let copyToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Ephemeral bottom-center confirmation (#copy-toast). Deliberately NOT
+ * messageList.handleSystemMessage: that appends into the transcript, and a
+ * "Copied" bubble must not land in an open cold-log window (Feature B).
+ */
+function showCopyToast(text: string): void {
+  let toast = document.getElementById("copy-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "copy-toast";
+    document.body.appendChild(toast);
+  }
+  toast.textContent = text;
+  toast.classList.add("visible");
+  if (copyToastTimer) clearTimeout(copyToastTimer);
+  copyToastTimer = setTimeout(() => {
+    toast?.classList.remove("visible");
+    copyToastTimer = null;
+  }, 1800);
+}
+
+function copyRowValue(text: string, label: string): void {
+  void copyText(text).then((ok) => {
+    showCopyToast(ok ? `${label} copied` : "Copy failed: clipboard unavailable");
+  });
+}
+
+/**
+ * Raw JSONL download through the webui server's /export route. A plain
+ * navigation (hidden anchor) cannot carry the x-hotdog-token header, so the
+ * session token rides the query string; the route checks it with exactly the
+ * /verify validation. The attachment Content-Disposition means the click
+ * downloads instead of navigating.
+ */
+function exportSessionLog(id: string): void {
+  const a = document.createElement("a");
+  a.href = `/export/${encodeURIComponent(id)}?token=${encodeURIComponent(token ?? "")}`;
+  a.download = `${id}.jsonl`;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/** Pin/Unpin toggle, one per row grammar, leading the menu. */
+function pinMenuItem(id: string): ContextMenuItem {
+  return {
+    label: pinnedIdsAtom().has(id) ? "Unpin" : "Pin",
+    onSelect: () => {
+      togglePinned(id);
+      dismissContextMenu();
+    },
+  };
+}
+
+/** Shared tail: copy id, copy path (hidden when the server omitted it), export. */
+function rowMenuTail(id: string, logPath: string | undefined): ContextMenuItem[] {
+  return [
+    {
+      label: "Copy session id",
+      onSelect: () => {
+        copyRowValue(id, "Session id");
+        dismissContextMenu();
+      },
+    },
+    ...(logPath
+      ? [
+          {
+            label: "Copy log file path",
+            onSelect: () => {
+              copyRowValue(logPath, "Log file path");
+              dismissContextMenu();
+            },
+          },
+        ]
+      : []),
+    {
+      label: "Export",
+      onSelect: () => {
+        exportSessionLog(id);
+        dismissContextMenu();
+      },
+    },
+  ];
+}
+
 function onSessionMenu(e: MouseEvent, s: SessionInfo): void {
   const displayName = s.title || s.profile || "default";
+  const isWorking = chat?.sessionWorkingMap.get(s.id) ?? false;
   contextMenuAtom({
     x: e.clientX,
     y: e.clientY,
     items: [
+      pinMenuItem(s.id),
+      ...(isWorking
+        ? [
+            {
+              label: "Cancel",
+              // The same availability and the same handler as the row's
+              // inline Cancel (which carries no confirm): the chat cancel
+              // path plus the optimistic working-flag clear.
+              onSelect: () => {
+                onCancelSession(s.id);
+                dismissContextMenu();
+              },
+            },
+          ]
+        : []),
+      ...rowMenuTail(s.id, s.logPath),
       {
         label: "Rename",
         onSelect: () => {
@@ -308,10 +463,21 @@ function onSessionMenu(e: MouseEvent, s: SessionInfo): void {
 }
 
 function onLogMenu(e: MouseEvent, logId: string): void {
+  const logPath = logsAtom().find((l) => l.id === logId)?.logPath;
   contextMenuAtom({
     x: e.clientX,
     y: e.clientY,
     items: [
+      pinMenuItem(logId),
+      {
+        label: "Continue",
+        // The inline Continue's handler verbatim (no confirm on either).
+        onSelect: () => {
+          chat?.loadLog(logId);
+          dismissContextMenu();
+        },
+      },
+      ...rowMenuTail(logId, logPath),
       {
         label: "Delete",
         danger: true,
@@ -446,9 +612,11 @@ function startChat(): void {
       // the live-row click read "same session, nothing to do".) Only the
       // attach path (sessionCreated) and explicit exits leave log view.
       sessionsAtom(sessions);
+      applyPinnedFlags(sessions);
     },
     onLogsUpdate: (logs) => {
       logsAtom(logs);
+      applyPinnedFlags(logs);
     },
     onLogViewed: (logId, entries) => {
       activeLogIdAtom(logId);
@@ -462,10 +630,19 @@ function startChat(): void {
       }
     },
     onLogDeleted: (logId) => {
+      dropPinnedId(logId);
       if (activeLogIdAtom() === logId) {
-        clearLogView();
+        // The viewed log died: restore the live transcript the same way
+        // closing the log view does (re-attach replays it), so a deleted
+        // log's entries can never sit on screen while live events
+        // un-suppress beneath them.
+        onCloseLogView();
+      } else {
+        chat?.listLogs();
       }
-      chat?.listLogs();
+    },
+    onSessionDeleted: (sessionId) => {
+      dropPinnedId(sessionId);
     },
     onAuthFailure: handleAuthFailure,
     onWorkingMapChange: () => {
@@ -853,6 +1030,7 @@ function App() {
           workingMap={chat?.sessionWorkingMap ?? new Map()}
           logs={logsAtom()}
           activeLogId={activeLogId}
+          pinnedIds={pinnedIdsAtom()}
           onCreate={() => chat?.createSession({})}
           onSwitch={(id) => {
             // Clicking the active session only matters in log view mode (switches back).
@@ -1101,6 +1279,7 @@ async function init(): Promise<void> {
     sessionsAtom,
     logsAtom,
     activeLogIdAtom,
+    pinnedIdsAtom,
     contextMenuAtom,
     completionAtom,
     attachmentsAtom,

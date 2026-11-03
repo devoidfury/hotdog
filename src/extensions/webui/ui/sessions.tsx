@@ -26,6 +26,11 @@ export interface SessionInfo {
   userMessageCount?: number;
   ctxUsed?: number;
   ctxTotal?: number;
+  /** Absolute JSONL log path on the server; omitted when the server could
+   *  not compute it (the menu then hides "Copy log file path"). */
+  logPath?: string;
+  /** Server-persisted pin flag; the sidebar's pin marks hydrate from it. */
+  pinned?: boolean;
 }
 
 export interface LogInfo {
@@ -41,6 +46,11 @@ export interface LogInfo {
   profile?: string;
   ctxUsed?: number;
   ctxTotal?: number;
+  /** Absolute JSONL log path on the server; omitted when the server could
+   *  not compute it (the menu then hides "Copy log file path"). */
+  logPath?: string;
+  /** Server-persisted pin flag; the sidebar's pin marks hydrate from it. */
+  pinned?: boolean;
 }
 
 export interface ContextMenuItem {
@@ -68,6 +78,10 @@ interface SidebarProps {
   workingMap: Map<string, boolean>;
   logs: LogInfo[];
   activeLogId: string | null;
+  /** Server-pinned row ids (pin-store.ts, hydrated from the list payload
+   *  flags; see app.tsx). Pinned rows sort above unpinned ones within their
+   *  own section, relative order kept. */
+  pinnedIds: Set<string>;
   sidebarWidth: number;
   sidebarMax: number;
   onCreate: () => void;
@@ -103,6 +117,8 @@ interface SidebarRowProps {
   /** Live rows only; absent on cold logs (structurally 0 clients). */
   connectedClients?: number;
   createdAt: number;
+  /** Server pin flag: leads line-1 with a small badge (see styles .row-pin). */
+  pinned?: boolean;
   /** Line-1 trailing action node (Cancel / Continue); null omits the slot. */
   action?: JsxChild;
   onSelect: () => void;
@@ -113,9 +129,16 @@ function rowClass(kindClass: string, active: boolean): string {
   return active ? `${kindClass} active` : kindClass;
 }
 
+/** Stable partition: pinned rows lead their section, everything else keeps
+ *  the incoming order (sort is stable, so both halves stay untouched). */
+export function sortPinned<T extends { id: string }>(rows: T[], pinned: Set<string>): T[] {
+  return [...rows].sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)));
+}
+
 /** One sidebar row in the shared grammar; the callers decide which slots exist. */
 export function SidebarRow(p: SidebarRowProps) {
   const line1: JsxChild[] = [];
+  if (p.pinned) line1.push(<span className="row-pin" title="Pinned">📌</span>);
   if (p.model) line1.push(<span className="row-model">{p.model}</span>);
   if (p.status) {
     line1.push(
@@ -180,7 +203,7 @@ export function Sidebar(p: SidebarProps) {
         <button id="new-session-btn" title="New session" onClick={p.onCreate}>+</button>
       </div>
       <div id="session-list">
-        {p.sessions.map((s) => {
+        {sortPinned(p.sessions, p.pinnedIds).map((s) => {
           const isWorking = p.workingMap.get(s.id) ?? false;
           return (
             <SidebarRow
@@ -188,6 +211,7 @@ export function Sidebar(p: SidebarProps) {
               kindClass="session-item"
               active={s.id === p.activeSessionId}
               id={s.id}
+              pinned={p.pinnedIds.has(s.id)}
               model={s.model}
               displayName={s.title || s.profile}
               status={isWorking ? "working" : "idle"}
@@ -230,12 +254,13 @@ export function Sidebar(p: SidebarProps) {
             No recent logs
           </div>
         ) : (
-          p.logs.map((log) => (
+          sortPinned(p.logs, p.pinnedIds).map((log) => (
             <SidebarRow
               key={log.id}
               kindClass="log-item"
               active={log.id === p.activeLogId}
               id={log.id}
+              pinned={p.pinnedIds.has(log.id)}
               model={log.model}
               displayName={log.profile}
               // Derived index state badges the row (idle stays unbadged).

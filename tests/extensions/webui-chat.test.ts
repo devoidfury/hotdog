@@ -666,6 +666,161 @@ describe("createChat task controls", () => {
   });
 });
 
+// ── Log-view suppression (Feature B bugfix) ───────────────────────────────
+// While a cold log is on screen the socket stays attached to its live
+// session, and live conversation events keep arriving. They must NOT render
+// into the log window, and they must NOT advance the replay-cursor
+// accounting: the cursor still describes the live transcript (the events
+// rendered nowhere), so the next delta attach re-delivers exactly the
+// suppressed tail -- once, no duplicates, no gaps.
+
+describe("createChat log-view suppression", () => {
+  const RealWebSocket = globalThis.WebSocket;
+  let chat: ChatController | null = null;
+
+  afterEach(() => {
+    chat?.disconnect();
+    chat = null;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = RealWebSocket;
+  });
+
+  function makeSuppressionChat(): { chat: ChatController; ws: FakeWebSocket; workingChanges: { n: number } } {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const container = makeContainer();
+    const workingChanges = { n: 0 };
+    chat = createChat({
+      token: null,
+      host: "localhost",
+      getMessageListContainer: () => container as unknown as HTMLElement,
+      // Same wiring as app.tsx: the attach path owns the transcript.
+      onSessionCreated: (d) => chat!.setSession(d.sessionId, d.replayDelta === true),
+      onWorkingMapChange: () => workingChanges.n++,
+    });
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+    return { chat, ws, workingChanges };
+  }
+
+  /** Live attach with a cursor report: transcript ends exactly at the cursor. */
+  function attachAtCursor(ws: FakeWebSocket, cursor: number): void {
+    ws.emit({ type: "sessionCreated", sessionId: "s1" });
+    ws.emit({ type: "userMessage", sessionId: "s1", content: "seed" });
+    ws.emit({ type: "sessionState", sessionId: "s1", key: "cursor", value: cursor });
+  }
+
+  /** Enter log view and wait for the server's logViewed frame. */
+  function enterLogView(ws: FakeWebSocket, logId = "log-9"): void {
+    chat!.viewLog(logId);
+    ws.emit({ type: "logViewed", logId, entries: [] });
+  }
+
+  /** Spies on every transcript write the suppression must cover. */
+  function spyTranscriptWrites() {
+    const list = chat!.messageListAtom()!;
+    return {
+      userMessage: spyOn(list, "handleUserMessage").mockImplementation(() => {}),
+      assistantMessage: spyOn(list, "handleAssistantMessage").mockImplementation(() => {}),
+      streamingChunk: spyOn(list, "handleStreamingChunk").mockImplementation(() => {}),
+      systemMessage: spyOn(list, "handleSystemMessage").mockImplementation(() => {}),
+      tokenUsage: spyOn(list, "handleTokenUsage").mockImplementation(() => {}),
+      error: spyOn(list, "handleError").mockImplementation(() => {}),
+    };
+  }
+
+  it("drops live transcript events while a cold log is open, keeps sidebar state live", () => {
+    const { chat, ws, workingChanges } = makeSuppressionChat();
+    attachAtCursor(ws, 2);
+    enterLogView(ws);
+    const spies = spyTranscriptWrites();
+
+    ws.emit({ type: "assistantMessage", sessionId: "s1", content: "suppressed" });
+    ws.emit({ type: "streamingChunk", sessionId: "s1", content: "tok" });
+    ws.emit({ type: "systemMessage", content: "server notice" });
+    ws.emit({ type: "tokenUsage", promptTokens: 1, cachedTokens: 0, completionTokens: 1, totalTokens: 2 });
+    ws.emit({ type: "error", message: "boom" });
+
+    expect(spies.assistantMessage).not.toHaveBeenCalled();
+    expect(spies.streamingChunk).not.toHaveBeenCalled();
+    expect(spies.systemMessage).not.toHaveBeenCalled();
+    expect(spies.tokenUsage).not.toHaveBeenCalled();
+    expect(spies.error).not.toHaveBeenCalled();
+    expect(workingChanges.n).toBe(0);
+
+    // The spinner plumbing is NOT suppressed: working pushes keep updating
+    // the per-session map, the header atom, and the app's re-poll hook.
+    ws.emit({ type: "sessionState", sessionId: "s1", key: "working", value: true });
+    expect(chat.sessionWorkingMap.get("s1")).toBe(true);
+    expect(chat.workingAtom()).toBe(true);
+    expect(workingChanges.n).toBe(1);
+  });
+
+  it("suppressed events leave the cursor clean: the reconnect delta replays exactly the tail", () => {
+    const { chat, ws } = makeSuppressionChat();
+    attachAtCursor(ws, 5);
+    enterLogView(ws);
+
+    // Three suppressed conversation events.
+    ws.emit({ type: "assistantMessage", sessionId: "s1", content: "a" });
+    ws.emit({ type: "userMessage", sessionId: "s1", content: "b" });
+    ws.emit({ type: "systemMessage", content: "c" });
+
+    // The reconnect URL must STILL carry cursor=5: the client transcript for
+    // the live session still ends exactly there, so the server's delta
+    // attach re-delivers exactly the suppressed tail, once.
+    chat.disconnect();
+    chat.connect();
+    const params = new URL(FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!.url).searchParams;
+    expect(params.get("session")).toBe("s1");
+    expect(params.get("cursor")).toBe("5");
+  });
+
+  it("switch-back ends suppression; the replayed tail renders once, live events dirty again", () => {
+    const { chat, ws } = makeSuppressionChat();
+    attachAtCursor(ws, 5);
+    enterLogView(ws);
+    const spies = spyTranscriptWrites();
+
+    ws.emit({ type: "assistantMessage", sessionId: "s1", content: "suppressed" });
+    expect(spies.assistantMessage).not.toHaveBeenCalled();
+
+    // Switch back (the app's onCloseLogView path): the switchSession frame
+    // goes out (followed by the sidebar refresh), and the server answers
+    // with a fresh attach + replay.
+    chat.switchSession("s1");
+    expect(ws.sent).toContainEqual({ type: "switchSession", sessionId: "s1" });
+    ws.emit({ type: "sessionCreated", sessionId: "s1" });
+    ws.emit({ type: "assistantMessage", sessionId: "s1", content: "suppressed" });
+    // Rendered exactly once -- on the replay, not on the live push.
+    expect(spies.assistantMessage).toHaveBeenCalledTimes(1);
+
+    // After the switch-back attach, live conversation events are visible and
+    // dirty the transcript again (full replay on the next reconnect).
+    ws.emit({ type: "sessionState", sessionId: "s1", key: "cursor", value: 6 });
+    ws.emit({ type: "userMessage", sessionId: "s1", content: "fresh" });
+    expect(spies.userMessage).toHaveBeenCalledTimes(1);
+    chat.disconnect();
+    chat.connect();
+    expect(
+      new URL(FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!.url).searchParams.get("cursor"),
+    ).toBeNull();
+  });
+
+  it("deleting the viewed log ends suppression; deleting another log does not", () => {
+    const { ws } = makeSuppressionChat();
+    attachAtCursor(ws, 2);
+    enterLogView(ws);
+    const spies = spyTranscriptWrites();
+
+    ws.emit({ type: "logDeleted", logId: "other-log" });
+    ws.emit({ type: "assistantMessage", sessionId: "s1", content: "still hidden" });
+    expect(spies.assistantMessage).not.toHaveBeenCalled();
+
+    ws.emit({ type: "logDeleted", logId: "log-9" });
+    ws.emit({ type: "assistantMessage", sessionId: "s1", content: "visible again" });
+    expect(spies.assistantMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ── Reconnect identity (session durability part 3) ────────────────────────
 // The client remembers its session across socket drops (sessionStorage in the
 // browser; the in-memory fallback under Bun) and rides it on the upgrade

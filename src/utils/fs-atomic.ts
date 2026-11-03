@@ -10,17 +10,20 @@
  * A process crashing between the temp write and the link leaves a stray `.new-*`
  * sibling; protocols that key on the final path treat it as inert litter.
  *
- * If the link fails with ENOENT right after a successful write, something outside the protocol
- * deleted the temp sibling or the parent dir. The vanish is classified, repaired (mkdir -p / rewrite temp),
+ * If the link fails with a vanished-parent errno right after a successful write, something outside
+ * the protocol deleted the temp sibling or the parent dir. The vanish is classified, repaired (mkdir -p / rewrite temp),
  * and the link retried once; the retry still goes through link(2), so EEXIST exclusivity is intact.
  * A failed repair warns with the classification (fail-open callers stay fail-open)
- * so future occurrences are diagnosable. An ENOENT from the temp write itself is NOT repaired:
- * a missing parent dir is the caller's problem, not external sabotage mid-create.
+ * so future occurrences are diagnosable. A missing parent at the temp write step is NOT repaired:
+ * the dir was already gone before we wrote -- the caller's problem, not external sabotage mid-create.
  */
 import { randomBytes } from "node:crypto";
 import { link, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { formatError } from "@core/error.ts";
 import { logger } from "./logger.ts";
+
+// BSD reports EINVAL/ENOTDIR where Linux reports ENOENT for a vanished parent at link(2).
+const VANISHED_PARENT_CODES = new Set(["ENOENT", "EINVAL", "ENOTDIR"]);
 
 async function isGone(p: string): Promise<boolean> {
   try {
@@ -52,7 +55,7 @@ export async function createExclusive(path: string, contents: string): Promise<b
     try {
       return await linkIn();
     } catch (e: unknown) {
-      if ((e as { code?: string }).code !== "ENOENT") throw e;
+      if (!VANISHED_PARENT_CODES.has((e as { code?: string }).code ?? "")) throw e;
       const [tmpGone, dirGone] = await Promise.all([isGone(tmp), isGone(dir)]);
       const gone =
         tmpGone && dirGone

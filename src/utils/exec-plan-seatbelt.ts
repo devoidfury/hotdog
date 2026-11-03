@@ -129,34 +129,46 @@ export function runSeatbeltProbe(seam?: {
 }): string | null {
   const bin = seam?.bin !== undefined ? seam.bin : seatbeltBinary();
   if (!bin) return null;
-  const base = [
-    "(version 1)",
-    "(deny default)",
-    "(allow process-exec* process-fork file-map-executable sysctl-read)",
-    `(allow file-read-metadata (literal ${seatbeltPath("/")}))`,
-    `(allow file-read-data file-read-metadata${
-      ["/usr", "/bin", "/System", "/private/etc"].map((p) => ` (subpath ${seatbeltPath(p)})`).join("")})`,
-  ].join("\n");
   let dir: string;
   let probeFile: string;
+  let probeFileReal: string;
   try {
     dir = mkdtempSync(join(tmpdir(), "hotdog-seatbelt-probe-"));
     probeFile = join(dir, "probe.txt");
     writeFileSync(probeFile, PROBE_TOKEN);
+    probeFileReal = realpathSync(probeFile); // seatbelt matches RESOLVED paths (see realPaths)
   } catch {
     // No temp dir means the probe cannot test anything: degrade like a
     // failed leg. The posture line is the reporting surface.
     return null;
   }
+  // Both spellings, deduped: the kernel may mediate the resolved path, and old-style
+  // profiles matched the given spelling; allowing both is free, one file either way.
+  const fileLiterals = [...new Set([probeFileReal, probeFile])].map((p) => `(literal ${seatbeltPath(p)})`);
+  const ancestorLiterals = [...new Set([probeFile, probeFileReal])].map((p) => `(path-ancestors ${seatbeltPath(p)})`);
+  const base = [
+    "(version 1)",
+    "(deny default)",
+    "(allow process-exec* process-fork file-map-executable sysctl-read)",
+    `(allow file-read-metadata file-test-existence (literal ${seatbeltPath("/")}))`,
+    // macOS resolution of the standard system symlinks (/etc,/tmp,/var -> /private/...).
+    `(allow file-read-metadata file-test-existence${
+      ["/private", "/etc", "/tmp", "/var"].map((p) => ` (literal ${seatbeltPath(p)})`).join("")})`,
+    `(allow file-read-data file-read-metadata file-test-existence${
+      ["/usr", "/bin", "/System", "/private/etc"].map((p) => ` (subpath ${seatbeltPath(p)})`).join("")})`,
+    // Component lookups are mediated under deny-default: walk INTO the probe dir.
+    // Metadata/test-existence only -- never data access on the ancestors.
+    `(allow file-read-metadata file-test-existence ${ancestorLiterals.join("")})`,
+  ].join("\n");
   const run = seam?.leg ?? ((argv: string[]): SeatbeltLegResult => {
     const p = Bun.spawnSync(argv);
     return { exitCode: p.exitCode, stdoutText: p.stdout.toString() };
   });
   try {
-    const allow = `${base}\n(allow file-read-data (literal ${seatbeltPath(probeFile)}))`;
+    const allow = `${base}\n(allow file-read-data file-read-metadata ${fileLiterals.join("")})`;
     const pos = run([bin, "-p", allow, "/bin/cat", probeFile]);
     if (pos.exitCode !== 0 || !pos.stdoutText.includes(PROBE_TOKEN)) return null;
-    const deny = `${allow}\n(deny file-read-data (literal ${seatbeltPath(probeFile)}))`;
+    const deny = `${allow}\n(deny file-read-data ${fileLiterals.join("")})`;
     const neg = run([bin, "-p", deny, "/bin/cat", probeFile]);
     if (neg.exitCode === 0) return null;
     return bin;
@@ -240,6 +252,16 @@ export function seatbeltProfile(opts: {
     // ro like the bwrap plan: system dirs, the interpreter's dir, and the
     // repo (the pooled runner imports it).
     `(allow file-read-data file-read-metadata${ro.map((p) => ` (subpath ${seatbeltPath(p)})`).join("")})`,
+    // Component lookups into every allowed path (ancestors are mediated under
+    // deny-default; scratch lives under TMPDIR = /private/var/folders on macOS).
+    // realpath'd inputs have symlink-free chains -- deterministic emission.
+    `(allow file-read-metadata file-test-existence${[...new Set([...ro, ...rw])]
+      .sort()
+      .map((p) => ` (path-ancestors ${seatbeltPath(p)})`).join("")})`,
+    `(allow file-read-metadata file-test-existence${
+      ["/private", "/etc", "/tmp", "/var"].map((p) => ` (literal ${seatbeltPath(p)})`).join("")})`,
+    // Shell redirect `>/dev/null`: /dev is ro-bound above; writes die without this.
+    `(allow file-write-data (literal ${seatbeltPath("/dev/null")}))`,
   ];
   // rw ONLY the session roots + scratch (last-match-wins lets an rw root
   // nested under a ro subpath keep its writes). Guarded: a filterless

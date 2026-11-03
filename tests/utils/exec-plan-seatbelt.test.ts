@@ -91,6 +91,11 @@ describe("seatbeltProfile (golden)", () => {
         '(allow mach-lookup (global-name "com.apple.logd") (global-name "com.apple.system.logger") (global-name "com.apple.system.notification_center") (global-name "com.apple.dnssd.service") (global-name "com.apple.lsd.mapdb") (global-name "com.apple.cfprefsd.daemon") (global-name "com.apple.cfprefsd.agent") (global-name "com.apple.tccd") (global-name "com.apple.tccd.system"))',
         '(allow ipc-posix-shm-read-data (ipc-posix-name "apple.shm.notification_center"))',
         `(allow file-read-data file-read-metadata${ro.map((p) => ` (subpath "${p}")`).join("")})`,
+        // Component-lookup traversal for every allowed chain: sorted-unique
+        // over ro ∪ rw (the same restatement doctrine as the ro list above).
+        `(allow file-read-metadata file-test-existence${[...new Set([...ro, ...rw])].sort().map((p) => ` (path-ancestors "${p}")`).join("")})`,
+        `(allow file-read-metadata file-test-existence (literal "/private") (literal "/etc") (literal "/tmp") (literal "/var"))`,
+        `(allow file-write-data (literal "/dev/null"))`,
         `(allow file-read* file-write*${rw.map((p) => ` (subpath "${p}")`).join("")})`,
         "(allow network-outbound network-inbound)",
       ].join("\n");
@@ -146,10 +151,10 @@ describe("seatbeltProfile escaping (SECURITY BOUNDARY)", () => {
       });
       // The quotes/backslash are escaped INSIDE the string; stripping all
       // string bodies (the way a lexer sees them) must leave exactly the
-      // 7 allow rules / 2 deny rules of the honest profile -- an escaped
+      // 10 allow rules / 2 deny rules of the honest profile -- an escaped
       // injection is gone, an unescaped one would show an extra allow.
       const grammar = strippedGrammar(profile);
-      expect(grammar.split("(allow").length - 1).toBe(7);
+      expect(grammar.split("(allow").length - 1).toBe(10);
       expect(grammar.split("(deny").length - 1).toBe(2);
       // The injection's payload was a `(allow file-write* ...` rule. No
       // honest line starts that way (the rw line reads file-read* FIRST),
@@ -183,7 +188,7 @@ describe("seatbeltProfile escaping (SECURITY BOUNDARY)", () => {
       // never interpolating unescaped. Where realpath DOES resolve them,
       // they must appear with the backslash doubled.
       const grammar = strippedGrammar(profile);
-      expect(grammar.split("(allow").length - 1).toBe(7);
+      expect(grammar.split("(allow").length - 1).toBe(10);
       expect(grammar.split("(deny").length - 1).toBe(2);
       for (const p of [bs, trailing]) {
         let real: string | null;
@@ -311,9 +316,19 @@ describe("runSeatbeltProbe two-leg logic", () => {
     // Positive leg: mediation baseline + exec granted up front + file literal.
     expect(seen[0]![2]).toContain("(deny default)");
     expect(seen[0]![2]).toContain("(allow process-exec*");
-    // Negative leg: the SAME profile plus an explicit deny of the same literal.
+    // Traversal + system-symlink resolution granted (macOS /var chain, H-traversal).
+    expect(seen[0]![2]).toContain("(path-ancestors");
+    expect(seen[0]![2]).toContain('(literal "/private")');
+    // Negative leg: the SAME profile plus an explicit deny covering the SAME
+    // file literals -- both spellings where realpath differs (macOS /var vs
+    // /private/var), deduped to one on Linux. Host-agnostic: same set, appended last.
     const probeFile = seen[0]![seen[0]!.length - 1]!;
-    expect(seen[1]![2]).toBe(`${seen[0]![2]}\n(deny file-read-data (literal "${probeFile}"))`);
+    expect(seen[1]![2]!.startsWith(seen[0]![2]!)).toBe(true);
+    const denySuffix = seen[1]![2]!.slice(seen[0]![2]!.length + 1);
+    expect(denySuffix.startsWith("(deny file-read-data ")).toBe(true);
+    expect(denySuffix).toContain(`"${probeFile}"`);
+    const literals = (line: string) => [...line.matchAll(/\(literal "([^"]*)"\)/g)].map((m) => m[1]).sort();
+    expect(literals(denySuffix)).toEqual(literals(seen[0]![2]!.split("\n").pop()!));
     expect(seen[0]!.slice(3)).toEqual(["/bin/cat", probeFile]);
     expect(seen[1]!.slice(3)).toEqual(["/bin/cat", probeFile]);
     // Cleanup: the temp dir is gone either way.

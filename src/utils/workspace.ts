@@ -316,7 +316,17 @@ export class Workspace {
       // The root itself may be a symlink; the ancestor walk accepts anything
       // under ANY root's REAL path, so the probe must too.
       const inLexicalRoot = within(probe, owner);
-      if (!inLexicalRoot && !this.#insideRealRoots(probe, realRoots)) {
+      // Compare in one domain: the hop target's lexical spelling differs from its
+      // real path whenever an ancestor is a symlink (macOS /var, /tmp) or the target
+      // is spelled through one. A hop whose REAL location is a configured root is
+      // inside the workspace by definition; a dangling hop keeps the lexical check.
+      let probeReal = probe;
+      try {
+        probeReal = fs.realpathSync.native(probe);
+      } catch {
+        // dangling: the lexical form is all we have (same check as before)
+      }
+      if (!inLexicalRoot && !this.#insideRealRoots(probeReal, realRoots)) {
         throw PathEscapeError.symlinkEscape(path);
       }
     }

@@ -557,6 +557,27 @@ describe("Workspace — multi-root", () => {
     fs.unlinkSync(fileLink);
   });
 
+  it("accepts cross-root symlinks when root spellings contain a symlink ancestor (macOS tmp shape)", () => {
+    const baseDir = path.dirname(rootA);
+    const alias = path.join(baseDir, `alias-${process.pid}`);
+    try { fs.symlinkSync(baseDir, alias); } catch { fs.rmSync(alias, { force: true }); fs.symlinkSync(baseDir, alias); }
+    const aliasedA = path.join(alias, "a");   // same dir as rootA, spelled through a symlink
+    const aliasedB = path.join(alias, "b");
+    const aliased = new Workspace([aliasedA, aliasedB]);
+    const fileLink = path.join(aliasedA, "to-b-file");
+    fs.symlinkSync(path.join(aliasedB, "same.txt"), fileLink);
+    expect(aliased.resolveSafe(fileLink)).toBe(fileLink); // threw "Symlink escape rejected" pre-patch
+    fs.unlinkSync(fileLink);
+    // containment still holds through the alias: an outside target is still rejected
+    const evil = path.join(alias, "evil.txt");
+    fs.writeFileSync(evil, "outside");
+    const evilLink = path.join(aliasedA, "out-link");
+    fs.symlinkSync(evil, evilLink);
+    expect(() => aliased.resolveSafe(evilLink)).toThrow("Symlink escape rejected");
+    fs.unlinkSync(evilLink); fs.unlinkSync(evil);
+    fs.rmSync(alias);
+  });
+
   it("rejects a dangling symlink final component under the secondary root", () => {
     const link = path.join(rootB, "dangle");
     // Unique per run, so the "never created" premise holds even with

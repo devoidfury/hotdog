@@ -201,16 +201,19 @@ export interface PlanOptions {
 export function planFor(
   opts: PlanOptions & {
     /** Override the bwrap binary (undefined = probe, null = force plain spawn).
-     *  Seatbelt's binary is Apple's fixed system shim, so on darwin only the
-     *  null meaning applies: plain spawn, no probe. */
+     *  A string forces a bwrap-shape plan on any platform: a tests-only seam
+     *  (no production caller passes it; house precedent: killGraceMs). Seatbelt's
+     *  binary is Apple's fixed system shim, never injectable. */
     binary?: string | null;
   },
 ): PlanePlanResult {
   // Platform dispatch. The bwrap path below stays byte-identical to the
   // linux behavior this file has always had; seatbelt (probe-gated, pure
   // profile generation otherwise) lives in exec-plan-seatbelt.ts.
-  if (process.platform === "darwin") {
-    if (opts.binary === null) return { prefixArgv: null, probe: null };
+  // An explicit non-null `binary` overrides the dispatch on darwin: the caller
+  // is requesting a bwrap-shape plan, and argv generation is platform-
+  // independent pure code (tests-only seam -- see the PlanOptions note).
+  if (process.platform === "darwin" && opts.binary === undefined) {
     if (probeSeatbelt() === null) return { prefixArgv: null, probe: null };
     return seatbeltPlan(opts);
   }

@@ -4,7 +4,6 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import {
   capToolResult,
@@ -31,7 +30,7 @@ import { BashTool } from "@extensions/bash-tool/index.ts";
 import { create as createSessionLog } from "@extensions/session-log/index.ts";
 import { readSessionEntries, replayEntriesIntoContext, LOG_SOURCE } from "@core/session/session-log.ts";
 import { closeSessionIndex } from "@core/session/session-index.ts";
-import { createMockCore } from "../helpers.ts";
+import { createMockCore, TMP_PARENT } from "../helpers.ts";
 
 const MARKER_RE = /--- \[output truncated, (\d+) chars elided\] ---$/;
 
@@ -468,7 +467,7 @@ describe("session log records the capped tool result", () => {
   const sessionId = `cap-log-${Date.now()}`;
 
   beforeAll(async () => {
-    dir = await fs.mkdtemp(path.join(os.tmpdir(), "hotdog-cap-log-"));
+    dir = await fs.mkdtemp(path.join(TMP_PARENT, "hotdog-cap-log-"));
     process.env.HOTDOG_SESSIONS_DIR = dir;
   });
 

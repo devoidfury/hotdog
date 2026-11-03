@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
 import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
 import { routeMessage } from "@extensions/websocket/message-routing.ts";
@@ -36,7 +36,7 @@ const bridgeStub = {
 } as unknown as WebSocketQuestionBridge;
 const coreStub = { completion: undefined } as unknown as CoreContext;
 
-const TMP = mkdtempSync(join(tmpdir(), "hotdog-pin-store-"));
+const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-pin-store-"));
 let prevSessionsDir: string | undefined;
 
 beforeAll(() => {
@@ -98,7 +98,7 @@ describe("pin store: durability", () => {
   });
 
   it("HOTDOG_SESSIONS_DIR relocation repoints the store (sessionIndexPath semantics)", () => {
-    const other = mkdtempSync(join(tmpdir(), "hotdog-pin-store-other-"));
+    const other = mkdtempSync(join(TMP_PARENT, "hotdog-pin-store-other-"));
     try {
       setPinned("pin-home-a", true);
       process.env.HOTDOG_SESSIONS_DIR = other;

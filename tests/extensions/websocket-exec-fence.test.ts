@@ -11,7 +11,6 @@
 
 import { describe, it, expect, afterEach, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
-import os from "node:os";
 import { join } from "node:path";
 import { createWsServer } from "@extensions/websocket/server.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
@@ -23,11 +22,12 @@ import {
 import { FENCE_OFF_NOTICE } from "@extensions/ui-interactive-cli/fence-command.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs } from "../mocks/websocket.ts";
 import type { AgentLike } from "@core/session/index.ts";
+import { TMP_PARENT } from "../mocks/io.ts";
 type MockWs = ReturnType<typeof createWsMockWs>;
 
 // Isolated sessions dir: the live-attach path reads logs off disk; never
 // touch the real one from a unit test.
-const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-execfence-"));
+const SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-sessions-execfence-"));
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
 });

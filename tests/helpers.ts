@@ -10,6 +10,6 @@
 export { MockLLMClient, buildStreamResponse } from './mocks/llm.ts';
 export { MockTool, simpleTool, validatedTool, failingTool, metadataTool } from './mocks/tools.ts';
 export { createFixture, MockAgent, createMockRl, createMockCore } from './mocks/fixtures.ts';
-export { resultStr, getDisplay, tmpDir, cleanupDir, toolCtx } from './mocks/io.ts';
+export { resultStr, getDisplay, tmpDir, cleanupDir, toolCtx, TMP_PARENT } from './mocks/io.ts';
 export { processAlive, waitForExit } from './mocks/process.ts';
 export { withMockFetch, jsonResponse, textResponse } from './mocks/fetch.ts';

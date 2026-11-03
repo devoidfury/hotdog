@@ -8,12 +8,11 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { create } from "@extensions/session-log/index.ts";
 import { readSessionEntries, LOG_SOURCE } from "@core/session/session-log.ts";
 import { HOOKS } from "@core/hooks.ts";
-import { createMockCore } from "../helpers.ts";
+import { createMockCore, TMP_PARENT } from "../helpers.ts";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync } from "node:fs";
-import os from "node:os";
 import { join } from "node:path";
 
-const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-ext-"));
+const SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-sessions-ext-"));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;

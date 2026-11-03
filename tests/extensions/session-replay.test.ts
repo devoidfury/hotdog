@@ -10,17 +10,16 @@ import {
   LOG_SOURCE,
 } from "@core/session/session-log.ts";
 import type { LogEntry } from "@core/session/session-log.ts";
-import { TestSessionLog } from "../mocks/io.ts";
+import { TestSessionLog, TMP_PARENT } from "../mocks/io.ts";
 import { Message } from "@core/context/message.ts";
 import { MessageLog } from "@core/context/message-log.ts";
 import { INTERRUPTED_TOOL_RESULT } from "@core/context/repair.ts";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import os from "node:os";
 import { join } from "node:path";
 
 // Use an isolated temp directory (via HOTDOG_SESSIONS_DIR) so tests never
 // write into the user's real ~/.cache/hotdog/sessions.
-const TEST_SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-replay-"));
+const TEST_SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-sessions-replay-"));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = TEST_SESSIONS_DIR;

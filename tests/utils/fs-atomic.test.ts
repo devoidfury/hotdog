@@ -183,7 +183,10 @@ describe("createExclusive vs external deletion", () => {
     result: unknown,
     warnSpy: { mock: { calls: unknown[][] } },
   ): void => {
-    expect((result as { code?: string }).code).toBe("ENOENT");
+    // Missing-file errno family: BSD link(2) reports EINVAL when the parent dir
+    // vanishes under the path, Linux reports ENOENT.
+    const code = (result as { code?: string }).code ?? "";
+    expect(["ENOENT", "EINVAL", "ENOTDIR"]).toContain(code);
     expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("repair failed"))).toBe(true);
   };
 

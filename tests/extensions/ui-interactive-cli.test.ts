@@ -2,7 +2,7 @@ import { describe, it, expect, spyOn, beforeAll, afterAll } from "bun:test";
 import readline from "node:readline";
 import { mkdtempSync, rmSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
 import {
   AsyncInteractiveCliInput,
@@ -1131,7 +1131,7 @@ describe("buildInteractiveAgent", () => {
   describe("resume", () => {
     // restoreSessionIntoAgent reads HOTDOG_SESSIONS_DIR on every call, so an
     // isolated dir keeps tests away from the real ~/.cache.
-    const sessionsDir = mkdtempSync(join(tmpdir(), "hotdog-interactive-resume-"));
+    const sessionsDir = mkdtempSync(join(TMP_PARENT, "hotdog-interactive-resume-"));
     let originalEnv: string | undefined;
 
     beforeAll(() => {

@@ -315,7 +315,9 @@ export class ProjectInfoTool {
     try {
       const { stdout } = await execFileAsync(
         "du",
-        ["--max-depth", String(maxDepth), "-h", "."],
+        // `-d` not `--max-depth`: macOS (BSD) du has no GNU long opts; `-d`/`-h`
+        // are the common set and byte-identical to `--max-depth` on GNU.
+        ["-d", String(maxDepth), "-h", "."],
         { cwd, maxBuffer: 10 * 1024 * 1024 },
       );
       let entries = stdout

@@ -11,8 +11,8 @@ import {
 } from "@extensions/compaction/completions.ts";
 import { ToolRegistry } from "@core/extensions/tool-registry.ts";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import { join } from "node:path";
+import { TMP_PARENT } from "../mocks/io.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -646,7 +646,7 @@ describe("COMMANDS_REGISTER Hook", () => {
 // ── Debug dump (compaction.out.json) ─────────────────────────────────────────
 
 describe("compact debug dump", () => {
-  const TMP = mkdtempSync(join(os.tmpdir(), "hotdog-compact-dbg-"));
+  const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-compact-dbg-"));
   const DUMP = join(TMP, "compaction.out.json");
 
   beforeAll(() => {

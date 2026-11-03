@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import net from "node:net";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
 import { createWebuiServer, attachSocketPeerIp } from "@extensions/webui/server.ts";
 import { DDG_SOLVE_SERVICE } from "@extensions/web-search/index.ts";
@@ -494,7 +494,7 @@ describe("webui export route", () => {
   let prevSessionsDir: string | undefined;
 
   beforeEach(async () => {
-    TMP = mkdtempSync(join(tmpdir(), "hotdog-export-"));
+    TMP = mkdtempSync(join(TMP_PARENT, "hotdog-export-"));
   });
 
   afterEach(async () => {

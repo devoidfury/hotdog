@@ -14,7 +14,6 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, spyOn } from "bu
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import { open as openHandle } from "node:fs/promises";
 import { join } from "node:path";
-import os from "node:os";
 
 import {
   replayEntriesIntoContext,
@@ -40,9 +39,9 @@ import {
 import { create } from "@extensions/session-log/index.ts";
 import { HOOKS } from "@core/hooks.ts";
 import type { Message } from "@core/context/message.ts";
-import { createMockCore } from "../helpers.ts";
+import { createMockCore, TMP_PARENT } from "../helpers.ts";
 
-const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-durability-"));
+const SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-durability-"));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;

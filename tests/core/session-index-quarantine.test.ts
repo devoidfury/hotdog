@@ -46,9 +46,9 @@ import {
   resetLoggerForTesting,
   type LogEvent,
 } from "@utils/logger.ts";
-import { createMockCore } from "../helpers.ts";
+import { createMockCore, TMP_PARENT } from "../helpers.ts";
 
-const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-index-quarantine-"));
+const SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-index-quarantine-"));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;

@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
 import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
 import { routeMessage } from "@extensions/websocket/message-routing.ts";
@@ -125,7 +125,7 @@ describe("SESSIONS rows: sidebar ctx payload", () => {
 // Live rows (SESSIONS) and cold rows (LOGS_LISTED) both carry it.
 
 describe("SESSIONS/LOGS_LISTED rows: logPath", () => {
-  const TMP = mkdtempSync(join(tmpdir(), "hotdog-sidebar-logpath-"));
+  const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-sidebar-logpath-"));
   const COLD_ID = "cold-log-row";
   let prevSessionsDir: string | undefined;
 

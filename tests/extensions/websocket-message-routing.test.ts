@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
 import { routeMessage } from "@extensions/websocket/message-routing.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
@@ -81,7 +81,7 @@ async function send(
 
 // ── Sessions/logs fixture dir (real files, real faults) ─────────────────────
 
-const TMP = mkdtempSync(join(tmpdir(), "hotdog-ws-routing-"));
+const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-ws-routing-"));
 const VIEW_LOG_ID = "view-img-log";
 const BROKEN_LOG_ID = "unreadable-log";
 

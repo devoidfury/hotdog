@@ -116,7 +116,9 @@ describe("file-attachment completion handler", () => {
   let originalCwd: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-attachment-completion-test-"));
+    // realpath the tmpdir parent: macOS /var -> /private/var; production canonicalizes,
+    // so raw-tmpdir expectations break there (identity on Linux).
+    tmpDir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "file-attachment-completion-test-"));
     originalCwd = process.cwd();
     process.chdir(tmpDir);
 
@@ -1103,7 +1105,7 @@ describe("file-attachment resolveFilePath (fail closed)", () => {
   it("still resolves unbounded when no workspace is supplied", () => {
     expect(resolveFilePath("/abs/path.txt", null)).toBe("/abs/path.txt");
     const originalCwd = process.cwd();
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "file-attach-nowrap-"));
+    const tmp = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "file-attach-nowrap-")); // canonical parent (macOS /var)
     try {
       process.chdir(tmp);
       const resolved = resolveFilePath("rel.txt", null);

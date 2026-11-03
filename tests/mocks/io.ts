@@ -129,3 +129,11 @@ export function toolCtx(opts: Record<string, unknown> = {}) {
 }
 
 
+
+/**
+ * Parent for tmp trees that host SQLite session indexes. macOS per-user
+ * TMPDIR (/var/folders/...) is a firmlinked managed tree where bun:sqlite WAL
+ * fails (SQLITE_IOERR_VNODE / extended DELETE); /private/tmp is a plain local
+ * dir, and os.tmpdir() IS /tmp on linux (zero change there).
+ */
+export const TMP_PARENT = process.platform === 'darwin' ? '/tmp' : os.tmpdir();

@@ -15,8 +15,8 @@ import { MessageLog } from "@core/context/message-log.ts";
 import { ToolRegistry } from "@core/extensions/tool-registry.ts";
 import { create as createCompactionExtension } from "@extensions/compaction/index.ts";
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
-import os from "node:os";
 import { join } from "node:path";
+import { TMP_PARENT } from "../mocks/io.ts";
 
 // ── Strategy-level helpers ───────────────────────────────────────────────────
 
@@ -267,7 +267,7 @@ describe("PassTheBatonStrategy", () => {
 
 // ── Extension wiring ─────────────────────────────────────────────────────────
 
-const TMP = mkdtempSync(join(os.tmpdir(), "hotdog-baton-test-"));
+const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-baton-test-"));
 
 afterAll(() => {
   rmSync(TMP, { recursive: true, force: true });

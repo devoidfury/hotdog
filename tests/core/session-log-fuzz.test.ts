@@ -32,7 +32,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { TMP_PARENT } from "../mocks/io.ts";
 
 import {
   readSessionEntries,
@@ -216,7 +216,7 @@ function expectedWindow(lo: number, m: number) {
 
 // ── Harness plumbing ────────────────────────────────────────────────
 
-const TMP = mkdtempSync(join(tmpdir(), "hotdog-sessionlog-fuzz-"));
+const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-sessionlog-fuzz-"));
 const ORIG_SESSIONS_DIR = process.env.HOTDOG_SESSIONS_DIR;
 
 beforeAll(() => {

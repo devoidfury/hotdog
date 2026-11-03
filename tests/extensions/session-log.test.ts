@@ -10,13 +10,12 @@ import {
   sessionPath,
   sessionsDir,
 } from "@core/session/session-log.ts";
-import { TestSessionLog } from "../mocks/io.ts";
+import { TestSessionLog, TMP_PARENT } from "../mocks/io.ts";
 import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import { join } from "node:path";
 
 // Use isolated temp directory to avoid scanning 100+ real session files
-const TEST_SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-log-"));
+const TEST_SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-sessions-log-"));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = TEST_SESSIONS_DIR;

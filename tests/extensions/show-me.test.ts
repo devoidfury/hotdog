@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -352,7 +352,9 @@ describe("generateImage", () => {
   });
 
   it("defaults to a timestamped file under ./generated/", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "show-me-cwd-"));
+    // realpath the tmpdir parent: macOS /var -> /private/var breaks the startsWith
+    // against the production-resolved path (identity on Linux).
+    const dir = await mkdtemp(join(realpathSync(tmpdir()), "show-me-cwd-"));
     const prevCwd = process.cwd();
     process.chdir(dir);
     try {

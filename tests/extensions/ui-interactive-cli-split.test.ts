@@ -1157,7 +1157,7 @@ describe("editor input mount", () => {
 // ui-interactive-cli.test.ts stay untouched as the byte-identity proof.
 
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { TMP_PARENT } from "../mocks/io.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
 import { createCompletionService } from "@core/completion.ts";
 import {
@@ -1561,7 +1561,7 @@ describe("editor session swap: question focus", () => {
   });
 
   it("the completion popup is suppressed while a question owns the input", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "hotdog-3b-qpopup-"));
+    const dir = mkdtempSync(join(TMP_PARENT, "hotdog-3b-qpopup-"));
     writeFileSync(join(dir, "alpha.txt"), "a");
     writeFileSync(join(dir, "alt.txt"), "b"); // keep the "al" span multi-match
     const rig = makeSessionRig();
@@ -1647,7 +1647,7 @@ describe("editor session swap: completion popup sources", () => {
   });
 
   it("readdir path completer answers synchronously at Tab", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "hotdog-3b-readdir-"));
+    const dir = mkdtempSync(join(TMP_PARENT, "hotdog-3b-readdir-"));
     writeFileSync(join(dir, "alpha.txt"), "a");
     writeFileSync(join(dir, "beta.txt"), "b");
     mkdirSync(join(dir, "subdir"));

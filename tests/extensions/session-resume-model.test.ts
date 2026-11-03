@@ -8,7 +8,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import os from "node:os";
 
 import {
   reconcileSessionIndex,
@@ -27,8 +26,9 @@ import {
   type LogEvent,
 } from "@utils/logger.ts";
 import { makeWsMockAgent, createWsMockCore, createWsMockWs } from "../mocks/websocket.ts";
+import { TMP_PARENT } from "../mocks/io.ts";
 
-const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-resume-model-"));
+const SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-resume-model-"));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;

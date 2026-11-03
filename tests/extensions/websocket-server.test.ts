@@ -15,11 +15,10 @@ import { MessageLog } from "@core/context/message-log.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import { TASK_STATUS } from "@core/session/task-types.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
-import { createFixture, simpleTool } from "../helpers.ts";
+import { createFixture, simpleTool, TMP_PARENT } from "../helpers.ts";
 import { Message } from "@core/context/message.ts";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { create as createSessionLogExt } from "@extensions/session-log/index.ts";
-import os from "node:os";
 import { join } from "node:path";
 import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
 import { HOOKS } from "@core/hooks.ts";
@@ -35,7 +34,7 @@ testRoleReg.register(developerRoleMapping);
 type MockWs = ReturnType<typeof createWsMockWs>;
 
 // Isolated sessions dir for cold-log tests (listLogs/viewLog/loadLog/deleteLog).
-const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-ws-"));
+const SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-sessions-ws-"));
 const FIXTURE_LOG_ID = "ws-fixture-log";
 
 beforeAll(() => {

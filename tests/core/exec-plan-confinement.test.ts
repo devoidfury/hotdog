@@ -97,6 +97,7 @@ let scratchSeq = 0;
 const strays = new Set<number>(); // pids we must not leave behind
 
 beforeAll(() => {
+  if (!HAS_FENCE) return; // file is skipped (no fence); base stays unset and afterAll no-ops
   base = fs.mkdtempSync(join(FENCE_HOME!, ".hotdog-fence-"));
   wsA = join(base, "ws-a");
   wsB = join(base, "ws-b");
@@ -109,6 +110,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  if (!HAS_FENCE) return; // nothing was created; base is undefined
   for (const pid of strays) {
     if (processAlive(pid)) {
       try {

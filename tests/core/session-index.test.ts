@@ -10,7 +10,6 @@ import { describe, it, expect, afterAll, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import os from "node:os";
 
 import {
   reconcileSessionIndex,
@@ -34,6 +33,7 @@ import {
   type LogEntry,
 } from "@core/session/session-log.ts";
 import type { Message } from "@core/context/message.ts";
+import { TMP_PARENT } from "../mocks/io.ts";
 
 // Fresh sessions dir per test: the index lives inside it, so per-test dirs
 // mean per-test dbs. One shared dir made every reconcile rescan the whole
@@ -93,7 +93,7 @@ function dumpIndex(): string {
 beforeEach(() => {
   // Fresh sessions dir + fresh index per test (see the SESSIONS_DIR note).
   closeSessionIndex();
-  SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-session-index-"));
+  SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-session-index-"));
   allDirs.push(SESSIONS_DIR);
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
 });

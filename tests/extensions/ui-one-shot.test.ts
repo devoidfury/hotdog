@@ -12,7 +12,7 @@ import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
 import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
 import type { Message } from "@core/context/message.ts";
 
@@ -677,7 +677,7 @@ describe("ui-one-shot extension", () => {
   describe("one-shot session resume (-s <existing-id>)", () => {
     // restoreSessionIntoAgent reads HOTDOG_SESSIONS_DIR on every call, so an
     // isolated dir keeps tests away from the real ~/.cache.
-    const sessionsDir = mkdtempSync(join(tmpdir(), "hotdog-oneshot-resume-"));
+    const sessionsDir = mkdtempSync(join(TMP_PARENT, "hotdog-oneshot-resume-"));
     let originalEnv: string | undefined;
 
     beforeAll(() => {

@@ -6,7 +6,7 @@
 // writer declarations; and the resume counter survives index deletion because
 // its source of record is the resume_attempt record in the log.
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { describe, it, expect, afterAll, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,16 +35,23 @@ import {
 } from "@core/session/session-log.ts";
 import type { Message } from "@core/context/message.ts";
 
-const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-session-index-"));
-
-beforeAll(() => {
-  process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
-});
+// Fresh sessions dir per test: the index lives inside it, so per-test dirs
+// mean per-test dbs. One shared dir made every reconcile rescan the whole
+// file's accumulated logs (slow enough to trip the 5s test timeout under
+// the coverage run) -- and a timed-out test keeps running as a zombie whose
+// in-flight reconcile then writes into the NEXT test's index, surfacing as
+// cross-test contamination (wrong logReads counts, rows that appear as
+// null). Per-test dirs contain the blast radius: a zombie only ever touches
+// its own dead home.
+let SESSIONS_DIR = "";
+const allDirs: string[] = [];
 
 afterAll(() => {
   delete process.env.HOTDOG_SESSIONS_DIR;
   closeSessionIndex();
-  try { rmSync(SESSIONS_DIR, { recursive: true, force: true }); } catch {}
+  for (const dir of allDirs) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
 });
 
 function uniqueId(prefix: string): string {
@@ -84,12 +91,11 @@ function dumpIndex(): string {
 }
 
 beforeEach(() => {
-  // Fresh index per test; logs are per-test ids so the sessions dir may
-  // still hold other tests' files -- reconcile scopes its writes per file.
+  // Fresh sessions dir + fresh index per test (see the SESSIONS_DIR note).
   closeSessionIndex();
-  rmSync(sessionIndexPath(), { force: true });
-  rmSync(`${sessionIndexPath()}-wal`, { force: true });
-  rmSync(`${sessionIndexPath()}-shm`, { force: true });
+  SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-session-index-"));
+  allDirs.push(SESSIONS_DIR);
+  process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
 });
 
 describe("reconcile", () => {

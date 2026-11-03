@@ -758,6 +758,46 @@ describe("createChat log-view suppression", () => {
     expect(workingChanges.n).toBe(1);
   });
 
+  it("every switch branch routes through the sink while a log is open", () => {
+    // Pins the FULL MessageListManager surface: any transcript-writing case
+    // added to the dispatch later must resolve to the no-op sink, not the
+    // live manager. One event per switch arm (chat.ts dispatch), each with a
+    // matching sessionId so it clears the orphan guard and reaches the sink.
+    const { chat, ws } = makeSuppressionChat();
+    attachAtCursor(ws, 2);
+    enterLogView(ws);
+    const list = chat.messageListAtom()!;
+    const all = [
+      "handleUserMessage", "handleAssistantMessage", "handleThinking",
+      "handleToolCall", "handleToolResult", "handleCompacting",
+      "handleCommandResult", "handleQuestion", "handleQuestionAnswered",
+      "handleStreamingChunk", "handleStreamingReasoningChunk", "handleStreamReset",
+      "handleTaskProgress", "handleTokenUsage", "handleCompactionResult",
+      "handleError", "addSystemMessage",
+    ] as const;
+    const spies = all.map((m) => spyOn(list, m).mockImplementation(() => {}));
+
+    ws.emit({ type: "userMessage", sessionId: "s1", content: "u" });
+    ws.emit({ type: "assistantMessage", sessionId: "s1", content: "a" });
+    ws.emit({ type: "thinking", sessionId: "s1", content: "t" });
+    ws.emit({ type: "toolCall", sessionId: "s1", name: "bash", toolCallId: "c1", arguments: "{}" });
+    ws.emit({ type: "toolResult", sessionId: "s1", toolCallId: "c1", content: "ok" });
+    ws.emit({ type: "compacting", sessionId: "s1" });
+    ws.emit({ type: "commandResult", sessionId: "s1", content: "cmd" });
+    ws.emit({ type: "question", sessionId: "s1", toolCallId: "q1", questions: [] });
+    ws.emit({ type: "questionAnswered", sessionId: "s1", toolCallId: "q1", answers: [] });
+    ws.emit({ type: "streamingChunk", sessionId: "s1", content: "c" });
+    ws.emit({ type: "streamingReasoningChunk", sessionId: "s1", content: "r" });
+    ws.emit({ type: "streamReset", sessionId: "s1" });
+    ws.emit({ type: "taskProgress", sessionId: "s1", taskId: "t1", activity: [] });
+    ws.emit({ type: "tokenUsage", sessionId: "s1", promptTokens: 1, cachedTokens: 0, completionTokens: 1, totalTokens: 2 });
+    ws.emit({ type: "compactionResult", sessionId: "s1", content: "summary" });
+    ws.emit({ type: "error", sessionId: "s1", message: "boom" });
+    ws.emit({ type: "systemMessage", sessionId: "s1", content: "sys" });
+
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
   it("suppressed events leave the cursor clean: the reconnect delta replays exactly the tail", () => {
     const { chat, ws } = makeSuppressionChat();
     attachAtCursor(ws, 5);

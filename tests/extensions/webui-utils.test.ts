@@ -1,8 +1,7 @@
-// Tests for webui/ui/utils.ts — pure utility functions.
-// Note: DOM-dependent UI components (app.ts, chat.ts, login.ts, message-list.ts,
-// sessions.ts) cannot be tested in Bun without a DOM polyfill.
+// Tests for webui/ui/utils.ts. Pure functions run anywhere; the clipboard
+// copyText path rides the dom-helper stub preloaded for the whole suite.
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import {
   formatTime,
   formatTokenCount,
@@ -10,6 +9,7 @@ import {
   sanitize,
   resolveQuestionAnswer,
   clampSidebarWidth,
+  copyText,
   SIDEBAR_MIN_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
@@ -150,5 +150,57 @@ describe("clampSidebarWidth", () => {
     expect(clampSidebarWidth(0, 4000)).toBe(SIDEBAR_MIN_WIDTH);
     expect(clampSidebarWidth(9999, 4000)).toBe(SIDEBAR_MAX_WIDTH);
     expect(clampSidebarWidth(SIDEBAR_DEFAULT_WIDTH, 1200)).toBe(SIDEBAR_DEFAULT_WIDTH);
+  });
+});
+
+// ── copyText (DOM via the preloaded dom-helper stub) ────────────────────────
+
+describe("copyText", () => {
+  const g = globalThis as Record<string, unknown>;
+  const doc = document as unknown as { execCommand?: (cmd: string) => boolean };
+  const prevNavigator = g.navigator;
+  const prevExec = doc.execCommand;
+
+  afterEach(() => {
+    g.navigator = prevNavigator;
+    doc.execCommand = prevExec;
+  });
+
+  it("resolves through the async clipboard in a secure context", async () => {
+    const written: string[] = [];
+    g.navigator = { clipboard: { writeText: async (t: string) => void written.push(t) } };
+    expect(await copyText("id-42")).toBe(true);
+    expect(written).toEqual(["id-42"]);
+  });
+
+  it("falls back to the legacy textarea copy when the clipboard API rejects", async () => {
+    g.navigator = { clipboard: { writeText: async () => { throw new Error("permission denied"); } } };
+    const seen: { cmd: string | null } = { cmd: null };
+    doc.execCommand = (c: string) => { seen.cmd = c; return true; };
+    const before = document.body.childNodes.length;
+    expect(await copyText("legacy")).toBe(true);
+    expect(seen.cmd).toBe("copy");
+    // The injected textarea is torn down with the copy, not left in the body.
+    expect(document.body.childNodes.length).toBe(before);
+  });
+
+  it("falls back when the clipboard API is absent entirely", async () => {
+    g.navigator = {};
+    const seen: { cmd: string | null } = { cmd: null };
+    doc.execCommand = (c: string) => { seen.cmd = c; return true; };
+    expect(await copyText("plain-http")).toBe(true);
+    expect(seen.cmd).toBe("copy");
+  });
+
+  it("reports failure when execCommand says no", async () => {
+    g.navigator = {};
+    doc.execCommand = () => false;
+    expect(await copyText("x")).toBe(false);
+  });
+
+  it("reports failure when execCommand throws", async () => {
+    g.navigator = {};
+    doc.execCommand = () => { throw new Error("unsupported"); };
+    expect(await copyText("x")).toBe(false);
   });
 });

@@ -257,6 +257,11 @@ class DElement extends DNode {
     this.selectionStart = start;
     this.selectionEnd = end;
   }
+  /** Select the whole value (legacy clipboard-copy path in utils.copyText). */
+  select(): void {
+    this.selectionStart = 0;
+    this.selectionEnd = this.value.length;
+  }
 
   // Minimal CSSStyleDeclaration surface (setProperty/getProperty): app.tsx
   // drives --sidebar-width here and textarea autoResize writes height.
@@ -646,6 +651,12 @@ class DDocument extends DNode {
 
   createElement(tag: string): DElement {
     return new DElement(tag, this);
+  }
+
+  /** Legacy clipboard hook (utils.copyText fallback). Tests replace this to
+   *  drive the success / false / throw branches. */
+  execCommand(_name: string): boolean {
+    return true;
   }
 
   createTextNode(data: string): DText {

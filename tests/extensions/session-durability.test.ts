@@ -39,9 +39,26 @@ import {
 import { create } from "@extensions/session-log/index.ts";
 import { HOOKS } from "@core/hooks.ts";
 import type { Message } from "@core/context/message.ts";
-import { createMockCore, TMP_PARENT } from "../helpers.ts";
+import { createMockCore, TMP_PARENT, walLifecycleProbe } from "../helpers.ts";
 
 const SESSIONS_DIR = mkdtempSync(join(TMP_PARENT, "hotdog-durability-"));
+
+// Host gate: bun on macOS links Apple's proprietary SQLite build whose WAL
+// lifecycle breaks on macOS 26 (oven-sh/bun#45171 family). Everything past
+// the kill -9 crash test reads the index AFTER a SIGKILL-mid-WAL -- on a
+// broken host those opens throw SQLITE_IOERR_VNODE, and the kill test
+// "passing" while recovery is broken is the poisoned-WAL masking pattern,
+// so the crash suite gates as a whole (the kill -9 describe + every
+// describe that touches the index afterward).
+const WAL_OK = walLifecycleProbe();
+if (!WAL_OK.recovery) {
+  console.warn(
+    "[session-durability] bun:sqlite WAL lifecycle BROKEN on this host (recovery=" +
+      WAL_OK.recovery +
+      ") -- SKIPPING crash-recovery suite. Coverage SKIPPED not passed: known bun/Apple-SQLite WAL " +
+      "issue on macOS 26 (oven-sh/bun#45171 family); run on a host where the probe passes.",
+  );
+}
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
@@ -351,7 +368,7 @@ describe("question_asked records and pending questions", () => {
   });
 });
 
-describe("kill -9 mid-side-effect (definition of done)", () => {
+describe.skipIf(!WAL_OK.recovery)("kill -9 mid-side-effect (definition of done)", () => {
   it("side effect lands exactly once and replays as outcome-unknown", async () => {
     const sessionId = uniqueId("crash");
     const counterPath = join(SESSIONS_DIR, `counter-${sessionId}`);
@@ -410,7 +427,7 @@ function openCallIds(sessionId: string): string[] {
     .map((r) => r.tool_call_id);
 }
 
-describe("session index mirrors durability commit points", () => {
+describe.skipIf(!WAL_OK.recovery)("session index mirrors durability commit points", () => {
   it("started/question/result flow through the real hooks; interrupted comes only from reconcile", async () => {
     const sessionId = uniqueId("mirror");
     try {
@@ -490,7 +507,7 @@ describe("session index mirrors durability commit points", () => {
   });
 });
 
-describe("resume_attempt record (livelock cap counter)", () => {
+describe.skipIf(!WAL_OK.recovery)("resume_attempt record (livelock cap counter)", () => {
   it("restoreSessionIntoAgent fsyncs the record, mirrors the count, replays it silently", async () => {
     const sessionId = uniqueId("resume");
     const logPath = join(SESSIONS_DIR, `${sessionId}.jsonl`);
@@ -664,7 +681,7 @@ describe("consecutive auto-resume counter", () => {
   });
 });
 
-describe("livelock cap on auto-resume (restoreSessionIntoAgent)", () => {
+describe.skipIf(!WAL_OK.recovery)("livelock cap on auto-resume (restoreSessionIntoAgent)", () => {
   /** Write a log: one input, then n auto resume attempts. */
   function writeLivelockLog(sessionId: string, autos: number): void {
     const lines = [JSON.stringify(entry({ session_id: sessionId, source: LOG_SOURCE.INPUT, content: "work" }))];

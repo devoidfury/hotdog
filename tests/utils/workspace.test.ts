@@ -654,7 +654,7 @@ describe("expandWorkspacePaths", () => {
   let cwdBefore: string;
 
   beforeAll(() => {
-    base = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-expand-"));
+    base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "hotdog-test-expand-")); // canonical parent: macOS cwd() realpaths /var -> /private/var
     fs.mkdirSync(path.join(base, "proj"), { recursive: true });
     fs.mkdirSync(path.join(base, "glob", "one"), { recursive: true });
     fs.mkdirSync(path.join(base, "glob", "two"), { recursive: true });

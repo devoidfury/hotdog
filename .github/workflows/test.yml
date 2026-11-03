@@ -130,6 +130,20 @@ jobs:
             exit 1
           }
 
+      # Forensics for the WAL lifecycle gate (walLifecycleProbe) on this
+      # runner: bun links Apple's proprietary SQLite build; its WAL
+      # lifecycle break on macOS 26 (oven-sh/bun#45171, IOERR_VNODE on the
+      # -shm map) is what silences the crash-recovery suites. Output is
+      # diagnostic only -- the suites' own probe gate makes the decision,
+      # so this step NEVER fails.
+      - name: "SQLite WAL diagnostics"
+        run: |
+          set +e
+          bun -e 'import { Database } from "bun:sqlite"; const db = new Database(":memory:"); console.log("sqlite_version=" + db.query("SELECT sqlite_version() v").get().v, "compile_options=" + db.query("PRAGMA compile_options").all().length);'
+          stat -f /tmp
+          bun -e 'const { walLifecycleProbe } = await import("./tests/mocks/wal-lifecycle.ts"); console.log("walLifecycleProbe=" + JSON.stringify(walLifecycleProbe()));' \
+            || echo "walLifecycleProbe=IMPORT/BOOT-FAILED (output above)"
+
       - name: "Run tests"
         run: bun run loud-test
         

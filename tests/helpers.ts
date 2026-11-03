@@ -13,3 +13,4 @@ export { createFixture, MockAgent, createMockRl, createMockCore } from './mocks/
 export { resultStr, getDisplay, tmpDir, cleanupDir, toolCtx, TMP_PARENT } from './mocks/io.ts';
 export { processAlive, waitForExit } from './mocks/process.ts';
 export { withMockFetch, jsonResponse, textResponse } from './mocks/fetch.ts';
+export { walLifecycleProbe } from './mocks/wal-lifecycle.ts';

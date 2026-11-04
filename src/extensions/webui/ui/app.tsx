@@ -141,8 +141,12 @@ const chatInputRef = domRef<HTMLTextAreaElement>((el) => {
       autoResize(el);
     }
     window.addEventListener(DRAFT_LEAVE_EVENT, flushDraftOnLeave);
+    window.addEventListener("dragover", swallowFileDrop);
+    window.addEventListener("drop", swallowFileDrop);
   } else {
     window.removeEventListener(DRAFT_LEAVE_EVENT, flushDraftOnLeave);
+    window.removeEventListener("dragover", swallowFileDrop);
+    window.removeEventListener("drop", swallowFileDrop);
   }
 });
 const profileSelectRef = domRef<HTMLSelectElement>((el) => {
@@ -772,14 +776,19 @@ async function onFilesPicked(e: Event): Promise<void> {
   const picked = Array.from(input.files ?? []);
   input.value = ""; // Allow re-picking the same file after a removal.
   if (picked.length === 0) return;
+  await stageFiles(picked);
+}
 
+/** Stage picked/pasted/dropped files as pending attachments. One shared path
+ *  for all three composer gestures; size/vision limits stay server-side. */
+async function stageFiles(picked: File[]): Promise<void> {
   const added: PendingAttachment[] = [];
   for (const file of picked) {
     if (file.size === 0) continue;
     try {
       added.push({
         id: `att-${++attachmentSeq}`,
-        name: file.name,
+        name: displayNameFor(file),
         mimeType: file.type || "application/octet-stream",
         size: file.size,
         data: await readFileAsBase64(file),
@@ -791,8 +800,94 @@ async function onFilesPicked(e: Event): Promise<void> {
   if (added.length > 0) attachmentsAtom([...attachmentsAtom(), ...added]);
 }
 
+/** Pasted screenshots arrive as anonymous blobs ("blob"/empty name); give
+ *  them a timestamped name so the chip and the server-side label mean something. */
+function displayNameFor(file: File): string {
+  if (file.name && file.name !== "blob") return file.name;
+  const ext = file.type.split("/")[1]?.split("+")[0] || "bin";
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  return `pasted-${stamp}.${ext}`;
+}
+
 function removeAttachment(id: string): void {
   attachmentsAtom(attachmentsAtom().filter((a) => a.id !== id));
+}
+
+// ── Paste & drag-drop into the composer ─────────────────────────────────────
+// Both feed the same stageFiles pipeline as the Attach button. Plain-text
+// pastes are never intercepted; a mixed text+file paste keeps both.
+
+function hasFiles(dt: DataTransfer | null): boolean {
+  return Array.from(dt?.types ?? []).includes("Files");
+}
+
+function onComposerPaste(e: ClipboardEvent): void {
+  const files = Array.from(e.clipboardData?.files ?? []);
+  if (files.length === 0) return; // plain text: let the browser paste it
+  e.preventDefault();
+  const el = e.currentTarget as HTMLTextAreaElement;
+  const text = e.clipboardData?.getData("text/plain") ?? "";
+  if (text) {
+    // Same splice pattern as applyCompletion: insert at the caret.
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    el.value = el.value.slice(0, start) + text + el.value.slice(end);
+    el.setSelectionRange(start + text.length, start + text.length);
+    autoResize(el);
+    scheduleDraftSave(() => el.value);
+  }
+  void stageFiles(files);
+}
+
+// dragenter/dragleave fire for every node crossed while hovering the composer,
+// so track depth and only clear the highlight once the pointer truly leaves.
+let dragDepth = 0;
+
+function setDragHighlight(el: EventTarget | null, on: boolean): void {
+  (el as HTMLElement | null)?.classList.toggle("drag-over", on);
+}
+
+function onComposerDragenter(e: DragEvent): void {
+  if (!hasFiles(e.dataTransfer) || activeLogIdAtom()) return;
+  e.preventDefault(); // without this the drop never fires on the composer
+  dragDepth++;
+  setDragHighlight(e.currentTarget, true);
+}
+
+function onComposerDragover(e: DragEvent): void {
+  if (hasFiles(e.dataTransfer) && !activeLogIdAtom()) e.preventDefault();
+}
+
+function onComposerDragleave(e: DragEvent): void {
+  if (!hasFiles(e.dataTransfer)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) setDragHighlight(e.currentTarget, false);
+}
+
+function onComposerDrop(e: DragEvent): void {
+  dragDepth = 0;
+  setDragHighlight(e.currentTarget, false);
+  if (activeLogIdAtom()) return; // read-only log view: ignore file drops
+  const files = Array.from(e.dataTransfer?.files ?? []);
+  if (files.length === 0) return;
+  e.preventDefault();
+  e.stopPropagation(); // the window guard would otherwise re-handle it
+  void stageFiles(files);
+  chatInputEl?.focus();
+}
+
+// Escape mid-drag fires dragcancel with no dragleave: reset the depth so a
+// later drag-enter starts clean.
+function onComposerDragcancel(e: DragEvent): void {
+  dragDepth = 0;
+  setDragHighlight(e.currentTarget, false);
+}
+
+/** Dropping a file anywhere else on the page would navigate away to the blob
+ *  and lose the composer draft; swallow it instead. The composer's own drop
+ *  handler runs first (deeper target), so accepted drops are unaffected. */
+function swallowFileDrop(e: DragEvent): void {
+  if (hasFiles(e.dataTransfer)) e.preventDefault();
 }
 
 // ── Push-to-talk dictation ──────────────────────────────────────────────────
@@ -1161,7 +1256,15 @@ function App() {
           />
 
           <div id="input-area" className={activeLogId ? "read-only" : undefined}>
-            <form id="chat-form" onSubmit={onChatSubmit}>
+            <form
+              id="chat-form"
+              onSubmit={onChatSubmit}
+              onDragenter={onComposerDragenter}
+              onDragover={onComposerDragover}
+              onDragleave={onComposerDragleave}
+              onDragcancel={onComposerDragcancel}
+              onDrop={onComposerDrop}
+            >
               {completionMenu ? (
                 <div id="completion-menu">
                   {completionMenu.options.map((o, i) => (
@@ -1215,6 +1318,7 @@ function App() {
                   }
                 }}
                 onBlur={dismissCompletion}
+                onPaste={onComposerPaste}
                 onKeydown={onChatKeydown}
               />
               <div id="composer-actions">

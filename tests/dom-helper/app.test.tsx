@@ -540,6 +540,109 @@ describe("attachments", () => {
     expect(els(".attachment-size").map((n) => n.textContent)).toEqual(["5 B", "1.5 KB", "3.0 MB"]);
     await tick();
   });
+
+  // ── Paste & drag-drop ─────────────────────────────────────────────────────
+
+  function paste(clipboard: { types: string[]; files: unknown[]; text?: string }): { prevented: boolean } {
+    const input = el("#chat-input");
+    const state = { prevented: false };
+    input.dispatchEvent({
+      type: "paste",
+      currentTarget: input,
+      clipboardData: {
+        types: clipboard.types,
+        files: clipboard.files,
+        getData: (kind: string) => (kind === "text/plain" ? clipboard.text ?? "" : ""),
+      },
+      preventDefault: () => {
+        state.prevented = true;
+      },
+    } as unknown as Event);
+    return state;
+  }
+
+  function dragForm(type: string, dt: { types: string[]; files?: unknown[] }): { prevented: boolean } {
+    const form = el("#chat-form");
+    const state = { prevented: false };
+    form.dispatchEvent({
+      type,
+      currentTarget: form,
+      dataTransfer: dt,
+      preventDefault: () => {
+        state.prevented = true;
+      },
+      stopPropagation: () => {},
+    } as unknown as Event);
+    return state;
+  }
+
+  it("pasted files attach and the paste is intercepted", async () => {
+    dropAll();
+    await tick();
+    const r = paste({ types: ["Files"], files: [makeFile("shot.png", "image/png", 64)] });
+    expect(r.prevented).toBe(true);
+    await tick();
+    expect(els(".attachment-chip")).toHaveLength(1);
+    expect(els(".attachment-name")[0]!.textContent).toBe("shot.png");
+  });
+
+  it("an anonymous pasted screenshot gets a timestamped name", async () => {
+    dropAll();
+    await tick();
+    paste({ types: ["Files"], files: [makeFile("blob", "image/png", 32)] });
+    await tick();
+    expect(els(".attachment-name")[0]!.textContent).toMatch(/^pasted-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.png$/);
+  });
+
+  it("a mixed text+file paste keeps both", async () => {
+    dropAll();
+    await tick();
+    setComposer("");
+    paste({ types: ["Files", "text/plain"], files: [makeFile("d.txt", "text/plain", 8)], text: "look: " });
+    await tick();
+    expect((el("#chat-input") as unknown as { value: string }).value).toBe("look: ");
+    expect(els(".attachment-chip")).toHaveLength(1);
+  });
+
+  it("plain-text paste is left to the browser", () => {
+    const r = paste({ types: ["text/plain"], files: [], text: "hello" });
+    expect(r.prevented).toBe(false);
+  });
+
+  it("dragging files highlights the composer; drop attaches and clears it", async () => {
+    dropAll();
+    await tick();
+    const files = [makeFile("drop.txt", "text/plain", 16)];
+    const dt = { types: ["Files"], files };
+    dragForm("dragenter", dt);
+    expect(el("#chat-form").classList.contains("drag-over")).toBe(true);
+    expect(dragForm("dragover", dt).prevented).toBe(true);
+    const dropped = dragForm("drop", dt);
+    expect(dropped.prevented).toBe(true);
+    expect(el("#chat-form").classList.contains("drag-over")).toBe(false);
+    await tick();
+    expect(els(".attachment-chip")).toHaveLength(1);
+    expect(els(".attachment-name")[0]!.textContent).toBe("drop.txt");
+  });
+
+  it("dragcancel clears the highlight so the next drag starts clean", async () => {
+    const dt = { types: ["Files"], files: [] };
+    dragForm("dragenter", dt);
+    dragForm("dragenter", dt); // nested crossing: depth 2
+    dragForm("dragcancel", dt);
+    expect(el("#chat-form").classList.contains("drag-over")).toBe(false);
+    dragForm("dragenter", dt);
+    expect(el("#chat-form").classList.contains("drag-over")).toBe(true);
+    dragForm("dragcancel", dt);
+  });
+
+  it("dragleave for a non-file drag and a stray drop without files are inert", () => {
+    const before = els(".attachment-chip").length;
+    dragForm("dragleave", { types: ["text/plain"] });
+    expect(el("#chat-form").classList.contains("drag-over")).toBe(false);
+    expect(dragForm("drop", { types: ["text/plain"], files: [] }).prevented).toBe(false);
+    expect(els(".attachment-chip")).toHaveLength(before);
+  });
 });
 
 // ── Push-to-talk ────────────────────────────────────────────────────────────

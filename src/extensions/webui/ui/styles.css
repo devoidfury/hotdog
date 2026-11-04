@@ -1734,6 +1734,13 @@ body.sidebar-resizing {
     box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* File drag hovering the composer (see onComposerDragenter in app.tsx). */
+#chat-form.drag-over {
+    border-style: dashed;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 #chat-input {
     width: 100%;
     padding: 2px 4px;

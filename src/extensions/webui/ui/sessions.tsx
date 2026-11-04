@@ -2,8 +2,12 @@
 // Session/log sidebar. Both lists share one row grammar:
 //
 //   provider/model      [status]            [action]
-//   profile  (connected client?)
-//   start date & time . (ctx used / ctx total) . (msg count)
+//   profile
+//   start date & time . (ctx used / ctx total) . (msg count)  [plug n]
+//
+// The connected-client count shows as the line-3 plug pinned to the card's
+// bottom-right (icon + number for 2+, icon only for 1, nothing at
+// 0/unattested) -- never a text metric.
 //
 // No literal parens anywhere: status renders as a text badge, profile as
 // quiet muted text. Missing segments are omitted outright, never rendered
@@ -23,6 +27,8 @@ export interface SessionInfo {
   model?: string;
   createdAt: number;
   lastActivityAt: number;
+  /** Live websocket clients on this session (registry metadata via the list
+   *  payload). Shown as the card's bottom-right plug, never as text. */
   connectedClients: number;
   /** Sidebar row slots: user-message tally and the last token_usage snapshot. */
   userMessageCount?: number;
@@ -115,7 +121,8 @@ interface SidebarRowProps {
   ctxUsed?: number;
   ctxTotal?: number;
   messageCount?: number;
-  /** Live rows only; absent on cold logs (structurally 0 clients). */
+  /** Live rows only; absent on cold logs (structurally 0 clients). Renders
+   *  as the line-2 plug icon, never a text metric (see styles .row-clients). */
   connectedClients?: number;
   createdAt: number;
   /** Server pin flag: leads line-1 with a small badge (see styles .row-pin). */
@@ -151,19 +158,17 @@ export function SidebarRow(p: SidebarRowProps) {
   }
   if (p.action) line1.push(<span className="row-action row-action-right">{p.action}</span>);
 
-  // Profile tag leads; the client metric rides beside it (line 2's only
-  // other slot, so no join dot -- the profile/metric juxtaposition is kept).
+  // Line 2 belongs to the profile tag alone (title wins, both-missing omits).
   const line2: JsxChild[] = [];
   if (p.displayName) line2.push(<span className="row-profile">{p.displayName}</span>);
-  const clients =
-    p.connectedClients != null && p.connectedClients > 0
-      ? `${p.connectedClients} client${p.connectedClients > 1 ? "s" : ""}`
-      : null;
-  if (clients) line2.push(<span className="row-metric">{clients}</span>);
 
   // Bottom row: date . ctx . msgs. The date always leads, so every metric
   // that rides gets a sep; unattested slots are omitted outright (legacy
-  // logs: date . msgs).
+  // logs: date . msgs). The live plug trails at the card's bottom-right
+  // (row-action-right idiom, margin-left:auto): a CSS mask glyph (see
+  // .row-clients in styles.css), no raw svg through the client mount.
+  // Rules: 0/unattested renders nothing; 1 is icon-only; 2+ rides the
+  // number; the native title is the tooltip.
   const line3: JsxChild[] = [<span className="row-date">{formatDateTime(p.createdAt)}</span>];
   const ctx =
     p.ctxUsed != null
@@ -176,6 +181,18 @@ export function SidebarRow(p: SidebarRowProps) {
   for (const part of [ctx, msgs]) {
     if (!part) continue;
     line3.push(<span className="row-sep">.</span>, <span className="row-metric">{part}</span>);
+  }
+  const clients = p.connectedClients ?? 0;
+  if (clients > 0) {
+    line3.push(
+      <span
+        className="row-clients"
+        title={`${clients} client${clients === 1 ? "" : "s"} connected`}
+        tabindex="0"
+      >
+        {clients > 1 ? <span className="row-clients-count">{clients}</span> : null}
+      </span>,
+    );
   }
 
   return (

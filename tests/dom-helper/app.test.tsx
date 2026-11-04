@@ -1651,6 +1651,63 @@ describe("header fence toggle (real app wiring)", () => {
   });
 });
 
+// ── Client plug on live cards (bottom-right, from the sessions payload) ─────
+// The count renders as the card's trailing plug icon (see sessions.test.tsx
+// for the row grammar); through real app wiring that means every live row's
+// figure comes straight from the payload's connectedClients. Render rules:
+// 0/unattested renders nothing; 1 is icon-only (the plug lives in the CSS
+// mask, so textContent stays empty); 2+ appends the number; native title is
+// the tooltip, singular for one; tabindex keeps it focus-reachable.
+
+describe("client plug on live cards", () => {
+  async function fireSessions(rows: Record<string, unknown>[]): Promise<void> {
+    ws.fireMessage({ type: "sessions", sessions: rows });
+    await tick();
+  }
+
+  it("one client: icon-only (no number), singular tooltip, focusable", async () => {
+    await fireSessions([{ ...lvSessionRow, connectedClients: 1 }]);
+    const plug = el(".session-item .row-clients");
+    expect(plug.textContent).toBe("");
+    expect(plug.getAttribute("title")).toBe("1 client connected");
+    expect(plug.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("2+ clients: icon plus the number, plural tooltip", async () => {
+    await fireSessions([{ ...lvSessionRow, connectedClients: 3 }]);
+    expect(el(".session-item .row-clients").textContent).toBe("3");
+    expect(el(".session-item .row-clients").getAttribute("title")).toBe("3 clients connected");
+  });
+
+  it("zero or unattested: no plug at all", async () => {
+    await fireSessions([{ ...lvSessionRow, connectedClients: 0 }]);
+    expect(document.querySelector(".session-item .row-clients")).toBeNull();
+    const { connectedClients: _gone, ...bareRow } = lvSessionRow;
+    await fireSessions([bareRow]);
+    expect(document.querySelector(".session-item .row-clients")).toBeNull();
+  });
+
+  it("per-card counts never mix; no card text ever reads 'client'", async () => {
+    await fireSessions([
+      { ...lvSessionRow, connectedClients: 7 },
+      { ...lvSessionRow, id: "s-other-0001", connectedClients: 1 },
+    ]);
+    // Position-independent: pin marks could re-sort the list, so key the
+    // cards off the ACTIVE highlight (LV_SID is the attached session).
+    const attached = activeRows(".session-item")[0]!;
+    expect(attached.querySelector(".row-clients")!.textContent).toBe("7");
+    expect(attached.querySelector(".row-clients")!.getAttribute("title")).toBe("7 clients connected");
+    const other = els(".session-item").find((r) => r !== attached)!;
+    expect(other.querySelector(".row-clients")!.textContent).toBe("");
+    expect(other.querySelector(".row-clients")!.getAttribute("title")).toBe("1 client connected");
+    for (const row of els(".session-item")) expect(row.textContent).not.toContain("client");
+  });
+
+  afterAll(async () => {
+    await fireSessions([lvSessionRow]); // restore the fixture list for later consumers
+  });
+});
+
 // ── Auth lifecycle: socket authError teardown, login form, Ctrl+Shift+L ─────
 // Runs last: the teardown drops the chat and the login screen takes the stage
 // back; the successful re-login opens a NEW FakeWebSocket, so the suites above

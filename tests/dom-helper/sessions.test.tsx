@@ -2,14 +2,18 @@
 // owner's fixture row:
 //
 //   ai365/qwen3.8-flash-next    working            Cancel
-//   manager 1 client
-//   2026-10-31 22:30 . 69k/262k . 42 msgs
+//   manager
+//   2026-10-31 22:30 . 69k/262k . 42 msgs   [plug]
 //
 // No literal parens: status is a text badge, profile quiet muted text, and
 // the line-1 action pins right (row-action-right) with no separator before
-// it. The raw session id renders nowhere -- the data model keeps it as the
-// selection key. Segments that have no data are omitted outright; the
-// legacy-log pins watch for "undefined"/"null" leakage into rendered text.
+// it. The connected-client count shows as the plug icon trailing line 3 --
+// the card's bottom-right (icon + number for 2+, icon only for 1, nothing
+// at 0/unattested; tooltip via the native title) -- never a text metric, so
+// row text must never read "client(s)". The raw session id renders nowhere
+// -- the data model keeps it as the selection key. Segments that have no
+// data are omitted outright; the legacy-log pins watch for
+// "undefined"/"null" leakage into rendered text.
 
 import { describe, it, expect, afterEach } from "bun:test";
 import {
@@ -125,18 +129,30 @@ describe("live row (owner fixture)", () => {
     expect(row.querySelectorAll(".row-l1 .row-sep")).toHaveLength(0);
 
     expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
-    // The client metric rides line 2 beside the profile.
-    expect(texts(row, ".row-l2 .row-metric")).toEqual(["1 client"]);
+    // The client count rides the card's bottom-right as a plug icon, trailing
+    // line 3 (the glyph itself lives in a CSS mask, so no DOM text at 1
+    // client; tooltip on the native title, focusable like other title
+    // carriers). Never a text metric, and no row text ever mentions clients.
+    const plug = row.querySelector(".row-clients")!;
+    expect(plug).toBeTruthy();
+    expect(plug.textContent).toBe("");
+    expect(plug.getAttribute("title")).toBe("1 client connected");
+    expect(plug.getAttribute("tabindex")).toBe("0");
+    expect(row.textContent).not.toContain("client");
 
     expect(row.querySelector(".row-date")!.textContent).toBe("2026-10-31 22:30");
-    // Bottom row: date . ctx . msgs, in that order.
+    // Bottom row: date . ctx . msgs [plug] -- the plug trails line 3 (the
+    // bottom-right corner is CSS: margin-left:auto, the row-action-right
+    // idiom), in that order.
     const l3 = row.querySelector(".row-l3")!;
+    expect(l3.children[l3.children.length - 1]).toBe(plug);
     expect([...l3.children].map((n) => n.className)).toEqual([
       "row-date",
       "row-sep",
       "row-metric",
       "row-sep",
       "row-metric",
+      "row-clients",
     ]);
     expect(texts(l3, ".row-metric")).toEqual(["69k/262k", "42 msgs"]);
 
@@ -164,13 +180,34 @@ describe("live row (owner fixture)", () => {
     expect(root.querySelector(".row-profile")!.textContent).toBe("renamed");
   });
 
-  it("client segment pluralizes and vanishes at zero", () => {
-    const root = render({ sessions: [liveSession({ connectedClients: 2 }), liveSession({ id: "s2", connectedClients: 0 })] });
+  it("plug rules: number + plural tooltip at 2+, nothing at 0 or unattested", () => {
+    const root = render({
+      sessions: [
+        liveSession({ id: "s2", connectedClients: 2 }),
+        liveSession({ id: "s3", connectedClients: 0 }),
+        // No connectedClients at all: unattested, not a zero state.
+        (() => {
+          const { connectedClients: _omit, ...bare } = liveSession({ id: "s4" });
+          return bare as SessionInfo;
+        })(),
+      ],
+    });
     const rows = root.querySelectorAll(".session-item");
-    expect(texts(rows[0]!, ".row-metric")).toContain("2 clients");
-    const metrics2 = texts(rows[1]!, ".row-metric");
-    expect(metrics2).not.toContain("0 clients");
-    expect(metrics2).toContain("42 msgs");
+
+    // Two clients: plug + number, plural tooltip, still no client WORD.
+    const plug = rows[0]!.querySelector(".row-clients")!;
+    expect(plug).toBeTruthy();
+    expect(plug.textContent).toBe("2");
+    expect(plug.getAttribute("title")).toBe("2 clients connected");
+    // Icon + number (not the retired "2 clients" text metric): the plug is
+    // its own span, and the row's metrics stay the ctx/msgs pair.
+    expect(plug.querySelector(".row-clients-count")!.textContent).toBe("2");
+    expect(texts(rows[0]!, ".row-metric")).toEqual(["69k/262k", "42 msgs"]);
+
+    expect(rows[1]!.querySelector(".row-clients")).toBeNull();
+    expect(rows[2]!.querySelector(".row-clients")).toBeNull();
+    // Line 3 ends at the msgs metric on plug-less rows.
+    expect(texts(rows[1]!, ".row-metric")).toEqual(["69k/262k", "42 msgs"]);
   });
 });
 
@@ -200,6 +237,7 @@ describe("cold row", () => {
     expect(row.querySelector(".row-action .log-continue-btn")).toBeTruthy();
     expect(row.querySelector(".row-action")!.classList.contains("row-action-right")).toBe(true);
     expect(row.textContent).not.toContain("client");
+    expect(row.querySelector(".row-clients")).toBeNull();
     expect(row.querySelector(".session-cancel-btn")).toBeNull();
   });
 

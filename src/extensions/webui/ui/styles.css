@@ -385,7 +385,7 @@ body.sidebar-resizing {
 /* ── Sidebar Row Grammar (shared by live sessions and cold logs) ───────────
    line 1: provider/model [status]        [action]  -- model ellipsizes,
                                                        action pins right
-   line 2: profile  client
+   line 2: profile  [plug n]   (client count is a plug icon, never text)
    line 3: YYYY-MM-DD HH:MM . ctx . msgs   (the raw session id is no longer
                                             displayed; it stays a key only)
    No literal parens: status is a text badge, profile quiet muted text. */
@@ -488,12 +488,44 @@ body.sidebar-resizing {
     overflow: hidden;
 }
 
-.row-l2 .row-metric:last-child,
 .row-l2 .row-profile:last-child {
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* Client plug: the live count on session cards, trailing line 3 at the
+   card's bottom-right (margin-left:auto -- the row-action-right idiom). The
+   glyph replicates the fingerprint-badge approach: same 24-viewBox stroke
+   geometry as a mask data URI tinted with currentColor (the client mount has
+   no raw-HTML path for inline svg). The ::before keeps the span's
+   textContent pure number text; 1 client is icon-only (0/unattested never
+   renders), so a bare plug means "this one", the number counts the rest. */
+.row-clients {
+    flex: 0 0 auto;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: default;
+}
+
+.row-clients::before {
+    content: "";
+    width: 11px;
+    height: 11px;
+    flex: 0 0 auto;
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M9 8V2' fill='none' stroke='black' stroke-width='2'/><path d='M15 8V2' fill='none' stroke='black' stroke-width='2'/><path d='M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z' fill='none' stroke='black' stroke-width='2'/><path d='M12 22v-5' fill='none' stroke='black' stroke-width='2'/></svg>") center / contain no-repeat;
+    mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M9 8V2' fill='none' stroke='black' stroke-width='2'/><path d='M15 8V2' fill='none' stroke='black' stroke-width='2'/><path d='M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z' fill='none' stroke='black' stroke-width='2'/><path d='M12 22v-5' fill='none' stroke='black' stroke-width='2'/></svg>") center / contain no-repeat;
+}
+
+/* Slightly louder than the profile text it rides beside, so the plug reads
+   as a live marker (hover/focus lift matches the badge idiom). */
+.row-clients:hover,
+.row-clients:focus-visible {
+    color: var(--text-primary);
 }
 
 .row-l3 {
@@ -517,8 +549,11 @@ body.sidebar-resizing {
 }
 
 /* Bottom-row metrics (ctx / msgs): the ellipsizing tail role row-l2's
-   metrics play, now riding line 3 after the date. */
-.row-l3 .row-metric:last-child {
+   metrics play, now riding line 3 after the date. The nth-last-child arm
+   keeps that tail role when the client plug pins the corner behind the
+   metric (the plug sits in last position, pushing the metric up one). */
+.row-l3 .row-metric:last-child,
+.row-l3 .row-metric:nth-last-child(2) {
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;

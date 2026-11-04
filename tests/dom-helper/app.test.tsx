@@ -22,6 +22,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { FakeWebSocket } from "./index.ts";
 import { DRAFT_STORAGE_KEY } from "@extensions/webui/ui/draft.ts";
+import { ATTACHMENTS_STORAGE_KEY } from "@extensions/webui/ui/attachment-store.ts";
 
 const SID = "s-ui-0001";
 const L1 = "l-ui-0001";
@@ -43,6 +44,11 @@ const store = new Map<string, string>([
   ["hotdog-webui-token", "tok"],
   // The composer mounts with this draft restored (ref contract).
   [DRAFT_STORAGE_KEY, "restored draft"],
+  // ...and with one attachment staged by the previous page load.
+  [
+    ATTACHMENTS_STORAGE_KEY,
+    JSON.stringify([{ name: "kept.png", mimeType: "image/png", size: 4, data: "QUJDRA==" }]),
+  ],
 ]);
 g.localStorage = {
   getItem: (k: string) => store.get(k) ?? null,
@@ -257,6 +263,18 @@ describe("app boot (stored token)", () => {
     // chatInputRef brought the stored draft back and autoResized.
     expect((el("#chat-input") as unknown as { value: string }).value).toBe("restored draft");
     expect(el("#steer-checkbox").hasAttribute("checked")).toBe(true);
+  });
+
+  it("attachments staged before the reload come back as chips; dismissing clears the key", async () => {
+    const chips = els(".attachment-chip");
+    expect(chips).toHaveLength(1);
+    expect(chips[0]!.querySelector(".attachment-name")!.textContent).toBe("kept.png");
+    expect(chips[0]!.querySelector(".attachment-size")!.textContent).toBe("4 B");
+    // Dismiss it here so the rest of the suite ships clean sends.
+    els(".attachment-remove")[0]!.click();
+    await tick();
+    expect(els(".attachment-chip")).toHaveLength(0);
+    expect(store.has(ATTACHMENTS_STORAGE_KEY)).toBe(false);
   });
 
   it("attach fills the header, selects, and sidebar", async () => {
@@ -505,6 +523,17 @@ describe("attachments", () => {
     expect(el("#file-input").getAttribute("value")).not.toBe("a.txt"); // input reset for re-pick
   });
 
+  it("the staged set persists to storage (payload only; ids are per-boot)", async () => {
+    await pick([makeFile("note.txt", "text/plain", 7)]);
+    const raw = JSON.parse(store.get(ATTACHMENTS_STORAGE_KEY) ?? "[]");
+    expect(raw).toHaveLength(1);
+    expect(raw[0]).toMatchObject({ name: "note.txt", mimeType: "text/plain", size: 7 });
+    expect(raw[0].id).toBeUndefined();
+    dropAll();
+    await tick();
+    expect(store.has(ATTACHMENTS_STORAGE_KEY)).toBe(false);
+  });
+
   it("the remove button drops a chip", async () => {
     await pick([makeFile("b.bin", "", 1024 * 1024)]);
     expect(els(".attachment-chip")).toHaveLength(1);
@@ -524,6 +553,7 @@ describe("attachments", () => {
     expect(msg?.files?.[0]?.name).toBe("note.txt");
     expect(sent("command")).toHaveLength(0);
     expect(els(".attachment-chip")).toHaveLength(0);
+    expect(store.has(ATTACHMENTS_STORAGE_KEY)).toBe(false); // sent: never resurrected
   });
 
   it("a lone attachment sends even with no text", async () => {

@@ -14,6 +14,7 @@ import {
   loginAtoms,
 } from "./login.tsx";
 import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
+import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo } from "./sessions.tsx";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
 import { createCoalescer } from "./batch.ts";
@@ -74,17 +75,11 @@ interface CompletionMenu {
 }
 const completionAtom = reactiveState<CompletionMenu | null>(null);
 
-// Composer file attachments (upload button): base64 payloads staged client-
-// side, sent with the next message as C2S `send` files (see protocol.ts
-// UploadFileWire). Size/vision limits are enforced server-side; rejections
-// surface as visible chat errors.
-interface PendingAttachment {
-  id: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  data: string; // base64, no data: prefix
-}
+// Composer file attachments: base64 payloads staged client-side (Attach
+// button, paste, drop), sent with the next message as C2S `send` files (see
+// protocol.ts UploadFileWire). Persisted across reloads by attachment-store,
+// restored when the composer mounts (same lifecycle as the draft). Size and
+// vision limits are enforced server-side; rejections surface as chat errors.
 const attachmentsAtom = reactiveState<PendingAttachment[]>([]);
 
 // When checked, messages are injected into the next seam (mid-turn steering)
@@ -139,6 +134,13 @@ const chatInputRef = domRef<HTMLTextAreaElement>((el) => {
     if (draft !== null && el.value === "") {
       el.value = draft;
       autoResize(el);
+    }
+    // Same reload-survival for staged attachments (never clobber live ones).
+    if (attachmentsAtom().length === 0) {
+      const stored = loadAttachments();
+      if (stored.length > 0) {
+        attachmentsAtom(stored.map((f) => ({ ...f, id: newAttachmentId() })));
+      }
     }
     window.addEventListener(DRAFT_LEAVE_EVENT, flushDraftOnLeave);
     window.addEventListener("dragover", swallowFileDrop);
@@ -738,6 +740,7 @@ function onChatSubmit(e: Event): void {
       : undefined;
   if (files) {
     attachmentsAtom([]);
+    persistAttachments(); // sent: a reload must not resurrect consumed files
     if (fileInputEl) fileInputEl.value = "";
   }
 
@@ -771,6 +774,16 @@ function readFileAsBase64(file: Blob): Promise<string> {
 
 let attachmentSeq = 0;
 
+function newAttachmentId(): string {
+  return `att-${++attachmentSeq}`;
+}
+
+/** Persist the staged set after every mutation (hydrate deliberately skips
+ *  this: it restores what is already in storage). */
+function persistAttachments(): void {
+  saveAttachments(attachmentsAtom());
+}
+
 async function onFilesPicked(e: Event): Promise<void> {
   const input = e.currentTarget as HTMLInputElement;
   const picked = Array.from(input.files ?? []);
@@ -787,7 +800,7 @@ async function stageFiles(picked: File[]): Promise<void> {
     if (file.size === 0) continue;
     try {
       added.push({
-        id: `att-${++attachmentSeq}`,
+        id: newAttachmentId(),
         name: displayNameFor(file),
         mimeType: file.type || "application/octet-stream",
         size: file.size,
@@ -797,7 +810,10 @@ async function stageFiles(picked: File[]): Promise<void> {
       console.warn("[upload] failed to read", file.name);
     }
   }
-  if (added.length > 0) attachmentsAtom([...attachmentsAtom(), ...added]);
+  if (added.length > 0) {
+    attachmentsAtom([...attachmentsAtom(), ...added]);
+    persistAttachments();
+  }
 }
 
 /** Pasted screenshots arrive as anonymous blobs ("blob"/empty name); give
@@ -811,6 +827,7 @@ function displayNameFor(file: File): string {
 
 function removeAttachment(id: string): void {
   attachmentsAtom(attachmentsAtom().filter((a) => a.id !== id));
+  persistAttachments();
 }
 
 // ── Paste & drag-drop into the composer ─────────────────────────────────────

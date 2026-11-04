@@ -11,6 +11,12 @@ export const C2S = {
   AUTH: "auth",
   CREATE_SESSION: "createSession",
   DELETE_SESSION: "deleteSession",
+  // Sidebar "Dismiss" on an IDLE session row: tear the live session down
+  // but keep its log and its pin -- the row demotes to the cold Recent
+  // Logs list. The server refuses a running session (busy guard) and
+  // answers with the refreshed SESSIONS + LOGS_LISTED payloads so every
+  // tab demotes the row without a manual refresh.
+  DISMISS_SESSION: "dismissSession",
   RENAME_SESSION: "renameSession",
   // Sidebar pin flip: { type, sessionId, pinned: boolean }. The id may name
   // a live session OR a cold log (pins span both sidebar sections). The

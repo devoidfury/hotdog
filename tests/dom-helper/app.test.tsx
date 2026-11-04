@@ -770,15 +770,17 @@ describe("sidebar resize", () => {
 describe("context menus", () => {
   const menuButtons = () => els(".context-menu-item");
 
-  it("session menu: rename through the prompt, delete behind confirm", async () => {
+  it("session menu: rename through the prompt, delete & dismiss behind confirm", async () => {
     await attach();
     els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
     await tick();
-    // Pin leads; the contextual action (Cancel only while working), the
-    // copies and Export follow; Rename/Delete keep the bottom slots.
-    // The fixture row carries no logPath, so "Copy log file path" is hidden.
+    // Pin leads; the contextual action (Cancel while working, Dismiss when
+    // idle), the copies and Export follow; Rename/Delete keep the bottom
+    // slots. The fixture row carries no logPath, so "Copy log file path"
+    // is hidden.
     expect(menuButtons().map((b) => b.textContent)).toEqual([
       "Pin",
+      "Dismiss",
       "Copy session id",
       "Export",
       "Rename",
@@ -808,6 +810,27 @@ describe("context menus", () => {
     menuButtons().find((b) => b.textContent === "Delete")!.click();
     await tick();
     expect(sent<{ sessionId: string }>("deleteSession")[0]?.sessionId).toBe(SID);
+
+    // Dismiss is confirm-gated too (it tears down a live agent): refuse ->
+    // nothing on the wire; accept -> the plain dismissSession frame.
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    clearSent();
+    confirmAnswer = false;
+    menuButtons().find((b) => b.textContent === "Dismiss")!.click();
+    await tick();
+    expect(sent("dismissSession")).toHaveLength(0);
+    confirmAnswer = true;
+
+    els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    menuButtons().find((b) => b.textContent === "Dismiss")!.click();
+    await tick();
+    expect(sent<{ type: string; sessionId: string }>("dismissSession")[0]).toEqual({
+      type: "dismissSession",
+      sessionId: SID,
+    });
+    expect(document.querySelector(".context-menu")).toBeNull(); // dismissed after pick
   });
 
   it("an empty rename name changes nothing", async () => {
@@ -1033,6 +1056,7 @@ describe("context menus", () => {
     await tick();
     expect(menuButtons().map((b) => b.textContent)).toEqual([
       "Pin",
+      "Dismiss",
       "Copy session id",
       "Copy log file path",
       "Export",

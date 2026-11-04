@@ -528,6 +528,8 @@ export interface ChatController {
   createSession: (opts?: Record<string, unknown>) => void;
   switchSession: (sessionId: string) => void;
   deleteSession: (sessionId: string) => void;
+  /** Tear down an idle live session; the log survives and the row demotes to Recent Logs. */
+  dismissSession: (sessionId: string) => void;
   renameSession: (sessionId: string, newName: string) => void;
   /** Flip a row's server-persisted pin (id may name a live session or a cold log). */
   setPinned: (sessionId: string, pinned: boolean) => void;
@@ -1146,6 +1148,15 @@ export function createChat({
     listSessions();
   }
 
+  // Dismiss: idle-only teardown whose log and pin survive (server-side
+  // handleDismissSession). No follow-up list unlike deleteSession -- the
+  // handler's SESSIONS/LOGS_LISTED broadcast is the reconcile and covers
+  // both sidebar halves, so a re-list here would only race it.
+  function dismissSession(sessionId: string): void {
+    send({ type: "dismissSession", sessionId });
+    sessionWorkingMap.delete(sessionId);
+  }
+
   function renameSession(sessionId: string, newName: string): void {
     send({ type: "renameSession", sessionId, newName });
     listSessions();
@@ -1289,6 +1300,7 @@ export function createChat({
     createSession,
     switchSession,
     deleteSession,
+    dismissSession,
     renameSession,
     setPinned,
     listSessions,

@@ -193,6 +193,35 @@ describe("createChat.transcribe", () => {
   });
 });
 
+// ── Outbound sidebar frames ─────────────────────────────────────────────────
+
+describe("createChat.dismissSession", () => {
+  const RealWebSocket = globalThis.WebSocket;
+  let chat: ChatController | null = null;
+
+  afterEach(() => {
+    chat?.disconnect();
+    chat = null;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = RealWebSocket;
+  });
+
+  it("sends exactly a dismissSession frame for the id", () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    chat = createChat({
+      token: null,
+      host: "localhost",
+      getMessageListContainer: () => null,
+    });
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+    chat.dismissSession("sid-7");
+    // The dismiss frame is the only thing on the wire: the handler's
+    // SESSIONS/LOGS_LISTED broadcast is the sidebar reconcile, so unlike
+    // deleteSession no optimistic re-list rides out.
+    expect(ws.sent).toEqual([{ type: "dismissSession", sessionId: "sid-7" }]);
+  });
+});
+
 // ── Subagent task feed ──────────────────────────────────────────────────────
 // taskList/taskUpdate/taskActivity/taskActivityHistory/taskControl are
 // handled before the message-list/session guard, so a container-less chat

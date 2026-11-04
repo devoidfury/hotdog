@@ -1,5 +1,6 @@
-// Session lifecycle + listing frames: create, delete, rename, list,
-// profiles, the sidebar's manual switch, and the server-persisted pin flip.
+// Session lifecycle + listing frames: create, delete, dismiss, rename,
+// list, profiles, the sidebar's manual switch, and the server-persisted
+// pin flip.
 
 import { isSafeSessionId } from "@core/session/session-log.ts";
 import { formatError } from "@core/error.ts";
@@ -53,6 +54,52 @@ export function handleDeleteSession(ctx: RouteContext): void {
   };
   ws.send(JSON.stringify(sessionDeletedMsg));
   registry.broadcast(sessionDeletedMsg);
+}
+
+/**
+ * Dismiss an IDLE live session: same teardown as Delete (channels, bus,
+ * SESSION_END re-fire, delegated-task interrupt via registry.delete) but
+ * non-destructive framing -- the JSONL log survives and the row's pin
+ * survives (pins span both sidebar sections, so no dropPinned here). The
+ * id lands back in the cold "Recent Logs" list, visibly, in every tab:
+ * SESSION_DELETED drops the live row (the client also clears the transcript
+ * when the dismissed session was the attached view), then the refreshed
+ * SESSIONS + LOGS_LISTED payloads re-land it as a cold row.
+ */
+export async function handleDismissSession(ctx: RouteContext): Promise<void> {
+  const { ws, msg, registry } = ctx;
+  const sessionId = msg.sessionId;
+  // Malformed frames are dropped like the other sidebar messages; the id
+  // carries the core session-id gate (it reaches the filesystem scan).
+  if (typeof sessionId !== "string" || !isSafeSessionId(sessionId)) return;
+  // Busy guard: refuse a session that is mid-run server-side, so a stale
+  // menu (run started in another tab between right-click and click) cannot
+  // silently tear down live work. The signal is the exact one the attach
+  // path reports as the "working" event (attach.ts): the SessionManager
+  // entry's bus. Guard and registry.delete() share one synchronous block --
+  // no await between check and teardown, so no run can start in between.
+  if (registry.getSessionManager().isSessionRunning(sessionId)) {
+    logger.warn(
+      `[websocket] dismissSession rejected: ${sessionId} is running; cancel it first`,
+    );
+    SessionRegistry.sendSafe(ws, errorFrame(new Error(`Session ${sessionId} is running. Nothing changed.`)));
+    return;
+  }
+  // Unknown id: nothing live to demote; no-op, no frames, no teardown.
+  if (!registry.delete(sessionId)) return;
+  const sessionDeletedMsg = { type: S2C.SESSION_DELETED, sessionId };
+  SessionRegistry.sendSafe(ws, sessionDeletedMsg);
+  registry.broadcast(sessionDeletedMsg);
+  // Demote now, not on the next refresh: live half first (cheap and sync),
+  // then the cold half -- one directory scan shared by all sockets. Awaited
+  // per the handleSetPinned settle contract; a failed scan must not fail
+  // the dismissal (it is already done): note it and let listLogs recover.
+  registry.broadcast({ type: S2C.SESSIONS, sessions: registry.list() });
+  await coldLogsPayload(registry)
+    .then((logs) => registry.broadcast({ type: S2C.LOGS_LISTED, logs }))
+    .catch((err: unknown) => {
+      logger.error(`[websocket] dismissSession logs refresh failed: ${formatError(err)}`);
+    });
 }
 
 /**

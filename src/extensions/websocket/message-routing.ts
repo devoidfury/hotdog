@@ -15,6 +15,7 @@ import { handleAuthMessage } from "./handlers-auth.ts";
 import {
   handleCreateSession,
   handleDeleteSession,
+  handleDismissSession,
   handleRenameSession,
   handleSetPinned,
   handleListSessions,
@@ -43,6 +44,7 @@ const MESSAGE_HANDLERS: Partial<Record<C2SType, MessageHandler>> = {
   [C2S.AUTH]: handleAuthMessage,
   [C2S.CREATE_SESSION]: handleCreateSession,
   [C2S.DELETE_SESSION]: handleDeleteSession,
+  [C2S.DISMISS_SESSION]: handleDismissSession,
   [C2S.RENAME_SESSION]: handleRenameSession,
   [C2S.SET_PINNED]: handleSetPinned,
   [C2S.LIST_SESSIONS]: handleListSessions,

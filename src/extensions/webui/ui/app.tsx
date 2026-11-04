@@ -436,7 +436,24 @@ function onSessionMenu(e: MouseEvent, s: SessionInfo): void {
               },
             },
           ]
-        : []),
+        : [
+            {
+              label: "Dismiss",
+              // Idle rows only (working rows keep Cancel above). Confirm
+              // because it tears down a live agent, with honest copy: the
+              // log and the pin survive; the row demotes to Recent Logs.
+              onSelect: () => {
+                if (
+                  confirm(
+                    `Dismiss session ${shortId(s.id)}? The live session closes; its log stays in Recent Logs.`,
+                  )
+                ) {
+                  chat?.dismissSession(s.id);
+                }
+                dismissContextMenu();
+              },
+            },
+          ]),
       ...rowMenuTail(s.id, s.logPath),
       {
         label: "Rename",

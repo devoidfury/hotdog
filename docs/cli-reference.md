@@ -39,6 +39,9 @@ hotdog workflow reconcile <run-id>
                                  # Check completed claims against the filesystem (resume planning)
 hotdog workflow cancel <run-id>  # Finished runs: idempotent report; live runs owned by another
                                  # process must be stopped there (Ctrl-C / '/workflow cancel')
+                                 # The manager's workflow_control tool (action cancel) shares this
+                                 # in-process ceiling: it only stops runs the calling session's
+                                 # process dispatched, and refuses foreign owners with this pointer
 ```
 
 ## Exit Codes

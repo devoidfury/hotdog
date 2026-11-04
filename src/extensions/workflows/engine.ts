@@ -50,6 +50,12 @@ export const NODE_STATE = {
   /** Upstream exhausted/failed, or the judge broke: recoverable via reconcile/re-run. */
   BLOCKED: "blocked",
   CANCELLED: "cancelled",
+  /**
+   * Manager-retirement state: workflow_control action=skip writes it into a
+   * dead run's terminal journal event only. The live engine never transitions
+   * a node to it -- it exists so readers share one status vocabulary.
+   */
+  SKIPPED: "skipped",
 } as const;
 export type NodeState = (typeof NODE_STATE)[keyof typeof NODE_STATE];
 
@@ -58,15 +64,17 @@ const TERMINAL: ReadonlySet<NodeState> = new Set([
   NODE_STATE.FAILED,
   NODE_STATE.BLOCKED,
   NODE_STATE.CANCELLED,
+  NODE_STATE.SKIPPED,
 ]);
 
-type NodeOutcome = "succeeded" | "failed" | "blocked" | "cancelled";
+type NodeOutcome = "succeeded" | "failed" | "blocked" | "cancelled" | "skipped";
 
 const OUTCOME_STATE: Record<NodeOutcome, NodeState> = {
   succeeded: NODE_STATE.SUCCEEDED,
   failed: NODE_STATE.FAILED,
   blocked: NODE_STATE.BLOCKED,
   cancelled: NODE_STATE.CANCELLED,
+  skipped: NODE_STATE.SKIPPED,
 };
 
 /** mtime slack for freshness: fs clock granularity at run start. */
@@ -129,7 +137,12 @@ export interface NodeStatusView {
 
 export interface RunSummary {
   runId: string;
-  outcome: "succeeded" | "failed" | "cancelled";
+  /**
+   * `skipped` is never produced by the engine itself: workflow_control
+   * action=skip writes it into a dead (ownerless) run's journal. It rides the
+   * same readers, so the union stays honest end to end.
+   */
+  outcome: "succeeded" | "failed" | "cancelled" | "skipped";
   states: Record<string, NodeState>;
 }
 
@@ -176,6 +189,8 @@ interface NodeRun {
   runtimeKilled: boolean;
   detail: string | null;
   outcome: NodeOutcome | null;
+  /** workflow_control node-cancel: stops the ladder for THIS node only. */
+  cancelRequested: boolean;
   verdict: string | null;
   /** Last worker turn result — a pointer summary, safe to splice downstream. */
   summary: string;
@@ -258,6 +273,7 @@ export class WorkflowRun {
         runtimeKilled: false,
         detail: null,
         outcome: null,
+        cancelRequested: false,
         verdict: null,
         summary: "",
         fileClaims: null,
@@ -352,6 +368,40 @@ export class WorkflowRun {
     return this.#cfg.tasks.sendFollowUp(nr.task, message);
   }
 
+  /**
+   * Single-node cancel for workflow_control (action=cancel, node). Interrupts
+   * the node's worker through the same task-interrupt seam TaskManager's
+   * run-level cancel drives (interruptTask: queued tasks go terminal without
+   * ever starting a worker; running ones abort). A per-node flag stops the
+   * retry ladder for THIS node only -- the node settles "cancelled", its
+   * descendants block through the ordinary dependency rule, siblings and
+   * other judges keep running. Unknown and already-terminal nodes report
+   * rather than throw; a judge whose owner already settled is terminal
+   * (mirrored), so "keep whatever verdict already landed" holds.
+   */
+  cancelNode(nodeId: string): { ok: true } | { error: "unknown" } | { error: "terminal"; state: NodeState } {
+    const nr = this.#runs.get(nodeId);
+    if (!nr) return { error: "unknown" };
+    if (TERMINAL.has(nr.state)) return { error: "terminal", state: nr.state };
+    nr.cancelRequested = true;
+    nr.gate?.deliver({ status: "cancelled", result: "Node cancelled" });
+    nr.gate = null;
+    if (nr.task) this.#cfg.tasks.interruptTask(nr.task);
+    // Owner cancelled while its judge holds the floor: end the judge's turn
+    // too. #runJudge checks the owner's flag at every loop/disposition point,
+    // so the judge settles cancelled (no respawn) and the attempt loop then
+    // settles the owner as part of its cancel.
+    if (nr.state === NODE_STATE.JUDGING && nr.node.accept.judge) {
+      const j = this.#runs.get(nr.node.accept.judge);
+      if (j && !TERMINAL.has(j.state)) {
+        j.gate?.deliver({ status: "cancelled", result: "Node cancelled" });
+        j.gate = null;
+        if (j.task) this.#cfg.tasks.interruptTask(j.task);
+      }
+    }
+    return { ok: true };
+  }
+
   status(): NodeStatusView[] {
     return [...this.#runs.values()].map((nr) => ({
       id: nr.node.id,
@@ -369,7 +419,7 @@ export class WorkflowRun {
     try {
       if (nr.judgeFor) return; // gate owners drive judges; never scheduled standalone
       if (TERMINAL.has(nr.state)) return; // reused by reconcile-resume
-      if (this.#cancelRequested) {
+      if (this.#cancelRequested || nr.cancelRequested) {
         this.#settleNode(nr, "cancelled");
         return;
       }
@@ -378,11 +428,11 @@ export class WorkflowRun {
       const badDep = nr.deps.find((d) => this.#runs.get(d)!.outcome !== "succeeded");
       if (badDep) {
         const why = this.#runs.get(badDep)!.outcome;
-        if (this.#cancelRequested) this.#settleNode(nr, "cancelled");
+        if (this.#cancelRequested || nr.cancelRequested) this.#settleNode(nr, "cancelled");
         else this.#settleNode(nr, "blocked", `dependency '${badDep}' ${why}`);
         return;
       }
-      if (this.#cancelRequested) {
+      if (this.#cancelRequested || nr.cancelRequested) {
         this.#settleNode(nr, "cancelled");
         return;
       }
@@ -411,7 +461,7 @@ export class WorkflowRun {
     let critique: PromptPart[] | null = null;
 
     while (true) {
-      if (this.#cancelRequested) {
+      if (this.#cancelRequested || nr.cancelRequested) {
         this.#releaseTask(nr);
         this.#settleNode(nr, "cancelled");
         return;
@@ -486,7 +536,7 @@ export class WorkflowRun {
 
       // ---- disposition ----
       nr.attempt++;
-      if (this.#cancelRequested) {
+      if (this.#cancelRequested || nr.cancelRequested) {
         this.#releaseTask(nr);
         this.#settleNode(nr, "cancelled");
         return;
@@ -507,7 +557,7 @@ export class WorkflowRun {
 
       // ---- gates ----
       let gateResult = await this.#evaluateGate(n, false);
-      if (this.#cancelRequested) {
+      if (this.#cancelRequested || nr.cancelRequested) {
         this.#releaseTask(nr);
         this.#settleNode(nr, "cancelled");
         return;
@@ -516,6 +566,14 @@ export class WorkflowRun {
         nr.state = NODE_STATE.JUDGING;
         this.#log({ ev: "node", id: n.id, state: "judging", attempt: nr.attempt, judge: accept.judge });
         const jres = await this.#runJudge(nr);
+        // The owner's own cancel outranks whatever the judge returned: a
+        // verdict that landed between the interrupt and here must not accept
+        // a node the manager just cancelled.
+        if (this.#cancelRequested || nr.cancelRequested) {
+          this.#releaseTask(nr);
+          this.#settleNode(nr, "cancelled");
+          return;
+        }
         if (jres.kind === "cancel") {
           this.#releaseTask(nr);
           this.#settleNode(nr, "cancelled");
@@ -545,7 +603,7 @@ export class WorkflowRun {
         }
         const released = task ? this.#cfg.tasks.completeTask(task.id) : false;
         if (task) await task.handle.done;
-        if (!released || this.#cancelRequested) {
+        if (!released || this.#cancelRequested || nr.cancelRequested) {
           this.#settleNode(nr, "cancelled");
           return;
         }
@@ -609,9 +667,16 @@ export class WorkflowRun {
     const judgeDeps = jnr.deps.filter((d) => d !== owner.node.id);
     if (judgeDeps.length > 0) {
       await Promise.all(judgeDeps.map((d) => this.#runs.get(d)!.settled));
-      if (this.#cancelRequested) {
-        if (!TERMINAL.has(jnr.state)) this.#settleJudge(jnr, "cancelled");
+      if (this.#cancelRequested || owner.cancelRequested) {
+        if (!TERMINAL.has(jnr.state)) {
+          this.#settleJudge(jnr, "cancelled", owner.cancelRequested ? `owner '${owner.node.id}' cancelled` : undefined);
+        }
         return { kind: "cancel" };
+      }
+      if (jnr.cancelRequested) {
+        const detail = `judge '${jn.id}' cancelled`;
+        if (!TERMINAL.has(jnr.state)) this.#settleJudge(jnr, "cancelled", detail);
+        return { kind: "blocked", detail };
       }
       const badDep = judgeDeps.find((d) => this.#runs.get(d)!.outcome !== "succeeded");
       if (badDep) {
@@ -621,10 +686,26 @@ export class WorkflowRun {
       }
     }
     while (true) {
-      if (this.#cancelRequested) {
+      // Run-level cancel ends the judge with the run; workflow_control
+      // cancelling the OWNER ends it too -- the judge of a cancelled producer
+      // must neither keep its turn nor respawn (post-cancel tokens spent on
+      // work the manager just stopped would also let a late verdict accept a
+      // node that is settling cancelled).
+      if (this.#cancelRequested || owner.cancelRequested) {
         this.#releaseTask(jnr);
-        if (!TERMINAL.has(jnr.state)) this.#settleJudge(jnr, "cancelled");
+        if (!TERMINAL.has(jnr.state)) {
+          this.#settleJudge(jnr, "cancelled", owner.cancelRequested ? `owner '${owner.node.id}' cancelled` : undefined);
+        }
         return { kind: "cancel" };
+      }
+      // workflow_control cancelled THIS judge: the producer has no gate left
+      // for this attempt. Block it honestly (recoverable via reconcile/re-run)
+      // rather than cancelling work the manager never touched.
+      if (jnr.cancelRequested) {
+        this.#releaseTask(jnr);
+        const detail = `judge '${jn.id}' cancelled`;
+        if (!TERMINAL.has(jnr.state)) this.#settleJudge(jnr, "cancelled", detail);
+        return { kind: "blocked", detail };
       }
       if (jnr.attempt >= jn.accept.maxAttempts) {
         this.#releaseTask(jnr);
@@ -674,9 +755,11 @@ export class WorkflowRun {
       const turn = await gate.promise;
       jnr.gate = null;
       jnr.attempt++;
-      if (this.#cancelRequested) {
+      if (this.#cancelRequested || owner.cancelRequested) {
         this.#releaseTask(jnr);
-        if (!TERMINAL.has(jnr.state)) this.#settleJudge(jnr, "cancelled");
+        if (!TERMINAL.has(jnr.state)) {
+          this.#settleJudge(jnr, "cancelled", owner.cancelRequested ? `owner '${owner.node.id}' cancelled` : undefined);
+        }
         return { kind: "cancel" };
       }
       if (turn.status !== "completed") {

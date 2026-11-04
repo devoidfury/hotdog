@@ -3,6 +3,7 @@
 // Surfaces:
 // - CLI: `hotdog workflow validate|render|run|list|status|reconcile|cancel`
 // - Manager tools: workflow_validate (validates AND saves) / workflow_dispatch (file + optional args) / workflow_status
+//   / workflow_followup (steer a running node, same seam as /followup) / workflow_control (skip | resume | cancel)
 // - Slash commands: /workflow (status + cancel) and /followup <node> <msg>
 //   (mid-turn steering of a node's worker)
 // - Skills-style availability listing of <workflows.path>/*.workflow.yaml

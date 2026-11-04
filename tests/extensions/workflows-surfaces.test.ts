@@ -915,6 +915,8 @@ describe("extension surfaces", () => {
       "workflow_validate",
       "workflow_dispatch",
       "workflow_status",
+      "workflow_followup",
+      "workflow_control",
     ]);
 
     const cmds = new Map<string, { matches: (c: string) => boolean; handler: Function }>();

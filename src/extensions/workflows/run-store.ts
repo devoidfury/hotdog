@@ -275,7 +275,13 @@ export interface InterruptedRunView {
   marked: boolean;
 }
 
-async function scanRunDirForInterruption(
+/**
+ * Single-run-dir interruption scan (the per-dir core of scanInterruptedRuns),
+ * exported for workflow_control: skip must judge one dir with exactly the
+ * rules the activation scan uses (terminal finished -> null, live same-host
+ * owner -> null, transient node states visible for the last-known snapshot).
+ */
+export async function scanRunDirForInterruption(
   runDir: string,
   host: string,
   alive: (pid: number) => boolean,
@@ -457,6 +463,10 @@ export async function readRunSummary(runDir: string): Promise<DiskRunSummary | n
   };
 }
 
+/** Node states a journal line may assert as settled truth (engine terminal
+ *  states + the manager-retirement `skipped` workflow_control skip writes). */
+const TERMINAL_NODE_STATES = new Set(["succeeded", "failed", "blocked", "cancelled", "skipped"]);
+
 interface SucceededClaim {
   id: string;
   attempt: number;
@@ -506,10 +516,19 @@ export async function readRunLog(runDir: string): Promise<RunLogEvents | null> {
       };
     } else if (ev.ev === "finished") {
       finished = { outcome: String(ev.outcome) };
+      // Terminal per-node mirror: the engine's finished event (and workflow_control
+      // skip's retired-run event) record the final state of every node. Folding it
+      // in lets a skipped run's nodes read truthfully even though no `node` line
+      // ever named those states. Terminal values only; garbage stays inert noise.
+      if (typeof ev.states === "object" && ev.states !== null) {
+        for (const [id, st] of Object.entries(ev.states as Record<string, unknown>)) {
+          if (typeof st === "string" && TERMINAL_NODE_STATES.has(st)) lastState.set(id, st);
+        }
+      }
     } else if (ev.ev === "node") {
       const id = String(ev.id);
       const state = String(ev.state);
-      if (!["succeeded", "failed", "blocked", "cancelled"].includes(state)) continue;
+      if (!TERMINAL_NODE_STATES.has(state)) continue;
       lastState.set(id, state);
       if (state === "succeeded") {
         succeeded.set(id, {

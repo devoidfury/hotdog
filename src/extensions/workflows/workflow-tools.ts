@@ -4,12 +4,13 @@
  * The repair loop for manager-designed graphs IS the tool error:
  * workflow_validate runs the exact same parseWorkflow as hand-authored <workflows.path> files,
  * and a valid design is saved as a graph file on the spot.
- * Orchestrator profile: these three plus the delegation tools, no bash/edit/file-write
+ * Orchestrator profile: these five plus the delegation tools, no bash/edit/file-write
  * (profile tool allowlists enforce; hermes anti-temptation pattern).
  */
 
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { appendFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
+import { hostname } from "node:os";
 import {
   toolDef,
   param,
@@ -21,15 +22,19 @@ import type { ToolContext } from "@core/extensions/types.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
+import { pidAlive } from "@utils/process-group.ts";
 import { parseWorkflow, resolveWorkflowLimits, type WorkflowLimits } from "./workflow.ts";
 import {
   claimRunDir,
   isSafeRunId,
   nextRunId,
+  readRunOwner,
   readRunSummary,
   scanInterruptedRuns,
+  scanRunDirForInterruption,
   RUN_ID_SHAPE_HINT,
   type InterruptedRunView,
+  type RunOwner,
 } from "./run-store.ts";
 import { WorkflowRun, type RunSummary } from "./engine.ts";
 import { runWorkflowCommandOnText } from "./workflow-cli.ts";
@@ -685,12 +690,294 @@ export class WorkflowStatusTool extends WorkflowTool {
   toToolDef(): ToolDef {
     return toolDef(
       "workflow_status",
-      "[DO NOT USE for polling] Show workflow runs dispatched in this session (with no run_id) or one run's per-node states (run_id). Runs notify on completion; only call this when the user asks or before deciding a recovery step. With no run_id, runs orphaned by a process restart are also listed from disk with their resume instruction.",
+      "[DO NOT USE for polling] Show workflow runs dispatched in this session (with no run_id) or one run's per-node states (run_id). Runs notify on completion; only call this when the user asks or before deciding a recovery step. With no run_id, runs orphaned by a process restart are also listed from disk with their resume instruction. Node states end as succeeded, failed, blocked, or cancelled; a run retired through workflow_control (skip) shows outcome skipped -- terminal, and deliberately absent from the resumable list.",
       {
         properties: {
           run_id: param("string", "Optional run id to inspect in detail"),
         },
         required: [],
+      },
+    );
+  }
+}
+
+// ── workflow_followup ───────────────────────────────────────────────────────
+
+/** `id=state` list of a live run's nodes, for refusal messages. */
+function nodeStateLines(run: WorkflowRun): string {
+  return run
+    .status()
+    .map((v) => `${v.id}=${v.state}`)
+    .join(", ");
+}
+
+/**
+ * The /followup seam, tool-shaped: WorkflowRun.steer -> TaskManager.sendFollowUp
+ * on the node's live task. Same machinery as the user command, honest
+ * refusals instead of a chat error.
+ */
+export class WorkflowFollowupTool extends WorkflowTool {
+  static readonly TOOL_NAME = "workflow_followup";
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 2, managerOnly: true };
+
+  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+    const args = parseToolInput(input) ?? {};
+    const runId = (args.run_id as string | undefined)?.trim();
+    const nodeId = (args.node as string | undefined)?.trim();
+    const message = (args.message as string | undefined)?.trim();
+    if (!runId) return ToolResult.err("Error: run_id is required");
+    if (!isSafeRunId(runId)) {
+      return ToolResult.err(`invalid run_id '${runId}' (${RUN_ID_SHAPE_HINT})`);
+    }
+    if (!nodeId) return ToolResult.err("Error: node is required");
+    if (!message) return ToolResult.err("Error: message is required");
+
+    const m = this.opts.registry.get(runId);
+    if (!m) {
+      return ToolResult.err(`run ${runId} not found in this process; this process owns: ${
+        this.opts.registry.all().map((r) => r.runId).join(", ") || "(none)"
+      }`);
+    }
+    if (m.finished) {
+      return ToolResult.err(`run ${runId} is already ${m.finished.outcome}: follow-ups reach only running nodes`);
+    }
+    if (m.error) {
+      return ToolResult.err(`run ${runId} crashed (${m.error}): follow-ups reach only running nodes`);
+    }
+
+    const view = m.run.status().find((v) => v.id === nodeId);
+    if (!view) {
+      return ToolResult.err(`node '${nodeId}' is not a node of run ${runId} (${nodeStateLines(m.run)})`);
+    }
+    if (view.state !== "running") {
+      return ToolResult.err(
+        `node '${nodeId}' of run ${runId} is ${view.state}: follow-ups reach only running nodes (${nodeStateLines(m.run)})`,
+      );
+    }
+    if (!m.run.steer(nodeId, message)) {
+      return ToolResult.err(
+        `node '${nodeId}' of run ${runId} is not mid-turn anymore: steering reaches only a live worker turn`,
+      );
+    }
+    return ToolResult.ok(`Follow-up delivered to node '${nodeId}' of run ${runId}.`);
+  }
+
+  toToolDef(): ToolDef {
+    return toolDef(
+      "workflow_followup",
+      [
+        "[DO NOT USE for polling] Add an instruction to a RUNNING workflow node's worker",
+        "through the same steering path the /followup user command uses (a live worker turn).",
+        "Node completions deliver to this session automatically; never follow-up to check progress.",
+        "Only nodes in state running are reachable: queued, pending, settled, unknown-node and",
+        "unknown-run cases are refused with the actual states.",
+      ].join(" "),
+      {
+        properties: {
+          run_id: param("string", "The run id workflow_dispatch returned"),
+          node: param("string", "The node id to steer"),
+          message: param("string", "The instruction to deliver to the node's worker"),
+        },
+        required: ["run_id", "node", "message"],
+      },
+    );
+  }
+}
+
+// ── workflow_control ────────────────────────────────────────────────────────
+
+/**
+ * Last-known transient state -> the state skip records when retiring an
+ * ownerless run: finished truths stand (failed stays failed), never-started
+ * nodes are blocked (their upstream chain never completed), and whatever was
+ * in flight (running/queued/judging) is what the manager retired: skipped.
+ */
+function retireState(last: string): string {
+  if (last === "pending") return "blocked";
+  if (
+    last === "succeeded" ||
+    last === "failed" ||
+    last === "blocked" ||
+    last === "cancelled" ||
+    last === "skipped"
+  ) {
+    return last;
+  }
+  return "skipped";
+}
+
+export class WorkflowControlTool extends WorkflowTool {
+  static readonly TOOL_NAME = "workflow_control";
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 3, managerOnly: true };
+
+  async execute(
+    input: string | Record<string, unknown> | null,
+    ctx?: ToolContext,
+  ): Promise<ToolResult> {
+    const args = parseToolInput(input) ?? {};
+    const runId = (args.run_id as string | undefined)?.trim();
+    const action = (args.action as string | undefined)?.trim();
+    const node = (args.node as string | undefined)?.trim();
+    if (!runId) return ToolResult.err("Error: run_id is required");
+    if (!isSafeRunId(runId)) {
+      return ToolResult.err(`invalid run_id '${runId}' (${RUN_ID_SHAPE_HINT})`);
+    }
+    if (action !== "skip" && action !== "resume" && action !== "cancel") {
+      return ToolResult.err(`unknown action '${action ?? ""}': expected skip | resume | cancel`);
+    }
+    const runsRoot = this.opts.getRunsRoot();
+    if (!runsRoot) return ToolResult.err("Error: workflows.path is not configured");
+    if (action === "skip") return this.#skip(runsRoot, runId);
+    if (action === "resume") return this.#resume(runsRoot, runId, ctx);
+    return this.#cancel(runsRoot, runId, node);
+  }
+
+  /**
+   * Retire an interrupted run: one appended terminal journal line (the O_APPEND
+   * idiom; the journal is never rewritten) with per-node states mirroring the
+   * last-known history. Eligibility uses exactly the activation-scan rules, so
+   * a live-owned or already-finished run can never be skipped.
+   */
+  async #skip(runsRoot: string, runId: string): Promise<ToolResult> {
+    const runDir = join(runsRoot, runId);
+    const view = await scanRunDirForInterruption(runDir, hostname(), pidAlive);
+    if (!view) {
+      const s = await readRunSummary(runDir);
+      if (!s) return ToolResult.err(`run ${runId} not found under ${runsRoot}`);
+      if (s.outcome) {
+        return ToolResult.err(`run ${runId} is already ${s.outcome}: skip retires only interrupted runs`);
+      }
+      const owner: RunOwner | null = await readRunOwner(runDir);
+      if (owner) {
+        return ToolResult.err(
+          `run ${runId} has a live owner (pid ${owner.pid} on '${owner.host}', claimed ${owner.claimedAt}): ` +
+            "skip retires only ownerless runs; action cancel reaches runs THIS process dispatched, " +
+            `otherwise '/workflow cancel ${runId}' in the owning process`,
+        );
+      }
+      return ToolResult.err(`run ${runId} has no interruption to retire`);
+    }
+    const states: Record<string, string> = {};
+    for (const n of view.nodes) states[n.id] = retireState(n.state);
+    const line = `${JSON.stringify({ t: new Date().toISOString(), ev: "finished", outcome: "skipped", states })}\n`;
+    try {
+      await appendFile(join(runDir, "run.jsonl"), line);
+    } catch (e: unknown) {
+      return ToolResult.err(`could not retire run ${runId}: ${formatError(e)}`);
+    }
+    return ToolResult.ok(
+      `run ${runId} retired as skipped (${Object.entries(states).map(([id, st]) => `${id}=${st}`).join(", ")}); ` +
+        "full journal history kept, the run is terminal (no longer resumable)",
+    ).withEntries({ run_id: runId });
+  }
+
+  /**
+   * Thin run_id-only wrapper over the existing dispatch resume path: resolve
+   * the graph from the journal's started event (the workflows-dir listing keys
+   * by workflow name, so the graph file itself may have been renamed), refuse
+   * live/terminal runs, then hand the exact same run_id resume semantics
+   * (claim, filesystem-verified reuse, engine guards) to WorkflowDispatchTool.
+   */
+  async #resume(runsRoot: string, runId: string, ctx?: ToolContext): Promise<ToolResult> {
+    const m = this.opts.registry.get(runId);
+    if (m && !m.finished && !m.error) {
+      return ToolResult.err(`run ${runId} is active in this process; nothing to resume`);
+    }
+    const s = await readRunSummary(join(runsRoot, runId));
+    if (!s) return ToolResult.err(`run ${runId} not found under ${runsRoot}`);
+    if (s.outcome) {
+      return ToolResult.err(`run ${runId} is already ${s.outcome}: resume applies to interrupted runs`);
+    }
+    const owner = await readRunOwner(join(runsRoot, runId));
+    if (owner && owner.host === hostname() && pidAlive(owner.pid)) {
+      return ToolResult.err(
+        `run ${runId} is live (owner pid ${owner.pid} on '${owner.host}', claimed ${owner.claimedAt}): ` +
+          "resume refuses live runs; stop it there first",
+      );
+    }
+    const dir = this.opts.getWorkflowsDir();
+    if (!dir) return ToolResult.err("Error: workflows.path is not configured");
+    const graph = (await listWorkflows(dir, this.opts.limits)).find((w) => w.name === s.workflow);
+    if (!graph) {
+      return ToolResult.err(
+        `workflow '${s.workflow}' is no longer saved in ${dir}; ` +
+          `re-save the graph before resuming run ${runId}`,
+      );
+    }
+    return new WorkflowDispatchTool(this.opts).execute({ file: graph.file, run_id: runId }, ctx);
+  }
+
+  /**
+   * Live-run cancel, in-process only. Registry first (the engine's own cancel
+   * surface); a run dir on disk without a registry entry is not ours to stop:
+   * refuse with the /workflow cancel pointer, exactly like the CLI's cross-
+   * process stance. Node-level cancel is engine-side (cancelNode).
+   */
+  async #cancel(runsRoot: string, runId: string, node: string | undefined): Promise<ToolResult> {
+    const m = this.opts.registry.get(runId);
+    if (!m) {
+      const s = await readRunSummary(join(runsRoot, runId));
+      if (!s) return ToolResult.err(`run ${runId} not found under ${runsRoot}`);
+      if (s.outcome) {
+        if (node) {
+          const st = s.nodes.find((n) => n.id === node);
+          if (st) return ToolResult.err(`node '${node}' of run ${runId} is already ${st.state}`);
+        }
+        return ToolResult.err(`run ${runId} is already ${s.outcome}`);
+      }
+      const owner = await readRunOwner(join(runsRoot, runId));
+      return ToolResult.err(
+        `run ${runId} is unfinished but not owned by this process` +
+          (owner
+            ? ` (owner: pid ${owner.pid} on '${owner.host}', claimed ${owner.claimedAt})`
+            : " (no live owner claim)") +
+          `; cancel reaches in-process runs only -- use '/workflow cancel ${runId}' in the owning process` +
+          (owner ? "" : "; with no live owner, action skip retires it"),
+      );
+    }
+    if (m.finished) {
+      if (node) {
+        const st = m.finished.states[node];
+        if (st) return ToolResult.err(`node '${node}' of run ${runId} is already ${st}`);
+      }
+      return ToolResult.err(`run ${runId} is already ${m.finished.outcome}`);
+    }
+    if (m.error) return ToolResult.err(`run ${runId} crashed (${m.error})`);
+    if (!node) {
+      m.run.cancel();
+      return ToolResult.ok(
+        `Cancel requested for run ${runId}: live node tasks are interrupted and the run settles cancelled with its full journal.`,
+      );
+    }
+    const res = m.run.cancelNode(node);
+    if ("error" in res) {
+      if (res.error === "unknown") {
+        return ToolResult.err(`node '${node}' is not a node of run ${runId} (${nodeStateLines(m.run)})`);
+      }
+      return ToolResult.err(`node '${node}' of run ${runId} is already ${res.state}`);
+    }
+    return ToolResult.ok(
+      `Cancel requested for node '${node}' of run ${runId}: it settles cancelled with no further attempts ` +
+        "(a queued node never spawns a worker), its descendants block, siblings keep running.",
+    );
+  }
+
+  toToolDef(): ToolDef {
+    return toolDef(
+      "workflow_control",
+      [
+        "Control one workflow run: action is required, one of skip | resume | cancel.",
+        "cancel (run_id, optional node): only runs dispatched by THIS process -- reuse the /workflow cancel machinery; cross-process runs are refused with a pointer to run it in the owning process. Without node the whole run settles cancelled. With node, one node's worker is interrupted: the node ends cancelled with no further retry attempts (a queued node never spawns a worker), its descendants block while siblings and unrelated judges keep running, and a judge cancelled mid-gate leaves the verdict that already landed and blocks its producer honestly. Cancelling a producer whose judge holds the floor settles BOTH the producer and that judge cancelled -- the judge never respawns. Cancel is not a delete: the journal keeps full history.",
+        "resume (run_id): convenience over dispatch's run_id resume for an interrupted run: resolves the graph file from the run journal, then filesystem-verified completed nodes are reused (graph params unchanged, so graphs with required params are refused). Live or terminal runs are refused with their actual outcome.",
+        "skip (run_id): retire a run with NO live owner (the interruption scan's view): appends one terminal journal event with outcome skipped, mirroring last-known node states (running->skipped, failed stays failed, never-started->blocked). Refuses live-owned runs (use cancel instead) and already-terminal runs. Skipped runs are never resumable.",
+      ].join(" "),
+      {
+        properties: {
+          run_id: param("string", "The run id to control"),
+          action: param("string", "skip | resume | cancel", { enum: ["skip", "resume", "cancel"] }),
+          node: param("string", "Node id (cancel only): interrupt just this node instead of the run"),
+        },
+        required: ["run_id", "action"],
       },
     );
   }
@@ -705,4 +992,6 @@ export const WORKFLOW_TOOL_CONSTRUCTORS: Record<
   workflow_validate: (opts) => new WorkflowValidateTool(opts),
   workflow_dispatch: (opts) => new WorkflowDispatchTool(opts),
   workflow_status: (opts) => new WorkflowStatusTool(opts),
+  workflow_followup: (opts) => new WorkflowFollowupTool(opts),
+  workflow_control: (opts) => new WorkflowControlTool(opts),
 };

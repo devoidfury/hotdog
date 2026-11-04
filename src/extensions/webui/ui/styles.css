@@ -928,7 +928,7 @@ body.sidebar-resizing {
    Deliberately quiet; the copy icon lifts to full contrast on hover (title
    carries the tooltip), and the confirmed state flashes green. */
 .message-assistant-footer {
-    align-self: flex-start;
+    align-self: center;
     display: flex;
     align-items: center;
     gap: 10px;

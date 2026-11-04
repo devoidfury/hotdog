@@ -99,10 +99,13 @@ class FakeView implements BrowserView {
   evaluateResponses = new Map<string, unknown>();
   /** onNavigated fires with this URL instead of the target (redirect sim). */
   redirectsTo: string | null = null;
+  /** Watchdog tests: a navigate to one of these URLs never settles (stalled page). */
+  stallNavigateUrls = new Set<string>();
   #inFlightEvals = 0;
 
   async navigate(url: string): Promise<void> {
     this.navigations.push(url);
+    if (this.stallNavigateUrls.has(url)) return new Promise<void>(() => {});
     const landed = this.redirectsTo ?? url;
     this.redirectsTo = null;
     this.url = landed;
@@ -181,9 +184,12 @@ function toolWithFake(make: () => FakeView) {
 
 const PUBLIC_URL = "https://93.184.216.34/"; // public IP literal: admission needs no DNS
 
-function ctxFor(sessionId = "sess-1", modelRegistry?: Record<string, unknown>) {
+function ctxFor(sessionId = "sess-1", modelRegistry?: Record<string, unknown>, abortSignal?: AbortSignal) {
   const agent = { sessionId, model: "test/model", modelRegistry };
-  return { get: (key: string) => (key === "agent" ? agent : undefined) } as never;
+  return {
+    get: (key: string) =>
+      key === "agent" ? agent : key === "abortSignal" ? abortSignal : undefined,
+  } as never;
 }
 
 const VISION_REGISTRY = { "test/model": { name: "test/model", inputModalities: ["text", "image"] } };
@@ -578,5 +584,155 @@ describe("session isolation", () => {
     expect(intruder.error).toContain('no view "mine"');
     const list = await tool.execute({ action: "list" }, ctxFor("s2"));
     expect(list.output).toContain("No views open");
+  });
+});
+
+// ── Watchdog: per-op ceiling, poisoning, cancellation (audit finding 1) ────
+
+describe("view watchdog (ceiling, poison, abort)", () => {
+  const CEILING_MS = 250; // "hundreds of ms" override via the constructor seam
+
+  /** Tool whose views are built per creation index, with a short ceiling. */
+  function watchdogTool(makeView: (index: number) => FakeView, opTimeoutMs = CEILING_MS) {
+    const made: FakeView[] = [];
+    let n = 0;
+    const tool = new AgentBrowserTool({
+      allowLoopback: false,
+      userGateEnabled: false,
+      opTimeoutMs,
+      createView: () => {
+        const view = makeView(n++);
+        made.push(view);
+        return view;
+      },
+    });
+    return { tool, made };
+  }
+  const stalling = () => {
+    const view = new FakeView();
+    view.stallNavigateUrls.add(PUBLIC_URL);
+    return view;
+  };
+
+  it("a never-settling page load rejects at the ceiling with a close instruction", async () => {
+    const { tool } = watchdogTool(() => stalling());
+    const t0 = Date.now();
+    const open = await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
+    expect(open.error).toContain(`did not finish within ${CEILING_MS} ms`);
+    expect(open.error).toContain('action=close, view="main"');
+    expect(Date.now() - t0).toBeLessThan(4_000); // released, not left hanging
+  });
+
+  it("a wedged view fails the next queue-bound call immediately; list still works", async () => {
+    const { tool } = watchdogTool(() => stalling());
+    await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
+    const t0 = Date.now();
+    const snap = await tool.execute({ action: "snapshot" }, ctxFor());
+    expect(snap.error).toContain("wedged");
+    expect(snap.hint).toContain('action=close, view="main"');
+    expect(Date.now() - t0).toBeLessThan(CEILING_MS); // fast-fail: no queue wait at all
+    const list = await tool.execute({ action: "list" }, ctxFor());
+    expect(list.output).toContain('"main"'); // list is queue-free
+  });
+
+  it("close works on a wedged view and a same-name reopen recovers it", async () => {
+    const { tool, made } = watchdogTool((i) => (i === 0 ? stalling() : new FakeView()));
+    await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
+    const closed = await tool.execute({ action: "close", view: "main" }, ctxFor());
+    expect(closed.output).toContain('Closed view "main"');
+    expect(made[0]!.closed).toBe(true);
+    const reopened = await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
+    expect(reopened.error).toBeNull();
+    expect(reopened.output).toContain('Opened view "main"');
+  });
+
+  it("a stalled guard egress releases the queue instead of poisoning it forever", async () => {
+    // Redirect into private space whose about:blank egress never settles:
+    // the guard runs under the same ceiling, so the triggering call returns
+    // (guard error) and the view poisons -- nothing hangs, follow-ups fail fast.
+    const { tool, made } = watchdogTool(() => {
+      const view = new FakeView();
+      view.redirectsTo = "http://10.1.2.3/evil";
+      view.stallNavigateUrls.add("about:blank");
+      return view;
+    });
+    const t0 = Date.now();
+    const open = await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
+    expect(Date.now() - t0).toBeLessThan(4_000); // settle was NOT wedged by the stalled egress
+    // Either the guard reports its landing or the drain watchdog reports the
+    // pending guard work -- both name the guard and carry the close route.
+    expect(open.error).toMatch(/navigation guard/i);
+    expect(open.error).toContain('action=close, view="main"');
+    const snap = await tool.execute({ action: "snapshot" }, ctxFor());
+    expect(snap.error).toContain("wedged");
+    expect(made[0]!.navigations).toContain("about:blank"); // the guard did try to egress
+  });
+
+  it("an aborted run releases a pending page call promptly, far below the ceiling", async () => {
+    const ac = new AbortController();
+    const { tool } = watchdogTool(() => stalling(), 60_000); // only the abort can release this
+    const pending = tool.execute(
+      { action: "open", url: PUBLIC_URL },
+      ctxFor("sess-1", undefined, ac.signal),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    ac.abort();
+    const t0 = Date.now();
+    const open = await pending;
+    expect(String(open.error).toLowerCase()).toContain("cancel");
+    expect(Date.now() - t0).toBeLessThan(2_000); // released by the signal, not the ceiling
+  }, 10_000);
+
+  it("positive control: fast operations under a small ceiling neither time out nor poison", async () => {
+    const { tool } = watchdogTool(() => new FakeView(), 2_000);
+    const open = await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
+    expect(open.error).toBeNull();
+    const snap = await tool.execute({ action: "snapshot" }, ctxFor());
+    expect(snap.error).toBeNull();
+    const nav = await tool.execute({ action: "navigate", url: "https://8.8.8.8/" }, ctxFor());
+    expect(nav.error).toBeNull();
+    expect(nav.output).toContain("8.8.8.8");
+    const click = await tool.execute({ action: "click", selector: "#go" }, ctxFor());
+    expect(click.error).toBeNull();
+  });
+});
+
+// ── Sessionless callers (audit finding 3) ─────────────────────────────────
+
+describe("sessionless callers", () => {
+  const NO_SESSION = { get: () => undefined } as never; // no agent, no sessionId anywhere
+
+  it("refuses stateful actions when no sessionId is resolvable", async () => {
+    const { tool, made } = makeTool();
+    for (const action of [
+      "open",
+      "navigate",
+      "snapshot",
+      "click",
+      "type",
+      "press",
+      "screenshot",
+      "evaluate",
+    ]) {
+      const viaEmpty = await tool.execute(
+        { action, url: PUBLIC_URL, script: "1+1" },
+        ctxFor("", undefined),
+      );
+      expect(viaEmpty.error, action).toContain("sessionId");
+      const viaNone = await tool.execute({ action, url: PUBLIC_URL, script: "1+1" }, NO_SESSION);
+      expect(viaNone.error, action).toContain("sessionId");
+    }
+    expect(made).toHaveLength(0); // refusal burns no views
+    expect(tool.viewCount("")).toBe(0); // the shared "" bucket stays unreachable/empty
+  });
+
+  it("list and close with no session are harmless empties", async () => {
+    const { tool } = makeTool();
+    const list = await tool.execute({ action: "list" }, NO_SESSION);
+    expect(list.error).toBeNull();
+    expect(list.output).toContain("No views open");
+    const close = await tool.execute({ action: "close" }, NO_SESSION);
+    expect(close.error).toBeNull();
+    expect(close.output).toContain("No views were open.");
   });
 });

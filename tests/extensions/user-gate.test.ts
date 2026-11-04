@@ -683,4 +683,68 @@ describe("agent_browser evaluate through the gate", () => {
     expect(evalNoUi.action).toBe("block");
     expect(evalNoUi.result).toContain("no interactive UI");
   });
+
+  it("huge script targets are truncated in the prompt line, but the session memo keeps the full script", async () => {
+    // Two multi-KB scripts identical until deep past the display budget:
+    // the human-facing targets line must stay bounded AND the two calls must
+    // still be separate asks with separate allow-for-session grants (the
+    // memo key keeps the FULL raw value, so truncation cannot collapse them).
+    const hooks = new HookSystem();
+    const core = { hooks, config: { userGate: { enabled: true, default: "ask" } } } as unknown as CoreContext;
+    const instance = create(core);
+    for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
+      hooks.on(name, handler as never, "user-gate");
+    }
+    const prompts: string[] = [];
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: (qs: Record<string, unknown>[]) => {
+        prompts.push(String(qs[0]?.prompt ?? ""));
+        return { approve: "allow for session" };
+      },
+    };
+    const through = (script: string) =>
+      hooks.runHookPipeline<GateAction, "tool:call">(
+        HOOKS.TOOL_CALL,
+        evaluatePayload(script, { inputOverride: input } as never),
+        { failOnError: true },
+      );
+
+    const head = `run(${JSON.stringify("p".repeat(3000))} + `;
+    const scriptA = `${head}"A")`;
+    const scriptB = `${head}"B")`; // differs from A only past the truncation point
+
+    await through(scriptA);
+    expect(prompts).toHaveLength(1);
+    await through(scriptA);
+    expect(prompts).toHaveLength(1); // memo hit: same session, same exact script
+
+    const targetsLine = (p: string) =>
+      p.split("\n").find((l) => l.trimStart().startsWith("targets:")) ?? "";
+    expect(targetsLine(prompts[0]!)).toContain("…");
+    expect(targetsLine(prompts[0]!).length).toBeLessThan(300); // bounded, not multi-KB
+
+    await through(scriptB);
+    expect(prompts).toHaveLength(2); // its own prompt: the memo did NOT collapse it
+    expect(targetsLine(prompts[1]!)).toBe(targetsLine(prompts[0]!)); // same visible prefix
+    await through(scriptB);
+    await through(scriptA);
+    expect(prompts).toHaveLength(2); // BOTH grants live side by side: distinct memo entries
+  });
+
+  it("rule matching keeps the full raw script value, not the truncated display", async () => {
+    // The identical-head/tail-differing pair again: an allow rule naming the
+    // EXACT huge script admits it silently; the other one still prompts.
+    const head = `run(${JSON.stringify("q".repeat(3000))} + `;
+    const scriptA = `${head}"A")`;
+    const scriptB = `${head}"B")`;
+    const { input, asked } = answerWith("deny");
+    const cfg: UserGateConfig = { enabled: true, default: "ask", allow: [`agent_browser.script=${scriptA}`] };
+    const exact = await run(cfg, evaluatePayload(scriptA, { inputOverride: input } as never));
+    expect(exact.action).toBeUndefined();
+    expect(asked).toHaveLength(0);
+    const other = await run(cfg, evaluatePayload(scriptB, { inputOverride: input } as never));
+    expect(other.action).toBe("block"); // denied here, but only AFTER its own ask
+    expect(asked).toHaveLength(1);
+  });
 });

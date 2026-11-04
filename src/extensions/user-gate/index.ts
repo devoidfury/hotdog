@@ -51,6 +51,15 @@ const ANSWER_KEY = "approve";
 const OPTIONS = ["allow once", "allow for session", "deny"];
 /** Args are echoed to the human, bounded so one call can't flood the prompt. */
 const MAX_ARGS_ECHO = 400;
+/**
+ * Same bounded-echo posture for the targets line: an agent_browser evaluate
+ * target is a whole model-authored script, and multi-KB is the normal size,
+ * so raw values would bury the question under the very thing being approved.
+ * DISPLAY TRUNCATION ONLY: rule matching and the allow-for-session memo key
+ * (memoKey) keep the FULL raw value, so two scripts that share a visible
+ * prefix are still separate asks and separate grants.
+ */
+const MAX_TARGET_ECHO = 200;
 
 /** How the human answered an ask. */
 type AskOutcome =
@@ -102,7 +111,9 @@ function approvalPromptText(call: ApprovalCall, reasons: string[], argsEcho: str
   const targets = call.targets
     .filter((t) => !t.denyOnly)
     .slice(0, 6)
-    .map((t) => `${t.param}: ${t.value}`);
+    .map((t) =>
+      `${t.param}: ${t.value.length > MAX_TARGET_ECHO ? `${t.value.slice(0, MAX_TARGET_ECHO)}…` : t.value}`,
+    );
   const lines = [
     `Approve this tool call? (${call.tool})`,
     `  args: ${argsEcho.length > MAX_ARGS_ECHO ? `${argsEcho.slice(0, MAX_ARGS_ECHO)}…` : argsEcho}`,

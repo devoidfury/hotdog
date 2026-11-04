@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { HOOKS } from "@core/hooks.ts";
-import { formatError } from "@core/error.ts";
+import { AppError, formatError } from "@core/error.ts";
 import {
   toolDef,
   param,
@@ -58,7 +58,26 @@ export const MAX_VIEWS_PER_SESSION = 3;
 /** Default viewport for created views (CSS pixels). */
 const VIEW_WIDTH = 1280;
 const VIEW_HEIGHT = 900;
-/** Selector-click actionability wait; the Bun default (30s) is too long mid-run. */
+/**
+ * Wall-clock ceiling for EVERY queue-bound view step: an action's place in
+ * the view's FIFO plus the page call itself, the navigation guard's URL
+ * check and about:blank egress, and the queue drain. A stalled page load or
+ * a stalled egress must never hold a model turn or wedge the FIFO past this
+ * point: the call rejects with a timeout error and the view is poisoned
+ * until close/reopen (see #govern). Tests override it through the
+ * constructor seam ONLY (house precedent: mcp-client's killGraceMs) --
+ * deliberately not a config key.
+ */
+const VIEW_OP_TIMEOUT_MS = 30_000;
+/**
+ * Selector-click actionability wait -- Bun's own per-call timeout option.
+ * Relationship to the watchdog: this bounds the common "selector never
+ * became actionable" case BELOW the generic ceiling, so the specific error
+ * surfaces first and (being a settled rejection) does not poison the view.
+ * The watchdog still covers what Bun does not bound -- coordinate clicks,
+ * navigate, evaluate, screenshot capture -- plus a renderer wedged so hard
+ * it ignores Bun's timeout entirely. Keep it well inside VIEW_OP_TIMEOUT_MS.
+ */
 const CLICK_TIMEOUT_MS = 10_000;
 /** Snapshot extraction: elements collected / output lines shown (house truncateOutput seam). */
 const SNAPSHOT_MAX_ELEMENTS = 200;
@@ -241,6 +260,14 @@ interface OpenView {
   /** Set by the onNavigated guard when a landed URL was disallowed. */
   blocked: string | null;
   closed: boolean;
+  /**
+   * Non-null once a queue-bound step hit the watchdog: the view is wedged
+   * (an abandoned page call still owns it) and holds the reason. Queue-bound
+   * calls then fail fast; `list`/`close` stay queue-free, and close, a
+   * same-name re-open, or SESSION_END (any path that drops the entry) fully
+   * recovers the name.
+   */
+  poison: string | null;
 }
 
 const VIEW_NAME_RE = /^[a-zA-Z0-9._-]{1,48}$/;
@@ -254,6 +281,12 @@ export interface AgentBrowserToolOptions {
   createView: ViewFactory;
   /** True only when the user-gate extension is enabled (evaluate prompt surface). */
   userGateEnabled: boolean;
+  /**
+   * Per-op watchdog ceiling override, a tests-only constructor seam
+   * (house precedent: mcp-client's killGraceMs), never a config knob;
+   * production always takes VIEW_OP_TIMEOUT_MS.
+   */
+  opTimeoutMs?: number;
 }
 
 export class AgentBrowserTool {
@@ -263,6 +296,7 @@ export class AgentBrowserTool {
   #allowLoopback: boolean;
   #createView: ViewFactory;
   #userGateEnabled: boolean;
+  #opTimeoutMs: number;
   /** sessionId -> view name -> view. Caller sessions survive tool calls. */
   #sessions = new Map<string, Map<string, OpenView>>();
 
@@ -270,6 +304,7 @@ export class AgentBrowserTool {
     this.#allowLoopback = options.allowLoopback;
     this.#createView = options.createView;
     this.#userGateEnabled = options.userGateEnabled;
+    this.#opTimeoutMs = options.opTimeoutMs ?? VIEW_OP_TIMEOUT_MS;
   }
 
   toToolDef(): ToolDef {
@@ -327,25 +362,37 @@ export class AgentBrowserTool {
 
     const agent = ctx?.get("agent") as Agent | undefined;
     const sessionId = typeof agent?.sessionId === "string" ? agent.sessionId : "";
+    // The run's cancellation (ToolExecutor wires it; standalone callers have none).
+    const signal = ctx?.get("abortSignal") ?? null;
+
+    // Stateful actions must belong to a session: views are reclaimed at
+    // SESSION_END, and a sessionless view lands in a shared "" bucket that no
+    // session end can ever reach (a live Chromium view pinned forever).
+    // `list`/`close` on that necessarily-empty bucket are harmless no-ops.
+    if (sessionId === "" && action !== "close" && action !== "list") {
+      return ToolResult.err(
+        `agent_browser: ${action} needs a sessionId on the calling context; views are reclaimed when their session ends, and a sessionless view could never be.`,
+      );
+    }
 
     try {
       switch (action) {
         case "open":
-          return await this.#open(args, sessionId);
+          return await this.#open(args, sessionId, signal);
         case "navigate":
-          return await this.#navigate(args, sessionId);
+          return await this.#navigate(args, sessionId, signal);
         case "snapshot":
-          return await this.#snapshot(args, sessionId);
+          return await this.#snapshot(args, sessionId, signal);
         case "click":
-          return await this.#click(args, sessionId);
+          return await this.#click(args, sessionId, signal);
         case "type":
-          return await this.#type(args, sessionId);
+          return await this.#type(args, sessionId, signal);
         case "press":
-          return await this.#press(args, sessionId);
+          return await this.#press(args, sessionId, signal);
         case "screenshot":
-          return await this.#screenshot(args, sessionId, agent);
+          return await this.#screenshot(args, sessionId, signal, agent);
         case "evaluate":
-          return await this.#modelEvaluate(args, sessionId);
+          return await this.#modelEvaluate(args, sessionId, signal);
         case "close":
           return this.#close(args, sessionId);
         case "list":
@@ -392,6 +439,16 @@ export class AgentBrowserTool {
         ),
       };
     }
+    // Wedged views refuse queue-bound work FAST: never queue behind the
+    // abandoned call that poisoned them. list/close bypass #getEntry and
+    // keep working; close (or same-name re-open / SESSION_END) recovers.
+    if (entry.poison) {
+      return {
+        error: ToolResult.err(
+          `agent_browser: view "${name}" is wedged: ${entry.poison}. It still holds a page operation that never completed, so no new operation is accepted.`,
+        ).withHint(`Close it (action=close, view="${name}") and open it again; "list" and "close" still work on a wedged view.`),
+      };
+    }
     return { entry, name };
   }
 
@@ -412,24 +469,150 @@ export class AgentBrowserTool {
   }
 
   /**
+   * Await `work` (already started) under BOTH the per-op ceiling and the
+   * run's abort signal -- the one governed-wait primitive every queue-bound
+   * step uses (operations plus their FIFO wait, the guard's check/egress,
+   * the queue drain).
+   *
+   * Ceiling hit: the view is poisoned (the abandoned page call owns the
+   * FIFO; Bun.WebView has no cancel -- poisoning is what contains it) and an
+   * expected "timeout" error names the view and its recovery. Abort: an
+   * expected "cancelled" error WITHOUT poisoning -- the abandoned call
+   * usually settles on its own and leaves a healthy view, and if it never
+   * does, the NEXT caller's own ceiling converts that wedge into a poison
+   * within one ceiling. That is the bounded-degradation posture: every wait
+   * here is bounded, so no state can leave a follow-up call hanging
+   * unbounded; recovery is always close/reopen. The timer and listener are
+   * always cleared, even when the abort wins, so a released call never pins
+   * the process with a stray timer. `work` keeps running after either loss;
+   * its late settle/rejection stays handled by Promise.race (no unhandled
+   * rejections). `signal` is null for guard steps, which fire outside any
+   * calling run.
+   */
+  async #govern<T>(
+    entry: OpenView,
+    label: string,
+    work: Promise<T>,
+    signal: AbortSignal | null,
+  ): Promise<T> {
+    if (signal?.aborted) {
+      throw new AppError(
+        `agent_browser: the run was cancelled before ${label} could touch view "${entry.name}".`,
+        "cancelled",
+      );
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ceiling = new Promise<"ceiling">((resolve) => {
+      timer = setTimeout(() => resolve("ceiling"), this.#opTimeoutMs);
+    });
+    let detach: () => void = () => {};
+    const aborted = new Promise<"abort">((resolve) => {
+      if (!signal) return;
+      const onAbort = () => resolve("abort");
+      signal.addEventListener("abort", onAbort, { once: true });
+      detach = () => signal.removeEventListener("abort", onAbort);
+    });
+    try {
+      const winner = await Promise.race([work.then(() => "done" as const), ceiling, aborted]);
+      if (winner === "ceiling") {
+        const reason = `${label} did not finish within ${this.#opTimeoutMs} ms; the page never answered`;
+        entry.poison ??= reason;
+        throw new AppError(
+          `agent_browser: view "${entry.name}" hit its operation ceiling: ${reason}. Close it (action=close, view="${entry.name}") and open a fresh one.`,
+          "timeout",
+        );
+      }
+      if (winner === "abort") {
+        throw new AppError(
+          `agent_browser: the run was cancelled while ${label} was pending on view "${entry.name}"; the browser call was released and its outcome is unknown. If the view misbehaves, close it (action=close, view="${entry.name}") and reopen.`,
+          "cancelled",
+        );
+      }
+      return await work;
+    } finally {
+      clearTimeout(timer);
+      detach();
+    }
+  }
+
+  /**
+   * Run one queue-bound view operation: FIFO position + page call under the
+   * governed wait (ceiling + abort; see #govern for the degradation
+   * posture). An already-aborted run never touches the view at all.
+   */
+  async #runView<T>(
+    entry: OpenView,
+    label: string,
+    signal: AbortSignal | null,
+    op: () => Promise<T>,
+  ): Promise<T> {
+    if (signal?.aborted) {
+      throw new AppError(
+        `agent_browser: the run was cancelled before ${label} could touch view "${entry.name}".`,
+        "cancelled",
+      );
+    }
+    return this.#govern(entry, label, this.#enqueue(entry, op), signal);
+  }
+
+  /** Await the FIFO drain (incl. guard egress): ceilinged and cancellable like #runView. */
+  async #drain(entry: OpenView, signal: AbortSignal | null): Promise<void> {
+    await this.#govern(
+      entry,
+      "the view's pending work (navigation guard)",
+      this.#settle(entry),
+      signal,
+    );
+  }
+
+  /**
    * The landed-URL guard. onNavigated fires for redirects and page-initiated
    * jumps too, before navigate() resolves -- the egress navigation queues
-   * behind the in-flight one instead of racing it (ERR_INVALID_STATE).
+   * behind the in-flight one instead of racing it (ERR_INVALID_STATE). The
+   * whole check+egress runs under the same per-op ceiling as ordinary
+   * operations: a stalled egress (the 0.0.0.x class) must release the FIFO,
+   * and a guard that times out poisons the view -- it can neither confirm
+   * the landing nor leave it, so follow-up work must fail fast, not queue
+   * behind a page stuck on a disallowed host.
    */
   #installGuard(entry: OpenView): void {
     entry.view.onNavigated = (landed: string) => {
-      void this.#enqueue(entry, async () => {
-        if (entry.closed) return;
-        const problem = await checkNavigationAllowed(landed, this.#allowLoopback);
-        if (!problem) return;
-        entry.blocked = `landed on "${landed}" which is not allowed (${problem}); the view was returned to about:blank.`;
-        try {
-          await entry.view.navigate("about:blank");
-        } catch (err) {
-          logger.warn(`agent-browser: egress navigation failed: ${formatError(err)}`);
-        }
-      });
+      void this.#enqueue(entry, () => this.#guardLanding(entry, landed));
     };
+  }
+
+  async #guardLanding(entry: OpenView, landed: string): Promise<void> {
+    if (entry.closed || entry.poison) return;
+    let problem: string | null;
+    try {
+      problem = await this.#govern(
+        entry,
+        "the navigation guard's URL check",
+        checkNavigationAllowed(landed, this.#allowLoopback),
+        null, // the guard fires from onNavigated, outside any calling run
+      );
+    } catch (err) {
+      // Watchdog (already poisoned) or a checker bug; either way the landing
+      // is unjudged -- report it, and let the poison (if any) fail the next call.
+      entry.blocked ??= `landed on "${landed}" and the guard could not finish checking it (${formatError(err)}).`;
+      logger.warn(`agent-browser: navigation guard check failed: ${formatError(err)}`);
+      return;
+    }
+    if (!problem) return;
+    try {
+      await this.#govern(
+        entry,
+        "the navigation guard's about:blank egress",
+        entry.view.navigate("about:blank"),
+        null,
+      );
+      entry.blocked = `landed on "${landed}" which is not allowed (${problem}); the view was returned to about:blank.`;
+    } catch (err) {
+      // Timeout poisons (the view is stuck ON a disallowed host); a plain
+      // rejection leaves the view usable but must still surface.
+      entry.blocked ??= `landed on "${landed}" which is not allowed (${problem}); returning it to about:blank failed (${formatError(err)}).`;
+      logger.warn(`agent-browser: egress navigation failed: ${formatError(err)}`);
+    }
   }
 
   #closeView(entry: OpenView): void {
@@ -450,15 +633,19 @@ export class AgentBrowserTool {
     return note;
   }
 
-  async #admittedNavigate(entry: OpenView, url: string): Promise<ToolResult | null> {
+  async #admittedNavigate(
+    entry: OpenView,
+    url: string,
+    signal: AbortSignal | null,
+  ): Promise<ToolResult | null> {
     const problem = await checkNavigationAllowed(url, this.#allowLoopback);
     if (problem) {
       return ToolResult.err(`agent_browser: navigation refused for ${url}: ${problem}`).withHint(
         "Only public http(s) hosts are allowed; agentBrowser.allowLoopback additionally opens localhost/127.x/::1.",
       );
     }
-    await this.#enqueue(entry, () => entry.view.navigate(url));
-    await this.#settle(entry);
+    await this.#runView(entry, "navigation", signal, () => entry.view.navigate(url));
+    await this.#drain(entry, signal);
     const note = this.#takeGuardNote(entry);
     if (note) return ToolResult.err(`agent_browser: blocked by navigation guard: ${note}`);
     return null;
@@ -466,7 +653,11 @@ export class AgentBrowserTool {
 
   // ── actions ───────────────────────────────────────────────────────────────
 
-  async #open(args: Record<string, unknown>, sessionId: string): Promise<ToolResult> {
+  async #open(
+    args: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal | null,
+  ): Promise<ToolResult> {
     const name = this.#viewName(args);
     if (name === null) return ToolResult.err(`agent_browser: invalid view name ${JSON.stringify(args.view)} (use [a-zA-Z0-9._-]{1,48})`);
     const url = typeof args.url === "string" ? args.url : "";
@@ -492,7 +683,7 @@ export class AgentBrowserTool {
     let entry: OpenView;
     try {
       const view = this.#createView({ width: VIEW_WIDTH, height: VIEW_HEIGHT });
-      entry = { name, view, queue: Promise.resolve(), blocked: null, closed: false };
+      entry = { name, view, queue: Promise.resolve(), blocked: null, closed: false, poison: null };
       views.set(name, entry);
       this.#installGuard(entry);
     } catch (err) {
@@ -501,60 +692,83 @@ export class AgentBrowserTool {
       );
     }
 
-    await this.#enqueue(entry, () => entry.view.navigate(url));
-    await this.#settle(entry);
+    await this.#runView(entry, "the initial page load", signal, () => entry.view.navigate(url));
+    await this.#drain(entry, signal);
     const note = this.#takeGuardNote(entry);
     if (note) return ToolResult.err(`agent_browser: blocked by navigation guard: ${note}`);
     return ToolResult.ok(`Opened view "${name}": ${entry.view.url} ("${entry.view.title}")`);
   }
 
-  async #navigate(args: Record<string, unknown>, sessionId: string): Promise<ToolResult> {
+  async #navigate(
+    args: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal | null,
+  ): Promise<ToolResult> {
     const got = this.#getEntry(args, sessionId);
     if ("error" in got) return got.error;
     const url = typeof args.url === "string" ? args.url : "";
     if (!url) return ToolResult.err("agent_browser: navigate needs a url").withHint('Pass url: "https://example.com".');
-    const blocked = await this.#admittedNavigate(got.entry, url);
+    const blocked = await this.#admittedNavigate(got.entry, url, signal);
     if (blocked) return blocked;
     return ToolResult.ok(`View "${got.name}" at ${got.entry.view.url} ("${got.entry.view.title}")`);
   }
 
-  async #snapshot(args: Record<string, unknown>, sessionId: string): Promise<ToolResult> {
+  async #snapshot(
+    args: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal | null,
+  ): Promise<ToolResult> {
     const got = this.#getEntry(args, sessionId);
     if ("error" in got) return got.error;
     // Extension-internal extraction (fixed script in this file) -- see
     // SNAPSHOT_SCRIPT: deliberately NOT the gated model-evaluate path.
-    const raw = await this.#enqueue(got.entry, () => got.entry.view.evaluate<unknown>(SNAPSHOT_SCRIPT));
-    await this.#settle(got.entry);
+    const raw = await this.#runView(got.entry, "the snapshot extraction", signal, () =>
+      got.entry.view.evaluate<unknown>(SNAPSHOT_SCRIPT),
+    );
+    await this.#drain(got.entry, signal);
     const text = formatSnapshot(raw);
     const note = this.#takeGuardNote(got.entry);
     return ToolResult.ok(note ? `${text}\nWARNING: navigation guard ${note}` : text);
   }
 
-  async #click(args: Record<string, unknown>, sessionId: string): Promise<ToolResult> {
+  async #click(
+    args: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal | null,
+  ): Promise<ToolResult> {
     const got = this.#getEntry(args, sessionId);
     if ("error" in got) return got.error;
     const { entry } = got;
     if (typeof args.selector === "string" && args.selector !== "") {
-      await this.#enqueue(entry, () => entry.view.click(args.selector as string, { timeout: CLICK_TIMEOUT_MS }));
+      // Bun's own actionability wait (see CLICK_TIMEOUT_MS) usually fires
+      // before the watchdog here and rejects cleanly without poisoning; the
+      // watchdog is the backstop for a renderer that ignores it.
+      await this.#runView(entry, "the click", signal, () =>
+        entry.view.click(args.selector as string, { timeout: CLICK_TIMEOUT_MS }),
+      );
     } else if (typeof args.x === "number" && typeof args.y === "number") {
-      await this.#enqueue(entry, () => entry.view.click(args.x as number, args.y as number));
+      await this.#runView(entry, "the click", signal, () => entry.view.click(args.x as number, args.y as number));
     } else {
       return ToolResult.err("agent_browser: click needs a selector or numeric x and y").withHint(
         'A snapshot line shows each element\'s (x,y) center; selector clicks wait for actionability.',
       );
     }
-    await this.#settle(entry);
+    await this.#drain(entry, signal);
     const note = this.#takeGuardNote(entry);
     if (note) return ToolResult.err(`agent_browser: blocked by navigation guard: ${note}`);
     return ToolResult.ok(`Clicked in view "${got.name}": ${entry.view.url} ("${entry.view.title}")`);
   }
 
-  async #type(args: Record<string, unknown>, sessionId: string): Promise<ToolResult> {
+  async #type(
+    args: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal | null,
+  ): Promise<ToolResult> {
     const got = this.#getEntry(args, sessionId);
     if ("error" in got) return got.error;
     if (typeof args.text !== "string") return ToolResult.err("agent_browser: type needs a text string");
-    await this.#enqueue(got.entry, () => got.entry.view.type(args.text as string));
-    await this.#settle(got.entry);
+    await this.#runView(got.entry, "typing", signal, () => got.entry.view.type(args.text as string));
+    await this.#drain(got.entry, signal);
     const note = this.#takeGuardNote(got.entry);
     return ToolResult.ok(
       note
@@ -563,14 +777,18 @@ export class AgentBrowserTool {
     );
   }
 
-  async #press(args: Record<string, unknown>, sessionId: string): Promise<ToolResult> {
+  async #press(
+    args: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal | null,
+  ): Promise<ToolResult> {
     const got = this.#getEntry(args, sessionId);
     if ("error" in got) return got.error;
     if (typeof args.key !== "string" || args.key === "") {
       return ToolResult.err("agent_browser: press needs a key (e.g. Enter, Tab, Escape)");
     }
-    await this.#enqueue(got.entry, () => got.entry.view.press(args.key as string));
-    await this.#settle(got.entry);
+    await this.#runView(got.entry, "the key press", signal, () => got.entry.view.press(args.key as string));
+    await this.#drain(got.entry, signal);
     const note = this.#takeGuardNote(got.entry);
     if (note) return ToolResult.err(`agent_browser: blocked by navigation guard: ${note}`);
     return ToolResult.ok(`Pressed ${JSON.stringify(args.key)} in view "${got.name}".`);
@@ -579,6 +797,7 @@ export class AgentBrowserTool {
   async #screenshot(
     args: Record<string, unknown>,
     sessionId: string,
+    signal: AbortSignal | null,
     agent: Agent | undefined,
   ): Promise<ToolResult> {
     const got = this.#getEntry(args, sessionId);
@@ -586,10 +805,12 @@ export class AgentBrowserTool {
     const { entry } = got;
 
     const png = Buffer.from(
-      await this.#enqueue(entry, () => entry.view.screenshot({ encoding: "base64", format: "png" })),
+      await this.#runView(entry, "screenshot capture", signal, () =>
+        entry.view.screenshot({ encoding: "base64", format: "png" }),
+      ),
       "base64",
     );
-    await this.#settle(entry);
+    await this.#drain(entry, signal);
 
     let mime = "image/png";
     let ext = "png";
@@ -634,7 +855,11 @@ export class AgentBrowserTool {
    * pipeline (user-gate + utils/approvals: the `script` param is the target;
    * a tool-level allow cannot admit it).
    */
-  async #modelEvaluate(args: Record<string, unknown>, sessionId: string): Promise<ToolResult> {
+  async #modelEvaluate(
+    args: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal | null,
+  ): Promise<ToolResult> {
     if (!this.#userGateEnabled) {
       return ToolResult.err(
         "agent_browser: the evaluate action runs model-authored JavaScript inside whatever page is loaded, and there is no approval prompt surface here (the user-gate extension is not enabled). Refused.",
@@ -645,8 +870,10 @@ export class AgentBrowserTool {
     const script = typeof args.script === "string" ? args.script : "";
     if (script === "") return ToolResult.err("agent_browser: evaluate needs a script (a JavaScript expression)");
 
-    const result = await this.#enqueue(got.entry, () => got.entry.view.evaluate<unknown>(script));
-    await this.#settle(got.entry);
+    const result = await this.#runView(got.entry, "the evaluate script", signal, () =>
+      got.entry.view.evaluate<unknown>(script),
+    );
+    await this.#drain(got.entry, signal);
     const note = this.#takeGuardNote(got.entry);
     let text: string;
     try {

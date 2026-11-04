@@ -104,6 +104,10 @@ What is **not** fenced:
   -- from that page's origin it can make the same unfenced requests (subject to
   CORS for reading responses). Its consent surface is the approval prompt, not
   the network policy.
+- **A `click` on a page-provided `javascript:` href or auto-redirecting anchor
+  executes page JavaScript with no prompt** -- the scheme gate judges the URLs
+  the model passes to `open`/`navigate`, not links the page itself supplies, so
+  page-driven JS execution sits in the same unfenced family as `evaluate` above.
 - **DNS rebinding**: like fetch-tool's identical gate (the ceiling is documented
   at its source), the host is resolved at check time and re-resolved at connect
   time; a hostile resolver can split those answers. Closing it would mean pinning

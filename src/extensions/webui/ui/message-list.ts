@@ -93,7 +93,16 @@ interface LogEntry {
   content: string | Array<Record<string, unknown>>;
   images?: UiImage[];
   reasoning_content?: string | null;
-  tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> | null;
+  /** llm records store the provider wire object ({function:{name,
+   *  arguments}} with arguments as a JSON string); the older flattened
+   *  {name, args} shape stays accepted. */
+  tool_calls?: Array<{
+    id?: string;
+    name?: string;
+    args?: Record<string, unknown>;
+    arguments?: string;
+    function?: { name?: string; arguments?: string };
+  }> | null;
   tool_call_id?: string | null;
   /** token_usage records (ctx segment source for the cold-log footer): the
    *  server forwards raw entries, so the same ctxByIndex derivation the
@@ -1179,13 +1188,18 @@ export function createMessageList(
           }
           if (entry.tool_calls && Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0) {
             for (const tc of entry.tool_calls) {
-              const toolCall = tc as { name?: string; arguments?: string | object; args?: string | object };
-              const name = toolCall.name || "unknown";
-              const args = typeof toolCall.arguments === "string"
-                ? toolCall.arguments
-                : typeof toolCall.args === "string"
-                  ? toolCall.args
-                  : JSON.stringify(toolCall.arguments ?? toolCall.args ?? {}, null, 2);
+              // File-log records hold the provider wire object
+              // ({function:{name,arguments}}); the flat {name,args} shape
+              // stays supported for older logs and hand-built entries.
+              const toolCall = tc as {
+                name?: string;
+                arguments?: string | object;
+                args?: string | object;
+                function?: { name?: string; arguments?: string | object };
+              };
+              const name = toolCall.function?.name || toolCall.name || "unknown";
+              const rawArgs = toolCall.function?.arguments ?? toolCall.arguments ?? toolCall.args;
+              const args = typeof rawArgs === "string" ? rawArgs : JSON.stringify(rawArgs ?? {}, null, 2);
               handleToolCall({ name, args, toolCallId: tc.id || undefined });
             }
           }

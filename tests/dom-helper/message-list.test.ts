@@ -532,6 +532,42 @@ describe("session log replay", () => {
     expect(pre.textContent).toContain("HINT: check the path");
     expect(pre.textContent).toContain('META: {"exit_code":"1"}');
   });
+
+  it("reads wire-shaped tool_calls from the file log ({function:{name,arguments}})", () => {
+    // The at-rest llm record stores the provider wire object, not the live
+    // SSE-flattened {name,args} shape (see the gold log: every tool_calls
+    // entry nests under `function` with `arguments` as a JSON string).
+    // Regression: the cold renderer read the flat fields, so every call
+    // row rendered as "unknown" with args "{}".
+    ml.renderLogEntries([
+      { source: "input", content: "do it" },
+      {
+        source: "llm",
+        content: "",
+        tool_calls: [
+          {
+            id: "call_f6xnpk6vdz7fadf86quh",
+            type: "function",
+            function: { name: "bash", arguments: '{"command":"ls -la"}' },
+          },
+        ],
+      } as any,
+      {
+        source: "tool_result",
+        content: "RESULT-OUT",
+        tool_call_id: "call_f6xnpk6vdz7fadf86quh",
+        tool_name: "bash",
+      },
+    ]);
+    const block = container.querySelector(".tool-call-block")!;
+    expect(block.querySelector(".tool-call-name")!.textContent).toContain("bash");
+    expect(block.textContent).not.toContain("unknown");
+    // The header fold reads the nested arguments string (the bug showed an
+    // empty fold over literal "{}" args).
+    expect(block.querySelector(".tool-call-display")!.textContent).toBe("ls -la");
+    // The result pairs by tool_call_id onto the named call.
+    expect(block.querySelector(".tool-result-pre")!.textContent).toBe("RESULT-OUT");
+  });
 });
 
 describe("scroll follow and lifecycle", () => {

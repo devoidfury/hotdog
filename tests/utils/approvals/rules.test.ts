@@ -290,3 +290,51 @@ describe("decision reporting", () => {
     }
   });
 });
+
+describe("bailOnToolAllow (agent_browser evaluate)", () => {
+  const scriptTarget = { param: "script", value: "alert(1)" } as const;
+  const evaluate = () =>
+    call("agent_browser", [scriptTarget], { bailOnToolAllow: true });
+
+  it("a tool-level allow does NOT admit it", () => {
+    const d = decide(evaluate(), compileApprovalRules({ default: "ask", allow: ["agent_browser"] }));
+    expect(d.verdict).toBe("ask");
+    expect(d.reasons[0]).toContain("not consent");
+  });
+
+  it("an explicit script param rule DOES admit it", () => {
+    const d = decide(
+      evaluate(),
+      compileApprovalRules({ default: "ask", allow: ["agent_browser.script=alert(*)"] }),
+    );
+    expect(d.verdict).toBe("allow");
+    expect(d.matched).toEqual(["agent_browser.script=alert(*)"]);
+  });
+
+  it("the permissive default is not consent either: ask, never a silent allow", () => {
+    const d = decide(evaluate(), compileApprovalRules({ default: "allow" }));
+    expect(d.verdict).toBe("ask");
+  });
+
+  it("under the allowlist default it denies", () => {
+    const d = decide(evaluate(), compileApprovalRules({ default: "deny" }));
+    expect(d.verdict).toBe("deny");
+    expect(d.deniedBy).toBe("default");
+  });
+
+  it("deny rules still win over everything", () => {
+    const byTool = decide(evaluate(), compileApprovalRules({ default: "ask", deny: ["agent_browser"] }));
+    expect(byTool.verdict).toBe("deny");
+    expect(byTool.deniedBy).toBe("rule");
+    const byScript = decide(
+      evaluate(),
+      compileApprovalRules({ default: "allow", deny: ["agent_browser.script=alert(*)"], allow: ["agent_browser.script=alert(1)"] }),
+    );
+    expect(byScript.verdict).toBe("deny");
+  });
+
+  it("ordinary agent_browser calls keep normal tool-level semantics", () => {
+    const open = call("agent_browser", [{ param: "url", value: "https://example.com/" }]);
+    expect(decide(open, compileApprovalRules({ default: "ask", allow: ["agent_browser"] })).verdict).toBe("allow");
+  });
+});

@@ -95,3 +95,32 @@ describe("suggestRuleLine", () => {
     expect(suggestRuleLine(extract("mcp__x__y", { foo: 1 }))).toContain('"mcp__x__y"');
   });
 });
+
+describe("agent_browser evaluate (model-authored page JS)", () => {
+  it("makes the script the target and flags the call so a tool-level allow cannot admit it", () => {
+    const call = extract("agent_browser", { action: "evaluate", script: "alert(1)" });
+    expect(call.recognized).toBe(true);
+    expect(call.bailOnToolAllow).toBe(true);
+    expect(call.targets).toEqual([{ param: "script", value: "alert(1)" }]);
+    expect(call.bailReason).toBeUndefined();
+  });
+
+  it("bails when evaluate carries no script string to inspect", () => {
+    const call = extract("agent_browser", { action: "evaluate" });
+    expect(call.bailOnToolAllow).toBe(true);
+    expect(call.targets).toEqual([]);
+    expect(call.bailReason).toContain("no script string");
+  });
+
+  it("treats the url of non-evaluate actions like fetch does (no bail flag)", () => {
+    const call = extract("agent_browser", { action: "open", url: "https://example.com/" });
+    expect(call.recognized).toBe(true);
+    expect(call.bailOnToolAllow).toBeUndefined();
+    expect(call.targets).toEqual([{ param: "url", value: "https://example.com/" }]);
+  });
+
+  it("the persistence hint names the script rule that would actually admit it", () => {
+    const call = extract("agent_browser", { action: "evaluate", script: "document.title" });
+    expect(suggestRuleLine(call)).toContain("agent_browser.script=document.title");
+  });
+});

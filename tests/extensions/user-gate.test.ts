@@ -622,3 +622,65 @@ describe("session grants are keyed by session (no cross-session silencing)", () 
     expect(asked).toBe(2);
   });
 });
+
+describe("agent_browser evaluate through the gate", () => {
+  const evaluatePayload = (script: string, over: Partial<ToolCallPayload> = {}) =>
+    payload({
+      toolName: "agent_browser",
+      input: JSON.stringify({ action: "evaluate", script }),
+      ...over,
+    });
+
+  it("a tool-level allow still prompts for evaluate, and the prompt shows the script", async () => {
+    const { input, asked } = answerWith("allow once");
+    const p = evaluatePayload("fetch('http://169.254.169.254/').then(r=>r.text())", { inputOverride: input } as never);
+    const r = await run({ enabled: true, default: "ask", allow: ["agent_browser"] }, p);
+    expect(r.action).toBeUndefined(); // allowed only after the human said so
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain("169.254.169.254"); // the human reads what they approve
+  });
+
+  it("allow-for-session is keyed to the exact script: a new script prompts again", async () => {
+    // One gate instance (one memo map): the process-wide "always allow" memo
+    // lives in the extension, so this pins it through a single wired hook set.
+    const hooks = new HookSystem();
+    const core = { hooks, config: { userGate: { enabled: true, default: "ask" } } } as unknown as CoreContext;
+    const instance = create(core);
+    for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
+      hooks.on(name, handler as never, "user-gate");
+    }
+    const answers = ["allow for session", "deny"];
+    let n = 0;
+    let asked = 0;
+    const input = {
+      isInteractive: () => true,
+      collectAnswers: () => {
+        asked++;
+        return { approve: answers[Math.min(n++, answers.length - 1)] };
+      },
+    };
+    const through = (script: string) =>
+      hooks.runHookPipeline<GateAction, "tool:call">(
+        HOOKS.TOOL_CALL,
+        evaluatePayload(script, { inputOverride: input } as never),
+        { failOnError: true },
+      );
+
+    await through("alert(1)");
+    expect(asked).toBe(1);
+    await through("alert(1)");
+    expect(asked).toBe(1); // memo hit: same session, same exact script
+    const fresh = await through("alert(2)");
+    expect(asked).toBe(2); // a different script is a new ask
+    expect(fresh.data.action).toBe("block"); // and it was denied here
+  });
+
+  it("headless: with no interactive UI evaluate is denied, other actions keep the tool-level allow", async () => {
+    const cfg: UserGateConfig = { enabled: true, default: "ask", allow: ["agent_browser"] };
+    const open = await run(cfg, payload({ toolName: "agent_browser", input: JSON.stringify({ action: "open", url: "https://example.com" }) }));
+    expect(open.action).toBeUndefined();
+    const evalNoUi = await run(cfg, evaluatePayload("alert(1)"));
+    expect(evalNoUi.action).toBe("block");
+    expect(evalNoUi.result).toContain("no interactive UI");
+  });
+});

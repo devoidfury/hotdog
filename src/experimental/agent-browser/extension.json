@@ -1,0 +1,23 @@
+{
+  "name": "agent-browser",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "agent_browser tool: headless browser views (Bun.WebView, forced-spawn Chromium) with named per-session persistence, navigation admission, and approval-gated model-authored evaluate",
+  "configSchema": {
+    "agentBrowser": {
+      "type": "object",
+      "properties": {
+        "allowLoopback": {
+          "type": "boolean",
+          "default": false,
+          "description": "Additionally allow navigation to loopback hosts (127.0.0.0/8, ::1, localhost); all other private/reserved ranges stay blocked"
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "agentBrowser" },
+        { "default": {} }
+      ]
+    }
+  }
+}

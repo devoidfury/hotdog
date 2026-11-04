@@ -50,6 +50,16 @@ export interface ApprovalCall {
   targets: ApprovalTarget[];
   /** Args/command could not be analyzed safely: ASK, with the reason. */
   bailReason?: string;
+  /**
+   * Bail past blanket grants: a tool-level allow entry AND the "allow" default
+   * are not taken as consent for this call. Only a matching PARAM rule (or a
+   * human at the prompt) may admit it; under the allowlist default it denies.
+   * Wired for `agent_browser` action=evaluate, which runs model-authored
+   * JavaScript inside the loaded page -- a grant made at tool level predates
+   * that consent surface, and "the script is the payload" means the script
+   * itself is the target an allow rule must name.
+   */
+  bailOnToolAllow?: boolean;
 }
 
 export interface ApprovalRule {
@@ -218,9 +228,12 @@ function uniq(values: string[]): string[] {
  * - a tool-level deny (`deny: ["bash"]`) blocks the whole call, no parse needed;
  * - a param deny that matches any target blocks, whatever else matches;
  * - a tool-level allow (`allow: ["bash"]`) allows the whole call, even a command the parser refused 
- *   to analyze (the human said yes to the tool);
+ *   to analyze (the human said yes to the tool) -- UNLESS the call carries `bailOnToolAllow`,
+ *   which means the tool-level grant never covered the call's real risk (model-authored page JS);
  * - otherwise every non-denyOnly target needs an allow; leftovers fall to `userGate.default` -- ask, allow,
  *   or (allowlist mode) deny. A bail or an unrecognized tool denies under "deny" instead of asking: unverifiable is not allowed.
+ *   A `bailOnToolAllow` call also ignores the "allow" default (ask instead): blanket permissiveness
+ *   is not informed consent to arbitrary code execution.
  */
 export function decide(call: ApprovalCall, rules: ApprovalRules): ApprovalDecision {
   const forTool = (list: ApprovalRule[]) => list.filter((r) => globToRegExp(r.toolGlob).test(call.tool));
@@ -249,7 +262,7 @@ export function decide(call: ApprovalCall, rules: ApprovalRules): ApprovalDecisi
   }
 
   const allowTool = forTool(rules.allow).find((r) => r.param === null);
-  if (allowTool) {
+  if (allowTool && !call.bailOnToolAllow) {
     return {
       verdict: "allow",
       matched: [allowTool.raw],
@@ -290,6 +303,26 @@ export function decide(call: ApprovalCall, rules: ApprovalRules): ApprovalDecisi
   // Either nothing needed covering (no targets at all) or something was left over:
   // unrecognized tools always ask, recognized ones fall to the default.
   const naming = unmatched.length > 0 ? unmatched.map((t) => `${t.param} '${t.value}'`).join(", ") : `'${call.tool}'`;
+  if (call.bailOnToolAllow) {
+    // The tool-level allow was skipped above; only an explicit param rule may
+    // cover this call, and a permissive default is not consent either.
+    return rules.default === "deny"
+      ? {
+          verdict: "deny",
+          deniedBy: "default",
+          matched,
+          reasons: [`no userGate.allow rule covers ${naming} and userGate.default is "deny"`],
+        }
+      : {
+          verdict: "ask",
+          matched,
+          reasons: [
+            unmatched.length > 0
+              ? `no userGate.allow param rule covers ${naming}; a tool-level allow and userGate.default are not consent for model-authored page JavaScript`
+              : `no userGate.allow param rule covers '${call.tool}'; a tool-level allow is not consent for this call`,
+          ],
+        };
+  }
   if (!call.recognized) {
     // Unrecognized + default deny: the tool was never allowlisted, which under
     // an allowlist IS the answer (asking instead would swallow the mode whole,

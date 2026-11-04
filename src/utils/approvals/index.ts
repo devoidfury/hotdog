@@ -33,6 +33,7 @@ const SHELL_TOOLS = new Set(["bash"]);
 const VALUE_PARAM_BY_TOOL: Record<string, string[]> = {
   fetch: ["url"],
   web_search: ["query"],
+  agent_browser: ["url"],
 };
 
 /** Cap on how many targets a single ask lists (approval text stays readable). */
@@ -89,6 +90,23 @@ export function extractTargets(
     const parsed = parseCommandline(command, workspace);
     if (!parsed.ok) return { tool: toolName, recognized, targets: [], bailReason: parsed.reason };
     return { tool: toolName, recognized, targets: parsed.targets };
+  }
+
+  // agent_browser's evaluate action runs model-authored JavaScript inside the
+  // loaded page. A tool-level allow (`agent_browser`) was granted without that
+  // consent surface, so it must not admit this call (bailOnToolAllow): the
+  // script itself is the target, coverable only by an explicit
+  // `agent_browser.script=...` rule or a human at the prompt -- and the
+  // session "allow for session" memo keys on the exact script, so a new script
+  // prompts again instead of inheriting the grant.
+  if (toolName === "agent_browser" && args.action === "evaluate") {
+    const call: ApprovalCall = { tool: toolName, recognized: true, targets: [], bailOnToolAllow: true };
+    if (typeof args.script === "string" && args.script !== "") {
+      call.targets.push({ param: "script", value: args.script });
+    } else {
+      call.bailReason = "evaluate was called with no script string to inspect";
+    }
+    return call;
   }
 
   const targets: ApprovalTarget[] = [];

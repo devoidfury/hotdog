@@ -1198,6 +1198,18 @@ Extensions register their own configuration namespaces. Each extension's config 
 { "fileWatch": { "writeGuard": false, "ignore": ["node_modules/", ".git/", "dist/"] } }
 ```
 
+### `agentBrowser`
+
+[Agent Browser](../src/experimental/agent-browser) — **Experimental**: not loaded by default; add `@experimental` to `extensionPaths` (keeping `@extensions` too — the setting replaces the default). The `agent_browser` tool drives headless browser views (`Bun.WebView`, forced-spawn Chromium — it never attaches to your running browser) for one session: named views that survive across tool calls (cap 3 per session, ephemeral storage, closed on session end), with `open`/`navigate`/`snapshot`/`click`/`type`/`press`/`screenshot`/`evaluate`/`close`/`list`. Navigation is admission-checked (https/http only, hosts resolved and private ranges blocked) and re-checked after redirects; this fences navigation only, not a page's own requests — see the extension README. The `evaluate` action runs model-authored JavaScript and prompts through `userGate` (a tool-level allow cannot admit it); it is refused outright when no approval UI exists.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `allowLoopback` | `boolean` | `false` | Additionally admit navigation to loopback hosts (`localhost`, `127.0.0.0/8`, `::1`); all other private/reserved ranges stay blocked. This is the only config key the extension has (no `enabled` key: loading `@experimental` is the opt-in). |
+
+```json
+{ "agentBrowser": { "allowLoopback": true } }
+```
+
 ### `handoffTool`
 
 [Handoff Tool](../src/extensions/handoff-tool) — Plan-execute handoff for multi-phase tasks.

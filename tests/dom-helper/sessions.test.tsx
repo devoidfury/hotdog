@@ -2,13 +2,14 @@
 // owner's fixture row:
 //
 //   ai365/qwen3.8-flash-next    working            Cancel
-//   manager 69k/262k . 42 msgs . 1 client
-//   2026-10-31 22:30 . 2s34e9825faaf89878923598
+//   manager 1 client
+//   2026-10-31 22:30 . 69k/262k . 42 msgs
 //
 // No literal parens: status is a text badge, profile quiet muted text, and
 // the line-1 action pins right (row-action-right) with no separator before
-// it. Segments that have no data are omitted outright -- the legacy-log pins
-// watch for "undefined"/"null" leakage into rendered text.
+// it. The raw session id renders nowhere -- the data model keeps it as the
+// selection key. Segments that have no data are omitted outright; the
+// legacy-log pins watch for "undefined"/"null" leakage into rendered text.
 
 import { describe, it, expect, afterEach } from "bun:test";
 import {
@@ -124,15 +125,28 @@ describe("live row (owner fixture)", () => {
     expect(row.querySelectorAll(".row-l1 .row-sep")).toHaveLength(0);
 
     expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
-    const metrics = texts(row, ".row-metric");
-    expect(metrics).toEqual(["69k/262k", "42 msgs", "1 client"]);
+    // The client metric rides line 2 beside the profile.
+    expect(texts(row, ".row-l2 .row-metric")).toEqual(["1 client"]);
 
     expect(row.querySelector(".row-date")!.textContent).toBe("2026-10-31 22:30");
-    // Full id, no shortening.
-    expect(row.querySelector(".row-id")!.textContent).toBe(FULL_ID);
+    // Bottom row: date . ctx . msgs, in that order.
+    const l3 = row.querySelector(".row-l3")!;
+    expect([...l3.children].map((n) => n.className)).toEqual([
+      "row-date",
+      "row-sep",
+      "row-metric",
+      "row-sep",
+      "row-metric",
+    ]);
+    expect(texts(l3, ".row-metric")).toEqual(["69k/262k", "42 msgs"]);
 
-    // Separators: line 2 (two) + line 3 (one); line 1 dots are gone.
-    expect(row.querySelectorAll(".row-sep")).toHaveLength(3);
+    // The raw id renders nowhere (it stays the selection key; see the id-
+    // display section for the round trip through the click handler).
+    expect(row.querySelector(".row-id")).toBeNull();
+    expect(row.textContent).not.toContain(FULL_ID);
+
+    // Separators: the two bottom-row dots; lines 1-2 are dot-free.
+    expect(row.querySelectorAll(".row-sep")).toHaveLength(2);
   });
 
   it("working row carries the Cancel action; idle row renders idle without one", () => {
@@ -141,8 +155,8 @@ describe("live row (owner fixture)", () => {
     expect(row.querySelector(".row-status")!.textContent).toBe("idle");
     expect(row.querySelector(".session-cancel-btn")).toBeNull();
     expect(row.querySelector(".session-spinner")).toBeNull();
-    // No action slot: line 1 never had a dot here; line2 x2 + line3.
-    expect(row.querySelectorAll(".row-sep")).toHaveLength(3);
+    // No action slot: line 1 never had a dot here; the two bottom-row dots.
+    expect(row.querySelectorAll(".row-sep")).toHaveLength(2);
   });
 
   it("an explicit title wins the profile slot", () => {
@@ -170,6 +184,16 @@ describe("cold row", () => {
     expect(row.querySelector(".row-status")!.textContent).toBe("interrupted");
     expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
     expect(texts(row, ".row-metric")).toEqual(["69k/262k", "42 msgs"]);
+    // Same bottom-row grammar as the live list: date . ctx . msgs.
+    expect([...row.querySelector(".row-l3")!.children].map((n) => n.className)).toEqual([
+      "row-date",
+      "row-sep",
+      "row-metric",
+      "row-sep",
+      "row-metric",
+    ]);
+    expect(row.querySelector(".row-id")).toBeNull();
+    expect(row.textContent).not.toContain(FULL_ID);
     const cont = row.querySelector(".log-continue-btn")!;
     expect(cont.textContent).toBe("Continue");
     // Continue sits in the right-pinned action slot, no sep precedes it.
@@ -183,8 +207,8 @@ describe("cold row", () => {
     const root = render({ logs: [coldLog({ id: "a", state: "idle" }), coldLog({ id: "b", state: undefined })] });
     const rows = root.querySelectorAll(".log-item");
     for (const row of rows) expect(row.querySelector(".row-status")).toBeNull();
-    // No status: line 1 has no dots (action pins right), line 2 one dot
-    // (ctx . msgs), line 3 one dot.
+    // No status: lines 1-2 hold no dots (action pins right, no client slot),
+    // the bottom row carries both (date . ctx . msgs).
     expect(rows[0]!.querySelectorAll(".row-sep")).toHaveLength(2);
   });
 
@@ -211,16 +235,23 @@ describe("legacy log row (no model/profile/ctx attested)", () => {
     expect(text).not.toContain("NaN");
     expect(row.querySelector(".row-model")).toBeNull();
     expect(row.querySelector(".row-profile")).toBeNull();
-    // ctx absent: only the msgs metric remains, and it carries no leading dot.
+    // ctx absent: only the msgs metric remains, dot-joined after the date.
     expect(texts(row, ".row-metric")).toEqual(["42 msgs"]);
     // Continue (the log's own action) still renders, right-pinned; line 1
     // holds no dots at all now (and never did when model/status are absent).
     expect(row.querySelector(".log-continue-btn")).toBeTruthy();
     const l1 = row.querySelector(".row-l1")!;
     expect(l1.querySelectorAll(".row-sep")).toHaveLength(0);
-    // Line 3 still holds: date . full id.
+    // Bottom row: no ctx attestation, so that segment omits -- date . msgs.
     expect(row.querySelector(".row-date")!.textContent).toBe("2026-10-31 22:30");
-    expect(row.querySelector(".row-id")!.textContent).toBe(FULL_ID);
+    expect([...row.querySelector(".row-l3")!.children].map((n) => n.className)).toEqual([
+      "row-date",
+      "row-sep",
+      "row-metric",
+    ]);
+    expect(row.querySelector(".row-l3 .row-metric")!.textContent).toBe("42 msgs");
+    expect(row.querySelector(".row-id")).toBeNull();
+    expect(row.textContent).not.toContain(FULL_ID);
   });
 
   it("ctxUsed without a window renders bare k-notation (no '/undefined')", () => {
@@ -247,7 +278,7 @@ describe("formatDateTime", () => {
 
 function mountInteractive(
   container: Element,
-  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean> },
+  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string> },
   calls: string[],
 ): Mounted {
   return mount(
@@ -257,7 +288,7 @@ function mountInteractive(
       workingMap={opts.working ?? new Map()}
       logs={opts.logs ?? []}
       activeLogId={null}
-      pinnedIds={new Set()}
+      pinnedIds={opts.pinned ?? new Set()}
       sidebarWidth={300}
       sidebarMax={520}
       onCreate={() => calls.push("create")}
@@ -339,6 +370,23 @@ describe("row interactions", () => {
   });
 });
 
+// ── Session id display ─────────────────────────────────────────────────────
+// Neither list's card markup renders the raw session id; it survives only in
+// the data model, so card interactions must still route it to the handlers.
+
+describe("session id display (both lists)", () => {
+  it("no card text shows the full id, yet clicks still carry it", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ sessions: [liveSession()], logs: [coldLog()] }, calls);
+    expect(root.querySelector(".row-id")).toBeNull();
+    expect(root.textContent).not.toContain(FULL_ID);
+    clickable(root, ".session-item").click();
+    clickable(root, ".log-item").click();
+    clickable(root, ".log-continue-btn").click();
+    expect(calls).toEqual([`switch:${FULL_ID}`, `view:${FULL_ID}`, `continue:${FULL_ID}`]);
+  });
+});
+
 // ── ContextMenu ─────────────────────────────────────────────────────────────
 
 describe("ContextMenu", () => {
@@ -388,17 +436,27 @@ describe("pinned row sorting", () => {
   it("pinned sessions lead #session-list and pinned logs lead #log-list, independently", () => {
     const s = (id: string): SessionInfo => ({ ...liveSession(), id });
     const l = (id: string): LogInfo => ({ ...coldLog(), id });
-    const root = render({
-      sessions: [s("s1"), s("s2"), s("s3")],
-      logs: [l("l1"), l("l2"), l("l3")],
-      pinned: new Set(["s3", "l1"]),
-    });
-    const sessionIds = Array.from(root.querySelectorAll("#session-list .row-id")).map(
-      (n) => n.textContent,
+    // Cards display no ids anymore: row order is pinned through the click
+    // handlers, which still carry the data-model id.
+    const calls: string[] = [];
+    const root = renderInteractive(
+      { sessions: [s("s1"), s("s2"), s("s3")], logs: [l("l1"), l("l2"), l("l3")], pinned: new Set(["s3", "l1"]) },
+      calls,
     );
-    const logIds = Array.from(root.querySelectorAll("#log-list .row-id")).map((n) => n.textContent);
-    expect(sessionIds).toEqual(["s3", "s1", "s2"]);
-    expect(logIds).toEqual(["l1", "l2", "l3"]);
+    for (const row of root.querySelectorAll("#session-list .session-item")) {
+      (row as unknown as HTMLElement).click();
+    }
+    for (const row of root.querySelectorAll("#log-list .log-item")) {
+      (row as unknown as HTMLElement).click();
+    }
+    expect(calls).toEqual([
+      "switch:s3",
+      "switch:s1",
+      "switch:s2",
+      "view:l1",
+      "view:l2",
+      "view:l3",
+    ]);
   });
 
   it("pinned rows carry the line-1 pin badge; unpinned rows do not", () => {

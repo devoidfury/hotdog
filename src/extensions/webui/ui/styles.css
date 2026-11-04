@@ -385,8 +385,9 @@ body.sidebar-resizing {
 /* ── Sidebar Row Grammar (shared by live sessions and cold logs) ───────────
    line 1: provider/model [status]        [action]  -- model ellipsizes,
                                                        action pins right
-   line 2: profile ctx . msgs . client
-   line 3: YYYY-MM-DD HH:MM . <full session id>
+   line 2: profile  client
+   line 3: YYYY-MM-DD HH:MM . ctx . msgs   (the raw session id is no longer
+                                            displayed; it stays a key only)
    No literal parens: status is a text badge, profile quiet muted text. */
 
 .session-item .row-l1,
@@ -513,6 +514,15 @@ body.sidebar-resizing {
     text-overflow: ellipsis;
     font-family: var(--font-mono);
     font-size: 0.68rem;
+}
+
+/* Bottom-row metrics (ctx / msgs): the ellipsizing tail role row-l2's
+   metrics play, now riding line 3 after the date. */
+.row-l3 .row-metric:last-child {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ── Session Working Indicator (sidebar) ─────────────────────────────────── */
@@ -660,6 +670,48 @@ body.sidebar-resizing {
     background: var(--bg-tertiary);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
+}
+
+/* The fingerprint badge IS the full-id copy button (app.tsx onCopySessionId):
+   the footer copy idiom (.footer-copy family -- quiet affordance, hover lift
+   to full opacity/text-primary, success flash while confirmed) with the whole
+   badge as the click target. The icon replicates ICON_COPY/ICON_CHECK from
+   message-list.ts: same 24-viewBox geometry as a mask data URI tinted with
+   currentColor (the client mount has no raw-HTML path for inline svg, and a
+   CSS ::after keeps the badge's textContent pure id text). */
+#current-session-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: none;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+#current-session-id::after {
+    content: "";
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='9' y='9' width='11' height='11' rx='2' fill='none' stroke='black' stroke-width='2'/><path d='M5 15V6a2 2 0 0 1 2-2h9' fill='none' stroke='black' stroke-width='2'/></svg>") center / contain no-repeat;
+    mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='9' y='9' width='11' height='11' rx='2' fill='none' stroke='black' stroke-width='2'/><path d='M5 15V6a2 2 0 0 1 2-2h9' fill='none' stroke='black' stroke-width='2'/></svg>") center / contain no-repeat;
+}
+
+#current-session-id:hover {
+    opacity: 1;
+    color: var(--text-primary);
+}
+
+#current-session-id.copied {
+    opacity: 1;
+    color: var(--success);
+}
+
+#current-session-id.copied::after {
+    -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M4 12l5 5L20 6' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M4 12l5 5L20 6' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
 /* Log view indicator */

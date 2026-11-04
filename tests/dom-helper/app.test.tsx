@@ -271,6 +271,43 @@ describe("app boot (stored token)", () => {
   });
 });
 
+// ── Header fingerprint badge (whole badge = full-id copy button) ───────────
+
+describe("header fingerprint badge", () => {
+  it("clicking the badge copies the FULL session id and flashes the confirmed state", async () => {
+    await attach();
+    const copied: string[] = [];
+    const prevNav = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        clipboard: {
+          writeText: async (t: string) => {
+            copied.push(t);
+          },
+        },
+      },
+      configurable: true,
+    });
+    try {
+      clearSent();
+      const badge = el("#current-session-id");
+      badge.click();
+      await tick();
+      // The FULL id, not the 8-char text printed on the badge.
+      expect(copied).toEqual([SID]);
+      expect(badge.classList.contains("copied")).toBe(true);
+      // Badge text stays the short display form (the copy/check glyph is a
+      // CSS ::after affordance, not DOM text).
+      expect(badge.textContent).toBe(SID.slice(0, 8));
+      // Copying is inert on the wire.
+      expect(ws.sent).toHaveLength(0);
+    } finally {
+      if (prevNav) Object.defineProperty(globalThis, "navigator", prevNav);
+      else delete (globalThis as Record<string, unknown>).navigator;
+    }
+  });
+});
+
 // ── Composer ────────────────────────────────────────────────────────────────
 
 describe("composer", () => {
@@ -882,7 +919,8 @@ describe("context menus", () => {
       logs: [logRow, { id: "l-doomed", createdAt: 1, lastActivityAt: 2, messageCount: 2 }],
     });
     await tick();
-    const doomed = els(".log-item").find((r) => r.textContent?.includes("l-doomed"))!;
+    // Cards show no ids: the doomed row is the list's second entry.
+    const doomed = els(".log-item")[1]!;
     expect(doomed).toBeTruthy();
     doomed.click(); // onViewLog
     ws.fireMessage({
@@ -1281,6 +1319,13 @@ function lvViewLog(logId: string, text: string): void {
   lvSidebarReplies();
 }
 
+/** Cards no longer display the raw id: a row's identity in the pinned fixture
+ *  lists is its index (LV_L1 is 0, LV_L2 is 1). Reports the index of the one
+ *  highlighted row of the given list. */
+function activeRowIndex(sel: string): number {
+  return els(sel).indexOf(activeRows(sel)[0]!);
+}
+
 describe("webui log-view round trip (real app wiring)", () => {
   beforeAll(async () => {
     // Query-suffixed copy: app-ui.test.tsx owns the plain-path import, which
@@ -1309,7 +1354,7 @@ describe("webui log-view round trip (real app wiring)", () => {
     expect(composerDisabled()).toBe(true);
     expect(el("#log-view-label")).toBeTruthy();
     expect(activeRows(".log-item")).toHaveLength(1);
-    expect(activeRows(".log-item")[0]!.textContent).toContain(LV_L1);
+    expect(activeRowIndex(".log-item")).toBe(0); // LV_L1's row
     expect(el("#message-list").textContent).toContain("LV_L1 cold line");
   });
 
@@ -1342,7 +1387,7 @@ describe("webui log-view round trip (real app wiring)", () => {
     expect(sentTypes()).toContain("viewLog");
     expect(composerDisabled()).toBe(true);
     expect(activeRows(".log-item")).toHaveLength(1);
-    expect(activeRows(".log-item")[0]!.textContent).toContain(LV_L2);
+    expect(activeRowIndex(".log-item")).toBe(1); // LV_L2's row
     const list = el("#message-list").textContent!;
     expect(list).toContain("LV_L2 cold line");
     expect(list).not.toContain("LV_L1 cold line");
@@ -1356,7 +1401,7 @@ describe("webui log-view round trip (real app wiring)", () => {
     expect(sentTypes()).not.toContain("switchSession");
     expect(composerDisabled()).toBe(true);
     expect(activeRows(".log-item")).toHaveLength(1);
-    expect(activeRows(".log-item")[0]!.textContent).toContain(LV_L2);
+    expect(activeRowIndex(".log-item")).toBe(1); // LV_L2's row (clicking it re-renders, stays active)
   });
 
 
@@ -1406,7 +1451,7 @@ describe("webui log-view round trip (real app wiring)", () => {
     expect(composerDisabled()).toBe(false);
     expect(document.querySelector("#log-view-label")).toBeNull();
     expect(activeRows(".session-item")).toHaveLength(1);
-    expect(activeRows(".session-item")[0]!.textContent).toContain(OTHER);
+    expect(activeRowIndex(".session-item")).toBe(1); // the OTHER row's index
     const list = el("#message-list").textContent!;
     expect(list).toContain("other session line");
     expect(list).not.toContain("LV_L1 cold line");

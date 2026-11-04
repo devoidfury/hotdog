@@ -2,13 +2,15 @@
 // Session/log sidebar. Both lists share one row grammar:
 //
 //   provider/model      [status]            [action]
-//   profile  (ctx used / ctx total) . (msg count) . (connected client?)
-//   start date & time . session id
+//   profile  (connected client?)
+//   start date & time . (ctx used / ctx total) . (msg count)
 //
 // No literal parens anywhere: status renders as a text badge, profile as
 // quiet muted text. Missing segments are omitted outright, never rendered
 // empty; " . " is the segment separator between the slots the example
 // dot-joins. The line-1 action pins right (margin-left:auto), no sep.
+// The raw session id is not displayed at all: it stays the selection key,
+// pin/export identifier and handler argument -- never card text.
 
 import { formatTokenCount, SIDEBAR_MIN_WIDTH } from "./utils.ts";
 import type { JsxChild, Ref } from "@utils/jsx";
@@ -102,7 +104,6 @@ interface SidebarRowProps {
   /** Slab styling: "session-item" (live) or "log-item" (cold). */
   kindClass: string;
   active: boolean;
-  id: string;
   model?: string | null;
   /** Line-2 profile tag: display name (title wins), omitted when neither set. */
   displayName?: string | null;
@@ -150,9 +151,20 @@ export function SidebarRow(p: SidebarRowProps) {
   }
   if (p.action) line1.push(<span className="row-action row-action-right">{p.action}</span>);
 
-  // Profile tag leads; the metric slots dot-join among themselves.
+  // Profile tag leads; the client metric rides beside it (line 2's only
+  // other slot, so no join dot -- the profile/metric juxtaposition is kept).
   const line2: JsxChild[] = [];
   if (p.displayName) line2.push(<span className="row-profile">{p.displayName}</span>);
+  const clients =
+    p.connectedClients != null && p.connectedClients > 0
+      ? `${p.connectedClients} client${p.connectedClients > 1 ? "s" : ""}`
+      : null;
+  if (clients) line2.push(<span className="row-metric">{clients}</span>);
+
+  // Bottom row: date . ctx . msgs. The date always leads, so every metric
+  // that rides gets a sep; unattested slots are omitted outright (legacy
+  // logs: date . msgs).
+  const line3: JsxChild[] = [<span className="row-date">{formatDateTime(p.createdAt)}</span>];
   const ctx =
     p.ctxUsed != null
       ? `${formatTokenCount(p.ctxUsed)}${p.ctxTotal != null && Number.isFinite(p.ctxTotal) ? `/${formatTokenCount(p.ctxTotal)}` : ""}`
@@ -161,23 +173,10 @@ export function SidebarRow(p: SidebarRowProps) {
     p.messageCount != null && p.messageCount > 0
       ? `${p.messageCount} msg${p.messageCount > 1 ? "s" : ""}`
       : null;
-  const clients =
-    p.connectedClients != null && p.connectedClients > 0
-      ? `${p.connectedClients} client${p.connectedClients > 1 ? "s" : ""}`
-      : null;
-  let metrics = 0;
-  for (const part of [ctx, msgs, clients]) {
+  for (const part of [ctx, msgs]) {
     if (!part) continue;
-    if (metrics > 0) line2.push(<span className="row-sep">.</span>);
-    line2.push(<span className="row-metric">{part}</span>);
-    metrics++;
+    line3.push(<span className="row-sep">.</span>, <span className="row-metric">{part}</span>);
   }
-
-  const line3: JsxChild[] = [
-    <span className="row-date">{formatDateTime(p.createdAt)}</span>,
-    <span className="row-sep">.</span>,
-    <span className="row-id">{p.id}</span>,
-  ];
 
   return (
     <div
@@ -210,7 +209,6 @@ export function Sidebar(p: SidebarProps) {
               key={s.id}
               kindClass="session-item"
               active={s.id === p.activeSessionId}
-              id={s.id}
               pinned={p.pinnedIds.has(s.id)}
               model={s.model}
               displayName={s.title || s.profile}
@@ -259,7 +257,6 @@ export function Sidebar(p: SidebarProps) {
               key={log.id}
               kindClass="log-item"
               active={log.id === p.activeLogId}
-              id={log.id}
               pinned={p.pinnedIds.has(log.id)}
               model={log.model}
               displayName={log.profile}

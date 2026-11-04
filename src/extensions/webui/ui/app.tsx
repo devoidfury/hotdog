@@ -1007,6 +1007,25 @@ function onFenceToggle(): void {
   chat?.setExecFencePolicy("off");
 }
 
+// Header fingerprint badge: copy the FULL session id (the message-footer
+// .footer-copy idiom, message-list.ts makeCopyButton -- copyText's seam and
+// a transient confirmed flash on the same 1.2s budget; the check rides a
+// real copy, failures stay silent).
+const copyFlashAtom = reactiveState<boolean>(false);
+let copyFlashTimer: ReturnType<typeof setTimeout> | null = null;
+
+function onCopySessionId(sessionId: string): void {
+  void copyText(sessionId).then((ok) => {
+    if (!ok) return; // no fake confirmation: the check rides a real copy
+    if (copyFlashTimer) clearTimeout(copyFlashTimer);
+    copyFlashAtom(true);
+    copyFlashTimer = setTimeout(() => {
+      copyFlashAtom(false);
+      copyFlashTimer = null;
+    }, 1200);
+  });
+}
+
 // ── View ────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -1072,7 +1091,25 @@ function App() {
           <div id="session-info">
             <span id="session-label" style={activeLogId ? { opacity: "0.5" } : undefined}>
               Session:{" "}
-              <span id="current-session-id">{title || (sessionId ? sessionId.slice(0, 8) : "")}</span>
+              <button
+                type="button"
+                id="current-session-id"
+                className={copyFlashAtom() ? "copied" : undefined}
+                title={sessionId ? "Copy full session id" : undefined}
+                aria-label={sessionId ? "Copy full session id" : undefined}
+                onClick={
+                  sessionId
+                    ? (e: MouseEvent) => {
+                        // The badge had no click action before the copy; stop
+                        // so it never bubbles into an ancestor handler.
+                        e.stopPropagation();
+                        onCopySessionId(sessionId);
+                      }
+                    : undefined
+                }
+              >
+                {title || (sessionId ? sessionId.slice(0, 8) : "")}
+              </button>
             </span>
             {activeLogId ? (
               <span id="log-view-label">
@@ -1303,6 +1340,7 @@ async function init(): Promise<void> {
     openTasksAtom,
     stripExpandedAtom,
     nowAtom,
+    copyFlashAtom,
   ]);
 
   document.addEventListener("keydown", (e: KeyboardEvent) => {

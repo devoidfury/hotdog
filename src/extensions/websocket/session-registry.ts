@@ -52,6 +52,10 @@ interface SessionMetadata {
    */
   ctxUsed?: number;
   ctxTotal?: number;
+  /** A pending question from the websocket question bridge is blocking this
+   *  session (sidebar badges the card awaiting_question). Absent = false;
+   *  kept in step by the bridge hooks via setQuestionPending. */
+  questionPending?: boolean;
 }
 
 interface CreateSessionOptions {
@@ -426,6 +430,9 @@ export class SessionRegistry {
     /** Server-persisted sidebar pin (pin-store.ts); always present so a
      *  payload rebuilds the client's pin marks outright. */
     pinned: boolean;
+    /** True while a pending question blocks the session (sidebar badge);
+     *  always present, same rebuild-outright rule as pinned. */
+    questionPending: boolean;
     /** Absolute JSONL log path (sidebar "Copy log file path"); omitted when
      *  the id fails the core path helper's safety gate. */
     logPath?: string;
@@ -442,6 +449,7 @@ export class SessionRegistry {
       ctxUsed?: number;
       ctxTotal?: number;
       pinned: boolean;
+      questionPending: boolean;
       logPath?: string;
     }> = [];
     const pinnedIds = getPinnedIds();
@@ -460,6 +468,7 @@ export class SessionRegistry {
         ...(meta.ctxUsed !== undefined ? { ctxUsed: meta.ctxUsed } : {}),
         ...(meta.ctxTotal !== undefined ? { ctxTotal: meta.ctxTotal } : {}),
         pinned: pinnedIds.has(id),
+        questionPending: meta.questionPending === true,
         ...(logPath !== undefined ? { logPath } : {}),
       });
     }
@@ -500,6 +509,16 @@ export class SessionRegistry {
   /** True if the session has at least one connected channel. */
   hasChannels(sessionId: string): boolean {
     return (this.#channels.get(sessionId)?.size ?? 0) > 0;
+  }
+
+  /** Mirror the question bridge's pending state onto the row (sidebar
+   *  awaiting_question badge). Returns whether the flag actually changed,
+   *  so callers can broadcast the list only on real transitions. */
+  setQuestionPending(sessionId: string, pending: boolean): boolean {
+    const meta = this.#metadata.get(sessionId);
+    if (!meta || Boolean(meta.questionPending) === pending) return false;
+    meta.questionPending = pending;
+    return true;
   }
 
   /**

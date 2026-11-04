@@ -383,12 +383,16 @@ body.sidebar-resizing {
 }
 
 /* ── Sidebar Row Grammar (shared by live sessions and cold logs) ───────────
-   line 1: provider/model [status]        [action]  -- model ellipsizes,
-                                                       action pins right
-   line 2: profile  [plug n]   (client count is a plug icon, never text)
-   line 3: YYYY-MM-DD HH:MM . ctx . msgs   (the raw session id is no longer
-                                            displayed; it stays a key only)
-   No literal parens: status is a text badge, profile quiet muted text. */
+   line 1: profile · provider/model        [status][action]  -- model
+                                                            ellipsizes; badge
+                                                            + action form the
+                                                            right-hand cluster
+   bottom row (class row-l3): YYYY-MM-DD HH:MM · ctx · msgs [plug n]
+       (the raw session id is no longer displayed; it stays a key only; the
+        client count is a plug icon, never text)
+   Separators are middle dots (·, U+00B7), vertically centered by the font's
+   em box. No literal parens: status is a glyph badge (.row-glyph, masked
+   stroke SVG tinted by currentColor), profile quiet muted text. */
 
 .session-item .row-l1,
 .log-item .row-l1 {
@@ -442,9 +446,11 @@ body.sidebar-resizing {
     line-height: 1.5;
 }
 
-/* Status badge: text alone, small type, faint tint + hairline border,
-   minimal rounding (radius-sm, not a pill). statusClass / log-state-*
-   override color + background; base covers unclassed live rows. */
+/* Status badge: glyph in a quiet box -- faint tint + hairline border,
+   minimal rounding (radius-sm, not a pill). log-state-* overrides color +
+   background; base covers unclassed live rows. The glyph is a custom stroke
+   SVG set tinted by currentColor (see .row-glyph), so the state colors carry
+   into it for free; the human label rides as the native title. */
 .row-status {
     display: inline-flex;
     align-items: center;
@@ -455,8 +461,46 @@ body.sidebar-resizing {
     background: var(--bg-elevated);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
-    padding: 0 6px;
+    padding: 0 5px;
     line-height: 1.5;
+}
+
+/* Status glyph set: same trick as the client plug -- 24-viewBox stroke
+   geometry as a mask data URI, tinted by the badge's currentColor. The
+   --glyph custom property keeps the shared sizing in one rule. */
+.row-glyph {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    background-color: currentColor;
+    -webkit-mask: var(--glyph) center / contain no-repeat;
+    mask: var(--glyph) center / contain no-repeat;
+}
+
+/* bolt: working (the Stop-button spinner is the busy tell; this is the
+   resting attestation on connected rows that show the badge) */
+.row-glyph-working {
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M13 2 L3 14 h9 l-1 8 10-12 h-9 l1-8 Z' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+/* ring: idle */
+.row-glyph-idle {
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='8' fill='none' stroke='black' stroke-width='2'/></svg>");
+}
+
+/* question hook + dot: awaiting_question */
+.row-glyph-awaiting_question {
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/><path d='M12 17 h.01' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/></svg>");
+}
+
+/* x: interrupted */
+.row-glyph-interrupted {
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M6 6 L18 18 M18 6 L6 18' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/></svg>");
+}
+
+/* crescent moon: parked */
+.row-glyph-parked {
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
 .row-sep {
@@ -469,30 +513,29 @@ body.sidebar-resizing {
     align-items: center;
 }
 
-/* Pins Cancel/Continue to the row's right edge; no separator precedes it. */
+/* Pins Stop/Resume to the row's right edge; no separator precedes it. */
 .row-action-right {
     margin-left: auto;
 }
 
-/* Profile tag: quieter than the status badge -- plain muted text (inherits
-   .row-l2 color), no badge treatment so line-1 status stays the loudest. */
-
-.row-l2 {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.72rem;
-    color: var(--text-muted);
-    line-height: 1.4;
-    white-space: nowrap;
-    overflow: hidden;
+/* Status badges right-align too: the auto margin rides the badge and the
+   following action keeps only the flex gap, so badge+action read as one
+   right-hand cluster. Without a badge, .row-action-right pins by itself. */
+.row-status {
+    margin-left: auto;
 }
 
-.row-l2 .row-profile:last-child {
-    flex: 0 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+.row-status + .row-action {
+    margin-left: 0;
+}
+
+/* Profile tag: rides line 1 ahead of the model. Quieter than the status
+   badge -- plain muted text, no badge treatment so the status stays the
+   loudest slot; the model keeps the ellipsizing role (.row-model). */
+.row-profile {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--text-muted);
 }
 
 /* Client plug: the live count on session cards, trailing line 3 at the
@@ -521,7 +564,7 @@ body.sidebar-resizing {
     mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M9 8V2' fill='none' stroke='black' stroke-width='2'/><path d='M15 8V2' fill='none' stroke='black' stroke-width='2'/><path d='M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z' fill='none' stroke='black' stroke-width='2'/><path d='M12 22v-5' fill='none' stroke='black' stroke-width='2'/></svg>") center / contain no-repeat;
 }
 
-/* Slightly louder than the profile text it rides beside, so the plug reads
+/* Slightly louder than the muted text it rides beside, so the plug reads
    as a live marker (hover/focus lift matches the badge idiom). */
 .row-clients:hover,
 .row-clients:focus-visible {
@@ -548,10 +591,10 @@ body.sidebar-resizing {
     font-size: 0.68rem;
 }
 
-/* Bottom-row metrics (ctx / msgs): the ellipsizing tail role row-l2's
-   metrics play, now riding line 3 after the date. The nth-last-child arm
-   keeps that tail role when the client plug pins the corner behind the
-   metric (the plug sits in last position, pushing the metric up one). */
+/* Bottom-row metrics (ctx / msgs): the ellipsizing tail role, riding the
+   bottom row after the date. The nth-last-child arm keeps that tail role
+   when the client plug pins the corner behind the metric (the plug sits in
+   last position, pushing the metric up one). */
 .row-l3 .row-metric:last-child,
 .row-l3 .row-metric:nth-last-child(2) {
     flex: 0 1 auto;
@@ -560,19 +603,14 @@ body.sidebar-resizing {
     text-overflow: ellipsis;
 }
 
-/* ── Session Working Indicator (sidebar) ─────────────────────────────────── */
-
-.session-spinner {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-}
+/* ── Session Working Indicator (sidebar) ──────────────────────────────────
+   The busy tell rides the Stop button itself (composer .spinner idiom),
+   so the badge stays plain text; inline-flex + gap carry the ring label. */
 
 .session-cancel-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     padding: 2px 8px;
     border: 1px solid var(--error-soft);
     border-radius: var(--radius-sm);
@@ -584,6 +622,11 @@ body.sidebar-resizing {
     cursor: pointer;
     transition: all 0.15s;
     line-height: 1.4;
+}
+
+.session-cancel-btn .spinner {
+    width: 9px;
+    height: 9px;
 }
 
 .session-cancel-btn:hover {
@@ -628,7 +671,8 @@ body.sidebar-resizing {
     border-color: rgba(52, 211, 153, 0.3);
 }
 
-/* State colors for the cold-row status slot (idle is unbadged). */
+/* State colors for the status slot (idle is unbadged on both lists, so
+   these three tokens are the only tinted badges). */
 .log-state-interrupted {
     color: var(--warning);
     background: rgba(251, 191, 36, 0.12);
@@ -1769,9 +1813,9 @@ body.sidebar-resizing {
     transform: scale(0.96);
 }
 
-/* Composer Cancel (working only): a peer of Send, danger-toned. The auto
+/* Composer Stop (working only): a peer of Send, danger-toned. The auto
    margin right-anchors the pair; the sibling rule pulls Send flush so
-   Cancel sits immediately left of it. */
+   Stop sits immediately left of it. */
 #cancel-btn {
     margin-left: auto;
     display: inline-flex;
@@ -1801,7 +1845,7 @@ body.sidebar-resizing {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SPINNER (inside #cancel-btn only; the sidebar row has its own .session-spinner)
+   SPINNER (shared: composer #cancel-btn and the sidebar's Stop button)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* currentColor-tracked ring so it survives the button's hover flip

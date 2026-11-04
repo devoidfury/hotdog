@@ -176,3 +176,26 @@ describe("SESSIONS/LOGS_LISTED rows: logPath", () => {
     registry.delete("path-live-2");
   });
 });
+
+describe("SESSIONS rows: questionPending badge flag", () => {
+  it("defaults false, mirrors setQuestionPending, and only signals real transitions", async () => {
+    const registry = makeRegistry(makeWsMockAgent({ sessionId: "q-live" }));
+    await registry.create({ profile: "manager" });
+
+    const find = async () =>
+      (await listSessionsViaWire(registry)).find((r) => r.id === "q-live")!;
+
+    expect((await find()).questionPending).toBe(false);
+
+    // Real transition -> true; the repeat is a no-op (no broadcast fuel).
+    expect(registry.setQuestionPending("q-live", true)).toBe(true);
+    expect(registry.setQuestionPending("q-live", true)).toBe(false);
+    expect((await find()).questionPending).toBe(true);
+
+    expect(registry.setQuestionPending("q-live", false)).toBe(true);
+    expect((await find()).questionPending).toBe(false);
+
+    // Unknown ids are ignored outright.
+    expect(registry.setQuestionPending("ghost", true)).toBe(false);
+  });
+});

@@ -426,9 +426,9 @@ function onSessionMenu(e: MouseEvent, s: SessionInfo): void {
       ...(isWorking
         ? [
             {
-              label: "Cancel",
+              label: "Stop",
               // The same availability and the same handler as the row's
-              // inline Cancel (which carries no confirm): the chat cancel
+              // inline Stop (which carries no confirm): the chat cancel
               // path plus the optimistic working-flag clear.
               onSelect: () => {
                 onCancelSession(s.id);
@@ -439,7 +439,7 @@ function onSessionMenu(e: MouseEvent, s: SessionInfo): void {
         : [
             {
               label: "Dismiss",
-              // Idle rows only (working rows keep Cancel above). Confirm
+              // Idle rows only (working rows keep Stop above). Confirm
               // because it tears down a live agent, with honest copy: the
               // log and the pin survive; the row demotes to Recent Logs.
               onSelect: () => {
@@ -487,8 +487,8 @@ function onLogMenu(e: MouseEvent, logId: string): void {
     items: [
       pinMenuItem(logId),
       {
-        label: "Continue",
-        // The inline Continue's handler verbatim (no confirm on either).
+        label: "Resume",
+        // The inline Resume's handler verbatim (no confirm on either).
         onSelect: () => {
           chat?.loadLog(logId);
           dismissContextMenu();
@@ -1284,7 +1284,7 @@ function App() {
                   // in-button spinner is the chat column's only busy tell.
                   <button type="button" id="cancel-btn" onClick={() => chat?.cancel()}>
                     <span className="spinner"></span>
-                    Cancel
+                    Stop
                   </button>
                 ) : null}
                 <button type="submit" id="send-btn">

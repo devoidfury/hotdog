@@ -194,8 +194,21 @@ export function createWsServer(
     interrupt: (sid) => registry.getSessionManager().interrupt(sid),
     // Task-host lane handoff: the worker yields its lane slot while a
     // question is pending, back on settle.
-    onQuestionAsked: (sid, qs) => taskManager?.onTaskQuestionAsked(sid, qs),
-    onQuestionSettled: (sid) => taskManager?.onTaskQuestionSettled(sid),
+    // Sidebar badge: mirror the pending flag onto the registry row and
+    // rebroadcast the sessions list (the sidebar-refresh idiom) so every
+    // tab's card swaps its status glyph to the question hook.
+    onQuestionAsked: (sid, qs) => {
+      taskManager?.onTaskQuestionAsked(sid, qs);
+      if (registry.setQuestionPending(sid, true)) {
+        registry.broadcast({ type: S2C.SESSIONS, sessions: registry.list() });
+      }
+    },
+    onQuestionSettled: (sid) => {
+      taskManager?.onTaskQuestionSettled(sid);
+      if (registry.setQuestionPending(sid, false)) {
+        registry.broadcast({ type: S2C.SESSIONS, sessions: registry.list() });
+      }
+    },
   });
 
   // Give every tool call for WS agents an Input implementation that resolves

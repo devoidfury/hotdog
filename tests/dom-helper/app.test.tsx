@@ -890,12 +890,12 @@ describe("context menus", () => {
 
     els(".log-item")[0]!.dispatchEvent(new Event("contextmenu"));
     await tick();
-    // Pin leads, the inline Continue's twin and the shared tail follow;
+    // Pin leads, the inline Resume's twin and the shared tail follow;
     // Delete takes the bottom slot (no "Copy log file path": the fixture
     // log row omits it).
     expect(menuButtons().map((b) => b.textContent)).toEqual([
       "Pin",
-      "Continue",
+      "Resume",
       "Copy session id",
       "Export",
       "Delete",
@@ -1061,23 +1061,23 @@ describe("context menus", () => {
     await tick();
   });
 
-  it("menu Cancel mirrors the row affordance: working-only, same cancel path", async () => {
+  it("menu Stop mirrors the row affordance: working-only, same cancel path", async () => {
     ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
     await tick();
     els(".session-item")[0]!.dispatchEvent(new Event("contextmenu"));
     await tick();
     expect(menuButtons().map((b) => b.textContent)).toEqual([
       "Pin",
-      "Cancel",
+      "Stop",
       "Copy session id",
       "Export",
       "Rename",
       "Delete",
     ]);
     clearSent();
-    menuButtons().find((b) => b.textContent === "Cancel")!.click();
+    menuButtons().find((b) => b.textContent === "Stop")!.click();
     await tick();
-    // Same frame as the inline row Cancel, no confirm on either.
+    // Same frame as the inline row Stop, no confirm on either.
     expect(sent<{ sessionId: string }>("cancel")[0]?.sessionId).toBe(SID);
     // Reset for the sections below.
     ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
@@ -1472,12 +1472,12 @@ describe("working state: spinnered composer Cancel (real app wiring)", () => {
   const composerButtonIds = (): (string | null)[] =>
     Array.from(el("#composer-actions").children).map((c) => c.getAttribute("id"));
 
-  it("idle: no indicator, no Cancel in the composer", () => {
+  it("idle: no indicator, no Stop in the composer", () => {
     expect(document.querySelector("#working-indicator")).toBeNull();
     expect(document.querySelector("#cancel-btn")).toBeNull();
   });
 
-  it("working: Cancel (carrying the spinner) sits inside #composer-actions left of Send", async () => {
+  it("working: Stop (carrying the spinner) sits inside #composer-actions left of Send", async () => {
     ws.fireMessage({ type: "sessionState", sessionId: LV_SID, key: "working", value: true });
     await tick();
 
@@ -1485,14 +1485,14 @@ describe("working state: spinnered composer Cancel (real app wiring)", () => {
     expect(document.querySelector("#working-indicator")).toBeNull();
     const cancel = el("#composer-actions #cancel-btn");
     expect(cancel.querySelector(".spinner")).toBeTruthy();
-    expect(cancel.textContent).toContain("Cancel");
+    expect(cancel.textContent).toContain("Stop");
     const ids = composerButtonIds();
     const cancelAt = ids.indexOf("cancel-btn");
     expect(cancelAt).toBeGreaterThanOrEqual(0);
     expect(ids[cancelAt + 1]).toBe("send-btn");
   });
 
-  it("clicking Cancel sends {type:cancel} and drops the button", async () => {
+  it("clicking Stop sends {type:cancel} and drops the button", async () => {
     ws.sent.length = 0;
     el("#cancel-btn").click();
     const cancelMsg = ws.sent

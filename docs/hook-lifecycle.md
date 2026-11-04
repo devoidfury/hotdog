@@ -108,7 +108,7 @@ Session Delete ────────────► "session:end"
 | `session:end` | Session deleted (or task agent released) | notify (fire-and-forget) | `{ sessionId }` |
 | `session:swap` | Agent swapped | awaited notify (sync `switchSession()` fires unawaited) | `{ oldAgent, newAgent }` |
 | `session:restoreActive` | Restore flag changes | notify (fire-and-forget) | `{ agent, isRestoring }` |
-| `session:resumeAttempt` | Any resume of an existing log (CLI `-s`, webui Continue, webui reconnect auto-resume), before replay | awaited notify | `{ agent, sessionId, origin, consecutiveAutoResumes }` |
+| `session:resumeAttempt` | Any resume of an existing log (CLI `-s`, webui Resume, webui reconnect auto-resume), before replay | awaited notify | `{ agent, sessionId, origin, consecutiveAutoResumes }` |
 
 ### 3. Agent Run Loop — Per-Iteration Lifecycle
 
@@ -240,7 +240,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | `SESSION_END` | `session:end` | notify (fire-and-forget) | Session deleted (`SessionManager.deleteSession`) or task agent released (`TaskExecution.finalizeTurn`/`launch`, fired on the agent's own hooks). The webui/ws `SessionManager` runs on a private hook system, so `SessionRegistry.delete` re-fires the notice on the deleted agent's hooks -- the only path by which extensions see a ws-session delete |
 | `SESSION_SWAP` | `session:swap` | awaited notify | Agent swapped (`swap()` awaits it; the sync `switchSession()` path fires it unawaited) |
 | `SESSION_RESTORE_ACTIVE` | `session:restoreActive` | notify (fire-and-forget) | Restore flag changes on agent (sync setter) |
-| `SESSION_RESUME_ATTEMPT` | `session:resumeAttempt` | awaited notify | `restoreSessionIntoAgent()` resumes a session by explicit id; session-log fsyncs a `resume_attempt` record (livelock-cap counter, logged so it survives index deletion) before the replay reads. `origin` is `"auto"` (non-user: webui reconnect, future gateway dial-back -- the only resumes the livelock cap counts) or `"manual"` (Continue, CLI `-s` -- never capped); `consecutiveAutoResumes` is the counter AFTER this record lands, so the index can park the row when the cap is reached |
+| `SESSION_RESUME_ATTEMPT` | `session:resumeAttempt` | awaited notify | `restoreSessionIntoAgent()` resumes a session by explicit id; session-log fsyncs a `resume_attempt` record (livelock-cap counter, logged so it survives index deletion) before the replay reads. `origin` is `"auto"` (non-user: webui reconnect, future gateway dial-back -- the only resumes the livelock cap counts) or `"manual"` (Resume, CLI `-s` -- never capped); `consecutiveAutoResumes` is the counter AFTER this record lands, so the index can park the row when the cap is reached |
 
 ### Message Flow
 

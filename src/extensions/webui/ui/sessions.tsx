@@ -1,18 +1,20 @@
 /// <reference lib="dom" />
 // Session/log sidebar. Both lists share one row grammar:
 //
-//   provider/model      [status]            [action]
-//   profile
-//   start date & time . (ctx used / ctx total) . (msg count)  [plug n]
+//   profile · provider/model          [status] [action]
+//   start date & time · (ctx used / ctx total) · (msg count)  [plug n]
 //
-// The connected-client count shows as the line-3 plug pinned to the card's
-// bottom-right (icon + number for 2+, icon only for 1, nothing at
+// The connected-client count shows as the bottom-row plug pinned to the
+// card's bottom-right (icon + number for 2+, icon only for 1, nothing at
 // 0/unattested) -- never a text metric.
 //
-// No literal parens anywhere: status renders as a text badge, profile as
-// quiet muted text. Missing segments are omitted outright, never rendered
-// empty; " . " is the segment separator between the slots the example
-// dot-joins. The line-1 action pins right (margin-left:auto), no sep.
+// No literal parens anywhere: status renders as a glyph badge (custom
+// stroke-SVG set through a CSS mask, tinted by currentColor, native title
+// tooltip), profile as quiet muted text. Missing segments are omitted
+// outright, never rendered empty; " · " (middle dot, U+00B7) is the segment
+// separator between the slots the example dot-joins (the profile/model join
+// dot rides only when both speak). The line-1 action pins right
+// (margin-left:auto), no sep.
 // The raw session id is not displayed at all: it stays the selection key,
 // pin/export identifier and handler argument -- never card text.
 
@@ -30,6 +32,10 @@ export interface SessionInfo {
   /** Live websocket clients on this session (registry metadata via the list
    *  payload). Shown as the card's bottom-right plug, never as text. */
   connectedClients: number;
+  /** A pending question is blocking this session (registry metadata via the
+   *  list payload). Wins the status slot: the card badges awaiting_question
+   *  instead of working/idle while a human answer is outstanding. */
+  questionPending?: boolean;
   /** Sidebar row slots: user-message tally and the last token_usage snapshot. */
   userMessageCount?: number;
   ctxUsed?: number;
@@ -111,23 +117,26 @@ interface SidebarRowProps {
   kindClass: string;
   active: boolean;
   model?: string | null;
-  /** Line-2 profile tag: display name (title wins), omitted when neither set. */
+  /** Line-1 profile tag: display name (title wins), dot-joined ahead of the
+   *  model; omitted when neither set. */
   displayName?: string | null;
-  /** Line-1 status badge text, rendered as-is; null/empty omits the segment. */
+  /** Line-1 status badge: raw state token (working/idle/awaiting_question/
+   *  interrupted/parked). Renders as a glyph badge (see styles .row-glyph)
+   *  with the human label as native title; unknown tokens fall back to text.
+   *  null/empty omits the segment. */
   status?: string | null;
   /** Optional color modifier for the status slot (cold-log derived states). */
   statusClass?: string;
-  spinner?: boolean;
   ctxUsed?: number;
   ctxTotal?: number;
   messageCount?: number;
   /** Live rows only; absent on cold logs (structurally 0 clients). Renders
-   *  as the line-2 plug icon, never a text metric (see styles .row-clients). */
+   *  as the bottom-row plug icon, never a text metric (see styles .row-clients). */
   connectedClients?: number;
   createdAt: number;
   /** Server pin flag: leads line-1 with a small badge (see styles .row-pin). */
   pinned?: boolean;
-  /** Line-1 trailing action node (Cancel / Continue); null omits the slot. */
+  /** Line-1 trailing action node (Stop / Resume); null omits the slot. */
   action?: JsxChild;
   onSelect: () => void;
   onContextMenu?: (e: MouseEvent) => void;
@@ -136,6 +145,16 @@ interface SidebarRowProps {
 function rowClass(kindClass: string, active: boolean): string {
   return active ? `${kindClass} active` : kindClass;
 }
+
+/** Status tokens with a custom glyph (see .row-glyph-* in styles.css); the
+ *  value is the badge's native title. Unlisted tokens render as text. */
+const STATUS_GLYPHS: Record<string, string> = {
+  working: "Working",
+  idle: "Idle",
+  awaiting_question: "Awaiting question",
+  interrupted: "Interrupted",
+  parked: "Parked",
+};
 
 /** Stable partition: pinned rows lead their section, everything else keeps
  *  the incoming order (sort is stable, so both halves stay untouched). */
@@ -147,24 +166,31 @@ export function sortPinned<T extends { id: string }>(rows: T[], pinned: Set<stri
 export function SidebarRow(p: SidebarRowProps) {
   const line1: JsxChild[] = [];
   if (p.pinned) line1.push(<span className="row-pin" title="Pinned">📌</span>);
+  // Profile leads, dot-joined to the model; the sep rides only when both
+  // halves exist (title wins the profile slot, both-missing omits).
+  if (p.displayName) line1.push(<span className="row-profile">{p.displayName}</span>);
+  if (p.displayName && p.model) line1.push(<span className="row-sep">·</span>);
   if (p.model) line1.push(<span className="row-model">{p.model}</span>);
   if (p.status) {
+    // Glyph badge when the token has a glyph, plain text when it doesn't;
+    // the human label always rides as the native title (plug idiom).
+    const hasGlyph = Object.hasOwn(STATUS_GLYPHS, p.status);
+    const label = hasGlyph ? STATUS_GLYPHS[p.status] : p.status.replace(/_/g, " ");
     line1.push(
-      <span className={p.statusClass ? `row-status ${p.statusClass}` : "row-status"}>
-        {p.spinner ? <span className="session-spinner"></span> : null}
-        {p.status}
+      <span
+        className={p.statusClass ? `row-status ${p.statusClass}` : "row-status"}
+        title={label}
+        tabindex="0"
+      >
+        {hasGlyph ? <span className={`row-glyph row-glyph-${p.status}`}></span> : label}
       </span>,
     );
   }
   if (p.action) line1.push(<span className="row-action row-action-right">{p.action}</span>);
 
-  // Line 2 belongs to the profile tag alone (title wins, both-missing omits).
-  const line2: JsxChild[] = [];
-  if (p.displayName) line2.push(<span className="row-profile">{p.displayName}</span>);
-
-  // Bottom row: date . ctx . msgs. The date always leads, so every metric
+  // Bottom row: date · ctx · msgs. The date always leads, so every metric
   // that rides gets a sep; unattested slots are omitted outright (legacy
-  // logs: date . msgs). The live plug trails at the card's bottom-right
+  // logs: date · msgs). The live plug trails at the card's bottom-right
   // (row-action-right idiom, margin-left:auto): a CSS mask glyph (see
   // .row-clients in styles.css), no raw svg through the client mount.
   // Rules: 0/unattested renders nothing; 1 is icon-only; 2+ rides the
@@ -180,7 +206,7 @@ export function SidebarRow(p: SidebarRowProps) {
       : null;
   for (const part of [ctx, msgs]) {
     if (!part) continue;
-    line3.push(<span className="row-sep">.</span>, <span className="row-metric">{part}</span>);
+    line3.push(<span className="row-sep">·</span>, <span className="row-metric">{part}</span>);
   }
   const clients = p.connectedClients ?? 0;
   if (clients > 0) {
@@ -205,7 +231,6 @@ export function SidebarRow(p: SidebarRowProps) {
       }}
     >
       <div className="row-l1">{line1}</div>
-      {line2.length > 0 ? <div className="row-l2">{line2}</div> : null}
       <div className="row-l3">{line3}</div>
     </div>
   );
@@ -229,8 +254,11 @@ export function Sidebar(p: SidebarProps) {
               pinned={p.pinnedIds.has(s.id)}
               model={s.model}
               displayName={s.title || s.profile}
-              status={isWorking ? "working" : "idle"}
-              spinner={isWorking}
+              // Idle omits the badge outright (the cold-log rule, now shared):
+              // the resting state is the default, only working and a pending
+              // question say anything.
+              status={s.questionPending ? "awaiting_question" : isWorking ? "working" : null}
+              statusClass={s.questionPending ? "log-state-awaiting_question" : undefined}
               ctxUsed={s.ctxUsed}
               ctxTotal={s.ctxTotal}
               messageCount={s.userMessageCount}
@@ -238,15 +266,19 @@ export function Sidebar(p: SidebarProps) {
               createdAt={s.createdAt}
               action={
                 isWorking ? (
+                  // The composer idiom: the spinner rides the Stop button
+                  // itself (.spinner is currentColor-tracked, so it survives
+                  // the hover flip), not the status badge.
                   <button
                     className="session-cancel-btn"
-                    title="Cancel"
+                    title="Stop"
                     onClick={(e: MouseEvent) => {
                       e.stopPropagation();
                       p.onCancel(s.id);
                     }}
                   >
-                    Cancel
+                    <span className="spinner"></span>
+                    Stop
                   </button>
                 ) : null
               }
@@ -278,7 +310,7 @@ export function Sidebar(p: SidebarProps) {
               model={log.model}
               displayName={log.profile}
               // Derived index state badges the row (idle stays unbadged).
-              status={log.state && log.state !== "idle" ? log.state.replace(/_/g, " ") : null}
+              status={log.state && log.state !== "idle" ? log.state : null}
               statusClass={log.state ? `log-state-${log.state}` : undefined}
               ctxUsed={log.ctxUsed}
               ctxTotal={log.ctxTotal}
@@ -287,13 +319,13 @@ export function Sidebar(p: SidebarProps) {
               action={
                 <button
                   className="log-continue-btn"
-                  title="Continue this session (keeps its session id)"
+                  title="Resume this session (keeps its session id)"
                   onClick={(e: MouseEvent) => {
                     e.stopPropagation();
                     p.onContinueLog(log.id);
                   }}
                 >
-                  Continue
+                  Resume
                 </button>
               }
               onSelect={() => p.onViewLog(log.id)}

@@ -1,19 +1,21 @@
 // Sidebar row grammar (shared by live sessions and cold logs), pinned on the
 // owner's fixture row:
 //
-//   ai365/qwen3.8-flash-next    working            Cancel
-//   manager
-//   2026-10-31 22:30 . 69k/262k . 42 msgs   [plug]
+//   manager · ai365/qwen3.8-flash-next    working            Stop
+//   2026-10-31 22:30 · 69k/262k · 42 msgs   [plug]
 //
-// No literal parens: status is a text badge, profile quiet muted text, and
-// the line-1 action pins right (row-action-right) with no separator before
-// it. The connected-client count shows as the plug icon trailing line 3 --
-// the card's bottom-right (icon + number for 2+, icon only for 1, nothing
-// at 0/unattested; tooltip via the native title) -- never a text metric, so
-// row text must never read "client(s)". The raw session id renders nowhere
-// -- the data model keeps it as the selection key. Segments that have no
-// data are omitted outright; the legacy-log pins watch for
-// "undefined"/"null" leakage into rendered text.
+// Separators are middle dots (·, U+00B7) -- never a baseline period.
+// No literal parens: status is a glyph badge (label as native title),
+// profile quiet muted text, and
+// the profile dot-joins ahead of the model on line 1 -- the join dot rides
+// only when both halves speak. The line-1 action pins right
+// (row-action-right) with no separator before it. The connected-client count
+// shows as the plug icon trailing the bottom row -- the card's bottom-right
+// (icon + number for 2+, icon only for 1, nothing at 0/unattested; tooltip
+// via the native title) -- never a text metric, so row text must never read
+// "client(s)". The raw session id renders nowhere -- the data model keeps it
+// as the selection key. Segments that have no data are omitted outright; the
+// legacy-log pins watch for "undefined"/"null" leakage into rendered text.
 
 import { describe, it, expect, afterEach } from "bun:test";
 import {
@@ -110,23 +112,38 @@ function coldLog(over: Partial<LogInfo> = {}): LogInfo {
 // ── Live row: every segment present ─────────────────────────────────────────
 
 describe("live row (owner fixture)", () => {
-  it("renders all three grammar lines with the dot separators", () => {
+  it("renders both grammar lines with the dot separators", () => {
     const root = render({ sessions: [liveSession()], working: new Map([[FULL_ID, true]]) });
     const row = root.querySelector(".session-item")!;
     expect(row).toBeTruthy();
 
     expect(row.querySelector(".row-model")!.textContent).toBe("ai365/qwen3.8-flash-next");
-    expect(row.querySelector(".row-status")!.textContent).toBe("working");
-    expect(row.querySelector(".session-spinner")).toBeTruthy();
+    // Status badge: custom glyph tinted by currentColor, label as native
+    // title (plug idiom), no text leaking into the slot.
+    const status = row.querySelector(".row-status")!;
+    expect(status.getAttribute("title")).toBe("Working");
+    expect(status.getAttribute("tabindex")).toBe("0");
+    expect(status.querySelector(".row-glyph-working")).toBeTruthy();
+    expect(status.textContent).toBe("");
+    // Busy tell: the spinner rides the Stop button (composer idiom), never
+    // the status badge.
     const cancel = row.querySelector(".session-cancel-btn")!;
-    expect(cancel.textContent).toBe("Cancel");
+    expect(cancel.textContent).toBe("Stop");
+    expect(cancel.querySelector(".spinner")).toBeTruthy();
+    expect(row.querySelector(".row-status .spinner")).toBeNull();
 
-    // Action pins right and trails every other line-1 slot; no sep precedes it.
+    // Line 1 grammar: profile dot-joined ahead of the model, status badge,
+    // then the action pinning right -- it trails every other line-1 slot and
+    // no sep precedes it (the only line-1 dot is the profile/model join).
     const action = row.querySelector(".row-action")!;
     expect(action.classList.contains("row-action-right")).toBe(true);
-    const l1Kids = row.querySelector(".row-l1")!.children;
-    expect(l1Kids[l1Kids.length - 1]).toBe(action);
-    expect(row.querySelectorAll(".row-l1 .row-sep")).toHaveLength(0);
+    expect([...row.querySelector(".row-l1")!.children].map((n) => n.className)).toEqual([
+      "row-profile",
+      "row-sep",
+      "row-model",
+      "row-status",
+      "row-action row-action-right",
+    ]);
 
     expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
     // The client count rides the card's bottom-right as a plug icon, trailing
@@ -141,7 +158,7 @@ describe("live row (owner fixture)", () => {
     expect(row.textContent).not.toContain("client");
 
     expect(row.querySelector(".row-date")!.textContent).toBe("2026-10-31 22:30");
-    // Bottom row: date . ctx . msgs [plug] -- the plug trails line 3 (the
+    // Bottom row: date · ctx · msgs [plug] -- the plug trails line 3 (the
     // bottom-right corner is CSS: margin-left:auto, the row-action-right
     // idiom), in that order.
     const l3 = row.querySelector(".row-l3")!;
@@ -161,23 +178,69 @@ describe("live row (owner fixture)", () => {
     expect(row.querySelector(".row-id")).toBeNull();
     expect(row.textContent).not.toContain(FULL_ID);
 
-    // Separators: the two bottom-row dots; lines 1-2 are dot-free.
-    expect(row.querySelectorAll(".row-sep")).toHaveLength(2);
+    // Separators: the profile/model join dot plus the two bottom-row dots,
+    // all middle dots (·) -- a baseline "." would sit low in flex-centered
+    // lines, so the glyph itself is pinned, not just the count.
+    expect(row.querySelectorAll(".row-sep")).toHaveLength(3);
+    for (const sep of row.querySelectorAll(".row-sep")) {
+      expect(sep.textContent).toBe("·");
+    }
   });
 
-  it("working row carries the Cancel action; idle row renders idle without one", () => {
+  it("idle rows carry no badge and no Stop action", () => {
     const root = render({ sessions: [liveSession()], working: new Map() });
     const row = root.querySelector(".session-item")!;
-    expect(row.querySelector(".row-status")!.textContent).toBe("idle");
+    expect(row.querySelector(".row-status")).toBeNull();
     expect(row.querySelector(".session-cancel-btn")).toBeNull();
-    expect(row.querySelector(".session-spinner")).toBeNull();
-    // No action slot: line 1 never had a dot here; the two bottom-row dots.
-    expect(row.querySelectorAll(".row-sep")).toHaveLength(2);
+    expect(row.querySelector(".spinner")).toBeNull();
+    // No action slot: still the join dot + the two bottom-row dots.
+    expect(row.querySelectorAll(".row-sep")).toHaveLength(3);
   });
 
   it("an explicit title wins the profile slot", () => {
     const root = render({ sessions: [liveSession({ title: "renamed" })] });
     expect(root.querySelector(".row-profile")!.textContent).toBe("renamed");
+  });
+
+  it("the profile/model join dot rides only when both halves speak", () => {
+    const root = render({
+      sessions: [
+        liveSession({ id: "s-no-model", model: undefined }),
+        liveSession({ id: "s-no-profile", profile: undefined }),
+      ],
+    });
+    const rows = root.querySelectorAll(".session-item");
+    // Profile alone leads line 1 with no dangling dot.
+    expect(rows[0]!.querySelector(".row-profile")!.textContent).toBe("manager");
+    expect(rows[0]!.querySelector(".row-model")).toBeNull();
+    expect(rows[0]!.querySelectorAll(".row-l1 .row-sep")).toHaveLength(0);
+    // Model alone: the profile slot omits outright, join dot with it.
+    expect(rows[1]!.querySelector(".row-profile")).toBeNull();
+    expect(rows[1]!.querySelector(".row-model")!.textContent).toBe("ai365/qwen3.8-flash-next");
+    expect(rows[1]!.querySelectorAll(".row-l1 .row-sep")).toHaveLength(0);
+  });
+
+  it("a pending question wins the status slot over working/idle", () => {
+    const root = render({
+      sessions: [
+        // Working AND asked: the human answer is what's actually outstanding.
+        liveSession({ id: "q1", questionPending: true }),
+        liveSession({ id: "q2", questionPending: false }),
+      ],
+      working: new Map([["q1", true]]),
+    });
+    const rows = root.querySelectorAll(".session-item");
+
+    const asked = rows[0]!.querySelector(".row-status")!;
+    expect(asked.getAttribute("title")).toBe("Awaiting question");
+    expect(asked.querySelector(".row-glyph-awaiting_question")).toBeTruthy();
+    expect(asked.className).toContain("log-state-awaiting_question");
+    expect(asked.querySelector(".row-glyph-working")).toBeNull();
+    // Stop still rides: interrupting settles the pending question.
+    expect(rows[0]!.querySelector(".session-cancel-btn")).toBeTruthy();
+
+    // questionPending false is an ordinary idle row: no badge at all.
+    expect(rows[1]!.querySelector(".row-status")).toBeNull();
   });
 
   it("plug rules: number + plural tooltip at 2+, nothing at 0 or unattested", () => {
@@ -214,14 +277,16 @@ describe("live row (owner fixture)", () => {
 // ── Cold row: no client segment, the log's own action ───────────────────────
 
 describe("cold row", () => {
-  it("renders model/status/ctx/msgs + Continue, and never a client segment", () => {
+  it("renders model/status/ctx/msgs + Resume, and never a client segment", () => {
     const root = render({ logs: [coldLog({ state: "interrupted" })] });
     const row = root.querySelector(".log-item")!;
     expect(row.querySelector(".row-model")!.textContent).toBe("ai365/qwen3.8-flash-next");
-    expect(row.querySelector(".row-status")!.textContent).toBe("interrupted");
+    const status = row.querySelector(".row-status")!;
+    expect(status.getAttribute("title")).toBe("Interrupted");
+    expect(status.querySelector(".row-glyph-interrupted")).toBeTruthy();
     expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
     expect(texts(row, ".row-metric")).toEqual(["69k/262k", "42 msgs"]);
-    // Same bottom-row grammar as the live list: date . ctx . msgs.
+    // Same bottom-row grammar as the live list: date · ctx · msgs.
     expect([...row.querySelector(".row-l3")!.children].map((n) => n.className)).toEqual([
       "row-date",
       "row-sep",
@@ -232,8 +297,8 @@ describe("cold row", () => {
     expect(row.querySelector(".row-id")).toBeNull();
     expect(row.textContent).not.toContain(FULL_ID);
     const cont = row.querySelector(".log-continue-btn")!;
-    expect(cont.textContent).toBe("Continue");
-    // Continue sits in the right-pinned action slot, no sep precedes it.
+    expect(cont.textContent).toBe("Resume");
+    // Resume sits in the right-pinned action slot, no sep precedes it.
     expect(row.querySelector(".row-action .log-continue-btn")).toBeTruthy();
     expect(row.querySelector(".row-action")!.classList.contains("row-action-right")).toBe(true);
     expect(row.textContent).not.toContain("client");
@@ -245,16 +310,26 @@ describe("cold row", () => {
     const root = render({ logs: [coldLog({ id: "a", state: "idle" }), coldLog({ id: "b", state: undefined })] });
     const rows = root.querySelectorAll(".log-item");
     for (const row of rows) expect(row.querySelector(".row-status")).toBeNull();
-    // No status: lines 1-2 hold no dots (action pins right, no client slot),
-    // the bottom row carries both (date . ctx . msgs).
-    expect(rows[0]!.querySelectorAll(".row-sep")).toHaveLength(2);
+    // No status: line 1 carries just the profile/model join dot, the bottom
+    // row both dots (date · ctx · msgs).
+    expect(rows[0]!.querySelectorAll(".row-sep")).toHaveLength(3);
   });
 
-  it("state text underscores become spaces and the state class colors the slot", () => {
+  it("the state label (underscores to spaces) rides the title; the glyph and state class follow the token", () => {
     const root = render({ logs: [coldLog({ state: "awaiting_question" })] });
     const status = root.querySelector(".row-status")!;
-    expect(status.textContent).toBe("awaiting question");
+    expect(status.getAttribute("title")).toBe("Awaiting question");
+    expect(status.textContent).toBe("");
     expect(status.className).toContain("log-state-awaiting_question");
+    expect(status.querySelector(".row-glyph-awaiting_question")).toBeTruthy();
+  });
+
+  it("unknown state tokens fall back to text: no glyph, nothing vanishes", () => {
+    const root = render({ logs: [coldLog({ state: "haunted" })] });
+    const status = root.querySelector(".row-status")!;
+    expect(status.textContent).toBe("haunted");
+    expect(status.getAttribute("title")).toBe("haunted");
+    expect(status.querySelector(".row-glyph")).toBeNull();
   });
 });
 
@@ -275,12 +350,12 @@ describe("legacy log row (no model/profile/ctx attested)", () => {
     expect(row.querySelector(".row-profile")).toBeNull();
     // ctx absent: only the msgs metric remains, dot-joined after the date.
     expect(texts(row, ".row-metric")).toEqual(["42 msgs"]);
-    // Continue (the log's own action) still renders, right-pinned; line 1
+    // Resume (the log's own action) still renders, right-pinned; line 1
     // holds no dots at all now (and never did when model/status are absent).
     expect(row.querySelector(".log-continue-btn")).toBeTruthy();
     const l1 = row.querySelector(".row-l1")!;
     expect(l1.querySelectorAll(".row-sep")).toHaveLength(0);
-    // Bottom row: no ctx attestation, so that segment omits -- date . msgs.
+    // Bottom row: no ctx attestation, so that segment omits -- date · msgs.
     expect(row.querySelector(".row-date")!.textContent).toBe("2026-10-31 22:30");
     expect([...row.querySelector(".row-l3")!.children].map((n) => n.className)).toEqual([
       "row-date",
@@ -311,7 +386,7 @@ describe("formatDateTime", () => {
 
 // ── Row interactions (handler wiring) ───────────────────────────────────────
 // The grammar above is only as good as its routing: each slot must reach
-// exactly the handler that owns it, and inner actions (Cancel/Continue) must
+// exactly the handler that owns it, and inner actions (Stop/Resume) must
 // not leak through to the row's select -- stopPropagation is the pin here.
 
 function mountInteractive(
@@ -370,7 +445,7 @@ describe("row interactions", () => {
     expect(calls).toEqual([`switch:${FULL_ID}`, "create"]);
   });
 
-  it("Cancel on a working row cancels it without also switching", () => {
+  it("Stop on a working row cancels it without also switching", () => {
     const calls: string[] = [];
     const root = renderInteractive(
       { sessions: [liveSession()], working: new Map([[FULL_ID, true]]) },
@@ -391,7 +466,7 @@ describe("row interactions", () => {
     expect(prevented).toBe(false);
   });
 
-  it("Continue on a log row resumes it without opening the log", () => {
+  it("Resume on a log row resumes it without opening the log", () => {
     const calls: string[] = [];
     const root = renderInteractive({ logs: [coldLog()] }, calls);
     clickable(root, ".log-continue-btn").click();

@@ -55,6 +55,18 @@ export function formatDuration(ms: number): string {
   return `${s}s`;
 }
 
+/**
+ * Compact per-call wall time for the footer segment, e.g. "4.2s", "0.9s",
+ * "1m 01s". Below 10s it keeps one decimal: a 4.2s call is not a 4s call,
+ * and a 900ms call must never print "0s". Longer calls use the whole-second
+ * formatDuration. Callers gate finiteness (same as the footer's other
+ * segments).
+ */
+export function formatCallDuration(ms: number): string {
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  return formatDuration(ms);
+}
+
 export function formatTokenCount(n: number): string {
   // Non-finite/negative pass through as-is; toFixed's trailing ".0" is stripped (1959 -> "2k").
   if (!Number.isFinite(n) || n < 0) return String(n);

@@ -28,23 +28,38 @@ export function s2cContent(
 /**
  * Assistant message frame. `meta` carries the webui footer data only the
  * log attests: completion ts (the entry timestamp, epoch ms), the duration
- * of the bracketing turn, and the ctx usage (`ctx`, see CtxUsage) attested
- * at that message's commit. Live event frames carry none of these (the
- * client measures its own turn and folds the live TOKEN_USAGE event it
- * receives into the footer); replay fills what the log knows.
+ * of the bracketing TURN (`durationMs`, the "Worked for" total), and the
+ * ctx usage (`ctx`, see CtxUsage) attested at that message's commit. The
+ * call's OWN wall time rides `callMs` (one LLM call, not the turn: a turn
+ * can span several calls); `callDerived` marks such a value as a log-gap
+ * derivation rather than a duration recorded on the usage record, so the
+ * client tooltip can say so instead of dressing a derived number as
+ * recorded. Live event frames carry none of these (the client measures its
+ * own turn and folds the live TOKEN_USAGE event it receives into the
+ * footer); replay fills what the log knows.
  */
 export function s2cAssistantMessage(
   sessionId: string,
   content: string,
-  meta?: { ts?: number; durationMs?: number; ctx?: CtxUsage },
+  meta?: { ts?: number; durationMs?: number; ctx?: CtxUsage; callMs?: number; callDerived?: boolean },
 ): Record<string, unknown> {
   return {
     type: S2C.ASSISTANT_MESSAGE,
     sessionId,
     content,
     ...(meta?.ts !== undefined ? { ts: meta.ts } : {}),
-    ...(meta?.durationMs !== undefined ? { durationMs: meta.durationMs } : {}),
+    // Duration fields ride only as trustworthy numbers (finite, >= 0): the
+    // helpers already uphold this, and the gate here keeps a hand-corrupted
+    // log record from pushing a negative onto the wire (the client render
+    // gates too -- defense in depth, same posture as s2cTokenUsage).
+    ...(meta?.durationMs !== undefined && Number.isFinite(meta.durationMs) && meta.durationMs >= 0
+      ? { durationMs: meta.durationMs }
+      : {}),
     ...(meta?.ctx !== undefined ? { ctx: meta.ctx } : {}),
+    ...(meta?.callMs !== undefined && Number.isFinite(meta.callMs) && meta.callMs >= 0
+      ? { callMs: meta.callMs }
+      : {}),
+    ...(meta?.callDerived === true ? { callDerived: true } : {}),
   };
 }
 
@@ -118,6 +133,8 @@ export interface TokenUsageWireSource {
   totalTokens?: number;
   cachedTokens?: number;
   contextWindow?: number;
+  /** Wall ms of the producing LLM call (agent.ts measured span). */
+  durationMs?: number;
 }
 
 /**
@@ -159,6 +176,12 @@ export function s2cTokenUsage(
     cachedTokens: u.cachedTokens || 0,
   };
   if (Number.isFinite(u.contextWindow)) msg.contextWindow = u.contextWindow;
+  // The call's own wall time (sibling of the ctx pair, see the footer):
+  // only a finite non-negative measurement rides the frame -- old records
+  // and unmeasured callers stay silent.
+  if (typeof u.durationMs === "number" && Number.isFinite(u.durationMs) && u.durationMs >= 0) {
+    msg.durationMs = u.durationMs;
+  }
   // Additive ctx fields for the message-list footer (older clients ignore
   // them). ctxTotal is gated finite>0 here, so a present-but-absurd window
   // (0/NaN) leaves the denominator off rather than rendering "126k/0".

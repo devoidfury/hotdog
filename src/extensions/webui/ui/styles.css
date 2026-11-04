@@ -949,6 +949,14 @@ body.sidebar-resizing {
     white-space: nowrap;
 }
 
+/* The per-call duration segment sits beside the gauge in the same quiet
+   mono; no styling beyond staying on one line (its derived-ness, when
+   there is no gauge to carry it, rides the native title). */
+.message-assistant-footer .footer-call {
+    font-family: var(--font-mono);
+    white-space: nowrap;
+}
+
 .message-assistant-footer .footer-copy {
     display: inline-flex;
     align-items: center;

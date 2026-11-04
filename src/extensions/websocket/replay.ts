@@ -23,7 +23,7 @@ import {
   type TokenUsageWireSource,
 } from "./wire-messages.ts";
 import { splitFileIncludes, wrapperContentText } from "@utils/tool-content.ts";
-import { ctxByIndex, parseEntryTs, turnDurationsByIndex } from "@utils/session-turns.ts";
+import { ctxByIndex, deriveCallDurationsByIndex, parseEntryTs, turnDurationsByIndex } from "@utils/session-turns.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
@@ -71,9 +71,13 @@ export function replayLogSlice(
   // and the ctx usage attested at the message's commit -- the token_usage
   // record written for that LLM response (undefined when the log has none:
   // the footer gauge segment is then omitted, never borrowed from a
-  // neighbouring call).
+  // neighbouring call). The call's own wall time (callMs) is the recorded
+  // durationMs on that usage record first, else the strict-adjacency log-gap
+  // derivation (deriveCallDurationsByIndex); callDerived says which it was,
+  // so the footer tooltip never dresses a derived number as recorded.
   const turnDurations = turnDurationsByIndex(entries);
   const ctxs = ctxByIndex(entries);
+  const derivedCalls = deriveCallDurationsByIndex(entries);
 
   for (let i = startIdx; i < entries.length; i++) {
     const e = entries[i]!;
@@ -106,11 +110,18 @@ export function replayLogSlice(
         }
         const text = wrapperContentText(content);
         if (text) {
+          // Per-call duration: recorded (the usage record's own durationMs,
+          // ctxByIndex posture) beats derived (strict-adjacency log gap);
+          // neither present means the segment rides no field.
+          const recordedCall = ctxs[i]?.callMs;
+          const derivedCall = recordedCall === undefined ? derivedCalls[i] : undefined;
           send(
             s2cAssistantMessage(sessionId, text, {
               ts: parseEntryTs(e.ts),
               durationMs: turnDurations[i],
               ctx: ctxs[i],
+              callMs: recordedCall ?? derivedCall,
+              ...(derivedCall !== undefined ? { callDerived: true } : {}),
             }),
           );
         }

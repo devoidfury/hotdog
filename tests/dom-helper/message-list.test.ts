@@ -980,15 +980,19 @@ describe("assistant footer ctx segment (cold-log replay)", () => {
     expect(container.querySelector(".token-usage")).toBeNull();
     const footers = container.querySelectorAll(".message-assistant-footer");
     expect(footers).toHaveLength(1);
+    // The record predates the durationMs field, so the per-call segment is a
+    // DERIVED log-gap value (input t0+10 -> llm t0+981200): it sits adjacent
+    // to the gauge, before the turn-total. turn-total/ts/copy unchanged.
     expect([...footers[0]!.children].map((c) => c.className)).toEqual([
       "footer-time",
       "footer-ctx",
+      "footer-call",
       "footer-worked",
       "footer-copy",
     ]);
     expect(footers[0]!.querySelector(".footer-ctx")!.textContent).toBe("126k/262k");
     expect(footers[0]!.querySelector(".footer-ctx")!.getAttribute("title")).toBe(
-      "cached 98k\nprompt 26k\ncompletion 1.4k\ntotal 126k",
+      "cached 98k\nprompt 26k\ncompletion 1.4k\ntotal 126k\ncall ~16m 21s (derived from log gap)",
     );
     expect(footers[0]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 16m 21s");
   });
@@ -1049,5 +1053,188 @@ describe("assistant footer ctx segment (cold-log replay)", () => {
       { source: "token_usage", content: "", totalTokens: 1200 },
     ] as never);
     expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+  });
+});
+
+
+// ── Footer per-call duration segment (callMs) ───────────────────────────────
+// The producing LLM call's own wall time renders as its own compact segment
+// adjacent to the ctx gauge, on every render path, independently of the gauge
+// and the turn-total. Recorded values come from the token_usage durationMs;
+// derived ones from the strict-adjacency log gap and carry honest phrasing.
+
+describe("assistant footer per-call duration segment", () => {
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const t0 = localTs(2026, 5, 4, 1, 5);
+
+  it("live turn: the call segment renders from the TOKEN_USAGE durationMs", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "answer" });
+    // A frame that attests both the gauge and this call's measured span.
+    ml.handleTokenUsage({
+      promptTokens: 26112,
+      cachedTokens: 98304,
+      completionTokens: 1408,
+      totalTokens: 125824,
+      contextWindow: 262144,
+      ctxUsed: 125824,
+      ctxTotal: 262144,
+      durationMs: 4200,
+    } as never);
+    ml.noteWorking(false);
+    const footer = container.querySelector(".message-assistant-footer")!;
+    // Order: ts, gauge, call (adjacent to the gauge), worked, copy.
+    expect([...footer.children].map((c) => c.className)).toEqual([
+      "footer-time",
+      "footer-ctx",
+      "footer-call",
+      "footer-worked",
+      "footer-copy",
+    ]);
+    expect(footer.querySelector(".footer-call")!.textContent).toBe("4.2s");
+  });
+
+  it("live call segment keeps a tenth below 10s and reads sub-second", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "x" });
+    ml.handleTokenUsage({ totalTokens: 50, ctxUsed: 50, durationMs: 900 } as never);
+    ml.noteWorking(false);
+    expect(container.querySelector(".footer-call")!.textContent).toBe("0.9s");
+  });
+
+  it("no duration on the frame: no call segment (omitted, never invented)", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "x" });
+    ml.handleTokenUsage({ totalTokens: 50, ctxUsed: 50, ctxTotal: 100 } as never);
+    ml.noteWorking(false);
+    // The gauge is attested, the call duration is not.
+    expect(container.querySelector(".footer-ctx")).not.toBeNull();
+    expect(container.querySelector(".footer-call")).toBeNull();
+  });
+
+  it("a frame with duration but no usable ctx still stamps the call (independent segments)", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "x" });
+    ml.handleTokenUsage({
+      promptTokens: 10,
+      cachedTokens: 0,
+      completionTokens: 5,
+      totalTokens: 0,
+      durationMs: 3300,
+    } as never);
+    ml.noteWorking(false);
+    // No gauge (totalTokens 0), but the measured span still renders.
+    expect(container.querySelector(".footer-ctx")).toBeNull();
+    expect(container.querySelector(".footer-call")!.textContent).toBe("3.3s");
+  });
+
+  it("the gauge tooltip gains a `call` line beside the breakdown", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "x" });
+    ml.handleTokenUsage({
+      promptTokens: 26112,
+      cachedTokens: 98304,
+      completionTokens: 1408,
+      totalTokens: 125824,
+      ctxUsed: 125824,
+      ctxTotal: 262144,
+      durationMs: 4200,
+    } as never);
+    ml.noteWorking(false);
+    const gauge = container.querySelector(".footer-ctx")!;
+    expect(gauge.getAttribute("title")).toBe(
+      "cached 98k\nprompt 26k\ncompletion 1.4k\ntotal 126k\ncall 4.2s",
+    );
+  });
+
+  it("a derived replay value phrases the tooltip call line with ~ and 'derived from log gap'", () => {
+    // Cold-log render, token_usage record WITHOUT durationMs + a clean gap:
+    // the call is DERIVED and the tooltip must never present it as recorded.
+    ml.renderLogEntries([
+      { source: "input", ts: iso(t0), content: "go" },
+      { source: "llm", ts: iso(t0 + 4200), content: "done" },
+      { source: "token_usage", ts: iso(t0 + 4210), content: "", totalTokens: 1200, contextWindow: 8000 },
+    ] as never);
+    const gauge = container.querySelector(".footer-ctx")!;
+    expect(gauge.getAttribute("title")).toContain("call ~4.2s (derived from log gap)");
+    const call = container.querySelector(".footer-call")!;
+    expect(call.textContent).toBe("4.2s");
+    // With a gauge present the derivation note lives on the gauge tooltip;
+    // the segment itself carries no title.
+    expect(call.getAttribute("title")).toBeNull();
+  });
+
+  it("a recorded replay value phrases the tooltip call line plainly (no ~, no derived note)", () => {
+    ml.renderLogEntries([
+      { source: "input", ts: iso(t0), content: "go" },
+      { source: "llm", ts: iso(t0 + 9000), content: "done" },
+      { source: "token_usage", ts: iso(t0 + 9010), content: "", totalTokens: 1200, contextWindow: 8000, durationMs: 4200 },
+    ] as never);
+    const gauge = container.querySelector(".footer-ctx")!;
+    expect(gauge.getAttribute("title")).toContain("call 4.2s");
+    expect(gauge.getAttribute("title")).not.toContain("derived");
+    // The recorded value (4.2s) wins over the wider input->llm gap (9s).
+    expect(container.querySelector(".footer-call")!.textContent).toBe("4.2s");
+  });
+
+  it("derived value with NO gauge states its derivation on the segment itself", () => {
+    // Provider kept usage private (no attested tokens -> no gauge), but the
+    // gap derives. Nothing is hoverable except the call segment, so it must
+    // carry the derivation note itself.
+    ml.renderLogEntries([
+      { source: "input", ts: iso(t0), content: "go" },
+      { source: "llm", ts: iso(t0 + 5100), content: "done" },
+    ] as never);
+    expect(container.querySelector(".footer-ctx")).toBeNull();
+    const call = container.querySelector(".footer-call")!;
+    expect(call.textContent).toBe("5.1s");
+    expect(call.getAttribute("title")).toBe("~ derived from log gap");
+    expect(call.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("handleAssistantMessage renders/omits the call segment per frame", () => {
+    ml.handleAssistantMessage({ content: "a", ts: t0, callMs: 2500 });
+    ml.handleAssistantMessage({ content: "b", ts: t0 + 1000 });
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers[0]!.querySelector(".footer-call")!.textContent).toBe("2.5s");
+    expect(footers[1]!.querySelector(".footer-call")).toBeNull();
+  });
+
+  it("call-only and turn-total+call are both valid rows (segments independent)", () => {
+    ml.handleAssistantMessage({ content: "only call", ts: t0, callMs: 1234 });
+    ml.handleAssistantMessage({ content: "call + turn", ts: t0 + 5000, callMs: 800, durationMs: 60000 });
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    // call-only: no gauge, no worked.
+    expect([...footers[0]!.children].map((c) => c.className)).toEqual([
+      "footer-time", "footer-call", "footer-copy",
+    ]);
+    // turn-total + call: worked present, call present, no gauge.
+    expect([...footers[1]!.children].map((c) => c.className)).toEqual([
+      "footer-time", "footer-call", "footer-worked", "footer-copy",
+    ]);
+    expect(footers[1]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 1m 00s");
+  });
+
+  it("a non-finite callMs on the frame is omitted, not rendered NaN", () => {
+    ml.handleAssistantMessage({ content: "a", ts: t0, callMs: NaN });
+    expect(container.querySelector(".footer-call")).toBeNull();
+  });
+
+  it("tool-boundary commit carries the call duration the same ordered sink stamps the gauge", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "let me check" });
+    ml.handleTokenUsage({ totalTokens: 120, ctxUsed: 120, ctxTotal: 1000, durationMs: 2600 } as never);
+    ml.handleToolCall({ name: "bash", args: "{}" });
+    const footer = container.querySelector(".message-assistant-footer")!;
+    expect(footer.querySelector(".footer-ctx")).not.toBeNull();
+    expect(footer.querySelector(".footer-call")!.textContent).toBe("2.6s");
+    // Turn is still open mid-turn: no worked segment, but the call is attested.
+    expect(footer.querySelector(".footer-worked")).toBeNull();
   });
 });

@@ -139,6 +139,13 @@ export interface TokenUsageEvent extends UsageTotals {
   type: typeof OUTPUT_EVENT.TOKEN_USAGE;
   /** The model's context window size, shown as total/contextWindow. */
   contextWindow: number;
+  /**
+   * Wall-clock ms of the LLM call this usage came from (see the measured
+   * span in agent.ts: call start through stream completion, retries
+   * included). Absent on re-emissions of pre-durationMs records and on
+   * callers that measure nothing: an unattested number rides no field.
+   */
+  durationMs?: number;
 }
 
 export interface CompactionResultEvent {

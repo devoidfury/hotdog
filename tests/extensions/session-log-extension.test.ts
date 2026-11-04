@@ -633,6 +633,51 @@ describe("write ordering serialization", () => {
     }
   });
 
+  it("OUTPUT_EVENT token_usage persists durationMs beside the usage numbers", async () => {
+    const sessionId = `test-token-duration-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
+      await hook({
+        type: "token_usage",
+        data: { promptTokens: 10, cachedTokens: 0, completionTokens: 5, totalTokens: 15, contextWindow: 128000, durationMs: 4213 },
+        agent: { sessionId },
+      });
+      const entries = await readSessionEntries(sessionId);
+      expect(entries[0]!.durationMs).toBe(4213);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("token_usage omits durationMs when the event carries none or a non-number", async () => {
+    const withGap = `test-token-dur-absent-${Date.now()}`;
+    const withNaN = `test-token-dur-nan-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
+      await hook({
+        type: "token_usage",
+        data: { promptTokens: 1, cachedTokens: 0, completionTokens: 1, totalTokens: 2, contextWindow: 1000 },
+        agent: { sessionId: withGap },
+      });
+      await hook({
+        type: "token_usage",
+        data: { promptTokens: 1, cachedTokens: 0, completionTokens: 1, totalTokens: 2, contextWindow: 1000, durationMs: "42" },
+        agent: { sessionId: withNaN },
+      });
+      // Absent/non-finite: the field is NOT written, so old-shape records keep
+      // their pre-duration shape and nothing is fabricated onto the log.
+      const [e1] = await readSessionEntries(withGap);
+      expect("durationMs" in (e1 ?? {})).toBe(false);
+      const [e2] = await readSessionEntries(withNaN);
+      expect("durationMs" in (e2 ?? {})).toBe(false);
+    } finally {
+      cleanupTestFile(withGap);
+      cleanupTestFile(withNaN);
+    }
+  });
+
   it("token_usage lands AFTER the llm row it summarizes (live dispatch order)", async () => {
     // The live agent runs addMessage(assistant) then emitOutput("token_usage");
     // both enter the per-path write queue in that synchronous order, so the

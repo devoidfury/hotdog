@@ -767,6 +767,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             completionTokens?: number;
             totalTokens?: number;
             contextWindow?: number;
+            durationMs?: number;
           };
           const sessionId = agent.sessionId || "unknown";
           // Restore replays re-emit every historical record through this
@@ -792,6 +793,13 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             completionTokens: d.completionTokens ?? 0,
             totalTokens: d.totalTokens ?? 0,
             contextWindow: d.contextWindow ?? 0,
+            // The producing call's wall time (agent.ts measured span),
+            // beside the other usage numbers. Absent/non-finite on the
+            // event means nothing was measured: the field is omitted, so
+            // old records and old callers keep their pre-duration shape.
+            ...(typeof d.durationMs === "number" && Number.isFinite(d.durationMs) && d.durationMs >= 0
+              ? { durationMs: d.durationMs }
+              : {}),
           });
           await queuedAppend(logPath, JSON.stringify(entry) + "\n");
           // Mirror the sidebar's ctx numbers into the index so cold-log rows

@@ -497,6 +497,16 @@ export class Agent implements AgentLike {
         turnEnded = false;
 
         const params = await this.#prepareIteration(iteration);
+        // Measured span for the call's own wall time: the first request
+        // issue through stream completion. It honestly INCLUDES a
+        // PROVIDER_ERROR retry (the failed attempt, the hook pipeline, and
+        // the re-issue are all cost the user waited through) and any
+        // client-level mid-stream resets, which happen inside
+        // #processStream/#performLlmCall before the result resolves. It
+        // EXCLUDES response post-processing (PROVIDER_RESPONSE hooks, the
+        // message append): the stream is done when the timestamp is taken,
+        // right where the TOKEN_USAGE this duration rides is emitted.
+        const callStartMs = Date.now();
         let response: StreamResult;
         try {
           response = await this.#performLlmCall(params);
@@ -519,10 +529,13 @@ export class Agent implements AgentLike {
           if (this.cancelled || runAbort.signal.aborted) throw err;
           response = await this.#performLlmCall(params);
         }
+        // The clock stops at stream completion (end of the try block),
+        // before any post-processing; see the measured-span note above.
+        const callDurationMs = Date.now() - callStartMs;
         // Snapshot the context tail before the assistant message lands: the
         // empty-turn nudge fires only when this request ended on tool results.
         const afterToolResults = this.context.getMessages().at(-1)?.role === "tool";
-        const result = await this.#handleLlmResponse(response, params);
+        const result = await this.#handleLlmResponse(response, params, callDurationMs);
 
         if (typeof result === "string") {
           if (!this.cancelled && !result.trim()) {
@@ -628,7 +641,11 @@ export class Agent implements AgentLike {
     try {
       const params = await this.#prepareIteration(this.iterationCount + 1);
       params.toolDefs = [];
+      // Same measured span as the main loop (no retry seam here: exactly
+      // one attempt, but the stamp rule is identical).
+      const callStartMs = Date.now();
       const response = await this.#performLlmCall(params);
+      const callDurationMs = Date.now() - callStartMs;
       if (!response.fullText.trim()) return null;
 
       // Deliberately not #handleLlmResponse: tool-call-repair could forge
@@ -640,7 +657,7 @@ export class Agent implements AgentLike {
         reasoningContent: response.fullReasoning,
         source: "model",
       }));
-      this.#emitTokenUsage(response);
+      this.#emitTokenUsage(response, callDurationMs);
       return response.fullText;
     } catch (e: unknown) {
       // Honest cancellation: a user abort during the wrap-up call cancels
@@ -781,6 +798,9 @@ export class Agent implements AgentLike {
   async #handleLlmResponse(
     response: StreamResult,
     params: LlmRequestParams,
+    /** Wall time of the producing call (see the measured span in run());
+     *  rides the token_usage emit so the footer can show it per bubble. */
+    callDurationMs?: number,
   ): Promise<string | { outcome: string; toolResults: ToolResult[] }> {
     const { modelConfig } = params;
     // handlers may repair/replace the response before it becomes an assistant message and its tool calls execute
@@ -810,7 +830,7 @@ export class Agent implements AgentLike {
       source: "model",
     });
     this.addMessage(assistantMsg);
-    this.#emitTokenUsage(response);
+    this.#emitTokenUsage(response, callDurationMs);
 
     if (response.finalToolCalls) {
       let toolCallsToExecute = response.finalToolCalls;
@@ -912,7 +932,7 @@ export class Agent implements AgentLike {
     });
   }
 
-  #emitTokenUsage(response: { usage?: RawUsage | null }): void {
+  #emitTokenUsage(response: { usage?: RawUsage | null }, durationMs?: number): void {
     this.context.recordUsage(response.usage, (usage) => {
       // contextWindow echoes this.contextLimit, so the sidebar gauge AND the
       // webui footer ctx segment (both derive from this event's numbers) show
@@ -920,7 +940,13 @@ export class Agent implements AgentLike {
       // (model setter keeps the prior limit for unregistered models) lands on
       // both views from this one line; fixing it here fixes everything at
       // once -- no consumer may paper over it with a constant.
-      this.emitOutput("token_usage", { ...usage, contextWindow: this.contextLimit });
+      // durationMs is this call's own wall time (measured span in run());
+      // absent stays absent -- an unmeasured emit rides no field.
+      this.emitOutput("token_usage", {
+        ...usage,
+        contextWindow: this.contextLimit,
+        ...(durationMs !== undefined ? { durationMs } : {}),
+      });
     });
   }
 

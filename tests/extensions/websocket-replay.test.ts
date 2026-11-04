@@ -550,3 +550,83 @@ describe("replayLogSlice footer meta (assistant ctx usage)", () => {
     expect("ctx" in assistant).toBe(false);
   });
 });
+
+describe("replayLogSlice footer meta (assistant per-call duration)", () => {
+  const T0 = Date.parse("2026-10-20T00:00:00.000Z");
+  const iso = (offsetMs: number) => new Date(T0 + offsetMs).toISOString();
+  function entryAt(offsetMs: number, over: Record<string, unknown>): LogEntry {
+    return { ts: iso(offsetMs), session_id: "s", source: LOG_SOURCE.INPUT, content: "", ...over } as unknown as LogEntry;
+  }
+  function sliceMeta(entries: LogEntry[]): Array<Record<string, unknown>> {
+    const ws = createWsMockWs();
+    replayLogSlice(ws, "s1", entries, 0);
+    return ws.messages.map((m) => JSON.parse(m) as Record<string, unknown>);
+  }
+
+  it("recorded durationMs on the usage record wins over the log gap", () => {
+    // The gap (input@0 -> llm@9000) would derive 9000, but the record's own
+    // durationMs is the truth: callMs = 4200, flagged NOT derived.
+    const out = sliceMeta([
+      entryAt(0, { source: LOG_SOURCE.INPUT, content: "go" }),
+      entryAt(9000, { source: LOG_SOURCE.LLM, content: "done" }),
+      entryAt(9010, { source: LOG_SOURCE.TOKEN_USAGE, totalTokens: 500, durationMs: 4200 }),
+    ]);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    expect(assistant.callMs).toBe(4200);
+    expect("callDerived" in assistant).toBe(false);
+  });
+
+  it("falls back to the derived log gap, flagged derived, when the record has no duration", () => {
+    const out = sliceMeta([
+      entryAt(0, { source: LOG_SOURCE.INPUT, content: "go" }),
+      entryAt(4200, { source: LOG_SOURCE.LLM, content: "done" }),
+      entryAt(4210, { source: LOG_SOURCE.TOKEN_USAGE, totalTokens: 500 }),
+    ]);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    expect(assistant.callMs).toBe(4200);
+    expect(assistant.callDerived).toBe(true);
+  });
+
+  it("old logs with no derivable gap omit callMs entirely (pinned omission)", () => {
+    // No trigger entry precedes the llm: nothing to measure from, so the
+    // field is omitted, never borrowed.
+    const out = sliceMeta([
+      entryAt(5000, { source: LOG_SOURCE.LLM, content: "old" }),
+      entryAt(14000, { source: LOG_SOURCE.TURN_END, content: { status: "completed" } }),
+    ]);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    expect("callMs" in assistant).toBe(false);
+    expect("callDerived" in assistant).toBe(false);
+  });
+
+  it("a restart never bridges: no callMs across the resume_attempt record", () => {
+    const out = sliceMeta([
+      entryAt(0, { source: LOG_SOURCE.TOOL_RESULT, content: "prior", tool_call_id: "c1" }),
+      entryAt(200000, { source: LOG_SOURCE.RESUME_ATTEMPT, content: { origin: "auto" } }),
+      entryAt(205000, { source: LOG_SOURCE.LLM, content: "after resume" }),
+    ]);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    expect("callMs" in assistant).toBe(false);
+  });
+
+  it("callMs and the turn durationMs are independent segments", () => {
+    // Turn bracket present (durationMs), but the call gap is separate:
+    // tool_result@1000 -> llm@3000 derives 2000 inside a longer turn.
+    const out = sliceMeta([
+      entryAt(0, { source: LOG_SOURCE.TURN_STARTED, content: { kind: "input" } }),
+      entryAt(10, { source: LOG_SOURCE.INPUT, content: "go" }),
+      entryAt(1000, { source: LOG_SOURCE.LLM, content: "call1", tool_calls: [{ id: "c1", function: { name: "bash", arguments: "{}" } }] }),
+      entryAt(1500, { source: LOG_SOURCE.TOOL_RESULT, content: "out", tool_call_id: "c1" }),
+      entryAt(3500, { source: LOG_SOURCE.LLM, content: "final" }),
+      entryAt(4000, { source: LOG_SOURCE.TURN_END, content: { status: "completed" } }),
+    ]);
+    const assistants = out.filter((m) => m.type === S2C.ASSISTANT_MESSAGE);
+    // First call: input@10 -> llm@1000 = 990, derived (no usage record).
+    expect(assistants[0]!.callMs).toBe(990);
+    expect(assistants[0]!.callDerived).toBe(true);
+    expect(assistants[0]!.durationMs).toBe(4000); // same turn total on both
+    // Second call: tool_result@1500 -> llm@3500 = 2000, derived.
+    expect(assistants[1]!.callMs).toBe(2000);
+    expect(assistants[1]!.durationMs).toBe(4000);
+  });
+});

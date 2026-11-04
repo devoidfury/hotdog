@@ -5,6 +5,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import {
   formatTime,
   formatTokenCount,
+  formatCallDuration,
   shortId,
   sanitize,
   resolveQuestionAnswer,
@@ -30,6 +31,24 @@ describe("formatTime", () => {
     const parts = result.split(":");
     expect(parts[0]!.length).toBe(2);
     expect(parts[1]!.length).toBe(2);
+  });
+});
+
+describe("formatCallDuration", () => {
+  it("keeps one decimal below 10s so a fast call never reads as 0s", () => {
+    expect(formatCallDuration(900)).toBe("0.9s");
+    expect(formatCallDuration(4200)).toBe("4.2s");
+    expect(formatCallDuration(9999)).toBe("10.0s"); // rounds up at the band edge
+  });
+
+  it("delegates the whole-second house format above 10s", () => {
+    expect(formatCallDuration(10_000)).toBe("10s");
+    expect(formatCallDuration(61_000)).toBe("1m 01s");
+    expect(formatCallDuration(3_909_000)).toBe("1h 05m 09s");
+  });
+
+  it("0 renders 0.0s (a measured instant is attested, not absent)", () => {
+    expect(formatCallDuration(0)).toBe("0.0s");
   });
 });
 

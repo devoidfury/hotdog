@@ -562,6 +562,38 @@ export function conversationContent(entry: LogEntry): string | Array<Record<stri
   return typeof c === "string" || Array.isArray(c) ? c : "";
 }
 
+/**
+ * The searchable text of one log entry for full-text session search: user
+ * messages (input/prompt) and assistant response text (llm content) only.
+ * Deliberately omits tool results, tool-call records, and reasoning -- a hit
+ * is always something the human typed or the model said, never harness
+ * plumbing. Image/base64 payloads ride their own field and are never scanned;
+ * plain-object content is bookkeeping (never a message), so it yields nothing.
+ *
+ * Lives here (the log's home) so the live log scan and the session index's
+ * future text mirror share one corpus definition and cannot drift.
+ */
+export function searchableEntryText(entry: LogEntry): string {
+  const source = entry.source;
+  if (
+    source !== LOG_SOURCE.INPUT &&
+    source !== LOG_SOURCE.PROMPT &&
+    source !== LOG_SOURCE.LLM
+  ) {
+    return "";
+  }
+  const content = entry.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const part of content) {
+      if (part && typeof part.text === "string") parts.push(part.text);
+    }
+    return parts.join("\n");
+  }
+  return "";
+}
+
 /** Converts log entries to Messages in the agent's context. */
 export function replayEntriesIntoContext(
   agent: AgentForReplay,

@@ -42,6 +42,7 @@ import {
   collectDurabilityFacts,
   epochEntries,
   readSessionEntries,
+  searchableEntryText,
   sessionPath,
   sessionsDir,
   type LogEntry,
@@ -80,6 +81,14 @@ export interface SessionRow {
   ctx_used: number | null;
   /** Its contextWindow; absent/0 on pre-window logs. */
   ctx_total: number | null;
+  /**
+   * The session's searchable text (user input + assistant response text,
+   * see searchableEntryText), mirrored so full-text search reads a compact
+   * column instead of re-parsing the JSONL. Re-derivable from the log scan
+   * like every other column, and gated on the same size/mtime staleness
+   * marker: a search only trusts it when the row is fresh for the file.
+   */
+  search_text: string | null;
 }
 
 const SCHEMA = `
@@ -96,7 +105,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   profile      TEXT,
   model        TEXT,
   ctx_used     INTEGER,
-  ctx_total    INTEGER
+  ctx_total    INTEGER,
+  search_text  TEXT
 );
 CREATE TABLE IF NOT EXISTS open_calls (
   session_id   TEXT NOT NULL,
@@ -150,6 +160,7 @@ function openPrepared(path: string): Database {
     );
     if (!cols.has("ctx_used")) next.exec("ALTER TABLE sessions ADD COLUMN ctx_used INTEGER");
     if (!cols.has("ctx_total")) next.exec("ALTER TABLE sessions ADD COLUMN ctx_total INTEGER");
+    if (!cols.has("search_text")) next.exec("ALTER TABLE sessions ADD COLUMN search_text TEXT");
   } catch (err) {
     try { next.close(); } catch {}
     throw err;
@@ -374,6 +385,23 @@ export function deriveCtxFromLog(
 }
 
 /**
+ * The full searchable text of a session for the search mirror: every
+ * user/assistant entry's searchable text (see searchableEntryText in
+ * session-log.ts) joined, in log order. Derived from the FULL log so a search
+ * still finds text that sits above a mid-session RESET (audit view). Returns
+ * "" for a log with no user/assistant text. Kept here so the mirror and the
+ * future live-append path share one corpus.
+ */
+export function deriveSearchText(entries: LogEntry[]): string {
+  const parts: string[] = [];
+  for (const e of entries) {
+    const t = searchableEntryText(e);
+    if (t) parts.push(t);
+  }
+  return parts.join("\n");
+}
+
+/**
  * Rebuild one session's row (and its open_calls mirror) from a full log read.
  * This is the adopt/reindex/repair path; returns null when the log file does
  * not exist. Position fields (size/mtime/updated_at) come from a stat taken
@@ -413,12 +441,17 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
   // ever mirrored -- so the derived value wins outright; a rewind truncation
   // must be able to clear a stale one.
   const ctx = deriveCtxFromLog(full);
+  // Search text: same outright-win rule as ctx -- it is fully re-derived from
+  // the log each sync, so a rewind that truncates the epoch view also clears
+  // the undone text from the mirror (a stale hit for deleted history would be
+  // worse than a re-read).
+  const searchText = deriveSearchText(full);
 
   withIndex((d) => {
     const write = d.transaction(() => {
       d.run(
-        `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title, profile, model, ctx_used, ctx_total)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sessions (session_id, path, updated_at, state, last_seq, size, mtime, resume_count, title, profile, model, ctx_used, ctx_total, search_text)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_id) DO UPDATE SET
          path = excluded.path,
          updated_at = excluded.updated_at,
@@ -431,7 +464,8 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
          profile = COALESCE(sessions.profile, excluded.profile),
          model = COALESCE(sessions.model, excluded.model),
          ctx_used = excluded.ctx_used,
-         ctx_total = excluded.ctx_total`,
+         ctx_total = excluded.ctx_total,
+         search_text = excluded.search_text`,
         [
           sessionId,
           path,
@@ -446,6 +480,7 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
           derived.model,
           ctx.ctxUsed,
           ctx.ctxTotal,
+          searchText,
         ],
       );
       d.run("DELETE FROM open_calls WHERE session_id = ?", [sessionId]);
@@ -468,6 +503,93 @@ export function getSessionRow(sessionId: string): SessionRow | null {
   return withIndex((d) =>
     d.query<SessionRow, [string]>("SELECT * FROM sessions WHERE session_id = ?").get(sessionId),
   );
+}
+
+/** One search match: the fresh searchable text of a session plus the columns
+ *  the sidebar row grammar needs. Snippet/match-count formatting is a display
+ *  concern and stays with the caller. */
+export interface SessionSearchMatch {
+  sessionId: string;
+  profile: string | null;
+  model: string | null;
+  /** Last activity (epoch ms) -- the row's mtime-based updated_at. */
+  lastActivityAt: number;
+  /** The mirrored user+assistant text (the corpus `needle` was found in). */
+  text: string;
+}
+
+/**
+ * Full-text search over every session log (live + cold), newest-activity
+ * first, using the disposable index as a text mirror:
+ *
+ *  - Enumeration is readdir + stat only (never a per-file read like
+ *    listSessionLogs), so a session that has only exchanged user/assistant
+ *    turns -- and so has no commit-point mirror row yet -- is still found.
+ *  - A row's `search_text` is trusted only when its size/mtime match the
+ *    file (the same staleness marker the whole index uses). On any
+ *    disagreement the log is re-read via syncSessionFromLog, which refreshes
+ *    both the row position and the mirror -- so the result is always the real
+ *    log content, and cold/unchanged logs never re-parse their JSONL.
+ *
+ * Matching is exact substring (`includes`) on the lowercased corpus, NOT
+ * SQL LIKE: a needle containing `%` or `_` stays literal. Empty query matches
+ * nothing. Case-insensitive throughout.
+ */
+export async function searchSessionCorpora(query: string): Promise<SessionSearchMatch[]> {
+  const needle = query.toLowerCase();
+  if (needle === "") return [];
+
+  const dir = sessionsDir();
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return []; // no sessions dir yet
+  }
+
+  const matches: SessionSearchMatch[] = [];
+  for (const file of files) {
+    if (!file.endsWith(".jsonl")) continue;
+    const sessionId = file.slice(0, -".jsonl".length);
+    let path: string;
+    try {
+      path = sessionPath(sessionId); // validates the id; malformed names skipped
+    } catch {
+      continue;
+    }
+    let st;
+    try {
+      st = statSync(path);
+    } catch {
+      continue; // vanished mid-scan
+    }
+
+    // Ensure a fresh mirror row: use the cache only when the position matches
+    // the file AND the text was actually mirrored; otherwise re-derive.
+    let row = getSessionRow(sessionId);
+    const cacheFresh =
+      row != null && row.size === st.size && row.mtime === st.mtimeMs && typeof row.search_text === "string";
+    if (!cacheFresh) {
+      try {
+        row = await syncSessionFromLog(sessionId);
+      } catch {
+        continue; // unreadable log: nothing honest to search
+      }
+    }
+    if (!row) continue;
+    const text = row.search_text ?? "";
+    if (text === "" || !text.toLowerCase().includes(needle)) continue;
+    matches.push({
+      sessionId,
+      profile: row.profile,
+      model: row.model,
+      lastActivityAt: row.updated_at,
+      text,
+    });
+  }
+
+  matches.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  return matches;
 }
 
 export interface ReconcileStats {

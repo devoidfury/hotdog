@@ -358,6 +358,170 @@ body.sidebar-resizing {
     box-shadow: var(--shadow-glow);
 }
 
+/* ── Sidebar search (header magnifier + panel) ───────────────────────────
+   The magnifier is the same trick as the status glyphs: 24-viewBox stroke
+   geometry as a CSS mask data URI tinted by currentColor -- the client mount
+   never carries raw <svg>. */
+.sidebar-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#search-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#search-btn:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+#search-btn.active {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
+
+.search-btn-glyph {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    background-color: currentColor;
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='11' cy='11' r='7' fill='none' stroke='black' stroke-width='2'/><path d='M16.5 16.5 L21 21' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/></svg>");
+    -webkit-mask: var(--glyph) center / contain no-repeat;
+    mask: var(--glyph) center / contain no-repeat;
+}
+
+/* Panel occupies the scroll region the two lists vacate when search opens. */
+#search-panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+#search-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.search-bar-glyph {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    background-color: var(--text-muted);
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='11' cy='11' r='7' fill='none' stroke='black' stroke-width='2'/><path d='M16.5 16.5 L21 21' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/></svg>");
+    -webkit-mask: var(--glyph) center / contain no-repeat;
+    mask: var(--glyph) center / contain no-repeat;
+}
+
+#search-input {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.82rem;
+}
+
+#search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+#search-clear {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+}
+
+#search-clear:hover {
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+}
+
+#search-results {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.search-status {
+    padding: 10px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.search-hit {
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    margin-bottom: 6px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
+}
+
+.search-hit:hover,
+.search-hit:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+}
+
+/* live/cold scope tag on the result's line-1. */
+.search-scope {
+    margin-left: 6px;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0 5px;
+}
+
+.search-scope-live {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.search-snippet {
+    margin-top: 5px;
+    font-size: 0.68rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.search-mark {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
 #session-list {
     flex: 1;
     overflow-y: auto;

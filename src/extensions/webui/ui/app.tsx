@@ -15,7 +15,8 @@ import {
 } from "./login.tsx";
 import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
-import { Sidebar, ContextMenu, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo } from "./sessions.tsx";
+import { Sidebar, ContextMenu, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
+import type { SearchHitWire } from "./chat.ts";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
 import { createCoalescer } from "./batch.ts";
 import { audioBlobToWav } from "./wav.ts";
@@ -27,6 +28,93 @@ const sessionsAtom = reactiveState<SessionInfo[]>([]);
 const logsAtom = reactiveState<LogInfo[]>([]);
 const activeLogIdAtom = reactiveState<string | null>(null);
 const contextMenuAtom = reactiveState<ContextMenuState | null>(null);
+
+// Sidebar full-text search (see sessions.tsx SearchPanel + the searchLogs WS
+// round-trip). One atom; every handler replaces the object wholesale. `open`
+// swaps the two sidebar lists for the panel. The input is uncontrolled: its
+// DOM node is stable across renders (unlike the tree), so keystrokes never
+// rebuild it; query mirrors into the atom for the highlight/results only.
+const searchAtom = reactiveState<SearchState>({ open: false, query: "", pending: false, results: null });
+
+// Debounce + request-id for the search round-trip. searchReqId bumps on every
+// query edit (invalidating any in-flight reply) AND when a request fires, so a
+// late server reply carrying an older id is dropped in onSearchResults.
+const SEARCH_DEBOUNCE_MS = 250;
+let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+let searchReqId = 0;
+
+function cancelSearchDebounce(): void {
+  if (searchDebounce !== null) {
+    clearTimeout(searchDebounce);
+    searchDebounce = null;
+  }
+}
+
+function openSearch(): void {
+  if (searchAtom().open) return;
+  searchAtom({ ...searchAtom(), open: true });
+  // Focus once the panel has rendered (the atom's render microtask is already
+  // queued ahead of this one, so the input element exists by the time we run).
+  queueMicrotask(() => searchInputEl?.focus());
+}
+
+function closeSearch(): void {
+  cancelSearchDebounce();
+  searchReqId++; // drop any in-flight reply for the query we're abandoning
+  searchAtom({ open: false, query: "", pending: false, results: null });
+}
+
+function sendSearch(query: string): void {
+  const q = query.trim();
+  if (q === "") return;
+  searchReqId++;
+  searchAtom({ ...searchAtom(), pending: true });
+  chat?.searchLogs(q, searchReqId);
+}
+
+function onSearchQuery(text: string): void {
+  cancelSearchDebounce();
+  searchReqId++; // any in-flight reply is now stale
+  const q = text.trim();
+  if (q === "") {
+    searchAtom({ ...searchAtom(), query: text, pending: false, results: null });
+    return;
+  }
+  searchAtom({ ...searchAtom(), query: text, pending: true });
+  searchDebounce = setTimeout(() => {
+    searchDebounce = null;
+    sendSearch(text);
+  }, SEARCH_DEBOUNCE_MS);
+}
+
+function onSearchKeydown(e: KeyboardEvent): void {
+  if (e.key === "Escape") {
+    closeSearch();
+    return;
+  }
+  if (e.key === "Enter") {
+    e.preventDefault();
+    cancelSearchDebounce();
+    sendSearch(searchAtom().query);
+  }
+}
+
+function onActivateHit(hit: SearchHitWire): void {
+  // live → attach to the running session; cold → read-only log view.
+  if (hit.live) chat?.switchSession(hit.logId);
+  else chat?.viewLog(hit.logId);
+  closeSearch();
+}
+
+function onSearchResults(
+  requestId: number | undefined,
+  query: string,
+  results: SearchHitWire[],
+): void {
+  if (requestId !== searchReqId) return; // stale: a newer query superseded it
+  cancelSearchDebounce();
+  searchAtom({ ...searchAtom(), pending: false, query, results });
+}
 
 // Subagent overlay panels: task ids with an open panel, bottom-first; the
 // last entry renders above the others. nowAtom ticks once per second while a
@@ -114,6 +202,14 @@ let modelSelectEl: HTMLSelectElement | null = null;
 let messageListEl: HTMLElement | null = null;
 let contextMenuEl: HTMLDivElement | null = null;
 let fileInputEl: HTMLInputElement | null = null;
+
+// Search input (sidebar). Uncontrolled: value lives in the DOM node, the atom
+// only mirrors it for highlight/results. Stable ref identity so the node is
+// never re-mounted (and focus preserved) across renders.
+let searchInputEl: HTMLInputElement | null = null;
+const searchInputRef = domRef<HTMLInputElement>((el) => {
+  searchInputEl = el;
+});
 
 // pagehide fires reliably everywhere modern; beforeunload only as the legacy
 // fallback so an unload still flushes a pending draft save.
@@ -236,6 +332,8 @@ function handleAuthFailure(): void {
   // Pins are server truth rehydrated from list payloads: start the next
   // login from an empty set so a dead connection can't keep stale marks.
   pinnedIdsAtom(new Set());
+  // Drop any open search: the panel is chat-scoped and the socket is gone.
+  closeSearch();
   showLogin();
 }
 
@@ -654,8 +752,7 @@ function startChat(): void {
     },
     onLogDeleted: (logId) => {
       dropPinnedId(logId);
-      if (activeLogIdAtom() === logId) {
-        // The viewed log died: restore the live transcript the same way
+      if (activeLogIdAtom() === logId) {        // The viewed log died: restore the live transcript the same way
         // closing the log view does (re-attach replays it), so a deleted
         // log's entries can never sit on screen while live events
         // un-suppress beneath them.
@@ -667,6 +764,7 @@ function startChat(): void {
     onSessionDeleted: (sessionId) => {
       dropPinnedId(sessionId);
     },
+    onSearchResults,
     onAuthFailure: handleAuthFailure,
     onWorkingMapChange: () => {
       // Re-poll so the sidebar's per-session working indicators refresh.
@@ -1190,6 +1288,13 @@ function App() {
           onViewLog={(id) => chat?.viewLog(id)}
           onSessionMenu={onSessionMenu}
           onLogMenu={onLogMenu}
+          search={searchAtom()}
+          searchInputRef={searchInputRef}
+          onOpenSearch={openSearch}
+          onCloseSearch={closeSearch}
+          onSearchQuery={onSearchQuery}
+          onSearchKeydown={onSearchKeydown}
+          onActivateHit={onActivateHit}
           sidebarWidth={sidebarWidth}
           sidebarMax={sidebarMaxWidth()}
           onResizeStart={onSidebarResizeStart}
@@ -1456,6 +1561,7 @@ async function init(): Promise<void> {
     activeLogIdAtom,
     pinnedIdsAtom,
     contextMenuAtom,
+    searchAtom,
     completionAtom,
     attachmentsAtom,
     openTasksAtom,

@@ -18,8 +18,9 @@
 // The raw session id is not displayed at all: it stays the selection key,
 // pin/export identifier and handler argument -- never card text.
 
-import { formatTokenCount, SIDEBAR_MIN_WIDTH } from "./utils.ts";
+import { formatTokenCount, SIDEBAR_MIN_WIDTH, shortId } from "./utils.ts";
 import type { JsxChild, Ref } from "@utils/jsx";
+import type { SearchHitWire } from "@extensions/websocket/protocol.ts";
 
 export interface SessionInfo {
   id: string;
@@ -79,6 +80,18 @@ export interface ContextMenuState {
   items: ContextMenuItem[];
 }
 
+/** Sidebar full-text search panel state (see the search button in the header).
+ *  `results` is null until the first search settles; an empty array means the
+ *  last query matched nothing. `live` hits open via switchSession, cold ones
+ *  via viewLog (the app picks the verb). */
+export interface SearchState {
+  open: boolean;
+  query: string;
+  /** A search request is in flight (the debounce or the server scan). */
+  pending: boolean;
+  results: SearchHitWire[] | null;
+}
+
 /** Local "YYYY-MM-DD HH:MM" -- the sidebar line-3 stamp. */
 export function formatDateTime(ts: number): string {
   const d = new Date(ts);
@@ -105,6 +118,15 @@ interface SidebarProps {
   onViewLog: (logId: string) => void;
   onSessionMenu: (e: MouseEvent, session: SessionInfo) => void;
   onLogMenu: (e: MouseEvent, logId: string) => void;
+  /** Search panel state + handlers (header magnifier toggles `open`). */
+  search: SearchState;
+  searchInputRef: Ref;
+  onOpenSearch: () => void;
+  onCloseSearch: () => void;
+  onSearchQuery: (text: string) => void;
+  onSearchKeydown: (e: KeyboardEvent) => void;
+  /** Activate a hit: live → switchSession, cold → viewLog (app decides). */
+  onActivateHit: (hit: SearchHitWire) => void;
   onResizeStart: (e: PointerEvent) => void;
   onResizeMove: (e: PointerEvent) => void;
   onResizeEnd: (e: PointerEvent) => void;
@@ -236,13 +258,138 @@ export function SidebarRow(p: SidebarRowProps) {
   );
 }
 
+/** Split `text` on every case-insensitive occurrence of `needle` and wrap
+ *  each in <mark>. Whitespace inside a snippet is already collapsed to
+ *  single spaces server-side (see makeSnippet in handlers-logs.ts). */
+function highlightMatches(text: string, needle: string): JsxChild[] {
+  if (!needle) return [text];
+  const lower = text.toLowerCase();
+  const out: JsxChild[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const idx = lower.indexOf(needle, i);
+    if (idx < 0) {
+      out.push(text.slice(i));
+      break;
+    }
+    if (idx > i) out.push(text.slice(i, idx));
+    out.push(<mark className="search-mark">{text.slice(idx, idx + needle.length)}</mark>);
+    i = idx + needle.length;
+  }
+  return out;
+}
+
+/** One search-result row. The grammar mirrors SidebarRow (profile/model dot
+ *  join, date + match-count metrics), with the excerpt snippets trailing. */
+function SearchHitRow(p: { hit: SearchHitWire; query: string; onActivate: () => void }) {
+  const { hit } = p;
+  const line1: JsxChild[] = [];
+  const name = hit.profile || shortId(hit.logId);
+  line1.push(<span className="row-profile">{name}</span>);
+  if (hit.model) line1.push(<span className="row-sep">·</span>, <span className="row-model">{hit.model}</span>);
+  // live/cold rides a quiet glyph-adjacent tag; the app opens it with the verb
+  // this badge names, so it never lies about what a click will do.
+  line1.push(
+    <span className={`search-scope${hit.live ? " search-scope-live" : ""}`} title={hit.live ? "Live session" : "Archived log"}>
+      {hit.live ? "live" : "log"}
+    </span>,
+  );
+
+  const line3: JsxChild[] = [
+    <span className="row-date">{formatDateTime(hit.lastActivityAt)}</span>,
+    <span className="row-sep">·</span>,
+    <span className="row-metric">
+      {hit.matchCount} match{hit.matchCount === 1 ? "" : "es"}
+    </span>,
+  ];
+
+  return (
+    <div className="search-hit" onClick={p.onActivate} tabindex="0"
+      onKeydown={(e: KeyboardEvent) => { if (e.key === "Enter") p.onActivate(); }}
+    >
+      <div className="row-l1">{line1}</div>
+      <div className="row-l3">{line3}</div>
+      {hit.snippets.map((s, i) => (
+        <div key={i} className="search-snippet">{highlightMatches(s, p.query)}</div>
+      ))}
+    </div>
+  );
+}
+
+/** Search panel: a filter-style input above a scrollable result list. Empty
+ *  query is a client-side idle prompt (never sent to the server). */
+function SearchPanel(p: {
+  search: SearchState;
+  inputRef: Ref;
+  onQuery: (text: string) => void;
+  onKeydown: (e: KeyboardEvent) => void;
+  onClose: () => void;
+  onActivate: (hit: SearchHitWire) => void;
+}) {
+  const { search } = p;
+  let body: JsxChild;
+  if (search.pending) {
+    body = <div className="search-status">Searching…</div>;
+  } else if (search.results === null) {
+    body = <div className="search-status">Type to search all session logs.</div>;
+  } else if (search.results.length === 0) {
+    body = <div className="search-status">No logs match{search.query ? ` "${search.query}"` : ""}.</div>;
+  } else {
+    body = search.results.map((hit) => (
+      <SearchHitRow key={hit.logId} hit={hit} query={search.query} onActivate={() => p.onActivate(hit)} />
+    ));
+  }
+  return (
+    <div id="search-panel">
+      <div id="search-bar">
+        <span className="search-bar-glyph" aria-hidden="true"></span>
+        <input
+          id="search-input"
+          type="text"
+          placeholder="Search logs…"
+          autocomplete="off"
+          spellcheck="false"
+          ref={p.inputRef}
+          onInput={(e: Event) => p.onQuery((e.currentTarget as HTMLInputElement).value)}
+          onKeydown={p.onKeydown}
+        />
+        <button id="search-clear" title="Close search (Esc)" onClick={p.onClose}>✕</button>
+      </div>
+      <div id="search-results">{body}</div>
+    </div>
+  );
+}
+
 export function Sidebar(p: SidebarProps) {
   return (
     <aside id="sidebar">
       <div className="sidebar-header">
         <h2>Sessions</h2>
-        <button id="new-session-btn" title="New session" onClick={p.onCreate}>+</button>
+        <div className="sidebar-header-actions">
+          <button
+            id="search-btn"
+            title={p.search.open ? "Close search" : "Search logs"}
+            aria-pressed={p.search.open}
+            className={p.search.open ? "active" : undefined}
+            onClick={() => (p.search.open ? p.onCloseSearch() : p.onOpenSearch())}
+          >
+            <span className="search-btn-glyph" aria-hidden="true"></span>
+          </button>
+          <button id="new-session-btn" title="New session" onClick={p.onCreate}>+</button>
+        </div>
       </div>
+
+      {p.search.open ? (
+        <SearchPanel
+          search={p.search}
+          inputRef={p.searchInputRef}
+          onQuery={p.onSearchQuery}
+          onKeydown={p.onSearchKeydown}
+          onClose={p.onCloseSearch}
+          onActivate={p.onActivateHit}
+        />
+      ) : (
+        <>
       <div id="session-list">
         {sortPinned(p.sessions, p.pinnedIds).map((s) => {
           const isWorking = p.workingMap.get(s.id) ?? false;
@@ -334,6 +481,8 @@ export function Sidebar(p: SidebarProps) {
           ))
         )}
       </div>
+        </>
+      )}
 
       {/* Drag/keyboard resize handle straddling the right border. The logic
           lives in app.tsx; hidden by CSS in the mobile drawer media query. */}

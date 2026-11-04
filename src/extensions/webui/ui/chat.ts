@@ -13,10 +13,12 @@ import type {
   TaskControlWire,
   TranscribeRequestWire,
   TranscriptReplyWire,
+  SearchHitWire,
 } from "@extensions/websocket/protocol.ts";
 
 export type { UploadFileWire };
 export type { TaskInfoWire };
+export type { SearchHitWire };
 
 // The core logger touches process.*, which doesn't exist in the browser.
 const logger = {
@@ -251,6 +253,14 @@ interface SessionsMessage {
 interface LogsListedMessage {
   type: "logsListed";
   logs: LogInfo[];
+}
+
+interface SearchResultsMessage {
+  type: "searchResults";
+  /** Echo of the C2S searchLogs request id; stale replies are dropped client-side. */
+  requestId?: number;
+  query: string;
+  results: SearchHitWire[];
 }
 
 // Image payload type (UiImage) is defined in message-list.ts; the server
@@ -488,6 +498,7 @@ type ServerMessage =
   | LogsListedMessage
   | LogViewedMessage
   | LogDeletedMessage
+  | SearchResultsMessage
   | AuthRequiredMessage
   | AuthOkMessage
   | AuthErrorMessage
@@ -529,6 +540,8 @@ interface ChatConfig {
   onLogsUpdate?: (logs: LogInfo[]) => void;
   onLogViewed?: (logId: string, entries: LogEntry[]) => void;
   onLogDeleted?: (logId: string) => void;
+  /** Reply to searchLogs; the app drops it when the request id is stale. */
+  onSearchResults?: (requestId: number | undefined, query: string, results: SearchHitWire[]) => void;
   /** Broadcast notice that a session died (the app drops its stale pin). */
   onSessionDeleted?: (sessionId: string) => void;
   onAuthFailure?: () => void;
@@ -556,6 +569,8 @@ export interface ChatController {
   loadLog: (logId: string) => void;
   viewLog: (logId: string) => void;
   deleteLog: (logId: string) => void;
+  /** Full-text search across all session logs; results arrive via onSearchResults. */
+  searchLogs: (query: string, requestId: number) => void;
   sendCommand: (command: string) => void;
   sendQuestionAnswer: (answers: Record<string, string>) => void;
   requestCompletions: (
@@ -607,6 +622,7 @@ export function createChat({
   onLogsUpdate,
   onLogViewed,
   onLogDeleted,
+  onSearchResults,
   onSessionDeleted,
   onAuthFailure,
   onWorkingMapChange,
@@ -795,6 +811,11 @@ export function createChat({
       case "logDeleted":
         if (data.logId === viewedLogId) viewedLogId = null;
         onLogDeleted?.(data.logId);
+        return;
+      case "searchResults":
+        // Not session-scoped (a whole-dir scan); correlated purely by the
+        // request id the app echoes back. No transcript side effects.
+        onSearchResults?.(data.requestId, data.query, data.results);
         return;
       case "authRequired":
         // Expected: the upgrade carries no token, so the server holds the
@@ -1312,6 +1333,12 @@ export function createChat({
     send({ type: "deleteLog", logId });
   }
 
+  function searchLogs(query: string, requestId: number): void {
+    const q = query.trim();
+    if (q === "") return;
+    send({ type: "searchLogs", query: q, requestId });
+  }
+
   return {
     connect,
     disconnect,
@@ -1330,6 +1357,7 @@ export function createChat({
     loadLog,
     viewLog,
     deleteLog,
+    searchLogs,
     sendCommand,
     sendQuestionAnswer,
     requestCompletions,

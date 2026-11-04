@@ -351,3 +351,102 @@ describe("routeMessage: LIST_LOGS sidebar fields", () => {
     expect(norow.messageCount).toBe(1);
   });
 });
+
+// ── SEARCH_LOGS (full-text scan across all session logs) ────────────────────
+
+describe("routeMessage: searchLogs", () => {
+  const SEARCH_ID = "search-target-log";
+  const OTHER_ID = "search-other-log";
+  const UNIQUE = "zxyquantumneedle"; // never appears in any other fixture
+
+  const logLine = (over: Record<string, unknown>): string =>
+    JSON.stringify({
+      ts: "2026-10-20T00:00:00.000Z",
+      session_id: "s",
+      source: "input",
+      content: "hi",
+      ...over,
+    }) + "\n";
+
+  beforeAll(() => {
+    writeFileSync(
+      join(TMP, `${SEARCH_ID}.jsonl`),
+      [
+        // Two searchable matches: a user message and the assistant reply.
+        logLine({ source: "input", content: `the ${UNIQUE} appears here` }),
+        logLine({ source: "llm", content: `the reply repeats the ${UNIQUE} once` }),
+        // NOT searchable: tool_result content, tool-call args, and reasoning.
+        logLine({ source: "tool_result", content: `tool echo ${UNIQUE} must not match` }),
+        logLine({
+          source: "llm",
+          content: "clean reply",
+          reasoning_content: `reasoning ${UNIQUE} must not match`,
+          tool_calls: [{ id: "1", type: "function", function: { name: "read", arguments: `{"path":"/tmp/${UNIQUE}-arg"}` } }],
+        }),
+      ].join(""),
+    );
+    writeFileSync(join(TMP, `${OTHER_ID}.jsonl`), logLine({ content: "nothing relevant" }));
+  });
+
+  it("empty / whitespace query answers an empty result set without scanning", async () => {
+    const { messages } = await send({ type: C2S.SEARCH_LOGS, query: "   ", requestId: 7 });
+    const reply = messages.find((m) => m.type === S2C.SEARCH_RESULTS)!;
+    expect(reply.query).toBe("");
+    expect(reply.results).toEqual([]);
+    expect(reply.requestId).toBe(7);
+  });
+
+  it("matches user + assistant text only, counting every occurrence", async () => {
+    const { messages } = await send({ type: C2S.SEARCH_LOGS, query: UNIQUE, requestId: 1 });
+    const reply = messages.find((m) => m.type === S2C.SEARCH_RESULTS)!;
+    const hits = reply.results as Array<Record<string, unknown>>;
+    const hit = hits.find((h) => h.logId === SEARCH_ID)!;
+    // Exactly the two conversation matches; tool result, tool args and
+    // reasoning are excluded from the corpus.
+    expect(hit.matchCount).toBe(2);
+    expect((hit.snippets as string[]).length).toBe(2);
+    expect(hit.live).toBe(false);
+    for (const s of hit.snippets as string[]) {
+      expect(s.toLowerCase()).toContain(UNIQUE);
+    }
+    // The excluded surfaces never leak into a snippet.
+    const joined = (hit.snippets as string[]).join("\n");
+    expect(joined).not.toContain("tool echo");
+    expect(joined).not.toContain("-arg");
+  });
+
+  it("matching is case-insensitive", async () => {
+    const { messages } = await send({ type: C2S.SEARCH_LOGS, query: UNIQUE.toUpperCase() });
+    const hits = (messages.find((m) => m.type === S2C.SEARCH_RESULTS)!.results) as Array<Record<string, unknown>>;
+    expect(hits.some((h) => h.logId === SEARCH_ID)).toBe(true);
+  });
+
+  it("a log with no match is absent from the result set", async () => {
+    const { messages } = await send({ type: C2S.SEARCH_LOGS, query: UNIQUE });
+    const hits = (messages.find((m) => m.type === S2C.SEARCH_RESULTS)!.results) as Array<Record<string, unknown>>;
+    expect(hits.some((h) => h.logId === OTHER_ID)).toBe(false);
+  });
+
+  it("flags a hit whose id is a live session", async () => {
+    const registry = stubRegistry({ list: () => [{ id: SEARCH_ID }] });
+    const { messages } = await send({ type: C2S.SEARCH_LOGS, query: UNIQUE }, registry);
+    const hits = (messages.find((m) => m.type === S2C.SEARCH_RESULTS)!.results) as Array<Record<string, unknown>>;
+    expect(hits.find((h) => h.logId === SEARCH_ID)!.live).toBe(true);
+  });
+
+  it("does NOT match tool-call args or reasoning", async () => {
+    const ARGS_ID = "search-exclude-log";
+    writeFileSync(
+      join(TMP, `${ARGS_ID}.jsonl`),
+      logLine({
+        source: "llm",
+        content: "no needle in the visible text",
+        reasoning_content: `hidden ${UNIQUE} in reasoning`,
+        tool_calls: [{ id: "1", type: "function", function: { name: "read", arguments: `{"path":"/tmp/${UNIQUE}-file"}` } }],
+      }),
+    );
+    const { messages } = await send({ type: C2S.SEARCH_LOGS, query: UNIQUE });
+    const hits = (messages.find((m) => m.type === S2C.SEARCH_RESULTS)!.results) as Array<Record<string, unknown>>;
+    expect(hits.some((h) => h.logId === ARGS_ID)).toBe(false);
+  });
+});

@@ -25,7 +25,9 @@ import {
   sortPinned,
   type SessionInfo,
   type LogInfo,
+  type SearchState,
 } from "@extensions/webui/ui/sessions.tsx";
+import type { SearchHitWire } from "@extensions/websocket/protocol.ts";
 import { mount, type DomNode, type Mounted } from "@utils/jsx";
 
 // ── Fixture + harness ───────────────────────────────────────────────────────
@@ -36,7 +38,10 @@ const FULL_ID = "2s34e9825faaf89878923598";
 
 const noop = (): void => {};
 
-function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string> }): Mounted {
+// Search closed by default; individual search tests override `search`.
+const CLOSED_SEARCH = { open: false, query: "", pending: false, results: null } as const;
+
+function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState }): Mounted {
   return mount(
     <Sidebar
       sessions={opts.sessions ?? []}
@@ -54,6 +59,13 @@ function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs
       onViewLog={noop}
       onSessionMenu={noop}
       onLogMenu={noop}
+      search={opts.search ?? CLOSED_SEARCH}
+      searchInputRef={noop}
+      onOpenSearch={noop}
+      onCloseSearch={noop}
+      onSearchQuery={noop}
+      onSearchKeydown={noop}
+      onActivateHit={noop}
       onResizeStart={noop}
       onResizeMove={noop}
       onResizeEnd={noop}
@@ -391,7 +403,7 @@ describe("formatDateTime", () => {
 
 function mountInteractive(
   container: Element,
-  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string> },
+  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState },
   calls: string[],
 ): Mounted {
   return mount(
@@ -411,6 +423,13 @@ function mountInteractive(
       onViewLog={(id) => calls.push(`view:${id}`)}
       onSessionMenu={(_e, s) => calls.push(`sessionMenu:${s.id}`)}
       onLogMenu={(_e, id) => calls.push(`logMenu:${id}`)}
+      search={opts.search ?? CLOSED_SEARCH}
+      searchInputRef={noop}
+      onOpenSearch={() => calls.push("openSearch")}
+      onCloseSearch={() => calls.push("closeSearch")}
+      onSearchQuery={(t) => calls.push(`searchQuery:${t}`)}
+      onSearchKeydown={noop}
+      onActivateHit={(hit) => calls.push(`activateHit:${hit.logId}`)}
       onResizeStart={noop}
       onResizeMove={noop}
       onResizeEnd={noop}
@@ -588,5 +607,103 @@ describe("pinned row sorting", () => {
     // l2 unpinned yet last).
     expect(badgesIn("#session-list .session-item")).toEqual([true, false]);
     expect(badgesIn("#log-list .log-item")).toEqual([true, false]);
+  });
+});
+
+// ── Search panel ────────────────────────────────────────────────────────────
+// The header magnifier swaps the two sidebar lists for a single search panel.
+// The panel is presentational: it echoes the query into <mark> highlights and
+// hands activations back to the app (live → switchSession, cold → viewLog).
+
+function hit(o: Partial<SearchHitWire> & { logId: string }): SearchHitWire {
+  return {
+    logId: o.logId,
+    lastActivityAt: o.lastActivityAt ?? STAMP,
+    matchCount: o.matchCount ?? 1,
+    live: o.live ?? false,
+    snippets: o.snippets ?? [],
+    ...(o.profile ? { profile: o.profile } : {}),
+    ...(o.model ? { model: o.model } : {}),
+  };
+}
+
+describe("search panel", () => {
+  it("closed search shows the two lists and no panel", () => {
+    const root = render({ sessions: [{ ...liveSession(), id: "s1" }], logs: [{ ...coldLog(), id: "l1" }] });
+    expect(root.querySelector("#search-panel")).toBeNull();
+    expect(root.querySelector("#session-list")).not.toBeNull();
+    expect(root.querySelector("#log-list")).not.toBeNull();
+    expect(root.querySelector("#search-btn")).not.toBeNull();
+  });
+
+  it("open search replaces both lists with the panel and marks the button active", () => {
+    const root = render({ search: { open: true, query: "", pending: false, results: null } });
+    expect(root.querySelector("#session-list")).toBeNull();
+    expect(root.querySelector("#log-list")).toBeNull();
+    expect(root.querySelector("#search-panel")).not.toBeNull();
+    const cls = (root.querySelector("#search-btn") as HTMLElement).getAttribute("class") ?? "";
+    expect(cls).toContain("active");
+  });
+
+  it("idle vs pending vs no-match statuses render distinct prompts", () => {
+    const idle = render({ search: { open: true, query: "", pending: false, results: null } });
+    expect(idle.querySelector(".search-status")?.textContent).toContain("Type to search");
+
+    const pending = render({ search: { open: true, query: "needle", pending: true, results: null } });
+    expect(pending.querySelector(".search-status")?.textContent).toContain("Searching");
+
+    const empty = render({ search: { open: true, query: "needle", pending: false, results: [] } });
+    expect(empty.querySelector(".search-status")?.textContent).toContain("No logs match");
+  });
+
+  it("renders a hit row per result with the match highlighted case-insensitively", () => {
+    const root = render({
+      search: {
+        open: true,
+        query: "bar",
+        pending: false,
+        results: [
+          hit({ logId: "l1", profile: "owner", model: "m1", matchCount: 2, snippets: ["foo BAR baz", "a Bar b"] }),
+          hit({ logId: "s9", live: true, matchCount: 1, snippets: ["no match text"] }),
+        ],
+      },
+    });
+    const rows = root.querySelectorAll(".search-hit");
+    expect(rows.length).toBe(2);
+    // Highlights ride every case-insensitive occurrence; the l1 row has two
+    // snippets with one match each, the s9 row has none for its snippet.
+    const marks1 = Array.from(rows[0]!.querySelectorAll(".search-mark")).map((m) => m.textContent);
+    expect(marks1).toEqual(["BAR", "Bar"]);
+    expect(rows[1]!.querySelectorAll(".search-mark").length).toBe(0);
+    // live/cold scope tag distinguishes the attach verb for each hit.
+    expect(rows[0]!.querySelector(".search-scope")?.textContent).toBe("log");
+    expect(rows[1]!.querySelector(".search-scope-live")?.textContent).toBe("live");
+  });
+
+  it("magnifier, close, input and row activation route to the app handlers", () => {
+    const calls: string[] = [];
+    const root = renderInteractive(
+      {
+        search: { open: true, query: "", pending: false, results: [hit({ logId: "l1", snippets: ["x"] })] },
+      },
+      calls,
+    );
+    // Open panel already: the button click closes it.
+    (root.querySelector("#search-btn") as unknown as HTMLElement).click();
+    (root.querySelector("#search-clear") as unknown as HTMLElement).click();
+    // Row click hands the hit back.
+    (root.querySelector(".search-hit") as unknown as HTMLElement).click();
+    // Typing routes the raw value (uncontrolled input) to onSearchQuery.
+    const input = root.querySelector("#search-input") as HTMLElement;
+    (input as unknown as { value: string }).value = "hello";
+    input.dispatchEvent({ type: "input", currentTarget: input } as unknown as Event);
+    expect(calls).toEqual(["closeSearch", "closeSearch", "activateHit:l1", "searchQuery:hello"]);
+  });
+
+  it("closed magnifier opens the panel", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({}, calls);
+    (root.querySelector("#search-btn") as unknown as HTMLElement).click();
+    expect(calls).toEqual(["openSearch"]);
   });
 });

@@ -1,10 +1,18 @@
 // Cold session log frames: list, load (resume), view, delete.
 
-import { getSessionRow } from "@core/session/session-index.ts";
+import { getSessionRow, searchSessionCorpora } from "@core/session/session-index.ts";
 import { deleteSessionLog, listSessionLogs, readSessionEntries, trySessionPath } from "@core/session/session-log.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
-import { S2C, errorFrame, wireImages } from "./protocol.ts";
+import {
+  S2C,
+  errorFrame,
+  wireImages,
+  MAX_SEARCH_HITS,
+  MAX_SEARCH_SNIPPETS_PER_LOG,
+  SEARCH_SNIPPET_CONTEXT,
+  type SearchHitWire,
+} from "./protocol.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { attachResumedSession } from "./attach.ts";
 import { dropPinned, isPinned } from "./pin-store.ts";
@@ -125,6 +133,111 @@ export async function handleDeleteLog(ctx: RouteContext): Promise<void> {
       }
     })
     .catch((err: unknown) => {
+      SessionRegistry.sendSafe(ws, errorFrame(err));
+    });
+}
+
+// ── Full-text log search ──────────────────────────────────────────────────
+// Case-insensitive substring scan across every session log (live + cold),
+// newest-activity first. The corpus is user messages + assistant response
+// text (see searchableEntryText in @core/session/session-log.ts): tool
+// results, tool calls and reasoning are never searched, and base64 image
+// payloads ride their own field, so a hit is always real conversation text.
+
+/** Collapse a match to a single trimmed snippet line, keeping
+ *  SEARCH_SNIPPET_CONTEXT characters on each side of the match. `idx`/`len`
+ *  are the match offsets in the lowercased scan string; toLowerCase is
+ *  length-preserving except for rare Unicode, where the excerpt window
+ *  shifts by a character at worst -- display-only, harmless. */
+function makeSnippet(text: string, idx: number, len: number): string {
+  const start = Math.max(0, idx - SEARCH_SNIPPET_CONTEXT);
+  const end = Math.min(text.length, idx + len + SEARCH_SNIPPET_CONTEXT);
+  const body = text.slice(start, end).replace(/\s+/g, " ").trim();
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < text.length ? "…" : "";
+  return `${prefix}${body}${suffix}`;
+}
+
+/** Scan one session's searchable-text corpus (user+assistant, newline-joined)
+ *  for `needle` (already lowercased). Returns the match count and up to
+ *  MAX_SEARCH_SNIPPETS_PER_LOG excerpts. */
+function scanText(text: string, needle: string): { matchCount: number; snippets: string[] } {
+  let matchCount = 0;
+  const snippets: string[] = [];
+  const lower = text.toLowerCase();
+  let from = 0;
+  while (true) {
+    const idx = lower.indexOf(needle, from);
+    if (idx < 0) break;
+    matchCount++;
+    if (snippets.length < MAX_SEARCH_SNIPPETS_PER_LOG) {
+      snippets.push(makeSnippet(text, idx, needle.length));
+    }
+    from = idx + needle.length;
+  }
+  return { matchCount, snippets };
+}
+
+/**
+ * Search every session log (live and cold) for a case-insensitive substring,
+ * newest-activity first, capped at MAX_SEARCH_HITS matching logs. The heavy
+ * lifting -- enumeration + a staleness-checked `search_text` mirror (so cold,
+ * unchanged logs are never re-parsed) -- is searchSessionCorpora in the
+ * session index; this layer only counts matches, cuts excerpts, and adds the
+ * live/cold status the client uses to pick viewLog vs switchSession.
+ */
+export async function searchSessionLogs(
+  query: string,
+  registry: SessionRegistry,
+): Promise<SearchHitWire[]> {
+  const needle = query.toLowerCase();
+  const matches = await searchSessionCorpora(query);
+  const activeIds = new Set(registry.list().map((s) => s.id));
+  const hits: SearchHitWire[] = [];
+  for (const match of matches) {
+    if (hits.length >= MAX_SEARCH_HITS) break;
+    const { matchCount, snippets } = scanText(match.text, needle);
+    if (matchCount === 0) continue;
+    hits.push({
+      logId: match.sessionId,
+      lastActivityAt: match.lastActivityAt,
+      matchCount,
+      ...(match.profile ? { profile: match.profile } : {}),
+      ...(match.model ? { model: match.model } : {}),
+      live: activeIds.has(match.sessionId),
+      snippets,
+    });
+  }
+  return hits;
+}
+
+export async function handleSearchLogs(ctx: RouteContext): Promise<void> {
+  const { ws, msg, registry } = ctx;
+  const query = typeof msg.query === "string" ? msg.query.trim() : "";
+  const requestId = typeof msg.requestId === "number" ? msg.requestId : undefined;
+  // Empty/whitespace query: answer empty rather than scanning every log for
+  // "" (which would match the first line of every file).
+  if (query === "") {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.SEARCH_RESULTS,
+      requestId,
+      query: "",
+      results: [],
+    });
+    return;
+  }
+  // Awaited for the settle contract: this walks every log on disk.
+  await searchSessionLogs(query, registry)
+    .then((results) => {
+      SessionRegistry.sendSafe(ws, {
+        type: S2C.SEARCH_RESULTS,
+        requestId,
+        query,
+        results,
+      });
+    })
+    .catch((err: unknown) => {
+      logger.warn(`[websocket] searchLogs failed: ${formatError(err)}`);
       SessionRegistry.sendSafe(ws, errorFrame(err));
     });
 }

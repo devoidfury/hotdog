@@ -37,6 +37,11 @@ export const C2S = {
   LOAD_LOG: "loadLog",
   VIEW_LOG: "viewLog",
   DELETE_LOG: "deleteLog",
+  // Full-text search across all session logs (live + cold):
+  // { type, requestId, query }. Case-insensitive substring match on the
+  // human-readable entry text (never base64 image payloads). Correlated
+  // back with SEARCH_RESULTS; stale replies are dropped client-side by id.
+  SEARCH_LOGS: "searchLogs",
   // Profile management
   LIST_PROFILES: "listProfiles",
   SWITCH_PROFILE: "switchProfile",
@@ -66,6 +71,8 @@ export const S2C = {
   LOGS_LISTED: "logsListed",
   LOG_VIEWED: "logViewed",
   LOG_DELETED: "logDeleted",
+  // Reply to C2S SEARCH_LOGS (requesting socket only), correlated by requestId.
+  SEARCH_RESULTS: "searchResults",
 
   // Profile management
   PROFILES: "profiles",
@@ -139,6 +146,33 @@ export interface C2SMessage {
   type: C2SType;
   [key: string]: unknown;
 }
+
+// ── Full-text log search (C2S searchLogs → S2C searchResults) ───────────────
+
+/**
+ * One session log that matched the search query. `logId` is the selection
+ * key the client hands to viewLog/loadLog/switchSession; `snippets` are
+ * short human-readable excerpts centered on the matches (never base64).
+ */
+export interface SearchHitWire {
+  logId: string;
+  /** Last activity (epoch ms) -- the sidebar row grammar's stamp. */
+  lastActivityAt: number;
+  /** Total matches in the log (may exceed the returned snippets). */
+  matchCount: number;
+  profile?: string;
+  model?: string;
+  /** Whether this id is a live session (vs a cold log). */
+  live: boolean;
+  /** Excerpt lines, capped per log; each rides the matching text. */
+  snippets: string[];
+}
+
+/** Caps on a single search reply (see searchLogs in ./handlers-logs.ts). */
+export const MAX_SEARCH_HITS = 50;
+export const MAX_SEARCH_SNIPPETS_PER_LOG = 3;
+/** Characters of context kept on each side of a match in a snippet. */
+export const SEARCH_SNIPPET_CONTEXT = 48;
 
 // ── File uploads on C2S SEND ────────────────────────────────────────────────
 

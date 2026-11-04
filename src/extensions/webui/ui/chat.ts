@@ -4,6 +4,7 @@
 import { reactiveState, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
 import type { UiImage } from "./message-list.ts";
+import type { CtxUsage } from "@utils/session-turns.ts";
 import type { LogInfo, SessionInfo } from "./sessions.tsx";
 import type {
   UploadFileWire,
@@ -199,6 +200,7 @@ const LOG_VIEW_SINK: MessageListManager = {
   handleSessionState: () => {},
   handleError: () => {},
   finalizeAssistant: () => {},
+  noteWorking: () => {},
   clear: () => {},
   addSystemMessage: () => {},
   handleSystemMessage: () => {},
@@ -257,6 +259,8 @@ interface LogsListedMessage {
 
 interface LogEntry {
   source: string;
+  /** Entry timestamp (ISO) as stored in the log; legacy entries may lack it. */
+  ts?: string;
   content: string;
   images?: UiImage[];
   reasoning_content?: string | null;
@@ -302,6 +306,13 @@ interface UserMessage {
 interface AssistantMessage {
   type: "assistantMessage";
   content: string;
+  /** Replay-only (see s2cAssistantMessage in ../websocket/wire-messages.ts):
+   *  completion ts (epoch ms), the bracketing turn's duration, and the ctx
+   *  usage attested at this message's commit, all from the session log.
+   *  Absent when the source attests neither. */
+  ts?: number;
+  durationMs?: number;
+  ctx?: CtxUsage;
 }
 
 interface ThinkingMessage {
@@ -406,6 +417,11 @@ interface TaskProgressMessage {
   message?: string;
 }
 
+/**
+ * TOKEN_USAGE frame (s2cTokenUsage): per-call numbers plus the additive
+ * gauge pair ctxUsed/ctxTotal. No transcript bubble anymore -- message-list
+ * folds the numbers into the footer's ctx segment.
+ */
 interface TokenUsageMessage {
   type: "tokenUsage";
   promptTokens: number;
@@ -413,6 +429,8 @@ interface TokenUsageMessage {
   completionTokens: number;
   totalTokens: number;
   contextWindow?: number;
+  ctxUsed?: number;
+  ctxTotal?: number;
 }
 
 interface CompactionResultMessage {
@@ -941,6 +959,10 @@ export function createChat({
             sessionWorkingMap.set(sid, Boolean(data.value));
             if (sid === sessionIdAtom()) {
               workingAtom(Boolean(data.value));
+              // Turn boundary for the message footer: false commits the
+              // in-flight row with its timestamp/duration footer (message-list
+              // owns the turn clock; other sessions' flips never touch it).
+              list.noteWorking(Boolean(data.value));
             }
           }
           onWorkingMapChange?.();

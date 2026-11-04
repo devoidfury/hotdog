@@ -37,6 +37,24 @@ export function formatTime(ts: number): string {
   return `${h}:${m}`;
 }
 
+/** Footer clock, e.g. "1:35 AM" (12-hour, local time). */
+export function formatClock(ts: number): string {
+  const d = new Date(ts);
+  const h = d.getHours();
+  return `${h % 12 || 12}:${d.getMinutes().toString().padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+
+/** Elapsed time, e.g. "16m 21s", "42s", "1h 05m 09s". */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m ${s.toString().padStart(2, "0")}s`;
+  if (m > 0) return `${m}m ${s.toString().padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
 export function formatTokenCount(n: number): string {
   // Non-finite/negative pass through as-is; toFixed's trailing ".0" is stripped (1959 -> "2k").
   if (!Number.isFinite(n) || n < 0) return String(n);

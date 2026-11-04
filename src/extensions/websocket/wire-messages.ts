@@ -8,6 +8,7 @@ import { OUTPUT_EVENT, type FileAttachmentView, type OutputEvent } from "@core/c
 import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
 import type { ArgDisplay } from "@core/extensions/tool-registry.ts";
 import { toolContentText } from "@utils/tool-content.ts";
+import type { CtxUsage } from "@utils/session-turns.ts";
 import { S2C, type S2CType, wireImages } from "./protocol.ts";
 
 /** Mapper options: resolves a tool's per-parameter display hints (argDisplay). */
@@ -22,6 +23,29 @@ export function s2cContent(
   content: string,
 ): Record<string, unknown> {
   return { type, sessionId, content };
+}
+
+/**
+ * Assistant message frame. `meta` carries the webui footer data only the
+ * log attests: completion ts (the entry timestamp, epoch ms), the duration
+ * of the bracketing turn, and the ctx usage (`ctx`, see CtxUsage) attested
+ * at that message's commit. Live event frames carry none of these (the
+ * client measures its own turn and folds the live TOKEN_USAGE event it
+ * receives into the footer); replay fills what the log knows.
+ */
+export function s2cAssistantMessage(
+  sessionId: string,
+  content: string,
+  meta?: { ts?: number; durationMs?: number; ctx?: CtxUsage },
+): Record<string, unknown> {
+  return {
+    type: S2C.ASSISTANT_MESSAGE,
+    sessionId,
+    content,
+    ...(meta?.ts !== undefined ? { ts: meta.ts } : {}),
+    ...(meta?.durationMs !== undefined ? { durationMs: meta.durationMs } : {}),
+    ...(meta?.ctx !== undefined ? { ctx: meta.ctx } : {}),
+  };
 }
 
 export function s2cUserMessage(
@@ -96,10 +120,33 @@ export interface TokenUsageWireSource {
   contextWindow?: number;
 }
 
+/**
+ * Ctx gauge view of a usage source, in the footer's field names: `used` is
+ * the call's totalTokens and `total` the context window -- exactly the pair
+ * the sidebar gauge caches (SessionRegistry.#trackUsage) and the session
+ * index derives (deriveCtxFromLog), so footer and gauge always agree. The
+ * window echoes whatever the event carries (stale-contextLimit on un-
+ * registered models is an open finding in agent.ts; fixing it there fixes
+ * gauge and footer together, so nothing here may hardwire a constant).
+ * Both numbers need finite > 0 to count as attested (same gate as
+ * deriveCtxFromLog); unattested fields ride no wire field.
+ */
+export function ctxFromUsage(u: TokenUsageWireSource): Pick<CtxUsage, "used" | "total"> | undefined {
+  const used = typeof u.totalTokens === "number" && Number.isFinite(u.totalTokens) && u.totalTokens > 0
+    ? u.totalTokens
+    : undefined;
+  const total = typeof u.contextWindow === "number" && Number.isFinite(u.contextWindow) && u.contextWindow > 0
+    ? u.contextWindow
+    : undefined;
+  if (used === undefined) return undefined;
+  return total !== undefined ? { used, total } : { used };
+}
+
 export function s2cTokenUsage(
   sessionId: string,
   u: TokenUsageWireSource,
 ): Record<string, unknown> {
+  const ctx = ctxFromUsage(u);
   const msg: Record<string, unknown> = {
     type: S2C.TOKEN_USAGE,
     sessionId,
@@ -112,6 +159,11 @@ export function s2cTokenUsage(
     cachedTokens: u.cachedTokens || 0,
   };
   if (Number.isFinite(u.contextWindow)) msg.contextWindow = u.contextWindow;
+  // Additive ctx fields for the message-list footer (older clients ignore
+  // them). ctxTotal is gated finite>0 here, so a present-but-absurd window
+  // (0/NaN) leaves the denominator off rather than rendering "126k/0".
+  if (ctx) msg.ctxUsed = ctx.used;
+  if (ctx?.total !== undefined) msg.ctxTotal = ctx.total;
   return msg;
 }
 
@@ -128,7 +180,9 @@ export function toS2CMessage(
     case OUTPUT_EVENT.USER_MESSAGE:
       return s2cUserMessage(sessionId, { content: event.content, files: event.files, images: event.images });
     case OUTPUT_EVENT.ASSISTANT_MESSAGE:
-      return s2cContent(S2C.ASSISTANT_MESSAGE, sessionId, event.content);
+      // No meta: a live event has no log entry behind it yet; the client
+      // times its own turn (sessionState working true->false).
+      return s2cAssistantMessage(sessionId, event.content);
     case OUTPUT_EVENT.STREAMING_CHUNK:
       return s2cContent(S2C.STREAMING_CHUNK, sessionId, event.content);
     case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:

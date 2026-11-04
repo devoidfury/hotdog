@@ -921,6 +921,57 @@ body.sidebar-resizing {
     white-space: pre-wrap;
 }
 
+/* ── Assistant Message Footer ───────────────────────────────────────────────
+   Muted meta row after a completed assistant message: finish time, the
+   ctx gauge segment (used/total, when the render path attests the usage),
+   turn duration (when the render path knows it), copy affordance.
+   Deliberately quiet; the copy icon lifts to full contrast on hover (title
+   carries the tooltip), and the confirmed state flashes green. */
+.message-assistant-footer {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    opacity: 0.75;
+    padding: 0 2px;
+}
+
+/* The `used/total` ctx segment: the gauge pair the sidebar shows, in the
+   retired token-usage bubble's mono. Its title carries the hover breakdown
+   (native title is the house tooltip idiom, multi-line content included),
+   and tabIndex lets keyboard focus surface it. */
+.message-assistant-footer .footer-ctx {
+    font-family: var(--font-mono);
+    cursor: default;
+    white-space: nowrap;
+}
+
+.message-assistant-footer .footer-copy {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    border-radius: 4px;
+    opacity: 0.55;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+.message-assistant-footer .footer-copy:hover {
+    opacity: 1;
+    color: var(--text-primary);
+}
+
+.message-assistant-footer .footer-copy.copied {
+    opacity: 1;
+    color: var(--success);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    MARKDOWN RENDERED CONTENT (.md-content)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -1484,20 +1535,6 @@ body.sidebar-resizing {
     padding: 4px 14px;
     border-radius: var(--radius-full);
     display: inline-block;
-}
-
-.message.token-usage {
-    align-self: center;
-    max-width: 100%;
-}
-
-.message.token-usage .bubble {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    font-family: var(--font-mono);
-    padding: 4px 0;
 }
 
 .message.compaction-result {

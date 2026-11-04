@@ -293,6 +293,9 @@ describe("WebSocketChannel - write()", () => {
         expect(msg.totalTokens).toBe(120);
         expect(msg.cachedTokens).toBe(10);
         expect(msg.contextWindow).toBe(200000);
+        // Additive footer pair: same numbers the sidebar gauge caches.
+        expect(msg.ctxUsed).toBe(120);
+        expect(msg.ctxTotal).toBe(200000);
       },
     },
     {
@@ -382,6 +385,9 @@ describe("WebSocketChannel - write()", () => {
     expect(msg.totalTokens).toBe(0);
     expect(msg.cachedTokens).toBe(0);
     expect(msg.contextWindow).toBeUndefined();
+    // Zero totals attest nothing: the ctx pair is omitted, not sent as 0.
+    expect("ctxUsed" in msg).toBe(false);
+    expect("ctxTotal" in msg).toBe(false);
   });
 
   it("omits a non-finite contextWindow from TOKEN_USAGE", () => {
@@ -402,8 +408,11 @@ describe("WebSocketChannel - write()", () => {
     const sent = (ws as any)._sentMessages;
     const msg = JSON.parse(sent[0]);
     expect(msg.totalTokens).toBe(120);
-    // Field omitted entirely, not serialized as null/NaN.
+    // Field omitted entirely, not serialized as null/NaN. Same for the
+    // ctxTotal gauge field: an unattested window never reaches the footer.
     expect("contextWindow" in msg).toBe(false);
+    expect("ctxTotal" in msg).toBe(false);
+    expect(msg.ctxUsed).toBe(120);
   });
 
   it("maps SESSION_STATE events to protocol with broadcast", () => {

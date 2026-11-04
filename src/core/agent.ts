@@ -914,6 +914,12 @@ export class Agent implements AgentLike {
 
   #emitTokenUsage(response: { usage?: RawUsage | null }): void {
     this.context.recordUsage(response.usage, (usage) => {
+      // contextWindow echoes this.contextLimit, so the sidebar gauge AND the
+      // webui footer ctx segment (both derive from this event's numbers) show
+      // whatever the agent believes the window is. The known stale-limit gap
+      // (model setter keeps the prior limit for unregistered models) lands on
+      // both views from this one line; fixing it here fixes everything at
+      // once -- no consumer may paper over it with a constant.
       this.emitOutput("token_usage", { ...usage, contextWindow: this.contextLimit });
     });
   }

@@ -285,7 +285,8 @@ describe("replayLogSlice token_usage", () => {
       S2C.TOKEN_USAGE,
     ]);
     // Byte-identical to what the live websocket-channel mapper sends for the
-    // same record: same fields, same order, no turns/sessionCachedTokens.
+    // same record: same fields, same order, no turns/sessionCachedTokens --
+    // including the additive ctxUsed/ctxTotal gauge pair for the footer.
     expect(raw[1]).toBe(
       JSON.stringify({
         type: S2C.TOKEN_USAGE,
@@ -298,6 +299,8 @@ describe("replayLogSlice token_usage", () => {
         totalTokens: 153000,
         cachedTokens: 148000,
         contextWindow: 200000,
+        ctxUsed: 153000,
+        ctxTotal: 200000,
       }),
     );
   });
@@ -318,7 +321,24 @@ describe("replayLogSlice token_usage", () => {
     const msg = JSON.parse(raw[0]!) as Record<string, unknown>;
     expect(msg.type).toBe(S2C.TOKEN_USAGE);
     expect("contextWindow" in msg).toBe(false);
+    // No attested window: the ctxTotal gauge field rides along as little as
+    // the denominator does; used is still attested and sent.
+    expect("ctxTotal" in msg).toBe(false);
+    expect(msg.ctxUsed).toBe(960);
     expect(msg.totalTokens).toBe(960);
+  });
+
+  it("attests no ctxUsed when the record's totalTokens is zero", () => {
+    const raw = slice([
+      entry({
+        source: LOG_SOURCE.TOKEN_USAGE,
+        totalTokens: 0,
+        contextWindow: 200000,
+      }),
+    ]);
+    const msg = JSON.parse(raw[0]!) as Record<string, unknown>;
+    expect("ctxUsed" in msg).toBe(false);
+    expect("ctxTotal" in msg).toBe(false); // no gauge without a used-number
   });
 });
 
@@ -344,5 +364,189 @@ describe("replayPendingQuestion", () => {
     replayPendingQuestion(bridgeWith({ other: questions }), "s1", ws);
     replayPendingQuestion(bridgeWith(null), "s1", ws);
     expect(ws.messages).toHaveLength(0);
+  });
+});
+
+describe("replayLogSlice footer meta (assistant ts + turn duration)", () => {
+  const T0 = Date.parse("2026-10-20T00:00:00.000Z");
+  const iso = (offsetMs: number) => new Date(T0 + offsetMs).toISOString();
+
+  function entryAt(offsetMs: number | undefined, over: Record<string, unknown>): LogEntry {
+    return {
+      ...(offsetMs !== undefined ? { ts: iso(offsetMs) } : {}),
+      session_id: "s",
+      source: LOG_SOURCE.INPUT,
+      content: "",
+      ...over,
+    } as unknown as LogEntry;
+  }
+
+  function sliceMeta(entries: LogEntry[], startIdx = 0): Array<Record<string, unknown>> {
+    const ws = createWsMockWs();
+    replayLogSlice(ws, "s1", entries, startIdx);
+    return ws.messages.map((m) => JSON.parse(m) as Record<string, unknown>);
+  }
+
+  it("assistant frames carry the entry ts and the bracketing turn's duration", () => {
+    const out = sliceMeta([
+      entryAt(0, { source: LOG_SOURCE.TURN_STARTED, content: { kind: "input" } }),
+      entryAt(10, { source: LOG_SOURCE.INPUT, content: "go" }),
+      entryAt(981200, { source: LOG_SOURCE.LLM, content: "done" }),
+      entryAt(981250, { source: LOG_SOURCE.TURN_END, content: { status: "completed" } }),
+    ]);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    expect(assistant.ts).toBe(T0 + 981200);
+    expect(assistant.durationMs).toBe(981250);
+  });
+
+  it("deltas resolve the duration from markers below the slice start", () => {
+    const full = [
+      entryAt(0, { source: LOG_SOURCE.TURN_STARTED, content: { kind: "input" } }),
+      entryAt(10, { source: LOG_SOURCE.INPUT, content: "go" }),
+      entryAt(5000, { source: LOG_SOURCE.LLM, content: "mid-turn" }),
+      entryAt(20000, { source: LOG_SOURCE.LLM, content: "final" }),
+      entryAt(20500, { source: LOG_SOURCE.TURN_END, content: { status: "completed" } }),
+    ];
+    const out = sliceMeta(full, 3);
+    expect(out).toHaveLength(1); // only the tail LLM entry replays
+    expect(out[0]!.content).toBe("final");
+    expect(out[0]!.ts).toBe(T0 + 20000);
+    expect(out[0]!.durationMs).toBe(20500); // full turn span, marker or not
+  });
+
+  it("an open turn keeps the ts but drops the duration", () => {
+    const out = sliceMeta([
+      entryAt(0, { source: LOG_SOURCE.TURN_STARTED, content: { kind: "input" } }),
+      entryAt(5000, { source: LOG_SOURCE.LLM, content: "crash cut" }),
+    ]);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    expect(assistant.ts).toBe(T0 + 5000);
+    expect("durationMs" in assistant).toBe(false);
+  });
+
+  it("a re-emitted turn_started (crash + resume) re-brackets: the later marker owns the turn", () => {
+    const out = sliceMeta([
+      entryAt(0, { source: LOG_SOURCE.TURN_STARTED, content: { kind: "input" } }),
+      entryAt(5000, { source: LOG_SOURCE.LLM, content: "before the crash" }),
+      entryAt(10000, { source: LOG_SOURCE.TURN_STARTED, content: { kind: "resume" } }),
+      entryAt(15000, { source: LOG_SOURCE.LLM, content: "after resume" }),
+      entryAt(16000, { source: LOG_SOURCE.TURN_END, content: { status: "completed" } }),
+    ]);
+    const assistants = out.filter((m) => m.type === S2C.ASSISTANT_MESSAGE);
+    expect(assistants).toHaveLength(2);
+    // The never-closed first bracket invents nothing: ts survives, duration does not.
+    expect(assistants[0]!.ts).toBe(T0 + 5000);
+    expect("durationMs" in assistants[0]!).toBe(false);
+    expect(assistants[1]!.durationMs).toBe(6000); // second marker owns the span
+  });
+
+  it("legacy entries without ts or markers ride neither field (and no bogus ts)", () => {
+    const out = sliceMeta([
+      { session_id: "s", source: LOG_SOURCE.LLM, content: "ancient" } as unknown as LogEntry,
+      entryAt(undefined, { source: LOG_SOURCE.LLM, content: "no ts" }),
+    ]);
+    for (const m of out) {
+      expect(m.type).toBe(S2C.ASSISTANT_MESSAGE);
+      expect("ts" in m).toBe(false);
+      expect("durationMs" in m).toBe(false);
+    }
+  });
+
+  it("a malformed ts is dropped, not sent as garbage", () => {
+    const out = sliceMeta([entryAt(undefined, { ts: "not-a-date", source: LOG_SOURCE.LLM, content: "x" })]);
+    expect("ts" in out[0]!).toBe(false);
+  });
+
+  it("fork (in-memory) replay has no timestamps to send", () => {
+    const out = replay([new Message({ role: "assistant", content: "forked" })]);
+    expect(out[0]!.type).toBe(S2C.ASSISTANT_MESSAGE);
+    expect("ts" in out[0]!).toBe(false);
+    expect("durationMs" in out[0]!).toBe(false);
+    expect("ctx" in out[0]!).toBe(false);
+  });
+});
+
+describe("replayLogSlice footer meta (assistant ctx usage)", () => {
+  function entry(over: Record<string, unknown>): LogEntry {
+    return {
+      session_id: "s",
+      source: LOG_SOURCE.INPUT,
+      content: "",
+      ...over,
+    } as unknown as LogEntry;
+  }
+
+  function sliceMeta(entries: LogEntry[], startIdx = 0): Array<Record<string, unknown>> {
+    const ws = createWsMockWs();
+    replayLogSlice(ws, "s1", entries, startIdx);
+    return ws.messages.map((m) => JSON.parse(m) as Record<string, unknown>);
+  }
+
+  it("the assistant frame carries the ctx usage of the record written for that response", () => {
+    const out = sliceMeta([
+      entry({ source: LOG_SOURCE.INPUT, content: "go" }),
+      entry({ source: LOG_SOURCE.LLM, ts: "2026-10-20T00:00:05.000Z", content: "done" }),
+      entry({
+        source: LOG_SOURCE.TOKEN_USAGE,
+        totalTokens: 125824,
+        contextWindow: 262144,
+        cachedTokens: 98304,
+        promptTokens: 26112,
+        completionTokens: 1408,
+      }),
+    ]);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    // The gauge pair (used/total) plus the breakdown the record attests,
+    // derived by ctxByIndex -- the same numbers the sidebar gauge shows.
+    expect(assistant.ctx).toEqual({
+      used: 125824,
+      total: 262144,
+      cached: 98304,
+      prompt: 26112,
+      completion: 1408,
+    });
+  });
+
+  it("logs predating usage records send no ctx field (pinned omission)", () => {
+    const out = sliceMeta([
+      entry({ source: LOG_SOURCE.LLM, ts: "2026-10-20T00:00:05.000Z", content: "old log" }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect("ctx" in out[0]!).toBe(false);
+  });
+
+  it("a record attributes to its own llm entry only", () => {
+    const out = sliceMeta([
+      entry({ source: LOG_SOURCE.LLM, content: "first" }),
+      entry({ source: LOG_SOURCE.TOKEN_USAGE, totalTokens: 960 }),
+      entry({ source: LOG_SOURCE.LLM, content: "second" }),
+    ]);
+    const assistants = out.filter((m) => m.type === S2C.ASSISTANT_MESSAGE);
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0]!.ctx).toEqual({ used: 960 });
+    // No record followed the second response: it borrows nothing.
+    expect("ctx" in assistants[1]!).toBe(false);
+  });
+
+  it("ctx rides a delta slice whose record lands after the cursor", () => {
+    const full = [
+      entry({ source: LOG_SOURCE.INPUT, content: "go" }),
+      entry({ source: LOG_SOURCE.LLM, content: "answer" }),
+      entry({ source: LOG_SOURCE.TOKEN_USAGE, totalTokens: 1200, contextWindow: 8000 }),
+    ];
+    const out = sliceMeta(full, 1);
+    expect(out).toHaveLength(2); // the llm frame and the usage frame
+    expect(out[0]!.type).toBe(S2C.ASSISTANT_MESSAGE);
+    expect(out[0]!.ctx).toEqual({ used: 1200, total: 8000 });
+    expect(out[1]!.type).toBe(S2C.TOKEN_USAGE); // the event stays on the wire
+  });
+
+  it("a record with zero totalTokens attests no ctx", () => {
+    const out = sliceMeta([
+      entry({ source: LOG_SOURCE.LLM, content: "answer" }),
+      entry({ source: LOG_SOURCE.TOKEN_USAGE, totalTokens: 0 }),
+    ]);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    expect("ctx" in assistant).toBe(false);
   });
 });

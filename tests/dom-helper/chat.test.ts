@@ -289,7 +289,10 @@ describe("content routing into the message list", () => {
     expect(container.querySelector(".command-result")).not.toBeNull();
     expect(container.querySelector(".question")).not.toBeNull();
     expect(container.querySelector(".task-progress")).not.toBeNull();
-    expect(container.querySelector(".token-usage")).not.toBeNull();
+    // tokenUsage renders NO transcript bubble (retired): the numbers fold
+    // into the footer's ctx segment at the next commit, and the event still
+    // flows through the dispatcher to message-list to make that happen.
+    expect(container.querySelector(".token-usage")).toBeNull();
     expect(container.querySelector(".compaction-result")).not.toBeNull();
   });
 
@@ -361,6 +364,67 @@ describe("content routing into the message list", () => {
     expect(chat.currentProfileAtom()).toBe("p2");
     ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "title", value: "T" });
     expect(chat.sessionTitleAtom()).toBe("T");
+  });
+});
+
+// ── Message footer wiring (working edges drive the completion footer) ───────
+
+describe("assistant footer via working edges", () => {
+  it("completes the streaming row with a footer when the attached session stops", () => {
+    const { ws, chat, container } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: false }); // attach baseline
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: true }); // turn start (clocked)
+    ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "hello there" });
+    // In flight: no footer yet.
+    expect(container.querySelector(".message-assistant-footer")).toBeNull();
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: false });
+    const footer = container.querySelector(".message-assistant-footer");
+    expect(footer).not.toBeNull();
+    expect(footer!.querySelector(".footer-time")!.textContent).toMatch(/\d{1,2}:\d{2} (AM|PM)/);
+    // The clock saw the false->true edge, so the worked segment is measured.
+    expect(footer!.querySelector(".footer-worked")!.textContent).toMatch(/^Worked for \d+s$/);
+    // No longer streaming.
+    expect(container.querySelector(".message.assistant.streaming")).toBeNull();
+  });
+
+  it("a turn already running at attach time renders the timestamp WITHOUT a duration", () => {
+    const { ws, chat, container } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    // First working report says running: mid-turn attach, start never observed.
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: true });
+    ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "partial" });
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: false });
+    const footer = container.querySelector(".message-assistant-footer")!;
+    expect(footer).not.toBeNull();
+    expect(footer.querySelector(".footer-worked")).toBeNull();
+  });
+
+  it("other sessions' working flips never touch this transcript", () => {
+    const { ws, chat, container } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "live" });
+    ws.fireMessage({ type: "sessionState", sessionId: "other", key: "working", value: true });
+    ws.fireMessage({ type: "sessionState", sessionId: "other", key: "working", value: false });
+    expect(container.querySelector(".message-assistant-footer")).toBeNull();
+    // The live row is still open (not finalized by another session's turn).
+    expect(container.querySelector(".message.assistant.streaming")).not.toBeNull();
+  });
+
+  it("replayed assistant frames render their footer from the wire ts/duration", () => {
+    const { ws, chat, container } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    const ts = new Date("2026-05-04T00:00:00.000Z").getTime();
+    ws.fireMessage({ type: "assistantMessage", sessionId: "s1", content: "from replay", ts, durationMs: 61_000 });
+    const footer = container.querySelector(".message-assistant-footer")!;
+    expect(footer.querySelector(".footer-worked")!.textContent).toBe("Worked for 1m 01s");
+    // Frames without footer data (fork replay, live) render no footer.
+    ws.fireMessage({ type: "assistantMessage", sessionId: "s1", content: "no meta" });
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(1);
   });
 });
 

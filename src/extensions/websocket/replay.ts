@@ -14,6 +14,7 @@ import type { ToolRegistry } from "@core/extensions/tool-registry.ts";
 import type { WebSocketQuestionBridge } from "./question-input.ts";
 import { S2C } from "./protocol.ts";
 import {
+  s2cAssistantMessage,
   s2cContent,
   s2cTokenUsage,
   s2cToolCall,
@@ -22,6 +23,7 @@ import {
   type TokenUsageWireSource,
 } from "./wire-messages.ts";
 import { splitFileIncludes, wrapperContentText } from "@utils/tool-content.ts";
+import { ctxByIndex, parseEntryTs, turnDurationsByIndex } from "@utils/session-turns.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
@@ -63,6 +65,16 @@ export function replayLogSlice(
     }
   }
 
+  // Message-footer meta: each entry's own completion ts, the wall-clock
+  // duration of the v2 turn bracketing it (undefined outside a closed
+  // bracket -- an unknown duration rides no field, the client omits it),
+  // and the ctx usage attested at the message's commit -- the token_usage
+  // record written for that LLM response (undefined when the log has none:
+  // the footer gauge segment is then omitted, never borrowed from a
+  // neighbouring call).
+  const turnDurations = turnDurationsByIndex(entries);
+  const ctxs = ctxByIndex(entries);
+
   for (let i = startIdx; i < entries.length; i++) {
     const e = entries[i]!;
     // Conversation sources only hold text or content parts (see the helper).
@@ -94,7 +106,13 @@ export function replayLogSlice(
         }
         const text = wrapperContentText(content);
         if (text) {
-          send(s2cContent(S2C.ASSISTANT_MESSAGE, sessionId, text));
+          send(
+            s2cAssistantMessage(sessionId, text, {
+              ts: parseEntryTs(e.ts),
+              durationMs: turnDurations[i],
+              ctx: ctxs[i],
+            }),
+          );
         }
         break;
       }
@@ -111,8 +129,12 @@ export function replayLogSlice(
         break;
       }
       case LOG_SOURCE.TOKEN_USAGE: {
-        // Not bookkeeping: one record = one usage bubble, mapped by the same
-        // builder as the live websocket-channel TOKEN_USAGE event.
+        // Not bookkeeping: the record still replays as a TOKEN_USAGE event
+        // (other consumers read the frame, and the webui holds its ctx pair),
+        // mapped by the same builder as the live websocket-channel event.
+        // It renders no bubble of its own: the numbers ride the assistant
+        // footer's ctx segment via the ctx meta on the s2cAssistantMessage
+        // frame it belongs to (ctxByIndex above).
         send(s2cTokenUsage(sessionId, e as unknown as TokenUsageWireSource));
         break;
       }

@@ -752,8 +752,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           return;
         }
 
-        // Token usage snapshot: replayed as an output event so the UI can
-        // show the token bubble on cold-log load and reconnect.
+        // Token usage snapshot: replays as an output event (sidebar gauge,
+        // terminal UI) and feeds the assistant footer's ctx segment on cold
+        // load and reconnect (ctxByIndex in @utils/session-turns.ts).
         if (type === "token_usage") {
           const d = data as {
             sessionPromptTokens?: number;

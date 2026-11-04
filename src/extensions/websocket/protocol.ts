@@ -73,6 +73,10 @@ export const S2C = {
 
   // OUTPUT_EVENT mappings
   USER_MESSAGE: "userMessage",
+  // Replay-only additive fields ride this frame: ts (the log entry's
+  // completion timestamp, epoch ms), durationMs (the bracketing turn's
+  // wall-clock span) and ctx (the token usage attested at the message's
+  // commit) -- see s2cAssistantMessage in wire-messages.ts.
   ASSISTANT_MESSAGE: "assistantMessage",
   THINKING: "thinking",
   TOOL_CALL: "toolCall",

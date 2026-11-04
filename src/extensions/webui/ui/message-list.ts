@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // Per-session message list: renders OUTPUT_EVENTs, incl. streaming markdown.
 
-import { sanitize, resolveQuestionAnswer, formatTokenCount } from "./utils.ts";
+import { sanitize, resolveQuestionAnswer, formatTokenCount, formatClock, formatDuration, copyText } from "./utils.ts";
 import {
   parseMarkdown,
   mdTreeToHtml,
@@ -12,6 +12,7 @@ import {
   type MdDocument,
 } from "@utils/md-parser.ts";
 import { toolContentText, wrapperContentText, splitFileIncludes } from "@utils/tool-content.ts";
+import { ctxByIndex, parseEntryTs, turnDurationsByIndex, type CtxUsage } from "@utils/session-turns.ts";
 import { ToolBlockController } from "./tool-block.tsx";
 import type { DomNode } from "@utils/jsx";
 
@@ -56,7 +57,16 @@ export interface UiImage {
 }
 
 interface UserMessage { content: string; images?: UiImage[]; files?: Array<{ path: string; content: string }>; }
-interface AssistantMessage { content: string; }
+/**
+ * A committed assistant message. The optional footer meta is data the wire
+ * path carries: `ts` (epoch ms, when the message completed), `durationMs`
+ * (the wall-clock duration of the turn that produced it) and `ctx` (the
+ * token usage attested at this message's commit; replay fills it from the
+ * log's token_usage records, live frames leave it off and the client folds
+ * in the live TOKEN_USAGE events it observes). Absent fields are omitted
+ * from the footer, never invented.
+ */
+interface AssistantMessage { content: string; ts?: number; durationMs?: number; ctx?: CtxUsage; }
 interface StreamingChunk { content: string; }
 interface ThinkingMessage { content: string; }
 interface ToolCallMessage { name: string; args: string; argsSummary?: string; toolCallId?: string; }
@@ -68,11 +78,21 @@ interface CommandResultMessage { content: string; }
 // `content` may be raw content parts (harness messages); flatten via wrapperContentText().
 interface LogEntry {
   source: string;
+  /** Entry timestamp (ISO). Legacy entries may lack it -- then no footer. */
+  ts?: string;
   content: string | Array<Record<string, unknown>>;
   images?: UiImage[];
   reasoning_content?: string | null;
   tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> | null;
   tool_call_id?: string | null;
+  /** token_usage records (ctx segment source for the cold-log footer): the
+   *  server forwards raw entries, so the same ctxByIndex derivation the
+   *  websocket replay runs can run here too. Absent on non-usage entries. */
+  totalTokens?: number;
+  contextWindow?: number;
+  cachedTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
 }
 
 interface QuestionOption {
@@ -101,12 +121,21 @@ interface NormalizedQuestion {
 
 interface TaskProgressMessage { taskId: string; status: string; message?: string; }
 
+/**
+ * Live TOKEN_USAGE wire frame. The per-call numbers (prompt is net of cache,
+ * see TokenTracker) plus the gauge pair the server derives additively in
+ * s2cTokenUsage: ctxUsed (the call's totalTokens) / ctxTotal (context
+ * window). The frame no longer renders its own transcript bubble: its data
+ * folds into the footer's ctx segment.
+ */
 interface TokenUsageMessage {
   promptTokens: number;
   cachedTokens: number;
   completionTokens: number;
   totalTokens: number;
   contextWindow?: number;
+  ctxUsed?: number;
+  ctxTotal?: number;
 }
 
 interface CompactionResultMessage { summary?: string; messagesCompacted: number; }
@@ -139,7 +168,15 @@ export interface MessageListManager {
   handleCompactionResult: (data: CompactionResultMessage) => void;
   handleSessionState: (data: SessionStateMessage) => void;
   handleError: (data: ErrorMessage) => void;
-  finalizeAssistant: () => void;
+  /**
+   * Close the in-flight streaming row. Pass `end` when the row committed as
+   * a COMPLETED message (turn end): the footer (timestamp + copy, with the
+   * ctx gauge and duration when known) rides the completion. Quiet closes
+   * (interruption, error) take nothing and render no footer.
+   */
+  finalizeAssistant: (end?: { ts: number; durationMs?: number; ctx?: CtxUsage }) => void;
+  /** Turn boundary from the session's "working" state (live turn clock). */
+  noteWorking: (active: boolean) => void;
   clear: () => void;
   /** Append a system notice (e.g. profile switched). Input must be a trusted display name. */
   addSystemMessage: (text: string) => void;
@@ -168,6 +205,49 @@ export function createMessageList(
   let thinkingParser: StreamingMdParser | null = null;
   let streamingBlockCount = 0;
   let thinkingBlockCount = 0;
+
+  // Raw markdown of the in-flight streaming row: the footer's copy source.
+  // The DOM holds rendered blocks; the copy button must hand out the wire text.
+  let currentAssistantRaw = "";
+
+  // Live turn clock, driven by the session's "working" edges (the live wire's
+  // turn-start/turn-end counterpart). The FIRST report a view sees is baseline
+  // only: attaching mid-turn knows a turn is running but not when it started,
+  // and measuring from the attach would print a duration smaller than the
+  // truth. Only false->true edges after the baseline get clocked; an unclocked
+  // turn end renders no duration segment.
+  let turnStartMs: number | null = null;
+  let workingBaseline = false;
+
+  // Latest ctx usage attested since the current turn opened, folded into
+  // the footer's gauge segment at the next commit. Filled by the TOKEN_USAGE
+  // frames of this turn (the same events the server caches for the sidebar
+  // gauge, and via the same ctxUsed/ctxTotal pair), so the footer echoes the
+  // gauge instead of re-deriving it. Reset on every working edge: usage
+  // observed BEFORE this view started watching a turn (replay burst of a
+  // previous turn, attach mid-turn) must never stamp this turn's footer.
+  let lastTurnCtx: CtxUsage | undefined;
+
+  /**
+   * Turn boundary from the session's "working" state. False finalizes the
+   * in-flight row as a COMPLETED assistant message: the footer (client-clock
+   * timestamp, plus the measured turn duration when this view saw the turn
+   * start, plus the turn's last attested ctx usage) rides that commit, never
+   * a per-delta update.
+   */
+  function noteWorking(active: boolean): void {
+    if (active) {
+      if (workingBaseline && turnStartMs === null) turnStartMs = Date.now();
+      workingBaseline = true;
+      lastTurnCtx = undefined;
+      return;
+    }
+    workingBaseline = true;
+    const durationMs = turnStartMs !== null ? Date.now() - turnStartMs : undefined;
+    turnStartMs = null;
+    finalizeAssistant({ ts: Date.now(), durationMs, ctx: lastTurnCtx });
+    lastTurnCtx = undefined;
+  }
 
   function ensureAssistantEl(): HTMLDivElement {
     if (!currentAssistantEl) {
@@ -302,6 +382,96 @@ export function createMessageList(
     parent.appendChild(wrap);
   }
 
+  // ── Assistant message footer ─────────────────────────────────────────────
+  // Static icon markup (never carries wire data; innerHTML on a constant).
+  const ICON_COPY =
+    '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+    '<rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>' +
+    '<path d="M5 15V6a2 2 0 0 1 2-2h9" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+  const ICON_CHECK =
+    '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+    '<path d="M4 12l5 5L20 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function makeCopyButton(rawMarkdown: string): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "footer-copy";
+    btn.setAttribute("title", "Copy message");
+    btn.setAttribute("aria-label", "Copy message");
+    btn.innerHTML = ICON_COPY;
+    let flashTimer: ReturnType<typeof setTimeout> | null = null;
+    btn.addEventListener("click", () => {
+      void copyText(rawMarkdown).then((ok) => {
+        if (!ok) return; // no fake confirmation: the check rides a real copy
+        if (flashTimer) clearTimeout(flashTimer);
+        btn.classList.add("copied");
+        btn.innerHTML = ICON_CHECK;
+        flashTimer = setTimeout(() => {
+          btn.classList.remove("copied");
+          btn.innerHTML = ICON_COPY;
+          flashTimer = null;
+        }, 1200);
+      });
+    });
+    return btn;
+  }
+
+  /**
+   * Muted meta row under a completed assistant message: finish time, then
+   * the `used/total` ctx segment when THIS render path attests the usage at
+   * this message's commit (cold replay: the log's token_usage record; live:
+   * the TOKEN_USAGE frames observed since the turn opened), then "Worked
+   * for X" when the duration is reliably known (cold replay: the log's turn
+   * markers; live: the observed working-edge span), then the copy button.
+   * Segments render independently -- ts-only, ts+gauge, ts+gauge+duration
+   * are all valid rows. No trustworthy timestamp means no footer at all
+   * (pinned degradation for legacy logs): the row speaks times, so it never
+   * renders without one.
+   */
+  function appendFooterRow(rawMarkdown: string, meta: { ts?: number; durationMs?: number; ctx?: CtxUsage }): void {
+    if (meta.ts === undefined || !Number.isFinite(meta.ts)) return;
+    const row = document.createElement("div");
+    row.className = "message-assistant-footer";
+    const time = document.createElement("span");
+    time.className = "footer-time";
+    time.textContent = formatClock(meta.ts);
+    row.appendChild(time);
+    const ctx = meta.ctx;
+    if (ctx && Number.isFinite(ctx.used) && ctx.used > 0) {
+      const gauge = document.createElement("span");
+      gauge.className = "footer-ctx";
+      gauge.textContent =
+        formatTokenCount(ctx.used)
+        + (ctx.total !== undefined && Number.isFinite(ctx.total) ? "/" + formatTokenCount(ctx.total) : "");
+      // Hover breakdown, same compact house format. The webui tooltip idiom
+      // is the native title attribute (copy button, sidebar rows, tool
+      // headers), which carries multi-line content fine -- no custom tooltip
+      // layer gets invented here. Lines follow the retired token-usage
+      // bubble (cached / prompt / completion / total, prompt net of cache);
+      // an unattested number omits its line rather than printing 0. The
+      // total line echoes the segment's used value: they are one number.
+      // tabIndex lets keyboard focus surface the title like it does on the
+      // focusable copy button; nothing beyond that.
+      const tip: string[] = [];
+      if (ctx.cached !== undefined) tip.push(`cached ${formatTokenCount(ctx.cached)}`);
+      if (ctx.prompt !== undefined) tip.push(`prompt ${formatTokenCount(ctx.prompt)}`);
+      if (ctx.completion !== undefined) tip.push(`completion ${formatTokenCount(ctx.completion)}`);
+      tip.push(`total ${formatTokenCount(ctx.used)}`);
+      gauge.setAttribute("title", tip.join("\n"));
+      gauge.setAttribute("tabindex", "0");
+      row.appendChild(gauge);
+    }
+    if (meta.durationMs !== undefined && Number.isFinite(meta.durationMs) && meta.durationMs >= 0) {
+      const worked = document.createElement("span");
+      worked.className = "footer-worked";
+      worked.textContent = `Worked for ${formatDuration(meta.durationMs)}`;
+      row.appendChild(worked);
+    }
+    row.appendChild(makeCopyButton(rawMarkdown));
+    container.appendChild(row);
+    scrollBottom();
+  }
+
   // ── Message Handlers ──────────────────────────────────────────────────────
   function handleUserMessage({ content, images, files }: UserMessage): void {
     // Close any in-flight assistant/thinking element first in case an interruption occurred;
@@ -338,7 +508,7 @@ export function createMessageList(
     }
   }
 
-  function handleAssistantMessage({ content }: AssistantMessage): void {
+  function handleAssistantMessage({ content, ts, durationMs, ctx }: AssistantMessage): void {
     if (!content?.trim()) return; // skip empty messages (e.g. tool-only turns during replay)
     finalizeAssistant();
     const el = document.createElement("div");
@@ -353,6 +523,9 @@ export function createMessageList(
     el.appendChild(bubble);
 
     container.appendChild(el);
+    // Replay frames carry the log's ts/duration/ctx; frames without a
+    // trustworthy ts (fork replay, legacy) get no footer.
+    appendFooterRow(content, { ts, durationMs, ctx });
     scrollBottom();
   }
 
@@ -360,7 +533,15 @@ export function createMessageList(
     // If we've had tool calls since the last assistant message, start a new
     // assistant element so tool calls appear sequentially before the final text.
     if (hasToolCallsSinceLastAssistant) {
-      finalizeAssistant();
+      // The previous row committed when the model stopped to call tools -- a
+      // completed message (log-replay parity) -- but mid-turn: the turn's
+      // duration is unknowable until it closes, so the footer omits it. The
+      // ctx segment IS attested here when the provider emits usage at all:
+      // agent.ts records the producing call's usage (and emits TOKEN_USAGE)
+      // before dispatching its tool calls, so the held numbers belong to
+      // this very message. If no usage arrived yet this turn, nothing was
+      // attested and the segment stays off.
+      finalizeAssistant({ ts: Date.now(), ctx: lastTurnCtx });
       hasToolCallsSinceLastAssistant = false;
     }
     const el = ensureAssistantEl();
@@ -370,6 +551,7 @@ export function createMessageList(
       streamingParser = createStreamingParser();
     }
 
+    currentAssistantRaw += content;
     dbg("handleStreamingChunk", { chunkLen: content.length, chunkPreview: content.slice(0, 60).replace(/\n/g, "\\n"), prevBlockCount: streamingBlockCount });
     const result = streamingParser.feed(content);
     dbg("handleStreamingChunk after feed", { stableFrom: result.stableFrom, treeBlocks: result.tree.children.length });
@@ -420,6 +602,7 @@ export function createMessageList(
     thinkingParser = null;
     streamingBlockCount = 0;
     thinkingBlockCount = 0;
+    currentAssistantRaw = "";
   }
 
   function handleThinking({ content }: ThinkingMessage): void {
@@ -431,7 +614,13 @@ export function createMessageList(
   function handleToolCall({ name, args, argsSummary, toolCallId }: ToolCallMessage): void {
     // Finalize the current assistant message so tool calls appear as
     // separate blocks after the user message, not nested inside the assistant.
-    finalizeAssistant();
+    // A text row closed here is a completed message (the model answered, then
+    // reached for tools -- the log stores it as one llm entry), so it gets a
+    // footer; the turn's duration segment is omitted mid-turn (unknown yet),
+    // while the ctx segment rides the producing call's held usage (the
+    // TOKEN_USAGE frame precedes this frame in the same ordered sink; see
+    // the boundary-commit note in handleStreamingChunk).
+    finalizeAssistant({ ts: Date.now(), ctx: lastTurnCtx });
 
     const host = document.createElement("div");
     container.appendChild(host);
@@ -497,7 +686,10 @@ export function createMessageList(
   }
 
   function handleQuestion({ questions }: QuestionMessage): void {
-    finalizeAssistant();
+    // A streamed row cut by a question did complete (the assistant reached its
+    // tool call); footer with ts and the held ctx usage, no duration (turn
+    // still open). Same ordered-sink attestation as the tool-call boundary.
+    finalizeAssistant({ ts: Date.now(), ctx: lastTurnCtx });
     const el = document.createElement("div");
     el.className = "message question";
 
@@ -707,24 +899,33 @@ export function createMessageList(
     scrollBottom();
   }
 
+  /**
+   * Live TOKEN_USAGE frame: the transcript bubble is retired -- its numbers
+   * fold into the footer's ctx segment. The frame instead refreshes the
+   * held gauge pair (ctxUsed/ctxTotal, pre-derived server-side exactly like
+   * the sidebar's cached numbers) plus the per-call breakdown for the
+   * hover tooltip, for whatever commit lands next this turn (turn end, tool
+   * boundary, question). The event itself keeps flowing untouched: session
+   * log, session index, sidebar cache and the terminal UI all still read it.
+   * A frame that attests no usable used-number refreshes nothing: the last
+   * honest value held this turn stays.
+   */
   function handleTokenUsage({
-    promptTokens,
+    ctxUsed,
+    ctxTotal,
     cachedTokens,
+    promptTokens,
     completionTokens,
-    totalTokens,
-    contextWindow,
   }: TokenUsageMessage): void {
-    const el = document.createElement("div");
-    el.className = "message token-usage";
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    const denom = typeof contextWindow === "number" && Number.isFinite(contextWindow)
-      ? "/" + formatTokenCount(contextWindow)
-      : "";
-    bubble.textContent = `(tokens cached: ${formatTokenCount(cachedTokens)} prompt:${formatTokenCount(promptTokens)} completion:${formatTokenCount(completionTokens)} total:${formatTokenCount(totalTokens)}${denom})`;
-    el.appendChild(bubble);
-    container.appendChild(el);
-    scrollBottom();
+    if (typeof ctxUsed !== "number" || !Number.isFinite(ctxUsed) || ctxUsed <= 0) return;
+    const ctx: CtxUsage = { used: ctxUsed };
+    if (typeof ctxTotal === "number" && Number.isFinite(ctxTotal) && ctxTotal > 0) ctx.total = ctxTotal;
+    // Breakdown numbers: 0 is an attested value (nothing cached), so only
+    // missing/non-finite fields drop their tooltip line.
+    if (typeof cachedTokens === "number" && Number.isFinite(cachedTokens)) ctx.cached = cachedTokens;
+    if (typeof promptTokens === "number" && Number.isFinite(promptTokens)) ctx.prompt = promptTokens;
+    if (typeof completionTokens === "number" && Number.isFinite(completionTokens)) ctx.completion = completionTokens;
+    lastTurnCtx = ctx;
   }
 
   function handleCompactionResult({ summary, messagesCompacted }: CompactionResultMessage): void {
@@ -765,7 +966,7 @@ export function createMessageList(
     scrollBottom();
   }
 
-  function finalizeAssistant(): void {
+  function finalizeAssistant(end?: { ts: number; durationMs?: number; ctx?: CtxUsage }): void {
     dbg("finalizeAssistant", { hadAssistant: !!currentAssistantEl, streamingBlockCount, thinkingBlockCount });
     if (currentAssistantEl) {
       // Drop empty assistant elements (e.g. tool-only turns).
@@ -775,6 +976,9 @@ export function createMessageList(
         currentAssistantEl.remove();
       } else {
         currentAssistantEl.classList.remove("streaming");
+        // A completed commit (turn end / tool boundary): footer row with the
+        // client-clock finish time; the duration segment only when known.
+        appendFooterRow(currentAssistantRaw, end ?? {});
       }
       currentAssistantEl = null;
     }
@@ -787,6 +991,7 @@ export function createMessageList(
     thinkingParser = null;
     streamingBlockCount = 0;
     thinkingBlockCount = 0;
+    currentAssistantRaw = "";
   }
 
   // Auto-scroll follow state: the view stays pinned to the bottom unless the
@@ -829,6 +1034,10 @@ export function createMessageList(
     thinkingParser = null;
     streamingBlockCount = 0;
     thinkingBlockCount = 0;
+    currentAssistantRaw = "";
+    turnStartMs = null;
+    workingBaseline = false;
+    lastTurnCtx = undefined;
   }
 
   /** Best-effort tool name from a tool_result entry: stored part, then JSON "name", then "tool: ..." prefix. */
@@ -861,7 +1070,17 @@ export function createMessageList(
    * Used for viewing cold session logs in read-only mode.
    */
   function renderLogEntries(entries: LogEntry[]): void {
-    for (const entry of entries) {
+    // Footer data for the replay path: each entry's own ts is its completion
+    // time, the v2 turn markers bracket each turn's wall-clock duration
+    // (turnDurationsByIndex yields undefined -- segment omitted -- for v1
+    // logs without markers and for turns still open at log end), and each
+    // llm entry's commit ctx comes from the token_usage record written for
+    // that response (ctxByIndex, the sibling derivation: undefined for logs
+    // predating usage records or calls whose provider kept usage private).
+    const turnDurations = turnDurationsByIndex(entries);
+    const ctxs = ctxByIndex(entries);
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i]!;
       // content may be raw parts (harness messages); flatten once per entry.
       const isTool = entry.source === "tool_result";
       const content =
@@ -902,7 +1121,12 @@ export function createMessageList(
             }
           }
           if (content.trim()) {
-            handleAssistantMessage({ content });
+            handleAssistantMessage({
+              content,
+              ts: parseEntryTs(entry.ts),
+              durationMs: turnDurations[i],
+              ctx: ctxs[i],
+            });
           }
           break;
         }
@@ -964,6 +1188,7 @@ export function createMessageList(
     handleSessionState,
     handleError,
     finalizeAssistant,
+    noteWorking,
     clear,
     addSystemMessage,
     handleSystemMessage,

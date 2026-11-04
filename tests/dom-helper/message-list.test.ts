@@ -3,7 +3,7 @@
 // tests/dom-helper (installed as a preload via bunfig.toml).
 // Spreading querySelectorAll()/children results needs dom.iterable.
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { createMessageList, type MessageListManager } from "@extensions/webui/ui/message-list.ts";
 
 let container: HTMLElement;
@@ -322,13 +322,16 @@ describe("tool calls and results", () => {
 });
 
 describe("misc message kinds", () => {
-  it("compacting, command result, token usage, compaction result, system", () => {
+  it("compacting, command result, token usage (silent), compaction result, system", () => {
     ml.handleCompacting({ message: "summarizing" });
     expect(texts(".message.compacting .bubble")[0]).toContain("summarizing");
     ml.handleCommandResult({ content: "ok: 3 files" });
     expect(container.querySelector(".message.command-result .content")!.textContent).toBe("ok: 3 files");
-    ml.handleTokenUsage({ promptTokens: 10, cachedTokens: 2, completionTokens: 5, totalTokens: 15 });
-    expect(texts(".token-usage .bubble")[0]).toContain("total:15");
+    // The legacy token-usage bubble is retired: the frame adds NOTHING to
+    // the transcript (its numbers fold into the next footer's ctx segment).
+    ml.handleTokenUsage({ promptTokens: 10, cachedTokens: 2, completionTokens: 5, totalTokens: 15, ctxUsed: 15 });
+    expect(container.querySelector(".token-usage")).toBeNull();
+    expect(container.querySelectorAll(".message")).toHaveLength(2);
     ml.handleCompactionResult({ summary: "s", messagesCompacted: 4 });
     expect(texts(".compaction-result .bubble")[0]).toContain("Compacted 4 messages");
     ml.addSystemMessage("coder");
@@ -346,26 +349,6 @@ describe("misc message kinds", () => {
     ml.handleError({ message: "kaboom" });
     expect(texts(".message.error .content")[0]).toBe("Error: kaboom");
     expect(container.querySelector(".message.assistant.streaming")).toBeNull();
-  });
-
-  it("renders token usage with k-notation and a /contextWindow denominator", () => {
-    ml.handleTokenUsage({
-      promptTokens: 1959,
-      cachedTokens: 148453,
-      completionTokens: 2869,
-      totalTokens: 153281,
-      contextWindow: 200000,
-    });
-    expect(texts(".token-usage .bubble")[0]).toBe(
-      "(tokens cached: 148k prompt:2k completion:2.9k total:153k/200k)",
-    );
-  });
-
-  it("token usage without contextWindow renders total with no denominator", () => {
-    ml.handleTokenUsage({ promptTokens: 950, cachedTokens: 2, completionTokens: 5, totalTokens: 957 });
-    expect(texts(".token-usage .bubble")[0]).toBe(
-      "(tokens cached: 2 prompt:950 completion:5 total:957)",
-    );
   });
 
   it("task progress updates in place per task id", () => {
@@ -657,5 +640,414 @@ describe("images in messages", () => {
       { source: "tool_result", tool_name: "read", content: "Image: x.png", images: [{ mimeType: "image/png", data: PNG_B64 }] },
     ] as any);
     expect(container.querySelector("img")!.getAttribute("src")).toBe(`data:image/png;base64,${PNG_B64}`);
+  });
+});
+
+// ── Assistant message footer ────────────────────────────────────────────────
+
+/** Local-wall-clock ts: formatClock renders local time, so build the Date
+ *  from local components instead of an ISO string. */
+function localTs(y: number, mo: number, d: number, h: number, mi: number): number {
+  return new Date(y, mo - 1, d, h, mi, 0, 0).getTime();
+}
+
+describe("assistant message footer", () => {
+  it("renders a muted meta row with timestamp + copy button under a completed assistant message", () => {
+    ml.handleAssistantMessage({ content: "all done", ts: localTs(2026, 5, 4, 1, 35) });
+    const footer = container.querySelector(".message-assistant-footer")!;
+    expect(footer.querySelector(".footer-time")!.textContent).toBe("1:35 AM");
+    const btn = footer.querySelector(".footer-copy")!;
+    expect(btn.getAttribute("title")).toBe("Copy message");
+    expect(btn.querySelector("svg")).not.toBeNull();
+    // No turn data on this frame: the worked segment is omitted, never invented.
+    expect(footer.querySelector(".footer-worked")).toBeNull();
+    // The footer is its own row after the message, not part of the bubble.
+    expect(container.querySelector(".message.assistant .footer-copy")).toBeNull();
+  });
+
+  it("user messages, tool results and system notices never get a footer", () => {
+    ml.handleUserMessage({ content: "hi" });
+    ml.handleCommandResult({ content: "cmd out" });
+    ml.handleSystemMessage({ content: "note" });
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+  });
+
+  it("midnight and noon format as 12 AM / 12 PM", () => {
+    ml.handleAssistantMessage({ content: "a", ts: localTs(2026, 1, 1, 0, 5) });
+    ml.handleAssistantMessage({ content: "b", ts: localTs(2026, 1, 1, 12, 0) });
+    const times = [...container.querySelectorAll(".footer-time")].map((e) => e.textContent);
+    expect(times).toEqual(["12:05 AM", "12:00 PM"]);
+  });
+
+  it("long durations pad the worked segment to h/m/s", () => {
+    ml.handleAssistantMessage({ content: "a", ts: localTs(2026, 5, 4, 3, 0), durationMs: 3_909_000 });
+    ml.handleAssistantMessage({ content: "b", ts: localTs(2026, 5, 4, 3, 1), durationMs: 61_000 });
+    ml.handleAssistantMessage({ content: "c", ts: localTs(2026, 5, 4, 3, 2), durationMs: 900 });
+    const worked = [...container.querySelectorAll(".footer-worked")].map((e) => e.textContent);
+    expect(worked).toEqual(["Worked for 1h 05m 09s", "Worked for 1m 01s", "Worked for 1s"]);
+  });
+
+  it("copy click writes the RAW markdown to the clipboard and flashes the confirmed state", async () => {
+    const copied: string[] = [];
+    const prev = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        clipboard: {
+          writeText: async (t: string) => {
+            copied.push(t);
+          },
+        },
+      },
+      configurable: true,
+    });
+    try {
+      const raw = "# keep **me** raw\n\n<html-looking text> stays verbatim";
+      ml.handleAssistantMessage({ content: raw, ts: localTs(2026, 5, 4, 9, 0) });
+      const btn = container.querySelector(".footer-copy") as HTMLElement;
+      btn.click();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(copied).toEqual([raw]);
+      expect(btn.classList.contains("copied")).toBe(true);
+    } finally {
+      if (prev) Object.defineProperty(globalThis, "navigator", prev);
+      else delete (globalThis as Record<string, unknown>).navigator;
+    }
+  });
+
+  it("in-flight row shows no footer; turn end completes it with timestamp + measured duration", () => {
+    let fakeNow = localTs(2026, 5, 4, 13, 5); // 1:05 PM
+    const nowSpy = spyOn(Date, "now").mockImplementation(() => fakeNow);
+    try {
+      // Attach reports idle first (the baseline); only edges after it clock.
+      ml.noteWorking(false);
+      ml.noteWorking(true); // observed idle->working edge starts the clock
+      ml.handleStreamingChunk({ content: "work" });
+      ml.handleToolCall({ name: "bash", args: "{}" });
+      // The mid-turn row committed (log-replay parity), but the turn duration
+      // is unknowable while the turn runs: no worked segment yet.
+      const midFooters = container.querySelectorAll(".message-assistant-footer");
+      expect(midFooters).toHaveLength(1);
+      expect(midFooters[0]!.querySelector(".footer-worked")).toBeNull();
+      expect(midFooters[0]!.querySelector(".footer-time")!.textContent).toBe("1:05 PM");
+
+      ml.handleStreamingChunk({ content: "done" });
+      // In flight again: no new footer while chunks flow.
+      expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(1);
+
+      fakeNow = localTs(2026, 5, 4, 13, 21) + 21_000; // +16m21s from 1:05 PM
+      ml.noteWorking(false);
+      const footers = container.querySelectorAll(".message-assistant-footer");
+      expect(footers).toHaveLength(2);
+      expect(footers[1]!.querySelector(".footer-time")!.textContent).toBe("1:21 PM");
+      expect(footers[1]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 16m 21s");
+      // The completed row is no longer marked streaming, and the copy button
+      // hands out this row's raw text only.
+      const rows = container.querySelectorAll(".message.assistant");
+      expect(rows[rows.length - 1]!.classList.contains("streaming")).toBe(false);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("turn end without an observed start (attach baseline) omits the duration segment", () => {
+    let fakeNow = localTs(2026, 5, 4, 9, 0);
+    const nowSpy = spyOn(Date, "now").mockImplementation(() => fakeNow);
+    try {
+      // A view attaching mid-turn gets the working state BEFORE any edge it
+      // could clock: the real start is unknown, so no duration is printed.
+      ml.noteWorking(true);
+      ml.handleStreamingChunk({ content: "partial" });
+      fakeNow += 5000;
+      ml.noteWorking(false);
+      const footer = container.querySelector(".message-assistant-footer")!;
+      expect(footer.querySelector(".footer-time")!.textContent).toBe("9:00 AM");
+      expect(footer.querySelector(".footer-worked")).toBeNull();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("an interrupted row (next user message / error) commits WITHOUT a footer", () => {
+    ml.handleStreamingChunk({ content: "cut short" });
+    ml.handleUserMessage({ content: "new thought" });
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+    ml.handleStreamingChunk({ content: "then failed" });
+    ml.handleError({ message: "boom" });
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+  });
+});
+
+describe("assistant message footer (cold-log replay)", () => {
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const entry = (over: Record<string, unknown>) => over;
+
+  it("renders footers from entry timestamps and turn-marker durations", () => {
+    const t0 = localTs(2026, 5, 4, 1, 5);
+    const t1 = t0 + (16 * 60 + 21) * 1000;
+    ml.renderLogEntries([
+      entry({ source: "turn_started", ts: iso(t0), content: { kind: "input" } }),
+      entry({ source: "input", ts: iso(t0 + 10), content: "go" }),
+      entry({ source: "llm", ts: iso(t1), content: "done" }),
+      entry({ source: "turn_end", ts: iso(t1 + 250), content: { status: "completed" } }),
+    ] as any);
+    // Only the assistant message gets a footer (user / markers do not).
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(1);
+    expect(footers[0]!.querySelector(".footer-time")!.textContent).toBe("1:21 AM");
+    expect(footers[0]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 16m 21s");
+  });
+
+  it("timestamp-less legacy entries render NO footer at all (pinned degradation)", () => {
+    ml.renderLogEntries([
+      entry({ source: "input", content: "old question" }),
+      entry({ source: "llm", content: "old answer" }),
+    ] as any);
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+    // The message itself still renders -- the omission is only the meta row.
+    expect(container.querySelector(".message.assistant .content")!.textContent).toContain("old answer");
+  });
+
+  it("a corrupt ts degrades like no ts", () => {
+    ml.renderLogEntries([entry({ source: "llm", ts: "not-a-date", content: "x" })] as any);
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+  });
+
+  it("ts without turn markers gives timestamp-only; an open turn likewise drops the duration", () => {
+    const t0 = localTs(2026, 5, 4, 1, 0);
+    ml.renderLogEntries([
+      entry({ source: "llm", ts: iso(t0), content: "v1 style" }),
+      entry({ source: "turn_started", ts: iso(t0 + 1000), content: { kind: "input" } }),
+      entry({ source: "llm", ts: iso(t0 + 2000), content: "crash before turn_end" }),
+    ] as any);
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(2);
+    expect(footers[0]!.querySelector(".footer-time")!.textContent).toBe("1:00 AM");
+    expect(footers[0]!.querySelector(".footer-worked")).toBeNull();
+    expect(footers[1]!.querySelector(".footer-time")!.textContent).toBe("1:00 AM");
+    expect(footers[1]!.querySelector(".footer-worked")).toBeNull();
+  });
+});
+
+// ── Footer ctx gauge segment + hover breakdown ──────────────────────────────
+// The legacy token-usage bubble is gone; its numbers ride the footer as a
+// `used/total` segment (the exact pair the sidebar gauge shows) with the
+// per-call breakdown on hover. Segments are honest per render path: absent
+// data omits the segment, and an unattested tooltip line drops its line.
+
+describe("assistant footer ctx segment (live path)", () => {
+  /** TOKEN_USAGE frame shaped like s2cTokenUsage emits (ctx pair included). */
+  function frame(over: Record<string, unknown> = {}) {
+    return {
+      promptTokens: 26112,
+      cachedTokens: 98304,
+      completionTokens: 1408,
+      totalTokens: 125824,
+      contextWindow: 262144,
+      ctxUsed: 125824,
+      ctxTotal: 262144,
+      ...over,
+    };
+  }
+
+  /** Drive one streamed turn with an optional usage frame; return its footer. */
+  function liveTurn(withUsage: boolean): Element {
+    ml.noteWorking(false); // baseline
+    ml.noteWorking(true); // observed edge clocks the turn
+    ml.handleStreamingChunk({ content: "answer" });
+    if (withUsage) ml.handleTokenUsage(frame() as never);
+    ml.noteWorking(false);
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    return footers[footers.length - 1]!;
+  }
+
+  it("full line order: ts, gauge, worked, copy button", () => {
+    const before = localTs(2026, 5, 4, 20, 52); // 8:52 PM
+    const nowSpy = spyOn(Date, "now").mockImplementation(() => before);
+    try {
+      const footer = liveTurn(true);
+      expect([...footer.children].map((c) => c.className)).toEqual([
+        "footer-time",
+        "footer-ctx",
+        "footer-worked",
+        "footer-copy",
+      ]);
+      expect(footer.querySelector(".footer-time")!.textContent).toBe("8:52 PM");
+      expect(footer.querySelector(".footer-ctx")!.textContent).toBe("126k/262k");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("hover tooltip carries the full breakdown in compact house format", () => {
+    liveTurn(true);
+    const gauge = container.querySelector(".footer-ctx")!;
+    expect(gauge.getAttribute("title")).toBe(
+      "cached 98k\nprompt 26k\ncompletion 1.4k\ntotal 126k",
+    );
+    // Focusable so keyboard focus surfaces the title like the copy button.
+    expect(gauge.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("no usage frame this turn: ts + worked render, the gauge does not", () => {
+    const footer = liveTurn(false);
+    expect(footer.querySelector(".footer-time")).not.toBeNull();
+    expect(footer.querySelector(".footer-worked")).not.toBeNull();
+    // No gauge span means nothing hoverable exists either.
+    expect(footer.querySelector(".footer-ctx")).toBeNull();
+  });
+
+  it("a frame without the ctx pair attests nothing: no gauge", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "answer" });
+    // Legacy-shaped frame (pre-ctx-pair server): totalTokens alone does not
+    // stamp a gauge -- the footer echoes the ctx pair, it re-derives nothing.
+    ml.handleTokenUsage({ promptTokens: 950, cachedTokens: 2, completionTokens: 5, totalTokens: 957 });
+    ml.noteWorking(false);
+    expect(container.querySelector(".footer-ctx")).toBeNull();
+    expect(container.querySelector(".token-usage")).toBeNull();
+  });
+
+  it("used without an attested window renders the bare number, no denominator", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "answer" });
+    ml.handleTokenUsage(frame({ ctxTotal: undefined }) as never);
+    ml.noteWorking(false);
+    expect(container.querySelector(".footer-ctx")!.textContent).toBe("126k");
+  });
+
+  it("a prior turn's gauge never leaks into the next turn", () => {
+    liveTurn(true); // turn 1 attests usage
+    // Turn 2 produces no usage: the segment is this turn's or nothing.
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "again" });
+    ml.noteWorking(false);
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(2);
+    expect(footers[0]!.querySelector(".footer-ctx")).not.toBeNull();
+    expect(footers[1]!.querySelector(".footer-ctx")).toBeNull();
+  });
+
+  it("tool-boundary commit carries the gauge (usage precedes the tool frame in the sink)", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "let me check" });
+    ml.handleTokenUsage(frame() as never);
+    ml.handleToolCall({ name: "bash", args: "{}" });
+    // Mid-turn row: duration stays omitted (turn open), ctx is attested.
+    const footer = container.querySelector(".message-assistant-footer")!;
+    expect(footer.querySelector(".footer-ctx")!.textContent).toBe("126k/262k");
+    expect(footer.querySelector(".footer-worked")).toBeNull();
+  });
+
+  it("question-boundary commit carries the gauge too", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "one question" });
+    ml.handleTokenUsage(frame() as never);
+    ml.handleQuestion({ questions: [{ prompt: "which?" }] });
+    const footer = container.querySelector(".message-assistant-footer")!;
+    expect(footer.querySelector(".footer-ctx")!.textContent).toBe("126k/262k");
+    expect(footer.querySelector(".footer-worked")).toBeNull();
+  });
+});
+
+describe("assistant footer ctx segment (cold-log replay)", () => {
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const t0 = localTs(2026, 5, 4, 1, 5);
+
+  it("gauge + tooltip derive from the token_usage record at the message's position", () => {
+    ml.renderLogEntries([
+      { source: "turn_started", ts: iso(t0), content: { kind: "input" } },
+      { source: "input", ts: iso(t0 + 10), content: "go" },
+      { source: "llm", ts: iso(t0 + 981_200), content: "done" },
+      {
+        source: "token_usage",
+        ts: iso(t0 + 981_210),
+        content: "",
+        totalTokens: 125824,
+        contextWindow: 262144,
+        cachedTokens: 98304,
+        promptTokens: 26112,
+        completionTokens: 1408,
+      },
+      { source: "turn_end", ts: iso(t0 + 981_450), content: { status: "completed" } },
+    ] as never);
+    // The usage record renders NO transcript node of its own; the record's
+    // data lands on the message footer (and stays in the log for every
+    // other consumer: session index, resume gauge, replay frames).
+    expect(container.querySelector(".token-usage")).toBeNull();
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(1);
+    expect([...footers[0]!.children].map((c) => c.className)).toEqual([
+      "footer-time",
+      "footer-ctx",
+      "footer-worked",
+      "footer-copy",
+    ]);
+    expect(footers[0]!.querySelector(".footer-ctx")!.textContent).toBe("126k/262k");
+    expect(footers[0]!.querySelector(".footer-ctx")!.getAttribute("title")).toBe(
+      "cached 98k\nprompt 26k\ncompletion 1.4k\ntotal 126k",
+    );
+    expect(footers[0]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 16m 21s");
+  });
+
+  it("logs predating usage records render ts+worked but no gauge (pinned omission)", () => {
+    ml.renderLogEntries([
+      { source: "turn_started", ts: iso(t0), content: { kind: "input" } },
+      { source: "llm", ts: iso(t0 + 5000), content: "old style" },
+      { source: "turn_end", ts: iso(t0 + 9000), content: { status: "completed" } },
+    ] as never);
+    const footer = container.querySelector(".message-assistant-footer")!;
+    expect(footer.querySelector(".footer-worked")).not.toBeNull();
+    expect(footer.querySelector(".footer-ctx")).toBeNull();
+  });
+
+  it("a record attributes to its own llm entry only", () => {
+    ml.renderLogEntries([
+      {
+        source: "llm",
+        ts: iso(t0),
+        content: "first",
+      },
+      { source: "token_usage", ts: iso(t0 + 5), content: "", totalTokens: 960 },
+      { source: "llm", ts: iso(t0 + 60_000), content: "second" },
+    ] as never);
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(2);
+    // The record follows (and belongs to) the first response; the second
+    // response has no record of its own, so it borrows nothing.
+    expect(footers[0]!.querySelector(".footer-ctx")!.textContent).toBe("960");
+    expect(footers[1]!.querySelector(".footer-ctx")).toBeNull();
+  });
+
+  it("partial breakdown omits the missing tooltip lines, never zeros them", () => {
+    ml.renderLogEntries([
+      { source: "llm", ts: iso(t0), content: "done" },
+      { source: "token_usage", ts: iso(t0 + 5), content: "", totalTokens: 960, contextWindow: 200000 },
+    ] as never);
+    const gauge = container.querySelector(".footer-ctx")!;
+    expect(gauge.textContent).toBe("960/200k");
+    // Record carries no cached/prompt/completion fields: total is all it
+    // attests, so the tooltip says exactly that.
+    expect(gauge.getAttribute("title")).toBe("total 960");
+  });
+
+  it("a zero attested on the wire keeps its tooltip line (0 is a number, not an absence)", () => {
+    ml.renderLogEntries([
+      { source: "llm", ts: iso(t0), content: "done" },
+      { source: "token_usage", ts: iso(t0 + 5), content: "", totalTokens: 960, cachedTokens: 0, completionTokens: 0 },
+    ] as never);
+    const gauge = container.querySelector(".footer-ctx")!;
+    expect(gauge.getAttribute("title")).toBe("cached 0\ncompletion 0\ntotal 960");
+  });
+
+  it("legacy entries without ts still get NO footer even when usage exists", () => {
+    ml.renderLogEntries([
+      { source: "llm", content: "undated answer" },
+      { source: "token_usage", content: "", totalTokens: 1200 },
+    ] as never);
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
   });
 });

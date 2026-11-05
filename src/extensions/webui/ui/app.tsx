@@ -788,6 +788,7 @@ function startChat(): void {
     chat.taskControlAtom,
     chat.sttEnabledAtom,
     chat.toolExecAtom,
+    chat.hideThinkingAtom,
     sttPhaseAtom,
   ]);
   const stopActivitySync = chat.activityVersionAtom.effect(flushActivityViews);
@@ -1248,6 +1249,9 @@ function App() {
   // Tool-exec plane posture: "worker (fence: bwrap | seatbelt | off | none --
   // probe failed)" / "inline (unfenced)", plus anything carrying [degraded: ...].
   const toolExec = chat?.toolExecAtom() ?? "";
+  // Reasoning visibility of THIS browser (localStorage; survives reload, applies
+  // to live transcripts and browsed cold logs alike).
+  const hideThinking = chat?.hideThinkingAtom() ?? false;
   // The strip becomes a control exactly when the ATTACHED live session shows
   // a worker-plane fence; inline/degraded postures and log view stay inert.
   const fenceClickable =
@@ -1337,6 +1341,20 @@ function App() {
               </span>
             ) : null}
             <span className="header-status-group">
+              {/* Reasoning visibility chip: a per-browser view toggle (chat
+                  toggleHideThinking -> localStorage + a sweep of every thinking
+                  block). Always clickable -- including in log view, where it is
+                  the only way to hide a cold log's reasoning. */}
+              <button
+                type="button"
+                id="thinking-toggle"
+                title={
+                  "Show or hide reasoning in this browser (view setting only: it does not change the CLI's /thinking session state, and it applies to the log being browsed too)"
+                }
+                onClick={() => chat?.toggleHideThinking()}
+              >
+                reasoning {hideThinking ? "hidden" : "shown"}
+              </button>
               {toolExec ? (
                 <span
                   id="tool-exec-status"

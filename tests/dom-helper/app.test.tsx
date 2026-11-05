@@ -23,6 +23,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { FakeWebSocket } from "./index.ts";
 import { DRAFT_STORAGE_KEY } from "@extensions/webui/ui/draft.ts";
 import { ATTACHMENTS_STORAGE_KEY } from "@extensions/webui/ui/attachment-store.ts";
+import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts";
 
 const SID = "s-ui-0001";
 const L1 = "l-ui-0001";
@@ -1838,6 +1839,104 @@ describe("client plug on live cards", () => {
 
   afterAll(async () => {
     await fireSessions([lvSessionRow]); // restore the fixture list for later consumers
+  });
+});
+
+// ── Header reasoning-visibility chip (per-browser view preference) ──────────
+// The chip sits immediately LEFT of the tool-exec chip and drives
+// chat.toggleHideThinking: the value lands in the shared `store` localStorage
+// stub and message-list sweeps every .thinking-block (committed + in-flight).
+// It is a VIEW setting: nothing goes out on the wire, and the server's
+// sessionState(hideThinking) (a CLI /thinking toggle) must not repaint it.
+// Stays attached to LV_SID -- the suites after this one key their sidebar rows
+// off "LV_SID is the attached session".
+
+describe("header reasoning-visibility chip", () => {
+  async function attachWithChip(): Promise<void> {
+    ws.fireMessage({
+      type: "sessionCreated",
+      sessionId: LV_SID,
+      profile: "manager",
+      title: null,
+      currentModel: "m1",
+      models: ["m1"],
+      toolExec: "worker (fence: probe)",
+    });
+    ws.fireMessage({ type: "sessionState", sessionId: LV_SID, key: "cursor", value: 4 });
+    lvSidebarReplies();
+    await tick();
+  }
+
+  const hiddenFlags = (): boolean[] => els(".thinking-block").map((b) => b.classList.contains("hidden"));
+
+  it("renders left of the tool-exec chip, states its state, and explains itself", async () => {
+    await attachWithChip();
+    const chip = el("#thinking-toggle");
+    expect(chip.localName).toBe("button");
+    expect(chip.textContent).toBe("reasoning shown");
+    expect(chip.getAttribute("title")).toContain("view setting only");
+    expect(chip.getAttribute("title")).toContain("/thinking");
+    const group = els(".header-status-group");
+    expect(group).toHaveLength(1);
+    expect(group[0]!.children[0]!.getAttribute("id")).toBe("thinking-toggle");
+    expect(group[0]!.children[1]!.getAttribute("id")).toBe("tool-exec-status");
+  });
+
+  it("click sweeps committed AND in-flight blocks, persists, and sends nothing", async () => {
+    await attachWithChip();
+    // One committed block (closed by the assistant row) and one still in flight.
+    ws.fireMessage({ type: "thinking", content: "old thought" });
+    ws.fireMessage({ type: "assistantMessage", content: "committed answer" });
+    ws.fireMessage({ type: "thinking", content: "live thought" });
+    await tick();
+    expect(hiddenFlags()).toEqual([false, false]);
+
+    const before = ws.sent.length;
+    el("#thinking-toggle").click();
+    await tick();
+    expect(hiddenFlags()).toEqual([true, true]);
+    expect(el("#thinking-toggle").textContent).toBe("reasoning hidden");
+    expect(store.get(HIDE_THINKING_STORAGE_KEY)).toBe("1");
+
+    el("#thinking-toggle").click();
+    await tick();
+    expect(hiddenFlags()).toEqual([false, false]);
+    expect(el("#thinking-toggle").textContent).toBe("reasoning shown");
+    expect(store.get(HIDE_THINKING_STORAGE_KEY)).toBe("0");
+    expect(ws.sent.length).toBe(before); // a view toggle never touches the wire
+  });
+
+  it("the server's sessionState(hideThinking) leaves this browser alone", async () => {
+    await attachWithChip();
+    ws.fireMessage({ type: "thinking", content: "the cli cannot hide me" });
+    await tick();
+    ws.fireMessage({ type: "sessionState", sessionId: LV_SID, key: "hideThinking", value: true });
+    await tick();
+    expect(hiddenFlags()).toEqual([false]);
+    expect(el("#thinking-toggle").textContent).toBe("reasoning shown");
+  });
+
+  it("stays clickable in log view and sweeps the cold log's reasoning", async () => {
+    await attachWithChip();
+    ws.fireMessage({
+      type: "logViewed",
+      logId: LV_L1,
+      entries: [{ source: "llm", content: "frozen answer", reasoning_content: "buried thought" }],
+    });
+    await tick();
+    expect(el("#log-view-label")).toBeTruthy();
+    expect(hiddenFlags()).toEqual([false]);
+
+    el("#thinking-toggle").click(); // always clickable -- log view is the point
+    await tick();
+    expect(hiddenFlags()).toEqual([true]);
+    expect(el("#thinking-toggle").textContent).toBe("reasoning hidden");
+
+    // Leave cleanly for the suites that follow.
+    el("#thinking-toggle").click();
+    el("#close-log-view-btn").click();
+    await tick();
+    expect(el("#log-view-label")).toBeFalsy();
   });
 });
 

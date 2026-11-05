@@ -5,6 +5,7 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { createChat, type ChatController } from "@extensions/webui/ui/chat.ts";
+import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts";
 import { FakeWebSocket, useFakeWebSocket } from "../dom-helper/index.ts";
 
 type Sent = Record<string, unknown>;
@@ -494,5 +495,127 @@ describe("outbound commands", () => {
     const { ws, chat } = makeChat();
     ws.fireMessage({ type: "sessionCreated", sessionId: "s1", profile: "role-a" });
     expect(chat.getCurrentProfile()).toBe("role-a");
+  });
+});
+
+// ── Reasoning visibility: the per-browser preference drives the list ─────────
+// Owner ruling 2026-11-05. chat.ts seeds the message list from localStorage
+// (thinking-pref.ts) and the header chip's toggle sweeps every thinking block;
+// the SERVER's sessionState(key:"hideThinking") is dropped on purpose -- a CLI
+// /thinking toggle must not repaint this browser. The message-list engine
+// itself is unchanged (see the pins in message-list.test.ts), and the CLI's
+// own "Thinking display: ..." notice rides the commandResult path untouched.
+
+describe("reasoning visibility preference (chat driver)", () => {
+  const win = window as unknown as Record<string, unknown>;
+  const prevLocalStorage = win.localStorage;
+
+  /** Map-backed window.localStorage; chat reads it once, at createChat. */
+  function storageWith(entries: Record<string, string> = {}): Map<string, string> {
+    const map = new Map<string, string>(Object.entries(entries));
+    win.localStorage = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, String(v)),
+      removeItem: (k: string) => void map.delete(k),
+    };
+    return map;
+  }
+
+  /** Private-mode Safari / blocked origin: even the property access throws. */
+  function storageThatThrows(): void {
+    Object.defineProperty(win, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("SecurityError: localStorage access denied");
+      },
+    });
+  }
+
+  afterEach(() => {
+    delete win.localStorage; // also drops a defineProperty getter
+    if (prevLocalStorage !== undefined) win.localStorage = prevLocalStorage;
+  });
+
+  /** Attach, then one committed thinking block plus one still in flight. */
+  function withThinkingBlocks() {
+    const ctx = makeChat();
+    ctx.ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    ctx.chat.setSession("s1");
+    ctx.ws.fireMessage({ type: "thinking", content: "committed thought" });
+    ctx.ws.fireMessage({ type: "assistantMessage", content: "the answer" });
+    ctx.ws.fireMessage({ type: "thinking", content: "in-flight thought" });
+    return ctx;
+  }
+
+  const hiddenFlags = (container: HTMLElement): boolean[] =>
+    [...container.querySelectorAll(".thinking-block")].map((b) =>
+      b.classList.contains("hidden"),
+    );
+
+  it("seeds the live list from the stored preference: thinking arrives hidden", () => {
+    storageWith({ [HIDE_THINKING_STORAGE_KEY]: "1" });
+    const { chat, container } = withThinkingBlocks();
+    expect(chat.hideThinkingAtom()).toBe(true);
+    expect(hiddenFlags(container)).toEqual([true, true]);
+  });
+
+  it("an unset or unparseable value means shown (default visible)", () => {
+    storageWith({ [HIDE_THINKING_STORAGE_KEY]: "yes-please" });
+    const { chat, container } = withThinkingBlocks();
+    expect(chat.hideThinkingAtom()).toBe(false);
+    expect(hiddenFlags(container)).toEqual([false, false]);
+  });
+
+  it("a throwing localStorage defaults to shown, and toggling still repaints", () => {
+    storageThatThrows();
+    const { chat, container } = withThinkingBlocks(); // no crash at createChat
+    expect(chat.hideThinkingAtom()).toBe(false);
+    expect(hiddenFlags(container)).toEqual([false, false]);
+    chat.toggleHideThinking(); // the swallowed persist costs only the reload
+    expect(hiddenFlags(container)).toEqual([true, true]);
+    expect(chat.hideThinkingAtom()).toBe(true);
+  });
+
+  it("toggle sweeps committed + in-flight blocks and persists; the socket stays silent", () => {
+    const map = storageWith();
+    const { chat, container, ws } = withThinkingBlocks();
+    const before = ws.sent.length;
+
+    chat.toggleHideThinking();
+    expect(hiddenFlags(container)).toEqual([true, true]);
+    expect(chat.hideThinkingAtom()).toBe(true);
+    expect(map.get(HIDE_THINKING_STORAGE_KEY)).toBe("1");
+
+    chat.toggleHideThinking();
+    expect(hiddenFlags(container)).toEqual([false, false]);
+    expect(chat.hideThinkingAtom()).toBe(false);
+    expect(map.get(HIDE_THINKING_STORAGE_KEY)).toBe("0");
+    expect(ws.sent.length).toBe(before); // a view setting never hits the wire
+  });
+
+  it("sessionState(hideThinking) from the server no longer repaints the transcript", () => {
+    storageWith();
+    const { chat, container, ws } = withThinkingBlocks();
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "hideThinking", value: true });
+    expect(hiddenFlags(container)).toEqual([false, false]);
+    expect(chat.hideThinkingAtom()).toBe(false);
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "hideThinking", value: false });
+    expect(hiddenFlags(container)).toEqual([false, false]);
+    // The rest of the sessionState channel still routes.
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "model", value: "m2" });
+    expect(chat.currentModelAtom()).toBe("m2");
+  });
+
+  it("the toggle works while a cold log is on screen (log view drops live events, not the sweep)", () => {
+    storageWith();
+    const { chat, container, ws } = withThinkingBlocks();
+    // Enter log view: from here live transcript events go to LOG_VIEW_SINK, but
+    // what is ON SCREEN is still the live container the sweep walks.
+    ws.fireMessage({ type: "logViewed", logId: "l1", entries: [] });
+    chat.toggleHideThinking();
+    expect(hiddenFlags(container)).toEqual([true, true]);
+    // A server toggle during log view stays inert too.
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "hideThinking", value: false });
+    expect(hiddenFlags(container)).toEqual([true, true]);
   });
 });

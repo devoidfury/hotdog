@@ -236,6 +236,30 @@ describe("thinking", () => {
     ml.handleStreamingReasoningChunk({ content: "sneaky" });
     expect(container.querySelector(".thinking-block")!.classList.contains("hidden")).toBe(true);
   });
+
+  it("setHideThinking sweeps committed blocks too, not just the in-flight row", () => {
+    // Two finalized blocks (a thinking row is committed by the assistant
+    // message that follows it) plus one still streaming.
+    ml.handleThinking({ content: "one" });
+    ml.handleAssistantMessage({ content: "a" });
+    ml.handleThinking({ content: "two" });
+    ml.handleAssistantMessage({ content: "b" });
+    ml.handleStreamingReasoningChunk({ content: "live" });
+    const hidden = () =>
+      [...container.querySelectorAll(".thinking-block")].map((b) => b.classList.contains("hidden"));
+    expect(hidden()).toEqual([false, false, false]);
+
+    ml.setHideThinking(true);
+    expect(hidden()).toEqual([true, true, true]);
+    ml.setHideThinking(false);
+    expect(hidden()).toEqual([false, false, false]);
+
+    // Late arrivals keep honoring the creation-time value (ensureThinkingEl).
+    ml.setHideThinking(true);
+    ml.handleAssistantMessage({ content: "c" });
+    ml.handleThinking({ content: "three" });
+    expect(hidden()).toEqual([true, true, true, true]);
+  });
 });
 
 describe("tool calls and results", () => {

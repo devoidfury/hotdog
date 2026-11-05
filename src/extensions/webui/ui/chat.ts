@@ -3,6 +3,7 @@
 
 import { reactiveState, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
+import { loadHideThinking, saveHideThinking } from "./thinking-pref.ts";
 import type { UiImage } from "./message-list.ts";
 import type { CtxUsage } from "@utils/session-turns.ts";
 import type { LogInfo, SessionInfo } from "./sessions.tsx";
@@ -201,6 +202,7 @@ const LOG_VIEW_SINK: MessageListManager = {
   handleTokenUsage: () => {},
   handleCompactionResult: () => {},
   handleSessionState: () => {},
+  setHideThinking: () => {},
   handleError: () => {},
   finalizeAssistant: () => {},
   noteWorking: () => {},
@@ -599,6 +601,13 @@ export interface ChatController {
   sttEnabledAtom: Atom<boolean>;
   /** Tool-exec plane posture for the header strip ("" until the first attach). */
   toolExecAtom: Atom<string>;
+  /**
+   * Reasoning visibility: the per-browser view preference behind the header
+   * chip (thinking-pref.ts). Independent of the CLI's /thinking session state.
+   */
+  hideThinkingAtom: Atom<boolean>;
+  /** Flip the preference, persist it, and repaint both transcript sinks. */
+  toggleHideThinking: () => void;
   // Raw WS message; the sidebar uses it to cancel non-active sessions.
   send: (obj: Record<string, unknown>) => void;
   ws: WebSocket | null;
@@ -653,6 +662,40 @@ export function createChat({
 
   // Per-session working state; kept across switches so the sidebar stays accurate.
   const sessionWorkingMap = new Map<string, boolean>();
+
+  // ── Reasoning visibility (per-browser view preference) ───────────────────
+  // Owner ruling 2026-11-05: whether reasoning shows is THIS browser's view
+  // setting (localStorage via thinking-pref.ts, survives reload), applied to
+  // whatever transcript is on screen -- the live one or a browsed cold log.
+  // The server's /thinking session state (agent.hideThinking, broadcast on the
+  // sessionState channel) stays independent: see the sessionState case in
+  // handleMessage, which deliberately drops that key.
+  const hideThinkingAtom = reactiveState<boolean>(loadHideThinking());
+
+  /**
+   * Push the preference into every transcript sink. The live list is the one
+   * that paints -- a cold log renders into it too (app.tsx onLogViewed calls
+   * messageList.renderLogEntries), so one sweep covers both views; the call on
+   * LOG_VIEW_SINK exists so the manager stays the single seam (that stand-in
+   * swallows everything, including this).
+   */
+  function applyHideThinking(hide: boolean): void {
+    messageList?.setHideThinking(hide);
+    LOG_VIEW_SINK.setHideThinking(hide);
+  }
+
+  /**
+   * Header-chip driver: flip -> persist -> repaint now -> relabel the chip.
+   * Persisting before the repaint means a reload lands on the new view even if
+   * the tab dies right after the click; a blocked localStorage is swallowed in
+   * the store and still repaints this page.
+   */
+  function toggleHideThinking(): void {
+    const hide = !hideThinkingAtom();
+    saveHideThinking(hide);
+    applyHideThinking(hide);
+    hideThinkingAtom(hide);
+  }
 
   // ── Reconnect identity (session durability part 3) ─────────────────────
   // The session id survives page reloads; the replay cursor (full log length
@@ -1023,7 +1066,13 @@ export function createChat({
             toolExecAtom(typeof data.value === "string" ? data.value : "");
           }
         }
-        list.handleSessionState(data);
+        // hideThinking is deliberately NOT forwarded: reasoning visibility is
+        // this browser's view preference (owner ruling 2026-11-05), so a CLI
+        // /thinking toggle must not repaint the webui transcript. The CLI's own
+        // notice still arrives as a commandResult row, and message-list's
+        // hideThinking engine (handleSessionState/setHideThinking) is intact --
+        // the header chip drives it now, not the server.
+        if (data.key !== "hideThinking") list.handleSessionState(data);
         break;
       case "error":
         workingAtom(false);
@@ -1280,7 +1329,9 @@ export function createChat({
     // clear() resets all its state), and recreating it would re-attach the
     // container's scroll listener on every switch.
     messageList ??= createMessageList(container, {
-      hideThinking: false,
+      // Seed from this browser's preference: a fresh list (first attach, or a
+      // list rebuilt by a later app boot) starts in the state the user left it.
+      hideThinking: hideThinkingAtom(),
       onQuestionAnswer: (answers) => sendQuestionAnswer(answers),
     });
     sessionIdAtom(sessionId);
@@ -1392,6 +1443,8 @@ export function createChat({
     messageListAtom: () => messageList,
     sttEnabledAtom,
     toolExecAtom,
+    hideThinkingAtom,
+    toggleHideThinking,
     transcribe,
     tasksAtom,
     activityVersionAtom,

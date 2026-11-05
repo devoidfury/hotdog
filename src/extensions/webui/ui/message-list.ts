@@ -193,6 +193,13 @@ export interface MessageListManager {
   handleTokenUsage: (data: TokenUsageMessage) => void;
   handleCompactionResult: (data: CompactionResultMessage) => void;
   handleSessionState: (data: SessionStateMessage) => void;
+  /**
+   * Programmatic visibility switch for this view (the webui's per-browser
+   * reasoning toggle). Same engine as the `hideThinking` session state above,
+   * but driven by the client: sweeps every thinking block, in-flight or
+   * finalized.
+   */
+  setHideThinking: (hide: boolean) => void;
   handleError: (data: ErrorMessage) => void;
   /**
    * Close the in-flight streaming row. Pass `end` when the row committed as
@@ -310,11 +317,21 @@ export function createMessageList(
     return currentThinkingEl;
   }
 
+  /**
+   * Flip reasoning visibility for this view. Sweeps EVERY .thinking-block in
+   * the container: the in-flight row and the finalized ones alike (the toggle
+   * used to touch only `currentThinkingEl`, so blocks committed before the
+   * click stayed in their old state -- history stayed visible after a "hide").
+   * Creation-time honoring in `ensureThinkingEl` is unchanged: blocks that
+   * arrive after a flip are born with the right class.
+   */
   function setHideThinking(v: boolean): void {
     hideThinkingValue = v;
-    if (currentThinkingEl) {
-      currentThinkingEl.classList.toggle("hidden", v);
-    }
+    // forEach (not a for..of spread): NodeList iteration needs dom.iterable,
+    // which the src build does not pull in.
+    container.querySelectorAll(".thinking-block").forEach((el) => {
+      el.classList.toggle("hidden", v);
+    });
   }
 
   /**
@@ -1284,6 +1301,7 @@ export function createMessageList(
     handleTokenUsage,
     handleCompactionResult,
     handleSessionState,
+    setHideThinking,
     handleError,
     finalizeAssistant,
     noteWorking,

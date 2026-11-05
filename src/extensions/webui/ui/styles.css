@@ -1109,8 +1109,11 @@ body.sidebar-resizing {
 
 /* Worker-plane posture is a click-to-toggle control for the session's fence:
    chip-button chrome (border + fill + hover/active) so the cue is visible
-   before the pointer arrives; still quiet enough to read as status. */
-.tool-exec-toggleable {
+   before the pointer arrives; still quiet enough to read as status. The
+   reasoning-visibility chip (#thinking-toggle, app.tsx) is a control on the
+   same row and borrows the identical chrome -- no new color surface. */
+.tool-exec-toggleable,
+#thinking-toggle {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 2px 8px;
@@ -1119,13 +1122,23 @@ body.sidebar-resizing {
     transition: border-color 0.15s, background 0.15s;
 }
 
-.tool-exec-toggleable:hover {
+.tool-exec-toggleable:hover,
+#thinking-toggle:hover {
     border-color: var(--accent);
     background: var(--bg-hover);
 }
 
-.tool-exec-toggleable:active {
+.tool-exec-toggleable:active,
+#thinking-toggle:active {
     background: var(--bg-active);
+}
+
+/* Same quiet mono text as the tool-exec chip it sits beside (a <button> has to
+   be told: form controls never inherit font-family/font-size). */
+#thinking-toggle {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
 }
 
 .status-connected {

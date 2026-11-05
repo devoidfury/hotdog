@@ -166,6 +166,38 @@ test("replayEntriesIntoContext handles tool result entries", () => {
   expect(agent.log.at(1)!.toolCallId).toBe("tc_1");
 });
 
+test("replayEntriesIntoContext replays a TOOL_RESULT images sidecar into no provider context", () => {
+  // The display sidecar must not leak into rebuilt model context on resume:
+  // the TOOL_RESULT replay case (and compaction around it) stays as-is.
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    {
+      ts: "2024-01-01T00:00:00Z",
+      session_id: "test",
+      source: LOG_SOURCE.LLM,
+      content: "reading",
+      tool_calls: [{ id: "tc_1", type: "function", function: { name: "read", arguments: "{}" } }],
+    },
+    {
+      ts: "2024-01-01T00:00:01Z",
+      session_id: "test",
+      source: LOG_SOURCE.TOOL_RESULT,
+      content: "Image: photo.png",
+      tool_call_id: "tc_1",
+      tool_name: "read",
+      origin: "tool",
+      images: [{ type: "image_url", mimeType: "image/png", data: "aGVsbG8=" }],
+    },
+  ];
+
+  const { replayed } = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(2);
+  const msg = agent.log.at(1)!;
+  expect(msg.role).toBe("tool");
+  expect(msg.content).toBe("Image: photo.png");
+  expect(msg.images).toBeUndefined();
+});
+
 test("replayEntriesIntoContext handles compaction entries as harness messages", () => {
   const agent = createMockAgent();
   const entries: LogEntry[] = [{

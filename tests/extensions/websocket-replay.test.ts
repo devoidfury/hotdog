@@ -14,7 +14,7 @@ import {
 } from "@extensions/websocket/replay.ts";
 import { LOG_SOURCE, type LogEntry } from "@core/session/session-log.ts";
 import type { ToolRegistry } from "@core/extensions/tool-registry.ts";
-import { S2C } from "@extensions/websocket/protocol.ts";
+import { MAX_WIRE_IMAGE_BASE64_BYTES, S2C } from "@extensions/websocket/protocol.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import { Message, type ImageAttachment } from "@core/context/message.ts";
 import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
@@ -724,5 +724,51 @@ describe("replayLogSlice display parts", () => {
     );
     const call = received(ws).find((m) => m.type === S2C.TOOL_CALL)!;
     expect("display" in call).toBe(false);
+  });
+});
+
+describe("replayLogSlice tool-result images", () => {
+  // The entry shape the session-log writer produces for an image-returning
+  // tool: sidecar array beside the tool-result parts in content.
+  const toolEntry = (over: Record<string, unknown> = {}) =>
+    ({
+      ts: "2026-10-20T00:00:00.000Z",
+      session_id: "s",
+      source: LOG_SOURCE.TOOL_RESULT,
+      content: [{ type: "tool-result", tool: "read", status: "success", meta: [], error: null, hint: null, output: "Image: photo.png" }],
+      tool_call_id: "c1",
+      tool_name: "read",
+      ...over,
+    }) as unknown as LogEntry;
+
+  function frames(entries: LogEntry[]): Array<Record<string, unknown>> {
+    const ws = createWsMockWs();
+    replayLogSlice(ws, "s1", entries, 0);
+    return received(ws);
+  }
+
+  it("emits the stored images on the TOOL_RESULT frame, wireImages-normalized", () => {
+    const out = frames([toolEntry({ images: [{ type: "image_url", mimeType: "image/png", data: "aGVsbG8=" }] })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.type).toBe(S2C.TOOL_RESULT);
+    expect(out[0]!.images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+    // Content still flattens to text as before: the sidecar changes nothing else.
+    expect(out[0]!.output).toBe("Image: photo.png");
+    expect(out[0]!.toolCallId).toBe("c1");
+  });
+
+  it("imageless entries replay image-free frames (no empty-array noise)", () => {
+    const out = frames([toolEntry()]);
+    expect("images" in out[0]!).toBe(false);
+  });
+
+  it("an over-cap stored image comes back as skipped+note, and the frame survives", () => {
+    const out = frames([toolEntry({ images: [{ type: "image_url", mimeType: "image/png", data: "x".repeat(MAX_WIRE_IMAGE_BASE64_BYTES + 1) }] })]);
+    expect(out).toHaveLength(1);
+    const imgs = out[0]!.images as Array<Record<string, unknown>>;
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0]!.skipped).toBe(true);
+    expect(typeof imgs[0]!.note).toBe("string");
+    expect(imgs[0]!.data).toBeUndefined();
   });
 });

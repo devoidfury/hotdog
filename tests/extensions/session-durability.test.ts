@@ -1307,3 +1307,26 @@ describe("token_usage restore suppression", () => {
     }
   });
 });
+
+describe("image sidecar vs the durability facts", () => {
+  // The writer's images field must be invisible to durability semantics: the
+  // facts (and the index mirror that derives from them) read source,
+  // tool_call_id and content, never the sidecar.
+  it("collectDurabilityFacts is identical with and without images on the entries", () => {
+    const base: LogEntry[] = [
+      entry({
+        source: LOG_SOURCE.LLM,
+        content: "",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "read", arguments: "{}" } }],
+      }),
+      entry({ source: LOG_SOURCE.TOOL_STARTED, content: "{}", tool_call_id: "c1" }),
+      entry({ source: LOG_SOURCE.TOOL_RESULT, content: "Image: photo.png", tool_call_id: "c1", origin: "tool" }),
+    ];
+    const withImages = base.map((e) =>
+      e.source === LOG_SOURCE.TOOL_RESULT
+        ? { ...e, images: [{ type: "image_url", mimeType: "image/png", data: "aGVsbG8=" }] }
+        : e,
+    );
+    expect(collectDurabilityFacts(withImages)).toEqual(collectDurabilityFacts(base));
+  });
+});

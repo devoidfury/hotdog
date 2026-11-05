@@ -82,6 +82,7 @@ async function send(
 
 const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-ws-routing-"));
 const VIEW_LOG_ID = "view-img-log";
+const VIEW_TOOL_IMG_LOG_ID = "view-tool-img-log";
 const BROKEN_LOG_ID = "unreadable-log";
 
 beforeAll(() => {
@@ -105,6 +106,24 @@ beforeAll(() => {
     ].join("\n") + "\n",
   );
   writeFileSync(join(TMP, `${BROKEN_LOG_ID}.jsonl`), '{"unreachable": true}\n');
+  writeFileSync(
+    join(TMP, `${VIEW_TOOL_IMG_LOG_ID}.jsonl`),
+    [
+      // Exactly what the session-log writer lands for an image-returning tool.
+      JSON.stringify({
+        ts: "2026-10-20T00:00:00Z",
+        session_id: VIEW_TOOL_IMG_LOG_ID,
+        role: "tool",
+        source: "tool_result",
+        v: 2,
+        content: [{ type: "tool-result", tool: "read", status: "success", meta: [], error: null, hint: null, output: "Image: photo.png" }],
+        images: [{ type: "image_url", mimeType: "image/png", data: "aGVsbG8=" }],
+        tool_call_id: "c1",
+        tool_name: "read",
+        origin: "tool",
+      }),
+    ].join("\n") + "\n",
+  );
   chmodSync(join(TMP, `${BROKEN_LOG_ID}.jsonl`), 0o000);
 });
 
@@ -185,6 +204,19 @@ describe("routeMessage: async error closures", () => {
     expect(entries[0]!.images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
     expect(entries[1]!.images).toBeUndefined();
     expect(entries[1]!.content).toBe("reply, no image");
+  });
+
+  it("VIEW_LOG retains a TOOL_RESULT entry's images sidecar", async () => {
+    // The cold browsed-log path (handlers-logs) reads entry.images the same way
+    // replay does: a persisted tool-result image survives to the wire.
+    const { messages } = await send({ type: C2S.VIEW_LOG, logId: VIEW_TOOL_IMG_LOG_ID });
+    const entries = messages[0]!.entries as Array<Record<string, unknown>>;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.source).toBe("tool_result");
+    expect(entries[0]!.images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+    expect(entries[0]!.content).toEqual([
+      { type: "tool-result", tool: "read", status: "success", meta: [], error: null, hint: null, output: "Image: photo.png" },
+    ]);
   });
 
   it("VIEW_LOG surfaces an unreadable log as ERROR", async () => {

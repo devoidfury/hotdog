@@ -39,6 +39,12 @@ interface SessionLogMessage {
   toolCallId?: string | null;
   /** Message provenance (Message.source); recorded as `origin` on the entry. */
   source?: string;
+  /**
+   * Images carried by the message (the executor stores tool-result images
+   * on Message.images, never in content parts). Persisted as the
+   * TOOL_RESULT entry's sidecar array.
+   */
+  images?: unknown;
   /** Present when the payload is a live Message (not raw log data). */
   getTextContent?: () => string;
 }
@@ -47,7 +53,8 @@ interface SessionLogMessage {
 /**
  * Content to persist: structured content (harness messages with `untrusted`
  * parts) is kept as raw parts so replay restores the exact trust structure;
- * everything else stays plain text (images stripped) as before.
+ * everything else stays plain text as before. Images never belong here: they
+ * ride the entry's sidecar array (see messageToLogEntry).
  */
 function logContent(message: SessionLogMessage): string | Array<Record<string, unknown>> {
   const raw = message.content;
@@ -90,6 +97,14 @@ function messageToLogEntry(
     source,
     v: LOG_VERSION,
     content: message.content,
+    // Tool-result images ride the entry as a sidecar array (the shape INPUT
+    // entries use): display persistence only. Never inlined into `content` --
+    // search and provider-context surfaces must not see base64 -- and omitted
+    // entirely when the message carries none, so imageless entries stay
+    // byte-identical to pre-sidecar logs.
+    ...(source === LOG_SOURCE.TOOL_RESULT && Array.isArray(message.images) && message.images.length > 0
+      ? { images: message.images as LogEntry["images"] }
+      : {}),
     reasoning_content: message.reasoningContent || null,
     tool_calls: message.toolCalls || null,
     tool_call_id: message.toolCallId || null,
@@ -240,6 +255,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         toolCalls: message.toolCalls,
         toolCallId: message.toolCallId,
         source: message.source,
+        images: message.images,
       },
       source,
     );

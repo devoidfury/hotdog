@@ -6,7 +6,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { create } from "@extensions/session-log/index.ts";
-import { readSessionEntries, LOG_SOURCE } from "@core/session/session-log.ts";
+import { countSessionLogEntries, readSessionEntries, LOG_SOURCE } from "@core/session/session-log.ts";
+import { seedRecordCount, getRecordCount, dropRecordCount } from "@extensions/session-log/record-count.ts";
+import { Message, type ImageAttachment } from "@core/context/message.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { createMockCore, TMP_PARENT } from "../helpers.ts";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync } from "node:fs";
@@ -1060,6 +1062,115 @@ describe("session-log per-session restore suppression (M-6)", () => {
       expect(entries[0]!.content).toBe("live");
     } finally {
       cleanupTestFile(sessionId);
+    }
+  });
+});
+
+// Tool-result image persistence (the vanished-image bug): the executor stores a
+// tool's images on Message.images, never in content parts, so the writer must
+// carry them as the TOOL_RESULT entry's sidecar array (the INPUT-entry shape).
+// Display persistence only -- content, the search corpus, the durability facts
+// and the sidebar record count must all stay exactly as they were.
+describe("session-log extension tool-result image sidecar", () => {
+  const IMG: ImageAttachment = { type: "image_url", mimeType: "image/png", data: "aGVsbG8=" };
+  const PART = {
+    type: "tool-result",
+    tool: "read",
+    status: "success",
+    meta: [],
+    error: null,
+    hint: null,
+    output: "Image: photo.png",
+  };
+
+  /** The executor's tool-message shape (tool-executor #writeToolResult). */
+  const toolMessage = (images?: unknown) =>
+    new Message({
+      role: "tool",
+      content: [PART],
+      toolCallId: "call_img",
+      source: "tool",
+      ...(images !== undefined ? { images: images as ImageAttachment[] } : {}),
+    });
+
+  /** Write one message through the real hook; return the landed JSONL line and its parse. */
+  async function writeOne(sessionId: string, message: Message) {
+    const ext = await create(createMockCore() as any) as any;
+    const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+    await hook({ message, agent: { sessionId } });
+    const line = readFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), "utf-8").trim().split("\n").at(-1)!;
+    return { line, entry: JSON.parse(line) as Record<string, unknown> };
+  }
+
+  it("persists tool-result images as a sidecar array with content untouched", async () => {
+    const idImg = `test-img-sidecar-${Date.now()}`;
+    const idPlain = `test-img-none-${Date.now()}`;
+    try {
+      const withImg = await writeOne(idImg, toolMessage([IMG]));
+      const plain = await writeOne(idPlain, toolMessage());
+
+      expect(withImg.entry.images).toEqual([IMG]);
+      // The sidecar rides beside content, never inside it: same parts, and no
+      // base64 anywhere in the content surface (the search corpus reads that).
+      expect(withImg.entry.content).toEqual(plain.entry.content);
+      expect(JSON.stringify(withImg.entry.content)).not.toContain("aGVsbG8=");
+      // INPUT-entry shape: the array sits right after content.
+      expect(Object.keys(withImg.entry)).toEqual([
+        "ts", "session_id", "role", "source", "v", "content", "images", "tool_call_id", "tool_name", "origin",
+      ]);
+
+      // Imageless entries keep the pre-sidecar bytes: no key, no null-noise,
+      // and every other field identical to the image-carrying write.
+      expect("images" in plain.entry).toBe(false);
+      const stripVolatile = (e: Record<string, unknown>) => {
+        const { ts: _ts, session_id: _sid, ...rest } = e;
+        return rest;
+      };
+      const { images: _images, ...withoutSidecar } = withImg.entry;
+      expect(stripVolatile(withoutSidecar)).toEqual(stripVolatile(plain.entry));
+    } finally {
+      cleanupTestFile(idImg);
+      cleanupTestFile(idPlain);
+    }
+  });
+
+  it("omits the sidecar for empty or malformed images, and for non-tool messages", async () => {
+    const idEmpty = `test-img-empty-${Date.now()}`;
+    const idJunk = `test-img-junk-${Date.now()}`;
+    const idUser = `test-img-user-${Date.now()}`;
+    try {
+      expect("images" in (await writeOne(idEmpty, toolMessage([]))).entry).toBe(false);
+      expect("images" in (await writeOne(idJunk, toolMessage("not-an-array"))).entry).toBe(false);
+      // INPUT stays as-is: user images riding the log would ride rebuilt
+      // provider context on resume (replayEntriesIntoContext reads entry.images
+      // for INPUT) -- display persistence here means tool results only.
+      const user = new Message({ role: "user", content: "look", images: [IMG], source: "user" });
+      expect("images" in (await writeOne(idUser, user)).entry).toBe(false);
+    } finally {
+      cleanupTestFile(idEmpty);
+      cleanupTestFile(idJunk);
+      cleanupTestFile(idUser);
+    }
+  });
+
+  it("an image-carrying TOOL_RESULT entry is exactly one counted record", async () => {
+    const sessionId = `test-img-count-${Date.now()}`;
+    try {
+      await seedRecordCount(sessionId); // no log yet: base 0
+      const ext = await create(createMockCore() as any) as any;
+      const hooks = ext.hooks as Record<string, (p: unknown) => Promise<void>>;
+      await hooks[HOOKS.SESSION_CREATE]!({ sessionId, config: {} });
+      await hooks[HOOKS.CONTEXT_MESSAGE]!({ message: toolMessage([IMG, IMG]), agent: { sessionId } });
+
+      const entries = await readSessionEntries(sessionId, { full: true });
+      // One line for the result, one counted record: the sidecar never splits
+      // or adds a record, and the live writer tally matches the cold sum.
+      expect(entries).toHaveLength(2);
+      expect(countSessionLogEntries(entries)).toBe(2);
+      expect(getRecordCount(sessionId)).toBe(2);
+    } finally {
+      cleanupTestFile(sessionId);
+      dropRecordCount(sessionId);
     }
   });
 });

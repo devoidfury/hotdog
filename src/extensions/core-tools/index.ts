@@ -57,15 +57,32 @@ interface CoreToolConfig {
 const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
   overwrite: () => new OverwriteTool(),
   append: () => new AppendTool(),
-  read: (config) =>
-    new ReadTool({
+  // Call-level display parts (ToolMetadata.display) ride the registered
+  // metadata here at the seam where this extension assembles its tools:
+  // read's result is file-like text; edit's args carry a replace-edit.
+  // The *Arg key names must match the tools' real schema parameters
+  // (pinned against toToolDef() in tests/extensions/tools-index.test.ts).
+  read: (config) => {
+    const tool = new ReadTool({
       readLimit: config.readToolLimit,
       maxImageSize: config.maxImageSize,
-    }),
-  edit: (config) =>
-    new EditTool({
+    });
+    tool.metadata = {
+      ...tool.metadata,
+      display: [{ kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" }],
+    };
+    return tool;
+  },
+  edit: (config) => {
+    const tool = new EditTool({
       maxEditInputSize: config.maxEditInputSize,
-    }),
+    });
+    tool.metadata = {
+      ...tool.metadata,
+      display: [{ kind: "diff", oldArg: "oldString", newArg: "newString" }],
+    };
+    return tool;
+  },
   grep: (config) =>
     new GrepTool({
       maxResults: config.grepMaxResults,

@@ -1,12 +1,26 @@
 /// <reference lib="dom" />
-// One mounted tool-call block: semantic header, collapsible body with the
-// pretty/raw args JSON (or a rendered diff for edit calls), the result text,
-// and result images. Each block is its own mount tree: message-list appends
-// a host div and mounts into it, so high-frequency updates elsewhere in the
-// chat never diff tool blocks, and a block only re-renders on its own
-// toggles or when its result arrives.
+// One mounted tool-call block: a generic interpreter for the declared
+// display DSL (ToolDisplayWire, the `display` array on the S2C TOOL_CALL
+// frame). Parts render in declaration order -- one element per known spec,
+// unknown kinds skipped silently -- and the block falls back to the generic
+// posture when nothing known rendered for the result. Nothing here keys off
+// tool names: the spec decides the rendering, the name is only a label.
+//
+// Each block is its own mount tree: message-list appends a host div and
+// mounts into it, so high-frequency updates elsewhere in the chat never diff
+// tool blocks, and a block only re-renders on its own toggles or when its
+// result arrives.
 
-import { mount, type DomNode, type Mounted } from "@utils/jsx";
+import { mount, type DomNode, type Mounted, type JsxChild } from "@utils/jsx";
+import { parseMarkdown, mdTreeToHtml } from "@utils/md-parser.ts";
+import { getTokenizer } from "@utils/syntax";
+import { TOOL_ICONS } from "./icons.tsx";
+import type { ToolDisplayWire } from "@extensions/websocket/protocol.ts";
+
+// One declared display part per spec (kind/source/arg keys): the single
+// source stays ToolDisplayWire in @extensions/websocket/protocol.ts (a
+// type-only import, erased in the browser bundle).
+export type { ToolDisplayWire };
 
 /** Image payload on the wire (see wireImages in @extensions/websocket/protocol.ts). */
 export interface ToolImageWire {
@@ -31,18 +45,39 @@ export interface ToolBlockState {
    * that send neither.
    */
   argsSummary?: string;
+  /** Declared display parts (TOOL_CALL frame `display`), rendered in order. */
+  display?: ToolDisplayWire[];
   result?: ToolResultData;
   expanded: boolean;
   /** Args shown as the raw wire string instead of pretty-printed JSON. */
   raw: boolean;
   /** Result preview replaced by the full text. */
   fullResult: boolean;
+  /** Explicit box overrides (file parts "f<i>", generic "g"); absent means
+   *  "fall back to auto-expand" (see AUTO_EXPAND_MAX_LINES). */
+  boxes: Record<string, boolean>;
+  /** Lists showing everything: diff folds "d<i>", capped files "ff<i>". */
+  unfolded: Record<string, boolean>;
 }
 
 /** Beyond this many chars the result shows a preview + "show full" button. */
 export const RESULT_PREVIEW_CHARS = 2000;
 /** Per-side cap on rendered diff lines (huge edits fall back to "…" rows). */
 export const MAX_DIFF_LINES = 300;
+/** Inline diff rows before the "expand remaining" button takes over. */
+export const MAX_INLINE_DIFF_LINES = 30;
+/** Cap on rendered file-part text; past it a "… N more — show full" button shows. */
+export const FILE_RENDER_CAP_CHARS = 100_000;
+/** Bodies under this many lines auto-open when they arrive (owner ruling
+ *  2026-11-05): a small result is not worth a click. Strictly fewer; empty
+ *  bodies stay closed, and so does anything past the preview cap -- a
+ *  one-line giant is a blob, and a collapsed summary is its lazy face.
+ *  A user toggle is always the explicit override in both directions. */
+export const AUTO_EXPAND_MAX_LINES = 20;
+const underAutoExpand = (text: string): boolean =>
+  text !== "" &&
+  text.length <= RESULT_PREVIEW_CHARS &&
+  text.split("\n").length < AUTO_EXPAND_MAX_LINES;
 
 function oneLine(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -54,23 +89,63 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+/** Parsed args object, or null when the wire string is not a JSON object. */
+export function parseArgsObject(args: string): Record<string, unknown> | null {
+  try {
+    const p: unknown = JSON.parse(args);
+    if (p && typeof p === "object" && !Array.isArray(p)) return p as Record<string, unknown>;
+  } catch {
+    // Not JSON: callers treat the args as unstructured.
+  }
+  return null;
+}
+
+/** "N lines · K chars" -- the house result-size grammar. */
+export function textStat(text: string): string {
+  const lines = text === "" ? 0 : text.split("\n").length;
+  return `${lines} lines · ${text.length} chars`;
+}
+
+/**
+ * Summary for a file part: `text` is the part's body bytes (the result text
+ * for a result-sourced part, the written arg for `source: "args"`). Range
+ * form `basename — lines 1–500 of 1234` when offsetArg/limitArg name numeric
+ * args; plain size otherwise. Null (skip the part) when pathArg does not name
+ * a string.
+ */
+export function fileSummary(args: string, resultText: string, spec: ToolDisplayWire): string | null {
+  const parsed = parseArgsObject(args);
+  const path = spec.pathArg !== undefined ? parsed?.[spec.pathArg] : undefined;
+  if (typeof path !== "string" || path === "") return null;
+  const total = resultText === "" ? 0 : resultText.split("\n").length;
+  const num = (key: string | undefined): number | undefined => {
+    if (key === undefined) return undefined;
+    const v = parsed?.[key];
+    return typeof v === "number" && Number.isFinite(v) ? Math.max(0, v) : undefined;
+  };
+  const offset = num(spec.offsetArg);
+  const limit = num(spec.limitArg);
+  if ((offset === undefined && limit === undefined) || total === 0) {
+    return `${basename(path)} — ${textStat(resultText)}`;
+  }
+  const start = (offset ?? 0) + 1;
+  let end = limit !== undefined ? (offset ?? 0) + limit : total;
+  if (end > total) end = total;
+  if (end < start) end = start;
+  return `${basename(path)} — lines ${start}–${end} of ${total}`;
+}
+
 /**
  * Fallback header when the server sent no argsSummary: a compact one-liner
  * built from well-known arg keys (path basename, command/pattern text, then
  * any string value). NEVER a raw JSON line.
  */
 export function argsSummary(args: string): string {
-  let parsed: Record<string, unknown> | null = null;
-  try {
-    const p: unknown = JSON.parse(args);
-    if (p && typeof p === "object" && !Array.isArray(p)) parsed = p as Record<string, unknown>;
-  } catch {
-    // Not JSON: the string itself (first line, truncated) is the summary.
-  }
+  const parsed = parseArgsObject(args);
   if (parsed === null) return oneLine(args, 80);
 
   const str = (k: string): string | null => {
-    const v = parsed![k];
+    const v = parsed[k];
     return typeof v === "string" && v.trim() ? v : null;
   };
   const path = str("path") ?? str("file_path");
@@ -101,10 +176,10 @@ export interface DiffLine {
 }
 
 /**
- * Diff lines for an edit call's oldString/newString: common prefix/suffix
- * trimmed, the changed middles rendered as del-then-add with one context
- * line on each side. Local to the UI (the core generateDiff stays as-is);
- * far kinder than a positional line-pairing diff for insertions.
+ * Diff lines for an old/new string pair: common prefix/suffix trimmed, the
+ * changed middles rendered as del-then-add with one context line on each
+ * side. Local to the UI (the core generateDiff stays as-is); far kinder than
+ * a positional line-pairing diff for insertions.
  */
 export function computeDiffLines(oldText: string, newText: string, maxLines = MAX_DIFF_LINES): DiffLine[] {
   const oldLines = oldText.split("\n");
@@ -140,20 +215,138 @@ export function computeDiffLines(oldText: string, newText: string, maxLines = MA
   return lines;
 }
 
-/** Diff body for edit-family calls only: name + both string sides present. */
-export function editDiff(name: string, args: string): DiffLine[] | null {
-  if (name !== "edit" && name !== "str_replace" && name !== "apply_patch") return null;
-  try {
-    const parsed: unknown = JSON.parse(args);
-    if (!parsed || typeof parsed !== "object") return null;
-    const o = parsed as Record<string, unknown>;
-    if (typeof o.oldString === "string" && typeof o.newString === "string") {
-      return computeDiffLines(o.oldString, o.newString);
-    }
-  } catch {
-    // Fall through: not an edit we can render.
+/** One styled run of highlighted code; cls null means unstyled text. */
+export interface CodeRun {
+  cls: string | null;
+  text: string;
+}
+
+/**
+ * Tokenize code through the shared @utils/syntax registry: token runs map
+ * to `tok-<type>` CSS classes (default runs stay unstyled), adjacent same-
+ * class runs coalesce. Null means "no tokenizer for this lang" -- the caller
+ * renders plain text (never a failure: e.g. yaml has no tokenizer yet).
+ */
+export function codeRuns(text: string, lang?: string): CodeRun[] | null {
+  const tokenizer = lang ? getTokenizer(lang) : undefined;
+  if (!tokenizer) return null;
+  const out: CodeRun[] = [];
+  for (const run of tokenizer(text)) {
+    const cls = run.type === "default" ? null : `tok-${run.type}`;
+    const last = out[out.length - 1];
+    if (last && last.cls === cls) last.text += run.text;
+    else out.push({ cls, text: run.text });
   }
-  return null;
+  return out;
+}
+
+/** Prose bytes through the house sanitizer-backed markdown route. */
+export function proseHtml(text: string): string {
+  return mdTreeToHtml(parseMarkdown(text));
+}
+
+/**
+ * Bytes a prose/code part renders, keyed by its source. "pending" means the
+ * source waits for a result; null means the part cannot render (skip).
+ */
+function partBytes(
+  spec: ToolDisplayWire,
+  state: ToolBlockState,
+): string | "pending" | null {
+  if (spec.source === "args") {
+    const parsed = parseArgsObject(state.args);
+    const v = spec.arg !== undefined ? parsed?.[spec.arg] : undefined;
+    return typeof v === "string" ? v : null;
+  }
+  if (spec.source === "error") {
+    if (!state.result) return "pending";
+    return state.result.error ?? null;
+  }
+  if (!state.result) return "pending";
+  if (state.result.error) return null;
+  return state.result.output ?? "";
+}
+
+type PartView =
+  | { posture: "skip" }
+  | { posture: "pending"; icon?: string }
+  | { posture: "file"; summary: string; text: string; envelope?: string }
+  | { posture: "diff"; lines: DiffLine[] }
+  | { posture: "prose"; text: string; icon?: string }
+  | { posture: "code"; text: string; runs: CodeRun[] | null };
+
+/**
+ * Resolve one declared part against the block state. Rules: result/error
+ * sources render only once the result arrives; error results never render
+ * as file parts; missing/non-string keys skip the part; unknown kinds skip
+ * silently (forward-compat). `consumes` (below) tracks whether a rendered
+ * part accounted for the result bytes, gating the generic result box.
+ * A file part follows `source` like the other kinds: result bytes by default,
+ * or the written arg at call time (`source: "args"`, append/overwrite), whose
+ * ok result is a size envelope rendered as the box's footer meta.
+ */
+function resolvePart(spec: ToolDisplayWire, state: ToolBlockState): PartView {
+  switch (spec.kind) {
+    case "file": {
+      if (spec.source === "args") {
+        const body = spec.arg !== undefined ? parseArgsObject(state.args)?.[spec.arg] : undefined;
+        if (typeof body !== "string" || body === "") return { posture: "skip" };
+        const summary = fileSummary(state.args, body, spec);
+        if (summary === null) return { posture: "skip" };
+        // Ok result = the write confirmation envelope: a quiet footer line
+        // inside the box, never the face. An error is no envelope at all.
+        if (!state.result || state.result.error) return { posture: "file", summary, text: body };
+        return { posture: "file", summary, text: body, envelope: oneLine(state.result.output ?? "", 80) };
+      }
+      if (!state.result || state.result.error) return { posture: "skip" };
+      const text = state.result.output ?? "";
+      const summary = fileSummary(state.args, text, spec);
+      if (summary === null) return { posture: "skip" };
+      return { posture: "file", summary, text };
+    }
+    case "diff": {
+      if (!state.result || state.result.error) return { posture: "skip" };
+      const parsed = parseArgsObject(state.args);
+      const oldV = parsed && spec.oldArg ? parsed[spec.oldArg] : undefined;
+      const newV = parsed && spec.newArg ? parsed[spec.newArg] : undefined;
+      if (typeof oldV !== "string" || typeof newV !== "string") return { posture: "skip" };
+      return { posture: "diff", lines: computeDiffLines(oldV, newV) };
+    }
+    case "prose":
+    case "code": {
+      const bytes = partBytes(spec, state);
+      if (bytes === null) return { posture: "skip" };
+      if (bytes === "pending") {
+        // Prose waits quietly (icon + name chip); framed parts show nothing.
+        return spec.kind === "prose" ? { posture: "pending", icon: spec.icon } : { posture: "skip" };
+      }
+      if (bytes === "") return { posture: "skip" };
+      if (spec.kind === "prose") return { posture: "prose", text: bytes, icon: spec.icon };
+      return { posture: "code", text: bytes, runs: codeRuns(bytes, spec.lang) };
+    }
+    default:
+      return { posture: "skip" };
+    }
+}
+
+/** Did a rendered part account for the result? Gates the generic result box. */
+function partConsumesResult(spec: ToolDisplayWire, view: PartView): boolean {
+  switch (view.posture) {
+    case "file":
+      // A result-sourced file part IS the result bytes. An args-sourced one
+      // (append/overwrite) shows the written content instead and takes the ok
+      // result into the box's footer meta, so the same text never arrives a
+      // second time as a framed box -- but an error result is no envelope: it
+      // keeps the generic tinted box.
+      return spec.source !== "args" || view.envelope !== undefined;
+    case "diff":
+      return true;
+    case "prose":
+    case "code":
+      return spec.source !== "args";
+    default:
+      return false;
+  }
 }
 
 function statusOf(state: ToolBlockState): "pending" | "ok" | "error" {
@@ -201,21 +394,234 @@ function ImagesView({ images }: { images: ToolImageWire[] }) {
   );
 }
 
+/** Summary line for the generic result box (rule: sizes collapsed, errors name themselves). */
+export function genericResultSummary(result: ToolResultData): string {
+  if (result.error) {
+    const first = result.error.trim().split("\n")[0] ?? "";
+    return `error — ${oneLine(first, 80)}`;
+  }
+  return `result — ${textStat(result.output ?? "")}`;
+}
+
+interface PartProps {
+  view: PartView;
+  state: ToolBlockState;
+  index: number;
+  /** Toggle a body; `current` is the EFFECTIVE open state (auto-expand
+   *  included), so the first click on an auto-opened body collapses it. */
+  onToggleBox: (key: string, current: boolean) => void;
+  onUnfold: (key: string) => void;
+}
+
+/** One declared part as DOM, per the posture resolved above. */
+function Part({ view, state, index, onToggleBox, onUnfold }: PartProps): JsxChild {
+  switch (view.posture) {
+    case "skip":
+      return null;
+    case "file": {
+      const key = `f${index}`;
+      const openKey = `ff${index}`;
+      const open = state.boxes[key] ?? underAutoExpand(view.text);
+      const full = state.unfolded[openKey] === true;
+      const capped = !full && view.text.length > FILE_RENDER_CAP_CHARS;
+      return (
+        <div className="tool-file" key={key}>
+          <button
+            type="button"
+            className="tool-box-summary"
+            onClick={() => onToggleBox(key, open)}
+          >
+            {view.summary}
+          </button>
+          {open ? (
+            <>
+              <pre className="tool-file-pre">
+                {capped ? view.text.slice(0, FILE_RENDER_CAP_CHARS) : view.text}
+              </pre>
+              {capped ? (
+                <button
+                  type="button"
+                  className="tool-raw-toggle"
+                  onClick={() => onUnfold(openKey)}
+                >
+                  {`… ${view.text.length - FILE_RENDER_CAP_CHARS} more — show full`}
+                </button>
+              ) : null}
+              {view.envelope ? (
+                <div className="tool-file-meta">{view.envelope}</div>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      );
+    }
+    case "diff": {
+      const key = `d${index}`;
+      const folded = view.lines.length > MAX_INLINE_DIFF_LINES;
+      const unfolded = state.unfolded[key] === true;
+      const shown = folded && !unfolded ? view.lines.slice(0, MAX_INLINE_DIFF_LINES) : view.lines;
+      return (
+        <div className="tool-diff" key={key}>
+          {shown.map((line, j) => (
+            <div key={j} className={`diff-row diff-${line.kind}`}>
+              <span className="diff-gutter">
+                {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
+              </span>
+              <span className="diff-text">{line.text}</span>
+            </div>
+          ))}
+          {folded && !unfolded ? (
+            <button
+              type="button"
+              className="tool-raw-toggle diff-expand"
+              onClick={() => onUnfold(key)}
+            >
+              {`expand remaining ${view.lines.length - MAX_INLINE_DIFF_LINES} lines`}
+            </button>
+          ) : null}
+        </div>
+      );
+    }
+    case "prose": {
+      // Quiet agent-message row: icon gutter + sanitizer-backed markdown.
+      // The inline ref re-runs every render (new closure identity), keeping
+      // the md-content div in sync through the house md pipeline only.
+      const html = proseHtml(view.text);
+      return (
+        <div className="tool-prose" key={`p${index}`}>
+          {view.icon && TOOL_ICONS[view.icon] ? (
+            <span className="tool-prose-icon">{TOOL_ICONS[view.icon]!()}</span>
+          ) : null}
+          <div
+            className="md-content tool-prose-md"
+            ref={(el) => {
+              if (el) (el as unknown as HTMLElement).innerHTML = html;
+            }}
+          />
+        </div>
+      );
+    }
+    case "pending": {
+      return (
+        <div className="tool-prose pending" key={`p${index}`}>
+          {view.icon && TOOL_ICONS[view.icon] ? (
+            <span className="tool-prose-icon">{TOOL_ICONS[view.icon]!()}</span>
+          ) : null}
+          <span className="tool-prose-chip">{state.name}</span>
+        </div>
+      );
+    }
+    case "code":
+      return (
+        <pre className="tool-code" key={`c${index}`}>
+          {view.runs
+            ? view.runs.map((run, j) =>
+                run.cls === null ? (
+                  run.text
+                ) : (
+                  <span key={j} className={run.cls}>
+                    {run.text}
+                  </span>
+                ),
+              )
+            : view.text}
+        </pre>
+      );
+    default:
+      return null;
+  }
+}
+
 interface BlockProps {
   state: ToolBlockState;
   onToggle: () => void;
   onToggleRaw: () => void;
   onShowFull: () => void;
+  /** Toggle a body; `current` is the EFFECTIVE open state (auto-expand
+   *  included), so the first click on an auto-opened body collapses it. */
+  onToggleBox: (key: string, current: boolean) => void;
+  onUnfold: (key: string) => void;
 }
 
-export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull }: BlockProps) {
+export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBox, onUnfold }: BlockProps) {
   const status = statusOf(state);
-  const header = state.argsSummary ?? argsSummary(state.args);
-  const diff = editDiff(state.name, state.args);
   const result = state.result;
-  const resultText = result ? result.error ? `Error: ${result.error}` : result.output ?? "" : "";
+  const specs = state.display ?? [];
+  const resolved = specs.map((spec) => {
+    const view = resolvePart(spec, state);
+    return { view, consumes: partConsumesResult(spec, view) };
+  });
+  const rendered = resolved.filter((r) => r.view.posture !== "skip");
+  const consumed = resolved.some((r) => r.consumes && r.view.posture !== "skip");
+  // Prose posture: the block reads as an agent message row, not a framed
+  // tool box. Framing comes back only if every prose part skipped.
+  const prosePosture = rendered.some((r) => r.view.posture === "prose" || r.view.posture === "pending");
+  const showGenericBox = result !== undefined && !consumed;
+  const resultText = result ? (result.error ? `Error: ${result.error}` : result.output ?? "") : "";
   const truncated = !state.fullResult && resultText.length > RESULT_PREVIEW_CHARS;
+  const boxOpen = state.boxes["g"] ?? underAutoExpand(resultText);
 
+  const parts = resolved.map((r, i) => (
+    <Part
+      key={i}
+      view={r.view}
+      state={state}
+      index={i}
+      onToggleBox={onToggleBox}
+      onUnfold={onUnfold}
+    />
+  ));
+
+  const genericBox = showGenericBox ? (
+    <div className={"tool-result-box" + (status === "error" ? " tool-result-error" : "")}>
+      <button type="button" className="tool-box-summary" onClick={() => onToggleBox("g", boxOpen)}>
+        {genericResultSummary(result)}
+      </button>
+      {boxOpen ? (
+        <>
+          <pre className="tool-result-pre">
+            {truncated
+              ? resultText.slice(0, RESULT_PREVIEW_CHARS) +
+                `\n\n… ${resultText.length - RESULT_PREVIEW_CHARS} more chars`
+              : resultText}
+          </pre>
+          {truncated ? (
+            <button type="button" className="tool-raw-toggle" onClick={onShowFull}>
+              show full result
+            </button>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  ) : null;
+
+  const images = result?.images && result.images.length > 0 ? <ImagesView images={result.images} /> : null;
+
+  if (prosePosture) {
+    // Slim raw disclosure so the wire JSON stays reachable under prose.
+    return (
+      <div className={`tool-call-block posture-prose status-${status}`}>
+        {parts}
+        {genericBox}
+        <div className="tool-prose-raw">
+          <button type="button" className="tool-raw-toggle" onClick={onToggle}>
+            {state.expanded ? "hide json" : "json"}
+          </button>
+          {state.expanded ? (
+            <>
+              <pre className="tool-args">{state.raw ? state.args : prettyArgs(state.args)}</pre>
+              <button type="button" className="tool-raw-toggle" onClick={onToggleRaw}>
+                {state.raw ? "pretty json" : "raw json"}
+              </button>
+            </>
+          ) : null}
+        </div>
+        {images}
+      </div>
+    );
+  }
+
+  const header = state.argsSummary ?? argsSummary(state.args);
   return (
     <div className={`tool-call-block status-${status}`}>
       <div className="tool-call-header" onClick={onToggle} title={state.name}>
@@ -223,53 +629,33 @@ export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull }: BlockPro
         <span className="tool-call-display">{header}</span>
         <span className={`tool-call-status status-${status}`}>{STATUS_GLYPH[status]}</span>
       </div>
+      {parts}
+      {genericBox}
       <div className={"tool-call-body" + (state.expanded ? "" : " hidden")}>
-        {diff ? (
-          <div className="tool-diff">
-            {diff.map((line, i) => (
-              <div key={i} className={`diff-line diff-${line.kind}`}>
-                {`${line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}${line.text}`}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <pre className="tool-args">{state.raw ? state.args : prettyArgs(state.args)}</pre>
-        )}
+        <pre className="tool-args">{state.raw ? state.args : prettyArgs(state.args)}</pre>
         <button type="button" className="tool-raw-toggle" onClick={onToggleRaw}>
           {state.raw ? "pretty json" : "raw json"}
         </button>
-        {result ? (
-          <div className={"tool-result-section" + (status === "error" ? " tool-result-error" : "")}>
-            <pre className="tool-result-pre">
-              {truncated
-                ? resultText.slice(0, RESULT_PREVIEW_CHARS) +
-                  `\n\n… ${resultText.length - RESULT_PREVIEW_CHARS} more chars`
-                : resultText}
-            </pre>
-            {truncated ? (
-              <button type="button" className="tool-raw-toggle" onClick={onShowFull}>
-                show full result
-              </button>
-            ) : null}
-          </div>
-        ) : null}
       </div>
-      {result?.images && result.images.length > 0 ? <ImagesView images={result.images} /> : null}
+      {images}
     </div>
   );
 }
 
 /**
- * Imperative handle message-list drives: create with the call, setResult
- * when the matching result arrives, destroy on clear. All state lives in
- * the handle; the component is pure.
+ * Imperative handle message-list drives: create with the call (including its
+ * declared display parts), setResult when the matching result arrives,
+ * destroy on clear. All state lives in the handle; the component is pure.
  */
 export class ToolBlockController {
   #state: ToolBlockState;
   #mounted: Mounted;
 
-  constructor(host: DomNode, init: { name: string; args: string; argsSummary?: string }) {
-    this.#state = { ...init, expanded: false, raw: false, fullResult: false };
+  constructor(
+    host: DomNode,
+    init: { name: string; args: string; argsSummary?: string; display?: ToolDisplayWire[] },
+  ) {
+    this.#state = { ...init, expanded: false, raw: false, fullResult: false, boxes: {}, unfolded: {} };
     this.#mounted = mount(this.#el(), host);
   }
 
@@ -280,6 +666,8 @@ export class ToolBlockController {
         onToggle={this.#toggle}
         onToggleRaw={this.#toggleRaw}
         onShowFull={this.#showFull}
+        onToggleBox={this.#toggleBox}
+        onUnfold={this.#unfold}
       />
     );
   }
@@ -299,8 +687,26 @@ export class ToolBlockController {
     this.#mounted.render(this.#el());
   };
 
+  #toggleBox = (key: string, current: boolean): void => {
+    this.#state = {
+      ...this.#state,
+      boxes: { ...this.#state.boxes, [key]: !current },
+    };
+    this.#mounted.render(this.#el());
+  };
+
+  #unfold = (key: string): void => {
+    this.#state = { ...this.#state, unfolded: { ...this.#state.unfolded, [key]: true } };
+    this.#mounted.render(this.#el());
+  };
+
   setResult(result: ToolResultData): void {
-    this.#state = { ...this.#state, result };
+    // Error results open the generic result box by default: it is the only
+    // thing the user needs to see, tinted, naming itself on one line.
+    const boxes = result.error
+      ? { ...this.#state.boxes, g: true }
+      : this.#state.boxes;
+    this.#state = { ...this.#state, result, boxes };
     this.#mounted.render(this.#el());
   }
 

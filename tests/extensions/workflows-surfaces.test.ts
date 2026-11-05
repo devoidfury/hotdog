@@ -406,6 +406,18 @@ describe("manager tools", () => {
     expect(new WorkflowStatusTool(o).metadata.managerOnly).toBe(true);
   });
 
+  it("workflow_validate declares the yaml code-block display part with its real yaml param", () => {
+    // Rename guard: sinks print the yaml arg as real content (never a JSON
+    // object with escaped newlines); the declared arg key must stay a real
+    // schema parameter.
+    const tool = new WorkflowValidateTool(toolOpts(null, null));
+    expect(tool.metadata.display).toEqual([
+      { kind: "code", source: "args", arg: "yaml", lang: "yaml" },
+    ]);
+    const props = tool.toToolDef().function.parameters.properties as Record<string, unknown>;
+    expect(Object.keys(props)).toContain(tool.metadata.display![0]!.arg!);
+  });
+
   it("workflow_validate yaml mode validates then writes the graph file", async () => {
     const root = freshDir();
     const wfDir = join(root, "defs");

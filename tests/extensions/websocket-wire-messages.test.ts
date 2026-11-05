@@ -11,7 +11,8 @@ import {
   s2cTokenUsage,
   toS2CMessage,
 } from "@extensions/websocket/wire-messages.ts";
-import { S2C } from "@extensions/websocket/protocol.ts";
+import { S2C, type ToolDisplayWire } from "@extensions/websocket/protocol.ts";
+import { ToolRegistry } from "@core/extensions/tool-registry.ts";
 import { OUTPUT_EVENT, type TokenUsageEvent } from "@core/context/output.ts";
 
 describe("s2cAssistantMessage per-call meta", () => {
@@ -125,5 +126,102 @@ describe("toS2CMessage maps a live TOKEN_USAGE durationMs onto the wire", () => 
     );
     expect("callMs" in (msg ?? {})).toBe(false);
     expect("durationMs" in (msg ?? {})).toBe(false);
+  });
+});
+
+// TOOL_CALL display parts: the frame forwards the tool's declared
+// ToolDisplaySpec[] (mapped through the single wireToolDisplay seam), in
+// array order, with unknown kinds passed through untouched. Values are ARG
+// PARAMETER NAMES (the args JSON rides the same frame), and a tool
+// declaring nothing rides no field at all.
+describe("TOOL_CALL display parts", () => {
+  const toolCall = (toolName: string, args = "{}") =>
+    ({
+      type: OUTPUT_EVENT.TOOL_CALL,
+      toolName,
+      input: args,
+      toolCallId: "tc-1",
+    }) as never;
+
+  it("forwards read's file part with its *Arg parameter names", () => {
+    const msg = toS2CMessage(toolCall("read"), "s1", {
+      display: (name) =>
+        name === "read"
+          ? [{ kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" }]
+          : undefined,
+    });
+    expect(msg?.type).toBe(S2C.TOOL_CALL);
+    expect(msg?.display).toEqual([
+      { kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" },
+    ]);
+  });
+
+  it("forwards multi-part declarations in order, untouched", () => {
+    const spec = [
+      { kind: "code", source: "args" as const, arg: "command", lang: "shell" },
+      { kind: "prose", source: "result" as const, icon: "hourglass" },
+    ];
+    const msg = toS2CMessage(toolCall("multi"), "s1", { display: () => spec });
+    expect(msg?.display).toEqual(spec);
+  });
+
+  it("unknown kinds pass through untouched (forward-compat; sinks skip them)", () => {
+    const msg = toS2CMessage(toolCall("chart"), "s1", {
+      display: () => [{ kind: "chart", source: "result" }],
+    });
+    expect(msg?.display).toEqual([{ kind: "chart", source: "result" }]);
+  });
+
+  it("lang rides the frame so sinks can pick a tokenizer", () => {
+    const msg = toS2CMessage(toolCall("workflow_validate"), "s1", {
+      display: () => [{ kind: "code", source: "args", arg: "yaml", lang: "yaml" }],
+    });
+    const parts = msg?.display as ToolDisplayWire[] | undefined;
+    expect(parts?.[0]?.lang).toBe("yaml");
+  });
+
+  it("the display field never carries arg VALUES", () => {
+    const msg = toS2CMessage(
+      toolCall("bash", JSON.stringify({ command: "echo secret-value" })),
+      "s1",
+      { display: () => [{ kind: "code", source: "args", arg: "command", lang: "shell" }] },
+    );
+    const displayJson = JSON.stringify(msg?.display);
+    expect(displayJson).toContain("command"); // parameter NAME
+    expect(displayJson).not.toContain("secret-value"); // never the value
+  });
+
+  it("omits the field entirely for a hintless tool (no null-noise)", () => {
+    const msg = toS2CMessage(toolCall("bash"), "s1", {
+      display: (name) => (name === "read" ? [{ kind: "file", pathArg: "path" }] : undefined),
+    });
+    expect("display" in (msg ?? {})).toBe(false);
+  });
+
+  it("omits an empty display array too", () => {
+    const msg = toS2CMessage(toolCall("mystery"), "s1", { display: () => [] });
+    expect("display" in (msg ?? {})).toBe(false);
+  });
+
+  it("no resolver wired at all means no display field", () => {
+    const msg = toS2CMessage(toolCall("read"), "s1");
+    expect("display" in (msg ?? {})).toBe(false);
+  });
+
+  it("mutating metadata.display (the TOOL_METADATA hook surface) flows to the wire", () => {
+    // The hook exposes the live mutable metadata objects; a resolver reading
+    // the registry must therefore see post-registration annotations.
+    const registry = new ToolRegistry();
+    registry.register("annotate_me", {
+      metadata: { sideEffects: false, difficulty: 1 },
+      toToolDef: () => ({ type: "function", function: { name: "annotate_me", description: "", parameters: {} } }),
+      execute: async () => "ok",
+    });
+    const resolve = (name: string) => registry.getMetadata(name)?.display;
+    expect("display" in (toS2CMessage(toolCall("annotate_me"), "s1", { display: resolve }) ?? {})).toBe(false);
+    // Annotate, exactly as a TOOL_METADATA handler would.
+    registry.getMetadata("annotate_me")!.display = [{ kind: "prose", icon: "hourglass" }];
+    const msg = toS2CMessage(toolCall("annotate_me"), "s1", { display: resolve });
+    expect(msg?.display).toEqual([{ kind: "prose", icon: "hourglass" }]);
   });
 });

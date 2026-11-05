@@ -11,6 +11,8 @@ When adding new functionality:
 
 See [Hook Lifecycle](../hook-lifecycle.md) for additional hooks.
 
+Tools declare their display policy on `Tool.metadata` (`src/core/extensions/tool-registry.ts`), never in the JSON Schema (which goes to the provider verbatim): `argDisplay` folds individual args into the summary line, and the ordered `display` array (`ToolDisplaySpec`) names the parts a sink should render for the call -- `file` boxes, `diff` views, `prose` with a sink-owned `icon`, `code` blocks with a `lang` for the shared tokenizer registry (`src/utils/syntax/`). Sinks resolve the result server-side via `ToolRegistry.getMetadata`, skip kinds they don't know, and fall back to their generic posture when nothing renderable remains. A part's bytes follow its `source`: result bytes by default, or `source: "args"` + `arg` for tools whose args carry the content (a `file` part with `source: "args"` renders the written text at call time and keeps the result envelope as a footer line -- see `append`/`overwrite`). The websocket `TOOL_CALL` frame and the cold `logViewed` entries both carry the resolved parts, so a browsed log renders exactly like the live feed.
+
 When adding new subcommands, create a new extension in `src/extensions/` and register via `CliSubcommandRegistry`.
 
 ### Extension.json Schema

@@ -99,6 +99,9 @@ export class BashTool {
     difficulty: 2,
     execution: "worker",
     argDisplay: { command: { preview: "first-line", syntax: "shell" } },
+    // Sinks with a display spec render the WHOLE multi-line command block
+    // unfolded, shell-highlighted (the terminal keeps the argsSummary fold).
+    display: [{ kind: "code", source: "args", arg: "command", lang: "shell" }],
   };
 
   readonly timeoutMs: number;

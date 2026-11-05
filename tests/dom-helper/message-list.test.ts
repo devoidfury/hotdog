@@ -22,6 +22,14 @@ function texts(sel: string): string[] {
   return [...container.querySelectorAll(sel)].map((e) => e.textContent ?? "");
 }
 
+/** The generic result box collapses to a summary line; auto-expand (owner
+ *  ruling 2026-11-05) already opens short bodies, so only click when the
+ *  body is not in the DOM yet. */
+function openResult(block: Element): void {
+  const summary = block.querySelector(".tool-result-box .tool-box-summary");
+  if (summary && !block.querySelector(".tool-result-pre")) (summary as HTMLElement).click();
+}
+
 describe("user / assistant messages", () => {
   it("renders a user bubble with escaped-by-textContent content", () => {
     ml.handleUserMessage({ content: "hi <script>alert(1)</script>" });
@@ -239,14 +247,15 @@ describe("tool calls and results", () => {
     expect(block.querySelector(".tool-call-body")!.classList.contains("hidden")).toBe(true);
 
     ml.handleToolResult({ name: "read", output: "x".repeat(2500), toolCallId: "t1" });
+    // The result rides a collapsed generic box: open it for the preview.
+    openResult(block);
     const pre = block.querySelector(".tool-result-pre")!;
     expect(pre.textContent).toContain("500 more chars");
 
-    // Expand reveals the body; "show full result" swaps in the full output.
+    // Expand reveals the args body; "show full result" swaps in the full output.
     (block.querySelector(".tool-call-header") as HTMLElement).click();
     expect(block.querySelector(".tool-call-body")!.classList.contains("hidden")).toBe(false);
-    const toggles = block.querySelectorAll<HTMLElement>(".tool-raw-toggle");
-    toggles[toggles.length - 1]!.click();
+    block.querySelector<HTMLElement>(".tool-result-box .tool-raw-toggle")!.click();
     expect(block.querySelector(".tool-result-pre")!.textContent).toHaveLength(2500);
   });
 
@@ -265,9 +274,11 @@ describe("tool calls and results", () => {
     // Results arrive newest-first: name-based pairing would hit the wrong call.
     ml.handleToolResult({ name: "bash", output: "RESULT-B", toolCallId: "b" });
     const blocks = container.querySelectorAll(".tool-call-block");
-    expect(blocks[0]!.querySelector(".tool-result-pre")).toBeNull();
+    expect(blocks[0]!.querySelector(".tool-result-box")).toBeNull();
+    openResult(blocks[1]!);
     expect(blocks[1]!.querySelector(".tool-result-pre")!.textContent).toBe("RESULT-B");
     ml.handleToolResult({ name: "bash", output: "RESULT-A", toolCallId: "a" });
+    openResult(blocks[0]!);
     expect(blocks[0]!.querySelector(".tool-result-pre")!.textContent).toBe("RESULT-A");
   });
 
@@ -276,8 +287,9 @@ describe("tool calls and results", () => {
     ml.handleToolCall({ name: "bash", args: '{"command":"pwd"}' });
     ml.handleToolResult({ name: "bash", output: "FIRST" });
     const blocks = container.querySelectorAll(".tool-call-block");
+    openResult(blocks[0]!);
     expect(blocks[0]!.querySelector(".tool-result-pre")!.textContent).toBe("FIRST");
-    expect(blocks[1]!.querySelector(".tool-result-pre")).toBeNull();
+    expect(blocks[1]!.querySelector(".tool-result-box")).toBeNull();
   });
 
   it("renders error results and ignores results with no matching call", () => {
@@ -287,21 +299,50 @@ describe("tool calls and results", () => {
     ml.handleToolResult({ name: "bash", error: "boom" });
     const block = container.querySelector(".tool-call-block")!;
     expect(block.className).toContain("status-error");
-    expect(block.querySelector(".tool-result-section")!.textContent).toContain("Error: boom");
+    // Error posture: the box is open by default, tinted, naming the error.
+    const box = block.querySelector(".tool-result-box")!;
+    expect(box.className).toContain("tool-result-error");
+    expect(box.textContent).toContain("error — boom");
+    expect(box.querySelector(".tool-result-pre")!.textContent).toContain("Error: boom");
   });
 
-  it("renders edit calls as a diff body", () => {
+  it("renders spec-declared diff parts inline once the result lands", () => {
+    // Spec-keyed, never name-keyed: the diff comes from the frame's display
+    // array (ToolDisplayWire), and pending calls render nothing inline yet.
     ml.handleToolCall({
       name: "edit",
+      display: [{ kind: "diff", oldArg: "oldString", newArg: "newString" }],
       args: JSON.stringify({ path: "a.ts", oldString: "one\ntwo\nthree", newString: "one\nTWO\nthree" }),
     });
     const block = container.querySelector(".tool-call-block")!;
-    (block.querySelector(".tool-call-header") as HTMLElement).click();
+    expect(block.querySelector(".tool-diff")).toBeNull();
+    ml.handleToolResult({ name: "edit", output: "ok", toolCallId: undefined });
+    // No expand click needed: the diff is the primary inline content.
     expect(block.querySelector(".diff-del")!.textContent).toContain("two");
     expect(block.querySelector(".diff-add")!.textContent).toContain("TWO");
-    const lines = block.querySelectorAll(".diff-line");
-    expect(lines[0]!.classList.contains("diff-ctx")).toBe(true);
-    expect(lines[lines.length - 1]!.classList.contains("diff-ctx")).toBe(true);
+    const rows = block.querySelectorAll(".diff-row");
+    expect(rows[0]!.classList.contains("diff-ctx")).toBe(true);
+    expect(rows[rows.length - 1]!.classList.contains("diff-ctx")).toBe(true);
+    // The diff consumed the result: no generic box alongside it.
+    expect(block.querySelector(".tool-result-box")).toBeNull();
+  });
+
+  it("threads frame display parts into the block (file summary)", () => {
+    ml.handleToolCall({
+      name: "read",
+      display: [{ kind: "file", pathArg: "path" }],
+      args: JSON.stringify({ path: "/a/b/c.txt" }),
+    });
+    ml.handleToolResult({ name: "read", output: "L1\nL2" });
+    const block = container.querySelector(".tool-call-block")!;
+    expect(block.querySelector(".tool-file .tool-box-summary")!.textContent).toBe("c.txt — 2 lines · 5 chars");
+    // No display on the frame -> generic posture only, no file box.
+    ml.handleToolCall({ name: "read", args: JSON.stringify({ path: "/a/b/d.txt" }) });
+    ml.handleToolResult({ name: "read", output: "L1\nL2" });
+    const plain = container.querySelectorAll(".tool-call-block")[1]!;
+    expect(plain.querySelector(".tool-file")).toBeNull();
+    openResult(plain);
+    expect(plain.querySelector(".tool-result-pre")!.textContent).toBe("L1\nL2");
   });
 
   it("toggles args between pretty and raw JSON", () => {
@@ -448,6 +489,8 @@ describe("session log replay", () => {
     // Entries carry no tool_call_id: the grep result pairs by name to the
     // grep block (the only pending "grep" call).
     const blocks = container.querySelectorAll(".tool-call-block");
+    openResult(blocks[0]!);
+    openResult(blocks[1]!);
     expect(blocks[0]!.querySelector(".tool-result-pre")!.textContent).toContain("hit");
     expect(blocks[1]!.querySelector(".tool-result-pre")!.textContent).toContain("did it");
     expect(container.querySelector(".message.assistant .content")!.textContent).toContain("answer");
@@ -501,7 +544,7 @@ describe("session log replay", () => {
     ]);
     // extractToolName returns "tool"; no pending call has that name, so the
     // result is silently dropped and the block keeps no result section.
-    expect(container.querySelector(".tool-call-block .tool-result-section")).toBeNull();
+    expect(container.querySelector(".tool-call-block .tool-result-box")).toBeNull();
   });
 
   it("a stored tool-result part names its own tool and flattens for display", () => {
@@ -524,8 +567,9 @@ describe("session log replay", () => {
       },
     ]);
     // The entry carries no tool_name: the stored part names the tool, which
-    // matches the pending call. The body shows the flattened fields, not
-    // markup or at-rest JSON.
+    // matches the pending call. The opened body shows the flattened fields,
+    // not markup or at-rest JSON.
+    openResult(container.querySelector(".tool-call-block")!);
     const pre = container.querySelector(".tool-result-pre")!;
     expect(pre.textContent).toContain("partial");
     expect(pre.textContent).toContain("Error: boom");
@@ -565,8 +609,95 @@ describe("session log replay", () => {
     // The header fold reads the nested arguments string (the bug showed an
     // empty fold over literal "{}" args).
     expect(block.querySelector(".tool-call-display")!.textContent).toBe("ls -la");
-    // The result pairs by tool_call_id onto the named call.
+    // The result pairs by tool_call_id onto the named call (box opened).
+    openResult(block);
     expect(block.querySelector(".tool-result-pre")!.textContent).toBe("RESULT-OUT");
+  });
+
+  it("annotated display parts reach the block: a browsed edit renders the DIFF", () => {
+    // The cold log-view carries the registry-resolved parts per tool_call
+    // (handlers-logs.ts), so a browsed log hits the SAME posture code as a
+    // live TOOL_CALL frame: the diff renders inline and consumes the result.
+    ml.renderLogEntries([
+      {
+        source: "llm",
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: {
+              name: "edit",
+              arguments: JSON.stringify({ path: "a.ts", oldString: "one\ntwo\nthree", newString: "one\nTWO\nthree" }),
+            },
+            display: [{ kind: "diff", oldArg: "oldString", newArg: "newString" }],
+          },
+        ],
+      } as any,
+      { source: "tool_result", content: "ok", tool_call_id: "c1", tool_name: "edit" },
+    ]);
+    const block = container.querySelector(".tool-call-block")!;
+    expect(block.querySelector(".diff-del")!.textContent).toContain("two");
+    expect(block.querySelector(".diff-add")!.textContent).toContain("TWO");
+    // Consumed by the diff: no generic result box anywhere in the block.
+    expect(block.querySelector(".tool-result-box")).toBeNull();
+  });
+
+  it("an entry with NO display stays generic (the pre-fix cold posture)", () => {
+    // Same call, same result, no annotated parts: the generic box is all the
+    // client can build. This is the shape old servers (and hintless tools)
+    // keep sending -- and the exact complaint the cold path used to cause.
+    ml.renderLogEntries([
+      {
+        source: "llm",
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: {
+              name: "edit",
+              arguments: JSON.stringify({ path: "a.ts", oldString: "one", newString: "two" }),
+            },
+          },
+        ],
+      } as any,
+      { source: "tool_result", content: "edited 1 line", tool_call_id: "c1", tool_name: "edit" },
+    ]);
+    const block = container.querySelector(".tool-call-block")!;
+    // The tool NAME never decides the posture (spec-keyed doctrine).
+    expect(block.querySelector(".tool-diff")).toBeNull();
+    openResult(block);
+    expect(block.querySelector(".tool-result-pre")!.textContent).toBe("edited 1 line");
+  });
+
+  it("an args-sourced file part renders from a cold append entry, envelope in the footer", () => {
+    ml.renderLogEntries([
+      {
+        source: "llm",
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "append", arguments: JSON.stringify({ path: "/srv/notes.md", content: "line one\nline two" }) },
+            display: [{ kind: "file", source: "args", arg: "content", pathArg: "path" }],
+          },
+        ],
+      } as any,
+      { source: "tool_result", content: '{"path":"/srv/notes.md","bytes_appended":17}', tool_call_id: "c1", tool_name: "append" },
+    ]);
+    const block = container.querySelector(".tool-call-block")!;
+    // Auto-expand (owner ruling): the small written body is already open and
+    // the envelope rides as the footer line; the result envelope is consumed
+    // (no second generic box).
+    expect(block.querySelector(".tool-file .tool-box-summary")!.textContent).toBe("notes.md — 2 lines · 17 chars");
+    expect(block.querySelector(".tool-result-box")).toBeNull();
+    expect(block.querySelector(".tool-file-pre")!.textContent).toBe("line one\nline two");
+    expect(block.querySelector(".tool-file-meta")!.textContent).toContain("bytes_appended");
+    // User collapse hides both the content and the envelope.
+    (block.querySelector(".tool-file .tool-box-summary") as HTMLElement).click();
+    expect(block.textContent).not.toContain("bytes_appended");
   });
 });
 

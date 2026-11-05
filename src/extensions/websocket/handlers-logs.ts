@@ -14,6 +14,8 @@ import {
   type SearchHitWire,
 } from "./protocol.ts";
 import { SessionRegistry } from "./session-registry.ts";
+import { registryDisplay } from "./replay.ts";
+import { wireToolDisplay } from "./wire-messages.ts";
 import { attachResumedSession } from "./attach.ts";
 import { dropPinned, isPinned } from "./pin-store.ts";
 import type { RouteContext } from "./route-types.ts";
@@ -89,16 +91,33 @@ export async function handleLoadLog(ctx: RouteContext): Promise<void> {
 }
 
 export async function handleViewLog(ctx: RouteContext): Promise<void> {
-  const { ws, msg } = ctx;
+  const { ws, msg, core } = ctx;
   if (!msg.logId) return;
   // Awaited so the caller sees LOG_VIEWED/ERROR on return (real log read).
   await readSessionEntries(msg.logId as string)
     .then((entries) => {
+      // A browsed log is a cold surface with no client-side registry, so the
+      // server resolves each tool_call's declared display parts against the
+      // LIVE registry (registryDisplay, the replay resolver) and maps them
+      // through wireToolDisplay -- the one metadata->wire seam. Additive
+      // per-call field: old clients ignore it, hintless tools and non-call
+      // entries ride untouched (no null-noise, no empty arrays).
+      const toolDisplay = registryDisplay(core?.toolRegistry);
       // Log entries carry raw images; put them through the same wire cap so a huge base64 can't flood the socket.
-      const capped = entries.map((entry) => {
+      const capped: Array<Record<string, unknown>> = entries.map((entry) => {
         const imgs = wireImages(entry.images);
-        if (!entry.images) return entry;
-        return { ...entry, images: imgs };
+        const calls = entry.tool_calls;
+        const withImages = entry.images ? { ...entry, images: imgs } : entry;
+        if (!Array.isArray(calls) || calls.length === 0) return withImages;
+        let touched = false;
+        const wired = calls.map((raw) => {
+          const call = raw as { name?: string; function?: { name?: string } };
+          const display = wireToolDisplay(toolDisplay(call?.function?.name || call?.name || ""));
+          if (!display) return raw;
+          touched = true;
+          return { ...call, display };
+        });
+        return touched ? { ...withImages, tool_calls: wired } : withImages;
       });
       SessionRegistry.sendSafe(ws, {
         type: S2C.LOG_VIEWED,

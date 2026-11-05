@@ -15,6 +15,8 @@ import { MessageLog } from "@core/context/message-log.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import { TASK_STATUS } from "@core/session/task-types.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
+import { ToolRegistry } from "@core/extensions/tool-registry.ts";
+import { createToolFactory } from "@extensions/core-tools/index.ts";
 import { createFixture, simpleTool, TMP_PARENT } from "../helpers.ts";
 import { Message } from "@core/context/message.ts";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
@@ -929,6 +931,96 @@ describe("createWsServer - cold log operations", () => {
     const viewed = await waitForMessage(ws, S2C.LOG_VIEWED);
     expect(viewed.logId).toBe(FIXTURE_LOG_ID);
     expect(viewed.entries.map((e: { content: string }) => e.content)).toEqual(["loaded input", "loaded reply"]);
+  });
+
+  it("annotates VIEW_LOG tool_call entries with the registry-resolved display parts", async () => {
+    // The cold viewer has no client-side registry, so VIEW_LOG resolves each
+    // call's declared parts against the LIVE registry (the same instance
+    // sessions are built with) and annotates the raw entry: a browsed log then
+    // reaches the identical posture code as a live TOOL_CALL frame.
+    writeFileSync(
+      join(SESSIONS_DIR, `${FIXTURE_LOG_ID}.jsonl`),
+      [
+        JSON.stringify({ ts: "2024-01-01T00:00:00Z", session_id: FIXTURE_LOG_ID, source: "input", content: "please edit" }),
+        JSON.stringify({
+          ts: "2024-01-01T00:00:01Z",
+          session_id: FIXTURE_LOG_ID,
+          source: "llm",
+          content: "",
+          tool_calls: [
+            { id: "c1", type: "function", function: { name: "edit", arguments: '{"path":"a.ts","oldString":"x","newString":"y"}' } },
+            { id: "c2", type: "function", function: { name: "append", arguments: '{"path":"a.md","content":"body"}' } },
+            { id: "c3", type: "function", function: { name: "grep", arguments: '{"pattern":"x"}' } },
+            // Older flattened call shape: the name still resolves.
+            { id: "c4", name: "overwrite", args: { path: "b.md", content: "body" } },
+          ],
+        }),
+      ].join("\n") + "\n",
+    );
+    const core = createWsMockCore();
+    // Real core-tools instances: the declared metadata is the pin's subject,
+    // so it must not be a hand-rolled stub.
+    const toolRegistry = new ToolRegistry();
+    const factory = createToolFactory({
+      readToolLimit: 500,
+      maxImageSize: 10485760,
+      maxEditInputSize: 16000,
+      grepMaxResults: 100,
+      findMaxResults: 200,
+    });
+    for (const name of ["edit", "append", "grep", "overwrite"]) {
+      toolRegistry.register(name, factory.createTool(name)!);
+    }
+    core.toolRegistry = toolRegistry;
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.VIEW_LOG, logId: FIXTURE_LOG_ID }));
+    const viewed = await waitForMessage(ws, S2C.LOG_VIEWED);
+    const [inputEntry, llmEntry] = viewed.entries;
+    // Entries that are not tool calls ride untouched.
+    expect("display" in inputEntry).toBe(false);
+    const calls = llmEntry.tool_calls;
+    expect(calls[0].display).toEqual([{ kind: "diff", oldArg: "oldString", newArg: "newString" }]);
+    expect(calls[1].display).toEqual([{ kind: "file", source: "args", arg: "content", pathArg: "path" }]);
+    expect(calls[3].display).toEqual([{ kind: "file", source: "args", arg: "content", pathArg: "path" }]);
+    // A hintless tool gets no field at all (no null-noise), and its stored
+    // shape rides byte-for-byte: the annotation is purely additive, which is
+    // what lets a client that predates the field keep working.
+    expect("display" in calls[2]).toBe(false);
+    expect(calls[2].function).toEqual({ name: "grep", arguments: '{"pattern":"x"}' });
+    expect(calls[0].id).toBe("c1");
+    expect(calls[3].args).toEqual({ path: "b.md", content: "body" });
+    expect(inputEntry.content).toBe("please edit");
+  });
+
+  it("resolves parts registered after load (the TOOL_METADATA annotation surface)", async () => {
+    // Resolution reads getMetadata per call, so a TOOL_METADATA annotation
+    // made after registration rides cold logs exactly like a declared part.
+    writeFileSync(
+      join(SESSIONS_DIR, `${FIXTURE_LOG_ID}.jsonl`),
+      JSON.stringify({
+        ts: "2024-01-01T00:00:01Z",
+        session_id: FIXTURE_LOG_ID,
+        source: "llm",
+        content: "",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "cat", arguments: '{"path":"x.txt"}' } }],
+      }) + "\n",
+    );
+    const core = createWsMockCore();
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register("cat", {
+      metadata: { sideEffects: false, difficulty: 1, display: [{ kind: "file", pathArg: "path" }] },
+      toToolDef: async () => null,
+      execute: async () => null,
+    } as never);
+    core.toolRegistry = toolRegistry;
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.VIEW_LOG, logId: FIXTURE_LOG_ID }));
+    const viewed = await waitForMessage(ws, S2C.LOG_VIEWED);
+    expect(viewed.entries[0].tool_calls[0].display).toEqual([{ kind: "file", pathArg: "path" }]);
   });
 
   it("VIEW_LOG with missing logId is ignored", async () => {

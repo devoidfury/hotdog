@@ -13,6 +13,7 @@ import {
   replaySessionHistory,
 } from "@extensions/websocket/replay.ts";
 import { LOG_SOURCE, type LogEntry } from "@core/session/session-log.ts";
+import type { ToolRegistry } from "@core/extensions/tool-registry.ts";
 import { S2C } from "@extensions/websocket/protocol.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import { Message, type ImageAttachment } from "@core/context/message.ts";
@@ -149,6 +150,40 @@ describe("replaySessionHistory", () => {
     );
     const call = out.find((m) => m.type === S2C.TOOL_CALL)!;
     expect(call.argsSummary).toBe("git status… (2 lines, 22 chars)");
+  });
+
+  it("carries the forwarded display parts from the registry's metadata", () => {
+    const registry = {
+      get: () => undefined,
+      getMetadata: (name: string) =>
+        name === "edit"
+          ? { display: [{ kind: "diff", oldArg: "oldString", newArg: "newString" }] }
+          : undefined,
+    };
+    const out = replay(
+      [
+        new Message({
+          role: "assistant",
+          content: "x",
+          toolCalls: [
+            {
+              id: "c1",
+              type: "function",
+              function: {
+                name: "edit",
+                arguments: JSON.stringify({ path: "a.ts", oldString: "foo", newString: "bar" }),
+              },
+            },
+            { id: "c2", type: "function", function: { name: "bash", arguments: "{}" } },
+          ],
+        }),
+      ],
+      { toolRegistry: registry },
+    );
+    const calls = out.filter((m) => m.type === S2C.TOOL_CALL);
+    expect(calls[0]!.display).toEqual([{ kind: "diff", oldArg: "oldString", newArg: "newString" }]);
+    // The hintless call rides no field.
+    expect("display" in calls[1]!).toBe(false);
   });
 
   it("flattens tool-result parts (output, hint, meta) and flags orphaned results", () => {
@@ -628,5 +663,66 @@ describe("replayLogSlice footer meta (assistant per-call duration)", () => {
     // Second call: tool_result@1500 -> llm@3500 = 2000, derived.
     expect(assistants[1]!.callMs).toBe(2000);
     expect(assistants[1]!.durationMs).toBe(4000);
+  });
+});
+
+// Display parts on OLD logs: replay resolves them from the CURRENT registry
+// (registryDisplay, mirroring registryArgDisplay), so a fixture log written
+// before the hint existed replays with the same parts a live call gets.
+describe("replayLogSlice display parts", () => {
+  const entry = (over: Record<string, unknown>) =>
+    ({
+      ts: "2026-10-20T00:00:00.000Z",
+      session_id: "s",
+      source: LOG_SOURCE.LLM,
+      content: "",
+      ...over,
+    }) as unknown as LogEntry;
+
+  const registry = {
+    getMetadata: (name: string) =>
+      name === "read"
+        ? { display: [{ kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" }] }
+        : undefined,
+  } as unknown as ToolRegistry;
+
+  it("replayed tool_call frames resolve display from the registry", () => {
+    const ws = createWsMockWs();
+    replayLogSlice(
+      ws,
+      "s1",
+      [
+        entry({
+          tool_calls: [
+            {
+              id: "c1",
+              type: "function",
+              function: { name: "read", arguments: JSON.stringify({ path: "a.ts" }) },
+            },
+            { id: "c2", type: "function", function: { name: "grep", arguments: "{}" } },
+          ],
+        }),
+      ],
+      0,
+      registry,
+    );
+    const calls = received(ws).filter((m) => m.type === S2C.TOOL_CALL);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.display).toEqual([
+      { kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" },
+    ]);
+    expect("display" in calls[1]!).toBe(false);
+  });
+
+  it("no registry means no display field on replayed frames", () => {
+    const ws = createWsMockWs();
+    replayLogSlice(
+      ws,
+      "s1",
+      [entry({ tool_calls: [{ id: "c1", function: { name: "read", arguments: "{}" } }] })],
+      0,
+    );
+    const call = received(ws).find((m) => m.type === S2C.TOOL_CALL)!;
+    expect("display" in call).toBe(false);
   });
 });

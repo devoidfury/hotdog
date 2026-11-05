@@ -147,6 +147,48 @@ export interface C2SMessage {
   [key: string]: unknown;
 }
 
+// ── Tool call display parts (S2C TOOL_CALL) ─────────────────────────────────
+
+/**
+ * One declared display part on a `toolCall` frame, mirroring
+ * ToolDisplaySpec (ToolMetadata.display, the call-level sibling of the
+ * argDisplay hints). The server forwards the tool's declared spec AS
+ * DECLARED, in array order -- unknown kinds are not filtered server-side
+ * (forward-compat: current sinks skip them) -- and a tool declaring
+ * nothing (or an empty array) sends no field (no null-noise, no empty
+ * array). Values are ARG PARAMETER NAMES, never values -- the args JSON
+ * is already on the frame, so a sink reads e.g.
+ * `JSON.parse(args)[part.oldArg]` to build the view. Sinks render the
+ * kinds they know and fall back to their generic posture when nothing
+ * renderable remains. The cold `logViewed` payload carries the very same
+ * parts per tool_call of its (otherwise raw) entries, so a browsed log and
+ * the live feed cannot drift; that per-call field is additive -- clients
+ * that predate it ignore it.
+ */
+export interface ToolDisplayWire {
+  /** Open vocabulary kind (see ToolDisplaySpec): "file", "diff", "prose",
+   * "code", or anything a future tool declares. */
+  kind: string;
+  /** Bytes this part renders: "result" (default), "error", "args". kind
+   * "file" follows it too: "args" renders the written content on the call
+   * (append/overwrite), "result" renders the returned text (read). */
+  source?: "args" | "result" | "error";
+  /** source: "args" -- the arg key holding this part's text. */
+  arg?: string;
+  /** kind: "diff" -- arg keys of the old/new strings. */
+  oldArg?: string;
+  newArg?: string;
+  /** kind: "file" -- arg key naming the file; optional line-range args. */
+  pathArg?: string;
+  offsetArg?: string;
+  limitArg?: string;
+  /** kind: "prose" -- sink-owned icon name; unknown names render no icon. */
+  icon?: string;
+  /** Syntax language for highlighting; sinks without that tokenizer
+   * render plain text. */
+  lang?: string;
+}
+
 // ── Full-text log search (C2S searchLogs → S2C searchResults) ───────────────
 
 /**

@@ -114,3 +114,69 @@ describe("createToolFactory - createAndRegister", () => {
     expect(registry.has("explore")).toBe(false);
   });
 });
+
+describe("core tool display parts (ToolMetadata.display)", () => {
+  // Rename guard: the declared *Arg values are ARG PARAMETER NAMES, so they
+  // must keep matching the tools' real schema parameters. Sinks resolve the
+  // names against the args JSON on the frame; a silent rename breaks the
+  // webui diff/file views with no compile error anywhere else.
+  const schemaProps = async (toolName: string): Promise<string[]> => {
+    const tool = createToolFactory(config).createTool(toolName);
+    const def = await tool!.toToolDef();
+    return Object.keys((def!.function.parameters.properties ?? {}) as Record<string, unknown>);
+  };
+
+  it("read declares the file part with its real path/offset/limit params", async () => {
+    const tool = createToolFactory(config).createTool("read")!;
+    expect(tool.metadata.display).toEqual([
+      { kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" },
+    ]);
+    const part = tool.metadata.display![0]!;
+    const props = await schemaProps("read");
+    expect(props).toContain(part.pathArg!);
+    expect(props).toContain(part.offsetArg!);
+    expect(props).toContain(part.limitArg!);
+  });
+
+  it("edit declares the diff part with its real oldString/newString params", async () => {
+    const tool = createToolFactory(config).createTool("edit")!;
+    expect(tool.metadata.display).toEqual([
+      { kind: "diff", oldArg: "oldString", newArg: "newString" },
+    ]);
+    const part = tool.metadata.display![0]!;
+    const props = await schemaProps("edit");
+    expect(props).toContain(part.oldArg!);
+    expect(props).toContain(part.newArg!);
+  });
+
+  it("overwrite and append declare the args-sourced file part with their real params", async () => {
+    // Owner ruling (follow-up run): what an append/overwrite call wrote IS the
+    // primary content, so the file part takes its body from the `content` arg
+    // at call time and its header from `path`; the result envelope is a size
+    // confirmation the sink demotes to a footer line. Supersedes the earlier
+    // "these declare nothing" pin.
+    const factory = createToolFactory(config);
+    for (const name of ["overwrite", "append"]) {
+      const tool = factory.createTool(name)!;
+      expect(tool.metadata.display, `${name} display parts`).toEqual([
+        { kind: "file", source: "args", arg: "content", pathArg: "path" },
+      ]);
+      const part = tool.metadata.display![0]!;
+      const props = await schemaProps(name);
+      expect(props, `${name} content param`).toContain(part.arg!);
+      expect(props, `${name} path param`).toContain(part.pathArg!);
+    }
+  });
+
+  it("the rest of core-tools declares no display parts (no speculative decoration)", () => {
+    const factory = createToolFactory(config);
+    // grep/find/project_info return search listings; explore is free-form LLM
+    // output -- none of them has a part a sink could draw better than the
+    // generic posture. The whitelist only hands disabled-by-default `explore`
+    // back; the pin reads its metadata.
+    for (const name of ["grep", "find", "project_info", "explore"]) {
+      const tool = factory.createTool(name, [name]);
+      expect(tool!.metadata.display, `${name} must declare no display parts`).toBeUndefined();
+    }
+  });
+});

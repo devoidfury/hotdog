@@ -31,6 +31,50 @@ export interface ArgDisplay {
 }
 
 /**
+ * One declared display part of a tool call (see ToolMetadata.display).
+ * Flat optional fields, same register as ArgDisplay above: everything is
+ * optional except `kind`, and unknown fields/kinds are ignored by sinks.
+ */
+export interface ToolDisplaySpec {
+  /**
+   * Open vocabulary. Sinks render kinds they know and SKIP unknown kinds.
+   * Documented kinds today: "file" (an expandable box named by
+   * `pathArg`; its body bytes FOLLOW `source`, so the result text by default,
+   * or the string named by `arg` at call time -- append/overwrite return a
+   * size-confirmation envelope, so what they wrote lives in the args),
+   * "diff" (the args carry a replace-edit; render an add/del diff from
+   * `oldArg`/`newArg`), "prose" (result renders like a normal agent message,
+   * optional `icon`), "code" (a verbatim text block rendered unfolded,
+   * `lang`-highlighted).
+   */
+  kind: "file" | "diff" | "prose" | "code" | (string & {});
+  /** Bytes this part renders: "result" (default), "error", or "args"
+   * (paired with `arg`). kind "file" follows this too: "result" renders the
+   * returned text, "args" renders the written content the moment the call
+   * arrives, before any result. A part whose source has no bytes (yet) is
+   * skipped, so the generic posture covers it. */
+  source?: "result" | "error" | "args";
+  /** source: "args" -- the arg key holding this part's text. */
+  arg?: string;
+  /** kind: "diff" -- arg keys of the old/new strings. */
+  oldArg?: string;
+  newArg?: string;
+  /** kind: "file" -- arg key naming the file (the box header, whatever the
+   * body's source is); optional offset/limit arg keys for a line-range
+   * summary (result-sourced reads only; the size form covers the rest). */
+  pathArg?: string;
+  offsetArg?: string;
+  limitArg?: string;
+  /** kind: "prose" -- optional sink-owned icon name (e.g. "hourglass");
+   * unknown icon names render no icon. */
+  icon?: string;
+  /** Syntax language for highlighting ("shell", "yaml", ...). Sinks look
+   * it up in the shared tokenizer registry (src/utils/syntax/); an unknown
+   * or absent lang renders plain text. */
+  lang?: string;
+}
+
+/**
  * Metadata describing a tool's behavior characteristics.
  * Used for sandbox mode filtering and difficulty-based tool hiding.
  */
@@ -59,6 +103,20 @@ export interface ToolMetadata {
    * display sinks via ToolRegistry.getMetadata; never sent to the provider.
    */
   argDisplay?: Record<string, ArgDisplay>;
+  /**
+   * Ordered list of display parts for this tool's calls (sibling of
+   * argDisplay, which folds individual args); supports multi-part returns.
+   * Same register and rules as the ArgDisplay hints above: the policy
+   * lives here next to the metadata, never inside the JSON Schema (the
+   * schema goes to the provider verbatim). Absent or empty means sinks use
+   * their own generic posture; sinks must skip unknown kinds and fall back
+   * to generic when nothing renderable remains. Declared per tool or
+   * annotated via the TOOL_METADATA hook (which exposes the full mutable
+   * tools map, core/main.ts) -- no display policy ever enters the JSON
+   * schema. Resolved server-side via ToolRegistry.getMetadata; sinks
+   * consume the RESULT of resolution, never the registry itself.
+   */
+  display?: ToolDisplaySpec[];
 }
 
 export interface ToolDef {

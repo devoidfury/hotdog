@@ -73,10 +73,10 @@
     --space-xl: 16px;
 
     /* Layout */
-    --radius-sm: 6px;
-    --radius: 10px;
-    --radius-lg: 16px;
-    --radius-xl: 20px;
+    --radius-sm: 4px;
+    --radius: 5px;
+    --radius-lg: 9px;
+    --radius-xl: 18px;
     --radius-full: 9999px;
     --sidebar-width: 300px;
     --input-height: 64px;
@@ -529,12 +529,11 @@ body.sidebar-resizing {
 }
 
 .session-item {
-    padding: 12px 14px;
+    padding: 8px 10px;
     border-radius: var(--radius);
     cursor: pointer;
     transition: all 0.15s var(--ease-out);
     margin-bottom: 2px;
-    border: 1px solid transparent;
 }
 
 .session-item:hover {
@@ -543,7 +542,6 @@ body.sidebar-resizing {
 
 .session-item.active {
     background: var(--accent-soft);
-    border-color: rgba(124, 92, 255, 0.25);
 }
 
 /* ── Sidebar Row Grammar (shared by live sessions and cold logs) ───────────
@@ -562,7 +560,7 @@ body.sidebar-resizing {
 .log-item .row-l1 {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     font-size: 0.9rem;
     font-weight: 500;
     color: var(--text-primary);
@@ -822,11 +820,17 @@ body.sidebar-resizing {
     cursor: pointer;
     transition: all 0.15s var(--ease-out);
     margin-bottom: 2px;
+    /* Transparent reservation border (only the pre-existing active-green
+       attests in a border color); no resting background -- the fill belongs
+       to hover/focus/active only. */
     border: 1px solid transparent;
-    background: var(--bg-tertiary);
 }
 
 .log-item:hover {
+    background: var(--bg-hover);
+}
+
+.log-item:focus-visible {
     background: var(--bg-hover);
 }
 
@@ -1231,7 +1235,7 @@ body.sidebar-resizing {
     font-size: 0.75rem;
     line-height: 1.4;
     opacity: 0.75;
-    padding: 0 2px;
+    padding: 4px 2px 16px;
 }
 
 /* The `used/total` ctx segment: the gauge pair the sidebar shows, in the
@@ -1480,33 +1484,50 @@ body.sidebar-resizing {
     background: var(--bg-hover);
 }
 
-/* ── Tool Call Blocks ─────────────────────────────────────────────────────── */
+/* ── Tool Call Blocks ───────────────────────────────────────────────────────
+   A generic interpreter for the declared display DSL (ToolDisplayWire).
+   Parts render in declaration order under the header; the posture is decided
+   by the spec, never by the tool name. Single-surface rule (owner ruling):
+   the BLOCK is the only surface -- one quiet background fill, no border, no
+   shadow. The header is a quiet typographic row (no band, no slab); the
+   file/result/code parts read as typographic content inside the block, and
+   only an expandable body carries one inner treatment so its extent is
+   legible. Color stays semantic: diff add/del tints, the error tint, tok-*. */
 
 .tool-call-block {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    margin: var(--space-xs) 0 var(--space-xs) var(--space-sm);
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+    margin: 4px 0 4px var(--space-sm);
+    overflow: hidden;
     animation: messageIn 0.25s var(--ease-out) both;
+}
+
+/* Prose posture: reads as an agent message row, so the surface goes too. */
+.tool-call-block.posture-prose {
+    background: transparent;
+    overflow: visible;
 }
 
 .tool-call-header {
     padding: 6px 12px;
-    background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: space-between;
     font-size: 0.82rem;
-    color: var(--text-secondary);
+    /* Quiet typographic row: muted name, muted mono path badge (below), no
+       band and no slab. Muted by default, so a pending block is already the
+       resting state -- nothing to brighten until a result changes the glyph. */
+    color: var(--text-muted);
     font-weight: 500;
-    transition: background 0.15s;
+    transition: color 0.15s;
     user-select: none;
     gap: var(--space-md);
 }
 
+/* Click affordance is typographic: the row strengthens, it never fills. */
 .tool-call-header:hover {
-    background: var(--bg-hover);
+    color: var(--text-primary);
 }
 
 .tool-call-body {
@@ -1517,7 +1538,8 @@ body.sidebar-resizing {
     word-break: break-word;
     color: var(--text-secondary);
     line-height: 1.5;
-    height: 40vh;
+    /* auto height with internal scroll (was a fixed 40vh slab) */
+    max-height: 40vh;
     overflow-y: auto;
     resize: vertical;
 }
@@ -1563,8 +1585,7 @@ body.sidebar-resizing {
 .tool-call-status.status-ok { color: var(--success); }
 .tool-call-status.status-error { color: var(--error); }
 
-.tool-call-body .tool-args,
-.tool-call-body .tool-result-pre {
+.tool-call-body .tool-args {
     margin: 0;
     font-family: var(--font-mono);
     font-size: 0.78rem;
@@ -1572,42 +1593,223 @@ body.sidebar-resizing {
     word-break: break-word;
 }
 
-.tool-result-section {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px dashed var(--border);
+/* Collapsed disclosure shared by file parts and the generic result posture:
+   one muted summary line until opened, then lazy content. NOT a box: no
+   border, no fill -- the block behind it is the only surface. */
+.tool-file,
+.tool-result-box {
+    margin: var(--space-xs) var(--space-lg);
 }
 
-.tool-result-error .tool-result-pre {
+.tool-box-summary {
+    display: block;
+    width: 100%;
+    text-align: center;
+    background: none;
+    border: none;
+    padding: 6px 10px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tool-box-summary:hover {
+    color: var(--text-secondary);
+}
+
+/* Expand/collapse affordance (owner ruling 2026-11-05, inline revision): a
+   chevron rides directly right of the centered summary label (currentColor,
+   so the error posture's red carries in) and pops to the accent on
+   hover/focus -- the summary already toggles, so this only signals that it
+   is clickable. The owner ruled inline over clipped: a summary long enough
+   to ellipsize scrolls the chevron out of the row with the text, which the
+   centered reading buys back. A single down chevron rotating 180° is the
+   expand/collapse pair (down = expand when closed, up = collapse when
+   open). The open body renders as the summary's following <pre>, so
+   :has(+ pre) is the open attestation -- no DOM change, no per-posture class. */
+.tool-box-summary::after {
+    content: "";
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-left: 6px;
+    vertical-align: -1px;
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M6 9 L12 15 18 9' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>")
+        center / contain no-repeat;
+    mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M6 9 L12 15 18 9' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>")
+        center / contain no-repeat;
+    transition:
+        transform 0.15s var(--ease-out),
+        background-color 0.15s var(--ease-out);
+}
+
+.tool-box-summary:has(+ .tool-file-pre)::after,
+.tool-box-summary:has(+ .tool-result-pre)::after {
+    transform: rotate(180deg);
+}
+
+.tool-box-summary:hover::after,
+.tool-box-summary:focus-visible::after {
+    background-color: var(--accent);
+}
+
+/* The ONE inner treatment: an expandable body gets a single recessed fill so
+   its extent is legible inside the block. No border, no radius slab. */
+.tool-file-pre,
+.tool-result-pre {
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--bg-base);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-secondary);
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+/* Quiet envelope line inside an open args-sourced file box (append/overwrite
+   return a size confirmation, so it rides under the written content). */
+.tool-file-meta {
+    margin: 0;
+    padding: 4px 10px 6px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Error posture: semantic only -- the open body carries the soft error tint
+   and the text names itself in the error color. No extra frame. */
+.tool-result-box.tool-result-error .tool-box-summary {
+    color: var(--error);
+}
+
+.tool-result-box.tool-result-error .tool-result-pre {
+    background: var(--error-soft);
     color: var(--error);
 }
 
 .tool-raw-toggle {
     margin-top: 8px;
     background: none;
-    border: 1px solid var(--border);
+    border: none;
+    padding: 2px 0;
     color: var(--text-muted);
     font-family: var(--font-mono);
     font-size: 0.7rem;
-    padding: 2px 8px;
     cursor: pointer;
 }
 
 .tool-raw-toggle:hover {
     color: var(--text-secondary);
-    border-color: var(--text-muted);
+    text-decoration: underline;
 }
 
-.tool-diff .diff-line {
+/* DIFF part: primary inline content on the block surface -- the only color is
+   the semantic add/del tint; fixed +/- gutter, muted context, no outer frame
+   (a diff needs no box to be legible). */
+.tool-diff {
+    margin: var(--space-xs) var(--space-lg);
     font-family: var(--font-mono);
     font-size: 0.78rem;
+    overflow: hidden;
+}
+
+.diff-row {
+    display: flex;
+    align-items: flex-start;
+}
+
+.diff-gutter {
+    flex: none;
+    width: 1.8em;
+    padding: 1px 4px;
+    text-align: center;
+    color: var(--text-muted);
+    user-select: none;
+}
+
+.diff-text {
+    flex: 1;
+    min-width: 0;
+    padding: 1px 8px 1px 2px;
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-.diff-add { color: var(--success); }
-.diff-del { color: var(--error); }
-.diff-ctx { color: var(--text-muted); }
+.diff-add { background: var(--success-soft); }
+.diff-del { background: var(--error-soft); }
+.diff-add .diff-text { color: var(--success); }
+.diff-del .diff-text { color: var(--error); }
+.diff-ctx .diff-text { color: var(--text-muted); }
+
+.diff-expand {
+    margin: 6px 8px 8px;
+}
+
+/* CODE part: the whole command, unfolded, wrapping long lines -- typographic
+   content on the block surface, no frame of its own (the tok-* colors and the
+   mono face are its identity). */
+.tool-code {
+    margin: var(--space-xs) var(--space-lg);
+    padding: 4px 10px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-secondary);
+}
+
+/* Tokenizer classes from the shared @utils/syntax registry (shell today).
+   Unknown token types render unstyled. */
+.tok-command { color: var(--success); }
+.tok-operator { color: var(--text-muted); }
+
+/* PROSE part: a quiet agent-message row with a left icon gutter. */
+.tool-prose {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    padding: 2px var(--space-sm);
+}
+
+.tool-prose-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    padding-top: 4px;
+    color: var(--text-muted);
+}
+
+/* Pending chip: quiet muted mono text (no bubble, no fill). */
+.tool-prose-chip {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    padding: 1px 0;
+}
+
+/* Assistant-bubble typography for the sanitizer-backed markdown body. */
+.tool-prose-md {
+    flex: 1;
+    min-width: 0;
+    white-space: normal;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.tool-prose-raw {
+    margin: 0 var(--space-lg);
+}
 
 /* ── Thinking Blocks ──────────────────────────────────────────────────────── */
 
@@ -2072,6 +2274,32 @@ body.sidebar-resizing {
 
     .tool-call-block {
         margin-left: 8px;
+    }
+
+    /* Spec-driven content breathes less on phones: one mono step down for the
+       typographic parts and their summaries, shorter internal scroll windows
+       for the two expandable bodies (file/result). Single-surface rule: no
+       phone-only fills or borders -- the block is still the only surface. */
+    .tool-code,
+    .tool-diff,
+    .tool-file-pre,
+    .tool-result-pre,
+    .tool-box-summary {
+        font-size: 0.72rem;
+    }
+
+    .tool-call-body,
+    .tool-file-pre,
+    .tool-result-pre {
+        max-height: 30vh;
+    }
+
+    .tool-file,
+    .tool-result-box,
+    .tool-diff,
+    .tool-code {
+        margin-left: var(--space-md);
+        margin-right: var(--space-md);
     }
 
     .thinking-block {

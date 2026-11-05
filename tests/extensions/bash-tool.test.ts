@@ -18,6 +18,17 @@ describe('BashTool', () => {
     expect(def.function.parameters.required).toEqual(['command']);
   });
 
+  it('declares the shell code-block display part with its real command param', () => {
+    // Rename guard: the declared arg key must stay a real schema parameter,
+    // or the webui command block silently loses its content.
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    expect(tool.metadata.display).toEqual([
+      { kind: "code", source: "args", arg: "command", lang: "shell" },
+    ]);
+    const props = tool.toToolDef().function.parameters.properties as Record<string, unknown>;
+    expect(Object.keys(props)).toContain(tool.metadata.display![0]!.arg!);
+  });
+
   it('returns error for missing command', async () => {
     const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
     const result = await tool.execute(JSON.stringify({}), {} as any);

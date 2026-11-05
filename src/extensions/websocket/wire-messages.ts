@@ -6,14 +6,16 @@
 
 import { OUTPUT_EVENT, type FileAttachmentView, type OutputEvent } from "@core/context/output.ts";
 import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
-import type { ArgDisplay } from "@core/extensions/tool-registry.ts";
+import type { ArgDisplay, ToolDisplaySpec } from "@core/extensions/tool-registry.ts";
 import { toolContentText } from "@utils/tool-content.ts";
 import type { CtxUsage } from "@utils/session-turns.ts";
-import { S2C, type S2CType, wireImages } from "./protocol.ts";
+import { S2C, type S2CType, type ToolDisplayWire, wireImages } from "./protocol.ts";
 
-/** Mapper options: resolves a tool's per-parameter display hints (argDisplay). */
+/** Mapper options: resolves a tool's per-parameter display hints
+ * (argDisplay) and its call-level display parts (ToolMetadata.display). */
 export interface WireMapOptions {
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
+  display?: (toolName: string) => ToolDisplaySpec[] | undefined;
 }
 
 /** Content-only messages (thinking, assistant text, streaming chunks, ...). */
@@ -78,16 +80,41 @@ export function s2cUserMessage(
 }
 
 /**
+ * Resolve a tool's declared display parts into the wire shape
+ * (ToolDisplayWire[]): a declared-spec copy -- array order preserved,
+ * unknown kinds forwarded untouched (sinks skip what they don't know),
+ * values are arg PARAMETER names never values. Nothing declared -- or an
+ * empty array -- rides no field. This is the ONE metadata->wire mapping
+ * seam: live, replay and the cold LOG_VIEWED annotation all route through
+ * it, so they cannot drift.
+ */
+export function wireToolDisplay(
+  display: ToolDisplaySpec[] | undefined,
+): ToolDisplayWire[] | undefined {
+  if (!display || display.length === 0) return undefined;
+  return display.map((spec) => ({ ...spec }));
+}
+
+/**
  * A tool call frame. argsSummary is the shared hint-driven fold
  * (ToolMetadata.argDisplay): the same shape the terminal's template args slot
  * prints, ANSI-free. Empty summaries ride no field; clients fall back to
- * their own header.
+ * their own header. `display` is the forwarded declared spec
+ * (ToolMetadata.display -> ToolDisplayWire[]): arg parameter names only,
+ * omitted entirely when the tool declares nothing.
  */
 export function s2cToolCall(
   sessionId: string,
-  o: { name: string; args: string; toolCallId?: string; argDisplay?: Record<string, ArgDisplay> },
+  o: {
+    name: string;
+    args: string;
+    toolCallId?: string;
+    argDisplay?: Record<string, ArgDisplay>;
+    display?: ToolDisplaySpec[] | undefined;
+  },
 ): Record<string, unknown> {
   const summary = summarizeToolArgs(o.args, undefined, o.argDisplay);
+  const display = wireToolDisplay(o.display);
   return {
     type: S2C.TOOL_CALL,
     sessionId,
@@ -96,6 +123,7 @@ export function s2cToolCall(
     // The call id lets clients pair results to calls.
     ...(o.toolCallId ? { toolCallId: o.toolCallId } : {}),
     ...(summary ? { argsSummary: summary } : {}),
+    ...(display ? { display } : {}),
   };
 }
 
@@ -218,6 +246,7 @@ export function toS2CMessage(
         args: event.input,
         toolCallId: event.toolCallId,
         argDisplay: opts?.argDisplay?.(event.toolName),
+        display: opts?.display?.(event.toolName),
       });
     case OUTPUT_EVENT.TOOL_RESULT:
       return s2cToolResult(sessionId, {

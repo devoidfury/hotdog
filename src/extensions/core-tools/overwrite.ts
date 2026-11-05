@@ -10,7 +10,15 @@ import { ToolContext } from "@core/extensions/types.ts";
 
 export class OverwriteTool {
   static readonly TOOL_NAME = "overwrite";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 1 };
+  // Same posture as append: the written `content` is the call's primary
+  // content (rendered at call time from the args), `path` names the box, and
+  // the result envelope (`filesize_after`) never competes for the face.
+  // Keys pinned against toToolDef() in tests/extensions/tools-index.test.ts.
+  metadata: ToolMetadata = {
+    sideEffects: true,
+    difficulty: 1,
+    display: [{ kind: "file", source: "args", arg: "content", pathArg: "path" }],
+  };
 
   toToolDef() {
     return toolDef(

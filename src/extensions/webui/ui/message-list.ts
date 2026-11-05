@@ -13,7 +13,7 @@ import {
 } from "@utils/md-parser.ts";
 import { toolContentText, wrapperContentText, splitFileIncludes } from "@utils/tool-content.ts";
 import { ctxByIndex, deriveCallDurationsByIndex, parseEntryTs, turnDurationsByIndex, type CtxUsage } from "@utils/session-turns.ts";
-import { ToolBlockController } from "./tool-block.tsx";
+import { ToolBlockController, type ToolDisplayWire } from "./tool-block.tsx";
 import type { DomNode } from "@utils/jsx";
 
 // Debug instrumentation, enabled with ?debug=1 in the URL.
@@ -79,7 +79,7 @@ interface AssistantMessage {
 }
 interface StreamingChunk { content: string; }
 interface ThinkingMessage { content: string; }
-interface ToolCallMessage { name: string; args: string; argsSummary?: string; toolCallId?: string; }
+interface ToolCallMessage { name: string; args: string; argsSummary?: string; display?: ToolDisplayWire[]; toolCallId?: string; }
 interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; toolCallId?: string; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
@@ -102,6 +102,10 @@ interface LogEntry {
     args?: Record<string, unknown>;
     arguments?: string;
     function?: { name?: string; arguments?: string };
+    /** Registry-resolved display parts the server annotated onto the raw
+     *  entry (additive per-call field; cold logs then render exactly like
+     *  live frames -- same specs, same posture code path). */
+    display?: ToolDisplayWire[];
   }> | null;
   tool_call_id?: string | null;
   /** token_usage records (ctx segment source for the cold-log footer): the
@@ -677,7 +681,7 @@ export function createMessageList(
     el.innerHTML = mdTreeToHtml(tree);
   }
 
-  function handleToolCall({ name, args, argsSummary, toolCallId }: ToolCallMessage): void {
+  function handleToolCall({ name, args, argsSummary, display, toolCallId }: ToolCallMessage): void {
     // Finalize the current assistant message so tool calls appear as
     // separate blocks after the user message, not nested inside the assistant.
     // A text row closed here is a completed message (the model answered, then
@@ -690,7 +694,7 @@ export function createMessageList(
 
     const host = document.createElement("div");
     container.appendChild(host);
-    const block = new ToolBlockController(host as unknown as DomNode, { name, args, argsSummary });
+    const block = new ToolBlockController(host as unknown as DomNode, { name, args, argsSummary, display });
     if (toolCallId) toolBlocksById.set(toolCallId, block);
     const queue = pendingToolCallsByName.get(name);
     if (queue) queue.push(block);
@@ -1196,11 +1200,15 @@ export function createMessageList(
                 arguments?: string | object;
                 args?: string | object;
                 function?: { name?: string; arguments?: string | object };
+                display?: ToolDisplayWire[];
               };
               const name = toolCall.function?.name || toolCall.name || "unknown";
               const rawArgs = toolCall.function?.arguments ?? toolCall.arguments ?? toolCall.args;
               const args = typeof rawArgs === "string" ? rawArgs : JSON.stringify(rawArgs ?? {}, null, 2);
-              handleToolCall({ name, args, toolCallId: tc.id || undefined });
+              // The server annotated the entry's calls with their resolved
+              // display parts (handlers-logs.ts), so a browsed log reaches the
+              // exact same posture code as a live TOOL_CALL frame.
+              handleToolCall({ name, args, display: toolCall.display, toolCallId: tc.id || undefined });
             }
           }
           if (content.trim()) {

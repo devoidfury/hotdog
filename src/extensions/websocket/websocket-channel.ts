@@ -3,7 +3,7 @@
 
 import { Channel, ChannelSessionManager } from "@core/channel.ts";
 import { OUTPUT_EVENT, OutputEvent } from "@core/context/output.ts";
-import type { ArgDisplay } from "@core/extensions/tool-registry.ts";
+import type { ArgDisplay, ToolDisplaySpec } from "@core/extensions/tool-registry.ts";
 import { toS2CMessage } from "./wire-messages.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
@@ -20,6 +20,13 @@ export interface WebSocketChannelOptions {
    * tool gets the default fold.
    */
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
+  /**
+   * Resolves a tool's call-level display parts (its metadata's `display`);
+   * the TOOL_CALL wire message forwards the declared spec (see
+   * ToolDisplayWire) when the tool declares any. Omitting the resolver just
+   * means every call renders generically.
+   */
+  display?: (toolName: string) => ToolDisplaySpec[] | undefined;
 }
 
 export class WebSocketChannel extends Channel {
@@ -28,6 +35,7 @@ export class WebSocketChannel extends Channel {
   #ready: boolean;
   #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;
   #argDisplay: ((toolName: string) => Record<string, ArgDisplay> | undefined) | undefined;
+  #display: ((toolName: string) => ToolDisplaySpec[] | undefined) | undefined;
 
   constructor(options: WebSocketChannelOptions) {
     super({ sessionManager: options.sessionManager });
@@ -36,13 +44,17 @@ export class WebSocketChannel extends Channel {
     this.#ready = true;
     this.#broadcastCallback = options.broadcastCallback;
     this.#argDisplay = options.argDisplay;
+    this.#display = options.display;
     this.attach(options.sessionId);
   }
 
   protected write(event: OutputEvent): void {
     if (!this.#ready) return;
 
-    const msg = toS2CMessage(event, this.#sessionId, { argDisplay: this.#argDisplay });
+    const msg = toS2CMessage(event, this.#sessionId, {
+      argDisplay: this.#argDisplay,
+      display: this.#display,
+    });
     if (!msg) return; // frame-only event: stays off the wire
 
     // Also broadcast session state to all connected clients

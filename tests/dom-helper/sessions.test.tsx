@@ -130,30 +130,24 @@ describe("live row (owner fixture)", () => {
     expect(row).toBeTruthy();
 
     expect(row.querySelector(".row-model")!.textContent).toBe("ai365/qwen3.8-flash-next");
-    // Status badge: custom glyph tinted by currentColor, label as native
-    // title (plug idiom), no text leaking into the slot.
-    const status = row.querySelector(".row-status")!;
-    expect(status.getAttribute("title")).toBe("Working");
-    expect(status.getAttribute("tabindex")).toBe("0");
-    expect(status.querySelector(".row-glyph-working")).toBeTruthy();
-    expect(status.textContent).toBe("");
-    // Busy tell: the spinner rides the Stop button (composer idiom), never
-    // the status badge.
+    // Working carries no status badge (owner ruling 2026-11-05): the Stop
+    // button's spinner is the busy tell, so the bolt slot would double-say it.
+    expect(row.querySelector(".row-status")).toBeNull();
+    // The spinner rides the Stop button (composer idiom).
     const cancel = row.querySelector(".session-cancel-btn")!;
     expect(cancel.textContent).toBe("Stop");
     expect(cancel.querySelector(".spinner")).toBeTruthy();
-    expect(row.querySelector(".row-status .spinner")).toBeNull();
 
-    // Line 1 grammar: profile dot-joined ahead of the model, status badge,
-    // then the action pinning right -- it trails every other line-1 slot and
-    // no sep precedes it (the only line-1 dot is the profile/model join).
+    // Line 1 grammar: profile dot-joined ahead of the model, then the action
+    // pinning right -- it trails every other line-1 slot and no sep precedes
+    // it (the only line-1 dot is the profile/model join). No status slot while
+    // working (owner ruling 2026-11-05): the Stop button carries the busy tell.
     const action = row.querySelector(".row-action")!;
     expect(action.classList.contains("row-action-right")).toBe(true);
     expect([...row.querySelector(".row-l1")!.children].map((n) => n.className)).toEqual([
       "row-profile",
       "row-sep",
       "row-model",
-      "row-status",
       "row-action row-action-right",
     ]);
 

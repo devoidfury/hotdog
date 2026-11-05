@@ -35,6 +35,15 @@ function registryArgDisplay(registry: ToolRegistry | undefined) {
   return (name: string) => registry?.getMetadata?.(name)?.argDisplay;
 }
 
+/** Per-tool call-level display parts, resolved the same way: OLD logs get
+ * hints from the CURRENT registry, so replayed frames match live ones.
+ * Exported for the cold LOG_VIEWED path (handlers-logs.ts): a browsed log has
+ * no registry of its own, so its tool calls resolve here too -- the same
+ * resolution live frames and replays use, then mapped by wireToolDisplay. */
+export function registryDisplay(registry: ToolRegistry | undefined) {
+  return (name: string) => registry?.getMetadata?.(name)?.display;
+}
+
 /**
  * Replay a slice of a session's FULL log as S2C messages. `startIdx` is the
  * client's replay cursor: a position in the full log (append-only -- a RESET
@@ -53,6 +62,7 @@ export function replayLogSlice(
   toolRegistry?: ToolRegistry,
 ): void {
   const argDisplay = registryArgDisplay(toolRegistry);
+  const toolDisplay = registryDisplay(toolRegistry);
   const send = (msg: Record<string, unknown>): void => {
     ws.send(JSON.stringify(msg));
   };
@@ -96,8 +106,9 @@ export function replayLogSlice(
         }
         const toolCalls = Array.isArray(e.tool_calls) ? (e.tool_calls as ToolCallWire[]) : undefined;
         for (const tc of toolCalls ?? []) {
-          // Replay has no live tool object; the wire carries name, args and
-          // the registry-resolved argsSummary fold.
+          // Replay has no live tool object; the wire carries name, args,
+          // the registry-resolved argsSummary fold, and the registry-resolved
+          // display parts.
           const name = tc.function?.name || "unknown";
           send(
             s2cToolCall(sessionId, {
@@ -105,6 +116,7 @@ export function replayLogSlice(
               args: tc.function?.arguments || "{}",
               toolCallId: tc.id,
               argDisplay: argDisplay(name),
+              display: toolDisplay(name),
             }),
           );
         }
@@ -164,6 +176,7 @@ export function replaySessionHistory(
   const messages = agent.getMessages();
 
   const argDisplay = registryArgDisplay((agent as Agent).toolRegistry);
+  const toolDisplay = registryDisplay((agent as Agent).toolRegistry);
   const send = (msg: Record<string, unknown>): void => {
     ws.send(JSON.stringify(msg));
   };
@@ -202,6 +215,7 @@ export function replaySessionHistory(
                   args: tc.function?.arguments || "{}",
                   toolCallId: tc.id,
                   argDisplay: argDisplay(name),
+                  display: toolDisplay(name),
                 }),
               );
             }

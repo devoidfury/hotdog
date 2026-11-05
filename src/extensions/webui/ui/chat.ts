@@ -14,6 +14,7 @@ import type {
   TranscribeRequestWire,
   TranscriptReplyWire,
   SearchHitWire,
+  ToolDisplayWire,
 } from "@extensions/websocket/protocol.ts";
 
 export type { UploadFileWire };
@@ -274,7 +275,15 @@ interface LogEntry {
   content: string;
   images?: UiImage[];
   reasoning_content?: string | null;
-  tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> | null;
+  /** Each tool_call may carry the registry-resolved display parts the server
+   *  annotated onto the raw entry (additive field; same ToolDisplayWire shape
+   *  the live TOOL_CALL frame sends). */
+  tool_calls?: Array<{
+    id: string;
+    name: string;
+    args: Record<string, unknown>;
+    display?: ToolDisplayWire[];
+  }> | null;
   tool_call_id?: string | null;
 }
 
@@ -336,6 +345,8 @@ interface ToolCallMessage {
   args: string;
   /** Server-computed hint-driven fold (see ToolBlockState.argsSummary). */
   argsSummary?: string;
+  /** Declared display parts forwarded as declared (see ToolDisplayWire). */
+  display?: ToolDisplayWire[];
   toolCallId?: string;
 }
 

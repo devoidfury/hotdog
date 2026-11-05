@@ -402,9 +402,10 @@ export function Sidebar(p: SidebarProps) {
               model={s.model}
               displayName={s.title || s.profile}
               // Idle omits the badge outright (the cold-log rule, now shared):
-              // the resting state is the default, only working and a pending
-              // question say anything.
-              status={s.questionPending ? "awaiting_question" : isWorking ? "working" : null}
+              // the resting state is the default. Working omits it too (owner
+              // ruling 2026-11-05): the Stop button's spinner is the busy
+              // tell; only a pending question speaks in this slot.
+              status={s.questionPending ? "awaiting_question" : null}
               statusClass={s.questionPending ? "log-state-awaiting_question" : undefined}
               ctxUsed={s.ctxUsed}
               ctxTotal={s.ctxTotal}

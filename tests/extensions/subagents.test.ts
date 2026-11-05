@@ -428,6 +428,15 @@ describe("WaitTool", () => {
     expect(def.function.parameters.required).toEqual([]);
   });
 
+  it("declares the prose display part with the hourglass icon", () => {
+    const tool = new WaitTool({});
+    // Renders like a normal agent message (source: the result text) with a
+    // sink-owned hourglass icon.
+    expect(tool.metadata.display).toEqual([
+      { kind: "prose", source: "result", icon: "hourglass" },
+    ]);
+  });
+
 });
 
 describe("SUBAGENT_TOOL_NAMES", () => {

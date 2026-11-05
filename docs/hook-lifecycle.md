@@ -272,6 +272,8 @@ Each tool call goes through a dedicated sub-pipeline:
 | `AGENT_TOOL_CONTEXT` | `agent:toolContext` | awaited notify | Enrich shared tool context — awaited before the `TOOL_CALL` gate, so handler mounts (even from async handlers) are complete for the gate and `tool.execute()`; the same `toolCtx` instance reaches both |
 | `TOOL_METRICS` | `tool:metrics` | awaited notify | After each individual tool execution — telemetry, profiling |
 
+The `TOOL_METADATA` payload carries the full mutable tools map (`{ tools: Map<string, ToolMetadata | undefined> }`), so a handler can annotate any tool in place after every registration — for example appending display parts to `metadata.display` (the ordered `ToolDisplaySpec[]` sinks render calls from: `file`, `diff`, `prose`, `code`, plus forward-compat kinds sinks skip) or setting `argDisplay` folding hints. Registry consumers pick the annotations up live, per call (the websocket `TOOL_CALL` frame resolves hints through `getMetadata`), and no display policy ever enters the JSON Schema sent to the provider.
+
 ### Services
 
 | Hook Constant | Name | Pattern | When |

@@ -425,7 +425,14 @@ export class PlanStatusTool extends SubagentTool {
 /** Wait for user input — signal that the manager has nothing more to do. */
 export class WaitTool extends SubagentTool {
   static readonly TOOL_NAME = "wait";
-  override metadata: ToolMetadata = { sideEffects: false, difficulty: 1, managerOnly: true };
+  // The result ("waiting for user input") renders like a normal agent
+  // message with an hourglass icon; the icon name is sink-owned.
+  override metadata: ToolMetadata = {
+    sideEffects: false,
+    difficulty: 1,
+    managerOnly: true,
+    display: [{ kind: "prose", source: "result", icon: "hourglass" }],
+  };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolInput(input) ?? {};

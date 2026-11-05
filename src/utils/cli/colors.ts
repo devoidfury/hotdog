@@ -1,4 +1,5 @@
 import fsPromises from "node:fs/promises";
+import { tokenizeShell } from "@utils/syntax/shell.ts";
 
 export interface PaletteOptions {
   thinking?: string;
@@ -258,16 +259,16 @@ export function applyArgKeyHighlight(text: string, palette: ColorPalette): strin
 
 /**
  * Shell-syntax highlighting for the default-fg args segment (the bash tool's
- * command): command words (line start, after &&, ||, | or ;) get the palette's
- * `shell_command` color, control operators get `shell_operator` (the glue
- * recedes; it is punctuation, not content), everything else rides the default
- * args color. An empty or unknown color name leaves that class unstyled
+ * command): a thin renderer over the shared shell tokenizer
+ * (src/utils/syntax/) -- command-word runs get the palette's
+ * `shell_command` color, operator runs `shell_operator` (the glue recedes;
+ * it is punctuation, not content), everything else rides the default args
+ * color. An empty or unknown color name leaves that class unstyled
  * (monochrome themes bold commands, dim the glue). Quote-aware -- nothing
  * inside '...' or "..." is touched, a stray quote rides through verbatim,
  * and an env-assignment prefix (`FOO=1 cmd`) stays default while keeping the
  * command position. Operators split commands even glued without spaces
  * (`a&&b;c`); a lone `&` (background, `2>&1`) rides through verbatim.
- * Backticks/$(...) are NOT parsed: this is display candy, not a shell.
  * Colors off -> text unchanged.
  */
 export function applyShellHighlight(text: string, palette: ColorPalette): string {
@@ -275,25 +276,9 @@ export function applyShellHighlight(text: string, palette: ColorPalette): string
   const cmd = COLOR_MAP[palette.shell_command];
   const op = COLOR_MAP[palette.shell_operator];
   let out = "";
-  let cmdPos = true;
-  // Token order: quoted strings, then the two-word operators (before their
-  // one-word prefixes), then | ; & singly, then whitespace, then plain words
-  // (&|; excluded so glued operators split), then a stray quote.
-  for (const [t] of text.matchAll(/('[^']*'|"(?:[^"\\]|\\.)*"|\|\||&&|[|;&]|\s+|[^\s'";|&]+|['"])/g)) {
-    if (t === "&&" || t === "||" || t === "|" || t === ";") {
-      out += op ? `\x1b[${op}m${t}${RESET}` : t;
-      cmdPos = true;
-    } else if (cmdPos && /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
-      out += t; // env prefix: default, still command position
-    } else if (cmdPos && /^["']/.test(t)) {
-      out += t; // quoted word reads as itself; the command position is spent
-      cmdPos = false;
-    } else if (cmdPos && !/^\s/.test(t)) {
-      out += cmd ? `\x1b[${cmd}m${t}${RESET}` : t;
-      cmdPos = false;
-    } else {
-      out += t;
-    }
+  for (const run of tokenizeShell(text)) {
+    const code = run.type === "command" ? cmd : run.type === "operator" ? op : undefined;
+    out += code ? `\x1b[${code}m${run.text}${RESET}` : run.text;
   }
   return out;
 }

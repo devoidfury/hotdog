@@ -592,15 +592,21 @@ export class SessionRegistry {
     const session = this.get(sessionId);
     if (!session) return undefined;
 
+    // One lookup expression for the session agent's tool registry metadata;
+    // every display-hint resolver below reads a key off it.
+    const metaOf = (toolName: string) =>
+      (session.agent as Partial<Pick<Agent, "toolRegistry">> | null)?.toolRegistry?.getMetadata?.(toolName);
+
     const channel = new WebSocketChannel({
       sessionManager: this.#sessionManager,
       ws,
       sessionId,
       broadcastCallback: (msg: Record<string, unknown>) => this.broadcast(msg),
-      // Live TOOL_CALL args summaries read the tool's display hints off the
-      // session agent's registry (same metadata the terminal sink consults).
-      argDisplay: (toolName) =>
-        (session.agent as Partial<Pick<Agent, "toolRegistry">> | null)?.toolRegistry?.getMetadata?.(toolName)?.argDisplay,
+      // Live TOOL_CALL args summaries and display parts read the tool's
+      // display hints off the session agent's registry (same metadata the
+      // terminal sink consults); the wire carries only the resolved result.
+      argDisplay: (toolName) => metaOf(toolName)?.argDisplay,
+      display: (toolName) => metaOf(toolName)?.display,
     });
 
     if (!this.#channels.has(sessionId)) {

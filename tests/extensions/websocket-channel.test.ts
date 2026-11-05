@@ -218,6 +218,59 @@ describe("WebSocketChannel - write()", () => {
     expect(msg.argsSummary).toBe("path: a.ts · content: 2 lines, 3 chars");
   });
 
+  it("TOOL_CALL carries the forwarded display parts (file view for read)", () => {
+    const event = {
+      type: OUTPUT_EVENT.TOOL_CALL,
+      toolName: "read",
+      input: JSON.stringify({ path: "a.ts", offset: 100, limit: 50 }),
+      toolCallId: "tc-9",
+    };
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, handler) => {
+        handler(event as any);
+        return () => {};
+      }),
+    });
+    const ws = createMockWs();
+    new WebSocketChannel({
+      sessionManager: sm,
+      ws,
+      sessionId: "session-1",
+      display: (name) =>
+        name === "read"
+          ? [{ kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" }]
+          : undefined,
+    });
+    const msg = JSON.parse((ws as any)._sentMessages[0]);
+    // Forwarded spec: arg parameter names, not values.
+    expect(msg.display).toEqual([
+      { kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" },
+    ]);
+  });
+
+  it("TOOL_CALL rides no display field when the resolver declares nothing", () => {
+    const event = {
+      type: OUTPUT_EVENT.TOOL_CALL,
+      toolName: "bash",
+      input: JSON.stringify({ command: "ls" }),
+    };
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, handler) => {
+        handler(event as any);
+        return () => {};
+      }),
+    });
+    const ws = createMockWs();
+    new WebSocketChannel({
+      sessionManager: sm,
+      ws,
+      sessionId: "session-1",
+      display: () => undefined,
+    });
+    const msg = JSON.parse((ws as any)._sentMessages[0]);
+    expect("display" in msg).toBe(false);
+  });
+
   // More event types in the same parameterized pattern
   it.each([
     {

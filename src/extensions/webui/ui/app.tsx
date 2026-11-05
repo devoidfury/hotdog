@@ -15,7 +15,7 @@ import {
 } from "./login.tsx";
 import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
-import { Sidebar, ContextMenu, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
+import { Sidebar, ContextMenu, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import type { SearchHitWire } from "./chat.ts";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
 import { createCoalescer } from "./batch.ts";
@@ -104,6 +104,11 @@ function onActivateHit(hit: SearchHitWire): void {
   if (hit.live) chat?.switchSession(hit.logId);
   else chat?.viewLog(hit.logId);
   closeSearch();
+  // Then bring the selected row into view: closing search re-mounts the
+  // lists, and closeSearch's atom render is already queued ahead of this
+  // microtask (the openSearch focus idiom), so the rows exist by the time
+  // we look. Missing row (session ended mid-click) is a quiet no-op.
+  queueMicrotask(() => scrollHitIntoView(document, hit.live, hit.logId));
 }
 
 function onSearchResults(

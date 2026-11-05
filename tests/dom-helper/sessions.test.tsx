@@ -22,6 +22,7 @@ import {
   Sidebar,
   ContextMenu,
   formatDateTime,
+  scrollHitIntoView,
   sortPinned,
   type SessionInfo,
   type LogInfo,
@@ -699,5 +700,41 @@ describe("search panel", () => {
     const root = renderInteractive({}, calls);
     (root.querySelector("#search-btn") as unknown as HTMLElement).click();
     expect(calls).toEqual(["openSearch"]);
+  });
+});
+
+// ── Search-activation scroll (owner QoL 2026-11-05) ────────────────────────
+
+describe("scrollHitIntoView", () => {
+  // Every sidebar row carries its id as data-sid so the app can find the row
+  // a search hit names once the lists are re-mounted (raw id stays in the
+  // attribute: the textContent pins above keep it out of visible text).
+  it("rows carry data-sid on both lists", () => {
+    const root = render({ sessions: [liveSession()], logs: [coldLog({ id: "log77" })] });
+    expect(root.querySelector("#session-list [data-sid]")!.getAttribute("data-sid")).toBe(FULL_ID);
+    expect(root.querySelector("#log-list [data-sid]")!.getAttribute("data-sid")).toBe("log77");
+  });
+
+  it("a live hit scrolls the session row; a cold hit the log row -- never the sibling", () => {
+    // Same id on both sides: scope is the only thing that can disambiguate.
+    const root = render({ sessions: [liveSession()], logs: [coldLog()] });
+    const sRow = root.querySelector("#session-list .session-item")!;
+    const lRow = root.querySelector("#log-list .log-item")!;
+    const sc = sRow as unknown as { scrollIntoViewCalls: unknown[] };
+    const lc = lRow as unknown as { scrollIntoViewCalls: unknown[] };
+
+    scrollHitIntoView(root, true, FULL_ID);
+    expect(sc.scrollIntoViewCalls).toEqual([{ block: "nearest" }]);
+    expect(lc.scrollIntoViewCalls).toEqual([]);
+
+    scrollHitIntoView(root, false, FULL_ID);
+    expect(sc.scrollIntoViewCalls).toHaveLength(1); // no late cross-list hit
+    expect(lc.scrollIntoViewCalls).toEqual([{ block: "nearest" }]);
+  });
+
+  it("a missing row is a silent no-op (session ended between search and click)", () => {
+    const root = render({ sessions: [liveSession()] });
+    expect(() => scrollHitIntoView(root, true, "gone")).not.toThrow();
+    expect(() => scrollHitIntoView(root, false, "gone")).not.toThrow();
   });
 });

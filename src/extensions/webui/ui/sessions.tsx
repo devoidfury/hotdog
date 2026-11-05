@@ -139,6 +139,9 @@ interface SidebarProps {
 interface SidebarRowProps {
   /** Slab styling: "session-item" (live) or "log-item" (cold). */
   kindClass: string;
+  /** Session/log id, echoed as data-sid so search activation can find the
+   * row to scroll (see scrollHitIntoView). */
+  sid: string;
   active: boolean;
   model?: string | null;
   /** Line-1 profile tag: display name (title wins), dot-joined ahead of the
@@ -184,6 +187,21 @@ const STATUS_GLYPHS: Record<string, string> = {
  *  the incoming order (sort is stable, so both halves stay untouched). */
 export function sortPinned<T extends { id: string }>(rows: T[], pinned: Set<string>): T[] {
   return [...rows].sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)));
+}
+
+/**
+ * Scroll the sidebar row a search hit names into view (owner QoL
+ * 2026-11-05): the click activates elsewhere, and the row can sit below the
+ * fold of the list the search panel just re-mounted (opening search drops
+ * the lists, so their scroll position is gone). Scoped to the list the hit
+ * declares (live -> #session-list, cold -> #log-list), so an id present on
+ * both sides scrolls the one the click opens. Missing row is a silent
+ * no-op -- a session can end between the search and the click. "nearest"
+ * keeps the scroll minimal: a visible row never moves.
+ */
+export function scrollHitIntoView(root: Document | Element, live: boolean, sid: string): void {
+  const el = root.querySelector(`#${live ? "session" : "log"}-list [data-sid="${sid}"]`);
+  el?.scrollIntoView({ block: "nearest" });
 }
 
 /** One sidebar row in the shared grammar; the callers decide which slots exist. */
@@ -248,6 +266,7 @@ export function SidebarRow(p: SidebarRowProps) {
   return (
     <div
       className={rowClass(p.kindClass, p.active)}
+      data-sid={p.sid}
       onClick={p.onSelect}
       onContextMenu={(e: MouseEvent) => {
         e.preventDefault();
@@ -399,6 +418,7 @@ export function Sidebar(p: SidebarProps) {
             <SidebarRow
               key={s.id}
               kindClass="session-item"
+              sid={s.id}
               active={s.id === p.activeSessionId}
               pinned={p.pinnedIds.has(s.id)}
               model={s.model}
@@ -455,6 +475,7 @@ export function Sidebar(p: SidebarProps) {
             <SidebarRow
               key={log.id}
               kindClass="log-item"
+              sid={log.id}
               active={log.id === p.activeLogId}
               pinned={p.pinnedIds.has(log.id)}
               model={log.model}

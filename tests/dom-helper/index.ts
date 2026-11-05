@@ -248,6 +248,13 @@ class DElement extends DNode {
   scrollHeight = 0;
   clientHeight = 0;
 
+  // scrollIntoView — there is no layout here, so the call is recorded rather
+  // than honored; tests assert the row that was targeted (and with what).
+  scrollIntoViewCalls: unknown[] = [];
+  scrollIntoView(opts?: unknown): void {
+    this.scrollIntoViewCalls.push(opts ?? null);
+  }
+
   // Form-field value + caret: real elements always carry these; the app's
   // composer reads/writes them through the ref handles.
   value = "";

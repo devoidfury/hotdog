@@ -11,12 +11,9 @@ import { formatError, LlmError } from "../error.ts";
 
 /**
  * Wrap a raw fetch failure as an expected (http) error before formatError.
- * Connection-level failures (ENOTFOUND, ECONNREFUSED, resets) are operational
- * states, not bugs -- but a bare TypeError carries no `type`, so isExpectedError
- * calls it unexpected and formatError appends a full stack to every log line
- * and provider-health reason that carries it. Same doctrine as
- * LlmClient.classifyStreamError: typed errors pass through, everything else
- * from a fetch boundary is "http".
+ * Connection-level failures (ENOTFOUND, ECONNREFUSED, resets) are operational states, not bugs,
+ * but a bare TypeError carries no `type`, so isExpectedError calls it unexpected and formatError appends
+ * a full stack along with it to every log line and provider-health reason.
  */
 function asOperationalError(e: unknown): LlmError {
   if (e instanceof LlmError) return e;
@@ -256,8 +253,7 @@ export interface RemoteModelsOutcome {
 
 /**
  * GET <base>/v1/models. String concat instead of `new URL()` -- URL resolution
- * drops path-prefixed bases (new URL("v1/models", "http://h:8080/api")
- * -> "http://h:8080/v1/models").
+ * drops path-prefixed bases (new URL("v1/models", "http://h:8080/api") -> "http://h:8080/v1/models").
  */
 export async function fetchRemoteModelsOutcome(
   baseUrl: string,
@@ -297,16 +293,15 @@ export async function fetchRemoteModelsOutcome(
       return { reachable: true, entries };
     } catch (e) {
       if (!controller.signal.aborted) {
-        // Unparseable body on a live socket: record the why message-only (a raw
-        // SyntaxError would otherwise format with a stack).
+        // Unparseable body on a live socket: record the why message-only (otherwise a raw SyntaxError would format with a stack)
         const msg = e instanceof Error ? e.message : String(e);
         return { reachable: true, entries: [], reason: formatError(LlmError.InvalidResponse(`bad /v1/models payload: ${msg}`)) };
       }
       throw e;
     }
   } catch (e) {
-    // Only this function's own timer aborts the controller, so an aborted
-    // signal here means the request timed out; everything else is network.
+    // Only this fn's own timer aborts the controller, so aborted signal here means the request timed out.
+    // everything else is network.
     const err = controller.signal.aborted
       ? LlmError.Timeout(`timed out after ${timeoutMs}ms`)
       : asOperationalError(e);
@@ -327,11 +322,10 @@ async function fetchRemoteModels(
 }
 
 /**
- * One provider's catalog contribution: static models deep-merged with remote
- * ones when fetchModels:true (local takes priority, remote fills in missing
- * fields), keyed "provider/model". Shared by the boot build (buildModelRegistry)
- * and the health-driven catalog refresh -- pass `prefetchedRemote` to reuse the
- * entries the health probe already fetched, so the sweep costs one request.
+ * One provider's catalog contribution: static models deep-merged with remote ones when fetchModels:true
+ * (local takes priority, remote fills in missing fields), keyed "provider/model".
+ * Shared by the boot build (buildModelRegistry) and the health-driven catalog refresh.
+ * Pass `prefetchedRemote` to reuse the entries the health probe already fetched, so the sweep costs one request.
  */
 export async function buildProviderModels(
   provider: ProviderDef,
@@ -490,9 +484,8 @@ export function modelAcceptsImages(
 }
 
 /**
- * Whether a catalog entry can serve as the session's main model: when modalities
- * are declared, they must include text in AND text out. Progressive enhancement:
- * entries with no modality data pass (unknown caps never exclude).
+ * Whether a catalog entry can serve as the session's main model: when modalities are declared,
+ * they must include text in AND text out. Progressive enhancement: entries with no modality data pass.
  */
 export function isTextGenerative(
   entry?: { inputModalities?: string[]; outputModalities?: string[] },
@@ -554,10 +547,7 @@ export function resolveModelConfig(
 
   // Runtime override via /reasoning command takes priority
   if (reasoningEffort !== undefined) {
-    return {
-      ...fromRegistry,
-      reasoningEffort,
-    };
+    return { ...fromRegistry, reasoningEffort };
   }
 
   return fromRegistry;
@@ -567,8 +557,7 @@ export async function initSystemPromptTemplate(
   templatePath?: string,
   configDir?: string,
 ): Promise<string> {
-  const templateFile =
-    templatePath ?? path.join(configDir ?? resolveConfigDir(), DEFAULT_SYSTEM_PROMPT_FILENAME);
+  const templateFile = templatePath ?? path.join(configDir ?? resolveConfigDir(), DEFAULT_SYSTEM_PROMPT_FILENAME);
 
   try {
     return await fsPromises.readFile(templateFile, "utf-8");

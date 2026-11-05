@@ -64,29 +64,19 @@ export function normalizeConfigKeys(obj: unknown): unknown {
 
   const normalized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-    // `env` objects (mcpServers[].env, bashTool.env) map environment variable
-    // NAMES to values; camelCasing their properties would rename the
-    // variables themselves (http_proxy -> httpProxy), so they pass through
-    // verbatim.
+    // `env` objects (mcpServers[].env, bashTool.env) map environment variable NAMES to values.
+    // camelCasing their properties would rename the variables (http_proxy -> httpProxy); pass through verbatim.
     if (key === "env" && typeof value === "object" && value !== null) {
       normalized[key] = value;
       continue;
     }
     const camelKey = camelCase(key);
-    // Same problem in `modelPricing`: its keys are model IDs, and
-    // "claude-3.5-sonnet" would camelCase into "claude-3.5Sonnet". Model keys
-    // stay verbatim; the rate entries below them normalize like any config.
-    if (
-      camelKey === "modelPricing" &&
-      typeof value === "object" &&
-      value !== null &&
-      !Array.isArray(value)
-    ) {
+    // Same problem in `modelPricing`: its keys are model IDs, and "claude-3.5-sonnet" would camelCase into "claude3.5Sonnet"
+    // Model keys stay verbatim; the rate entries below them normalize like any config.
+    if (camelKey === "modelPricing" && typeof value === "object" && value !== null && !Array.isArray(value)) {
       normalized[camelKey] = Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).map(([model, rates]) => [
-          model,
-          normalizeConfigKeys(rates),
-        ]),
+        Object.entries(value as Record<string, unknown>)
+            .map(([model, rates]) => [model, normalizeConfigKeys(rates)])
       );
       continue;
     }
@@ -285,13 +275,11 @@ export async function buildConfig(
 }> {
   const extParams = configRegistry?.getConfigParams();
 
-  // An explicitly requested config dir must exist: a typo'd --config-dir /
-  // HOTDOG_CONFIG_DIR would otherwise silently discard the providers/keys/model
-  // and surface later as a generic "No AI URL configured". An EXISTING dir with
-  // no defaults.json stays legal -- that is the isolation pattern (pure defaults
-  // + CLI flags). Enforced here, on the session-launch path, not inside
-  // loadConfig: diagnostics (info --config-debug, the early bootstrap) must be
-  // able to look at a missing/broken config without crashing.
+  // An explicitly requested config dir must exist: a typo'd --config-dir / HOTDOG_CONFIG_DIR
+  // would otherwise silently discard the providers/keys/model and surface later as a generic "No AI URL configured".
+  // An EXISTING dir with no defaults.json stays legal -- that is the isolation pattern (pure defaults + CLI flags).
+  // Enforced here, on the session-launch path, instead of loadConfig: diagnostics (info --config-debug, the early bootstrap)
+  // must be able to look at a missing/broken config without crashing.
   if ((cliArgv.configDir || process.env.HOTDOG_CONFIG_DIR) && !cliArgv.config) {
     const explicitDir = resolveConfigDir(cliArgv.configDir ?? undefined);
     try {
@@ -365,11 +353,7 @@ export async function buildAgentConfig(options: {
     defaultModel = getLayerDefault(CONFIG_SCHEMA.defaultModel) as string | null,
   } = options;
 
-  const context: ResolutionContext = {
-    cli,
-    config,
-    configDir,
-  };
+  const context: ResolutionContext = { cli, config, configDir };
 
   const profileName = castAs<string>(resolveKey("profileName", CONFIG_SCHEMA.profileName, context));
   // Resolve profilesPath through schema layers (cli -> config -> compute joinConfigDir)
@@ -424,11 +408,9 @@ export async function buildAgentConfig(options: {
 
   const profiles = profileManager.getProfilesForSwitch();
 
-  // Workspace roots: workspace.paths when present, else the legacy raw
-  // cwdBoundary/workspaceRoot keys (undocumented defaults.json passthroughs),
-  // else the process CWD. expandWorkspacePaths validates and expands tilde
-  // and globs; paths that do not exist are dropped with a warning (fatal only
-  // if nothing survives).
+  // Workspace roots: workspace.paths when present, else the legacy raw cwdBoundary/workspaceRoot keys,
+  // else the process CWD. expandWorkspacePaths validates and expands tilde and globs;
+  // paths that do not exist are dropped with a warning (fatal only if nothing survives).
   const legacyRoot =
     typeof config.cwdBoundary === "string" && config.cwdBoundary
       ? config.cwdBoundary

@@ -998,7 +998,9 @@ describe("createWsServer - cold log operations", () => {
     // Entries that are not tool calls ride untouched.
     expect("display" in inputEntry).toBe(false);
     const calls = llmEntry.tool_calls;
-    expect(calls[0].display).toEqual([{ kind: "diff", oldArg: "oldString", newArg: "newString" }]);
+    expect(calls[0].display).toEqual([
+      { kind: "diff", oldArg: "oldString", newArg: "newString", pathArg: "path" },
+    ]);
     expect(calls[1].display).toEqual([{ kind: "file", source: "args", arg: "content", pathArg: "path" }]);
     expect(calls[3].display).toEqual([{ kind: "file", source: "args", arg: "content", pathArg: "path" }]);
     // A hintless tool gets no field at all (no null-noise), and its stored

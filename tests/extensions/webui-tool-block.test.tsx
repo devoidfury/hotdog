@@ -10,10 +10,12 @@ import {
   argsSummary,
   prettyArgs,
   computeDiffLines,
+  diffStat,
   fileSummary,
   genericResultSummary,
   codeRuns,
   proseHtml,
+  splitPath,
   ToolBlock,
   ToolBlockController,
   MAX_INLINE_DIFF_LINES,
@@ -56,13 +58,16 @@ describe("prettyArgs", () => {
 });
 
 describe("computeDiffLines", () => {
+  // Numbering is the GitHub body's reason to exist, so every shape of change
+  // is pinned exact: the two gutters must never agree on a row that only
+  // exists on one side.
   it("trims common prefix/suffix and shows one context line per side", () => {
     const lines = computeDiffLines("a\nb\nc\nd", "a\nB\nc\nd");
     expect(lines).toEqual([
-      { kind: "ctx", text: "a" },
-      { kind: "del", text: "b" },
-      { kind: "add", text: "B" },
-      { kind: "ctx", text: "c" },
+      { kind: "ctx", text: "a", oldNo: 1, newNo: 1 },
+      { kind: "del", text: "b", oldNo: 2 },
+      { kind: "add", text: "B", newNo: 2 },
+      { kind: "ctx", text: "c", oldNo: 3, newNo: 3 },
     ]);
   });
 
@@ -70,6 +75,58 @@ describe("computeDiffLines", () => {
     const lines = computeDiffLines("a\nd", "a\nb\nc\nd");
     expect(lines.filter((l) => l.kind === "del")).toHaveLength(0);
     expect(lines.filter((l) => l.kind === "add").map((l) => l.text)).toEqual(["b", "c"]);
+  });
+
+  it("numbers a pure insertion on the NEW side only", () => {
+    expect(computeDiffLines("a\nd", "a\nb\nc\nd")).toEqual([
+      { kind: "ctx", text: "a", oldNo: 1, newNo: 1 },
+      { kind: "add", text: "b", newNo: 2 },
+      { kind: "add", text: "c", newNo: 3 },
+      // The trailing context row numbers differently per side: old line 2 is
+      // new line 4 after the insertion.
+      { kind: "ctx", text: "d", oldNo: 2, newNo: 4 },
+    ]);
+  });
+
+  it("numbers a pure deletion on the OLD side only", () => {
+    expect(computeDiffLines("a\nb\nc\nd", "a\nd")).toEqual([
+      { kind: "ctx", text: "a", oldNo: 1, newNo: 1 },
+      { kind: "del", text: "b", oldNo: 2 },
+      { kind: "del", text: "c", oldNo: 3 },
+      { kind: "ctx", text: "d", oldNo: 4, newNo: 2 },
+    ]);
+  });
+
+  it("numbers an in-place change so the del and the add sit on one number", () => {
+    expect(computeDiffLines("a\nb\nc", "a\nB\nc")).toEqual([
+      { kind: "ctx", text: "a", oldNo: 1, newNo: 1 },
+      { kind: "del", text: "b", oldNo: 2 },
+      { kind: "add", text: "B", newNo: 2 },
+      { kind: "ctx", text: "c", oldNo: 3, newNo: 3 },
+    ]);
+  });
+
+  it("numbers a both-changed middle (context rows bookend one del-then-add block)", () => {
+    // Prefix/suffix trimming keeps a single changed middle: old 2..4 against
+    // new 2..4, bookended by line 1 on both sides and old 5 / new 5 after it.
+    expect(computeDiffLines("a\nb\nc\nd\ne", "a\nB\nc\nD\ne")).toEqual([
+      { kind: "ctx", text: "a", oldNo: 1, newNo: 1 },
+      { kind: "del", text: "b", oldNo: 2 },
+      { kind: "del", text: "c", oldNo: 3 },
+      { kind: "del", text: "d", oldNo: 4 },
+      { kind: "add", text: "B", newNo: 2 },
+      { kind: "add", text: "c", newNo: 3 },
+      { kind: "add", text: "D", newNo: 4 },
+      { kind: "ctx", text: "e", oldNo: 5, newNo: 5 },
+    ]);
+  });
+
+  it("numbers nothing at the start of the file (no leading context exists)", () => {
+    expect(computeDiffLines("a\nb", "A\nb")).toEqual([
+      { kind: "del", text: "a", oldNo: 1 },
+      { kind: "add", text: "A", newNo: 1 },
+      { kind: "ctx", text: "b", oldNo: 2, newNo: 2 },
+    ]);
   });
 
   it("identical texts produce no change lines", () => {
@@ -87,8 +144,46 @@ describe("computeDiffLines", () => {
     expect(lines.some((l) => l.text.includes("more added"))).toBe(true);
   });
 
+  it("carries no line numbers on the cap placeholders (info rows are not lines)", () => {
+    const oldT = Array.from({ length: 20 }, (_, i) => `o${i}`).join("\n");
+    const newT = Array.from({ length: 20 }, (_, i) => `n${i}`).join("\n");
+    const lines = computeDiffLines(oldT, newT, 5);
+    const info = lines.filter((l) => l.kind === "info");
+    expect(info).toHaveLength(2);
+    expect(info.every((l) => l.oldNo === undefined && l.newNo === undefined)).toBe(true);
+    // The rows that did render keep counting from 1 on their own side.
+    expect(lines.filter((l) => l.kind === "del").map((l) => l.oldNo)).toEqual([1, 2, 3, 4, 5]);
+    expect(lines.filter((l) => l.kind === "add").map((l) => l.newNo)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("counts the stat from change rows only", () => {
+    expect(diffStat(computeDiffLines("a\nb\nc", "a\nB\nC\nc"))).toEqual({ add: 2, del: 1 });
+    expect(diffStat(computeDiffLines("x", "x"))).toEqual({ add: 0, del: 0 });
+    // The cap placeholder never counts as an added line.
+    const capped = computeDiffLines("x", Array.from({ length: 12 }, (_, i) => `n${i}`).join("\n"), 5);
+    expect(diffStat(capped)).toEqual({ add: 5, del: 1 });
+  });
+
   it("keeps the per-side cap constant (huge edits still fold to markers)", () => {
     expect(MAX_DIFF_LINES).toBe(300);
+  });
+});
+
+describe("splitPath", () => {
+  it("cuts at the last separator and keeps both pieces byte-identical", () => {
+    expect(splitPath("src/a/b.ts")).toEqual({ dir: "src/a/", base: "b.ts" });
+    expect(splitPath("b.ts")).toEqual({ dir: "", base: "b.ts" });
+    // Backslash paths split on the normalized separator but slice the ORIGINAL
+    // bytes, so dir + base re-joins to exactly what the arg said (and exactly
+    // what the copy button puts on the clipboard).
+    expect(splitPath("a\\b\\c.ts")).toEqual({ dir: "a\\b\\", base: "c.ts" });
+    const weird = "a dir / with /spaces/file name.md";
+    const { dir, base } = splitPath(weird);
+    expect(base).toBe("file name.md");
+    expect(dir + base).toBe(weird);
+    // A name-less path (trailing separator) has nothing to emphasize: the whole
+    // arg is the primary piece, and no muted prefix is rendered.
+    expect(splitPath("dir/")).toEqual({ dir: "", base: "dir/" });
   });
 });
 
@@ -222,7 +317,7 @@ describe("auto-expand (owner ruling 2026-11-05)", () => {
     });
     ctrl.setResult({ output: "a\nb\nc" });
     expect(block.querySelector(".tool-file-pre")!.textContent).toBe("a\nb\nc");
-    click(".tool-file .tool-box-summary");
+    click(".tool-file .part-head");
     expect(block.querySelector(".tool-file-pre")).toBeNull();
   });
 });
@@ -349,7 +444,7 @@ function mountBlock(init: MountInit) {
 describe("file part (DOM)", () => {
   const spec: ToolDisplayWire = { kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" };
 
-  it("waits while pending, then collapses to a summary; body populates on open", () => {
+  it("waits while pending, then shows the path header; body populates on open", () => {
     const { block, ctrl, click } = mountBlock({
       name: "read",
       args: JSON.stringify({ path: "/x/y/readme.md", offset: 0, limit: 50 }),
@@ -361,14 +456,20 @@ describe("file part (DOM)", () => {
     const out = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
     ctrl.setResult({ output: out });
     const box = block.querySelector(".tool-file")!;
-    expect(box.querySelector(".tool-box-summary")!.textContent).toBe("readme.md — lines 1–50 of 100");
-    // Collapsed: one summary line, no body bytes in the DOM (lazy).
+    // The path header replaced the centered summary: verbatim path split into
+    // a muted directory and the primary basename, the range meta far right
+    // WITHOUT the basename prefix the centered summary repeated.
+    const head = box.querySelector(".part-head")!;
+    expect(head.querySelector(".part-path-dir")!.textContent).toBe("/x/y/");
+    expect(head.querySelector(".part-path-base")!.textContent).toBe("readme.md");
+    expect(head.querySelector(".part-meta")!.textContent).toBe("lines 1–50 of 100");
+    // Collapsed: one header row, no body bytes in the DOM (lazy).
     expect(box.querySelector(".tool-file-pre")).toBeNull();
     expect(box.children).toHaveLength(1);
     // The file part consumed the result: no generic result box.
     expect(block.querySelector(".tool-result-box")).toBeNull();
 
-    click(".tool-file .tool-box-summary");
+    click(".tool-file .part-head");
     expect(box.querySelector(".tool-file-pre")!.textContent).toBe(out);
   });
 
@@ -379,7 +480,7 @@ describe("file part (DOM)", () => {
       display: [{ kind: "file", pathArg: "path" }],
     });
     ctrl.setResult({ output: "q".repeat(FILE_RENDER_CAP_CHARS + 50_000) });
-    click(".tool-file .tool-box-summary");
+    click(".tool-file .part-head");
     const pre = block.querySelector(".tool-file-pre")!;
     expect(pre.textContent).toHaveLength(FILE_RENDER_CAP_CHARS);
     const more = block.querySelector(".tool-file .tool-raw-toggle")!;
@@ -395,17 +496,20 @@ describe("file part (DOM)", () => {
     it("renders on the call, before any result; a small body auto-opens, click collapses", () => {
       const { block, click } = mountBlock({ name: "append", args, display: [argsSpec] });
       const box = block.querySelector(".tool-file")!;
-      // The summary sizes the WRITTEN content (not a result), at call time.
-      expect(box.querySelector(".tool-box-summary")!.textContent).toBe("notes.md — 2 lines · 17 chars");
+      // The header sizes the WRITTEN content (not a result), at call time.
+      const head = box.querySelector(".part-head")!;
+      expect(head.querySelector(".part-path-dir")!.textContent).toBe("/srv/");
+      expect(head.querySelector(".part-path-base")!.textContent).toBe("notes.md");
+      expect(head.querySelector(".part-meta")!.textContent).toBe("2 lines · 17 chars");
       expect(block.querySelector(".tool-result-box")).toBeNull(); // nothing arrived yet
       // Auto-expand (owner ruling): the 2-line body is already open, no click.
       expect(box.querySelector(".tool-file-pre")!.textContent).toBe("line one\nline two");
       // No envelope exists yet, so the box has no footer line.
       expect(box.querySelector(".tool-file-meta")).toBeNull();
       // The user toggle overrides auto-expand in both directions.
-      click(".tool-file .tool-box-summary");
+      click(".tool-file .part-head");
       expect(box.querySelector(".tool-file-pre")).toBeNull();
-      click(".tool-file .tool-box-summary");
+      click(".tool-file .part-head");
       expect(box.querySelector(".tool-file-pre")!.textContent).toBe("line one\nline two");
     });
 
@@ -421,7 +525,7 @@ describe("file part (DOM)", () => {
       expect(meta.textContent).not.toContain("\n");
       expect(Array.from(block.querySelector(".tool-file")!.children).indexOf(meta)).toBe(2);
       // Collapsed face (user toggle): the envelope text is nowhere to see.
-      click(".tool-file .tool-box-summary");
+      click(".tool-file .part-head");
       expect(block.textContent).not.toContain("bytes_appended");
     });
 
@@ -474,7 +578,7 @@ describe("file part (DOM)", () => {
         args: JSON.stringify({ path: "big.md", content: big }),
         display: [argsSpec],
       });
-      click(".tool-file .tool-box-summary");
+      click(".tool-file .part-head");
       expect(block.querySelector(".tool-file-pre")!.textContent).toHaveLength(FILE_RENDER_CAP_CHARS);
       expect(block.querySelector(".tool-file .tool-raw-toggle")!.textContent).toContain("1000 more — show full");
     });
@@ -495,12 +599,163 @@ describe("file part (DOM)", () => {
   });
 });
 
+describe("path header + copy (DOM)", () => {
+  const spec: ToolDisplayWire = { kind: "file", pathArg: "path" };
+  const deep = "src/extensions/webui/ui/tool-block.tsx";
+
+  /** Swap the clipboard out for a recorder (the message-footer copy idiom). */
+  function stubClipboard(write: (t: string) => void): () => void {
+    const prev = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        clipboard: {
+          writeText: async (t: string) => {
+            write(t);
+          },
+        },
+      },
+      configurable: true,
+    });
+    return () => {
+      if (prev) Object.defineProperty(globalThis, "navigator", prev);
+      else delete (globalThis as Record<string, unknown>).navigator;
+    };
+  }
+
+  function stubRejectedClipboard(): () => void {
+    const prevNav = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", { value: {}, configurable: true });
+    const doc = document as unknown as { execCommand?: (cmd: string) => boolean };
+    const prevExec = doc.execCommand;
+    doc.execCommand = () => false; // the legacy path reports failure
+    return () => {
+      doc.execCommand = prevExec;
+      if (prevNav) Object.defineProperty(globalThis, "navigator", prevNav);
+      else delete (globalThis as Record<string, unknown>).navigator;
+    };
+  }
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it("renders the verbatim path split into a muted dir and the basename", () => {
+    const { block, ctrl } = mountBlock({
+      name: "read",
+      args: JSON.stringify({ path: deep }),
+      display: [spec],
+    });
+    ctrl.setResult({ output: "one\ntwo" });
+    const path = block.querySelector(".part-path")!;
+    // The full string is there, byte for byte, and the split keeps it whole.
+    expect(path.textContent).toBe(deep);
+    expect(path.querySelector(".part-path-dir")!.textContent).toBe("src/extensions/webui/ui/");
+    expect(path.querySelector(".part-path-base")!.textContent).toBe("tool-block.tsx");
+  });
+
+  it("shows the meta without the basename prefix, plus a copy-path button", () => {
+    const { block, ctrl } = mountBlock({
+      name: "read",
+      args: JSON.stringify({ path: "/x/y/readme.md", offset: 10, limit: 5 }),
+      display: [{ kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" }],
+    });
+    ctrl.setResult({ output: Array.from({ length: 40 }, (_, i) => `l${i}`).join("\n") });
+    const head = block.querySelector(".part-head")!;
+    expect(head.querySelector(".part-meta")!.textContent).toBe("lines 11–15 of 40");
+    const copy = head.querySelector(".part-copy")!;
+    expect(copy.getAttribute("title")).toBe("copy path");
+    // A name with no directory at all still renders (no muted prefix to speak of).
+    const bare = mountBlock({ name: "read", args: '{"path":"f.ts"}', display: [spec] });
+    bare.ctrl.setResult({ output: "x" });
+    const barePath = bare.block.querySelector(".part-path")!;
+    expect(barePath.querySelector(".part-path-dir")).toBeNull();
+    expect(barePath.querySelector(".part-path-base")!.textContent).toBe("f.ts");
+  });
+
+  it("copies the path arg verbatim and flashes only on an acknowledged copy", async () => {
+    const written: string[] = [];
+    const restore = stubClipboard((t) => written.push(t));
+    try {
+      const { block, ctrl } = mountBlock({
+        name: "read",
+        args: JSON.stringify({ path: deep }),
+        display: [spec],
+      });
+      ctrl.setResult({ output: "one\ntwo" });
+      const copy = block.querySelector<HTMLElement>(".part-copy")!;
+      expect(copy.classList.contains("copied")).toBe(false);
+      copy.click();
+      await settle();
+      expect(written).toEqual([deep]); // the relative arg as declared: no resolution
+      expect(copy.classList.contains("copied")).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it("a failed copy confirms nothing", async () => {
+    const restore = stubRejectedClipboard();
+    try {
+      const { block, ctrl } = mountBlock({
+        name: "read",
+        args: JSON.stringify({ path: "a/b.md" }),
+        display: [spec],
+      });
+      ctrl.setResult({ output: "one\ntwo" });
+      const copy = block.querySelector<HTMLElement>(".part-copy")!;
+      copy.click();
+      await settle();
+      expect(copy.classList.contains("copied")).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("the header toggles the body; the copy button does not", () => {
+    // 25 lines: past the auto-expand ceiling, so the body starts closed and
+    // both clicks have an unambiguous effect to compare.
+    const { block, ctrl, click } = mountBlock({
+      name: "read",
+      args: JSON.stringify({ path: "notes.md" }),
+      display: [spec],
+    });
+    ctrl.setResult({ output: Array.from({ length: 25 }, (_, i) => `l${i}`).join("\n") });
+    expect(block.querySelector(".tool-file-pre")).toBeNull();
+
+    block.querySelector<HTMLElement>(".part-copy")!.click();
+    expect(block.querySelector(".tool-file-pre")).toBeNull(); // stopPropagation: no fold
+
+    click(".tool-file .part-head");
+    expect(block.querySelector(".tool-file-pre")!.textContent).toContain("l24");
+    click(".tool-file .part-head");
+    expect(block.querySelector(".tool-file-pre")).toBeNull();
+  });
+
+  it("the keyboard folds the file part too (div fold restates the button semantics)", () => {
+    const { block, ctrl } = mountBlock({
+      name: "read",
+      args: JSON.stringify({ path: "notes.md" }),
+      display: [spec],
+    });
+    ctrl.setResult({ output: Array.from({ length: 25 }, (_, i) => `l${i}`).join("\n") });
+    const head = block.querySelector<HTMLElement>(".part-head")!;
+    expect(head.getAttribute("role")).toBe("button");
+    expect(head.getAttribute("tabindex")).toBe("0");
+    // dispatchEvent returns !defaultPrevented: Enter/Space toggle AND swallow
+    // (Space must never scroll the row), a stray key does neither.
+    expect(head.dispatchEvent({ type: "keydown", key: "Enter" } as unknown as Event)).toBe(false);
+    expect(block.querySelector(".tool-file-pre")!.textContent).toContain("l24");
+    expect(head.dispatchEvent({ type: "keydown", key: "x" } as unknown as Event)).toBe(true);
+    expect(block.querySelector(".tool-file-pre")).not.toBeNull();
+    expect(head.dispatchEvent({ type: "keydown", key: " " } as unknown as Event)).toBe(false);
+    expect(block.querySelector(".tool-file-pre")).toBeNull();
+  });
+});
+
 describe("diff part (DOM)", () => {
-  function mountDiff(args: Record<string, unknown>) {
+  function mountDiff(args: Record<string, unknown>, spec?: ToolDisplayWire) {
     return mountBlock({
       name: "change",
       args: JSON.stringify(args),
-      display: [{ kind: "diff", oldArg: "a", newArg: "b" }],
+      display: [spec ?? { kind: "diff", oldArg: "a", newArg: "b" }],
     });
   }
 
@@ -512,13 +767,73 @@ describe("diff part (DOM)", () => {
     expect(diff.querySelector(".diff-del")!.textContent).toContain("two");
     expect(diff.querySelector(".diff-add")!.textContent).toContain("TWO");
     expect(diff.querySelector(".diff-ctx")!.textContent).toContain("one");
-    // Gutter rows: +/- markers live in their own fixed column.
-    expect(diff.querySelector(".diff-del .diff-gutter")!.textContent).toBe("-");
-    expect(diff.querySelector(".diff-add .diff-gutter")!.textContent).toBe("+");
+    // GitHub cells: [old-no][new-no][sign][text]. The marker now lives in its
+    // own sign column -- this replaces the old single .diff-gutter shape, which
+    // is exactly the structure the redesign rules out.
+    expect(diff.querySelector(".diff-del .diff-sign")!.textContent).toBe("-");
+    expect(diff.querySelector(".diff-add .diff-sign")!.textContent).toBe("+");
+    expect(diff.querySelector(".diff-ctx .diff-sign")!.textContent).toBe("");
+    expect(diff.querySelector(".diff-gutter")).toBeNull();
     // Still no click needed: the args body stays collapsed around it.
     expect(block.querySelector(".tool-call-body")!.classList.contains("hidden")).toBe(true);
     // The diff consumed the result.
     expect(block.querySelector(".tool-result-box")).toBeNull();
+  });
+
+  it("populates the two line-number gutters per row kind", () => {
+    const { block, ctrl } = mountDiff({ a: "one\ntwo\nthree", b: "one\nTWO\nthree" });
+    ctrl.setResult({ output: "ok" });
+    const rows = Array.from(block.querySelectorAll(".diff-row"));
+    // ctx 1/1, del old-2, add new-2, ctx 3/3 -- and the side a row does not
+    // exist on renders an EMPTY cell, not a dash (nothing to select by mistake).
+    expect(rows.map((r) => r.querySelector(".diff-ln-old")!.textContent)).toEqual(["1", "2", "", "3"]);
+    expect(rows.map((r) => r.querySelector(".diff-ln-new")!.textContent)).toEqual(["1", "", "2", "3"]);
+    // Numbers are gutter ink, not row content: they stay out of the text cell.
+    expect(rows[1]!.querySelector(".diff-text")!.textContent).toBe("two");
+  });
+
+  it("renders a capped side's placeholder as .diff-info, gutterless", () => {
+    const { block, ctrl, click } = mountDiff({
+      a: "x",
+      b: Array.from({ length: MAX_DIFF_LINES + 3 }, (_, i) => `n${i}`).join("\n"),
+    });
+    ctrl.setResult({ output: "ok" });
+    click(".diff-expand"); // past the inline fold, so the placeholder row is rendered
+    const info = block.querySelector(".diff-row.diff-info")!;
+    expect(info.textContent).toContain("3 more added");
+    expect(info.querySelector(".diff-sign")).toBeNull();
+    expect(info.querySelector(".diff-ln-old")).toBeNull();
+    expect(info.querySelector(".diff-ln-new")).toBeNull();
+    // Not a fake context row either.
+    expect(info.classList.contains("diff-ctx")).toBe(false);
+  });
+
+  it("carries a path header with the +N −M stat when the declaration names a pathArg", () => {
+    const { block, ctrl } = mountDiff(
+      { path: "src/a/b/f.ts", a: "one\ntwo\nthree\nfour", b: "one\nTWO\n2.5\nthree\nfour" },
+      { kind: "diff", oldArg: "a", newArg: "b", pathArg: "path" },
+    );
+    expect(block.querySelector(".tool-diff .part-head")).toBeNull(); // pending
+    ctrl.setResult({ output: "ok" });
+    const head = block.querySelector(".tool-diff .part-head")!;
+    expect(head.querySelector(".part-path-dir")!.textContent).toBe("src/a/b/");
+    expect(head.querySelector(".part-path-base")!.textContent).toBe("f.ts");
+    // The stat is two tinted cells (the gap between them is CSS, not bytes).
+    expect(head.querySelector(".diff-stat-add")!.textContent).toBe("+2");
+    expect(head.querySelector(".diff-stat-del")!.textContent).toBe("−1");
+    // The diff header is NOT a toggle: the body is inline primary content and
+    // the line fold stays the diff's only fold.
+    expect(head.className).not.toContain("part-head-toggle");
+    (head as HTMLElement).click();
+    expect(block.querySelectorAll(".diff-row")).toHaveLength(5);
+  });
+
+  it("renders no path header (and no copy button) when no pathArg is declared", () => {
+    const { block, ctrl } = mountDiff({ path: "a.ts", a: "x", b: "y" });
+    ctrl.setResult({ output: "ok" });
+    expect(block.querySelector(".tool-diff")).not.toBeNull();
+    expect(block.querySelector(".tool-diff .part-head")).toBeNull();
+    expect(block.querySelector(".part-copy")).toBeNull();
   });
 
   it("folds at MAX_INLINE_DIFF_LINES: exactly 30 inline, 31 behind a working expand", () => {

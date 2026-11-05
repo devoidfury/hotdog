@@ -359,7 +359,12 @@ describe("tool calls and results", () => {
     });
     ml.handleToolResult({ name: "read", output: "L1\nL2" });
     const block = container.querySelector(".tool-call-block")!;
-    expect(block.querySelector(".tool-file .tool-box-summary")!.textContent).toBe("c.txt — 2 lines · 5 chars");
+    // The declared-path file part renders the GitHub header row: the verbatim
+    // path (muted dir + primary basename) with the size meta on the right.
+    const head = block.querySelector(".tool-file .part-head")!;
+    expect(head.querySelector(".part-path-dir")!.textContent).toBe("/a/b/");
+    expect(head.querySelector(".part-path-base")!.textContent).toBe("c.txt");
+    expect(head.querySelector(".part-meta")!.textContent).toBe("2 lines · 5 chars");
     // No display on the frame -> generic posture only, no file box.
     ml.handleToolCall({ name: "read", args: JSON.stringify({ path: "/a/b/d.txt" }) });
     ml.handleToolResult({ name: "read", output: "L1\nL2" });
@@ -714,13 +719,17 @@ describe("session log replay", () => {
     const block = container.querySelector(".tool-call-block")!;
     // Auto-expand (owner ruling): the small written body is already open and
     // the envelope rides as the footer line; the result envelope is consumed
-    // (no second generic box).
-    expect(block.querySelector(".tool-file .tool-box-summary")!.textContent).toBe("notes.md — 2 lines · 17 chars");
+    // (no second generic box). The face is the path header: verbatim path
+    // (muted dir + basename) and the written content's size as its meta.
+    const head = block.querySelector(".tool-file .part-head")!;
+    expect(head.querySelector(".part-path-dir")!.textContent).toBe("/srv/");
+    expect(head.querySelector(".part-path-base")!.textContent).toBe("notes.md");
+    expect(head.querySelector(".part-meta")!.textContent).toBe("2 lines · 17 chars");
     expect(block.querySelector(".tool-result-box")).toBeNull();
     expect(block.querySelector(".tool-file-pre")!.textContent).toBe("line one\nline two");
     expect(block.querySelector(".tool-file-meta")!.textContent).toContain("bytes_appended");
-    // User collapse hides both the content and the envelope.
-    (block.querySelector(".tool-file .tool-box-summary") as HTMLElement).click();
+    // User collapse (the header row IS the toggle) hides content and envelope.
+    (block.querySelector(".tool-file .part-head") as HTMLElement).click();
     expect(block.textContent).not.toContain("bytes_appended");
   });
 });

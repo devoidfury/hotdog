@@ -15,6 +15,7 @@ import { mount, type DomNode, type Mounted, type JsxChild } from "@utils/jsx";
 import { parseMarkdown, mdTreeToHtml } from "@utils/md-parser.ts";
 import { getTokenizer } from "@utils/syntax";
 import { TOOL_ICONS } from "./icons.tsx";
+import { copyText } from "./utils.ts";
 import type { ToolDisplayWire } from "@extensions/websocket/protocol.ts";
 
 // One declared display part per spec (kind/source/arg keys): the single
@@ -89,6 +90,34 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+/**
+ * The path header's two-tone split: the directory portion (separator included,
+ * so the strings re-join byte-identical to the arg) and the basename, which
+ * carries the emphasis (GitHub's filename reading). Slash-normalized for the
+ * cut only -- the returned pieces stay the verbatim arg bytes, because that
+ * string is also what the copy button writes.
+ */
+export function splitPath(path: string): { dir: string; base: string } {
+  const cut = path.replace(/\\/g, "/").lastIndexOf("/") + 1;
+  const base = path.slice(cut);
+  // Trailing separator (a path with no name to emphasize): the whole arg is
+  // the primary piece, and there is no muted prefix.
+  return base === "" ? { dir: "", base: path } : { dir: path.slice(0, cut), base };
+}
+
+/**
+ * The path a part DECLARES (its `pathArg`), verbatim from the args -- no
+ * resolution, no absolutizing: the args are workspace-relative in practice and
+ * that relative string IS what the header shows and the copy button copies.
+ * Null when the spec names no pathArg or names one the call did not fill with
+ * a non-empty string (the part then renders with no path header).
+ */
+function declaredPath(args: string, spec: ToolDisplayWire): string | null {
+  if (spec.pathArg === undefined) return null;
+  const v = parseArgsObject(args)?.[spec.pathArg];
+  return typeof v === "string" && v !== "" ? v : null;
+}
+
 /** Parsed args object, or null when the wire string is not a JSON object. */
 export function parseArgsObject(args: string): Record<string, unknown> | null {
   try {
@@ -136,6 +165,22 @@ export function fileSummary(args: string, resultText: string, spec: ToolDisplayW
 }
 
 /**
+ * The header pair for a declared-path part: the path arg VERBATIM and the
+ * fileSummary meta with its basename prefix dropped (the path is already the
+ * header's left side; saying the name twice is noise). Same skip rule as
+ * fileSummary -- no declared path string, no part. `fileSummary` itself stays
+ * the centered-summary builder untouched.
+ */
+function fileHead(args: string, resultText: string, spec: ToolDisplayWire): { path: string; meta: string } | null {
+  const summary = fileSummary(args, resultText, spec);
+  if (summary === null) return null;
+  const path = declaredPath(args, spec);
+  if (path === null) return null;
+  const prefix = `${basename(path)} — `;
+  return { path, meta: summary.startsWith(prefix) ? summary.slice(prefix.length) : summary };
+}
+
+/**
  * Fallback header when the server sent no argsSummary: a compact one-liner
  * built from well-known arg keys (path basename, command/pattern text, then
  * any string value). NEVER a raw JSON line.
@@ -171,8 +216,13 @@ export function prettyArgs(args: string): string {
 }
 
 export interface DiffLine {
-  kind: "ctx" | "add" | "del";
+  kind: "ctx" | "add" | "del" | "info";
   text: string;
+  /** 1-based line number in the OLD file; absent on add/info rows (the side
+   *  that line does not exist on renders an empty gutter cell). */
+  oldNo?: number;
+  /** 1-based line number in the NEW file; absent on del/info rows. */
+  newNo?: number;
 }
 
 /**
@@ -180,6 +230,15 @@ export interface DiffLine {
  * changed middles rendered as del-then-add with one context line on each
  * side. Local to the UI (the core generateDiff stays as-is); far kinder than
  * a positional line-pairing diff for insertions.
+ *
+ * Numbering (the GitHub body's two gutters), with `start` the trimmed prefix
+ * length: removed oldLines[start..endOld-1] number start+1+i in the old file,
+ * added newLines[start..endNew-1] number start+1+i in the new one, the leading
+ * context row is line `start` on both sides, the trailing one `endOld+1` /
+ * `endNew+1`. A pure insertion therefore shows only new numbers and a pure
+ * deletion only old ones -- the two sides never share a row. The cap
+ * placeholders ("… N more removed/added") are `info` rows: they say something
+ * about the diff, not about a line, so they carry no numbers.
  */
 export function computeDiffLines(oldText: string, newText: string, maxLines = MAX_DIFF_LINES): DiffLine[] {
   const oldLines = oldText.split("\n");
@@ -202,17 +261,31 @@ export function computeDiffLines(oldText: string, newText: string, maxLines = MA
   const added = newLines.slice(start, endNew);
 
   const lines: DiffLine[] = [];
-  if (start > 0) lines.push({ kind: "ctx", text: oldLines[start - 1]! });
+  if (start > 0) lines.push({ kind: "ctx", text: oldLines[start - 1]!, oldNo: start, newNo: start });
   removed.forEach((text, i) => {
-    if (i === maxLines) lines.push({ kind: "ctx", text: `… ${removed.length - maxLines} more removed` });
-    else if (i < maxLines) lines.push({ kind: "del", text });
+    if (i === maxLines) lines.push({ kind: "info", text: `… ${removed.length - maxLines} more removed` });
+    else if (i < maxLines) lines.push({ kind: "del", text, oldNo: start + 1 + i });
   });
   added.forEach((text, i) => {
-    if (i === maxLines) lines.push({ kind: "ctx", text: `… ${added.length - maxLines} more added` });
-    else if (i < maxLines) lines.push({ kind: "add", text });
+    if (i === maxLines) lines.push({ kind: "info", text: `… ${added.length - maxLines} more added` });
+    else if (i < maxLines) lines.push({ kind: "add", text, newNo: start + 1 + i });
   });
-  if (endOld < oldLines.length) lines.push({ kind: "ctx", text: oldLines[endOld]! });
+  if (endOld < oldLines.length) {
+    lines.push({ kind: "ctx", text: oldLines[endOld]!, oldNo: endOld + 1, newNo: endNew + 1 });
+  }
   return lines;
+}
+
+/** The diff header's stat: add/del row counts of the resolved lines (info
+ *  placeholders are not counted -- they are not lines). Rendered "+N −M". */
+export function diffStat(lines: DiffLine[]): { add: number; del: number } {
+  let add = 0;
+  let del = 0;
+  for (const l of lines) {
+    if (l.kind === "add") add++;
+    else if (l.kind === "del") del++;
+  }
+  return { add, del };
 }
 
 /** One styled run of highlighted code; cls null means unstyled text. */
@@ -270,8 +343,8 @@ function partBytes(
 type PartView =
   | { posture: "skip" }
   | { posture: "pending"; icon?: string }
-  | { posture: "file"; summary: string; text: string; envelope?: string }
-  | { posture: "diff"; lines: DiffLine[] }
+  | { posture: "file"; path: string; meta: string; text: string; envelope?: string }
+  | { posture: "diff"; path: string | null; lines: DiffLine[] }
   | { posture: "prose"; text: string; icon?: string }
   | { posture: "code"; text: string; runs: CodeRun[] | null };
 
@@ -291,18 +364,18 @@ function resolvePart(spec: ToolDisplayWire, state: ToolBlockState): PartView {
       if (spec.source === "args") {
         const body = spec.arg !== undefined ? parseArgsObject(state.args)?.[spec.arg] : undefined;
         if (typeof body !== "string" || body === "") return { posture: "skip" };
-        const summary = fileSummary(state.args, body, spec);
-        if (summary === null) return { posture: "skip" };
+        const head = fileHead(state.args, body, spec);
+        if (head === null) return { posture: "skip" };
         // Ok result = the write confirmation envelope: a quiet footer line
         // inside the box, never the face. An error is no envelope at all.
-        if (!state.result || state.result.error) return { posture: "file", summary, text: body };
-        return { posture: "file", summary, text: body, envelope: oneLine(state.result.output ?? "", 80) };
+        if (!state.result || state.result.error) return { posture: "file", ...head, text: body };
+        return { posture: "file", ...head, text: body, envelope: oneLine(state.result.output ?? "", 80) };
       }
       if (!state.result || state.result.error) return { posture: "skip" };
       const text = state.result.output ?? "";
-      const summary = fileSummary(state.args, text, spec);
-      if (summary === null) return { posture: "skip" };
-      return { posture: "file", summary, text };
+      const head = fileHead(state.args, text, spec);
+      if (head === null) return { posture: "skip" };
+      return { posture: "file", ...head, text };
     }
     case "diff": {
       if (!state.result || state.result.error) return { posture: "skip" };
@@ -310,7 +383,7 @@ function resolvePart(spec: ToolDisplayWire, state: ToolBlockState): PartView {
       const oldV = parsed && spec.oldArg ? parsed[spec.oldArg] : undefined;
       const newV = parsed && spec.newArg ? parsed[spec.newArg] : undefined;
       if (typeof oldV !== "string" || typeof newV !== "string") return { posture: "skip" };
-      return { posture: "diff", lines: computeDiffLines(oldV, newV) };
+      return { posture: "diff", path: declaredPath(state.args, spec), lines: computeDiffLines(oldV, newV) };
     }
     case "prose":
     case "code": {
@@ -413,6 +486,119 @@ interface PartProps {
   onUnfold: (key: string) => void;
 }
 
+/**
+ * Copy-the-path button -- the message footer's copy idiom at header scale. The
+ * bytes are the path arg VERBATIM: args are workspace-relative in practice and
+ * that relative string is exactly what the owner wants on the clipboard, so
+ * there is no resolution here and no server call. The green check rides ONLY a
+ * real acknowledged copy (a failed one flashes nothing), and the click stops
+ * propagation so a copy under a toggleable header never folds the body.
+ */
+function CopyPath({ path }: { path: string }): JsxChild {
+  let el: HTMLElement | null = null;
+  let flash: ReturnType<typeof setTimeout> | null = null;
+  return (
+    <button
+      type="button"
+      className="part-copy"
+      title="copy path"
+      aria-label="copy path"
+      ref={(node) => {
+        el = node as unknown as HTMLElement | null;
+      }}
+      onClick={(e: MouseEvent) => {
+        e.stopPropagation(); // a copy is not a toggle
+        void copyText(path).then((ok) => {
+          if (!ok || !el) return; // no fake confirmation: the check rides a real copy
+          if (flash) clearTimeout(flash);
+          el.classList.add("copied");
+          flash = setTimeout(() => {
+            el?.classList.remove("copied");
+            flash = null;
+          }, 1200);
+        });
+      }}
+    >
+      {/* Static glyph pair (same 24-viewBox stroke idiom as the footer's copy
+          button); CSS swaps them on the .copied state. */}
+      <svg
+        className="part-copy-icon"
+        viewBox="0 0 24 24"
+        width="12"
+        height="12"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <rect x="9" y="9" width="11" height="11" rx="2" />
+        <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+      </svg>
+      <svg
+        className="part-copy-check"
+        viewBox="0 0 24 24"
+        width="12"
+        height="12"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M4 12l5 5L20 6" />
+      </svg>
+    </button>
+  );
+}
+
+/**
+ * The declared-path header (GitHub's file header, typographic): the verbatim
+ * path with its directory portion muted and the basename primary, the copy
+ * button immediately right of it, the part's meta far right. NOT a slab -- the
+ * block fill stays the only surface, and an open body is separated by a single
+ * hairline. `onToggle` is what makes this row the file part's fold (the
+ * centered summary used to be); the diff part passes none, because its body is
+ * inline primary content and the line fold stays its only fold.
+ */
+function PartHeader({
+  path,
+  meta,
+  onToggle,
+}: {
+  path: string;
+  meta: JsxChild;
+  onToggle?: () => void;
+}): JsxChild {
+  const { dir, base } = splitPath(path);
+  // The fold was a <button>; it is a row now, so the button semantics are
+  // restated by hand (role/tabIndex/Enter+Space) rather than regressed.
+  const onKey = onToggle
+    ? (e: KeyboardEvent): void => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault(); // Space toggles, it never scrolls the row
+          onToggle();
+        }
+      }
+    : undefined;
+  return (
+    <div
+      className={onToggle ? "part-head part-head-toggle" : "part-head"}
+      role={onToggle ? "button" : undefined}
+      tabIndex={onToggle ? 0 : undefined}
+      onClick={onToggle}
+      onKeyDown={onKey}
+    >
+      <span className="part-path">
+        {dir === "" ? null : <span className="part-path-dir">{dir}</span>}
+        <span className="part-path-base">{base}</span>
+      </span>
+      <CopyPath path={path} />
+      <span className="part-meta">{meta}</span>
+    </div>
+  );
+}
+
 /** One declared part as DOM, per the posture resolved above. */
 function Part({ view, state, index, onToggleBox, onUnfold }: PartProps): JsxChild {
   switch (view.posture) {
@@ -426,13 +612,7 @@ function Part({ view, state, index, onToggleBox, onUnfold }: PartProps): JsxChil
       const capped = !full && view.text.length > FILE_RENDER_CAP_CHARS;
       return (
         <div className="tool-file" key={key}>
-          <button
-            type="button"
-            className="tool-box-summary"
-            onClick={() => onToggleBox(key, open)}
-          >
-            {view.summary}
-          </button>
+          <PartHeader path={view.path} meta={view.meta} onToggle={() => onToggleBox(key, open)} />
           {open ? (
             <>
               <pre className="tool-file-pre">
@@ -460,14 +640,40 @@ function Part({ view, state, index, onToggleBox, onUnfold }: PartProps): JsxChil
       const folded = view.lines.length > MAX_INLINE_DIFF_LINES;
       const unfolded = state.unfolded[key] === true;
       const shown = folded && !unfolded ? view.lines.slice(0, MAX_INLINE_DIFF_LINES) : view.lines;
+      const stat = diffStat(view.lines);
       return (
         <div className="tool-diff" key={key}>
+          {view.path === null ? null : (
+            <PartHeader
+              path={view.path}
+              meta={
+                <span className="diff-stat">
+                  <span className="diff-stat-add">{`+${stat.add}`}</span>
+                  <span className="diff-stat-del">{`−${stat.del}`}</span>
+                </span>
+              }
+            />
+          )}
           {shown.map((line, j) => (
             <div key={j} className={`diff-row diff-${line.kind}`}>
-              <span className="diff-gutter">
-                {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
-              </span>
-              <span className="diff-text">{line.text}</span>
+              {line.kind === "info" ? (
+                // Hunk-info flavor: the cap placeholder talks about the diff,
+                // not a line -- no gutters, no sign, full width.
+                <span className="diff-text">{line.text}</span>
+              ) : (
+                <>
+                  <span className="diff-ln diff-ln-old">
+                    {line.oldNo === undefined ? "" : line.oldNo}
+                  </span>
+                  <span className="diff-ln diff-ln-new">
+                    {line.newNo === undefined ? "" : line.newNo}
+                  </span>
+                  <span className="diff-sign">
+                    {line.kind === "add" ? "+" : line.kind === "del" ? "-" : ""}
+                  </span>
+                  <span className="diff-text">{line.text}</span>
+                </>
+              )}
             </div>
           ))}
           {folded && !unfolded ? (

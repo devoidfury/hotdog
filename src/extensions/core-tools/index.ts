@@ -79,7 +79,9 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
     });
     tool.metadata = {
       ...tool.metadata,
-      display: [{ kind: "diff", oldArg: "oldString", newArg: "newString" }],
+      // pathArg names the file the edit lands in: the diff part gets the same
+      // GitHub path header the file parts carry (key pinned against toToolDef()).
+      display: [{ kind: "diff", oldArg: "oldString", newArg: "newString", pathArg: "path" }],
     };
     return tool;
   },

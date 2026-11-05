@@ -138,15 +138,19 @@ describe("core tool display parts (ToolMetadata.display)", () => {
     expect(props).toContain(part.limitArg!);
   });
 
-  it("edit declares the diff part with its real oldString/newString params", async () => {
+  it("edit declares the diff part with its real oldString/newString/path params", async () => {
     const tool = createToolFactory(config).createTool("edit")!;
+    // pathArg is the sink's path header (GitHub's file header on the diff):
+    // the same rename guard covers it, so a silent path rename cannot strand
+    // the header client-side.
     expect(tool.metadata.display).toEqual([
-      { kind: "diff", oldArg: "oldString", newArg: "newString" },
+      { kind: "diff", oldArg: "oldString", newArg: "newString", pathArg: "path" },
     ]);
     const part = tool.metadata.display![0]!;
     const props = await schemaProps("edit");
     expect(props).toContain(part.oldArg!);
     expect(props).toContain(part.newArg!);
+    expect(props).toContain(part.pathArg!);
   });
 
   it("overwrite and append declare the args-sourced file part with their real params", async () => {

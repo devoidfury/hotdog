@@ -42,6 +42,27 @@
     --error-soft: rgba(248, 113, 113, 0.12);
     --warning: #fbbf24;
 
+    /* Diff body -- GitHub's reading, tuned to this theme's hues (dark is the
+       only theme). The row fill is a whisper of the semantic color and the two
+       number gutters ride it at a near-identical step (owner ruling
+       2026-11-05: the columns must read as one continuous ruler across
+       ctx/add/del rows, never as bricks or alternating slabs; the gutter step
+       over the row stays <= ~0.07 alpha of the same hue), so the meaning
+       rides the sign + ink, not the fill. The line text stays near-default:
+       30 rows of green/red prose was unreadable, GitHub reads like code on a
+       tinted row. --diff-ctx-gutter is the hueless whisper that keeps the
+       ruler continuous on untinted context rows. --diff-num is the gutter
+       ink; --diff-info-* the hunk-header flavor for the per-side cap
+       placeholders (muted blue-ish, the one non-semantic hue here). */
+    --diff-add-fill: rgba(52, 211, 153, 0.11);
+    --diff-del-fill: rgba(248, 113, 113, 0.11);
+    --diff-add-gutter: rgba(52, 211, 153, 0.07);
+    --diff-del-gutter: rgba(248, 113, 113, 0.07);
+    --diff-ctx-gutter: rgba(139, 147, 166, 0.07);
+    --diff-num: #8b93a6;
+    --diff-info-fill: rgba(96, 140, 200, 0.1);
+    --diff-info-ink: #8aa8cf;
+
     /* Borders */
     --border: #2a2a38;
     --border-light: #36364a;
@@ -1503,9 +1524,13 @@ body.sidebar-resizing {
    by the spec, never by the tool name. Single-surface rule (owner ruling):
    the BLOCK is the only surface -- one quiet background fill, no border, no
    shadow. The header is a quiet typographic row (no band, no slab); the
-   file/result/code parts read as typographic content inside the block, and
-   only an expandable body carries one inner treatment so its extent is
-   legible. Color stays semantic: diff add/del tints, the error tint, tok-*. */
+   declared-path parts (file bodies, the edit diff) open with a typographic path
+   header (muted dir + primary basename, copy button, meta right), and the
+   file/result bodies read as typographic content inside the block. Only an
+   expandable body carries one inner treatment so its extent is legible, and
+   only the diff rows carry a fill (the --diff-* family: a whisper on the row,
+   the number columns at a near-identical step so the rail stays continuous).
+   Color stays semantic: diff add/del, the error tint, tok-*. */
 
 .tool-call-block {
     background: var(--bg-secondary);
@@ -1606,9 +1631,10 @@ body.sidebar-resizing {
     word-break: break-word;
 }
 
-/* Collapsed disclosure shared by file parts and the generic result posture:
-   one muted summary line until opened, then lazy content. NOT a box: no
-   border, no fill -- the block behind it is the only surface. */
+/* The generic result posture's collapsed disclosure: one muted centered summary
+   line until opened, then lazy content. NOT a box: no border, no fill -- the
+   block behind it is the only surface. (Declared-path parts got their own
+   header row below; this idiom now serves the result box alone.) */
 .tool-file,
 .tool-result-box {
     margin: var(--space-xs) var(--space-lg);
@@ -1644,7 +1670,8 @@ body.sidebar-resizing {
    expand/collapse pair (down = expand when closed, up = collapse when
    open). The open body renders as the summary's following <pre>, so
    :has(+ pre) is the open attestation -- no DOM change, no per-posture class. */
-.tool-box-summary::after {
+.tool-box-summary::after,
+.part-head-toggle::after {
     content: "";
     display: inline-block;
     width: 10px;
@@ -1662,13 +1689,131 @@ body.sidebar-resizing {
 }
 
 .tool-box-summary:has(+ .tool-file-pre)::after,
-.tool-box-summary:has(+ .tool-result-pre)::after {
+.tool-box-summary:has(+ .tool-result-pre)::after,
+.part-head-toggle:has(+ .tool-file-pre)::after {
     transform: rotate(180deg);
 }
 
 .tool-box-summary:hover::after,
-.tool-box-summary:focus-visible::after {
+.tool-box-summary:focus-visible::after,
+.part-head-toggle:hover::after,
+.part-head-toggle:focus-visible::after {
     background-color: var(--accent);
+}
+
+/* The file-part fold is a div (role=button), so focus needs the same quiet
+   accent step the old <button> got from the UA. */
+.part-head-toggle:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+/* Part header (declared-path parts -- read/append/overwrite file boxes and the
+   edit diff): GitHub's file header as a typographic row. LEFT the path verbatim
+   from the arg, directory portion muted and the basename primary (the emphasis
+   that makes a long path scannable); immediately right of it the copy-path
+   button; FAR RIGHT the meta -- "lines 12–61 of 340" / "N lines · K chars" for
+   a file body (the basename is already on the left, so the prefix is gone),
+   "+N −M" for a diff. Single-surface rule holds: no fill, no slab, no border
+   around the row -- only a hairline where an open body actually starts.
+   Toggle semantics live here for file parts (the centered summary they used to
+   ride is gone); the diff header is NOT a toggle, its line fold is the only
+   fold. The copy button stops propagation, so a copy never folds the body. */
+.part-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-width: 0;
+    padding: 5px 10px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.tool-diff .part-head,
+.part-head-toggle:has(+ .tool-file-pre) {
+    border-bottom: 1px solid var(--border);
+}
+
+.part-head-toggle {
+    cursor: pointer;
+    user-select: none;
+}
+
+/* The path: dir then basename, one mono string that re-joins byte-identical to
+   the arg. A long directory loses characters (ellipsis) before the basename
+   does -- the name is the part worth reading. */
+.part-path {
+    display: flex;
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow: hidden;
+}
+
+.part-path-dir {
+    color: var(--text-muted);
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 0 1 auto;
+}
+
+.part-path-base {
+    color: var(--text-primary);
+    white-space: pre;
+    flex: none;
+}
+
+.part-head-toggle:hover .part-path-dir {
+    color: var(--text-secondary);
+}
+
+/* Copy-path button: the footer-copy family at header scale -- quiet, lifts on
+   hover, and flashes green ONLY on an acknowledged copy (the check is a real
+   receipt, never a promise). The two glyphs swap on the same .copied state. */
+.part-copy {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    padding: 1px;
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    opacity: 0.5;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+.part-copy:hover {
+    opacity: 1;
+    color: var(--text-primary);
+}
+
+.part-copy.copied {
+    opacity: 1;
+    color: var(--success);
+}
+
+.part-copy-check {
+    display: none;
+}
+
+.part-copy.copied .part-copy-icon {
+    display: none;
+}
+
+.part-copy.copied .part-copy-check {
+    display: inline-block;
+}
+
+.part-meta {
+    margin-left: auto;
+    flex: none;
+    color: var(--text-muted);
+    white-space: nowrap;
+    padding-left: var(--space-md);
 }
 
 /* The ONE inner treatment: an expandable body gets a single recessed fill so
@@ -1727,9 +1872,15 @@ body.sidebar-resizing {
     text-decoration: underline;
 }
 
-/* DIFF part: primary inline content on the block surface -- the only color is
-   the semantic add/del tint; fixed +/- gutter, muted context, no outer frame
-   (a diff needs no box to be legible). */
+/* DIFF part: primary inline content on the block surface -- the GitHub body:
+   [old-no][new-no][sign][text]. The semantic hue carries the meaning, but as
+   GitHub wears it: a whisper of tint on the row (fill spans the FULL row,
+   gutters included), the two number columns at a near-identical step so the
+   rail never breaks across ctx/add/del rows (owner ruling 2026-11-05: big
+   gutter deltas read as bricks), and the line text itself stays near-default
+   -- the old whole-line green/red .diff-text tint is exactly what got dropped
+   (30 rows of tinted prose read as noise; GitHub looks like code on a colored
+   row). No outer frame: a diff needs no box to be legible. */
 .tool-diff {
     margin: var(--space-xs) var(--space-lg);
     font-family: var(--font-mono);
@@ -1739,15 +1890,33 @@ body.sidebar-resizing {
 
 .diff-row {
     display: flex;
-    align-items: flex-start;
+    /* stretch, NOT flex-start (owner finding 2026-11-05): an empty-side cell
+       (the old number on an add row) is a blockified span with zero content
+       height -- under flex-start it painted only its padding as a little box
+       mid-row and read as a border between every row. Stretched, its whisper
+       paint covers the exact row box, so the number rail stays continuous. */
+    align-items: stretch;
 }
 
-.diff-gutter {
+/* The two number columns: right-aligned tabular mono, muted, never selectable
+   (selecting diff text should copy the code, not the line numbers). An empty
+   side keeps painting its (whisper) cell -- continuity of the rail is the
+   point; the step over the row must stay too small to read as a slab. */
+.diff-ln {
     flex: none;
-    width: 1.8em;
-    padding: 1px 4px;
+    width: 3.6em;
+    padding: 1px 5px;
+    text-align: right;
+    color: var(--diff-num);
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+}
+
+.diff-sign {
+    flex: none;
+    width: 1.5em;
+    padding: 1px 0 1px 4px;
     text-align: center;
-    color: var(--text-muted);
     user-select: none;
 }
 
@@ -1759,11 +1928,30 @@ body.sidebar-resizing {
     word-break: break-word;
 }
 
-.diff-add { background: var(--success-soft); }
-.diff-del { background: var(--error-soft); }
-.diff-add .diff-text { color: var(--success); }
-.diff-del .diff-text { color: var(--error); }
+.diff-add { background: var(--diff-add-fill); }
+.diff-del { background: var(--diff-del-fill); }
+.diff-add .diff-ln { background: var(--diff-add-gutter); }
+.diff-del .diff-ln { background: var(--diff-del-gutter); }
+.diff-ctx .diff-ln { background: var(--diff-ctx-gutter); }
+.diff-add .diff-sign { color: var(--success); }
+.diff-del .diff-sign { color: var(--error); }
 .diff-ctx .diff-text { color: var(--text-muted); }
+
+/* The per-side cap placeholder ("… N more removed"): hunk-header flavor -- it
+   speaks about the diff, not about a line, so it has no sign, no numbers and no
+   semantic hue of its own. */
+.diff-info {
+    background: var(--diff-info-fill);
+    color: var(--diff-info-ink);
+}
+
+.diff-info .diff-text {
+    color: inherit;
+    padding-left: 6px;
+}
+
+.diff-stat-add { color: var(--success); }
+.diff-stat-del { color: var(--error); margin-left: 6px; }
 
 .diff-expand {
     margin: 6px 8px 8px;
@@ -2297,6 +2485,7 @@ body.sidebar-resizing {
     .tool-diff,
     .tool-file-pre,
     .tool-result-pre,
+    .part-head,
     .tool-box-summary {
         font-size: 0.72rem;
     }

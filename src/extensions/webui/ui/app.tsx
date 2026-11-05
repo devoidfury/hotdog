@@ -784,7 +784,6 @@ function startChat(): void {
     chat.connectedAtom,
     chat.workingAtom,
     chat.sessionIdAtom,
-    chat.sessionTitleAtom,
     chat.modelsAtom,
     chat.currentModelAtom,
     chat.profilesAtom,
@@ -1250,7 +1249,6 @@ function App() {
   const working = chat?.workingAtom() ?? false;
   const activeLogId = activeLogIdAtom();
   const sessionId = chat?.sessionIdAtom() ?? null;
-  const title = chat?.sessionTitleAtom() ?? null;
   // Tool-exec plane posture: "worker (fence: bwrap | seatbelt | off | none --
   // probe failed)" / "inline (unfenced)", plus anything carrying [degraded: ...].
   const toolExec = chat?.toolExecAtom() ?? "";
@@ -1334,7 +1332,10 @@ function App() {
                     : undefined
                 }
               >
-                {title || (sessionId ? sessionId.slice(0, 8) : "")}
+                {/* Fingerprint ONLY: the badge is the full-id copy button,
+                    never a title slot (titles live on the sidebar row; a
+                    derived one is far too long for the header). */}
+                {sessionId ? sessionId.slice(0, 8) : ""}
               </button>
             </span>
             {activeLogId ? (

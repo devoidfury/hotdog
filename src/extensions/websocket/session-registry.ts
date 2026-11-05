@@ -464,11 +464,12 @@ export class SessionRegistry {
     lastActivityAt: number;
     connectedClients: number;
     /**
-     * Log record count (the sidebar metric): the session-log writer's
-     * committed-record tally -- what listSessionLogs reports for this
-     * session's file at this moment (same exclusion rule: system_prompt and
-     * reset records never count, bookkeeping records do). Omitted while the
-     * count is unknowable (a failed seed), never fabricated.
+     * Conversation message count (the sidebar metric): the session-log
+     * writer's committed-record tally -- what listSessionLogs reports for
+     * this session's file at this moment (same rule: only user input and
+     * model responses count; tool traffic and bookkeeping records never do).
+     * Omitted while the count is unknowable (a failed seed), never
+     * fabricated.
      */
     messageCount?: number;
     ctxUsed?: number;

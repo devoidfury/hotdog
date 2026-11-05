@@ -1156,7 +1156,7 @@ describe("session-log extension tool-result image sidecar", () => {
     }
   });
 
-  it("an image-carrying TOOL_RESULT entry is exactly one counted record", async () => {
+  it("an image-carrying TOOL_RESULT entry never counts (sidecar splits nothing)", async () => {
     const sessionId = `test-img-count-${Date.now()}`;
     try {
       await seedRecordCount(sessionId); // no log yet: base 0
@@ -1166,11 +1166,12 @@ describe("session-log extension tool-result image sidecar", () => {
       await hooks[HOOKS.CONTEXT_MESSAGE]!({ message: toolMessage([IMG, IMG]), agent: { sessionId } });
 
       const entries = await readSessionEntries(sessionId, { full: true });
-      // One line for the result, one counted record: the sidecar never splits
-      // or adds a record, and the live writer tally matches the cold sum.
+      // One line for the result: the sidecar never splits or adds a record.
+      // The conversation-only rule keeps tool traffic out of the count
+      // entirely (the session_start header stays out too), live and cold.
       expect(entries).toHaveLength(2);
-      expect(countSessionLogEntries(entries)).toBe(2);
-      expect(getRecordCount(sessionId)).toBe(2);
+      expect(countSessionLogEntries(entries)).toBe(0);
+      expect(getRecordCount(sessionId)).toBe(0);
     } finally {
       cleanupTestFile(sessionId);
       dropRecordCount(sessionId);
@@ -1291,10 +1292,11 @@ describe("session-log extension user-input image sidecar", () => {
 
       const entries = await readSessionEntries(sessionId, { full: true });
       // session_start + one input record: the sidecar never splits or adds a
-      // record, and the live writer tally matches the cold sum.
+      // record, and only the input counts (headers stay out of the rule).
+      // The live writer tally matches the cold sum.
       expect(entries).toHaveLength(2);
-      expect(countSessionLogEntries(entries)).toBe(2);
-      expect(getRecordCount(sessionId)).toBe(2);
+      expect(countSessionLogEntries(entries)).toBe(1);
+      expect(getRecordCount(sessionId)).toBe(1);
     } finally {
       cleanupTestFile(sessionId);
       dropRecordCount(sessionId);

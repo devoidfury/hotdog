@@ -325,6 +325,17 @@ describe("header fingerprint badge", () => {
       else delete (globalThis as Record<string, unknown>).navigator;
     }
   });
+
+  it("stays the fingerprint even when the session carries a title", async () => {
+    await attach();
+    // The bug class: derived titles now ride every title channel the header
+    // used to read (rename push + authoritative list), turning the copy
+    // button into a headline. The badge text is always the 8-char id.
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "title", value: "Some fine headline" });
+    ws.fireMessage({ type: "sessions", sessions: [{ ...sessionRow, title: "Some fine headline" }] });
+    await tick();
+    expect(el("#current-session-id").textContent).toBe(SID.slice(0, 8));
+  });
 });
 
 // ── Composer ────────────────────────────────────────────────────────────────

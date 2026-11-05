@@ -2,10 +2,11 @@
 // live-row messageCount must equal what listSessionLogs reports for the same
 // session's log at the same moment. The mechanism: the session-log writer is
 // the single chokepoint (record-count.ts counts committed records under
-// core's one exclusion rule), seeded once per registration from the existing
-// log. These pins drive a scripted agent (the hook sequence a real
-// Agent.run fires) through the real ws server, the real SessionRegistry, and
-// the real session-log extension against a temp sessions dir.
+// core's one message rule -- conversation records only), seeded once per
+// registration from the existing log. These pins drive a scripted agent (the
+// hook sequence a real Agent.run fires) through the real ws server, the real
+// SessionRegistry, and the real session-log extension against a temp
+// sessions dir.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
@@ -51,7 +52,8 @@ async function waitForMessage(ws: MockWs, type: string, opts: { timeoutMs?: numb
  * exactly where the real Agent fires them, and whose run() scripts one
  * input turn with a tool round and an assistant tail:
  *   turn_started, input, llm(+tool_calls), tool_started, tool_result, llm
- *   tail, turn_end  -> 7 counted records.
+ *   tail, turn_end  -> 7 written records, 3 counted (input + both llms:
+ *   the sidebar rule counts conversation messages only).
  */
 async function harness() {
   const core = createWsMockCore();
@@ -148,9 +150,9 @@ describe("live sidebar count == listSessionLogs (parity contract)", () => {
 
       const row = (await h.liveRows(h.ws)).find((r) => r.id === sessionId)!;
       const cold = await h.coldCount(sessionId);
-      // turn_started, input, llm(+tool_calls), tool_started, tool_result,
-      // llm tail, turn_end.
-      expect(cold).toBe(7);
+      // Of the turn's 7 records only the conversation ones count: input,
+      // llm(+tool_calls), llm tail.
+      expect(cold).toBe(3);
       expect(row.messageCount).toBe(cold);
       // The wire renamed in lockstep: the user-only field is gone.
       expect("userMessageCount" in row).toBe(false);
@@ -164,15 +166,16 @@ describe("live sidebar count == listSessionLogs (parity contract)", () => {
     try {
       const { sessionId } = await h.server.sessionRegistry.create({});
       await h.send(h.ws, sessionId, "first");
-      // Each send drives one scripted 7-record turn. The removed
-      // registry.incrementUserMessageCount seam used to add an eighth,
-      // user-only phantom per send -- parity would break on every row below.
+      // Each send drives one scripted turn (7 written records, 3 counted).
+      // The removed registry.incrementUserMessageCount seam used to add an
+      // eighth, user-only phantom per send -- parity would break on every
+      // row below.
       await h.send(h.ws, sessionId, "second");
       await h.send(h.ws, sessionId, "third");
 
       const row = (await h.liveRows(h.ws)).find((r) => r.id === sessionId)!;
       const cold = await h.coldCount(sessionId);
-      expect(cold).toBe(21);
+      expect(cold).toBe(9);
       expect(row.messageCount).toBe(cold);
     } finally {
       h.server.stopCleanupLoop();
@@ -192,7 +195,7 @@ describe("live sidebar count == listSessionLogs (parity contract)", () => {
 
       const row = (await h.liveRows(h.ws)).find((r) => r.id === sessionId)!;
       const cold = await h.coldCount(sessionId);
-      expect(cold).toBe(8); // 7 + the compaction record
+      expect(cold).toBe(3); // the compaction record lands but never counts
       expect(row.messageCount).toBe(cold);
     } finally {
       h.server.stopCleanupLoop();
@@ -211,8 +214,9 @@ describe("live sidebar count == listSessionLogs (parity contract)", () => {
         agent,
       });
       // Rewind to a context of two kept messages: the writer appends reset
-      // (NOT counted) + the kept messages (counted again, they are new file
-      // records) + the re-emitted turn_started marker (counted).
+      // (never counted) + the kept messages (counted again, they are new
+      // file records) + the re-emitted turn_started marker (bookkeeping,
+      // never counted).
       await agent.hooks.notifyHooks(HOOKS.CONTEXT_REWOUND, {
         agent,
         newContext: [
@@ -224,8 +228,8 @@ describe("live sidebar count == listSessionLogs (parity contract)", () => {
 
       const row = (await h.liveRows(h.ws)).find((r) => r.id === sessionId)!;
       const cold = await h.coldCount(sessionId);
-      // turn_started, input, [reset skipped], kept input, kept llm, marker = 5
-      expect(cold).toBe(5);
+      // input, kept input, kept llm = 3 (turn markers and the reset stay out)
+      expect(cold).toBe(3);
       expect(row.messageCount).toBe(cold);
     } finally {
       h.server.stopCleanupLoop();
@@ -236,8 +240,9 @@ describe("live sidebar count == listSessionLogs (parity contract)", () => {
     const h = await harness();
     const logId = `parity-seed-${Date.now()}`;
     try {
-      // History a cold read counts as 3: the system_prompt and the reset
-      // marker never count; everything else does -- including the records
+      // History a cold read counts as 2: only the conversation records
+      // (the input and the llm reply) count -- the system_prompt, the reset
+      // marker and the turn_started bookkeeping stay out, including history
       // above the reset.
       writeFileSync(logFile(logId), [
         { ts: "2024-01-01T00:00:00Z", session_id: logId, source: "system_prompt", content: "p" },
@@ -251,9 +256,9 @@ describe("live sidebar count == listSessionLogs (parity contract)", () => {
       const row = (await h.liveRows(h.ws)).find((r) => r.id === sessionId)!;
       const cold = await h.coldCount(sessionId);
       expect(sessionId).toBe(logId);
-      expect(cold).toBe(3);
+      expect(cold).toBe(2);
       // The live row starts at the log's count -- not 0.
-      expect(row.messageCount).toBe(3);
+      expect(row.messageCount).toBe(2);
       expect(row.messageCount).toBe(cold);
     } finally {
       h.server.stopCleanupLoop();
@@ -268,7 +273,7 @@ describe("live sidebar count == listSessionLogs (parity contract)", () => {
       const { sessionId } = await h.server.sessionRegistry.create({ sessionId: logId });
       await h.send(h.ws, sessionId, "committed");
       const before = await h.coldCount(sessionId);
-      expect(before).toBe(7);
+      expect(before).toBe(3);
 
       // Freeze the file: every further append fails, so nothing new counts --
       // mirroring exactly what a cold read of the same file would report.
@@ -282,8 +287,8 @@ describe("live sidebar count == listSessionLogs (parity contract)", () => {
 
       const row = (await h.liveRows(h.ws)).find((r) => r.id === sessionId)!;
       const cold = await h.coldCount(sessionId);
-      expect(cold).toBe(7);
-      expect(row.messageCount).toBe(7);
+      expect(cold).toBe(3);
+      expect(row.messageCount).toBe(3);
       expect(row.messageCount).toBe(cold);
     } finally {
       h.server.stopCleanupLoop();

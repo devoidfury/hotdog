@@ -1191,11 +1191,12 @@ describe("createWsServer - cold log operations", () => {
     const created = await waitForMessage(ws, S2C.SESSION_CREATED);
     expect(created.profile).toBe("coder");
     expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.profile).toBe("coder");
-    // The live row's messageCount is the log's own record count (session_start
-    // and input both count under the sidebar rule), seeded by adoption -- not
-    // a user-message tally of the replayed context.
+    // The live row's messageCount is the log's own conversation tally (only
+    // the input counts -- the session_start header stays out under the
+    // sidebar rule), seeded by adoption -- not a user-message tally of the
+    // replayed context.
     const row = wsServer.sessionRegistry.list().find((r) => r.id === created.sessionId)!;
-    expect(row.messageCount).toBe(2);
+    expect(row.messageCount).toBe(1);
   });
 });
 

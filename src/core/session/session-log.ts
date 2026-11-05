@@ -183,20 +183,23 @@ export function trySessionPath(sessionId: string): string | undefined {
 
 /**
  * The sidebar record rule, defined ONCE: a log entry counts toward a
- * session's message count when it carries a source other than the system
- * prompt or a reset marker. Bookkeeping records (turn_started, token_usage,
- * resume_attempt, ...) DO count -- the metric is "records in the log", not
- * "conversation messages". listSessionLogs (cold rows) and the seed of the
- * session-log extension's live writer counter (live rows) both sum with
+ * session's message count when it is a CONVERSATION message -- user input
+ * (`input`, or the legacy `prompt` source no writer produces anymore) or a
+ * model response (`llm`). Everything else is bookkeeping and never counts:
+ * system_prompt, reset, tool traffic (tool_result/tool_started), questions,
+ * turn markers, token_usage, compaction, resume_attempts, session headers,
+ * switches. listSessionLogs (cold rows) and the seed of the session-log
+ * extension's live writer counter (live rows) both sum with
  * countSessionLogEntries, so the two sidebar halves cannot drift apart.
  */
+const MESSAGE_LOG_SOURCES: ReadonlySet<string> = new Set([
+  LOG_SOURCE.INPUT,
+  LOG_SOURCE.PROMPT,
+  LOG_SOURCE.LLM,
+]);
+
 export function isCountedLogEntry(entry: { source?: unknown }): boolean {
-  return (
-    typeof entry.source === "string" &&
-    entry.source !== "" &&
-    entry.source !== LOG_SOURCE.SYSTEM_PROMPT &&
-    entry.source !== LOG_SOURCE.RESET
-  );
+  return typeof entry.source === "string" && MESSAGE_LOG_SOURCES.has(entry.source);
 }
 
 /**

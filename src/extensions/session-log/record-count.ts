@@ -3,8 +3,9 @@
 // EVERY committed record to a session's JSONL goes through queuedAppend or
 // queuedFsyncAppend below, so counting lives with the writer: a record
 // increments the session's live count exactly when its bytes land (append
-// resolved), under the ONE exclusion rule the cold rows use
-// (core's countSessionLogEntries -- system_prompt/reset never counted). A
+// resolved), under the ONE message rule the cold rows use
+// (core's countSessionLogEntries -- only user input and model responses
+// count; tool traffic and every bookkeeping record never do). A
 // failed write counts nothing, which is honest: the cold row can never show
 // a record the file does not hold, so an unwritable log degrades the live
 // count the same way it degrades the log itself. The websocket sidebar reads
@@ -141,8 +142,9 @@ export function seedRecordCount(sessionId: string): Promise<void> {
   const prev = writeQueues.get(logPath) ?? Promise.resolve();
   const seed = async () => {
     try {
-      // Full view (not epoch): the sidebar rule counts every record in the
-      // file except system_prompt/reset, including history above a RESET.
+      // Full view (not epoch): the sidebar rule counts the conversation
+      // records (input/prompt/llm) anywhere in the file, including history
+      // above a RESET.
       recordCounts.set(sessionId, countSessionLogEntries(await readSessionEntries(sessionId, { full: true })));
       unseeded.delete(sessionId);
     } catch (err) {

@@ -204,9 +204,23 @@ describe("live row (owner fixture)", () => {
     expect(row.querySelectorAll(".row-sep")).toHaveLength(3);
   });
 
-  it("an explicit title wins the profile slot", () => {
+  it("profile keeps the profile slot; the title rides its own middle line", () => {
     const root = render({ sessions: [liveSession({ title: "renamed" })] });
-    expect(root.querySelector(".row-profile")!.textContent).toBe("renamed");
+    const row = root.querySelector(".session-item")!;
+    expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
+    const l2 = row.querySelector(".row-l2")!;
+    expect(l2.textContent).toBe("renamed");
+    // The line ellipsizes, so the full value rides the native title.
+    expect(l2.getAttribute("title")).toBe("renamed");
+    // The middle line sits between the grammar lines (l1, l2, l3).
+    expect([...row.children].map((n) => n.className)).toEqual(["row-l1", "row-l2", "row-l3"]);
+  });
+
+  it("an untitled row omits the middle line outright", () => {
+    const root = render({ sessions: [liveSession({ title: null })] });
+    const row = root.querySelector(".session-item")!;
+    expect(row.querySelector(".row-l2")).toBeNull();
+    expect([...row.children].map((n) => n.className)).toEqual(["row-l1", "row-l3"]);
   });
 
   it("the profile/model join dot rides only when both halves speak", () => {
@@ -311,6 +325,22 @@ describe("cold row", () => {
     expect(row.textContent).not.toContain("client");
     expect(row.querySelector(".row-clients")).toBeNull();
     expect(row.querySelector(".session-cancel-btn")).toBeNull();
+  });
+
+  it("a cold log with a derived title gets the middle line between the grammar lines", () => {
+    const root = render({ logs: [coldLog({ title: "Review the staged changes" })] });
+    const row = root.querySelector(".log-item")!;
+    const l2 = row.querySelector(".row-l2")!;
+    expect(l2.textContent).toBe("Review the staged changes");
+    expect(l2.getAttribute("title")).toBe("Review the staged changes");
+    expect([...row.children].map((n) => n.className)).toEqual(["row-l1", "row-l2", "row-l3"]);
+    // The profile slot still speaks the profile, never the title.
+    expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
+  });
+
+  it("an untitled cold log omits the middle line", () => {
+    const root = render({ logs: [coldLog()] });
+    expect(root.querySelector(".log-item")!.querySelector(".row-l2")).toBeNull();
   });
 
   it("idle (and missing) states omit the status segment", () => {

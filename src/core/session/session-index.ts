@@ -315,23 +315,201 @@ export function deriveSessionState(facts: {
   return SESSION_STATE.IDLE;
 }
 
-/** First user-visible text in the log, truncated, for sidebar rendering. */
-function deriveTitle(entries: Array<{ source: string; content: unknown }>): string | null {
-  for (const e of entries) {
-    if (e.source !== LOG_SOURCE.INPUT && e.source !== LOG_SOURCE.PROMPT) continue;
-    let text = "";
-    if (typeof e.content === "string") {
-      text = e.content;
-    } else if (Array.isArray(e.content)) {
-      const part = e.content.find(
-        (p) => p && typeof p === "object" && (p as Record<string, unknown>).type === "text",
-      ) as { text?: unknown } | undefined;
-      text = typeof part?.text === "string" ? part.text : "";
+// ---------------------------------------------------------------------------
+// Session title: a deterministic heuristic headline over the first user
+// messages. No model call -- the index is disposable, so the title must be
+// purely re-derivable from the log, and every rebuild must produce the exact
+// same bytes. Ruleset corpus-tuned against the full session history: each
+// strip earns its keep there (the tuning log lives in the commit).
+
+/** Hard word budget for a finished title. */
+const TITLE_WORD_CAP = 12;
+/** First N user texts considered; the first title-worthy one wins. */
+const TITLE_SCAN_MESSAGES = 5;
+/** Positional decay in the sentence picker: later sentences need to earn
+ *  their way past the opener, but not by much (0.5 over-penalized, 0 just
+ *  takes sentence one). */
+const SENTENCE_DECAY = 0.25;
+
+/** Scoring stopwords: words that never make a sentence title-worthy. */
+const TITLE_STOPWORDS = new Set(
+  ("a about above after again against all am an and any are aren't as at be because been before being " +
+    "below between both but by can cannot could couldn't did didn't do does doesn't doing don't down " +
+    "during each few for from further had hadn't has hasn't have haven't having he her here hers herself " +
+    "him himself his how i if in into is isn't it its itself just me more most my myself no nor not of off " +
+    "on once only or other our ours ourselves out over own same she should shouldn't so some such than that " +
+    "the their theirs them themselves then there these they this those through to too under until very " +
+    "was wasn't we were weren't what when where which while who whom why will with would wouldn't you your " +
+    "yours yourself yourselves also please hey hi ok okay thanks thank want needs need make made use using " +
+    "used get got let's lets one two thing things something anything nothing really much lot still even " +
+    "now new way know think see look going").split(/\s+/),
+);
+
+/** Whole-message rejects: openers that say nothing about the session's topic. */
+const TRIVIAL_MESSAGE =
+  /^(continue|go( ahead)?|ok( ay)?|yes|yeah|yep|no|nope|do it|same|try again|redo|hm+m?|k|sure|sounds good|lgtm|nice|great|perfect|cool|thanks?|thx|ty|hi|hello|hey|yo|sup|test(ing)?|ping)[\s.!?,]*$/i;
+
+/** Personal pronouns (1st/2nd person + he/she/they; it/its kept -- usually
+ *  refers to code, not a person, and dropping it mangles more than it helps). */
+const PERSONAL_PRONOUN =
+  /\b(i(?:'m|'ve|'ll|'d)?|me|my(?:self)?|mine|we(?:'re|'ve|'ll|'d)?|us|our(?:s|selves)?|you(?:'re|'ve|'ll|'d)?|your(?:s|self|selves)?|he|him|his|himself|she|her(?:self)?|hers|they|them|their(?:s|selves)?)\b\s*/gi;
+
+/** Sentence-head throat-clearing (run on the pronoun-stripped text until it
+ *  stops matching: openers stack -- "hey also could you like to..."). */
+const THROAT_CLEAR = [
+  /^(hey|hello|hi|yo|sup)[!,.\s-]+/i,
+  /^(and|but|also|so|plus|then)[,\s]+/i,
+  /^(am|are|can|could|should)\s+/i, // polite head modals ("could you...")
+  /^((i|we|you)\s+)?(would\s+|'d\s+)?(really\s+|just\s+)?(like|love|want|need|hope|hate)(\s+you)?\s+to\s+/i,
+];
+
+function trimThroat(s: string): string {
+  let prev: string;
+  let out = s;
+  do {
+    prev = out;
+    for (const re of THROAT_CLEAR) out = out.replace(re, "");
+  } while (out !== prev);
+  return out;
+}
+
+/** Strip code, URLs, markdown chrome, and discourse noise to plain prose.
+ *  Hyphenated compounds are safe: every word strip requires trailing
+ *  whitespace, which a hyphen never provides (state-of-the-art survives). */
+function cleanTitleText(raw: string): string {
+  let t = raw;
+  t = t.replace(/```[\s\S]*?(```|$)/g, " ");            // fenced code blocks
+  t = t.replace(/~~~[\s\S]*?(~~~|$)/g, " ");
+  t = t.replace(/`[^`\n]*`/g, " ");                     // inline code
+  t = t.replace(/!\[[^\]]*\]\([^)]*\)/g, " ");          // images
+  t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");        // links -> label
+  t = t.replace(/https?:\/\/\S+/gi, " ");               // bare urls
+  t = t.replace(/<\/?[^>\n]{1,60}>/g, " ");             // html-ish tags
+  t = t.replace(/^\s{0,3}(#{1,6}|[*+-]?>)\s+/gm, " ");  // md headers/list markers/quotes
+  t = t.replace(/[*_]{1,3}([^*\n]+?)[*_]{1,3}/g, "$1"); // bold/italic
+  t = t.replace(/\|/g, " ");                            // table pipes
+  t = t.replace(/(^|\s)@\S+/g, "$1");                   // @file references
+  t = t.replace(/\(\s*[-–—:,]*\s*\)/g, " ");            // parens emptied by stripping
+  t = t.replace(/\[\s*[-–—:,]*\s*\]/g, " ");
+  t = t.replace(/\(\s+(?=[-–—])/g, "");                 // dangling "( --"
+  if ((t.match(/\(/g)?.length ?? 0) !== (t.match(/\)/g)?.length ?? 0)) t = t.replace(/[()]/g, " ");
+  t = t.replace(/\bplease\b\s+/gi, "");                 // politeness (all positions)
+  t = t.replace(PERSONAL_PRONOUN, "");
+  t = t.replace(/\b(is|a|an)\b\s+/gi, "");              // copula + indefinite articles ("the" stays)
+  t = t.replace(/\bhere\b\s+/gi, "");                   // deictic
+  t = t.replace(/\bthere(?:'s| is| are)?\b\s*/gi, "");  // existential leftovers ("is there a" -> "")
+  t = t.replace(/^(in|for)\s+\w+\s+--\s+/i, "");        // "In hotdog --" project preambles
+  t = trimThroat(t);
+  t = t.replace(/\s{2,}/g, " ").trim();
+  if (t) t = t[0]!.toUpperCase() + t.slice(1);
+  return t.replace(/\s+/g, " ").trim();
+}
+
+const titleWords = (t: string): string[] => t.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [];
+const titleContentWordCount = (t: string): number =>
+  titleWords(t).filter((w) => !TITLE_STOPWORDS.has(w.toLowerCase())).length;
+
+/** Highest-scoring sentence: non-stopword count with positional decay. */
+function bestTitleSentence(text: string): string {
+  const sentences = text
+    .split(/(?<=[.!?…])\s+(?=[A-Z0-9"'“(*\[]|[A-Za-z]{2,})/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(trimThroat)
+    .filter(Boolean);
+  if (sentences.length <= 1) return text;
+  let best = "";
+  let bestScore = -1;
+  sentences.forEach((s, i) => {
+    const score = titleContentWordCount(s) / (1 + SENTENCE_DECAY * i);
+    if (score > bestScore) {
+      bestScore = score;
+      best = s;
     }
-    text = text.trim();
-    if (text) return text.length > 120 ? `${text.slice(0, 119)}…` : text;
+  });
+  return best;
+}
+
+/** Workflow dispatch headers carry the only identifying token in the whole
+ *  message -- the workflow name. Reformat rather than let the picker lose it. */
+function workflowTitleTile(raw: string): string | null {
+  const m = raw.match(/^Workflow '([^']+)' run [^:]+: (JUDGE )?node '([^']+)'/);
+  return m ? `${m[1]} · ${m[3]}${m[2] ? " (judge)" : ""}` : null;
+}
+
+/** Final edge trim: leading junk up to the first letter/digit, trailing
+ *  punctuation (a terminal ? or ! is kept -- question titles read better),
+ *  then re-capitalize whatever survived at the head. */
+function trimTitleEdges(s: string): string {
+  const ell = s.endsWith("…") ? "…" : "";
+  let t = s.slice(0, s.length - ell.length);
+  t = t.replace(/^[^\p{L}\p{N}]+/u, "").replace(/[^0-9\p{L}?!]+$/u, "");
+  t = (t + ell).trim();
+  return t ? t.replace(/^./, (c) => c.toUpperCase()) : "";
+}
+
+/** Turn one candidate message into a title; null if it is untitled-worthy. */
+function titleFromMessage(raw: string): string | null {
+  if (TRIVIAL_MESSAGE.test(raw.trim())) return null;
+  const tile = workflowTitleTile(raw);
+  if (tile) return tile;
+  const text = cleanTitleText(raw);
+  if (!text || titleContentWordCount(text) < 2) return null; // too thin to say anything
+  let out = text;
+  if (titleWords(out).length > TITLE_WORD_CAP) out = bestTitleSentence(out);
+  if (titleWords(out).length > TITLE_WORD_CAP) {
+    // Cut at the budget word's end offset, so punctuation/spaces survive.
+    let count = 0;
+    let cut = out.length;
+    for (const m of out.matchAll(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)) {
+      if (++count === TITLE_WORD_CAP) {
+        cut = (m.index as number) + m[0].length;
+        break;
+      }
+    }
+    out = out.slice(0, cut).replace(/[,;:—-]+\s*$/, "") + "…";
+  }
+  return trimTitleEdges(out) || null;
+}
+
+/** The pure title core: first of the candidate user messages that yields a
+ *  title wins. Deterministic -- same inputs, same bytes, every rebuild. */
+export function deriveTitleFromMessages(messages: string[]): string | null {
+  for (const m of messages) {
+    const t = titleFromMessage(m);
+    if (t) return t;
   }
   return null;
+}
+
+/** User-visible text of a log entry: plain string or a parts array. Both
+ *  "text" and "untrusted" parts count (the webui wraps user input in
+ *  "untrusted"; matching only "text" silently titled nothing for those). */
+function userEntryText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const part = content.find(
+      (p) =>
+        p &&
+        typeof p === "object" &&
+        ((p as Record<string, unknown>).type === "text" ||
+          (p as Record<string, unknown>).type === "untrusted"),
+    ) as { text?: unknown } | undefined;
+    return typeof part?.text === "string" ? part.text : "";
+  }
+  return "";
+}
+
+/** Title the session from its first user messages, oldest-first scan. */
+function deriveTitle(entries: Array<{ source: string; content: unknown }>): string | null {
+  const texts: string[] = [];
+  for (const e of entries) {
+    if (e.source !== LOG_SOURCE.INPUT && e.source !== LOG_SOURCE.PROMPT) continue;
+    const t = userEntryText(e.content).trim();
+    if (t) texts.push(t);
+    if (texts.length >= TITLE_SCAN_MESSAGES) break;
+  }
+  return deriveTitleFromMessages(texts);
 }
 
 /**
@@ -485,7 +663,7 @@ export async function syncSessionFromLog(sessionId: string): Promise<SessionRow 
       );
       d.run("DELETE FROM open_calls WHERE session_id = ?", [sessionId]);
       const ins = d.query(
-        "INSERT INTO open_calls (session_id, tool_call_id, kind) VALUES (?, ?, ?)",
+        "INSERT INTO open_calls (session_id, tool_call_id, kind) VALUES (?, ?, ?) ON CONFLICT(session_id, tool_call_id) DO NOTHING",
       );
       for (const id of facts.started) {
         if (!facts.answered.has(id)) ins.run(sessionId, id, OPEN_CALL_KIND.STARTED);
@@ -842,6 +1020,32 @@ export async function indexSessionProfile(
       [profile, sessionId],
     );
   }, true);
+}
+
+/**
+ * User input committed (the registry's CONTEXT_MESSAGE mirror): seed the
+ * row's derived title so a live session shows its headline from the first
+ * title-worthy message, no rebuild wait. Set-once (`title IS NULL` guard):
+ * the first title-worthy message wins forever, matching the rebuild's
+ * oldest-first scan, so cold-resume replays and later messages are honest
+ * no-ops that never clobber. Deliberately NOT an atCommitPoint writer: the
+ * record itself is counted by the session-log chokepoint, and a title is
+ * display data, not a durability fact. Missing row: the UPDATE matches
+ * nothing and the honest answer is false -- row creation is the first
+ * durability commit point's job, and its sync derives the title anyway.
+ */
+export function indexUserInput(sessionId: string, content: unknown): boolean {
+  const text = userEntryText(content).trim();
+  if (!text) return false;
+  const title = deriveTitleFromMessages([text]);
+  if (!title) return false;
+  return withIndex((d) => {
+    const res = d.run(
+      `UPDATE sessions SET title = ? WHERE session_id = ? AND title IS NULL`,
+      [title, sessionId],
+    );
+    return res.changes > 0;
+  });
 }
 
 /**

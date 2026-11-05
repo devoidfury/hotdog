@@ -6,7 +6,9 @@ import crypto from "node:crypto";
 import { HOOKS, createHooks } from "@core/hooks.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
-import { indexSessionModel } from "@core/session/session-index.ts";
+import { indexSessionModel, indexUserInput, getSessionRow } from "@core/session/session-index.ts";
+import { formatError } from "@core/error.ts";
+import { logger } from "@utils/logger.ts";
 import { trySessionPath } from "@core/session/session-log.ts";
 import { getPinnedIds } from "./pin-store.ts";
 import type { TurnLanes } from "@core/session/turn-lanes.ts";
@@ -339,6 +341,7 @@ export class SessionRegistry {
 
     this.#trackModelChanges(actualSessionId);
     this.#trackUsage(actualSessionId);
+    this.#trackUserInput(actualSessionId);
     return { sessionId: actualSessionId, agent };
   }
 
@@ -382,6 +385,7 @@ export class SessionRegistry {
 
     this.#trackModelChanges(newSessionId);
     this.#trackUsage(newSessionId);
+    this.#trackUserInput(newSessionId);
     return { sessionId: newSessionId, agent };
   }
 
@@ -393,6 +397,33 @@ export class SessionRegistry {
       if (meta) meta.model = newModel;
       await indexSessionModel(sessionId, newModel);
     });
+  }
+
+  /**
+   * Mirror live user input into the index title (set-once: the first
+   * title-worthy message wins). CONTEXT_MESSAGE fires on every addMessage,
+   * cold-resume replay included; the title IS NULL guard makes replays
+   * honest no-ops that never clobber and never rebroadcast. Harness-role
+   * messages (tool results, system injections) must NOT title: only what
+   * the user asked becomes the headline. A real set broadcasts the sessions
+   * list (the sidebar-refresh idiom) so the row gains its middle line live.
+   */
+  #trackUserInput(sessionId: string): void {
+    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
+    if (!agent || !agent.hooks || typeof agent.hooks.on !== "function") return;
+    agent.hooks.on(
+      HOOKS.CONTEXT_MESSAGE,
+      ({ message }: { message?: { role?: unknown; content?: unknown } }) => {
+        if (message?.role !== "user") return;
+        try {
+          if (indexUserInput(sessionId, message.content)) {
+            this.broadcast({ type: S2C.SESSIONS, sessions: this.list() });
+          }
+        } catch (err) {
+          logger.error(`[websocket] live title mirror failed: ${formatError(err)}`);
+        }
+      },
+    );
   }
 
   /**
@@ -475,7 +506,9 @@ export class SessionRegistry {
       result.push({
         id,
         profile: meta.profile,
-        title: meta.title,
+        // Priority chain: rename (in-memory meta) > derived (index row) >
+        // nothing. Renames stay in-memory only, exactly as before.
+        title: meta.title ?? getSessionRow(id)?.title ?? null,
         model: agent?.model || meta.model,
         createdAt: meta.createdAt,
         lastActivityAt: meta.lastActivityAt,

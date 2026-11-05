@@ -53,6 +53,7 @@ export async function coldLogsPayload(registry: SessionRegistry): Promise<Array<
         state: row.state,
         ...(row.model ? { model: row.model } : {}),
         ...(row.profile ? { profile: row.profile } : {}),
+        ...(row.title ? { title: row.title } : {}),
         ...(row.ctx_used != null ? { ctxUsed: row.ctx_used } : {}),
         ...(row.ctx_total != null ? { ctxTotal: row.ctx_total } : {}),
       };

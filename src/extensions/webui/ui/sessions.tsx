@@ -61,6 +61,10 @@ export interface LogInfo {
   /** Index-attested model/profile + ctx; absent on legacy logs (segments omitted). */
   model?: string;
   profile?: string;
+  /** Heuristic title derived from the log's first user messages (see
+   *  deriveTitleFromMessages); absent until the index has a derived title.
+   *  Renders on its own middle line -- never in the profile slot. */
+  title?: string;
   ctxUsed?: number;
   ctxTotal?: number;
   /** Absolute JSONL log path on the server; omitted when the server could
@@ -144,9 +148,13 @@ interface SidebarRowProps {
   sid: string;
   active: boolean;
   model?: string | null;
-  /** Line-1 profile tag: display name (title wins), dot-joined ahead of the
-   *  model; omitted when neither set. */
-  displayName?: string | null;
+  /** Line-1 profile tag, dot-joined ahead of the model; omitted when absent.
+   *  (Title no longer rides here: it got its own middle line.) */
+  profile?: string | null;
+  /** Middle line: the session title (derived or renamed), full value on the
+   *  native title attribute since the line ellipsizes. Omitted outright when
+   *  absent (the row stays two lines). */
+  title?: string | null;
   /** Line-1 status badge: raw state token (working/idle/awaiting_question/
    *  interrupted/parked). Renders as a glyph badge (see styles .row-glyph)
    *  with the human label as native title; unknown tokens fall back to text.
@@ -209,9 +217,10 @@ export function SidebarRow(p: SidebarRowProps) {
   const line1: JsxChild[] = [];
   if (p.pinned) line1.push(<span className="row-pin" title="Pinned">📌</span>);
   // Profile leads, dot-joined to the model; the sep rides only when both
-  // halves exist (title wins the profile slot, both-missing omits).
-  if (p.displayName) line1.push(<span className="row-profile">{p.displayName}</span>);
-  if (p.displayName && p.model) line1.push(<span className="row-sep">·</span>);
+  // halves exist (both-missing omits). The title is NOT here: it rides its
+  // own middle line between this row and the metrics row.
+  if (p.profile) line1.push(<span className="row-profile">{p.profile}</span>);
+  if (p.profile && p.model) line1.push(<span className="row-sep">·</span>);
   if (p.model) line1.push(<span className="row-model">{p.model}</span>);
   if (p.status) {
     // Glyph badge when the token has a glyph, plain text when it doesn't;
@@ -274,6 +283,13 @@ export function SidebarRow(p: SidebarRowProps) {
       }}
     >
       <div className="row-l1">{line1}</div>
+      {/* Middle line: the title, ellipsized with the full value on the
+          native title; omitted outright when absent (two-line row). */}
+      {p.title ? (
+        <div className="row-l2" title={p.title}>
+          {p.title}
+        </div>
+      ) : null}
       <div className="row-l3">{line3}</div>
     </div>
   );
@@ -422,7 +438,8 @@ export function Sidebar(p: SidebarProps) {
               active={s.id === p.activeSessionId}
               pinned={p.pinnedIds.has(s.id)}
               model={s.model}
-              displayName={s.title || s.profile}
+              profile={s.profile}
+              title={s.title}
               // Idle omits the badge outright (the cold-log rule, now shared):
               // the resting state is the default. Working omits it too (owner
               // ruling 2026-11-05): the Stop button's spinner is the busy
@@ -479,7 +496,8 @@ export function Sidebar(p: SidebarProps) {
               active={log.id === p.activeLogId}
               pinned={p.pinnedIds.has(log.id)}
               model={log.model}
-              displayName={log.profile}
+              profile={log.profile}
+              title={log.title}
               // Derived index state badges the row (idle stays unbadged).
               status={log.state && log.state !== "idle" ? log.state : null}
               statusClass={log.state ? `log-state-${log.state}` : undefined}

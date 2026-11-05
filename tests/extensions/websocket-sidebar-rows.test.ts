@@ -8,9 +8,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
 import { SessionRegistry } from "@extensions/websocket/session-registry.ts";
+import { sessionCreatedPayload } from "@extensions/websocket/session-created.ts";
 import { routeMessage } from "@extensions/websocket/message-routing.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { closeSessionIndex, getSessionRow, syncSessionFromLog } from "@core/session/session-index.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import type { AuthMiddleware } from "@extensions/websocket/auth.ts";
 import type { WebSocketQuestionBridge } from "@extensions/websocket/question-input.ts";
@@ -28,6 +31,15 @@ const coreStub = { completion: undefined } as unknown as CoreContext;
 
 async function flush(times = 3): Promise<void> {
   for (let i = 0; i < times; i++) await new Promise((r) => setTimeout(r, 0));
+}
+
+function makeTitleRegistry(agent: AgentLike): SessionRegistry {
+  // toolExecResolved mirrors the boot resolved bag (as the real server wires
+  // it): sessionCreatedPayload reads the tool-exec posture from it.
+  return new SessionRegistry({
+    buildAgent: async () => agent,
+    toolExecResolved: { toolExec: "inline", execFence: "probe" },
+  });
 }
 
 function makeRegistry(agent: AgentLike): SessionRegistry {
@@ -179,6 +191,49 @@ describe("SESSIONS/LOGS_LISTED rows: logPath", () => {
   });
 });
 
+// ── LOGS_LISTED rows: derived title passthrough ─────────────────────────────
+// Cold rows surface the index's heuristic title (see deriveTitleFromMessages)
+// so the sidebar's middle line has data for logs that never had a rename.
+
+describe("LOGS_LISTED rows: derived title", () => {
+  const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-cold-title-"));
+  let prevSessionsDir: string | undefined;
+
+  beforeAll(async () => {
+    prevSessionsDir = process.env.HOTDOG_SESSIONS_DIR;
+    process.env.HOTDOG_SESSIONS_DIR = TMP;
+    const mk = (id: string, content: unknown) =>
+      writeFileSync(
+        join(TMP, `${id}.jsonl`),
+        JSON.stringify({ ts: "2026-10-20T00:00:00.000Z", session_id: id, source: "input", content }) + "\n",
+      );
+    mk("titled-log", "summarize the sidebar row grammar");
+    mk("deadbeat-log", "hi");
+    await syncSessionFromLog("titled-log");
+    await syncSessionFromLog("deadbeat-log");
+  });
+
+  afterAll(() => {
+    if (prevSessionsDir === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
+    else process.env.HOTDOG_SESSIONS_DIR = prevSessionsDir;
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it("carries the title when the index derived one; omits it when the log is deadbeat", async () => {
+    const registry = makeRegistry(makeWsMockAgent({ sessionId: "not-cold" }));
+    const ws = createWsMockWs();
+    await routeMessage(ws, { type: C2S.LIST_LOGS } as never, registry, authStub, bridgeStub, coreStub);
+    await flush();
+    const msg = JSON.parse(ws.messages[ws.messages.length - 1]!) as {
+      type: string;
+      logs: Array<Record<string, unknown>>;
+    };
+    expect(msg.type).toBe(S2C.LOGS_LISTED);
+    expect(msg.logs.find((l) => l.id === "titled-log")!.title).toBe("Summarize the sidebar row grammar");
+    expect("title" in (msg.logs.find((l) => l.id === "deadbeat-log") as Record<string, unknown>)).toBe(false);
+  });
+});
+
 describe("SESSIONS rows: questionPending badge flag", () => {
   it("defaults false, mirrors setQuestionPending, and only signals real transitions", async () => {
     const registry = makeRegistry(makeWsMockAgent({ sessionId: "q-live" }));
@@ -199,5 +254,118 @@ describe("SESSIONS rows: questionPending badge flag", () => {
 
     // Unknown ids are ignored outright.
     expect(registry.setQuestionPending("ghost", true)).toBe(false);
+  });
+});
+
+// ── SESSIONS rows: live derived title ───────────────────────────────────────
+// The registry surfaces the index's derived title on live rows (rename in
+// meta wins > derived row title > nothing), and a live user message titles
+// its untitled row exactly once, rebroadcasting the sidebar on the hit.
+
+describe("SESSIONS rows: live derived title", () => {
+  const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-live-title-ws-"));
+  let prevSessionsDir: string | undefined;
+
+  beforeAll(async () => {
+    prevSessionsDir = process.env.HOTDOG_SESSIONS_DIR;
+    process.env.HOTDOG_SESSIONS_DIR = TMP;
+    const mk = async (id: string, content: string) => {
+      writeFileSync(
+        join(TMP, `${id}.jsonl`),
+        JSON.stringify({ ts: "2026-10-20T00:00:00.000Z", session_id: id, source: "input", content }) + "\n",
+      );
+      await syncSessionFromLog(id);
+    };
+    await mk("adopt-titled", "summarize the cold adoption flow");
+    await mk("live-hook", "hi"); // deadbeat: row exists, title null
+  });
+
+  afterAll(() => {
+    if (prevSessionsDir === undefined) delete process.env.HOTDOG_SESSIONS_DIR;
+    else process.env.HOTDOG_SESSIONS_DIR = prevSessionsDir;
+    closeSessionIndex();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it("cold adoption surfaces the row title on list() and session_created", async () => {
+    const registry = makeTitleRegistry(makeWsMockAgent({ sessionId: "adopt-titled" }));
+    await registry.create({ sessionId: "adopt-titled" });
+
+    expect(registry.list().find((s) => s.id === "adopt-titled")!.title).toBe(
+      "Summarize the cold adoption flow",
+    );
+    expect(sessionCreatedPayload(registry, "adopt-titled").title).toBe(
+      "Summarize the cold adoption flow",
+    );
+    registry.delete("adopt-titled");
+  });
+
+  it("a rename (in-memory meta) wins over the derived row title", async () => {
+    const registry = makeTitleRegistry(makeWsMockAgent({ sessionId: "adopt-titled" }));
+    await registry.create({ sessionId: "adopt-titled" });
+    expect(registry.rename("adopt-titled", "My careful name")).toBe(true);
+
+    expect(registry.list().find((s) => s.id === "adopt-titled")!.title).toBe("My careful name");
+    expect(sessionCreatedPayload(registry, "adopt-titled").title).toBe("My careful name");
+    // The row keeps the derived value: renames never write to the index.
+    expect(getSessionRow("adopt-titled")!.title).toBe("Summarize the cold adoption flow");
+    registry.delete("adopt-titled");
+  });
+
+  it("CONTEXT_MESSAGE titles an untitled live row once; only real hits broadcast", async () => {
+    // A hooks.on-capable stand-in (the shared mock's hooks lack .on, which
+    // the tracker's guard tolerates; here we need the registration seam).
+    const registered: Record<string, Array<(d: unknown) => unknown>> = {};
+    const agent = makeWsMockAgent({
+      sessionId: "live-hook",
+      hooks: {
+        on: (name: string, handler: (d: unknown) => unknown) => {
+          (registered[name] ||= []).push(handler);
+          return () => {};
+        },
+        notifyHooks: () => {},
+        runHookPipeline: async () => undefined,
+        registerHook: () => {},
+        unregisterHook: () => {},
+      } as never,
+    });
+    const registry = makeTitleRegistry(agent);
+    await registry.create({ sessionId: "live-hook" });
+    const ws = createWsMockWs();
+    registry.registerConnection(ws);
+    const ctxHandlers = registered[HOOKS.CONTEXT_MESSAGE]!;
+    const fire = (message: unknown) => {
+      for (const h of ctxHandlers) h({ message });
+    };
+
+    expect(getSessionRow("live-hook")!.title).toBeNull();
+
+    fire({ role: "user", content: "polish the live title mirror" });
+    expect(getSessionRow("live-hook")!.title).toBe("Polish the live title mirror");
+    const bcast = JSON.parse(ws.messages[ws.messages.length - 1]!) as {
+      type: string;
+      sessions: Array<Record<string, unknown>>;
+    };
+    expect(bcast.type).toBe(S2C.SESSIONS);
+    expect(bcast.sessions.find((s) => s.id === "live-hook")!.title).toBe(
+      "Polish the live title mirror",
+    );
+    const bcastCount = ws.messages.filter((m) => JSON.parse(m).type === S2C.SESSIONS).length;
+
+    // Set-once: a later title-worthy ask changes nothing and renews nothing.
+    fire({ role: "user", content: "rename the mirror again please" });
+    expect(getSessionRow("live-hook")!.title).toBe("Polish the live title mirror");
+    expect(
+      ws.messages.filter((m) => JSON.parse(m).type === S2C.SESSIONS).length,
+    ).toBe(bcastCount);
+
+    // Deadbeat user input and harness-role messages never title or broadcast.
+    fire({ role: "tool", content: "rename the mirror once more" });
+    fire({ role: "user", content: "ok" });
+    expect(
+      ws.messages.filter((m) => JSON.parse(m).type === S2C.SESSIONS).length,
+    ).toBe(bcastCount);
+
+    registry.delete("live-hook");
   });
 });

@@ -100,7 +100,7 @@ beforeEach(() => {
 
 describe("reconcile", () => {
   it("adopts logs and derives state from durability facts", async () => {
-    const idle = fixtureLog(uniqueId("idle"), [line({ content: "hi" })]);
+    const idle = fixtureLog(uniqueId("idle"), [line({ content: "review the staged changes" })]);
     const asked = fixtureLog(uniqueId("asked"), [
       line({ source: LOG_SOURCE.LLM, content: "", tool_calls: [{ id: "q1", name: "question", input: "{}" }] as never }),
       line({ source: LOG_SOURCE.QUESTION_ASKED, content: [{ prompt: "which?" }], tool_call_id: "q1" }),
@@ -125,12 +125,32 @@ describe("reconcile", () => {
     expect(stats.logReads).toBeGreaterThanOrEqual(5);
 
     expect(getSessionRow(idle)?.state).toBe(SESSION_STATE.IDLE);
-    expect(getSessionRow(idle)?.title).toBe("hi");
+    expect(getSessionRow(idle)?.title).toBe("Review the staged changes");
     expect(getSessionRow(asked)?.state).toBe(SESSION_STATE.AWAITING_QUESTION);
     expect(getSessionRow(interrupted)?.state).toBe(SESSION_STATE.INTERRUPTED);
     expect(getSessionRow(answered)?.state).toBe(SESSION_STATE.IDLE);
     expect(getSessionRow(resumed)?.resume_count).toBe(2);
     expect(getSessionRow(answered)?.last_seq).toBe(3);
+  });
+
+  it("titles a log whose only input part is untrusted (webui-wrapped user text)", async () => {
+    const sid = fixtureLog(uniqueId("untrusted"), [
+      line({ content: [{ type: "untrusted", text: "please reindex the sidebar pins in the store" }] }),
+    ]);
+    await syncSessionFromLog(sid);
+    expect(getSessionRow(sid)?.title).toBe("Reindex the sidebar pins in the store");
+  });
+
+  it("rebuilds a log whose question id carries both durability records (writer-shaped)", async () => {
+    // The live hooks mirror started-then-question with DO NOTHING; the
+    // rebuild must agree, or a log where the question tool wrote both
+    // records throws UNIQUE on every reindex (real corpus: b3ed492f).
+    const sid = fixtureLog(uniqueId("qboth"), [
+      line({ source: LOG_SOURCE.TOOL_STARTED, content: "question", tool_call_id: "q1" }),
+      line({ source: LOG_SOURCE.QUESTION_ASKED, content: [{ prompt: "which?" }], tool_call_id: "q1" }),
+    ]);
+    const row = await syncSessionFromLog(sid);
+    expect(row?.state).toBe(SESSION_STATE.AWAITING_QUESTION);
   });
 
   it("mirrors open calls only for unanswered durability records", async () => {

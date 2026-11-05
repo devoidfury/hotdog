@@ -570,6 +570,9 @@ body.sidebar-resizing {
                                                             ellipsizes; badge
                                                             + action form the
                                                             right-hand cluster
+   middle row (class row-l2): the title -- quiet text, single line with
+       ellipsis (the full value rides the native title); omitted outright
+       when the session has none (the row stays two lines)
    bottom row (class row-l3): YYYY-MM-DD HH:MM · ctx · msgs [plug n]
        (the raw session id is no longer displayed; it stays a key only; the
         client count is a plug icon, never text)
@@ -593,6 +596,24 @@ body.sidebar-resizing {
 .log-item .row-l1 {
     font-size: 0.85rem;
     color: var(--text-secondary);
+}
+
+/* Middle row: the title. It's the longest text on the card (server-capped
+   at 12 words), so the ellipsis is load-bearing and the native title
+   carries the full value (the status-glyph tooltip idiom). */
+.session-item .row-l2,
+.log-item .row-l2 {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+}
+
+.log-item .row-l2 {
+    font-size: 0.75rem;
+    color: var(--text-muted);
 }
 
 .session-item.active .row-l1 {

@@ -72,12 +72,14 @@ describe("searchableEntryText", () => {
   });
 
   it("never yields image payloads, whatever source carries them", () => {
-    // Persisted tool-result images ride the entry's sidecar array; the search
-    // corpus reads only text surfaces, so base64 can never leak into a hit.
+    // Persisted images ride the entry's sidecar array on both gated sources
+    // (TOOL_RESULT display, INPUT context-visible); the search corpus reads
+    // only text surfaces, so base64 can never leak into a hit.
     const img = [{ type: "image_url", mimeType: "image/png", data: "aGVsbG8=" }];
     const result = entry({ source: LOG_SOURCE.TOOL_RESULT, content: "Image: photo.png", images: img });
     expect(searchableEntryText(result)).toBe("");
-    // An INPUT entry with images still yields only its text.
+    // An INPUT entry with images still yields only its text -- the persisted
+    // sidecar stays invisible to search and to the index's search_text mirror.
     const input = entry({ source: LOG_SOURCE.INPUT, content: "look", images: img });
     expect(searchableEntryText(input)).toBe("look");
     expect(searchableEntryText(input)).not.toContain("aGVsbG8=");

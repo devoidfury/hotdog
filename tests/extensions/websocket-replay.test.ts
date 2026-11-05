@@ -772,3 +772,51 @@ describe("replayLogSlice tool-result images", () => {
     expect(imgs[0]!.data).toBeUndefined();
   });
 });
+
+describe("replayLogSlice user-input images", () => {
+  // The entry shape the session-log writer produces for an input turn with
+  // images (owner ruling: INPUT images persist and replay to the client).
+  const inputEntry = (over: Record<string, unknown> = {}) =>
+    ({
+      ts: "2026-10-20T00:00:00.000Z",
+      session_id: "s",
+      source: LOG_SOURCE.INPUT,
+      role: "user",
+      content: "look at this",
+      origin: "user",
+      ...over,
+    }) as unknown as LogEntry;
+
+  function frames(entries: LogEntry[]): Array<Record<string, unknown>> {
+    const ws = createWsMockWs();
+    replayLogSlice(ws, "s1", entries, 0);
+    return received(ws);
+  }
+
+  it("emits the stored images on the USER_MESSAGE frame, wireImages-normalized", () => {
+    const out = frames([inputEntry({ images: [{ type: "image_url", mimeType: "image/png", data: "aGVsbG8=" }] })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.type).toBe(S2C.USER_MESSAGE);
+    expect(out[0]!.images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+    expect(out[0]!.content).toBe("look at this");
+  });
+
+  it("imageless INPUT entries replay image-free frames (no empty-array noise)", () => {
+    const out = frames([inputEntry()]);
+    expect("images" in out[0]!).toBe(false);
+  });
+
+  it("an over-cap stored input image comes back as skipped+note, and the frame survives", () => {
+    const out = frames([
+      inputEntry({ images: [{ type: "image_url", mimeType: "image/png", data: "x".repeat(MAX_WIRE_IMAGE_BASE64_BYTES + 1) }] }),
+    ]);
+    expect(out).toHaveLength(1);
+    const imgs = out[0]!.images as Array<Record<string, unknown>>;
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0]!.skipped).toBe(true);
+    expect(typeof imgs[0]!.note).toBe("string");
+    expect(imgs[0]!.data).toBeUndefined();
+    // The message itself survives the cap: the frame keeps its text.
+    expect(out[0]!.content).toBe("look at this");
+  });
+});

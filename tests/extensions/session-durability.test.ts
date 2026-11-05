@@ -1311,9 +1311,11 @@ describe("token_usage restore suppression", () => {
 describe("image sidecar vs the durability facts", () => {
   // The writer's images field must be invisible to durability semantics: the
   // facts (and the index mirror that derives from them) read source,
-  // tool_call_id and content, never the sidecar.
+  // tool_call_id and content, never the sidecar. Covers both gated sources:
+  // the TOOL_RESULT display sidecar and the context-visible INPUT sidecar.
   it("collectDurabilityFacts is identical with and without images on the entries", () => {
     const base: LogEntry[] = [
+      entry({ source: LOG_SOURCE.INPUT, content: "look at this", origin: "user" }),
       entry({
         source: LOG_SOURCE.LLM,
         content: "",
@@ -1323,7 +1325,7 @@ describe("image sidecar vs the durability facts", () => {
       entry({ source: LOG_SOURCE.TOOL_RESULT, content: "Image: photo.png", tool_call_id: "c1", origin: "tool" }),
     ];
     const withImages = base.map((e) =>
-      e.source === LOG_SOURCE.TOOL_RESULT
+      e.source === LOG_SOURCE.TOOL_RESULT || e.source === LOG_SOURCE.INPUT
         ? { ...e, images: [{ type: "image_url", mimeType: "image/png", data: "aGVsbG8=" }] }
         : e,
     );

@@ -1066,11 +1066,13 @@ describe("session-log per-session restore suppression (M-6)", () => {
   });
 });
 
-// Tool-result image persistence (the vanished-image bug): the executor stores a
-// tool's images on Message.images, never in content parts, so the writer must
-// carry them as the TOOL_RESULT entry's sidecar array (the INPUT-entry shape).
-// Display persistence only -- content, the search corpus, the durability facts
-// and the sidebar record count must all stay exactly as they were.
+// Image persistence (the vanished-image bug): the executor stores a tool's
+// images on Message.images, never in content parts, so the writer carries them
+// as the TOOL_RESULT entry's sidecar array. Owner ruling: user-input images
+// persist too -- the INPUT entry's sidecar is CONTEXT-VISIBLE on resume
+// (replayEntriesIntoContext reads entry.images for INPUT), exactly like the
+// live session. TOOL_RESULT stays display-only. Content, the search corpus,
+// the durability facts and the sidebar record count must all stay as they were.
 describe("session-log extension tool-result image sidecar", () => {
   const IMG: ImageAttachment = { type: "image_url", mimeType: "image/png", data: "aGVsbG8=" };
   const PART = {
@@ -1134,22 +1136,23 @@ describe("session-log extension tool-result image sidecar", () => {
     }
   });
 
-  it("omits the sidecar for empty or malformed images, and for non-tool messages", async () => {
+  it("omits the sidecar for empty or malformed images, and for sources outside the gate", async () => {
     const idEmpty = `test-img-empty-${Date.now()}`;
     const idJunk = `test-img-junk-${Date.now()}`;
-    const idUser = `test-img-user-${Date.now()}`;
+    const idLlm = `test-img-llm-${Date.now()}`;
     try {
       expect("images" in (await writeOne(idEmpty, toolMessage([]))).entry).toBe(false);
       expect("images" in (await writeOne(idJunk, toolMessage("not-an-array"))).entry).toBe(false);
-      // INPUT stays as-is: user images riding the log would ride rebuilt
-      // provider context on resume (replayEntriesIntoContext reads entry.images
-      // for INPUT) -- display persistence here means tool results only.
-      const user = new Message({ role: "user", content: "look", images: [IMG], source: "user" });
-      expect("images" in (await writeOne(idUser, user)).entry).toBe(false);
+      // The gate is the explicit INPUT+TOOL_RESULT source list, not "any
+      // message with images": an assistant (LLM-source) message carrying an
+      // images array -- no real producer does, but the gate must not care --
+      // never gains the sidecar.
+      const llm = new Message({ role: "assistant", content: "sure", images: [IMG], source: "model" });
+      expect("images" in (await writeOne(idLlm, llm)).entry).toBe(false);
     } finally {
       cleanupTestFile(idEmpty);
       cleanupTestFile(idJunk);
-      cleanupTestFile(idUser);
+      cleanupTestFile(idLlm);
     }
   });
 
@@ -1165,6 +1168,130 @@ describe("session-log extension tool-result image sidecar", () => {
       const entries = await readSessionEntries(sessionId, { full: true });
       // One line for the result, one counted record: the sidecar never splits
       // or adds a record, and the live writer tally matches the cold sum.
+      expect(entries).toHaveLength(2);
+      expect(countSessionLogEntries(entries)).toBe(2);
+      expect(getRecordCount(sessionId)).toBe(2);
+    } finally {
+      cleanupTestFile(sessionId);
+      dropRecordCount(sessionId);
+    }
+  });
+});
+
+// User-input image persistence (owner ruling): INPUT entries carry the
+// message's images as a sidecar array, CONTEXT-VISIBLE on resume (see
+// replayEntriesIntoContext INPUT case). The gate stays the explicit
+// INPUT+TOOL_RESULT source list; content bytes, the record count and the
+// byte-identity of imageless writes must all stay exactly as they were.
+describe("session-log extension user-input image sidecar", () => {
+  const IMG: ImageAttachment = { type: "image_url", mimeType: "image/png", data: "aGVsbG8gdXNlciBwaWM=" };
+  const IMG2: ImageAttachment = { type: "image_url", mimeType: "image/jpeg", data: "anBlZyBwaWMgdG9v" };
+
+  /** Plain CLI / chat turn: role user, provenance user. */
+  const userMessage = (images?: unknown) =>
+    new Message({
+      role: "user",
+      content: "look at this",
+      source: "user",
+      ...(images !== undefined ? { images: images as ImageAttachment[] } : {}),
+    });
+
+  /** Webui upload shape (Agent.run with source harness, handlers-send
+   * content parts + images on the enqueue opts). */
+  const uploadMessage = (images: unknown) =>
+    new Message({
+      role: "harness",
+      content: [
+        { type: "untrusted", text: "what is in this photo?" },
+        { type: "file-include", path: "notes.txt", content: "file body" },
+      ],
+      source: "harness",
+      images: images as ImageAttachment[],
+    });
+
+  /** Write one message through the real hook; return the landed JSONL line and its parse. */
+  async function writeOne(sessionId: string, message: Message) {
+    const ext = await create(createMockCore() as any) as any;
+    const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+    await hook({ message, agent: { sessionId } });
+    const line = readFileSync(join(SESSIONS_DIR, `${sessionId}.jsonl`), "utf-8").trim().split("\n").at(-1)!;
+    return { line, entry: JSON.parse(line) as Record<string, unknown> };
+  }
+
+  it("persists user-input images as a sidecar array with content bytes untouched", async () => {
+    const idImg = `test-input-img-${Date.now()}`;
+    const idPlain = `test-input-plain-${Date.now()}`;
+    try {
+      const withImg = await writeOne(idImg, userMessage([IMG, IMG2]));
+      const plain = await writeOne(idPlain, userMessage());
+
+      expect(withImg.entry.source).toBe(LOG_SOURCE.INPUT);
+      expect(withImg.entry.images).toEqual([IMG, IMG2]);
+      // Sidecar only: the content field holds the exact plain text of the
+      // imageless write, and no base64 rides inside it.
+      expect(withImg.entry.content).toBe(plain.entry.content);
+      expect(JSON.stringify(withImg.entry.content)).not.toContain("aGVsbG8gdXNlciBwaWM=");
+      // The sidecar sits right after content, same slot as TOOL_RESULT.
+      expect(Object.keys(withImg.entry)).toEqual([
+        "ts", "session_id", "role", "source", "v", "content", "images", "origin",
+      ]);
+
+      // Structured uploads (webui shape): harness-provenance parts keep their
+      // exact structure in content -- the untrusted/file-include rules are
+      // untouched -- while the image rides the sidecar.
+      const idUpload = `test-upload-img-${Date.now()}`;
+      try {
+        const up = await writeOne(idUpload, uploadMessage([IMG]));
+        expect(up.entry.source).toBe(LOG_SOURCE.INPUT);
+        expect(up.entry.origin).toBe("harness");
+        expect(up.entry.images).toEqual([IMG]);
+        expect(up.entry.content).toEqual([
+          { type: "untrusted", text: "what is in this photo?" },
+          { type: "file-include", path: "notes.txt", content: "file body" },
+        ]);
+        expect(JSON.stringify(up.entry.content)).not.toContain("aGVsbG8gdXNlciBwaWM=");
+      } finally {
+        cleanupTestFile(idUpload);
+      }
+    } finally {
+      cleanupTestFile(idImg);
+      cleanupTestFile(idPlain);
+    }
+  });
+
+  it("imageless INPUT writes emit no images key (byte-identity with pre-sidecar logs)", async () => {
+    const idImg = `test-input-bi-img-${Date.now()}`;
+    const idPlain = `test-input-bi-plain-${Date.now()}`;
+    try {
+      const withImg = await writeOne(idImg, userMessage([IMG]));
+      const plain = await writeOne(idPlain, userMessage());
+      expect("images" in plain.entry).toBe(false);
+      // Every other field identical to the image-carrying write: the gate
+      // adds nothing (not even null-noise) when the message carries none.
+      const stripVolatile = (e: Record<string, unknown>) => {
+        const { ts: _ts, session_id: _sid, ...rest } = e;
+        return rest;
+      };
+      const { images: _images, ...withoutSidecar } = withImg.entry;
+      expect(stripVolatile(withoutSidecar)).toEqual(stripVolatile(plain.entry));
+    } finally {
+      cleanupTestFile(idImg);
+      cleanupTestFile(idPlain);
+    }
+  });
+
+  it("an image-heavy INPUT turn is exactly one counted record (live/cold parity)", async () => {
+    const sessionId = `test-input-img-count-${Date.now()}`;
+    try {
+      await seedRecordCount(sessionId); // no log yet: base 0
+      const ext = await create(createMockCore() as any) as any;
+      const hooks = ext.hooks as Record<string, (p: unknown) => Promise<void>>;
+      await hooks[HOOKS.SESSION_CREATE]!({ sessionId, config: {} });
+      await hooks[HOOKS.CONTEXT_MESSAGE]!({ message: uploadMessage([IMG, IMG2]), agent: { sessionId } });
+
+      const entries = await readSessionEntries(sessionId, { full: true });
+      // session_start + one input record: the sidecar never splits or adds a
+      // record, and the live writer tally matches the cold sum.
       expect(entries).toHaveLength(2);
       expect(countSessionLogEntries(entries)).toBe(2);
       expect(getRecordCount(sessionId)).toBe(2);

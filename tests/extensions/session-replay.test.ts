@@ -325,6 +325,9 @@ test("replayEntriesIntoContext handles PROMPT source as user messages", () => {
 // ── Images ──────────────────────────────────────────────────────────────────
 
 test("replayEntriesIntoContext preserves images in user messages", () => {
+  // The resume-semantics ruling (owner decision): persisted INPUT images are
+  // CONTEXT-VISIBLE -- the rebuilt message hands them back to the model,
+  // exactly like the live session did.
   const agent = createMockAgent();
   const entries: LogEntry[] = [
     { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
@@ -335,6 +338,19 @@ test("replayEntriesIntoContext preserves images in user messages", () => {
   expect(agent.log.at(0)!.images).toEqual([
     { type: "image_url", mimeType: "image/png", data: "abc" },
   ]);
+});
+
+test("replayEntriesIntoContext leaves images undefined for an imageless INPUT entry", () => {
+  // Byte-identity holds in the other direction too: imageless replay rebuilds
+  // the exact pre-sidecar Message (no empty array, no null).
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "plain text" },
+  ];
+
+  const { replayed } = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(1);
+  expect(agent.log.at(0)!.images).toBeUndefined();
 });
 
 test("replayEntriesIntoContext handles multiple images", () => {

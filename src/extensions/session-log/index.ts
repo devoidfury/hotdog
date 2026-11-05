@@ -41,8 +41,9 @@ interface SessionLogMessage {
   source?: string;
   /**
    * Images carried by the message (the executor stores tool-result images
-   * on Message.images, never in content parts). Persisted as the
-   * TOOL_RESULT entry's sidecar array.
+   * on Message.images, never in content parts; user turns carry upload /
+   * INPUT-transform images the same way). Persisted as the entry's sidecar
+   * array for the INPUT and TOOL_RESULT sources -- see messageToLogEntry.
    */
   images?: unknown;
   /** Present when the payload is a live Message (not raw log data). */
@@ -97,14 +98,23 @@ function messageToLogEntry(
     source,
     v: LOG_VERSION,
     content: message.content,
-    // Tool-result images ride the entry as a sidecar array (the shape INPUT
-    // entries use): display persistence only. Never inlined into `content` --
-    // search and provider-context surfaces must not see base64 -- and omitted
-    // entirely when the message carries none, so imageless entries stay
-    // byte-identical to pre-sidecar logs.
-    ...(source === LOG_SOURCE.TOOL_RESULT && Array.isArray(message.images) && message.images.length > 0
-      ? { images: message.images as LogEntry["images"] }
-      : {}),
+    // Images ride the entry as a sidecar array on an explicit source list,
+    // never source-agnostic: TOOL_RESULT is display-only (replay's TOOL_RESULT
+    // case never reads entry.images, so a stored tool image never rides a
+    // rebuilt provider message), and INPUT is CONTEXT-VISIBLE on resume by
+    // owner decision (replayEntriesIntoContext reads entry.images for INPUT,
+    // so a resumed session hands the user's images back to the model exactly
+    // like the live one). PROMPT stays out: logSourceForRole maps every
+    // user-role message to INPUT and no writer produces PROMPT entries.
+    // Never inlined into `content` -- search and text surfaces must not see
+    // base64 -- and omitted entirely when the message carries none, so
+    // imageless entries stay byte-identical to pre-sidecar logs.
+    ...(
+      (source === LOG_SOURCE.INPUT || source === LOG_SOURCE.TOOL_RESULT)
+      && Array.isArray(message.images) && message.images.length > 0
+        ? { images: message.images as LogEntry["images"] }
+        : {}
+    ),
     reasoning_content: message.reasoningContent || null,
     tool_calls: message.toolCalls || null,
     tool_call_id: message.toolCallId || null,

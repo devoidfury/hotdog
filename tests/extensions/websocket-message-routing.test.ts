@@ -83,6 +83,7 @@ async function send(
 const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-ws-routing-"));
 const VIEW_LOG_ID = "view-img-log";
 const VIEW_TOOL_IMG_LOG_ID = "view-tool-img-log";
+const VIEW_INPUT_IMG_LOG_ID = "view-input-img-log";
 const BROKEN_LOG_ID = "unreadable-log";
 
 beforeAll(() => {
@@ -121,6 +122,22 @@ beforeAll(() => {
         tool_call_id: "c1",
         tool_name: "read",
         origin: "tool",
+      }),
+    ].join("\n") + "\n",
+  );
+  writeFileSync(
+    join(TMP, `${VIEW_INPUT_IMG_LOG_ID}.jsonl`),
+    [
+      // Exactly what the session-log writer lands for an input turn with images.
+      JSON.stringify({
+        ts: "2026-10-20T00:00:00Z",
+        session_id: VIEW_INPUT_IMG_LOG_ID,
+        role: "harness",
+        source: "input",
+        v: 2,
+        content: [{ type: "untrusted", text: "what is in this photo?" }],
+        images: [{ type: "image_url", mimeType: "image/png", data: "aGVsbG8=" }],
+        origin: "harness",
       }),
     ].join("\n") + "\n",
   );
@@ -217,6 +234,17 @@ describe("routeMessage: async error closures", () => {
     expect(entries[0]!.content).toEqual([
       { type: "tool-result", tool: "read", status: "success", meta: [], error: null, hint: null, output: "Image: photo.png" },
     ]);
+  });
+
+  it("VIEW_LOG retains an INPUT entry's images sidecar", async () => {
+    // The owner ruling extends persistence to user turns: a browsed log's
+    // INPUT entry keeps its images through the same wireImages cap.
+    const { messages } = await send({ type: C2S.VIEW_LOG, logId: VIEW_INPUT_IMG_LOG_ID });
+    const entries = messages[0]!.entries as Array<Record<string, unknown>>;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.source).toBe("input");
+    expect(entries[0]!.images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+    expect(entries[0]!.content).toEqual([{ type: "untrusted", text: "what is in this photo?" }]);
   });
 
   it("VIEW_LOG surfaces an unreadable log as ERROR", async () => {

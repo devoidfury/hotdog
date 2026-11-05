@@ -1708,14 +1708,15 @@ body.sidebar-resizing {
     outline-offset: -1px;
 }
 
-/* Part header (declared-path parts -- read/append/overwrite file boxes and the
-   edit diff): GitHub's file header as a typographic row. LEFT the path verbatim
-   from the arg, directory portion muted and the basename primary (the emphasis
-   that makes a long path scannable); immediately right of it the copy-path
-   button; FAR RIGHT the meta -- "lines 12–61 of 340" / "N lines · K chars" for
-   a file body (the basename is already on the left, so the prefix is gone),
-   "+N −M" for a diff. Single-surface rule holds: no fill, no slab, no border
-   around the row -- only a hairline where an open body actually starts.
+/* Part header (declared-path parts -- read's file box and both diff postures:
+   the edit diff, the all-add write diffs): the file header as a typographic
+   row. LEFT the path verbatim from the arg, directory portion muted and the
+   basename primary (the emphasis that makes a long path scannable);
+   immediately right of it the copy-path button; FAR RIGHT the meta --
+   "lines 12–61 of 340" / "N lines · K chars" for a file body (the basename is
+   already on the left, so the prefix is gone), "+N −M" for a diff (a zero-del
+   side renders nothing). Single-surface rule holds: no fill, no slab, no
+   border around the row -- only a hairline where an open body actually starts.
    Toggle semantics live here for file parts (the centered summary they used to
    ride is gone); the diff header is NOT a toggle, its line fold is the only
    fold. The copy button stops propagation, so a copy never folds the body. */
@@ -1832,8 +1833,9 @@ body.sidebar-resizing {
     overflow-y: auto;
 }
 
-/* Quiet envelope line inside an open args-sourced file box (append/overwrite
-   return a size confirmation, so it rides under the written content). */
+/* Quiet envelope line under an open args-sourced body (append/overwrite
+   return a size confirmation): the footer inside the file box, and the same
+   quiet mono line under an all-add diff body. */
 .tool-file-meta {
     margin: 0;
     padding: 4px 10px 6px;

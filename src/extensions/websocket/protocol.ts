@@ -170,14 +170,19 @@ export interface ToolDisplayWire {
    * "code", or anything a future tool declares. */
   kind: string;
   /** Bytes this part renders: "result" (default), "error", "args". kind
-   * "file" follows it too: "args" renders the written content on the call
-   * (append/overwrite), "result" renders the returned text (read). */
+   * "file" and kind "diff" follow it too: "args" renders the written
+   * content on the call (append/overwrite, every line as an add when the
+   * kind is "diff"), "result" renders the returned text (read). */
   source?: "args" | "result" | "error";
   /** source: "args" -- the arg key holding this part's text. */
   arg?: string;
   /** kind: "diff" -- arg keys of the old/new strings. */
   oldArg?: string;
   newArg?: string;
+  /** kind: "diff" + source: "args" -- first new-side line number of the add
+   * rail (positive integer, see ToolDisplaySpec.addStart); absent leaves the
+   * rail blank (append: unknown existing content above it). */
+  addStart?: number;
   /** kind: "file" -- arg key naming the file; optional line-range args. */
   pathArg?: string;
   offsetArg?: string;

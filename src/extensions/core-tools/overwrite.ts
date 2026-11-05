@@ -10,14 +10,16 @@ import { ToolContext } from "@core/extensions/types.ts";
 
 export class OverwriteTool {
   static readonly TOOL_NAME = "overwrite";
-  // Same posture as append: the written `content` is the call's primary
-  // content (rendered at call time from the args), `path` names the box, and
-  // the result envelope (`filesize_after`) never competes for the face.
-  // Keys pinned against toToolDef() in tests/extensions/tools-index.test.ts.
+  // Same posture as append (the written `content` renders at call time as
+  // pure adds, `path` names the header, the `filesize_after` envelope never
+  // competes for the face) with one truth append cannot claim: a rewrite
+  // replaces the whole file, so the written text IS lines 1..N -- the add
+  // rail numbers from `addStart: 1`. Keys pinned against toToolDef() in
+  // tests/extensions/tools-index.test.ts.
   metadata: ToolMetadata = {
     sideEffects: true,
     difficulty: 1,
-    display: [{ kind: "file", source: "args", arg: "content", pathArg: "path" }],
+    display: [{ kind: "diff", source: "args", arg: "content", pathArg: "path", addStart: 1 }],
   };
 
   toToolDef() {

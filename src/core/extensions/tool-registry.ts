@@ -40,18 +40,22 @@ export interface ToolDisplaySpec {
    * Open vocabulary. Sinks render kinds they know and SKIP unknown kinds.
    * Documented kinds today: "file" (an expandable box named by
    * `pathArg`; its body bytes FOLLOW `source`, so the result text by default,
-   * or the string named by `arg` at call time -- append/overwrite return a
-   * size-confirmation envelope, so what they wrote lives in the args),
-   * "diff" (the args carry a replace-edit; render an add/del diff from
-   * `oldArg`/`newArg`), "prose" (result renders like a normal agent message,
+   * or the string named by `arg` at call time),
+   * "diff" (the add/del body: by default the args carry a
+   * replace-edit rendered from `oldArg`/`newArg` once the result arrives;
+   * with `source: "args"` the string named by `arg` renders as pure adds --
+   * append/overwrite return a size-confirmation envelope, so what they wrote
+   * lives in the args and is all-green),
+   * "prose" (result renders like a normal agent message,
    * optional `icon`), "code" (a verbatim text block rendered unfolded,
    * `lang`-highlighted).
    */
   kind: "file" | "diff" | "prose" | "code" | (string & {});
   /** Bytes this part renders: "result" (default), "error", or "args"
-   * (paired with `arg`). kind "file" follows this too: "result" renders the
-   * returned text, "args" renders the written content the moment the call
-   * arrives, before any result. A part whose source has no bytes (yet) is
+   * (paired with `arg`). kind "file" and kind "diff" follow this too:
+   * "result" renders the returned text, "args" renders the written content
+   * the moment the call arrives, before any result -- a "diff" so sourced
+   * renders every line as an add. A part whose source has no bytes (yet) is
    * skipped, so the generic posture covers it. */
   source?: "result" | "error" | "args";
   /** source: "args" -- the arg key holding this part's text. */
@@ -59,6 +63,14 @@ export interface ToolDisplaySpec {
   /** kind: "diff" -- arg keys of the old/new strings. */
   oldArg?: string;
   newArg?: string;
+  /** kind: "diff" + source: "args" -- what line of the new file the add rail
+   * starts at: a positive integer numbers the written text from it (overwrite
+   * replaces the whole file, so `1` is the truth); absent -- or not a
+   * positive integer -- leaves the new-side rail blank. Append declares
+   * nothing: it lands after content of unknown length, and a fake 1..N for
+   * an unknown offset is the one lie the gutters must never tell. No `Arg`
+   * suffix: this is a literal number, not an arg-key name. */
+  addStart?: number;
   /** kind: "file" -- arg key naming the file (the box header, whatever the
    * body's source is); optional offset/limit arg keys for a line-range
    * summary (result-sourced reads only; the size form covers the rest). */

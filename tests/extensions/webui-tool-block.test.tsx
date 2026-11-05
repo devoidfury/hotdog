@@ -871,6 +871,153 @@ describe("diff part (DOM)", () => {
     expect(block.querySelector(".tool-diff")).toBeNull();
     expect(block.querySelector(".tool-result-box.tool-result-error")).not.toBeNull();
   });
+
+  it("hides a zero-del side even on the edit posture (a stat never says −0)", () => {
+    // Pure insertion into the file: the stat's minus side would be pure
+    // noise, and the same gate the all-add write posture relies on covers it.
+    const { block, ctrl } = mountDiff(
+      { path: "f.ts", a: "x\ny", b: "x\ny\nz" },
+      { kind: "diff", oldArg: "a", newArg: "b", pathArg: "path" },
+    );
+    ctrl.setResult({ output: "ok" });
+    const head = block.querySelector(".tool-diff .part-head")!;
+    expect(head.querySelector(".diff-stat-add")!.textContent).toBe("+1");
+    expect(head.querySelector(".diff-stat-del")).toBeNull();
+  });
+});
+
+describe("args-sourced diff (append/overwrite: the written content is all adds)", () => {
+  // Owner ruling (run 20261105-0435): what a write call wrote wears the
+  // same all-green add posture the edit diff uses -- rendered at
+  // CALL time, sign +, path header with copy. The asymmetry is the truth:
+  // overwrite replaces the whole file (addStart: 1 numbers the rail),
+  // append lands after unknown content (blank rail, no fake 1..N).
+  const overwriteSpec: ToolDisplayWire = { kind: "diff", source: "args", arg: "content", pathArg: "path", addStart: 1 };
+  const appendSpec: ToolDisplayWire = { kind: "diff", source: "args", arg: "content", pathArg: "path" };
+
+  function mountWrite(spec: ToolDisplayWire, content: unknown, path: unknown = "/srv/notes.md") {
+    return mountBlock({ name: "write", args: JSON.stringify({ path, content }), display: [spec] });
+  }
+  const cells = (root: Element, sel: string): string[] =>
+    Array.from(root.querySelectorAll(sel)).map((c) => c.textContent!);
+
+  it("renders at call time: add rows before any result, + signs, blank old rail", () => {
+    const { block } = mountWrite(overwriteSpec, "line one\nline two");
+    const diff = block.querySelector(".tool-diff")!;
+    expect(block.querySelector(".tool-result-box")).toBeNull(); // nothing arrived yet
+    const rows = Array.from(diff.querySelectorAll(".diff-row"));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.classList.contains("diff-add"))).toBe(true);
+    expect(cells(diff, ".diff-sign")).toEqual(["+", "+"]);
+    expect(cells(diff, ".diff-ln-old")).toEqual(["", ""]); // no old side exists
+    expect(cells(diff, ".diff-text")).toEqual(["line one", "line two"]);
+    // The declared-path header (with its copy button) rides from the call.
+    const head = diff.querySelector(".part-head")!;
+    expect(head.querySelector(".part-path-dir")!.textContent).toBe("/srv/");
+    expect(head.querySelector(".part-path-base")!.textContent).toBe("notes.md");
+    expect(head.querySelector(".part-copy")).not.toBeNull();
+    // No envelope exists before the result.
+    expect(diff.querySelector(".tool-file-meta")).toBeNull();
+  });
+
+  it("addStart: 1 numbers the new rail 1..N (overwrite replaces the whole file)", () => {
+    const { block } = mountWrite(overwriteSpec, "a\nb\nc");
+    expect(cells(block, ".diff-ln-new")).toEqual(["1", "2", "3"]);
+    expect(cells(block, ".diff-ln-old")).toEqual(["", "", ""]);
+  });
+
+  it("no addStart leaves the new rail blank (append: unknown offset, no fake numbers)", () => {
+    const { block } = mountWrite(appendSpec, "a\nb\nc");
+    // The cells exist and paint the continuity band; they carry no digits.
+    expect(block.querySelectorAll(".diff-ln-new")).toHaveLength(3);
+    expect(cells(block, ".diff-ln-new")).toEqual(["", "", ""]);
+  });
+
+  it("addStart is a number or it is nothing: 0/negatives/fractions paint no rail", () => {
+    for (const bad of [0, -3, 1.5]) {
+      const { block } = mountWrite({ ...appendSpec, addStart: bad }, "a\nb");
+      expect(cells(block, ".diff-ln-new")).toEqual(["", ""]);
+    }
+    // A positive offset is honored from wherever it says (not 1-biased).
+    const { block } = mountWrite({ ...appendSpec, addStart: 40 }, "a\nb");
+    expect(cells(block, ".diff-ln-new")).toEqual(["40", "41"]);
+  });
+
+  it("the write stat shows +N with no minus side", () => {
+    const { block } = mountWrite(overwriteSpec, "a\nb\nc");
+    const head = block.querySelector(".tool-diff .part-head")!;
+    expect(head.querySelector(".diff-stat-add")!.textContent).toBe("+3");
+    expect(head.querySelector(".diff-stat-del")).toBeNull();
+  });
+
+  it("the ok envelope rides under the body as the quiet footer, consumed", () => {
+    const { block, ctrl } = mountWrite(appendSpec, "line one\nline two");
+    ctrl.setResult({ output: '{"path":"/srv/notes.md","bytes_appended":17}' });
+    // Consumed: the envelope never returns as a second framed box.
+    expect(block.querySelector(".tool-result-box")).toBeNull();
+    const meta = block.querySelector(".tool-diff .tool-file-meta")!;
+    expect(meta.textContent).toBe('{"path":"/srv/notes.md","bytes_appended":17}');
+  });
+
+  it("an error result skips the part and opens the tinted error box", () => {
+    const { block, ctrl } = mountWrite(appendSpec, "a\nb");
+    expect(block.querySelector(".tool-diff")).not.toBeNull(); // call-time body
+    ctrl.setResult({ error: "EACCES: permission denied" });
+    expect(block.querySelector(".tool-diff")).toBeNull(); // nothing was written
+    const box = block.querySelector(".tool-result-box.tool-result-error")!;
+    expect(box.querySelector(".tool-box-summary")!.textContent).toBe("error — EACCES: permission denied");
+  });
+
+  it("long written content folds at the inline diff limit and expands", () => {
+    const content = Array.from({ length: 40 }, (_, i) => `l${i}`).join("\n");
+    const { block } = mountWrite(overwriteSpec, content);
+    expect(block.querySelectorAll(".diff-row")).toHaveLength(MAX_INLINE_DIFF_LINES);
+    const btn = block.querySelector<HTMLElement>(".diff-expand")!;
+    expect(btn.textContent).toContain("expand remaining 10 lines");
+    btn.click();
+    expect(block.querySelectorAll(".diff-row")).toHaveLength(40);
+  });
+
+  it("splits on \\n only: a \\r rides inside the line, a trailing \\n keeps its empty add row", () => {
+    // The house diff idiom (computeDiffLines splits the same way) and the
+    // same line accounting the file posture shipped ("a\nb\n" counted as 3
+    // lines), kept on purpose: a trailing newline renders as a final empty
+    // add row -- the line its closing newline terminates.
+    const crlf = mountWrite(appendSpec, "a\r\nb");
+    expect(cells(crlf.block, ".diff-text")).toEqual(["a\r", "b"]);
+    const trailing = mountWrite(overwriteSpec, "a\nb\n");
+    expect(cells(trailing.block, ".diff-text")).toEqual(["a", "b", ""]);
+    expect(cells(trailing.block, ".diff-ln-new")).toEqual(["1", "2", "3"]);
+  });
+
+  it("missing, non-string or empty content skips the part; the generic fallback covers it", () => {
+    for (const bad of [
+      { path: "/srv/notes.md" }, // no content key at all
+      { path: "/srv/notes.md", content: 7 }, // not a string
+      { path: "/srv/notes.md", content: "" }, // empty bytes never count
+      "not json at all", // unparseable args
+    ]) {
+      const { block, ctrl } = mountBlock({
+        name: "append",
+        args: typeof bad === "string" ? bad : JSON.stringify(bad),
+        display: [appendSpec],
+      });
+      expect(block.querySelector(".tool-diff")).toBeNull();
+      ctrl.setResult({ output: "wrote 0 bytes" });
+      expect(block.querySelector(".tool-diff")).toBeNull();
+      expect(block.querySelector(".tool-result-pre")!.textContent).toBe("wrote 0 bytes");
+    }
+  });
+
+  it("a non-string path still renders the rows (just no header to name them)", () => {
+    // Unlike the file posture (whose header IS the box, so no path skips
+    // everything), the diff body is inline primary content: declaredPath
+    // just drops the header, exactly like the edit posture.
+    const { block } = mountWrite(overwriteSpec, "a", 3);
+    expect(block.querySelector(".tool-diff")).not.toBeNull();
+    expect(block.querySelector(".tool-diff .part-head")).toBeNull();
+    expect(block.querySelector(".part-copy")).toBeNull();
+  });
 });
 
 describe("prose part (DOM)", () => {

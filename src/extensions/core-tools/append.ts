@@ -10,14 +10,17 @@ import { ToolContext } from "@core/extensions/types.ts";
 
 export class AppendTool {
   static readonly TOOL_NAME = "append";
-  // What was written is the primary content of the call: the file part takes
-  // its body from the `content` arg at call time (`source: "args"`) and names
-  // the box after `path`; the result envelope (`bytes_appended`) is a size
-  // confirmation, never the face of the block. Keys pinned against toToolDef().
+  // What was written is the primary content of the call: the diff part takes
+  // its body from the `content` arg at call time (`source: "args"`) and
+  // renders every line as an add -- append lands after content the sink has
+  // never seen, so it declares NO addStart and the new-side rail stays blank
+  // (honest emptiness over a fake 1..N). `path` names the header, and the
+  // result envelope (`bytes_appended`) is a size confirmation, never the
+  // face of the block. Keys pinned against toToolDef().
   metadata: ToolMetadata = {
     sideEffects: true,
     difficulty: 1,
-    display: [{ kind: "file", source: "args", arg: "content", pathArg: "path" }],
+    display: [{ kind: "diff", source: "args", arg: "content", pathArg: "path" }],
   };
 
   toToolDef() {

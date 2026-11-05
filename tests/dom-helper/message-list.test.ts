@@ -700,7 +700,7 @@ describe("session log replay", () => {
     expect(block.querySelector(".tool-result-pre")!.textContent).toBe("edited 1 line");
   });
 
-  it("an args-sourced file part renders from a cold append entry, envelope in the footer", () => {
+  it("an args-sourced all-add diff renders from a cold append entry, envelope in the footer", () => {
     ml.renderLogEntries([
       {
         source: "llm",
@@ -710,27 +710,31 @@ describe("session log replay", () => {
             id: "c1",
             type: "function",
             function: { name: "append", arguments: JSON.stringify({ path: "/srv/notes.md", content: "line one\nline two" }) },
-            display: [{ kind: "file", source: "args", arg: "content", pathArg: "path" }],
+            display: [{ kind: "diff", source: "args", arg: "content", pathArg: "path" }],
           },
         ],
       } as any,
       { source: "tool_result", content: '{"path":"/srv/notes.md","bytes_appended":17}', tool_call_id: "c1", tool_name: "append" },
     ]);
     const block = container.querySelector(".tool-call-block")!;
-    // Auto-expand (owner ruling): the small written body is already open and
-    // the envelope rides as the footer line; the result envelope is consumed
-    // (no second generic box). The face is the path header: verbatim path
-    // (muted dir + basename) and the written content's size as its meta.
-    const head = block.querySelector(".tool-file .part-head")!;
-    expect(head.querySelector(".part-path-dir")!.textContent).toBe("/srv/");
-    expect(head.querySelector(".part-path-base")!.textContent).toBe("notes.md");
-    expect(head.querySelector(".part-meta")!.textContent).toBe("2 lines · 17 chars");
+    // Cold replay wears exactly what the live frame would (owner ruling
+    // 20261105-0435: writes render as all-add diffs): the written lines as
+    // adds with blank rails (append declares no addStart), the path header
+    // with its +2 stat (no −0 side), and the envelope as the quiet footer
+    // line -- consumed, so no second generic box alongside.
+    const diff = block.querySelector(".tool-diff")!;
+    expect(block.querySelector(".tool-file")).toBeNull();
+    expect(diff.querySelector(".part-path-dir")!.textContent).toBe("/srv/");
+    expect(diff.querySelector(".part-path-base")!.textContent).toBe("notes.md");
+    expect(diff.querySelector(".diff-stat-add")!.textContent).toBe("+2");
+    expect(diff.querySelector(".diff-stat-del")).toBeNull();
+    expect(diff.querySelectorAll(".diff-row")).toHaveLength(2);
     expect(block.querySelector(".tool-result-box")).toBeNull();
-    expect(block.querySelector(".tool-file-pre")!.textContent).toBe("line one\nline two");
-    expect(block.querySelector(".tool-file-meta")!.textContent).toContain("bytes_appended");
-    // User collapse (the header row IS the toggle) hides content and envelope.
-    (block.querySelector(".tool-file .part-head") as HTMLElement).click();
-    expect(block.textContent).not.toContain("bytes_appended");
+    expect(block.querySelector(".tool-diff .tool-file-meta")!.textContent).toContain("bytes_appended");
+    // The diff header is NOT a fold (inline primary content): replayed
+    // bytes can never be stranded behind a click.
+    (diff.querySelector(".part-head") as HTMLElement).click();
+    expect(diff.querySelectorAll(".diff-row")).toHaveLength(2);
   });
 });
 

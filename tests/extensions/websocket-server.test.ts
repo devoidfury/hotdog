@@ -1001,8 +1001,14 @@ describe("createWsServer - cold log operations", () => {
     expect(calls[0].display).toEqual([
       { kind: "diff", oldArg: "oldString", newArg: "newString", pathArg: "path" },
     ]);
-    expect(calls[1].display).toEqual([{ kind: "file", source: "args", arg: "content", pathArg: "path" }]);
-    expect(calls[3].display).toEqual([{ kind: "file", source: "args", arg: "content", pathArg: "path" }]);
+    // The all-add write declarations ride the cold log exactly as declared
+    // (the {...spec} spread carries addStart with no extra plumbing), and
+    // the asymmetry survives: append has NO addStart key at all.
+    expect(calls[1].display).toEqual([{ kind: "diff", source: "args", arg: "content", pathArg: "path" }]);
+    expect("addStart" in calls[1].display![0]).toBe(false);
+    expect(calls[3].display).toEqual([
+      { kind: "diff", source: "args", arg: "content", pathArg: "path", addStart: 1 },
+    ]);
     // A hintless tool gets no field at all (no null-noise), and its stored
     // shape rides byte-for-byte: the annotation is purely additive, which is
     // what lets a client that predates the field keep working.

@@ -276,8 +276,21 @@ export function computeDiffLines(oldText: string, newText: string, maxLines = MA
   return lines;
 }
 
+/**
+ * The add-rail start a kind "diff" args part declares: only a positive
+ * integer is a number, anything else (absent, 0, negative, fractional)
+ * leaves the new-side rail blank. A fake 1..N for an unknown offset is the
+ * one lie the two gutters exist to prevent.
+ */
+function addRailStart(spec: ToolDisplayWire): number | undefined {
+  return typeof spec.addStart === "number" && Number.isInteger(spec.addStart) && spec.addStart > 0
+    ? spec.addStart
+    : undefined;
+}
+
 /** The diff header's stat: add/del row counts of the resolved lines (info
- *  placeholders are not counted -- they are not lines). Rendered "+N −M". */
+ *  placeholders are not counted -- they are not lines). Rendered "+N −M"; a
+ *  zero-del side renders nothing -- the stat never says "−0". */
 export function diffStat(lines: DiffLine[]): { add: number; del: number } {
   let add = 0;
   let del = 0;
@@ -344,7 +357,7 @@ type PartView =
   | { posture: "skip" }
   | { posture: "pending"; icon?: string }
   | { posture: "file"; path: string; meta: string; text: string; envelope?: string }
-  | { posture: "diff"; path: string | null; lines: DiffLine[] }
+  | { posture: "diff"; path: string | null; lines: DiffLine[]; envelope?: string }
   | { posture: "prose"; text: string; icon?: string }
   | { posture: "code"; text: string; runs: CodeRun[] | null };
 
@@ -354,9 +367,10 @@ type PartView =
  * as file parts; missing/non-string keys skip the part; unknown kinds skip
  * silently (forward-compat). `consumes` (below) tracks whether a rendered
  * part accounted for the result bytes, gating the generic result box.
- * A file part follows `source` like the other kinds: result bytes by default,
- * or the written arg at call time (`source: "args"`, append/overwrite), whose
- * ok result is a size envelope rendered as the box's footer meta.
+ * A part follows `source` like the other kinds: result bytes by default, or
+ * the written arg at call time (`source: "args"`). An args-sourced file box
+ * and an args-sourced all-add diff (append/overwrite) both take the ok
+ * result's size envelope as a quiet footer line under their body.
  */
 function resolvePart(spec: ToolDisplayWire, state: ToolBlockState): PartView {
   switch (spec.kind) {
@@ -378,8 +392,29 @@ function resolvePart(spec: ToolDisplayWire, state: ToolBlockState): PartView {
       return { posture: "file", ...head, text };
     }
     case "diff": {
-      if (!state.result || state.result.error) return { posture: "skip" };
       const parsed = parseArgsObject(state.args);
+      if (spec.source === "args") {
+        // append/overwrite: the written content IS one hunk of adds -- no
+        // old side, no diff computation. Skip rules mirror the file args
+        // posture (missing/non-string/empty bytes), and an error result
+        // skips too: the tinted generic box carries that story.
+        const body = spec.arg !== undefined ? parsed?.[spec.arg] : undefined;
+        if (typeof body !== "string" || body === "" || state.result?.error) return { posture: "skip" };
+        // Line accounting stays the house diff idiom: split on \n only (a
+        // \r rides inside the line; a trailing \n yields a final empty add
+        // row, the same way the file posture already counts it).
+        const start = addRailStart(spec);
+        const lines: DiffLine[] = body.split("\n").map((text, i) => ({
+          kind: "add",
+          text,
+          ...(start === undefined ? {} : { newNo: start + i }),
+        }));
+        // Ok result = the size envelope as a quiet footer under the body
+        // (same treatment as the file box); pending has nothing to show.
+        const envelope = state.result ? oneLine(state.result.output ?? "", 80) : undefined;
+        return { posture: "diff", path: declaredPath(state.args, spec), lines, envelope };
+      }
+      if (!state.result || state.result.error) return { posture: "skip" };
       const oldV = parsed && spec.oldArg ? parsed[spec.oldArg] : undefined;
       const newV = parsed && spec.newArg ? parsed[spec.newArg] : undefined;
       if (typeof oldV !== "string" || typeof newV !== "string") return { posture: "skip" };
@@ -407,13 +442,17 @@ function partConsumesResult(spec: ToolDisplayWire, view: PartView): boolean {
   switch (view.posture) {
     case "file":
       // A result-sourced file part IS the result bytes. An args-sourced one
-      // (append/overwrite) shows the written content instead and takes the ok
-      // result into the box's footer meta, so the same text never arrives a
-      // second time as a framed box -- but an error result is no envelope: it
+      // shows the written content instead and takes the ok result into the
+      // box's footer meta, so the same text never arrives a second time as a
+      // framed box -- but an error result is no envelope: it
       // keeps the generic tinted box.
       return spec.source !== "args" || view.envelope !== undefined;
     case "diff":
-      return true;
+      // The result-gated edit diff is the result's story: consumed. An
+      // args-sourced all-add part mirrors the file posture -- it takes the
+      // ok result into its footer envelope (consumed), and an error result
+      // skips the part entirely, so the tinted generic box stays.
+      return spec.source !== "args" || view.envelope !== undefined;
     case "prose":
     case "code":
       return spec.source !== "args";
@@ -649,7 +688,10 @@ function Part({ view, state, index, onToggleBox, onUnfold }: PartProps): JsxChil
               meta={
                 <span className="diff-stat">
                   <span className="diff-stat-add">{`+${stat.add}`}</span>
-                  <span className="diff-stat-del">{`−${stat.del}`}</span>
+                  {/* A zero side of the stat is noise: the header never
+                      says "−0", and on the all-add write posture it would
+                      be a lie. */}
+                  {stat.del > 0 ? <span className="diff-stat-del">{`−${stat.del}`}</span> : null}
                 </span>
               }
             />
@@ -685,6 +727,9 @@ function Part({ view, state, index, onToggleBox, onUnfold }: PartProps): JsxChil
               {`expand remaining ${view.lines.length - MAX_INLINE_DIFF_LINES} lines`}
             </button>
           ) : null}
+          {/* Args-sourced writes: the size envelope rides under the body as
+              the same quiet mono line the file box footer uses. */}
+          {view.envelope ? <div className="tool-file-meta">{view.envelope}</div> : null}
         </div>
       );
     }

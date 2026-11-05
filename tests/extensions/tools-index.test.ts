@@ -153,19 +153,27 @@ describe("core tool display parts (ToolMetadata.display)", () => {
     expect(props).toContain(part.pathArg!);
   });
 
-  it("overwrite and append declare the args-sourced file part with their real params", async () => {
-    // Owner ruling (follow-up run): what an append/overwrite call wrote IS the
-    // primary content, so the file part takes its body from the `content` arg
-    // at call time and its header from `path`; the result envelope is a size
-    // confirmation the sink demotes to a footer line. Supersedes the earlier
-    // "these declare nothing" pin.
-    const factory = createToolFactory(config);
-    for (const name of ["overwrite", "append"]) {
-      const tool = factory.createTool(name)!;
-      expect(tool.metadata.display, `${name} display parts`).toEqual([
-        { kind: "file", source: "args", arg: "content", pathArg: "path" },
-      ]);
-      const part = tool.metadata.display![0]!;
+  it("overwrite and append declare the args-sourced all-add diff with their real params", async () => {
+    // Owner ruling (run 20261105-0435): what an append/overwrite call wrote
+    // IS the primary content, and it wears the same all-green add posture
+    // the edit diff uses -- kind "diff", bytes from the `content`
+    // arg at call time, header named by `path`, envelope demoted to a
+    // footer. The asymmetry IS the ruling: overwrite replaces the whole
+    // file so its add rail numbers from 1 (`addStart: 1` is the truth),
+    // while append lands after unknown existing content and declares NO
+    // addStart (blank rail, honest). toEqual alone cannot pin that --
+    // undefined keys compare equal -- so the key-presence checks below are
+    // the loud half of the pin. Supersedes the "args-sourced file part" pin.
+    const base = { kind: "diff", source: "args", arg: "content", pathArg: "path" } as const;
+    const overwrite = createToolFactory(config).createTool("overwrite")!;
+    const append = createToolFactory(config).createTool("append")!;
+    expect(overwrite.metadata.display).toEqual([{ ...base, addStart: 1 }]);
+    expect(append.metadata.display).toEqual([base]);
+    const overwritePart = overwrite.metadata.display![0]!;
+    const appendPart = append.metadata.display![0]!;
+    expect(overwritePart.addStart).toBe(1);
+    expect("addStart" in appendPart).toBe(false); // append must NOT claim 1..N
+    for (const [name, part] of [["overwrite", overwritePart], ["append", appendPart]] as const) {
       const props = await schemaProps(name);
       expect(props, `${name} content param`).toContain(part.arg!);
       expect(props, `${name} path param`).toContain(part.pathArg!);

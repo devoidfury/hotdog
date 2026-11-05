@@ -105,11 +105,9 @@ export async function adoptSessionLog(
       }
     }
     // Restore UI metadata from the log's own timeline so the sidebar agrees
-    // with what the user sees.
+    // with what the user sees. (No message count: the live row reads the
+    // writer-side record tally, seeded by registry.create from this log.)
     if (meta) {
-      meta.userMessageCount = agent
-        .getMessages()
-        .filter((m) => m.role === "user").length;
       let createdAt = 0;
       let lastActivityAt = 0;
       for (const e of preAdoptionEntries) {

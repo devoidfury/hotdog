@@ -36,7 +36,6 @@ function stubRegistry(overrides: Record<string, unknown> = {}): any {
     listProfiles: () => [{ name: "default" }],
     switchProfile: async () => ({ success: true }),
     touch: () => {},
-    incrementUserMessageCount: () => {},
     rename: () => {},
     delete: () => {},
     getSessionManager: () => ({

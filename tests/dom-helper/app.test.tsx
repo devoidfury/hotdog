@@ -209,7 +209,7 @@ const sessionRow = {
   createdAt: 1,
   lastActivityAt: 2,
   connectedClients: 1,
-  userMessageCount: 3,
+  messageCount: 3,
 };
 const logRow = { id: L1, createdAt: 1, lastActivityAt: 2, messageCount: 5 };
 
@@ -1418,7 +1418,7 @@ const lvSessionRow = {
   createdAt: 1,
   lastActivityAt: 2,
   connectedClients: 1,
-  userMessageCount: 3,
+  messageCount: 3,
 };
 
 /** The sidebar replies every log-view enter/leave triggers (listLogs +
@@ -1558,7 +1558,7 @@ describe("webui log-view round trip (real app wiring)", () => {
     expect(composerDisabled()).toBe(true);
 
     const OTHER = "s-live-0002";
-    const otherRow = { ...lvSessionRow, id: OTHER, profile: "other", userMessageCount: 1 };
+    const otherRow = { ...lvSessionRow, id: OTHER, profile: "other", messageCount: 1 };
     ws.fireMessage({ type: "sessions", sessions: [lvSessionRow, otherRow] });
     await tick();
     ws.sent.length = 0;

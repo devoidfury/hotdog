@@ -301,19 +301,36 @@ describe("SessionRegistry", () => {
     });
 
     it("switches without confirmation even after user messages, and keeps the count", async () => {
-      const { agent } = createFixture({});
+      // The sidebar count is the session-log writer's committed-record tally
+      // (record-count.ts), seeded at registration from the session's own log
+      // -- not a registry-side user-only tally. A profile switch is
+      // non-destructive, so the tally survives it untouched.
+      const logId = `count-switch-${Date.now()}`;
+      writeFileSync(
+        join(SESSIONS_DIR, `${logId}.jsonl`),
+        [
+          JSON.stringify({ ts: "2024-01-01T00:00:00Z", session_id: logId, source: "input", content: "u1" }),
+          JSON.stringify({ ts: "2024-01-01T00:00:01Z", session_id: logId, source: "llm", content: "a1" }),
+        ].join("\n") + "\n",
+      );
+      const { agent } = createFixture({ sessionId: logId });
       const wsRegistry = new SessionRegistry({
         buildAgent: async () => agent,
         profiles: { coder: { body: "", model: null, whitelistTools: null, blacklistTools: [], manager: false } },
       });
-      const { sessionId } = await wsRegistry.create({});
-      wsRegistry.incrementUserMessageCount(sessionId);
+      try {
+        const { sessionId } = await wsRegistry.create({});
+        expect(sessionId).toBe(logId);
+        expect(wsRegistry.list().find((r) => r.id === sessionId)!.messageCount).toBe(2);
 
-      const result = await wsRegistry.switchProfile({ sessionId, profileName: "coder" });
-      expect(result.success).toBe(true);
-      expect(agent.profileName).toBe("coder");
-      // The switch is non-destructive, so the message count stays honest.
-      expect(wsRegistry.get(sessionId)!.metadata.userMessageCount).toBe(1);
+        const result = await wsRegistry.switchProfile({ sessionId, profileName: "coder" });
+        expect(result.success).toBe(true);
+        expect(agent.profileName).toBe("coder");
+        // The switch is non-destructive, so the message count stays honest.
+        expect(wsRegistry.list().find((r) => r.id === sessionId)!.messageCount).toBe(2);
+      } finally {
+        try { rmSync(join(SESSIONS_DIR, `${logId}.jsonl`), { force: true }); } catch {}
+      }
     });
 
     it("errors on unknown profiles and unknown sessions", async () => {
@@ -1166,8 +1183,11 @@ describe("createWsServer - cold log operations", () => {
     const created = await waitForMessage(ws, S2C.SESSION_CREATED);
     expect(created.profile).toBe("coder");
     expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.profile).toBe("coder");
-    // The replayed user message is counted in the resumed metadata.
-    expect(wsServer.sessionRegistry.get(created.sessionId)!.metadata.userMessageCount).toBe(1);
+    // The live row's messageCount is the log's own record count (session_start
+    // and input both count under the sidebar rule), seeded by adoption -- not
+    // a user-message tally of the replayed context.
+    const row = wsServer.sessionRegistry.list().find((r) => r.id === created.sessionId)!;
+    expect(row.messageCount).toBe(2);
   });
 });
 

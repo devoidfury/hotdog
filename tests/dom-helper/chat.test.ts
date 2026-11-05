@@ -233,7 +233,7 @@ describe("session management messages", () => {
       type: "sessions",
       sessions: [
         { id: "other", profile: "p" },
-        { id: "s1", profile: "coder", title: "renamed", userMessageCount: 3 },
+        { id: "s1", profile: "coder", title: "renamed", messageCount: 3 },
       ],
     });
     expect(chat.currentProfileAtom()).toBe("coder");

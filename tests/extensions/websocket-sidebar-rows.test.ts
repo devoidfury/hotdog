@@ -78,10 +78,12 @@ describe("SESSIONS rows: sidebar ctx payload", () => {
     const row = rows.find((r) => r.id === "ctx-live")!;
     expect(row.ctxUsed).toBe(69000);
     expect(row.ctxTotal).toBe(262144);
-    // The grammar's other live slots stay on the wire unchanged.
+    // The grammar's other live slots stay on the wire unchanged. The
+    // messageCount is the writer-side record tally: registered with no log
+    // records yet, it is the honest 0 (seeded, not fabricated).
     expect(row.profile).toBe("manager");
     expect(row.connectedClients).toBe(0);
-    expect(row.userMessageCount).toBe(0);
+    expect(row.messageCount).toBe(0);
   });
 
   it("later usage events replace the snapshot (last usage wins)", async () => {

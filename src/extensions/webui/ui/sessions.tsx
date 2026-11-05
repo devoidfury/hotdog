@@ -37,8 +37,10 @@ export interface SessionInfo {
    *  list payload). Wins the status slot: the card badges awaiting_question
    *  instead of working/idle while a human answer is outstanding. */
   questionPending?: boolean;
-  /** Sidebar row slots: user-message tally and the last token_usage snapshot. */
-  userMessageCount?: number;
+  /** Sidebar row slots: the log record count (same rule as the cold rows'
+   *  messageCount: every log record except system_prompt/reset) and the last
+   *  token_usage snapshot. */
+  messageCount?: number;
   ctxUsed?: number;
   ctxTotal?: number;
   /** Absolute JSONL log path on the server; omitted when the server could
@@ -409,7 +411,7 @@ export function Sidebar(p: SidebarProps) {
               statusClass={s.questionPending ? "log-state-awaiting_question" : undefined}
               ctxUsed={s.ctxUsed}
               ctxTotal={s.ctxTotal}
-              messageCount={s.userMessageCount}
+              messageCount={s.messageCount}
               connectedClients={s.connectedClients}
               createdAt={s.createdAt}
               action={

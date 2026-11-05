@@ -239,7 +239,9 @@ interface SessionsMessage {
     id: string;
     profile?: string;
     title?: string | null;
-    userMessageCount?: number;
+    /** Live-row record count from the session-log writer (same rule the cold
+     *  LOGS_LISTED rows use); omitted when the server cannot attest it. */
+    messageCount?: number;
     /** Last token_usage snapshot cached server-side (sidebar ctx segment). */
     ctxUsed?: number;
     ctxTotal?: number;

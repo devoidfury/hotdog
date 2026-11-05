@@ -42,7 +42,9 @@ export function handleSend(ctx: RouteContext): void {
     content.push(...parsed.parts);
     if (content.length === 0 && parsed.images.length === 0) return;
     registry.touch(sid);
-    registry.incrementUserMessageCount(sid);
+    // No message-count bump here: the sidebar count is the session-log
+    // writer's committed-record tally (record-count.ts), which counts this
+    // send exactly once when its input record lands.
     sessionManager.enqueue(sid, content, {
       source: "harness",
       ...(parsed.images.length > 0 ? { images: parsed.images } : {}),
@@ -52,7 +54,6 @@ export function handleSend(ctx: RouteContext): void {
 
   if (text) {
     registry.touch(sid);
-    registry.incrementUserMessageCount(sid);
     sessionManager.enqueue(
       sid,
       text,

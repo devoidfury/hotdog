@@ -16,6 +16,10 @@ import { S2C, type TaskActivityWire } from "./protocol.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import { sharedExecFenceDisplay, toolExecModeLabel, sharedToolExecDegraded } from "@core/tool-exec-broker.ts";
+import {
+  getRecordCount,
+  seedRecordCount,
+} from "@extensions/session-log/record-count.ts";
 import type { Agent } from "@core/agent.ts";
 import { AgentError } from "@core/error.ts";
 import type { SttTarget } from "@core/config/stt.ts";
@@ -44,7 +48,6 @@ interface SessionMetadata {
   connectedClients: number;
   questionStrategy: string;
   questionTimeoutSecs: number;
-  userMessageCount: number;
   /**
    * Last token_usage snapshot (per-call totalTokens + contextWindow), the
    * same numbers the chat token bubble shows. Cached for the sidebar's ctx
@@ -319,7 +322,6 @@ export class SessionRegistry {
       connectedClients: 0,
       questionStrategy: questionStrategy || this.#questionStrategy,
       questionTimeoutSecs: questionTimeoutSecs || this.#questionTimeoutSecs,
-      userMessageCount: 0,
     });
 
     this.#sessionManager.registerAgent(agent, {
@@ -328,6 +330,12 @@ export class SessionRegistry {
       profileName: profile || "default",
       model,
     });
+
+    // Seed the writer-side record count from the existing log ONCE (cold-log
+    // adoption brings its file; a fresh id seeds 0). The sidebar's live-row
+    // messageCount then rides the append chokepoint (record-count.ts), never
+    // a registry-side tally -- parity with the cold rows is structural.
+    await seedRecordCount(actualSessionId);
 
     this.#trackModelChanges(actualSessionId);
     this.#trackUsage(actualSessionId);
@@ -367,9 +375,9 @@ export class SessionRegistry {
       connectedClients: 0,
       questionStrategy: meta.questionStrategy,
       questionTimeoutSecs: meta.questionTimeoutSecs,
-      userMessageCount: agent
-        .getMessages()
-        .filter((m) => m.role === "user").length,
+      // No count to carry: the fork's log starts empty and the kept messages
+      // ride addMessage -> CONTEXT_MESSAGE -> the writer chokepoint, which
+      // counts them into the fork's own tally as they land.
     });
 
     this.#trackModelChanges(newSessionId);
@@ -424,7 +432,14 @@ export class SessionRegistry {
     createdAt: number;
     lastActivityAt: number;
     connectedClients: number;
-    userMessageCount: number;
+    /**
+     * Log record count (the sidebar metric): the session-log writer's
+     * committed-record tally -- what listSessionLogs reports for this
+     * session's file at this moment (same exclusion rule: system_prompt and
+     * reset records never count, bookkeeping records do). Omitted while the
+     * count is unknowable (a failed seed), never fabricated.
+     */
+    messageCount?: number;
     ctxUsed?: number;
     ctxTotal?: number;
     /** Server-persisted sidebar pin (pin-store.ts); always present so a
@@ -445,7 +460,7 @@ export class SessionRegistry {
       createdAt: number;
       lastActivityAt: number;
       connectedClients: number;
-      userMessageCount: number;
+      messageCount?: number;
       ctxUsed?: number;
       ctxTotal?: number;
       pinned: boolean;
@@ -456,6 +471,7 @@ export class SessionRegistry {
     for (const [id, meta] of this.#metadata) {
       const agent = this.#sessionManager.getAgentBySessionId(id);
       const logPath = trySessionPath(id);
+      const recordCount = getRecordCount(id);
       result.push({
         id,
         profile: meta.profile,
@@ -464,7 +480,7 @@ export class SessionRegistry {
         createdAt: meta.createdAt,
         lastActivityAt: meta.lastActivityAt,
         connectedClients: meta.connectedClients,
-        userMessageCount: meta.userMessageCount,
+        ...(recordCount !== undefined ? { messageCount: recordCount } : {}),
         ...(meta.ctxUsed !== undefined ? { ctxUsed: meta.ctxUsed } : {}),
         ...(meta.ctxTotal !== undefined ? { ctxTotal: meta.ctxTotal } : {}),
         pinned: pinnedIds.has(id),
@@ -576,13 +592,6 @@ export class SessionRegistry {
     meta.lastActivityAt = Date.now();
 
     return { success: true };
-  }
-
-  incrementUserMessageCount(sessionId: string): void {
-    const meta = this.#metadata.get(sessionId);
-    if (meta) {
-      meta.userMessageCount += 1;
-    }
   }
 
   createChannel(

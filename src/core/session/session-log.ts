@@ -182,12 +182,44 @@ export function trySessionPath(sessionId: string): string | undefined {
 }
 
 /**
+ * The sidebar record rule, defined ONCE: a log entry counts toward a
+ * session's message count when it carries a source other than the system
+ * prompt or a reset marker. Bookkeeping records (turn_started, token_usage,
+ * resume_attempt, ...) DO count -- the metric is "records in the log", not
+ * "conversation messages". listSessionLogs (cold rows) and the seed of the
+ * session-log extension's live writer counter (live rows) both sum with
+ * countSessionLogEntries, so the two sidebar halves cannot drift apart.
+ */
+export function isCountedLogEntry(entry: { source?: unknown }): boolean {
+  return (
+    typeof entry.source === "string" &&
+    entry.source !== "" &&
+    entry.source !== LOG_SOURCE.SYSTEM_PROMPT &&
+    entry.source !== LOG_SOURCE.RESET
+  );
+}
+
+/**
  * Shape gate for a parsed JSONL value: `null`, numbers, strings and arrays are
  * valid JSON but are not entries. Dropped at the read site, because everything
  * downstream (the epoch scan, replay, the audit facts) reads fields off them.
  */
 function isLogEntry(value: unknown): value is LogEntry {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The sidebar metric: how many entries of a parsed log count as records
+ * (rule: isCountedLogEntry). The cold rows (listSessionLogs) and the live
+ * writer-side counter's seed (session-log extension's record-count module)
+ * share this one sum.
+ */
+export function countSessionLogEntries(entries: LogEntry[]): number {
+  let messageCount = 0;
+  for (const entry of entries) {
+    if (isCountedLogEntry(entry)) messageCount++;
+  }
+  return messageCount;
 }
 
 /**
@@ -282,7 +314,6 @@ export async function listSessionLogs(): Promise<SessionLogInfo[]> {
 
       let createdAt = 0;
       let lastActivityAt = 0;
-      let messageCount = 0;
 
       for (const entry of entries) {
         const ts = (entry.ts as string) ? new Date(entry.ts as string).getTime() : 0;
@@ -290,10 +321,8 @@ export async function listSessionLogs(): Promise<SessionLogInfo[]> {
           if (createdAt === 0 || ts < createdAt) createdAt = ts;
           if (ts > lastActivityAt) lastActivityAt = ts;
         }
-        if (entry.source && entry.source !== LOG_SOURCE.SYSTEM_PROMPT && entry.source !== LOG_SOURCE.RESET) {
-          messageCount++;
-        }
       }
+      const messageCount = countSessionLogEntries(entries);
 
       if (messageCount > 0) {
         results.push({

@@ -100,7 +100,7 @@ function liveSession(over: Partial<SessionInfo> = {}): SessionInfo {
     createdAt: STAMP,
     lastActivityAt: STAMP,
     connectedClients: 1,
-    userMessageCount: 42,
+    messageCount: 42,
     ctxUsed: 69000,
     ctxTotal: 262144,
     ...over,

@@ -1,13 +1,21 @@
 // Session Log Extension
 // Append-only JSONL audit trail for observability.
 
-import { appendFile, open, readFile, access, mkdir } from "node:fs/promises";
+import { readFile, access, mkdir } from "node:fs/promises";
 import { HOOKS, type GateAction } from "@core/hooks.ts";
 import { stripNulls } from "@utils/objects.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { isWrapperPart, isToolResultPart } from "@core/context/wrappers.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
+
+import {
+  drainWrites,
+  dropRecordCount,
+  dropWrites,
+  queuedAppend,
+  queuedFsyncAppend,
+} from "./record-count.ts";
 
 import { LOG_SOURCE, LOG_VERSION, MAX_CONSECUTIVE_AUTO_RESUMES, sessionPath, sessionsDir, type LogEntry } from "@core/session/session-log.ts";
 import {
@@ -160,45 +168,10 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // Track the most recent session ID so readEntries/getLogPath work correctly.
   let lastSessionId: string | null = null;
 
-  // Serialize writes per session file. Hook handlers fire independently (addMessage
-  // does not await notifyHooks), so floating appendFile calls can land out of dispatch
-  // order -- e.g. a /fork's first prompt entry written below the copied history it
-  // should follow. Chaining keeps file order equal to hook dispatch order, which holds
-  // because handlers enqueue synchronously (async handlers run to their first await
-  // before the next dispatch).
-  const writeQueues = new Map<string, Promise<void>>();
-  const queuedAppend = (logPath: string, line: string): Promise<void> => {
-    const prev = writeQueues.get(logPath) ?? Promise.resolve();
-    // Chain on either outcome: one failed write must not poison the queue.
-    const next = prev.then(
-      () => appendFile(logPath, line),
-      () => appendFile(logPath, line),
-    );
-    writeQueues.set(logPath, next);
-    return next;
-  };
-
-  /**
-   * Durability-class append: same write queue (file order = dispatch order),
-   * fsynced so the record and everything appended before it survives
-   * kill -9 / power loss. Only for records whose presence on disk carries
-   * meaning: tool_started, question_asked.
-   */
-  const queuedFsyncAppend = (logPath: string, line: string): Promise<void> => {
-    const prev = writeQueues.get(logPath) ?? Promise.resolve();
-    const write = async () => {
-      const fh = await open(logPath, "a");
-      try {
-        await fh.appendFile(line);
-        await fh.sync();
-      } finally {
-        await fh.close();
-      }
-    };
-    const next = prev.then(write, write);
-    writeQueues.set(logPath, next);
-    return next;
-  };
+  // Serialize writes per session file and count committed records: the append
+  // chokepoint (queuedAppend / queuedFsyncAppend) lives in ./record-count.ts;
+  // every append below carries its sessionId and source so the live sidebar
+  // count rides the same serialized path as the bytes.
 
   /** Validate + remember the log path for a session id; null when rejected. */
   const resolveLogPath = (sessionId: string): string | null => {
@@ -257,6 +230,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     const logPath = resolveLogPath(sessionId);
     if (!logPath) return;
 
+    const source = logSourceForRole(message.role);
     const entry = messageToLogEntry(
       {
         sessionId: agent.sessionId,
@@ -267,11 +241,11 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         toolCallId: message.toolCallId,
         source: message.source,
       },
-      logSourceForRole(message.role),
+      source,
     );
     await (fsync
-      ? queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n")
-      : queuedAppend(logPath, JSON.stringify(entry) + "\n"));
+      ? queuedFsyncAppend(sessionId, logPath, JSON.stringify(entry) + "\n", source)
+      : queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", source));
   };
 
   /**
@@ -303,7 +277,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       v: LOG_VERSION,
       content: prompt,
     });
-    return queuedAppend(logPath, JSON.stringify(entry) + "\n");
+    return queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.SYSTEM_PROMPT);
   };
 
   return {
@@ -326,7 +300,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           model: (config.model as string) || null,
           profile: (config.profileName as string) || null,
         });
-        await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+        await queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.SESSION_START);
       },
 
       [HOOKS.SESSION_RESTORE_ACTIVE]: ({
@@ -360,11 +334,14 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           if (rec.sessionId === sessionId) barrierFailures.delete(callId);
         }
         try {
-          writeQueues.delete(sessionPath(sessionId));
+          dropWrites(sessionPath(sessionId));
         } catch (err) {
           // A rejected id never owned a queue entry; nothing to reclaim.
           logger.debug(`[session-log] rejected session id at session end: ${formatError(err)}`);
         }
+        // The live record count goes with the session; a later re-registration
+        // (webui cold-load, resume) re-seeds from the file, never from this map.
+        dropRecordCount(sessionId);
       },
 
       /**
@@ -447,9 +424,9 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         // Tail determination: marker if re-emitted, else last kept message,
         // else the reset entry alone.
         if (keptMessages.length === 0 && openKind === undefined) {
-          done = queuedFsyncAppend(logPath, JSON.stringify(resetEntry) + "\n");
+          done = queuedFsyncAppend(sessionId, logPath, JSON.stringify(resetEntry) + "\n", LOG_SOURCE.RESET);
         } else {
-          done = queuedAppend(logPath, JSON.stringify(resetEntry) + "\n");
+          done = queuedAppend(sessionId, logPath, JSON.stringify(resetEntry) + "\n", LOG_SOURCE.RESET);
           for (let i = 0; i < keptMessages.length; i++) {
             // appendMessageEntry queues synchronously before its first await.
             const isTail = openKind === undefined && i === keptMessages.length - 1;
@@ -468,7 +445,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             v: LOG_VERSION,
             content: { kind: openKind },
           });
-          done = queuedFsyncAppend(logPath, JSON.stringify(marker) + "\n");
+          done = queuedFsyncAppend(sessionId, logPath, JSON.stringify(marker) + "\n", LOG_SOURCE.TURN_STARTED);
         }
         await done;
         // The reset moved the replay window and wiped all durability facts:
@@ -510,7 +487,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         // handler errors): catch, remember it against the call id, and let
         // the TOOL_CALL gate refuse it.
         try {
-          await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+          await queuedFsyncAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.TOOL_STARTED);
           barrierFailures.delete(toolCallId);
         } catch (err) {
           const why = formatError(err);
@@ -589,7 +566,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           v: LOG_VERSION,
           content: { kind: kind ?? "input" },
         });
-        const turnRecord = queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+        const turnRecord = queuedFsyncAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.TURN_STARTED);
         if (promptWrite) await promptWrite;
         await turnRecord;
         openTurns.set(sessionId, kind ?? "input");
@@ -637,7 +614,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           v: LOG_VERSION,
           content: { status },
         });
-        await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+        await queuedFsyncAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.TURN_END);
         openTurns.delete(sessionId);
       },
 
@@ -666,7 +643,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           v: LOG_VERSION,
           content: { origin: origin === "auto" ? "auto" : "manual" },
         });
-        await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+        await queuedFsyncAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.RESUME_ATTEMPT);
         await safeIndex("resume_attempt", () =>
           indexResumeAttempt(sessionId, (consecutiveAutoResumes ?? 0) >= MAX_CONSECUTIVE_AUTO_RESUMES),
         );
@@ -693,7 +670,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           from_profile: fromProfile || null,
           profile: toProfile,
         });
-        await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+        await queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.PROFILE_SWITCH);
         await safeIndex("profile_switch", () => indexSessionProfile(sessionId, toProfile));
       },
 
@@ -723,7 +700,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           content: "",
           model: newModel,
         });
-        await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+        await queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.MODEL_CHANGE);
         await safeIndex("model_change", () => indexSessionModel(sessionId, newModel));
       },
 
@@ -745,7 +722,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             content: questions,
             tool_call_id: toolCallId,
           });
-          await queuedFsyncAppend(logPath, JSON.stringify(entry) + "\n");
+          await queuedFsyncAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.QUESTION_ASKED);
           // Commit point: awaiting_question is honest the moment the record
           // lands -- alive or dead, the session IS waiting on a human now.
           await safeIndex("question_asked", () => indexQuestionAsked(sessionId, toolCallId));
@@ -801,7 +778,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
               ? { durationMs: d.durationMs }
               : {}),
           });
-          await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+          await queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.TOKEN_USAGE);
           // Mirror the sidebar's ctx numbers into the index so cold-log rows
           // carry them without a log scan (absolute values: idempotent).
           await safeIndex("token_usage", () =>
@@ -841,7 +818,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
               // Compaction summaries are harness-generated content.
               origin: "harness",
             });
-            await queuedAppend(logPath, JSON.stringify(entry) + "\n");
+            await queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.COMPACTION);
           }
         }
       },
@@ -857,12 +834,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       const logPath = sessionPath(lastSessionId);
       // Drain the write queue: entries dispatched but not yet flushed (floating
       // hook writes) must be on disk before the read.
-      const pending = writeQueues.get(logPath);
-      if (pending) {
-        try {
-          await pending;
-        } catch {}
-      }
+      await drainWrites(logPath);
       try {
         await access(logPath);
       } catch {

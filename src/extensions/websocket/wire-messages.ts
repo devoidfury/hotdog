@@ -38,7 +38,10 @@ export function s2cContent(
  * client tooltip can say so instead of dressing a derived number as
  * recorded. Live event frames carry none of these (the client measures its
  * own turn and folds the live TOKEN_USAGE event it receives into the
- * footer); replay fills what the log knows.
+ * footer); replay fills what the log knows. An empty `content` is the
+ * text-less response frame (tool calls and/or reasoning only): the client
+ * renders no bubble, only the bar -- no copy button, and nothing at all
+ * without a trustworthy ts.
  */
 export function s2cAssistantMessage(
   sessionId: string,

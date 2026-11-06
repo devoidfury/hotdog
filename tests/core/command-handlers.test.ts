@@ -15,6 +15,7 @@ import {
   parseForkArg,
   CORE_COMMAND_HANDLERS,
 } from "@core/command-handlers.ts";
+import { createCommandRegistry } from "@core/extensions/registries.ts";
 
 type TokenUsage = {
   turns: number;
@@ -56,9 +57,40 @@ function makeMockAgent(overrides: Record<string, unknown> = {}): Record<string, 
 // ── Handler Tests ──────────────────────────────────────────────────────
 
 describe("handleQuit / handleHelp", () => {
-  it("return fallback messages", () => {
+  it("handleQuit returns the fallback message", () => {
     expect(handleQuit().content).toBe("Quit (use /quit to exit)");
-    expect(handleHelp().content).toBe("Help (use /help for commands)");
+  });
+
+  it("handleHelp returns the registry-generated command list", () => {
+    const agent = makeMockAgent({
+      commandRegistry: {
+        generateHelpText: mock(
+          () => "  /help                Show help\n  /tokens              Show token usage",
+        ),
+      },
+    });
+    const result = handleHelp(agent as any);
+    expect(result.action).toBe(ACTIONS.DISPLAY);
+    // Content comes from the registry, not a placeholder.
+    expect((agent.commandRegistry as any).generateHelpText).toHaveBeenCalled();
+    expect(result.content).toContain("/help");
+    expect(result.content).toContain("Show help");
+    expect(result.content).toContain("Show token usage");
+    expect(result.content).not.toContain("Help (use /help for commands)");
+  });
+
+  it("handleHelp lists the real core commands off a real registry", () => {
+    const registry = createCommandRegistry();
+    for (const [type, def] of Object.entries(CORE_COMMAND_HANDLERS)) {
+      registry.register(type, def);
+    }
+    const agent = makeMockAgent({ commandRegistry: registry });
+    const result = handleHelp(agent as any);
+    for (const name of ["help", "clear", "tokens", "rewind", "fork", "reasoning"]) {
+      expect(result.content).toContain(`/${name}`);
+    }
+    expect(result.content).toContain("Show token usage");
+    expect(result.content).toContain("Rewind the last N turns");
   });
 });
 

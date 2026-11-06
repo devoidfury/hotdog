@@ -499,6 +499,47 @@ describe("replayLogSlice footer meta (assistant ts + turn duration)", () => {
     expect("durationMs" in out[0]!).toBe(false);
     expect("ctx" in out[0]!).toBe(false);
   });
+
+  it("text-less llm entries replay as footer-only frames with full meta", () => {
+    const out = sliceMeta([
+      entryAt(0, { source: LOG_SOURCE.TURN_STARTED, content: { kind: "input" } }),
+      entryAt(10, { source: LOG_SOURCE.INPUT, content: "go" }),
+      entryAt(5000, {
+        source: LOG_SOURCE.LLM,
+        content: "",
+        tool_calls: [{ id: "c1", function: { name: "bash", arguments: "{}" } }],
+      }),
+      entryAt(5001, { source: LOG_SOURCE.TOKEN_USAGE, content: "", totalTokens: 960, contextWindow: 200000 }),
+      entryAt(6000, { source: LOG_SOURCE.TURN_END, content: { status: "completed" } }),
+    ]);
+    // The tool call still replays; the entry also sends its footer frame:
+    // empty content + the per-response meta (ts, ctx, turn duration). The
+    // client renders that as a bar without a copy button.
+    expect(out.some((m) => m.type === S2C.TOOL_CALL)).toBe(true);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    expect(assistant.content).toBe("");
+    expect(assistant.ts).toBe(T0 + 5000);
+    expect(assistant.durationMs).toBe(6000);
+    // No durationMs on the record: the call segment is the strict-adjacency
+    // log gap (input t0+10 -> llm t0+5000), flagged derived.
+    expect(assistant.ctx).toEqual({ used: 960, total: 200000 });
+    expect(assistant.callMs).toBe(4990);
+    expect(assistant.callDerived).toBe(true);
+  });
+
+  it("a legacy text-less entry still sends its frame, sans ts (client drops the bar)", () => {
+    const out = sliceMeta([
+      {
+        session_id: "s",
+        source: LOG_SOURCE.LLM,
+        content: "",
+        tool_calls: [{ id: "c1", function: { name: "bash", arguments: "{}" } }],
+      } as unknown as LogEntry,
+    ]);
+    const assistant = out.find((m) => m.type === S2C.ASSISTANT_MESSAGE)!;
+    expect(assistant.content).toBe("");
+    expect("ts" in assistant).toBe(false);
+  });
 });
 
 describe("replayLogSlice footer meta (assistant ctx usage)", () => {
@@ -659,10 +700,36 @@ describe("replayLogSlice footer meta (assistant per-call duration)", () => {
     // First call: input@10 -> llm@1000 = 990, derived (no usage record).
     expect(assistants[0]!.callMs).toBe(990);
     expect(assistants[0]!.callDerived).toBe(true);
-    expect(assistants[0]!.durationMs).toBe(4000); // same turn total on both
+    // The mid-round row rides its own call time only: the turn was still
+    // open, and one bracket spans the whole turn -- stamping its total here
+    // too would print "Worked for 4s" under every round.
+    expect("durationMs" in assistants[0]!).toBe(false);
     // Second call: tool_result@1500 -> llm@3500 = 2000, derived.
     expect(assistants[1]!.callMs).toBe(2000);
-    expect(assistants[1]!.durationMs).toBe(4000);
+    expect(assistants[1]!.durationMs).toBe(4000); // the response that closed the turn
+  });
+
+  it("one bracket spans a multi-round turn: only the turn-final frame carries the total", () => {
+    const out = sliceMeta([
+      entryAt(0, { source: LOG_SOURCE.TURN_STARTED, content: { kind: "input" } }),
+      entryAt(10, { source: LOG_SOURCE.INPUT, content: "go" }),
+      // Three responses live in the SAME bracket (turn_started is written on
+      // the run's first iteration, turn_end when the run stops).
+      entryAt(5000, { source: LOG_SOURCE.LLM, content: "", tool_calls: [{ id: "c1", function: { name: "bash", arguments: "{}" } }] }),
+      entryAt(5001, { source: LOG_SOURCE.TOKEN_USAGE, content: "", totalTokens: 960, contextWindow: 200000 }),
+      entryAt(6000, { source: LOG_SOURCE.TOOL_RESULT, content: "ok", tool_call_id: "c1" }),
+      entryAt(7000, { source: LOG_SOURCE.LLM, content: "", tool_calls: [{ id: "c2", function: { name: "bash", arguments: "{}" } }] }),
+      entryAt(8000, { source: LOG_SOURCE.TOOL_RESULT, content: "ok", tool_call_id: "c2" }),
+      entryAt(9500, { source: LOG_SOURCE.LLM, content: "done" }),
+      entryAt(10000, { source: LOG_SOURCE.TURN_END, content: { status: "completed" } }),
+    ]);
+    const assistants = out.filter((m) => m.type === S2C.ASSISTANT_MESSAGE);
+    expect(assistants).toHaveLength(3);
+    expect("durationMs" in assistants[0]!).toBe(false);
+    expect("durationMs" in assistants[1]!).toBe(false);
+    expect(assistants[2]!.durationMs).toBe(10000);
+    // Every frame keeps its own identity: ts is per-entry, never turn-level.
+    expect(assistants.map((m) => m.ts)).toEqual([T0 + 5000, T0 + 7000, T0 + 9500]);
   });
 });
 

@@ -1030,6 +1030,30 @@ describe("assistant message footer (cold-log replay)", () => {
     expect(footers[1]!.querySelector(".footer-time")!.textContent).toBe("1:00 AM");
     expect(footers[1]!.querySelector(".footer-worked")).toBeNull();
   });
+
+  it("a multi-round turn: the turn total rides ONLY the turn-final bar", () => {
+    const t0 = localTs(2026, 5, 4, 1, 5);
+    ml.renderLogEntries([
+      // ONE bracket spans the whole turn (turn_started lands on the run's
+      // first iteration, turn_end when it stops), so a naive per-entry stamp
+      // printed the same total under every round's bar.
+      entry({ source: "turn_started", ts: iso(t0), content: { kind: "input" } }),
+      entry({ source: "input", ts: iso(t0 + 10), content: "go" }),
+      entry({
+        source: "llm",
+        ts: iso(t0 + 5000),
+        content: "checking",
+        tool_calls: [{ id: "t1", name: "bash", arguments: "{}" }],
+      }),
+      entry({ source: "tool_result", ts: iso(t0 + 5100), content: "ok" }),
+      entry({ source: "llm", ts: iso(t0 + 9000), content: "done" }),
+      entry({ source: "turn_end", ts: iso(t0 + 9000), content: { status: "completed" } }),
+    ] as any);
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(2);
+    expect(footers[0]!.querySelector(".footer-worked")).toBeNull();
+    expect(footers[1]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 9s");
+  });
 });
 
 // ── Footer ctx gauge segment + hover breakdown ──────────────────────────────
@@ -1254,6 +1278,202 @@ describe("assistant footer ctx segment (cold-log replay)", () => {
   it("legacy entries without ts still get NO footer even when usage exists", () => {
     ml.renderLogEntries([
       { source: "llm", content: "undated answer" },
+      { source: "token_usage", content: "", totalTokens: 1200 },
+    ] as never);
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+  });
+});
+
+// ── One bar per response, text-less responses included ──────────────────────
+// Every completed LLM response gets exactly one footer bar with its own ctx
+// gauge, on every render path -- including responses that streamed no text
+// (tool calls and/or reasoning only). The copy button is the action for
+// text: a text-less bar has none. The TOKEN_USAGE frame is the per-response
+// marker on the live path (providers that report no usage honestly have no
+// text-less bar); TOOL_RESULT clears the marker so a replayed usage record
+// (which lands before the NEXT entry's tool frames in log order) can never
+// stamp a later response.
+
+describe("assistant bar per response (text-less responses)", () => {
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const t0 = localTs(2026, 5, 4, 1, 5);
+
+  function frame(over: Record<string, unknown> = {}) {
+    return {
+      promptTokens: 26112,
+      cachedTokens: 98304,
+      completionTokens: 1408,
+      totalTokens: 125824,
+      contextWindow: 262144,
+      ctxUsed: 125824,
+      ctxTotal: 262144,
+      ...over,
+    };
+  }
+
+  it("live tool-only response: one bar with gauge, no copy button, no bubble", () => {
+    ml.noteWorking(false); // baseline
+    ml.noteWorking(true);
+    ml.handleTokenUsage(frame() as never);
+    ml.handleToolCall({ name: "bash", args: "{}" });
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(1);
+    expect(footers[0]!.querySelector(".footer-ctx")!.textContent).toBe("126k/262k");
+    expect(footers[0]!.querySelector(".footer-copy")).toBeNull();
+    expect(footers[0]!.querySelector(".footer-worked")).toBeNull(); // turn still open
+    // The response itself rendered no assistant bubble -- only the bar.
+    expect(container.querySelectorAll(".message.assistant")).toHaveLength(0);
+  });
+
+  it("parallel tool calls in one response stay ONE bar", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleTokenUsage(frame() as never);
+    ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c1" });
+    ml.handleToolCall({ name: "read", args: "{}", toolCallId: "c2" });
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(1);
+  });
+
+  it("one bar per round: text round keeps its copy button, tool-only round gets none", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingChunk({ content: "let me check" });
+    ml.handleTokenUsage(frame() as never);
+    ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c1" });
+    ml.handleToolResult({ name: "bash", output: "ok", toolCallId: "c1" });
+    // Round 2: no text streamed, its own usage frame, then tools.
+    ml.handleTokenUsage(frame({ ctxUsed: 130000 }) as never);
+    ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c2" });
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(2);
+    expect(footers[0]!.querySelector(".footer-copy")).not.toBeNull();
+    expect(footers[1]!.querySelector(".footer-copy")).toBeNull();
+    expect(footers[1]!.querySelector(".footer-ctx")!.textContent).toBe("130k/262k");
+  });
+
+  it("live reasoning-only response: bar lands once, thinking block stays rendered", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleStreamingReasoningChunk({ content: "pondering" });
+    ml.handleTokenUsage(frame() as never);
+    ml.handleToolCall({ name: "bash", args: "{}" });
+    expect(container.querySelectorAll(".thinking-block")).toHaveLength(1);
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(1);
+    expect(footers[0]!.querySelector(".footer-copy")).toBeNull();
+  });
+
+  it("silent final response: turn end gives it ts + gauge + worked, no copy", () => {
+    let fakeNow = localTs(2026, 5, 4, 9, 0);
+    const nowSpy = spyOn(Date, "now").mockImplementation(() => fakeNow);
+    try {
+      ml.noteWorking(false); // baseline
+      ml.noteWorking(true);
+      ml.handleTokenUsage(frame() as never);
+      fakeNow += 65_000;
+      ml.noteWorking(false);
+      const footers = container.querySelectorAll(".message-assistant-footer");
+      expect(footers).toHaveLength(1);
+      expect(footers[0]!.querySelector(".footer-copy")).toBeNull();
+      expect(footers[0]!.querySelector(".footer-ctx")).not.toBeNull();
+      expect(footers[0]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 1m 05s");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("stop after a tool round attaches the turn total to the round's bar", () => {
+    let fakeNow = localTs(2026, 5, 4, 9, 0);
+    const nowSpy = spyOn(Date, "now").mockImplementation(() => fakeNow);
+    try {
+      ml.noteWorking(false); // baseline (clocked turn starts now)
+      ml.noteWorking(true);
+      ml.handleTokenUsage(frame() as never);
+      ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c1" });
+      const footer = container.querySelector(".message-assistant-footer")!;
+      expect(footer.querySelector(".footer-worked")).toBeNull(); // open turn
+      ml.handleToolResult({ name: "bash", output: "ok", toolCallId: "c1" });
+      fakeNow += 30_000;
+      ml.noteWorking(false); // stopped: no further response
+      // Still the one bar -- now carrying the turn total.
+      expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(1);
+      expect(footer.querySelector(".footer-worked")!.textContent).toBe("Worked for 30s");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("cancel after a round: the cut-off stream row still gets no footer, the round's bar keeps its honest total", () => {
+    let fakeNow = localTs(2026, 5, 4, 9, 0);
+    const nowSpy = spyOn(Date, "now").mockImplementation(() => fakeNow);
+    try {
+      ml.noteWorking(false); // baseline
+      ml.noteWorking(true);
+      ml.handleTokenUsage(frame() as never);
+      ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c1" });
+      fakeNow += 10_000;
+      // A new response starts streaming, then a new user ask cuts it off: the
+      // interrupted row is NOT a completed response, so it gets no bar.
+      ml.handleStreamingChunk({ content: "half a thought" });
+      ml.handleUserMessage({ content: "stop, do this instead" });
+      ml.noteWorking(false); // cancelled turn closes
+      const footers = container.querySelectorAll(".message-assistant-footer");
+      expect(footers).toHaveLength(1);
+      expect(footers[0]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 10s");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("a usage record cleared by a tool result never stamps the next response", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleTokenUsage(frame() as never);
+    ml.handleToolResult({ name: "read", output: "x" }); // closes the record's response
+    ml.handleToolCall({ name: "bash", args: "{}" }); // later response, no usage yet
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+  });
+
+  it("provider with no usage frame: text-less response honestly renders no bar", () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    ml.handleToolCall({ name: "bash", args: "{}" });
+    expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+  });
+
+  it("empty-content frame with ts renders the bar only (replay path)", () => {
+    ml.handleAssistantMessage({ content: "", ts: localTs(2026, 5, 4, 2, 30), ctx: { used: 960 } });
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(1);
+    expect(footers[0]!.querySelector(".footer-time")!.textContent).toBe("2:30 AM");
+    expect(footers[0]!.querySelector(".footer-ctx")!.textContent).toBe("960");
+    expect(footers[0]!.querySelector(".footer-copy")).toBeNull();
+    expect(container.querySelectorAll(".message.assistant")).toHaveLength(0);
+  });
+
+  it("empty-content frame without ts renders nothing (legacy omission)", () => {
+    ml.handleAssistantMessage({ content: "" });
+    expect(container.children).toHaveLength(0);
+  });
+
+  it("cold log: text-less llm entry gets bar + gauge from its usage record, no copy", () => {
+    ml.renderLogEntries([
+      { source: "turn_started", ts: iso(t0), content: { kind: "input" } },
+      { source: "llm", ts: iso(t0 + 5000), content: "", tool_calls: [{ id: "t1", name: "bash", arguments: "{}" }] },
+      { source: "token_usage", ts: iso(t0 + 5005), content: "", totalTokens: 125824, contextWindow: 262144 },
+      { source: "turn_end", ts: iso(t0 + 9000), content: { status: "completed" } },
+    ] as never);
+    const footers = container.querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(1);
+    expect(footers[0]!.querySelector(".footer-ctx")!.textContent).toBe("126k/262k");
+    expect(footers[0]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 9s");
+    expect(footers[0]!.querySelector(".footer-copy")).toBeNull();
+    expect(container.querySelectorAll(".message.assistant")).toHaveLength(0);
+  });
+
+  it("cold log: legacy text-less entry without ts renders nothing", () => {
+    ml.renderLogEntries([
+      { source: "llm", content: "", tool_calls: [{ id: "t1", name: "bash", arguments: "{}" }] },
       { source: "token_usage", content: "", totalTokens: 1200 },
     ] as never);
     expect(container.querySelectorAll(".message-assistant-footer")).toHaveLength(0);

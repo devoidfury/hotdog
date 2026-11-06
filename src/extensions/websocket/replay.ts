@@ -23,7 +23,7 @@ import {
   type TokenUsageWireSource,
 } from "./wire-messages.ts";
 import { splitFileIncludes, wrapperContentText } from "@utils/tool-content.ts";
-import { ctxByIndex, deriveCallDurationsByIndex, parseEntryTs, turnDurationsByIndex } from "@utils/session-turns.ts";
+import { ctxByIndex, deriveCallDurationsByIndex, parseEntryTs, turnFinalDurationsByIndex } from "@utils/session-turns.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import type { HotdogServerSocket } from "./socket.ts";
 
@@ -75,8 +75,9 @@ export function replayLogSlice(
     }
   }
 
-  // Message-footer meta: each entry's own completion ts, the wall-clock
-  // duration of the v2 turn bracketing it (undefined outside a closed
+  // Message-footer meta: each entry's own completion ts, the wall-clock turn
+  // total ONLY on the entry that closed its bracket (one bracket spans a whole
+  // multi-round turn, so mid-round rows ride none; undefined outside a closed
   // bracket -- an unknown duration rides no field, the client omits it),
   // and the ctx usage attested at the message's commit -- the token_usage
   // record written for that LLM response (undefined when the log has none:
@@ -85,7 +86,7 @@ export function replayLogSlice(
   // durationMs on that usage record first, else the strict-adjacency log-gap
   // derivation (deriveCallDurationsByIndex); callDerived says which it was,
   // so the footer tooltip never dresses a derived number as recorded.
-  const turnDurations = turnDurationsByIndex(entries);
+  const turnFinalDurations = turnFinalDurationsByIndex(entries);
   const ctxs = ctxByIndex(entries);
   const derivedCalls = deriveCallDurationsByIndex(entries);
 
@@ -121,22 +122,24 @@ export function replayLogSlice(
           );
         }
         const text = wrapperContentText(content);
-        if (text) {
-          // Per-call duration: recorded (the usage record's own durationMs,
-          // ctxByIndex posture) beats derived (strict-adjacency log gap);
-          // neither present means the segment rides no field.
-          const recordedCall = ctxs[i]?.callMs;
-          const derivedCall = recordedCall === undefined ? derivedCalls[i] : undefined;
-          send(
-            s2cAssistantMessage(sessionId, text, {
-              ts: parseEntryTs(e.ts),
-              durationMs: turnDurations[i],
-              ctx: ctxs[i],
-              callMs: recordedCall ?? derivedCall,
-              ...(derivedCall !== undefined ? { callDerived: true } : {}),
-            }),
-          );
-        }
+        // One footer per response: text-less llm entries (tool calls and/or
+        // reasoning only) still send their frame with empty content, and the
+        // client renders just the bar (no copy button -- nothing to copy).
+        // Frames without a trustworthy ts render no bar (pinned omission).
+        // Per-call duration: recorded (the usage record's own durationMs,
+        // ctxByIndex posture) beats derived (strict-adjacency log gap);
+        // neither present means the segment rides no field.
+        const recordedCall = ctxs[i]?.callMs;
+        const derivedCall = recordedCall === undefined ? derivedCalls[i] : undefined;
+        send(
+          s2cAssistantMessage(sessionId, text, {
+            ts: parseEntryTs(e.ts),
+            durationMs: turnFinalDurations[i],
+            ctx: ctxs[i],
+            callMs: recordedCall ?? derivedCall,
+            ...(derivedCall !== undefined ? { callDerived: true } : {}),
+          }),
+        );
         break;
       }
       case LOG_SOURCE.TOOL_RESULT: {

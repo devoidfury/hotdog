@@ -43,11 +43,17 @@ export function handleQuit(): CommandResult {
 }
 
 /**
- * Handler for /help — handled at the Channel level.
- * This fallback exists for direct agent command execution.
+ * Handler for /help — the real command list, built from the registry every
+ * agent owns (core handlers plus extension-registered commands all carry
+ * descriptions). The interactive CLI still intercepts /help at its UI layer
+ * with its own static HELP_TEXT; this is what non-CLI channels (webui)
+ * render.
  */
-export function handleHelp(): CommandResult {
-  return { action: ACTIONS.DISPLAY, content: "Help (use /help for commands)" };
+export function handleHelp(agent: Agent): CommandResult {
+  return {
+    action: ACTIONS.DISPLAY,
+    content: `Commands:\n${agent.commandRegistry.generateHelpText()}`,
+  };
 }
 
 /**

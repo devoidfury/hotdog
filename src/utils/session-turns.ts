@@ -13,34 +13,45 @@ export function parseEntryTs(ts: unknown): number | undefined {
 }
 
 /**
- * For each entry index, the wall-clock ms of the turn bracketing it.
- * A v2 log closes every turn with `turn_started` ... `turn_end`; both
- * bracketing records must carry valid timestamps to yield a duration.
- * Entries outside any bracket, logs without markers (v1), and turns still
- * open at log end (crash) get undefined: an unknown duration is omitted,
- * never invented.
+ * For each entry index, the wall-clock ms of the turn that entry CLOSED --
+ * and only ONE index per turn gets a number. A v2 log brackets a whole turn:
+ * `turn_started` is written on the run's first iteration only and `turn_end`
+ * when the run stops, so every LLM response of a multi-round turn lives in
+ * the SAME bracket. Handing the bracket total to all of them printed
+ * "Worked for <whole turn>" under every round's bar. The total is a
+ * turn-level number, so it belongs to the row that ended the turn: the
+ * bracket's LAST `llm` entry (the first one after it would already be the
+ * next turn's).
+ *
+ * Both bracketing records must carry valid timestamps, and the end must not
+ * precede the start. Entries outside a bracket, logs without markers (v1),
+ * and turns still open at log end (crash) get undefined: an unknown
+ * duration is omitted, never invented. A second `turn_started` before an
+ * end (crash + resume re-emits it) means the later marker owns the turn --
+ * whatever the unclosed earlier one covered stays without a duration.
  */
-export function turnDurationsByIndex(
+export function turnFinalDurationsByIndex(
   entries: ReadonlyArray<{ source?: string | null; ts?: string | null }>,
 ): Array<number | undefined> {
   const durations: Array<number | undefined> = new Array(entries.length).fill(undefined);
-  let openAt = -1;
   let openMs: number | undefined;
+  let finalLlmAt = -1;
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i]!;
     if (e.source === "turn_started") {
-      // A second marker before an end (crash + resume re-emits it): the
-      // later one owns the turn; entries under the unclosed earlier one
-      // stay without a duration.
-      openAt = i;
       openMs = parseEntryTs(e.ts);
+      finalLlmAt = -1;
+    } else if (e.source === "llm") {
+      // Outside an open turn (v1 log, or a marker-less resume tail): nothing
+      // to close, so this entry is not a candidate.
+      if (openMs !== undefined) finalLlmAt = i;
     } else if (e.source === "turn_end") {
       const endMs = parseEntryTs(e.ts);
-      if (openAt >= 0 && openMs !== undefined && endMs !== undefined && endMs >= openMs) {
-        for (let k = openAt; k <= i; k++) durations[k] = endMs - openMs;
+      if (finalLlmAt >= 0 && openMs !== undefined && endMs !== undefined && endMs >= openMs) {
+        durations[finalLlmAt] = endMs - openMs;
       }
-      openAt = -1;
       openMs = undefined;
+      finalLlmAt = -1;
     }
   }
   return durations;
@@ -86,7 +97,7 @@ function recorded(n: unknown): number | undefined {
 
 /**
  * For each entry index, the ctx usage attested AT that message's commit --
- * the sibling of turnDurationsByIndex for the footer's `used/total` segment.
+ * the sibling of turnFinalDurationsByIndex for the footer's `used/total` segment.
  * A token_usage record belongs to the LLM response that precedes it (the
  * session-log hook writes it right after the `llm` entry it describes), so
  * each record claims the nearest preceding un-claimed `llm` entry and stamps

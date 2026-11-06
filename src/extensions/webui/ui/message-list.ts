@@ -12,7 +12,7 @@ import {
   type MdDocument,
 } from "@utils/md-parser.ts";
 import { toolContentText, wrapperContentText, splitFileIncludes } from "@utils/tool-content.ts";
-import { ctxByIndex, deriveCallDurationsByIndex, parseEntryTs, turnDurationsByIndex, type CtxUsage } from "@utils/session-turns.ts";
+import { ctxByIndex, deriveCallDurationsByIndex, parseEntryTs, turnFinalDurationsByIndex, type CtxUsage } from "@utils/session-turns.ts";
 import { ToolBlockController, type ToolDisplayWire } from "./tool-block.tsx";
 import type { DomNode } from "@utils/jsx";
 
@@ -68,6 +68,10 @@ interface UserMessage { content: string; images?: UiImage[]; files?: Array<{ pat
  * else the strict-adjacency log-gap derivation, which `callDerived: true`
  * then marks so the tooltip says so (a derived number never presents as
  * recorded). Absent fields are omitted from the footer, never invented.
+ * `content` may be empty: a response with no text (tool calls and/or
+ * reasoning only) still sends its frame so the per-response bar lands --
+ * without a copy button (nothing to copy), and not at all without a
+ * trustworthy ts.
  */
 interface AssistantMessage {
   content: string;
@@ -203,9 +207,11 @@ export interface MessageListManager {
   handleError: (data: ErrorMessage) => void;
   /**
    * Close the in-flight streaming row. Pass `end` when the row committed as
-   * a COMPLETED message (turn end): the footer (timestamp + copy, with the
-   * ctx gauge and duration when known) rides the completion. Quiet closes
-   * (interruption, error) take nothing and render no footer.
+   * a COMPLETED message (turn end / tool boundary): the footer (timestamp +
+   * copy, with the ctx gauge and duration when known) rides the completion,
+   * and a text-less completed response (usage attested, no text streamed)
+   * gets its bar with no copy button. Quiet closes (interruption, error)
+   * take nothing and render no footer.
    */
   finalizeAssistant: (end?: { ts: number; durationMs?: number; ctx?: CtxUsage; callMs?: number }) => void;
   /** Turn boundary from the session's "working" state (live turn clock). */
@@ -268,6 +274,26 @@ export function createMessageList(
   // attribution rule: an unobserved duration renders nothing.
   let lastTurnCallMs: number | undefined;
 
+  // One bar per response: the TOKEN_USAGE frame is the marker that an LLM
+  // response completed (agent.ts emits it once per call, right after
+  // addMessage and -- ordered sink -- before that call's tool frames).
+  // Every commit consumes it; a completed commit with no text row in flight
+  // renders the bar on its own (no copy button: nothing to copy), so a
+  // tool-only/reasoning-only response still gets its bar + gauge update.
+  // TOOL_RESULT frames clear it: in log replay the usage record lands
+  // BEFORE the next entry's tool frames, and a stale flag must never stamp
+  // a later response. Providers that report no usage emit no frame: their
+  // text-less responses honestly have no per-response bar to show.
+  let usageAwaitingBar = false;
+
+  // The most recently rendered footer row + whether its "Worked for" turn
+  // total already rode it. A turn closing with a measured duration attaches
+  // the total to the last bar when that bar landed mid-turn (tool round,
+  // then stop). Turn start clears this so a bar from an earlier turn (or a
+  // replayed log) never claims the new turn's duration.
+  let lastBar: HTMLElement | null = null;
+  let lastBarWorked = false;
+
   /**
    * Turn boundary from the session's "working" state. False finalizes the
    * in-flight row as a COMPLETED assistant message: the footer (client-clock
@@ -281,12 +307,29 @@ export function createMessageList(
       workingBaseline = true;
       lastTurnCtx = undefined;
       lastTurnCallMs = undefined;
+      usageAwaitingBar = false;
+      lastBar = null;
+      lastBarWorked = false;
       return;
     }
+    // The very first report (idle attach): this view observed no turn, so a
+    // usage flag left behind by the replay burst must never render a bar --
+    // only a real turn end consumes the flag. A flushed in-flight row
+    // (mid-turn attach) still commits honestly here.
+    const wasFirstReport = !workingBaseline;
     workingBaseline = true;
+    if (wasFirstReport) usageAwaitingBar = false;
     const durationMs = turnStartMs !== null ? Date.now() - turnStartMs : undefined;
     turnStartMs = null;
     finalizeAssistant({ ts: Date.now(), durationMs, ctx: lastTurnCtx, callMs: lastTurnCallMs });
+    // The turn closed on a tool/reasoning round: the final response's bar
+    // landed at the tool boundary with no duration (the turn was still
+    // open). The wall-clock total is known now -- attach it there, so the
+    // stopped row carries "Worked for X" like any completed final row.
+    if (durationMs !== undefined && lastBar && !lastBarWorked) {
+      appendWorkedSegment(lastBar, durationMs);
+      lastBarWorked = true;
+    }
     lastTurnCtx = undefined;
     lastTurnCallMs = undefined;
   }
@@ -478,7 +521,9 @@ export function createMessageList(
    * derivation -- callDerived says which, and the tooltip discloses it),
    * then "Worked for X" when the turn total is reliably known (cold replay:
    * the log's turn markers; live: the observed working-edge span), then the
-   * copy button. Segments render independently -- ts-only, ts+gauge,
+   * copy button -- which only rides when there IS text to copy: a text-less
+   * response's bar (tool calls and/or reasoning only) has no raw markdown,
+   * so no button. Segments render independently -- ts-only, ts+gauge,
    * call-only, ctx+call, turn-total+call are all valid rows. No trustworthy
    * timestamp means no footer at all (pinned degradation for legacy logs):
    * the row speaks times, so it never renders without one.
@@ -548,14 +593,29 @@ export function createMessageList(
       row.appendChild(call);
     }
     if (meta.durationMs !== undefined && Number.isFinite(meta.durationMs) && meta.durationMs >= 0) {
-      const worked = document.createElement("span");
-      worked.className = "footer-worked";
-      worked.textContent = `Worked for ${formatDuration(meta.durationMs)}`;
-      row.appendChild(worked);
+      appendWorkedSegment(row, meta.durationMs);
     }
-    row.appendChild(makeCopyButton(rawMarkdown));
+    // The copy button is the row's action for text: a text-less response's
+    // bar (no raw markdown) gets no button -- nothing to copy.
+    if (rawMarkdown.trim() !== "") {
+      row.appendChild(makeCopyButton(rawMarkdown));
+    }
     container.appendChild(row);
+    lastBar = row;
+    lastBarWorked = meta.durationMs !== undefined && Number.isFinite(meta.durationMs) && meta.durationMs >= 0;
     scrollBottom();
+  }
+
+  /** The "Worked for X" segment, before the copy button when one is there.
+   *  Also used to attach a closing turn's total to the last bar that landed
+   *  mid-turn (a tool-only final response committed without a duration). */
+  function appendWorkedSegment(row: HTMLElement, durationMs: number): void {
+    const worked = document.createElement("span");
+    worked.className = "footer-worked";
+    worked.textContent = `Worked for ${formatDuration(durationMs)}`;
+    const copy = row.querySelector(".footer-copy");
+    if (copy) row.insertBefore(worked, copy);
+    else row.appendChild(worked);
   }
 
   // ── Message Handlers ──────────────────────────────────────────────────────
@@ -595,8 +655,15 @@ export function createMessageList(
   }
 
   function handleAssistantMessage({ content, ts, durationMs, ctx, callMs, callDerived }: AssistantMessage): void {
-    if (!content?.trim()) return; // skip empty messages (e.g. tool-only turns during replay)
     finalizeAssistant();
+    if (!content?.trim()) {
+      // A response with no text (tool calls and/or reasoning only). Replay
+      // paths still send this frame with the entry's footer meta, so the
+      // bar lands under the response's blocks -- no bubble, no copy button
+      // (nothing to copy), and no bar at all without a trustworthy ts.
+      appendFooterRow("", { ts, durationMs, ctx, callMs, callDerived });
+      return;
+    }
     const el = document.createElement("div");
     el.className = "message assistant";
 
@@ -685,6 +752,7 @@ export function createMessageList(
     if (currentThinkingEl) currentThinkingEl.remove();
     currentThinkingEl = null;
     hasToolCallsSinceLastAssistant = false;
+    usageAwaitingBar = false;
     streamingParser = null;
     thinkingParser = null;
     streamingBlockCount = 0;
@@ -722,6 +790,10 @@ export function createMessageList(
   }
 
   function handleToolResult({ name, output, error, images, toolCallId }: ToolResultMessage): void {
+    // The response behind the preceding usage record is fully closed here.
+    // Log-order replay puts the usage frame BEFORE the next entry's tool
+    // frames, so a held flag must not survive into a later response's bar.
+    usageAwaitingBar = false;
     // Pair by tool-call id first; without one (old logs), fall back to the
     // oldest unresolved call of the same name.
     let block = toolCallId ? toolBlocksById.get(toolCallId) : undefined;
@@ -1008,6 +1080,12 @@ export function createMessageList(
     completionTokens,
     durationMs,
   }: TokenUsageMessage): void {
+    // The frame itself is the per-response marker: an LLM call completed
+    // (even one whose provider kept the numbers private). Every completed
+    // commit consumes it; TOOL_RESULT clears it so a replayed usage record
+    // (which lands BEFORE the next entry's tool frames in log order) can
+    // never stamp a later response's bar.
+    usageAwaitingBar = true;
     if (typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs >= 0) {
       lastTurnCallMs = durationMs;
     }
@@ -1045,6 +1123,10 @@ export function createMessageList(
 
   function handleError({ message }: ErrorMessage): void {
     finalizeAssistant();
+    // An errored turn is neither completed nor stopped: no "Worked for"
+    // claim on the last bar.
+    lastBar = null;
+    lastBarWorked = false;
     const el = document.createElement("div");
     el.className = "message error";
 
@@ -1062,6 +1144,7 @@ export function createMessageList(
 
   function finalizeAssistant(end?: { ts: number; durationMs?: number; ctx?: CtxUsage; callMs?: number }): void {
     dbg("finalizeAssistant", { hadAssistant: !!currentAssistantEl, streamingBlockCount, thinkingBlockCount });
+    let rowCommitted = false;
     if (currentAssistantEl) {
       // Drop empty assistant elements (e.g. tool-only turns).
       const contentDiv = currentAssistantEl.querySelector(".content") as HTMLDivElement;
@@ -1073,9 +1156,19 @@ export function createMessageList(
         // A completed commit (turn end / tool boundary): footer row with the
         // client-clock finish time; the duration segment only when known.
         appendFooterRow(currentAssistantRaw, end ?? {});
+        rowCommitted = true;
       }
       currentAssistantEl = null;
     }
+    if (!rowCommitted && end && usageAwaitingBar) {
+      // Text-less completed response (tool calls and/or reasoning, no text
+      // streamed): the usage frame attests the response and this completed
+      // commit is its boundary. One bar per response -- the bar lands here
+      // (no copy button: there is no raw markdown), so every response shows
+      // its own ts + ctx gauge update, not just the ones with prose.
+      appendFooterRow("", end);
+    }
+    usageAwaitingBar = false;
     if (currentThinkingEl && !currentThinkingEl.textContent?.trim()) {
       currentThinkingEl.remove();
     }
@@ -1133,6 +1226,9 @@ export function createMessageList(
     workingBaseline = false;
     lastTurnCtx = undefined;
     lastTurnCallMs = undefined;
+    usageAwaitingBar = false;
+    lastBar = null;
+    lastBarWorked = false;
   }
 
   /** Best-effort tool name from a tool_result entry: stored part, then JSON "name", then "tool: ..." prefix. */
@@ -1166,16 +1262,18 @@ export function createMessageList(
    */
   function renderLogEntries(entries: LogEntry[]): void {
     // Footer data for the replay path: each entry's own ts is its completion
-    // time, the v2 turn markers bracket each turn's wall-clock duration
-    // (turnDurationsByIndex yields undefined -- segment omitted -- for v1
-    // logs without markers and for turns still open at log end), and each
+    // time, the v2 turn markers give the turn's wall-clock total to the
+    // response that CLOSED the turn and nothing to the rounds before it
+    // (turnFinalDurationsByIndex returns undefined -- segment omitted -- for
+    // every other entry, for v1 logs without markers and for turns still open
+    // at log end), and each
     // llm entry's commit ctx comes from the token_usage record written for
     // that response (ctxByIndex, the sibling derivation: undefined for logs
     // predating usage records or calls whose provider kept usage private).
     // The per-call duration is the record's own durationMs first (ctx.callMs),
     // else the strict-adjacency log-gap derivation -- marked derived so the
     // tooltip never presents it as a measured value.
-    const turnDurations = turnDurationsByIndex(entries);
+    const turnFinalDurations = turnFinalDurationsByIndex(entries);
     const ctxs = ctxByIndex(entries);
     const derivedCalls = deriveCallDurationsByIndex(entries);
     for (let i = 0; i < entries.length; i++) {
@@ -1228,21 +1326,22 @@ export function createMessageList(
               handleToolCall({ name, args, display: toolCall.display, toolCallId: tc.id || undefined });
             }
           }
-          if (content.trim()) {
-            // Per-call duration: the usage record's own durationMs (ctx.callMs)
-            // wins; otherwise the strict-adjacency log gap, flagged derived so
-            // the tooltip says so. Neither attested -> segment omitted.
-            const recordedCall = ctxs[i]?.callMs;
-            const derivedCall = recordedCall === undefined ? derivedCalls[i] : undefined;
-            handleAssistantMessage({
-              content,
-              ts: parseEntryTs(entry.ts),
-              durationMs: turnDurations[i],
-              ctx: ctxs[i],
-              callMs: recordedCall ?? derivedCall,
-              ...(derivedCall !== undefined ? { callDerived: true } : {}),
-            });
-          }
+          // Every llm entry gets its footer, text or not: the per-call
+          // duration is the usage record's own durationMs (ctx.callMs)
+          // first; otherwise the strict-adjacency log gap, flagged derived
+          // so the tooltip says so. Neither attested -> segment omitted. A
+          // text-less entry (tool calls and/or reasoning only) renders no
+          // bubble -- just the bar, without a copy button.
+          const recordedCall = ctxs[i]?.callMs;
+          const derivedCall = recordedCall === undefined ? derivedCalls[i] : undefined;
+          handleAssistantMessage({
+            content,
+            ts: parseEntryTs(entry.ts),
+            durationMs: turnFinalDurations[i],
+            ctx: ctxs[i],
+            callMs: recordedCall ?? derivedCall,
+            ...(derivedCall !== undefined ? { callDerived: true } : {}),
+          });
           break;
         }
         case "tool_result":

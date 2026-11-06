@@ -1,7 +1,8 @@
 // Fuzz suite for utils/workspace.ts expandWorkspacePaths brace expansion
-// (the glob engine underneath is Bun.Glob; semantics below were pinned
-// empirically against bun 1.4.4 -- 1.4.2-era pins for unclosed groups,
-// deep-nesting alternative drops, and NUL bytes changed upstream).
+// (the glob engine underneath is Bun.Glob. Brace semantics for unclosed
+// groups and NUL bytes changed in bun 1.4.4; engines allows >= 1.4.2 and CI
+// pins the floor, so those two behaviors are pinned per-version below via
+// BUN_GTE_1_4_4 -- old assertions verified against 1.4.2 CI, new ones against 1.4.4).
 //
 // SUPPORTED BRACE SUBSET:
 //   - `{alt1,alt2,...}` groups, nested at any depth (bun 1.4.2 silently
@@ -45,6 +46,11 @@ import { makeRng } from "../fuzz/prng.ts";
 let base: string;
 let root: string;
 const R = (s: string) => path.join(root, s);
+
+// Bun 1.4.4 changed two Glob behaviors this suite pins (unclosed brace
+// groups, NUL bytes). engines allows >= 1.4.2 and CI runs the floor, so
+// both behaviors are asserted.
+const BUN_GTE_1_4_4 = Bun.semver.order(Bun.version, "1.4.4") >= 0;
 
 // Names that EXIST directly under root (no dotfiles -- brace alternatives
 // never match those; no `/` or `..` -- out of the oracle subset).
@@ -246,11 +252,17 @@ describe("workspace brace expansion fuzz", () => {
     expect(runEwp([R("{lit}")])).toEqual([R("{lit}")]); // glob matches 0; literal exists
   });
 
-  it("pinned: unclosed group matches NOTHING (bun >= 1.4.4; 1.4.2 kept the complete alts)", () => {
-    expect(runEwp([R("{a,zzz")])).toBeNull(); // even the complete alt `a` is gone
-    expect(runEwp([R("{a,b")])).toBeNull();
-    expect(runEwp([R("{zzz,a")])).toBeNull();
-    expect(runEwp([R("{x/y,a")])).toBeNull();
+  it("pinned: unclosed group -- 1.4.4 matches NOTHING, 1.4.2 kept the complete alts", () => {
+    if (BUN_GTE_1_4_4) {
+      expect(runEwp([R("{a,zzz")])).toBeNull(); // even the complete alt `a` is gone
+      expect(runEwp([R("{a,b")])).toBeNull();
+    } else {
+      // 1.4.2 matched every COMPLETE alternative and dropped the open last one
+      expect(runEwp([R("{a,zzz")])).toEqual([R("a")]); // "zzz" is the open alt
+      expect(runEwp([R("{a,b")])).toEqual([R("a")]);
+    }
+    expect(runEwp([R("{zzz,a")])).toBeNull(); // version-stable: the open alt is the one that exists
+    expect(runEwp([R("{x/y,a")])).toBeNull(); // `/` inside an alt deadens the group on both
   });
 
   it("pinned: stray braces are literal (and dropped when missing)", () => {
@@ -321,11 +333,15 @@ describe("workspace brace expansion fuzz", () => {
   });
 
   it("NUL bytes never crash: whole entry dropped or ConfigError", () => {
-    // 1.4.2 globbed around the NUL (so `{a\0b,a}` still yielded `a`); bun >= 1.4.4
-    // throws TypeError at scan time. expandWorkspacePaths catches it, so an entry
-    // with a NUL anywhere follows the no-match -> literal-missing -> dropped path.
-    expect(runEwp([R("a\u0000*")])).toBeNull();
-    expect(runEwp([R("{a\u0000b,a}")])).toBeNull();
+    // bun >= 1.4.4 throws TypeError at scan time; expandWorkspacePaths catches
+    // it, so an entry with a NUL anywhere follows the no-match -> literal-missing
+    // -> dropped path. 1.4.2 globbed around the NUL instead.
+    expect(runEwp([R("a\u0000*")])).toBeNull(); // both: no match, literal missing
+    if (BUN_GTE_1_4_4) {
+      expect(runEwp([R("{a\u0000b,a}")])).toBeNull(); // whole entry rejected
+    } else {
+      expect(runEwp([R("{a\u0000b,a}")])).toEqual([R("a")]); // 1.4.2 still yielded the clean alt
+    }
     expect(runEwp([R("\u0000")])).toBeNull();
   });
 

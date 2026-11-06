@@ -1,10 +1,12 @@
 // Fuzz suite for utils/workspace.ts expandWorkspacePaths brace expansion
 // (the glob engine underneath is Bun.Glob; semantics below were pinned
-// empirically against bun 1.4.2, see run notes fuzz-path-globbing.md).
+// empirically against bun 1.4.4 -- 1.4.2-era pins for unclosed groups,
+// deep-nesting alternative drops, and NUL bytes changed upstream).
 //
 // SUPPORTED BRACE SUBSET:
-//   - `{alt1,alt2,...}` groups, NESTED up to 10 levels (Bun silently drops
-//     alternatives past depth ~10 -- deep nesting is therefore invariant-
+//   - `{alt1,alt2,...}` groups, nested at any depth (bun 1.4.2 silently
+//     dropped alternatives past depth ~10; 1.4.4 expands all depths -- the
+//     fuzz generator stays at depth <= 3 and deep nesting remains invariant-
 //     only, never oracle-checked); concatenation with literals ("a{b,c}")
 //     and cartesian groups per segment.
 //   - alternatives are single-segment: a `/` inside any alternative matches
@@ -244,12 +246,11 @@ describe("workspace brace expansion fuzz", () => {
     expect(runEwp([R("{lit}")])).toEqual([R("{lit}")]); // glob matches 0; literal exists
   });
 
-  it("pinned: unclosed group matches all COMPLETE alternatives, drops the last", () => {
-    expect(runEwp([R("{a,zzz")])).toEqual([R("a")]); // "zzz" is the open alt
-    expect(runEwp([R("{a,b")])).toEqual([R("a")]);
-    // dropping the last alternative kills the only existing name -> ConfigError
+  it("pinned: unclosed group matches NOTHING (bun >= 1.4.4; 1.4.2 kept the complete alts)", () => {
+    expect(runEwp([R("{a,zzz")])).toBeNull(); // even the complete alt `a` is gone
+    expect(runEwp([R("{a,b")])).toBeNull();
     expect(runEwp([R("{zzz,a")])).toBeNull();
-    expect(runEwp([R("{x/y,a")])).toBeNull(); // `/` inside an alt deadens it
+    expect(runEwp([R("{x/y,a")])).toBeNull();
   });
 
   it("pinned: stray braces are literal (and dropped when missing)", () => {
@@ -294,9 +295,9 @@ describe("workspace brace expansion fuzz", () => {
     const t0 = performance.now();
     for (const k of [1000, 20000, 100000]) {
       const pattern = R("{a,".repeat(k) + "x" + "}".repeat(k));
-      const out = runEwp([pattern]); // may legitimately be [a] or null
+      const out = runEwp([pattern]); // 1.4.4 expands every depth: always {a, x}; null also legal
       checkInvariants(out, root);
-      if (out !== null) for (const o of out) expect(o).toBe(R("a")); // only ever `a`
+      if (out !== null) for (const o of out) expect([R("a"), R("x")]).toContain(o); // only ever `a` or `x`
       expect(performance.now() - t0).toBeLessThan(2000);
     }
   });
@@ -319,9 +320,12 @@ describe("workspace brace expansion fuzz", () => {
     expect(runEwp([R("café/ünï")])).toEqual([R("café/ünï")]); // no magic -> literal
   });
 
-  it("NUL bytes never crash: entry dropped or ConfigError", () => {
+  it("NUL bytes never crash: whole entry dropped or ConfigError", () => {
+    // 1.4.2 globbed around the NUL (so `{a\0b,a}` still yielded `a`); bun >= 1.4.4
+    // throws TypeError at scan time. expandWorkspacePaths catches it, so an entry
+    // with a NUL anywhere follows the no-match -> literal-missing -> dropped path.
     expect(runEwp([R("a\u0000*")])).toBeNull();
-    expect(runEwp([R("{a\u0000b,a}")])).toEqual([R("a")]);
+    expect(runEwp([R("{a\u0000b,a}")])).toBeNull();
     expect(runEwp([R("\u0000")])).toBeNull();
   });
 

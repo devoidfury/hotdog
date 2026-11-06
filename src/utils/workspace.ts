@@ -7,7 +7,7 @@
 import { resolve as resolveAbs, sep, dirname } from "node:path";
 import { homedir } from "node:os";
 import fs from "node:fs";
-import { ToolError, ConfigError } from "@core/error.ts";
+import { ToolError, ConfigError, formatError } from "@core/error.ts";
 import { logger } from "./logger.ts";
 
 export type PathEscapeKind = "invalid" | "direct" | "symlink" | "denied";
@@ -73,6 +73,7 @@ function expandTilde(entry: string): string {
  * Glob matches resolve against CWD. A glob matching nothing but existing as a literal path (e.g. a name containing `[`) is used as-is;
  * a glob or literal that does not exist is dropped with a warning -- a missing root is a warning, not fatal, so one stale entry
  * doesn't take down the session. If every entry drops, that is fatal.
+ * A pattern the glob engine refuses to compile (bun >= 1.4.4 throws on NUL bytes) is treated as matching nothing, same fallback.
  *
  * @returns Absolute lexical paths, deduplicated, order-preserving, never empty.
  * @throws ConfigError on a non-array/non-string input, or if nothing resolved.
@@ -90,8 +91,21 @@ export function expandWorkspacePaths(entries: readonly string[]): string[] {
 
     const expanded = expandTilde(entry);
     const isGlob = GLOB_MAGIC.test(expanded);
-    // onlyFiles:false -- workspace roots are usually directories, and scanSync defaults to files only.
-    const matches = isGlob ? Array.from(new Bun.Glob(expanded).scanSync({ onlyFiles: false })) : [expanded];
+    let matches: string[];
+    if (isGlob) {
+      try {
+        // onlyFiles:false -- workspace roots are usually directories, and scanSync defaults to files only.
+        matches = Array.from(new Bun.Glob(expanded).scanSync({ onlyFiles: false }));
+      } catch (e) {
+        // The engine rejects some patterns outright (TypeError on NUL bytes since bun 1.4.4).
+        // An uncompilable pattern matches nothing; without this catch a raw TypeError escapes
+        // config loading instead of the documented drop/ConfigError contract.
+        logger.warn(`workspace path pattern '${entry}' rejected by the glob engine: ${formatError(e)}`);
+        matches = [];
+      }
+    } else {
+      matches = [expanded];
+    }
 
     if (isGlob && matches.length === 0) {
       // The entry may be a literal path whose name merely contains glob

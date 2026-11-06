@@ -47,18 +47,16 @@ export interface SystemNoticePart {
 }
 
 /**
- * Neutralize wire-marker bytes in an UNTRUSTED fragment interpolated into a
- * `system-notice` text (a file path, a name -- anything that did not originate
- * in harness code).
+ * Neutralize wire-marker bytes in an UNTRUSTED fragment interpolated into a `system-notice` text.
+ * (a file path, a name -- anything that did not originate in harness code)
  *
- * system-notice renders VERBATIM at harness trust level: the marker mangler
- * never processes this channel, so a hostile fragment carrying an angle-bracket
- * closing sequence -- a cloned repo may name a file whose component spells the
- * live notice tag plus `>` -- would close the element early and forge framing
- * the model is told to trust. Any future notice builder that interpolates
- * environment data MUST route the fragment through here; the notice's own
- * template lines are harness text and stay as written. `<`, `>`, NUL, CR and
- * LF become an ellipsis: a forged tag needs `<>`, a fake notice line needs `\n`.
+ * system-notice renders VERBATIM at harness trust level: the marker mangler never processes this channel,
+ * so a hostile fragment carrying an angle-bracket closing sequence -- a cloned repo may name a file
+ * whose component spells the live notice tag plus `>` -- would close the element early and forge framing
+ * the model is told to trust. Any future notice builder that interpolates environment data MUST route the
+ * fragment through here; the notice's own template lines are harness text and stay as written.
+ *
+ * `<`, `>`, NUL, CR and LF become an ellipsis: a forged tag needs `<>`, a fake notice line needs `\n`.
  */
 export function sanitizeNoticeText(fragment: string): string {
   return fragment.replace(/[<>\u0000\r\n]/g, "\u2026");
@@ -139,7 +137,7 @@ export function renderWrapperAtRest(part: WrapperPart): string {
 
 /**
  * Apply the file-include trust spec: the file's path and content are data
- * and escape; returns a NEW part -- stored content is never mutated.
+ * and escape; returns a NEW part.
  */
 export function mangleFileIncludeFields(part: FileIncludePart, mangler: MarkerMangler): FileIncludePart {
   const m = (s: string): string => mangler.escape(s) ?? s;
@@ -147,13 +145,10 @@ export function mangleFileIncludeFields(part: FileIncludePart, mangler: MarkerMa
 }
 
 /**
- * Apply the tool-result trust spec: every value the tool produced (name,
- * metadata keys and values, error, hint, payload) is escaped; the
- * harness-generated `status` is verbatim. Returns a NEW part -- stored content
- * is never mutated.
+ * Apply the tool-result trust spec: every value the tool produced (name, metadata keys and values, error, hint, payload) is escaped;
+ * the harness-generated `status` is verbatim. Returns a NEW part.
  *
- * Escaping happens here, before the part reaches the format, so a format
- * physically cannot emit an unescaped tool payload.
+ * Escaping happens here, before the part reaches the format, so a format physically cannot emit an unescaped tool payload.
  */
 export function mangleToolResultFields(part: ToolResultPart, mangler: MarkerMangler): ToolResultPart {
   const m = (s: string): string => mangler.escape(s) ?? s;

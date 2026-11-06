@@ -57,13 +57,11 @@ function pickBoolean(value: unknown, fallback: boolean | undefined): boolean | u
 }
 
 /**
- * Single agent-assembly pipeline for every UI entry point (interactive CLI,
- * one-shot, websocket/webui). Precedence per field: agentConfig override >
- * profile overlay (when `profiles` is set) > resolved config.
+ * Single agent-assembly pipeline for every UI entry point (interactive CLI, one-shot, websocket/webui).
+ * Precedence per field: agentConfig override > profile overlay (when `profiles` is set) > resolved config.
  *
  * Fires COMMANDS_REGISTER after construction (all entry points need it).
- * `agentConfig.sink` must pass through: TaskManager hands spawnTask a silent
- * sink whose onTaskComplete delivers the task result.
+ * `agentConfig.sink` must pass through: TaskManager hands spawnTask a silent sink whose onTaskComplete delivers the task result.
  */
 export function createAgentFactory(
   core: CoreContext,

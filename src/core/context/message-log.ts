@@ -9,9 +9,7 @@ export class MessageLog {
 
   push(msg: Message): number {
     if (!(msg instanceof Message)) {
-      throw new TypeError(
-        `MessageLog.push() requires a Message instance, got ${typeof msg}`,
-      );
+      throw new TypeError(`MessageLog.push() requires a Message instance, got ${typeof msg}`);
     }
     this.#messages.push(msg);
     return this.#messages.length;
@@ -19,16 +17,13 @@ export class MessageLog {
 
   replace(messages: Message[]): void {
     if (!Array.isArray(messages)) {
-      throw new TypeError(
-        `MessageLog.replace() requires an array, got ${typeof messages}`,
-      );
+      throw new TypeError(`MessageLog.replace() requires an array, got ${typeof messages}`);
     }
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i];
       if (!(m instanceof Message)) {
         throw new TypeError(
-          `MessageLog.replace() requires all elements to be Message instances, ` +
-            `element ${i} is ${typeof m}`,
+          `MessageLog.replace() requires all elements to be Message instances, element ${i} is ${typeof m}`,
         );
       }
     }

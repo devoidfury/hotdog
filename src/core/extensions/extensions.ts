@@ -18,7 +18,7 @@ const ROOT_DIR = path.resolve(__dirname, "../../");
 
 export function resolveExtensionPath(spec: string): string {
   // core builtins
-  if (spec === "@extensions") { 
+  if (spec === "@extensions") {
     return path.join(ROOT_DIR, "extensions");
   }
   // explicit opt-in experimental tier (src/experimental)
@@ -118,14 +118,11 @@ function fieldObject(
 }
 
 // A manifest that exists but fails to read or parse does NOT abort discovery;
-// the error is recorded on the metadata as `manifestError` and
-// getExtensionsToLoad() turns it into a fatal error only for extensions that
-// would actually load. An extension excluded by config (enabled: false, or an
-// extensions list that omits it) may keep a broken manifest without bricking
-// the CLI. Fail-closed where it matters: autoload is read FROM the manifest,
-// so a manifest that cannot be parsed cannot disable itself.
-// A missing manifest stays a silent default (isExtensionDirectory already
-// requires the file, so that branch only covers a race).
+// the error is recorded on the metadata as `manifestError` and getExtensionsToLoad() turns it
+// into a fatal error only for extensions that would actually load. An extension excluded by config
+// (enabled: false, or an extensions list that omits it) may keep a broken manifest without bricking the CLI.
+// Fail-closed where it matters: autoload is read FROM the manifest, so a manifest that cannot be parsed cannot disable itself.
+// A missing manifest stays a silent default (isExtensionDirectory already requires the file, so that branch only covers a race).
 async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata> {
   const metaPath = path.join(dirPath, "extension.json");
   const name = path.basename(dirPath);

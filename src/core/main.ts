@@ -104,8 +104,7 @@ export function createCore(
   const completion = createCompletionService();
 
   // Must happen before the extension loader is created: extensions read
-  // core.config during create() (e.g., profile-dependent metadata and
-  // tool wiring).
+  // core.config during create() (e.g., profile-dependent metadata and tool wiring).
   const coreConfig: CoreConfigWithExtensions = {
     ...config,
     profileName: options.profileName || config.profileName || "default",

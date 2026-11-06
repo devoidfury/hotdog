@@ -1,25 +1,22 @@
 import { Message, type ToolCall } from "./message.ts";
 
 /**
- * Synthesized tool-result content for interrupted calls. Pinned verbatim: the
- * point is that the model KNOWS the call may have partially executed --
- * wording matters for non-idempotent commands.
+ * Synthesized tool-result content for interrupted calls.
+ * The point is that the model KNOWS the call may have partially executed, wording matters for non-idempotent commands.
  */
 export const INTERRUPTED_TOOL_RESULT = "[Tool execution was interrupted]";
 
 /**
- * Resume protocol: a `tool_started` with no result -- execution began, fate
- * unknown. The verify-before-retry wording is the point: never assume
- * success, never blind-retry a side effect.
+ * Resume protocol: a `tool_started` with no result -- execution began, fate unknown.
+ * The verify-before-retry wording is the point: never assume success, never blind-retry a side effect.
  */
 export const INTERRUPTED_OUTCOME_UNKNOWN =
   "[Tool execution was interrupted before its result was recorded. Side effects may have landed: verify the current state before retrying this call.]";
 
 /**
- * Resume protocol: no `tool_started` in a log that uses the records -- the
- * call never dispatched, safe to retry. Only applied when the log carries
- * started records at all (absence proves nothing otherwise); pre-protocol
- * logs keep INTERRUPTED_TOOL_RESULT.
+ * Resume protocol: no `tool_started` in a log that uses the records -- the call never dispatched, safe to retry.
+ * Only applied when the log carries started records at all (absence proves nothing otherwise);
+ * pre-protocol logs keep INTERRUPTED_TOOL_RESULT.
  */
 export const INTERRUPTED_NOT_STARTED =
   "[Tool execution was interrupted before the call started; it never ran. Safe to retry.]";

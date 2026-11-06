@@ -92,9 +92,8 @@ export interface ToolResultEvent {
   toolName: string;
   input: string;
   /**
-   * The tool's answer as stored: harness text or a tool-result part. Passed
-   * through unchanged -- output surfaces decide their own presentation, core
-   * prescribes none (see ToolResultContent in context/wrappers.ts).
+   * The tool's answer as stored: harness text or a tool-result part. Passed through unchanged --
+   * output surfaces decide their own presentation (see ToolResultContent in context/wrappers.ts).
    */
   content: ToolResultContent;
   toolCallId: string;
@@ -140,10 +139,8 @@ export interface TokenUsageEvent extends UsageTotals {
   /** The model's context window size, shown as total/contextWindow. */
   contextWindow: number;
   /**
-   * Wall-clock ms of the LLM call this usage came from (see the measured
-   * span in agent.ts: call start through stream completion, retries
-   * included). Absent on re-emissions of pre-durationMs records and on
-   * callers that measure nothing: an unattested number rides no field.
+   * Wall-clock ms of the LLM call this usage came from (see agent.ts: call start through stream completion, retries included).
+   * Absent on re-emissions of pre-durationMs records and on callers that measure nothing.
    */
   durationMs?: number;
 }
@@ -170,11 +167,9 @@ export interface SystemMessageEvent {
 }
 
 /**
- * Pending mid-run steering count (steer-default): emitted by the
- * bus on a steering enqueue and on chain drain. Frame content for the split
- * renderer's queue chip -- NOT printable output: the base sink ignores it
- * (no switch case) and WebSocket drops it (maps to null in toS2CMessage),
- * so no wire protocol is added.
+ * Pending mid-run steering count (steer-default): emitted by the bus on a steering enqueue and on chain drain.
+ * Frame content for the split renderer's queue chip -- NOT printable output: the base sink ignores it
+ * (no switch case) and WebSocket drops it (maps to null in toS2CMessage), so no wire protocol is added.
  */
 export interface QueueUpdateEvent {
   type: typeof OUTPUT_EVENT.QUEUE_UPDATE;
@@ -184,13 +179,12 @@ export interface QueueUpdateEvent {
 }
 
 /**
- * A tool call growing mid-stream (streaming-path design 2026-10-22): the
- * accumulated partial, emitted per wire delta. Frame content for the split
- * renderer's in-flight row -- NOT printable output: the base sink ignores it
- * (no switch case) and WebSocket drops it (maps to null in toS2CMessage),
- * the QueueUpdateEvent precedent. `args` carries raw text that is usually
- * NOT valid JSON yet; sinks present it as-is (the summarizer's unparseable
- * passthrough is the fallback). Live-only: never persisted, never replayed.
+ * A tool call growing mid-stream: the accumulated partial, emitted per wire delta.
+ * Frame content for the split renderer's in-flight row -- NOT printable output:
+ * the base sink ignores it (no switch case) and WebSocket drops it (maps to null in toS2CMessage),
+ * the QueueUpdateEvent precedent. `args` carries raw text that is usually NOT valid JSON yet;
+ * sinks present it as-is (the summarizer's unparseable passthrough is the fallback).
+ * Live-only: never persisted, never replayed.
  */
 export interface ToolCallDeltaEvent {
   type: typeof OUTPUT_EVENT.TOOL_CALL_DELTA;
@@ -203,13 +197,12 @@ export interface ToolCallDeltaEvent {
 }
 
 /**
- * The transport is re-issuing a request after a mid-stream failure: every
- * streamed fragment from the failed attempt (text, reasoning, in-flight tool
- * calls) is DEAD -- the retry re-streams the response from scratch and the
- * assembled result will contain none of it. Sinks that accumulate streamed
- * content for rendering must drop that state on this event; the processor's
- * assembly/replay buffers are already cleared when it is emitted. Live-only:
- * never persisted, never replayed. No payload -- the event IS the instruction.
+ * The transport is re-issuing a request after a mid-stream failure: every streamed fragment
+ * from the failed attempt (text, reasoning, in-flight tool calls) is DEAD --
+ * the retry re-streams the response from scratch and the assembled result will contain none of it.
+ * Sinks that accumulate streamed content for rendering must drop that state on this event;
+ * the processor's assembly/replay buffers are already cleared when it is emitted.
+ * Live-only: never persisted, never replayed.
  */
 export interface StreamResetEvent {
   type: typeof OUTPUT_EVENT.STREAM_RESET;
@@ -331,10 +324,9 @@ export class OutputSink {
   emitTaskProgress(_event: TaskProgressEvent): void {}
 
   /**
-   * Mid-stream failure being retried: drop whatever the failed attempt put
-   * into live render state. The base sink streams through without buffering
-   * (written bytes are unretractable on a print stream), so the default is a
-   * no-op; surfaces that hold an in-flight row/element override.
+   * Mid-stream failure being retried: drop whatever the failed attempt put into live render state.
+   * The base sink streams through without buffering (written bytes are unretractable on a print stream),
+   * so the default is a no-op; surfaces that hold an in-flight row/element override.
    */
   emitStreamReset(_event: StreamResetEvent): void {}
 

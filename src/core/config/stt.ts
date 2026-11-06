@@ -1,18 +1,11 @@
 // STT target resolution for push-to-talk (webui mic + CLI dictation).
 //
-// Mirrors show-me's imageModel pattern:
-//   - An explicit `sttUrl` (full OpenAI-compatible transcriptions endpoint)
-//     wins and skips the registry entirely; `sttModel`, if set, is the
-//     multipart model field.
-//   - Without sttUrl, the model registry is consulted: `sttModel` pins a
-//     registry entry (which must declare audio input); empty AUTO-selects
-//     the first entry declaring "audio" input and "text" output. Entries
-//     with absent modality data never auto-pick (unknown capabilities must
-//     not hijack transcription; same strictness as show-me).
-//   - Registry mode derives the endpoint from the model's provider via
-//     LlmClient.resolveProviderSettings -- the same base URL and transport
-//     key every other request uses -- so an API-key-protected llama-swap
-//     needs no credentials in the STT config.
+// - An explicit `sttUrl` (OpenAI-compatible transcriptions endpoint) wins and skips the registry;
+//   `sttModel`, if set, is the multipart model field.
+// - Without sttUrl, check model registry: `sttModel` pins a registry entry (which must declare audio input);
+//   empty AUTO-selects the first entry declaring "audio" input and "text" output.
+//   Entries with absent modality data don't auto-pick (unknown capabilities must not hijack transcription).
+// - Registry mode derives the endpoint from the model's provider via LlmClient.resolveProviderSettings.
 
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
@@ -42,10 +35,7 @@ export interface SttSettingsLike {
   modelRegistry?: Record<string, RegistryEntryLike> | null;
 }
 
-/**
- * Structural slice of LlmClient so tests can pass a duck-typed fake
- * (show-me declares ImageChatClient for the same reason).
- */
+/** Structural slice of LlmClient so tests can pass a duck-typed fake. */
 export interface SttProviderResolver {
   resolveProviderSettings(name: string): { url: string; apiKey: string | null };
 }
@@ -91,8 +81,7 @@ export function resolveSttTarget(
     }
     ({ key, entry } = found);
   } else {
-    // Deterministic AUTO: first match in registry insertion order (provider
-    // declaration order), no sorting -- same rule as show-me.
+    // Deterministic AUTO: first match in registry insertion order (provider declaration order), no sorting.
     for (const [k, e] of Object.entries(registry)) {
       if (!e || typeof e !== "object") continue;
       if (!e.inputModalities?.includes("audio")) continue;
@@ -107,8 +96,7 @@ export function resolveSttTarget(
 
   try {
     const { url, apiKey } = llmClient.resolveProviderSettings(key);
-    // Wire model name: registry key minus its provider prefix (show-me does
-    // the same for the Images API).
+    // Wire model name: registry key minus its provider prefix.
     const wireName = (entry?.name || key).split("/").pop() || key;
     return {
       url: `${url.replace(/\/+$/, "")}${TRANSCRIPTIONS_API_PATH}`,

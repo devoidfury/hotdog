@@ -19,8 +19,8 @@ export class ContextManager {
   #systemPromptBuilder: SystemPromptBuilder;
 
   /**
-   * @param template - Loaded system prompt template text (from buildConfig's
-   *   resolved config). Omitted only by standalone callers.
+   * @param template - Loaded system prompt template text (from buildConfig's resolved config).
+   *   Omitted only by standalone callers.
    */
   constructor(template?: string) {
     this.#log = new MessageLog();

@@ -63,9 +63,8 @@ export class SystemPromptBuilder {
   #template: string | null = null;
 
   /**
-   * @param template - Loaded template text (from buildConfig's resolved
-   *   config). Omitted only by standalone callers; build() then falls back
-   *   to config-dir resolution.
+   * @param template - Loaded template text (from buildConfig's resolved config).
+   *   Omitted only by standalone callers; build() then falls back to config-dir resolution.
    */
   constructor(template?: string) {
     this.#template = template || null;

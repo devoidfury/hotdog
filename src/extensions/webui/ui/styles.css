@@ -1137,50 +1137,36 @@ body.sidebar-resizing {
     gap: 12px;
 }
 
-#tool-exec-status {
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    font-family: var(--font-mono);
-}
-
 /* A degraded plane (broker respawn cap) must not look calm. */
-.tool-exec-degraded {
+.header-btn.tool-exec-degraded {
     color: var(--error);
     font-weight: 600;
 }
 
-/* Worker-plane posture is a click-to-toggle control for the session's fence:
-   chip-button chrome (border + fill + hover/active) so the cue is visible
-   before the pointer arrives; still quiet enough to read as status. The
-   reasoning-visibility chip (#thinking-toggle, app.tsx) is a control on the
-   same row and borrows the identical chrome -- no new color surface. */
-.tool-exec-toggleable,
-#thinking-toggle {
-    border: 1px solid var(--border);
+.header-btn {
     border-radius: var(--radius-sm);
     padding: 2px 8px;
-    background: var(--bg-secondary);
-    cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
 }
 
-.tool-exec-toggleable:hover,
-#thinking-toggle:hover {
+/* Worker-plane posture is a click-to-toggle control for the session's fence:
+   chip-button chrome (border + fill + hover/active) so the cue is visible
+   before the pointer arrives; still quiet enough to read as status. */
+.header-btn.toggleable {
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.header-btn.toggleable:hover {
     border-color: var(--accent);
     background: var(--bg-hover);
 }
 
-.tool-exec-toggleable:active,
-#thinking-toggle:active {
+.header-btn.toggleable:active {
     background: var(--bg-active);
-}
-
-/* Same quiet mono text as the tool-exec chip it sits beside (a <button> has to
-   be told: form controls never inherit font-family/font-size). */
-#thinking-toggle {
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    font-family: var(--font-mono);
 }
 
 .status-connected {

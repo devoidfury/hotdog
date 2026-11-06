@@ -1213,9 +1213,7 @@ function onFenceToggle(): void {
     return;
   }
   if (
-    !confirm(
-      `Turn the exec fence OFF? Tool code for this session will run UNFENCED from the next spawn (this session only; other sessions follow the boot config, a restart reverts).`,
-    )
+    !confirm(`Turn the exec fence OFF? Tools will run UNFENCED starting from the next tool call (this session only). This scalates permissions and access for the agent, which may be used to work around issues (eg allowing for updating system packages and issuing restart commands). Recommended to leave the fence ON unless the task cannot be completed with the fence in place.`)
   ) {
     return;
   }
@@ -1249,14 +1247,13 @@ function App() {
   const working = chat?.workingAtom() ?? false;
   const activeLogId = activeLogIdAtom();
   const sessionId = chat?.sessionIdAtom() ?? null;
-  // Tool-exec plane posture: "worker (fence: bwrap | seatbelt | off | none --
-  // probe failed)" / "inline (unfenced)", plus anything carrying [degraded: ...].
+  // Tool-exec plane posture: "worker (fence: bwrap | seatbelt | off | none -- probe failed)" / "inline (unfenced)",
+  // plus anything carrying [degraded: ...].
   const toolExec = chat?.toolExecAtom() ?? "";
-  // Reasoning visibility of THIS browser (localStorage; survives reload, applies
-  // to live transcripts and browsed cold logs alike).
+  // Reasoning visibility (localStorage; survives reload, applies to live transcripts and browsed cold logs alike).
   const hideThinking = chat?.hideThinkingAtom() ?? false;
-  // The strip becomes a control exactly when the ATTACHED live session shows
-  // a worker-plane fence; inline/degraded postures and log view stay inert.
+  // The strip becomes a control exactly when the ATTACHED live session shows a worker-plane fence;
+  // inline/degraded postures and log view stay inert.
   const fenceClickable =
     toolExec.includes("fence:") &&
     !toolExec.includes("degraded") &&
@@ -1354,6 +1351,7 @@ function App() {
               <button
                 type="button"
                 id="thinking-toggle"
+                className="header-btn toggleable"
                 title={
                   "Show or hide reasoning in this browser (view setting only: it does not change the CLI's /thinking session state, and it applies to the log being browsed too)"
                 }
@@ -1362,14 +1360,16 @@ function App() {
                 reasoning {hideThinking ? "hidden" : "shown"}
               </button>
               {toolExec ? (
-                <span
+                <button
                   id="tool-exec-status"
                   className={[
+                    "header-btn",
                     toolExec.includes("degraded") ? "tool-exec-degraded" : "",
-                    fenceClickable ? "tool-exec-toggleable" : "",
+                    fenceClickable ? "toggleable" : "",
                   ]
                     .filter(Boolean)
                     .join(" ") || undefined}
+                  disabled={fenceClickable}
                   title={
                     fenceClickable
                       ? `${toolExec} -- click to toggle this session's fence`
@@ -1380,7 +1380,7 @@ function App() {
                   onClick={fenceClickable ? onFenceToggle : undefined}
                 >
                   tools: {toolExec}
-                </span>
+                </button>
               ) : null}
               <span id="connection-status" className={connected ? "status-connected" : "status-disconnected"}>
                 {connected ? "Connected" : "Disconnected"}

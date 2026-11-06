@@ -1701,7 +1701,7 @@ describe("header fence toggle (real app wiring)", () => {
     await attachWithPosture("worker (fence: bwrap)");
     const strip = el("#tool-exec-status");
     expect(strip.textContent).toContain("worker (fence: bwrap)");
-    expect(strip.getAttribute("class")).toContain("tool-exec-toggleable");
+    expect(strip.getAttribute("class")).toContain("toggleable");
     // Button chrome lives in the class, not an inline style attribute.
     expect(strip.getAttribute("style")).toBeNull();
     expect(strip.getAttribute("title")).toContain("click to toggle this session's fence");
@@ -1730,7 +1730,7 @@ describe("header fence toggle (real app wiring)", () => {
       return false;
     };
     el("#tool-exec-status").click();
-    expect(seen).toContain("Tool code for this session will run UNFENCED");
+    expect(seen).toContain("Tools will run UNFENCED");
   });
 
   it("server-pushed posture update repaints the strip; off -> probe flips back WITHOUT confirm", async () => {
@@ -1768,7 +1768,7 @@ describe("header fence toggle (real app wiring)", () => {
     stubConfirm(true);
     await attachWithPosture("inline (unfenced)");
     const strip = el("#tool-exec-status");
-    expect(strip.getAttribute("class") ?? "").not.toContain("tool-exec-toggleable");
+    expect(strip.getAttribute("class") ?? "").not.toContain("toggleable");
     expect(strip.getAttribute("style")).toBeNull();
     ws.sent.length = 0;
     strip.click();
@@ -1783,7 +1783,7 @@ describe("header fence toggle (real app wiring)", () => {
     await tick();
     expect(el("#log-view-label")).toBeTruthy();
     const strip = el("#tool-exec-status");
-    expect(strip.getAttribute("class") ?? "").not.toContain("tool-exec-toggleable");
+    expect(strip.getAttribute("class") ?? "").not.toContain("toggleable");
     expect(strip.getAttribute("title")).toContain("live sessions only");
     ws.sent.length = 0;
     strip.click();

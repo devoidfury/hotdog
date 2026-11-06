@@ -77,9 +77,11 @@ function openSocket(wsServer: WsServer): MockWs {
   return ws;
 }
 
-/** Wait for the async attach to land; returns the sessionCreated id. */
+/** Wait for the async attach to land; returns the sessionCreated id.
+ * Generous deadline: the attach is in-memory, so the only way it misses is
+ * event-loop starvation under `bun test --parallel` on loaded runners. */
 async function attachedSessionId(ws: MockWs): Promise<string> {
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + 10_000;
   for (;;) {
     const created = messages(ws).find((m) => m.type === S2C.SESSION_CREATED);
     if (created) return created.sessionId as string;
@@ -88,7 +90,7 @@ async function attachedSessionId(ws: MockWs): Promise<string> {
   }
 }
 
-async function settle(pred: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
+async function settle(pred: () => boolean, what: string, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!pred()) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);

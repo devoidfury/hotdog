@@ -184,9 +184,12 @@ describe("createExclusive vs external deletion", () => {
     warnSpy: { mock: { calls: unknown[][] } },
   ): void => {
     // Missing-file errno family: BSD link(2) reports EINVAL when the parent dir
-    // vanishes under the path, Linux reports ENOENT.
+    // vanishes under the path, Linux reports ENOENT. EEXIST is the repair-side
+    // race: mkdir -p takes EEXIST while the foreign rmdir has not landed yet,
+    // the rmdir lands before the recursive mkdir verifies the dir, and the
+    // original EEXIST surfaces -- still one strike consuming the repair.
     const code = (result as { code?: string }).code ?? "";
-    expect(["ENOENT", "EINVAL", "ENOTDIR"]).toContain(code);
+    expect(["ENOENT", "EINVAL", "ENOTDIR", "EEXIST"]).toContain(code);
     expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("repair failed"))).toBe(true);
   };
 

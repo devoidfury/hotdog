@@ -21,6 +21,9 @@ export class AppendTool {
     sideEffects: true,
     difficulty: 1,
     display: [{ kind: "diff", source: "args", arg: "content", pathArg: "path" }],
+    // The diff part carries the path header; the title bar keeps the size of
+    // what was written (multi-line strings fold to "N lines, K chars").
+    headerKeys: ["content"],
   };
 
   toToolDef() {

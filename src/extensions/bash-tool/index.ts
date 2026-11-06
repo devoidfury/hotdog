@@ -102,6 +102,9 @@ export class BashTool {
     // Sinks with a display spec render the WHOLE multi-line command block
     // unfolded, shell-highlighted (the terminal keeps the argsSummary fold).
     display: [{ kind: "code", source: "args", arg: "command", lang: "shell" }],
+    // The webui title bar shows only the non-command args (timeoutMs when the
+    // model passed one); the command itself is the body.
+    headerKeys: ["timeoutMs"],
   };
 
   readonly timeoutMs: number;

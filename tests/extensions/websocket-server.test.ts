@@ -1019,6 +1019,48 @@ describe("createWsServer - cold log operations", () => {
     expect(inputEntry.content).toBe("please edit");
   });
 
+  it("annotates the declared title-bar fold on browsed tool calls", async () => {
+    // headerKeys on the cold LOG_VIEWED path: declaring tools ride the
+    // labeled fold -- and the explicit "" when nothing declared remains
+    // (it suppresses the client's fallback heuristic, so a browsed log
+    // matches the live frame). Non-declaring tools ride untouched.
+    writeFileSync(
+      join(SESSIONS_DIR, `${FIXTURE_LOG_ID}.jsonl`),
+      JSON.stringify({
+        ts: "2024-01-01T00:00:01Z",
+        session_id: FIXTURE_LOG_ID,
+        source: "llm",
+        content: "",
+        tool_calls: [
+          { id: "c1", type: "function", function: { name: "bash", arguments: '{"command":"ls","timeoutMs":30000}' } },
+          { id: "c2", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } },
+          { id: "c3", type: "function", function: { name: "grep", arguments: '{"pattern":"x"}' } },
+        ],
+      }) + "\n",
+    );
+    const core = createWsMockCore();
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register("bash", {
+      metadata: { sideEffects: true, difficulty: 2, headerKeys: ["timeoutMs"] },
+      toToolDef: async () => null,
+      execute: async () => null,
+    } as never);
+    core.toolRegistry = toolRegistry;
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.VIEW_LOG, logId: FIXTURE_LOG_ID }));
+    const viewed = await waitForMessage(ws, S2C.LOG_VIEWED);
+    const calls = viewed.entries[0].tool_calls;
+    expect(calls[0].argsSummary).toBe("timeoutMs: 30000");
+    expect("argsSummary" in calls[1]).toBe(true);
+    expect(calls[1].argsSummary).toBe("");
+    // A non-declaring tool gets no field at all (no null-noise) and its
+    // stored shape rides byte-for-byte.
+    expect("argsSummary" in calls[2]).toBe(false);
+    expect(calls[2].function).toEqual({ name: "grep", arguments: '{"pattern":"x"}' });
+  });
+
   it("resolves parts registered after load (the TOOL_METADATA annotation surface)", async () => {
     // Resolution reads getMetadata per call, so a TOOL_METADATA annotation
     // made after registration rides cold logs exactly like a declared part.

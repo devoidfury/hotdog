@@ -70,6 +70,9 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
     tool.metadata = {
       ...tool.metadata,
       display: [{ kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" }],
+      // The file box carries the path header; the block title bar keeps only
+      // the range args (absent on a whole-file read -> no summary at all).
+      headerKeys: ["offset", "limit"],
     };
     return tool;
   },
@@ -82,6 +85,9 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
       // pathArg names the file the edit lands in: the diff part gets the same
       // GitHub path header the file parts carry (key pinned against toToolDef()).
       display: [{ kind: "diff", oldArg: "oldString", newArg: "newString", pathArg: "path" }],
+      // The diff part carries the path header and shows both sides; the title
+      // bar keeps only the multi-edit flag, and only when the model sent it.
+      headerKeys: ["replace_all"],
     };
     return tool;
   },

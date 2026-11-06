@@ -5,16 +5,18 @@
 // Any field-order or guard change lands once, for live and replay together.
 
 import { OUTPUT_EVENT, type FileAttachmentView, type OutputEvent } from "@core/context/output.ts";
-import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
+import { summarizeHeaderArgs, summarizeToolArgs } from "@core/extensions/tool-utils.ts";
 import type { ArgDisplay, ToolDisplaySpec } from "@core/extensions/tool-registry.ts";
-import { toolContentText } from "@utils/tool-content.ts";
+import { toolContentMeta, toolContentText } from "@utils/tool-content.ts";
 import type { CtxUsage } from "@utils/session-turns.ts";
 import { S2C, type S2CType, type ToolDisplayWire, wireImages } from "./protocol.ts";
 
 /** Mapper options: resolves a tool's per-parameter display hints
- * (argDisplay) and its call-level display parts (ToolMetadata.display). */
+ * (argDisplay), its title-bar keys (ToolMetadata.headerKeys), and its
+ * call-level display parts (ToolMetadata.display). */
 export interface WireMapOptions {
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
+  headerKeys?: (toolName: string) => readonly string[] | undefined;
   display?: (toolName: string) => ToolDisplaySpec[] | undefined;
 }
 
@@ -102,7 +104,11 @@ export function wireToolDisplay(
  * A tool call frame. argsSummary is the shared hint-driven fold
  * (ToolMetadata.argDisplay): the same shape the terminal's template args slot
  * prints, ANSI-free. Empty summaries ride no field; clients fall back to
- * their own header. `display` is the forwarded declared spec
+ * their own header. EXCEPTION: a tool that declares headerKeys
+ * (ToolMetadata.headerKeys) gets the title-bar fold instead
+ * (summarizeHeaderArgs), and it rides even when empty -- `argsSummary: ""`
+ * is the explicit "no summary, no fallback" signal (the body's declared
+ * parts are the story). `display` is the forwarded declared spec
  * (ToolMetadata.display -> ToolDisplayWire[]): arg parameter names only,
  * omitted entirely when the tool declares nothing.
  */
@@ -114,9 +120,12 @@ export function s2cToolCall(
     toolCallId?: string;
     argDisplay?: Record<string, ArgDisplay>;
     display?: ToolDisplaySpec[] | undefined;
+    headerKeys?: readonly string[] | undefined;
   },
 ): Record<string, unknown> {
-  const summary = summarizeToolArgs(o.args, undefined, o.argDisplay);
+  const summary = o.headerKeys
+    ? summarizeHeaderArgs(o.args, o.headerKeys, o.argDisplay)
+    : summarizeToolArgs(o.args, undefined, o.argDisplay);
   const display = wireToolDisplay(o.display);
   return {
     type: S2C.TOOL_CALL,
@@ -125,7 +134,9 @@ export function s2cToolCall(
     args: o.args,
     // The call id lets clients pair results to calls.
     ...(o.toolCallId ? { toolCallId: o.toolCallId } : {}),
-    ...(summary ? { argsSummary: summary } : {}),
+    // A declared header fold always rides ("" = suppress the client header);
+    // the shared fold keeps its old rule (non-empty only).
+    ...(o.headerKeys !== undefined || summary ? { argsSummary: summary } : {}),
     ...(display ? { display } : {}),
   };
 }
@@ -141,6 +152,11 @@ export function s2cToolResult(
   },
 ): Record<string, unknown> {
   const imgs = wireImages(o.images);
+  // A result part that knows where its change landed (edit's `start_line`
+  // meta) rides it as a structured number: the diff rails then number from
+  // the real file line instead of the snippet's 1..N. Anything not a
+  // positive integer is dropped -- a blank rail beats a fake number.
+  const startLine = Number(toolContentMeta(o.content, "start_line"));
   return {
     type: S2C.TOOL_RESULT,
     sessionId,
@@ -151,6 +167,7 @@ export function s2cToolResult(
     ...(o.toolCallId ? { toolCallId: o.toolCallId } : {}),
     ...(o.error !== undefined ? { error: o.error } : {}),
     ...(imgs ? { images: imgs } : {}),
+    ...(Number.isInteger(startLine) && startLine > 0 ? { startLine } : {}),
   };
 }
 
@@ -249,6 +266,7 @@ export function toS2CMessage(
         args: event.input,
         toolCallId: event.toolCallId,
         argDisplay: opts?.argDisplay?.(event.toolName),
+        headerKeys: opts?.headerKeys?.(event.toolName),
         display: opts?.display?.(event.toolName),
       });
     case OUTPUT_EVENT.TOOL_RESULT:

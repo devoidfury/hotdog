@@ -1569,58 +1569,27 @@ body.sidebar-resizing {
 
 .tool-call-header {
     padding: 6px 12px;
-    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: space-between;
     font-size: 0.82rem;
-    /* Quiet typographic row: muted name, muted mono path badge (below), no
-       band and no slab. Muted by default, so a pending block is already the
-       resting state -- nothing to brighten until a result changes the glyph. */
+    /* Static typographic row: the name carries the emphasis (primary), the
+       path summary stays the muted mono badge (below). Muted remainder, so a
+       pending block is already the resting state -- nothing to brighten until
+       a result changes the glyph. */
     color: var(--text-muted);
     font-weight: 500;
-    transition: color 0.15s;
-    user-select: none;
     gap: var(--space-md);
 }
 
-/* Click affordance is typographic: the row strengthens, it never fills. */
-.tool-call-header:hover {
-    color: var(--text-primary);
-}
-
-.tool-call-body {
-    padding: 8px 12px;
-    font-family: var(--font-mono);
-    font-size: 0.8rem;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: var(--text-secondary);
-    line-height: 1.5;
-    /* auto height with internal scroll (was a fixed 40vh slab) */
-    max-height: 40vh;
-    overflow-y: auto;
-    resize: vertical;
-}
-
-.tool-call-body.hidden {
-    padding: 0 14px;
-    max-height: 0;
-    overflow: hidden;
-    transition:
-        max-height 0.2s var(--ease-out),
-        padding 0.2s var(--ease-out);
-}
-
-.tool-call-body:not(.hidden) {
-    padding: 8px 12px;
-}
-
+/* The name keeps the primary ink -- the emphasis the row used to only
+   borrow on hover. */
 .tool-call-name {
     flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+    color: var(--text-primary);
 }
 
 .tool-call-display {
@@ -1644,7 +1613,9 @@ body.sidebar-resizing {
 .tool-call-status.status-ok { color: var(--success); }
 .tool-call-status.status-error { color: var(--error); }
 
-.tool-call-body .tool-args {
+/* The prose posture's json disclosure pre (the framed header's args box is
+   gone; this is the class's only renderer now). */
+.tool-args {
     margin: 0;
     font-family: var(--font-mono);
     font-size: 0.78rem;
@@ -1746,7 +1717,7 @@ body.sidebar-resizing {
     align-items: center;
     gap: var(--space-xs);
     min-width: 0;
-    padding: 5px 10px;
+    padding: 5px 0;
     font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--text-secondary);
@@ -2513,7 +2484,6 @@ body.sidebar-resizing {
         font-size: 0.72rem;
     }
 
-    .tool-call-body,
     .tool-file-pre,
     .tool-result-pre {
         max-height: 30vh;

@@ -29,6 +29,28 @@ export function toolContentText(content: ToolResultContent | Array<unknown> | nu
 }
 
 /**
+ * First value stored under `key` in any tool-result part's `meta` (the
+ * fields the parts keep at rest). Display layers read structured facts from
+ * here instead of parsing the flattened `META:` text back apart -- today
+ * `start_line` numbers the webui diff rails with the real file line.
+ * Degrades to null for strings and the bookkeeping plain-object shape, the
+ * same postures toolContentText takes.
+ */
+export function toolContentMeta(
+  content: ToolResultContent | Array<unknown> | null | undefined,
+  key: string,
+): string | null {
+  if (content == null || typeof content === "string" || !Array.isArray(content)) return null;
+  for (const part of content) {
+    if (!isToolResultPart(part)) continue;
+    for (const [k, v] of part.meta) {
+      if (k === key) return v;
+    }
+  }
+  return null;
+}
+
+/**
  * Plain-text view of ANY message content for display surfaces (session
  * review, web log views). Core renders wrapper parts as JSON at rest; a
  * human-facing view composes prose instead -- this is display, not a wire

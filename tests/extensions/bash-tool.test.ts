@@ -29,6 +29,15 @@ describe('BashTool', () => {
     expect(Object.keys(props)).toContain(tool.metadata.display![0]!.arg!);
   });
 
+  it('folds only timeoutMs into the title bar; the command is the body', () => {
+    // headerKeys rename guard (same idiom as the display pin above): a
+    // silently renamed param drops out of the fold with no compile error.
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    expect(tool.metadata.headerKeys).toEqual(['timeoutMs']);
+    const props = tool.toToolDef().function.parameters.properties as Record<string, unknown>;
+    for (const k of tool.metadata.headerKeys!) expect(Object.keys(props)).toContain(k);
+  });
+
   it('returns error for missing command', async () => {
     const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
     const result = await tool.execute(JSON.stringify({}), {} as any);

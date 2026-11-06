@@ -9,6 +9,7 @@ import {
   truncateOutput,
   generateDiff,
   getRequiredStr,
+  summarizeHeaderArgs,
   ToolResult,
   TOOL_STOP_LOOP,
 } from "@core/extensions/tool-utils.ts";
@@ -523,5 +524,48 @@ describe("ToolResult.withStopLoop()", () => {
       .withStopLoop();
     expect(r.metadata!.get("key")).toBe("value");
     expect(r[TOOL_STOP_LOOP]).toBe(true);
+  });
+});
+
+describe("summarizeHeaderArgs", () => {
+  it("keeps only the declared keys, labeled, in declaration order", () => {
+    expect(summarizeHeaderArgs('{"command":"ls","timeoutMs":5000}', ["timeoutMs"])).toBe("timeoutMs: 5000");
+    // Declaration order wins over the model's serialization order, so the
+    // same call always reads the same.
+    expect(summarizeHeaderArgs({ path: "a", offset: 10, limit: 5 }, ["limit", "offset"])).toBe("limit: 5 · offset: 10");
+  });
+
+  it("never drops the label -- a lone kept key still reads `k: v`", () => {
+    // summarizeToolArgs's single-key rule bares the value; here the label is
+    // the point (a bare 180000 beside a tool name identifies nothing).
+    expect(summarizeHeaderArgs('{"timeoutMs":180000}', ["timeoutMs"])).toBe("timeoutMs: 180000");
+  });
+
+  it("drops absent keys; folds to empty when nothing remains", () => {
+    expect(summarizeHeaderArgs('{"command":"ls"}', ["timeoutMs"])).toBe("");
+    expect(summarizeHeaderArgs("{}", ["timeoutMs", "offset"])).toBe("");
+    expect(summarizeHeaderArgs(null, ["timeoutMs"])).toBe("");
+  });
+
+  it("keeps falsy-but-present values (0, false)", () => {
+    expect(summarizeHeaderArgs('{"offset":0,"replace_all":false}', ["offset", "replace_all"])).toBe(
+      "offset: 0 · replace_all: false",
+    );
+  });
+
+  it("folds multi-line strings to their size and honors argDisplay hints", () => {
+    expect(summarizeHeaderArgs({ oldString: "a\nb" }, ["oldString"])).toBe("oldString: 2 lines, 3 chars");
+    // A kept multi-line key can preview instead of count, hint honored.
+    expect(
+      summarizeHeaderArgs('{"command":"git status\\n&& git diff"}', ["command"], {
+        command: { preview: "first-line" },
+      }),
+    ).toBe("command: git status… (2 lines, 22 chars)");
+  });
+
+  it("non-object args fold to empty (keys cannot pick from them)", () => {
+    expect(summarizeHeaderArgs("not json", ["command"])).toBe("");
+    expect(summarizeHeaderArgs('"5"', ["x"])).toBe("");
+    expect(summarizeHeaderArgs("[1,2]", ["x"])).toBe("");
   });
 });

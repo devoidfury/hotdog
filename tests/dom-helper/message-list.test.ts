@@ -263,12 +263,13 @@ describe("thinking", () => {
 });
 
 describe("tool calls and results", () => {
-  it("renders a collapsible tool call and attaches matching results", () => {
+  it("renders a static tool header and attaches matching results", () => {
     ml.handleToolCall({ name: "read", args: '{"path":"a.ts"}', toolCallId: "t1" });
     const block = container.querySelector(".tool-call-block")!;
     expect(block.querySelector(".tool-call-name")!.textContent).toContain("read");
     expect(block.querySelector(".tool-call-display")!.textContent).toBe("a.ts");
-    expect(block.querySelector(".tool-call-body")!.classList.contains("hidden")).toBe(true);
+    // The header is static: no args box exists below it.
+    expect(block.querySelector(".tool-call-body")).toBeNull();
 
     ml.handleToolResult({ name: "read", output: "x".repeat(2500), toolCallId: "t1" });
     // The result rides a collapsed generic box: open it for the preview.
@@ -276,9 +277,7 @@ describe("tool calls and results", () => {
     const pre = block.querySelector(".tool-result-pre")!;
     expect(pre.textContent).toContain("500 more chars");
 
-    // Expand reveals the args body; "show full result" swaps in the full output.
-    (block.querySelector(".tool-call-header") as HTMLElement).click();
-    expect(block.querySelector(".tool-call-body")!.classList.contains("hidden")).toBe(false);
+    // "show full result" swaps in the full output.
     block.querySelector<HTMLElement>(".tool-result-box .tool-raw-toggle")!.click();
     expect(block.querySelector(".tool-result-pre")!.textContent).toHaveLength(2500);
   });
@@ -372,16 +371,6 @@ describe("tool calls and results", () => {
     expect(plain.querySelector(".tool-file")).toBeNull();
     openResult(plain);
     expect(plain.querySelector(".tool-result-pre")!.textContent).toBe("L1\nL2");
-  });
-
-  it("toggles args between pretty and raw JSON", () => {
-    ml.handleToolCall({ name: "grep", args: '{"pattern":"x","path":"src"}' });
-    const block = container.querySelector(".tool-call-block")!;
-    (block.querySelector(".tool-call-header") as HTMLElement).click();
-    const argsPre = block.querySelector(".tool-args")!;
-    expect(argsPre.textContent).toContain('"pattern": "x"'); // pretty
-    block.querySelector<HTMLElement>(".tool-raw-toggle")!.click();
-    expect(argsPre.textContent).toBe('{"pattern":"x","path":"src"}'); // raw
   });
 
   it("sanitizes tool names in headers", () => {

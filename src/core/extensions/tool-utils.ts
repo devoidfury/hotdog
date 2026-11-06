@@ -375,6 +375,33 @@ function summarizeToolValue(value: unknown, hint?: ArgDisplay): string {
   return json.length > 60 ? `${json.slice(0, 59)}…` : json;
 }
 
+/**
+ * Title-bar fold for display sinks (ToolMetadata.headerKeys): only the
+ * declared keys, always labeled `k: v · k: v` (summarizeToolArgs's
+ * single-key rule drops the label, and a bare `180000` beside a tool name
+ * identifies nothing -- here the label is the point). Declaration order
+ * wins over the model's serialization order, so the same call always reads
+ * the same; absent/undefined keys drop out. Everything folded away (or args
+ * that are not a JSON object) yields "", which is the explicit "the title
+ * bar shows no summary" signal on the wire -- see s2cToolCall for when an
+ * empty fold rides.
+ */
+export function summarizeHeaderArgs(
+  input: string | Record<string, unknown> | null,
+  headerKeys: readonly string[],
+  argDisplay?: Record<string, ArgDisplay>,
+): string {
+  const parsed = parseToolInput(input);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+  const parts: string[] = [];
+  for (const k of headerKeys) {
+    const v = parsed[k];
+    if (v === undefined) continue;
+    parts.push(`${k}: ${summarizeToolValue(v, argDisplay?.[k])}`);
+  }
+  return parts.join(" · ");
+}
+
 export function generateDiff(
   oldText: string,
   newText: string,

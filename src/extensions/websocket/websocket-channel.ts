@@ -21,6 +21,14 @@ export interface WebSocketChannelOptions {
    */
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
   /**
+   * Resolves a tool's title-bar keys (its metadata's headerKeys); a declaring
+   * tool's TOOL_CALL frame carries the labeled key-fold instead of the shared
+   * argsSummary, riding even when empty (an explicit "no summary" that also
+   * suppresses the client's fallback header). Omitting the resolver leaves
+   * every tool on the shared fold.
+   */
+  headerKeys?: (toolName: string) => readonly string[] | undefined;
+  /**
    * Resolves a tool's call-level display parts (its metadata's `display`);
    * the TOOL_CALL wire message forwards the declared spec (see
    * ToolDisplayWire) when the tool declares any. Omitting the resolver just
@@ -35,6 +43,7 @@ export class WebSocketChannel extends Channel {
   #ready: boolean;
   #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;
   #argDisplay: ((toolName: string) => Record<string, ArgDisplay> | undefined) | undefined;
+  #headerKeys: ((toolName: string) => readonly string[] | undefined) | undefined;
   #display: ((toolName: string) => ToolDisplaySpec[] | undefined) | undefined;
 
   constructor(options: WebSocketChannelOptions) {
@@ -44,6 +53,7 @@ export class WebSocketChannel extends Channel {
     this.#ready = true;
     this.#broadcastCallback = options.broadcastCallback;
     this.#argDisplay = options.argDisplay;
+    this.#headerKeys = options.headerKeys;
     this.#display = options.display;
     this.attach(options.sessionId);
   }
@@ -53,6 +63,7 @@ export class WebSocketChannel extends Channel {
 
     const msg = toS2CMessage(event, this.#sessionId, {
       argDisplay: this.#argDisplay,
+      headerKeys: this.#headerKeys,
       display: this.#display,
     });
     if (!msg) return; // frame-only event: stays off the wire

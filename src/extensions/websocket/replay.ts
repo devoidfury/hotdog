@@ -30,9 +30,17 @@ import type { HotdogServerSocket } from "./socket.ts";
 type ToolCallWire = { id?: string; function?: { name?: string; arguments?: string } };
 
 /** Per-tool arg-display hints resolved from the tool registry (replay's only
- * metadata source; live calls carry their own summary from the channel). */
-function registryArgDisplay(registry: ToolRegistry | undefined) {
+ * metadata source; live calls carry their own summary from the channel).
+ * Exported for the cold LOG_VIEWED annotator (handlers-logs.ts), which folds
+ * declared header keys against the LIVE registry exactly as replay does. */
+export function registryArgDisplay(registry: ToolRegistry | undefined) {
   return (name: string) => registry?.getMetadata?.(name)?.argDisplay;
+}
+
+/** Per-tool title-bar keys, resolved the same way: a declaring tool's
+ * replayed frame folds exactly like its live counterpart. */
+export function registryHeaderKeys(registry: ToolRegistry | undefined) {
+  return (name: string) => registry?.getMetadata?.(name)?.headerKeys;
 }
 
 /** Per-tool call-level display parts, resolved the same way: OLD logs get
@@ -62,6 +70,7 @@ export function replayLogSlice(
   toolRegistry?: ToolRegistry,
 ): void {
   const argDisplay = registryArgDisplay(toolRegistry);
+  const headerKeys = registryHeaderKeys(toolRegistry);
   const toolDisplay = registryDisplay(toolRegistry);
   const send = (msg: Record<string, unknown>): void => {
     ws.send(JSON.stringify(msg));
@@ -117,6 +126,7 @@ export function replayLogSlice(
               args: tc.function?.arguments || "{}",
               toolCallId: tc.id,
               argDisplay: argDisplay(name),
+              headerKeys: headerKeys(name),
               display: toolDisplay(name),
             }),
           );
@@ -179,6 +189,7 @@ export function replaySessionHistory(
   const messages = agent.getMessages();
 
   const argDisplay = registryArgDisplay((agent as Agent).toolRegistry);
+  const headerKeys = registryHeaderKeys((agent as Agent).toolRegistry);
   const toolDisplay = registryDisplay((agent as Agent).toolRegistry);
   const send = (msg: Record<string, unknown>): void => {
     ws.send(JSON.stringify(msg));
@@ -218,6 +229,7 @@ export function replaySessionHistory(
                   args: tc.function?.arguments || "{}",
                   toolCallId: tc.id,
                   argDisplay: argDisplay(name),
+                  headerKeys: headerKeys(name),
                   display: toolDisplay(name),
                 }),
               );

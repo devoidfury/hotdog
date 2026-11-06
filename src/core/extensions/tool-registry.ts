@@ -129,6 +129,18 @@ export interface ToolMetadata {
    * consume the RESULT of resolution, never the registry itself.
    */
   display?: ToolDisplaySpec[];
+  /**
+   * Arg keys the display-sink title bar summarizes (sibling of argDisplay
+   * and display, same register: display-only policy next to the metadata,
+   * never in the JSON Schema). Present -> the title bar's fold covers ONLY
+   * these keys, always in labeled `k: v` form, declaration order; the fold
+   * rides the wire even when empty, so an explicit "no summary" also
+   * suppresses the client's fallback heuristic (see summarizeHeaderArgs).
+   * Absent -> the shared argsSummary fold (terminal and sinks alike).
+   * The terminal ignores this field: its line prints the shared fold, where
+   * e.g. a bash command preview IS the display.
+   */
+  headerKeys?: string[];
 }
 
 export interface ToolDef {

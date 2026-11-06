@@ -2,7 +2,7 @@
 // (CLI, websocket bridge, web log view). Display, not a wire format.
 
 import { describe, it, expect } from 'bun:test';
-import { toolContentText, wrapperContentText, splitFileIncludes } from '@utils/tool-content.ts';
+import { toolContentMeta, toolContentText, wrapperContentText, splitFileIncludes } from '@utils/tool-content.ts';
 import type { ToolResultPart } from '@core/context/wrappers.ts';
 
 const part = (over: Partial<ToolResultPart> = {}): ToolResultPart => ({
@@ -126,5 +126,25 @@ describe("splitFileIncludes (attachment splitter)", () => {
 
   it("degrades the bookkeeping plain-object shape to empty text", () => {
     expect(splitFileIncludes({ session: "x" } as unknown as never)).toEqual({ text: "", files: [] });
+  });
+});
+
+describe('toolContentMeta', () => {
+  it('reads the first value under the key from the part meta', () => {
+    const p = part({ meta: [['path', 'a.ts'], ['start_line', '207']] });
+    expect(toolContentMeta([p], 'start_line')).toBe('207');
+    expect(toolContentMeta([p], 'nope')).toBeNull();
+  });
+
+  it('degrades to null for strings, non-arrays, and non-part entries', () => {
+    expect(toolContentMeta('plain', 'start_line')).toBeNull();
+    expect(toolContentMeta(null, 'start_line')).toBeNull();
+    expect(toolContentMeta([{ type: 'other', meta: [['start_line', '3']] }], 'start_line')).toBeNull();
+  });
+
+  it('takes the first part hit when several parts carry the key', () => {
+    expect(
+      toolContentMeta([part({ meta: [['start_line', '5']] }), part({ meta: [['start_line', '9']] })], 'start_line'),
+    ).toBe('5');
   });
 });

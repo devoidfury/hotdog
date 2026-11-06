@@ -191,4 +191,29 @@ describe("core tool display parts (ToolMetadata.display)", () => {
       expect(tool!.metadata.display, `${name} must declare no display parts`).toBeUndefined();
     }
   });
+
+  it("title-bar headerKeys pin to real schema params (read/edit/overwrite/append)", async () => {
+    // Rename guard, same idiom as the display *Arg pins above: a silently
+    // renamed param drops out of the title-bar fold with no compile error.
+    // The five declaring tools keep only their non-path/non-command keys --
+    // the body's declared parts carry the story the title bar repeats.
+    const expectHeaderKeys = async (name: string, keys: string[]) => {
+      const tool = createToolFactory(config).createTool(name)!;
+      expect(tool.metadata.headerKeys, `${name} headerKeys`).toEqual(keys);
+      const props = await schemaProps(name);
+      for (const k of keys) expect(props, `${name} ${k} param`).toContain(k);
+    };
+    await expectHeaderKeys("read", ["offset", "limit"]);
+    await expectHeaderKeys("edit", ["replace_all"]);
+    await expectHeaderKeys("overwrite", ["content"]);
+    await expectHeaderKeys("append", ["content"]);
+  });
+
+  it("the rest of core-tools declares no headerKeys (shared fold stays)", () => {
+    const factory = createToolFactory(config);
+    for (const name of ["grep", "find", "project_info", "explore"]) {
+      const tool = factory.createTool(name, [name]);
+      expect(tool!.metadata.headerKeys, `${name} must declare no headerKeys`).toBeUndefined();
+    }
+  });
 });

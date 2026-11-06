@@ -14,8 +14,9 @@ import {
   type SearchHitWire,
 } from "./protocol.ts";
 import { SessionRegistry } from "./session-registry.ts";
-import { registryDisplay } from "./replay.ts";
+import { registryArgDisplay, registryDisplay, registryHeaderKeys } from "./replay.ts";
 import { wireToolDisplay } from "./wire-messages.ts";
+import { summarizeHeaderArgs } from "@core/extensions/tool-utils.ts";
 import { attachResumedSession } from "./attach.ts";
 import { dropPinned, isPinned } from "./pin-store.ts";
 import type { RouteContext } from "./route-types.ts";
@@ -98,12 +99,16 @@ export async function handleViewLog(ctx: RouteContext): Promise<void> {
   await readSessionEntries(msg.logId as string)
     .then((entries) => {
       // A browsed log is a cold surface with no client-side registry, so the
-      // server resolves each tool_call's declared display parts against the
-      // LIVE registry (registryDisplay, the replay resolver) and maps them
-      // through wireToolDisplay -- the one metadata->wire seam. Additive
-      // per-call field: old clients ignore it, hintless tools and non-call
+      // server resolves each tool_call's declared display parts (registryDisplay,
+      // the replay resolver) and its declared title-bar fold (headerKeys ->
+      // argsSummary, "" included: the explicit "no summary" that also suppresses
+      // the client's fallback heuristic) against the LIVE registry, mapping the
+      // parts through wireToolDisplay -- the one metadata->wire seam. Additive
+      // per-call fields: old clients ignore them, hintless tools and non-call
       // entries ride untouched (no null-noise, no empty arrays).
       const toolDisplay = registryDisplay(core?.toolRegistry);
+      const headerKeys = registryHeaderKeys(core?.toolRegistry);
+      const argDisplay = registryArgDisplay(core?.toolRegistry);
       // Log entries carry raw images; put them through the same wire cap so a huge base64 can't flood the socket.
       const capped: Array<Record<string, unknown>> = entries.map((entry) => {
         const imgs = wireImages(entry.images);
@@ -112,11 +117,30 @@ export async function handleViewLog(ctx: RouteContext): Promise<void> {
         if (!Array.isArray(calls) || calls.length === 0) return withImages;
         let touched = false;
         const wired = calls.map((raw) => {
-          const call = raw as { name?: string; function?: { name?: string } };
-          const display = wireToolDisplay(toolDisplay(call?.function?.name || call?.name || ""));
-          if (!display) return raw;
+          const call = raw as {
+            name?: string;
+            arguments?: string | Record<string, unknown>;
+            args?: Record<string, unknown>;
+            function?: { name?: string; arguments?: string };
+          };
+          const name = call?.function?.name || call?.name || "";
+          const display = wireToolDisplay(toolDisplay(name));
+          const keys = headerKeys(name);
+          if (!display && keys === undefined) return raw;
           touched = true;
-          return { ...call, display };
+          return {
+            ...call,
+            ...(display ? { display } : {}),
+            ...(keys !== undefined
+              ? {
+                  argsSummary: summarizeHeaderArgs(
+                    call?.function?.arguments ?? call?.arguments ?? call?.args ?? "",
+                    keys,
+                    argDisplay(name),
+                  ),
+                }
+              : {}),
+          };
         });
         return touched ? { ...withImages, tool_calls: wired } : withImages;
       });

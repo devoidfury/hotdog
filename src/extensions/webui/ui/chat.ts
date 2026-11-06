@@ -361,6 +361,9 @@ interface ToolResultMessage {
   error?: string;
   images?: UiImage[];
   toolCallId?: string;
+  /** Where the edit landed (server-extracted from the result's meta);
+   *  numbers the diff gutters with real file lines. */
+  startLine?: number;
 }
 
 interface CompactingMessage {

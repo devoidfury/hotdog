@@ -152,6 +152,39 @@ describe("replaySessionHistory", () => {
     expect(call.argsSummary).toBe("git status… (2 lines, 22 chars)");
   });
 
+  it("folds the declared headerKeys, riding the explicit empty one", () => {
+    const registry = {
+      get: () => undefined,
+      getMetadata: (name: string) => (name === "bash" ? { headerKeys: ["timeoutMs"] } : undefined),
+    };
+    const out = replay(
+      [
+        new Message({
+          role: "assistant",
+          content: "x",
+          toolCalls: [
+            {
+              id: "c1",
+              type: "function",
+              function: { name: "bash", arguments: JSON.stringify({ command: "ls" }) },
+            },
+            {
+              id: "c2",
+              type: "function",
+              function: { name: "bash", arguments: JSON.stringify({ command: "ls", timeoutMs: 30000 }) },
+            },
+          ],
+        }),
+      ],
+      { toolRegistry: registry },
+    );
+    const calls = out.filter((m) => m.type === S2C.TOOL_CALL);
+    // Declared keys kept nothing -> the explicit "" (no client fallback);
+    // kept something -> the labeled fold. Replayed frames match live ones.
+    expect(calls[0]!.argsSummary).toBe("");
+    expect(calls[1]!.argsSummary).toBe("timeoutMs: 30000");
+  });
+
   it("carries the forwarded display parts from the registry's metadata", () => {
     const registry = {
       get: () => undefined,

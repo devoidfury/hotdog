@@ -11,7 +11,7 @@ import {
   type FeedResult,
   type MdDocument,
 } from "@utils/md-parser.ts";
-import { toolContentText, wrapperContentText, splitFileIncludes } from "@utils/tool-content.ts";
+import { toolContentMeta, toolContentText, wrapperContentText, splitFileIncludes } from "@utils/tool-content.ts";
 import { ctxByIndex, deriveCallDurationsByIndex, parseEntryTs, turnFinalDurationsByIndex, type CtxUsage } from "@utils/session-turns.ts";
 import { ToolBlockController, type ToolDisplayWire } from "./tool-block.tsx";
 import type { DomNode } from "@utils/jsx";
@@ -84,7 +84,7 @@ interface AssistantMessage {
 interface StreamingChunk { content: string; }
 interface ThinkingMessage { content: string; }
 interface ToolCallMessage { name: string; args: string; argsSummary?: string; display?: ToolDisplayWire[]; toolCallId?: string; }
-interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; toolCallId?: string; }
+interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; toolCallId?: string; startLine?: number; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
 
@@ -110,6 +110,9 @@ interface LogEntry {
      *  entry (additive per-call field; cold logs then render exactly like
      *  live frames -- same specs, same posture code path). */
     display?: ToolDisplayWire[];
+    /** Registry-resolved title-bar fold for tools declaring headerKeys
+     *  (additive; "" is explicit -- it suppresses the client heuristic). */
+    argsSummary?: string;
   }> | null;
   tool_call_id?: string | null;
   /** token_usage records (ctx segment source for the cold-log footer): the
@@ -789,7 +792,7 @@ export function createMessageList(
     scrollBottom();
   }
 
-  function handleToolResult({ name, output, error, images, toolCallId }: ToolResultMessage): void {
+  function handleToolResult({ name, output, error, images, toolCallId, startLine }: ToolResultMessage): void {
     // The response behind the preceding usage record is fully closed here.
     // Log-order replay puts the usage frame BEFORE the next entry's tool
     // frames, so a held flag must not survive into a later response's bar.
@@ -815,6 +818,7 @@ export function createMessageList(
       ...(output !== undefined ? { output } : {}),
       ...(error !== undefined ? { error } : {}),
       ...(images ? { images } : {}),
+      ...(startLine !== undefined ? { startLine } : {}),
     });
     scrollBottom();
   }
@@ -1316,14 +1320,22 @@ export function createMessageList(
                 args?: string | object;
                 function?: { name?: string; arguments?: string | object };
                 display?: ToolDisplayWire[];
+                argsSummary?: string;
               };
               const name = toolCall.function?.name || toolCall.name || "unknown";
               const rawArgs = toolCall.function?.arguments ?? toolCall.arguments ?? toolCall.args;
               const args = typeof rawArgs === "string" ? rawArgs : JSON.stringify(rawArgs ?? {}, null, 2);
               // The server annotated the entry's calls with their resolved
-              // display parts (handlers-logs.ts), so a browsed log reaches the
-              // exact same posture code as a live TOOL_CALL frame.
-              handleToolCall({ name, args, display: toolCall.display, toolCallId: tc.id || undefined });
+              // display parts and declared-header fold (handlers-logs.ts), so
+              // a browsed log reaches the exact same posture code as a live
+              // TOOL_CALL frame.
+              handleToolCall({
+                name,
+                args,
+                argsSummary: toolCall.argsSummary,
+                display: toolCall.display,
+                toolCallId: tc.id || undefined,
+              });
             }
           }
           // Every llm entry gets its footer, text or not: the per-call
@@ -1344,15 +1356,20 @@ export function createMessageList(
           });
           break;
         }
-        case "tool_result":
+        case "tool_result": {
+          // Cold parity with the live TOOL_RESULT frame: the stored parts'
+          // start_line meta numbers the diff gutters with real file lines.
+          const metaStartLine = Number(toolContentMeta(entry.content, "start_line"));
           handleToolResult({
             name:
               (entry as { tool_name?: string | null }).tool_name || extractToolNameFromEntry(entry),
             output: content,
             images: entry.images,
             toolCallId: (entry as { tool_call_id?: string | null }).tool_call_id || undefined,
+            ...(Number.isInteger(metaStartLine) && metaStartLine > 0 ? { startLine: metaStartLine } : {}),
           });
           break;
+        }
         case "compaction":
           handleCompacting({ message: content });
           break;

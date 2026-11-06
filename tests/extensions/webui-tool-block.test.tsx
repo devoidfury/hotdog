@@ -325,7 +325,7 @@ describe("auto-expand (owner ruling 2026-11-05)", () => {
 describe("ToolBlock SSR", () => {
   const base = { expanded: false, raw: false, fullResult: false, boxes: {}, unfolded: {} };
 
-  it("renders the header and pending status collapsed", () => {
+  it("renders the static header row with pending status and no args box", () => {
     const html = renderToString(
       ToolBlock({
         state: { name: "read", args: '{"path":"a.ts"}', argsSummary: "a.ts (lines 1-5)", ...base },
@@ -338,7 +338,7 @@ describe("ToolBlock SSR", () => {
     );
     expect(html).toContain('class="tool-call-block status-pending"');
     expect(html).toContain("a.ts (lines 1-5)");
-    expect(html).toContain('class="tool-call-body hidden"');
+    expect(html).not.toContain("tool-call-body");
     // No result box until a result exists.
     expect(html).not.toContain("tool-result-box");
   });
@@ -359,6 +359,23 @@ describe("ToolBlock SSR", () => {
     expect(render({ argsSummary: "FOLD" })).toContain('<span class="tool-call-display">FOLD</span>');
     // No fold -> the old heuristic (basename) still covers old servers.
     expect(render({})).toContain('<span class="tool-call-display">x.ts</span>');
+  });
+
+  it("renders no summary at all for the explicit empty fold", () => {
+    const html = renderToString(
+      ToolBlock({
+        state: { name: "read", args: '{"path":"a.ts"}', argsSummary: "", ...base },
+        onToggle: () => {},
+        onToggleRaw: () => {},
+        onShowFull: () => {},
+        onToggleBox: () => {},
+        onUnfold: () => {},
+      }),
+    );
+    // "" is the server saying "no summary, the parts are the story": the
+    // local basename heuristic must NOT step in.
+    expect(html).toContain('<span class="tool-call-display"></span>');
+    expect(html).not.toContain("a.ts");
   });
 
   it("escapes hostile headers and args (never injects markup)", () => {
@@ -383,7 +400,6 @@ describe("ToolBlock SSR", () => {
           name: "run",
           args: "{}",
           ...base,
-          expanded: true,
           boxes: { g: true },
           result: { error: "boom" },
         },
@@ -774,8 +790,8 @@ describe("diff part (DOM)", () => {
     expect(diff.querySelector(".diff-add .diff-sign")!.textContent).toBe("+");
     expect(diff.querySelector(".diff-ctx .diff-sign")!.textContent).toBe("");
     expect(diff.querySelector(".diff-gutter")).toBeNull();
-    // Still no click needed: the args body stays collapsed around it.
-    expect(block.querySelector(".tool-call-body")!.classList.contains("hidden")).toBe(true);
+    // No args box exists to open -- the header is static.
+    expect(block.querySelector(".tool-call-body")).toBeNull();
     // The diff consumed the result.
     expect(block.querySelector(".tool-result-box")).toBeNull();
   });
@@ -1212,5 +1228,70 @@ describe("generic posture and fallbacks (DOM)", () => {
     expect(imgs.textContent).toContain("too big");
     // Images sit after the result box, last in the block.
     expect(block.children[Array.from(block.children).length - 1]).toBe(imgs as unknown as Element);
+  });
+});
+
+describe("computeDiffLines fileStartLine", () => {
+  it("numbers a one-line change with its real file line", () => {
+    // The snippet's first line IS file line 207 (no context): gutters read
+    // 207, not the snippet's 1.
+    expect(computeDiffLines("b", "B", MAX_DIFF_LINES, 207)).toEqual([
+      { kind: "del", text: "b", oldNo: 207 },
+      { kind: "add", text: "B", newNo: 207 },
+    ]);
+  });
+
+  it("shifts the context rows with the base", () => {
+    // Snippet starts at file line 206: ctx 206, changed line 207 both sides,
+    // trailing ctx 208.
+    expect(computeDiffLines("a\nb\nc\nd", "a\nB\nc\nd", MAX_DIFF_LINES, 206)).toEqual([
+      { kind: "ctx", text: "a", oldNo: 206, newNo: 206 },
+      { kind: "del", text: "b", oldNo: 207 },
+      { kind: "add", text: "B", newNo: 207 },
+      { kind: "ctx", text: "c", oldNo: 208, newNo: 208 },
+    ]);
+  });
+
+  it("keeps the two sides honest when the replacement length differs", () => {
+    // 1 line replaced by 2: the trailing context shifts differently per side.
+    expect(computeDiffLines("a\nb\nc", "a\nB1\nB2\nc", MAX_DIFF_LINES, 10)).toEqual([
+      { kind: "ctx", text: "a", oldNo: 10, newNo: 10 },
+      { kind: "del", text: "b", oldNo: 11 },
+      { kind: "add", text: "B1", newNo: 11 },
+      { kind: "add", text: "B2", newNo: 12 },
+      { kind: "ctx", text: "c", oldNo: 12, newNo: 13 },
+    ]);
+  });
+
+  it("absent or invalid fileStartLine falls back to the snippet's 1..N", () => {
+    expect(computeDiffLines("b", "B").map((l) => l.oldNo ?? l.newNo)).toEqual([1, 1]);
+    expect(computeDiffLines("b", "B", MAX_DIFF_LINES, 0).map((l) => l.oldNo ?? l.newNo)).toEqual([1, 1]);
+    expect(computeDiffLines("b", "B", MAX_DIFF_LINES, 2.5).map((l) => l.oldNo ?? l.newNo)).toEqual([1, 1]);
+  });
+});
+
+describe("diff gutters follow the result's startLine (DOM)", () => {
+  it("numbers rows from the file, not the snippet", () => {
+    const { block, ctrl } = mountBlock({
+      name: "change",
+      args: JSON.stringify({ a: "one\ntwo\nthree", b: "one\nTWO\nthree" }),
+      display: [{ kind: "diff", oldArg: "a", newArg: "b" }],
+    });
+    ctrl.setResult({ output: "ok", startLine: 206 });
+    const rows = Array.from(block.querySelectorAll(".diff-row"));
+    // ctx 206, del 207, add 207, ctx 208 -- the empty cell per side stands.
+    expect(rows.map((r) => r.querySelector(".diff-ln-old")!.textContent)).toEqual(["206", "207", "", "208"]);
+    expect(rows.map((r) => r.querySelector(".diff-ln-new")!.textContent)).toEqual(["206", "", "207", "208"]);
+  });
+
+  it("without a startLine the snippet's own 1..N stands (old logs, old servers)", () => {
+    const { block, ctrl } = mountBlock({
+      name: "change",
+      args: JSON.stringify({ a: "one\ntwo\nthree", b: "one\nTWO\nthree" }),
+      display: [{ kind: "diff", oldArg: "a", newArg: "b" }],
+    });
+    ctrl.setResult({ output: "ok" });
+    const rows = Array.from(block.querySelectorAll(".diff-row"));
+    expect(rows.map((r) => r.querySelector(".diff-ln-old")!.textContent)).toEqual(["1", "2", "", "3"]);
   });
 });

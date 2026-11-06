@@ -649,6 +649,7 @@ export class SessionRegistry {
       // display hints off the session agent's registry (same metadata the
       // terminal sink consults); the wire carries only the resolved result.
       argDisplay: (toolName) => metaOf(toolName)?.argDisplay,
+      headerKeys: (toolName) => metaOf(toolName)?.headerKeys,
       display: (toolName) => metaOf(toolName)?.display,
     });
 

@@ -35,15 +35,22 @@ export interface ToolResultData {
   output?: string;
   error?: string;
   images?: ToolImageWire[];
+  /** 1-based file line the edit's change starts at (the result part's
+   *  `start_line` meta, forwarded on the TOOL_RESULT frame). Numbers the
+   *  diff gutters with real file lines; absent -> snippet-relative 1..N. */
+  startLine?: number;
 }
 
 export interface ToolBlockState {
   name: string;
   args: string;
   /**
-   * Server-computed hint-driven fold (ToolMetadata.argDisplay, shared with
-   * the terminal). The local argsSummary heuristic covers older servers
-   * that send neither.
+   * Server-computed title-bar fold: the shared hint fold
+   * (ToolMetadata.argDisplay) or, for tools declaring headerKeys, the labeled
+   * key fold (summarizeHeaderArgs). Tri-state: undefined = server sent no
+   * fold (the local argsSummary heuristic covers older servers); "" =
+   * explicit "no summary" -- the declared parts are the story, and the
+   * heuristic must NOT step in.
    */
   argsSummary?: string;
   /** Declared display parts (TOOL_CALL frame `display`), rendered in order. */
@@ -232,15 +239,33 @@ export interface DiffLine {
  * a positional line-pairing diff for insertions.
  *
  * Numbering (the GitHub body's two gutters), with `start` the trimmed prefix
- * length: removed oldLines[start..endOld-1] number start+1+i in the old file,
- * added newLines[start..endNew-1] number start+1+i in the new one, the leading
- * context row is line `start` on both sides, the trailing one `endOld+1` /
- * `endNew+1`. A pure insertion therefore shows only new numbers and a pure
- * deletion only old ones -- the two sides never share a row. The cap
- * placeholders ("… N more removed/added") are `info` rows: they say something
- * about the diff, not about a line, so they carry no numbers.
+ * length and `base = (fileStartLine ?? 1) - 1`: removed oldLines[start..endOld-1]
+ * number base+start+1+i in the old file, added newLines[start..endNew-1] number
+ * base+start+1+i in the new one, the leading context row is line base+start on
+ * both sides, the trailing one base+endOld+1 / base+endNew+1. A pure insertion
+ * therefore shows only new numbers and a pure deletion only old ones -- the two
+ * sides never share a row. The cap placeholders ("… N more removed/added") are
+ * `info` rows: they say something about the diff, not about a line, so they
+ * carry no numbers.
+ *
+ * `fileStartLine` is the file line of the rendered snippet's FIRST line
+ * (edit's `start_line` meta: where oldString matched, context included): it
+ * shifts the base, so the gutters read the file, not the snippet. Both sides
+ * share the base because everything above the snippet is unchanged:
+ * oldString and newString start at the same line in their respective files.
+ * Absent (no result fact) -> base 0, the snippet's own 1..N -- the honest
+ * fallback, and what a multi-match replace_all renders against (its gutters
+ * describe the first match).
  */
-export function computeDiffLines(oldText: string, newText: string, maxLines = MAX_DIFF_LINES): DiffLine[] {
+export function computeDiffLines(
+  oldText: string,
+  newText: string,
+  maxLines = MAX_DIFF_LINES,
+  fileStartLine?: number,
+): DiffLine[] {
+  const base = (fileStartLine !== undefined && Number.isInteger(fileStartLine) && fileStartLine > 0
+    ? fileStartLine
+    : 1) - 1;
   const oldLines = oldText.split("\n");
   const newLines = newText.split("\n");
   let start = 0;
@@ -261,17 +286,17 @@ export function computeDiffLines(oldText: string, newText: string, maxLines = MA
   const added = newLines.slice(start, endNew);
 
   const lines: DiffLine[] = [];
-  if (start > 0) lines.push({ kind: "ctx", text: oldLines[start - 1]!, oldNo: start, newNo: start });
+  if (start > 0) lines.push({ kind: "ctx", text: oldLines[start - 1]!, oldNo: base + start, newNo: base + start });
   removed.forEach((text, i) => {
     if (i === maxLines) lines.push({ kind: "info", text: `… ${removed.length - maxLines} more removed` });
-    else if (i < maxLines) lines.push({ kind: "del", text, oldNo: start + 1 + i });
+    else if (i < maxLines) lines.push({ kind: "del", text, oldNo: base + start + 1 + i });
   });
   added.forEach((text, i) => {
     if (i === maxLines) lines.push({ kind: "info", text: `… ${added.length - maxLines} more added` });
-    else if (i < maxLines) lines.push({ kind: "add", text, newNo: start + 1 + i });
+    else if (i < maxLines) lines.push({ kind: "add", text, newNo: base + start + 1 + i });
   });
   if (endOld < oldLines.length) {
-    lines.push({ kind: "ctx", text: oldLines[endOld]!, oldNo: endOld + 1, newNo: endNew + 1 });
+    lines.push({ kind: "ctx", text: oldLines[endOld]!, oldNo: base + endOld + 1, newNo: base + endNew + 1 });
   }
   return lines;
 }
@@ -418,7 +443,11 @@ function resolvePart(spec: ToolDisplayWire, state: ToolBlockState): PartView {
       const oldV = parsed && spec.oldArg ? parsed[spec.oldArg] : undefined;
       const newV = parsed && spec.newArg ? parsed[spec.newArg] : undefined;
       if (typeof oldV !== "string" || typeof newV !== "string") return { posture: "skip" };
-      return { posture: "diff", path: declaredPath(state.args, spec), lines: computeDiffLines(oldV, newV) };
+      return {
+        posture: "diff",
+        path: declaredPath(state.args, spec),
+        lines: computeDiffLines(oldV, newV, MAX_DIFF_LINES, state.result.startLine),
+      };
     }
     case "prose":
     case "code": {
@@ -873,21 +902,18 @@ export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBo
   }
 
   const header = state.argsSummary ?? argsSummary(state.args);
+  // The header is a static row: the summary is the whole story, and the raw
+  // args box it used to disclose is gone (prose posture keeps its explicit
+  // "json" disclosure; the framed header never needs one).
   return (
     <div className={`tool-call-block status-${status}`}>
-      <div className="tool-call-header" onClick={onToggle} title={state.name}>
+      <div className="tool-call-header" title={state.name}>
         <span className="tool-call-name">🛠 {state.name}</span>
         <span className="tool-call-display">{header}</span>
         <span className={`tool-call-status status-${status}`}>{STATUS_GLYPH[status]}</span>
       </div>
       {parts}
       {genericBox}
-      <div className={"tool-call-body" + (state.expanded ? "" : " hidden")}>
-        <pre className="tool-args">{state.raw ? state.args : prettyArgs(state.args)}</pre>
-        <button type="button" className="tool-raw-toggle" onClick={onToggleRaw}>
-          {state.raw ? "pretty json" : "raw json"}
-        </button>
-      </div>
       {images}
     </div>
   );

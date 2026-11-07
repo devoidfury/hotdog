@@ -18,6 +18,18 @@ export interface StreamResult {
   finishReason: string | null;
 }
 
+/** Payload of StreamCallbacks.onRetry (mirrors the client's `retry` StreamEvent). */
+export interface StreamRetryInfo {
+  /** 1-based index of the attempt that just failed; the retry will be attempt+1. */
+  attempt: number;
+  /** Retries allowed after the initial attempt (total attempts = 1 + maxRetries). */
+  maxRetries: number;
+  /** The delay actually slept (Retry-After-honoring), in ms. */
+  delayMs: number;
+  /** The failure's display text -- untrusted provider content. */
+  reason: string;
+}
+
 export interface StreamCallbacks {
   onChunk?: (content: string) => void;
   onReasoning?: (content: string) => void;
@@ -48,6 +60,23 @@ export interface StreamCallbacks {
    * callback.
    */
   onReset?: () => void;
+
+  /**
+   * A failed attempt is being retried (the client yields a `retry` event before the
+   * backoff sleep, at BOTH the request phase and the stream phase): fired ONCE per retry
+   * event with the scheduling numbers and the failure's display text. Nothing is
+   * accumulated regardless of this callback.
+   *
+   * `reason` is UNTRUSTED provider content -- whoever renders it owes the spoof-safe
+   * discipline and one-line truncation (the agent does, in retryNoticeText).
+   *
+   * Ordering contract (the mirror of onReset's): a stream-phase retry provably lands
+   * AFTER its paired reset event, so a surface that cleared on onReset sees the notice
+   * after its own clear, never before. The request phase yields no reset (nothing had
+   * streamed). Optional like every callback here: construction sites that do not pass
+   * it are unaffected.
+   */
+  onRetry?: (info: StreamRetryInfo) => void;
 
   /** Called to check if processing should be cancelled. Return true to abort the stream. */
   shouldCancel?(): boolean;
@@ -239,6 +268,20 @@ export class StreamProcessor {
           // (see StreamCallbacks.onReset for the ordering contract).
           if (callbacks.onReset) {
             callbacks.onReset();
+          }
+          break;
+        }
+
+        case "retry": {
+          // Display-only: the transport announces the retry it is about to
+          // sleep through. No assembly, no replay buffer touched.
+          if (callbacks.onRetry) {
+            callbacks.onRetry({
+              attempt: event.attempt,
+              maxRetries: event.maxRetries,
+              delayMs: event.delayMs,
+              reason: event.reason,
+            });
           }
           break;
         }

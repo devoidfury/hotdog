@@ -2,7 +2,7 @@ import { resolveRetryDelayMs, parseRetryAfterMs, shouldRetryLlmError, hasQuotaSi
 import { sleep } from "@utils/promise.ts";
 import { MarkerMangler } from "../marker-mangler.ts";
 import type { Message } from "../context/message.ts";
-import { LlmError } from "../error.ts";
+import { LlmError, formatError } from "../error.ts";
 import { ToolDef } from "../extensions/tool-registry.ts";
 import { createWireFormatRegistry, resolveWireFormatId, WireFormat, type WireFormatRegistry } from "../extensions/wire-format.ts";
 import { createRoleMappingRegistry, resolveRoleMappingId, type RoleMapping, type RoleMappingRegistry } from "../extensions/role-mapping.ts";
@@ -88,6 +88,34 @@ export type StreamEvent =
        * usage, and replay buffers -- so only the successful stream remains.
        */
       type: "reset";
+    }
+  | {
+      /**
+       * A failed attempt is being retried: yielded BEFORE the backoff sleep, and only
+       * when the retry is actually taken (the final failed attempt and a rethrown error
+       * yield nothing -- the failure surfaces on its own path). The request phase yields
+       * this event alone (nothing streamed yet, so no partial output to discard); the
+       * stream phase yields `reset` first and then this, so display surfaces clear before
+       * they see the notice explaining the clear.
+       * Display-only: StreamProcessor forwards it to StreamCallbacks.onRetry and
+       * accumulates nothing.
+       */
+      type: "retry";
+      /** 1-based index of the attempt that just failed; the retry will be attempt+1. */
+      attempt: number;
+      /** Retries allowed after the initial attempt (total attempts = 1 + maxRetries). */
+      maxRetries: number;
+      /**
+       * The delay actually slept before the retry -- the Retry-After-honoring value from
+       * resolveRetryDelayMs, not the exponential ladder constant.
+       */
+      delayMs: number;
+      /**
+       * The failure's display text (formatError). UNTRUSTED provider content: renderers
+       * must follow the spoof-safe discipline and one-line truncation
+       * (see retryNoticeText in agent.ts).
+       */
+      reason: string;
     };
 
 
@@ -398,7 +426,18 @@ export class LlmClient {
           if (!shouldRetryLlmError(e, attempt, this.maxRetries)) throw e;
           // Server Retry-After wins over the backoff when present; the
           // exponential ladder keeps advancing regardless.
-          await sleep(resolveRetryDelayMs(e, delayMs), abortController.signal);
+          const waitMs = resolveRetryDelayMs(e, delayMs);
+          // The notice lands before the sleep: a backoff that prints nothing reads as a
+          // hang. No reset here -- a request-phase failure streamed nothing, so there is
+          // no partial output for consumers to discard.
+          yield {
+            type: "retry",
+            attempt,
+            maxRetries: this.maxRetries,
+            delayMs: waitMs,
+            reason: formatError(e),
+          };
+          await sleep(waitMs, abortController.signal);
           delayMs *= 2;
           continue;
         }
@@ -426,7 +465,18 @@ export class LlmClient {
           // (and replay buffers) before the new stream's events arrive.
           yield { type: "reset" };
 
-          await sleep(resolveRetryDelayMs(err, delayMs), abortController.signal);
+          // Notice AFTER the reset and BEFORE the sleep: a surface that clears on reset
+          // provably does so before it renders the line that explains the clear (the
+          // StreamCallbacks.onRetry ordering contract).
+          const waitMs = resolveRetryDelayMs(err, delayMs);
+          yield {
+            type: "retry",
+            attempt,
+            maxRetries: this.maxRetries,
+            delayMs: waitMs,
+            reason: formatError(err),
+          };
+          await sleep(waitMs, abortController.signal);
           delayMs *= 2;
         }
       }

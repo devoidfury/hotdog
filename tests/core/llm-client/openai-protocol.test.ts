@@ -69,6 +69,68 @@ describe("openaiProtocol.parseStream", () => {
     ]);
   });
 
+  it("emits reasoning from the alias field reasoning (delta) when reasoning_content is absent", async () => {
+    // vLLM/Ollama-family OpenAI-compat routers echo `delta.reasoning`;
+    // reading only `reasoning_content` made their thinking invisible.
+    const body = `data: {"choices":[{"delta":{"reasoning":"alias musing"}}]}\n\n`;
+    expect(await collect(openaiProtocol.parseStream(sseResponse(body), ctx()))).toEqual([
+      { type: "reasoning", content: "alias musing" },
+    ]);
+  });
+
+  it("reasoning_content wins over the reasoning alias when a delta carries both", async () => {
+    const body =
+      `data: {"choices":[{"delta":{"reasoning_content":"canonical","reasoning":"alias"}}]}\n\n`;
+    expect(await collect(openaiProtocol.parseStream(sseResponse(body), ctx()))).toEqual([
+      { type: "reasoning", content: "canonical" },
+    ]);
+  });
+
+  it("neither reasoning field produces no reasoning event (nulls included)", async () => {
+    const body =
+      `data: {"choices":[{"delta":{"reasoning_content":null,"reasoning":null,"content":"plain"}}]}\n\n`;
+    expect(await collect(openaiProtocol.parseStream(sseResponse(body), ctx()))).toEqual([
+      { type: "content", content: "plain" },
+    ]);
+  });
+
+  it("drops a non-string reasoning value instead of shipping an object event", async () => {
+    // Structured-reasoning routers must not push objects into a string event.
+    const body =
+      `data: {"choices":[{"delta":{"reasoning":{"block":"opaque"},"content":"plain"}}]}\n\n`;
+    expect(await collect(openaiProtocol.parseStream(sseResponse(body), ctx()))).toEqual([
+      { type: "content", content: "plain" },
+    ]);
+  });
+
+  it("the non-SSE message-shape fallback reads the reasoning alias too", async () => {
+    // parseStreamData reads the delta/message object through the same field
+    // lookups, so the JSON body (choice.message) inherits the alias fix.
+    const aliasOnly = jsonResponse({
+      choices: [{
+        message: { role: "assistant", reasoning: "message alias thinking", content: "answer" },
+        finish_reason: "stop",
+      }],
+    });
+    expect(await collect(openaiProtocol.parseStream(aliasOnly, ctx()))).toEqual([
+      { type: "reasoning", content: "message alias thinking" },
+      { type: "content", content: "answer" },
+      { type: "finish", reason: "stop" },
+    ]);
+
+    const both = jsonResponse({
+      choices: [{
+        message: { role: "assistant", reasoning_content: "canonical", reasoning: "alias", content: "answer" },
+        finish_reason: "stop",
+      }],
+    });
+    expect(await collect(openaiProtocol.parseStream(both, ctx()))).toEqual([
+      { type: "reasoning", content: "canonical" },
+      { type: "content", content: "answer" },
+      { type: "finish", reason: "stop" },
+    ]);
+  });
+
   it("prefers delta over message when a body oddly carries both", async () => {
     const resp = jsonResponse({
       choices: [{

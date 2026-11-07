@@ -12,6 +12,7 @@
 
 import { EventEmitter } from "node:events";
 import { formatError } from "@core/error.ts";
+import { STREAM_RETRY_MARKER } from "@utils/cli/cli.ts";
 import { RendererCore } from "@utils/cli/renderer/commit.ts";
 import { Grid } from "@utils/cli/renderer/grid.ts";
 import { ProcessTerminal } from "@utils/cli/renderer/terminal.ts";
@@ -483,6 +484,16 @@ export class OutputBridge {
   #chipText: string | null = null;
   /** In-flight tool-call rows by wire index (streaming-call display). */
   #inflightCalls = new Map<number, string>();
+  /**
+   * True once the live streaming attempt has put bytes on screen via a
+   * streaming event (the event glue calls markAttemptOutput on every chunk /
+   * reasoning chunk / in-flight delta). resetStream consumes it: rows
+   * committed to scrollback during the dead attempt are just as dead as an
+   * open partial, but a committed row alone proves nothing about WHICH
+   * attempt wrote it -- this flag is the honest knowledge that they were
+   * stream bytes. Any settled-live boundary clears it (endAttemptOutput).
+   */
+  #attemptOutput = false;
 
   constructor(private readonly opts: OutputBridgeOptions) {
     this.core = new RendererCore({
@@ -742,6 +753,9 @@ export class OutputBridge {
    * edge first stamps worked/last-response, the second is a no-op). */
   endTurn(): void {
     this.updateStatus({ working: false, laneWait: false });
+    // The turn settled: whatever streamed is either committed live output or
+    // gone with the run. No later reset may claim it.
+    this.endAttemptOutput();
   }
 
   /** Explicit purge-and-reprint: the /redraw command's entry,
@@ -791,10 +805,40 @@ export class OutputBridge {
    */
   resetStream(): void {
     const hadPartial = this.#streamingOpen() !== "";
+    // Dead-bytes rule: the marker prints only when the dead attempt actually
+    // showed something the retry will duplicate. The honest knowledge here is
+    // (a) an open partial row on either channel and (b) the attempt-output
+    // flag -- rows committed to scrollback during the attempt count as shown
+    // only because the streaming events themselves marked them; a bare commit
+    // (tool row, user echo) is not evidence of stream bytes.
+    const deadShown = hadPartial || this.#attemptOutput;
+    this.#attemptOutput = false;
     this.#outChannel.discardPartial();
     this.#errChannel.discardPartial();
     this.clearInflightCalls();
+    if (deadShown) {
+      // One plain marker row at the duplication point, committed like any
+      // transcript line (write-once, purge-and-reprint honest). Plain bytes:
+      // the constant carries no styling and nothing untrusted lands on it.
+      this.#commitLines([STREAM_RETRY_MARKER]);
+    }
     if (hadPartial) this.#repaint();
+  }
+
+  /** Stream bytes are on screen: called by the event glue on every chunk /
+   * reasoning chunk / in-flight delta of the live attempt. */
+  markAttemptOutput(): void {
+    this.#attemptOutput = true;
+  }
+
+  /**
+   * Any printed row that is not stream bytes (tool rows, user echo, thinking,
+   * the committed response, a system notice, turn end) settles the previous
+   * attempt's bytes as LIVE output: no later reset may claim them, so the
+   * marker stays silent until fresh stream bytes land.
+   */
+  endAttemptOutput(): void {
+    this.#attemptOutput = false;
   }
 
   /** In-flight rows composed for the frame: each entry ANSI-wrapped to width. */

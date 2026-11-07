@@ -395,6 +395,109 @@ describe("CliOutputSink", () => {
     expect(stdoutWrites).toContain("\n");
   });
 
+  // ── Retry visibility: notice line + dead-bytes marker (gap pick #3) ──────
+
+  it("the retry notice prints on stderr via SYSTEM_MESSAGE, one line", () => {
+    sink.emit({
+      type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+      content: "Provider error, retrying in 3s (attempt 2/4): HTTP 503 upstream",
+    });
+    expect(stderrWrites.join("")).toContain(
+      "Provider error, retrying in 3s (attempt 2/4): HTTP 503 upstream",
+    );
+    expect(stdoutWrites).toHaveLength(0); // System mode rides the alt stream
+  });
+
+  it("stream reset marker: prints once at the duplication point when the dead attempt showed bytes", () => {
+    // Mid-stream sequence as the agent emits it: dead chunk, reset, notice.
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "dead prose" });
+    sink.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    sink.emit({
+      type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+      content: "Provider error, retrying in 3s (attempt 2/4): HTTP 503 upstream",
+    });
+
+    const err = stderrWrites.join("");
+    expect(err).toContain("-- stream failed mid-response; retrying --"); // the marker
+    expect(err).toContain("Provider error, retrying in 3s"); // the notice rides on
+    // Marker first: it lands at the reset (duplication point), the notice follows.
+    expect(err.indexOf("stream failed mid-response")).toBeLessThan(
+      err.indexOf("Provider error"),
+    );
+    // One marker line only, and the dead bytes stay in stdout scrollback (the
+    // honest ceiling: a print stream cannot retract).
+    expect(stderrWrites.filter((w) => w.includes("stream failed mid-response"))).toHaveLength(1);
+    expect(stdoutWrites.join("")).toContain("dead prose");
+
+    // A second reset with nothing new shown: no second marker, no re-print.
+    stderrWrites.length = 0;
+    sink.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(stderrWrites.join("")).toBe("");
+  });
+
+  it("stream reset marker: silent when the dead attempt showed nothing (invisible newlines only)", () => {
+    // Trailing newlines buffer (never written); the reset drops them. Nothing
+    // reached the terminal, so there is nothing the retry could duplicate.
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "\n\n" });
+    sink.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(stderrWrites).toHaveLength(0);
+    expect(stdoutWrites).toHaveLength(0);
+  });
+
+  it("stream reset marker: hidden thinking shows nothing, so a reset stays silent (both toggle shapes)", () => {
+    // Config/CLI shape (--hide-thinking): the reasoning emit returns before
+    // touching the pipeline, so the dead-bytes flag never flips.
+    sink.hideThinking = true;
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "hidden musing" });
+    sink.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(stderrWrites).toHaveLength(0);
+    expect(stdoutWrites).toHaveLength(0);
+
+    // /thinking shape: SESSION_STATE hideThinking refreshes the sink's own
+    // state; from then on the marker honors the new visibility.
+    const s2 = new CliOutputSink({ palette: new ColorPalette({ use_colors: false }) });
+    s2.emit({ type: OUTPUT_EVENT.SESSION_STATE, key: "hideThinking", value: true });
+    s2.emit({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "musing after toggle" });
+    s2.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(stderrWrites.join("")).not.toContain("stream failed mid-response");
+    expect(stdoutWrites.join("")).not.toContain("musing");
+  });
+
+  it("stream reset marker: a settled-live boundary settles the previous bytes (no false marker)", () => {
+    // Iteration 1 streams prose and COMPLETES (token usage follows: the call
+    // settled as a live response). Iteration 2 fails before streaming: the
+    // reset must not claim iteration 1's visible prose as dead.
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "previous live answer" });
+    sink.emit({
+      type: OUTPUT_EVENT.TOKEN_USAGE,
+      turns: 1,
+      sessionPromptTokens: 1, sessionCachedTokens: 0, sessionCompletionTokens: 1,
+      sessionTotalTokens: 2, promptTokens: 1, cachedTokens: 0, completionTokens: 1,
+      totalTokens: 2, contextWindow: 1000,
+    });
+    sink.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(stderrWrites.join("")).not.toContain("stream failed mid-response");
+
+    // Control: without the boundary the same reset DOES print the marker.
+    stdoutWrites.length = 0;
+    stderrWrites.length = 0;
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "streaming now" });
+    sink.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(stderrWrites.join("")).toContain("stream failed mid-response");
+  });
+
+  it("stream reset marker: the split sink writes nothing itself (the bridge commits it)", () => {
+    // logRouter installed = split mode. The bridge owns the marker there
+    // (resetStream's honest dead-bytes signal); printing from both would
+    // double the line.
+    const routed: string[] = [];
+    sink.logRouter = (m: string) => routed.push(m);
+    sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "dead prose" });
+    sink.emit({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(stderrWrites.join("")).not.toContain("stream failed mid-response");
+    expect(routed).toHaveLength(0);
+  });
+
   it("emitTaskProgress writes progress to stderr", () => {
     sink.emit({ type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "task-1", status: "running", message: "2/5 tasks" });
     expect(stderrWrites.some((w) => w.includes("task"))).toBe(true);

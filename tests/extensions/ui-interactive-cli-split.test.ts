@@ -21,7 +21,7 @@ import {
   type IoPatchHost,
 } from "@extensions/ui-interactive-cli/split-bridge.ts";
 import { ClipboardPasteInterceptor } from "@extensions/ui-interactive-cli/clipboard-paste.ts";
-import { CliOutputSink } from "@utils/cli/cli.ts";
+import { CliOutputSink, STREAM_RETRY_MARKER } from "@utils/cli/cli.ts";
 import { applyFinalResponse } from "@utils/cli/colors.ts";
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
 import { GridTerminal, FakeClock, MemoryKeySource } from "@utils/cli/renderer/index.ts";
@@ -3084,6 +3084,9 @@ describe("stream reset through the session event glue (mid-stream retry, H-3)", 
     expect(cueRows(rig.screenRows())).toEqual([]); // dead call rows gone
     expect(rows).toContain("a completed line"); // scrollback stays write-once
     expect(bridgeTranscript(rig)).not.toContain("half a thou");
+    // The dead attempt showed bytes (open partial), so the marker lands at
+    // the duplication point -- committed once, as a clean transcript row.
+    expect(bridgeTranscript(rig)).toContain(STREAM_RETRY_MARKER);
 
     // The retry streams clean into the same frame.
     rig.bridge.commitText("fresh thou");
@@ -3091,7 +3094,7 @@ describe("stream reset through the session event glue (mid-stream retry, H-3)", 
     expect(rig.screenRows().join("|")).toContain("fresh thou");
   });
 
-  it("resetStream on a bare bridge: partial discarded without a commit, idempotent", () => {
+  it("resetStream on a bare bridge: partial discarded, one marker committed, idempotent", () => {
     const { bridge, term, clock } = makeBridge();
     // Mounted: the frame only paints after mount (RendererCore.setFrame is
     // inert until then), so the retraction asserts against the terminal the
@@ -3107,12 +3110,82 @@ describe("stream reset through the session event glue (mid-stream retry, H-3)", 
 
     bridge.resetStream();
     clock.runAll();
-    bridge.resetStream(); // idempotent, no throw
+    bridge.resetStream(); // idempotent, no throw (second pass: nothing shown dead, silent)
 
-    expect(bridge.transcriptLog).toEqual([]); // nothing was committed
+    // The partial itself is NEVER committed; the only committed row is the
+    // intentional duplication-point marker (one line, constant text). The
+    // second resetStream adds nothing: idempotence keeps the transcript at
+    // exactly one marker.
+    expect(bridge.transcriptLog).toEqual([STREAM_RETRY_MARKER]);
     const painted = term.grid.snapshot().screen.join("|");
     expect(painted).not.toContain("dead partial"); // partial discarded, never committed
     expect(painted).not.toContain("\u{1F527} read a.ts"); // in-flight rows retracted
+  });
+
+  it("hideThinking gate: hidden reasoning never marks the attempt; visible reasoning and prose do (glue wiring)", async () => {
+    // The event lane must mirror what the SINK can render: the agent emits
+    // reasoning chunks unconditionally, the sink drops them under
+    // hideThinking, and the frame only receives stream bytes through the
+    // sink. Marking on hidden reasoning would invent dead bytes that were
+    // never shown, and the reset would announce a duplication that cannot
+    // exist (kill-list: the marker appears ONLY where bytes landed).
+    const hidden = makeSessionRig({ resolvedExtra: { hideThinking: true } });
+    await hidden.done;
+    hidden.emitEvent({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "DEAD-THINK" });
+    hidden.emitEvent({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(bridgeTranscript(hidden)).not.toContain(STREAM_RETRY_MARKER);
+
+    // Control 1: visible thinking, same event pair through the same glue --
+    // the mark lands and the reset commits the marker (no partial needed:
+    // this is the glue-mark-driven path the gate guards).
+    const shown = makeSessionRig();
+    await shown.done;
+    shown.emitEvent({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "DEAD-THINK" });
+    shown.emitEvent({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(bridgeTranscript(shown)).toContain(STREAM_RETRY_MARKER);
+
+    // Control 2: plain prose marks unconditionally -- no toggle hides prose,
+    // so the gate belongs ONLY to the reasoning case.
+    const prose = makeSessionRig({ resolvedExtra: { hideThinking: true } });
+    await prose.done;
+    prose.emitEvent({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "dead prose" });
+    prose.emitEvent({ type: OUTPUT_EVENT.STREAM_RESET });
+    expect(bridgeTranscript(prose)).toContain(STREAM_RETRY_MARKER);
+  });
+
+  it("reset marker: committed rows during the attempt count as shown; a silent reset commits nothing", () => {
+    const { bridge, clock } = makeBridge();
+    bridge.mount();
+
+    // No streaming, no partial: an honest reset says nothing at all.
+    bridge.resetStream();
+    clock.runAll();
+    expect(bridge.transcriptLog).toEqual([]);
+
+    // A dead attempt whose rows already COMMITTED to scrollback (no open
+    // partial left): the streaming events marked the output, so the marker
+    // fires even though hadPartial is false -- the retry will duplicate
+    // those scrollback rows and nothing else would explain it.
+    bridge.markAttemptOutput();
+    bridge.commitText("dead committed line\n");
+    clock.runAll();
+    const rowsBefore = bridge.transcriptLog.join("|");
+    expect(rowsBefore).toContain("dead committed line");
+
+    bridge.resetStream();
+    clock.runAll();
+    expect(bridge.transcriptLog).toEqual(["dead committed line", STREAM_RETRY_MARKER]);
+
+    // Boundary discipline: after endAttemptOutput the flag is spent -- a
+    // later reset with no fresh stream bytes stays silent.
+    bridge.resetStream();
+    clock.runAll();
+    expect(bridge.transcriptLog.length).toBe(2);
+    bridge.markAttemptOutput();
+    bridge.endAttemptOutput(); // the segment settled as live output
+    bridge.resetStream();
+    clock.runAll();
+    expect(bridge.transcriptLog.length).toBe(2);
   });
 });
 

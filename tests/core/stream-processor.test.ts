@@ -709,6 +709,72 @@ describe("StreamProcessor", () => {
     });
   });
 
+  describe("retry (visibility notice)", () => {
+    it("onRetry fires after the paired reset and carries its full payload; nothing is accumulated", async () => {
+      const processor = createStreamProcessor();
+      const calls: string[] = [];
+
+      const result = await processEvents(
+        processor,
+        [
+          { type: "content", content: "dead " },
+          { type: "reset" },
+          {
+            type: "retry",
+            attempt: 1,
+            maxRetries: 3,
+            delayMs: 2000,
+            reason: "HTTP 503 upstream",
+          },
+          { type: "content", content: "live" },
+        ],
+        {
+          onChunk: (c) => calls.push(`chunk:${c}`),
+          onReset: () => calls.push("reset"),
+          onRetry: (info) => calls.push(`retry:${JSON.stringify(info)}`),
+        },
+      );
+
+      // Ordering contract: a stream-phase retry lands AFTER its reset, so a
+      // surface that cleared there sees the notice after its own clear.
+      expect(calls).toEqual([
+        "chunk:dead ",
+        "reset",
+        'retry:{"attempt":1,"maxRetries":3,"delayMs":2000,"reason":"HTTP 503 upstream"}',
+        "chunk:live",
+      ]);
+      // Display-only: the retry event assembles nothing.
+      expect(result.fullText).toBe("live");
+    });
+
+    it("a request-phase retry (no reset) fires the callback alone, payload intact", async () => {
+      const processor = createStreamProcessor();
+      const retries: Array<Record<string, unknown>> = [];
+
+      const result = await processEvents(
+        processor,
+        [
+          { type: "retry", attempt: 2, maxRetries: 4, delayMs: 150, reason: "fetch failed" },
+          { type: "content", content: "late ok" },
+        ],
+        { onRetry: (info) => retries.push({ ...info }) },
+      );
+
+      expect(retries).toEqual([{ attempt: 2, maxRetries: 4, delayMs: 150, reason: "fetch failed" }]);
+      expect(result.fullText).toBe("late ok");
+      expect(processor.streamingContent).toBe("");
+    });
+
+    it("a retry event with no onRetry callback is inert (optionality preserved)", async () => {
+      const processor = createStreamProcessor();
+      const result = await processEvents(processor, [
+        { type: "retry", attempt: 1, maxRetries: 1, delayMs: 5, reason: "x" },
+        { type: "content", content: "fine" },
+      ]);
+      expect(result.fullText).toBe("fine");
+    });
+  });
+
   describe("onToolCallDelta (in-flight tool calls)", () => {
     it("carries the accumulated name and args per index", async () => {
       const processor = createStreamProcessor();

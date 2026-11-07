@@ -113,11 +113,23 @@ function* parseStreamData(
   for (const choice of choices) {
     // Streaming chunks carry the payload in `delta`; a non-streaming JSON
     // body carries it in `message` (same field names: content,
-    // reasoning_content, tool_calls). delta wins if a body oddly has both.
+    // reasoning_content/reasoning, tool_calls). delta wins if a body oddly
+    // has both.
     const fromMessage = choice.delta == null;
     const delta = ((fromMessage ? choice.message : choice.delta) as Record<string, unknown> | undefined) || {};
 
-    const reasoningContent = delta.reasoning_content as string | null | undefined;
+    // Two reasoning field names are live on OpenAI-compat routers: the
+    // OpenAI-family `reasoning_content` and the vLLM/Ollama-family
+    // `reasoning`. Accept both with reasoning_content keeping precedence;
+    // neither (or both empty) emits no reasoning event, as before. The
+    // non-streaming `message` fallback above reads the SAME object, so the
+    // alias holds on both shapes. Non-string values are dropped: the alias
+    // is new surface, and a router shipping structured reasoning blocks
+    // must not push an object into a string event.
+    const rc = delta.reasoning_content;
+    const ra = delta.reasoning;
+    const reasoningContent =
+      typeof rc === "string" && rc ? rc : typeof ra === "string" && ra ? ra : null;
     if (reasoningContent) {
       events.push({ type: "reasoning", content: reasoningContent });
     }

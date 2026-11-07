@@ -2,6 +2,8 @@
 
 import {
   OutputSink,
+  OUTPUT_EVENT,
+  type OutputEvent,
   UserMessageEvent,
   AssistantMessageEvent,
   ThinkingEvent,
@@ -120,6 +122,16 @@ const TOOL_CALL_PREFIX = " 🔧 ";
 
 /** Rune cap on the raw preview of an in-flight call's unparseable partial args. */
 const INFLIGHT_PREVIEW_RUNES = 80;
+
+/**
+ * The stream-reset marker: one line at the duplication point, printed when a
+ * mid-stream retry retracts a dead attempt that actually showed bytes. A print
+ * stream cannot retract scrollback, so the repeated prose stays -- this names
+ * why. Constant text (spoof-safe by construction); both CLI sinks print this
+ * exact line (legacy inline in the sink, the split bridge as a committed row),
+ * so tests and notes can pin one string.
+ */
+export const STREAM_RETRY_MARKER = "-- stream failed mid-response; retrying --";
 
 /** True if any of these argDisplay hints asks for the shell highlighter. */
 function hasShellSyntax(argDisplay?: Record<string, ArgDisplay>): boolean {
@@ -302,6 +314,16 @@ export class CliOutputSink extends OutputSink {
   #textBuf: string;
   #outputMode: Mode | null;
 
+  /**
+   * True once the current streaming attempt has written real bytes to the
+   * terminal (a prose/thinking flush; a pending newline is not yet visible).
+   * Any printed row that is not stream bytes clears it -- those bytes settled
+   * as live output and no later reset may claim them -- and emitStreamReset
+   * consumes it: the marker prints exactly when the dead attempt showed
+   * something the retry will duplicate.
+   */
+  #attemptFlushed: boolean;
+
   outStream: NodeJS.WriteStream;
   altStream: NodeJS.WriteStream;
 
@@ -332,6 +354,7 @@ export class CliOutputSink extends OutputSink {
     this.#nlBuf = 0; // trailing newline buffer
     this.#textBuf = ""; // pending non-newline text (colored as batch)
     this.#outputMode = null; // for transition detection
+    this.#attemptFlushed = false; // dead-bytes claim for the stream-reset marker
 
     this.outStream = process.stdout;
     this.altStream = process.stderr;
@@ -342,10 +365,12 @@ export class CliOutputSink extends OutputSink {
    */
   _flushNl(): void {
     if (this.#nlBuf > 0) {
+      const mode = this.#outputMode ?? Modes.Default;
       const stream =
-        (this as Record<string, unknown>)[modeStreams[this.#outputMode ?? Modes.Default]] as NodeJS.WriteStream;
+        (this as Record<string, unknown>)[modeStreams[mode]] as NodeJS.WriteStream;
       stream.write("\n".repeat(this.#nlBuf));
       this.#nlBuf = 0;
+      if (mode === Modes.Default || mode === Modes.Thinking) this.#attemptFlushed = true;
     }
   }
 
@@ -354,13 +379,15 @@ export class CliOutputSink extends OutputSink {
    */
   _flushText(): void {
     if (this.#textBuf) {
+      const mode = this.#outputMode ?? Modes.Default;
       const stream =
-        (this as Record<string, unknown>)[modeStreams[this.#outputMode ?? Modes.Default]] as NodeJS.WriteStream;
+        (this as Record<string, unknown>)[modeStreams[mode]] as NodeJS.WriteStream;
       const colorFn =
-        modeColorFns[this.#outputMode ?? Modes.Default];
+        modeColorFns[mode];
       const colored = colorFn(this.#textBuf, this.palette);
       stream.write(colored);
       this.#textBuf = "";
+      if (mode === Modes.Default || mode === Modes.Thinking) this.#attemptFlushed = true;
     }
   }
 
@@ -445,7 +472,31 @@ export class CliOutputSink extends OutputSink {
   }
 
   // Event dispatch is inherited from OutputSink.emit(); each event type is
-  // routed to the emitXxx() overrides below.
+  // routed to the emitXxx() overrides below -- with one bookkeeping rule
+  // layered on top:
+
+  /**
+   * Any event that is not this attempt's own stream bytes -- and not the
+   * invisible plumbing that renders nothing on this sink -- proves the last
+   * printed segment settled as live output, so the stream-reset marker no
+   * longer owns it (see #attemptFlushed / emitStreamReset). TOOL_CALL_DELTA
+   * belongs to the in-flight attempt, and QUEUE_UPDATE / SESSION_STATE render
+   * nothing here (frame rows and toggles, the base sink ignores both), so
+   * none of them is a boundary.
+   */
+  override emit(event: OutputEvent): void {
+    if (
+      event.type !== OUTPUT_EVENT.STREAMING_CHUNK &&
+      event.type !== OUTPUT_EVENT.STREAMING_REASONING_CHUNK &&
+      event.type !== OUTPUT_EVENT.TOOL_CALL_DELTA &&
+      event.type !== OUTPUT_EVENT.QUEUE_UPDATE &&
+      event.type !== OUTPUT_EVENT.SESSION_STATE &&
+      event.type !== OUTPUT_EVENT.STREAM_RESET
+    ) {
+      this.#attemptFlushed = false;
+    }
+    super.emit(event);
+  }
 
   override emitUserMessage(event: UserMessageEvent): void {
     if (this.hideUserMessage) return;
@@ -604,8 +655,23 @@ export class CliOutputSink extends OutputSink {
     // already written to the terminal live in scrollback and cannot be
     // retracted -- that is the honest, accepted ceiling of a print stream;
     // the assembled response never contains them (the processor cleared it).
+    const deadShown = this.#attemptFlushed;
+    this.#attemptFlushed = false;
     this.#nlBuf = 0;
     this.#outputMode = null;
+    // The duplication point: when the dead attempt actually flushed bytes,
+    // print one marker line so the retry's re-streamed prose is explained
+    // rather than mysterious. Legacy surface only: a split session (logRouter
+    // installed) commits the same line from the bridge's own honest signal
+    // (split-bridge.ts resetStream), and printing from both would double it.
+    // Direct write, not the newline pipeline: the dead attempt's trailing
+    // separator was just (deliberately) dropped, so the marker starts right
+    // after the dead bytes on that line and its own terminator closes it
+    // before the retry streams; the separator-drop contract (no buffered "\n"
+    // surviving a reset) is untouched.
+    if (deadShown && this.logRouter === null) {
+      this.altStream.write(` ${applyCompacting(STREAM_RETRY_MARKER, this.palette)}\n`);
+    }
   }
 
   override emitTaskProgress(event: TaskProgressEvent): void {

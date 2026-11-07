@@ -1070,8 +1070,12 @@ export async function runInteractiveSession(
           if (ev.key === "working") {
             bridge.updateStatus({ working: ev.value === true });
             // Turn over (done, cancelled, errored): any call still "in
-            // flight" on the frame is a dead stream -- drop the row.
-            if (ev.value === false) bridge.clearInflightCalls();
+            // flight" on the frame is a dead stream -- drop the row, and no
+            // later reset may claim this turn's bytes for the marker.
+            if (ev.value === false) {
+              bridge.clearInflightCalls();
+              bridge.endAttemptOutput();
+            }
           } else if (ev.key === "model") {
             pricedModel = String(ev.value ?? "");
             bridge.updateStatus({ cost: sessionCost() });
@@ -1081,6 +1085,8 @@ export async function runInteractiveSession(
           if (ev.content.startsWith("Waiting for provider lane")) {
             bridge.updateStatus({ laneWait: true });
           }
+          // A visible harness row: the previous attempt's bytes settled live.
+          bridge.endAttemptOutput();
           return;
         case OUTPUT_EVENT.TOOL_CALL_DELTA:
           // In-flight tool call: one frame row per wire index, composed with
@@ -1096,6 +1102,8 @@ export async function runInteractiveSession(
             ),
           );
           bridge.updateStatus({ laneWait: false });
+          // Bytes of the live attempt (a reset before the boundary marks them).
+          bridge.markAttemptOutput();
           return;
         case OUTPUT_EVENT.TOOL_CALL:
           // The committed line is about to print through the sink; the
@@ -1103,12 +1111,14 @@ export async function runInteractiveSession(
           bridge.clearInflightCalls();
           // First sign the turn is actually running: the lane wait is over.
           bridge.updateStatus({ laneWait: false });
+          bridge.endAttemptOutput();
           return;
         case OUTPUT_EVENT.TOOL_RESULT:
           // Covers the paths that answer a call without ever emitting
           // TOOL_CALL (invalid name, unavailable tool). Idempotent after
           // the TOOL_CALL clear.
           bridge.clearInflightCalls();
+          bridge.endAttemptOutput();
           return;
         case OUTPUT_EVENT.STREAM_RESET:
           // Mid-stream provider failure being retried: the dead attempt's
@@ -1120,17 +1130,42 @@ export async function runInteractiveSession(
         case OUTPUT_EVENT.USER_MESSAGE:
           // Input echoed into context: a fresh visible message, so #N moves.
           refreshIndex();
+          bridge.endAttemptOutput();
           return;
         case OUTPUT_EVENT.STREAMING_CHUNK:
+          // First sign the turn is actually running: the lane wait is over.
+          bridge.updateStatus({ laneWait: false });
+          // Bytes of the live attempt: a reset before the next boundary marks
+          // them as dead-but-shown for the marker (split-bridge resetStream).
+          bridge.markAttemptOutput();
+          return;
         case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
+          // First sign the turn is actually running: the lane wait is over.
+          bridge.updateStatus({ laneWait: false });
+          // Mark ONLY when the reasoning bytes can actually render here: the
+          // agent emits reasoning chunks unconditionally, and the SINK drops
+          // them under hideThinking (cli.ts emitStreamingReasoningChunk). The
+          // frame receives stream bytes only through the sink, so with
+          // thinking hidden the bridge holds nothing and a reset must not
+          // claim dead bytes that were never shown (the marker would
+          // announce a duplication that cannot exist). sink.hideThinking is
+          // the live value: config/CLI at construction, every SESSION_STATE
+          // hideThinking toggle (/thinking) the sink itself consumes.
+          if (!sink.hideThinking) bridge.markAttemptOutput();
+          return;
         case OUTPUT_EVENT.THINKING:
         case OUTPUT_EVENT.ASSISTANT_MESSAGE:
           // First sign the turn is actually running: the lane wait is over.
           bridge.updateStatus({ laneWait: false });
+          // Non-streaming output: the previous attempt's bytes settled live.
+          bridge.endAttemptOutput();
           // A committed response is visible too: the row's number follows it.
           if (ev.type === OUTPUT_EVENT.ASSISTANT_MESSAGE) refreshIndex();
           return;
         case OUTPUT_EVENT.TOKEN_USAGE:
+          // The producing call completed: its streamed text is a committed
+          // response now, so a later reset cannot claim it as dead.
+          bridge.endAttemptOutput();
           usage = {
             promptTokens: ev.sessionPromptTokens,
             cachedTokens: ev.sessionCachedTokens,

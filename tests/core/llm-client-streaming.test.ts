@@ -338,11 +338,166 @@ describe("LlmClient.chatStreamCancellable — Retry-After", () => {
     const elapsed = Date.now() - start;
 
     expect(attempts).toBe(2);
-    expect(events).toHaveLength(1);
-    expect((events[0] as { content?: string }).content).toBe("Hello");
+    // Retry visibility: the notice event lands BEFORE the sleep, and its
+    // delayMs is the server hint (150), not the 60_000 ladder constant. The
+    // success claim is unchanged: exactly one content event, "Hello".
+    expect(events).toHaveLength(2);
+    const [retryEv, contentEv] = events as Array<Record<string, unknown>>;
+    expect(retryEv!.type).toBe("retry");
+    expect(retryEv!.attempt).toBe(1);
+    expect(retryEv!.maxRetries).toBe(3);
+    expect(retryEv!.delayMs).toBe(150);
+    expect(typeof retryEv!.reason).toBe("string");
+    expect((contentEv as { content?: string }).content).toBe("Hello");
     // Waited the hinted 150ms, not the 60s fallback.
     expect(elapsed).toBeGreaterThanOrEqual(140);
     expect(elapsed).toBeLessThan(5000);
+  });
+});
+
+describe("LlmClient.chatStreamCancellable — retry visibility (request phase)", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function makeMsg(role: string, content: string) {
+    return new Message({ role, content });
+  }
+
+  function sseOk(content: string): Response {
+    return {
+      ok: true,
+      headers: new Map([["content-type", "text/event-stream"]]),
+      body: {
+        getReader: () => {
+          let done = false;
+          return {
+            read: async () => {
+              if (done) return { done: true, value: undefined as any };
+              done = true;
+              return {
+                done: false,
+                value: new TextEncoder().encode(
+                  `data: {"choices":[{"delta":{"content":"${content}"}}]}\n\n`,
+                ),
+              };
+            },
+            releaseLock: () => {},
+          } as any;
+        },
+        cancel: async () => {},
+      },
+    } as unknown as Response;
+  }
+
+  it("request-phase retry yields the notice BEFORE the sleep, with no reset (nothing streamed)", async () => {
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 60 });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls === 1) throw new TypeError("fetch failed");
+      return sseOk("recovered");
+    }) as unknown as typeof fetch;
+
+    const seen: Array<Record<string, unknown> & { callsAtEvent: number }> = [];
+    for await (const event of client.chatStreamCancellable([makeMsg("user", "Hi")], mc())) {
+      seen.push({ ...(event as Record<string, unknown>), callsAtEvent: calls });
+    }
+
+    // The notice is the FIRST thing the consumer learns: yielded before the
+    // backoff sleep, so at its arrival the retry request has NOT been made
+    // yet (calls is still 1 -- the second fetch happens after the sleep).
+    expect(seen.map((e) => e.type)).toEqual(["retry", "content"]);
+    expect(seen[0]!.callsAtEvent).toBe(1);
+    expect(seen[1]!.callsAtEvent).toBe(2);
+    expect(seen[0]!.attempt).toBe(1); // the FAILED attempt; the retry is 2
+    expect(seen[0]!.maxRetries).toBe(2);
+    expect(seen[0]!.delayMs).toBe(60); // the value actually slept
+    expect(String(seen[0]!.reason)).toContain("fetch failed");
+    // Request-phase failures emit the notice but NO reset: no partial output exists.
+    expect(seen.some((e) => e.type === "reset")).toBe(false);
+    expect((seen[1] as { content?: string }).content).toBe("recovered");
+  });
+
+  it("the notice is never yielded on the final failed attempt", async () => {
+    // maxRetries 1 = two attempts total: attempt 1 is followed by a notice,
+    // attempt 2 is final -- the error surfaces on its own path, no notice.
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 1, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+
+    const events: Array<Record<string, unknown>> = [];
+    let error: unknown;
+    try {
+      for await (const event of client.chatStreamCancellable([makeMsg("user", "Hi")], mc())) {
+        events.push(event as Record<string, unknown>);
+      }
+    } catch (e) {
+      error = e;
+    }
+
+    expect(calls).toBe(2);
+    expect(events).toHaveLength(1); // exactly the attempt-1 notice
+    expect(events[0]!.type).toBe("retry");
+    expect(events[0]!.attempt).toBe(1);
+    expect(error).toBeInstanceOf(LlmError);
+    expect((error as LlmError).type).toBe("http");
+  });
+
+  it("a non-retryable failure (rethrow) yields no notice", async () => {
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      return { ok: false, status: 400, text: async () => "Bad Request" } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const events: Array<Record<string, unknown>> = [];
+    let error: unknown;
+    try {
+      for await (const event of client.chatStreamCancellable([makeMsg("user", "Hi")], mc())) {
+        events.push(event as Record<string, unknown>);
+      }
+    } catch (e) {
+      error = e;
+    }
+
+    expect(calls).toBe(1); // never retried
+    expect(events.filter((e) => e.type === "retry")).toHaveLength(0); // and no notice either
+    expect(error).toBeInstanceOf(LlmError);
+    expect((error as LlmError).type).toBe("api");
+  });
+
+  it("a cancelled request yields no notice (cancellation is never a retry)", async () => {
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const ac = new AbortController();
+    ac.abort();
+
+    const events: Array<Record<string, unknown>> = [];
+    let error: unknown;
+    try {
+      for await (const event of client.chatStreamCancellable([makeMsg("user", "Hi")], mc(), [], ac.signal)) {
+        events.push(event as Record<string, unknown>);
+      }
+    } catch (e) {
+      error = e;
+    }
+
+    expect(events.filter((e) => e.type === "retry")).toHaveLength(0);
+    expect(error).toBeInstanceOf(LlmError);
+    expect(LlmError.isCancelled(error)).toBe(true);
   });
 });
 
@@ -640,15 +795,51 @@ describe("LlmClient.chatStreamCancellable — mid-stream failures", () => {
     expect(error).toBeUndefined();
     // A half-read body cannot be resumed: the retry re-issues the request.
     expect(calls).toBe(2);
-    // The failed attempt's chunks are followed by a reset, then ONLY the
+    // The failed attempt's chunks are followed by a reset, then the retry
+    // notice (stream phase: reset FIRST, so a surface that cleared sees the
+    // line explaining the clear after its own clear), then ONLY the
     // successful stream's events.
     expect(events.map((e) => (e.type === "content" ? `content:${e.content}` : e.type))).toEqual([
       "content:partial-one",
       "content:partial-two",
       "reset",
+      "retry",
       "content:good-one",
       "content:good-two",
     ]);
+  });
+
+  it("stream-phase retry: reset FIRST, then the notice, both yielded BEFORE the sleep", async () => {
+    const client = new LlmClient({ roleMapping: "system-first", roleMappingRegistry: testRoleReg, chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 60 });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls === 1) {
+        return sseMidStreamFailure(
+          [contentFrame("partial")],
+          new Error("socket hang up"),
+        );
+      }
+      return sseMultiResponse([contentFrame("clean")]);
+    }) as unknown as typeof fetch;
+
+    const seen: Array<Record<string, unknown> & { callsAtEvent: number }> = [];
+    for await (const event of client.chatStreamCancellable([makeMsg("user", "Hi")], mc())) {
+      seen.push({ ...(event as Record<string, unknown>), callsAtEvent: calls });
+    }
+
+    // reset lands before the notice (the display surface clears before the
+    // line that explains the clear), and NEITHER waits for the backoff: at
+    // both arrivals the re-issue fetch has not happened yet (calls still 1).
+    expect(seen.map((e) => e.type)).toEqual(["content", "reset", "retry", "content"]);
+    expect(seen[2]!.callsAtEvent).toBe(1);
+    expect(seen[3]!.callsAtEvent).toBe(2);
+    expect(seen[2]!.attempt).toBe(1);
+    expect(seen[2]!.maxRetries).toBe(2);
+    expect(seen[2]!.delayMs).toBe(60);
+    expect(String(seen[2]!.reason)).toContain("socket hang up");
+    expect((seen[3] as { content?: string }).content).toBe("clean");
   });
 
   it("leaves no partial residue in the assembled result after a mid-stream retry", async () => {
@@ -1031,9 +1222,10 @@ describe("LlmClient.chatStreamCancellable — SSE idle watchdog", () => {
     }
 
     expect(attempts).toBe(2);
-    // Failed attempt's partial output is discarded via the reset event.
-    expect(events.map((e) => e.type)).toEqual(["content", "reset", "content"]);
+    // Failed attempt's partial output is discarded via the reset event, and
+    // the retry notice rides right behind it (before the sleep).
+    expect(events.map((e) => e.type)).toEqual(["content", "reset", "retry", "content"]);
     expect(events[0]!.content).toBe("partial");
-    expect(events[2]!.content).toBe("clean");
+    expect(events[3]!.content).toBe("clean");
   });
 });

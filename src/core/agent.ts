@@ -8,12 +8,13 @@ import { createContextManager, type ContextManager } from "./context/context-man
 import type { ForkCut } from "./context/rewind.ts";
 import { AgentError, ConfigError, formatError, LlmError } from "./error.ts";
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
-import { createStreamProcessor, StreamProcessor, type StreamResult } from "./llm-client/stream-processor.ts";
+import { createStreamProcessor, StreamProcessor, type StreamRetryInfo, type StreamResult } from "./llm-client/stream-processor.ts";
 import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from "./extensions/registries.ts";
 import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult, type ToolCallRefusal } from "./hooks.ts";
 import { type RawUsage } from "./token-tracker.ts";
 import { logger } from "@utils/logger.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 import { splitFileIncludes } from "@utils/tool-content.ts";
 import { ToolExecutor, createToolExecutor, type ToolResult } from "./tool-executor.ts";
 import type { ToolExecLink, WireToolConfig } from "./tool-exec-protocol.ts";
@@ -64,6 +65,42 @@ const ASSISTANT_TAIL_NOTICE_TEXT =
 const EMPTY_TURN_NUDGE_TEXT =
   "Your last response was empty: no text and no tool calls after the tool results. " +
   "Continue the task now -- make the next tool call or respond to the user.";
+
+/** Cap on how many runes of a retry notice's provider reason are kept. */
+const RETRY_NOTICE_REASON_MAX_RUNES = 160;
+
+/** The delay segment of the retry notice: whole seconds, at least 1 (ceil --
+ * "retrying in 0s" would announce a wait that never prints). */
+export function formatRetryDelaySecs(ms: number): string {
+  return `${Math.max(1, Math.ceil(Math.max(0, ms) / 1000))}s`;
+}
+
+/**
+ * The one-line retry notice rendered onto the EXISTING SYSTEM_MESSAGE output
+ * event (webui and the CLI sinks already map it; no protocol change). The
+ * retry is otherwise a silent sleep that reads as a hang, and mid-stream the
+ * dead attempt's bytes sit in scrollback waiting to be duplicated.
+ *
+ * `info.reason` is UNTRUSTED provider content: first line only, whitespace
+ * collapsed, rune-capped, spoof-neutralized LAST so a cap can never split a
+ * `[U+XXXX]` token (the resultEnvelope discipline in @utils/cli/cli.ts).
+ * Display-side only: the notice creates no Message and never enters model
+ * context; the session log mirrors no system_message output record either.
+ */
+export function retryNoticeText(info: StreamRetryInfo): string {
+  const flat = (info.reason.split("\n")[0] ?? "").replace(/\s+/g, " ").trim();
+  const runes = Array.from(flat);
+  const reason = spoofSafe(
+    runes.length > RETRY_NOTICE_REASON_MAX_RUNES
+      ? `${runes.slice(0, RETRY_NOTICE_REASON_MAX_RUNES).join("")}\u2026`
+      : flat,
+  );
+  return (
+    `Provider error, retrying in ${formatRetryDelaySecs(info.delayMs)} ` +
+    `(attempt ${info.attempt + 1}/${1 + Math.max(0, info.maxRetries)})` +
+    (reason === "" ? "" : `: ${reason}`)
+  );
+}
 
 interface LlmRequestParams {
   messages: Message[];
@@ -984,6 +1021,18 @@ export class Agent implements AgentLike {
       // ordering contract), so sinks told here can drop their in-flight
       // fragments knowing nothing dead can replay behind them.
       onReset: () => this.emitOutput("stream_reset", {}),
+      // A retry is being taken (request or stream phase; the client emits this
+      // BEFORE its backoff sleep, never on the final failed attempt): one line on the
+      // EXISTING SYSTEM_MESSAGE output event, spoof-safe and truncated by
+      // retryNoticeText. Direct sink.emit is this event's house pattern (system_message
+      // is deliberately outside EVENT_NAME_MAP; see the wrap-up notice and the bus's
+      // lane notices). No Message is created -- the notice is display-side only,
+      // never model context, and the session log mirrors no system_message record.
+      onRetry: (info) =>
+        this.sink?.emit({
+          type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+          content: retryNoticeText(info),
+        }),
       shouldCancel: () => this.cancelled,
     }, this.llmClient.markerMangler);
   }

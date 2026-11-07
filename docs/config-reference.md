@@ -274,13 +274,13 @@ into `{}` is literal: `$&`, `` $` ``, `$'` and `$$` in file content are printed 
 
 - **Type:** `boolean`
 - **CLI flag:** `--show-tools` / `--hide-tools`
-- **Default:** `true`
+- **Default:** `false` (tool calls and results are shown)
 - **Resolution:** CLI > config > default
 
-When `true`, tool calls are hidden from output. Set to `false` to show them.
+When `true`, tool calls are hidden from output. Shown by default; set to `true` (or use `/tools` mid-session) to hide.
 
 ```json
-{ "hideTools": false }
+{ "hideTools": true }
 ```
 
 ### `hideThinking`

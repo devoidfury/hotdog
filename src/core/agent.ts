@@ -225,7 +225,10 @@ export class Agent implements AgentLike {
     this.#model = options.model;
     this.maxIterations = options.maxIterations;
     this.contextLimit = options.contextLimit;
-    this.hideTools = options.hideTools !== false;
+    // Tool display is SHOWN by default (owner ruling); hide requires an
+    // explicit true. Task workers pass true deliberately (they have their own
+    // activity panel). Core config default: core.config.json hideTools.
+    this.hideTools = options.hideTools === true;
     this.hideThinking = options.hideThinking === true;
     this.sink = options.sink || null;
     this.modelRegistry = options.modelRegistry || {};

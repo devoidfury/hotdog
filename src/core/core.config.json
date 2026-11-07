@@ -202,13 +202,13 @@
     "cliFlag": {
       "long": "--show-tools",
       "type": "boolean",
-      "description": "Show tool calls"
+      "description": "Show tool calls (now the default; kept for explicit override)"
     },
     "layers": [
       { "source": "cli", "key": "showTools", "cast": "falsy" },
       { "source": "cli", "key": "hideTools", "cast": "any" },
       { "source": "config", "key": "hideTools" },
-      { "default": true }
+      { "default": false }
     ]
   },
   "hideThinking": {

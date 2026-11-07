@@ -84,7 +84,7 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
 --json                       Output as JSON for the subcommands that support it (info, profiles,
                                sessions, rescue); stdout carries only the JSON, diagnostics go to stderr
     --json-schema <json|path>  One-shot structured output: a JSON Schema (inline or file path); the run ends when the model returns a valid payload, printed as bare JSON
---show-tools                 Show tool calls in output
+--show-tools                 Show tool calls in output (default; overrides hideTools)
 --show-thinking              Show reasoning/thinking output
 --no-colors                  Disable colors (also honors NO_COLOR / TERM=dumb env)
 --hook-trace                 Trace hook execution (requires HOTDOG_LOG_LEVEL=debug)

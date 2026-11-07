@@ -446,10 +446,10 @@ describe('SessionManager.forkSession', () => {
     return { sm, src };
   }
 
-  it('branches a new session N turns back and switches to it', async () => {
+  it('branches a new session after visible message #N (bare N) and switches to it', async () => {
     const { sm, src } = await createSourceSession();
 
-    const { sessionId: newId } = await sm.forkSession('fork-src', { turnsBack: 1 });
+    const { sessionId: newId } = await sm.forkSession('fork-src', { cut: { kind: 'index', index: 2 } });
 
     expect(newId).not.toBe('fork-src');
     expect(sm.sessionId()).toBe(newId);
@@ -464,36 +464,80 @@ describe('SessionManager.forkSession', () => {
 
   it('strips sessionId from the build config so the fork gets a fresh id', async () => {
     const { sm } = await createSourceSession();
-    await sm.forkSession('fork-src', { turnsBack: 0 });
+    await sm.forkSession('fork-src', { cut: { kind: 'head' } });
     const forkConfig = seenConfigs[seenConfigs.length - 1]!;
     expect(forkConfig.sessionId).toBeUndefined();
   });
 
-  it('drops every turn when turnsBack exceeds the turn count', async () => {
+  it('a back cut at the deepest boundary branches an empty session', async () => {
     const { sm } = await createSourceSession();
-    const { sessionId: newId, droppedTurns } = await sm.forkSession('fork-src', { turnsBack: 99 });
+    const { sessionId: newId, branchAfter } = await sm.forkSession('fork-src', { cut: { kind: 'back', messages: 4 } });
     const forked = sm.getAgentBySessionId(newId)!;
+    // All four visible messages dropped: nothing is kept, branchAfter is honest.
     expect(forked.getMessages()).toHaveLength(0);
-    // Clamped to the source's real turn count for honest /fork reporting.
-    expect(droppedTurns).toBe(2);
+    expect(branchAfter).toBeNull();
+  });
+
+  it('a forked branch ends at the cut boundary with no stray entries trailing', async () => {
+    const { sm } = await createSourceSession();
+    const src = sm.getAgent()!;
+    // Dangling traffic after the newest visible message of the source.
+    src.addMessage(new Message({ role: 'harness', content: 'trailing notice' }));
+    src.addMessage(new Message({ role: 'tool', content: 'orphan', toolCallId: 'gone' }));
+
+    const { sessionId: newId } = await sm.forkSession('fork-src', { cut: { kind: 'index', index: 4 } });
+    const forked = sm.getAgentBySessionId(newId)!;
+    // Kept ends exactly at the addressed message (a2, the newest visible
+    // one); the harness notice and the orphan tool result trail the cut and
+    // are not seeded into the branch.
+    expect(forked.getMessages().map((m) => m.content)).toEqual(['u1', 'a1', 'u2', 'a2']);
+  });
+
+  it('message-index cuts branch at the addressed boundary; source untouched', async () => {
+    const { sm, src } = await createSourceSession();
+
+    const { sessionId: idxId, branchAfter } = await sm.forkSession('fork-src', {
+      cut: { kind: 'index', index: 2 },
+    });
+    expect(branchAfter).toBe(2);
+    expect(sm.getAgentBySessionId(idxId)!.getMessages().map((m) => m.content)).toEqual(['u1', 'a1']);
+
+    const { sessionId: backId, branchAfter: backAt } = await sm.forkSession('fork-src', {
+      cut: { kind: 'back', messages: 1 },
+    });
+    expect(backAt).toBe(3);
+    expect(sm.getAgentBySessionId(backId)!.getMessages().map((m) => m.content)).toEqual(['u1', 'a1', 'u2']);
+
+    // Both cuts leave the source standing in full.
+    expect(src.getMessages()).toHaveLength(4);
+
+    // Out-of-range targets error honestly and branch nothing.
+    const countBefore = sm.sessionCount();
+    await expect(
+      sm.forkSession('fork-src', { cut: { kind: 'index', index: 9 } }),
+    ).rejects.toThrow('past the newest');
+    await expect(
+      sm.forkSession('fork-src', { cut: { kind: 'index', index: 0 } }),
+    ).rejects.toThrow('at least 1');
+    expect(sm.sessionCount()).toBe(countBefore);
   });
 
   it('the injected fork seam forks through the manager (chainable)', async () => {
     const { sm, src } = await createSourceSession();
     expect(typeof src.forkSession).toBe('function');
 
-    const { sessionId: firstId } = await src.forkSession!({ turnsBack: 1 });
+    const { sessionId: firstId } = await src.forkSession!({ cut: { kind: 'index', index: 2 } });
     const first = sm.getAgentBySessionId(firstId)!;
     expect(first.getMessages().map((m) => m.content)).toEqual(['u1', 'a1']);
 
-    // Fork the fork: one turn back removes its only turn.
-    const { sessionId: secondId } = await first.forkSession!({ turnsBack: 1 });
+    // Fork the fork: back past its only visible turn removes everything.
+    const { sessionId: secondId } = await first.forkSession!({ cut: { kind: 'back', messages: 2 } });
     expect(sm.getAgentBySessionId(secondId)!.getMessages()).toHaveLength(0);
   });
 
   it('rejects an unknown source session', async () => {
     const { sm } = await createSourceSession();
-    await expect(sm.forkSession('nope', { turnsBack: 0 })).rejects.toThrow(
+    await expect(sm.forkSession('nope', { cut: { kind: 'head' } })).rejects.toThrow(
       'Cannot fork unknown session',
     );
   });
@@ -504,7 +548,7 @@ describe('SessionManager.forkSession', () => {
     const { sm } = await createSourceSession();
     sm.getBus('fork-src')!.isRunning = true;
     await expect(
-      sm.forkSession('fork-src', { turnsBack: 0 }),
+      sm.forkSession('fork-src', { cut: { kind: 'head' } }),
     ).rejects.toThrow('while the session is running');
   });
 
@@ -515,7 +559,7 @@ describe('SessionManager.forkSession', () => {
       seen.push(sm.sessionId());
     });
 
-    const { sessionId: newId } = await sm.forkSession('fork-src', { turnsBack: 0 });
+    const { sessionId: newId } = await sm.forkSession('fork-src', { cut: { kind: 'head' } });
     expect(seen).toEqual([newId]);
   });
 
@@ -526,7 +570,7 @@ describe('SessionManager.forkSession', () => {
       swaps.push(p);
     });
 
-    const { sessionId: newId } = await sm.forkSession('fork-src', { turnsBack: 0 });
+    const { sessionId: newId } = await sm.forkSession('fork-src', { cut: { kind: 'head' } });
     // Swap notify is fire-and-forget; let it settle.
     await settle(() => swaps.length > 0, 'SESSION_SWAP to fire');
     expect(swaps).toHaveLength(1);

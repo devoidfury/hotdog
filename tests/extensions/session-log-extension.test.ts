@@ -9,6 +9,7 @@ import { create } from "@extensions/session-log/index.ts";
 import { countSessionLogEntries, readSessionEntries, LOG_SOURCE } from "@core/session/session-log.ts";
 import { seedRecordCount, getRecordCount, dropRecordCount } from "@extensions/session-log/record-count.ts";
 import { Message, type ImageAttachment } from "@core/context/message.ts";
+import { resolveMessageCut } from "@core/context/rewind.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { createMockCore, TMP_PARENT } from "../helpers.ts";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync } from "node:fs";
@@ -406,6 +407,54 @@ describe("CONTEXT_REWOUND checkpointing", () => {
       expect(raw).toHaveLength(7);
       expect(raw[4]!.source).toBe("reset");
       expect(raw.map((e) => e.content)).toContain("u2");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("replay of a resolver-cut context stays stray-free: the reset slice ends at the boundary", async () => {
+    // Owner ruling (stray-free cut): after a trim the kept context carries no
+    // tool call, tool result, or harness/system entry trailing the cut
+    // boundary, and the CONTEXT_REWOUND checkpoint keeps that true through a
+    // session-log replay.
+    const sessionId = `test-rewind-strays-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const msgHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+      const rewindHook = ext.hooks[HOOKS.CONTEXT_REWOUND] as (ctx: any) => Promise<void>;
+
+      const full = [
+        new Message({ role: "system", content: "sys prompt" }),
+        new Message({ role: "user", content: "u1" }), //                                              #1
+        new Message({
+          role: "assistant",
+          content: "a1",
+          toolCalls: [{ id: "c1", type: "function", function: { name: "t", arguments: "{}" } }],
+        }), //                                                                                         #2
+        new Message({ role: "tool", content: "t1", toolCallId: "c1" }),
+        new Message({ role: "harness", content: "nudge" }),
+        new Message({ role: "user", content: "u2" }), //                                              #3
+        new Message({ role: "assistant", content: "a2" }), //                                         #4
+        new Message({ role: "harness", content: "trailing notice" }),
+      ];
+      // The shared resolver decides what survives: keep through #2, its
+      // answered tool block riding along.
+      const { kept } = resolveMessageCut(full, { kind: "index", index: 2 });
+      expect(kept.map((m) => m.content)).toEqual(["sys prompt", "u1", "a1", "t1"]);
+
+      for (const m of full) await msgHook({ message: m, agent: { sessionId } });
+      await rewindHook({ agent: { sessionId }, newContext: kept });
+
+      // Replay slices from the last reset: exactly the kept non-system
+      // messages, ending at the answered tool result. Zero trailing entries
+      // of any role -- the nudge and the later history stay above the marker.
+      const entries = await readSessionEntries(sessionId);
+      expect(entries.map((e) => e.content)).toEqual(["u1", "a1", "t1"]);
+      expect(entries.map((e) => e.source)).toEqual([
+        LOG_SOURCE.INPUT,
+        LOG_SOURCE.LLM,
+        LOG_SOURCE.TOOL_RESULT,
+      ]);
     } finally {
       cleanupTestFile(sessionId);
     }

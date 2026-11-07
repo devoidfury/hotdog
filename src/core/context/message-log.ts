@@ -1,10 +1,12 @@
 import { Message } from "./message.ts";
+import { noteMessageAdded, noteMessageLogCleared, noteMessageLogReplaced } from "./message-index.ts";
 
 export class MessageLog {
   #messages: Message[];
 
   constructor(messages: Message[] = []) {
     this.#messages = [...messages];
+    noteMessageLogReplaced(this, this.#messages);
   }
 
   push(msg: Message): number {
@@ -12,6 +14,7 @@ export class MessageLog {
       throw new TypeError(`MessageLog.push() requires a Message instance, got ${typeof msg}`);
     }
     this.#messages.push(msg);
+    noteMessageAdded(this, msg);
     return this.#messages.length;
   }
 
@@ -28,10 +31,12 @@ export class MessageLog {
       }
     }
     this.#messages = [...messages];
+    noteMessageLogReplaced(this, this.#messages);
   }
 
   clear(): void {
     this.#messages = [];
+    noteMessageLogCleared(this);
   }
 
   get length(): number {

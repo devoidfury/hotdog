@@ -23,9 +23,9 @@ export function handleCommand(ctx: RouteContext): void {
   // register the new session's UI metadata and re-target the requesting socket,
   // or the tab stays on the source and the fork is unreachable in the webui.
   if (cmdText === "fork" || cmdText.startsWith("fork ")) {
-    const { turnsBack, prompt } = parseForkArg(cmdText.slice("fork".length));
+    const { cut, prompt } = parseForkArg(cmdText.slice("fork".length));
     registry
-      .fork(msg.sessionId as string, { turnsBack })
+      .fork(msg.sessionId as string, { cut })
       .then(({ sessionId: newSessionId, agent }) => {
         if (ws.activeSessionId && ws.activeChannel) {
           registry.removeChannel(ws.activeSessionId, ws.activeChannel);

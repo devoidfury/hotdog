@@ -99,9 +99,14 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
 /quit, /exit       Exit
 /redraw            Purge scrollback and reprint the transcript (split renderer; ctrl-l also works)
 /clear             Clear conversation history
-/undo              Undo the last turn (user message + everything after it)
-/rewind [N]        Rewind the last N turns (default 1)
-/fork [N] [prompt] Branch a new session from N turns back; optionally send a prompt there
+/undo              Undo the last turn (turn-based: user message + everything after it)
+/rewind [N]        Cut to absolute visible message #N (keep #N, drop everything
+                   after); bare /rewind cuts exactly one back, same as /rewind -1
+/rewind -N         Cut N visible MESSAGES back (the status row's #N numbering)
+/fork [-N | N] [prompt]
+                   Branch a new session: N branches after visible
+                   message #N, -N messages back, omitted = fork the head;
+                   optionally send a prompt there
                      Fork auto-switches to the new session; the original stays
                      attached (interactive/switch-capable UIs)
 /loop <prompt>     Repeatedly run a prompt until cancelled
@@ -122,6 +127,56 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
 /reasoning <level> Set reasoning effort (none/minimal/low/high/xhigh/max/unset)
 /fence on|off|status  Runtime exec-fence toggle for THIS session (worker plane)
 ```
+
+The visible-message index (the status row's `#N`)
+-------------------------------------------------
+
+`#N` numbers every message you see as conversation: USER_INPUT (your prompts,
+including steering) and ASSISTANT_RESPONSE (assistant messages with text).
+Tool results, the system prompt, harness notices, and tool-call-only assistant
+messages are never numbered. The numbering is assigned as messages enter the
+context and never reused: after a rewind the dropped numbers stay spent (the
+next message continues above them), and compaction swallows the oldest numbers
+entirely. So a stale number -- one cut away by a rewind, swallowed by
+compaction, or past the newest message -- always errors with the valid range
+named, and never silently cuts at a nearby message.
+
+A cut keeps through the addressed message and drops everything strictly
+after it -- whatever role that trailing content has. Its answered tool
+results ride along with it (a cut never splits a tool call from a result);
+everything past the end of that block goes: tool traffic, harness notices,
+system reminders, compaction remnants. No stray entry of any role ever
+dangles past the kept boundary, on `/rewind` and `/fork` and on `/undo`'s
+turn trim alike. Example transcript:
+
+```
+#1  you:      fix the flaky test
+              [call: read_file] [result]        <- tool traffic, unnumbered
+#2  assistant: reading it now, one call left    (narration + tool call)
+              [call: edit_file] [result]
+#3  assistant: fixed -- the assertion was inverted
+#4  you:      thanks, run the suite            <- status row reads #4
+```
+
+`/rewind 2` (or `/fork 2 [prompt]`) keeps through #2 (and its tool
+results), dropping #3 and #4; `/rewind -1` (or `/fork -1`) drops the last
+visible message and everything trailing it; bare `/rewind` cuts exactly
+one message back -- the same cut and the same report as `/rewind -1`;
+`/fork` alone branches the head. The absolute form also accepts a leading
+hash, so `/fork #5` means `/fork 5` (sugar for the status row's `#N`).
+Bare `N` addresses a visible index,
+`-N` goes back N messages, and both commands resolve the number through
+the same resolver, so one number means one boundary everywhere. The
+deliberate split: `/undo` is the TURN-based undo (the last user message
+plus everything after it, always exactly one turn); `/rewind` cuts by the
+visible-message index. The old turn-count reading of bare `N` and the
+`index N` keyword are retired -- `/rewind index 2` is an invalid argument,
+not an alias for `/rewind 2`.
+
+A `/fork` prompt whose FIRST token is a digit parses as the index spec:
+`/fork 404 handling` branches at message #404 with the prompt "handling",
+not a session forked from the head with the prompt "404 handling". Text
+that must reach the fork verbatim cannot begin with a bare number.
 
 `/fence` is runtime-only and never written to config, and it is session-scoped:
 it changes the exec-fence policy of the CALLING session only. `on` maps to
@@ -166,18 +221,22 @@ stdin+stdout, TERM not `dumb`):
   input. Ctrl-D on an empty buffer quits.
 - **Status line** (top frame row) mirrors the webui footer, with every
   segment gated on what the session has actually attested (no number is
-  ever invented). During a turn it reads `working · 00:12` -- the elapsed
-  timer ticks once per second -- or `waiting for lane · 00:03` while the
-  provider lane is full; mid-call usage frames add the context gauge and
-  the producing call's wall time (`working · 00:12 · 45k/200k · 4.2s`). At
-  idle it mirrors the footer: last response's local clock (24-hour), the
-  ctx gauge, the last call's time, and the turn's worked total, e.g.
-  `21:47 · 45k/200k · 4.2s · worked 1m 03s`. On stop/interrupt the closing
-  row shows the honest worked time to stop. A cost suffix (`· $0.0021`)
-  appears only when the `modelPricing` config key exists for the session
-  model. With no attestation yet (before the first turn) the row is hidden.
-  The turn counter (`#N`) was dropped by owner ruling: the transcript
-  already shows every prompt.
+  ever invented). It leads with the visible-message index (`#N`, the newest
+  message's number in the USER_INPUT + ASSISTANT_RESPONSE counting described
+  above -- owner ruling: the row's number counts those messages, and it is
+  the number `/rewind N` / `/rewind -N` / `/fork N` / `/fork -N`
+  address). During a turn it reads `#4 · working · 00:12` -- the elapsed
+  timer ticks once per second -- or `#4 · waiting for lane · 00:03` while
+  the provider lane is full; mid-call usage frames add the context gauge and
+  the producing call's wall time (`#4 · working · 00:12 · 45k/200k · 4.2s`).
+  At idle it mirrors the footer: the last response's local clock (24-hour),
+  the ctx gauge, the last call's time, and the turn's worked total, e.g.
+  `#4 · 21:47 · 45k/200k · 4.2s · worked 1m 03s`. On stop/interrupt the
+  closing row shows the honest worked time to stop. The cost suffix
+  (`· $0.0021`) appears only when the `modelPricing` config key exists for
+  the session model. With no attestation yet (before the first message) the
+  row is hidden. The old TURN counter stays dropped (owner ruling); this
+  `#N` counts messages, not turns.
 - **Streaming text shows above the input.** Output lines commit into the
   native scrollback as each line completes, exactly as before -- committed
   rows stay there and scroll naturally. The one in-progress (unterminated)

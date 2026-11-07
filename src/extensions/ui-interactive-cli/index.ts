@@ -20,6 +20,7 @@ import { getSessionRow } from "@core/session/session-index.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { ExtensionError, formatError } from "@core/error.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { latestVisibleIndex } from "@core/context/message-index.ts";
 import {
   computeTokenCost,
   findModelPrice,
@@ -62,9 +63,10 @@ Commands:
   /help         - Show help
   /redraw       - Purge scrollback and reprint the transcript (split renderer; also ctrl-l)
   /clear        - Clear context
-  /undo         - Undo the last turn
-  /rewind [N]   - Rewind the last N turns (default 1)
-  /fork [N] [prompt] - Branch a new session from N turns back; optionally send prompt there
+  /undo         - Undo the last turn (turn-based; /rewind cuts messages)
+  /rewind [N]   - Cut to visible message #N (keep #N; #N form accepted); bare /rewind cuts one back, exactly /rewind -1
+  /rewind -N    - Cut N visible messages back (the status row's #N)
+  /fork [-N | N] [prompt] - Branch a new session: N (or #N) after message #N, -N messages back, omitted = head; optionally send prompt there
   /loop <prompt> - Repeatedly run prompt until cancelled
   /model <name> - Switch model
   /models       - List available models
@@ -1043,6 +1045,25 @@ export async function runInteractiveSession(
       const total = computeTokenCost(usage, price).total;
       return formatUsd(total);
     };
+    // Status row #N: the newest message's visible index (the number /rewind N
+    // and /fork N address, @core/context/message-index.ts). Read
+    // from the live context on exactly the edges that can move it -- input
+    // echo, response commit, compaction, rewind, fork/switch -- never on a
+    // timer; updateStatus's text-diff keeps this to at most one repaint.
+    const refreshIndex = (): void => {
+      const agent = sessionManager.getAgent();
+      bridge.updateStatus({ messageIndex: agent ? latestVisibleIndex(agent.getMessages()) : null });
+    };
+    const isCurrentAgent = (a: unknown): boolean => a === sessionManager.getAgent();
+    core.hooks.on(HOOKS.CONTEXT_REPLACED, ({ agent }: { agent?: unknown }) => {
+      if (isCurrentAgent(agent)) refreshIndex();
+    });
+    core.hooks.on(HOOKS.CONTEXT_REWOUND, ({ agent }: { agent?: unknown }) => {
+      if (isCurrentAgent(agent)) refreshIndex();
+    });
+    // Fork and /switch: the row numbers the session that is current now.
+    core.hooks.on(HOOKS.SESSION_SWAP, () => refreshIndex());
+    refreshIndex();
     sessionManager.onSessionEvents(sessionManager.sessionId()!, (ev) => {
       switch (ev.type) {
         case OUTPUT_EVENT.SESSION_STATE:
@@ -1096,12 +1117,18 @@ export async function runInteractiveSession(
           // via its emitStreamReset override.)
           bridge.resetStream();
           return;
+        case OUTPUT_EVENT.USER_MESSAGE:
+          // Input echoed into context: a fresh visible message, so #N moves.
+          refreshIndex();
+          return;
         case OUTPUT_EVENT.STREAMING_CHUNK:
         case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
         case OUTPUT_EVENT.THINKING:
         case OUTPUT_EVENT.ASSISTANT_MESSAGE:
           // First sign the turn is actually running: the lane wait is over.
           bridge.updateStatus({ laneWait: false });
+          // A committed response is visible too: the row's number follows it.
+          if (ev.type === OUTPUT_EVENT.ASSISTANT_MESSAGE) refreshIndex();
           return;
         case OUTPUT_EVENT.TOKEN_USAGE:
           usage = {

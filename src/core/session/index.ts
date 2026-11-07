@@ -6,7 +6,7 @@ import { TaskManager } from "./task-manager.ts";
 import type { TaskManagerRequiredOptions } from "./task-types.ts";
 import type { ProviderHealth } from "./provider-health.ts";
 import { OutputEvent } from "../context/output.ts";
-import { trimTurns } from "../context/rewind.ts";
+import { resolveMessageCut, type ForkCut } from "../context/rewind.ts";
 import { AgentError, formatError } from "../error.ts";
 import { logger } from "@utils/logger.ts";
 import type { CommandRegistryLike, ParsedCommand } from "../commands.ts";
@@ -261,11 +261,16 @@ export class SessionManager {
 
   /**
    * Branch a session (/fork command): build a new agent from the source's original build config,
-   * copy its non-system messages minus the last `turnsBack` turns, and switch this manager to the new session.
+   * copy its non-system messages down to the cut point, and switch this manager to the new session.
+   * The cut is a ForkCut: head (everything) or a message-index cut
+   * resolved through resolveMessageCut -- the same resolver /rewind runs, so the same #N cuts
+   * the same boundary in both. The kept branch ends exactly at the addressed message's answered
+   * tool-call block; nothing trails it (stray-free cut, see context/rewind.ts).
    *
    * Kept messages ride `addMessage` (not replaceContext) so CONTEXT_MESSAGE fires and the session-log extension
    * writes the new session's log live -- persistence stays in the extension, so `--no-log` is honored and no core
-   * JSONL writer is needed. The source session is untouched.
+   * JSONL writer is needed. The source session is untouched, and the copied Message objects carry their
+   * visible-index ordinals into the branch: the fork's numbering continues from what the user saw.
    *
    * `sessionId` is stripped from the metadata config: it may carry the `--session` id of a resumed run,
    * and an adopted id would make the fork append to the source's log.
@@ -276,7 +281,7 @@ export class SessionManager {
    */
   async forkSession(
     sourceSessionId: string,
-    opts: { turnsBack: number },
+    opts: { cut: ForkCut },
   ): Promise<ForkSessionResult> {
     const entry = this.#sessions.get(sourceSessionId);
     if (!entry) {
@@ -290,8 +295,17 @@ export class SessionManager {
       );
     }
 
-    const nonSystem = entry.agent.getMessages().filter((m) => m.role !== "system");
-    const { kept, droppedTurns } = trimTurns(nonSystem, opts.turnsBack);
+    const source = entry.agent.getMessages();
+    let keptFull: Message[];
+    let branchAfter: number | null = null;
+    if (opts.cut.kind === "head") {
+      keptFull = source;
+    } else {
+      const cut = resolveMessageCut(source, opts.cut);
+      keptFull = cut.kept;
+      branchAfter = cut.after;
+    }
+    const kept = keptFull.filter((m) => m.role !== "system");
 
     // The fork's own metadata: stripped and copied, so the stored entry never aliases the
     // source's object or carries its sessionId into SESSION_CREATE / later re-forks.
@@ -320,7 +334,7 @@ export class SessionManager {
 
     // The swap switchSession() would have performed, fired the same fire-and-forget way.
     this.#hooks.notifyHooks(HOOKS.SESSION_SWAP, { oldAgent, newAgent });
-    return { sessionId: newAgent.sessionId, droppedTurns };
+    return { sessionId: newAgent.sessionId, branchAfter };
   }
 
   getAgentBySessionId(sessionId: string): AgentLike | undefined {

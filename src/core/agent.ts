@@ -5,6 +5,7 @@ import type { SwitchProfile } from "./config/profiles.ts";
 import { Message, contentToText, type ImageAttachment, type ToolCall, type MessageSource } from "./context/message.ts";
 import { OUTPUT_EVENT, OutputEvent, EVENT_NAME_MAP, type EventName } from "./context/output.ts";
 import { createContextManager, type ContextManager } from "./context/context-manager.ts";
+import type { ForkCut } from "./context/rewind.ts";
 import { AgentError, ConfigError, formatError, LlmError } from "./error.ts";
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
 import { createStreamProcessor, StreamProcessor, type StreamResult } from "./llm-client/stream-processor.ts";
@@ -81,11 +82,11 @@ export interface OutputSink {
  */
 export interface ForkSessionResult {
   sessionId: string;
-  /** Turns actually dropped (clamped to the source's turn count), for honest reporting. */
-  droppedTurns: number;
+  /** Message-index cuts only: visible number (#N) of the last message copied into the branch; null for head cuts and when no visible message was kept. */
+  branchAfter: number | null;
 }
 
-export type ForkSessionFn = (opts: { turnsBack: number }) => Promise<ForkSessionResult>;
+export type ForkSessionFn = (opts: { cut: ForkCut }) => Promise<ForkSessionResult>;
 
 // Subset of config keys read by Agent; extensions read the rest via core.config.
 export interface AgentConfig {

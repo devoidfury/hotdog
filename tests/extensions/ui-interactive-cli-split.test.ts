@@ -1219,10 +1219,14 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
   // Session-event fan-out stub: stores handlers so tests can fire bus
   // events (SESSION_STATE/QUEUE_UPDATE/...) at the status glue.
   const sessionHandlers: Array<(ev: unknown) => void> = [];
+  // The current agent's context: the status row's #N reads the visible index
+  // off it, so wiring tests push plain entries and echo the events.
+  const messages: Array<Record<string, unknown>> = [];
   const agent = {
     sessionId: "test-session",
     commandRegistry: { names: () => ["test"] },
     modelRegistry: {},
+    getMessages: () => messages.map((m) => ({ ...m })),
   };
   const sm = {
     getAgent: () => agent,
@@ -1291,7 +1295,7 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
     for (const h of [...sessionHandlers]) h(ev);
     settle();
   };
-  return { term, clock, sig, bridge, keys, calls, done, screenRows, count, emitEvent, settle };
+  return { term, clock, sig, bridge, keys, calls, done, screenRows, count, emitEvent, settle, messages, agent };
 }
 
 /** Run fn with process.exit stubbed (same pattern as the legacy suite). */
@@ -2599,6 +2603,30 @@ describe("status row: pure shape", () => {
     ).toBe("21:47 · 45k/200k · 4.2s · worked 16m 21s · $0.42");
   });
 
+  it("#N is the visible-message index: leads every row, gated on a real number", () => {
+    // Alone it is the whole row; with other segments it leads.
+    expect(statusRowText({ ...base, messageIndex: 7 })).toBe("#7");
+    expect(statusRowText({ ...base, messageIndex: 7, working: true, turnStartMs: 0, tickMs: 5_000 })).toBe(
+      "#7 · working · 00:05",
+    );
+    expect(
+      statusRowText({
+        ...base,
+        messageIndex: 12,
+        lastAtMs: AT,
+        ctxUsed: 45_000,
+        ctxTotal: 200_000,
+        callMs: 4_200,
+        workedMs: 981_000,
+      }),
+    ).toBe("#12 · 21:47 · 45k/200k · 4.2s · worked 16m 21s");
+    // No attested message yet (null) and non-positive/garbage numbers render
+    // nothing -- the row never invents a #0.
+    expect(statusRowText({ ...base, messageIndex: null, cost: "$0.10" })).toBe("$0.10");
+    expect(statusRowText({ ...base, messageIndex: 0 })).toBeNull();
+    expect(statusRowText({ ...base, messageIndex: Number.NaN })).toBeNull();
+  });
+
   it("segments render independently; each gates on its own attestation", () => {
     expect(statusRowText({ ...base, lastAtMs: AT })).toBe("21:47");
     expect(statusRowText({ ...base, workedMs: 42_000 })).toBe("worked 42s");
@@ -2824,6 +2852,40 @@ describe("status row: live tick + footer segments (in-process wiring)", () => {
     // Next turn opens clean: no stale ctx/call from the previous turn.
     rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
     expect(status()).toEqual(["working · 00:00"]);
+  });
+
+  it("#N leads the row: input echo, response commit, and rewind move it", async () => {
+    const hooks = new HookSystem();
+    const rig = makeSessionRig({ hooks });
+    await rig.done;
+    const hashRows = () => rig.screenRows().filter((r) => r.includes("#"));
+
+    // No visible message yet: no number, never an invented #0.
+    expect(hashRows()).toEqual([]);
+
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    rig.messages.push({ role: "user", content: "q1" });
+    rig.emitEvent({ type: OUTPUT_EVENT.USER_MESSAGE, content: "q1" });
+    expect(hashRows()).toEqual(["#1 · working · 00:00"]);
+
+    // A committed response is visible too; tool frames never move the number.
+    rig.messages.push({ role: "assistant", content: "a1" });
+    rig.emitEvent({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "a1" });
+    expect(hashRows()).toEqual(["#2 · working · 00:00"]);
+
+    // The turn settles; the number survives idle as the lineage's newest.
+    await hooks.notifyHooks(HOOKS.TURN_END, { stopped: true } as never);
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
+    const idle = hashRows();
+    expect(idle.length).toBe(1);
+    expect(idle[0]).toMatch(/^#2 · \d\d:\d\d/);
+
+    // A rewind fires CONTEXT_REWOUND: the row re-reads the context, and an
+    // emptied lineage honestly shows no number at all.
+    rig.messages.length = 0;
+    await hooks.notifyHooks(HOOKS.CONTEXT_REWOUND, { agent: rig.agent } as never);
+    rig.settle();
+    expect(hashRows()).toEqual([]);
   });
 
   it("tick arms once per working edge, ticks the elapsed second-by-second, stops on the close", async () => {

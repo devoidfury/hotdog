@@ -291,24 +291,29 @@ export interface EditorInputHandlers {
 const NO_ANSWER_MARK = "(no answer)";
 
 /**
- * Status-line state: the activity words plus the footer-style segments the
- * webui footer carries under each assistant message (last-response clock,
- * ctx used/total, the producing call's wall time, the worked-for turn
- * total, cost). The turn counter is gone (owner ruling: nobody read the
- * ordinal; the transcript already echoes every prompt), so nothing left in
- * FrameStatus counts turns. Every segment rides only on real attestation:
- * `cost` is a preformatted USD string that exists only when `modelPricing`
- * is configured; ctx/call come from the in-process TOKEN_USAGE frames
- * (totalTokens/contextWindow/durationMs -- the same pair the sidebar gauge
- * caches, see @extensions/websocket/session-registry.ts #trackUsage) and
- * clear on the working edge that opens a new turn, so a row never wears
- * last turn's numbers as this turn's; `lastAtMs`/`workedMs` are written by
- * the CLOSING working edge -- the same honest basis as the webui's stopped
- * row, so an interrupt's worked time is the observed span to stop.
+ * Status-line state: the visible-message index (`#N`, the newest message's
+ * number in the owner's USER_INPUT + ASSISTANT_RESPONSE counting -- see
+ * @core/context/message-index.ts, the number /rewind N and /fork N address
+ * address), the activity words, plus the footer-style segments the webui
+ * footer carries under each assistant message (last-response clock, ctx
+ * used/total, the producing call's wall time, the worked-for turn total,
+ * cost). The old TURN counter stays dropped (owner ruling); `messageIndex`
+ * returns as the row's number under the owner's later ruling that it count
+ * all user-input + assistant-response messages. Every segment rides only on
+ * real attestation: `cost` is a preformatted USD string that exists only
+ * when `modelPricing` is configured; ctx/call come from the in-process
+ * TOKEN_USAGE frames (totalTokens/contextWindow/durationMs -- the same pair
+ * the sidebar gauge caches, see @extensions/websocket/session-registry.ts
+ * #trackUsage) and clear on the working edge that opens a new turn, so a row
+ * never wears last turn's numbers as this turn's; `lastAtMs`/`workedMs` are
+ * written by the CLOSING working edge -- the same honest basis as the webui's
+ * stopped row, so an interrupt's worked time is the observed span to stop.
  * `turnStartMs`/`tickMs` exist only while working: the edge records the
  * start, the bridge's 1s tick advances `tickMs` for the live elapsed timer.
  */
 export interface FrameStatus {
+  /** Latest visible message's index (#N); null until the lineage has one. */
+  messageIndex?: number | null;
   working: boolean;
   laneWait: boolean;
   cost: string | null;
@@ -372,15 +377,19 @@ function formatStatusElapsed(ms: number): string {
  * no activity: the frame is just the editor then). Segments render
  * independently and every one is gated on its attestation -- no usage frame
  * means no ctx segment, no closing working edge means no clock or worked-for,
- * an unmeasured call renders no call time. The state word leads (lane-wait
- * beats working -- waiting for a provider lane IS the current activity) and
- * carries the live elapsed timer while a turn is in flight; the footer
- * mirror (clock, worked-for) renders idle only, so a working row never
+ * an unmeasured call renders no call time. The visible-message number leads
+ * (the lineage's newest #N, once there is one); the state word follows
+ * (lane-wait beats working -- waiting for a provider lane IS the current
+ * activity) and carries the live elapsed timer while a turn is in flight; the
+ * footer mirror (clock, worked-for) renders idle only, so a working row never
  * shows the PREVIOUS turn's finish time or total as if they were current.
  * Cost keeps the tail (modelPricing-gated upstream).
  */
 export function statusRowText(s: FrameStatus): string | null {
   const parts: string[] = [];
+  if (typeof s.messageIndex === "number" && Number.isFinite(s.messageIndex) && s.messageIndex >= 1) {
+    parts.push(`#${Math.trunc(s.messageIndex)}`);
+  }
   const state = s.laneWait ? "waiting for lane" : s.working ? "working" : null;
   if (state) {
     parts.push(state);
@@ -466,7 +475,7 @@ export class OutputBridge {
    * view has already cleared its buffer (stash-to-draft) when the event fires. */
   #lastBlockRows: string[] = [];
   /** Status-line state (all attestation-gated; see FrameStatus). */
-  #status: FrameStatus = { working: false, laneWait: false, cost: null };
+  #status: FrameStatus = { messageIndex: null, working: false, laneWait: false, cost: null };
   /** The 1s live-tick handle while working; null when idle (no interval
    * ever runs outside a working edge -- it cannot leak across teardown). */
   #tickHandle: unknown = null;

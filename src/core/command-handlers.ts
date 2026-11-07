@@ -1,7 +1,13 @@
 // Extracted from agent.ts so that agent.ts only does generic dispatch.
 
 import { Command, ACTIONS } from "./commands.ts";
-import { trimTurns } from "./context/rewind.ts";
+import {
+  MessageCutError,
+  resolveMessageCut,
+  trimTurns,
+  type ForkCut,
+  type MessageCut,
+} from "./context/rewind.ts";
 import { formatError } from "./error.ts";
 import { computeTokenCost, findModelPrice, formatUsd, isPricingConfigured } from "./token-pricing.ts";
 import { contextGaugeSegment } from "./context-gauge.ts";
@@ -183,12 +189,13 @@ export async function handleRegenerate(
 }
 
 /**
- * Shared implementation for /undo (turns=1) and /rewind [N]: drop the last N turns via rewindContext,
- * which also fires CONTEXT_REWOUND so the session-log extension checkpoints the log.
+ * /undo: drop the last turn via rewindContext, which also fires CONTEXT_REWOUND so the session-log extension checkpoints the log.
+ * Turn-based by owner ruling -- the deliberate difference: /undo undoes a TURN (user message + everything after it),
+ * /rewind cuts by the visible-message index. trimTurns serves this path and nothing else.
  */
-async function rewindTurns(agent: Agent, turns: number): Promise<CommandResult> {
+export async function handleUndo(agent: Agent): Promise<CommandResult> {
   const messages = agent.getMessages();
-  const { kept, droppedTurns, totalTurns } = trimTurns(messages, turns);
+  const { kept, droppedTurns, totalTurns } = trimTurns(messages, 1);
   if (droppedTurns === 0) {
     return {
       action: ACTIONS.DISPLAY,
@@ -205,39 +212,90 @@ async function rewindTurns(agent: Agent, turns: number): Promise<CommandResult> 
   };
 }
 
-export async function handleUndo(agent: Agent): Promise<CommandResult> {
-  return rewindTurns(agent, 1);
+/**
+ * Take a cut spec off the front of a command argument: "-N" (N visible
+ * messages back) or "N"/"#N" (absolute visible message #N -- the leading "#"
+ * is accepted as sugar for the status row's number, so "/fork #5" is
+ * "/fork 5"). `rest` is whatever follows the spec -- rewind requires it
+ * empty; fork hands it to the prompt half. Nothing else is a spec: the
+ * retired "index" keyword has no alias and lands in the invalid-argument
+ * path.
+ */
+function takeMessageCut(arg: string): { cut: MessageCut | null; rest: string } {
+  const back = arg.match(/^-(\d+)(?:\s+([\s\S]*))?$/);
+  if (back) return { cut: { kind: "back", messages: parseInt(back[1]!, 10) }, rest: (back[2] ?? "").trim() };
+  const idx = arg.match(/^#?(\d+)(?:\s+([\s\S]*))?$/);
+  if (idx) return { cut: { kind: "index", index: parseInt(idx[1]!, 10) }, rest: (idx[2] ?? "").trim() };
+  return { cut: null, rest: arg };
 }
 
+const REWIND_USAGE = "Usage: /rewind [-N | N]";
+
+/**
+ * /rewind grammar (docs/cli-reference.md), message-based by owner ruling --
+ * the turns unit lives only in /undo:
+ *   /rewind        cut ONE visible message back -- exactly /rewind -1
+ *   /rewind N      cut to absolute visible message #N (keep through #N)
+ *   /rewind -N     drop the last N visible messages (the status row's #N)
+ * The bare form runs through the same -1 spec and resolver, so its result
+ * envelope is identical to an explicit /rewind -1. The legacy "index N"
+ * keyword is retired: "/rewind index 2" is an invalid argument, not an alias.
+ */
 export async function handleRewind(agent: Agent, value?: string | null): Promise<CommandResult> {
-  // Bare /rewind defaults to one turn (same as /undo).
-  let turns = 1;
-  if (value) {
-    if (!/^\d+$/.test(value)) {
-      return {
-        action: ACTIONS.ERROR,
-        error: `Invalid turn count: '${value}'. Usage: /rewind [N]`,
-      };
-    }
-    turns = parseInt(value, 10);
-    if (turns < 1) {
-      return { action: ACTIONS.ERROR, error: "N must be at least 1." };
-    }
+  const arg = (value ?? "").trim();
+  // Bare /rewind is exactly -1: same spec, same resolver, same envelope.
+  const { cut, rest } =
+    arg === ""
+      ? { cut: { kind: "back", messages: 1 } as MessageCut, rest: "" }
+      : takeMessageCut(arg);
+  if (!cut || rest !== "") {
+    return {
+      action: ACTIONS.ERROR,
+      error: `Invalid argument: '${arg}'. ${REWIND_USAGE}`,
+    };
   }
-  return rewindTurns(agent, turns);
+  let resolved;
+  try {
+    resolved = resolveMessageCut(agent.getMessages(), cut);
+  } catch (err) {
+    return {
+      action: ACTIONS.ERROR,
+      error: err instanceof MessageCutError ? err.message : formatError(err),
+    };
+  }
+  if (resolved.droppedVisible === 0) {
+    return {
+      action: ACTIONS.DISPLAY,
+      content: `Nothing to rewind (message #${resolved.after} is already the newest visible message).`,
+    };
+  }
+  // rewindContext fires CONTEXT_REWOUND, so the session-log checkpoint lands
+  // on the kept (stray-free) context.
+  await agent.rewindContext(resolved.kept);
+  const n = resolved.droppedVisible;
+  const content =
+    resolved.after === null
+      ? `Rewound ${n} visible message${n === 1 ? "" : "s"}; no visible messages remain.`
+      : cut.kind === "index"
+        ? `Rewound to message #${resolved.after} (dropped ${n} visible message${n === 1 ? "" : "s"}).`
+        : `Rewound ${cut.messages} visible message${cut.messages === 1 ? "" : "s"} (now at #${resolved.after}).`;
+  return { action: ACTIONS.DISPLAY, content };
 }
 
 /**
- * Parse the `/fork` argument: an optional leading integer = turns to drop back, the rest = prompt.
- * Exported for UIs (webui ws layer) that route fork around the command bus.
+ * Parse the `/fork` argument: an optional leading cut spec -- "-N" (N visible
+ * messages back) or bare "N" (absolute visible message #N, keep through it) --
+ * then the optional prompt. Accepted consequence of the bare-N grammar: a
+ * prompt whose FIRST token is a digit parses as the index spec -- "/fork 404
+ * handling" is index 404 with prompt "handling", never prompt "404 handling"
+ * (docs/cli-reference.md). Exported for UIs (webui ws layer) that route fork
+ * around the command bus.
  */
-export function parseForkArg(value: string): { turnsBack: number; prompt?: string } {
+export function parseForkArg(value: string): { cut: ForkCut; prompt?: string } {
   const arg = value.trim();
-  const match = arg.match(/^(\d+)(?:\s+([\s\S]*))?$/);
-  if (match) {
-    return { turnsBack: parseInt(match[1]!, 10), prompt: match[2]?.trim() || undefined };
-  }
-  return { turnsBack: 0, prompt: arg || undefined };
+  const { cut, rest } = takeMessageCut(arg);
+  if (cut) return { cut, prompt: rest || undefined };
+  return { cut: { kind: "head" }, prompt: arg || undefined };
 }
 
 export async function handleFork(
@@ -251,21 +309,34 @@ export async function handleFork(
     };
   }
 
-  const { turnsBack, prompt } = parseForkArg(value || "");
+  const { cut, prompt } = parseForkArg(value || "");
 
   try {
     // Note: prompt is parsed for reporting only -- the hosting UI enqueues it after
     // re-targeting its channel onto the fork (see SessionManager.forkSession doc).
-    const { sessionId: newSessionId, droppedTurns } = await agent.forkSession({ turnsBack });
+    const { sessionId: newSessionId, branchAfter } = await agent.forkSession({ cut });
+    const cutNote =
+      cut.kind === "head"
+        ? "branched the full context"
+        : cut.kind === "index"
+          ? `branched after message #${branchAfter}`
+          : branchAfter !== null
+            ? `branched ${cut.messages} message${cut.messages === 1 ? "" : "s"} back, after #${branchAfter}`
+            : `branched ${cut.messages} message${cut.messages === 1 ? "" : "s"} back with every visible message dropped`;
     return {
       action: ACTIONS.DISPLAY,
       content:
         `Forked session ${agent.sessionId} → ${newSessionId}` +
-        ` (dropped ${droppedTurns} turn${droppedTurns === 1 ? "" : "s"}).` +
+        ` (${cutNote}).` +
         (prompt ? "\nPrompt sent to the forked session." : ""),
     };
   } catch (err) {
-    return { action: ACTIONS.ERROR, error: formatError(err) };
+    // A MessageCutError is an honest usage error: the range text is the whole
+    // story, no stack. Everything else goes through formatError.
+    return {
+      action: ACTIONS.ERROR,
+      error: err instanceof MessageCutError ? err.message : formatError(err),
+    };
   }
 }
 
@@ -345,12 +416,13 @@ export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
   },
   [Command.Rewind]: {
     handler: handleRewind,
-    description: "Rewind the last N turns",
+    description: "Rewind by message: N = cut to visible message #N, -N = N visible messages back, bare = -1",
     mutatesSession: true,
   },
   [Command.Fork]: {
     handler: handleFork,
-    description: "Branch a new session from N turns back with an optional prompt",
+    description:
+      "Branch a new session: N after visible message #N, -N messages back, omitted = head; optional prompt",
     mutatesSession: true,
   },
   [Command.Reasoning]: {

@@ -5,6 +5,7 @@
 import crypto from "node:crypto";
 import { HOOKS, createHooks } from "@core/hooks.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
+import type { ForkCut } from "@core/context/rewind.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { indexSessionModel, indexUserInput, getSessionRow } from "@core/session/session-index.ts";
 import { formatError } from "@core/error.ts";
@@ -353,7 +354,7 @@ export class SessionRegistry {
    */
   async fork(
     sourceSessionId: string,
-    opts: { turnsBack: number },
+    opts: { cut: ForkCut },
   ): Promise<{ sessionId: string; agent: AgentLike }> {
     const meta = this.#metadata.get(sourceSessionId);
     if (!meta) {

@@ -431,7 +431,7 @@ describe("SessionRegistry", () => {
     it("registers UI metadata for the fork and lists both sessions", async () => {
       const { sessionId } = await registry.create({ profile: "coder" });
 
-      const { sessionId: forkId } = await registry.fork(sessionId, { turnsBack: 0 });
+      const { sessionId: forkId } = await registry.fork(sessionId, { cut: { kind: "head" } });
 
       expect(forkId).not.toBe(sessionId);
       const forked = registry.get(forkId)!;
@@ -445,7 +445,7 @@ describe("SessionRegistry", () => {
     });
 
     it("rejects an unknown source session", async () => {
-      await expect(registry.fork("nope", { turnsBack: 0 })).rejects.toThrow(
+      await expect(registry.fork("nope", { cut: { kind: "head" } })).rejects.toThrow(
         "Cannot fork unknown session",
       );
     });
@@ -453,7 +453,7 @@ describe("SessionRegistry", () => {
     it("rejects while the source session is running", async () => {
       const { sessionId } = await registry.create();
       registry.getSessionManager().getBus(sessionId)!.isRunning = true;
-      await expect(registry.fork(sessionId, { turnsBack: 1 })).rejects.toThrow(
+      await expect(registry.fork(sessionId, { cut: { kind: "back", messages: 1 } })).rejects.toThrow(
         "while the session is running",
       );
     });
@@ -708,7 +708,7 @@ describe("createWsServer", () => {
 
     wsServer.onMessage(
       ws,
-      JSON.stringify({ type: C2S.COMMAND, sessionId: sourceId, command: "/fork 1 branch prompt" }),
+      JSON.stringify({ type: C2S.COMMAND, sessionId: sourceId, command: "/fork branch prompt" }),
     );
 
     const created = await waitForMessage(ws, S2C.SESSION_CREATED, { after: sendCount });

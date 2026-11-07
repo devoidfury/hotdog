@@ -153,8 +153,9 @@ async function handlePromptSubcommand(
       toolOutputFmt: resolved.toolOutputFmt,
       // Same as the interactive CLI: -p must not echo the user's prompt back.
       hideUserMessage: true,
-      // Same display-hints wiring as the interactive CLI.
+      // Same display-hints wiring as the interactive CLI, declared parts included.
       argDisplay: (toolName) => core.toolRegistry.getMetadata(toolName)?.argDisplay,
+      display: (toolName) => core.toolRegistry.getMetadata(toolName)?.display,
     });
   }
 

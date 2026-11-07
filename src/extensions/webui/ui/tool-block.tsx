@@ -14,6 +14,13 @@
 import { mount, type DomNode, type Mounted, type JsxChild } from "@utils/jsx";
 import { parseMarkdown, mdTreeToHtml } from "@utils/md-parser.ts";
 import { getTokenizer } from "@utils/syntax";
+import {
+  computeDiffLines,
+  addOnlyDiffLines,
+  diffStat,
+  MAX_DIFF_LINES,
+  type DiffLine,
+} from "@utils/diff.ts";
 import { TOOL_ICONS } from "./icons.tsx";
 import { copyText } from "./utils.ts";
 import type { ToolDisplayWire } from "@extensions/websocket/protocol.ts";
@@ -70,8 +77,14 @@ export interface ToolBlockState {
 
 /** Beyond this many chars the result shows a preview + "show full" button. */
 export const RESULT_PREVIEW_CHARS = 2000;
-/** Per-side cap on rendered diff lines (huge edits fall back to "…" rows). */
-export const MAX_DIFF_LINES = 300;
+/**
+ * Per-side cap on rendered diff lines (huge edits fall back to "…" rows).
+ * Re-exported from the shared util (with `computeDiffLines` itself) so the
+ * number and the algorithm's own fallback are one constant and can never drift
+ * apart; the render path still passes it explicitly, so the block's posture
+ * stays visible at its call site.
+ */
+export { MAX_DIFF_LINES };
 /** Inline diff rows before the "expand remaining" button takes over. */
 export const MAX_INLINE_DIFF_LINES = 30;
 /** Cap on rendered file-part text; past it a "… N more — show full" button shows. */
@@ -222,109 +235,13 @@ export function prettyArgs(args: string): string {
   }
 }
 
-export interface DiffLine {
-  kind: "ctx" | "add" | "del" | "info";
-  text: string;
-  /** 1-based line number in the OLD file; absent on add/info rows (the side
-   *  that line does not exist on renders an empty gutter cell). */
-  oldNo?: number;
-  /** 1-based line number in the NEW file; absent on del/info rows. */
-  newNo?: number;
-}
-
-/**
- * Diff lines for an old/new string pair: common prefix/suffix trimmed, the
- * changed middles rendered as del-then-add with one context line on each
- * side. Local to the UI (the core generateDiff stays as-is); far kinder than
- * a positional line-pairing diff for insertions.
- *
- * Numbering (the GitHub body's two gutters), with `start` the trimmed prefix
- * length and `base = (fileStartLine ?? 1) - 1`: removed oldLines[start..endOld-1]
- * number base+start+1+i in the old file, added newLines[start..endNew-1] number
- * base+start+1+i in the new one, the leading context row is line base+start on
- * both sides, the trailing one base+endOld+1 / base+endNew+1. A pure insertion
- * therefore shows only new numbers and a pure deletion only old ones -- the two
- * sides never share a row. The cap placeholders ("… N more removed/added") are
- * `info` rows: they say something about the diff, not about a line, so they
- * carry no numbers.
- *
- * `fileStartLine` is the file line of the rendered snippet's FIRST line
- * (edit's `start_line` meta: where oldString matched, context included): it
- * shifts the base, so the gutters read the file, not the snippet. Both sides
- * share the base because everything above the snippet is unchanged:
- * oldString and newString start at the same line in their respective files.
- * Absent (no result fact) -> base 0, the snippet's own 1..N -- the honest
- * fallback, and what a multi-match replace_all renders against (its gutters
- * describe the first match).
- */
-export function computeDiffLines(
-  oldText: string,
-  newText: string,
-  maxLines = MAX_DIFF_LINES,
-  fileStartLine?: number,
-): DiffLine[] {
-  const base = (fileStartLine !== undefined && Number.isInteger(fileStartLine) && fileStartLine > 0
-    ? fileStartLine
-    : 1) - 1;
-  const oldLines = oldText.split("\n");
-  const newLines = newText.split("\n");
-  let start = 0;
-  while (
-    start < oldLines.length &&
-    start < newLines.length &&
-    oldLines[start] === newLines[start]
-  ) {
-    start++;
-  }
-  let endOld = oldLines.length;
-  let endNew = newLines.length;
-  while (endOld > start && endNew > start && oldLines[endOld - 1] === newLines[endNew - 1]) {
-    endOld--;
-    endNew--;
-  }
-  const removed = oldLines.slice(start, endOld);
-  const added = newLines.slice(start, endNew);
-
-  const lines: DiffLine[] = [];
-  if (start > 0) lines.push({ kind: "ctx", text: oldLines[start - 1]!, oldNo: base + start, newNo: base + start });
-  removed.forEach((text, i) => {
-    if (i === maxLines) lines.push({ kind: "info", text: `… ${removed.length - maxLines} more removed` });
-    else if (i < maxLines) lines.push({ kind: "del", text, oldNo: base + start + 1 + i });
-  });
-  added.forEach((text, i) => {
-    if (i === maxLines) lines.push({ kind: "info", text: `… ${added.length - maxLines} more added` });
-    else if (i < maxLines) lines.push({ kind: "add", text, newNo: base + start + 1 + i });
-  });
-  if (endOld < oldLines.length) {
-    lines.push({ kind: "ctx", text: oldLines[endOld]!, oldNo: base + endOld + 1, newNo: base + endNew + 1 });
-  }
-  return lines;
-}
-
-/**
- * The add-rail start a kind "diff" args part declares: only a positive
- * integer is a number, anything else (absent, 0, negative, fractional)
- * leaves the new-side rail blank. A fake 1..N for an unknown offset is the
- * one lie the two gutters exist to prevent.
- */
-function addRailStart(spec: ToolDisplayWire): number | undefined {
-  return typeof spec.addStart === "number" && Number.isInteger(spec.addStart) && spec.addStart > 0
-    ? spec.addStart
-    : undefined;
-}
-
-/** The diff header's stat: add/del row counts of the resolved lines (info
- *  placeholders are not counted -- they are not lines). Rendered "+N −M"; a
- *  zero-del side renders nothing -- the stat never says "−0". */
-export function diffStat(lines: DiffLine[]): { add: number; del: number } {
-  let add = 0;
-  let del = 0;
-  for (const l of lines) {
-    if (l.kind === "add") add++;
-    else if (l.kind === "del") del++;
-  }
-  return { add, del };
-}
+// The diff algorithm (prefix/suffix trim, two-gutter numbering, per-side cap,
+// the all-add rail) lives in the shared zero-dep util @utils/diff.ts, which
+// the terminal sink renders from too -- one algorithm, so the browser's gutters
+// and the CLI's ANSI block can never disagree about what one edit changed.
+// Re-exported here as the module's existing surface. The header renders the
+// stat "+N −M"; a zero-del side renders nothing -- the stat never says "−0".
+export { computeDiffLines, diffStat, type DiffLine };
 
 /** One styled run of highlighted code; cls null means unstyled text. */
 export interface CodeRun {
@@ -425,15 +342,12 @@ function resolvePart(spec: ToolDisplayWire, state: ToolBlockState): PartView {
         // skips too: the tinted generic box carries that story.
         const body = spec.arg !== undefined ? parsed?.[spec.arg] : undefined;
         if (typeof body !== "string" || body === "" || state.result?.error) return { posture: "skip" };
-        // Line accounting stays the house diff idiom: split on \n only (a
-        // \r rides inside the line; a trailing \n yields a final empty add
-        // row, the same way the file posture already counts it).
-        const start = addRailStart(spec);
-        const lines: DiffLine[] = body.split("\n").map((text, i) => ({
-          kind: "add",
-          text,
-          ...(start === undefined ? {} : { newNo: start + i }),
-        }));
+        // Line accounting and the add-rail rule come from the shared util
+        // (split on \n only, so a \r rides inside the line and a trailing
+        // \n yields a final empty add row, the same way the file posture
+        // already counts it; a non-positive addStart leaves the rail blank).
+        // No cap here: the block bounds this render with its own expand row.
+        const { lines } = addOnlyDiffLines(body, spec.addStart);
         // Ok result = the size envelope as a quiet footer under the body
         // (same treatment as the file box); pending has nothing to show.
         const envelope = state.result ? oneLine(state.result.output ?? "", 80) : undefined;

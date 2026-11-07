@@ -18,10 +18,11 @@ import {
   SessionStateEvent,
   SystemMessageEvent,
 } from "@core/context/output.ts";
-import { toolContentText } from "@utils/tool-content.ts";
+import { toolContentMeta, toolContentSuccess, toolContentText } from "@utils/tool-content.ts";
+import { resolveCliDiff, renderCliDiff } from "@utils/cli/diff-render.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 import { summarizeToolArgs, firstLinePreview } from "@core/extensions/tool-utils.ts";
-import type { ArgDisplay } from "@core/extensions/tool-registry.ts";
+import type { ArgDisplay, ToolDisplaySpec } from "@core/extensions/tool-registry.ts";
 import {
   ColorPalette,
   applyThinking,
@@ -93,6 +94,15 @@ export interface CliOutputSinkOptions {
    * value folding (first-line previews) and syntax highlighters.
    */
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
+  /**
+   * Resolves a tool's declared display parts (its metadata's `display`). The
+   * sibling of `argDisplay` one level up: where the hints fold a single
+   * argument, a part declares what a whole call renders as -- today only
+   * kind "diff" has a terminal renderer (the core write tools declare it), and
+   * a tool that declares nothing keeps the generic result posture. The sink
+   * never keys off a tool name. Unwired = every result renders generically.
+   */
+  display?: (toolName: string) => ToolDisplaySpec[] | undefined;
 }
 
 export function formatCompacting(messageCount: number, keepRecent: number): string {
@@ -188,12 +198,31 @@ export function inflightCallText(
   return applyToolCall(`${TOOL_CALL_PREFIX}${body}`, palette);
 }
 
+/**
+ * Fill `{}` slots positionally, one pass, LITERAL substitution.
+ *
+ * Two hazards, both model-authored bytes in the substituted value:
+ *   - `$&`, `` $` ``, `$'` and `$$` are replace-pattern tokens. A file line
+ *     containing `sed $&` would splice the template's own chrome (or the match)
+ *     into the middle of the printed text, so what the terminal shows is not
+ *     what the tool wrote -- and with a rendered diff that is ~40 rows of raw
+ *     file content per call. The replacer-function form disables the tokens.
+ *   - the old two-step fill re-scanned the already-substituted name, so a tool
+ *     name containing `{}` swallowed the args slot. One pass over the format
+ *     string cannot: substituted text is never re-read, and a `{}` past the
+ *     last slot stays literal, as it did before.
+ */
+function fillSlots(fmt: string, ...slots: string[]): string {
+  let i = 0;
+  return fmt.replace(/\{\}/g, () => (i < slots.length ? slots[i++]! : "{}"));
+}
+
 export function formatToolCall(toolName: string, input: string, toolFmt: string): string {
-  return toolFmt.replace("{}", toolName).replace("{}", input);
+  return fillSlots(toolFmt, toolName, input);
 }
 
 export function formatToolResult(result: string, toolOutputFmt: string): string {
-  return toolOutputFmt.replace("{}", result);
+  return fillSlots(toolOutputFmt, result);
 }
 
 export function formatTokenUsage(
@@ -208,7 +237,7 @@ export function formatTokenUsage(
 
 export function formatThinking(content: string, thinkerFmt: string | null | undefined): string {
   if (thinkerFmt) {
-    return thinkerFmt.replace("{}", content);
+    return fillSlots(thinkerFmt, content);
   }
   return `[Thinking: ${content}]`;
 }
@@ -219,6 +248,37 @@ export function formatTaskProgress(activeTasks: number, totalTasks: number): str
     return `${activeTasks} task${activeTasks === 1 ? "" : "s"} running`;
   }
   return `${activeTasks}/${totalTasks} tasks`;
+}
+
+/** Runes of a call's own result text kept under a rendered diff block. */
+const RESULT_ENVELOPE_RUNES = 120;
+
+/**
+ * The tool's answer as ONE line under a diff block (which edit landed, how
+ * many bytes): the diff is the change, the envelope is the fact that it
+ * happened. Only the result's first line rides -- what follows it is the
+ * `META:` block, and the one fact that carries (start_line) is already the
+ * diff's gutter. HINTs are failure guidance (every shipped `withHint` is on an
+ * error path), and failures never reach this posture: they keep the full
+ * generic box, HINT included. Flat, rune-capped, spoofed last so a cap can
+ * never split a `[U+XXXX]` token.
+ */
+function resultEnvelope(text: string): string {
+  const flat = text.split("\n")[0]!.replace(/\s+/g, " ").trim();
+  const runes = Array.from(flat);
+  return spoofSafe(
+    runes.length > RESULT_ENVELOPE_RUNES ? `${runes.slice(0, RESULT_ENVELOPE_RUNES).join("")}\u2026` : flat,
+  );
+}
+
+/**
+ * edit's `start_line` result meta as a positive integer, else undefined: the
+ * same gate the wire applies before it lets the diff rails number from the
+ * file rather than the snippet.
+ */
+function resultStartLine(content: ToolResultEvent["content"]): number | undefined {
+  const n = Number(toolContentMeta(content, "start_line"));
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 /**
@@ -234,6 +294,7 @@ export class CliOutputSink extends OutputSink {
   hideUserMessage?: boolean;
   showTokenUse: boolean;
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
+  display?: (toolName: string) => ToolDisplaySpec[] | undefined;
   [key: string]: unknown;
 
   // ── Newline buffer for streaming output ────────────────────────────────
@@ -262,6 +323,7 @@ export class CliOutputSink extends OutputSink {
     this.hideUserMessage = options.hideUserMessage;
     this.showTokenUse = options.showTokenUse !== false;
     this.argDisplay = options.argDisplay;
+    this.display = options.display;
 
     // ── Newline buffer for streaming output ────────────────────────────────
     // Buffers trailing newlines to normalize spacing between reasoning and
@@ -442,8 +504,42 @@ export class CliOutputSink extends OutputSink {
     if (this.hideTools) return;
     this._transitionTo(Modes.ToolResult);
     // The event carries the stored content (harness text or a tool-result
-    // part); the terminal decides how to show it.
-    this._processContent(formatToolResult(toolContentText(event.content), this.toolOutputFmt || "{}"));
+    // part) and the call's args; the terminal decides how to show it. A tool
+    // that DECLARES a kind "diff" part gets the change itself: the folded
+    // args preview and a size-confirmation envelope never said what moved,
+    // and the declaration (never a tool-name table) is what opts a call in.
+    // The gate is POSITIVE: the part must attest the call succeeded. Failure
+    // reaches the sink in too many shapes to recognize by absence -- a thrown
+    // tool error, a gate block and a handled verdict all land as
+    // {status:"error", error:null, output:<failure text}> (formatToolResult),
+    // ToolResult.err() lands as {status:"failure", error:...}, and the
+    // harness's own failures are bare strings ("Parameter validation error:",
+    // "Skipped due to maxToolCallsPerIteration limit (N)",
+    // "[skipped: loop stop requested]", "Tool execution failed: ..."). A denied
+    // or failed write showing its diff with the real path and gutter as if it
+    // landed is the worst thing this surface can print, so anything that is not
+    // an attested success keeps the generic box (which also keeps the tool's
+    // HINT line). Undeclared tools, unknown kinds and missing arg keys skip in
+    // the resolver for the same effect: today's behavior is the fallback.
+    // The block rides the same toolOutputFmt box and the same mode pipeline as
+    // any other result: legacy stdout and the split bridge's commit channel
+    // both see one multi-line text, as before.
+    const diff = resolveCliDiff(this.display?.(event.toolName), event.input, {
+      failed: event.error !== undefined || !toolContentSuccess(event.content),
+      startLine: resultStartLine(event.content),
+    });
+    let text: string;
+    if (diff) {
+      const envelope = resultEnvelope(toolContentText(event.content));
+      text = renderCliDiff(diff, { palette: this.palette });
+      // The tool's own answer keeps the result color the generic box would
+      // have given it (the block's rows each close their own SGR, so nothing
+      // inherits it).
+      if (envelope !== "") text += "\n" + applyToolResult(envelope, this.palette);
+    } else {
+      text = toolContentText(event.content);
+    }
+    this._processContent(formatToolResult(text, this.toolOutputFmt || "{}"));
   }
 
   override emitCompacting(event: CompactingEvent): void {

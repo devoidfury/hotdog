@@ -664,6 +664,9 @@ export async function runInteractiveSession(
     // syntax); the sink stays generic and asks the registry per call.
     // Optional chain: test rigs hand in bare core doubles.
     argDisplay: (toolName) => core.toolRegistry?.getMetadata(toolName)?.argDisplay,
+    // Same seam one level up: the declared display parts (kind "diff" renders
+    // as a committed ANSI diff on the result; see @utils/cli/diff-render.ts).
+    display: (toolName) => core.toolRegistry?.getMetadata(toolName)?.display,
   });
 
   // Split-renderer mount gate (default-on): mounts iff the

@@ -49,12 +49,22 @@ function payload(over: Partial<ToolCallPayload> & { inputOverride?: unknown } = 
   } as unknown as ToolCallPayload;
 }
 
+/** Registry double for the display-declaration tests: metadata only, the one
+ * field the gate reads (ToolDisplaySpec) is what it asks for. */
+function registryWith(display: Record<string, unknown[]>): unknown {
+  return {
+    getMetadata: (name: string) =>
+      display[name] ? { sideEffects: true, difficulty: 2, display: display[name] } : undefined,
+  };
+}
+
 async function run(
   cfg: UserGateConfig,
   p: ToolCallPayload,
+  toolRegistry?: unknown,
 ): Promise<{ action: string | undefined; result: string }> {
   const hooks = new HookSystem();
-  const core = { hooks, config: { userGate: cfg } } as unknown as CoreContext;
+  const core = { hooks, config: { userGate: cfg }, ...(toolRegistry ? { toolRegistry } : {}) } as unknown as CoreContext;
   const instance = create(core);
   for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
     hooks.on(name, handler as never, "user-gate");
@@ -746,5 +756,98 @@ describe("agent_browser evaluate through the gate", () => {
     const other = await run(cfg, evaluatePayload(scriptB, { inputOverride: input } as never));
     expect(other.action).toBe("block"); // denied here, but only AFTER its own ask
     expect(asked).toHaveLength(1);
+  });
+});
+
+describe("approval prompt shows the declared diff (approve what you can read)", () => {
+  const EDIT_DISPLAY = [
+    { kind: "diff", oldArg: "oldString", newArg: "newString", pathArg: "path" },
+  ];
+  const APPEND_DISPLAY = [{ kind: "diff", source: "args", arg: "content", pathArg: "path" }];
+
+  async function ask(
+    display: Record<string, unknown[]>,
+    toolName: string,
+    args: Record<string, unknown>,
+    answer = "allow once",
+  ): Promise<string> {
+    const { input, asked } = answerWith(answer);
+    const p = payload({ toolName, input: JSON.stringify(args), inputOverride: input } as never);
+    const r = await run({ enabled: true, default: "ask" }, p, registryWith(display));
+    expect(r.action).toBeUndefined(); // the ask still ran to an allow
+    expect(asked).toHaveLength(1);
+    return asked[0]!;
+  }
+
+  it("renders the change block with its path, stat, gutter and signs", async () => {
+    const prompt = await ask({ edit: EDIT_DISPLAY }, "edit", {
+      path: "src/app.ts",
+      replace_all: false,
+      oldString: "function hello() {\n  return 1;\n}",
+      newString: "function hello() {\n  return 2;\n}",
+    });
+    const lines = prompt.split("\n");
+    expect(lines[0]).toBe("Approve this tool call? (edit)");
+    // The string args the block shows drop out of the echo; what is left is
+    // the shared k: v fold, so the question stays readable.
+    expect(lines[1]).toBe("  args: path: src/app.ts · replace_all: false");
+    expect(lines[2]).toBe("  will change src/app.ts +1 \u22121");
+    expect(lines[3]).toBe("      1 function hello() {");
+    expect(lines[4]).toBe("  -   2   return 1;");
+    expect(lines[5]).toBe("  +   2   return 2;");
+    expect(lines[6]).toBe("      3 }");
+    // No result fact exists before the call runs: the gutter numbers the
+    // snippet, and the block is labeled as the proposal it is.
+    expect(prompt).not.toContain("META");
+    expect(prompt).toContain("why:");
+    expect(prompt).toContain("to persist:");
+  });
+
+  it("shows a write tool's content as adds, with the same cap and elision line", async () => {
+    const body = Array.from({ length: 30 }, (_, i) => `row ${i}`).join("\n");
+    const prompt = await ask({ append: APPEND_DISPLAY }, "append", { path: "notes.md", content: body });
+    const lines = prompt.split("\n");
+    expect(lines[2]).toBe("  will change notes.md +20");
+    expect(lines.filter((l) => l.trimStart().startsWith("+ row"))).toHaveLength(20);
+    expect(prompt).toContain("\u2026 10 more changed lines");
+    expect(prompt).not.toContain("row 25"); // capped: the tail never floods the ask
+  });
+
+  it("keeps today's prompt when the tool declares nothing (registry absent or silent)", async () => {
+    const args = { path: "src/app.ts", oldString: "a", newString: "b" };
+    const { input, asked } = answerWith("allow once");
+    // No registry (a bare core double), a registry with no metadata for the
+    // tool, and metadata with no display parts: all three are undeclared.
+    const bare: unknown[] = [undefined, { getMetadata: () => undefined }, registryWith({})];
+    for (const toolRegistry of bare) {
+      const p = payload({ toolName: "edit", input: JSON.stringify(args), inputOverride: input } as never);
+      const r = await run({ enabled: true, default: "ask" }, p, toolRegistry);
+      expect(r.action).toBeUndefined();
+      const prompt = asked[asked.length - 1]!;
+      expect(prompt).not.toContain("will change");
+      // The raw args echo is the unchanged posture for an undeclared tool.
+      expect(prompt).toContain('"oldString":"a"');
+    }
+  });
+
+  it("tokenizes spoofing code points inside the diff body it shows", async () => {
+    const prompt = await ask({ edit: EDIT_DISPLAY }, "edit", {
+      path: "src/a\u200bpp.ts",
+      oldString: "rm -rf /\u200b*",
+      newString: "rm -rf /\u202e",
+    });
+    expect(prompt).toContain("[U+200B]");
+    expect(prompt).toContain("[U+202E]");
+    expect(prompt).not.toContain("\u200b");
+    expect(prompt).not.toContain("\u202e");
+  });
+
+  it("a failed-to-parse or non-object args call still prompts with no diff block", async () => {
+    const { input, asked } = answerWith("deny");
+    const p = payload({ toolName: "edit", input: "{not json", inputOverride: input } as never);
+    const r = await run({ enabled: true, default: "ask" }, p, registryWith({ edit: EDIT_DISPLAY }));
+    expect(r.action).toBe("block");
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).not.toContain("will change");
   });
 });

@@ -16,6 +16,14 @@ export interface PaletteOptions {
   shell_operator?: string;
   /** The ` · ` separator between summarized arg pairs. */
   arg_separator?: string;
+  /** Added lines in a committed tool-result diff (a kind "diff" display part). */
+  diff_add?: string;
+  /** Removed lines in a committed tool-result diff. */
+  diff_del?: string;
+  /** Diff context rows -- they recede so the changed lines read first. */
+  diff_ctx?: string;
+  /** Diff chrome: the path/stat header and the elision summary. */
+  diff_meta?: string;
   use_colors?: boolean;
 }
 
@@ -30,6 +38,10 @@ export class ColorPalette {
   shell_command: string;
   shell_operator: string;
   arg_separator: string;
+  diff_add: string;
+  diff_del: string;
+  diff_ctx: string;
+  diff_meta: string;
   use_colors: boolean;
 
   constructor(options: PaletteOptions = {}) {
@@ -43,6 +55,12 @@ export class ColorPalette {
     this.shell_command = options.shell_command ?? "cyan";
     this.shell_operator = options.shell_operator ?? "bright_black";
     this.arg_separator = options.arg_separator ?? "bright_black";
+    // Diff rows: the change carries the hue, context and chrome recede. The
+    // +/- signs and the gutter still read with colors off (see diff-render.ts).
+    this.diff_add = options.diff_add ?? "green";
+    this.diff_del = options.diff_del ?? "red";
+    this.diff_ctx = options.diff_ctx ?? "bright_black";
+    this.diff_meta = options.diff_meta ?? "bright_black";
     this.use_colors = options.use_colors ?? true;
   }
 
@@ -69,6 +87,10 @@ export function dark_palette(): PaletteOptions {
     shell_command: "cyan",
     shell_operator: "bright_black",
     arg_separator: "bright_black",
+    diff_add: "green",
+    diff_del: "red",
+    diff_ctx: "bright_black",
+    diff_meta: "bright_black",
     use_colors: true,
   };
 }
@@ -86,6 +108,10 @@ export function light_palette(): PaletteOptions {
     shell_command: "blue",
     shell_operator: "bright_black",
     arg_separator: "bright_black",
+    diff_add: "green",
+    diff_del: "red",
+    diff_ctx: "bright_black",
+    diff_meta: "bright_black",
     use_colors: true,
   };
 }
@@ -103,6 +129,11 @@ export function monochrome_palette(): PaletteOptions {
     shell_command: "bold",
     shell_operator: "dim",
     arg_separator: "dim",
+    // No hue survives here: the styles carry the diff, the +/- signs carry it again.
+    diff_add: "bold",
+    diff_del: "dim",
+    diff_ctx: "dim",
+    diff_meta: "dim",
     use_colors: true,
   };
 }
@@ -151,6 +182,10 @@ export function mergePalette(base: ColorPalette, custom: PaletteOptions): ColorP
     shell_command: custom.shell_command || base.shell_command,
     shell_operator: custom.shell_operator || base.shell_operator,
     arg_separator: custom.arg_separator || base.arg_separator,
+    diff_add: custom.diff_add || base.diff_add,
+    diff_del: custom.diff_del || base.diff_del,
+    diff_ctx: custom.diff_ctx || base.diff_ctx,
+    diff_meta: custom.diff_meta || base.diff_meta,
     use_colors:
       custom.use_colors !== undefined ? custom.use_colors : base.use_colors,
   });

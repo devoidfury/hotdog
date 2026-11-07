@@ -252,6 +252,20 @@ Global default for the RoleMapping registry name -- where internal roles ride on
 
 Format string for tool result display. `{}` is replaced with the tool output.
 
+A tool that declares a `kind: "diff"` display part (edit, append, overwrite) gets the change itself in that slot instead of the
+flattened result text: a capped ANSI block (`path +A -D`, a line-number gutter, `+`/`-` rows, then one `... N more changed lines`
+summary) followed by the tool's own answer as its first line. Terminal scrollback is write-once, so it is bounded on both axes --
+20 rows per side (`CLI_MAX_DIFF_LINES`) and 400 runes per row (`CLI_MAX_DIFF_ROW_RUNES`, with an inline `... +N chars` marker) --
+and the `+A -D` header counts the SHOWN rows, with the elision line carrying the remainder. The same block, plain and labeled
+`will change`, is what the user-gate approval prompt shows BEFORE you answer.
+
+The posture is taken only on a result that ATTESTS success (a tool-result part with `status: "success"` and no error). A thrown tool
+error, a gate block, a handled verdict and the harness's own bare-string failures (`Parameter validation error:`,
+`Skipped due to maxToolCallsPerIteration limit (N)`, `[skipped: loop stop requested]`, `Tool execution failed: ...`) keep the generic
+result bytes -- including the tool's `HINT:` line -- because a denied or failed write shown as a landed diff with the real path and
+gutter is the worst reading this surface can produce. Undeclared tools and kinds the terminal cannot draw do the same. Substituting
+into `{}` is literal: `$&`, `` $` ``, `$'` and `$$` in file content are printed as written, never as replace patterns.
+
 ```json
 { "toolOutputFmt": "<<< {} >>>" }
 ```
@@ -497,7 +511,9 @@ Trace hook execution. Requires `HOTDOG_LOG_LEVEL=debug`.
 
 UI theme. Built-in options: `dark`, `light`, `monochrome`. Also accepts a file path to a custom theme
 -- a JSON file of `ColorPalette` overrides (merged over `dark`): `thinking`, `tool_call`, `tool_result`,
-`final_response`, `compacting`, `progress`, `arg_key`, `shell_command`, `shell_operator`, `arg_separator`.
+`final_response`, `compacting`, `progress`, `arg_key`, `shell_command`, `shell_operator`, `arg_separator`,
+and the tool-result diff classes `diff_add` (green), `diff_del` (red), `diff_ctx` (bright_black), `diff_meta`
+(the diff's path/stat header and elision line).
 Color names are ANSI classes (`cyan`, `bright_black`, `bold_white`, ...); an empty or unknown name leaves
 that class unstyled.
 

@@ -1,11 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   CliOutputSink,
+  formatThinking,
+  formatToolCall,
+  formatToolResult,
   inflightCallText,
 } from "@utils/cli/cli.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
+// core's part builder, aliased: this file's module under test exports its own
+// same-named {} layout formatter (pinned at the bottom of this file).
+import { formatToolResult as buildResultPart } from "@core/extensions/tool-utils.ts";
+import { INTERRUPTED_TOOL_RESULT } from "@core/context/repair.ts";
 import { ColorPalette } from "@utils/cli/colors.ts";
-import type { ArgDisplay } from "@core/extensions/tool-registry.ts";
+import type { ArgDisplay, ToolDisplaySpec } from "@core/extensions/tool-registry.ts";
 
 /**
  * Bash's metadata display hints as the registry would hand them to the
@@ -611,5 +618,255 @@ describe("inflightCallText (in-flight frame row)", () => {
       out.mockRestore();
       err.mockRestore();
     }
+  });
+});
+
+// ── The diff posture: a result whose tool DECLARES kind "diff" ─────────────
+// The declaration opts a call in (no tool names in the sink), the cap bounds
+// what lands in write-once scrollback, and everything else keeps today's
+// bytes: no seam, no declaration, an unknown kind, or a failed call all render
+// the generic result exactly as before.
+
+const EDIT_DISPLAY: ToolDisplaySpec[] = [
+  { kind: "diff", oldArg: "oldString", newArg: "newString", pathArg: "path" },
+];
+const APPEND_DISPLAY: ToolDisplaySpec[] = [
+  { kind: "diff", source: "args", arg: "content", pathArg: "path" },
+];
+
+describe("CliOutputSink diff posture", () => {
+  let stdoutWrites: string[];
+
+  function makeSink(
+    display?: (toolName: string) => ToolDisplaySpec[] | undefined,
+    useColors = false,
+  ): CliOutputSink {
+    const s = new CliOutputSink({
+      palette: new ColorPalette({ use_colors: useColors }),
+      toolOutputFmt: "----\n{}\n----",
+      showTokenUse: false,
+      ...(display ? { display } : {}),
+    });
+    return s;
+  }
+
+  beforeEach(() => {
+    stdoutWrites = [];
+    spyOn(process.stdout, "write").mockImplementation((s: string) => {
+      stdoutWrites.push(s);
+      return true;
+    });
+    spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    (process.stdout.write as any).mockRestore();
+    (process.stderr.write as any).mockRestore();
+  });
+
+  const okPart = (output: string, meta: Array<[string, string]> = []) => ({
+    type: "tool-result",
+    tool: "edit",
+    status: "success",
+    meta,
+    error: null,
+    hint: null,
+    output,
+  });
+
+  const editEvent = (over: Record<string, unknown> = {}) => ({
+    type: OUTPUT_EVENT.TOOL_RESULT,
+    toolName: "edit",
+    input: JSON.stringify({ path: "src/a.ts", oldString: "a\nb\nc", newString: "a\nB\nc" }),
+    content: [okPart("Replaced 1 occurrence in src/a.ts")],
+    toolCallId: "1",
+    ...over,
+  });
+
+  it("commits the change itself: rows, header, and the tool's one-line answer", () => {
+    makeSink(() => EDIT_DISPLAY).emit(editEvent() as never);
+    const written = stdoutWrites.join("");
+    expect(written).toBe("----\nsrc/a.ts +1 \u22121\n    1 a\n-   2 b\n+   2 B\n    3 c\nReplaced 1 occurrence in src/a.ts\n----");
+    // The old folded-args story (a "3 lines, 12 chars" stub for oldString) is
+    // gone from the result row: the diff replaced it.
+    expect(written).not.toContain("lines,");
+  });
+
+  it("keeps today's bytes when nothing is declared (no seam, no parts, unknown kinds)", () => {
+    const plain = "Replaced 1 occurrence in src/a.ts";
+    const cases: Array<(n: string) => ToolDisplaySpec[] | undefined> = [
+      () => undefined, // undeclared
+      () => [], // an empty declaration
+      () => [{ kind: "file" }, { kind: "tomorrow" }] as ToolDisplaySpec[], // kinds the terminal cannot draw
+    ];
+    for (const display of cases) {
+      stdoutWrites = [];
+      makeSink(display).emit(editEvent() as never);
+      expect(stdoutWrites.join("")).toBe(`----\n${plain}\n----`);
+    }
+    // And a sink built without the seam at all (every pre-existing caller).
+    stdoutWrites = [];
+    makeSink().emit(editEvent() as never);
+    expect(stdoutWrites.join("")).toBe(`----\n${plain}\n----`);
+  });
+
+  // The gate is positive (the part must ATTEST success), because failure
+  // reaches the sink in shapes an error-field test cannot see. These are the
+  // shapes core emits, built with core's own builders -- a false positive here
+  // prints a never-written change with the real path and gutter numbers, the
+  // worst thing this surface can produce.
+  const thrown = buildResultPart(
+    "Error executing tool edit: text not found in file.",
+    "edit",
+    false,
+    "Use the exact text from read's output",
+  );
+  const denied = buildResultPart("User denied this tool call.", "edit", false);
+  const handled = buildResultPart(
+    "Tool call intercepted by a TOOL_CALL handler (verdict: handled); the tool did not run.",
+    "edit",
+    false,
+  );
+  it.each([
+    [
+      "ToolResult.toApiContent() failure",
+      [{ ...okPart(""), status: "failure", error: "oldString not found", output: "" }],
+      "Error: oldString not found",
+    ],
+    ["formatToolResult(thrown tool error)", [thrown], "Error executing tool edit: text not found in file."],
+    ["formatToolResult(gate block)", [denied], "User denied this tool call."],
+    ["formatToolResult(handled verdict)", [handled], "the tool did not run."],
+    ["executor throw (bare string)", "Tool execution failed: EACCES: permission denied, open 'src/a.ts'", "Tool execution failed: EACCES"],
+    ["parameter validation (bare string)", "Parameter validation error:\nmissing required property 'oldString'", "Parameter validation error:"],
+    ["unknown tool (bare string)", "Unknown tool: edit", "Unknown tool: edit"],
+    ["per-iteration limit skip (bare string)", "Skipped due to maxToolCallsPerIteration limit (5)", "Skipped due to maxToolCallsPerIteration limit (5)"],
+    ["loop-stop skip (bare string)", "[skipped: loop stop requested]", "[skipped: loop stop requested]"],
+    ["interrupted-call repair (bare string)", INTERRUPTED_TOOL_RESULT, INTERRUPTED_TOOL_RESULT],
+  ])("keeps the generic posture for %s", (_shape, content, expectText) => {
+    makeSink(() => EDIT_DISPLAY).emit(editEvent({ content }) as never);
+    const written = stdoutWrites.join("");
+    expect(written).toContain(expectText);
+    // Neither side of the never-written change appears...
+    expect(written).not.toContain("+   2 B");
+    expect(written).not.toContain("src/a.ts +1");
+  });
+
+  it("keeps the tool's HINT line under the generic posture", () => {
+    expect(thrown.hint).toBe("Use the exact text from read's output");
+    makeSink(() => EDIT_DISPLAY).emit(editEvent({ content: [thrown] }) as never);
+    expect(stdoutWrites.join("")).toContain("HINT: Use the exact text from read's output");
+  });
+
+  it("takes the posture for both attested success shapes", () => {
+    // ToolResult.ok().toApiContent() shape (the fixture's okPart) ...
+    makeSink(() => EDIT_DISPLAY).emit(editEvent() as never);
+    expect(stdoutWrites.join("")).toContain("+   2 B");
+    // ... and formatToolResult(payload, name, true), the plain-payload shape.
+    stdoutWrites = [];
+    makeSink(() => EDIT_DISPLAY).emit(
+      editEvent({ content: [buildResultPart("Replaced 1 occurrence in src/a.ts", "edit", true)] }) as never,
+    );
+    expect(stdoutWrites.join("")).toContain("+   2 B");
+  });
+
+  it("numbers the gutter with the file line from the result's start_line meta", () => {
+    makeSink(() => EDIT_DISPLAY).emit(
+      editEvent({ content: [okPart("Replaced 1 occurrence in src/a.ts", [["start_line", "41"]])] }) as never,
+    );
+    const written = stdoutWrites.join("");
+    expect(written).toContain("-  42 b");
+    expect(written).toContain("+  42 B");
+    // The meta dump is what the gutter already says: it does not ride twice.
+    expect(written).not.toContain("META:");
+  });
+
+  it("renders an args-sourced write as adds and caps what lands in scrollback", () => {
+    const body = Array.from({ length: 60 }, (_, i) => `line ${i}`).join("\n");
+    makeSink(() => APPEND_DISPLAY).emit({
+      type: OUTPUT_EVENT.TOOL_RESULT,
+      toolName: "append",
+      input: JSON.stringify({ path: "notes.md", content: body }),
+      content: [okPart("Appended 359 bytes to notes.md")],
+      toolCallId: "1",
+    } as never);
+    const rows = stdoutWrites.join("").replace("----\n", "").replace("\n----", "").split("\n");
+    expect(rows[0]).toBe("notes.md +20");
+    expect(rows[1]).toBe("+ line 0");
+    expect(rows.filter((r) => r.startsWith("+ line"))).toHaveLength(20);
+    expect(rows[rows.length - 2]).toBe("  \u2026 40 more changed lines");
+    expect(rows[rows.length - 1]).toBe("Appended 359 bytes to notes.md");
+  });
+
+  it("paints rows through the palette and commits zero escape bytes with colors off", () => {
+    makeSink(() => EDIT_DISPLAY, true).emit(editEvent() as never);
+    const painted = stdoutWrites.join("");
+    expect(painted).toContain("\x1b[31m-   2 b\x1b[0m");
+    expect(painted).toContain("\x1b[32m+   2 B\x1b[0m");
+    stdoutWrites = [];
+    makeSink(() => EDIT_DISPLAY, false).emit(editEvent() as never);
+    expect(stdoutWrites.join("")).not.toContain("\x1b");
+  });
+
+  it("neutralizes spoofing code points in the diff body it commits", () => {
+    makeSink(() => EDIT_DISPLAY).emit(
+      editEvent({
+        input: JSON.stringify({
+          path: "src/a.ts",
+          oldString: "rm -rf /\u200b*",
+          newString: "rm -rf /\u202e",
+        }),
+      }) as never,
+    );
+    const written = stdoutWrites.join("");
+    expect(written).toContain("[U+200B]");
+    expect(written).toContain("[U+202E]");
+    expect(written).not.toContain("\u200b");
+  });
+
+  it("commits $& $` $' $$ in diff content literally, not as replace patterns", () => {
+    // The block rides toolOutputFmt ("----\n{}\n----"), and String.replace
+    // treats those four sequences as tokens in the replacement: without a
+    // literal substitution `$&` becomes the matched "{}" and $` / $' splice
+    // the template's own chrome into the middle of a file line -- so the
+    // committed transcript would not be the bytes the tool wrote, and
+    // model-authored content could forge the box delimiters. The approval
+    // prompt (no template on the question seam) shows the row verbatim, and
+    // the two surfaces must agree.
+    const raw = `sed $& and $\`` + `$' and $$ and ${"z".repeat(5)}`;
+    makeSink(() => EDIT_DISPLAY).emit(
+      editEvent({ input: JSON.stringify({ path: "src/a.ts", oldString: "keep", newString: raw }) }) as never,
+    );
+    const written = stdoutWrites.join("");
+    expect(written).toContain(`+   1 ${raw}`);
+    expect(written).toContain("keep");
+    expect(written).toContain("----\n");
+    // The row is one line: no template chrome was spliced into its middle.
+    const row = written.split("\n").find((r) => r.startsWith("+   1"))!;
+    expect(row).toBe(`+   1 ${raw}`);
+  });
+
+  it("is still gated by hideTools", () => {
+    const sink = makeSink(() => EDIT_DISPLAY);
+    sink.hideTools = true;
+    sink.emit(editEvent() as never);
+    expect(stdoutWrites).toHaveLength(0);
+  });
+});
+
+describe("the {} templaters substitute literally", () => {
+  const hostile = `a $& b $\`` + `$' c $$ d $1`;
+  it("formatToolResult keeps the result bytes intact", () => {
+    expect(formatToolResult(hostile, "----\n{}\n----")).toBe(`----\n${hostile}\n----`);
+    expect(formatToolResult(hostile, "{}")).toBe(hostile);
+  });
+  it("formatToolCall keeps both slots literal and never re-scans the name", () => {
+    expect(formatToolCall("bash", hostile, " \ud83d\udd27 {} {}")).toBe(` \ud83d\udd27 bash ${hostile}`);
+    // A name that itself contains "{}" must not swallow the args slot.
+    expect(formatToolCall("x{}y", hostile, "{} -> {}")).toBe(`x{}y -> ${hostile}`);
+    // More slots than values: the extra "{}" stays literal, as before.
+    expect(formatToolCall("n", "a", "{} {} {}")).toBe("n a {}");
+  });
+  it("formatThinking keeps the reasoning bytes literal", () => {
+    expect(formatThinking(hostile, "[think: {}]")).toBe(`[think: ${hostile}]`);
   });
 });

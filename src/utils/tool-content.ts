@@ -100,3 +100,35 @@ export function splitFileIncludes(
   }
   return { text: wrapperContentText(rest), files };
 }
+
+/**
+ * Does this stored result ATTEST that the call succeeded? True only when a
+ * tool-result part exists whose `status` is exactly "success" and whose
+ * `error` is null.
+ *
+ * Positive attestation is the whole point: failure reaches a display surface
+ * in too many shapes to be recognized by looking for one of them.
+ *   - `ToolResult.toApiContent()` failure: `{status:"failure", error:<msg>}`.
+ *   - `formatToolResult(x, name, false)` -- a thrown tool error, a gate block,
+ *     a handled verdict: `{status:"error", error:null, output:<failure text>}`.
+ *     No `error` field at all, so an error-presence test reads it as a success.
+ *   - the harness's own failures, which carry no part: bare strings
+ *     ("Parameter validation error:\n...", "Unknown tool: x",
+ *     "Tool execution failed: ...", "Skipped due to maxToolCallsPerIteration
+ *     limit (N)", "[skipped: loop stop requested]", the interrupted-call
+ *     repair text).
+ * So the question is asked the other way, and anything that cannot answer it
+ * (strings, the bookkeeping plain-object shape, an array with no part, a part
+ * with an unset status) reads as "no diff to show".
+ */
+export function toolContentSuccess(
+  content: ToolResultContent | Array<unknown> | null | undefined,
+): boolean {
+  if (content == null || typeof content === "string" || !Array.isArray(content)) return false;
+  for (const part of content) {
+    if (!isToolResultPart(part)) continue;
+    if (part.error != null) return false;
+    return part.status === "success";
+  }
+  return false;
+}

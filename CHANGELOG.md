@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **cli - declared tool diffs are now readable in the terminal, including at the approval prompt.** Tools whose display spec declares `kind: "diff"` (edit/append/overwrite) commit a bounded ANSI diff block (20 rows per side, a `+/- ` stat header with the path, one honest elision line, spoof-neutralized) instead of a folded arg preview, and the user-gate approval prompt shows the same block labeled "will change" before you answer -- approve what you can read. Failed or denied writes keep the generic error box: only an attested-success call can render a landed diff. `{}` template slots now substitute literally, so `$&`, `` $` ``, `$'` and `$$` in model or file content can no longer splice output chrome.
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.16.0...main
 
 ## [v0.16.0] - 2026-11-06

@@ -32,6 +32,9 @@ import {
   type ResolvedUserGateConfig,
 } from "@utils/approvals/rules.ts";
 import { extractTargets, suggestRuleLine } from "@utils/approvals/index.ts";
+import { summarizeToolArgs } from "@core/extensions/tool-utils.ts";
+import type { ToolDisplaySpec } from "@core/extensions/tool-registry.ts";
+import { resolveCliDiff, renderCliDiff } from "@utils/cli/diff-render.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 import { ABORTED, raceAbort } from "@utils/promise.ts";
 
@@ -106,18 +109,45 @@ function memoKey(call: ApprovalCall): string {
   return `${call.tool}\u0000${parts.join("\u0001")}`;
 }
 
-/** What the human sees. Bounded, and always ends with the persistence hint. */
-function approvalPromptText(call: ApprovalCall, reasons: string[], argsEcho: string): string {
+/**
+ * The args line when the prompt already carries a diff: the diff parts' OWN
+ * string args drop out (their bytes are the block below, and echoing a 4 KB
+ * oldString twice buries the question it belongs to) and what remains -- the
+ * path, the flags -- reads as the shared `k: v` fold.
+ */
+function diffArgEcho(args: Record<string, unknown>, display: ToolDisplaySpec[]): string {
+  const rest = { ...args };
+  for (const spec of display) {
+    if (spec.kind !== "diff") continue;
+    for (const key of [spec.arg, spec.oldArg, spec.newArg]) {
+      if (key !== undefined) delete rest[key];
+    }
+  }
+  return summarizeToolArgs(rest);
+}
+
+/** What the human sees. Bounded, and always ends with the persistence hint.
+ * `diffText` is the change itself -- the block `resolveCliDiff`/`renderCliDiff`
+ * compose for this call's declaration: the human approves what they can read,
+ * so a declared-diff call shows the same capped block the transcript commits,
+ * before the answer rather than after it. */
+function approvalPromptText(
+  call: ApprovalCall,
+  reasons: string[],
+  argsEcho: string,
+  diffText: string | null,
+): string {
   const targets = call.targets
     .filter((t) => !t.denyOnly)
     .slice(0, 6)
     .map((t) =>
       `${t.param}: ${t.value.length > MAX_TARGET_ECHO ? `${t.value.slice(0, MAX_TARGET_ECHO)}…` : t.value}`,
     );
-  const lines = [
-    `Approve this tool call? (${call.tool})`,
-    `  args: ${argsEcho.length > MAX_ARGS_ECHO ? `${argsEcho.slice(0, MAX_ARGS_ECHO)}…` : argsEcho}`,
-  ];
+  const lines = [`Approve this tool call? (${call.tool})`];
+  if (argsEcho !== "") {
+    lines.push(`  args: ${argsEcho.length > MAX_ARGS_ECHO ? `${argsEcho.slice(0, MAX_ARGS_ECHO)}…` : argsEcho}`);
+  }
+  if (diffText) lines.push(diffText);
   if (targets.length > 0) lines.push(`  targets: ${targets.join(" | ")}`);
   lines.push(`  why: ${reasons.join("; ")}`);
   lines.push(`  ${suggestRuleLine(call)}`);
@@ -132,6 +162,7 @@ async function askUser(
   call: ApprovalCall,
   reasons: string[],
   argsEcho: string,
+  diffText: string | null,
   input: InputLike | null | undefined,
   signal: AbortSignal | null,
 ): Promise<AskOutcome> {
@@ -143,7 +174,7 @@ async function askUser(
 
     const question = {
       key: ANSWER_KEY,
-      prompt: approvalPromptText(call, reasons, argsEcho),
+      prompt: approvalPromptText(call, reasons, argsEcho, diffText),
       options: OPTIONS,
       required: true,
       default: "deny",
@@ -223,6 +254,15 @@ export function create(core: CoreContext): ExtensionInstance {
    */
   const sessionGrants = new Map<string, Set<string>>();
 
+  /**
+   * The tool's declared display parts, read through the registry like every
+   * other display policy (the sink's own `display` seam is the same call).
+   * Optional chain: bare core doubles in tests carry no registry, and a gate
+   * that cannot see the declaration simply prompts without the diff.
+   */
+  const displayOf = (toolName: string): ToolDisplaySpec[] | undefined =>
+    core.toolRegistry?.getMetadata(toolName)?.display;
+
   const handler = async (payload: ToolCallPayload): Promise<GateAction | undefined> => {
     try {
       const parsedArgs = parseToolArgs(payload.input);
@@ -267,11 +307,23 @@ export function create(core: CoreContext): ExtensionInstance {
       const grantKey = typeof rawSessionId === "string" ? rawSessionId : null;
       if (grantKey !== null && sessionGrants.get(grantKey)?.has(key)) return;
 
+      // Approve what you can read: a call whose tool declares a kind "diff"
+      // part shows that part in the prompt -- the same capped block the
+      // transcript commits, PLAIN (no palette: the question rides the input
+      // seam and may be presented by a UI that has no terminal), and labeled
+      // as the proposal it is, since the call has not run yet. With no result
+      // fact in sight, its gutter numbers the snippet, not the file.
+      const diffDisplay = displayOf(payload.toolName) ?? [];
+      const proposed = resolveCliDiff(diffDisplay, payload.input);
+      const diffText = proposed
+        ? renderCliDiff(proposed, { indent: "  ", label: "will change" })
+        : null;
       const outcome = await enqueuePrompt(() =>
         askUser(
           call,
           decision.reasons,
-          payload.input,
+          proposed && parsedArgs.ok ? diffArgEcho(parsedArgs.args, diffDisplay) : payload.input,
+          diffText,
           (payload.toolCtx?.get("input") as InputLike | undefined) ?? null,
           runSignal(payload.agent, payload.toolCtx as { get(key: string): unknown } | undefined),
         ),

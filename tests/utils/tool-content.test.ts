@@ -2,7 +2,7 @@
 // (CLI, websocket bridge, web log view). Display, not a wire format.
 
 import { describe, it, expect } from 'bun:test';
-import { toolContentMeta, toolContentText, wrapperContentText, splitFileIncludes } from '@utils/tool-content.ts';
+import { toolContentMeta, toolContentSuccess, toolContentText, wrapperContentText, splitFileIncludes } from '@utils/tool-content.ts';
 import type { ToolResultPart } from '@core/context/wrappers.ts';
 
 const part = (over: Partial<ToolResultPart> = {}): ToolResultPart => ({
@@ -146,5 +146,57 @@ describe('toolContentMeta', () => {
     expect(
       toolContentMeta([part({ meta: [['start_line', '5']] }), part({ meta: [['start_line', '9']] })], 'start_line'),
     ).toBe('5');
+  });
+});
+
+describe('toolContentSuccess', () => {
+  // The question the terminal's diff posture asks: does the stored result
+  // ATTEST success? Every shape core actually emits is pinned here, because a
+  // false true prints a never-written change with the real path and gutter.
+  it('is true only for the attested success shapes', () => {
+    expect(toolContentSuccess([part()])).toBe(true);
+    expect(toolContentSuccess([part({ meta: [['start_line', '41']], output: 'Replaced 1 occurrence' })])).toBe(true);
+    // A plain payload wrapped by formatToolResult(result, name, true).
+    expect(toolContentSuccess([{ type: 'tool-result', tool: 'edit', status: 'success', meta: [], error: null, hint: null, output: 'ok' }])).toBe(true);
+  });
+
+  it('is false for every failure shape core produces', () => {
+    // ToolResult.toApiContent() failure.
+    expect(toolContentSuccess([part({ status: 'failure', error: 'boom', output: '' })])).toBe(false);
+    // formatToolResult(x, name, false): thrown tool error, gate block, handled
+    // verdict -- the failure text is in `output`, `error` stays null.
+    expect(
+      toolContentSuccess([part({ status: 'error', error: null, hint: 'Use the exact text', output: 'Error executing tool edit: text not found.' })]),
+    ).toBe(false);
+    // A part that failed but says nothing else.
+    expect(toolContentSuccess([part({ status: 'error', error: null, output: 'User denied this tool call.' })])).toBe(false);
+  });
+
+  it('is false for the harness string shapes (no part, no attestation)', () => {
+    for (const harness of [
+      'Parameter validation error:\nmissing path',
+      'Unknown tool: edit',
+      'Tool execution failed: EACCES: permission denied',
+      'Skipped due to maxToolCallsPerIteration limit (5)',
+      '[skipped: loop stop requested]',
+      '[Tool execution was interrupted]',
+    ]) {
+      expect(toolContentSuccess(harness)).toBe(false);
+    }
+  });
+
+  it('is false for nothing-at-all, the plain-object bookkeeping shape, and arrays with no part', () => {
+    expect(toolContentSuccess(null)).toBe(false);
+    expect(toolContentSuccess(undefined)).toBe(false);
+    expect(toolContentSuccess('')).toBe(false);
+    expect(toolContentSuccess([])).toBe(false);
+    expect(toolContentSuccess([{ type: 'other', status: 'success' }])).toBe(false);
+    // A part with no status recorded attests nothing (a loose double is not evidence).
+    expect(toolContentSuccess([{ type: 'tool-result', tool: 'edit' }])).toBe(false);
+  });
+
+  it('the first part decides, so a failure first is never overwritten by a later success', () => {
+    expect(toolContentSuccess([part({ status: 'failure', error: 'boom' }), part()])).toBe(false);
+    expect(toolContentSuccess([part(), part({ status: 'failure', error: 'boom' })])).toBe(true);
   });
 });

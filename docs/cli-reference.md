@@ -164,11 +164,20 @@ stdin+stdout, TERM not `dumb`):
 - **Esc / Ctrl-C interrupt**, never steer: the turn is cancelled, pending
   steering is untouched, the question/approval prompt (if any) releases the
   input. Ctrl-D on an empty buffer quits.
-- **Status line** (top frame row) shows the turn count with state: `#2`
-  idle, `#3 · working` during a turn, `#3 · waiting for lane` while the
-  provider lane is full. A cost suffix (`· $0.0021`) appears only when the
-  `modelPricing` config key exists for the session model. Before the first
-  turn the row is hidden.
+- **Status line** (top frame row) mirrors the webui footer, with every
+  segment gated on what the session has actually attested (no number is
+  ever invented). During a turn it reads `working · 00:12` -- the elapsed
+  timer ticks once per second -- or `waiting for lane · 00:03` while the
+  provider lane is full; mid-call usage frames add the context gauge and
+  the producing call's wall time (`working · 00:12 · 45k/200k · 4.2s`). At
+  idle it mirrors the footer: last response's local clock (24-hour), the
+  ctx gauge, the last call's time, and the turn's worked total, e.g.
+  `21:47 · 45k/200k · 4.2s · worked 1m 03s`. On stop/interrupt the closing
+  row shows the honest worked time to stop. A cost suffix (`· $0.0021`)
+  appears only when the `modelPricing` config key exists for the session
+  model. With no attestation yet (before the first turn) the row is hidden.
+  The turn counter (`#N`) was dropped by owner ruling: the transcript
+  already shows every prompt.
 - **Streaming text shows above the input.** Output lines commit into the
   native scrollback as each line completes, exactly as before -- committed
   rows stay there and scroll naturally. The one in-progress (unterminated)

@@ -290,29 +290,127 @@ export interface EditorInputHandlers {
  * answer arrived and it was empty, distinct from ordinary vertical spacing. */
 const NO_ANSWER_MARK = "(no answer)";
 
-/** Status-line state: turn count + lane-wait +
- * working state by default; `cost` is a preformatted USD string that exists
- * only when `modelPricing` is configured. Context-% stays off. */
+/**
+ * Status-line state: the activity words plus the footer-style segments the
+ * webui footer carries under each assistant message (last-response clock,
+ * ctx used/total, the producing call's wall time, the worked-for turn
+ * total, cost). The turn counter is gone (owner ruling: nobody read the
+ * ordinal; the transcript already echoes every prompt), so nothing left in
+ * FrameStatus counts turns. Every segment rides only on real attestation:
+ * `cost` is a preformatted USD string that exists only when `modelPricing`
+ * is configured; ctx/call come from the in-process TOKEN_USAGE frames
+ * (totalTokens/contextWindow/durationMs -- the same pair the sidebar gauge
+ * caches, see @extensions/websocket/session-registry.ts #trackUsage) and
+ * clear on the working edge that opens a new turn, so a row never wears
+ * last turn's numbers as this turn's; `lastAtMs`/`workedMs` are written by
+ * the CLOSING working edge -- the same honest basis as the webui's stopped
+ * row, so an interrupt's worked time is the observed span to stop.
+ * `turnStartMs`/`tickMs` exist only while working: the edge records the
+ * start, the bridge's 1s tick advances `tickMs` for the live elapsed timer.
+ */
 export interface FrameStatus {
-  turns: number;
   working: boolean;
   laneWait: boolean;
   cost: string | null;
+  lastAtMs?: number | null;
+  workedMs?: number | null;
+  ctxUsed?: number | null;
+  ctxTotal?: number | null;
+  callMs?: number | null;
+  turnStartMs?: number | null;
+  tickMs?: number | null;
 }
 
 /**
- * The status row text, or null for nothing-to-show (before the first turn
- * and while idle: the frame is just the editor then). While active the
- * counter reads as the turn in flight (#turns+1); lane-wait shows over
- * working -- waiting for a provider lane IS the current activity.
+ * Compact clock face for the terminal row: 24-hour HH:MM, local time (the
+ * webui footer's 12-hour "1:35 AM" costs four cells a terminal row does not
+ * have to give). Exported so wiring tests can build TZ-neutral expectations
+ * against values the fake clock stamps.
+ */
+export function formatStatusClock(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Compact token count (mirrors the webui footer's formatTokenCount). */
+function formatStatusTokens(n: number): string {
+  if (n < 1_000) return String(Math.round(n));
+  if (n < 10_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
+  if (n < 1_000_000) return Math.round(n / 1_000) + "k";
+  return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+}
+
+/** Per-call wall time (mirrors formatCallDuration: a 4.2s call is not a 4s call). */
+function formatStatusCall(ms: number): string {
+  if (ms < 10_000) return `${(ms / 1_000).toFixed(1)}s`;
+  return formatStatusWorked(ms);
+}
+
+/** Turn-total duration: "42s", "16m 21s", "1h 05m 09s". */
+function formatStatusWorked(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1_000));
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3_600);
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+/** The live elapsed timer: zero-padded mm:ss, h:mm:ss past an hour. FLOOR,
+ *  never round -- a turn that has not crossed a second never shows it. */
+function formatStatusElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1_000));
+  const s = String(total % 60).padStart(2, "0");
+  const m = String(Math.floor(total / 60) % 60).padStart(2, "0");
+  const h = Math.floor(total / 3_600);
+  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
+}
+
+/**
+ * The status row text, or null for nothing-to-show (no attested segment and
+ * no activity: the frame is just the editor then). Segments render
+ * independently and every one is gated on its attestation -- no usage frame
+ * means no ctx segment, no closing working edge means no clock or worked-for,
+ * an unmeasured call renders no call time. The state word leads (lane-wait
+ * beats working -- waiting for a provider lane IS the current activity) and
+ * carries the live elapsed timer while a turn is in flight; the footer
+ * mirror (clock, worked-for) renders idle only, so a working row never
+ * shows the PREVIOUS turn's finish time or total as if they were current.
+ * Cost keeps the tail (modelPricing-gated upstream).
  */
 export function statusRowText(s: FrameStatus): string | null {
-  if (s.turns === 0 && !s.working) return null;
-  let text = s.working ? `#${s.turns + 1}` : `#${s.turns}`;
+  const parts: string[] = [];
   const state = s.laneWait ? "waiting for lane" : s.working ? "working" : null;
-  if (state) text += ` · ${state}`;
-  if (s.cost) text += ` · ${s.cost}`;
-  return text;
+  if (state) {
+    parts.push(state);
+    if (
+      typeof s.turnStartMs === "number" && Number.isFinite(s.turnStartMs) &&
+      typeof s.tickMs === "number" && Number.isFinite(s.tickMs) && s.tickMs >= s.turnStartMs
+    ) {
+      parts.push(formatStatusElapsed(s.tickMs - s.turnStartMs));
+    }
+  }
+  if (!s.working && typeof s.lastAtMs === "number" && Number.isFinite(s.lastAtMs)) {
+    parts.push(formatStatusClock(s.lastAtMs));
+  }
+  if (typeof s.ctxUsed === "number" && Number.isFinite(s.ctxUsed) && s.ctxUsed > 0) {
+    const total = s.ctxTotal;
+    parts.push(
+      formatStatusTokens(s.ctxUsed) +
+        (typeof total === "number" && Number.isFinite(total) && total > 0
+          ? "/" + formatStatusTokens(total)
+          : ""),
+    );
+  }
+  if (typeof s.callMs === "number" && Number.isFinite(s.callMs) && s.callMs >= 0) {
+    parts.push(formatStatusCall(s.callMs));
+  }
+  if (!s.working && typeof s.workedMs === "number" && Number.isFinite(s.workedMs) && s.workedMs >= 0) {
+    parts.push(`worked ${formatStatusWorked(s.workedMs)}`);
+  }
+  if (s.cost) parts.push(s.cost);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 /**
@@ -367,8 +465,11 @@ export class OutputBridge {
   /** Last editor block the frame showed -- the interrupt echo, since the
    * view has already cleared its buffer (stash-to-draft) when the event fires. */
   #lastBlockRows: string[] = [];
-  /** Status-line state. */
-  #status: FrameStatus = { turns: 0, working: false, laneWait: false, cost: null };
+  /** Status-line state (all attestation-gated; see FrameStatus). */
+  #status: FrameStatus = { working: false, laneWait: false, cost: null };
+  /** The 1s live-tick handle while working; null when idle (no interval
+   * ever runs outside a working edge -- it cannot leak across teardown). */
+  #tickHandle: unknown = null;
   /** Precomposed queue-chip text, or null for no chip. */
   #chipText: string | null = null;
   /** In-flight tool-call rows by wire index (streaming-call display). */
@@ -399,6 +500,10 @@ export class OutputBridge {
       (lines) => this.#commitLines(lines),
       () => this.#repaintIfStreaming(),
     );
+    // The live tick must not outlive the terminal: the guard fires on every
+    // exit path (quit, signal, crash, process exit), so a working session's
+    // interval is cancelled there even if no working:false edge ever lands.
+    this.guard.onTeardown(() => this.#stopTick());
   }
 
   /**
@@ -557,20 +662,77 @@ export class OutputBridge {
   }
 
   /**
-   * Merge a status-line patch. Repaint only when the composed
-   * row text actually changes, so a token-usage tick with an unchanged cost
-   * (or an idle working:false on an already-idle frame) never storms paints.
+   * Merge a status-line patch. Working EDGES are settled here, in one place,
+   * so every attester (bus events, the TURN_END hook, the tick itself) rides
+   * the same state machine: opening a turn stamps the start (the Clock seam
+   * is the only clock the renderer reads), arms the 1s tick, and clears the
+   * turn-scoped segments (a fresh turn attests nothing yet -- webui's reset
+   * rule); closing one stamps the last-response clock and the worked-for
+   * total from the OBSERVED edge span (an interrupt's final row is honest
+   * time-to-stop, never a guess), stops the tick, and drops the live-span
+   * fields. Idempotent on same-value patches, so TURN_END and the bus's
+   * working:false can land in either order and only the real edge stamps.
+   * Repaints only when the composed row text actually changes, so a
+   * token-usage tick with unchanged numbers (or an idle working:false on an
+   * already-idle frame) never storms paints.
    */
   updateStatus(patch: Partial<FrameStatus>): void {
     const before = statusRowText(this.#status);
-    this.#status = { ...this.#status, ...patch };
+    let next: FrameStatus = { ...this.#status, ...patch };
+    const opened = patch.working === true && !this.#status.working;
+    const closed = patch.working === false && this.#status.working;
+    if (opened) {
+      const now = this.opts.clock.now();
+      next = { ...next, turnStartMs: now, tickMs: now, ctxUsed: null, ctxTotal: null, callMs: null };
+    } else if (closed) {
+      const now = this.opts.clock.now();
+      const start = this.#status.turnStartMs;
+      next = {
+        ...next,
+        lastAtMs: now,
+        workedMs: typeof start === "number" ? now - start : null,
+        turnStartMs: null,
+        tickMs: null,
+      };
+    }
+    this.#status = next;
+    if (opened) this.#armTick();
+    if (closed) this.#stopTick();
     if (statusRowText(this.#status) !== before) this.#repaint();
   }
 
-  /** TURN_END: bump the turn counter; the turn settled, so the working and
-   * lane-wait hints go with it (the bus's working:false is idempotent here). */
-  addTurn(): void {
-    this.updateStatus({ turns: this.#status.turns + 1, working: false, laneWait: false });
+  /**
+   * The live elapsed timer for the turn in flight: a self-rescheduling
+   * 1s Clock-seam setTimeout (the seam has no setInterval; the chain is
+   * deterministic under FakeClock and cancellable like any handle). Each
+   * tick refreshes tickMs; updateStatus's text-diff keeps the repaint to
+   * once per second, not per timer fire. The chain ends on the working
+   * edge (stopTick), on a dead renderer, and via the teardown hook
+   * registered in the constructor -- never across teardown. While
+   * suspended the update is skipped (a stdio-inherit child owns the
+   * screen; the resume thunk refreshes the elapsed segment).
+   */
+  #armTick(): void {
+    if (this.#tickHandle !== null) return;
+    this.#tickHandle = this.opts.clock.setTimeout(() => {
+      this.#tickHandle = null;
+      if (this.core.isDead || !this.#status.working) return;
+      if (!this.#suspended) this.updateStatus({ tickMs: this.opts.clock.now() });
+      if (this.#status.working && !this.core.isDead) this.#armTick();
+    }, 1000);
+  }
+
+  #stopTick(): void {
+    if (this.#tickHandle === null) return;
+    this.opts.clock.clearTimeout(this.#tickHandle);
+    this.#tickHandle = null;
+  }
+
+  /** TURN_END: the turn settled, so the working and lane-wait hints go with
+   * it (the bus's working:false is idempotent here -- whichever closes the
+   * edge first stamps worked/last-response, the second is a no-op). */
+  endTurn(): void {
+    this.updateStatus({ working: false, laneWait: false });
   }
 
   /** Explicit purge-and-reprint: the /redraw command's entry,
@@ -843,6 +1005,11 @@ export class OutputBridge {
       this.#suspended = false;
       this.core.modes.setRawMode(true);
       this.core.modes.bracketedPaste(true);
+      // Ticks skipped updates while the child held the screen; refresh the
+      // elapsed segment so the row never shows handoff time as the stale
+      // pre-suspend value (the repaint below restores the erased frame either
+      // way; updateStatus's text-diff keeps this to at most one extra paint).
+      if (this.#status.working) this.updateStatus({ tickMs: this.opts.clock.now() });
       this.#repaint();
       for (const listener of saved) stdin.on("data", listener);
       stdin.resume();
@@ -870,25 +1037,28 @@ export class OutputBridge {
     // Status/chip rows are editor-path features (split mode only);
     // the block's height budget accounts for every non-block row (INV-2
     // sees the frame grow). The streaming line sits ABOVE everything: the
-    // transcript above it has already committed into scrollback.
-    const status = statusRowText(this.#status);
+    // transcript above it has already committed into scrollback. The status
+    // row wraps like the other chrome rows -- a footer-style row on a narrow
+    // terminal must never clip into the frame's geometry.
+    const statusText = statusRowText(this.#status);
+    const status = statusText ? wrapToWidth(statusText, width) : [];
     const chip = this.#chipText;
     const inflight = this.#inflightRows(width);
     const popup = editor.popupRows(width);
     const chrome =
-      stream.length + inflight.length + popup.length + (status ? 1 : 0) + (chip ? 1 : 0);
+      stream.length + inflight.length + popup.length + status.length + (chip ? 1 : 0);
     const block = editor.view(width, Math.max(1, this.opts.terminal.rows - chrome));
     const rows = [
       ...stream,
       ...inflight,
-      ...(status ? [status] : []),
+      ...status,
       ...popup,
       ...block.rows,
       ...(chip ? [chip] : []),
     ];
     this.#lastBlockRows = block.rows;
     this.#setFrame(rows, {
-      row: stream.length + inflight.length + (status ? 1 : 0) + popup.length + block.cursorRow,
+      row: stream.length + inflight.length + status.length + popup.length + block.cursorRow,
       col: block.cursorCol,
     });
   }

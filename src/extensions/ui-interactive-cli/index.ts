@@ -864,8 +864,10 @@ export async function runInteractiveSession(
   // Re-display prompt after agent finishes
   core.hooks.on(HOOKS.TURN_END, ({ stopped }) => {
     if (stopped) {
-      // Status-line turn counter: the settled turn is the tick.
-      bridge?.addTurn();
+      // Status row: the settled turn drops the working/lane-wait hints;
+      // the working-edge close stamps the worked/last-response segments
+      // (idempotent against the bus's working:false, either order).
+      bridge?.endTurn();
       setImmediate(() => {
         sink.log("");
         // The editor path has no readline to re-prompt: its frame is
@@ -1026,9 +1028,11 @@ export async function runInteractiveSession(
 
     // ── Status line + queue chip ─────────────────────────────────────────
     // Tap the session's event fan-out (the same seam Channel uses; N
-    // subscribers supported). Turn count rides the TURN_END hook below;
-    // working/lane-wait come from bus events; cost exists only while the
-    // modelPricing key is configured (dark by default), context-% off.
+    // subscribers supported). Working edges, lane-wait, and the footer-style
+    // segments (ctx pair, producing-call time) come from bus events; the
+    // TURN_END hook below settles the row when a turn stops; cost exists
+    // only while the modelPricing key is configured (dark by default).
+    // The row never shows a number the session has not attested.
     const pricing = resolved.modelPricing;
     let pricedModel = String(resolved.model ?? "");
     let usage: CostableUsage | null = null;
@@ -1105,7 +1109,22 @@ export async function runInteractiveSession(
             cachedTokens: ev.sessionCachedTokens,
             completionTokens: ev.sessionCompletionTokens,
           };
-          bridge.updateStatus({ cost: sessionCost() });
+          // Footer-style segments from the same in-process frame the webui
+          // reads (no wire/protocol path): ctx used = the call's own
+          // totalTokens and total = contextWindow -- exactly the pair the
+          // sidebar gauge caches (@extensions/websocket/session-registry.ts
+          // #trackUsage) -- and call = durationMs, the agent's measured
+          // span (agent.ts run()). Unattested fields patch NOTHING: the
+          // last honest value held this turn stays (webui's rule), and a
+          // frame with no usable used-number renders no gauge.
+          bridge.updateStatus({
+            cost: sessionCost(),
+            ...(Number.isFinite(ev.totalTokens) && ev.totalTokens > 0 ? { ctxUsed: ev.totalTokens } : {}),
+            ...(Number.isFinite(ev.contextWindow) && ev.contextWindow > 0 ? { ctxTotal: ev.contextWindow } : {}),
+            ...(typeof ev.durationMs === "number" && Number.isFinite(ev.durationMs) && ev.durationMs >= 0
+              ? { callMs: ev.durationMs }
+              : {}),
+          });
           return;
         case OUTPUT_EVENT.QUEUE_UPDATE:
           bridge.setQueueChip(ev.pending, ev.preview);

@@ -1274,11 +1274,24 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
 
   const screenRows = (): string[] => term.grid.snapshot().screen.map((r) => r.replace(/\s+$/, ""));
   const count = (log: string[], entry: string): number => log.filter((m) => m === entry).length;
+  /**
+   * Settle the repaints a status/chip update schedules: drain immediates,
+   * fire the scheduler's <=16ms throttled paint, drain again. Deliberately
+   * NOT runAll: while a turn is working the status row arms its 1s live
+   * tick, and an exhaust-the-clock drain would reschedule it forever
+   * (FakeClock.runAll fails the runaway on purpose). The tick fires only
+   * when a test advances time past its second.
+   */
+  const settle = (): void => {
+    clock.runImmediates();
+    clock.advance(20);
+    clock.runImmediates();
+  };
   const emitEvent = (ev: unknown): void => {
     for (const h of [...sessionHandlers]) h(ev);
-    clock.runAll(); // settle the repaint the status/chip update schedules
+    settle();
   };
-  return { term, clock, sig, bridge, keys, calls, done, screenRows, count, emitEvent };
+  return { term, clock, sig, bridge, keys, calls, done, screenRows, count, emitEvent, settle };
 }
 
 /** Run fn with process.exit stubbed (same pattern as the legacy suite). */
@@ -2537,18 +2550,90 @@ describe("cursorCol clamp probes (editor contract leftover)", () => {
 
 // ══ Status line + queue chip ════════════════════════════════════════════
 
-import { statusRowText, queueChipText } from "@extensions/ui-interactive-cli/split-bridge.ts";
+import { statusRowText, queueChipText, formatStatusClock } from "@extensions/ui-interactive-cli/split-bridge.ts";
 
 describe("status row: pure shape", () => {
-  it("nothing before the first turn; current turn while working; settled count at idle", () => {
-    expect(statusRowText({ turns: 0, working: false, laneWait: false, cost: null })).toBeNull();
-    expect(statusRowText({ turns: 0, working: true, laneWait: false, cost: null })).toBe("#1 · working");
-    expect(statusRowText({ turns: 0, working: true, laneWait: true, cost: null })).toBe("#1 · waiting for lane");
-    expect(statusRowText({ turns: 2, working: false, laneWait: false, cost: null })).toBe("#2");
-    expect(statusRowText({ turns: 2, working: true, laneWait: false, cost: null })).toBe("#3 · working");
-    // Cost rides only when present (modelPricing-gated upstream, ruling 4).
-    expect(statusRowText({ turns: 2, working: true, laneWait: false, cost: "$0.0021" })).toBe("#3 · working · $0.0021");
-    expect(statusRowText({ turns: 1, working: false, laneWait: false, cost: "$1.23" })).toBe("#1 · $1.23");
+  const base = { working: false, laneWait: false, cost: null };
+  // Built from LOCAL date parts so the expected face is the same in every TZ.
+  const AT = new Date(2026, 10, 7, 21, 47).getTime();
+
+  it("no attestation, no activity: nothing to show", () => {
+    expect(statusRowText(base)).toBeNull();
+    // Unattested or non-finite values render nothing, never invented numbers.
+    expect(statusRowText({ ...base, lastAtMs: Number.NaN, ctxUsed: 0, callMs: -1, workedMs: null })).toBeNull();
+    // A total never renders alone: it is the denominator of a gauge that
+    // needs an attested used-number.
+    expect(statusRowText({ ...base, ctxUsed: Number.POSITIVE_INFINITY, ctxTotal: 200_000 })).toBeNull();
+  });
+
+  it("working: state word + live elapsed; lane-wait keeps precedence", () => {
+    expect(statusRowText({ ...base, working: true, turnStartMs: 0, tickMs: 0 })).toBe("working · 00:00");
+    expect(statusRowText({ ...base, working: true, laneWait: true, turnStartMs: 1_000, tickMs: 34_000 })).toBe(
+      "waiting for lane · 00:33",
+    );
+    // Idle-only segments never render while a turn is in flight: the row
+    // must not wear the PREVIOUS turn's clock/worked as if they were current.
+    expect(
+      statusRowText({ ...base, working: true, turnStartMs: 0, tickMs: 5_000, lastAtMs: AT, workedMs: 90_000, cost: "$0.01" }),
+    ).toBe("working · 00:05 · $0.01");
+    // Elapsed needs both ends of the span, in order; without them the bare
+    // state word stands (honest absence, not 00:00).
+    expect(statusRowText({ ...base, working: true })).toBe("working");
+    expect(statusRowText({ ...base, working: true, turnStartMs: 1_000, tickMs: 500 })).toBe("working");
+    // A stale laneWait on an idle frame shows no elapsed (the span died
+    // with the working edge).
+    expect(statusRowText({ ...base, laneWait: true })).toBe("waiting for lane");
+  });
+
+  it("idle mirrors the webui footer: clock · ctx · call · worked · cost", () => {
+    expect(
+      statusRowText({
+        ...base,
+        lastAtMs: AT,
+        ctxUsed: 45_000,
+        ctxTotal: 200_000,
+        callMs: 4_200,
+        workedMs: 981_000,
+        cost: "$0.42",
+      }),
+    ).toBe("21:47 · 45k/200k · 4.2s · worked 16m 21s · $0.42");
+  });
+
+  it("segments render independently; each gates on its own attestation", () => {
+    expect(statusRowText({ ...base, lastAtMs: AT })).toBe("21:47");
+    expect(statusRowText({ ...base, workedMs: 42_000 })).toBe("worked 42s");
+    expect(statusRowText({ ...base, cost: "$1.23" })).toBe("$1.23");
+    // No total (or a 0/non-finite one): the used number alone.
+    expect(statusRowText({ ...base, ctxUsed: 45_000 })).toBe("45k");
+    expect(statusRowText({ ...base, ctxUsed: 45_000, ctxTotal: 0 })).toBe("45k");
+    // 0 is an attested value for call/worked (a sub-second call, a stop at
+    // the edge); used=0 is NOT a gauge (the webui gate).
+    expect(statusRowText({ ...base, callMs: 0 })).toBe("0.0s");
+    expect(statusRowText({ ...base, workedMs: 0 })).toBe("worked 0s");
+    expect(statusRowText({ ...base, ctxUsed: 0, workedMs: 5_000 })).toBe("worked 5s");
+  });
+
+  it("tick formatting: zero-padded mm:ss, floor, hour roll", () => {
+    const row = (deltaMs: number) =>
+      statusRowText({ ...base, working: true, turnStartMs: 0, tickMs: deltaMs });
+    expect(row(500)).toBe("working · 00:00"); // floor: an un-crossed second never shows
+    expect(row(59_999)).toBe("working · 00:59");
+    expect(row(60_000)).toBe("working · 01:00");
+    expect(row(600_000)).toBe("working · 10:00");
+    expect(row(3_600_000)).toBe("working · 1:00:00");
+    expect(row(3_723_000)).toBe("working · 1:02:03");
+  });
+
+  it("compact numbers: tokens (webui format), call wall time, worked totals", () => {
+    const row = (over: Partial<Parameters<typeof statusRowText>[0]>) => statusRowText({ ...base, ...over });
+    expect(row({ ctxUsed: 823, ctxTotal: 14_891 })).toBe("823/15k"); // the webui bands: one decimal only below 10k
+    expect(row({ ctxUsed: 8_234, ctxTotal: 200_000 })).toBe("8.2k/200k");
+    expect(row({ ctxUsed: 999, ctxTotal: 1_500_000 })).toBe("999/1.5M");
+    expect(row({ ctxUsed: 999_999 })).toBe("1000k"); // the webui compact table's own edge
+    expect(row({ callMs: 900 })).toBe("0.9s"); // a 900ms call never prints 0s
+    expect(row({ callMs: 10_000 })).toBe("10s");
+    expect(row({ callMs: 61_000 })).toBe("1m 01s");
+    expect(row({ workedMs: 3_725_000 })).toBe("worked 1h 02m 05s");
   });
 
   it("queue chip: 40-rune truncation (codepoint-safe), extra count, blank preview reads 'item'", () => {
@@ -2570,32 +2655,35 @@ describe("session frame: status line follows the event sequence", () => {
     const rig = makeSessionRig({ hooks });
     await rig.done;
     rig.clock.runAll();
-    const status = () => rig.screenRows().filter((r) => r.startsWith("#"));
+    const status = () => rig.screenRows().filter((r) => r.includes("·"));
 
-    // Before any turn: nothing to show, the frame is just the editor.
+    // Before any turn: nothing attested, nothing to show; the frame is just the editor.
     expect(status()).toEqual([]);
 
     rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
-    expect(status()).toEqual(["#1 · working"]);
+    expect(status()).toEqual(["working · 00:00"]);
 
     rig.emitEvent({ type: OUTPUT_EVENT.SYSTEM_MESSAGE, content: "Waiting for provider lane 'openai'..." });
-    expect(status()).toEqual(["#1 · waiting for lane"]);
+    expect(status()).toEqual(["waiting for lane · 00:00"]);
 
     // First sign of real work: the lane wait is over.
     rig.emitEvent({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "hi" });
-    expect(status()).toEqual(["#1 · working"]);
+    expect(status()).toEqual(["working · 00:00"]);
 
-    // TURN_END: counter settles at 1, working drops with the turn.
+    // TURN_END settles: the closing working edge stamps the last-response
+    // clock and the worked-for total (fake clock: a few settle-ms apart).
     await hooks.notifyHooks(HOOKS.TURN_END, { stopped: true } as never);
+    const tClose = rig.clock.now();
     rig.clock.runAll(); // the repaint TURN_END schedules rides the fake clock
-    expect(status()).toEqual(["#1"]);
+    expect(status()).toEqual([`${formatStatusClock(tClose)} · worked 0s`]);
 
-    // Second turn reads as the turn in flight (#2), and its end settles.
+    // Second turn re-arms the live state; its end settles again.
     rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
-    expect(status()).toEqual(["#2 · working"]);
+    expect(status()).toEqual(["working · 00:00"]);
     await hooks.notifyHooks(HOOKS.TURN_END, { stopped: true } as never);
+    const tClose2 = rig.clock.now();
     rig.clock.runAll();
-    expect(status()).toEqual(["#2"]);
+    expect(status()).toEqual([`${formatStatusClock(tClose2)} · worked 0s`]);
   });
 
   it("cost stays dark without modelPricing and appears with it", async () => {
@@ -2613,12 +2701,13 @@ describe("session frame: status line follows the event sequence", () => {
       contextWindow: 200000,
     };
 
-    // Default (no modelPricing key): the usage event adds no cost to the row.
+    // Default (no modelPricing key): the usage event adds no cost to the
+    // row -- but its ctx pair is attested either way (no pricing needed).
     const rig = makeSessionRig();
     await rig.done;
     rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
     rig.emitEvent(usage);
-    expect(rig.screenRows().filter((r) => r.startsWith("#"))).toEqual(["#1 · working"]);
+    expect(rig.screenRows().filter((r) => r.includes("·"))).toEqual(["working · 00:00 · 1k/200k"]);
 
     // With modelPricing for the session model, the row carries the USD total.
     const priced = makeSessionRig({
@@ -2627,7 +2716,7 @@ describe("session frame: status line follows the event sequence", () => {
     await priced.done;
     priced.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
     priced.emitEvent(usage);
-    expect(priced.screenRows().filter((r) => r.startsWith("#"))).toEqual(["#1 · working · $20.00"]);
+    expect(priced.screenRows().filter((r) => r.includes("·"))).toEqual(["working · 00:00 · 1k/200k · $20.00"]);
   });
 
   it("QUEUE_UPDATE shows the chip and pending:0 removes it", async () => {
@@ -2643,6 +2732,136 @@ describe("session frame: status line follows the event sequence", () => {
 
     rig.emitEvent({ type: OUTPUT_EVENT.QUEUE_UPDATE, pending: 0, preview: "" });
     expect(chips()).toEqual([]);
+  });
+});
+
+describe("status row: live tick + footer segments (in-process wiring)", () => {
+  const usageFrame = (over: Record<string, unknown> = {}) => ({
+    type: OUTPUT_EVENT.TOKEN_USAGE,
+    sessionPromptTokens: 2_000_000,
+    sessionCachedTokens: 0,
+    sessionCompletionTokens: 0,
+    sessionTotalTokens: 2_000_000,
+    turns: 1,
+    promptTokens: 45_000,
+    cachedTokens: 0,
+    completionTokens: 120,
+    totalTokens: 45_120,
+    contextWindow: 200_000,
+    durationMs: 4_200,
+    ...over,
+  });
+
+  it("TOKEN_USAGE attests ctx + call; the working edge re-arms; the closing edge mirrors the footer", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    const status = () => rig.screenRows().filter((r) => r.includes("·"));
+
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    expect(status()).toEqual(["working · 00:00"]);
+
+    // Mid-call usage frame: ctx pair + producing call's wall time join the row.
+    rig.emitEvent(usageFrame());
+    expect(status()).toEqual(["working · 00:00 · 45k/200k · 4.2s"]);
+
+    // A later frame replaces the values; an UNATTESTED field patches nothing
+    // (no durationMs -> the last honest call time stays, never a guess).
+    rig.emitEvent(usageFrame({ totalTokens: 47_000, durationMs: undefined }));
+    expect(status()).toEqual(["working · 00:00 · 47k/200k · 4.2s"]);
+
+    // A frame with no usable used-number refreshes the gauge with nothing.
+    rig.emitEvent(usageFrame({ totalTokens: 0, contextWindow: 0, durationMs: undefined }));
+    expect(status()).toEqual(["working · 00:00 · 47k/200k · 4.2s"]);
+
+    // A real minute of work passes on the fake clock (the tick rides it).
+    rig.clock.advance(65_000);
+    expect(status()).toEqual(["working · 01:05 · 47k/200k · 4.2s"]);
+
+    // The closing edge (bus working:false) settles the footer mirror: clock,
+    // ctx, call, and the worked total of the OBSERVED span. (Clock face via
+    // regex: the fake stamp is a small epoch ms; the TURN_END test above
+    // pins the stamp itself against formatStatusClock.)
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
+    expect(status().length).toBe(1);
+    expect(status()[0]).toMatch(/^\d\d:\d\d · 47k\/200k · 4\.2s · worked 1m 05s$/);
+  });
+
+  it("stop/interrupt with no TURN_END: the final row shows the honest span to stop", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    const status = () => rig.screenRows().filter((r) => r.includes("·"));
+
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    rig.clock.advance(12_000);
+    // Interrupt: only the bus's working:false lands (no TURN_END hook).
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
+
+    // Worked time is the edge span: open stamped before the first settle
+    // (t=0), close at t=12020 -> 12020ms -> "12s".
+    expect(status().length).toBe(1);
+    expect(status()[0]).toMatch(/^\d\d:\d\d · worked 12s$/);
+    // Tick stopped with the turn: nothing re-arms, nothing repaints.
+    expect(rig.clock.pendingCount).toBe(0);
+    const before = rig.screenRows().join("|");
+    rig.clock.advance(60_000);
+    expect(rig.clock.pendingCount).toBe(0);
+    expect(rig.screenRows().join("|")).toBe(before);
+  });
+
+  it("new turn start clears turn-scoped numbers until re-attested", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    const status = () => rig.screenRows().filter((r) => r.includes("·"));
+
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    rig.emitEvent(usageFrame());
+    expect(status()).toEqual(["working · 00:00 · 45k/200k · 4.2s"]);
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
+    const settled = status();
+    expect(settled.length).toBe(1);
+    expect(settled[0]).toMatch(/ · 45k\/200k · 4\.2s · worked 0s$/);
+
+    // Next turn opens clean: no stale ctx/call from the previous turn.
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    expect(status()).toEqual(["working · 00:00"]);
+  });
+
+  it("tick arms once per working edge, ticks the elapsed second-by-second, stops on the close", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    const status = () => rig.screenRows().filter((r) => r.includes("·"));
+    rig.settle();
+
+    // Unworked: no interval pending at all.
+    expect(rig.clock.pendingCount).toBe(0);
+
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    // Exactly one pending timer: the 1s tick (the repaint drained in settle).
+    expect(rig.clock.pendingCount).toBe(1);
+
+    rig.clock.advance(1_000);
+    expect(status()).toEqual(["working · 00:01"]);
+    rig.clock.advance(2_500);
+    expect(status()).toEqual(["working · 00:03"]);
+    expect(rig.clock.pendingCount).toBe(1); // still one chained timer, not a pile
+
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
+    expect(rig.clock.pendingCount).toBe(0); // stopped on the working edge
+  });
+
+  it("teardown with the interval live: the tick is cancelled and never leaks", async () => {
+    const rig = makeSessionRig();
+    await rig.done;
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    rig.clock.advance(2_500); // ticks fired; one is pending
+    expect(rig.clock.pendingCount).toBe(1);
+
+    // Quit path mid-turn: guard.run() reaches the tick-stop hook even
+    // though no working:false edge ever lands.
+    rig.bridge.shutdown();
+    expect(rig.clock.pendingCount).toBe(0);
+    rig.clock.advance(60_000); // no throw, no repaint, nothing re-arms
+    expect(rig.clock.pendingCount).toBe(0);
   });
 });
 
@@ -2718,7 +2937,7 @@ describe("in-flight rows through the session event glue", () => {
     const rows = rig.screenRows();
     const si = rows.findIndex((r) => r.includes("half a thought"));
     const ii = rows.findIndex((r) => r.includes("🔧 read"));
-    const st = rows.findIndex((r) => r.startsWith("#"));
+    const st = rows.findIndex((r) => r.includes("·"));
     expect(si).toBeGreaterThanOrEqual(0);
     expect(ii).toBe(si + 1);
     expect(st).toBeGreaterThan(ii);
@@ -2806,7 +3025,7 @@ describe("stream reset through the session event glue (mid-stream retry, H-3)", 
 
     // The retry streams clean into the same frame.
     rig.bridge.commitText("fresh thou");
-    rig.clock.runAll(); // the repaint the streaming write schedules rides the fake clock
+    rig.settle(); // the repaint the streaming write schedules rides the fake clock
     expect(rig.screenRows().join("|")).toContain("fresh thou");
   });
 

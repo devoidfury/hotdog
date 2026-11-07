@@ -1,17 +1,16 @@
 import type { SyntaxRun } from "./index.ts";
 
 /**
- * Shell tokenizer. Token order: quoted strings, then the two-word operators
- * (before their one-word prefixes), then | ; & singly, then whitespace,
- * then plain words (&|; excluded so glued operators split), then a stray
- * quote. Command words (line start, after &&, ||, | or ;) are typed
- * "command"; control operators "operator"; everything else "default". An
- * env-assignment prefix (`FOO=1 cmd`) is default but keeps the command
- * position armed; a quoted word reads as itself and spends the position.
- * A lone `&` (background, `2>&1`) is not an operator and rides through
- * verbatim. Backticks/$(...) are NOT parsed: this is display candy, not a
- * shell. One run per token; adjacent runs may share a type (sinks coalesce
- * as they like).
+ * Shell tokenizer.
+ *
+ * Token order: quoted strings, then the two-word operators (before their one-word prefixes),
+ * then | ; & singly, then whitespace, then plain words (&|; excluded so glued operators split),
+ * then a stray quote. Command words (line start, after &&, ||, | or ;) are typed "command";
+ * control operators "operator"; everything else "default". An env-assignment prefix (`FOO=1 cmd`)
+ * is default but keeps the command position armed; a quoted word reads as itself and spends the position.
+ * A lone `&` (background, `2>&1`) is not treated as an operator and passes through verbatim.
+ * Backticks/$(...) are NOT parsed: this is display candy, not a shell. One run per token;
+ * adjacent runs may share a type (sinks coalesce as they like).
  */
 export function tokenizeShell(text: string): SyntaxRun[] {
   const runs: SyntaxRun[] = [];

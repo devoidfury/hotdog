@@ -1,10 +1,8 @@
 /**
- * Shared syntax tokenizer registry: pure text -> typed token runs, with no
- * palette and no ANSI. Sinks own the coloring (terminal palettes, webui CSS
- * classes); the tokenizers only classify. Resolve a language through
- * getTokenizer: an unknown or absent lang means the caller renders plain
- * text. A new language drops in as a tokenizer file plus one registry
- * entry (or a runtime registerTokenizer call); no existing code changes.
+ * Shared syntax tokenizer registry: pure text -> typed token runs, with no palette and no ANSI.
+ * Sinks own the coloring (terminal palettes, webui CSS classes); the tokenizers only classify.
+ * Resolve a language through getTokenizer: an unknown or absent lang means the caller renders plain text.
+ * A new language drops in as a tokenizer file plus one registry entry (or a runtime registerTokenizer call).
  */
 
 import { tokenizeShell } from "./shell.ts";
@@ -22,8 +20,6 @@ export interface SyntaxRun {
  * run's text reproduces the input exactly (lossless, no reordering). */
 export type SyntaxTokenizer = (text: string) => SyntaxRun[];
 
-// Map, not a plain object: a lang named "constructor" must miss, not
-// surface something off Object.prototype.
 const TOKENIZERS = new Map<string, SyntaxTokenizer>([["shell", tokenizeShell]]);
 
 /** Register (or replace) the tokenizer for a lang name. */

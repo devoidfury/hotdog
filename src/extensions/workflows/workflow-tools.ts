@@ -333,6 +333,7 @@ export class WorkflowValidateTool extends WorkflowTool {
     sideEffects: true,
     difficulty: 1,
     managerOnly: true,
+    tags: ["manager"],
     display: [{ kind: "code", source: "args", arg: "yaml", lang: "yaml" }],
   };
 
@@ -430,7 +431,7 @@ export class WorkflowValidateTool extends WorkflowTool {
 
 export class WorkflowDispatchTool extends WorkflowTool {
   static readonly TOOL_NAME = "workflow_dispatch";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 3, managerOnly: true };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 3, managerOnly: true, tags: ["manager"] };
 
   async execute(
     input: string | Record<string, unknown> | null,
@@ -633,7 +634,7 @@ export class WorkflowDispatchTool extends WorkflowTool {
 
 export class WorkflowStatusTool extends WorkflowTool {
   static readonly TOOL_NAME = "workflow_status";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 4, managerOnly: true };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 4, managerOnly: true, tags: ["manager"] };
 
   async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolInput(input) ?? {};
@@ -726,7 +727,7 @@ function nodeStateLines(run: WorkflowRun): string {
  */
 export class WorkflowFollowupTool extends WorkflowTool {
   static readonly TOOL_NAME = "workflow_followup";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 2, managerOnly: true };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 2, managerOnly: true, tags: ["manager"] };
 
   async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolInput(input) ?? {};
@@ -816,7 +817,7 @@ function retireState(last: string): string {
 
 export class WorkflowControlTool extends WorkflowTool {
   static readonly TOOL_NAME = "workflow_control";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 3, managerOnly: true };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 3, managerOnly: true, tags: ["manager"] };
 
   async execute(
     input: string | Record<string, unknown> | null,

@@ -95,6 +95,19 @@ export interface ToolMetadata {
   sideEffects: boolean;
   /** Difficulty score 1-5: how hard this tool is to use correctly. */
   difficulty: number;
+  /**
+   * Author-declared domain tags, e.g. `["files", "network"]`. Canonical
+   * vocabulary: `"files"`, `"network"`, `"utility"`, `"system"`, `"manager"`,
+   * `"guidance"` -- arbitrary additional strings are first-class (extensions
+   * author their own domains). Lowercase spelling convention; no ordering
+   * guarantee; absent or empty means untagged, and consumers read absent as
+   * empty. Stored exactly as declared (the TOOL_METADATA hook mutates live
+   * metadata objects); the normalized view for comparison is
+   * ToolRegistry.getTags (trim + lowercase + drop-empty, dedupe, declaration
+   * order). Forward-looking purpose: profile access assignment/restriction
+   * and future dynamic tool queries -- nothing enforces tags yet.
+   */
+  tags?: string[];
   /** True if the tool is only available when the active profile is a manager. */
   managerOnly?: boolean;
   /**
@@ -224,6 +237,23 @@ export class ToolRegistry {
   getMetadata(name: string): ToolMetadata | undefined {
     const tool = this.tools.get(name);
     return tool?.metadata;
+  }
+
+  /**
+   * Normalized tag view for comparison (the field stores as-declared):
+   * trim + lowercase, empty dropped, deduped, declaration order. Absent
+   * tool, absent tags, or empty tags all read as the empty array.
+   */
+  getTags(name: string): string[] {
+    const tags = this.tools.get(name)?.metadata.tags;
+    if (!tags || tags.length === 0) return [];
+    const out: string[] = [];
+    for (const tag of tags) {
+      if (typeof tag !== "string") continue;
+      const t = tag.trim().toLowerCase();
+      if (t && !out.includes(t)) out.push(t);
+    }
+    return out;
   }
 
   getAllWithMetadata(): Array<{ name: string; tool: Tool; metadata: ToolMetadata }> {

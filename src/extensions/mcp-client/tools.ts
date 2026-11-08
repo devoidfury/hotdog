@@ -35,7 +35,9 @@ export class McpTool {
   readonly #connection: McpConnectionHandle;
   readonly #registeredName: string;
   /** MCP tools default to sideEffects: true (conservative — unknown tools assumed somewhat risky). */
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
+  // tags deliberately empty: third-party servers get no invented domains.
+  // Untagged means "no domain claim about an external tool", which is honest.
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 3, tags: [] };
 
   constructor(serverName: string, toolDef: McpToolDefinitionInput, connectionHandle: McpConnectionHandle) {
     this.#toolName = toolDef.name;

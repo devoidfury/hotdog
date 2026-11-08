@@ -136,7 +136,7 @@ function parseArgs(input: string | null): ParsedArgs {
 
 export class ReviewTool {
   static TOOL_NAME = "review";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 5 };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 5, tags: ["manager"] };
 
   toToolDef() {
     return toolDef(

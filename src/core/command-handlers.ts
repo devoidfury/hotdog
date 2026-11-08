@@ -11,6 +11,7 @@ import {
 import { formatError } from "./error.ts";
 import { computeTokenCost, findModelPrice, formatUsd, isPricingConfigured } from "./token-pricing.ts";
 import { contextGaugeSegment } from "./context-gauge.ts";
+import { spoofSafe } from "@utils/spoof.ts";
 import type {
   CommandDefinition,
   CommandHandler,
@@ -156,7 +157,35 @@ export function handleTokens(agent: Agent): CommandResult {
   return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
 }
 
-export function handleTools(agent: Agent): CommandResult {
+/**
+ * `/tools` toggles the tool-call display. `/tools list` prints the registered
+ * tools with their author-declared domain tags trailing (untagged tools show
+ * nothing extra). Tags are author text, not model text, but the listing still
+ * goes through the render-time spoof neutralizer like every other human-facing
+ * surface.
+ */
+export function handleTools(agent: Agent, value?: string | null): CommandResult {
+  const arg = (value ?? "").trim().toLowerCase();
+  if (arg) {
+    if (arg !== "list") {
+      return {
+        action: ACTIONS.ERROR,
+        error: `Unknown /tools argument '${spoofSafe(arg)}'. Valid: list`,
+      };
+    }
+    const registry = agent.toolRegistry;
+    const rows = registry
+      .getAllWithMetadata()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(({ name }) => {
+        const tags = registry.getTags(name).map(spoofSafe);
+        return tags.length > 0 ? `  ${spoofSafe(name)} [${tags.join(", ")}]` : `  ${spoofSafe(name)}`;
+      });
+    return {
+      action: ACTIONS.DISPLAY,
+      content: `Tools (${rows.length}):\n${rows.join("\n")}`,
+    };
+  }
   agent.hideTools = !agent.hideTools;
   agent.emitOutput("session_state", {
     key: "hideTools",
@@ -399,7 +428,7 @@ export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
   [Command.Tokens]: { handler: handleTokens, description: "Show token usage" },
   [Command.Tools]: {
     handler: handleTools,
-    description: "Toggle tool call display",
+    description: "Toggle tool call display (/tools list shows each tool's domain tags)",
   },
   [Command.Thinking]: {
     handler: handleThinking,

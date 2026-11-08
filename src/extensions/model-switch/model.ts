@@ -15,7 +15,7 @@ interface OnSwitchModel {
 
 export class ModelTool {
   static readonly TOOL_NAME = "model";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 3 };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 3, tags: ["utility"] };
 
   private readonly modelRegistry: ModelRegistry;
 

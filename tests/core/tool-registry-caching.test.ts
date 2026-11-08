@@ -1,9 +1,9 @@
 // Tests for ToolRegistry caching.
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
-import { ToolRegistry, type Tool } from "@core/extensions/tool-registry.ts";
+import { ToolRegistry, type Tool, type ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { Agent } from "@core/agent.ts";
-import { HookSystem } from "@core/hooks.ts";
+import { HookSystem, HOOKS } from "@core/hooks.ts";
 import { createToolRegistry } from "@core/extensions/tool-registry.ts";
 import { initializeLogger, resetLoggerForTesting } from "@utils/logger.ts";
 
@@ -396,5 +396,47 @@ describe("Agent model setter clears tool def cache", () => {
     // Next getToolDefs should re-call toToolDef
     await agent.getToolDefs();
     expect(callCount).toBe(2);
+  });
+});
+
+describe("ToolMetadata tags", () => {
+  it("round-trips the declared array and normalizes in getTags", () => {
+    const registry = new ToolRegistry();
+    registry.register("tagged", {
+      metadata: { sideEffects: false, difficulty: 1, tags: [" Files ", "files", "", "guidance"] },
+      toToolDef: () => ({ type: "function", function: { name: "tagged", description: "d", parameters: { type: "object", properties: {} } } }),
+      execute: async () => "ok",
+    });
+    // Stored exactly as declared; the normalized view dedupes and drops empties.
+    expect(registry.getMetadata("tagged")!.tags).toEqual([" Files ", "files", "", "guidance"]);
+    expect(registry.getTags("tagged")).toEqual(["files", "guidance"]);
+    // Untagged (absent tags) and unknown names read as empty.
+    registry.register("plain", mkTool(async () => "ok", "plain"));
+    expect(registry.getTags("plain")).toEqual([]);
+    expect(registry.getTags("missing")).toEqual([]);
+  });
+
+  it("a tag annotated on the TOOL_METADATA hook survives to getMetadata", async () => {
+    const registry = new ToolRegistry();
+    registry.register("annotated", mkTool(async () => "ok", "annotated"));
+
+    const hooks = new HookSystem();
+    hooks.on(
+      HOOKS.TOOL_METADATA,
+      (payload) => {
+        const meta = payload.tools.get("annotated");
+        if (meta) meta.tags = ["guidance"];
+      },
+      "test-tag-annotator",
+    );
+
+    // Map built exactly as core/main.ts does: values are the live metadata
+    // objects, so a handler mutating one annotates the registered tool.
+    const toolMetadataMap = new Map<string, ToolMetadata | undefined>();
+    for (const [name, tool] of registry.getAll()) toolMetadataMap.set(name, tool.metadata);
+    await hooks.notifyHooks(HOOKS.TOOL_METADATA, { tools: toolMetadataMap });
+
+    expect(registry.getMetadata("annotated")!.tags).toEqual(["guidance"]);
+    expect(registry.getTags("annotated")).toEqual(["guidance"]);
   });
 });

@@ -26,7 +26,7 @@ function pushDirSection(lines: string[], dirSizes: [string, string][]): void {
 
 export class ProjectInfoTool {
   static readonly TOOL_NAME = "project_info";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, tags: ["files"] };
 
   /** File-listing ceiling, plumbed from coreTools.grepMaxResults. */
   private readonly maxFiles: number;

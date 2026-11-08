@@ -22,6 +22,7 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 **ToolMetadata** — each tool declares metadata via a `metadata` property:
 - `sideEffects: boolean` — `true` if the tool performs writes, network access, or other external effects. Used by sandbox mode.
 - `difficulty: number` (1–5) — how often models of different sizes misuse or fail to comprehend the tool. Lower = simpler, more reliable.
+- `tags?: string[]` — author-declared domain tags. Canonical vocabulary: `"files"`, `"network"`, `"utility"`, `"system"`, `"manager"`, `"guidance"`; arbitrary additional strings are first-class (extensions author their own domains). Lowercase spelling convention, no ordering guarantee, a tool may declare several; absent or empty means untagged. The field stores exactly as declared — the normalized comparison view is `ToolRegistry.getTags()` (trim + lowercase, drop empty, dedupe, declaration order), which also reads absent/unknown tools as the empty array. Purpose is forward-looking: profile access assignment/restriction and future dynamic tool queries. **Nothing enforces tags yet** — they are declared and displayed only.
 
 Tools without metadata are excluded when filtering is active (conservative default).
 

@@ -51,7 +51,7 @@ export function measureString(s: string): StringLengthResult {
 
 export class StringLengthTool {
   static readonly TOOL_NAME = "string_length";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, tags: ["utility"] };
 
   toToolDef() {
     return toolDef(

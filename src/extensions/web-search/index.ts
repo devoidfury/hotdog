@@ -492,7 +492,7 @@ function formatResults(results: SearchResult[], query: string, provider: string)
 
 export class WebSearchTool {
   static readonly TOOL_NAME = "web_search";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 1 };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 1, tags: ["network"] };
 
   #provider: string;
   #maxResults: number;

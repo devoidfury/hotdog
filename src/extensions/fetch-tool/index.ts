@@ -81,7 +81,7 @@ interface FetchToolOptions {
 
 export class FetchTool {
   static readonly TOOL_NAME = "fetch";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 1 };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 1, tags: ["network"] };
 
   readonly timeoutMs: number;
   readonly maxBodyLength: number;

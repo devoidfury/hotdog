@@ -7,7 +7,7 @@ import { SkillsLoader } from "./loader.ts";
 
 export class LoadSkillTool {
   static readonly TOOL_NAME = "load_skill";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 2 };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 2, tags: ["guidance"] };
   private readonly loader: SkillsLoader | null;
 
   constructor(options: { loader?: SkillsLoader } = {}) {

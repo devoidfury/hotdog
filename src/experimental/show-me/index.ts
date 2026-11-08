@@ -361,7 +361,9 @@ interface ShowMeToolInput {
 
 class ShowMeTool {
   static readonly TOOL_NAME = "show_me";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 2 };
+  // files: the tool's side effect on the machine is the workspace write; the
+  // provider call rides the session's existing llmClient, not its own access.
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 2, tags: ["files"] };
 
   #imageModel: string;
 

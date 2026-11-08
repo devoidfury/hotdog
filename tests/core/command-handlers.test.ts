@@ -16,6 +16,7 @@ import {
   CORE_COMMAND_HANDLERS,
 } from "@core/command-handlers.ts";
 import { createCommandRegistry } from "@core/extensions/registries.ts";
+import { ToolRegistry } from "@core/extensions/tool-registry.ts";
 
 type TokenUsage = {
   turns: number;
@@ -269,6 +270,41 @@ describe("handleTools", () => {
     const result = handleTools(agent as any);
     expect(agent.hideTools).toBe(false);
     expect(result.content).toContain("shown");
+  });
+
+  it("/tools list prints each tool with a trailing tag list; untagged tools show nothing extra", () => {
+    const registry = new ToolRegistry();
+    const mk = (name: string, tags?: string[]) => ({
+      metadata: { sideEffects: false, difficulty: 1, ...(tags ? { tags } : {}) },
+      toToolDef: () => ({ type: "function", function: { name, description: name, parameters: { type: "object", properties: {} } } }),
+      execute: async () => "ok",
+    });
+    registry.register("plain_tool", mk("plain_tool"));
+    registry.register("tagged_tool", mk("tagged_tool", ["files"]));
+    const result = handleTools({ toolRegistry: registry } as any, "list");
+    expect(result.action).toBe(ACTIONS.DISPLAY);
+    expect(result.content).toContain("Tools (2):");
+    expect(result.content).toContain("  tagged_tool [files]");
+    expect(result.content).toContain("  plain_tool\n");
+    expect(result.content).not.toContain("plain_tool [");
+  });
+
+  it("/tools list tags are spoof-neutralized at print", () => {
+    const registry = new ToolRegistry();
+    registry.register("x", {
+      metadata: { sideEffects: false, difficulty: 1, tags: ["files\u202E"] },
+      toToolDef: () => ({ type: "function", function: { name: "x", description: "x", parameters: { type: "object", properties: {} } } }),
+      execute: async () => "ok",
+    });
+    const result = handleTools({ toolRegistry: registry } as any, "list");
+    expect(result.content).toContain("x [files[U+202E]]");
+  });
+
+  it("/tools with an unknown argument errors and does not toggle", () => {
+    const agent = makeMockAgent({ hideTools: false });
+    const result = handleTools(agent as any, "bogus");
+    expect(result.action).toBe(ACTIONS.ERROR);
+    expect(agent.hideTools).toBe(false);
   });
 });
 

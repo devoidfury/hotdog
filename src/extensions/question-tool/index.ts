@@ -65,7 +65,7 @@ function ensureKey(question: Question, index: number): string {
 
 export class QuestionTool {
   static readonly TOOL_NAME = "question";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 2 };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 2, tags: ["utility"] };
 
   toToolDef() {
     return toolDef(

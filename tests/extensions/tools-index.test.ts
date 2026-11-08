@@ -217,3 +217,21 @@ describe("core tool display parts (ToolMetadata.display)", () => {
     }
   });
 });
+
+describe("core tool domain tags (ToolMetadata.tags)", () => {
+  // Tags are the author-declared domain claims feeding future profile
+  // access rules and dynamic tool queries. Nothing enforces them at
+  // runtime, so drift is silent -- the tree-wide sweep in
+  // tool-tags-sweep.test.ts only proves "every tool resolves >=1 tag";
+  // these exact pins are what catch a vocabulary typo like ["flies"].
+  it("every core tool declares exactly one domain: files", () => {
+    const factory = createToolFactory(config);
+    for (const name of ["overwrite", "append", "read", "edit", "grep", "find", "project_info", "explore"]) {
+      // The whitelist hands back the disabled-by-default `explore`; the
+      // factory also re-spreads read/edit metadata (display annotations),
+      // so pin the factory-produced object, not a hand-built instance.
+      const tool = factory.createTool(name, [name]);
+      expect(tool!.metadata.tags, `${name} tags`).toEqual(["files"]);
+    }
+  });
+});

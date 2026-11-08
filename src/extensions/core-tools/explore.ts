@@ -20,7 +20,10 @@ export type SpawnFn = typeof _spawn;
 
 export class ExploreTool {
   static readonly TOOL_NAME = "explore";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 4 };
+  // files, deliberately not system: `system` marks a direct host primitive
+  // (bash); explore spawns the harness's own constrained-profile explorer
+  // agent, and its domain of action is the project directory.
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 4, tags: ["files"] };
 
   private readonly spawnFn: SpawnFn;
 

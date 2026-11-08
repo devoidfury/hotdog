@@ -116,6 +116,7 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
 /profile <name>    Switch profile (also: /profile:<name>)
 /tokens            Show token usage stats + context-window fill gauge
 /tools             Toggle tool call display
+/tools list        List registered tools with their domain tags
 /compact [n]       Compact context
 /compact <strategy>  Switch compaction strategy (also: /compact:<strategy>)
 /prompt:name       Execute saved prompt from prompts directory

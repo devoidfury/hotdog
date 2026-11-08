@@ -97,6 +97,7 @@ export class BashTool {
   metadata: ToolMetadata = {
     sideEffects: true,
     difficulty: 2,
+    tags: ["system"],
     execution: "worker",
     argDisplay: { command: { preview: "first-line", syntax: "shell" } },
     // Sinks with a display spec render the WHOLE multi-line command block

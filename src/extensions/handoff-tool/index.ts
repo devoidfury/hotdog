@@ -27,7 +27,7 @@ interface HandoffPayload {
 
 export class HandoffTool {
   static readonly TOOL_NAME = "handoff";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 3, tags: ["manager"] };
 
   constructor(private pending: Map<string, HandoffPayload>) {}
 

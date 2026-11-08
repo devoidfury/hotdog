@@ -49,7 +49,7 @@ export class StructuredOutputTool {
   // Pinned: registered only when --json-schema is passed, so a profile
   // whitelist/blacklist must not filter it out of the request (the model
   // would then have no tool to answer through and reply in prose).
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, pinned: true };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, pinned: true, tags: ["utility"] };
 
   private readonly schema: Record<string, unknown>;
   private readonly onOutput: (payload: Record<string, unknown>) => void;

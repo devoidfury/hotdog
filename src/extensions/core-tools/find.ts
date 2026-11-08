@@ -128,7 +128,7 @@ async function runFindFallback(pattern: string, fileType: string | null, cwd: st
 
 export class FindTool {
   static readonly TOOL_NAME = "find";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, tags: ["files"] };
 
   private readonly maxResults: number;
   private readonly maxOutputLines: number;

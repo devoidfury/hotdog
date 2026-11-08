@@ -72,6 +72,7 @@ Commands:
   /models       - List available models
   /tokens       - Show token usage
   /tools        - Toggle tool call display
+  /tools list   - List tools with their domain tags
   /compact [n] [--compact-debug]  - Compact context
   /compact <strategy>             - Switch compaction strategy
   /compact:<strategy>             - Switch compaction strategy

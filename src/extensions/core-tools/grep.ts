@@ -366,7 +366,7 @@ function parseArgs(
 
 export class GrepTool {
   static readonly TOOL_NAME = "grep";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, execution: "worker" };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, execution: "worker", tags: ["files"] };
 
   private readonly maxResults: number;
   private readonly maxOutputLines: number;

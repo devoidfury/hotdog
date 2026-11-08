@@ -37,7 +37,7 @@ interface FindReplaceResult {
 
 export class EditTool {
   static readonly TOOL_NAME = "edit";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 2 };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 2, tags: ["files"] };
 
   private readonly maxEditInputSize: number;
 

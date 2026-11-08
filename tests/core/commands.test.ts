@@ -24,6 +24,12 @@ describe('parseCommand', () => {
     expect(parseCommand('regenerate')).toEqual({ type: Command.Regenerate, value: null });
   });
 
+  it('parses /tools with an argument (list) and trims it', () => {
+    expect(parseCommand('tools list')).toEqual({ type: Command.Tools, value: 'list' });
+    expect(parseCommand('tools  list ')).toEqual({ type: Command.Tools, value: 'list' });
+    expect(parseCommand('tools')).toEqual({ type: Command.Tools, value: null });
+  });
+
   it('parses reasoning command with levels', () => {
     expect(parseCommand('reasoning')).toEqual({ type: Command.Reasoning, value: null });
     expect(parseCommand('reasoning high')).toEqual({ type: Command.Reasoning, value: 'high' });

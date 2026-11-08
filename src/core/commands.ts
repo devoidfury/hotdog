@@ -90,11 +90,13 @@ export function parseCommand(
     };
   }
 
-  switch (cmd) {
-    case "tools":
-      return { type: Command.Tools, value: null };
-    case "thinking":
-      return { type: Command.Thinking, value: null };
+  if (cmd === "tools" || cmd.startsWith("tools ")) {
+    // Bare /tools toggles display; "/tools list" prints the registry listing.
+    const arg = cmd.slice("tools".length).trim();
+    return { type: Command.Tools, value: arg || null };
+  }
+  if (cmd === "thinking") {
+    return { type: Command.Thinking, value: null };
   }
 
   if (cmd === "tokens") {

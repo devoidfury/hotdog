@@ -291,7 +291,7 @@ export interface AgentBrowserToolOptions {
 
 export class AgentBrowserTool {
   static readonly TOOL_NAME = "agent_browser";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 3, tags: ["network"] };
 
   #allowLoopback: boolean;
   #createView: ViewFactory;

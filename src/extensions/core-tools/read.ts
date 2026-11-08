@@ -43,7 +43,7 @@ interface ReadArgs {
 
 export class ReadTool {
   static readonly TOOL_NAME = "read";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, execution: "worker" };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1, execution: "worker", tags: ["files"] };
 
   private readonly readLimit: number;
   private readonly maxImageSize: number;

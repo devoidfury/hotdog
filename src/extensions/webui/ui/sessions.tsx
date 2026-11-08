@@ -117,6 +117,14 @@ interface SidebarProps {
   pinnedIds: Set<string>;
   sidebarWidth: number;
   sidebarMax: number;
+  /** Recent Logs section state (see app.tsx logsPanel). `logsCollapsed` hides
+   *  the list and drops the titlebar's drag-handle semantics entirely -- a
+   *  collapsed section has no height to drag. Height clamps ride as props so
+   *  the aria limits and the seam's clamp stay one source. */
+  logsCollapsed: boolean;
+  logsHeight: number;
+  logsMin: number;
+  logsMax: number;
   onCreate: () => void;
   onSwitch: (sessionId: string) => void;
   onCancel: (sessionId: string) => void;
@@ -138,6 +146,16 @@ interface SidebarProps {
   onResizeEnd: (e: PointerEvent) => void;
   onResizeKey: (e: KeyboardEvent) => void;
   onResizeReset: (e: MouseEvent) => void;
+  /** The chevron at the right of the Recent Logs titlebar. */
+  onToggleLogs: () => void;
+  /** The same five gestures for the Recent Logs section, bound to its
+   *  titlebar (drag anywhere on it but the collapse button; double-click
+   *  resets the height; arrows resize it while it has keyboard focus). */
+  onLogsResizeStart: (e: PointerEvent) => void;
+  onLogsResizeMove: (e: PointerEvent) => void;
+  onLogsResizeEnd: (e: PointerEvent) => void;
+  onLogsResizeKey: (e: KeyboardEvent) => void;
+  onLogsResizeReset: (e: MouseEvent) => void;
 }
 
 interface SidebarRowProps {
@@ -399,7 +417,7 @@ function SearchPanel(p: {
 
 export function Sidebar(p: SidebarProps) {
   return (
-    <aside id="sidebar">
+    <aside id="sidebar" className={p.logsCollapsed ? "logs-collapsed" : undefined}>
       <div className="sidebar-header">
         <h2>Sessions</h2>
         <div className="sidebar-header-actions">
@@ -476,8 +494,54 @@ export function Sidebar(p: SidebarProps) {
         })}
       </div>
 
-      <div className="sidebar-header sidebar-header-secondary">
+      {/* Secondary header: the Recent Logs title, its collapse chevron, and
+          the vertical drag handle for the list below. The seam logic lives in
+          app.tsx; the titlebar is a focusable separator so the keyboard gets
+          the same respect #sidebar-resize has (arrows resize, Home/End clamp).
+          While collapsed there is no height to drag, so the handle semantics
+          (role, tabindex, row-resize cursor) drop out entirely and the header
+          is just a header again. */}
+      <div
+        className={
+          p.logsCollapsed
+            ? "sidebar-header sidebar-header-secondary"
+            : "sidebar-header sidebar-header-secondary sidebar-header-resize"
+        }
+        role={p.logsCollapsed ? undefined : "separator"}
+        aria-orientation={p.logsCollapsed ? undefined : "horizontal"}
+        aria-label={p.logsCollapsed ? undefined : "Resize Recent Logs height"}
+        aria-valuenow={p.logsCollapsed ? undefined : p.logsHeight}
+        aria-valuemin={p.logsCollapsed ? undefined : p.logsMin}
+        aria-valuemax={p.logsCollapsed ? undefined : p.logsMax}
+        tabindex={p.logsCollapsed ? undefined : "0"}
+        onPointerdown={p.onLogsResizeStart}
+        onPointermove={p.onLogsResizeMove}
+        onPointerup={p.onLogsResizeEnd}
+        onPointercancel={p.onLogsResizeEnd}
+        onKeydown={p.onLogsResizeKey}
+        onDblclick={p.onLogsResizeReset}
+      >
         <h2>Recent Logs</h2>
+        {/* Chevron: down while expanded (click folds the list up), up while
+            collapsed (click opens it back down). The button swallows its own
+            pointerdown and dblclick, so a press on it is never a drag and a
+            double-click on it is never a height reset. */}
+        <button
+          id="logs-toggle"
+          type="button"
+          aria-expanded={p.logsCollapsed ? "false" : "true"}
+          aria-controls="log-list"
+          aria-label={p.logsCollapsed ? "Expand recent logs" : "Collapse recent logs"}
+          title={p.logsCollapsed ? "Expand recent logs" : "Collapse recent logs"}
+          onClick={p.onToggleLogs}
+          onPointerdown={(e: MouseEvent) => e.stopPropagation()}
+          onDblclick={(e: MouseEvent) => e.stopPropagation()}
+        >
+          <span
+            className={p.logsCollapsed ? "logs-toggle-glyph logs-toggle-glyph-up" : "logs-toggle-glyph"}
+            aria-hidden="true"
+          ></span>
+        </button>
       </div>
       <div id="log-list">
         {p.logs.length === 0 ? (

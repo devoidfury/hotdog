@@ -100,6 +100,9 @@
     --radius-xl: 18px;
     --radius-full: 9999px;
     --sidebar-width: 300px;
+    /* Recent Logs list cap (panel-resize.ts writes it on drag; the user's
+       stored height hydrates it on load). */
+    --logs-height: 240px;
     --input-height: 64px;
 
     /* Transitions */
@@ -847,13 +850,101 @@ body.sidebar-resizing {
     border-top: 1px solid var(--border);
 }
 
+/* The titlebar doubles as the section's vertical resize handle (see
+   panel-resize.ts + the logsPanel wiring in app.tsx): drag anywhere on it
+   except the collapse button, double-click resets, and -- because it carries
+   role="separator" tabindex="0" while expanded -- arrows resize it. Collapsed
+   drops the class, so no cursor lies about what a drag would do. */
+.sidebar-header-resize {
+    cursor: row-resize;
+    touch-action: none; /* the drag owns the gesture instead of scrolling */
+}
+
+.sidebar-header-resize:hover {
+    background: var(--bg-hover);
+}
+
+/* Same focus grammar as #sidebar-resize: tint plus an inset accent outline. */
+.sidebar-header-resize:focus-visible {
+    background: var(--accent-soft);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.sidebar-header-resize h2 {
+    /* The title is a drag surface, so it never becomes a text selection. */
+    user-select: none;
+}
+
+/* Collapse chevron at the right edge of the titlebar: a 24-viewBox stroke
+   glyph through a CSS mask (the .row-glyph / .search-btn-glyph idiom), so the
+   client mount carries no raw <svg> and the tint rides currentColor. */
+#logs-toggle {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+#logs-toggle:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+#logs-toggle:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.logs-toggle-glyph {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M6 9 L12 15 L18 9' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    -webkit-mask: var(--glyph) center / contain no-repeat;
+    mask: var(--glyph) center / contain no-repeat;
+}
+
+/* Collapsed: the arrow points where the next click takes the list. */
+.logs-toggle-glyph-up {
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M6 15 L12 9 L18 15' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+/* While dragging the section: consistent cursor everywhere, no selection --
+   the body.sidebar-resizing idiom one axis over. */
+body.logs-resizing {
+    cursor: row-resize;
+    user-select: none;
+}
+
+body.logs-resizing .sidebar-header-resize {
+    background: var(--accent-soft);
+}
+
 /* ── Log List ─────────────────────────────────────────────────────────────── */
 
 #log-list {
     flex: 0 0 auto;
-    max-height: 240px;
+    /* The user's height (or the 240px default) is a CAP, not a reservation:
+       a short list stays short and the live-sessions list above it keeps
+       taking the leftover. Collapsed takes the box out of the flow entirely
+       -- the header stays, the sessions list gets the space back. */
+    max-height: var(--logs-height);
     overflow-y: auto;
     padding: 8px;
+}
+
+#sidebar.logs-collapsed #log-list {
+    display: none;
 }
 
 .log-item {
@@ -2438,6 +2529,17 @@ body.sidebar-resizing {
     /* Drawer mode: width is CSS-controlled, no resizing. */
     #sidebar-resize {
         display: none;
+    }
+
+    /* The Recent Logs titlebar keeps its gestures here: unlike the sidebar
+       width, the drawer's height is still the flex column the --logs-height
+       cap acts on, and viewportMax (half the viewport) keeps the section
+       under half the drawer, so nothing needs no-op'ing. Touch has no hover,
+       and a sticky hover tint on a drag surface reads as a stuck state, so
+       only the hover fill goes quiet -- the collapse button and its chevron
+       are untouched and keep working. */
+    .sidebar-header-resize:hover {
+        background: transparent;
     }
 
     #sidebar.open {

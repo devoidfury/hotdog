@@ -15,18 +15,25 @@ import { spoofSafe } from "@utils/spoof.ts";
 import { escapeHtml } from "@utils/html.ts";
 
 
-// ── Sidebar resize ──────────────────────────────────────────────────────────
+// ── Panel sizing (sidebar width, Recent Logs height) ───────────────────────
+// The numbers only: the drag/collapse/clamp machinery is one seam
+// (panel-resize.ts) and both panels configure themselves here.
 
 export const SIDEBAR_MIN_WIDTH = 200;
 export const SIDEBAR_MAX_WIDTH = 520;
 export const SIDEBAR_DEFAULT_WIDTH = 300;
 
-/** Sidebar width clamp: 200px .. min(520px, half the viewport). */
-export function clampSidebarWidth(width: number, viewportWidth: number): number {
-  // Min beats max on degenerate (sub-400px) viewports.
-  const max = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, viewportWidth / 2));
-  return Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), max);
-}
+// Recent Logs list height. The default is the height the CSS cap shipped
+// before the section became resizable, so a fresh visitor sees no change;
+// 96px keeps a couple of rows plus their scroll affordance on screen.
+export const LOGS_MIN_HEIGHT = 96;
+// The static ceiling only binds on very tall viewports; on ordinary screens the
+// live ceiling is viewport height minus LOGS_VIEWPORT_RESERVE (see the panel
+// config in app.tsx), so the list can reach nearly the full sidebar while the
+// live sessions above it stay visible.
+export const LOGS_MAX_HEIGHT = 900;
+export const LOGS_VIEWPORT_RESERVE = 220;
+export const LOGS_DEFAULT_HEIGHT = 240;
 
 // ── Formatting & sanitisation ───────────────────────────────────────────────
 

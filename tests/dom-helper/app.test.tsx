@@ -143,11 +143,15 @@ document.body.appendChild(appEl);
 const win = window as unknown as Record<string, unknown>;
 const prevWin = {
   innerWidth: win.innerWidth,
+  innerHeight: win.innerHeight,
   addEventListener: win.addEventListener,
   removeEventListener: win.removeEventListener,
   localStorage: win.localStorage,
 };
 win.innerWidth = 1200;
+// The Recent Logs height clamp reads the viewport height the same way the
+// sidebar width reads the viewport width (half of it, at most).
+win.innerHeight = 900;
 const winListeners = new Map<string, Set<(e: unknown) => void>>();
 win.addEventListener = (type: string, cb: (e: unknown) => void) => {
   (winListeners.get(type) ?? winListeners.set(type, new Set()).get(type)!).add(cb);
@@ -162,6 +166,7 @@ const fireWin = (type: string): void => {
 afterAll(() => {
   appEl.remove();
   win.innerWidth = prevWin.innerWidth;
+  win.innerHeight = prevWin.innerHeight;
   win.addEventListener = prevWin.addEventListener;
   win.removeEventListener = prevWin.removeEventListener;
   if (prevWin.localStorage === undefined) delete win.localStorage;
@@ -944,6 +949,153 @@ describe("sidebar resize", () => {
     h.dispatchEvent({ type: "pointerdown", pointerId: 7, clientX: 0, currentTarget: h } as unknown as Event);
     expect(document.body.classList.contains("sidebar-resizing")).toBe(false);
     delete (h as unknown as Record<string, unknown>).offsetParent;
+  });
+});
+
+// ── Recent Logs: collapse + vertical resize ────────────────────────────────
+// The same seam, one axis over, driven through the mounted app: the titlebar
+// rides the list's TOP edge, so the pointer and the height move opposite ways
+// (drag up = taller). Keys: ArrowUp grows. Storage rides its own two keys, and
+// the collapse button owns its own gestures.
+
+const logsBar = () => {
+  const b = el(".sidebar-header-secondary");
+  const any = b as unknown as Record<string, unknown>;
+  any.offsetParent ??= {};
+  any.setPointerCapture ??= () => {};
+  return b;
+};
+const logsHeightVar = (): string =>
+  (document.documentElement as unknown as { style: { getPropertyValue: (n: string) => string } }).style.getPropertyValue(
+    "--logs-height",
+  );
+const logsPointer = (type: string, over: Record<string, unknown> = {}): void => {
+  const b = logsBar();
+  b.dispatchEvent({ type, currentTarget: b, ...over } as unknown as Event);
+};
+const logsAria = (): string | null => el(".sidebar-header-secondary").getAttribute("aria-valuenow");
+
+describe("Recent Logs section", () => {
+  it("the titlebar starts as the handle and the chevron starts expanded", () => {
+    expect(logsAria()).toBe("240");
+    expect(el(".sidebar-header-secondary").getAttribute("role")).toBe("separator");
+    expect(el("#logs-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(el("#sidebar").classList.contains("logs-collapsed")).toBe(false);
+  });
+
+  it("dragging the titlebar UP grows the list, release persists", () => {
+    logsPointer("pointerdown", { pointerId: 1, clientY: 500 });
+    expect(document.body.classList.contains("logs-resizing")).toBe(true);
+    logsPointer("pointermove", { pointerId: 1, clientY: 460 });
+    expect(logsHeightVar()).toBe("280px"); // 240 + (500 - 460): near-edge, so up grows
+    expect(store.has("hotdog.logsHeight")).toBe(false); // nothing written mid-drag
+    logsPointer("pointerup", { pointerId: 1, clientY: 460 });
+    expect(document.body.classList.contains("logs-resizing")).toBe(false);
+    expect(store.get("hotdog.logsHeight")).toBe("280");
+    expect(logsAria()).toBe("280");
+  });
+
+  it("dragging DOWN shrinks it, and the clamp floor holds", () => {
+    logsPointer("pointerdown", { pointerId: 2, clientY: 460 });
+    logsPointer("pointermove", { pointerId: 2, clientY: 520 });
+    expect(logsHeightVar()).toBe("220px");
+    logsPointer("pointermove", { pointerId: 2, clientY: 5000 });
+    expect(logsHeightVar()).toBe("96px"); // LOGS_MIN_HEIGHT
+    logsPointer("pointerup", { pointerId: 2, clientY: 5000 });
+    expect(store.get("hotdog.logsHeight")).toBe("96");
+  });
+
+  it("keys resize it (ArrowUp grows) and Home/End clamp; the reset forgets", async () => {
+    logsBar().dispatchEvent({ type: "dblclick", currentTarget: logsBar() } as unknown as Event);
+    expect(logsHeightVar()).toBe("240px");
+    expect(store.has("hotdog.logsHeight")).toBe(false);
+    key(logsBar(), "ArrowUp", { currentTarget: logsBar() });
+    expect(logsAria()).toBe("256");
+    key(logsBar(), "ArrowDown", { shiftKey: true, currentTarget: logsBar() });
+    expect(logsAria()).toBe("208");
+    key(logsBar(), "End", { currentTarget: logsBar() });
+    expect(logsAria()).toBe("680"); // min(900, stubbed 900 - LOGS_VIEWPORT_RESERVE 220)
+    key(logsBar(), "Home", { currentTarget: logsBar() });
+    expect(logsAria()).toBe("96");
+    key(logsBar(), "a", { currentTarget: logsBar() });
+    expect(logsAria()).toBe("96");
+    expect(store.get("hotdog.logsHeight")).toBe("96");
+    logsBar().dispatchEvent({ type: "dblclick", currentTarget: logsBar() } as unknown as Event);
+    expect(logsHeightVar()).toBe("240px");
+    expect(store.has("hotdog.logsHeight")).toBe(false);
+    await tick();
+  });
+
+  it("the chevron collapses the section and keeps the height the user left", async () => {
+    logsPointer("pointerdown", { pointerId: 3, clientY: 300 });
+    logsPointer("pointermove", { pointerId: 3, clientY: 268 });
+    logsPointer("pointerup", { pointerId: 3, clientY: 268 });
+    expect(store.get("hotdog.logsHeight")).toBe("272");
+    el("#logs-toggle").click();
+    await tick();
+    expect(el("#sidebar").classList.contains("logs-collapsed")).toBe(true);
+    expect(el("#logs-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(store.get("hotdog.logsCollapsed")).toBe("1");
+    // A collapsed section has no height to drag: the gestures are inert.
+    logsPointer("pointerdown", { pointerId: 4, clientY: 300 });
+    expect(document.body.classList.contains("logs-resizing")).toBe(false);
+    key(logsBar(), "ArrowUp", { currentTarget: logsBar() });
+    expect(logsAria()).toBeNull(); // the handle semantics are gone while collapsed
+    expect(store.get("hotdog.logsHeight")).toBe("272");
+    // Expand: the user's height rides along (the var was never touched).
+    el("#logs-toggle").click();
+    await tick();
+    expect(el("#sidebar").classList.contains("logs-collapsed")).toBe(false);
+    expect(logsAria()).toBe("272");
+    expect(logsHeightVar()).toBe("272px");
+    expect(store.get("hotdog.logsCollapsed")).toBe("0");
+    // Leave the section as the app shipped it for the suites below.
+    logsBar().dispatchEvent({ type: "dblclick", currentTarget: logsBar() } as unknown as Event);
+    expect(logsHeightVar()).toBe("240px");
+  });
+
+  it("a gesture on the chevron is never a drag or a reset", () => {
+    const toggle = el("#logs-toggle");
+    toggle.dispatchEvent({ type: "pointerdown", pointerId: 5, clientY: 300, currentTarget: toggle } as unknown as Event);
+    expect(document.body.classList.contains("logs-resizing")).toBe(false);
+    toggle.dispatchEvent({ type: "dblclick", currentTarget: toggle } as unknown as Event);
+    expect(logsHeightVar()).toBe("240px");
+  });
+
+  it("a cold search hit reveals a collapsed list before scrolling to the row", async () => {
+    // scrollHitIntoView has no scroll box to reveal a row in while the section
+    // is collapsed, so onActivateHit expands it first (the height the user left
+    // rides along untouched).
+    el("#logs-toggle").click();
+    await tick();
+    expect(el("#sidebar").classList.contains("logs-collapsed")).toBe(true);
+
+    el("#search-btn").click();
+    await tick();
+    const input = el("#search-input");
+    (input as unknown as { value: string }).value = "needle";
+    input.dispatchEvent({ type: "input", currentTarget: input } as unknown as Event);
+    await sleep(300); // the search debounce
+    const [req] = sent<{ requestId: number }>("searchLogs");
+    expect(req?.requestId).toBeNumber();
+    ws.fireMessage({
+      type: "searchResults",
+      requestId: req!.requestId,
+      query: "needle",
+      results: [{ logId: L1, lastActivityAt: 2, matchCount: 1, profile: "manager", live: false, snippets: ["a needle line"] }],
+    });
+    await tick();
+    el(".search-hit").click();
+    await tick();
+    expect(el("#sidebar").classList.contains("logs-collapsed")).toBe(false);
+    expect(el("#logs-toggle").getAttribute("aria-expanded")).toBe("true");
+    const row = els(".log-item").find((r) => r.getAttribute("data-sid") === L1);
+    expect(row).toBeDefined();
+    expect((row as unknown as { scrollIntoViewCalls: unknown[] }).scrollIntoViewCalls).toEqual([{ block: "nearest" }]);
+    // Revealing is a collapse-flag write only: the height the user left (here,
+    // none) is never rewritten, and the section stays expanded below.
+    expect(store.has("hotdog.logsHeight")).toBe(false);
+    expect(store.get("hotdog.logsCollapsed")).toBe("0");
   });
 });
 

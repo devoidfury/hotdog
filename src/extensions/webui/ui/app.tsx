@@ -4,7 +4,8 @@
 // message list container is handed to the imperative renderer via ref.
 
 import { mount, type Mounted, type Ref, type DomNode } from "@utils/jsx";
-import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, clampSidebarWidth } from "./utils.ts";
+import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE } from "./utils.ts";
+import { createPanelResize } from "./panel-resize.ts";
 import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
 import {
   LoginScreen,
@@ -101,8 +102,15 @@ function onSearchKeydown(e: KeyboardEvent): void {
 
 function onActivateHit(hit: SearchHitWire): void {
   // live → attach to the running session; cold → read-only log view.
-  if (hit.live) chat?.switchSession(hit.logId);
-  else chat?.viewLog(hit.logId);
+  if (hit.live) {
+    chat?.switchSession(hit.logId);
+  } else {
+    // A cold hit's row lives in the log list: a collapsed section has no
+    // scroll box to reveal it in, so expand first (the height the user left
+    // is already stored; expand just shows it).
+    if (logsPanel.collapsed()) logsPanel.toggle();
+    chat?.viewLog(hit.logId);
+  }
   closeSearch();
   // Then bring the selected row into view: closing search re-mounts the
   // lists, and closeSearch's atom render is already queued ahead of this
@@ -627,91 +635,68 @@ document.addEventListener("mousedown", (e: MouseEvent) => {
   dismissContextMenu();
 });
 
-// ── Sidebar resize ──────────────────────────────────────────────────────────
+// ── Panel sizing (sidebar width + Recent Logs height) ──────────────────────
+// Both panels ride one seam (panel-resize.ts): a pointerId-guarded drag that
+// paints imperatively (CSS var + aria-valuenow, so a pointermove never
+// re-renders the tree), viewport-aware clamps, keyboard steps, double-click
+// reset, and localStorage that degrades to session-only when storage is
+// blocked. The numbers live in utils.ts; the gestures live in the seam.
 
 const SIDEBAR_WIDTH_KEY = "hotdog.sidebarWidth";
+const LOGS_HEIGHT_KEY = "hotdog.logsHeight";
+const LOGS_COLLAPSED_KEY = "hotdog.logsCollapsed";
 
-// Live width; App reads it per render for aria-valuenow. Drags update it
-// imperatively (CSS var + aria attr) so pointermove never re-renders the tree.
-let sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
-let resizeDrag: { pointerId: number; startX: number; startWidth: number } | null = null;
+const sidebarPanel = createPanelResize({
+  axis: "x",
+  sizeKey: SIDEBAR_WIDTH_KEY,
+  defaultSize: SIDEBAR_DEFAULT_WIDTH,
+  min: SIDEBAR_MIN_WIDTH,
+  max: SIDEBAR_MAX_WIDTH,
+  // Half the viewport, whatever that is today: the same floor the old clamp
+  // used, so min wins on sub-400px viewports.
+  viewportMax: () => window.innerWidth / 2,
+  step: 16,
+  coarseStep: 48,
+  bodyClass: "sidebar-resizing",
+  paint: (width, el) => {
+    document.documentElement.style.setProperty("--sidebar-width", `${width}px`);
+    el?.setAttribute("aria-valuenow", String(width));
+  },
+});
 
-function sidebarMaxWidth(): number {
-  // Same floor as clampSidebarWidth: on sub-400px viewports min wins.
-  return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, window.innerWidth / 2));
-}
+// Recent Logs: a collapsible section the user drags taller/shorter from its
+// titlebar. Collapsed keeps the header and drops the list entirely, so the
+// resize gestures are gated off until it expands again -- and a section that
+// later expands comes back at the height the user left.
+const logsCollapsedAtom = reactiveState<boolean>(false);
 
-function applySidebarWidth(el: HTMLElement | null, width: number): void {
-  sidebarWidth = clampSidebarWidth(width, window.innerWidth);
-  document.documentElement.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
-  el?.setAttribute("aria-valuenow", String(sidebarWidth));
-}
+const logsPanel = createPanelResize({
+  axis: "y",
+  sizeKey: LOGS_HEIGHT_KEY,
+  collapsedKey: LOGS_COLLAPSED_KEY,
+  defaultSize: LOGS_DEFAULT_HEIGHT,
+  min: LOGS_MIN_HEIGHT,
+  max: LOGS_MAX_HEIGHT,
+  // Nearly the full viewport: only the reserve (header + a readable floor of
+  // live sessions above) is withheld. Degenerate viewports are still covered
+  // by the seam's min-wins rule.
+  viewportMax: () => window.innerHeight - LOGS_VIEWPORT_RESERVE,
+  step: 16,
+  coarseStep: 48,
+  // The titlebar sits ABOVE the list it sizes, so it rides into it: drag up to
+  // grow, drag down to shrink (and ArrowUp/ArrowDown follow the same grammar).
+  nearEdge: true,
+  bodyClass: "logs-resizing",
+  enabled: () => !logsCollapsedAtom(),
+  paint: (height, el) => {
+    document.documentElement.style.setProperty("--logs-height", `${height}px`);
+    el?.setAttribute("aria-valuenow", String(height));
+  },
+  onCollapseChange: (collapsed) => logsCollapsedAtom(collapsed),
+});
 
-function persistSidebarWidth(): void {
-  try {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
-  } catch {
-    // Storage disabled (private mode / blocked): the session still resizes.
-  }
-}
-
-function restoreSidebarWidth(): void {
-  let raw: string | null = null;
-  try {
-    raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
-  } catch {
-    return;
-  }
-  if (raw === null) return;
-  const saved = Number(raw);
-  if (!Number.isFinite(saved)) return;
-  // Clamp against the current viewport, not the one it was saved on.
-  applySidebarWidth(null, saved);
-}
-
-function onSidebarResizeStart(e: PointerEvent): void {
-  const el = e.currentTarget as HTMLElement;
-  if (el.offsetParent === null) return; // mobile drawer: width is CSS-only
-  el.focus();
-  resizeDrag = { pointerId: e.pointerId, startX: e.clientX, startWidth: sidebarWidth };
-  el.setPointerCapture(e.pointerId);
-  document.body.classList.add("sidebar-resizing");
-}
-
-function onSidebarResizeMove(e: PointerEvent): void {
-  if (!resizeDrag || e.pointerId !== resizeDrag.pointerId) return;
-  applySidebarWidth(e.currentTarget as HTMLElement, resizeDrag.startWidth + (e.clientX - resizeDrag.startX));
-}
-
-function onSidebarResizeEnd(e: PointerEvent): void {
-  if (!resizeDrag || e.pointerId !== resizeDrag.pointerId) return;
-  resizeDrag = null;
-  document.body.classList.remove("sidebar-resizing");
-  persistSidebarWidth();
-}
-
-// Home/End jump to min/max (standard slider semantics); arrows step 16px,
-// or 48px with Shift for a coarse step.
-function onSidebarResizeKey(e: KeyboardEvent): void {
-  let next: number | null = null;
-  if (e.key === "ArrowRight") next = sidebarWidth + (e.shiftKey ? 48 : 16);
-  else if (e.key === "ArrowLeft") next = sidebarWidth - (e.shiftKey ? 48 : 16);
-  else if (e.key === "Home") next = SIDEBAR_MIN_WIDTH;
-  else if (e.key === "End") next = SIDEBAR_MAX_WIDTH;
-  if (next === null) return;
-  e.preventDefault();
-  applySidebarWidth(e.currentTarget as HTMLElement, next);
-  persistSidebarWidth();
-}
-
-function onSidebarResizeReset(e: MouseEvent): void {
-  // Double-click: back to the default and forget the stored preference.
-  applySidebarWidth(e.currentTarget as HTMLElement, SIDEBAR_DEFAULT_WIDTH);
-  try {
-    localStorage.removeItem(SIDEBAR_WIDTH_KEY);
-  } catch {
-    // ignore storage failures
-  }
+function onToggleLogs(): void {
+  logsPanel.toggle(); // persists and bumps the atom; the render does the rest
 }
 
 // ── Chat wiring ─────────────────────────────────────────────────────────────
@@ -1299,13 +1284,23 @@ function App() {
           onSearchQuery={onSearchQuery}
           onSearchKeydown={onSearchKeydown}
           onActivateHit={onActivateHit}
-          sidebarWidth={sidebarWidth}
-          sidebarMax={sidebarMaxWidth()}
-          onResizeStart={onSidebarResizeStart}
-          onResizeMove={onSidebarResizeMove}
-          onResizeEnd={onSidebarResizeEnd}
-          onResizeKey={onSidebarResizeKey}
-          onResizeReset={onSidebarResizeReset}
+          sidebarWidth={sidebarPanel.size()}
+          sidebarMax={sidebarPanel.maxSize()}
+          onResizeStart={sidebarPanel.onPointerDown}
+          onResizeMove={sidebarPanel.onPointerMove}
+          onResizeEnd={sidebarPanel.onPointerUp}
+          onResizeKey={sidebarPanel.onKeyDown}
+          onResizeReset={sidebarPanel.onDoubleClick}
+          logsCollapsed={logsPanel.collapsed()}
+          logsHeight={logsPanel.size()}
+          logsMin={LOGS_MIN_HEIGHT}
+          logsMax={logsPanel.maxSize()}
+          onToggleLogs={onToggleLogs}
+          onLogsResizeStart={logsPanel.onPointerDown}
+          onLogsResizeMove={logsPanel.onPointerMove}
+          onLogsResizeEnd={logsPanel.onPointerUp}
+          onLogsResizeKey={logsPanel.onKeyDown}
+          onLogsResizeReset={logsPanel.onDoubleClick}
         />
 
         <main id="chat-area">
@@ -1575,7 +1570,8 @@ function App() {
 async function init(): Promise<void> {
   const root = document.getElementById("app");
   if (!root) return;
-  restoreSidebarWidth();
+  sidebarPanel.restore();
+  logsPanel.restore();
   mounted = mount(<App />, root as unknown as DomNode);
   effect(render, [
     screenAtom,
@@ -1586,6 +1582,7 @@ async function init(): Promise<void> {
     pinnedIdsAtom,
     contextMenuAtom,
     searchAtom,
+    logsCollapsedAtom,
     completionAtom,
     attachmentsAtom,
     openTasksAtom,

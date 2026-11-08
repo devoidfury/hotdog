@@ -9,11 +9,7 @@ import {
   shortId,
   sanitize,
   resolveQuestionAnswer,
-  clampSidebarWidth,
   copyText,
-  SIDEBAR_MIN_WIDTH,
-  SIDEBAR_MAX_WIDTH,
-  SIDEBAR_DEFAULT_WIDTH,
 } from "@extensions/webui/ui/utils.ts";
 
 describe("formatTime", () => {
@@ -141,36 +137,6 @@ describe("question resolver wiring", () => {
   });
 });
 
-
-// ── Sidebar resize clamp ────────────────────────────────────────────────────
-
-describe("clampSidebarWidth", () => {
-  it("passes through values in range", () => {
-    expect(clampSidebarWidth(300, 1200)).toBe(300);
-  });
-
-  it("clamps below to the minimum", () => {
-    expect(clampSidebarWidth(50, 1200)).toBe(200);
-  });
-
-  it("clamps above to 520 on wide viewports", () => {
-    expect(clampSidebarWidth(800, 1200)).toBe(520);
-  });
-
-  it("caps at half the viewport when that is tighter", () => {
-    expect(clampSidebarWidth(500, 900)).toBe(450);
-  });
-
-  it("keeps the minimum on degenerate sub-400px viewports", () => {
-    expect(clampSidebarWidth(100, 300)).toBe(200);
-  });
-
-  it("matches the exported bounds", () => {
-    expect(clampSidebarWidth(0, 4000)).toBe(SIDEBAR_MIN_WIDTH);
-    expect(clampSidebarWidth(9999, 4000)).toBe(SIDEBAR_MAX_WIDTH);
-    expect(clampSidebarWidth(SIDEBAR_DEFAULT_WIDTH, 1200)).toBe(SIDEBAR_DEFAULT_WIDTH);
-  });
-});
 
 // ── copyText (DOM via the preloaded dom-helper stub) ────────────────────────
 

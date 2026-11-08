@@ -42,7 +42,7 @@ const noop = (): void => {};
 // Search closed by default; individual search tests override `search`.
 const CLOSED_SEARCH = { open: false, query: "", pending: false, results: null } as const;
 
-function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState }): Mounted {
+function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; logsCollapsed?: boolean }): Mounted {
   return mount(
     <Sidebar
       sessions={opts.sessions ?? []}
@@ -53,6 +53,10 @@ function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs
       pinnedIds={opts.pinned ?? new Set()}
       sidebarWidth={300}
       sidebarMax={520}
+      logsCollapsed={opts.logsCollapsed ?? false}
+      logsHeight={240}
+      logsMin={96}
+      logsMax={450}
       onCreate={noop}
       onSwitch={noop}
       onCancel={noop}
@@ -67,11 +71,17 @@ function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs
       onSearchQuery={noop}
       onSearchKeydown={noop}
       onActivateHit={noop}
+      onToggleLogs={noop}
       onResizeStart={noop}
       onResizeMove={noop}
       onResizeEnd={noop}
       onResizeKey={noop}
       onResizeReset={noop}
+      onLogsResizeStart={noop}
+      onLogsResizeMove={noop}
+      onLogsResizeEnd={noop}
+      onLogsResizeKey={noop}
+      onLogsResizeReset={noop}
     />,
     container as unknown as DomNode,
   );
@@ -441,6 +451,10 @@ function mountInteractive(
       pinnedIds={opts.pinned ?? new Set()}
       sidebarWidth={300}
       sidebarMax={520}
+      logsCollapsed={false}
+      logsHeight={240}
+      logsMin={96}
+      logsMax={450}
       onCreate={() => calls.push("create")}
       onSwitch={(id) => calls.push(`switch:${id}`)}
       onCancel={(id) => calls.push(`cancel:${id}`)}
@@ -455,11 +469,17 @@ function mountInteractive(
       onSearchQuery={(t) => calls.push(`searchQuery:${t}`)}
       onSearchKeydown={noop}
       onActivateHit={(hit) => calls.push(`activateHit:${hit.logId}`)}
+      onToggleLogs={() => calls.push("toggleLogs")}
       onResizeStart={noop}
       onResizeMove={noop}
       onResizeEnd={noop}
       onResizeKey={noop}
       onResizeReset={noop}
+      onLogsResizeStart={() => calls.push("logsResizeStart")}
+      onLogsResizeMove={() => calls.push("logsResizeMove")}
+      onLogsResizeEnd={() => calls.push("logsResizeEnd")}
+      onLogsResizeKey={() => calls.push("logsResizeKey")}
+      onLogsResizeReset={() => calls.push("logsResizeReset")}
     />,
     container as unknown as DomNode,
   );
@@ -524,6 +544,97 @@ describe("row interactions", () => {
     row.click();
     row.dispatchEvent(new Event("contextmenu"));
     expect(calls).toEqual([`view:${FULL_ID}`, `logMenu:${FULL_ID}`]);
+  });
+});
+
+// ── Recent Logs titlebar (collapse + vertical drag handle) ─────────────────
+// The secondary header is the section's collapse control AND its vertical
+// resize handle (panel-resize.ts drives it from app.tsx). What the component
+// owns: the chevron button's a11y contract, the separator semantics that ride
+// only while there is a height to drag, and the rule that a gesture landing
+// on the button belongs to the button.
+
+const pointer = (el: Element, type: string, init: Record<string, unknown> = {}): boolean =>
+  (el as unknown as HTMLElement).dispatchEvent({ type, ...init } as unknown as Event);
+
+describe("Recent Logs titlebar", () => {
+  it("expanded: the header is a focusable horizontal separator and the chevron says collapse", () => {
+    const root = render({ logs: [coldLog()] });
+    const header = root.querySelector(".sidebar-header-secondary")!;
+    expect(header.getAttribute("class")).toContain("sidebar-header-resize");
+    expect(header.getAttribute("role")).toBe("separator");
+    expect(header.getAttribute("aria-orientation")).toBe("horizontal");
+    expect(header.getAttribute("aria-label")).toContain("Resize");
+    expect(header.getAttribute("tabindex")).toBe("0");
+    expect(header.getAttribute("aria-valuenow")).toBe("240");
+    expect(header.getAttribute("aria-valuemin")).toBe("96");
+    expect(header.getAttribute("aria-valuemax")).toBe("450");
+
+    const toggle = root.querySelector("#logs-toggle")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.getAttribute("aria-controls")).toBe("log-list");
+    expect(toggle.getAttribute("aria-label")).toBe("Collapse recent logs");
+    // Chevron down while expanded; the glyph is decoration (aria-hidden).
+    expect(root.querySelector(".logs-toggle-glyph")!.getAttribute("class")).not.toContain("-up");
+    expect(root.querySelector(".logs-toggle-glyph")!.getAttribute("aria-hidden")).toBe("true");
+    // The list is present and the live-sessions section above it untouched.
+    expect(root.querySelector("#log-list")).not.toBeNull();
+    expect(root.querySelector("#session-list")).not.toBeNull();
+    expect(root.querySelector("aside")!.getAttribute("class") ?? "").not.toContain("logs-collapsed");
+  });
+
+  it("collapsed: the header stays, the drag semantics drop, the chevron flips", () => {
+    const root = render({ logs: [coldLog()], logsCollapsed: true });
+    const header = root.querySelector(".sidebar-header-secondary")!;
+    // A collapsed section has no height to drag: no separator, no tabindex,
+    // no row-resize class (the cursor must not lie).
+    expect(header.getAttribute("class")).not.toContain("sidebar-header-resize");
+    expect(header.getAttribute("role")).toBeNull();
+    expect(header.getAttribute("tabindex")).toBeNull();
+    expect(header.getAttribute("aria-valuenow")).toBeNull();
+    // Still a header with its title, still holding the toggle.
+    expect(header.textContent).toContain("Recent Logs");
+    const toggle = root.querySelector("#logs-toggle")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getAttribute("aria-label")).toBe("Expand recent logs");
+    expect(root.querySelector(".logs-toggle-glyph")!.getAttribute("class")).toContain("logs-toggle-glyph-up");
+    // The class that hides the list rides the aside (CSS drops #log-list out
+    // of the flow; the live-sessions list keeps its own slot).
+    expect(root.querySelector("aside")!.getAttribute("class")).toContain("logs-collapsed");
+    expect(root.querySelector("#session-list")).not.toBeNull();
+  });
+
+  it("the toggle routes to onToggleLogs", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ logs: [coldLog()] }, calls);
+    clickable(root, "#logs-toggle").click();
+    expect(calls).toEqual(["toggleLogs"]);
+  });
+
+  it("drag and reset ride the titlebar, but never the toggle button", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ logs: [coldLog()] }, calls);
+    const header = root.querySelector(".sidebar-header-secondary")!;
+    pointer(header, "pointerdown", { pointerId: 1, clientY: 200, currentTarget: header });
+    expect(calls).toEqual(["logsResizeStart"]);
+    calls.length = 0;
+    // The button swallows its own pointerdown and dblclick, so a press on the
+    // chevron is never a drag and a double-click on it is never a height reset.
+    const toggle = clickable(root, "#logs-toggle");
+    pointer(toggle, "pointerdown", { pointerId: 1, clientY: 200, currentTarget: toggle });
+    pointer(toggle, "dblclick", { currentTarget: toggle });
+    expect(calls).toEqual([]);
+    // ...while the same gesture on the titlebar still reaches the seam.
+    pointer(header, "dblclick", { currentTarget: header });
+    expect(calls).toEqual(["logsResizeReset"]);
+  });
+
+  it("keydown on the titlebar reaches the keyboard resize handler", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ logs: [coldLog()] }, calls);
+    const header = root.querySelector(".sidebar-header-secondary")!;
+    pointer(header, "keydown", { key: "ArrowDown", currentTarget: header });
+    expect(calls).toEqual(["logsResizeKey"]);
   });
 });
 

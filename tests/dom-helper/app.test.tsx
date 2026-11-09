@@ -2101,6 +2101,408 @@ describe("header reasoning-visibility chip", () => {
     await tick();
     expect(el("#log-view-label")).toBeFalsy();
   });
+
+  it("carries aria-pressed with the sibling search-chip idiom (audit 1.6)", async () => {
+    await attachWithChip();
+    // Same contract as #search-btn: the attribute rides only when pressed.
+    // Pressed = the view deviation (reasoning hidden) is engaged; the
+    // default shown state reads unpressed.
+    expect(el("#thinking-toggle").getAttribute("aria-pressed")).toBeNull();
+    el("#thinking-toggle").click();
+    await tick();
+    expect(el("#thinking-toggle").getAttribute("aria-pressed")).toBe("true");
+    el("#thinking-toggle").click();
+    await tick();
+    expect(el("#thinking-toggle").getAttribute("aria-pressed")).toBeNull();
+  });
+});
+
+// ── Accessibility: composer escape hatches (focus-trap findings) ────────────
+
+describe("a11y: composer focus escape hatches", () => {
+  // Custom dispatch: the shared key() swallows preventDefault behind a no-op;
+  // these pins need to OBSERVE it. Returns defaultPrevented.
+  function keyTrack(node: Element, k: string, over: Record<string, unknown> = {}): boolean {
+    let prevented = false;
+    node.dispatchEvent({
+      type: "keydown",
+      key: k,
+      currentTarget: node,
+      preventDefault: () => {
+        prevented = true;
+      },
+      ...over,
+    } as unknown as Event);
+    return prevented;
+  }
+
+  // "/"-style prefix -> server options -> popup rendered. Callers own the
+  // popup afterwards and dismiss it before finishing.
+  async function openCompletionPopup(): Promise<HTMLElement> {
+    await attach();
+    const box = el("#chat-input");
+    setComposer("/mod");
+    (box as unknown as { selectionStart: number | null }).selectionStart = 4;
+    clearSent();
+    key(box, "Tab");
+    await tick();
+    const req = sent<{ requestId: number }>("complete")[0]!;
+    ws.fireMessage({
+      type: "completions",
+      requestId: req.requestId,
+      prefix: "/mod",
+      options: [{ value: "/model" }, { value: "/models" }],
+    });
+    await tick();
+    return box;
+  }
+
+  it("Shift+Tab traverses: not prevented, and no completion request fires", async () => {
+    await attach();
+    const box = el("#chat-input");
+    (box as unknown as { value: string }).value = "ship it";
+    clearSent();
+    // The trap: the old guard preventDefaulted BOTH directions and fired a
+    // forward completion request off Shift+Tab too.
+    expect(keyTrack(box, "Tab", { shiftKey: true })).toBe(false);
+    await tick();
+    expect(sent("complete")).toHaveLength(0);
+  });
+
+  it("forward Tab still requests completions (the completion UX is unchanged)", async () => {
+    await attach();
+    const box = el("#chat-input");
+    setComposer("/mod");
+    (box as unknown as { selectionStart: number | null }).selectionStart = 4;
+    clearSent();
+    expect(keyTrack(box, "Tab")).toBe(true);
+    await tick();
+    expect(sent("complete")).toHaveLength(1);
+  });
+
+  it("popup-open Tab and Shift+Tab cycle options (menu branch unchanged)", async () => {
+    const box = await openCompletionPopup();
+    expect(els(".completion-item")[0]!.classList.contains("active")).toBe(true);
+    key(box, "Tab");
+    await tick();
+    expect(els(".completion-item")[1]!.classList.contains("active")).toBe(true);
+    key(box, "Tab", { shiftKey: true });
+    await tick();
+    expect(els(".completion-item")[0]!.classList.contains("active")).toBe(true);
+    key(box, "Escape"); // leave no popup for the suites that follow
+    await tick();
+    expect(document.querySelector("#completion-menu")).toBeNull();
+  });
+
+  it("Escape closes the popup first (focus stays), blurs on the second press", async () => {
+    const box = await openCompletionPopup();
+    box.focus();
+    key(box, "Escape"); // press 1: popup dismissal only -- focus never moves
+    await tick();
+    expect(document.querySelector("#completion-menu")).toBeNull();
+    expect(document.activeElement).toBe(box);
+    box.focus();
+    key(box, "Escape"); // press 2: no popup -> leave the field
+    await tick();
+    expect(document.activeElement).toBe(document.body);
+    expect((box as unknown as { value: string }).value).toBe("/mod"); // text untouched
+  });
+
+  it("Escape with no popup open blurs the textarea and prevents its default", async () => {
+    await attach();
+    const box = el("#chat-input");
+    box.focus();
+    expect(document.activeElement).toBe(box);
+    expect(keyTrack(box, "Escape")).toBe(true);
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
+// ── Accessibility: sidebar rows + context menus on the keyboard (audit 1.2) ─
+
+describe("a11y: sidebar rows and menus on the keyboard", () => {
+  it("rows are focusable list items inside role=list containers", async () => {
+    await attach();
+    expect(els(".session-item")[0]!.getAttribute("role")).toBe("listitem");
+    expect(els(".session-item")[0]!.getAttribute("tabindex")).toBe("0");
+    expect(els(".log-item")[0]!.getAttribute("role")).toBe("listitem");
+    expect(els(".log-item")[0]!.getAttribute("tabindex")).toBe("0");
+    expect(el("#session-list").getAttribute("role")).toBe("list");
+    expect(el("#log-list").getAttribute("role")).toBe("list");
+  });
+
+  it("Enter on a cold log row opens that log (left-click parity)", async () => {
+    await attach();
+    clearSent();
+    key(els(".log-item")[0]!, "Enter");
+    await tick();
+    expect(sent<{ logId: string }>("viewLog")[0]?.logId).toBe(L1);
+  });
+
+  it("Space on a live row switches to it and suppresses the page scroll", async () => {
+    await attach();
+    ws.fireMessage({
+      type: "sessions",
+      sessions: [sessionRow, { ...sessionRow, id: "s-kb-2" }],
+    });
+    await tick();
+    const other = els(".session-item").find((r) => r.getAttribute("data-sid") === "s-kb-2")!;
+    expect(other).toBeDefined();
+    let prevented = false;
+    other.dispatchEvent({
+      type: "keydown",
+      key: " ",
+      currentTarget: other,
+      preventDefault: () => {
+        prevented = true;
+      },
+    } as unknown as Event);
+    await tick();
+    expect(sent<{ sessionId: string }>("switchSession")[0]?.sessionId).toBe("s-kb-2");
+    expect(prevented).toBe(true);
+  });
+
+  it("the ContextMenu key opens the row menu; roles ride it, focus lands on the first item", async () => {
+    await attach();
+    const row = els(".session-item")[0]!;
+    row.focus();
+    key(row, "ContextMenu");
+    await tick();
+    const menu = el(".context-menu");
+    expect(menu.getAttribute("role")).toBe("menu");
+    const items = els(".context-menu-item");
+    expect(items.length).toBeGreaterThan(1);
+    expect(items.map((i) => i.getAttribute("role"))).toEqual(items.map(() => "menuitem"));
+    expect(items.every((i) => i.getAttribute("tabindex") === "-1")).toBe(true);
+    expect(document.activeElement).toBe(items[0]!);
+    key(menu, "Escape");
+    await tick();
+  });
+
+  it("Shift+F10 opens the menu too (the browser that never fires contextmenu from keys)", async () => {
+    await attach();
+    const row = els(".session-item")[0]!;
+    row.focus();
+    key(row, "F10", { shiftKey: true });
+    await tick();
+    expect(el(".context-menu")).toBeTruthy();
+    expect(document.activeElement).toBe(els(".context-menu-item")[0]!);
+    key(el(".context-menu"), "Escape");
+    await tick();
+    expect(document.querySelector(".context-menu")).toBeNull();
+  });
+
+  it("Tab closes the menu WITHOUT preventDefault and returns focus to the row", async () => {
+    await attach();
+    const row = els(".session-item")[0]!;
+    row.focus();
+    key(row, "ContextMenu");
+    await tick();
+    const menu = el(".context-menu");
+    let prevented = false;
+    menu.dispatchEvent({
+      type: "keydown",
+      key: "Tab",
+      currentTarget: menu,
+      preventDefault: () => {
+        prevented = true;
+      },
+    } as unknown as Event);
+    await tick();
+    expect(prevented).toBe(false); // traversal must continue
+    expect(document.querySelector(".context-menu")).toBeNull(); // WAI: Tab dismisses
+    // The dismissal hands focus to the row (not the unmounted item), so the
+    // browser's Tab advance starts from a live element instead of <body>.
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("arrow keys traverse the menu (wrapping) and Escape closes + refocuses the row", async () => {
+    await attach();
+    const row = els(".session-item")[0]!;
+    row.focus();
+    key(row, "ContextMenu");
+    await tick();
+    const menu = el(".context-menu");
+    const items = els(".context-menu-item");
+    key(menu, "ArrowDown");
+    await tick();
+    expect(document.activeElement).toBe(items[1]!);
+    key(menu, "ArrowUp");
+    key(menu, "ArrowUp");
+    await tick();
+    expect(document.activeElement).toBe(items[items.length - 1]!); // wraps past the top
+    key(menu, "Escape");
+    await tick();
+    expect(document.querySelector(".context-menu")).toBeNull();
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("Enter activates the highlighted item and focus returns to the row", async () => {
+    await attach();
+    const row = els(".session-item")[0]!;
+    row.focus();
+    key(row, "ContextMenu");
+    await tick();
+    clearSent();
+    key(els(".context-menu-item")[0]!, "Enter"); // Pin leads every menu
+    await tick();
+    expect(sent<{ sessionId: string }>("setPinned")[0]?.sessionId).toBe(SID);
+    expect(document.querySelector(".context-menu")).toBeNull();
+    expect(document.activeElement).toBe(row);
+    // The next attach's applyPinnedFlags reconciles the optimistic pin away.
+  });
+});
+
+// ── Accessibility: search dialog Escape focus return + live region ──────────
+
+describe("a11y: search dialog focus", () => {
+  it("Escape in the search input closes the panel and refocuses #search-btn", async () => {
+    await attach();
+    el("#search-btn").click();
+    await tick();
+    const input = el("#search-input");
+    expect(document.activeElement).toBe(input); // openSearch auto-focus
+    key(input, "Escape");
+    await tick();
+    expect(document.querySelector("#search-panel")).toBeNull();
+    expect(document.activeElement).toBe(el("#search-btn"));
+  });
+
+  it("the X button closes the panel and refocuses #search-btn (same handoff as Escape)", async () => {
+    await attach();
+    el("#search-btn").click();
+    await tick();
+    // The ✕ unmounts its own panel: focus must not drop to <body>.
+    el("#search-clear").click();
+    await tick();
+    expect(document.querySelector("#search-panel")).toBeNull();
+    expect(document.activeElement).toBe(el("#search-btn"));
+  });
+
+  it("activating a search hit hands focus to the revealed row, not <body>", async () => {
+    await attach();
+    el("#search-btn").click();
+    await tick();
+    const input = el("#search-input");
+    (input as unknown as { value: string }).value = "needle";
+    input.dispatchEvent({ type: "input", currentTarget: input } as unknown as Event);
+    clearSent();
+    await sleep(300); // the search debounce
+    const [req] = sent<{ requestId: number }>("searchLogs");
+    ws.fireMessage({
+      type: "searchResults",
+      requestId: req!.requestId,
+      query: "needle",
+      results: [
+        { logId: L1, lastActivityAt: 2, matchCount: 1, profile: "manager", live: false, snippets: ["a needle line"] },
+      ],
+    });
+    await tick();
+    el(".search-hit").click(); // the hit unmounts with the panel
+    await tick();
+    const row = els(".log-item").find((r) => r.getAttribute("data-sid") === L1)!;
+    expect(row).toBeDefined();
+    expect(document.querySelector("#search-panel")).toBeNull();
+    expect(document.activeElement).toBe(row);
+  });
+});
+
+// Live region: the terminal matrix and the teardown. This describe runs LAST
+// before the auth lifecycle -- its final test logs the app out, and the auth
+// section begins by firing authError anyway.
+
+describe("a11y: aria-live terminals and teardown", () => {
+  it("the live region is a polite status role and mirrors the attached run", async () => {
+    await attach();
+    const region = el("#live-status");
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(region.classList.contains("visually-hidden")).toBe(true);
+    // Baseline the attached session to idle, then run a full turn.
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Working");
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Reply complete");
+  });
+
+  it("other sessions' working flips never announce", async () => {
+    await attach();
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Working");
+    ws.fireMessage({ type: "sessionState", sessionId: "s-noise-1", key: "working", value: true });
+    ws.fireMessage({ type: "sessionState", sessionId: "s-noise-1", key: "working", value: false });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Working"); // a side session says nothing here
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Reply complete");
+  });
+
+  it("a provider error announces Run failed; idle errors poison nothing", async () => {
+    await attach();
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Working");
+    // The doctrine (message-list handleError): an errored turn is neither
+    // completed nor stopped -- the region must not claim a completion.
+    ws.fireMessage({ type: "error", message: "provider exploded" });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Run failed");
+    // A stray error frame with no run in flight announces nothing and must
+    // not label the NEXT completion as failed.
+    ws.fireMessage({ type: "error", message: "stray command error" });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Run failed"); // unchanged
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Reply complete"); // honest again
+  });
+
+  it("a local Stop announces Work stopped, not a completion", async () => {
+    await attach();
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Working");
+    clearSent();
+    el("#cancel-btn").click();
+    await tick();
+    expect(sent("cancel")).toHaveLength(1);
+    expect(el("#live-status").textContent).toBe("Work stopped");
+  });
+
+  it("a socket drop mid-run announces Connection lost", async () => {
+    await attach();
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Working");
+    // The double's plain onclose handler property -- exactly what a real
+    // dropped connection fires (chat then flips working with connected=false).
+    ws.onclose?.();
+    await tick();
+    expect(el("#live-status").textContent).toBe("Connection lost");
+  });
+
+  it("logout unsubscribes the announce effect: teardown flips never announce", async () => {
+    await attach();
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Working");
+    // handleAuthFailure stops the chat effects BEFORE chat.disconnect(): a
+    // leaked announce effect would fire on that working(false) and announce
+    // ("Connection lost") mid-teardown, on a screen the user is leaving.
+    // The boot socket's handlers stay attached to the instance, so the
+    // leaked mutant is observable here exactly.
+    ws.fireMessage({ type: "authError", message: "revoked" });
+    await tick();
+    expect(el("#main-ui").getAttribute("class")).toContain("hidden"); // logged out
+    expect(el("#live-status").textContent).toBe("Working"); // nothing announced on the way down
+  });
 });
 
 // ── Auth lifecycle: socket authError teardown, login form, Ctrl+Shift+L ─────

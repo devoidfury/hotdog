@@ -564,6 +564,12 @@ interface ChatConfig {
   onSessionDeleted?: (sessionId: string) => void;
   onAuthFailure?: () => void;
   onWorkingMapChange?: () => void;
+  /** The server's error frame landed (case "error"). Fired BEFORE the working
+   *  flip so the app's aria-live off-edge can read the terminal signal and
+   *  say "Run failed" instead of claiming a completion (the doctrine of
+   *  message-list.ts handleError: an errored turn is neither completed nor
+   *  stopped). UI-layer notice only -- the frame itself is untouched. */
+  onRunError?: () => void;
 }
 
 export interface ChatController {
@@ -651,6 +657,7 @@ export function createChat({
   onSessionDeleted,
   onAuthFailure,
   onWorkingMapChange,
+  onRunError,
 }: ChatConfig): ChatController {
   let ws: WebSocket | null = null;
   let messageList: MessageListManager | null = null;
@@ -1078,6 +1085,9 @@ export function createChat({
         if (data.key !== "hideThinking") list.handleSessionState(data);
         break;
       case "error":
+        // Terminal marker first, flip second: the working-effect that rides
+        // the flip must see WHY the turn ended (aria-live, see app.tsx).
+        onRunError?.();
         workingAtom(false);
         list.handleError(data);
         break;

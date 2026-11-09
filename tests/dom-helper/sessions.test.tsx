@@ -438,16 +438,16 @@ describe("formatDateTime", () => {
 
 function mountInteractive(
   container: Element,
-  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState },
+  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; activeSessionId?: string | null; activeLogId?: string | null },
   calls: string[],
 ): Mounted {
   return mount(
     <Sidebar
       sessions={opts.sessions ?? []}
-      activeSessionId={null}
+      activeSessionId={opts.activeSessionId ?? null}
       workingMap={opts.working ?? new Map()}
       logs={opts.logs ?? []}
-      activeLogId={null}
+      activeLogId={opts.activeLogId ?? null}
       pinnedIds={opts.pinned ?? new Set()}
       sidebarWidth={300}
       sidebarMax={520}
@@ -544,6 +544,99 @@ describe("row interactions", () => {
     row.click();
     row.dispatchEvent(new Event("contextmenu"));
     expect(calls).toEqual([`view:${FULL_ID}`, `logMenu:${FULL_ID}`]);
+  });
+});
+
+// ── Keyboard access (audit 1.2) ─────────────────────────────────────────────
+// Rows were inert divs; they are focusable list items now, with Enter/Space
+// opening exactly what a left-click opens and the Menu key / Shift+F10 opening
+// exactly what a right-click opens. keyOn returns !defaultPrevented, so the
+// Enter/Space pins also prove the page scroll was suppressed.
+
+const keyOn = (el: Element, k: string, over: Record<string, unknown> = {}): boolean =>
+  // No preventDefault in the payload on purpose: dom-helper Object.assigns
+  // payload fields over DEvent, and a stub would swallow the real flag the
+  // return value reports.
+  (el as unknown as HTMLElement).dispatchEvent({
+    type: "keydown",
+    key: k,
+    currentTarget: el,
+    ...over,
+  } as unknown as Event);
+
+describe("row keyboard access", () => {
+  it("rows are focusable list items; the lists carry role=list only with rows", () => {
+    const root = render({ sessions: [liveSession()], logs: [coldLog()] });
+    expect(clickable(root, ".session-item").getAttribute("role")).toBe("listitem");
+    expect(clickable(root, ".session-item").getAttribute("tabindex")).toBe("0");
+    expect(clickable(root, ".log-item").getAttribute("role")).toBe("listitem");
+    expect(clickable(root, ".log-item").getAttribute("tabindex")).toBe("0");
+    expect(root.querySelector("#session-list")!.getAttribute("role")).toBe("list");
+    expect(root.querySelector("#log-list")!.getAttribute("role")).toBe("list");
+    // No rows -> no list (a role=list without listitems misleads readers).
+    const empty = render({});
+    expect(empty.querySelector("#session-list")!.getAttribute("role")).toBeNull();
+    expect(empty.querySelector("#log-list")!.getAttribute("role")).toBeNull();
+  });
+
+  it("Enter on a row activates exactly what a click activates", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ sessions: [liveSession()], logs: [coldLog()] }, calls);
+    expect(keyOn(clickable(root, ".session-item"), "Enter")).toBe(false); // prevented
+    expect(keyOn(clickable(root, ".log-item"), "Enter")).toBe(false);
+    expect(calls).toEqual([`switch:${FULL_ID}`, `view:${FULL_ID}`]);
+  });
+
+  it("Space activates and suppresses the list scroll", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ sessions: [liveSession()] }, calls);
+    expect(keyOn(clickable(root, ".session-item"), " ")).toBe(false);
+    expect(calls).toEqual([`switch:${FULL_ID}`]);
+  });
+
+  it("keys bubbling from a row's own button never double-activate the row", () => {
+    const calls: string[] = [];
+    const root = renderInteractive(
+      { sessions: [liveSession()], working: new Map([[FULL_ID, true]]) },
+      calls,
+    );
+    const row = clickable(root, ".session-item");
+    const stop = clickable(root, ".session-cancel-btn");
+    // The real-browser shape of a keydown that started on the button:
+    // target=button, currentTarget=row. The row must stay silent.
+    stop.dispatchEvent({
+      type: "keydown",
+      key: "Enter",
+      target: stop,
+      currentTarget: row,
+      preventDefault: () => {},
+    } as unknown as Event);
+    expect(calls).toEqual([]);
+  });
+
+  it("the Menu key and Shift+F10 open the row menu; plain F10 does not", () => {
+    const calls: string[] = [];
+    const root = renderInteractive({ sessions: [liveSession()], logs: [coldLog()] }, calls);
+    keyOn(clickable(root, ".session-item"), "ContextMenu");
+    keyOn(clickable(root, ".log-item"), "F10", { shiftKey: true });
+    keyOn(clickable(root, ".log-item"), "F10"); // unmodified F10 stays unclaimed
+    expect(calls).toEqual([`sessionMenu:${FULL_ID}`, `logMenu:${FULL_ID}`]);
+  });
+
+  it("the active row carries aria-current; inactive rows carry none", () => {
+    const calls: string[] = [];
+    const liveActive = renderInteractive(
+      { sessions: [liveSession()], logs: [coldLog()], activeSessionId: FULL_ID },
+      calls,
+    );
+    expect(clickable(liveActive, ".session-item").getAttribute("aria-current")).toBe("true");
+    expect(clickable(liveActive, ".log-item").getAttribute("aria-current")).toBeNull();
+    const logActive = renderInteractive(
+      { sessions: [liveSession()], logs: [coldLog()], activeLogId: FULL_ID },
+      calls,
+    );
+    expect(clickable(logActive, ".log-item").getAttribute("aria-current")).toBe("true");
+    expect(clickable(logActive, ".session-item").getAttribute("aria-current")).toBeNull();
   });
 });
 
@@ -672,6 +765,7 @@ describe("ContextMenu", () => {
           ],
         }}
         rootRef={() => {}}
+        onClose={() => {}}
       />,
       host as unknown as DomNode,
     );
@@ -682,6 +776,44 @@ describe("ContextMenu", () => {
     items[0]!.click();
     items[1]!.click();
     expect(calls).toEqual(["open", "delete"]);
+  });
+
+  it("keyboard: arrows cycle focus, Enter activates, Escape and Tab close (Tab un-prevented)", () => {
+    const calls: string[] = [];
+    let closes = 0;
+    const host = document.createElement("div");
+    app = mount(
+      <ContextMenu
+        menu={{
+          x: 0,
+          y: 0,
+          items: [
+            { label: "Open", onSelect: () => calls.push("open") },
+            { label: "Copy", onSelect: () => calls.push("copy") },
+          ],
+        }}
+        rootRef={() => {}}
+        onClose={() => closes++}
+      />,
+      host as unknown as DomNode,
+    );
+    const menu = clickable(host, ".context-menu");
+    const items = Array.from(host.querySelectorAll(".context-menu-item")) as unknown as HTMLElement[];
+    expect(menu.getAttribute("role")).toBe("menu");
+    expect(items.map((i) => i.getAttribute("role"))).toEqual(["menuitem", "menuitem"]);
+    items[0]!.focus();
+    expect(keyOn(menu, "ArrowDown")).toBe(false); // prevented
+    expect(document.activeElement).toBe(items[1]!);
+    expect(keyOn(items[1]!, "Enter")).toBe(false); // menuitems have no native activation
+    expect(calls).toEqual(["copy"]);
+    items[0]!.focus();
+    expect(keyOn(menu, "Escape")).toBe(false);
+    expect(closes).toBe(1);
+    // Tab closes but is NOT prevented: WAI traversal must continue past the
+    // dismissed menu (in-app, the close hands focus to the row first).
+    items[1]!.focus();
+    expect(keyOn(menu, "Tab")).toBe(true);
+    expect(closes).toBe(2);
   });
 });
 

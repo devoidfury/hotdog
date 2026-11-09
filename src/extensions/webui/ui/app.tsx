@@ -30,6 +30,28 @@ const logsAtom = reactiveState<LogInfo[]>([]);
 const activeLogIdAtom = reactiveState<string | null>(null);
 const contextMenuAtom = reactiveState<ContextMenuState | null>(null);
 
+// Screen-reader announcements for the streaming reply the transcript renders
+// imperatively (audit 1.1). Kept deliberately coarse: the attached session's
+// run boundaries only -- "Working" on a start, and on the end edge a string
+// picked from the TERMINAL SIGNAL: "Work stopped" (local Stop pressed),
+// "Run failed" (the server's error frame), "Connection lost" (dead socket),
+// or "Reply complete" (a genuinely finished turn). An errored or stopped turn
+// claims no completion -- the same rule message-list.ts:1130-1133 applies to
+// the turn footer. Never a streamed token, never reply text (the transcript
+// already exposes that; duplicating it would fight the reader). A
+// role="status" aria-live region (#live-status) renders this; every on-edge
+// announces "Working", so consecutive end-strings are always separated by a
+// different value and always re-announced.
+const liveAnnounceAtom = reactiveState<string>("");
+
+// One-shot terminal markers so the off-edge knows WHY the run ended (the
+// workingAtom(false) flip itself does not say). Armed only while a run is
+// actually in flight -- an idle command error or a Stop with nothing running
+// has no off-edge to consume the marker, and a stale one would mislabel the
+// next real completion. Both are consumed by the single off-edge they arm.
+let liveStopped = false;
+let liveFailed = false;
+
 // Sidebar full-text search (see sessions.tsx SearchPanel + the searchLogs WS
 // round-trip). One atom; every handler replaces the object wholesale. `open`
 // swaps the two sidebar lists for the panel. The input is uncontrolled: its
@@ -65,6 +87,26 @@ function closeSearch(): void {
   searchAtom({ open: false, query: "", pending: false, results: null });
 }
 
+/**
+ * The panel unmounts its input (and the hit rows), so every UI close must
+ * hand focus somewhere on purpose -- <body> is not an option (audit keyboard
+ * pass: Escape dropped focus). The header chip is the dialog's opener, so it
+ * is the default receiver. getElementById: the chip lives inside the Sidebar
+ * tree, out of this module's ref reach.
+ */
+function refocusSearchChip(): void {
+  document.getElementById("search-btn")?.focus();
+}
+
+/** A user closing the dialog (the ✕ button or the chip toggle) lands focus
+ *  back on the chip. Escape has its own path (onSearchKeydown); activation
+ *  hands focus to the revealed row instead (onActivateHit). The auth-failure
+ *  teardown deliberately stays on bare closeSearch. */
+function closeSearchFromUi(): void {
+  closeSearch();
+  refocusSearchChip();
+}
+
 function sendSearch(query: string): void {
   const q = query.trim();
   if (q === "") return;
@@ -91,6 +133,8 @@ function onSearchQuery(text: string): void {
 function onSearchKeydown(e: KeyboardEvent): void {
   if (e.key === "Escape") {
     closeSearch();
+    // Escape leaves the dialog the way it entered: back on the chip.
+    refocusSearchChip();
     return;
   }
   if (e.key === "Enter") {
@@ -112,11 +156,18 @@ function onActivateHit(hit: SearchHitWire): void {
     chat?.viewLog(hit.logId);
   }
   closeSearch();
-  // Then bring the selected row into view: closing search re-mounts the
-  // lists, and closeSearch's atom render is already queued ahead of this
-  // microtask (the openSearch focus idiom), so the rows exist by the time
-  // we look. Missing row (session ended mid-click) is a quiet no-op.
-  queueMicrotask(() => scrollHitIntoView(document, hit.live, hit.logId));
+  // Then bring the selected row into view AND hand it focus: closing search
+  // re-mounts the lists, and the hit row that was just clicked unmounted with
+  // the panel -- dropping focus to <body> would force a Tab walk from the
+  // page top. closeSearch's atom render is already queued ahead of this
+  // microtask (the openSearch focus idiom), so the rows exist by the time we
+  // look. Missing row (session ended mid-click) is quiet for the scroll and
+  // falls back to the search chip for focus.
+  queueMicrotask(() => {
+    const row = scrollHitIntoView(document, hit.live, hit.logId);
+    if (row) row.focus();
+    else refocusSearchChip();
+  });
 }
 
 function onSearchResults(
@@ -393,8 +444,57 @@ function onCloseLogView(): void {
 
 // ── Context menus ───────────────────────────────────────────────────────────
 
+// The row that opened the current menu: dismissContextMenu's focus-return
+// target (the menu itself is keyboard-operated via roles + arrow traversal).
+let contextMenuTriggerEl: HTMLElement | null = null;
+
 function dismissContextMenu(): void {
+  const trigger = contextMenuTriggerEl;
+  contextMenuTriggerEl = null;
+  // Focus-return (audit 1.2): the menu holds focus from the moment it opens
+  // (armContextMenu), so if it is still inside the menu at teardown --
+  // Escape, Enter/Space activation, or a mouse click elsewhere -- focus goes
+  // back to the row that opened it (when that row still exists) instead of
+  // dropping to <body>. A mousedown-outside onto a focusable control is
+  // unaffected: the browser's own focus handling runs after this listener.
+  if (
+    trigger &&
+    trigger.parentNode &&
+    contextMenuEl &&
+    contextMenuEl.contains(document.activeElement as unknown as Node)
+  ) {
+    trigger.focus();
+  }
   contextMenuAtom(null);
+}
+
+/**
+ * Anchor for a freshly built menu. A pointer contextmenu carries client
+ * coordinates; the keyboard paths (the row's Menu-key/Shift-F10 handler, and
+ * the keyboard-fired contextmenu events) carry none -- anchor at the row's
+ * rect, falling back to the origin when there is no layout to measure.
+ */
+function rowMenuPoint(e: MouseEvent | KeyboardEvent, rowEl: HTMLElement): { x: number; y: number } {
+  const mx = e.type === "contextmenu" ? (e as MouseEvent).clientX ?? 0 : 0;
+  const my = e.type === "contextmenu" ? (e as MouseEvent).clientY ?? 0 : 0;
+  if (mx || my) return { x: mx, y: my };
+  const r = rowEl?.getBoundingClientRect?.();
+  return r ? { x: r.left + 12, y: r.bottom + 2 } : { x: 0, y: 0 };
+}
+
+/**
+ * Arm a menu that was just put on the atom: remember the opening row for
+ * dismissContextMenu's focus-return, and move focus to the first item once
+ * the menu has rendered (openSearch's queueMicrotask idiom: the atom's
+ * render microtask was queued by its setter before this one runs). Every
+ * open takes focus so a keyboard-opened menu is immediately operable -- its
+ * items sit at tabindex="-1", out of Tab's way by design.
+ */
+function armContextMenu(rowEl: HTMLElement): void {
+  contextMenuTriggerEl = rowEl;
+  queueMicrotask(() => {
+    contextMenuEl?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  });
 }
 
 // ── Row pins (server-persisted) ─────────────────────────────────────────────
@@ -532,12 +632,13 @@ function rowMenuTail(id: string, logPath: string | undefined): ContextMenuItem[]
   ];
 }
 
-function onSessionMenu(e: MouseEvent, s: SessionInfo): void {
+function onSessionMenu(e: MouseEvent | KeyboardEvent, s: SessionInfo, rowEl: HTMLElement): void {
   const displayName = s.title || s.profile || "default";
   const isWorking = chat?.sessionWorkingMap.get(s.id) ?? false;
+  const { x, y } = rowMenuPoint(e, rowEl);
   contextMenuAtom({
-    x: e.clientX,
-    y: e.clientY,
+    x,
+    y,
     items: [
       pinMenuItem(s.id),
       ...(isWorking
@@ -594,13 +695,15 @@ function onSessionMenu(e: MouseEvent, s: SessionInfo): void {
       },
     ],
   });
+  armContextMenu(rowEl);
 }
 
-function onLogMenu(e: MouseEvent, logId: string): void {
+function onLogMenu(e: MouseEvent | KeyboardEvent, logId: string, rowEl: HTMLElement): void {
   const logPath = logsAtom().find((l) => l.id === logId)?.logPath;
+  const { x, y } = rowMenuPoint(e, rowEl);
   contextMenuAtom({
-    x: e.clientX,
-    y: e.clientY,
+    x,
+    y,
     items: [
       pinMenuItem(logId),
       {
@@ -624,6 +727,7 @@ function onLogMenu(e: MouseEvent, logId: string): void {
       },
     ],
   });
+  armContextMenu(rowEl);
 }
 
 // Close the menu on any mousedown outside it. No deferral needed: the
@@ -760,6 +864,12 @@ function startChat(): void {
       // Re-poll so the sidebar's per-session working indicators refresh.
       chat?.listSessions();
     },
+    onRunError: () => {
+      // Arm the failure terminal only while a run is actually in flight: an
+      // idle command error has no off-edge to consume the marker, and a stale
+      // one would mislabel the next real completion.
+      if (chat?.workingAtom()) liveFailed = true;
+    },
   });
 
   // Re-render on any chat atom change; also refresh the sidebar when the
@@ -790,12 +900,38 @@ function startChat(): void {
   // Elapsed-time tick only while a task is live (idle sessions burn nothing).
   const stopTaskTick = chat.tasksAtom.effect(syncTaskTick);
   syncTaskTick();
+  // aria-live narration of the attached session's working run (audit 1.1).
+  // The reactiveState primitive fires only on a real change, so every effect
+  // run IS a boundary. The off-edge reads its terminal marker first (local
+  // Stop, server error), then the socket truth (connectedAtom); only a turn
+  // that ended by finishing while connected claims "Reply complete".
+  const stopLiveAnnounce = chat.workingAtom.effect(() => {
+    const w = chat?.workingAtom() ?? false;
+    if (w) {
+      liveAnnounceAtom("Working");
+      return;
+    }
+    const stopped = liveStopped;
+    const failed = liveFailed;
+    liveStopped = false;
+    liveFailed = false;
+    liveAnnounceAtom(
+      stopped
+        ? "Work stopped"
+        : failed
+          ? "Run failed"
+          : (chat?.connectedAtom() ?? false)
+            ? "Reply complete"
+            : "Connection lost",
+    );
+  });
   const prevStop = stopChatEffects;
   stopChatEffects = () => {
     prevStop();
     stopModelRefresh();
     stopProfilesRefresh();
     stopTaskTick();
+    stopLiveAnnounce();
     stopActivitySync();
   };
 }
@@ -1146,9 +1282,21 @@ function onChatKeydown(e: KeyboardEvent): void {
       applyCompletion(el, menu, menu.options[menu.index]!);
       return;
     }
-  } else if (e.key === "Tab") {
+  } else if (e.key === "Tab" && !e.shiftKey) {
+    // Forward Tab requests completions. Shift+Tab is deliberately NOT caught
+    // here (or prevented): it falls through to the browser's backward focus
+    // traversal, the universal escape hatch that the old unconditional Tab
+    // guard destroyed -- with it, no in-page key could leave the composer.
     e.preventDefault();
     requestCompletions(el);
+    return;
+  } else if (e.key === "Escape") {
+    // No completion popup to dismiss -> Escape blurs the textarea, so the
+    // keyboard user can leave the composer (focus would otherwise have no
+    // way out). Popup-open Escape is handled above and still dismisses the
+    // popup without blurring, exactly as before.
+    e.preventDefault();
+    el.blur();
     return;
   }
 
@@ -1173,6 +1321,11 @@ function onModelChange(e: Event): void {
 }
 
 function onCancelSession(sessionId: string): void {
+  // A Stop on the ATTACHED running session is a user-initiated end: arm the
+  // terminal marker before the optimistic flip below (and chat.cancel's own
+  // flip) so the aria-live off-edge says "Work stopped". Scope: attached +
+  // working only, so a stray flag can never mislabel a later completion.
+  if (chat && sessionId === chat.sessionIdAtom() && chat.workingAtom()) liveStopped = true;
   chat?.send({ type: "cancel", sessionId });
   chat?.sessionWorkingMap.set(sessionId, false);
   if (chat?.sessionIdAtom() === sessionId) {
@@ -1259,6 +1412,19 @@ function App() {
       <LoginScreen hidden={screen !== "login"} onToken={activateToken} />
 
       <div id="main-ui" className={`screen${screen === "main" ? "" : " hidden"}`}>
+        {/* Screen-reader narration channel (audit 1.1): role=status announced
+            politely; carries ONLY working-state boundaries (liveAnnounceAtom)
+            -- never streamed tokens, never transcript text. Visually hidden:
+            clip, not display:none, or readers would skip it. */}
+        <div
+          id="live-status"
+          className="visually-hidden"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {liveAnnounceAtom()}
+        </div>
         <Sidebar
           sessions={sessionsAtom()}
           activeSessionId={sessionId}
@@ -1280,7 +1446,7 @@ function App() {
           search={searchAtom()}
           searchInputRef={searchInputRef}
           onOpenSearch={openSearch}
-          onCloseSearch={closeSearch}
+          onCloseSearch={closeSearchFromUi}
           onSearchQuery={onSearchQuery}
           onSearchKeydown={onSearchKeydown}
           onActivateHit={onActivateHit}
@@ -1347,6 +1513,10 @@ function App() {
                 type="button"
                 id="thinking-toggle"
                 className="header-btn toggleable"
+                // Same idiom as #search-btn next door: a pressed toggle chip.
+                // Pressed = the view deviation is engaged (reasoning hidden);
+                // the default "shown" state reads unpressed.
+                aria-pressed={hideThinking}
                 title={
                   "Show or hide reasoning in this browser (view setting only: it does not change the CLI's /thinking session state, and it applies to the log being browsed too)"
                 }
@@ -1527,7 +1697,17 @@ function App() {
                   // type=button: it lives inside #chat-form; without it the
                   // click would submit the composer before cancelling. The
                   // in-button spinner is the chat column's only busy tell.
-                  <button type="button" id="cancel-btn" onClick={() => chat?.cancel()}>
+                  <button
+                    type="button"
+                    id="cancel-btn"
+                    onClick={() => {
+                      // Same user-initiated-end marker as the row/menu Stop
+                      // (onCancelSession): chat.cancel flips working itself,
+                      // so arm before handing it the click.
+                      if (chat?.workingAtom()) liveStopped = true;
+                      chat?.cancel();
+                    }}
+                  >
                     <span className="spinner"></span>
                     Stop
                   </button>
@@ -1560,7 +1740,7 @@ function App() {
         })}
       </div>
 
-      {menu ? <ContextMenu menu={menu} rootRef={contextMenuRef} /> : null}
+      {menu ? <ContextMenu menu={menu} rootRef={contextMenuRef} onClose={dismissContextMenu} /> : null}
     </>
   );
 }
@@ -1581,6 +1761,7 @@ async function init(): Promise<void> {
     activeLogIdAtom,
     pinnedIdsAtom,
     contextMenuAtom,
+    liveAnnounceAtom,
     searchAtom,
     logsCollapsedAtom,
     completionAtom,

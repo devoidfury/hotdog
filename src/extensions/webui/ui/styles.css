@@ -123,6 +123,22 @@ body {
     overflow: hidden;
 }
 
+/* Screen-reader-only content: present to assistive tech, invisible on
+   screen. clip (not display:none/visibility:hidden, which readers skip).
+   Used by #live-status (app.tsx). */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* ── Custom Scrollbar ─────────────────────────────────────────────────────── */
 
 ::-webkit-scrollbar {
@@ -568,6 +584,15 @@ body.sidebar-resizing {
     background: var(--accent-soft);
 }
 
+/* Rows are keyboard-focusable (role=listitem tabindex=0, audit 1.2); mirror
+   the log-row focus grammar and add an inset accent ring so focus is visible
+   on the accent-soft active background too. */
+.session-item:focus-visible {
+    background: var(--bg-hover);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
 /* ── Sidebar Row Grammar (shared by live sessions and cold logs) ───────────
    line 1: profile · provider/model        [status][action]  -- model
                                                             ellipsizes; badge
@@ -965,6 +990,8 @@ body.logs-resizing .sidebar-header-resize {
 
 .log-item:focus-visible {
     background: var(--bg-hover);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
 }
 
 .log-item.active {
@@ -2656,6 +2683,14 @@ body.logs-resizing .sidebar-header-resize {
 
 .context-menu-item:active {
     background: var(--bg-active);
+}
+
+/* Arrow-key traversal focuses items programmatically; a real ring is needed
+   even when the browser's focus-visible heuristics stay off for JS focus. */
+.context-menu-item:focus {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+    background: var(--bg-hover);
 }
 
 .context-menu-item-danger {

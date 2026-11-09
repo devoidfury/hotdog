@@ -413,9 +413,28 @@ class DElement extends DNode {
     this.dispatchEvent(new DEvent("click", this));
   }
 
-  // The frontend focuses inputs (login screen, composer caret); nothing here
-  // has focus semantics, so this exists only so focus() calls are inert.
-  focus(): void {}
+  // Focus model: the a11y affordances (menu-item focus, Escape-blur, focus
+  // restore to the opener) move focus, so track document.activeElement
+  // instead of leaving focus() inert. No events fire -- tests observe the
+  // active element, not focus/blur bookkeeping.
+  focus(): void {
+    this.ownerDocument.activeElement = this;
+  }
+
+  blur(): void {
+    if (this.ownerDocument.activeElement === this) {
+      this.ownerDocument.activeElement = this.ownerDocument.body;
+    }
+  }
+
+  // There is no layout here: rects are all-zero, so anchoring code that
+  // consults them lands on its documented zero-rect fallback in tests.
+  getBoundingClientRect(): {
+    x: number; y: number; left: number; top: number;
+    right: number; bottom: number; width: number; height: number;
+  } {
+    return { x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+  }
 }
 
 function kebab(s: string): string {
@@ -643,6 +662,9 @@ class DDocument extends DNode {
   documentElement: DElement;
   body: DElement;
   head: DElement;
+  /** Where focus() lands; blurred elements fall back to <body> (real browsers
+   *  say <body> too when nothing else holds focus). */
+  activeElement: DElement;
 
   constructor() {
     super(null as unknown as DDocument);
@@ -654,6 +676,7 @@ class DDocument extends DNode {
     this.body = new DElement("body", this);
     this.documentElement.appendChild(this.head);
     this.documentElement.appendChild(this.body);
+    this.activeElement = this.body;
   }
 
   createElement(tag: string): DElement {

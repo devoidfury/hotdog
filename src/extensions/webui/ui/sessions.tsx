@@ -130,8 +130,8 @@ interface SidebarProps {
   onCancel: (sessionId: string) => void;
   onContinueLog: (logId: string) => void;
   onViewLog: (logId: string) => void;
-  onSessionMenu: (e: MouseEvent, session: SessionInfo) => void;
-  onLogMenu: (e: MouseEvent, logId: string) => void;
+  onSessionMenu: (e: MouseEvent | KeyboardEvent, session: SessionInfo, rowEl: HTMLElement) => void;
+  onLogMenu: (e: MouseEvent | KeyboardEvent, logId: string, rowEl: HTMLElement) => void;
   /** Search panel state + handlers (header magnifier toggles `open`). */
   search: SearchState;
   searchInputRef: Ref;
@@ -192,7 +192,10 @@ interface SidebarRowProps {
   /** Line-1 trailing action node (Stop / Resume); null omits the slot. */
   action?: JsxChild;
   onSelect: () => void;
-  onContextMenu?: (e: MouseEvent) => void;
+  /** Right-click AND its keyboard twins (Menu key / Shift+F10, and the
+   *  keyboard-fired contextmenu event). rowEl is the row element: the app
+   *  anchors keyboard-opened menus on it and restores focus there on close. */
+  onContextMenu?: (e: MouseEvent | KeyboardEvent, rowEl: HTMLElement) => void;
 }
 
 function rowClass(kindClass: string, active: boolean): string {
@@ -223,11 +226,18 @@ export function sortPinned<T extends { id: string }>(rows: T[], pinned: Set<stri
  * declares (live -> #session-list, cold -> #log-list), so an id present on
  * both sides scrolls the one the click opens. Missing row is a silent
  * no-op -- a session can end between the search and the click. "nearest"
- * keeps the scroll minimal: a visible row never moves.
+ * keeps the scroll minimal: a visible row never moves. Returns the row it
+ * revealed (null for the missing case) so the caller can hand it focus -- the
+ * search hit that was just clicked unmounted with the panel.
  */
-export function scrollHitIntoView(root: Document | Element, live: boolean, sid: string): void {
+export function scrollHitIntoView(
+  root: Document | Element,
+  live: boolean,
+  sid: string,
+): HTMLElement | null {
   const el = root.querySelector(`#${live ? "session" : "log"}-list [data-sid="${sid}"]`);
   el?.scrollIntoView({ block: "nearest" });
+  return (el as unknown as HTMLElement | null) ?? null;
 }
 
 /** One sidebar row in the shared grammar; the callers decide which slots exist. */
@@ -294,10 +304,31 @@ export function SidebarRow(p: SidebarRowProps) {
     <div
       className={rowClass(p.kindClass, p.active)}
       data-sid={p.sid}
+      // Focusable list item (audit 1.2): the div carried click/contextmenu
+      // listeners but no semantics, so rows were invisible to keyboards and
+      // assistive tech. Enter/Space activate exactly what a left-click does;
+      // the Menu key / Shift+F10 open exactly what a right-click opens.
+      role="listitem"
+      tabindex="0"
+      // "Which row is on screen" rode only the accent border; a reader needs
+      // it stated (aria-current on the active row of a role=list).
+      aria-current={p.active ? "true" : undefined}
       onClick={p.onSelect}
+      onKeydown={(e: KeyboardEvent) => {
+        // Direct presses on the row itself only; keys landing on its own
+        // buttons (Stop/Resume) belong to those buttons.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault(); // Space must not page-scroll while the row has focus
+          p.onSelect();
+        } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+          e.preventDefault();
+          p.onContextMenu?.(e, e.currentTarget as HTMLElement);
+        }
+      }}
       onContextMenu={(e: MouseEvent) => {
         e.preventDefault();
-        p.onContextMenu?.(e);
+        p.onContextMenu?.(e, e.currentTarget as HTMLElement);
       }}
     >
       <div className="row-l1">{line1}</div>
@@ -445,7 +476,7 @@ export function Sidebar(p: SidebarProps) {
         />
       ) : (
         <>
-      <div id="session-list">
+      <div id="session-list" role={p.sessions.length > 0 ? "list" : undefined}>
         {sortPinned(p.sessions, p.pinnedIds).map((s) => {
           const isWorking = p.workingMap.get(s.id) ?? false;
           return (
@@ -488,7 +519,7 @@ export function Sidebar(p: SidebarProps) {
                 ) : null
               }
               onSelect={() => p.onSwitch(s.id)}
-              onContextMenu={(e) => p.onSessionMenu(e, s)}
+              onContextMenu={(e, rowEl) => p.onSessionMenu(e, s, rowEl)}
             />
           );
         })}
@@ -543,7 +574,7 @@ export function Sidebar(p: SidebarProps) {
           ></span>
         </button>
       </div>
-      <div id="log-list">
+      <div id="log-list" role={p.logs.length > 0 ? "list" : undefined}>
         {p.logs.length === 0 ? (
           <div
             className="log-empty"
@@ -582,7 +613,7 @@ export function Sidebar(p: SidebarProps) {
                 </button>
               }
               onSelect={() => p.onViewLog(log.id)}
-              onContextMenu={(e) => p.onLogMenu(e, log.id)}
+              onContextMenu={(e, rowEl) => p.onLogMenu(e, log.id, rowEl)}
             />
           ))
         )}
@@ -612,21 +643,71 @@ export function Sidebar(p: SidebarProps) {
   );
 }
 
+/**
+ * Row context menu (audit 1.2): a real WAI menu. role=menu/menuitem, arrow
+ * keys move focus, Enter/Space activates (menuitems are divs -- no native
+ * activation), Escape closes (the app's onClose returns focus to the row
+ * that opened it). The app focuses the first item when the menu mounts, so
+ * a keyboard-opened menu is operable without traversal, and Tab never has
+ * to hunt items that sit at tabindex="-1".
+ */
 export function ContextMenu(props: {
   menu: ContextMenuState;
   rootRef: Ref;
+  onClose: () => void;
 }) {
+  const onMenuKeydown = (e: KeyboardEvent): void => {
+    const root = e.currentTarget as HTMLElement;
+    const items = Array.from(root.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
+    if (items.length === 0) return;
+    const idx = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      const n = items.length;
+      const next =
+        e.key === "Home" ? 0
+        : e.key === "End" ? n - 1
+        : e.key === "ArrowDown" ? (idx + 1) % n
+        : (idx - 1 + n) % n;
+      items[idx < 0 ? 0 : next]?.focus();
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      props.onClose();
+      return;
+    }
+    if (e.key === "Tab") {
+      // WAI menu: Tab dismisses and moves on. Deliberately NOT prevented:
+      // traversal continues (the dismiss hands focus to the row, and the
+      // browser advances from there). Without this, Tab would leave the
+      // overlay mounted with focus wandering out of it.
+      props.onClose();
+    }
+  };
+
   return (
     <div
       className="context-menu"
+      role="menu"
       ref={props.rootRef}
       style={{ left: `${props.menu.x}px`, top: `${props.menu.y}px` }}
+      onKeydown={onMenuKeydown}
     >
       {props.menu.items.map((it, i) => (
         <div
           key={i}
+          role="menuitem"
+          tabindex="-1"
           className={`context-menu-item${it.danger ? " context-menu-item-danger" : ""}`}
           onClick={it.onSelect}
+          onKeydown={(e: KeyboardEvent) => {
+            // Div menuitems get no native Enter/Space activation.
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              it.onSelect();
+            }
+          }}
         >
           {it.label}
         </div>

@@ -20,7 +20,7 @@ session's views are closed on `session:end`).
 | `open` | `url`, `view?` | Create (or replace) a named view and load an http(s) URL. |
 | `navigate` | `url`, `view?` | Load a URL in an existing view. |
 | `snapshot` | `view?` | Structured text of interactive elements: tag, id/class/name/type/role, aria label, text snippet, bounding-box center `(x,y)`. |
-| `click` | `selector` or `x`+`y`, `view?` | Click a selector (waits for actionability, 10s cap) or raw viewport coordinates. |
+| `click` | `selector` or `x`+`y`, `view?` | Click a selector (waits for actionability, 10s cap) or raw viewport coordinates. Raw x/y outside the **measured viewport** are refused with that frame named; nothing is dispatched. `open`/`snapshot`/`screenshot` print the measured frame. |
 | `type` | `text`, `view?` | Insert text into the focused element. |
 | `press` | `key`, `view?` | Press a key (`Enter`, `Tab`, `Escape`, arrows, a single character...). |
 | `screenshot` | `view?` | Viewport-only capture; attaches an image part for vision-capable models, otherwise path + text stub. Always saved under the session's directory. |
@@ -85,6 +85,20 @@ session's views are closed on `session:end`).
 8. **Config**: exactly one key, `agentBrowser.allowLoopback` -- no `enabled`
    key either; loading `@experimental` *is* the opt-in. See
    `docs/config-reference.md`.
+9. **Viewport honesty** (the raw-click offset fix): the constructor's
+   width/height size the Chrome **window**, so `open` calls
+   `resize(1280, 900)` (a layout-viewport override that survives navigate)
+   once the first page commits -- Chrome rejects it on an un-navigated view
+   (`Emulation.setDeviceMetricsOverride` wasn't found) -- then measures
+   `{innerWidth, innerHeight, devicePixelRatio}` page-side through the
+   extension-internal evaluate seam (fixed script, never the gated model
+   `evaluate`) and caches the frame on the view. `open`, `snapshot` and
+   `screenshot` publish that measured frame; raw `click` x/y outside it -- or
+   non-finite -- are refused with the measured dimensions named and nothing
+   dispatched. Deliberately **no rescaling**: guessing which frame a caller
+   meant compounds the bug, a loud refusal plus a published frame is honest.
+   An unmeasurable frame turns raw aims into refusals, never into aiming in
+   an assumed frame.
 
 ## The network ceiling, honestly
 
@@ -123,7 +137,7 @@ threat model includes a page or script reaching the host network.
 | Limit | Value |
 |-------|-------|
 | Views per session | 3 |
-| Viewport | 1280x900 |
+| Viewport | 1280x900 -- but the `Bun.WebView` constructor sizes the Chrome **window**, so after the first page commits every view is `resize()`d to pin the **layout viewport** to 1280x900 (Chrome rejects the override on an un-navigated view); the frame is then measured page-side and printed on `open`/`snapshot`/`screenshot` (a Chromium build where the pin does not hold shows a smaller measured frame, e.g. 1280x813). Raw `click` x/y outside the measured frame are refused. |
 | Selector-click wait | 10s |
 | Snapshot elements / lines | 200 / 150 |
 | Screenshot inline budget | 1.5 MB (source bytes) |
@@ -133,12 +147,17 @@ threat model includes a page or script reaching the host network.
 
 - `tests/extensions/agent-browser.test.ts` -- fake-view unit tests (routing, cap,
   admission matrix, redirect egress, snapshot caps, screenshot budget ladder,
-  evaluate refusal, SESSION_END leak pin). Writes only under a tmp
-  `HOTDOG_SESSIONS_DIR`.
+  evaluate refusal, SESSION_END leak pin, viewport pin: resize-after-initial-
+  load ordering, measured-frame publication on open/snapshot/screenshot,
+  the raw x/y viewport gate including the unmeasured-frame refusal). The
+  `{x:10, y:20}` passthrough pin proves in-range coordinates reach the view
+  untransformed. Writes only under a tmp `HOTDOG_SESSIONS_DIR`.
 - `tests/extensions/agent-browser-smoke.test.ts` -- real chromium, loopback
   fixture with `allowLoopback: true` (a `data:` URL cannot be used: the very
-  admission ruling above would egress it); skipped with a loud title when no
-  chromium is found.
+  admission ruling above would egress it); pins the measured frame to the
+  requested 1280x900 (the 87 px band regression), asserts the PNG IHDR matches
+  it, clicks the fixed-bottom strip at `innerHeight - 5`, and rejects a raw
+  aim `innerHeight + 40`; skipped with a loud title when no chromium is found.
 - Approvals wiring pins: `tests/utils/approvals/{rules,extract}.test.ts` and the
   `agent_browser evaluate through the gate` block in
   `tests/extensions/user-gate.test.ts`.

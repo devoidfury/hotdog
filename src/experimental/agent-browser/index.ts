@@ -9,6 +9,11 @@
 //  - Chrome backend is SPAWN-FORCED (`backend: { type: "chrome", url: false }`):
 //    never auto-connect to a stray DevToolsActivePort browser. Storage is
 //    ephemeral; no persistent dataStore in v1.
+//  - The constructor sizes the Chrome WINDOW, so every view is resize()d to
+//    the requested LAYOUT viewport once its first page commits (Chrome
+//    rejects the override on an un-navigated view); the frame is then
+//    measured page-side and published on open/snapshot/screenshot, and raw
+//    x/y clicks outside it are refused (the click-offset bug class).
 //  - Navigation admission: https/http only; the host is resolved and private
 //    ranges are BLOCKED, loopback included, unless agentBrowser.allowLoopback.
 //    The classifier is fetch-tool's (imported, not forked). onNavigated
@@ -123,6 +128,13 @@ export interface BrowserView {
   click(x: number, y: number): Promise<void>;
   type(text: string): Promise<void>;
   press(key: string): Promise<void>;
+  /**
+   * Pin the LAYOUT viewport. The constructor's width/height size the Chrome
+   * WINDOW (the page loses the furniture band); resize() applies as a
+   * viewport override and survives navigate, so #open pins every view with
+   * it before the first paint.
+   */
+  resize(width: number, height: number): Promise<void>;
   readonly url: string;
   readonly title: string;
   onNavigated: ((url: string, title: string) => void) | null;
@@ -226,14 +238,16 @@ const SNAPSHOT_SCRIPT = `(() => {
   return { url: location.href, title: document.title, elements: out };
 })()`;
 
-function formatSnapshot(raw: unknown): string {
+function formatSnapshot(raw: unknown, viewport: MeasuredViewport | null): string {
   const page = raw as {
     url?: string;
     title?: string;
     elements?: Array<Record<string, string | number>>;
   } | null;
   const elements = Array.isArray(page?.elements) ? page.elements : [];
-  const header = `URL: ${page?.url ?? "?"}\nTitle: ${page?.title ?? ""}`;
+  // The frame the (x,y) centers live in, stated once per snapshot: coordinates
+  // the caller can see the frame of cannot be frame-confused by much.
+  const header = `URL: ${page?.url ?? "?"}\nTitle: ${page?.title ?? ""}\nViewport: ${viewportLabel(viewport)}`;
   const lines = elements.map((el, i) => {
     const bits: string[] = [`${i + 1}. ${el.tag}`];
     if (el.id) bits.push(`#${el.id}`);
@@ -250,11 +264,80 @@ function formatSnapshot(raw: unknown): string {
   return truncateOutput(`${header}\n${lines.join("\n")}`, SNAPSHOT_MAX_LINES);
 }
 
+// ── Viewport measurement (extension-internal) ───────────────────────────────
+// Same ungated seam as SNAPSHOT_SCRIPT (fixed script shipped in this file,
+// never the model-authored evaluate): constructor/resize sizes are claims,
+// innerWidth/innerHeight/devicePixelRatio are the fact. Every published frame
+// and the raw-click gate speak this measured space.
+
+const VIEWPORT_SCRIPT = `({ innerWidth, innerHeight, devicePixelRatio })`;
+
+interface MeasuredViewport {
+  width: number;
+  height: number;
+  dpr: number;
+}
+
+/** Page-side truth or null; a half-parsed frame counts as unmeasured, not as a guess. */
+function parseViewport(raw: unknown): MeasuredViewport | null {
+  const o = raw as { innerWidth?: unknown; innerHeight?: unknown; devicePixelRatio?: unknown } | null;
+  const w = o?.innerWidth;
+  const h = o?.innerHeight;
+  const dpr = o?.devicePixelRatio;
+  if (
+    typeof w !== "number" || !Number.isFinite(w) || w <= 0 ||
+    typeof h !== "number" || !Number.isFinite(h) || h <= 0 ||
+    typeof dpr !== "number" || !Number.isFinite(dpr) || dpr <= 0
+  ) {
+    return null;
+  }
+  return { width: w, height: h, dpr };
+}
+
+function viewportLabel(v: MeasuredViewport | null): string {
+  return v ? `${v.width}x${v.height} dpr=${v.dpr}` : "unmeasured";
+}
+
+/**
+ * The raw-coordinate trust boundary: x/y are viewport CSS pixels, so a point
+ * outside the measured frame can only ever be dispatched into the page
+ * furniture of a frame the caller was never told about (the tool used to
+ * answer "Clicked in view" for those). Refuse loudly and name the measured
+ * frame; deliberately NO rescaling -- guessing which frame the caller meant
+ * is how this bug class compounds. Selector clicks never pass through here:
+ * their point is computed page-side at click time.
+ */
+function rawAimRefusal(name: string, v: MeasuredViewport | null, x: number, y: number): ToolResult | null {
+  if (!v) {
+    return ToolResult.err(
+      `agent_browser: refusing the x/y click in view "${name}": its viewport was never measured (open printed "viewport unmeasured"), so no coordinate can be honestly interpreted.`,
+    ).withHint(`Close and reopen the view, or click a selector (selector click points are computed page-side and need no frame).`);
+  }
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return ToolResult.err(
+      `agent_browser: click needs finite numeric x and y (got x=${x}, y=${y}); the measured viewport of view "${name}" is ${v.width}x${v.height}.`,
+    );
+  }
+  if (x < 0 || x >= v.width || y < 0 || y >= v.height) {
+    return ToolResult.err(
+      `agent_browser: the click (${x}, ${y}) is outside the measured ${v.width}x${v.height} viewport of view "${name}" (valid: 0 <= x < ${v.width}, 0 <= y < ${v.height}); nothing was clicked.`,
+    ).withHint(`open/snapshot/screenshot print this frame; take (x,y) from a snapshot line or click a selector.`);
+  }
+  return null;
+}
+
 // ── Sessions ────────────────────────────────────────────────────────────────
 
 interface OpenView {
   name: string;
   view: BrowserView;
+  /**
+   * The layout viewport measured page-side right after the view was resized
+   * to the requested frame (open, after the initial load). Null only when
+   * measurement failed, which turns raw x/y clicks into refusals -- never
+   * into aiming in an assumed frame.
+   */
+  viewport: MeasuredViewport | null;
   /** Per-view FIFO: Bun.WebView rejects a second in-flight evaluate/navigate. */
   queue: Promise<unknown>;
   /** Set by the onNavigated guard when a landed URL was disallowed. */
@@ -310,7 +393,7 @@ export class AgentBrowserTool {
   toToolDef(): ToolDef {
     return toolDef(
       AgentBrowserTool.TOOL_NAME,
-      `Drive a headless browser view (experimental; Bun.WebView on a spawned Chromium, ephemeral storage). Actions: open (create a named view and load an http(s) URL), navigate (load a URL in an existing view), snapshot (structured text of interactive elements with click coordinates), click (CSS selector or viewport x/y), type (text into the focused element), press (a key, e.g. Enter), screenshot (viewport PNG), evaluate (run JavaScript you write inside the loaded page -- always prompts for user approval, and is refused when no approval UI exists), close (one view, or all of the session's views), list. Views are per-session, survive across calls, and are capped at ${MAX_VIEWS_PER_SESSION} per session. Navigation is admission-checked (https/http only, private/loopback hosts blocked) and re-checked after redirects; subresources and page requests of an admitted page are NOT fenced.`,
+      `Drive a headless browser view (experimental; Bun.WebView on a spawned Chromium, ephemeral storage). Actions: open (create a named view and load an http(s) URL), navigate (load a URL in an existing view), snapshot (structured text of interactive elements with click coordinates), click (CSS selector or viewport x/y, refused outside the measured frame), type (text into the focused element), press (a key, e.g. Enter), screenshot (viewport PNG), evaluate (run JavaScript you write inside the loaded page -- always prompts for user approval, and is refused when no approval UI exists), close (one view, or all of the session's views), list. Views are per-session, survive across calls, and are capped at ${MAX_VIEWS_PER_SESSION} per session. Navigation is admission-checked (https/http only, private/loopback hosts blocked) and re-checked after redirects; subresources and page requests of an admitted page are NOT fenced.`,
       {
         properties: {
           action: param("string", "Browser action to perform", { enum: [...ACTIONS] }),
@@ -320,8 +403,14 @@ export class AgentBrowserTool {
           ),
           url: param("string", "Absolute http(s) URL for open/navigate"),
           selector: param("string", "CSS selector for click (waits for the element to be actionable)"),
-          x: param("number", "Viewport x coordinate for click"),
-          y: param("number", "Viewport y coordinate for click"),
+          x: param(
+            "number",
+            "Viewport x coordinate for click (CSS px of the live viewport, whose size open/snapshot/screenshot print; points outside it are refused)",
+          ),
+          y: param(
+            "number",
+            "Viewport y coordinate for click (CSS px of the live viewport, whose size open/snapshot/screenshot print; points outside it are refused)",
+          ),
           text: param("string", "Text for type (goes to the focused element)"),
           key: param(
             "string",
@@ -683,7 +772,7 @@ export class AgentBrowserTool {
     let entry: OpenView;
     try {
       const view = this.#createView({ width: VIEW_WIDTH, height: VIEW_HEIGHT });
-      entry = { name, view, queue: Promise.resolve(), blocked: null, closed: false, poison: null };
+      entry = { name, view, viewport: null, queue: Promise.resolve(), blocked: null, closed: false, poison: null };
       views.set(name, entry);
       this.#installGuard(entry);
     } catch (err) {
@@ -696,7 +785,26 @@ export class AgentBrowserTool {
     await this.#drain(entry, signal);
     const note = this.#takeGuardNote(entry);
     if (note) return ToolResult.err(`agent_browser: blocked by navigation guard: ${note}`);
-    return ToolResult.ok(`Opened view "${name}": ${entry.view.url} ("${entry.view.title}")`);
+
+    // Pin the frame the tool promises, then read it back page-side. The
+    // constructor's width/height size the Chrome WINDOW (headless furniture
+    // ate ~87px of the page -- the raw-click offset); resize() applies as a
+    // LAYOUT-viewport override and survives later navigations. It needs a
+    // committed page (a brand-new view answers with
+    // 'Emulation.setDeviceMetricsOverride' wasn't found), hence after the
+    // first load. The probe is fixed extension code, ungated like the
+    // snapshot extraction: the tool states only frames it measured.
+    await this.#runView(entry, "the viewport resize", signal, () =>
+      entry.view.resize(VIEW_WIDTH, VIEW_HEIGHT),
+    );
+    const probe = await this.#runView(entry, "the viewport probe", signal, () =>
+      entry.view.evaluate<unknown>(VIEWPORT_SCRIPT),
+    );
+    entry.viewport = parseViewport(probe);
+
+    return ToolResult.ok(
+      `Opened view "${name}": ${entry.view.url} ("${entry.view.title}") [viewport ${viewportLabel(entry.viewport)}]`,
+    );
   }
 
   async #navigate(
@@ -726,7 +834,7 @@ export class AgentBrowserTool {
       got.entry.view.evaluate<unknown>(SNAPSHOT_SCRIPT),
     );
     await this.#drain(got.entry, signal);
-    const text = formatSnapshot(raw);
+    const text = formatSnapshot(raw, got.entry.viewport);
     const note = this.#takeGuardNote(got.entry);
     return ToolResult.ok(note ? `${text}\nWARNING: navigation guard ${note}` : text);
   }
@@ -747,6 +855,8 @@ export class AgentBrowserTool {
         entry.view.click(args.selector as string, { timeout: CLICK_TIMEOUT_MS }),
       );
     } else if (typeof args.x === "number" && typeof args.y === "number") {
+      const refusal = rawAimRefusal(got.name, entry.viewport, args.x as number, args.y as number);
+      if (refusal) return refusal;
       await this.#runView(entry, "the click", signal, () => entry.view.click(args.x as number, args.y as number));
     } else {
       return ToolResult.err("agent_browser: click needs a selector or numeric x and y").withHint(
@@ -825,7 +935,10 @@ export class AgentBrowserTool {
     }
 
     const path = await saveScreenshot(bytes, ext, sessionId);
-    const label = `Screenshot of view "${got.name}" (${entry.view.url}): ${path} (${mime}, ${(bytes.byteLength / 1024).toFixed(1)}KB)`;
+    // The measured frame travels with the image: its pixels ARE that frame
+    // (at dpr pixels per CSS px), so aiming in the picture cannot drift from
+    // the frame the raw-click gate enforces.
+    const label = `Screenshot of view "${got.name}" (${entry.view.url}): ${path} (${mime}, ${(bytes.byteLength / 1024).toFixed(1)}KB, viewport ${viewportLabel(entry.viewport)})`;
 
     if (bytes.byteLength > SCREENSHOT_BUDGET_BYTES) {
       // Still over budget after every ladder step: save only, never attach.

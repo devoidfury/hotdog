@@ -93,6 +93,19 @@ class FakeView implements BrowserView {
   pressed: string[] = [];
   evaluates: string[] = [];
   screenshotCalls: Array<{ format?: string; quality?: number }> = [];
+  resizes: Array<{ width: number; height: number }> = [];
+  /**
+   * What the extension's fixed viewport probe reads back. Defaults to the
+   * pre-fix band (constructor asked 900, the page got 813) so the gate tests
+   * prove the tool speaks the MEASURED frame, never the requested one.
+   */
+  viewport: { innerWidth: number; innerHeight: number; devicePixelRatio: number } | null = {
+    innerWidth: 1280,
+    innerHeight: 813,
+    devicePixelRatio: 1,
+  };
+  /** Cross-method call order, for pins like "resize before the first navigate". */
+  log: string[] = [];
   /** Scripted screenshot payloads (base64) consumed per call. */
   screenshots: string[] = [];
   /** evaluate() responses keyed by script substring; default: empty snapshot. */
@@ -104,6 +117,7 @@ class FakeView implements BrowserView {
   #inFlightEvals = 0;
 
   async navigate(url: string): Promise<void> {
+    this.log.push(`navigate ${url}`);
     this.navigations.push(url);
     if (this.stallNavigateUrls.has(url)) return new Promise<void>(() => {});
     const landed = this.redirectsTo ?? url;
@@ -113,14 +127,23 @@ class FakeView implements BrowserView {
     this.onNavigated?.(landed, this.title);
   }
 
+  async resize(width: number, height: number): Promise<void> {
+    this.log.push(`resize ${width}x${height}`);
+    this.resizes.push({ width, height });
+  }
+
   async evaluate<T>(script: string): Promise<T> {
     if (this.#inFlightEvals > 0) throw new Error("ERR_INVALID_STATE: evaluate overlap");
     this.#inFlightEvals++;
+    this.log.push("evaluate");
     this.evaluates.push(script);
     try {
       for (const [needle, value] of this.evaluateResponses) {
         if (script.includes(needle)) return value as T;
       }
+      // The extension's fixed viewport probe (it is the only shipped script
+      // naming devicePixelRatio); viewport=null simulates an unreadable frame.
+      if (script.includes("devicePixelRatio")) return this.viewport as T;
       return { url: this.url, title: this.title, elements: [] } as unknown as T;
     } finally {
       this.#inFlightEvals--;
@@ -440,6 +463,69 @@ describe("action routing", () => {
   });
 });
 
+// ── Viewport pin: resize, measured frame publication, raw-aim gate ─────────
+
+describe("viewport pin and raw-aim gate", () => {
+  it("open resize()s to the requested frame exactly once, right after the initial load", async () => {
+    const { tool, made } = makeTool();
+    const r = await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
+    expect(r.error).toBeNull();
+    expect(made[0]!.resizes).toEqual([{ width: 1280, height: 900 }]);
+    // Ordering pin: Chrome only accepts the viewport override on a committed
+    // page, so open navigates first, then pins, then probes -- each exactly
+    // once, all before open returns (the frame is stated only once true).
+    expect(made[0]!.log).toEqual([`navigate ${PUBLIC_URL}`, "resize 1280x900", "evaluate"]);
+  });
+
+  it("open/snapshot/screenshot publish the MEASURED viewport, not the requested one", async () => {
+    const { tool } = toolWithFake(() => {
+      const view = new FakeView();
+      view.screenshots.push(TINY_PNG_B64);
+      return view; // fake measured frame: 1280x813 (the pre-fix band)
+    });
+    const open = await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor("vp-frame"));
+    expect(open.output).toContain("[viewport 1280x813 dpr=1]");
+    const snap = await tool.execute({ action: "snapshot" }, ctxFor("vp-frame"));
+    expect(snap.output).toContain("Viewport: 1280x813 dpr=1");
+    const shot = await tool.execute({ action: "screenshot" }, ctxFor("vp-frame", VISION_REGISTRY));
+    expect(String(shot.output)).toContain("viewport 1280x813 dpr=1");
+  });
+
+  it("raw x/y outside the measured viewport are refused by name; inside values pass through untransformed", async () => {
+    const { tool, made } = makeTool(); // measured 1280x813 despite the 900 request
+    await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
+
+    const below = await tool.execute({ action: "click", x: 150, y: 900 }, ctxFor());
+    expect(below.error).toContain("outside the measured 1280x813 viewport");
+    expect(below.error).toContain("nothing was clicked");
+    const right = await tool.execute({ action: "click", x: 1400, y: 10 }, ctxFor());
+    expect(right.error).toContain("1280x813");
+    const junk = await tool.execute({ action: "click", x: 1.5, y: Number.NaN }, ctxFor());
+    expect(junk.error).toContain("finite numeric x and y");
+
+    const edge = await tool.execute({ action: "click", x: 150, y: 812 }, ctxFor());
+    expect(edge.error).toBeNull();
+    expect(made[0]!.clicks).toEqual([{ x: 150, y: 812 }]); // no rescale, no phantom dispatches
+  });
+
+  it("an unmeasured frame refuses raw aims; selector clicks stay available", async () => {
+    const { tool, made } = toolWithFake(() => {
+      const view = new FakeView();
+      view.viewport = null; // probe comes back unreadable
+      return view;
+    });
+    const open = await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
+    expect(open.error).toBeNull();
+    expect(open.output).toContain("[viewport unmeasured]");
+    const raw = await tool.execute({ action: "click", x: 10, y: 10 }, ctxFor());
+    expect(raw.error).toContain("never measured");
+    expect(made[0]!.clicks).toEqual([]);
+    const sel = await tool.execute({ action: "click", selector: "#go" }, ctxFor());
+    expect(sel.error).toBeNull();
+    expect(made[0]!.clicks).toEqual(["#go"]);
+  });
+});
+
 // ── Snapshot ────────────────────────────────────────────────────────────────
 
 describe("snapshot", () => {
@@ -464,7 +550,8 @@ describe("snapshot", () => {
     expect(r.output).toContain('1. button #b0 .primary.big type=submit "press 0" (0,0)');
     expect(r.output).toContain("[truncated,");
     expect(r.output).toContain("more lines] ---");
-    expect(made[0]!.evaluates).toHaveLength(1);
+    // The open-time viewport probe is the other page touch; the extraction itself ran once.
+    expect(made[0]!.evaluates.filter((s) => s.includes("querySelectorAll"))).toHaveLength(1);
   });
 
   it("snapshot is extension-internal: fixed extraction script, works with the user-gate OFF", async () => {
@@ -472,8 +559,9 @@ describe("snapshot", () => {
     await tool.execute({ action: "open", url: PUBLIC_URL }, ctxFor());
     const r = await tool.execute({ action: "snapshot" }, ctxFor());
     expect(r.output).toContain("(no visible interactive elements)");
-    expect(made[0]!.evaluates).toHaveLength(1);
-    expect(made[0]!.evaluates[0]).toContain("querySelectorAll"); // the shipped extraction script
+    const extraction = made[0]!.evaluates.filter((s) => s.includes("querySelectorAll"));
+    expect(extraction).toHaveLength(1);
+    expect(extraction[0]).toContain("querySelectorAll"); // the shipped extraction script
   });
 });
 
@@ -486,7 +574,9 @@ describe("evaluate gating", () => {
     const r = await tool.execute({ action: "evaluate", script: "fetch('http://10.0.0.1')" }, ctxFor());
     expect(r.error).toContain("no approval prompt surface");
     expect(r.error).toContain("user-gate");
-    expect(made[0]!.evaluates).toEqual([]); // not one model script ran
+    // Open's fixed internal viewport probe is the only page touch; not one
+    // model script reached the page.
+    expect(made[0]!.evaluates).toEqual([expect.stringContaining("devicePixelRatio")]);
   });
 
   it("runs with the gate on and caps the result", async () => {
@@ -497,7 +587,12 @@ describe("evaluate gating", () => {
     expect(okResult.output).toContain("93.184.216.34"); // the fake page JSON came back
     const big = await tool.execute({ action: "evaluate", script: "big" }, ctxFor());
     expect(big.output).toContain("[truncated at 8000 chars]");
-    expect(made[0]!.evaluates).toEqual([expect.stringContaining("small"), expect.stringContaining("big")]);
+    // index 0 is open's fixed viewport probe; the model scripts follow verbatim.
+    expect(made[0]!.evaluates).toEqual([
+      expect.stringContaining("devicePixelRatio"),
+      expect.stringContaining("small"),
+      expect.stringContaining("big"),
+    ]);
   });
 });
 

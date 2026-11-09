@@ -165,21 +165,24 @@ describe("live row (owner fixture)", () => {
     expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
     // The client count rides the card's bottom-right as a plug icon, trailing
     // line 3 (the glyph itself lives in a CSS mask, so no DOM text at 1
-    // client; tooltip on the native title, focusable like other title
-    // carriers). Never a text metric, and no row text ever mentions clients.
+    // client; tooltip on the native title). aria-hidden decoration: a glyph
+    // is not a stop on the way to the row's controls. Never a text metric,
+    // and no row text ever mentions clients.
     const plug = row.querySelector(".row-clients")!;
     expect(plug).toBeTruthy();
     expect(plug.textContent).toBe("");
     expect(plug.getAttribute("title")).toBe("1 client connected");
-    expect(plug.getAttribute("tabindex")).toBe("0");
+    expect(plug.getAttribute("tabindex")).toBeNull();
+    expect(plug.getAttribute("aria-hidden")).toBe("true");
     expect(row.textContent).not.toContain("client");
 
     expect(row.querySelector(".row-date")!.textContent).toBe("2026-10-31 22:30");
-    // Bottom row: date · ctx · msgs [plug] -- the plug trails line 3 (the
-    // bottom-right corner is CSS: margin-left:auto, the row-action-right
-    // idiom), in that order.
+    // Bottom row: date · ctx · msgs [plug][menu] -- the plug trails the
+    // metrics (the bottom-right corner is CSS: margin-left:auto, the
+    // row-action-right idiom) and the visible menu button trails the plug,
+    // in that order.
     const l3 = row.querySelector(".row-l3")!;
-    expect(l3.children[l3.children.length - 1]).toBe(plug);
+    expect(l3.children[l3.children.length - 2]).toBe(plug);
     expect([...l3.children].map((n) => n.className)).toEqual([
       "row-date",
       "row-sep",
@@ -187,6 +190,7 @@ describe("live row (owner fixture)", () => {
       "row-sep",
       "row-metric",
       "row-clients",
+      "row-menu-btn",
     ]);
     expect(texts(l3, ".row-metric")).toEqual(["69k/262k", "42 msgs"]);
 
@@ -317,13 +321,14 @@ describe("cold row", () => {
     expect(status.querySelector(".row-glyph-interrupted")).toBeTruthy();
     expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
     expect(texts(row, ".row-metric")).toEqual(["69k/262k", "42 msgs"]);
-    // Same bottom-row grammar as the live list: date · ctx · msgs.
+    // Same bottom-row grammar as the live list: date · ctx · msgs [menu].
     expect([...row.querySelector(".row-l3")!.children].map((n) => n.className)).toEqual([
       "row-date",
       "row-sep",
       "row-metric",
       "row-sep",
       "row-metric",
+      "row-menu-btn",
     ]);
     expect(row.querySelector(".row-id")).toBeNull();
     expect(row.textContent).not.toContain(FULL_ID);
@@ -408,6 +413,7 @@ describe("legacy log row (no model/profile/ctx attested)", () => {
       "row-date",
       "row-sep",
       "row-metric",
+      "row-menu-btn",
     ]);
     expect(row.querySelector(".row-l3 .row-metric")!.textContent).toBe("42 msgs");
     expect(row.querySelector(".row-id")).toBeNull();

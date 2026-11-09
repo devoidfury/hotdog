@@ -601,9 +601,11 @@ body.sidebar-resizing {
    middle row (class row-l2): the title -- quiet text, single line with
        ellipsis (the full value rides the native title); omitted outright
        when the session has none (the row stays two lines)
-   bottom row (class row-l3): YYYY-MM-DD HH:MM · ctx · msgs [plug n]
+   bottom row (class row-l3): YYYY-MM-DD HH:MM · ctx · msgs [plug n] [⋮]
        (the raw session id is no longer displayed; it stays a key only; the
-        client count is a plug icon, never text)
+        client count is a plug icon, never text; the row's visible menu
+        button inlines at the very end of this line -- never its own row --
+        revealed on hover/focus, see .row-menu-btn)
    Separators are middle dots (·, U+00B7), vertically centered by the font's
    em box. No literal parens: status is a glyph badge (.row-glyph, masked
    stroke SVG tinted by currentColor), profile quiet muted text. */
@@ -797,10 +799,80 @@ body.sidebar-resizing {
 }
 
 /* Slightly louder than the muted text it rides beside, so the plug reads
-   as a live marker (hover/focus lift matches the badge idiom). */
-.row-clients:hover,
-.row-clients:focus-visible {
+   as a live marker. aria-hidden decoration: no focus stop, no lift state. */
+.row-clients:hover {
     color: var(--text-primary);
+}
+
+/* Visible menu affordance, the twin of the right-click (owner: make the
+   trigger seeable). Trails the card bottom-right behind the plug; hidden
+   until the row is hovered or keyboard-focused (visibility drops it from
+   the tab order while invisible -- no phantom stops). Bare-icon idiom like
+   the section-header chips. */
+.row-menu-btn {
+    flex: 0 0 auto;
+    /* Pin right: the button owns the auto margin when it trails metrics
+       directly; behind the client plug, the plug keeps it and the button
+       rides 2px off its shoulder. */
+    margin-left: auto;
+    padding: 0 2px;
+    display: inline-flex;
+    align-items: center;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.15s;
+    position: relative;
+}
+
+/* Hit target >= 24px (the audit's own minimum-touch doctrine) without a
+   layout footprint: an absolutely-positioned pseudo extends the button's
+   clickable box into the surrounding flex gap -- the glyph stays line-
+   sized, the pointer zone grows. */
+.row-menu-btn::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+}
+
+.row-clients + .row-menu-btn {
+    margin-left: 2px;
+}
+
+.session-item:hover .row-menu-btn,
+.session-item:focus-within .row-menu-btn,
+.log-item:hover .row-menu-btn,
+.log-item:focus-within .row-menu-btn {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* The mount has no SVG namespace path (client.ts createElement is HTML-only;
+   imperative icon surfaces use innerHTML instead), so the glyph is the house
+   mask idiom -- three dots tinted by currentColor, like the plug. */
+.row-menu-glyph {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='5' r='2' fill='black'/><circle cx='12' cy='12' r='2' fill='black'/><circle cx='12' cy='19' r='2' fill='black'/></svg>") center / contain no-repeat;
+    mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='5' r='2' fill='black'/><circle cx='12' cy='12' r='2' fill='black'/><circle cx='12' cy='19' r='2' fill='black'/></svg>") center / contain no-repeat;
+}
+
+.row-menu-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-active);
+}
+
+.row-menu-btn:focus-visible {
+    visibility: visible;
+    opacity: 1;
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
 }
 
 .row-l3 {
@@ -824,11 +896,11 @@ body.sidebar-resizing {
 }
 
 /* Bottom-row metrics (ctx / msgs): the ellipsizing tail role, riding the
-   bottom row after the date. The nth-last-child arm keeps that tail role
-   when the client plug pins the corner behind the metric (the plug sits in
-   last position, pushing the metric up one). */
-.row-l3 .row-metric:last-child,
-.row-l3 .row-metric:nth-last-child(2) {
+   bottom row after the date. Every metric shrinks (not just the trailing
+   ones) so the pinned right-hand cluster -- client plug + menu button --
+   can never be pushed off the clipped edge; with room to spare, nothing
+   visually changes. */
+.row-l3 .row-metric {
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;

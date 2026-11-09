@@ -469,14 +469,16 @@ function dismissContextMenu(): void {
 }
 
 /**
- * Anchor for a freshly built menu. A pointer contextmenu carries client
+ * Anchor for a freshly built menu. A pointing event (the pointer
+ * contextmenu, or a click on the row's visible menu button) carries client
  * coordinates; the keyboard paths (the row's Menu-key/Shift-F10 handler, and
- * the keyboard-fired contextmenu events) carry none -- anchor at the row's
+ * the keyboard-fired contextmenu event) carry none -- anchor at the row's
  * rect, falling back to the origin when there is no layout to measure.
  */
 function rowMenuPoint(e: MouseEvent | KeyboardEvent, rowEl: HTMLElement): { x: number; y: number } {
-  const mx = e.type === "contextmenu" ? (e as MouseEvent).clientX ?? 0 : 0;
-  const my = e.type === "contextmenu" ? (e as MouseEvent).clientY ?? 0 : 0;
+  const pointing = e.type === "contextmenu" || e.type === "click";
+  const mx = pointing ? (e as MouseEvent).clientX ?? 0 : 0;
+  const my = pointing ? (e as MouseEvent).clientY ?? 0 : 0;
   if (mx || my) return { x: mx, y: my };
   const r = rowEl?.getBoundingClientRect?.();
   return r ? { x: r.left + 12, y: r.bottom + 2 } : { x: 0, y: 0 };

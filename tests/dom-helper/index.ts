@@ -62,6 +62,12 @@ class DNode {
     return this.childNodes.filter((c): c is DElement => c instanceof DElement);
   }
 
+  // Real DOM parity (elements always mount under an element here): the row's
+  // menu button resolves its owning row through this.
+  get parentElement(): DElement | null {
+    return this.parentNode instanceof DElement ? this.parentNode : null;
+  }
+
   insertBefore(node: DNode, ref: DNode | null): void {
     if (node instanceof DFragment) {
       // Real fragment semantics: its children move into the target.

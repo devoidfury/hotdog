@@ -184,7 +184,8 @@ interface SidebarRowProps {
   ctxTotal?: number;
   messageCount?: number;
   /** Live rows only; absent on cold logs (structurally 0 clients). Renders
-   *  as the bottom-row plug icon, never a text metric (see styles .row-clients). */
+   *  as the bottom-row plug icon, never a text metric (see styles
+   *  .row-clients): aria-hidden decoration, the tooltip carries the figure. */
   connectedClients?: number;
   createdAt: number;
   /** Server pin flag: leads line-1 with a small badge (see styles .row-pin). */
@@ -259,7 +260,7 @@ export function SidebarRow(p: SidebarRowProps) {
       <span
         className={p.statusClass ? `row-status ${p.statusClass}` : "row-status"}
         title={label}
-        tabindex="0"
+        aria-hidden="true"
       >
         {hasGlyph ? <span className={`row-glyph row-glyph-${p.status}`}></span> : label}
       </span>,
@@ -293,10 +294,39 @@ export function SidebarRow(p: SidebarRowProps) {
       <span
         className="row-clients"
         title={`${clients} client${clients === 1 ? "" : "s"} connected`}
-        tabindex="0"
+        aria-hidden="true"
       >
         {clients > 1 ? <span className="row-clients-count">{clients}</span> : null}
       </span>,
+    );
+  }
+  // Visible twin of the right-click (owner: the affordance must be SEEABLE),
+  // inline at the end of the metrics line -- trailing the client plug, never
+  // its own row. Revealed on row hover/focus; belongs to the row, not the
+  // selection (the click stops with the button). Anchor = the click point;
+  // focus-return lands on the row.
+  if (p.onContextMenu) {
+    // Callback-ref handle to the mounted button (house escape hatch): the
+    // click resolves the owning row from the DOM parent, not the event.
+    let menuBtn: HTMLElement | null = null;
+    line3.push(
+      <button
+        className="row-menu-btn"
+        type="button"
+        aria-label={p.kindClass === "log-item" ? "Log actions" : "Session actions"}
+        title={p.kindClass === "log-item" ? "Log actions" : "Session actions"}
+        ref={(el) => {
+          if (el) menuBtn = el as unknown as HTMLElement;
+        }}
+        onClick={(e: MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const row = (menuBtn?.parentElement?.parentElement ?? null) as HTMLElement | null;
+          if (row) p.onContextMenu?.(e, row);
+        }}
+      >
+        <span className="row-menu-glyph" aria-hidden="true"></span>
+      </button>,
     );
   }
 

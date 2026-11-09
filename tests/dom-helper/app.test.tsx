@@ -1954,7 +1954,7 @@ describe("header fence toggle (real app wiring)", () => {
 // figure comes straight from the payload's connectedClients. Render rules:
 // 0/unattested renders nothing; 1 is icon-only (the plug lives in the CSS
 // mask, so textContent stays empty); 2+ appends the number; native title is
-// the tooltip, singular for one; tabindex keeps it focus-reachable.
+// the tooltip, singular for one; aria-hidden decoration, not a tab stop.
 
 describe("client plug on live cards", () => {
   async function fireSessions(rows: Record<string, unknown>[]): Promise<void> {
@@ -1962,12 +1962,13 @@ describe("client plug on live cards", () => {
     await tick();
   }
 
-  it("one client: icon-only (no number), singular tooltip, focusable", async () => {
+  it("one client: icon-only (no number), singular tooltip, decoration", async () => {
     await fireSessions([{ ...lvSessionRow, connectedClients: 1 }]);
     const plug = el(".session-item .row-clients");
     expect(plug.textContent).toBe("");
     expect(plug.getAttribute("title")).toBe("1 client connected");
-    expect(plug.getAttribute("tabindex")).toBe("0");
+    expect(plug.getAttribute("tabindex")).toBeNull();
+    expect(plug.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("2+ clients: icon plus the number, plural tooltip", async () => {
@@ -2290,6 +2291,22 @@ describe("a11y: sidebar rows and menus on the keyboard", () => {
     key(el(".context-menu"), "Escape");
     await tick();
     expect(document.querySelector(".context-menu")).toBeNull();
+  });
+
+  it("the row's visible menu button opens the menu without selecting the row", async () => {
+    await attach();
+    clearSent();
+    const row = els(".session-item")[0]!;
+    els(".row-menu-btn")[0]!.click();
+    await tick();
+    expect(el(".context-menu")).toBeTruthy();
+    expect(sent("switchSession").length).toBe(0); // the click belongs to the button
+    const menu = el(".context-menu");
+    expect(document.activeElement).toBe(els(".context-menu-item")[0]!);
+    key(menu, "Escape");
+    await tick();
+    // Focus-return lands on the row, not on the unmounted button.
+    expect(document.activeElement).toBe(row);
   });
 
   it("Tab closes the menu WITHOUT preventDefault and returns focus to the row", async () => {

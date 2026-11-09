@@ -3414,3 +3414,203 @@ body.workbench-resizing {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* ── Settings viewer (settings button in the chat header) ────────────────
+   An overlay dialog (task-overlay posture, not a docked pane): a snapshot
+   read of the resolved config. Diagnostics banner sits above the key table. */
+.settings-view {
+    position: fixed;
+    top: 6%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(1120px, 94vw);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+    z-index: 200;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+}
+
+.settings-view:focus {
+    outline: none;
+}
+
+.settings-view-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.settings-view-header h2 {
+    margin: 0;
+    font-size: 1rem;
+    flex: 1;
+}
+
+.settings-view-scope {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px 6px;
+    cursor: help;
+}
+
+.settings-btn {
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    padding: 3px 10px;
+    cursor: pointer;
+}
+
+.settings-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.settings-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.settings-close {
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.settings-pending {
+    padding: 18px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.settings-view-body {
+    overflow-y: auto;
+    padding: 12px 14px 18px;
+}
+
+.settings-diagnostics {
+    border: 1px solid var(--border-light);
+    border-left: 3px solid var(--warn, #d9a441);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: rgba(217, 164, 65, 0.06);
+}
+
+.settings-diag {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: baseline;
+    font-size: 0.8rem;
+}
+
+.settings-diag-key {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 0.66rem;
+    letter-spacing: 0.03em;
+}
+
+.settings-diag-name,
+.settings-diag-path {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+.settings-diag-detail {
+    color: var(--text-secondary);
+}
+
+.settings-diag-suggest {
+    color: var(--accent);
+}
+
+.settings-diag-hint {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.settings-dir {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    cursor: help;
+}
+
+.settings-section {
+    margin-bottom: 16px;
+}
+
+.settings-section-title {
+    margin: 0 0 6px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 3px;
+}
+
+.settings-row {
+    display: grid;
+    grid-template-columns: minmax(160px, 280px) minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: baseline;
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.settings-key {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.settings-value {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.settings-row-redacted .settings-value {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.settings-badges {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.settings-badge {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 1px 5px;
+    color: var(--text-muted);
+    cursor: help;
+}
+
+.settings-badge-diff {
+    color: var(--warn, #d9a441);
+    border-color: var(--warn, #d9a441);
+}

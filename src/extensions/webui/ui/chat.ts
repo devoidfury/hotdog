@@ -16,11 +16,13 @@ import type {
   TranscriptReplyWire,
   SearchHitWire,
   ToolDisplayWire,
+  ConfigSnapshotResultWire,
 } from "@extensions/websocket/protocol.ts";
 
 export type { UploadFileWire };
 export type { TaskInfoWire };
 export type { SearchHitWire };
+export type { ConfigSnapshotResultWire };
 
 // The core logger touches process.*, which doesn't exist in the browser.
 const logger = {
@@ -517,6 +519,7 @@ type ServerMessage =
   | LogViewedMessage
   | LogDeletedMessage
   | SearchResultsMessage
+  | ConfigSnapshotResultWire
   | AuthRequiredMessage
   | AuthOkMessage
   | AuthErrorMessage
@@ -560,6 +563,9 @@ interface ChatConfig {
   onLogDeleted?: (logId: string) => void;
   /** Reply to searchLogs; the app drops it when the request id is stale. */
   onSearchResults?: (requestId: number | undefined, query: string, results: SearchHitWire[]) => void;
+  /** Reply to configSnapshot (settings viewer); the app drops it when the
+   *  request id is stale (same doctrine as onSearchResults). */
+  onConfigSnapshot?: (requestId: number | undefined, snapshot: ConfigSnapshotResultWire) => void;
   /** Broadcast notice that a session died (the app drops its stale pin). */
   onSessionDeleted?: (sessionId: string) => void;
   onAuthFailure?: () => void;
@@ -595,6 +601,8 @@ export interface ChatController {
   deleteLog: (logId: string) => void;
   /** Full-text search across all session logs; results arrive via onSearchResults. */
   searchLogs: (query: string, requestId: number) => void;
+  /** Ask for a config snapshot (settings viewer); arrives via onConfigSnapshot. */
+  requestConfigSnapshot: (requestId: number) => void;
   sendCommand: (command: string) => void;
   sendQuestionAnswer: (answers: Record<string, string>) => void;
   requestCompletions: (
@@ -654,6 +662,7 @@ export function createChat({
   onLogViewed,
   onLogDeleted,
   onSearchResults,
+  onConfigSnapshot,
   onSessionDeleted,
   onAuthFailure,
   onWorkingMapChange,
@@ -882,6 +891,11 @@ export function createChat({
         // Not session-scoped (a whole-dir scan); correlated purely by the
         // request id the app echoes back. No transcript side effects.
         onSearchResults?.(data.requestId, data.query, data.results);
+        return;
+      case "configSnapshotResult":
+        // The settings viewer's snapshot reply (not session-scoped); the app
+        // drops stale ids. No transcript side effects.
+        onConfigSnapshot?.(data.requestId, data);
         return;
       case "authRequired":
         // Expected: the upgrade carries no token, so the server holds the
@@ -1416,6 +1430,12 @@ export function createChat({
     send({ type: "searchLogs", query: q, requestId });
   }
 
+  /** Ask the server for a live config snapshot (settings viewer). The reply
+   *  rides onConfigSnapshot with the same id; stale replies drop client-side. */
+  function requestConfigSnapshot(requestId: number): void {
+    send({ type: "configSnapshot", requestId });
+  }
+
   return {
     connect,
     disconnect,
@@ -1435,6 +1455,7 @@ export function createChat({
     viewLog,
     deleteLog,
     searchLogs,
+    requestConfigSnapshot,
     sendCommand,
     sendQuestionAnswer,
     requestCompletions,

@@ -2501,6 +2501,113 @@ describe("workbench pane (real app wiring)", () => {
   });
 });
 
+// ── Settings viewer (settings button -> dialog, real app wiring) ───────────
+
+describe("settings viewer (real app wiring)", () => {
+  const snapshotPayload = (requestId: number): Record<string, unknown> => ({
+    type: "configSnapshotResult",
+    requestId,
+    ts: 1700000000000,
+    configDir: "/cfg",
+    files: [{ path: "/cfg/defaults.json", inUse: true, status: "ok" }],
+    findings: [],
+    sections: [
+      {
+        name: "core",
+        rows: [
+          { key: "theme", description: "Theme", default: "dark", file: "light", resolved: "light" },
+          { key: "apiKey", leafSecret: true, redacted: true, resolved: null },
+        ],
+      },
+    ],
+  });
+
+  it("the settings button opens the dialog and re-fetches; matching reply paints; Escape returns focus", async () => {
+    await attach();
+    clearSent();
+    // Chip chrome (the .toggleable fill, not the browser-default grey) +
+    // the pressed state mirrors the dialog (owner 2026-11-09).
+    expect(el("#settings-btn").getAttribute("class")).toContain("toggleable");
+    expect(el("#settings-btn").getAttribute("aria-expanded")).toBe("false");
+    el("#settings-btn").click();
+    await tick();
+    expect(el("#settings-btn").getAttribute("aria-expanded")).toBe("true");
+    const reqs = sent<{ requestId: number }>("configSnapshot");
+    expect(reqs).toHaveLength(1);
+    const dialog = el("#settings-view");
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    // openSettings focuses the dialog root (queueMicrotask idiom).
+    expect(document.activeElement).toBe(dialog);
+    ws.fireMessage(snapshotPayload(reqs[0]!.requestId));
+    await tick();
+    expect(el(".settings-key").textContent).toBe("theme");
+    expect(el("#settings-view").textContent).toContain("set (redacted)");
+    key(el("#settings-view"), "Escape");
+    await tick();
+    expect(document.querySelector("#settings-view")).toBeNull();
+    expect(document.activeElement).toBe(el("#settings-btn"));
+    expect(el("#settings-btn").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("every open re-fetches with a fresh id and stale replies drop", async () => {
+    await attach();
+    clearSent();
+    el("#settings-btn").click();
+    await tick();
+    const first = sent<{ requestId: number }>("configSnapshot").pop()!;
+    // A stale reply (older id) must not paint anything.
+    ws.fireMessage(snapshotPayload(first.requestId - 1));
+    await tick();
+    expect(document.querySelector(".settings-row")).toBeNull();
+    // Close + reopen: a NEW request id goes out (config may have changed).
+    key(el("#settings-view"), "Escape");
+    await tick();
+    clearSent();
+    el("#settings-btn").click();
+    await tick();
+    const second = sent<{ requestId: number }>("configSnapshot").pop()!;
+    expect(second.requestId).toBeGreaterThan(first.requestId);
+    ws.fireMessage(snapshotPayload(second.requestId));
+    await tick();
+    expect(els(".settings-row").length).toBe(2);
+  });
+
+  it("Refresh re-issues with a fresh id; the ✕ button hands focus back to the settings button", async () => {
+    await attach();
+    clearSent();
+    el("#settings-btn").click();
+    await tick();
+    const first = sent<{ requestId: number }>("configSnapshot").pop()!;
+    const refresh = els(".settings-btn").find((b) => b.textContent === "Refresh")!;
+    refresh.click();
+    await tick();
+    const second = sent<{ requestId: number }>("configSnapshot").pop()!;
+    expect(second.requestId).toBeGreaterThan(first.requestId);
+    // An in-flight reply for the superseded id drops even though it lands after.
+    ws.fireMessage(snapshotPayload(first.requestId));
+    await tick();
+    expect(document.querySelector(".settings-row")).toBeNull();
+    ws.fireMessage(snapshotPayload(second.requestId));
+    await tick();
+    expect(els(".settings-row").length).toBe(2);
+    els(".settings-close")[0]!.click();
+    await tick();
+    expect(document.querySelector("#settings-view")).toBeNull();
+    expect(document.activeElement).toBe(el("#settings-btn"));
+  });
+
+  it("click-outside does NOT close (config values get selected)", async () => {
+    await attach();
+    el("#settings-btn").click();
+    await tick();
+    document.body.dispatchEvent({ type: "mousedown", currentTarget: document.body } as unknown as Event);
+    await tick();
+    expect(el("#settings-view")).toBeTruthy();
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+});
+
 // Live region: the terminal matrix and the teardown. This describe runs LAST
 // before the auth lifecycle -- its final test logs the app out, and the auth
 // section begins by firing authError anyway.

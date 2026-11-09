@@ -40,6 +40,7 @@ import {
   handleDeleteLog,
   handleSearchLogs,
 } from "./handlers-logs.ts";
+import { handleConfigSnapshot } from "./handlers-config.ts";
 
 const MESSAGE_HANDLERS: Partial<Record<C2SType, MessageHandler>> = {
   [C2S.AUTH]: handleAuthMessage,
@@ -67,6 +68,7 @@ const MESSAGE_HANDLERS: Partial<Record<C2SType, MessageHandler>> = {
   [C2S.VIEW_LOG]: handleViewLog,
   [C2S.DELETE_LOG]: handleDeleteLog,
   [C2S.SEARCH_LOGS]: handleSearchLogs,
+  [C2S.CONFIG_SNAPSHOT]: handleConfigSnapshot,
 };
 
 export async function routeMessage(

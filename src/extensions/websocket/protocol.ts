@@ -54,6 +54,13 @@ export const C2S = {
   // { type, sessionId, policy: "off" | "probe" }. The server answers with a
   // sessionState frame (key "toolExec") scoped to that session's clients.
   EXEC_FENCE: "execFence",
+  // Settings-viewer config snapshot: { type, requestId }. The server computes
+  // the payload FRESH per request (the config may have changed on disk since
+  // startup; the viewer's honest framing is snapshot-at-open, never live).
+  // Correlated back with CONFIG_SNAPSHOT_RESULT by requestId; stale replies
+  // are dropped client-side by id (the searchLogs precedent). The handler is
+  // strictly read-only and answers the requesting socket only.
+  CONFIG_SNAPSHOT: "configSnapshot",
 } as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────
@@ -73,6 +80,9 @@ export const S2C = {
   LOG_DELETED: "logDeleted",
   // Reply to C2S SEARCH_LOGS (requesting socket only), correlated by requestId.
   SEARCH_RESULTS: "searchResults",
+  // Reply to C2S CONFIG_SNAPSHOT (requesting socket only), correlated by
+  // requestId. See the Config snapshot section below and handlers-config.ts.
+  CONFIG_SNAPSHOT_RESULT: "configSnapshotResult",
 
   // Profile management
   PROFILES: "profiles",
@@ -339,6 +349,138 @@ export function wireImages(
   }
   return out.length > 0 ? out : undefined;
 }
+
+// ── Config snapshot (C2S configSnapshot → S2C configSnapshotResult) ────────
+// The settings viewer's read path (see ./handlers-config.ts). Diagnostics
+// ONLY: FileReport.rawText and parse-error excerpts never serialize -- file
+// bytes are not a viewer deliverable. Secret-shaped values are nulled at the
+// wire boundary (isSecretConfigPath), so a snapshot reply can never carry an
+// API key, token, or password even if the config file holds one.
+
+/** Ceiling on a serialized slot value; longer strings cut with the
+ *  "[truncated]" marker (MAX_TASK_ACTIVITY_CHARS precedent). The schema
+ *  bounds the row set, this bounds the fat values. */
+export const MAX_CONFIG_VALUE_CHARS = 2000;
+/** Row and finding caps per snapshot reply (belt over the schema's own bound). */
+export const MAX_CONFIG_ROWS = 400;
+export const MAX_CONFIG_FINDINGS = 100;
+
+/**
+ * Redaction boundary test: TRUE when the LAST segment of a dotted config key
+ * path names a credential. Matching is on the lowercased segment with "_" and
+ * "-" stripped (so API_KEY / api-key / apiKey normalize alike):
+ * - endsWith "key" (apiKey, braveApiKey, tavilyApiKey, privateKey, and any
+ *   providers.*.apiKey) or equals "key";
+ * - endsWith "token" (singular; accessToken, GH_TOKEN -- "reserveTokens"/
+ *   "tokens" budget knobs and sessionTokenTtlMin do NOT match);
+ * - endsWith "secret" / "pass" (which covers password and passwd) /
+ *   "credential" / "auth" (authorization) / "cert" (caCert, certPem) /
+ *   "creds".
+ * Over-redaction is the safe failure; under-redaction is the bug. Keys it
+ * catches in the current schemas: apiKey (+ env HOTDOG_API_KEY/AI_API_KEY),
+ * providers.*.apiKey (config-passthrough block), webui.apiKey (+ env
+ * HOTDOG_WEBUI_API_KEY), webSearch.braveApiKey (+ env BRAVE_API_KEY),
+ * webSearch.tavilyApiKey (+ env TAVILY_API_KEY).
+ */
+export function isSecretConfigPath(keyPath: string): boolean {
+  const seg = (keyPath.split(".").pop() ?? "").toLowerCase().replace(/[_-]/g, "");
+  if (!seg) return false;
+  if (
+    seg.endsWith("key") ||
+    seg.endsWith("token") ||
+    seg.endsWith("secret") ||
+    seg.endsWith("pass") ||
+    seg.endsWith("credential") ||
+    seg.endsWith("creds") ||
+    seg.endsWith("auth") ||
+    seg.endsWith("cert")
+  ) {
+    return true;
+  }
+  return seg === "certificate";
+}
+
+/** Per-config-file verdict (subset of rescue's FileReport -- no rawText, no
+ *  error excerpt/offset; the parse message and JSONC issue kinds/lines only). */
+export interface ConfigFileEntryWire {
+  path: string;
+  inUse: boolean;
+  status: "missing" | "ok" | "broken";
+  /** JSONC issue kinds with their line numbers (grouped by kind). */
+  jsoncIssues?: Array<{ kind: string; lines: number[] }>;
+  /** True when `hotdog rescue fix` can repair this file. */
+  fixable?: boolean;
+  /** JSON.parse error message (broken files only). */
+  parseError?: string;
+}
+
+/** One key-level diagnostic (unknown / duplicate / removed). Carries the key,
+ *  its line, and did-you-mean suggestions -- never the key's value. */
+export interface ConfigFindingWire {
+  type: "unknown-key" | "duplicate-key" | "removed-key";
+  key: string;
+  line: number;
+  /** duplicate-key: the line of the first occurrence (the later value wins). */
+  firstLine?: number;
+  /** unknown-key: near-miss schema keys. */
+  didYouMean?: string[];
+  /** removed-key: tombstone text naming the replacement. */
+  message?: string;
+}
+
+/**
+ * One leaf config key with its per-layer slots. A slot that the server cannot
+ * attest rides OMITTED (never a fabricated default or a lying "unset"):
+ * the UI renders source badges only for the slots present. `redacted: true`
+ * means every value on this row was replaced with null by the secret rule
+ * (the row itself may still show description/default presence and the
+ * set/unset distinction for env).
+ */
+export interface ConfigKeyEntryWire {
+  /** Full dotted leaf path ("webui.port"). */
+  key: string;
+  description?: string;
+  /** Schema literal default (absent when the default is computed or none exists). */
+  default?: unknown;
+  /** Raw config-file value where the in-use file (or the explicit --config) sets it. */
+  file?: unknown;
+  /** env layer: present only when the schema declares an env source for the key. */
+  env?: { set: boolean; source?: string; value?: unknown };
+  /** cli layer: present only when the key declares a cliFlag AND the server
+   *  process was launched with it (attested from the live argv + the registry's flag table). */
+  cli?: { flag: string; value?: unknown };
+  /** Resolved value the running server uses (core.resolved, falling back to the
+   *  merged config for extension keys). */
+  resolved?: unknown;
+  /** The key path's own final segment is secret-shaped (isSecretConfigPath):
+   *  every slot value on this row ships null, and slot PRESENCE is what the
+   *  UI reads -- `redacted: true` renders "set (redacted)", its absence with
+   *  nothing set renders "unset". */
+  leafSecret?: boolean;
+  /** Redaction fired on this row: leaf-secret, or a secret-shaped entry
+   *  nulled inside a container value (bashTool.env, mcpServers[].env). */
+  redacted?: boolean;
+}
+
+/** Key table section: "core" first, then one section per loaded extension. */
+export interface ConfigSectionWire {
+  name: string;
+  rows: ConfigKeyEntryWire[];
+}
+
+export type ConfigSnapshotResultWire = {
+  type: "configSnapshotResult";
+  /** Echo of the C2S configSnapshot request id; stale replies drop client-side. */
+  requestId?: number;
+  /** Epoch ms of the snapshot (the "snapshot-at-open" stamp; not a live feed). */
+  ts: number;
+  configDir: string;
+  files: ConfigFileEntryWire[];
+  findings: ConfigFindingWire[];
+  sections: ConfigSectionWire[];
+  /** Set when a row cap cut the table (MAX_CONFIG_ROWS / MAX_CONFIG_FINDINGS). */
+  truncated?: boolean;
+};
 
 // ── Subagent task feed ──────────────────────────────────────────────────────
 

@@ -17,9 +17,18 @@ import {
 import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
-import type { SearchHitWire } from "./chat.ts";
+import type { SearchHitWire, ConfigSnapshotResultWire } from "./chat.ts";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
 import { WorkbenchPanel, workbenchStore } from "./workbench.tsx";
+import {
+  SettingsViewer,
+  initialSettingsPanelState,
+  openSettingsPanel,
+  refreshSettingsPanel,
+  closeSettingsPanel,
+  applySnapshotReply,
+  type SettingsPanelState,
+} from "./settings-view.tsx";
 import { createCoalescer } from "./batch.ts";
 import { audioBlobToWav } from "./wav.ts";
 
@@ -59,6 +68,11 @@ let liveFailed = false;
 // DOM node is stable across renders (unlike the tree), so keystrokes never
 // rebuild it; query mirrors into the atom for the highlight/results only.
 const searchAtom = reactiveState<SearchState>({ open: false, query: "", pending: false, results: null });
+
+// Settings viewer (settings button in the chat header): the panel state + request-id
+// doctrine live in settings-view.tsx (pure functions); every open/refresh
+// re-fetches with a fresh requestId and stale replies drop by id.
+const settingsAtom = reactiveState<SettingsPanelState>(initialSettingsPanelState);
 
 // Debounce + request-id for the search round-trip. searchReqId bumps on every
 // query edit (invalidating any in-flight reply) AND when a request fires, so a
@@ -179,6 +193,45 @@ function onSearchResults(
   if (requestId !== searchReqId) return; // stale: a newer query superseded it
   cancelSearchDebounce();
   searchAtom({ ...searchAtom(), pending: false, query, results });
+}
+
+// ── Settings viewer ─────────────────────────────────────────────────────────
+
+// Imperative handle on the dialog root (focus-in on open, like openSearch's
+// input focus). Stable ref identity so patch() never re-attaches it.
+let settingsRootEl: HTMLElement | null = null;
+const settingsRootRef = domRef<HTMLElement>((el) => {
+  settingsRootEl = el;
+});
+
+/** Settings button pressed: open the panel and re-fetch (the config may have changed on
+ *  disk since startup; the reply is a snapshot-at-open, and every open asks
+ *  again). Focus moves into the dialog so Escape is caught by its keydown. */
+function openSettings(): void {
+  const next = openSettingsPanel(settingsAtom());
+  settingsAtom(next);
+  chat?.requestConfigSnapshot(next.reqId);
+  queueMicrotask(() => settingsRootEl?.focus());
+}
+
+/** Escape/✕ leave the dialog the way they entered: focus back on the button
+ *  (getElementById: it lives in the header tree, same contract as
+ *  refocusSearchChip). The close also invalidates any in-flight reply. */
+function closeSettings(): void {
+  settingsAtom(closeSettingsPanel(settingsAtom()));
+  document.getElementById("settings-btn")?.focus();
+}
+
+/** Refresh button: re-issue with a fresh requestId; the stale in-flight
+ *  reply (if any) drops by id in onConfigSnapshot. */
+function refreshSettings(): void {
+  const next = refreshSettingsPanel(settingsAtom());
+  settingsAtom(next);
+  chat?.requestConfigSnapshot(next.reqId);
+}
+
+function onConfigSnapshot(requestId: number | undefined, snapshot: ConfigSnapshotResultWire): void {
+  settingsAtom(applySnapshotReply(settingsAtom(), requestId, snapshot));
 }
 
 // Subagent overlay panels: task ids with an open panel, bottom-first; the
@@ -399,6 +452,8 @@ function handleAuthFailure(): void {
   pinnedIdsAtom(new Set());
   // Drop any open search: the panel is chat-scoped and the socket is gone.
   closeSearch();
+  // Same for the settings dialog: its snapshot belongs to the dead socket.
+  settingsAtom(closeSettingsPanel(settingsAtom()));
   showLogin();
 }
 
@@ -944,6 +999,7 @@ function startChat(): void {
       dropPinnedId(sessionId);
     },
     onSearchResults,
+    onConfigSnapshot,
     onAuthFailure: handleAuthFailure,
     onWorkingMapChange: () => {
       // Re-poll so the sidebar's per-session working indicators refresh.
@@ -1491,6 +1547,7 @@ function App() {
   const tasks = allTasks.filter((t) => sessionId !== null && t.sessionId === sessionId);
   const openTasks = openTasksAtom();
   const sttPhase = sttPhaseAtom();
+  const settings = settingsAtom();
 
   return (
     <>
@@ -1643,6 +1700,21 @@ function App() {
                 onClick={onToggleWorkbench}
               >
                 workbench
+              </button>
+              {/* Settings viewer: a snapshot-at-open read of the resolved
+                  config (diagnostics + per-key sources, secrets redacted
+                  server-side). Opens a dialog; Escape returns focus here. */}
+              <button
+                type="button"
+                id="settings-btn"
+                className="header-btn toggleable"
+                aria-label="Settings"
+                aria-haspopup="dialog"
+                aria-expanded={settingsAtom().open ? "true" : "false"}
+                title="Settings: resolved config snapshot (read-only)"
+                onClick={openSettings}
+              >
+                settings
               </button>
               <span id="connection-status" className={connected ? "status-connected" : "status-disconnected"}>
                 {connected ? "Connected" : "Disconnected"}
@@ -1853,6 +1925,18 @@ function App() {
             />
           );
         })}
+        {/* Settings viewer dialog (settings button in the header). Mounted only while
+            open; Escape/✕ close it, click-outside does NOT (values get
+            selected). One mount hook, one import -- the panel is self-contained. */}
+        {settings.open ? (
+          <SettingsViewer
+            snapshot={settings.snapshot}
+            pending={settings.pending}
+            rootRef={settingsRootRef}
+            onClose={closeSettings}
+            onRefresh={refreshSettings}
+          />
+        ) : null}
       </div>
 
       {menu ? <ContextMenu menu={menu} rootRef={contextMenuRef} onClose={dismissContextMenu} /> : null}
@@ -1895,6 +1979,7 @@ async function init(): Promise<void> {
     nowAtom,
     copyFlashAtom,
     workbenchCollapsedAtom,
+    settingsAtom,
   ]);
 
   document.addEventListener("keydown", (e: KeyboardEvent) => {

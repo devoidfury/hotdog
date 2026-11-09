@@ -24,6 +24,7 @@ import { FakeWebSocket } from "./index.ts";
 import { DRAFT_STORAGE_KEY } from "@extensions/webui/ui/draft.ts";
 import { ATTACHMENTS_STORAGE_KEY } from "@extensions/webui/ui/attachment-store.ts";
 import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts";
+import { workbenchStore } from "@extensions/webui/ui/workbench.tsx";
 
 const SID = "s-ui-0001";
 const L1 = "l-ui-0001";
@@ -855,10 +856,16 @@ describe("sidebar glue", () => {
     await tick();
   });
 
-  it("Continue on a log row loads it as a session", async () => {
+  it("the log menu's Resume loads the log as a session", async () => {
+    // The inline card Resume was retired (owner 2026-11-09); this is now
+    // the only resume path, so the menu item carries the old pin.
     clearSent();
-    els(".log-continue-btn")[0]!.click();
+    els(".log-item")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    els(".context-menu-item").find((b) => b.textContent === "Resume")!.click();
+    await tick();
     expect(sent<{ logId: string }>("loadLog")[0]?.logId).toBe(L1);
+    expect(document.querySelector(".context-menu")).toBeNull(); // dismissed after pick
   });
 
   it("the fence strip acts for the attached worker posture", async () => {
@@ -1187,7 +1194,8 @@ describe("context menus", () => {
 
     els(".log-item")[0]!.dispatchEvent(new Event("contextmenu"));
     await tick();
-    // Pin leads, the inline Resume's twin and the shared tail follow;
+    // Pin leads, then the Resume entry (the sole resume path since the
+    // inline card button was retired 2026-11-09) and the shared tail;
     // Delete takes the bottom slot (no "Copy log file path": the fixture
     // log row omits it).
     expect(menuButtons().map((b) => b.textContent)).toEqual([
@@ -2421,6 +2429,75 @@ describe("a11y: search dialog focus", () => {
     expect(row).toBeDefined();
     expect(document.querySelector("#search-panel")).toBeNull();
     expect(document.activeElement).toBe(row);
+  });
+});
+
+// ── Workbench pane (real app wiring) ────────────────────────────────────────────────
+// The header chip opens the right-docked pane; the app's own createPanelResize
+// instance persists the seam keys hotdog.workbenchWidth /
+// hotdog.workbenchCollapsed; the tab strip paints from the workbench-state
+// store through the app's subscription. Runs before the auth lifecycle and
+// leaves the pane collapsed, exactly as a first visit would.
+
+describe("workbench pane (real app wiring)", () => {
+  const wbHandle = (): HTMLElement => {
+    const h = el("#workbench-resize");
+    const any = h as unknown as Record<string, unknown>;
+    any.offsetParent ??= {};
+    any.setPointerCapture ??= () => {};
+    return h;
+  };
+  const wbPointer = (type: string, over: Record<string, unknown> = {}): void => {
+    const h = wbHandle();
+    h.dispatchEvent({ type, currentTarget: h, ...over } as unknown as Event);
+  };
+
+  it("boots first-run collapsed: the seed persisted, no pane DOM at all", async () => {
+    await attach();
+    expect(store.get("hotdog.workbenchCollapsed")).toBe("1"); // init()'s first-run seed
+    expect(el("#workbench-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(document.querySelector("#workbench-panel")).toBeNull();
+  });
+
+  it("the chip opens the pane, aria-expanded follows, and the handle carries the seam's aria", async () => {
+    el("#workbench-toggle").click();
+    await tick();
+    expect(el("#workbench-panel")).toBeTruthy();
+    expect(el("#workbench-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(store.get("hotdog.workbenchCollapsed")).toBe("0");
+    const h = wbHandle();
+    expect(h.getAttribute("role")).toBe("separator");
+    expect(h.getAttribute("aria-orientation")).toBe("vertical");
+    // Stubbed viewport 1200: max = max(320, min(900, 1200 - 300 - 480)) = 420.
+    expect(h.getAttribute("aria-valuenow")).toBe("420");
+    expect(h.getAttribute("aria-valuemin")).toBe("320");
+    expect(h.getAttribute("aria-valuemax")).toBe("420");
+  });
+
+  it("dragging RIGHT shrinks (nearEdge) and release writes hotdog.workbenchWidth", () => {
+    wbPointer("pointerdown", { pointerId: 1, clientX: 900 });
+    wbPointer("pointermove", { pointerId: 1, clientX: 960 });
+    const docStyle = (document.documentElement as unknown as { style: { getPropertyValue: (n: string) => string } }).style;
+    expect(docStyle.getPropertyValue("--workbench-width")).toBe("360px");
+    wbPointer("pointerup", { pointerId: 1, clientX: 960 });
+    expect(store.get("hotdog.workbenchWidth")).toBe("360");
+  });
+
+  it("tabs injected through the state module paint the strip; emptying it brings the honest line", async () => {
+    workbenchStore.open({ id: "w1", kind: "placeholder", label: "a.ts", dirty: false });
+    await tick();
+    expect(els("#workbench-tabs [role=tab]").map((b) => b.textContent)).toEqual(["a.ts"]);
+    workbenchStore.close("w1");
+    await tick();
+    expect(document.querySelector("#workbench-tabs")).toBeNull();
+    expect(el("#workbench-empty").textContent).toBe("Files will open here");
+  });
+
+  it("the second toggle closes the pane and leaves the app collapsed", async () => {
+    el("#workbench-toggle").click();
+    await tick();
+    expect(document.querySelector("#workbench-panel")).toBeNull();
+    expect(store.get("hotdog.workbenchCollapsed")).toBe("1");
   });
 });
 

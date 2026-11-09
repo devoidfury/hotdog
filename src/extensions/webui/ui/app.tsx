@@ -4,7 +4,7 @@
 // message list container is handed to the imperative renderer via ref.
 
 import { mount, type Mounted, type Ref, type DomNode } from "@utils/jsx";
-import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE } from "./utils.ts";
+import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH, WORKBENCH_DEFAULT_WIDTH } from "./utils.ts";
 import { createPanelResize } from "./panel-resize.ts";
 import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
 import {
@@ -16,9 +16,10 @@ import {
 } from "./login.tsx";
 import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
-import { Sidebar, ContextMenu, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
+import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import type { SearchHitWire } from "./chat.ts";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
+import { WorkbenchPanel, workbenchStore } from "./workbench.tsx";
 import { createCoalescer } from "./batch.ts";
 import { audioBlobToWav } from "./wav.ts";
 
@@ -495,6 +496,32 @@ function rowMenuPoint(e: MouseEvent | KeyboardEvent, rowEl: HTMLElement): { x: n
 function armContextMenu(rowEl: HTMLElement): void {
   contextMenuTriggerEl = rowEl;
   queueMicrotask(() => {
+    const el = contextMenuEl;
+    const menu = contextMenuAtom();
+    if (el && menu) {
+      // Keep the whole box on screen (owner: menus opened near the bottom
+      // rendered offscreen). position:fixed, so the rect shares the viewport
+      // origin. Clamp and correct the ANCHOR ON THE ATOM, not just the
+      // style: ContextMenu re-applies style from state on every coalesced
+      // render, so a style-only nudge gets undone by the next payload
+      // refresh -- the box jumps back offscreen (owner, 2026-11-09). The
+      // style write stays for a flash-free first frame; the atom write is
+      // what makes it durable.
+      const r = el.getBoundingClientRect();
+      const c = clampMenuAnchor(
+        r.left,
+        r.top,
+        r.width,
+        r.height,
+        window.innerWidth,
+        window.innerHeight,
+      );
+      if (c.left !== menu.x || c.top !== menu.y) {
+        el.style.left = `${c.left}px`;
+        el.style.top = `${c.top}px`;
+        contextMenuAtom({ ...menu, x: c.left, y: c.top });
+      }
+    }
     contextMenuEl?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   });
 }
@@ -710,7 +737,10 @@ function onLogMenu(e: MouseEvent | KeyboardEvent, logId: string, rowEl: HTMLElem
       pinMenuItem(logId),
       {
         label: "Resume",
-        // The inline Resume's handler verbatim (no confirm on either).
+        // Sole resume entry since the log-row inline button went away
+        // (owner 2026-11-09: the menu item is enough). Same handler the
+        // button carried: loads the log as a live session, keeps its id,
+        // no confirm.
         onSelect: () => {
           chat?.loadLog(logId);
           dismissContextMenu();
@@ -803,6 +833,59 @@ const logsPanel = createPanelResize({
 
 function onToggleLogs(): void {
   logsPanel.toggle(); // persists and bumps the atom; the render does the rest
+}
+
+// ── Workbench pane (right dock) ─────────────────────────────────────────────
+// The third panel on the same seam. axis x + nearEdge: the handle rides the
+// panel's LEFT (near) edge, so dragging left GROWS the pane and ArrowLeft
+// steps it up -- panelDragSign/panelSizeForKey flip both together.
+// DEFAULT COLLAPSED: a first-run visitor never sees the pane; today's layout
+// renders exactly as before until the header toggle opens it. The seam's
+// collapse codec reads "no stored key" as expanded, so init() seeds the
+// first visit (see hasStoredWorkbenchCollapsed there).
+
+const WORKBENCH_WIDTH_KEY = "hotdog.workbenchWidth";
+const WORKBENCH_COLLAPSED_KEY = "hotdog.workbenchCollapsed";
+
+const workbenchCollapsedAtom = reactiveState<boolean>(true);
+
+const workbenchPanel = createPanelResize({
+  axis: "x",
+  sizeKey: WORKBENCH_WIDTH_KEY,
+  collapsedKey: WORKBENCH_COLLAPSED_KEY,
+  defaultSize: WORKBENCH_DEFAULT_WIDTH,
+  min: WORKBENCH_MIN_WIDTH,
+  max: WORKBENCH_MAX_WIDTH,
+  // Leave the default sidebar plus a readable chat column standing; on
+  // degenerate viewports the seam's min-wins rule takes the wheel.
+  viewportMax: () => window.innerWidth - SIDEBAR_DEFAULT_WIDTH - 480,
+  step: 16,
+  coarseStep: 48,
+  nearEdge: true,
+  bodyClass: "workbench-resizing",
+  // A closed pane has no width to drag (its handle is not even mounted);
+  // the gate is the same lock logsPanel puts on a collapsed list.
+  enabled: () => !workbenchCollapsedAtom(),
+  paint: (width, el) => {
+    document.documentElement.style.setProperty("--workbench-width", `${width}px`);
+    el?.setAttribute("aria-valuenow", String(width));
+  },
+  onCollapseChange: (collapsed) => workbenchCollapsedAtom(collapsed),
+});
+
+function onToggleWorkbench(): void {
+  workbenchPanel.toggle(); // persists and bumps the atom; the render does the rest
+}
+
+/** Best-effort probe for the init() seed: a throwing or absent storage reads
+ *  as "no stored choice", which lands on the default-collapsed side -- the
+ *  seam doctrine's cost is the reload, and the session's toggle stays live. */
+function hasStoredWorkbenchCollapsed(): boolean {
+  try {
+    return window.localStorage?.getItem(WORKBENCH_COLLAPSED_KEY) != null;
+  } catch {
+    return false;
+  }
 }
 
 // ── Chat wiring ─────────────────────────────────────────────────────────────
@@ -1441,7 +1524,6 @@ function App() {
             chat?.switchSession(id);
           }}
           onCancel={onCancelSession}
-          onContinueLog={(id) => chat?.loadLog(id)}
           onViewLog={(id) => chat?.viewLog(id)}
           onSessionMenu={onSessionMenu}
           onLogMenu={onLogMenu}
@@ -1549,6 +1631,19 @@ function App() {
                   tools: {toolExec}
                 </button>
               ) : null}
+              {/* Workbench disclosure: opens the right-docked pane (see
+                      workbench.tsx). Same toggleable idiom as its neighbors;
+                      aria-expanded mirrors the OPEN state like #logs-toggle. */}
+              <button
+                type="button"
+                id="workbench-toggle"
+                className="header-btn toggleable"
+                aria-expanded={workbenchCollapsedAtom() ? "false" : "true"}
+                title="Workbench (right-docked pane): show or hide. Width and open state persist in this browser."
+                onClick={onToggleWorkbench}
+              >
+                workbench
+              </button>
               <span id="connection-status" className={connected ? "status-connected" : "status-disconnected"}>
                 {connected ? "Connected" : "Disconnected"}
               </span>
@@ -1722,6 +1817,24 @@ function App() {
           </div>
         </main>
 
+        {/* Right-docked workbench; a sibling of the chat column inside the
+            #main-ui flex row. Collapsed (the default on first run) renders
+            nothing at all. */}
+        <WorkbenchPanel
+          collapsed={workbenchCollapsedAtom()}
+          width={workbenchPanel.size()}
+          min={WORKBENCH_MIN_WIDTH}
+          max={workbenchPanel.maxSize()}
+          state={workbenchStore.get()}
+          onActivate={(id) => workbenchStore.activate(id)}
+          onCloseTab={(id) => workbenchStore.close(id)}
+          onResizeStart={workbenchPanel.onPointerDown}
+          onResizeMove={workbenchPanel.onPointerMove}
+          onResizeEnd={workbenchPanel.onPointerUp}
+          onResizeKey={workbenchPanel.onKeyDown}
+          onResizeReset={workbenchPanel.onDoubleClick}
+        />
+
         {/* Stacked task overlays; the most recently opened sits on top. */}
         {openTasks.map((id, i) => {
           const task = tasks.find((t) => t.taskId === id);
@@ -1754,6 +1867,15 @@ async function init(): Promise<void> {
   if (!root) return;
   sidebarPanel.restore();
   logsPanel.restore();
+  workbenchPanel.restore();
+  // First-run default-collapsed: restore() honors a STORED choice ("0"
+  // keeps the pane open across visits), but "no key" decodes as expanded
+  // and an unopened workbench must never dock itself into the layout. Seed
+  // the first visit (or a storage-blocked one) to collapsed once; the write
+  // persists, so later visits are decided by restore() alone.
+  if (!hasStoredWorkbenchCollapsed()) workbenchPanel.toggle();
+  workbenchCollapsedAtom(workbenchPanel.collapsed());
+  workbenchStore.subscribe(render);
   mounted = mount(<App />, root as unknown as DomNode);
   effect(render, [
     screenAtom,
@@ -1772,6 +1894,7 @@ async function init(): Promise<void> {
     stripExpandedAtom,
     nowAtom,
     copyFlashAtom,
+    workbenchCollapsedAtom,
   ]);
 
   document.addEventListener("keydown", (e: KeyboardEvent) => {

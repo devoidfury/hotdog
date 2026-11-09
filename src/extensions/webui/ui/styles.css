@@ -1088,27 +1088,6 @@ body.logs-resizing .sidebar-header-resize {
     background: var(--error-soft);
 }
 
-.log-continue-btn {
-    padding: 2px 8px;
-    border: 1px solid rgba(124, 92, 255, 0.3);
-    border-radius: var(--radius-sm);
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-size: 0.65rem;
-    font-weight: 600;
-    font-family: var(--font-sans);
-    cursor: pointer;
-    transition: all 0.15s;
-    line-height: 1.3;
-    white-space: nowrap;
-}
-
-.log-continue-btn:hover {
-    background: var(--accent);
-    color: var(--text-inverse);
-    border-color: var(--accent);
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
    CHAT AREA
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -2611,6 +2590,146 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   WORKBENCH (right-docked pane; see ui/workbench.tsx)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Collapsed renders NO DOM (workbench.tsx returns null), so there is no
+   hidden state here -- the pane either participates in the flex row or is
+   absent. min-width: 0 keeps the tab strip/body from forcing the row wider
+   than --workbench-width at the clamp floor (no horizontal overflow). */
+#workbench-panel {
+    width: var(--workbench-width, 420px);
+    flex-shrink: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border);
+    position: relative; /* anchor for #workbench-resize */
+}
+
+/* Left-edge handle: the sidebar's strip one border over. nearEdge means the
+   drag grows LEFT (the seam flips the sign); visuals are the house match. */
+#workbench-resize {
+    position: absolute;
+    top: 0;
+    left: -3px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    touch-action: none;
+    z-index: 10;
+}
+
+#workbench-resize::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    right: -4px;
+}
+
+#workbench-resize:hover,
+body.workbench-resizing #workbench-resize {
+    background: var(--accent-soft);
+}
+
+#workbench-resize:focus-visible {
+    background: var(--accent-soft);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+body.workbench-resizing {
+    cursor: col-resize;
+    user-select: none;
+}
+
+/* Tab strip: scrolls sideways instead of overflowing; the active tab lifts
+   off the baseline like the sidebar's headers. Hidden at zero tabs by the
+   component (decision, see workbench.tsx header). */
+#workbench-tabs {
+    display: flex;
+    align-items: stretch;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.workbench-tab {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 200px;
+    border-right: 1px solid var(--border);
+}
+
+.workbench-tab.active {
+    background: var(--bg-primary);
+}
+
+.workbench-tab-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+    /* ellipsis at the strip's floor, not a clipped wall of text */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.workbench-tab.active .workbench-tab-label {
+    color: var(--text-primary);
+}
+
+.workbench-tab-label:hover {
+    background: var(--bg-hover);
+}
+
+.workbench-dirty {
+    color: var(--accent, var(--text-secondary));
+}
+
+.workbench-tab-close {
+    padding: 2px 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font: inherit;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.workbench-tab-close:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+#workbench-body {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.workbench-empty,
+.workbench-placeholder {
+    color: var(--text-muted);
+    margin: 8px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    RESPONSIVE
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -2627,6 +2746,28 @@ body.logs-resizing .sidebar-header-resize {
 
     /* Drawer mode: width is CSS-controlled, no resizing. */
     #sidebar-resize {
+        display: none;
+    }
+
+    /* Workbench on phones: an OPEN pane becomes a full-width overlay (the
+       chosen degradation -- document decision: "hidden-but-openable" would
+       leave a docked strip stealing chat width on the smallest screens,
+       and the sidebar drawer already sets the grammar). The header toggle
+       is the only entry point; collapsed still renders no DOM. The handle
+       goes -- like the drawer, CSS owns the width, so the seam's
+       offsetParent guard would make it inert anyway. */
+    #workbench-panel {
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: auto;
+        z-index: 100;
+        box-shadow: var(--shadow-lg);
+    }
+
+    #workbench-resize {
         display: none;
     }
 

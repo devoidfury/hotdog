@@ -128,7 +128,6 @@ interface SidebarProps {
   onCreate: () => void;
   onSwitch: (sessionId: string) => void;
   onCancel: (sessionId: string) => void;
-  onContinueLog: (logId: string) => void;
   onViewLog: (logId: string) => void;
   onSessionMenu: (e: MouseEvent | KeyboardEvent, session: SessionInfo, rowEl: HTMLElement) => void;
   onLogMenu: (e: MouseEvent | KeyboardEvent, logId: string, rowEl: HTMLElement) => void;
@@ -630,18 +629,6 @@ export function Sidebar(p: SidebarProps) {
               ctxTotal={log.ctxTotal}
               messageCount={log.messageCount}
               createdAt={log.createdAt}
-              action={
-                <button
-                  className="log-continue-btn"
-                  title="Resume this session (keeps its session id)"
-                  onClick={(e: MouseEvent) => {
-                    e.stopPropagation();
-                    p.onContinueLog(log.id);
-                  }}
-                >
-                  Resume
-                </button>
-              }
               onSelect={() => p.onViewLog(log.id)}
               onContextMenu={(e, rowEl) => p.onLogMenu(e, log.id, rowEl)}
             />
@@ -671,6 +658,31 @@ export function Sidebar(p: SidebarProps) {
       />
     </aside>
   );
+}
+
+/** Pure viewport clamp for a fixed-positioned menu box anchored at (x, y)
+ *  with size (w, h). A pointing event near the bottom or right edge would
+ *  otherwise push the box offscreen; nudge it back inside the pad frame
+ *  staying as close to the anchor as possible. A box larger than the
+ *  viewport pins to the top-left pad. Geometry-only so the layout-free
+ *  dom harness can pin every direction (same reasoning as panel-resize's
+ *  env seam); the caller measures and applies. Zero rect (no layout)
+ *  degrades to (pad, pad), the documented fallback. */
+export function clampMenuAnchor(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  pad = 8,
+): { left: number; top: number } {
+  const maxLeft = Math.max(pad, viewportWidth - w - pad);
+  const maxTop = Math.max(pad, viewportHeight - h - pad);
+  return {
+    left: Math.min(Math.max(x, pad), maxLeft),
+    top: Math.min(Math.max(y, pad), maxTop),
+  };
 }
 
 /**

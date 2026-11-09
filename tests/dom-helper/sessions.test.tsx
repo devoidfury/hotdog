@@ -21,6 +21,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import {
   Sidebar,
   ContextMenu,
+  clampMenuAnchor,
   formatDateTime,
   scrollHitIntoView,
   sortPinned,
@@ -60,7 +61,6 @@ function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs
       onCreate={noop}
       onSwitch={noop}
       onCancel={noop}
-      onContinueLog={noop}
       onViewLog={noop}
       onSessionMenu={noop}
       onLogMenu={noop}
@@ -312,7 +312,7 @@ describe("live row (owner fixture)", () => {
 // ── Cold row: no client segment, the log's own action ───────────────────────
 
 describe("cold row", () => {
-  it("renders model/status/ctx/msgs + Resume, and never a client segment", () => {
+  it("renders model/status/ctx/msgs, and never a client segment", () => {
     const root = render({ logs: [coldLog({ state: "interrupted" })] });
     const row = root.querySelector(".log-item")!;
     expect(row.querySelector(".row-model")!.textContent).toBe("ai365/qwen3.8-flash-next");
@@ -332,11 +332,10 @@ describe("cold row", () => {
     ]);
     expect(row.querySelector(".row-id")).toBeNull();
     expect(row.textContent).not.toContain(FULL_ID);
-    const cont = row.querySelector(".log-continue-btn")!;
-    expect(cont.textContent).toBe("Resume");
-    // Resume sits in the right-pinned action slot, no sep precedes it.
-    expect(row.querySelector(".row-action .log-continue-btn")).toBeTruthy();
-    expect(row.querySelector(".row-action")!.classList.contains("row-action-right")).toBe(true);
+    // No inline Resume (owner 2026-11-09: the context-menu item is the
+    // resume path) -- cold rows carry no action slot at all.
+    expect(row.querySelector(".log-continue-btn")).toBeNull();
+    expect(row.querySelector(".row-action")).toBeNull();
     expect(row.textContent).not.toContain("client");
     expect(row.querySelector(".row-clients")).toBeNull();
     expect(row.querySelector(".session-cancel-btn")).toBeNull();
@@ -402,9 +401,8 @@ describe("legacy log row (no model/profile/ctx attested)", () => {
     expect(row.querySelector(".row-profile")).toBeNull();
     // ctx absent: only the msgs metric remains, dot-joined after the date.
     expect(texts(row, ".row-metric")).toEqual(["42 msgs"]);
-    // Resume (the log's own action) still renders, right-pinned; line 1
-    // holds no dots at all now (and never did when model/status are absent).
-    expect(row.querySelector(".log-continue-btn")).toBeTruthy();
+    // Line 1 holds no dots at all (model/status absent, and the row carries
+    // no inline action since the Resume button was retired).
     const l1 = row.querySelector(".row-l1")!;
     expect(l1.querySelectorAll(".row-sep")).toHaveLength(0);
     // Bottom row: no ctx attestation, so that segment omits -- date · msgs.
@@ -439,7 +437,7 @@ describe("formatDateTime", () => {
 
 // ── Row interactions (handler wiring) ───────────────────────────────────────
 // The grammar above is only as good as its routing: each slot must reach
-// exactly the handler that owns it, and inner actions (Stop/Resume) must
+// exactly the handler that owns it, and inner actions (Stop) must
 // not leak through to the row's select -- stopPropagation is the pin here.
 
 function mountInteractive(
@@ -464,7 +462,6 @@ function mountInteractive(
       onCreate={() => calls.push("create")}
       onSwitch={(id) => calls.push(`switch:${id}`)}
       onCancel={(id) => calls.push(`cancel:${id}`)}
-      onContinueLog={(id) => calls.push(`continue:${id}`)}
       onViewLog={(id) => calls.push(`view:${id}`)}
       onSessionMenu={(_e, s) => calls.push(`sessionMenu:${s.id}`)}
       onLogMenu={(_e, id) => calls.push(`logMenu:${id}`)}
@@ -534,13 +531,6 @@ describe("row interactions", () => {
     const prevented = clickable(root, ".session-item").dispatchEvent(new Event("contextmenu"));
     expect(calls).toEqual([`sessionMenu:${FULL_ID}`]);
     expect(prevented).toBe(false);
-  });
-
-  it("Resume on a log row resumes it without opening the log", () => {
-    const calls: string[] = [];
-    const root = renderInteractive({ logs: [coldLog()] }, calls);
-    clickable(root, ".log-continue-btn").click();
-    expect(calls).toEqual([`continue:${FULL_ID}`]);
   });
 
   it("clicking a log row body opens it; right-click opens the log menu", () => {
@@ -749,8 +739,7 @@ describe("session id display (both lists)", () => {
     expect(root.textContent).not.toContain(FULL_ID);
     clickable(root, ".session-item").click();
     clickable(root, ".log-item").click();
-    clickable(root, ".log-continue-btn").click();
-    expect(calls).toEqual([`switch:${FULL_ID}`, `view:${FULL_ID}`, `continue:${FULL_ID}`]);
+    expect(calls).toEqual([`switch:${FULL_ID}`, `view:${FULL_ID}`]);
   });
 });
 
@@ -1015,5 +1004,40 @@ describe("scrollHitIntoView", () => {
     const root = render({ sessions: [liveSession()] });
     expect(() => scrollHitIntoView(root, true, "gone")).not.toThrow();
     expect(() => scrollHitIntoView(root, false, "gone")).not.toThrow();
+  });
+});
+
+describe("clampMenuAnchor", () => {
+  // Pure geometry (the dom harness has no layout, so the menu call site in
+  // app.tsx stays a measure+apply; every direction is pinned here).
+  it("leaves a box that fits untouched", () => {
+    expect(clampMenuAnchor(100, 200, 140, 90, 1280, 800)).toEqual({ left: 100, top: 200 });
+  });
+
+  it("nudges a bottom-edge anchor up so the whole box stays visible", () => {
+    // Owner bug: a row low on screen put y near vh; the menu ran offscreen.
+    expect(clampMenuAnchor(300, 780, 140, 200, 1280, 800)).toEqual({ left: 300, top: 592 });
+  });
+
+  it("nudges a right-edge anchor left", () => {
+    expect(clampMenuAnchor(1240, 300, 200, 90, 1280, 800)).toEqual({ left: 1072, top: 300 });
+  });
+
+  it("clamps both axes together", () => {
+    expect(clampMenuAnchor(1270, 790, 200, 220, 1280, 800)).toEqual({ left: 1072, top: 572 });
+  });
+
+  it("pins a box taller or wider than the viewport to the pad, never negative", () => {
+    expect(clampMenuAnchor(640, 790, 200, 1600, 1280, 800)).toEqual({ left: 640, top: 8 });
+    expect(clampMenuAnchor(1270, 400, 2000, 90, 1280, 800)).toEqual({ left: 8, top: 400 });
+  });
+
+  it("clamps a negative or zero anchor back to the pad (zero-rect fallback)", () => {
+    expect(clampMenuAnchor(0, 0, 140, 90, 1280, 800)).toEqual({ left: 8, top: 8 });
+    expect(clampMenuAnchor(-50, -40, 140, 90, 1280, 800)).toEqual({ left: 8, top: 8 });
+  });
+
+  it("honors a custom pad", () => {
+    expect(clampMenuAnchor(300, 795, 140, 90, 1280, 800, 20)).toEqual({ left: 300, top: 690 });
   });
 });

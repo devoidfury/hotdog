@@ -35,6 +35,13 @@ export const LOGS_MAX_HEIGHT = 900;
 export const LOGS_VIEWPORT_RESERVE = 220;
 export const LOGS_DEFAULT_HEIGHT = 240;
 
+// Workbench pane (right dock, see workbench.tsx + the workbenchPanel config
+// in app.tsx). The static ceiling only binds on huge viewports; the live one
+// is viewport-aware. 320 keeps a usable file tree readable at the floor.
+export const WORKBENCH_MIN_WIDTH = 320;
+export const WORKBENCH_MAX_WIDTH = 900;
+export const WORKBENCH_DEFAULT_WIDTH = 420;
+
 // ── Formatting & sanitisation ───────────────────────────────────────────────
 
 export function formatTime(ts: number): string {

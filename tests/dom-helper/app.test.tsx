@@ -20,7 +20,7 @@
 // All browser stubs below are installed before the import and torn down after.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { FakeWebSocket } from "./index.ts";
+import { FakeWebSocket, SVG_NS } from "./index.ts";
 import { DRAFT_STORAGE_KEY } from "@extensions/webui/ui/draft.ts";
 import { ATTACHMENTS_STORAGE_KEY } from "@extensions/webui/ui/attachment-store.ts";
 import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts";
@@ -530,6 +530,18 @@ describe("attachments", () => {
     };
     el("#attach-btn").click();
     expect(opened).toBe(1);
+  });
+
+  it("Attach button is an SVG paperclip with an aria-label", () => {
+    const btn = el("#attach-btn");
+    expect(btn.getAttribute("aria-label")).toBe("Attach files to the next message");
+    // The icon only renders because the JSX runtime mounts the <svg> subtree
+    // via createElementNS; assert the mounted node really is namespaced.
+    const svg = btn.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg!.namespaceURI).toBe(SVG_NS);
+    expect(svg!.querySelector("path")!.namespaceURI).toBe(SVG_NS);
+    expect(svg!.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("picked files become chips with size labels; empty files are skipped", async () => {

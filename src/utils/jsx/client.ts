@@ -56,11 +56,18 @@ export interface DomElement extends DomNode {
 
 export interface DomDocument {
   createElement(tag: string): DomElement;
+  createElementNS(ns: string, tag: string): DomElement;
   createTextNode(data: string): DomText;
   createComment(data: string): DomNode;
 }
 
 export type DomListener = (event?: unknown) => void;
+
+// Elements below an <svg> are foreign content: they only render when created
+// in the SVG namespace (createElement leaves them HTMLUnknownElement). The
+// namespace threads through create/patch/reconcile as `ns` (null = HTML);
+// an <svg> tag switches it on for its whole subtree, siblings stay HTML.
+const SVG_NS = "http://www.w3.org/2000/svg";
 
 /**
  * Callback ref on a host element: called with the DOM node when the element
@@ -173,13 +180,14 @@ function checkDupKeys(parent: DomNode, units: Unit[]): void {
   }
 }
 
-function create(u: Unit, doc: DomDocument, depth: number): Entry {
+function create(u: Unit, doc: DomDocument, depth: number, ns: string | null): Entry {
   if (u.kind === "placeholder") return { unit: u, dom: doc.createComment("") };
   if (u.kind === "text") return { unit: u, dom: doc.createTextNode(u.value) };
   // Lowercase: HTML tag names are case-insensitive and browsers lowercase them,
   // so a dynamic <IMG> must hit the same void-element table as <img>.
   const tag = String(u.vnode.type).toLowerCase();
-  const el = doc.createElement(tag);
+  ns = tag === "svg" ? SVG_NS : ns;
+  const el = ns === null ? doc.createElement(tag) : doc.createElementNS(ns, tag);
   const entry: Entry = { unit: u, dom: el, kids: [], events: new Map() };
   applyProps(el, {}, u.vnode.props, entry, tag);
   const ref = u.vnode.props.ref as Ref | undefined;
@@ -196,7 +204,7 @@ function create(u: Unit, doc: DomDocument, depth: number): Entry {
     flatten(u.vnode.props.children as JsxChild, depth + 1, kids);
     checkDupKeys(el, kids);
     for (const ku of kids) {
-      const kid = create(ku, doc, depth + 1);
+      const kid = create(ku, doc, depth + 1, ns);
       el.insertBefore(kid.dom, null);
       entry.kids!.push(kid);
     }
@@ -291,7 +299,7 @@ function removeEntry(e: Entry): void {
   }
 }
 
-function patch(e: Entry, u: Unit, doc: DomDocument, depth: number): Entry {
+function patch(e: Entry, u: Unit, doc: DomDocument, depth: number, ns: string | null): Entry {
   if (u.kind === "placeholder") return e;
   if (u.kind === "text") {
     if (e.unit.kind === "text" && e.unit.value !== u.value) {
@@ -322,7 +330,7 @@ function patch(e: Entry, u: Unit, doc: DomDocument, depth: number): Entry {
     e.kids = [];
     return e;
   }
-  e.kids = reconcile(el, e.kids ?? [], u.vnode.props.children as JsxChild, doc, depth);
+  e.kids = reconcile(el, e.kids ?? [], u.vnode.props.children as JsxChild, doc, depth, tag === "svg" ? SVG_NS : ns);
   return e;
 }
 
@@ -333,6 +341,7 @@ function reconcile(
   child: JsxChild,
   doc: DomDocument,
   depth: number,
+  ns: string | null,
 ): Entry[] {
   const units: Unit[] = [];
   // Same rule as create(): a host element without a children prop has no child slots at all.
@@ -367,7 +376,7 @@ function reconcile(
     // Track it so a later unit in this same reconcile cannot reuse the same entry (an old child can match a new one by key AND by position)
     //  and the removal pass below does not drop it even though it was just patched.
     if (reuse) consumed.add(reuse);
-    newKids.push(reuse ? patch(reuse, u, doc, depth + 1) : create(u, doc, depth + 1));
+    newKids.push(reuse ? patch(reuse, u, doc, depth + 1, ns) : create(u, doc, depth + 1, ns));
   }
 
   for (const e of oldKids) {
@@ -403,10 +412,10 @@ export function mount(node: JsxChild, container: DomNode): Mounted {
   }
   const doc = container.ownerDocument ?? (globalThis as { document?: DomDocument }).document;
   if (!doc) throw new Error("[jsx] mount: no document available");
-  let kids = reconcile(container, [], node, doc, 0);
+  let kids = reconcile(container, [], node, doc, 0, null);
   return {
     render(next: JsxChild) {
-      kids = reconcile(container, kids, next, doc, 0);
+      kids = reconcile(container, kids, next, doc, 0, null);
     },
     unmount() {
       for (const e of kids) removeEntry(e);

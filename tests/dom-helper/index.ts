@@ -242,9 +242,17 @@ const VOID_TAGS = new Set([
   "link", "meta", "param", "source", "track", "wbr",
 ]);
 
+// Element namespaces. createElement lands in the HTML namespace; createElementNS
+// in the given one. Tests assert `namespaceURI` to prove the JSX runtime routed
+// inline <svg> subtrees through createElementNS (HTMLUnknownElement otherwise).
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+const SVG_NS = "http://www.w3.org/2000/svg";
+export { HTML_NS, SVG_NS };
+
 class DElement extends DNode {
   nodeType = 1;
   tagName: string;
+  namespaceURI: string;
   attributes = new Map<string, string>();
   classList: DClassList;
   dataset: Record<string, string>;
@@ -291,9 +299,10 @@ class DElement extends DNode {
     },
   };
 
-  constructor(tag: string, doc: DDocument) {
+  constructor(tag: string, doc: DDocument, ns: string = HTML_NS) {
     super(doc);
     this.tagName = tag.toUpperCase();
+    this.namespaceURI = ns;
     this.classList = new DClassList(this);
     // dataset proxies to data-* attributes (camelCase → kebab-case).
     this.dataset = new Proxy({} as Record<string, string>, {
@@ -687,6 +696,10 @@ class DDocument extends DNode {
 
   createElement(tag: string): DElement {
     return new DElement(tag, this);
+  }
+
+  createElementNS(ns: string, tag: string): DElement {
+    return new DElement(tag, this, ns);
   }
 
   /** Legacy clipboard hook (utils.copyText fallback). Tests replace this to

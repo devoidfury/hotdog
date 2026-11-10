@@ -11,8 +11,13 @@ import { VOID_ELEMENTS } from "@utils/jsx/core.ts";
 // elements, so the fake must too. Importing the runtime's own set keeps the
 // double from drifting from what mount() treats as void.
 
+// HTML namespace URI, so the fake can assert namespace routing like a browser.
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+const SVG_NS = "http://www.w3.org/2000/svg";
+
 class FDocument {
   createElement(tag: string) { return new FElement(tag, this, VOID_ELEMENTS.has(tag)); }
+  createElementNS(ns: string, tag: string) { return new FElement(tag, this, VOID_ELEMENTS.has(tag), ns); }
   createTextNode(data: string) { return new FText(data, this); }
   createComment(data: string) { return new FComment(data, this); }
 }
@@ -50,7 +55,7 @@ class FComment extends FNode {
 class FElement extends FNode {
   attrs = new Map<string, string>();
   listeners = new Map<string, Set<(ev?: unknown) => void>>();
-  constructor(public tag: string, doc: FDocument, public voidEl = false) { super(doc); }
+  constructor(public tag: string, doc: FDocument, public voidEl = false, public namespaceURI = HTML_NS) { super(doc); }
   override insertBefore(node: FNode, ref: FNode | null): void {
     if (this.voidEl) throw new Error(`void element <${this.tag}> can't have children`);
     super.insertBefore(node, ref);
@@ -396,5 +401,34 @@ describe("mount", () => {
     expect(calls).toEqual(["p"]);
     m.render(<div />);
     expect(calls).toEqual(["p", null]);
+  });
+
+  it("creates <svg> and all its descendants in the SVG namespace", () => {
+    // createElement leaves <svg>/<path> as HTMLUnknownElement (renders nothing),
+    // so the runtime must route the whole svg subtree through createElementNS.
+    const { container } = setup();
+    mount(<div><svg viewBox="0 0 24 24"><path d="M7 3h10" /></svg><span /></div>, container);
+    const div = container.children[0] as FElement;
+    const svg = div.children[0] as FElement;
+    const path = svg.children[0] as FElement;
+    const span = div.children[1] as FElement;
+    expect(svg.namespaceURI).toBe(SVG_NS);
+    expect(path.namespaceURI).toBe(SVG_NS);
+    // Siblings of the <svg> stay HTML.
+    expect(span.namespaceURI).toBe(HTML_NS);
+    // SVG attributes round-trip verbatim, camelCase included (viewBox is
+    // case-sensitive in SVG, `d` lands as a plain attribute).
+    expect(svg.attrs.get("viewBox")).toBe("0 0 24 24");
+    expect(path.attrs.get("d")).toBe("M7 3h10");
+  });
+
+  it("re-renders inside an <svg> onto the namespace-preserved nodes", () => {
+    const { container } = setup();
+    const m = mount(<div><svg><path d="a" /></svg></div>, container);
+    const svg = (container.children[0] as FElement).children[0] as FElement;
+    m.render(<div><svg><path d="b" /></svg></div>);
+    const path = svg.children[0] as FElement;
+    expect(path.namespaceURI).toBe(SVG_NS);
+    expect(path.attrs.get("d")).toBe("b");
   });
 });

@@ -99,7 +99,7 @@ describe("tokenizeShell runs", () => {
 describe("tokenizer registry", () => {
   it("resolves shell and misses unknown langs (plain-text fallback signal)", () => {
     expect(getTokenizer("shell")).toBe(tokenizeShell);
-    expect(getTokenizer("yaml")).toBeUndefined();
+    expect(getTokenizer("json")).toBeUndefined();
     expect(getTokenizer("")).toBeUndefined();
     // A lang name shadowing Object.prototype must miss, not resolve.
     expect(getTokenizer("constructor")).toBeUndefined();

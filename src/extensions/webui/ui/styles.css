@@ -2124,6 +2124,24 @@ body.logs-resizing .sidebar-header-resize {
 .tok-command { color: var(--success); }
 .tok-operator { color: var(--text-muted); }
 
+/* YAML token classes (the yaml tokenizer's vocabulary; shell keeps tok-command).
+   One hue family per reading: keys are the accent (the structure you scan),
+   strings one warm family, scalar literals (number/boolean/null) one cool
+   family, comments muted and italic so they recede, anchor/alias/tag share
+   the reference hue, doc markers loud (they divide the file). All theme vars,
+   readable on every panel bg; the palette is the same semantic set the diff
+   and status colors ride. */
+.tok-key { color: var(--accent); }
+.tok-string { color: var(--warning); }
+.tok-comment { color: var(--text-muted); font-style: italic; }
+.tok-number { color: var(--diff-info-ink); }
+.tok-boolean { color: var(--diff-info-ink); }
+.tok-null { color: var(--diff-info-ink); }
+.tok-anchor { color: var(--success); }
+.tok-alias { color: var(--success); }
+.tok-tag { color: var(--error); }
+.tok-marker { color: var(--text-primary); font-weight: 600; }
+
 /* PROSE part: a quiet agent-message row with a left icon gutter. */
 .tool-prose {
     display: flex;

@@ -270,7 +270,7 @@ describe("codeRuns (shared tokenizer seam)", () => {
   });
 
   it("returns null for unknown or absent langs (plain <pre> render)", () => {
-    expect(codeRuns("a: 1", "yaml")).toBeNull();
+    expect(codeRuns("a: 1", "json")).toBeNull();
     expect(codeRuns("a: 1")).toBeNull();
     expect(codeRuns("a: 1", "constructor")).toBeNull();
   });
@@ -1120,12 +1120,45 @@ describe("code part (DOM)", () => {
     expect(spans.some((s) => s.classList.contains("tok-operator") && s.textContent === "|")).toBe(true);
   });
 
+  it("workflow-graph YAML renders tok-key AND tok-comment spans (styles.css colors them)", () => {
+    // The coloring bug this pins: styles.css only styled tok-command/tok-
+    // operator, so every yaml token rendered unstyled. This asserts the sink
+    // EMITS the classes (the CSS itself is visual -- see the .tok-key /
+    // .tok-comment rules in styles.css).
+    const graph = [
+      "name: demo-graph # a workflow graph",
+      "nodes:",
+      "  - id: implement",
+      "    prompt: do the thing",
+      "    retry: 2",
+      "  - id: review",
+      "    dependsOn: [implement]",
+      "",
+    ].join("\n");
+    const { block } = mountBlock({
+      name: "workflow_validate",
+      args: JSON.stringify({ graph }),
+      display: [{ kind: "code", source: "args", arg: "graph", lang: "yaml" }],
+    });
+    const pre = block.querySelector(".tool-code")!;
+    expect(pre.textContent).toBe(graph);
+    const spans = [...pre.querySelectorAll("span")];
+    expect(spans.some((s) => s.classList.contains("tok-key") && s.textContent === "name")).toBe(true);
+    expect(spans.some((s) => s.classList.contains("tok-key") && s.textContent === "dependsOn")).toBe(true);
+    expect(spans.some((s) => s.classList.contains("tok-comment") && s.textContent === "# a workflow graph")).toBe(true);
+    // The classes the new CSS rules name must all be reachable from this one
+    // sample (the tokenizer registry is the sink's only source).
+    const classes = new Set(spans.map((s) => s.className).flatMap((c) => c.split(" ")).filter((c) => c.startsWith("tok-")));
+    expect(classes.has("tok-key")).toBe(true);
+    expect(classes.has("tok-comment")).toBe(true);
+  });
+
   it("unknown langs render a plain block with the raw text", () => {
     const yaml = "name: demo\nsteps:\n  - run: echo hi\n";
     const { block } = mountBlock({
       name: "check",
       args: JSON.stringify({ yaml }),
-      display: [{ kind: "code", source: "args", arg: "yaml", lang: "yaml" }],
+      display: [{ kind: "code", source: "args", arg: "yaml", lang: "json" }],
     });
     const pre = block.querySelector(".tool-code")!;
     // REAL content, never a JSON object with escaped \n.

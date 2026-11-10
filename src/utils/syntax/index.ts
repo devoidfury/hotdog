@@ -6,6 +6,7 @@
  */
 
 import { tokenizeShell } from "./shell.ts";
+import { tokenizeYaml } from "./yaml.ts";
 
 /** One token run: a contiguous slice of the input sharing a token class. */
 export interface SyntaxRun {
@@ -20,7 +21,12 @@ export interface SyntaxRun {
  * run's text reproduces the input exactly (lossless, no reordering). */
 export type SyntaxTokenizer = (text: string) => SyntaxRun[];
 
-const TOKENIZERS = new Map<string, SyntaxTokenizer>([["shell", tokenizeShell]]);
+// Lang names match the webui file-view's extension guesses ("yaml" covers
+// .yaml and .yml there), so a guessed lang resolves here without aliases.
+const TOKENIZERS = new Map<string, SyntaxTokenizer>([
+  ["shell", tokenizeShell],
+  ["yaml", tokenizeYaml],
+]);
 
 /** Register (or replace) the tokenizer for a lang name. */
 export function registerTokenizer(lang: string, tokenizer: SyntaxTokenizer): void {

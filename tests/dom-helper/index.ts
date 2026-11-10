@@ -343,6 +343,17 @@ class DElement extends DNode {
     this.setAttribute("class", value);
   }
 
+  // id reflects to the attribute (real-DOM parity): app.tsx's showCopyToast
+  // assigns `toast.id = "copy-toast"`, which without this stays a plain JS
+  // field and never reaches getElementById / #id selectors.
+  get id(): string {
+    return this.getAttribute("id") ?? "";
+  }
+
+  set id(value: string) {
+    this.setAttribute("id", value);
+  }
+
   setAttribute(name: string, value: string): void {
     const lower = name.toLowerCase();
     this.attributes.set(lower, String(value));

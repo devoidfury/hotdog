@@ -117,20 +117,22 @@ export async function copyText(text: string): Promise<boolean> {
   } catch {
     // Fall through to the legacy path (permission denied, non-secure context).
   }
+  // The offscreen textarea must leave the document even when execCommand
+  // throws (a leaked node poisons later querySelector("textarea") lookups).
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  // Keep it out of the layout and the scroll position.
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.top = "-1000px";
   try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    // Keep it out of the layout and the scroll position.
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.top = "-1000px";
     document.body.appendChild(ta);
     ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
+    return document.execCommand("copy");
   } catch {
     return false;
+  } finally {
+    ta.remove();
   }
 }
 

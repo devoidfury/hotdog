@@ -9,10 +9,13 @@
 // encode nothing true. When the first real tab kind lands, its open/close
 // writes ride the same localStorage doctrine the panels already use.
 //
-// `kind` is deliberately a one-member union. Real kinds (file, settings,
-// diff) widen it when they ship; consumers must not switch on it yet.
+// `kind` widened with the first real producers: "files" is the workspace
+// tree (its id keys the root list), "file" is a read-only viewer whose id IS
+// the path -- so openTab's id-idempotence doubles as "reopening the same
+// path focuses the existing tab". "placeholder" stays for the shell's own
+// demo tabs.
 
-export type WorkbenchTabKind = "placeholder";
+export type WorkbenchTabKind = "placeholder" | "files" | "file";
 
 export interface WorkbenchTab {
   /** Stable identity: reopening the same target reuses the same id (openTab

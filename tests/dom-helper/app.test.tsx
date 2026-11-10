@@ -19,7 +19,7 @@
 //
 // All browser stubs below are installed before the import and torn down after.
 
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { FakeWebSocket, SVG_NS } from "./index.ts";
 import { DRAFT_STORAGE_KEY } from "@extensions/webui/ui/draft.ts";
 import { ATTACHMENTS_STORAGE_KEY } from "@extensions/webui/ui/attachment-store.ts";
@@ -2617,6 +2617,196 @@ describe("settings viewer (real app wiring)", () => {
     expect(el("#settings-view")).toBeTruthy();
     key(el("#settings-view"), "Escape");
     await tick();
+  });
+});
+// ── Workbench file tree + viewer (real app wiring) ──────────────────────────
+// The zero-tabs button docks the tree tab and requests the roots; replies
+// correlate by requestId (stale drop); a file click opens a "file" tab
+// (id = path, reopened ONCE) and reads it; server rejections render verbatim;
+// the row context menu is Copy path (the quote-to-composer item is deferred:
+// no composer-insert seam). Leaves the app exactly as found: no tabs, pane
+// collapsed.
+
+describe("workbench file tree (real app wiring)", () => {
+  const openPane = async (): Promise<void> => {
+    if (!document.querySelector("#workbench-panel")) {
+      el("#workbench-toggle").click();
+      await tick();
+    }
+  };
+  const closeTabs = async (): Promise<void> => {
+    for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
+    await tick();
+  };
+  const tabLabels = (): string[] => els("#workbench-tabs [role=tab]").map((b) => b.textContent ?? "");
+
+  afterEach(async () => {
+    await closeTabs();
+    if (document.querySelector("#workbench-panel")) {
+      el("#workbench-toggle").click();
+      await tick();
+    }
+  });
+
+  it("entry button -> roots request -> expand -> file click -> tab + read; reopening the path reuses the tab", async () => {
+    await attach();
+    await openPane();
+    await closeTabs();
+    clearSent();
+    el("#workbench-open-files").click();
+    await tick();
+    expect(tabLabels()).toEqual(["Files"]);
+    expect(el(".file-tree")).toBeTruthy();
+    expect(el(".file-tree").textContent).toContain("Listing workspace");
+    const rootsReq = sent<{ requestId: number; path?: unknown }>("listDir").pop()!;
+    expect("path" in rootsReq).toBe(false);
+
+    ws.fireMessage({
+      type: "listDirResult",
+      requestId: rootsReq.requestId,
+      roots: [{ name: "rootA", path: "/rootA" }],
+    });
+    await tick();
+    expect(el(".ft-root .ft-name").textContent).toBe("rootA");
+
+    clearSent();
+    el(".ft-root .ft-row-btn").click();
+    await tick();
+    const expReq = sent<{ requestId: number; path: string }>("listDir").pop()!;
+    expect(expReq.path).toBe("/rootA");
+    // A stale reply for the ROOTS id cannot overwrite the dir slot.
+    ws.fireMessage({ type: "listDirResult", requestId: rootsReq.requestId - 1, entries: [] });
+    await tick();
+    expect(el(".ft-loading")).toBeTruthy(); // still listing
+
+    ws.fireMessage({
+      type: "listDirResult",
+      requestId: expReq.requestId,
+      path: "/rootA",
+      entries: [
+        { name: "src", path: "/rootA/src", isDir: true },
+        { name: "run.sh", path: "/rootA/run.sh", isDir: false, size: 9 },
+      ],
+    });
+    await tick();
+    expect(els(".ft-file").length).toBe(1);
+
+    clearSent();
+    el(".ft-file .ft-row-btn").click();
+    await tick();
+    expect(tabLabels()).toEqual(["Files", "run.sh"]);
+    const readReq = sent<{ requestId: number; path: string; offset: number }>("readFile").pop()!;
+    expect(readReq.path).toBe("/rootA/run.sh");
+    expect(readReq.offset).toBe(0);
+    ws.fireMessage({
+      type: "readFileResult",
+      requestId: readReq.requestId,
+      path: "/rootA/run.sh",
+      offset: 0,
+      content: "echo hi\nls\n",
+    });
+    await tick();
+    expect(els(".file-line").map((r) => r.getAttribute("data-line"))).toEqual(["1", "2"]);
+    expect(el(".tk-command")!.textContent).toBe("echo");
+
+    // Back to the tree, click the same file again: ONE tab (id = path), no
+    // second read (openFileView reuses the cached entry).
+    clearSent();
+    els("#workbench-tabs [role=tab]")[0]!.click();
+    await tick();
+    el('.ft-file .ft-row-btn').click();
+    await tick();
+    expect(tabLabels()).toEqual(["Files", "run.sh"]);
+    expect(sent("readFile")).toHaveLength(0);
+  });
+
+  it("server rejections render VERBATIM (tree row + viewer) and the row menu copies the path", async () => {
+    await attach();
+    await openPane();
+    await closeTabs();
+    clearSent();
+    el("#workbench-open-files").click();
+    await tick();
+    // The tree atom may carry expanded dirs from an earlier test (open then
+    // re-requests the roots AND them): address requests by shape, not count.
+    const reqs = sent<{ requestId: number; path?: string }>("listDir");
+    const rootsReq = reqs.find((r) => r.path === undefined)!;
+    ws.fireMessage({ type: "listDirResult", requestId: rootsReq.requestId, roots: [{ name: "rootA", path: "/rootA" }] });
+    await tick();
+    expect(el(".ft-root .ft-name").textContent).toBe("rootA");
+    let expReq = reqs.find((r) => r.path === "/rootA");
+    if (!expReq) {
+      // Fresh state: expand by click, which mints the dir request.
+      clearSent();
+      el(".ft-root .ft-row-btn").click();
+      await tick();
+      expReq = sent<{ requestId: number; path: string }>("listDir").pop()!;
+    }
+    ws.fireMessage({
+      type: "listDirResult",
+      requestId: expReq.requestId,
+      error: "Symlink escape rejected: link-etc",
+    });
+    await tick();
+    expect(el(".ft-error").textContent).toBe("Symlink escape rejected: link-etc");
+
+    // Right-click the root row: the app's Copy-path menu (ContextMenu idiom).
+    const rowBtn = el(".ft-root .ft-row-btn");
+    rowBtn.dispatchEvent({ type: "contextmenu", currentTarget: rowBtn, clientX: 50, clientY: 50 } as unknown as Event);
+    await tick();
+    const items = els(".context-menu-item").map((i) => i.textContent);
+    expect(items).toEqual(["Copy path"]);
+    const copied: string[] = [];
+    document.execCommand = (): boolean => {
+      const ta = document.querySelector("textarea[readonly]") as unknown as { value: string } | null;
+      if (ta) copied.push(ta.value);
+      return true;
+    };
+    els(".context-menu-item")[0]!.click();
+    await tick();
+    expect(copied).toEqual(["/rootA"]);
+    expect(el("#copy-toast").textContent).toBe("Path copied");
+    expect(document.querySelector(".context-menu")).toBeNull();
+  });
+
+  it("a viewer error rides verbatim; pager re-requests with the loaded offset", async () => {
+    await attach();
+    await openPane();
+    await closeTabs();
+    clearSent();
+    workbenchStore.open({ id: "/rootA/big.txt", kind: "file", label: "big.txt", dirty: false });
+    await tick();
+    // The tab landed with no view (a producer bypass); clicking the tab is
+    // the recovery path -- activate ensures the first page is requested.
+    els("#workbench-tabs [role=tab]").at(-1)!.click();
+    await tick();
+    const req = sent<{ requestId: number; path: string; offset: number }>("readFile").pop()!;
+    expect(req.path).toBe("/rootA/big.txt");
+    ws.fireMessage({
+      type: "readFileResult",
+      requestId: req.requestId,
+      path: "/rootA/big.txt",
+      content: "l1\nl2\n",
+      truncated: true,
+    });
+    await tick();
+    expect(els(".file-line").length).toBe(2);
+    clearSent();
+    el(".file-view-more").click();
+    await tick();
+    const more = sent<{ requestId: number; offset: number }>("readFile").pop()!;
+    expect(more.offset).toBe(2);
+    ws.fireMessage({
+      type: "readFileResult",
+      requestId: more.requestId,
+      path: "/rootA/big.txt",
+      error: "binary file (9 bytes) -- not displayed",
+    });
+    await tick();
+    // Loaded lines stay; the honest pager text rides; pager is gone.
+    expect(els(".file-line").length).toBe(2);
+    expect(el(".file-view-error").textContent).toBe("binary file (9 bytes) -- not displayed");
+    expect(document.querySelector(".file-view-more")).toBeNull();
   });
 });
 

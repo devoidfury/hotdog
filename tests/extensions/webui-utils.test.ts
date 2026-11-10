@@ -186,6 +186,12 @@ describe("copyText", () => {
   it("reports failure when execCommand throws", async () => {
     g.navigator = {};
     doc.execCommand = () => { throw new Error("unsupported"); };
+    const before = document.body.childNodes.length;
     expect(await copyText("x")).toBe(false);
+    // Teardown is unconditional: a throw must not leave the offscreen
+    // textarea in the document (a stale readonly textarea poisons every
+    // later querySelector("textarea[readonly]") in the shared suite doc).
+    expect(document.body.childNodes.length).toBe(before);
+    expect(document.querySelector("textarea[readonly]")).toBeNull();
   });
 });

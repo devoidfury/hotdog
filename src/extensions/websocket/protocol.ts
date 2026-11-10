@@ -61,6 +61,18 @@ export const C2S = {
   // are dropped client-side by id (the searchLogs precedent). The handler is
   // strictly read-only and answers the requesting socket only.
   CONFIG_SNAPSHOT: "configSnapshot",
+  // Workspace file tree (webui workbench): { type, requestId, path? }. NO
+  // path lists the configured workspace ROOTS only (no fs call); a path
+  // lists that directory. Every path goes through Workspace.resolveSafe
+  // BEFORE any fs touch (see handlers-files.ts -- confinement is the whole
+  // ballgame). Replied with LIST_DIR_RESULT, requesting socket only.
+  LIST_DIR: "listDir",
+  // Read a TEXT file: { type, requestId, path, offset?, limit? }. offset is
+  // lines to SKIP (0-based, the core read tool's grammar) and limit lines to
+  // return; pages cut at line boundaries so consecutive slices concatenate
+  // byte-identical. Binary files are refused honestly with zero content
+  // bytes. Replied with READ_FILE_RESULT, requesting socket only.
+  READ_FILE: "readFile",
 } as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────
@@ -83,6 +95,13 @@ export const S2C = {
   // Reply to C2S CONFIG_SNAPSHOT (requesting socket only), correlated by
   // requestId. See the Config snapshot section below and handlers-config.ts.
   CONFIG_SNAPSHOT_RESULT: "configSnapshotResult",
+  // Reply to C2S LIST_DIR (requesting socket only), correlated by requestId.
+  // Rejections ride the error field (still requestId-correlated), so the
+  // tree can render the honest one-liner IN the row it belongs to.
+  LIST_DIR_RESULT: "listDirResult",
+  // Reply to C2S READ_FILE (requesting socket only), correlated by requestId.
+  // Same error-field doctrine as LIST_DIR_RESULT.
+  READ_FILE_RESULT: "readFileResult",
 
   // Profile management
   PROFILES: "profiles",
@@ -480,6 +499,92 @@ export type ConfigSnapshotResultWire = {
   sections: ConfigSectionWire[];
   /** Set when a row cap cut the table (MAX_CONFIG_ROWS / MAX_CONFIG_FINDINGS). */
   truncated?: boolean;
+};
+
+// ── Workspace file tree + text reader (C2S listDir/readFile → S2C replies) ─
+// The webui workbench's read path (see ./handlers-files.ts). READ-ONLY: zero
+// writes, zero new config keys. CONFINEMENT: every path that arrives off the
+// wire passes Workspace.resolveSafe BEFORE any fs call (no pre-stat, no
+// pre-read), and listings omit entries the denylist would reject -- the tree
+// never offers a dead end. Rejections are honest one-line strings carried in
+// the reply's `error` field (still requestId-correlated); stacks stay
+// server-side (errorFrame covers the unexpected).
+
+/** Ceiling on entries per directory listing (MAX_CONFIG_ROWS idiom: count
+ *  rows, set truncated when the cap cuts). 500 covers a real source dir at
+ *  a glance without turning one socket frame into a phone book. */
+export const MAX_LIST_DIR_ENTRIES = 500;
+/** Ceiling on characters of file content per READ_FILE reply. 256 KiB of
+ *  UTF-16 chars -- a 16th of MAX_WIRE_IMAGE_BASE64_BYTES (8 MiB), so a text
+ *  page can never out-flood the image path that already has its own cap.
+ *  Pages cut at LINE boundaries only: consecutive slices concatenate
+ *  byte-identical (Phase 7 line-addressing resumes mid-file); a single line
+ *  longer than the cap is refused honestly, never sliced. */
+export const MAX_FILE_READ_CHARS = 256 * 1024;
+/** Lines returned when the request omits limit, and the hard clamp on a
+ *  provided one (the char cap bounds bytes; this bounds line bookkeeping). */
+export const READ_LINES_DEFAULT = 200;
+export const MAX_READ_LINES = 5000;
+
+/** One entry of a directory listing. `path` is absolute (the roots listing
+ *  already exposes absolute spellings; the tree walks down from there). */
+export interface DirEntryWire {
+  name: string;
+  path: string;
+  isDir: boolean;
+  /** True for symbolic links. Their TARGET is never resolved into the
+   *  listing: the row carries the link itself. Expanding/reading one whose
+   *  target escapes roots/deny is refused by resolveSafe with an honest
+   *  error; a dangling final link rides resolveSafe's own probe semantics. */
+  isSymlink?: boolean;
+  /** Regular files only (lstat byte size). */
+  size?: number;
+  /** lstat mtime, epoch ms (omitted when the stat raced away). */
+  mtime?: number;
+}
+
+/** One configured workspace root as a top-level tree row (name + absolute
+ *  path; the no-path LIST_DIR reply is exactly this list, no fs call). */
+export interface FileRootWire {
+  name: string;
+  path: string;
+}
+
+export type ListDirResultWire = {
+  type: "listDirResult";
+  /** Echo of the C2S listDir request id; stale replies drop client-side. */
+  requestId?: number;
+  /** The directory listed (resolved absolute). Absent on the roots reply. */
+  path?: string;
+  /** Set on the roots reply (no C2S path): one row per configured root. */
+  roots?: FileRootWire[];
+  /** Set on a directory listing: dirs first, then names, denylist omitted. */
+  entries?: DirEntryWire[];
+  /** Set when MAX_LIST_DIR_ENTRIES cut the listing. */
+  truncated?: boolean;
+  /** Honest one-line rejection (outside roots, denied, not found, not a
+   *  dir, ...). When set, roots/entries/truncated ride absent. */
+  error?: string;
+};
+
+export type ReadFileResultWire = {
+  type: "readFileResult";
+  /** Echo of the C2S readFile request id; stale replies drop client-side. */
+  requestId?: number;
+  /** The requested path, echoed as sent (the client keys views by it).
+   *  Absent on error replies for invalid input that never named a file. */
+  path?: string;
+  /** Echo of the request's line-skip offset (0-based). */
+  offset?: number;
+  /** Exact slice of the file: the requested line window, terminators
+   *  intact. Text files ONLY -- a refusal ships no content field at all. */
+  content?: string;
+  /** More lines exist past this window (line limit or char cap cut it). */
+  truncated?: boolean;
+  /** Honest one-line rejection (outside roots, denied, not found, is a
+   *  directory -- use listDir, binary file (N bytes), line over the char
+   *  cap). When set, content/truncated ride absent. */
+  error?: string;
 };
 
 // ── Subagent task feed ──────────────────────────────────────────────────────

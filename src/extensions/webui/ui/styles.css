@@ -2747,6 +2747,214 @@ body.workbench-resizing {
     margin: 8px;
 }
 
+.workbench-empty-btn {
+    display: block;
+    margin: 8px;
+    padding: 4px 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.workbench-empty-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+/* ── Workbench file tree ─────────────────────────────────────────────────── */
+
+.file-tree {
+    font-size: 13px;
+}
+
+.ft-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.ft-header-label {
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ft-btn {
+    padding: 2px 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.ft-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.ft-row {
+    /* Indent comes from the nested .ft-children container, not a style attr. */
+    min-width: 0;
+}
+
+.ft-row-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    width: 100%;
+    padding: 2px 4px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ft-row-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.ft-caret {
+    color: var(--text-muted);
+    width: 10px;
+    flex: none;
+}
+
+.ft-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-root>.ft-row-btn .ft-name {
+    color: var(--accent, var(--text-primary));
+}
+
+.ft-symlink {
+    color: var(--text-muted);
+    flex: none;
+}
+
+.ft-children {
+    padding-left: 12px;
+}
+
+.ft-note {
+    color: var(--text-muted);
+    padding: 2px 4px 2px 14px;
+    font-style: italic;
+}
+
+.ft-error {
+    color: var(--error);
+}
+
+/* ── Workbench read-only file viewer ─────────────────────────────────────── */
+
+.file-view {
+    font-size: 12px;
+}
+
+.file-view-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.file-view-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-view-status {
+    color: var(--text-muted);
+    flex: 1;
+}
+
+.file-view-btn {
+    padding: 2px 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.file-view-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.file-view-note {
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 2px 0;
+}
+
+.file-view-error {
+    color: var(--error);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.file-view-rows {
+    display: block;
+    font-family: var(--font-mono);
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow-x: auto;
+}
+
+.file-line {
+    display: flex;
+    align-items: baseline;
+}
+
+.file-line:hover {
+    background: var(--bg-secondary);
+}
+
+.file-ln {
+    flex: none;
+    width: 4em;
+    padding-right: 8px;
+    text-align: right;
+    color: var(--text-muted);
+    user-select: none;
+}
+
+.file-code {
+    white-space: pre;
+    color: var(--text-primary);
+}
+
+/* Token classes: sinks own the coloring (see @utils/syntax). Only the kinds
+   the shell tokenizer emits are styled; unknown runs pass through plain. */
+.tk-command {
+    color: #8bd5a0;
+}
+
+.tk-operator {
+    color: var(--accent);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    RESPONSIVE
    ═══════════════════════════════════════════════════════════════════════════ */

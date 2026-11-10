@@ -1,14 +1,16 @@
 /// <reference lib="dom" />
 // The workbench: a right-docked, resizable, collapsible pane that lives
-// beside the chat column. This phase ships the SHELL -- the drag handle
-// riding the panel-resize seam (axis x, nearEdge: its handle is on the
-// panel's left edge, so dragging left GROWS it), the tab strip, and honest
-// placeholders. No tab producers exist yet; the store and the ops live in
-// workbench-state.ts.
+// beside the chat column. The shell (this file) rides the panel-resize seam
+// (axis x, nearEdge: its handle is on the panel's left edge, so dragging
+// left GROWS it) and the WAI tab strip; the real tab bodies arrived with the
+// file-tree phase: kind "files" (workspace tree) and kind "file" (read-only
+// viewer), both wired by app.tsx through the optional wire props. The
+// placeholder kind stays byte-identical for anything else.
 //
 // Documented decisions:
 // - ZERO TABS HIDES THE STRIP: with nothing to select or close, a tablist
-//   would be an empty widget; the body shows one muted line instead.
+//   would be an empty widget; the body shows one muted line instead (plus
+//   the file-tree entry-point button when the app wires one).
 // - COLLAPSED UNMOUNTS the panel entirely (returns null): today's layout
 //   renders exactly as before until the user opens the pane, and a detached
 //   handle cannot be dragged by anything (the seam's enabled() gate is the
@@ -25,6 +27,25 @@
 // the reload, never the interaction.
 
 import { createWorkbenchStore, type WorkbenchTab, type WorkbenchTabState } from "./workbench-state.ts";
+import { FileTree, type FileTreeState } from "./file-tree.tsx";
+import { FileView, type FileViewEntry } from "./file-view.tsx";
+
+/** Body wiring for the two real tab kinds; app.tsx owns the state and the
+ *  socket, the bodies are dumb projections. Optional: without wiring the
+ *  kinds fall through to the placeholder (tests drive the shell alone). */
+export interface WorkbenchFileTreeWire {
+  tree: FileTreeState;
+  onToggleDir: (path: string) => void;
+  onOpenFile: (path: string) => void;
+  onRefresh: () => void;
+  onContextMenu: (e: MouseEvent | KeyboardEvent, path: string, rowEl: HTMLElement) => void;
+}
+
+export interface WorkbenchFileViewsWire {
+  views: Record<string, FileViewEntry>;
+  onReload: (path: string) => void;
+  onMore: (path: string) => void;
+}
 
 /** The app's tab store. Tab producers (the phases that open files, settings,
  *  diffs) import this and call open(); app.tsx subscribes render() to it. */
@@ -49,6 +70,13 @@ interface WorkbenchPanelProps {
   onResizeEnd: (e: PointerEvent) => void;
   onResizeKey: (e: KeyboardEvent) => void;
   onResizeReset: (e: MouseEvent) => void;
+  /** Kind "files": the workspace tree body (see file-tree.tsx). */
+  fileTree?: WorkbenchFileTreeWire;
+  /** Kind "file": the read-only viewer bodies, keyed by path (= tab id). */
+  fileViews?: WorkbenchFileViewsWire;
+  /** Zero-tabs affordance: dock the "files" tab (the app opens it and
+   *  re-requests the roots). Absent = no button (shell-only tests). */
+  onOpenFiles?: () => void;
 }
 
 /**
@@ -172,14 +200,40 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
             aria-labelledby={`wtab-${active.id}`}
             tabindex="0"
           >
-            <p className="workbench-placeholder">
-              {active.label} -- placeholder body; real tab content ships with the tab kinds.
-            </p>
+            {active.kind === "files" && p.fileTree ? (
+              <FileTree
+                tree={p.fileTree.tree}
+                onToggleDir={p.fileTree.onToggleDir}
+                onOpenFile={p.fileTree.onOpenFile}
+                onRefresh={p.fileTree.onRefresh}
+                onContextMenu={p.fileTree.onContextMenu}
+              />
+            ) : active.kind === "file" && p.fileViews ? (
+              <FileView
+                path={active.id}
+                view={p.fileViews.views[active.id]}
+                onReload={p.fileViews.onReload}
+                onMore={p.fileViews.onMore}
+              />
+            ) : (
+              <p className="workbench-placeholder">
+                {active.label} -- placeholder body; real tab content ships with the tab kinds.
+              </p>
+            )}
           </div>
         ) : (
-          <p id="workbench-empty" className="workbench-empty">
-            Files will open here
-          </p>
+          <>
+            <p id="workbench-empty" className="workbench-empty">
+              Files will open here
+            </p>
+            {p.onOpenFiles ? (
+              // Entry point for the first real tab kind: docks the "files"
+              // tab (the app opens it and re-requests the roots).
+              <button type="button" id="workbench-open-files" className="workbench-empty-btn" onClick={p.onOpenFiles}>
+                Open the workspace file tree
+              </button>
+            ) : null}
+          </>
         )}
       </div>
     </aside>

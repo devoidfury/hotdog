@@ -17,12 +17,16 @@ import type {
   SearchHitWire,
   ToolDisplayWire,
   ConfigSnapshotResultWire,
+  ListDirResultWire,
+  ReadFileResultWire,
 } from "@extensions/websocket/protocol.ts";
 
 export type { UploadFileWire };
 export type { TaskInfoWire };
 export type { SearchHitWire };
 export type { ConfigSnapshotResultWire };
+export type { ListDirResultWire };
+export type { ReadFileResultWire };
 
 // The core logger touches process.*, which doesn't exist in the browser.
 const logger = {
@@ -520,6 +524,8 @@ type ServerMessage =
   | LogDeletedMessage
   | SearchResultsMessage
   | ConfigSnapshotResultWire
+  | ListDirResultWire
+  | ReadFileResultWire
   | AuthRequiredMessage
   | AuthOkMessage
   | AuthErrorMessage
@@ -566,6 +572,11 @@ interface ChatConfig {
   /** Reply to configSnapshot (settings viewer); the app drops it when the
    *  request id is stale (same doctrine as onSearchResults). */
   onConfigSnapshot?: (requestId: number | undefined, snapshot: ConfigSnapshotResultWire) => void;
+  /** Reply to listDir (workbench file tree); the tree state drops stale ids
+   *  by its own pending map (the settings-viewer precedent). */
+  onListDir?: (requestId: number | undefined, result: ListDirResultWire) => void;
+  /** Reply to readFile (workbench file viewer); same stale-drop doctrine. */
+  onReadFile?: (requestId: number | undefined, result: ReadFileResultWire) => void;
   /** Broadcast notice that a session died (the app drops its stale pin). */
   onSessionDeleted?: (sessionId: string) => void;
   onAuthFailure?: () => void;
@@ -603,6 +614,10 @@ export interface ChatController {
   searchLogs: (query: string, requestId: number) => void;
   /** Ask for a config snapshot (settings viewer); arrives via onConfigSnapshot. */
   requestConfigSnapshot: (requestId: number) => void;
+  /** List a workspace dir (workbench tree); arrives via onListDir. No path = the roots. */
+  listDir: (requestId: number, path?: string) => void;
+  /** Read a line-window page of a text file (workbench viewer); arrives via onReadFile. */
+  readFile: (requestId: number, path: string, offset?: number, limit?: number) => void;
   sendCommand: (command: string) => void;
   sendQuestionAnswer: (answers: Record<string, string>) => void;
   requestCompletions: (
@@ -663,6 +678,8 @@ export function createChat({
   onLogDeleted,
   onSearchResults,
   onConfigSnapshot,
+  onListDir,
+  onReadFile,
   onSessionDeleted,
   onAuthFailure,
   onWorkingMapChange,
@@ -896,6 +913,16 @@ export function createChat({
         // The settings viewer's snapshot reply (not session-scoped); the app
         // drops stale ids. No transcript side effects.
         onConfigSnapshot?.(data.requestId, data);
+        return;
+      case "listDirResult":
+        // The workbench file tree's listing reply (not session-scoped); the
+        // tree state drops stale ids by its pending map. No transcript side
+        // effects -- rejections ride the payload's error field, correlated.
+        onListDir?.(data.requestId, data);
+        return;
+      case "readFileResult":
+        // The workbench file viewer's page reply; same doctrine.
+        onReadFile?.(data.requestId, data);
         return;
       case "authRequired":
         // Expected: the upgrade carries no token, so the server holds the
@@ -1436,6 +1463,24 @@ export function createChat({
     send({ type: "configSnapshot", requestId });
   }
 
+  /** List a workspace directory (workbench file tree); omit path for the
+   *  roots. The reply rides onListDir with the same id. */
+  function listDir(requestId: number, path?: string): void {
+    send(path !== undefined ? { type: "listDir", requestId, path } : { type: "listDir", requestId });
+  }
+
+  /** Read a line-window page of a text file (workbench file viewer). The
+   *  reply rides onReadFile with the same id; offset is 0-based lines-to-skip. */
+  function readFile(requestId: number, path: string, offset?: number, limit?: number): void {
+    send({
+      type: "readFile",
+      requestId,
+      path,
+      ...(offset !== undefined ? { offset } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+  }
+
   return {
     connect,
     disconnect,
@@ -1456,6 +1501,8 @@ export function createChat({
     deleteLog,
     searchLogs,
     requestConfigSnapshot,
+    listDir,
+    readFile,
     sendCommand,
     sendQuestionAnswer,
     requestCompletions,

@@ -17,9 +17,27 @@ import {
 import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
-import type { SearchHitWire, ConfigSnapshotResultWire } from "./chat.ts";
+import type { SearchHitWire, ConfigSnapshotResultWire, ListDirResultWire, ReadFileResultWire } from "./chat.ts";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
 import { WorkbenchPanel, workbenchStore } from "./workbench.tsx";
+import {
+  emptyFileTree,
+  openFileTree,
+  toggleDir,
+  applyListDir,
+  filesTab,
+  type FileTreeState,
+  type TreeFetch,
+} from "./file-tree.tsx";
+import {
+  emptyFileViews,
+  openFileView,
+  reloadFileView,
+  moreFileView,
+  applyReadFile,
+  type FileViewsState,
+  type FileFetch,
+} from "./file-view.tsx";
 import {
   SettingsViewer,
   initialSettingsPanelState,
@@ -943,6 +961,116 @@ function hasStoredWorkbenchCollapsed(): boolean {
   }
 }
 
+// ── Workbench file tabs (tree + read-only viewer) ───────────────────────────
+
+// Both producers keep their state in atoms (pure ops in file-tree.tsx /
+// file-view.tsx); this layer's job is (1) run the op, (2) dispatch the fetch
+// it mints, (3) feed replies back through the apply op, which drops stale
+// request ids. Re-request on every tree open/refresh; file tabs fetch once
+// per unseen path (reopen reuses the tab and its state; Reload re-reads).
+const fileTreeAtom = reactiveState<FileTreeState>(emptyFileTree());
+const fileViewsAtom = reactiveState<FileViewsState>(emptyFileViews());
+
+function dispatchTreeFetches(fetches: TreeFetch[]): void {
+  for (const f of fetches) chat?.listDir(f.requestId, f.path);
+}
+
+/** Zero-tabs button and any future producer: dock the tree tab, (re)request
+ *  the roots + expanded dirs. */
+function openFilesTab(): void {
+  workbenchStore.open(filesTab());
+  const { state, fetches } = openFileTree(fileTreeAtom());
+  fileTreeAtom(state);
+  dispatchTreeFetches(fetches);
+}
+
+function onTreeRefresh(): void {
+  const { state, fetches } = openFileTree(fileTreeAtom());
+  fileTreeAtom(state);
+  dispatchTreeFetches(fetches);
+}
+
+function onTreeToggleDir(path: string): void {
+  const { state, fetch } = toggleDir(fileTreeAtom(), path);
+  fileTreeAtom(state);
+  if (fetch) chat?.listDir(fetch.requestId, fetch.path);
+}
+
+function onListDirReply(requestId: number | undefined, result: ListDirResultWire): void {
+  // Stale ids drop inside applyListDir (pending map); rejections ride the
+  // payload's error field and render verbatim on their row -- no toast.
+  fileTreeAtom(applyListDir(fileTreeAtom(), requestId, result));
+}
+
+const baseName = (p: string): string => p.split(/[/\\]/).pop() || p;
+
+/** Fetch a "file" tab's first page unless its entry already exists (open is
+ *  idempotent by path). Also wired to tab activation: a tab whose view went
+ *  missing re-requests rather than staring at the pending note forever. */
+function ensureFileView(path: string): void {
+  const { state, fetch } = openFileView(fileViewsAtom(), path);
+  fileViewsAtom(state);
+  dispatchFileFetch(fetch);
+}
+
+function onActivateWorkbenchTab(id: string): void {
+  workbenchStore.activate(id);
+  const tab = workbenchStore.get().tabs.find((t) => t.id === id);
+  if (tab?.kind === "file") ensureFileView(id);
+}
+
+/** Tree file click: open the "file" tab (id = path, so re-clicking reuses
+ *  it) AND make the pane visible through the EXISTING toggle -- a tab
+ *  opened while the pane is collapsed would otherwise be invisible, but the
+ *  collapsed default is never fought by anything else (no auto-open on load,
+ *  no auto-open on tab close). */
+function onOpenFilePath(path: string): void {
+  workbenchStore.open({ id: path, kind: "file", label: baseName(path), dirty: false });
+  if (workbenchCollapsedAtom()) onToggleWorkbench();
+  ensureFileView(path);
+}
+
+function dispatchFileFetch(fetch: FileFetch | null): void {
+  if (fetch) chat?.readFile(fetch.requestId, fetch.path, fetch.offset);
+}
+
+function onFileReload(path: string): void {
+  const { state, fetch } = reloadFileView(fileViewsAtom(), path);
+  fileViewsAtom(state);
+  dispatchFileFetch(fetch);
+}
+
+function onFileMore(path: string): void {
+  const { state, fetch } = moreFileView(fileViewsAtom(), path);
+  fileViewsAtom(state);
+  dispatchFileFetch(fetch);
+}
+
+function onReadFileReply(requestId: number | undefined, result: ReadFileResultWire): void {
+  fileViewsAtom(applyReadFile(fileViewsAtom(), requestId, result));
+}
+
+/** Tree-row menu (ContextMenu idiom: the app owns the atom + focus-return,
+ *  the rows just hand over (event, path, el); the viewer has no menu by
+ *  design). "Quote into composer" is DEFERRED: no composer-insert seam exists
+ *  (draft.ts is persistence-only, chat.ts owns the socket, the textarea is
+ *  app-internal), so wiring it here would be surgery on app.tsx's #chat-input
+ *  -- see the phase notes. */
+function onFilePathMenu(e: MouseEvent | KeyboardEvent, path: string, rowEl: HTMLElement): void {
+  const { x, y } = rowMenuPoint(e, rowEl);
+  const items: ContextMenuItem[] = [
+    {
+      label: "Copy path",
+      onSelect: () => {
+        copyRowValue(path, "Path"); // honest toast: "Path copied" / "Copy failed: clipboard unavailable"
+        dismissContextMenu();
+      },
+    },
+  ];
+  contextMenuAtom({ x, y, items });
+  armContextMenu(rowEl);
+}
+
 // ── Chat wiring ─────────────────────────────────────────────────────────────
 
 function startChat(): void {
@@ -1000,6 +1128,8 @@ function startChat(): void {
     },
     onSearchResults,
     onConfigSnapshot,
+    onListDir: onListDirReply,
+    onReadFile: onReadFileReply,
     onAuthFailure: handleAuthFailure,
     onWorkingMapChange: () => {
       // Re-poll so the sidebar's per-session working indicators refresh.
@@ -1548,6 +1678,10 @@ function App() {
   const openTasks = openTasksAtom();
   const sttPhase = sttPhaseAtom();
   const settings = settingsAtom();
+  // Workbench file-tab bodies read their state here (atoms flip on WS
+  // replies; the coalesced render repaints the pane).
+  const fileTree = fileTreeAtom();
+  const fileViews = fileViewsAtom();
 
   return (
     <>
@@ -1902,13 +2036,26 @@ function App() {
           min={WORKBENCH_MIN_WIDTH}
           max={workbenchPanel.maxSize()}
           state={workbenchStore.get()}
-          onActivate={(id) => workbenchStore.activate(id)}
+          onActivate={(id) => onActivateWorkbenchTab(id)}
           onCloseTab={(id) => workbenchStore.close(id)}
           onResizeStart={workbenchPanel.onPointerDown}
           onResizeMove={workbenchPanel.onPointerMove}
           onResizeEnd={workbenchPanel.onPointerUp}
           onResizeKey={workbenchPanel.onKeyDown}
           onResizeReset={workbenchPanel.onDoubleClick}
+          fileTree={{
+            tree: fileTree,
+            onToggleDir: onTreeToggleDir,
+            onOpenFile: onOpenFilePath,
+            onRefresh: onTreeRefresh,
+            onContextMenu: onFilePathMenu,
+          }}
+          fileViews={{
+            views: fileViews.views,
+            onReload: onFileReload,
+            onMore: onFileMore,
+          }}
+          onOpenFiles={openFilesTab}
         />
 
         {/* Stacked task overlays; the most recently opened sits on top. */}
@@ -1984,6 +2131,8 @@ async function init(): Promise<void> {
     copyFlashAtom,
     workbenchCollapsedAtom,
     settingsAtom,
+    fileTreeAtom,
+    fileViewsAtom,
   ]);
 
   document.addEventListener("keydown", (e: KeyboardEvent) => {

@@ -97,6 +97,49 @@ export interface ProviderDef {
 }
 
 /**
+ * THE runtime declaration of the ProviderDef children (keep in lockstep with
+ * the interface above -- it is the single place the known provider-field set
+ * exists at runtime; the settings snapshot and the write gate both consult
+ * it, so neither invents a client-side list). Keyed by the camelCase field
+ * name; comparison normalizes like rescue's checkKeys (fetch_models hits
+ * fetchModels). "json" means the array-shaped children (models,
+ * controlTokens, tags): a create-on-write must parse to that shape class.
+ * `description` is the one honest line the settings rows ship (the fallback
+ * providerRows wording, shared).
+ */
+export const PROVIDER_DEF_FIELDS: Record<
+  string,
+  { type: "string" | "boolean" | "number" | "json"; description: string }
+> = {
+  name: { type: "string", description: "Provider name (naming half of every 'name/model' string)" },
+  url: { type: "string", description: "Provider base URL" },
+  apiKey: { type: "string", description: "Provider API key (never leaves the server)" },
+  fetchModels: { type: "boolean", description: "Fetch /v1/models to refresh this provider's catalog" },
+  models: { type: "json", description: "Models served by this provider" },
+  defaultModel: { type: "string", description: "Default model of this provider" },
+  temperature: { type: "number", description: "Default temperature for this provider's models" },
+  contextLimit: { type: "number", description: "Default context limit for this provider's models" },
+  roleMapping: { type: "string", description: "RoleMapping registry name (e.g. system-first)" },
+  noSpread: { type: "boolean", description: "Exclude this provider from implicit model-copy fanout" },
+  taskLanes: { type: "number", description: "Concurrent task agents allowed on this provider's lane (below 1 = unlimited)" },
+  protocol: { type: "string", description: "LlmProtocol registry name (e.g. openai)" },
+  wireFormat: { type: "string", description: "WireFormat registry name (e.g. xml)" },
+  controlTokens: { type: "json", description: "Server chat-template control tokens to mangle in message content" },
+  tags: { type: "json", description: "Free-form provider tags" },
+};
+
+/** The declared entry for a provider-child key spelled ANY way the loader
+ *  accepts (normalizeKey equivalence: case + "-" / "_" interchangeable).
+ *  Undefined for unknown fields (file-only keys keep the existing walk). */
+export function providerDefField(key: string): { type: "string" | "boolean" | "number" | "json"; description: string } | undefined {
+  const norm = key.toLowerCase().replace(/[-_]/g, "");
+  for (const [name, def] of Object.entries(PROVIDER_DEF_FIELDS)) {
+    if (name.toLowerCase().replace(/[-_]/g, "") === norm) return def;
+  }
+  return undefined;
+}
+
+/**
  * LlamaSwap /v1/models response format. Plain llama.cpp servers answer the same
  * endpoint with a different shape (see LlamaCompatModel); this parser handles both.
  */

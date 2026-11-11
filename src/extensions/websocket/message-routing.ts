@@ -40,7 +40,7 @@ import {
   handleDeleteLog,
   handleSearchLogs,
 } from "./handlers-logs.ts";
-import { handleConfigSnapshot, handleConfigKeySet } from "./handlers-config.ts";
+import { handleConfigSnapshot, handleConfigKeySet, handleConfigListEdit } from "./handlers-config.ts";
 import { handleListDir, handleReadFile } from "./handlers-files.ts";
 
 const MESSAGE_HANDLERS: Partial<Record<C2SType, MessageHandler>> = {
@@ -71,6 +71,7 @@ const MESSAGE_HANDLERS: Partial<Record<C2SType, MessageHandler>> = {
   [C2S.SEARCH_LOGS]: handleSearchLogs,
   [C2S.CONFIG_SNAPSHOT]: handleConfigSnapshot,
   [C2S.SET_CONFIG_KEY]: handleConfigKeySet,
+  [C2S.EDIT_CONFIG_LIST]: handleConfigListEdit,
   [C2S.LIST_DIR]: handleListDir,
   [C2S.READ_FILE]: handleReadFile,
 };

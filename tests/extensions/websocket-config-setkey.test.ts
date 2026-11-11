@@ -94,6 +94,9 @@ const WEBSOCKET_SCHEMA = {
   properties: {
     sessionTimeoutMin: { type: "number", default: 30, description: "Idle session cleanup timeout (minutes)" },
     questionTimeoutSecs: { type: "number", default: 300, description: "Default question timeout (seconds)" },
+    // Mirror of the REAL websocket entry's enum (extension.json): schema
+    // enums ride the edit stamp and gate the write.
+    questionStrategy: { type: "string", enum: ["wait", "default", "cancel"], default: "wait", description: "What an unanswered question does" },
   },
   layers: [{ source: "config", key: "websocket" }, { default: {} }],
 };
@@ -196,8 +199,22 @@ const FULL = `{
 
 /** The class-A refusals in FULL: their SHIPPED payload redacts something
  *  inside (so the whole-value editor would write the stub summary back).
- *  Everything else in the snapshot must carry row.edit. */
+ *  providers + providers[0] carry a secret, so they land here too; providers[1]
+ *  is a clean element and belongs only to the chrome set below. */
 const CLASS_A_ROWS = ["webui.headers", "bashTool", "bashTool.env", "providers", "providers[0]"];
+/** Provider CARD chrome (owner ruling 2026-11-11): the section heading
+ *  (providers) and every element header (providers[i]) render as chrome, carry
+ *  no edit stamp, and refuse a wholesale container write (the secret-bearing
+ *  ones trip the lossy gate, the clean ones the chrome gate). The element's
+ *  FIELDS -- shipped and known-but-absent create-on-write rows -- are stamped. */
+const PROVIDER_CHROME_ROWS = ["providers", "providers[0]", "providers[1]"];
+/** ARRAY LIST chrome (owner ruling 2026-11-11, the card doctrine generalized):
+ *  primitive-valued arrays and schema-declared lists render as one chrome row
+ *  (no stamp) plus per-element rows; absent schema lists ride chrome alone
+ *  (append creates them). A wholesale write to any of them is refused. */
+const ARRAY_CHROME_ROWS = ["workspace.deny", "extensionPaths", "extensions", "providers[0].models"];
+/** Every un-stampable row (class A + chrome): the family the stamp sweep skips. */
+const UNSTAMPABLE_ROWS = [...new Set<string>([...CLASS_A_ROWS, ...PROVIDER_CHROME_ROWS, ...ARRAY_CHROME_ROWS])];
 
 const allRows = (payload: Awaited<ReturnType<typeof buildConfigSnapshot>>) =>
   payload.sections.flatMap((s) => s.rows);
@@ -257,14 +274,15 @@ describe("configSnapshot all-fields stamp sweep", () => {
     const rows = allRows(payload);
     const rowIn = (key: string) => rows.find((r) => r.key === key);
 
-    // THE SWEEP: no row outside the named refusal classes may be unstamped.
+    // THE SWEEP: no row outside the named refusal family (redacted-inside class
+    // A + provider card chrome) may be unstamped.
     for (const row of rows) {
-      if (CLASS_A_ROWS.includes(row.key)) continue;
+      if (UNSTAMPABLE_ROWS.includes(row.key)) continue;
       expect(row.edit !== undefined, `row "${row.key}" must carry edit (ALL the settings)`).toBe(true);
     }
-    // The class-A refusals are exactly the un-stampable ones (belt: they
-    // carry the "fields redacted" ship the refusal is about).
-    for (const key of CLASS_A_ROWS) {
+    // The refusal family is exactly the un-stampable ones (belt: each carries
+    // no edit -- class A for the redacted ship, chrome for the card header).
+    for (const key of UNSTAMPABLE_ROWS) {
       const row = rowIn(key)!;
       expect(row, `fixture row missing: ${key}`).toBeDefined();
       expect(row.edit, `refused row "${key}" must NOT carry edit`).toBeUndefined();
@@ -273,14 +291,24 @@ describe("configSnapshot all-fields stamp sweep", () => {
     // Representative stamps (the shape the client renders from):
     expect(rowIn("webui.port")!.edit).toEqual({ type: "number" });
     expect(rowIn("coreTools.readToolLimit")!.edit).toEqual({ type: "number", minimum: 0 });
+    expect(rowIn("websocket.questionStrategy")!.edit).toEqual({ type: "string", enum: ["wait", "default", "cancel"] }); // SCHEMA ENUM: the set ships on the stamp
     expect(rowIn("prompts.displayPrompt")!.edit).toEqual({ type: "boolean" });
     expect(rowIn("maxToolResultChars")!.edit!.type).toBe("number"); // core schema, no longer whitelist-gated
     expect(rowIn("webui.apiKey")!.edit).toEqual({ type: "string", writeOnly: true }); // SECRET-SHAPED leaf
     expect(rowIn("widget")!.edit).toEqual({ type: "string" }); // UNKNOWN file-only key: a REAL row
     expect(rowIn("themee")!.edit).toEqual({ type: "json" }); // unknown container
-    expect(rowIn("providers[1]")!.edit).toEqual({ type: "json" }); // clean provider element
+    // Provider cards: the element header is chrome (no edit); the FIELDS -- the
+    // ones the file ships AND the known ProviderDef children it omits -- are the
+    // stamped rows (create-on-write for the absent ones).
+    expect(rowIn("providers[1]"), "providers[1] is card chrome").toBeDefined();
+    expect(rowIn("providers[1]")!.edit, "chrome element header carries no edit").toBeUndefined();
+    expect(rowIn("providers[0]")!.edit, "chrome element header carries no edit").toBeUndefined();
+    expect(rowIn("providers[1].url")!.edit).toEqual({ type: "string" });
     expect(rowIn("providers[0].url")!.edit).toEqual({ type: "string" });
     expect(rowIn("providers[0].apiKey")!.edit).toEqual({ type: "string", writeOnly: true });
+    expect(rowIn("providers[1].apiKey")!.edit).toEqual({ type: "string", writeOnly: true }); // known-but-absent: create-on-write REPLACE
+    expect(rowIn("providers[1].fetchModels")!.edit).toEqual({ type: "boolean" }); // known-but-absent: a live control
+    expect(rowIn("providers[1].models")!.edit).toEqual({ type: "json" }); // known-but-absent array child
     expect(rowIn("bashTool.env.GITHUB_TOKEN")!.edit).toEqual({ type: "string", writeOnly: true });
     expect(rowIn("bashTool.env.DB_PASSWORD")!.edit).toEqual({ type: "string", writeOnly: true }); // the PASSWORD family: named, not guessed
     expect(rowIn("bashTool.env.DB_PASSWORD")!.redacted).toBe(true);
@@ -393,6 +421,15 @@ describe("setConfigKey scalar writes", () => {
     expect(readdirSync(dir)).toEqual(["defaults.json"]);
   });
 
+  it("an enum leaf accepts a member of its set and inserts honestly when absent", async () => {
+    const dir = dirWith(FULL);
+    const res = await edit(dir, "websocket.questionStrategy", { value: "cancel" });
+    expect(res).toEqual({ ok: true, value: "cancel", needsRestart: true });
+    const after = readFileSync(cfgFile(dir), "utf-8");
+    expect((parseLoose(after).websocket as Record<string, unknown>).questionStrategy).toBe("cancel");
+    expect(readdirSync(dir)).toEqual(["defaults.json"]);
+  });
+
   it("wrong type / out-of-bounds refuse pre-write with zero change (schema is the gate)", async () => {
     const dir = dirWith(FULL);
     const before = sha(cfgFile(dir));
@@ -404,6 +441,7 @@ describe("setConfigKey scalar writes", () => {
       { key: "prompts.displayPrompt", input: { value: "yes" }, want: "expected true or false" },
       { key: "webui.port", input: { value: true }, want: "expected a number" },
       { key: "webui.port", input: { value: null }, want: "string, number, or boolean" },
+      { key: "websocket.questionStrategy", input: { value: "sleep" }, want: "must be one of: wait, default, cancel" }, // ENUM gate
     ];
     for (const c of cases) {
       const res = await edit(dir, c.key, c.input as { value?: unknown });
@@ -567,7 +605,11 @@ describe("setConfigKey json edits", () => {
     const dirA = dirWith(`{ "tags": ["x"] }`);
     res = await edit(dirA, "tags", { valueText: `{"0": {}}` }); // array must stay an array
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toContain("must stay");
+    // A primitive-valued array is LIST chrome (owner 2026-11-11): the chrome
+    // gate refuses the wholesale write BEFORE the shape-class gate even sees
+    // the payload -- both refuse, the honest text now names the real
+    // interface (element rows + append/remove).
+    if (!res.ok) expect(res.error).toContain("array-list chrome");
     // A class-A array refuses at the lossy gate BEFORE shape even matters:
     res = await edit(dir, "providers", { valueText: `{"0": {}}` });
     expect(res.ok).toBe(false);
@@ -613,13 +655,17 @@ describe("setConfigKey class-A refusal enforced server-side", () => {
     expect(gh).toEqual({ ok: true, value: null, redacted: true, needsRestart: true }); // still never echoed
   });
 
-  it("stamped containers still roundtrip (the gate only bites unfaithful ships)", async () => {
+  it("stamped containers still roundtrip; a provider element header is chrome (refused)", async () => {
     const dir = dirWith(FULL);
     const payload = await buildConfigSnapshot(fakeCore(dir));
-    const seed = JSON.stringify(rowOf(payload, "providers[1]").file);
-    const res = await edit(dir, "providers[1]", { valueText: seed });
-    expect(res.ok).toBe(true);
-    expect((await edit(dir, "themee", { valueText: `{ "nested": 2 }` })).ok).toBe(true);
+    // A clean unknown container roundtrips its own faithful ship.
+    expect((await edit(dir, "themee", { valueText: JSON.stringify(rowOf(payload, "themee").file) })).ok).toBe(true);
+    // A provider element header is CARD chrome: the wholesale container write
+    // is refused, while the element's FIELDS stay writable on their own rows.
+    const chrome = await edit(dir, "providers[1]", { valueText: JSON.stringify(rowOf(payload, "providers[1]").file) });
+    expect(chrome.ok).toBe(false);
+    if (!chrome.ok) expect(chrome.error).toContain("provider-list chrome");
+    expect((await edit(dir, "providers[1].url", { value: "http://127.0.0.1:8002/v1" })).ok).toBe(true);
   });
 
   it("TWO-WAY sweep: every stamped row accepts its own seed; every unstamped row refuses wholesale writes", async () => {
@@ -669,7 +715,7 @@ describe("setConfigKey class-A refusal enforced server-side", () => {
       expect(res.ok, `unstamped ${row.key} must refuse a wholesale write`).toBe(false);
       expect(sha(cfgFile(dir2))).toBe(before);
     }
-    expect(checked).toBe(CLASS_A_ROWS.length); // FULL is clean: class A is the only refusal family
+    expect(checked).toBe(UNSTAMPABLE_ROWS.length); // FULL is clean: class A + chrome is the only refusal family
     expect(readdirSync(dir2)).toEqual(["defaults.json"]);
   });
 });
@@ -1118,5 +1164,43 @@ describe("setConfigKey plumbing", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toContain("string, number, or boolean");
     expect(sha(cfgFile(dir))).toBe(before);
+  });
+});
+
+// ── Boot-bound logger keys (logLevel / logTarget, owner request 2026-11-11) ─
+// These apply at BOOT (the logger is initialized from an early peek before
+// loadConfig), so the honesty rule bites hard: a successful write MUST report
+// needsRestart:true -- the running logger keeps its posture until restart.
+// The enum gate is the schema's own (core.config.json declares both sets),
+// so an out-of-set save is refused pre-write, file frozen.
+
+describe("setConfigKey logger boot keys", () => {
+  it("a logLevel write reports needsRestart:true honestly (boot-bound, the running logger will not move)", async () => {
+    const dir = dirWith(FULL);
+    const res = await edit(dir, "logLevel", { value: "debug" });
+    expect(res).toEqual({ ok: true, value: "debug", needsRestart: true });
+    const after = readFileSync(cfgFile(dir), "utf-8");
+    expect(parseLoose(after).logLevel).toBe("debug");
+    expect(readdirSync(dir)).toEqual(["defaults.json"]);
+  });
+
+  it("a logTarget write reports needsRestart:true and round-trips through the enum gate", async () => {
+    const dir = dirWith(FULL);
+    const res = await edit(dir, "logTarget", { value: "stdout" });
+    expect(res).toEqual({ ok: true, value: "stdout", needsRestart: true });
+    expect(parseLoose(readFileSync(cfgFile(dir), "utf-8")).logTarget).toBe("stdout");
+  });
+
+  it("out-of-set logger values refuse pre-write naming the accepted set (file frozen)", async () => {
+    const dir = dirWith(FULL);
+    const before = sha(cfgFile(dir));
+    const bad = await edit(dir, "logLevel", { value: "verbos" });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain("must be one of: debug, info, warn, error");
+    const badTarget = await edit(dir, "logTarget", { value: "silence" });
+    expect(badTarget.ok).toBe(false);
+    if (!badTarget.ok) expect(badTarget.error).toContain("must be one of: stderr, stdout, none");
+    expect(sha(cfgFile(dir))).toBe(before);
+    expect(readdirSync(dir)).toEqual(["defaults.json"]);
   });
 });

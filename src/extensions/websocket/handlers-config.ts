@@ -1,7 +1,9 @@
 // Config snapshot for the webui settings VIEWER (C2S configSnapshot ->
 // S2C configSnapshotResult). Computed LIVE per request (the config may have
-// changed on disk since startup; the viewer's honest framing is
-// snapshot-at-open, never a live feed). The bottom of this file adds the
+// changed on disk since startup; the viewer's honest framing is a
+// live-at-open read -- every open re-reads the file, but there is no push
+// feed, so staleness only ends at the next open/Refresh, never mid-visit).
+// The bottom of this file adds the
 // settings EDITOR (C2S setConfigKey -> S2C setConfigKeyResult): the file's
 // one write path -- ALL-FIELDS editability per the owner ruling 2026-11-09
 // ("it needs to be ALL the settings"), gated by the two honest refusals +
@@ -60,7 +62,7 @@ import { getNested } from "@utils/objects.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
-import type { ProviderDef } from "@core/config/providers.ts";
+import { PROVIDER_DEF_FIELDS, providerDefField, type ProviderDef } from "@core/config/providers.ts";
 import {
   S2C,
   errorFrame,
@@ -73,6 +75,7 @@ import {
   type ConfigFindingWire,
   type ConfigKeyEditWire,
   type ConfigKeyEntryWire,
+  type ConfigListOp,
   type ConfigSectionWire,
   type ConfigSnapshotResultWire,
 } from "./protocol.ts";
@@ -346,6 +349,47 @@ const runtimeScalarType = (v: unknown): "number" | "integer" | "boolean" | "stri
         ? "string"
         : null;
 
+/** LIST-CHROME array test (owner ruling 2026-11-11, the provider-card
+ *  doctrine generalized): an array whose EVERY element is a writable scalar
+ *  (the same four words isEditScalarType gates on the write side -- stamp
+ *  predicate and write gate share the definition). Chrome row + one stamped
+ *  element row per value. Arrays with object/null members (mcpServers,
+ *  profiles-style maps, mixed junk) keep their existing posture -- whole-json
+ *  stamp, provider cards, or class-A child rows. */
+function primitiveArrayItems(v: unknown): unknown[] | null {
+  return Array.isArray(v) && v.every((el) => typeof el === "string" || typeof el === "number" || typeof el === "boolean")
+    ? v
+    : null;
+}
+
+/** The declared items schema of a schema array leaf when it names a
+ *  primitive type (null: element stamps fall back to each element's runtime
+ *  shape -- the file-only doctrine). Object-item arrays are NOT chrome. */
+function arrayItemsProp(prop: SchemaProperty | null | undefined): SchemaProperty | null {
+  return prop?.type === "array" && prop.items && isEditScalarType(prop.items.type) ? prop.items : null;
+}
+
+/** True when the schema declares the path a LIST-chrome array: type array
+ *  with no items or primitive items (even absent from the file the chrome
+ *  row owns the interface -- append creates the array element by element). */
+function schemaListChrome(prop: SchemaProperty | null | undefined): boolean {
+  return prop?.type === "array" && (prop.items === undefined || isEditScalarType(prop.items.type));
+}
+
+/** Parse a layer's raw token (env var value / argv literal) into the array it
+ *  attests. Unparseable or non-array: null -- nothing is attested per
+ *  element, so the element rows simply omit that layer slot (never a
+ *  fabricated source chip). */
+function parseLayerArray(value: unknown): unknown[] | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 interface StampRequest {
   /** The row's parsed path (already grammar-checked by the caller). */
   segs: KeySeg[];
@@ -394,6 +438,7 @@ function stampFor(r: StampRequest): ConfigKeyEditWire | null {  if (!r.addressab
       type: r.prop!.type as "number" | "integer" | "boolean" | "string",
       ...(typeof bounds.minimum === "number" ? { minimum: bounds.minimum } : {}),
       ...(typeof bounds.maximum === "number" ? { maximum: bounds.maximum } : {}),
+      ...(Array.isArray(bounds.enum) && bounds.enum.length > 0 ? { enum: [...bounds.enum] } : {}),
       ...(!r.faithful ? { seedless: true } : {}),
     };
   }
@@ -444,6 +489,146 @@ function keyString(segs: KeySeg[]): string {
 }
 
 /**
+ * Element rows for a LIST-chrome array (one row per element, keyed
+ * `parent[i]`), SHAPED LIKE A FIELD ROW: the parent's slot rides through
+ * (a class-A / provider child ships one slot; schema-leaf arrays get the
+ * full layer set via schemaListElementRows). Stamps come from stampFor:
+ * secret-shaped paths keep the writeOnly REPLACE box (a coherent per-element
+ * posture -- the write splices one string into one slot, the reply echoes
+ * value:null + redacted:true, and no element byte ever ships), everything
+ * else rides the items schema when the caller has one, else the element's
+ * runtime scalar type (seedless when its ship is lossy). Class-B gates
+ * (duplicated/unspellable) stamp nothing, exactly like every other row.
+ */
+function listElementRows(
+  segs: KeySeg[],
+  arr: unknown[],
+  ctx: RowCtx,
+  slot: "file" | "resolved",
+  depth: number,
+  items: SchemaProperty | null,
+): ConfigKeyEntryWire[] {
+  const out: ConfigKeyEntryWire[] = [];
+  arr.forEach((el, index) => {
+    const esegs: KeySeg[] = [...segs, index];
+    const row: ConfigKeyEntryWire = { key: keyString(esegs) };
+    let faithful = false;
+    if (secretSegs(esegs)) {
+      row.leafSecret = true;
+      row[slot] = null;
+      if (isSet(el)) row.redacted = true; // an element slot is by definition set
+    } else {
+      const wv = wireValue(el, depth);
+      row[slot] = wv.value;
+      if (wv.hit) row.redacted = true;
+      faithful = !wv.hit && !wv.lossy;
+    }
+    const stamp = stampFor({
+      segs: esegs,
+      prop: items,
+      rawSeed: el,
+      faithful,
+      addressable: ctx.addressable,
+      dups: ctx.dups,
+    });
+    if (stamp) row.edit = stamp;
+    out.push(row);
+  });
+  return out;
+}
+
+/** Layer slots an array element can attest (computed by buildRows; absent
+ *  layer, absent slot -- the same honesty rule as every other row). */
+interface ArrayLayerSlots {
+  def: unknown;
+  hasDefault: boolean;
+  resolved: unknown;
+  envSet?: { set: boolean; source?: string; value?: unknown };
+  envNameSecret: boolean;
+  cliHit?: { literal: string; value?: unknown } | null;
+}
+
+/**
+ * Element rows for a SCHEMA-leaf LIST-chrome array: full per-layer slots so
+ * the source chips stay honest (file element, plus resolved/default/env/cli
+ * elements when those layers carry an array that reaches index i; env/cli
+ * hand the whole array as one token, so an unparseable token attests nothing
+ * per element and the slot rides omitted). Secret arrays mirror the parent's
+ * secret shape per element: null slots + the REPLACE box, never a byte.
+ */
+function schemaListElementRows(
+  segs: KeySeg[],
+  arr: unknown[],
+  items: SchemaProperty | null,
+  slots: ArrayLayerSlots,
+  secret: boolean,
+  ctx: RowCtx,
+): ConfigKeyEntryWire[] {
+  const resolvedArr = Array.isArray(slots.resolved) ? slots.resolved : null;
+  const defArr = slots.hasDefault && Array.isArray(slots.def) ? slots.def : null;
+  const envArr = slots.envSet?.set === true ? parseLayerArray(slots.envSet.value) : null;
+  const cliArr = slots.cliHit ? parseLayerArray(slots.cliHit.value) : null;
+  const out: ConfigKeyEntryWire[] = [];
+  arr.forEach((el, index) => {
+    const esegs: KeySeg[] = [...segs, index];
+    const row: ConfigKeyEntryWire = { key: keyString(esegs) };
+    let faithful = false;
+    if (secret) {
+      row.leafSecret = true;
+      if (defArr !== null && index < defArr.length) row.default = null;
+      row.file = null;
+      if (envArr !== null && index < envArr.length && slots.envSet?.source) {
+        row.env = { set: true, source: slots.envSet.source };
+      }
+      if (cliArr !== null && index < cliArr.length && slots.cliHit) {
+        row.cli = { flag: slots.cliHit.literal, value: null };
+      }
+      if (resolvedArr !== null && index < resolvedArr.length) row.resolved = null;
+      row.redacted = true; // the file element is set; its bytes are not shippable
+    } else {
+      const wf = wireValue(el, 0); // an element is its own row: scalar shaping, not container stubs
+      row.file = wf.value;
+      faithful = !wf.hit && !wf.lossy;
+      let hit = wf.hit;
+      if (defArr !== null && index < defArr.length) {
+        const r = wireValue(defArr[index], 0);
+        row.default = r.value;
+        hit = hit || r.hit;
+      }
+      if (resolvedArr !== null && index < resolvedArr.length) {
+        const r = wireValue(resolvedArr[index], 0);
+        row.resolved = r.value;
+        hit = hit || r.hit;
+      }
+      if (envArr !== null && index < envArr.length && slots.envSet) {
+        // The env var NAME keeps its own redaction test (the parent rule).
+        row.env = {
+          set: true,
+          ...(slots.envSet.source ? { source: slots.envSet.source } : {}),
+          ...(slots.envNameSecret ? { value: null } : { value: wireValue(envArr[index], 0).value }),
+        };
+        hit = hit || slots.envNameSecret;
+      }
+      if (cliArr !== null && index < cliArr.length && slots.cliHit) {
+        row.cli = { flag: slots.cliHit.literal, value: wireValue(cliArr[index], 0).value };
+      }
+      if (hit) row.redacted = true;
+    }
+    const stamp = stampFor({
+      segs: esegs,
+      prop: items,
+      rawSeed: el,
+      faithful,
+      addressable: ctx.addressable,
+      dups: ctx.dups,
+    });
+    if (stamp) row.edit = stamp;
+    out.push(row);
+  });
+  return out;
+}
+
+/**
  * Build the row(s) for one schema leaf and apply the redaction boundary:
  * when the leaf path is secret-shaped, every slot value nulls (slot PRESENCE
  * survives -- that is how the UI says "set (redacted)" vs "unset") and
@@ -488,6 +673,12 @@ function buildRows(entry: LeafEntry, ctx: RowCtx): ConfigKeyEntryWire[] {
   const flagDecl = prop.cliFlag ?? ctx.registryFlags.get(path);
   const cliHit = flagDecl ? cliFlagInArgv(ctx.argv, flagDecl) : null;
 
+  // The env var NAME is redaction-tested too: a third-party schema that
+  // names its env var like a credential behind a non-secret key path must
+  // not hand its value over (the key-path rule alone would miss it). Shared
+  // by the whole-array env slot below and the array-element env slots.
+  const envNameSecret = envSet?.source !== undefined && isSecretConfigPath(envSet.source.replace(/_/g, "."));
+
   // resolved: core.resolved carries the startup resolution chain for core
   // keys; extension-resolved keys live on core.config (resolveExtensionConfig
   // assigns them there).
@@ -496,6 +687,8 @@ function buildRows(entry: LeafEntry, ctx: RowCtx): ConfigKeyEntryWire[] {
 
   const segs = parseKeyPath(path) ?? [];
   const secret = isSecretConfigPath(path);
+  const gates = ctx.addressable && grammarSafe(segs) && !hasDuplicatePrefix(ctx.dups, segs);
+  const fileArr = primitiveArrayItems(fileValue);
   if (secret) {
     const anySet = isSet(fileValue) || envSet?.set === true || cliHit !== null || isSet(resolvedValue);
     // A secret-shaped key never ships a value, set or not (defense in depth).
@@ -506,10 +699,37 @@ function buildRows(entry: LeafEntry, ctx: RowCtx): ConfigKeyEntryWire[] {
     if (cliHit) row.cli = { flag: cliHit.literal, value: null };
     if (resolvedValue !== undefined) row.resolved = null;
     if (anySet) row.redacted = true;
-    // The writeOnly REPLACE box: the one stamp that never needs the old
-    // value, so class A cannot touch it; class B (duplicate/unaddressable)
-    // still refuses it.
-    if (ctx.addressable && grammarSafe(segs) && !hasDuplicatePrefix(ctx.dups, segs)) {
+    // SECRET-SHAPED LIST chrome (owner 2026-11-11 decision): a primitive
+    // array (or a schema-declared list) under a secret-shaped path gets the
+    // chrome posture with the REPLACE box MOVED TO THE ELEMENTS -- per
+    // element the writeOnly write is coherent (it splices one string into
+    // one slot, echoes value:null + redacted:true, and no byte ever ships).
+    // The chrome row itself is unstamped and its bulk write is refused, so
+    // the old bulk-REPLACE-that-flattens-the-array is gone; secret SCALARS
+    // keep their single writeOnly box untouched.
+    if (fileArr !== null && gates) {
+      row.arrayChrome = true;
+      const out = [row];
+      out.push(
+        ...schemaListElementRows(
+          segs,
+          fileArr,
+          arrayItemsProp(prop),
+          { def, hasDefault, resolved: resolvedValue, envSet, envNameSecret, cliHit },
+          true,
+          ctx,
+        ),
+      );
+      return out;
+    }
+    if (fileValue === undefined && schemaListChrome(prop) && gates) {
+      row.arrayChrome = true; // absent schema list: chrome with zero elements (append creates)
+      return [row];
+    }
+    // The writeOnly REPLACE box (scalars, and arrays whose elements are not
+    // all scalars): the one stamp that never needs the old value, so class A
+    // cannot touch it; class B (duplicate/unaddressable) still refuses it.
+    if (gates) {
       row.edit = { type: "string", writeOnly: true };
     }
     return [row];
@@ -529,18 +749,14 @@ function buildRows(entry: LeafEntry, ctx: RowCtx): ConfigKeyEntryWire[] {
     seedFaithful = !r.hit && !r.lossy;
   }
   if (envSet) {
-    // The env var NAME is redaction-tested too: a third-party schema that
-    // names its env var like a credential behind a non-secret key path must
-    // not hand its value over (the key-path rule alone would miss it).
-    const nameSecret = envSet.source !== undefined && isSecretConfigPath(envSet.source.replace(/_/g, "."));
     const r =
-      !nameSecret && envSet.value !== undefined ? wireValue(envSet.value) : { value: undefined, hit: false, lossy: false };
+      !envNameSecret && envSet.value !== undefined ? wireValue(envSet.value) : { value: undefined, hit: false, lossy: false };
     row.env = {
       set: envSet.set,
       ...(envSet.source ? { source: envSet.source } : {}),
-      ...(envSet.set ? (nameSecret ? { value: null } : { value: r.value }) : {}),
+      ...(envSet.set ? (envNameSecret ? { value: null } : { value: r.value }) : {}),
     };
-    hit = hit || r.hit || nameSecret;
+    hit = hit || r.hit || envNameSecret;
   }
   if (cliHit) {
     const r = cliHit.value !== undefined ? wireValue(cliHit.value) : { value: undefined, hit: false, lossy: false };
@@ -556,6 +772,33 @@ function buildRows(entry: LeafEntry, ctx: RowCtx): ConfigKeyEntryWire[] {
   // A secret-shaped entry nulled inside a container value (bashTool.env,
   // mcpServers[].env) is a redaction event too -- flag it so the UI says so.
   if (hit) row.redacted = true;
+  // ARRAY LIST chrome (owner ruling 2026-11-11, the provider-card doctrine
+  // generalized): a primitive-valued array -- or a schema-declared list the
+  // file does not carry yet -- ships as this chrome row (slots intact, NO
+  // edit stamp) plus one stamped row per element carrying its own per-layer
+  // slots. The wholesale array write is refused server-side to match (the
+  // stamp predicate is the write gate); the element rows and the editConfigList
+  // ops are the interface. EMPTY arrays ride chrome + zero element rows; an
+  // absent schema list rides chrome alone (append creates it). Class B ships
+  // the plain unstamped row: elements of a duplicated path address nothing.
+  if (fileArr !== null && gates) {
+    row.arrayChrome = true;
+    return [
+      row,
+      ...schemaListElementRows(
+        segs,
+        fileArr,
+        arrayItemsProp(prop),
+        { def, hasDefault, resolved: resolvedValue, envSet, envNameSecret, cliHit },
+        false,
+        ctx,
+      ),
+    ];
+  }
+  if (fileValue === undefined && schemaListChrome(prop) && gates) {
+    row.arrayChrome = true;
+    return [row];
+  }
   // Editor affordance (ALL the settings, owner ruling 2026-11-09): every
   // row the snapshot renders is stamped except the two honest refusals (see
   // the stamp section). The type/bounds ride as input hints; the write path
@@ -622,6 +865,24 @@ function childRows(
       if (wv.hit) row.redacted = true;
       faithful = !wv.hit && !wv.lossy;
     }
+    // LIST chrome (provider-card doctrine generalized): a primitive-valued
+    // array child ships as this chrome row (NO stamp; the card-field/json
+    // dump is retired the same way `providers[0].models` retired it) plus one
+    // stamped row per element. Secret-shaped arrays keep every slot null and
+    // hand each element the writeOnly REPLACE box. Class-B paths ship the
+    // plain unstamped row (no element rows: nothing addresses them).
+    const chromeArr = primitiveArrayItems(v);
+    if (
+      chromeArr !== null &&
+      ctx.addressable &&
+      grammarSafe(childSegs) &&
+      !hasDuplicatePrefix(ctx.dups, childSegs)
+    ) {
+      row.arrayChrome = true;
+      out.push(row);
+      out.push(...listElementRows(childSegs, chromeArr, ctx, slot, depth, null));
+      continue;
+    }
     const stamp = stampFor({
       segs: childSegs,
       prop: null, // children of free-form containers are shape-validated, not schema-validated
@@ -686,6 +947,67 @@ function providerRows(core: CoreContext): ConfigKeyEntryWire[] {
 }
 
 /**
+ * Rows for a providers array the IN-USE FILE carries, shaped for the panel's
+ * provider CARDS (owner ruling 2026-11-11: one card per provider, no
+ * whole-array dump, no per-element JSON container row while the leaf rows
+ * render). The shipped set:
+ *  - the top `providers` row as-is MINUS its edit stamp: the section heading
+ *    is its chrome (the whole-array JSON editor is retired -- provider lists
+ *    change through the card's add/remove ops, and the write gate refuses the
+ *    wholesale container write to match the stamp);
+ *  - per element: the `providers[i]` row (the card HEADER's chrome row, also
+ *    unstamped -- its fields own the editing) followed by every field the
+ *    element carries (existing child-row machinery: faithful scalars
+ *    stamped, secrets writeOnly, lossy ships recursing), plus one stamped
+ *    row per KNOWN ProviderDef child the file does not set. Those
+ *    known-but-absent rows ship no value slot (nothing attests one -- the
+ *    panel's value cell reads "(unset)") but carry the create-on-write
+ *    stamp: the staged transaction inserts the member into the element
+ *    object (providers[i].url-style), and applyConfigKeyEditLocked accepts
+ *    exactly these creations (same providerDefField declaration), so every
+ *    live control saves. A field the DECLARATION does not know never gets a
+ *    create row (the file stays the interface there).
+ * Elements that are not objects (a stray string in the array) keep the plain
+ * file-only row -- a card needs an object to hang fields on.
+ */
+function providerArrayRows(providers: unknown[], topRow: ConfigKeyEntryWire, ctx: RowCtx): ConfigKeyEntryWire[] {
+  const top = { ...topRow };
+  delete top.edit; // chrome: the section heading renders this row; no array-level JSON dump
+  const out: ConfigKeyEntryWire[] = [top];
+  providers.forEach((el, index) => {
+    const segs: KeySeg[] = ["providers", index];
+    if (el === null || typeof el !== "object" || Array.isArray(el)) {
+      out.push(...fileOnlyRows(segs, el, ctx, 1));
+      return;
+    }
+    const element = el as Record<string, unknown>;
+    const header: ConfigKeyEntryWire = { key: keyString(segs) };
+    const wv = wireValue(element, 1); // container-member shaping, same as the child rows
+    header.file = wv.value;
+    if (wv.hit) header.redacted = true;
+    // NO edit on the chrome row (see the doc): fields and list ops own it.
+    out.push(header);
+    out.push(...childRows(segs, element, ctx, "file", 1));
+    // Known-but-absent children: create-on-write rows (class-B gates apply
+    // to the CREATION too -- an unspellable/duplicated path ships nothing).
+    const present = new Set(Object.keys(element).map((k) => normalizeKey(k)));
+    for (const [field, def] of Object.entries(PROVIDER_DEF_FIELDS)) {
+      if (present.has(normalizeKey(field))) continue;
+      const fsegs: KeySeg[] = [...segs, field];
+      if (!ctx.addressable || !grammarSafe(fsegs) || hasDuplicatePrefix(ctx.dups, fsegs)) continue;
+      const row: ConfigKeyEntryWire = { key: keyString(fsegs), description: def.description };
+      row.edit = secretSegs(fsegs)
+        ? { type: "string", writeOnly: true }
+        : def.type === "json"
+          ? { type: "json" }
+          : { type: def.type };
+      out.push(row);
+    }
+  });
+  return out;
+}
+
+/**
  * Rows for everything the file holds that the schema walk did NOT cover --
  * unknown keys, EXTRA_KNOWN passthroughs (providers, services, cwdBoundary,
  * legacy spellings) and unknown members inside known objects. Same name-based
@@ -721,7 +1043,10 @@ function collectFileRows(
 }
 
 /** One file-only row (unknown / passthrough), plus class-A child rows when
- *  the container's shipped payload redacts or stubs something inside. */
+ *  the container's shipped payload redacts or stubs something inside. A
+ *  primitive-valued array becomes LIST chrome instead (heading row, no
+ *  stamp, + one stamped row per element; the write gate refuses the bulk
+ *  splice to match -- owner ruling 2026-11-11). */
 function fileOnlyRows(segs: KeySeg[], v: unknown, ctx: RowCtx, wireDepth: number): ConfigKeyEntryWire[] {
   const row: ConfigKeyEntryWire = { key: keyString(segs) };
   const secret = secretSegs(segs);
@@ -735,6 +1060,11 @@ function fileOnlyRows(segs: KeySeg[], v: unknown, ctx: RowCtx, wireDepth: number
     row.file = wv.value;
     if (wv.hit) row.redacted = true;
     faithful = !wv.hit && !wv.lossy;
+  }
+  const chromeArr = primitiveArrayItems(v);
+  if (chromeArr !== null && ctx.addressable && grammarSafe(segs) && !hasDuplicatePrefix(ctx.dups, segs)) {
+    row.arrayChrome = true;
+    return [row, ...listElementRows(segs, chromeArr, ctx, "file", wireDepth, null)];
   }
   const stamp = stampFor({
     segs,
@@ -954,7 +1284,15 @@ export async function buildConfigSnapshot(
     for (const g of fileGroups) {
       const top = g.segs[0];
       const name = sectionNameOf(typeof top === "string" ? top : "");
-      for (const row of g.rows) {
+      // The providers passthrough gets the CARD shape (chrome rows + always-
+      // expanded fields + known-but-absent create rows) instead of the
+      // generic dump-or-container walk. Exact-key match: a "Providers"
+      // misspelling keeps the unknown-key story as before.
+      const rows =
+        g.rows.length > 0 && typeof top === "string" && top === "providers" && Array.isArray(fileConfig.providers)
+          ? providerArrayRows(fileConfig.providers, g.rows[0]!, ctx)
+          : g.rows;
+      for (const row of rows) {
         if (!addRow(name, row)) break;
       }
     }
@@ -1073,6 +1411,30 @@ function findLeafProp(unified: ConfigSchema, segs: KeySeg[]): SchemaProperty | n
   return prop ?? null;
 }
 
+/** The schema property that governs the ITEM an indexed path addresses:
+ *  walks `items` on every array hop ("ports[2]" -> ports.items,
+ *  "servers[0].ports[1]" -> servers.items.properties.ports.items). Null when
+ *  the path is not an array element or the schema declares no items -- the
+ *  element gate then falls back to the file's shape (the file-only doctrine,
+ *  same as the shape-derived element STAMP). */
+function findItemProp(unified: ConfigSchema, segs: KeySeg[]): SchemaProperty | null {
+  if (segs.length === 0 || typeof segs[0] === "number") return null;
+  const rootKey = Object.keys(unified).find((k) => normalizeKey(k) === normalizeKey(segs[0] as string));
+  if (rootKey === undefined) return null;
+  let prop: SchemaProperty | undefined = unified[rootKey];
+  for (let i = 1; i < segs.length; i++) {
+    const s = segs[i]!;
+    if (typeof s === "number") {
+      if (prop?.type !== "array" || prop.items === undefined) return null;
+      prop = prop.items;
+    } else {
+      const hit = Object.keys(prop?.properties ?? {}).find((k) => normalizeKey(k) === normalizeKey(s));
+      prop = hit !== undefined ? prop!.properties![hit] : undefined;
+    }
+  }
+  return prop ?? null;
+}
+
 type EditScalar = string | number | boolean;
 
 /** Server-side validation against the schema's declared type + bounds. The
@@ -1098,6 +1460,9 @@ function validateEditValue(type: string, value: unknown, prop: SchemaProperty, k
   if (typeof value === "number") {
     if (prop.minimum !== undefined && value < prop.minimum) return `"${keyPath}" must be >= ${prop.minimum} (got ${value})`;
     if (prop.maximum !== undefined && value > prop.maximum) return `"${keyPath}" must be <= ${prop.maximum} (got ${value})`;
+  }
+  if (Array.isArray(prop.enum) && prop.enum.length > 0 && !prop.enum.includes(value as string)) {
+    return `"${keyPath}" must be one of: ${prop.enum.join(", ")} (got ${JSON.stringify(value)})`;
   }
   return null;
 }
@@ -1185,6 +1550,21 @@ interface EditMember {
   object: EditObjectNode | null;
 }
 
+/** Geometry of a walked ARRAY (recorded separately from members: an array
+ *  value keeps `object: null` so the absent-key ancestor walk keeps refusing
+ *  to "insert into" an array it cannot re-shape). The provider list ops are
+ *  the only consumers: append inserts before the closing bracket, remove
+ *  drops one element range. `firstKeyStart` / `lastValueEnd` / `memberCount`
+ *  carry the same meaning as in EditObjectNode (elements, not members). */
+interface EditArrayNode {
+  segs: KeySeg[];
+  open: number;
+  close: number;
+  firstKeyStart: number;
+  lastValueEnd: number;
+  memberCount: number;
+}
+
 /**
  * Walk the (comment-masked) text and record every object member with its
  * key segments and value range, plus the geometry of every object. Grammar
@@ -1193,10 +1573,11 @@ interface EditMember {
  * deserve an editor that keeps their style. Anything the walk cannot follow
  * returns null -- never a partial answer.
  */
-function locateJsonStructure(text: string): { members: EditMember[]; root: EditObjectNode } | null {
+function locateJsonStructure(text: string): { members: EditMember[]; root: EditObjectNode; arrays: Map<string, EditArrayNode> } | null {
   const t = maskComments(text);
   const n = t.length;
   const members: EditMember[] = [];
+  const arrays = new Map<string, EditArrayNode>();
   let i = 0;
   const ws = () => {
     while (i < n && (t[i] === " " || t[i] === "\t" || t[i] === "\n" || t[i] === "\r")) i++;
@@ -1260,11 +1641,20 @@ function locateJsonStructure(text: string): { members: EditMember[]; root: EditO
 
   function parseArray(segs: KeySeg[], depth: number): { start: number; end: number; object: null } | null {
     const start = i;
+    // Geometry for the provider list ops (append/remove): the same shape the
+    // object insert borrows formatting from. `memberCount` counts ELEMENTS;
+    // firstKeyStart is the first element's value start; lastValueEnd the last.
+    const node: EditArrayNode = { segs, open: start, close: -1, firstKeyStart: -1, lastValueEnd: -1, memberCount: 0 };
+    const record = (end: number): { start: number; end: number; object: null } => {
+      node.close = end - 1; // the "]" itself
+      arrays.set(spellPath(segs), node);
+      return { start, end, object: null };
+    };
     i++; // [
     ws();
     if (t[i] === "]") {
       i++;
-      return { start, end: i, object: null };
+      return record(i);
     }
     let index = 0;
     for (;;) {
@@ -1272,6 +1662,9 @@ function locateJsonStructure(text: string): { members: EditMember[]; root: EditO
       // the `[i]` segment (providers[0].url), exactly like the row keys.
       const v = parseValue([...segs, index], depth);
       if (!v) return null;
+      if (node.firstKeyStart < 0) node.firstKeyStart = v.start;
+      node.lastValueEnd = v.end;
+      node.memberCount++;
       members.push({ segs: [...segs, index], valueStart: v.start, valueEnd: v.end, object: v.object });
       index++;
       ws();
@@ -1280,13 +1673,13 @@ function locateJsonStructure(text: string): { members: EditMember[]; root: EditO
         ws();
         if (t[i] === "]") {
           i++; // trailing comma (JSONC grace)
-          return { start, end: i, object: null };
+          return record(i);
         }
         continue;
       }
       if (t[i] === "]") {
         i++;
-        return { start, end: i, object: null };
+        return record(i);
       }
       return null;
     }
@@ -1345,7 +1738,7 @@ function locateJsonStructure(text: string): { members: EditMember[]; root: EditO
   if (!root) return null;
   ws();
   if (i < n) return null; // trailing garbage after the root object
-  return { members, root: root.object };
+  return { members, root: root.object, arrays };
 }
 
 /** `"a": { "b": { "c": V } }` at column `indent` (or the multi-line
@@ -1369,6 +1762,71 @@ function buildChainText(segs: KeySeg[], valueJson: string, indent: string, multi
 type ConfigTextEdit =
   | { ok: true; newText: string }
   | { ok: false; reason: "unparseable" | "duplicate" | "ancestor" | "empty"; conflict?: string };
+
+/** Leading whitespace of the line containing `pos`. */
+function indentAtOf(text: string, pos: number): string {
+  const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
+  return /^[ \t]*/.exec(text.slice(lineStart))![0]!;
+}
+
+/** Borrowed formatting for an insertion into `node`: an object (or array)
+ *  whose members share its line stays inline; multiline inserts hang off the
+ *  first member's indent. Returns the full new text with `entry` slotted in
+ *  as the node's LAST member. The comment-run rule: a comment sitting on the
+ *  last member's value line belongs to THAT member: inserting at lastValueEnd
+ *  would strand it behind the new key (its "200 // page size" describing
+ *  readToolLimit would land on grepMaxResults). So advance the insertion
+ *  point past a comment run contiguous with the value (across whitespace and
+ *  one existing comma), and hang the separator comma on the value token
+ *  instead. With no comment in the gap the old geometry stands untouched: an
+ *  existing trailing comma still becomes the single trailing comma behind the
+ *  new member. Shared by the value-set insert (editConfigText) and the
+ *  provider list append (same byte discipline). */
+function insertEntryIntoNode(text: string, node: EditObjectNode | EditArrayNode, entry: string): string {
+  const multiline =
+    node.firstKeyStart >= 0
+      ? text.slice(node.firstKeyStart, node.close).includes("\n")
+      : text.slice(node.open + 1, node.close).includes("\n");
+  const childIndent =
+    node.firstKeyStart >= 0 ? indentAtOf(text, node.firstKeyStart) : indentAtOf(text, node.open) + "  ";
+
+  if (node.memberCount === 0) {
+    // No comma to hang off: place the member before the closing brace (an
+    // interior comment line rides untouched, above the new key).
+    return text.slice(0, node.close) + (multiline ? childIndent + entry : entry) + text.slice(node.close);
+  }
+  let p = node.lastValueEnd;
+  let sawComma = false;
+  let sawComment = false;
+  run: while (p < node.close) {
+    while (p < node.close && (text[p] === " " || text[p] === "\t")) p++;
+    if (text[p] === "/" && (text[p + 1] === "/" || text[p + 1] === "*")) {
+      sawComment = true;
+      if (text[p + 1] === "/") {
+        while (p < node.close && text[p] !== "\n") p++;
+      } else {
+        p += 2;
+        while (p < node.close && !(text[p] === "*" && text[p + 1] === "/")) p++;
+        p += 2;
+      }
+      continue run;
+    }
+    if (!sawComma && text[p] === ",") {
+      sawComma = true;
+      p++;
+      continue run;
+    }
+    break;
+  }
+  if (!sawComment) {
+    return text.slice(0, node.lastValueEnd) + "," + (multiline ? "\n" + childIndent : " ") + entry + text.slice(node.lastValueEnd);
+  }
+  // head: reuse the member's own trailing comma when it wrote one; else the
+  // separator comma lands directly on the value token, before its comment.
+  const head = sawComma ? "" : ",";
+  const sep = multiline ? "\n" + childIndent : " ";
+  return text.slice(0, node.lastValueEnd) + head + text.slice(node.lastValueEnd, p) + sep + entry + text.slice(p);
+}
 
 /** Produce the full file text with ONE path's value set to `newValueText`
  *  (replace in place, or insert at the right depth with formatting borrowed
@@ -1421,64 +1879,13 @@ function editConfigText(text: string, segs: KeySeg[], newValueText: string): Con
 
   // Formatting borrowed from the object we insert into (or the open line for
   // an empty one); an object whose members share its line stays inline.
-  const indentAt = (pos: number): string => {
-    const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
-    return /^[ \t]*/.exec(text.slice(lineStart))![0]!;
-  };
   const multiline =
     node.firstKeyStart >= 0
       ? text.slice(node.firstKeyStart, node.close).includes("\n")
       : text.slice(node.open + 1, node.close).includes("\n");
-  const childIndent = node.firstKeyStart >= 0 ? indentAt(node.firstKeyStart) : indentAt(node.open) + "  ";
+  const childIndent = node.firstKeyStart >= 0 ? indentAtOf(text, node.firstKeyStart) : indentAtOf(text, node.open) + "  ";
   const chain = buildChainText(create, newValueText, childIndent, multiline);
-
-  if (node.memberCount === 0) {
-    // No comma to hang off: place the member before the closing brace (an
-    // interior comment line rides untouched, above the new key).
-    return { ok: true, newText: text.slice(0, node.close) + (multiline ? childIndent + chain : chain) + text.slice(node.close) };
-  }
-  // A comment sitting on the last member's value line belongs to THAT member:
-  // inserting at lastValueEnd would strand it behind the new key (its
-  // "200 // page size" describing readToolLimit would land on grepMaxResults).
-  // So advance the insertion point past a comment run contiguous with the
-  // value (across whitespace and one existing comma), and hang the separator
-  // comma on the value token instead. With no comment in the gap the old
-  // geometry stands untouched: an existing trailing comma still becomes the
-  // single trailing comma behind the new member.
-  let p = node.lastValueEnd;
-  let sawComma = false;
-  let sawComment = false;
-  run: while (p < node.close) {
-    while (p < node.close && (text[p] === " " || text[p] === "\t")) p++;
-    if (text[p] === "/" && (text[p + 1] === "/" || text[p + 1] === "*")) {
-      sawComment = true;
-      if (text[p + 1] === "/") {
-        while (p < node.close && text[p] !== "\n") p++;
-      } else {
-        p += 2;
-        while (p < node.close && !(text[p] === "*" && text[p + 1] === "/")) p++;
-        p += 2;
-      }
-      continue run;
-    }
-    if (!sawComma && text[p] === ",") {
-      sawComma = true;
-      p++;
-      continue run;
-    }
-    break;
-  }
-  if (!sawComment) {
-    return { ok: true, newText: text.slice(0, node.lastValueEnd) + "," + (multiline ? "\n" + childIndent : " ") + chain + text.slice(node.lastValueEnd) };
-  }
-  // head: reuse the member's own trailing comma when it wrote one; else the
-  // separator comma lands directly on the value token, before its comment.
-  const head = sawComma ? "" : ",";
-  const sep = multiline ? "\n" + childIndent : " ";
-  return {
-    ok: true,
-    newText: text.slice(0, node.lastValueEnd) + head + text.slice(node.lastValueEnd, p) + sep + chain + text.slice(p),
-  };
+  return { ok: true, newText: insertEntryIntoNode(text, node, chain) };
 }
 
 /** Post-write read-back: the file must parse (raw or JSONC-repaired), the
@@ -1611,6 +2018,50 @@ function fileRawValue(parsed: unknown, segs: KeySeg[]): { found: boolean; value:
 const shapeWord = (s: "object" | "array" | "null" | "scalar"): string =>
   s === "array" ? "an array" : s === "null" ? "null" : s === "scalar" ? "a different scalar" : "an object";
 
+/** The provider array as the PARSED file spells it (normalized-key lookup,
+ *  the loader's equivalence). undefined: absent; the value otherwise (the
+ *  caller decides whether it is an array). */
+function parsedProviders(parsed: unknown): unknown {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const hitKey = Object.keys(parsed as object).find((k) => normalizeKey(k) === "providers");
+  return hitKey === undefined ? undefined : (parsed as Record<string, unknown>)[hitKey];
+}
+
+/** True when the path addresses the providers ARRAY itself or one of its
+ *  OBJECT elements -- the snapshot's card chrome (heading / card header).
+ *  The snapshot never stamps these and the write gate refuses the wholesale
+ *  container write; the element's FIELDS stay individually writable. */
+function providerListChromePath(segs: KeySeg[], parsedFile: unknown): boolean {
+  if (typeof segs[0] !== "string" || normalizeKey(segs[0]) !== "providers") return false;
+  const providers = parsedProviders(parsedFile);
+  if (segs.length === 1) return Array.isArray(providers);
+  if (segs.length === 2 && typeof segs[1] === "number") {
+    const el = Array.isArray(providers) ? providers[segs[1]] : undefined;
+    return el !== null && typeof el === "object" && !Array.isArray(el);
+  }
+  return false;
+}
+
+/** The declared ProviderDef child this path would CREATE: set when segs is
+ *  providers[<i>].<knownField>, the provider ELEMENT exists in the file as an
+ *  object, and the field is not there yet (normalized comparison, loader
+ *  semantics). undefined otherwise -- everything else fail-closes as before. */
+function providerChildCreateTarget(segs: KeySeg[], parsedFile: unknown): { type: "string" | "boolean" | "number" | "json" } | undefined {
+  if (segs.length !== 3 || typeof segs[0] !== "string" || normalizeKey(segs[0]) !== "providers" || typeof segs[1] !== "number") {
+    return undefined;
+  }
+  const providers = parsedProviders(parsedFile);
+  if (!Array.isArray(providers)) return undefined;
+  const el: unknown = providers[segs[1]];
+  if (el === null || typeof el !== "object" || Array.isArray(el)) return undefined;
+  const field = String(segs[2]);
+  for (const k of Object.keys(el as object)) {
+    if (normalizeKey(k) === normalizeKey(field)) return undefined; // present: the normal write path owns it
+  }
+  const def = providerDefField(field);
+  return def ? { type: def.type } : undefined;
+}
+
 /**
  * The whole edit, from keyPath to persisted byte. Only ever touches the ONE
  * resolved config file path (the snapshot's in-use path: explicit --config/-f
@@ -1672,7 +2123,8 @@ async function applyConfigKeyEditLocked(
   const fileShape = cur.found ? shapeClass(cur.value) : undefined;
 
   // 4. Kind resolution + validation -> newValueText + canonical + echo.
-  const prop = findLeafProp(unifiedSchemaFor(core), segs);
+  const unified = unifiedSchemaFor(core);
+  const prop = findLeafProp(unified, segs);
   const schemaKind =
     prop && (!prop.properties || Object.keys(prop.properties).length === 0)
       ? prop.type === "array"
@@ -1716,6 +2168,44 @@ async function applyConfigKeyEditLocked(
     };
   }
 
+  // PROVIDER LIST chrome: the providers array itself and its element rows are
+  // the snapshot's CARD chrome (section heading / card header) -- the panel
+  // never ships a wholesale-write stamp for them, so the gate refuses them
+  // too (stamp predicate = write gate). Provider lists change through the
+  // field rows and the editConfigList add/remove ops, not a bulk container
+  // splice.
+  if (cur.found && containerTarget && providerListChromePath(segs, parsedFile)) {
+    return {
+      ok: false,
+      error: `"${keyPath}" is provider-list chrome -- the panel edits provider FIELDS on their own rows and changes the list with Add provider / Remove (${refusal})`,
+    };
+  }
+
+  // Known ProviderDef child ABSENT from an existing provider element: the
+  // card row ships a create-on-write stamp (providers[i].url-style); the
+  // staged transaction inserts the member into the element object. This is
+  // the gate half of that stamp -- the declared kind validates the fresh
+  // value, and nothing else creates array-element children (fail closed).
+  const provCreate = cur.found ? undefined : providerChildCreateTarget(segs, parsedFile);
+
+  // ARRAY LIST chrome (owner ruling 2026-11-11, the provider-card doctrine
+  // generalized): a primitive-valued array in the file, or an ABSENT
+  // schema-declared list, renders as chrome (heading row without a stamp;
+  // the elements are the rows, editConfigList appends/removes). The gate
+  // matches the stamp: the bulk splice is refused and the honest text names
+  // the interface. It also fires for SECRET-shaped primitive arrays -- the
+  // secret short-circuit below must not smuggle a bulk array replace past
+  // the chrome (per-element REPLACE rows own those).
+  const listChromeTarget =
+    (cur.found && fileShape === "array" && primitiveArrayItems(cur.value) !== null) ||
+    (!cur.found && provCreate === undefined && schemaListChrome(prop));
+  if (listChromeTarget) {
+    return {
+      ok: false,
+      error: `"${keyPath}" is an array-list chrome row -- the panel edits the ELEMENTS on their own rows (${keyPath}[0], ...) and changes the list with append/remove (${refusal})`,
+    };
+  }
+
   let newValueText: string;
   let canonical: unknown;
   let echo: { value?: EditScalar | null; valueText?: string; redacted?: true };
@@ -1724,7 +2214,9 @@ async function applyConfigKeyEditLocked(
     // The writeOnly REPLACE: a JSON string in whatever slot the path holds.
     // An unknown secret absent from the file on a server with no schema for
     // it has nothing to validate against -- fail closed like any unknown.
-    if (!prop && !cur.found) {
+    // The one exception the snapshot may stamp: a provider element's own
+    // declared apiKey child (the card's REPLACE row -- provCreate below).
+    if (!prop && !cur.found && !provCreate) {
       return {
         ok: false,
         error: `no schema entry for "${keyPath}" on this server and no value in the file -- refusing to write (${refusal})`,
@@ -1785,9 +2277,18 @@ async function applyConfigKeyEditLocked(
     echo = { valueText: text as string };
   } else if (cur.found && fileShape === "scalar") {
     // File-only scalar (unknown key, env entry): validate by the channel's
-    // scalar-ness + primitive-kind agreement with what the file holds.
+    // scalar-ness + primitive-kind agreement with what the file holds. An
+    // ARRAY ELEMENT under a schema-declared list is the exception: its items
+    // schema is the gate (type, bounds, enum -- the same declaration the
+    // element row's stamp rode), so an off-set or out-of-bounds element value
+    // refuses exactly like the leaf write would.
     if (!hasScalar) {
       return { ok: false, error: "value must be a string, number, or boolean" };
+    }
+    const itemProp = findItemProp(unified, segs);
+    if (itemProp !== null && isEditScalarType(itemProp.type)) {
+      const invalidItem = validateEditValue(itemProp.type as string, scalar, itemProp, keyPath);
+      if (invalidItem) return { ok: false, error: invalidItem };
     }
     if (typeof scalar !== typeof cur.value) {
       return {
@@ -1798,6 +2299,47 @@ async function applyConfigKeyEditLocked(
     newValueText = JSON.stringify(scalar);
     canonical = scalar;
     echo = { value: scalar as EditScalar };
+  } else if (provCreate) {
+    // CREATE-ON-WRITE for a known provider child (the card's "(unset)" row):
+    // the declared kind is the gate; the insert lands the member inside the
+    // existing element object (editConfigText's ancestor insertion).
+    if (provCreate.type === "json") {
+      if (!hasText) {
+        return { ok: false, error: `"${keyPath}" is a list -- send the new value as JSON text (valueText)` };
+      }
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(text as string);
+      } catch (err) {
+        return { ok: false, error: `"${keyPath}": invalid JSON -- ${errorText(err)}` };
+      }
+      if (shapeClass(parsedJson) !== "array") {
+        return {
+          ok: false,
+          error: `"${keyPath}" must be an array -- the new JSON is ${shapeWord(shapeClass(parsedJson) ?? "null")}`,
+        };
+      }
+      newValueText = text as string;
+      canonical = parsedJson;
+      echo = { valueText: text as string };
+    } else {
+      if (!hasScalar) {
+        return { ok: false, error: "value must be a string, number, or boolean" };
+      }
+      const want = provCreate.type;
+      const kindOk =
+        want === "string"
+          ? typeof scalar === "string"
+          : want === "boolean"
+            ? typeof scalar === "boolean"
+            : typeof scalar === "number" && Number.isFinite(scalar);
+      if (!kindOk) {
+        return { ok: false, error: `invalid value for "${keyPath}": expected a ${want}` };
+      }
+      newValueText = JSON.stringify(scalar);
+      canonical = scalar;
+      echo = { value: scalar as EditScalar };
+    }
   } else {
     // Nothing to validate against: no schema leaf on this server and no
     // value in the file (or a null the editor cannot take a shape from).
@@ -1838,60 +2380,92 @@ async function applyConfigKeyEditLocked(
     newText = edit.newText;
   }
 
-  // 6. Atomic write (temp + rename in the same directory).
-  const tmp = `${filePath}.${process.pid}.${++configEditSeq}.cfg-edit.tmp`;
-  try {
-    await deps.writeFile(tmp, newText);
-    await deps.rename(tmp, filePath);
-  } catch (err) {
+  // 6/7. Atomic write + verify + rollback (the shared write tail; the list
+  // ops run through the very same one).
+  return commitVerifiedEdit({
+    filePath,
+    newText,
+    hadFile,
+    rawText: report.rawText,
+    deps,
+    refusal,
+    logTag: "setConfigKey",
+    verify: (after) => verifyEdit(after, segs, canonical),
+    onOk: () => ({ ok: true, needsRestart: true, ...echo } as ConfigKeyEditOutcome),
+  });
+}
+
+/** The ONE write tail: temp+rename in the same directory, re-read + verify,
+ *  and rollback to the exact pre-write bytes (or un-create the file) on any
+ *  post-write doubt, with the restore re-verified before it is claimed. The
+ *  value edit and the provider list ops share it verbatim: one atomicity
+ *  discipline for the config file, no second implementation to drift. */
+function commitVerifiedEdit(args: {
+  filePath: string;
+  newText: string;
+  hadFile: boolean;
+  rawText: string;
+  deps: ConfigEditDeps;
+  refusal: string;
+  logTag: string;
+  verify: (after: string) => boolean;
+  onOk: () => { ok: true; needsRestart: true } | { ok: false; error: string };
+}): Promise<{ ok: true; needsRestart: true } | { ok: false; error: string }> {
+  const { filePath, newText, hadFile, rawText, deps, refusal, logTag, verify, onOk } = args;
+  return (async () => {
+    // Atomic write (temp + rename in the same directory).
+    const tmp = `${filePath}.${process.pid}.${++configEditSeq}.cfg-edit.tmp`;
     try {
-      await deps.unlink(tmp);
-    } catch {}
-    return { ok: false, error: `could not write ${filePath}: ${errorText(err)}` };
-  }
-
-  // 7. Post-write verification, then rollback-on-any-doubt.
-  let verifyErr: string | null = null;
-  try {
-    const after = await deps.readFile(filePath);
-    if (!verifyEdit(after, segs, canonical)) verifyErr = "post-write verification failed";
-  } catch (err) {
-    verifyErr = `post-write read failed: ${errorText(err)}`;
-  }
-  // Success echoes per kind: the scalar, the accepted JSON text, or -- for a
-  // writeOnly secret -- value:null + redacted:true (never the bytes).
-  if (!verifyErr) return { ok: true, needsRestart: true, ...echo };
-
-  const tmpBack = `${filePath}.${process.pid}.${++configEditSeq}.cfg-edit.tmp`;
-  try {
-    if (hadFile) {
-      await deps.writeFile(tmpBack, report.rawText);
-      await deps.rename(tmpBack, filePath);
-    } else {
-      await deps.unlink(filePath); // the file did not exist before; un-create it
+      await deps.writeFile(tmp, newText);
+      await deps.rename(tmp, filePath);
+    } catch (err) {
+      try {
+        await deps.unlink(tmp);
+      } catch {}
+      return { ok: false, error: `could not write ${filePath}: ${errorText(err)}` };
     }
-  } catch (err) {
+
+    // Post-write verification, then rollback-on-any-doubt.
+    let verifyErr: string | null = null;
     try {
-      await deps.unlink(tmpBack);
-    } catch {}
-    logger.error(`[websocket] setConfigKey ${verifyErr} AND the rollback of ${filePath} failed: ${formatError(err)}`);
-    return { ok: false, error: `${verifyErr}; ROLLBACK FAILED -- restore ${filePath} by hand (hotdog rescue validates it)` };
-  }
-  // Re-verify the restore before claiming it. The module lock serializes
-  // in-process writers, but a CROSS-PROCESS one can land its bytes after our
-  // rollback rename -- and then "the previous file was restored" would be a
-  // lie written over someone else's ACKED value. Report what actually holds.
-  let holdsOurBytes = false;
-  try {
-    holdsOurBytes = hadFile ? (await deps.readFile(filePath)) === report.rawText : false;
-  } catch {
-    holdsOurBytes = !hadFile; // the created file is gone again: the un-create landed
-  }
-  if (holdsOurBytes) return { ok: false, error: `${verifyErr}; the previous file was restored (${refusal})` };
-  return {
-    ok: false,
-    error: `${verifyErr}; a concurrent edit won -- the file no longer holds its pre-write bytes; review ${filePath} before retrying (${refusal})`,
-  };
+      const after = await deps.readFile(filePath);
+      if (!verify(after)) verifyErr = "post-write verification failed";
+    } catch (err) {
+      verifyErr = `post-write read failed: ${errorText(err)}`;
+    }
+    if (!verifyErr) return onOk();
+
+    const tmpBack = `${filePath}.${process.pid}.${++configEditSeq}.cfg-edit.tmp`;
+    try {
+      if (hadFile) {
+        await deps.writeFile(tmpBack, rawText);
+        await deps.rename(tmpBack, filePath);
+      } else {
+        await deps.unlink(filePath); // the file did not exist before; un-create it
+      }
+    } catch (err) {
+      try {
+        await deps.unlink(tmpBack);
+      } catch {}
+      logger.error(`[websocket] ${logTag} ${verifyErr} AND the rollback of ${filePath} failed: ${formatError(err)}`);
+      return { ok: false, error: `${verifyErr}; ROLLBACK FAILED -- restore ${filePath} by hand (hotdog rescue validates it)` };
+    }
+    // Re-verify the restore before claiming it. The module lock serializes
+    // in-process writers, but a CROSS-PROCESS one can land its bytes after our
+    // rollback rename -- and then "the previous file was restored" would be a
+    // lie written over someone else's ACKED value. Report what actually holds.
+    let holdsOurBytes = false;
+    try {
+      holdsOurBytes = hadFile ? (await deps.readFile(filePath)) === rawText : false;
+    } catch {
+      holdsOurBytes = !hadFile; // the created file is gone again: the un-create landed
+    }
+    if (holdsOurBytes) return { ok: false, error: `${verifyErr}; the previous file was restored (${refusal})` };
+    return {
+      ok: false,
+      error: `${verifyErr}; a concurrent edit won -- the file no longer holds its pre-write bytes; review ${filePath} before retrying (${refusal})`,
+    };
+  })();
 }
 
 export async function handleConfigKeySet(ctx: RouteContext): Promise<void> {
@@ -1925,5 +2499,615 @@ export async function handleConfigKeySet(ctx: RouteContext): Promise<void> {
       // the wire-safe message the client renders verbatim.
       logger.warn(`[websocket] setConfigKey failed: ${formatError(err)}`);
       SessionRegistry.sendSafe(ws, { type: S2C.SET_CONFIG_KEY_RESULT, requestId, ok: false, error: errorText(err) });
+    });
+}
+
+// ── LIST edit (C2S editConfigList → S2C editConfigListResult) ────────────────
+// Add / remove ONE ELEMENT of any array (the providers cards and every
+// primitive LIST-chrome row) through the SAME verified transaction the value
+// editor uses: read the in-use file, splice surgically, atomic temp+rename,
+// rescue-verify, rollback-on-doubt (commitVerifiedEdit). What is not the
+// targeted element survives byte-identically -- append borrows the array's own
+// formatting through insertEntryIntoNode, remove cuts exactly one element
+// under the comment-preserving doctrine of providerRemoveCuts (INDEX-
+// addressed, so duplicate values are removable one at a time). The whole
+// chain runs under the module edit lock (withConfigEditLock) so it can never
+// interleave with a setConfigKey.
+
+export type ConfigListEditOutcome = { ok: true; needsRestart: true } | { ok: false; error: string };
+
+/** Any provider-name reference the PARSED file holds, EXCLUDING the element at
+ *  skipPath (the one being removed never "references itself" through its own
+ *  name field or its own "name/..." model keys). A reference is any object key
+ *  or string value equal to `name`, or starting "name/" -- the loader matches
+ *  provider ids exactly (config/index.ts: providers.find(p => p.name === name))
+ *  and model registry keys are "name/…" (findModelKey suffix). The FIRST
+ *  referencing keyPath is returned so the refusal names it; null when clean. */
+function providerRemoveReferences(name: string, parsedFile: unknown, skipPath: string): string | null {
+  if (name === "") return null;
+  const walk = (node: unknown, path: string): string | null => {
+    if (path === skipPath) return null; // the element being removed
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        const r = walk(node[i], `${path}[${i}]`);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (node && typeof node === "object") {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        const child = path === "" ? k : `${path}.${k}`;
+        if (k === name || k.startsWith(`${name}/`)) return child;
+        if (typeof v === "string" && (v === name || v.startsWith(`${name}/`))) return child;
+        const r = walk(v, child);
+        if (r) return r;
+      }
+    }
+    return null;
+  };
+  return walk(parsedFile, "");
+}
+
+/** Post-write read-back for a list op: the file parses (raw or JSONC) and the
+ *  ARRAY at `pathSegs` equals `expected` exactly (order and members) -- append
+ *  landed its one element, remove spliced exactly one out. Normalized-key
+ *  walking, the loader's equivalence (same rules as verifyEdit's path walk). */
+function verifyListValue(after: string, pathSegs: KeySeg[], expected: unknown[]): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(after);
+  } catch {
+    try {
+      parsed = JSON.parse(stripJsonc(after).text);
+    } catch {
+      return false;
+    }
+  }
+  const hit = fileRawValue(parsed, pathSegs);
+  if (!hit.found || !Array.isArray(hit.value)) return false;
+  try {
+    return JSON.stringify(hit.value) === JSON.stringify(expected);
+  } catch {
+    return false;
+  }
+}
+
+type ListByteEdit = { ok: true; newText: string } | { ok: false; reason: "no-array" | "out-of-range" };
+
+/** Mask-aware scan: position + char of the first structural character at or
+ *  after `from` (whitespace and JSONC comments are transparent). Only ever run
+ *  on the GAPS between array elements, which hold nothing but whitespace and
+ *  comments -- no string there for a stray "/" to impersonate. */
+function firstStructuralChar(text: string, from: number): { at: number; ch: string } {
+  let i = from;
+  while (i < text.length) {
+    const c = text[i] as string;
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+      i++;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i);
+      i = nl < 0 ? text.length : nl;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 2;
+      continue;
+    }
+    return { at: i, ch: c };
+  }
+  return { at: text.length, ch: "" };
+}
+
+/** Does a JSONC comment START within [from, to)? (same gap-only guarantee as
+ *  firstStructuralChar: the scanned range never contains a string value.) */
+function commentInside(text: string, from: number, to: number): boolean {
+  for (let i = from; i < to; i++) {
+    const c = text[i] as string;
+    if (c === "/" && (text[i + 1] === "/" || text[i + 1] === "*")) return true;
+  }
+  return false;
+}
+
+/** End of the comment starting at `at` ("//" or "/*"): line comments end AT
+ *  their newline (the newline itself is not part of them); block comments
+ *  end just past their two-char terminator. */
+function commentEndAt(text: string, at: number): number {
+  if (text[at + 1] === "/") {
+    const nl = text.indexOf("\n", at);
+    return nl < 0 ? text.length : nl;
+  }
+  const end = text.indexOf("*/", at + 2);
+  return end < 0 ? text.length : end + 2;
+}
+
+/** The byte ranges a remove of elems[pos] deletes (application order: last
+ *  start first). THE CUT DOCTRINE (owner ruling 2026-11-11, audit finding 2):
+ * a cut swallows ONLY whitespace, at most one separator comma (plus a JSONC
+ * trailing comma riding on the cut), and -- the one deliberately pinned
+ * exception -- a comment that STARTS on the removed element's closing line
+ * (spaces/tabs and at most its own comma in between); that comment describes
+ * the line vanishing. Every other comment is user data and survives
+ * byte-identical: a comment run between the element and its SUCCESSOR belongs
+ * to the successor, and a comment run between the PREDECESSOR and the element
+ * belongs to the predecessor. Cut shapes:
+ *  - glued same-line comment: erase the element's whole LINE (leading
+ *    newline+indent only when that run is comment-free). If the line swallowed
+ *    no comma, or the element is last, the preceding separator comma dies too
+ *    -- never may a dangling comma sit before the successor or before "]".
+ *  - comment-free interior: non-last cuts [preceding separator comma, element
+ *    end] (the element's own comma rises to separate the survivors, and its
+ *    trailing comment run stays untouched after the cut); last cuts
+ *    [preceding comma, element end + trailing comma if one sits bare there];
+ *    first cuts [just past "[", own comma] so the successor's line keeps its
+ *    own newline+indent.
+ *  - an interior comment PINS the cut to the element: delete the element (+
+ *    its own comma only when nothing comments between them) and the whitespace
+ *    immediately after -- never a following comment run.
+ * null = the grammar the locator accepted but this doctrine cannot cut
+ * safely; the caller refuses the write. */
+function providerRemoveCuts(
+  text: string,
+  arrNode: { open: number; close: number },
+  elems: Array<{ valueStart: number; valueEnd: number }>,
+  pos: number,
+): Array<[number, number]> | null {
+  const n = elems.length;
+  const e = elems[pos]!;
+  const prev = pos > 0 ? elems[pos - 1]! : null;
+  const isLast = pos === n - 1;
+  const killPrevComma = (cuts: Array<[number, number]>): Array<[number, number]> | null => {
+    if (!prev) return null;
+    const pc = firstStructuralChar(text, prev.valueEnd);
+    if (pc.ch !== ",") return null;
+    cuts.push([pc.at, pc.at + 1]);
+    return cuts;
+  };
+  const cuts: Array<[number, number]> = [];
+
+  // The same-line glued comment (the pinned exception) -- found through only
+  // spaces/tabs and at most the element's own comma, never across a newline.
+  let gp = e.valueEnd;
+  while (" \t".includes(text[gp] as string)) gp++;
+  let commaEaten = false;
+  if (text[gp] === ",") {
+    commaEaten = true;
+    gp++;
+    while (" \t".includes(text[gp] as string)) gp++;
+  }
+  if (text[gp] === "/" && (text[gp + 1] === "/" || text[gp + 1] === "*")) {
+    let start = e.valueStart;
+    while (start > arrNode.open + 1 && " \t".includes(text[start - 1] as string)) start--;
+    if (text[start - 1] === "\n" && !commentInside(text, prev ? prev.valueEnd : arrNode.open + 1, e.valueStart)) start--;
+    let end = commentEndAt(text, gp);
+    for (;;) {
+      let p = end;
+      while (" \t\r".includes(text[p] as string)) p++;
+      if (text[p] === ",") {
+        if (commaEaten) break; // a second separator is the file's problem, not this cut's
+        commaEaten = true;
+        end = p + 1;
+        continue;
+      }
+      if (text[p] === "\n") {
+        let q = p + 1;
+        while (" \t\r".includes(text[q] as string)) q++;
+        if (text[q] === "," && !commaEaten) {
+          commaEaten = true; // the comma sits on the line BELOW the comment: still this element's separator
+          end = q + 1;
+          continue;
+        }
+        break; // the line simply ends here -- a successor's newline belongs to the successor
+      }
+      break; // real content follows on this line: stop right after the comment
+    }
+    cuts.push([start, end]);
+    if (isLast && n > 1) return killPrevComma(cuts); // no orphan trailing comma before "]"
+    if (!commaEaten) {
+      const nx = firstStructuralChar(text, end);
+      if (nx.ch === ",") {
+        cuts.push([nx.at, nx.at + 1]);
+        return cuts;
+      }
+      return killPrevComma(cuts); // the element's comma eluded the line -- the preceding one dies instead
+    }
+    return cuts;
+  }
+
+  if (n === 1) {
+    // Sole element: brackets AND everything commented between them survive;
+    // only the element's bytes die (whitespace residue stays, still valid).
+    return [[e.valueStart, e.valueEnd]];
+  }
+
+  if (pos === 0) {
+    const oc = firstStructuralChar(text, e.valueEnd);
+    if (oc.ch !== ",") return null;
+    if (!commentInside(text, arrNode.open + 1, e.valueStart)) {
+      cuts.push([arrNode.open + 1, oc.at + 1]); // the element's own line vanishes into "["
+      return cuts;
+    }
+    let end = oc.at + 1; // interior comment pins the start; the element + its comma go
+    while (" \t\r\n".includes(text[end] as string)) end++;
+    cuts.push([e.valueStart, end]);
+    return cuts;
+  }
+
+  const pc = firstStructuralChar(text, prev!.valueEnd);
+  if (pc.ch !== ",") return null;
+  const interiorClean = !commentInside(text, pc.at + 1, e.valueStart);
+  if (!isLast) {
+    if (interiorClean) {
+      cuts.push([pc.at, e.valueEnd]); // the audit fixture: successor's comment run survives whole
+      return cuts;
+    }
+    const oc = firstStructuralChar(text, e.valueEnd);
+    if (oc.ch !== ",") return null;
+    if (commentInside(text, e.valueEnd, oc.at)) {
+      cuts.push([e.valueStart, e.valueEnd]); // even the element's own comma is comment-shielded
+      let end = oc.at + 1;
+      while (" \t\r\n".includes(text[end] as string)) end++;
+      cuts.push([oc.at, end]);
+      return cuts;
+    }
+    let end = oc.at + 1;
+    while (" \t\r\n".includes(text[end] as string)) end++;
+    cuts.push([e.valueStart, end]);
+    return cuts;
+  }
+
+  if (interiorClean) {
+    let end = e.valueEnd;
+    let q = end;
+    while (q < arrNode.close && " \t\n\r".includes(text[q] as string)) q++;
+    if (text[q] === ",") end = q + 1; // a bare JSONC trailing comma dies with the last element
+    cuts.push([pc.at, end]);
+    return cuts;
+  }
+  cuts.push([e.valueStart, e.valueEnd]);
+  const tc = firstStructuralChar(text, e.valueEnd);
+  if (tc.ch === "," && tc.at < arrNode.close) cuts.push([tc.at, tc.at + 1]);
+  return killPrevComma(cuts); // kills the separator so no dangling comma precedes the surviving comment run
+}
+
+/** Splice an ARRAY in `text` (generalized from the providers-only helper --
+ *  the provider cards and every primitive list share one byte discipline).
+ *  op append: insert `args.entry` (already-built JSON text: `{"name": ...}`
+ *  for the providers list, JSON.stringify(value) for primitive arrays) as
+ *  the last element, formatting borrowed from the array. op remove: delete
+ *  element `args.index` per the CUT DOCTRINE in providerRemoveCuts --
+ *  comments are user data and survive. Elements address by INDEX, so two
+ *  equal values are two distinct addresses and the right one dies.
+ *  `located` is locateJsonStructure(text), which already parsed
+ *  (comment-masked) the file. */
+function editArrayText(
+  text: string,
+  located: NonNullable<ReturnType<typeof locateJsonStructure>>,
+  op: ConfigListOp,
+  path: KeySeg[],
+  args: { entry?: string; index?: number },
+): ListByteEdit {
+  const arrNode = located.arrays.get(spellPath(path));
+  if (!arrNode) return { ok: false, reason: "no-array" };
+  if (op === "append") {
+    return { ok: true, newText: insertEntryIntoNode(text, arrNode, args.entry as string) };
+  }
+  const idx = args.index as number;
+  const elems = located.members
+    .filter(
+      (m) =>
+        m.segs.length === path.length + 1 &&
+        typeof m.segs[path.length] === "number" &&
+        spellPath(m.segs.slice(0, path.length)) === spellPath(path),
+    )
+    .sort((a, b) => a.valueStart - b.valueStart);
+  const pos = elems.findIndex((m) => m.segs[path.length] === idx);
+  if (pos < 0) return { ok: false, reason: "out-of-range" };
+  const cuts = providerRemoveCuts(text, arrNode, elems, pos);
+  if (!cuts) return { ok: false, reason: "no-array" }; // the locator parsed it; the doctrine still refuses to cut it blind
+  let out = text;
+  for (const [s, end] of [...cuts].sort((a, b) => b[0] - a[0])) out = out.slice(0, s) + out.slice(end);
+  return { ok: true, newText: out };
+}
+
+async function applyConfigListEditLocked(
+  core: CoreContext,
+  keyPath: string,
+  op: ConfigListOp,
+  input: { name?: unknown; index?: unknown; value?: unknown },
+  opts: { argv?: string[]; deps?: ConfigEditDeps } = {},
+): Promise<ConfigListEditOutcome> {
+  const deps = opts.deps ?? realConfigEditDeps;
+  const argv = opts.argv ?? process.argv;
+  const configDir = (typeof core.resolved?.configDir === "string" && core.resolved.configDir) || resolveConfigDir();
+  const filePath = inUseConfigPath(argv, configDir);
+  const refusal = `edit in file: ${filePath} (hotdog rescue validates it)`;
+  const unparseable = `config file does not parse -- refusing to write; run "hotdog rescue" (${refusal})`;
+
+  const segs = parseKeyPath(keyPath);
+  if (!segs || segs.length === 0) return { ok: false, error: `"${keyPath}" is not an addressable config path -- ${refusal}` };
+
+  // Frame shape. The providers list keeps its historic shape verbatim (the
+  // client's add/remove rides `name` because its elements are OBJECTS):
+  // append targets the "providers" root, remove targets providers[<index>].
+  // Every other array rides the GENERIC shape: append targets the array
+  // itself and carries a typed `value`, remove targets <array>[<index>] (an
+  // index field, when present, must agree with the keyPath -- both shapes).
+  const headIsProviders = typeof segs[0] === "string" && normalizeKey(segs[0]) === "providers";
+  const isProvidersAppend = op === "append" && headIsProviders && segs.length === 1;
+  const isProvidersRemove = op === "remove" && headIsProviders && segs.length === 2 && typeof segs[1] === "number";
+  let removeIndex = -1;
+  if (op === "append") {
+    if (isProvidersAppend) {
+      if (input.value !== undefined) {
+        return { ok: false, error: `appending to "providers" takes a name, not a value (its elements are objects)` };
+      }
+    } else {
+      if (input.name !== undefined) {
+        return { ok: false, error: `appending to "${keyPath}" takes a value, not a name (only "providers" names its elements)` };
+      }
+      if (typeof segs[segs.length - 1] === "number") {
+        return { ok: false, error: `append must target the array itself (got "${keyPath}")` };
+      }
+    }
+  } else if (isProvidersRemove) {
+    removeIndex = segs[1] as number;
+    if (input.index !== undefined && input.index !== removeIndex) {
+      return { ok: false, error: `frame index ${JSON.stringify(input.index)} disagrees with keyPath "${keyPath}"` };
+    }
+  } else if (typeof segs[segs.length - 1] === "number") {
+    removeIndex = segs[segs.length - 1] as number;
+    if (input.index !== undefined && input.index !== removeIndex) {
+      return { ok: false, error: `frame index ${JSON.stringify(input.index)} disagrees with keyPath "${keyPath}"` };
+    }
+  } else {
+    return { ok: false, error: `remove must target "<array>[<index>]" (got "${keyPath}")` };
+  }
+
+  const report = await diagnoseConfigFile(filePath);
+  const hadFile = report.status !== "missing";
+  if (hadFile && report.parsedText === null) return { ok: false, error: unparseable };
+  let parsedFile: unknown;
+  try {
+    parsedFile = report.parsedText === null ? undefined : JSON.parse(report.parsedText);
+  } catch {
+    parsedFile = undefined;
+  }
+  let newText: string;
+  let expected: unknown[];
+  let verifyPath: KeySeg[]; // the ARRAY the post-write read-back compares
+
+  if (isProvidersAppend) {
+    const providers = parsedProviders(parsedFile);
+    const providersIsArray = Array.isArray(providers);
+    const before: unknown[] = providersIsArray ? (providers as unknown[]) : [];
+    const name = typeof input.name === "string" ? input.name.trim() : "";
+    if (name === "") return { ok: false, error: "refusing to add a provider: the name is empty" };
+    for (const el of before) {
+      if (el && typeof el === "object" && !Array.isArray(el) && (el as Record<string, unknown>).name === name) {
+        return { ok: false, error: `a provider named "${name}" already exists -- refusing to add a duplicate` };
+      }
+    }
+    expected = [...before, { name }];
+    const entry = `{ "name": ${JSON.stringify(name)} }`;
+    if (hadFile && providersIsArray) {
+      const located = locateJsonStructure(report.rawText);
+      if (!located) return { ok: false, error: unparseable };
+      const edit = editArrayText(report.rawText, located, "append", ["providers"], { entry });
+      if (!edit.ok) return { ok: false, error: unparseable };
+      newText = edit.newText;
+    } else if (hadFile) {
+      // The value is absent OR broken -- and broken means BYTE-PRESERVING
+      // refusal (owner 2026-11-11, audit finding 5): replacing a present-but-
+      // unparseable value (a typo string, a dotted fallback map) would
+      // silently discard what the user wrote, even if the loader cannot use
+      // it. The file stays the interface until the block itself is fixed.
+      if (parsedProviders(parsedFile) !== undefined) {
+        return { ok: false, error: `"providers" is present but is not an array in the file -- refusing to append; fix the providers block first (${refusal})` };
+      }
+      // Providers key absent: create it (top-level insert, root formatting).
+      const edit = editConfigText(report.rawText, ["providers"], `[ ${entry} ]`);
+      if (!edit.ok) return { ok: false, error: unparseable };
+      newText = edit.newText;
+    } else {
+      newText = `{\n  "providers": [\n    ${entry}\n  ]\n}\n`;
+    }
+    verifyPath = ["providers"];
+  } else if (isProvidersRemove) {
+    const providers = parsedProviders(parsedFile);
+    if (!Array.isArray(providers)) return { ok: false, error: `"providers" is not an array in the file -- refusing to remove (${refusal})` };
+    const before: unknown[] = providers;
+    if (removeIndex < 0 || removeIndex >= before.length) {
+      return { ok: false, error: `no provider at index ${removeIndex} -- the file holds ${before.length} (${refusal})` };
+    }
+    const target = before[removeIndex];
+    const targetName =
+      target && typeof target === "object" && !Array.isArray(target) ? (target as Record<string, unknown>).name : undefined;
+    if (typeof targetName === "string") {
+      const referrer = providerRemoveReferences(targetName, parsedFile, `providers[${removeIndex}]`);
+      if (referrer) {
+        return { ok: false, error: `"${targetName}" is still referenced by "${referrer}" -- remove that reference first (${refusal})` };
+      }
+    }
+    expected = before.filter((_, j) => j !== removeIndex);
+    const located = hadFile ? locateJsonStructure(report.rawText) : null;
+    if (!located) return { ok: false, error: unparseable };
+    const edit = editArrayText(report.rawText, located, "remove", ["providers"], { index: removeIndex });
+    if (!edit.ok) return { ok: false, error: edit.reason === "out-of-range" ? `no provider at index ${removeIndex} (${refusal})` : unparseable };
+    newText = edit.newText;
+    verifyPath = ["providers"];
+  } else if (op === "append") {
+    // ── GENERIC append: one typed element onto a primitive array ──────────
+    const value = input.value;
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+      return { ok: false, error: `append needs a value (string, number, or boolean) for "${keyPath}"` };
+    }
+    const entry = JSON.stringify(value);
+    const cur = parsedFile === undefined ? { found: false, value: undefined } : fileRawValue(parsedFile, segs);
+    if (cur.found) {
+      const items = primitiveArrayItems(cur.value);
+      if (!Array.isArray(cur.value)) {
+        // Present-but-not-an-array is the audit-finding-5 doctrine extended
+        // to every list: those are USER BYTES; replacing them to "help" the
+        // user would silently discard what they wrote.
+        return { ok: false, error: `"${keyPath}" is present but is not an array in the file -- refusing to append; fix the block first (${refusal})` };
+      }
+      if (items === null) {
+        return {
+          ok: false,
+          error: `"${keyPath}" holds objects or nulls -- append supports primitive lists (and "providers"); refusing to guess the element shape (${refusal})`,
+        };
+      }
+      // Validation: the schema's items declaration when it exists (type,
+      // bounds, enum -- the exact gate the element rows ride), else the
+      // array's own element kind (an EMPTY array accepts any primitive:
+      // the file offers no shape to disagree with).
+      const itemsProp = arrayItemsProp(findLeafProp(unifiedSchemaFor(core), segs));
+      if (itemsProp !== null) {
+        const invalid = validateEditValue(itemsProp.type as string, value, itemsProp, keyPath);
+        if (invalid) return { ok: false, error: invalid };
+      } else if (items.length > 0 && typeof value !== typeof items[0]) {
+        return {
+          ok: false,
+          error: `"${keyPath}" holds ${typeof items[0]} elements -- appending a ${typeof value} would mix types (${refusal})`,
+        };
+      }
+      expected = [...items, value];
+      const located = locateJsonStructure(report.rawText);
+      if (!located) return { ok: false, error: unparseable };
+      const edit = editArrayText(report.rawText, located, "append", segs, { entry });
+      if (!edit.ok) return { ok: false, error: unparseable };
+      newText = edit.newText;
+    } else {
+      // Absent: an array is created element by element ONLY where the schema
+      // declares a list (or a known provider child whose declaration says
+      // json) -- an unknown key has nothing to validate against (fail closed;
+      // the file stays the interface).
+      const provJson = providerChildCreateTarget(segs, parsedFile)?.type === "json";
+      if (!schemaListChrome(findLeafProp(unifiedSchemaFor(core), segs)) && !provJson) {
+        return {
+          ok: false,
+          error: `no schema entry declares "${keyPath}" an array on this server and no value is in the file -- refusing to invent it (${refusal})`,
+        };
+      }
+      expected = [value];
+      // Even when the array is created, the declared items schema gates the
+      // value (an absent array with items {type:"string", enum:[...]} must
+      // not accept an off-set first element).
+      const itemsProp = arrayItemsProp(findLeafProp(unifiedSchemaFor(core), segs));
+      if (itemsProp !== null) {
+        const invalid = validateEditValue(itemsProp.type as string, value, itemsProp, keyPath);
+        if (invalid) return { ok: false, error: invalid };
+      }
+      if (hadFile) {
+        const edit = editConfigText(report.rawText, segs, `[ ${entry} ]`);
+        if (!edit.ok) {
+          if (edit.reason === "duplicate") {
+            return {
+              ok: false,
+              error: `ambiguous target: "${edit.conflict ?? keyPath}" appears more than once -- refusing to guess which one (hotdog rescue names every duplicate; ${refusal})`,
+            };
+          }
+          if (edit.reason === "ancestor") {
+            return { ok: false, error: `"${edit.conflict ?? keyPath}" is not an object in the file -- refusing to re-shape it (${refusal})` };
+          }
+          if (edit.reason === "empty") {
+            return { ok: false, error: `config file is empty -- refusing to guess its shape (hotdog rescue validates it)` };
+          }
+          return { ok: false, error: unparseable };
+        }
+        newText = edit.newText;
+      } else {
+        newText = `{\n  ${buildChainText(segs, `[ ${entry} ]`, "  ", true)}\n}\n`;
+      }
+    }
+    verifyPath = segs;
+  } else {
+    // ── GENERIC remove: one element of ANY array, same cut doctrine ───────
+    // Elements address by INDEX, so a file holding the same value twice is
+    // removable one occurrence at a time: the cut splices BYTE RANGES the
+    // locator assigned to that index, and which occurrence survives is
+    // decided by address, never by value equality.
+    const parent = segs.slice(0, -1);
+    const cur = parsedFile === undefined || parent.length === 0
+      ? { found: false, value: undefined }
+      : fileRawValue(parsedFile, parent);
+    if (!cur.found || !Array.isArray(cur.value)) {
+      return { ok: false, error: `"${keyString(parent)}" is not an array in the file -- refusing to remove (${refusal})` };
+    }
+    const before = cur.value as unknown[];
+    if (removeIndex >= before.length) {
+      return {
+        ok: false,
+        error: `no element at index ${removeIndex} in "${keyString(parent)}" -- the array holds ${before.length} (${refusal})`,
+      };
+    }
+    expected = before.filter((_, j) => j !== removeIndex);
+    const located = hadFile ? locateJsonStructure(report.rawText) : null;
+    if (!located) return { ok: false, error: unparseable };
+    const edit = editArrayText(report.rawText, located, "remove", parent, { index: removeIndex });
+    if (!edit.ok) {
+      return {
+        ok: false,
+        error:
+          edit.reason === "out-of-range"
+            ? `no element at index ${removeIndex} in "${keyString(parent)}" (${refusal})`
+            : `"${keyString(parent)}" holds a shape the surgical cut cannot make safely -- refusing to write (${refusal})`,
+      };
+    }
+    newText = edit.newText;
+    verifyPath = parent;
+  }
+
+  return commitVerifiedEdit({
+    filePath,
+    newText,
+    hadFile,
+    rawText: report.rawText,
+    deps,
+    refusal,
+    logTag: "editConfigList",
+    verify: (after) => verifyListValue(after, verifyPath, expected),
+    onOk: () => ({ ok: true, needsRestart: true }),
+  });
+}
+
+/** Serialized entry point for the LIST ops (see withConfigEditLock). */
+export function applyConfigListEdit(
+  core: CoreContext,
+  keyPath: string,
+  op: ConfigListOp,
+  input: { name?: unknown; index?: unknown; value?: unknown },
+  opts: { argv?: string[]; deps?: ConfigEditDeps } = {},
+): Promise<ConfigListEditOutcome> {
+  return withConfigEditLock(() => applyConfigListEditLocked(core, keyPath, op, input, opts));
+}
+
+export async function handleConfigListEdit(ctx: RouteContext): Promise<void> {
+  const { ws, msg, core } = ctx;
+  const requestId = typeof msg.requestId === "number" ? msg.requestId : undefined;
+  const keyPath = msg.keyPath;
+  const op = msg.op;
+  // Frame-shape gate: keyPath is a config key string and op is exactly one of
+  // the two list ops. name (append) / index (remove) are validated deeper, in
+  // the handler, where the file is in hand.
+  if (typeof keyPath !== "string" || keyPath === "" || (op !== "append" && op !== "remove")) {
+    SessionRegistry.sendSafe(ws, {
+      type: S2C.EDIT_CONFIG_LIST_RESULT,
+      requestId,
+      ok: false,
+      error: 'editConfigList needs keyPath (string) and op ("append" | "remove")',
+    });
+    return;
+  }
+  await applyConfigListEdit(core, keyPath, op as ConfigListOp, { name: msg.name, index: msg.index, value: msg.value })
+    .then((result) => {
+      SessionRegistry.sendSafe(ws, { ...result, type: S2C.EDIT_CONFIG_LIST_RESULT, requestId });
+    })
+    .catch((err: unknown) => {
+      logger.warn(`[websocket] editConfigList failed: ${formatError(err)}`);
+      SessionRegistry.sendSafe(ws, { type: S2C.EDIT_CONFIG_LIST_RESULT, requestId, ok: false, error: errorText(err) });
     });
 }

@@ -227,6 +227,10 @@ export function loadExtensionSchemas(extensions: Array<{ configSchema?: unknown 
           type: keySchema.type,
           layers: keySchema.layers,
           ...(keySchema.properties ? { properties: keySchema.properties } : {}),
+          // items survives the compile (the core path keeps it via
+          // compileSchemaKey's rest): the settings editor's element stamps
+          // and element/append write gates enforce the items declaration.
+          ...(keySchema.items ? { items: keySchema.items } : {}),
         });
       }
     }

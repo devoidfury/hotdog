@@ -55,8 +55,9 @@ export const C2S = {
   // sessionState frame (key "toolExec") scoped to that session's clients.
   EXEC_FENCE: "execFence",
   // Settings-viewer config snapshot: { type, requestId }. The server computes
-  // the payload FRESH per request (the config may have changed on disk since
-  // startup; the viewer's honest framing is snapshot-at-open, never live).
+  // the payload FRESH per request, and the viewer asks on EVERY open (live-
+  // at-open: no cached snapshot is ever shown; there is still no push feed --
+  // staleness only ends at the next open/Refresh, never mid-visit).
   // Correlated back with CONFIG_SNAPSHOT_RESULT by requestId; stale replies
   // are dropped client-side by id (the searchLogs precedent). The handler is
   // strictly read-only and answers the requesting socket only.
@@ -86,6 +87,27 @@ export const C2S = {
   // replace echoes value:null + redacted:true -- never the new value.
   // Replied with SET_CONFIG_KEY_RESULT, requesting socket only.
   SET_CONFIG_KEY: "setConfigKey",
+  // LIST edit (settings editor, ONE additive pair alongside setConfigKey):
+  // { type, requestId, keyPath, op, name?, index?, value? }. The frame edits
+  // the ARRAY itself, never a value: op "append" carries keyPath = the array
+  // path and EITHER name (only for "providers", whose elements are objects:
+  // writes exactly {"name": <name>} -- no invented fields) OR value (any
+  // primitive array: the typed element, validated against the items schema
+  // when the schema declares one, else against the array's existing element
+  // kind; object/null appends and type-mixed appends refuse). op "remove"
+  // carries keyPath "<array>[<index>]" (the optional index field, when
+  // present, must agree with the keyPath). Same surgical transaction as
+  // setConfigKey (comments/formatting of everything else byte-identical,
+  // atomic temp+rename, rescue-verify with rollback); refuses duplicate
+  // provider names, out-of-range indexes, non-primitive arrays on append, a
+  // present-but-not-an-array target rather than replacing user bytes, and a
+  // provider the config still references (defaultProvider / provider keys, or
+  // any "name/..." model string, naming the referencing keyPath). Elements
+  // address by INDEX, so duplicate values are removable/editable one at a
+  // time. The reply never echoes secret bytes; ok carries needsRestart like
+  // every list write. Replied with EDIT_CONFIG_LIST_RESULT, requesting socket
+  // only.
+  EDIT_CONFIG_LIST: "editConfigList",
 } as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────
@@ -115,12 +137,19 @@ export const S2C = {
   // Reply to C2S READ_FILE (requesting socket only), correlated by requestId.
   // Same error-field doctrine as LIST_DIR_RESULT.
   READ_FILE_RESULT: "readFileResult",
-  // Reply to C2S SET_CONFIG_KEY (requesting socket only), correlated by
+  // Replied to C2S SET_CONFIG_KEY (requesting socket only), correlated by
   // requestId. ok:true carries the persisted value echo + needsRestart:true
   // (the running server still uses the pre-edit value until restart);
   // ok:false carries the honest error string (rendered verbatim, stacks
   // stay server-side). See handlers-config.ts.
   SET_CONFIG_KEY_RESULT: "setConfigKeyResult",
+  // Reply to C2S EDIT_CONFIG_LIST (requesting socket only), correlated by
+  // requestId. The result envelope mirrors SET_CONFIG_KEY_RESULT exactly
+  // (ok / error / needsRestart) so the client renders refusals verbatim the
+  // same way; a list op ships no value echo (there is no scalar to echo --
+  // and an append's bytes are the caller's own name/value anyway, never a
+  // secret).
+  EDIT_CONFIG_LIST_RESULT: "editConfigListResult",
 
   // Profile management
   PROFILES: "profiles",
@@ -514,6 +543,19 @@ export interface ConfigKeyEntryWire {
   /** Redaction fired on this row: leaf-secret, or a secret-shaped entry
    *  nulled inside a container value (bashTool.env, mcpServers[].env). */
   redacted?: boolean;
+  /** LIST-CHROME array row (owner ruling 2026-11-11, the provider-card
+   *  doctrine generalized): the row is the array field's heading. It carries
+   *  NO edit stamp (a wholesale write to it is refused), and the array's
+   *  elements ride as their own rows keyed `key[i]` ("workspace.deny[0]",
+   *  "providers[0].models[2]"), each with its own stamp (scalar/enum/writeOnly
+   *  when the array is secret-shaped -- REPLACE per element, never a byte
+   *  ships). Append/remove go through editConfigList against the array path /
+   *  an element path. Absent for every other row; an EMPTY primitive array
+   *  ships this chrome row and zero element rows; a schema-declared list the
+   *  file does not carry ships the chrome row with no elements either (append
+   *  creates it). Object/mixed arrays are NOT chrome: they keep their whole-
+   *  json stamp or the provider-card / class-A child posture. */
+  arrayChrome?: true;
   /** Settings EDITOR affordance: present on EVERY row the write path would
    *  accept from setConfigKey (owner ruling 2026-11-09: ALL the settings --
    *  the whitelist is retired) and ABSENT only on the honest refusal classes,
@@ -562,6 +604,11 @@ export interface ConfigKeyEditWire {
   writeOnly?: true;
   /** Lossy ship (truncated / URL-scrubbed): the editor starts EMPTY. */
   seedless?: true;
+  /** Schema enum: the ONLY legal values for this leaf. The panel renders a
+   *  dropdown of exactly these (a shipped value outside the set rides a
+   *  "(current)" option, never silently replaced); the write gate refuses
+   *  anything else with the set named in the text. */
+  enum?: string[];
 }
 
 /** Key table section: "core" first, then one section per loaded extension. */
@@ -574,7 +621,8 @@ export type ConfigSnapshotResultWire = {
   type: "configSnapshotResult";
   /** Echo of the C2S configSnapshot request id; stale replies drop client-side. */
   requestId?: number;
-  /** Epoch ms of the snapshot (the "snapshot-at-open" stamp; not a live feed). */
+  /** Epoch ms of this fresh read (the server recomputes per request; the
+   *  panel re-reads on every open -- live-at-open, no push feed). */
   ts: number;
   configDir: string;
   files: ConfigFileEntryWire[];
@@ -621,6 +669,36 @@ export type SetConfigKeyResultWire = {
   /** Set on a successful writeOnly secret replace: the value landed, its
    *  bytes are not shippable (this is the ONLY echo such a save produces). */
   redacted?: true;
+};
+
+// ── LIST edit (C2S editConfigList → S2C editConfigListResult) ────────────────
+// The settings editor's array add/remove path (see ./handlers-config.ts).
+// The C2S frame is { requestId, keyPath, op, name?, index?, value? } (additive
+// to the C2S union, same requestId-correlated idiom as setConfigKey): append
+// targets the array path ("providers" carries name; any primitive array
+// carries value); remove targets "<array>[<index>]" (optional index echo must
+// agree with the keyPath). The result envelope mirrors SET_CONFIG_KEY_RESULT
+// (ok / error / needsRestart) so the existing client error rendering applies
+// verbatim; there is NO value echo -- a list op persists no single scalar, and
+// the reply never carries config bytes of any kind. Success means the file
+// changed; needsRestart follows the same rule every list write applies (config
+// resolves at startup -- the running server keeps its startup values until
+// restart).
+
+export type ConfigListOp = "append" | "remove";
+
+export type EditConfigListResultWire = {
+  type: "editConfigListResult";
+  /** Echo of the C2S editConfigList request id; stale replies drop client-side. */
+  requestId?: number;
+  ok: boolean;
+  /** Honest one-line rejection (bad op/name, duplicate name, out-of-range
+   *  index, still-referenced provider, unparseable file, write or
+   *  verification failure). Rendered verbatim; stacks stay server-side. */
+  error?: string;
+  /** True on ok: the array edit is persisted; the RUNNING server keeps its
+   *  startup providers until it restarts. */
+  needsRestart?: boolean;
 };
 
 // ── Workspace file tree + text reader (C2S listDir/readFile → S2C replies) ─

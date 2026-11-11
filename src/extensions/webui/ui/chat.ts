@@ -17,8 +17,10 @@ import type {
   SearchHitWire,
   ToolDisplayWire,
   ConfigEditPayload,
+  ConfigListOp,
   ConfigSnapshotResultWire,
   SetConfigKeyResultWire,
+  EditConfigListResultWire,
   ListDirResultWire,
   ReadFileResultWire,
 } from "@extensions/websocket/protocol.ts";
@@ -28,6 +30,8 @@ export type { TaskInfoWire };
 export type { SearchHitWire };
 export type { ConfigSnapshotResultWire };
 export type { SetConfigKeyResultWire };
+export type { ConfigListOp };
+export type { EditConfigListResultWire };
 export type { ListDirResultWire };
 export type { ReadFileResultWire };
 
@@ -528,6 +532,7 @@ type ServerMessage =
   | SearchResultsMessage
   | ConfigSnapshotResultWire
   | SetConfigKeyResultWire
+  | EditConfigListResultWire
   | ListDirResultWire
   | ReadFileResultWire
   | AuthRequiredMessage
@@ -580,6 +585,9 @@ interface ChatConfig {
    *  write-request id is stale (the save sequence is its own counter, so a
    *  snapshot refresh cannot collide with it). */
   onSetConfigKey?: (requestId: number | undefined, result: SetConfigKeyResultWire) => void;
+  /** Reply to editConfigList (provider add/remove); the app drops it when
+   *  the list-request id is stale (its own sequence, same doctrine). */
+  onEditConfigList?: (requestId: number | undefined, result: EditConfigListResultWire) => void;
   /** Reply to listDir (workbench file tree); the tree state drops stale ids
    *  by its own pending map (the settings-viewer precedent). */
   onListDir?: (requestId: number | undefined, result: ListDirResultWire) => void;
@@ -627,6 +635,11 @@ export interface ChatController {
    *  { valueText }. Arrives via onSetConfigKey with the same id. The server
    *  revalidates and says needsRestart -- the client never claims live effect. */
   setConfigKey: (requestId: number, keyPath: string, payload: ConfigEditPayload) => void;
+  /** Append/remove a whole provider through the additive editConfigList pair.
+   *  `append`: keyPath "providers" + name; `remove`: keyPath "providers[i]"
+   *  (+ the same index, which the server requires to agree). Arrives via
+   *  onEditConfigList with the same id; the reply carries no value echo. */
+  editConfigList: (requestId: number, keyPath: string, op: ConfigListOp, name?: string, index?: number) => void;
   /** List a workspace dir (workbench tree); arrives via onListDir. No path = the roots. */
   listDir: (requestId: number, path?: string) => void;
   /** Read a line-window page of a text file (workbench viewer); arrives via onReadFile. */
@@ -692,6 +705,7 @@ export function createChat({
   onSearchResults,
   onConfigSnapshot,
   onSetConfigKey,
+  onEditConfigList,
   onListDir,
   onReadFile,
   onSessionDeleted,
@@ -933,6 +947,12 @@ export function createChat({
         // drops stale ids against its own save sequence. No transcript side
         // effects -- rejections ride the payload's error field, correlated.
         onSetConfigKey?.(data.requestId, data);
+        return;
+      case "editConfigListResult":
+        // The provider add/remove reply (not session-scoped); the app drops
+        // stale ids against its own list sequence. No transcript side
+        // effects -- rejections ride the payload's error field, correlated.
+        onEditConfigList?.(data.requestId, data);
         return;
       case "listDirResult":
         // The workbench file tree's listing reply (not session-scoped); the
@@ -1491,6 +1511,22 @@ export function createChat({
     send({ type: "setConfigKey", requestId, keyPath, ...payload });
   }
 
+  /** Append/remove a whole provider (settings provider cards). Append carries
+   *  the name, remove the index echo (the server refuses a keyPath/index
+   *  disagreement). The reply rides onEditConfigList with the same id; stale
+   *  replies drop client-side. No value bytes ride this frame in either
+   *  direction -- an append's only payload is the caller's own name. */
+  function editConfigList(requestId: number, keyPath: string, op: ConfigListOp, name?: string, index?: number): void {
+    send({
+      type: "editConfigList",
+      requestId,
+      keyPath,
+      op,
+      ...(name !== undefined ? { name } : {}),
+      ...(index !== undefined ? { index } : {}),
+    });
+  }
+
   /** List a workspace directory (workbench file tree); omit path for the
    *  roots. The reply rides onListDir with the same id. */
   function listDir(requestId: number, path?: string): void {
@@ -1530,6 +1566,7 @@ export function createChat({
     searchLogs,
     requestConfigSnapshot,
     setConfigKey,
+    editConfigList,
     listDir,
     readFile,
     sendCommand,

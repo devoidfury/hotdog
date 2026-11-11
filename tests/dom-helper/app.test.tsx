@@ -2513,6 +2513,55 @@ describe("workbench pane (real app wiring)", () => {
   });
 });
 
+// The shared editor snapshot the settings suites paint (module scope: both
+// the viewer rail-filter test and the editor suite ride it).
+const editPayload = (requestId: number): Record<string, unknown> => ({
+  type: "configSnapshotResult",
+  requestId,
+  ts: 1700000000000,
+  configDir: "/cfg",
+  files: [{ path: "/cfg/defaults.json", inUse: true, status: "ok" }],
+  findings: [],
+  sections: [
+    {
+      name: "webui",
+      rows: [
+        { key: "webui.port", description: "WebUI server port", default: 3000, file: 3000, resolved: 3000, edit: { type: "number" } },
+        { key: "webui.host", description: "WebUI server host", default: "127.0.0.1", resolved: "127.0.0.1" },
+        { key: "webui.apiKey", description: "API key for login authentication.", default: null, resolved: null, leafSecret: true, redacted: true },
+        { key: "webui.enabled", description: "Enable the WebUI", default: true, resolved: true, edit: { type: "boolean" } },
+      ],
+    },
+    {
+      name: "providers",
+      // Card-shaped snapshot (server groundwork 2026-11-11): the top `providers`
+      // chrome (section heading), then per element a chrome HEADER row (NO edit
+      // stamp -- the card header owns it; a wholesale container write is refused
+      // as provider-list chrome) followed by the element's field rows.
+      rows: [
+        { key: "providers", description: "Model providers", file: [{ name: "p1" }, { name: "p2" }] },
+        { key: "providers[0]", description: "Provider entry", file: { name: "p1", url: "http://127.0.0.1:8000/v1" } },
+        { key: "providers[0].url", description: "Provider base URL", file: "http://127.0.0.1:8000/v1", edit: { type: "string" } },
+        { key: "providers[0].apiKey", description: "Provider API key.", leafSecret: true, file: null, redacted: true, edit: { type: "string", writeOnly: true } },
+        { key: "providers[1]", description: "Provider entry", file: { name: "p2", url: "http://127.0.0.1:8100/v1" } },
+        { key: "providers[1].url", description: "Provider base URL", file: "http://127.0.0.1:8100/v1", edit: { type: "string" } },
+      ],
+    },
+    {
+      name: "workspace",
+      rows: [
+        { key: "workspace.paths", description: "Workspace roots", file: ["/home/u/proj"], edit: { type: "json" } },
+      ],
+    },
+    {
+      name: "loop-detect",
+      rows: [
+        { key: "loopDetect.repeatThreshold", description: "Identical repeats before the first nudge", default: 3, resolved: 3, edit: { type: "integer", minimum: 2, maximum: 12 } },
+      ],
+    },
+  ],
+});
+
 // ── Settings viewer (settings button -> dialog, real app wiring) ───────────
 
 describe("settings viewer (real app wiring)", () => {
@@ -2552,8 +2601,13 @@ describe("settings viewer (real app wiring)", () => {
     expect(document.activeElement).toBe(dialog);
     ws.fireMessage(snapshotPayload(reqs[0]!.requestId));
     await tick();
-    expect(el(".settings-key").textContent).toBe("theme");
+    // The Zed row renders the DERIVED label; the redaction wording survives.
+    expect(el(".settings-row").getAttribute("data-key")).toBe("theme");
+    expect(el(".settings-row .settings-row-label").textContent).toBe("Theme");
     expect(el("#settings-view").textContent).toContain("set (redacted)");
+    // The rail: search input + the category list with counts.
+    expect(el(".settings-search")).toBeTruthy();
+    expect(el(".settings-cat .settings-cat-title").textContent).toBe("All settings");
     key(el("#settings-view"), "Escape");
     await tick();
     expect(document.querySelector("#settings-view")).toBeNull();
@@ -2566,6 +2620,8 @@ describe("settings viewer (real app wiring)", () => {
     clearSent();
     el("#settings-btn").click();
     await tick();
+    // Live-at-open: one open issues exactly one configSnapshot request.
+    expect(sent("configSnapshot").length).toBe(1);
     const first = sent<{ requestId: number }>("configSnapshot").pop()!;
     // A stale reply (older id) must not paint anything.
     ws.fireMessage(snapshotPayload(first.requestId - 1));
@@ -2608,6 +2664,100 @@ describe("settings viewer (real app wiring)", () => {
     expect(document.activeElement).toBe(el("#settings-btn"));
   });
 
+  it("the rail filters: a category click filters the pane, the search flattens, closing resets both", async () => {
+    await attach();
+    el("#settings-btn").click();
+    await tick();
+    const req = sent<{ requestId: number }>("configSnapshot").pop()!;
+    ws.fireMessage(editPayload(req.requestId));
+    await tick();
+    clearSent();
+    // Click the Providers category: the card layout paints (one card per
+    // element; the chrome heading + header rows are card chrome, NOT flat
+    // .settings-row dumps; the field rows live inside their card body).
+    const provCat = els(".settings-cat").find((c) => c.querySelector(".settings-cat-title")!.textContent === "Providers")!;
+    provCat.click();
+    await tick();
+    expect(els(".settings-provider-card").map((c) => c.getAttribute("data-key"))).toEqual(["providers[0]", "providers[1]"]);
+    expect(els(".settings-row").map((r) => r.getAttribute("data-key"))).toEqual([
+      "providers[0].url",
+      "providers[0].apiKey",
+      "providers[1].url",
+    ]);
+    // The search box (live, client-side): matches keyPath AND description,
+    // flattening across categories with a chip naming each row's home. The
+    // RAIL filters too: only Providers holds a match, count at match level.
+    const search = el(".settings-search");
+    (search as unknown as { value: string }).value = "base url";
+    search.dispatchEvent({ type: "input" } as unknown as Event);
+    await tick();
+    expect(els(".settings-row").map((r) => r.getAttribute("data-key"))).toEqual(["providers[0].url", "providers[1].url"]);
+    expect(el(".settings-row .settings-cat-chip")!.textContent).toBe("Providers");
+    expect(els(".settings-cat").map((c) => c.querySelector(".settings-cat-title")!.textContent)).toEqual(["All settings", "Providers"]);
+    expect(els(".settings-cat").map((c) => c.querySelector(".settings-cat-count")!.textContent)).toEqual(["2", "2"]);
+    // Escape inside a non-empty box clears the search FIRST and does NOT close
+    // (owner 2026-11-11, mirroring the JSON-collapse precedent). The rail
+    // returns to snapshot truth; the surviving Providers selection narrows
+    // the restored pane -- the field's live value goes down with the query.
+    key(el("#settings-view"), "Escape");
+    await tick();
+    expect(el("#settings-view")).toBeTruthy();
+    expect(els(".settings-search")[0]!.getAttribute("value") ?? "").toBe("");
+    expect((els(".settings-search")[0] as unknown as { value: string }).value).toBe("");
+    expect(els(".settings-row").map((r) => r.getAttribute("data-key"))).toEqual([
+      "providers[0].url",
+      "providers[0].apiKey",
+      "providers[1].url",
+    ]);
+    expect(els(".settings-cat").map((c) => c.querySelector(".settings-cat-title")!.textContent)).toEqual([
+      "All settings",
+      "WebUI",
+      "Providers",
+      "Loop Detect",
+      "Workspace",
+    ]);
+    expect(els(".settings-cat").map((c) => c.querySelector(".settings-cat-count")!.textContent)).toEqual(["8", "4", "2", "1", "1"]);
+    // Escape with the box empty now closes. Closing retires the filter state:
+    // the next visit is the full sweep.
+    key(el("#settings-view"), "Escape");
+    await tick();
+    expect(document.querySelector("#settings-view")).toBeNull();
+    el("#settings-btn").click();
+    await tick();
+    ws.fireMessage(editPayload(sent<{ requestId: number }>("configSnapshot").pop()!.requestId));
+    await tick();
+    expect(els(".settings-row").length).toBe(9);
+    expect(els(".settings-search")[0]!.getAttribute("value") ?? "").toBe("");
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("the search x button clears the query, restores the unfiltered pane and the full rail, and keeps focus in the box", async () => {
+    await attach();
+    el("#settings-btn").click();
+    await tick();
+    ws.fireMessage(editPayload(sent<{ requestId: number }>("configSnapshot").pop()!.requestId));
+    await tick();
+    const search = el(".settings-search");
+    expect(el(".settings-search-clear")).toBeNull(); // empty box: no affordance at all
+    (search as unknown as { value: string }).value = "port";
+    search.dispatchEvent({ type: "input" } as unknown as Event);
+    await tick();
+    expect(els(".settings-row").map((r) => r.getAttribute("data-key"))).toEqual(["webui.port"]);
+    expect(els(".settings-search-clear")).toHaveLength(1);
+    search.focus();
+    els(".settings-search-clear")[0]!.click();
+    await tick();
+    expect(els(".settings-search-clear")).toHaveLength(0); // the x retires with the query
+    expect(document.activeElement).toBe(search); // focus stayed in the search field
+    expect((els(".settings-search")[0] as unknown as { value: string }).value).toBe("");
+    // Unfiltered group list + full snapshot-truth rail are back.
+    expect(els(".settings-row").length).toBe(9);
+    expect(els(".settings-cat").map((c) => c.querySelector(".settings-cat-count")!.textContent)).toEqual(["8", "4", "2", "1", "1"]);
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
   it("click-outside does NOT close (config values get selected)", async () => {
     await attach();
     el("#settings-btn").click();
@@ -2619,15 +2769,22 @@ describe("settings viewer (real app wiring)", () => {
     await tick();
   });
 });
-// ── Settings editor (Edit affordance -> setConfigKey on the wire) ───────────
-// The socket half of the editor: the app parses the row field, mints a WRITE id
-// from its own sequence (independent of the snapshot id), and settles the row
-// only from the reply carrying that id. Rejections render verbatim; a parse
-// miss never reaches the socket. The pure state doctrine + row rendering are
-// pinned in settings-editor.test.tsx.
 
-describe("settings editor (real app wiring)", () => {
-  const editPayload = (requestId: number): Record<string, unknown> => ({
+// ── Settings focus: the JSON reveal + the armed provider Remove ─────────────
+// Both interactions REPLACE the focused control (the reveal swaps the Edit
+// JSON button for the textarea; arming swaps Remove for the confirm pair), so
+// without an explicit handoff focus drops to <body> and the next Tab restarts
+// from the top of the document (owner bug report 2026-11-11). The reveal must
+// land the caret in THAT row's textarea; the collapse must hand focus back.
+// FOCUS OBSERVABILITY: the dom-helper already tracks document.activeElement
+// through focus()/blur() (the a11y affordance seam, the same seam the
+// provider-card focus pin below uses) -- no helper extension was needed.
+
+describe("settings focus: JSON reveal + armed Remove (real app wiring)", () => {
+  // THREE json-stamped rows plus a live scalar FIRST in document order: an
+  // implementation that grabs the first .settings-edit-input in the pane (the
+  // old document-wide selector) or the first textarea is caught cold.
+  const jsonPayload = (requestId: number): Record<string, unknown> => ({
     type: "configSnapshotResult",
     requestId,
     ts: 1700000000000,
@@ -2637,19 +2794,128 @@ describe("settings editor (real app wiring)", () => {
     sections: [
       {
         name: "webui",
+        rows: [{ key: "webui.port", description: "WebUI server port", default: 3000, file: 3000, resolved: 3000, edit: { type: "number" } }],
+      },
+      {
+        name: "prompts",
         rows: [
-          { key: "webui.port", description: "WebUI server port", default: 3000, file: 3000, resolved: 3000, edit: { type: "number" } },
-          { key: "webui.host", description: "WebUI server host", default: "127.0.0.1", resolved: "127.0.0.1" },
-          { key: "webui.apiKey", description: "API key for login authentication.", default: null, resolved: null, leafSecret: true, redacted: true },
-          { key: "providers[0].url", description: "Provider base URL", file: "http://127.0.0.1:8000/v1", edit: { type: "string" } },
-          { key: "providers[0]", description: "Provider entry", file: { name: "p1", url: "http://127.0.0.1:8000/v1" }, edit: { type: "json" } },
-          { key: "providers[0].apiKey", description: "Provider API key.", leafSecret: true, file: null, redacted: true, edit: { type: "string", writeOnly: true } },
+          { key: "prompts.displayPrompt", description: "Rendered system prompt", file: "one", resolved: "one", edit: { type: "json" } },
+          { key: "prompts.batonNotice", description: "Baton notice prose", file: "two", resolved: "two", edit: { type: "json" } },
         ],
+      },
+      {
+        name: "workspace",
+        rows: [{ key: "workspace.paths", description: "Workspace roots", file: ["/srv"], resolved: ["/srv"], edit: { type: "json" } }],
       },
     ],
   });
 
-  /** Open the dialog against a snapshot with one editable row; returns the snapshot id. */
+  /** Open the dialog against the three-json-row snapshot. */
+  async function openJson(): Promise<void> {
+    await attach();
+    el("#settings-btn").click();
+    await tick();
+    ws.fireMessage(jsonPayload(sent<{ requestId: number }>("configSnapshot").pop()!.requestId));
+    await tick();
+  }
+  const rowOf = (key: string): HTMLElement =>
+    els(".settings-row").find((r) => r.getAttribute("data-key") === key)!;
+
+  it("Edit JSON focuses THAT row's textarea, not the first editable control or textarea", async () => {
+    await openJson();
+    const row = rowOf("prompts.batonNotice"); // the SECOND json row (document order)
+    (row.querySelector(".settings-json-open") as unknown as HTMLElement).click();
+    await tick();
+    const area = row.querySelector(".settings-edit-json");
+    expect(area).toBeTruthy();
+    expect(document.activeElement).toBe(area);
+    // The row was brought into view (the dom-helper records the call).
+    expect((area as unknown as { scrollIntoViewCalls: unknown[] }).scrollIntoViewCalls.length).toBeGreaterThan(0);
+    // Exactly one textarea exists and the other rows keep their buttons.
+    expect(els(".settings-edit-json")).toHaveLength(1);
+    expect(rowOf("prompts.displayPrompt").querySelector(".settings-json-open")).toBeTruthy();
+    // The old selector's victim: the first .settings-edit-input in the pane
+    // (the webui.port stepper value) is NOT what took focus.
+    expect(document.activeElement).not.toBe(rowOf("webui.port").querySelector(".settings-edit-input"));
+    key(el("#settings-view"), "Escape"); // collapse (staged ladder)...
+    await tick();
+    key(el("#settings-view"), "Escape"); // ...then close
+    await tick();
+  });
+
+  it("Cancel collapses and hands focus back to THAT row's Edit JSON button", async () => {
+    await openJson();
+    const row = rowOf("workspace.paths");
+    (row.querySelector(".settings-json-open") as unknown as HTMLElement).click();
+    await tick();
+    expect(document.activeElement).toBe(row.querySelector(".settings-edit-json"));
+    (row.querySelector(".settings-cancel") as unknown as HTMLElement).click();
+    await tick();
+    expect(row.querySelector(".settings-edit-json")).toBeNull();
+    expect(document.activeElement).toBe(row.querySelector(".settings-json-open"));
+    expect(el("#settings-view")).toBeTruthy(); // collapsing never closes
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("Escape inside the textarea collapses it (never closes) and returns focus to the button", async () => {
+    await openJson();
+    const row = rowOf("workspace.paths");
+    (row.querySelector(".settings-json-open") as unknown as HTMLElement).click();
+    await tick();
+    key(row.querySelector(".settings-edit-json") as Element, "Escape");
+    await tick();
+    expect(el("#settings-view")).toBeTruthy(); // the textarea owns the first Escape
+    expect(row.querySelector(".settings-edit-json")).toBeNull();
+    expect(document.activeElement).toBe(row.querySelector(".settings-json-open"));
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("arming Remove moves focus to the Confirm control; Cancel and Escape hand it back to Remove", async () => {
+    await attach();
+    el("#settings-btn").click();
+    await tick();
+    ws.fireMessage(editPayload(sent<{ requestId: number }>("configSnapshot").pop()!.requestId));
+    await tick();
+    const card = els(".settings-provider-card").find((c) => c.getAttribute("data-key") === "providers[0]")!;
+    (card.querySelector(".settings-provider-remove") as unknown as HTMLElement).click();
+    await tick();
+    const yes = card.querySelector(".settings-provider-remove-yes");
+    expect(yes).toBeTruthy();
+    // The focused Remove was replaced -- the confirm pair takes the focus.
+    expect(document.activeElement).toBe(yes);
+    // Cancel disarms and returns to the row's Remove control.
+    const cancelBtn = (Array.from(card.querySelectorAll(".settings-btn")) as unknown as HTMLElement[]).find(
+      (b) => b.textContent === "Cancel",
+    )!;
+    cancelBtn.click();
+    await tick();
+    expect(card.querySelector(".settings-provider-remove-yes")).toBeNull();
+    expect(document.activeElement).toBe(card.querySelector(".settings-provider-remove"));
+    // Escape disarms the same way (staged ladder, dialog stays open).
+    (card.querySelector(".settings-provider-remove") as unknown as HTMLElement).click();
+    await tick();
+    key(el("#settings-view"), "Escape");
+    await tick();
+    expect(el("#settings-view")).toBeTruthy();
+    expect(card.querySelector(".settings-provider-remove-yes")).toBeNull();
+    expect(document.activeElement).toBe(card.querySelector(".settings-provider-remove"));
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+});
+// ── Settings editor (immediate-save controls -> setConfigKey on the wire) ───
+// The socket half of the editor (redesign C6: NO Edit click for scalars):
+// the app parses the control's text, mints a WRITE id from its own sequence
+// (independent of the snapshot id), serializes writes through one in-flight
+// slot with a last-write-wins queue, and settles rows only from the reply
+// carrying that id. Rejections render verbatim and REVERT the control; the
+// restart marker follows the reply's needsRestart field. The pure state
+// doctrine + widgets are pinned in settings-editor.test.tsx.
+
+describe("settings editor (real app wiring)", () => {
+  /** Open the dialog against the editor snapshot; returns the snapshot id. */
   async function openSnapshot(): Promise<number> {
     await attach();
     clearSent();
@@ -2662,38 +2928,48 @@ describe("settings editor (real app wiring)", () => {
   }
 
   const rowFor = (keyName: string): HTMLElement =>
-    els(".settings-row").find((r) => r.querySelector(".settings-key")!.textContent === keyName)!;
+    els(".settings-row").find((r) => r.getAttribute("data-key") === keyName)!;
   const labeled = (scope: HTMLElement, label: string): HTMLElement | undefined =>
     Array.from(scope.querySelectorAll("button")).find((b) => b.textContent === label) as unknown as HTMLElement | undefined;
-  const openEdit = async (keyName: string): Promise<void> => {
-    labeled(rowFor(keyName), "Edit")!.click();
+  const ariaBtn = (scope: HTMLElement, aria: string): HTMLElement | undefined =>
+    Array.from(scope.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === aria) as unknown as HTMLElement | undefined;
+  const fieldOf = (keyName: string): HTMLElement & { value: string } =>
+    rowFor(keyName).querySelector(".settings-edit-input") as unknown as HTMLElement & { value: string };
+  const blur = (node: Element): void => {
+    node.dispatchEvent({ type: "blur" } as unknown as Event);
+  };
+  const settleLast = async (result: Record<string, unknown>): Promise<void> => {
+    const frame = sent<{ requestId: number }>("setConfigKey").pop()!;
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: frame.requestId, ...result });
     await tick();
   };
-  const fieldOf = (keyName: string): { value: string } =>
-    rowFor(keyName).querySelector(".settings-edit-input") as unknown as { value: string };
 
-  it("only the stamped row offers Edit; the rest stay inert (hint, or nothing)", async () => {
+  it("stamped rows carry live controls; the rest stay inert (value + honest hint)", async () => {
     await openSnapshot();
-    expect(labeled(rowFor("webui.port"), "Edit")).toBeTruthy();
-    expect(labeled(rowFor("webui.host"), "Edit")).toBeUndefined();
+    expect(rowFor("webui.port").querySelector(".settings-edit-input")).toBeTruthy();
+    expect(rowFor("webui.enabled").querySelector('[role="switch"]')).toBeTruthy();
+    expect(rowFor("webui.host").querySelector(".settings-edit-input")).toBeNull();
     expect(rowFor("webui.host").querySelector(".settings-file-hint")!.textContent).toContain("edit in file");
     // A redacted row without a stamp (ancient reply) gets no affordance but
     // does get the honest edit-in-file hint (judge finding #3, 2026-11-09).
-    expect(labeled(rowFor("webui.apiKey"), "Edit")).toBeUndefined();
+    expect(rowFor("webui.apiKey").querySelector("input")).toBeNull();
     expect(rowFor("webui.apiKey").querySelector(".settings-file-hint")!.textContent).toContain("edit in file");
     key(el("#settings-view"), "Escape");
     await tick();
   });
 
-  it("Save sends setConfigKey with its own write id; id-space crossings drop; the matching reply paints the echo + the banner", async () => {
+  it("an unchanged blur is ZERO wire traffic; a typed blur sends setConfigKey with its own write id; id crossings drop; the matching reply paints the echo + banner", async () => {
     const snapId = await openSnapshot();
-    await openEdit("webui.port");
     const field = fieldOf("webui.port");
-    expect(field.value).toBe(""); // dom-helper: the attribute, not .value, carries the seed
-    expect(rowFor("webui.port").querySelector(".settings-edit-input")!.getAttribute("value")).toBe("3000");
+    expect(field.getAttribute("value")).toBe("3000");
+    // An honest unchanged blur (the field holds what the panel seeded): no frame.
+    field.value = "3000";
+    blur(field);
+    await tick();
+    expect(sent("setConfigKey")).toHaveLength(0);
     field.value = "4399";
     clearSent();
-    labeled(rowFor("webui.port"), "Save")!.click();
+    blur(field);
     await tick();
     const frames = sent<{ requestId: number; keyPath: string; value: unknown }>("setConfigKey");
     expect(frames).toHaveLength(1);
@@ -2701,29 +2977,27 @@ describe("settings editor (real app wiring)", () => {
     expect(frames[0]!.value).toBe(4399); // parsed to a NUMBER before the wire
     const saveId = frames[0]!.requestId!;
     expect(typeof saveId).toBe("number");
+    // The row says "saving" while the reply is out.
+    expect(rowFor("webui.port").className).toContain("settings-row-pending");
 
     // A snapshot refresh rides the OTHER sequence: the in-flight save survives
-    // it (still "Saving..."), and a write reply carrying the SNAPSHOT id is not
-    // the reply this row waits for.
+    // it, and a write reply carrying the SNAPSHOT id is not the reply this row
+    // waits for.
     els(".settings-btn").find((b) => b.textContent === "Refresh")!.click();
     await tick();
     const refreshed = sent<{ requestId: number }>("configSnapshot").pop()!.requestId;
     expect(refreshed).toBeGreaterThan(snapId);
-    expect(labeled(rowFor("webui.port"), "Saving...")).toBeTruthy();
     ws.fireMessage({ type: "setConfigKeyResult", requestId: refreshed, ok: true, value: 777, needsRestart: true });
     await tick();
     expect(document.querySelector(".settings-restart")).toBeNull();
-    // Had it been taken for the save, the editor would have closed and the
-    // banner + the 777 echo would be up: instead the save is still in flight.
-    expect(rowFor("webui.port").querySelector(".settings-edit-input")).toBeTruthy();
-    expect(labeled(rowFor("webui.port"), "Saving...")).toBeTruthy();
+    expect(rowFor("webui.port").className).toContain("settings-row-pending"); // still in flight
     expect(rowFor("webui.port").textContent).not.toContain("restart pending");
 
-    // The matching reply: row from the SERVER echo, banner up, editor closed.
+    // The matching reply: row from the SERVER echo, banner up, pending gone.
     ws.fireMessage({ type: "setConfigKeyResult", requestId: saveId, ok: true, value: 4399, needsRestart: true });
     await tick();
-    expect(rowFor("webui.port").querySelector(".settings-value")!.textContent).toBe("4399");
-    expect(rowFor("webui.port").querySelector(".settings-edit-input")).toBeNull();
+    expect(fieldOf("webui.port").getAttribute("value")).toBe("4399");
+    expect(rowFor("webui.port").className).not.toContain("settings-row-pending");
     const banner = el(".settings-restart");
     expect(banner.textContent).toContain("Restart required");
     expect(banner.getAttribute("role")).toBe("status");
@@ -2731,13 +3005,12 @@ describe("settings editor (real app wiring)", () => {
     // Settled: that id is spent, so a late/duplicate reply is inert.
     ws.fireMessage({ type: "setConfigKeyResult", requestId: saveId, ok: true, value: 999, needsRestart: true });
     await tick();
-    expect(rowFor("webui.port").querySelector(".settings-value")!.textContent).toBe("4399");
+    expect(fieldOf("webui.port").getAttribute("value")).toBe("4399");
 
     // The next save gets a STRICTLY FRESHER write id, and the banner survives it.
     clearSent();
-    await openEdit("webui.port");
     fieldOf("webui.port").value = "4400";
-    labeled(rowFor("webui.port"), "Save")!.click();
+    blur(fieldOf("webui.port"));
     await tick();
     expect(sent<{ requestId: number }>("setConfigKey").pop()!.requestId).toBeGreaterThan(saveId);
     expect(document.querySelector(".settings-restart")).toBeTruthy();
@@ -2751,7 +3024,68 @@ describe("settings editor (real app wiring)", () => {
     ws.fireMessage(editPayload(sent<{ requestId: number }>("configSnapshot").pop()!.requestId));
     await tick();
     expect(document.querySelector(".settings-restart")).toBeNull();
-    expect(rowFor("webui.port").querySelector(".settings-value")!.textContent).toBe("3000");
+    expect(fieldOf("webui.port").getAttribute("value")).toBe("3000");
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("a toggle flip rides value as a BOOLEAN; a second flip while pending QUEUES (no parallel second save) and drains freshest-first", async () => {
+    await openSnapshot();
+    clearSent();
+    const toggle = () => rowFor("webui.enabled").querySelector('[role="switch"]') as unknown as HTMLElement;
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    toggle().click();
+    await tick();
+    let frames = sent<{ requestId: number; value?: unknown }>("setConfigKey");
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.value).toBe(false); // the flip is the save, boolean on `value`
+    expect(toggle().getAttribute("aria-checked")).toBe("false"); // optimistic while pending
+
+    // Flip AGAIN while the first is in flight: NO parallel frame -- the queue
+    // holds the newest intent instead.
+    toggle().click();
+    await tick();
+    expect(sent("setConfigKey")).toHaveLength(1);
+    expect(toggle().getAttribute("aria-checked")).toBe("true"); // the queued intent shows
+
+    // Settle the first: the queued write goes out with a fresher id.
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: frames[0]!.requestId, ok: true, value: false, needsRestart: true });
+    await tick();
+    frames = sent<{ requestId: number; value?: unknown }>("setConfigKey");
+    expect(frames).toHaveLength(2);
+    expect(frames[1]!.value).toBe(true);
+    expect(frames[1]!.requestId).toBeGreaterThan(frames[0]!.requestId);
+
+    // Settle the queue too (the row lands on true, the reply echo attests).
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: frames[1]!.requestId, ok: true, value: true, needsRestart: true });
+    await tick();
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("the stepper: plus/minus steps a BOUNDED integer on `value` and clamps at the bounds without wire traffic", async () => {
+    await openSnapshot();
+    clearSent();
+    const row = () => rowFor("loopDetect.repeatThreshold");
+    ariaBtn(row(), "Increase loopDetect.repeatThreshold")!.click();
+    await tick();
+    let frames = sent<{ keyPath: string; value?: unknown }>("setConfigKey");
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.keyPath).toBe("loopDetect.repeatThreshold");
+    expect(frames[0]!.value).toBe(4);
+    await settleLast({ ok: true, value: 4, needsRestart: true });
+    expect(fieldOf("loopDetect.repeatThreshold").getAttribute("value")).toBe("4");
+    ariaBtn(row(), "Decrease loopDetect.repeatThreshold")!.click();
+    await tick();
+    expect(sent("setConfigKey").pop()!.value).toBe(3);
+    await settleLast({ ok: true, value: 3, needsRestart: true });
+    // Clamp: hold the field at the floor (2) -- minus has nothing to save.
+    fieldOf("loopDetect.repeatThreshold").value = "2";
+    clearSent();
+    ariaBtn(row(), "Decrease loopDetect.repeatThreshold")!.click();
+    await tick();
+    expect(sent("setConfigKey")).toHaveLength(0);
     key(el("#settings-view"), "Escape");
     await tick();
   });
@@ -2759,66 +3093,66 @@ describe("settings editor (real app wiring)", () => {
   it("the ALL-the-settings channels: scalars ride value, json and writeOnly ride valueText", async () => {
     await openSnapshot();
     // A string scalar with an INDEXED keyPath goes out verbatim on `value`.
-    await openEdit("providers[0].url");
-    fieldOf("providers[0].url")!.value = "http://127.0.0.1:9100/v1";
+    fieldOf("providers[0].url").value = "http://127.0.0.1:9100/v1";
     clearSent();
-    labeled(rowFor("providers[0].url"), "Save")!.click();
+    blur(fieldOf("providers[0].url"));
     await tick();
     let frame = sent<{ keyPath: string; value?: unknown; valueText?: unknown }>("setConfigKey").pop()!;
     expect(frame.keyPath).toBe("providers[0].url");
     expect(frame.value).toBe("http://127.0.0.1:9100/v1");
     expect("valueText" in frame).toBe(false);
-    // Settle it (a save in flight renders every row's button as "Saving...").
-    ws.fireMessage({ type: "setConfigKeyResult", requestId: sent<{ requestId: number }>("setConfigKey").pop()!.requestId, ok: true, value: "http://127.0.0.1:9100/v1", needsRestart: true });
-    await tick();
+    // Settle it (a save in flight queues anything further).
+    await settleLast({ ok: true, value: "http://127.0.0.1:9100/v1", needsRestart: true });
 
-    // A json container: the RAW textarea text rides valueText, never value.
-    await openEdit("providers[0]");
-    const area = rowFor("providers[0]").querySelector("textarea.settings-edit-input") as unknown as { value: string };
-    area.value = '{"name": "p1", "url": "http://x/v1"}';
+    // A json container: Edit JSON reveals the textarea; the RAW textarea text
+    // rides valueText, never value. (workspace.paths -- a provider element is
+    // chrome now: the whole-element JSON editor is retired, the card + the
+    // list ops own it, and the server refuses a container write there.)
+    labeled(rowFor("workspace.paths"), "Edit JSON")!.click();
+    await tick();
+    const area = rowFor("workspace.paths").querySelector("textarea.settings-edit-input") as unknown as { value: string };
+    area.value = '["/srv/new"]';
     clearSent();
-    labeled(rowFor("providers[0]"), "Save")!.click();
+    labeled(rowFor("workspace.paths"), "Save")!.click();
     await tick();
     frame = sent<{ keyPath: string; value?: unknown; valueText?: unknown }>("setConfigKey").pop()!;
-    expect(frame.keyPath).toBe("providers[0]");
-    expect(frame.valueText).toBe('{"name": "p1", "url": "http://x/v1"}');
+    expect(frame.keyPath).toBe("workspace.paths");
+    expect(frame.valueText).toBe('["/srv/new"]');
     expect("value" in frame).toBe(false);
-    // Its ok reply updates the row from the ECHOED text (re-parsed).
-    const saveId = sent<{ requestId: number }>("setConfigKey").pop()!.requestId;
-    ws.fireMessage({ type: "setConfigKeyResult", requestId: saveId, ok: true, valueText: '{"name": "p1"}', needsRestart: true });
-    await tick();
-    expect(rowFor("providers[0]").querySelector(".settings-value")!.textContent).toContain("name: p1");
+    // Its ok reply updates the row from the ECHOED text (re-parsed), collapses
+    // the textarea, and the cell shows the persisted value.
+    await settleLast({ ok: true, valueText: '["/srv/new"]', needsRestart: true });
+    expect(rowFor("workspace.paths").querySelector(".settings-value")!.textContent).toContain("/srv/new");
 
-    // A writeOnly secret: empty save refuses CLIENT-side (no frame, honest
-    // hint); a typed save rides valueText; its reply patches the row to the
+    // A writeOnly secret: empty Set refuses CLIENT-side (no frame, honest
+    // hint); a typed Set rides valueText; its reply patches the row to the
     // "set (redacted)" display plus the pending marker -- value:null echoes.
-    await openEdit("providers[0].apiKey");
     clearSent();
-    labeled(rowFor("providers[0].apiKey"), "Save")!.click();
+    labeled(rowFor("providers[0].apiKey"), "Set")!.click();
     await tick();
     expect(sent("setConfigKey")).toHaveLength(0);
     expect(rowFor("providers[0].apiKey").querySelector(".settings-edit-error")!.textContent).toContain("no new value entered");
-    fieldOf("providers[0].apiKey")!.value = "FRESH-SECRET";
-    labeled(rowFor("providers[0].apiKey"), "Save")!.click();
+    (rowFor("providers[0].apiKey").querySelector(".settings-edit-secret") as unknown as { value: string }).value = "FRESH-SECRET";
+    labeled(rowFor("providers[0].apiKey"), "Set")!.click();
     await tick();
     frame = sent<{ keyPath: string; value?: unknown; valueText?: unknown }>("setConfigKey").pop()!;
     expect(frame.valueText).toBe("FRESH-SECRET");
     expect("value" in frame).toBe(false);
-    const secretId = sent<{ requestId: number }>("setConfigKey").pop()!.requestId;
-    ws.fireMessage({ type: "setConfigKeyResult", requestId: secretId, ok: true, value: null, redacted: true, needsRestart: true });
-    await tick();
+    await settleLast({ ok: true, value: null, redacted: true, needsRestart: true });
     expect(rowFor("providers[0].apiKey").querySelector(".settings-value")!.textContent).toBe("set (redacted)");
     expect(rowFor("providers[0].apiKey").textContent).toContain("restart pending");
+    // The REPLACE box never shows anything: cleared on Set, still empty after.
+    expect((rowFor("providers[0].apiKey").querySelector(".settings-edit-secret") as unknown as { value: string }).value).toBe("");
     key(el("#settings-view"), "Escape");
     await tick();
   });
 
-  it("a refusal renders the server text VERBATIM and leaves the row in edit mode", async () => {
+  it("a refusal renders the server text VERBATIM, reverts the control, and never claims a save", async () => {
     await openSnapshot();
-    await openEdit("webui.port");
-    fieldOf("webui.port").value = "0";
+    const field = fieldOf("webui.port");
+    field.value = "0";
     clearSent();
-    labeled(rowFor("webui.port"), "Save")!.click();
+    blur(field);
     await tick();
     const id = sent<{ requestId: number }>("setConfigKey").pop()!.requestId;
     const message = '"webui.port" must be >= 1 (got 0)';
@@ -2827,29 +3161,253 @@ describe("settings editor (real app wiring)", () => {
     const err = rowFor("webui.port").querySelector(".settings-edit-error")!;
     expect(err.textContent).toBe(message);
     expect(err.getAttribute("role")).toBe("alert");
-    expect(rowFor("webui.port").querySelector(".settings-edit-input")).toBeTruthy(); // still editable
+    // REVERT: the control re-seeds from the last server-known value (3000)
+    // and the row is no longer pending.
+    expect(fieldOf("webui.port").getAttribute("value")).toBe("3000");
+    expect(rowFor("webui.port").className).not.toContain("settings-row-pending");
     expect(document.querySelector(".settings-restart")).toBeNull(); // a refusal never claims a save
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("the restart marker is DRIVEN by the reply: ok WITHOUT needsRestart persists but raises no banner/badge", async () => {
+    await openSnapshot();
+    clearSent();
+    const toggle = () => rowFor("webui.enabled").querySelector('[role="switch"]') as unknown as HTMLElement;
+    toggle().click();
+    await tick();
+    await settleLast({ ok: true, value: false }); // Phase 9 shape: no needsRestart on this key
+    expect(document.querySelector(".settings-restart")).toBeNull();
+    expect(rowFor("webui.enabled").textContent).not.toContain("restart pending");
+    // The write itself still persisted honestly (no queue churn).
+    expect(sent("setConfigKey")).toHaveLength(1);
     key(el("#settings-view"), "Escape");
     await tick();
   });
 
   it("a parse miss never reaches the socket", async () => {
     await openSnapshot();
-    await openEdit("webui.port");
-    fieldOf("webui.port").value = "banana";
+    const field = fieldOf("webui.port");
+    field.value = "banana";
     clearSent();
-    labeled(rowFor("webui.port"), "Save")!.click();
+    blur(field);
     await tick();
     expect(sent("setConfigKey")).toHaveLength(0);
     expect(rowFor("webui.port").querySelector(".settings-edit-error")!.textContent).toContain('"banana" is not a number');
-    // Escape cancels the edit (one retreat) before it closes the dialog.
-    key(el("#settings-view"), "Escape");
-    await tick();
-    expect(rowFor("webui.port").querySelector(".settings-edit-error")).toBeNull();
-    expect(el("#settings-view")).toBeTruthy();
+    // No edit mode to retreat from: Escape closes the dialog (the control
+    // stays live with the hint until a good save replaces it).
     key(el("#settings-view"), "Escape");
     await tick();
     expect(document.querySelector("#settings-view")).toBeNull();
+  });
+
+  // ── Provider list ops (additive editConfigList pair, one op in flight) ────
+  // Add / two-step Remove ride their OWN id sequence (listReqId), separate
+  // from the snapshot and write counters; the reply envelope mirrors
+  // setConfigKeyResult (ok / error / needsRestart, NO value echo). Success
+  // RE-READS the snapshot (the file is the truth); refusals render verbatim.
+
+  const provCard = (keyName: string): HTMLElement =>
+    els(".settings-provider-card").find((c) => c.getAttribute("data-key") === keyName)!;
+  const listFrames = (): Array<{ requestId: number; keyPath: string; op: string; name?: string; index?: number }> =>
+    sent("editConfigList");
+  const addBtn = (): HTMLElement => els(".settings-provider-add-btn")[0]!;
+  const addField = (): HTMLElement & { value: string } => el(".settings-provider-add-input") as unknown as HTMLElement & { value: string };
+  const addCommitBtn = (): HTMLElement =>
+    els(".settings-provider-add-go")[0]!;
+  /** Settle the LAST list frame with a reply (the server echoes the id). */
+  const settleList = async (result: Record<string, unknown>): Promise<void> => {
+    const frame = listFrames().pop()!;
+    ws.fireMessage({ type: "editConfigListResult", requestId: frame.requestId, ...result });
+    await tick();
+  };
+  /** The editPayload shape plus a third provider (what the re-read after a
+   *  successful append ships: the card list follows the file). */
+  const payloadWithThird = (requestId: number): Record<string, unknown> => {
+    const base = editPayload(requestId) as { sections: Array<{ name: string; rows: Record<string, unknown>[] }> };
+    return {
+      ...base,
+      sections: base.sections.map((sec) =>
+        sec.name === "providers"
+          ? {
+              ...sec,
+              rows: [
+                ...sec.rows,
+                { key: "providers[2]", description: "Provider entry", file: { name: "p3" } },
+                { key: "providers[2].url", description: "Provider base URL", file: "http://127.0.0.1:8200/v1", edit: { type: "string" } },
+              ],
+            }
+          : sec,
+      ),
+    };
+  };
+
+  it("provider Add: opening is zero traffic; an empty name is refused LOCALLY; a commit sends exactly ONE declared frame; ok re-reads and the new card appears", async () => {
+    await openSnapshot();
+    clearSent();
+    addBtn().click();
+    await tick();
+    expect(addField()).toBeTruthy();
+    expect(listFrames()).toHaveLength(0);
+    // Empty commit: the local refusal, no frame, honest text under the field.
+    addCommitBtn().click();
+    await tick();
+    expect(listFrames()).toHaveLength(0);
+    expect(el(".settings-provider-list-error")!.textContent).toContain("can't be empty");
+    // A real commit: ONE editConfigList frame, the declared append shape
+    // (keyPath "providers", the name, NO index, no value bytes of any kind).
+    addField().value = "p3";
+    addCommitBtn().click();
+    await tick();
+    const frames = listFrames();
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.keyPath).toBe("providers");
+    expect(frames[0]!.op).toBe("append");
+    expect(frames[0]!.name).toBe("p3");
+    expect("index" in frames[0]!).toBe(false);
+    expect(Object.keys(frames[0]!).sort()).toEqual(["keyPath", "name", "op", "requestId", "type"]);
+    // ok -> the snapshot is RE-READ (fresh id), and the refreshed payload
+    // brings the new card in; needsRestart followed the REPLY field.
+    await settleList({ ok: true, needsRestart: true });
+    const reRead = sent<{ requestId: number }>("configSnapshot").pop()!;
+    ws.fireMessage(payloadWithThird(reRead.requestId));
+    await tick();
+    expect(els(".settings-provider-card").map((c) => c.getAttribute("data-key"))).toEqual([
+      "providers[0]",
+      "providers[1]",
+      "providers[2]",
+    ]);
+    expect(provCard("providers[2]").getAttribute("data-name")).toBe("p3");
+    expect(el(".settings-restart")).toBeTruthy();
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  // Audit finding 6 (2026-11-11): provider names are USER data. A `"` in the
+  // name must not break the post-add focus pass -- the interpolated CSS
+  // selector used to throw inside queueMicrotask, and the stranded focus
+  // marker then re-threw on every later snapshot.
+  it("provider Add with a quote in the name: the focus pass completes and the marker clears", async () => {
+    await openSnapshot();
+    clearSent();
+    addBtn().click();
+    await tick();
+    addField().value = 'p"3';
+    addCommitBtn().click();
+    await tick();
+    expect(listFrames().pop()!.name).toBe('p"3');
+    await settleList({ ok: true });
+    const reRead = sent<{ requestId: number }>("configSnapshot").pop()!;
+    const base = editPayload(reRead.requestId) as unknown as { sections: Array<{ name: string; rows: Record<string, unknown>[] }> };
+    ws.fireMessage({
+      ...base,
+      sections: base.sections.map((sec) =>
+        sec.name === "providers"
+          ? {
+              ...sec,
+              rows: [
+                ...sec.rows,
+                { key: "providers[2]", description: "Provider entry", file: { name: 'p"3' } },
+                { key: "providers[2].url", description: "Provider base URL", file: "http://127.0.0.1:8200/v1", edit: { type: "string" } },
+              ],
+            }
+          : sec,
+      ),
+    });
+    await tick();
+    // The quoted card rendered, got the focus (the attribute walk found it --
+    // no selector was ever built from the name), and the marker was consumed.
+    const card = els(".settings-provider-card").find((c) => c.getAttribute("data-key") === "providers[2]")!;
+    expect(card.getAttribute("data-name")).toBe('p"3');
+    expect(document.activeElement).toBe(card as unknown as Element);
+    expect(card.getAttribute("data-focus")).toBeNull();
+    // A LATER snapshot still applies cleanly (the stranded-marker re-throw
+    // loop is gone): Refresh repaints the three cards.
+    clearSent();
+    const refreshBtn = els(".settings-btn").find((b) => b.textContent === "Refresh")!;
+    refreshBtn.click();
+    await tick();
+    ws.fireMessage(editPayload(sent<{ requestId: number }>("configSnapshot").pop()!.requestId));
+    await tick();
+    expect(els(".settings-provider-card").map((c) => c.getAttribute("data-key"))).toEqual([
+      "providers[0]",
+      "providers[1]",
+    ]);
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("provider Remove: the FIRST click is zero traffic; Confirm sends the remove; Escape cancels with zero traffic", async () => {
+    await openSnapshot();
+    clearSent();
+    (provCard("providers[1]").querySelector(".settings-provider-remove") as unknown as HTMLElement).click();
+    await tick();
+    expect(listFrames()).toHaveLength(0); // nothing left the client on the first click
+    expect(provCard("providers[1]").querySelector(".settings-provider-remove-yes")).toBeTruthy(); // armed
+    // Escape dismisses the armed confirm -- pure client state, zero wire.
+    key(el("#settings-view"), "Escape");
+    await tick();
+    expect(listFrames()).toHaveLength(0);
+    expect(provCard("providers[1]").querySelector(".settings-provider-remove-yes")).toBeNull();
+    // Arm again + Confirm: exactly ONE frame, keyed by the element path, the
+    // index echo agreeing with the keyPath (the server demands it).
+    (provCard("providers[1]").querySelector(".settings-provider-remove") as unknown as HTMLElement).click();
+    await tick();
+    (provCard("providers[1]").querySelector(".settings-provider-remove-yes") as unknown as HTMLElement).click();
+    await tick();
+    const frames = listFrames();
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.keyPath).toBe("providers[1]");
+    expect(frames[0]!.op).toBe("remove");
+    expect(frames[0]!.index).toBe(1);
+    expect("name" in frames[0]!).toBe(false);
+    // A refusal keeps the SERVER text verbatim (a referenced provider names
+    // the referrer) and never claims the removal.
+    ws.fireMessage({
+      type: "editConfigListResult",
+      requestId: frames[0]!.requestId,
+      ok: false,
+      error: '"p2" is still referenced by defaultProvider',
+    });
+    await tick();
+    expect(el(".settings-provider-list-error")!.textContent).toBe('"p2" is still referenced by defaultProvider');
+    expect(document.querySelector(".settings-restart")).toBeNull();
+    expect(els(".settings-provider-card").length).toBe(2);
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("a second list op while one is in flight QUEUES (no parallel frame) and drains after the reply", async () => {
+    await openSnapshot();
+    clearSent();
+    // Op 1: append p3 goes out immediately.
+    addBtn().click();
+    await tick();
+    addField().value = "p3";
+    addCommitBtn().click();
+    await tick();
+    expect(listFrames()).toHaveLength(1);
+    // Mid-flight the affordances are busy-disabled (the dom-helper still fires
+    // the handler; the STATE queue is the belt that keeps the wire serial).
+    const remove2 = provCard("providers[1]").querySelector(".settings-provider-remove") as unknown as HTMLElement;
+    expect(addBtn().hasAttribute("disabled")).toBe(true);
+    expect(remove2.hasAttribute("disabled")).toBe(true);
+    remove2.click();
+    await tick();
+    (provCard("providers[1]").querySelector(".settings-provider-remove-yes") as unknown as HTMLElement).click();
+    await tick();
+    expect(listFrames()).toHaveLength(1); // the remove QUEUED; no parallel frame
+    // The append reply settles: the queued remove drains (second frame), then
+    // the success re-read follows; the remove's own ok re-reads again.
+    await settleList({ ok: true, needsRestart: true });
+    const afterAppend = listFrames();
+    expect(afterAppend).toHaveLength(2);
+    expect(afterAppend[1]!.op).toBe("remove");
+    expect(sentTypes()).toEqual(["editConfigList", "editConfigList", "configSnapshot"]);
+    await settleList({ ok: true, needsRestart: true });
+    expect(sentTypes()).toEqual(["editConfigList", "editConfigList", "configSnapshot", "configSnapshot"]);
+    key(el("#settings-view"), "Escape");
+    await tick();
   });
 });
 

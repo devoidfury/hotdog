@@ -18,7 +18,7 @@ import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSa
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire } from "./chat.ts";
-import type { ConfigKeyEditWire } from "@extensions/websocket/protocol.ts";
+import type { ConfigKeyEditWire, EditConfigListResultWire } from "@extensions/websocket/protocol.ts";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
 import { WorkbenchPanel, workbenchStore } from "./workbench.tsx";
 import {
@@ -50,8 +50,20 @@ import {
   cancelSettingsEdit,
   parseEditValue,
   rejectSettingsSave,
-  beginSettingsSave,
+  requestSettingsSave,
+  flushSettingsSave,
+  pendingDisplay,
   applySetConfigReply,
+  setSettingsQuery,
+  setSettingsCategory,
+  startProviderAdd,
+  cancelProviderAdd,
+  armProviderRemove,
+  cancelProviderRemove,
+  requestProviderListOp,
+  applyListOpReply,
+  flushProviderList,
+  clearProviderFocus,
   type SettingsPanelState,
 } from "./settings-view.tsx";
 import { createCoalescer } from "./batch.ts";
@@ -229,9 +241,10 @@ const settingsRootRef = domRef<HTMLElement>((el) => {
   settingsRootEl = el;
 });
 
-/** Settings button pressed: open the panel and re-fetch (the config may have changed on
- *  disk since startup; the reply is a snapshot-at-open, and every open asks
- *  again). Focus moves into the dialog so Escape is caught by its keydown. */
+/** Settings button pressed: open the panel and ALWAYS re-fetch a fresh
+ *  snapshot (live-at-open: every open issues one configSnapshot request with a
+ *  fresh requestId, no cached snapshot is ever shown). Focus moves into the
+ *  dialog so Escape is caught by its keydown. */
 function openSettings(): void {
   const next = openSettingsPanel(settingsAtom());
   settingsAtom(next);
@@ -257,44 +270,211 @@ function refreshSettings(): void {
 
 function onConfigSnapshot(requestId: number | undefined, snapshot: ConfigSnapshotResultWire): void {
   settingsAtom(applySnapshotReply(settingsAtom(), requestId, snapshot));
+  // A fresh append asked to bring the new card into view: once the refreshed
+  // snapshot is on screen, focus that card (data-name match) and consume the
+  // request. Only fires on the CURRENT snapshot id (a stale reply applied
+  // nothing, so focusProviderName was not freshly set by it either).
+  const st = settingsAtom();
+  if (st.focusProviderName !== null && requestId === st.reqId) {
+    queueMicrotask(() => {
+      // Iterate the data-name attribute instead of interpolating the name into
+      // a CSS selector (audit finding 6): provider names are user data, and an
+      // unescaped quote/bracket would throw HERE -- inside queueMicrotask, the
+      // focus marker would never clear and every later snapshot would re-throw.
+      const cards = (Array.from(settingsRootEl?.querySelectorAll(".settings-provider-card") ?? []) as unknown as (
+        | (HTMLElement & { focus?: () => void })
+        | null
+      )[]);
+      const card = cards.find((c) => c !== null && c.getAttribute("data-name") === st.focusProviderName);
+      card?.focus?.();
+      card?.scrollIntoView?.({ block: "nearest" });
+      settingsAtom(clearProviderFocus(settingsAtom()));
+    });
+  }
 }
 
 // ── Settings editor (rows the server stamped `edit`; see settings-view.tsx) ─
 
-/** Edit pressed: open the row's inline editor and move focus into the field
- *  (openSettings' queueMicrotask focus idiom, one level down). */
+/** Find a panel container by a data-key attribute value (GENERAL, WEBUI,
+ *  providers[0], a row keyPath...). ATTRIBUTE ITERATION, never a built
+ *  selector: these keys are user data carrying dots/brackets/quotes, and an
+ *  unescaped `[data-key="..."]` would throw inside queueMicrotask (audit
+ *  finding 6 -- same idiom as the provider-card focus walk above). */
+function findSettingsNodeByDataKey(containerClass: string, dataKey: string): HTMLElement | null {
+  const nodes = Array.from(settingsRootEl?.querySelectorAll("." + containerClass) ?? []) as HTMLElement[];
+  return nodes.find((n) => n.getAttribute("data-key") === dataKey) ?? null;
+}
+
+/** Hand focus to an element the last render just revealed (unconditional:
+ *  the interaction demands it -- openSettings/provider-add precedent). */
+function focusRevealed(el: HTMLElement | null): void {
+  if (!el) return;
+  el.focus();
+  el.scrollIntoView?.({ block: "nearest" });
+}
+
+/** Return focus to a control that replaced a just-destroyed one, but ONLY
+ *  when focus is stranded (body, gone, or a node the re-render detached).
+ *  A click-away that landed on a live control already moved focus there --
+ *  this must not steal it back. */
+function refocusStranded(el: HTMLElement | null): void {
+  if (!el) return;
+  const active = document.activeElement as Node | null;
+  if (active && active !== document.body && settingsRootEl?.contains(active)) return;
+  el.focus();
+}
+
+/** Edit pressed: open the JSON container's textarea and move focus into THAT
+ *  row's field (openSettings' queueMicrotask focus idiom, one level down).
+ *  The reveal destroys the focused button (rows re-key on the shown value),
+ *  so without this the browser drops focus to <body> and Tab restarts from
+ *  the top of the document. The textarea is found INSIDE the named row --
+ *  a document-wide .settings-edit-input query would hit the first editable
+ *  control anywhere in the pane, which is not necessarily this row's.
+ *  Scalar rows have no edit mode -- their controls save immediately. */
 function startSettingsEditRow(keyPath: string): void {
   settingsAtom(startSettingsEdit(settingsAtom(), keyPath));
   queueMicrotask(() => {
-    const field = settingsRootEl?.querySelector(".settings-edit-input") as HTMLElement | null;
-    field?.focus();
+    const area = findSettingsNodeByDataKey("settings-row", keyPath)?.querySelector(".settings-edit-json") ?? null;
+    focusRevealed(area as HTMLElement | null);
   });
 }
 
+/** Collapse the JSON reveal (Cancel button, Escape inside the textarea, or
+ *  the root ladder): hand focus back to the row's Edit JSON button so the
+ *  user keeps their place instead of dropping to body (the dialog's
+ *  focus-return doctrine, one row deep). */
 function cancelSettingsEditRow(): void {
+  const keyPath = settingsAtom().editing;
   settingsAtom(cancelSettingsEdit(settingsAtom()));
+  if (keyPath === null) return;
+  queueMicrotask(() => {
+    const btn = findSettingsNodeByDataKey("settings-row", keyPath)?.querySelector(".settings-json-open") ?? null;
+    refocusStranded(btn as HTMLElement | null);
+  });
 }
 
-/** Save: parse against the server-stamped type (a parse miss never goes to
- *  the wire; the row stays open with the hint), then send with a FRESH write
- *  id. The server revalidates the value against the schema regardless --
- *  this parse is courtesy, not gate. */
+function setSettingsQueryRow(query: string): void {
+  settingsAtom(setSettingsQuery(settingsAtom(), query));
+}
+
+function setSettingsCategoryRow(category: string | null): void {
+  settingsAtom(setSettingsCategory(settingsAtom(), category));
+}
+
+/** A control save: parse against the server-stamped type (a parse miss never
+ *  goes to the wire; the row keeps its hint), then SEND or QUEUE. Writes
+ *  serialize through one in-flight slot: a further change on a path whose
+ *  save is pending updates the queued value (last-write-wins) instead of
+ *  firing a parallel second save. The server revalidates every value against
+ *  the schema regardless -- this parse is courtesy, not gate. */
 function saveSettingsEditRow(keyPath: string, raw: string, edit: ConfigKeyEditWire): void {
   const parsed = parseEditValue(edit, raw);
   if (!parsed.ok) {
     settingsAtom(rejectSettingsSave(settingsAtom(), keyPath, parsed.error));
     return;
   }
-  const next = beginSettingsSave(settingsAtom(), keyPath);
-  settingsAtom(next);
-  chat?.setConfigKey(next.saveReqId, keyPath, parsed.payload);
+  // The optimistic display NEVER carries a writeOnly replace or a json
+  // container's bytes (pendingDisplay is "" there).
+  const r = requestSettingsSave(settingsAtom(), keyPath, parsed.payload, pendingDisplay(edit, parsed.payload));
+  settingsAtom(r.state);
+  if (r.send) chat?.setConfigKey(r.send.reqId, keyPath, parsed.payload);
 }
 
 /** Write reply: stale ids drop in the pure state fn (the write sequence is
  *  the panel's own). ok: the row updates from the server's echo and the
- *  restart banner goes up for the visit; refusal: server text verbatim. */
+ *  restart marker follows the reply's needsRestart FIELD; refusal: server
+ *  text verbatim. Then the queue drains: the oldest waiting write goes out
+ *  (fresh id, same sequence). */
 function onSetConfigKey(requestId: number | undefined, result: SetConfigKeyResultWire): void {
-  settingsAtom(applySetConfigReply(settingsAtom(), requestId, result));
+  const settled = applySetConfigReply(settingsAtom(), requestId, result);
+  const drained = flushSettingsSave(settled);
+  settingsAtom(drained.state);
+  if (drained.send) chat?.setConfigKey(drained.send.reqId, drained.send.key, drained.send.payload);
+}
+
+// ── Provider cards: add / remove (owner 2026-11-11) ──────────────────────────
+// The card's Add / two-step Remove drive the additive editConfigList pair. A
+// list op obeys the one-op-in-flight doctrine (requestProviderListOp queues on
+// a busy path). On success the snapshot is RE-READ (the file is the truth); on
+// refusal the server text renders verbatim under the add affordance.
+
+/** Send a requested list op (append/remove) if the pure state decided to fire
+ *  it (nothing in flight). Empty/whitespace names never reach here as a send --
+ *  requestProviderListOp refuses them locally with zero wire traffic. */
+function sendProviderListOp(send: { reqId: number; op: "append" | "remove"; keyPath: string; name?: string; index?: number } | null): void {
+  if (!send) return;
+  chat?.editConfigList(send.reqId, send.keyPath, send.op, send.name, send.index);
+}
+
+function providerAddStart(): void {
+  settingsAtom(startProviderAdd(settingsAtom()));
+  queueMicrotask(() => {
+    (settingsRootEl?.querySelector(".settings-provider-add-input") as HTMLElement | null)?.focus();
+  });
+}
+
+function providerAddCommit(name: string): void {
+  const r = requestProviderListOp(settingsAtom(), "append", "providers", { name });
+  settingsAtom(r.state);
+  sendProviderListOp(r.send);
+}
+
+function providerAddCancel(): void {
+  settingsAtom(cancelProviderAdd(settingsAtom()));
+}
+
+/** Remove clicked: arm the two-step confirm. The arm REPLACES the focused
+ *  Remove button with the confirm pair (positional diff, different tags), so
+ *  focus would drop to body exactly like the JSON reveal did -- hand it to
+ *  the Confirm control the render just created. */
+function providerRemoveArm(cardKey: string, _index: number, _name: string): void {
+  settingsAtom(armProviderRemove(settingsAtom(), cardKey));
+  queueMicrotask(() => {
+    const yes = findSettingsNodeByDataKey("settings-provider-card", cardKey)?.querySelector(
+      ".settings-provider-remove-yes",
+    );
+    focusRevealed((yes as HTMLElement | null) ?? null);
+  });
+}
+
+function providerRemoveConfirm(index: number, _name: string): void {
+  const r = requestProviderListOp(settingsAtom(), "remove", `providers[${index}]`, { index });
+  settingsAtom(r.state);
+  sendProviderListOp(r.send);
+}
+
+/** Disarm (Cancel button / Escape / click-away): the confirm pair is
+ *  replaced by the Remove button -- return focus to it (the armed flow
+ *  started there; the stranded guard keeps a click-away that landed on a
+ *  live control from being stolen back). Zero wire traffic either way. */
+function providerRemoveCancel(): void {
+  const cardKey = settingsAtom().confirmRemoveKey;
+  settingsAtom(cancelProviderRemove(settingsAtom()));
+  if (cardKey === null) return;
+  queueMicrotask(() => {
+    const btn = findSettingsNodeByDataKey("settings-provider-card", cardKey)?.querySelector(
+      ".settings-provider-remove",
+    );
+    refocusStranded((btn as HTMLElement | null) ?? null);
+  });
+}
+
+/** editConfigList reply: stale ids drop in the pure state fn. ok folds
+ *  needsRestart + (for an append) marks the new provider for focus; refusal
+ *  renders verbatim. Then any queued list op drains, and a SUCCESS re-reads the
+ *  snapshot so the card list reflects the file. */
+function onEditConfigList(requestId: number | undefined, result: EditConfigListResultWire): void {
+  const settled = applyListOpReply(settingsAtom(), requestId, result);
+  const drained = flushProviderList(settled);
+  settingsAtom(drained.state);
+  if (drained.send) sendProviderListOp(drained.send);
+  if (result.ok) {
+    // Re-read: the file changed; bring the card list (and the new card) current.
+    const next = refreshSettingsPanel(settingsAtom());
+    settingsAtom(next);
+    chat?.requestConfigSnapshot(next.reqId);
+  }
 }
 
 // Subagent overlay panels: task ids with an open panel, bottom-first; the
@@ -1174,6 +1354,7 @@ function startChat(): void {
     onSearchResults,
     onConfigSnapshot,
     onSetConfigKey,
+    onEditConfigList,
     onListDir: onListDirReply,
     onReadFile: onReadFileReply,
     onAuthFailure: handleAuthFailure,
@@ -1881,9 +2062,10 @@ function App() {
               >
                 workbench
               </button>
-              {/* Settings viewer: a snapshot-at-open read of the resolved
-                  config (diagnostics + per-key sources, secrets redacted
-                  server-side). Opens a dialog; Escape returns focus here. */}
+              {/* Settings viewer: a live-at-open read of the resolved config
+                  (a fresh snapshot is requested on every open; diagnostics +
+                  per-key sources, secrets redacted server-side). Opens a
+                  dialog; Escape returns focus here. */}
               <button
                 type="button"
                 id="settings-btn"
@@ -1891,7 +2073,7 @@ function App() {
                 aria-label="Settings"
                 aria-haspopup="dialog"
                 aria-expanded={settingsAtom().open ? "true" : "false"}
-                title="Settings: resolved config snapshot (read-only)"
+                title="Settings: resolved config snapshot, re-read on every open"
                 onClick={openSettings}
               >
                 settings
@@ -2122,10 +2304,11 @@ function App() {
             />
           );
         })}
-        {/* Settings viewer + editor dialog (settings button in the header). Mounted
-            only while open; Escape closes (or cancels an open row edit), ✕ closes,
-            click-outside does NOT (values get selected). One mount hook, one
-            import -- the panel is self-contained. */}
+        {/* Settings viewer + immediate-save editor dialog (settings button in the
+            header). Mounted only while open; Escape closes (or collapses an
+            expanded JSON container), ✕ closes, click-outside does NOT (values
+            get selected). One mount hook, one import -- the panel is
+            self-contained. */}
         {settings.open ? (
           <SettingsViewer
             snapshot={settings.snapshot}
@@ -2134,13 +2317,29 @@ function App() {
             onClose={closeSettings}
             onRefresh={refreshSettings}
             editing={settings.editing}
-            saving={settings.pendingSave !== null}
+            pendingSave={settings.pendingSave}
+            queuedSaves={settings.queuedSaves}
             editError={settings.editError}
             needsRestart={settings.needsRestart}
             editedKeys={settings.editedKeys}
+            query={settings.query}
+            category={settings.category}
+            onQuery={setSettingsQueryRow}
+            onCategory={setSettingsCategoryRow}
             onEdit={startSettingsEditRow}
             onCancelEdit={cancelSettingsEditRow}
             onSaveEdit={saveSettingsEditRow}
+            addingProvider={settings.addingProvider}
+            confirmRemoveKey={settings.confirmRemoveKey}
+            providerListError={settings.providerListError}
+            listBusy={settings.pendingList !== null}
+            focusProviderName={settings.focusProviderName}
+            onProviderAdd={providerAddStart}
+            onProviderAddCommit={providerAddCommit}
+            onProviderAddCancel={providerAddCancel}
+            onProviderRemoveArm={providerRemoveArm}
+            onProviderRemoveConfirm={providerRemoveConfirm}
+            onProviderRemoveCancel={providerRemoveCancel}
           />
         ) : null}
       </div>

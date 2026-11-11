@@ -17,7 +17,8 @@ import {
 import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
-import type { SearchHitWire, ConfigSnapshotResultWire, ListDirResultWire, ReadFileResultWire } from "./chat.ts";
+import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire } from "./chat.ts";
+import type { ConfigKeyEditWire } from "@extensions/websocket/protocol.ts";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
 import { WorkbenchPanel, workbenchStore } from "./workbench.tsx";
 import {
@@ -45,6 +46,12 @@ import {
   refreshSettingsPanel,
   closeSettingsPanel,
   applySnapshotReply,
+  startSettingsEdit,
+  cancelSettingsEdit,
+  parseEditValue,
+  rejectSettingsSave,
+  beginSettingsSave,
+  applySetConfigReply,
   type SettingsPanelState,
 } from "./settings-view.tsx";
 import { createCoalescer } from "./batch.ts";
@@ -250,6 +257,44 @@ function refreshSettings(): void {
 
 function onConfigSnapshot(requestId: number | undefined, snapshot: ConfigSnapshotResultWire): void {
   settingsAtom(applySnapshotReply(settingsAtom(), requestId, snapshot));
+}
+
+// ── Settings editor (rows the server stamped `edit`; see settings-view.tsx) ─
+
+/** Edit pressed: open the row's inline editor and move focus into the field
+ *  (openSettings' queueMicrotask focus idiom, one level down). */
+function startSettingsEditRow(keyPath: string): void {
+  settingsAtom(startSettingsEdit(settingsAtom(), keyPath));
+  queueMicrotask(() => {
+    const field = settingsRootEl?.querySelector(".settings-edit-input") as HTMLElement | null;
+    field?.focus();
+  });
+}
+
+function cancelSettingsEditRow(): void {
+  settingsAtom(cancelSettingsEdit(settingsAtom()));
+}
+
+/** Save: parse against the server-stamped type (a parse miss never goes to
+ *  the wire; the row stays open with the hint), then send with a FRESH write
+ *  id. The server revalidates the value against the schema regardless --
+ *  this parse is courtesy, not gate. */
+function saveSettingsEditRow(keyPath: string, raw: string, edit: ConfigKeyEditWire): void {
+  const parsed = parseEditValue(edit, raw);
+  if (!parsed.ok) {
+    settingsAtom(rejectSettingsSave(settingsAtom(), keyPath, parsed.error));
+    return;
+  }
+  const next = beginSettingsSave(settingsAtom(), keyPath);
+  settingsAtom(next);
+  chat?.setConfigKey(next.saveReqId, keyPath, parsed.payload);
+}
+
+/** Write reply: stale ids drop in the pure state fn (the write sequence is
+ *  the panel's own). ok: the row updates from the server's echo and the
+ *  restart banner goes up for the visit; refusal: server text verbatim. */
+function onSetConfigKey(requestId: number | undefined, result: SetConfigKeyResultWire): void {
+  settingsAtom(applySetConfigReply(settingsAtom(), requestId, result));
 }
 
 // Subagent overlay panels: task ids with an open panel, bottom-first; the
@@ -1128,6 +1173,7 @@ function startChat(): void {
     },
     onSearchResults,
     onConfigSnapshot,
+    onSetConfigKey,
     onListDir: onListDirReply,
     onReadFile: onReadFileReply,
     onAuthFailure: handleAuthFailure,
@@ -2076,9 +2122,10 @@ function App() {
             />
           );
         })}
-        {/* Settings viewer dialog (settings button in the header). Mounted only while
-            open; Escape/✕ close it, click-outside does NOT (values get
-            selected). One mount hook, one import -- the panel is self-contained. */}
+        {/* Settings viewer + editor dialog (settings button in the header). Mounted
+            only while open; Escape closes (or cancels an open row edit), ✕ closes,
+            click-outside does NOT (values get selected). One mount hook, one
+            import -- the panel is self-contained. */}
         {settings.open ? (
           <SettingsViewer
             snapshot={settings.snapshot}
@@ -2086,6 +2133,14 @@ function App() {
             rootRef={settingsRootRef}
             onClose={closeSettings}
             onRefresh={refreshSettings}
+            editing={settings.editing}
+            saving={settings.pendingSave !== null}
+            editError={settings.editError}
+            needsRestart={settings.needsRestart}
+            editedKeys={settings.editedKeys}
+            onEdit={startSettingsEditRow}
+            onCancelEdit={cancelSettingsEditRow}
+            onSaveEdit={saveSettingsEditRow}
           />
         ) : null}
       </div>

@@ -2619,6 +2619,240 @@ describe("settings viewer (real app wiring)", () => {
     await tick();
   });
 });
+// ── Settings editor (Edit affordance -> setConfigKey on the wire) ───────────
+// The socket half of the editor: the app parses the row field, mints a WRITE id
+// from its own sequence (independent of the snapshot id), and settles the row
+// only from the reply carrying that id. Rejections render verbatim; a parse
+// miss never reaches the socket. The pure state doctrine + row rendering are
+// pinned in settings-editor.test.tsx.
+
+describe("settings editor (real app wiring)", () => {
+  const editPayload = (requestId: number): Record<string, unknown> => ({
+    type: "configSnapshotResult",
+    requestId,
+    ts: 1700000000000,
+    configDir: "/cfg",
+    files: [{ path: "/cfg/defaults.json", inUse: true, status: "ok" }],
+    findings: [],
+    sections: [
+      {
+        name: "webui",
+        rows: [
+          { key: "webui.port", description: "WebUI server port", default: 3000, file: 3000, resolved: 3000, edit: { type: "number" } },
+          { key: "webui.host", description: "WebUI server host", default: "127.0.0.1", resolved: "127.0.0.1" },
+          { key: "webui.apiKey", description: "API key for login authentication.", default: null, resolved: null, leafSecret: true, redacted: true },
+          { key: "providers[0].url", description: "Provider base URL", file: "http://127.0.0.1:8000/v1", edit: { type: "string" } },
+          { key: "providers[0]", description: "Provider entry", file: { name: "p1", url: "http://127.0.0.1:8000/v1" }, edit: { type: "json" } },
+          { key: "providers[0].apiKey", description: "Provider API key.", leafSecret: true, file: null, redacted: true, edit: { type: "string", writeOnly: true } },
+        ],
+      },
+    ],
+  });
+
+  /** Open the dialog against a snapshot with one editable row; returns the snapshot id. */
+  async function openSnapshot(): Promise<number> {
+    await attach();
+    clearSent();
+    el("#settings-btn").click();
+    await tick();
+    const req = sent<{ requestId: number }>("configSnapshot").pop()!;
+    ws.fireMessage(editPayload(req.requestId));
+    await tick();
+    return req.requestId;
+  }
+
+  const rowFor = (keyName: string): HTMLElement =>
+    els(".settings-row").find((r) => r.querySelector(".settings-key")!.textContent === keyName)!;
+  const labeled = (scope: HTMLElement, label: string): HTMLElement | undefined =>
+    Array.from(scope.querySelectorAll("button")).find((b) => b.textContent === label) as unknown as HTMLElement | undefined;
+  const openEdit = async (keyName: string): Promise<void> => {
+    labeled(rowFor(keyName), "Edit")!.click();
+    await tick();
+  };
+  const fieldOf = (keyName: string): { value: string } =>
+    rowFor(keyName).querySelector(".settings-edit-input") as unknown as { value: string };
+
+  it("only the stamped row offers Edit; the rest stay inert (hint, or nothing)", async () => {
+    await openSnapshot();
+    expect(labeled(rowFor("webui.port"), "Edit")).toBeTruthy();
+    expect(labeled(rowFor("webui.host"), "Edit")).toBeUndefined();
+    expect(rowFor("webui.host").querySelector(".settings-file-hint")!.textContent).toContain("edit in file");
+    // A redacted row without a stamp (ancient reply) gets no affordance but
+    // does get the honest edit-in-file hint (judge finding #3, 2026-11-09).
+    expect(labeled(rowFor("webui.apiKey"), "Edit")).toBeUndefined();
+    expect(rowFor("webui.apiKey").querySelector(".settings-file-hint")!.textContent).toContain("edit in file");
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("Save sends setConfigKey with its own write id; id-space crossings drop; the matching reply paints the echo + the banner", async () => {
+    const snapId = await openSnapshot();
+    await openEdit("webui.port");
+    const field = fieldOf("webui.port");
+    expect(field.value).toBe(""); // dom-helper: the attribute, not .value, carries the seed
+    expect(rowFor("webui.port").querySelector(".settings-edit-input")!.getAttribute("value")).toBe("3000");
+    field.value = "4399";
+    clearSent();
+    labeled(rowFor("webui.port"), "Save")!.click();
+    await tick();
+    const frames = sent<{ requestId: number; keyPath: string; value: unknown }>("setConfigKey");
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.keyPath).toBe("webui.port");
+    expect(frames[0]!.value).toBe(4399); // parsed to a NUMBER before the wire
+    const saveId = frames[0]!.requestId!;
+    expect(typeof saveId).toBe("number");
+
+    // A snapshot refresh rides the OTHER sequence: the in-flight save survives
+    // it (still "Saving..."), and a write reply carrying the SNAPSHOT id is not
+    // the reply this row waits for.
+    els(".settings-btn").find((b) => b.textContent === "Refresh")!.click();
+    await tick();
+    const refreshed = sent<{ requestId: number }>("configSnapshot").pop()!.requestId;
+    expect(refreshed).toBeGreaterThan(snapId);
+    expect(labeled(rowFor("webui.port"), "Saving...")).toBeTruthy();
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: refreshed, ok: true, value: 777, needsRestart: true });
+    await tick();
+    expect(document.querySelector(".settings-restart")).toBeNull();
+    // Had it been taken for the save, the editor would have closed and the
+    // banner + the 777 echo would be up: instead the save is still in flight.
+    expect(rowFor("webui.port").querySelector(".settings-edit-input")).toBeTruthy();
+    expect(labeled(rowFor("webui.port"), "Saving...")).toBeTruthy();
+    expect(rowFor("webui.port").textContent).not.toContain("restart pending");
+
+    // The matching reply: row from the SERVER echo, banner up, editor closed.
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: saveId, ok: true, value: 4399, needsRestart: true });
+    await tick();
+    expect(rowFor("webui.port").querySelector(".settings-value")!.textContent).toBe("4399");
+    expect(rowFor("webui.port").querySelector(".settings-edit-input")).toBeNull();
+    const banner = el(".settings-restart");
+    expect(banner.textContent).toContain("Restart required");
+    expect(banner.getAttribute("role")).toBe("status");
+
+    // Settled: that id is spent, so a late/duplicate reply is inert.
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: saveId, ok: true, value: 999, needsRestart: true });
+    await tick();
+    expect(rowFor("webui.port").querySelector(".settings-value")!.textContent).toBe("4399");
+
+    // The next save gets a STRICTLY FRESHER write id, and the banner survives it.
+    clearSent();
+    await openEdit("webui.port");
+    fieldOf("webui.port").value = "4400";
+    labeled(rowFor("webui.port"), "Save")!.click();
+    await tick();
+    expect(sent<{ requestId: number }>("setConfigKey").pop()!.requestId).toBeGreaterThan(saveId);
+    expect(document.querySelector(".settings-restart")).toBeTruthy();
+
+    // Closing retires the banner: the next visit is honest against its own snapshot.
+    key(el("#settings-view"), "Escape");
+    await tick();
+    clearSent();
+    el("#settings-btn").click();
+    await tick();
+    ws.fireMessage(editPayload(sent<{ requestId: number }>("configSnapshot").pop()!.requestId));
+    await tick();
+    expect(document.querySelector(".settings-restart")).toBeNull();
+    expect(rowFor("webui.port").querySelector(".settings-value")!.textContent).toBe("3000");
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("the ALL-the-settings channels: scalars ride value, json and writeOnly ride valueText", async () => {
+    await openSnapshot();
+    // A string scalar with an INDEXED keyPath goes out verbatim on `value`.
+    await openEdit("providers[0].url");
+    fieldOf("providers[0].url")!.value = "http://127.0.0.1:9100/v1";
+    clearSent();
+    labeled(rowFor("providers[0].url"), "Save")!.click();
+    await tick();
+    let frame = sent<{ keyPath: string; value?: unknown; valueText?: unknown }>("setConfigKey").pop()!;
+    expect(frame.keyPath).toBe("providers[0].url");
+    expect(frame.value).toBe("http://127.0.0.1:9100/v1");
+    expect("valueText" in frame).toBe(false);
+    // Settle it (a save in flight renders every row's button as "Saving...").
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: sent<{ requestId: number }>("setConfigKey").pop()!.requestId, ok: true, value: "http://127.0.0.1:9100/v1", needsRestart: true });
+    await tick();
+
+    // A json container: the RAW textarea text rides valueText, never value.
+    await openEdit("providers[0]");
+    const area = rowFor("providers[0]").querySelector("textarea.settings-edit-input") as unknown as { value: string };
+    area.value = '{"name": "p1", "url": "http://x/v1"}';
+    clearSent();
+    labeled(rowFor("providers[0]"), "Save")!.click();
+    await tick();
+    frame = sent<{ keyPath: string; value?: unknown; valueText?: unknown }>("setConfigKey").pop()!;
+    expect(frame.keyPath).toBe("providers[0]");
+    expect(frame.valueText).toBe('{"name": "p1", "url": "http://x/v1"}');
+    expect("value" in frame).toBe(false);
+    // Its ok reply updates the row from the ECHOED text (re-parsed).
+    const saveId = sent<{ requestId: number }>("setConfigKey").pop()!.requestId;
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: saveId, ok: true, valueText: '{"name": "p1"}', needsRestart: true });
+    await tick();
+    expect(rowFor("providers[0]").querySelector(".settings-value")!.textContent).toContain("name: p1");
+
+    // A writeOnly secret: empty save refuses CLIENT-side (no frame, honest
+    // hint); a typed save rides valueText; its reply patches the row to the
+    // "set (redacted)" display plus the pending marker -- value:null echoes.
+    await openEdit("providers[0].apiKey");
+    clearSent();
+    labeled(rowFor("providers[0].apiKey"), "Save")!.click();
+    await tick();
+    expect(sent("setConfigKey")).toHaveLength(0);
+    expect(rowFor("providers[0].apiKey").querySelector(".settings-edit-error")!.textContent).toContain("no new value entered");
+    fieldOf("providers[0].apiKey")!.value = "FRESH-SECRET";
+    labeled(rowFor("providers[0].apiKey"), "Save")!.click();
+    await tick();
+    frame = sent<{ keyPath: string; value?: unknown; valueText?: unknown }>("setConfigKey").pop()!;
+    expect(frame.valueText).toBe("FRESH-SECRET");
+    expect("value" in frame).toBe(false);
+    const secretId = sent<{ requestId: number }>("setConfigKey").pop()!.requestId;
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: secretId, ok: true, value: null, redacted: true, needsRestart: true });
+    await tick();
+    expect(rowFor("providers[0].apiKey").querySelector(".settings-value")!.textContent).toBe("set (redacted)");
+    expect(rowFor("providers[0].apiKey").textContent).toContain("restart pending");
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("a refusal renders the server text VERBATIM and leaves the row in edit mode", async () => {
+    await openSnapshot();
+    await openEdit("webui.port");
+    fieldOf("webui.port").value = "0";
+    clearSent();
+    labeled(rowFor("webui.port"), "Save")!.click();
+    await tick();
+    const id = sent<{ requestId: number }>("setConfigKey").pop()!.requestId;
+    const message = '"webui.port" must be >= 1 (got 0)';
+    ws.fireMessage({ type: "setConfigKeyResult", requestId: id, ok: false, error: message });
+    await tick();
+    const err = rowFor("webui.port").querySelector(".settings-edit-error")!;
+    expect(err.textContent).toBe(message);
+    expect(err.getAttribute("role")).toBe("alert");
+    expect(rowFor("webui.port").querySelector(".settings-edit-input")).toBeTruthy(); // still editable
+    expect(document.querySelector(".settings-restart")).toBeNull(); // a refusal never claims a save
+    key(el("#settings-view"), "Escape");
+    await tick();
+  });
+
+  it("a parse miss never reaches the socket", async () => {
+    await openSnapshot();
+    await openEdit("webui.port");
+    fieldOf("webui.port").value = "banana";
+    clearSent();
+    labeled(rowFor("webui.port"), "Save")!.click();
+    await tick();
+    expect(sent("setConfigKey")).toHaveLength(0);
+    expect(rowFor("webui.port").querySelector(".settings-edit-error")!.textContent).toContain('"banana" is not a number');
+    // Escape cancels the edit (one retreat) before it closes the dialog.
+    key(el("#settings-view"), "Escape");
+    await tick();
+    expect(rowFor("webui.port").querySelector(".settings-edit-error")).toBeNull();
+    expect(el("#settings-view")).toBeTruthy();
+    key(el("#settings-view"), "Escape");
+    await tick();
+    expect(document.querySelector("#settings-view")).toBeNull();
+  });
+});
+
 // ── Workbench file tree + viewer (real app wiring) ──────────────────────────
 // The zero-tabs button docks the tree tab and requests the roots; replies
 // correlate by requestId (stale drop); a file click opens a "file" tab

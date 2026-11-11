@@ -16,7 +16,9 @@ import type {
   TranscriptReplyWire,
   SearchHitWire,
   ToolDisplayWire,
+  ConfigEditPayload,
   ConfigSnapshotResultWire,
+  SetConfigKeyResultWire,
   ListDirResultWire,
   ReadFileResultWire,
 } from "@extensions/websocket/protocol.ts";
@@ -25,6 +27,7 @@ export type { UploadFileWire };
 export type { TaskInfoWire };
 export type { SearchHitWire };
 export type { ConfigSnapshotResultWire };
+export type { SetConfigKeyResultWire };
 export type { ListDirResultWire };
 export type { ReadFileResultWire };
 
@@ -524,6 +527,7 @@ type ServerMessage =
   | LogDeletedMessage
   | SearchResultsMessage
   | ConfigSnapshotResultWire
+  | SetConfigKeyResultWire
   | ListDirResultWire
   | ReadFileResultWire
   | AuthRequiredMessage
@@ -572,6 +576,10 @@ interface ChatConfig {
   /** Reply to configSnapshot (settings viewer); the app drops it when the
    *  request id is stale (same doctrine as onSearchResults). */
   onConfigSnapshot?: (requestId: number | undefined, snapshot: ConfigSnapshotResultWire) => void;
+  /** Reply to setConfigKey (settings editor); the app drops it when the
+   *  write-request id is stale (the save sequence is its own counter, so a
+   *  snapshot refresh cannot collide with it). */
+  onSetConfigKey?: (requestId: number | undefined, result: SetConfigKeyResultWire) => void;
   /** Reply to listDir (workbench file tree); the tree state drops stale ids
    *  by its own pending map (the settings-viewer precedent). */
   onListDir?: (requestId: number | undefined, result: ListDirResultWire) => void;
@@ -614,6 +622,11 @@ export interface ChatController {
   searchLogs: (query: string, requestId: number) => void;
   /** Ask for a config snapshot (settings viewer); arrives via onConfigSnapshot. */
   requestConfigSnapshot: (requestId: number) => void;
+  /** Persist one config value (settings editor; ALL the settings): scalars
+   *  ride { value }, JSON containers and writeOnly secret replaces ride
+   *  { valueText }. Arrives via onSetConfigKey with the same id. The server
+   *  revalidates and says needsRestart -- the client never claims live effect. */
+  setConfigKey: (requestId: number, keyPath: string, payload: ConfigEditPayload) => void;
   /** List a workspace dir (workbench tree); arrives via onListDir. No path = the roots. */
   listDir: (requestId: number, path?: string) => void;
   /** Read a line-window page of a text file (workbench viewer); arrives via onReadFile. */
@@ -678,6 +691,7 @@ export function createChat({
   onLogDeleted,
   onSearchResults,
   onConfigSnapshot,
+  onSetConfigKey,
   onListDir,
   onReadFile,
   onSessionDeleted,
@@ -913,6 +927,12 @@ export function createChat({
         // The settings viewer's snapshot reply (not session-scoped); the app
         // drops stale ids. No transcript side effects.
         onConfigSnapshot?.(data.requestId, data);
+        return;
+      case "setConfigKeyResult":
+        // The settings editor's write reply (not session-scoped); the app
+        // drops stale ids against its own save sequence. No transcript side
+        // effects -- rejections ride the payload's error field, correlated.
+        onSetConfigKey?.(data.requestId, data);
         return;
       case "listDirResult":
         // The workbench file tree's listing reply (not session-scoped); the
@@ -1463,6 +1483,14 @@ export function createChat({
     send({ type: "configSnapshot", requestId });
   }
 
+  /** Persist one config value (settings editor). Scalars ride { value },
+   *  JSON containers / writeOnly secret replaces ride { valueText }. The
+   *  reply rides onSetConfigKey with the same id; stale replies drop
+   *  client-side. */
+  function setConfigKey(requestId: number, keyPath: string, payload: ConfigEditPayload): void {
+    send({ type: "setConfigKey", requestId, keyPath, ...payload });
+  }
+
   /** List a workspace directory (workbench file tree); omit path for the
    *  roots. The reply rides onListDir with the same id. */
   function listDir(requestId: number, path?: string): void {
@@ -1501,6 +1529,7 @@ export function createChat({
     deleteLog,
     searchLogs,
     requestConfigSnapshot,
+    setConfigKey,
     listDir,
     readFile,
     sendCommand,

@@ -17,7 +17,7 @@ import {
   initialSettingsPanelState,
   displayConfigValue,
 } from "@extensions/webui/ui/settings-view.tsx";
-import type { ConfigSnapshotResultWire } from "@extensions/websocket/protocol.ts";
+import type { ConfigKeyEditWire, ConfigSnapshotResultWire } from "@extensions/websocket/protocol.ts";
 import { mount, type DomNode, type Mounted } from "@utils/jsx";
 
 const noop = (): void => {};
@@ -79,9 +79,23 @@ const CANNED: ConfigSnapshotResultWire = {
 
 let current: Mounted | null = null;
 
+/** Editor-context defaults: the panel renders inert (no row in edit mode, no
+ *  save in flight, no banner) unless a test opts into the editor props. */
 function renderPanel(
   snapshot: ConfigSnapshotResultWire | null,
-  opts: { pending?: boolean; onClose?: () => void; onRefresh?: () => void } = {},
+  opts: {
+    pending?: boolean;
+    onClose?: () => void;
+    onRefresh?: () => void;
+    editing?: string | null;
+    saving?: boolean;
+    editError?: { key: string; message: string } | null;
+    needsRestart?: boolean;
+    editedKeys?: string[];
+    onEdit?: (key: string) => void;
+    onCancelEdit?: () => void;
+    onSaveEdit?: (key: string, raw: string, edit: ConfigKeyEditWire) => void;
+  } = {},
 ): HTMLElement {
   const host = document.createElement("div");
   current = mount(
@@ -91,6 +105,14 @@ function renderPanel(
       rootRef={() => {}}
       onClose={opts.onClose ?? noop}
       onRefresh={opts.onRefresh ?? noop}
+      editing={opts.editing ?? null}
+      saving={opts.saving ?? false}
+      editError={opts.editError ?? null}
+      needsRestart={opts.needsRestart ?? false}
+      editedKeys={opts.editedKeys ?? []}
+      onEdit={opts.onEdit ?? noop}
+      onCancelEdit={opts.onCancelEdit ?? noop}
+      onSaveEdit={opts.onSaveEdit ?? noop}
     />,
     host as unknown as DomNode,
   );
@@ -378,7 +400,18 @@ describe("settings viewer interactions", () => {
 describe("settings panel state", () => {
   it("open re-fetches: pending, no stale snapshot, fresh id", () => {
     const opened = openSettingsPanel(initialSettingsPanelState);
-    expect(opened).toEqual({ open: true, pending: true, snapshot: null, reqId: 1 });
+    expect(opened).toEqual({
+      open: true,
+      pending: true,
+      snapshot: null,
+      reqId: 1,
+      editing: null,
+      pendingSave: null,
+      editError: null,
+      saveReqId: 0,
+      needsRestart: false,
+      editedKeys: [],
+    });
     // Re-open after a close bumps again (every open re-fetches).
     const reopened = openSettingsPanel(closeSettingsPanel(opened));
     expect(reopened.reqId).toBe(3);

@@ -3843,3 +3843,106 @@ body.workbench-resizing {
     color: var(--warn, #d9a441);
     border-color: var(--warn, #d9a441);
 }
+
+/* Settings editor (rows the server stamps `edit`, the inline input, the
+   restart banner, and the honest edit-in-file hint on inert rows). */
+.settings-edit {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.settings-edit-input {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--text-primary);
+    background: var(--bg-input, var(--bg-secondary));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px 6px;
+    max-width: 220px;
+    min-width: 0;
+}
+
+.settings-edit-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* JSON container editor: a monospace textarea (the value is JSON, the
+   formatting is the user's). Escape cancels, Enter inserts a newline --
+   saving is the explicit button. */
+.settings-edit-json-wrap {
+    align-items: flex-start;
+}
+
+.settings-edit-json {
+    max-width: min(480px, 100%);
+    min-width: 240px;
+    line-height: 1.45;
+    resize: vertical;
+    white-space: pre;
+}
+
+/* writeOnly secret REPLACE box: never prefilled, bytes hidden on screen. */
+.settings-edit-secret {
+    max-width: 220px;
+}
+
+.settings-btn.settings-save {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.settings-edit-btn {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 1px 6px;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.settings-edit-btn:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.settings-edit-btn:disabled,
+.settings-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.settings-file-hint {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 1px 5px;
+    color: var(--text-muted);
+    cursor: help;
+}
+
+.settings-edit-error {
+    font-size: 0.7rem;
+    color: var(--danger, #e05252);
+    overflow-wrap: anywhere;
+}
+
+.settings-restart {
+    border: 1px solid var(--border-light);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: rgba(90, 160, 255, 0.07);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    padding: 8px 10px;
+    margin: 0 14px 10px;
+}

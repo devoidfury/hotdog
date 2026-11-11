@@ -25,8 +25,11 @@ import { createWsMockWs } from "../mocks/websocket.ts";
 
 const TMP = mkdtempSync(join(TMP_PARENT, "hotdog-cfgsnap-"));
 
-// Distinctive sentinels: each secret-shaped slot in the fixture carries a
+// Distinctive sentinels: each SECRET-shaped slot in the fixture carries a
 // different one, so the sweep also proves WHICH layer leaked if any does.
+// (Owner ruling 2026-11-09, ALL-the-settings editor: NON-secret values --
+// including unknown file-only keys' values -- legitimately ride rows now;
+// the sweep's contract is secrets, exactly as isSecretConfigPath defines.)
 const SENTINELS = [
   "SENTINEL-FILE-API", // defaults.json apiKey
   "SENTINEL-ENV-API", // HOTDOG_API_KEY
@@ -34,7 +37,7 @@ const SENTINELS = [
   "SENTINEL-WEBUI-FILE", // defaults.json webui.apiKey (via core.config)
   "SENTINEL-WEBUI-ENV", // HOTDOG_WEBUI_API_KEY
   "SENTINEL-PROV-RUN", // core.config.providers[0].apiKey (runtime shape)
-  "SENTINEL-UNKNOWN-VAL", // value of the unknown key in the file
+  "SENTINEL-UNKNOWN-TOKEN", // value of an UNKNOWN secret-shaped key (rides no row)
   "SENTINEL-PASS", // X-ADMIN-PASS inside a container value
   "SENTINEL-CERT", // X-DB-CERT inside a container value
   "SENTINEL-CREDS", // X-AWS-CREDS inside a container value
@@ -47,10 +50,11 @@ const CONFIG_TEXT = `{
   // a comment (JSONC) -- rescue fix repairs this
   "apiKey": "SENTINEL-FILE-API",
   "theme": "dark",
-  "themee": "SENTINEL-UNKNOWN-VAL",
+  "themee": "glow",
   "theme": "light",
   "bashTool": { "maxToolOutputLines": 4000 },
-  "webui": { "port": 4321, "apiKey": "SENTINEL-WEBUI-FILE", "headers": { "X-ADMIN-PASS": "SENTINEL-PASS", "X-DB-CERT": "SENTINEL-CERT", "X-AWS-CREDS": "SENTINEL-CREDS" } }
+  "webui": { "port": 4321, "apiKey": "SENTINEL-WEBUI-FILE", "headers": { "X-ADMIN-PASS": "SENTINEL-PASS", "X-DB-CERT": "SENTINEL-CERT", "X-AWS-CREDS": "SENTINEL-CREDS" } },
+  "myFtToken": "SENTINEL-UNKNOWN-TOKEN"
 }
 `;
 
@@ -215,9 +219,9 @@ describe("configSnapshot findings", () => {
     expect(unknown).toBeDefined();
     expect(unknown!.line).toBe(5);
     expect(unknown!.didYouMean).toContain("theme");
-    // The finding object itself serializes without the value (belt: the
-    // whole-payload sweep already proved the sentinel is absent everywhere).
-    expect(JSON.stringify(unknown).includes("SENTINEL-UNKNOWN-VAL")).toBe(false);
+    // The finding object itself serializes without the value (the ROW for
+    // the unknown key carries it -- ALL-the-settings; the FINDINGS never do).
+    expect(JSON.stringify(unknown).includes("glow")).toBe(false);
   });
 
   it("duplicate key points at both lines", async () => {
@@ -400,6 +404,27 @@ describe("configSnapshot wire-surface hardening", () => {
     expect(String(profiles.manager!.systemPrompt)).toMatch(/^\[\d+-char text omitted\]$/);
     // And a top-level long string keeps the OLD truncation posture (row
     // "prompt" test in layer slots) -- the stub is container-members only.
+  });
+
+  it("unknown file-only keys become ROWS: non-secret rides stamped, secret-shaped redacts to a writeOnly box", async () => {
+    const payload = await buildConfigSnapshot(core);
+    const all = payload.sections.flatMap((s) => s.rows);
+    const themee = all.find((r) => r.key === "themee")!;
+    expect(themee).toBeDefined();
+    expect(themee.file).toBe("glow"); // the file value rides (it is config data, not a credential)
+    expect(themee.edit).toEqual({ type: "string" }); // editable: unknown keys are REAL rows now
+    // ...while the same name-based rule nulls a secret-shaped unknown value,
+    // and the sweep above proved SENTINEL-UNKNOWN-TOKEN is nowhere in the reply.
+    const ft = all.find((r) => r.key === "myFtToken")!;
+    expect(ft).toBeDefined();
+    expect(ft.leafSecret).toBe(true);
+    expect(ft.file).toBeNull();
+    expect(ft.redacted).toBe(true);
+    expect(ft.edit).toEqual({ type: "string", writeOnly: true });
+    // And the duplicate "theme" (twice in the file) stays un-stamped: the
+    // locator refuses to guess which occurrence it would splice.
+    const theme = all.find((r) => r.key === "theme")!;
+    expect(theme.edit).toBeUndefined();
   });
 
   it("non-secret keys keep their values (anti-over-redaction pin)", async () => {

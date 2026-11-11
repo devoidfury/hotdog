@@ -73,6 +73,19 @@ export const C2S = {
   // byte-identical. Binary files are refused honestly with zero content
   // bytes. Replied with READ_FILE_RESULT, requesting socket only.
   READ_FILE: "readFile",
+  // Edit ONE config value (settings editor, ALL the settings): { type,
+  // requestId, keyPath, value? , valueText? }. keyPath is a dotted CONFIG
+  // PATH that may address array elements by index ("providers[0].url");
+  // zero path components come off the wire as filesystem paths. Scalars ride
+  // `value` (string|number|boolean); JSON containers and writeOnly secret
+  // replaces ride `valueText` (raw text the server parses/revalidates). The
+  // write is a surgical JSONC text edit of exactly that value (comments and
+  // formatting outside the value are user data and survive), atomic,
+  // rescue-verified with rollback. Success carries needsRestart: config
+  // resolves at startup, so the server NEVER claims live effect. A secret
+  // replace echoes value:null + redacted:true -- never the new value.
+  // Replied with SET_CONFIG_KEY_RESULT, requesting socket only.
+  SET_CONFIG_KEY: "setConfigKey",
 } as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────
@@ -102,6 +115,12 @@ export const S2C = {
   // Reply to C2S READ_FILE (requesting socket only), correlated by requestId.
   // Same error-field doctrine as LIST_DIR_RESULT.
   READ_FILE_RESULT: "readFileResult",
+  // Reply to C2S SET_CONFIG_KEY (requesting socket only), correlated by
+  // requestId. ok:true carries the persisted value echo + needsRestart:true
+  // (the running server still uses the pre-edit value until restart);
+  // ok:false carries the honest error string (rendered verbatim, stacks
+  // stay server-side). See handlers-config.ts.
+  SET_CONFIG_KEY_RESULT: "setConfigKeyResult",
 
   // Profile management
   PROFILES: "profiles",
@@ -380,7 +399,14 @@ export function wireImages(
  *  "[truncated]" marker (MAX_TASK_ACTIVITY_CHARS precedent). The schema
  *  bounds the row set, this bounds the fat values. */
 export const MAX_CONFIG_VALUE_CHARS = 2000;
-/** Row and finding caps per snapshot reply (belt over the schema's own bound). */
+/** Row and finding caps per snapshot reply (belt over the schema's own
+ *  bound; MAX_TASK_ACTIVITY_CHARS idiom: count rows, honor the truncated
+ *  flag). KEPT at 400 for the all-fields editor (owner ruling 2026-11-09):
+ *  rows now include file-only keys, provider entries (indexed) and the
+ *  children of class-A refused containers, but a full real snapshot is ~80
+ *  schema leaves plus tens of extras -- 400 bounds one reply well above the
+ *  real payload, and the honest `truncated` flag covers the pathological
+ *  config. A bump needs a documented reason, not just headroom. */
 export const MAX_CONFIG_ROWS = 400;
 export const MAX_CONFIG_FINDINGS = 100;
 
@@ -392,9 +418,13 @@ export const MAX_CONFIG_FINDINGS = 100;
  *   providers.*.apiKey) or equals "key";
  * - endsWith "token" (singular; accessToken, GH_TOKEN -- "reserveTokens"/
  *   "tokens" budget knobs and sessionTokenTtlMin do NOT match);
- * - endsWith "secret" / "pass" (which covers password and passwd) /
- *   "credential" / "auth" (authorization) / "cert" (caCert, certPem) /
- *   "creds".
+ * - endsWith "secret" / "credential" / "auth" / "cert" (caCert, certPem) /
+ *   "creds";
+ * - endsWith "pass" / "passwd" / "password" / "pwd" (each spelling is listed:
+ *   "password" does NOT end in "pass" -- db_password and DB_PASSWORD alike
+ *   match on the full word);
+ * - endsWith "authorization" / "bearer" (the trailing word is what names a
+ *   credential: "auth" alone does not match "authorization").
  * Over-redaction is the safe failure; under-redaction is the bug. Keys it
  * catches in the current schemas: apiKey (+ env HOTDOG_API_KEY/AI_API_KEY),
  * providers.*.apiKey (config-passthrough block), webui.apiKey (+ env
@@ -409,9 +439,14 @@ export function isSecretConfigPath(keyPath: string): boolean {
     seg.endsWith("token") ||
     seg.endsWith("secret") ||
     seg.endsWith("pass") ||
+    seg.endsWith("passwd") ||
+    seg.endsWith("password") ||
+    seg.endsWith("pwd") ||
     seg.endsWith("credential") ||
     seg.endsWith("creds") ||
     seg.endsWith("auth") ||
+    seg.endsWith("authorization") ||
+    seg.endsWith("bearer") ||
     seg.endsWith("cert")
   ) {
     return true;
@@ -479,6 +514,54 @@ export interface ConfigKeyEntryWire {
   /** Redaction fired on this row: leaf-secret, or a secret-shaped entry
    *  nulled inside a container value (bashTool.env, mcpServers[].env). */
   redacted?: boolean;
+  /** Settings EDITOR affordance: present on EVERY row the write path would
+   *  accept from setConfigKey (owner ruling 2026-11-09: ALL the settings --
+   *  the whitelist is retired) and ABSENT only on the honest refusal classes,
+   *  whose writes the SERVER refuses too (the stamp predicate is the write
+   *  gate, not just the button):
+   *  (1) a CONTAINER whose shipped payload is not byte-faithful (secrets were
+   *  nulled, URL userinfo scrubbed, or long strings stubbed inside -- editing
+   *  from the stub would overwrite the real bytes); its children ride as
+   *  their own stamped rows. (Lossy SCALARS are not a third class: scalar
+   *  writes replace the whole token, so they carry `seedless` below.)
+   *  (2) anything the surgical locator cannot address (a duplicated key on
+   *  the path, an unparseable/unaddressable file, a key the path grammar
+   *  cannot spell).
+   *  (3) a file value of null -- the editor takes no write shape from it
+   *  (the scalar/json distinction has nothing to hold).
+   *  The type/bounds ride as INPUT HINTS for the row editor; the server
+   *  revalidates the incoming value on every write, so a tampered hint
+   *  changes nothing but the widget. */
+  edit?: ConfigKeyEditWire;
+}
+
+/** Editor descriptor stamped by the server on editable rows.
+ *  - scalar kinds (number/integer/boolean/string): the schema-declared type
+ *    (runtime-inferred for file-only keys); minimum/maximum are the schema's
+ *    declared bounds (the exact pair the write path enforces). The value
+ *    rides the `value` channel of setConfigKey.
+ *  - "json": a container (object/array). The client renders a monospace JSON
+ *    textarea seeded from the row's SHIPPED value; the new value rides the
+ *    `valueText` channel and must JSON.parse AND keep the current shape class
+ *    (object stays object, array stays array). Containers whose ship is
+ *    unfaithful never carry this stamp (refusal class 1; the write path
+ *    refuses their wholesale writes with the same predicate).
+ *  - writeOnly:true (always type "string", always a secret-shaped path):
+ *    a REPLACE box (password input, never prefilled). The current value never
+ *    rides any reply and never leaves the server; the new value rides
+ *    `valueText` and is echoed back only as `value: null + redacted: true`.
+ *  - seedless:true (type "string"; the shipped form was truncated or the URL
+ *    userinfo scrubbed): a REPLACE box with an EMPTY input -- the row's ship
+ *    is a summary, not a seed, and a scalar write replaces the whole token
+ *    anyway, so the user types a full replacement instead of editing a stub. */
+export interface ConfigKeyEditWire {
+  type: "number" | "integer" | "boolean" | "string" | "json";
+  minimum?: number;
+  maximum?: number;
+  /** Secret-shaped leaf: the write replaces the value sight-unseen. */
+  writeOnly?: true;
+  /** Lossy ship (truncated / URL-scrubbed): the editor starts EMPTY. */
+  seedless?: true;
 }
 
 /** Key table section: "core" first, then one section per loaded extension. */
@@ -499,6 +582,45 @@ export type ConfigSnapshotResultWire = {
   sections: ConfigSectionWire[];
   /** Set when a row cap cut the table (MAX_CONFIG_ROWS / MAX_CONFIG_FINDINGS). */
   truncated?: boolean;
+};
+
+// ── Config key edit (C2S setConfigKey → S2C setConfigKeyResult) ────────────
+// The settings editor's write path (see ./handlers-config.ts). One value,
+// one addressable keyPath, one atomic surgical edit of the resolved config
+// file. The reply NEVER claims live effect: config resolves at startup, so
+// success rides needsRestart:true until the process restarts.
+
+/** What the client sends as the new value: scalars ride `value`; JSON
+ *  containers and writeOnly secret replaces ride `valueText` (raw text --
+ *  the server parses, validates, and re-serializes nothing it did not get).
+ *  The channels are exclusive: a frame carrying BOTH is refused at the gate
+ *  (and one carrying neither never reaches a write). */
+export type ConfigEditPayload = { value: string | number | boolean } | { valueText: string };
+
+export type SetConfigKeyResultWire = {
+  type: "setConfigKeyResult";
+  /** Echo of the C2S setConfigKey request id; stale replies drop client-side. */
+  requestId?: number;
+  ok: boolean;
+  /** Honest one-line rejection (unaddressable path / failed schema or shape
+   *  validation / ambiguous target / unparseable file / empty writeOnly
+   *  replace / write or verification failure). Rendered verbatim; stacks stay
+   *  server-side in the log. */
+  error?: string;
+  /** True on ok: the value is persisted to the config file but the RUNNING
+   *  server keeps its startup-resolved value until it restarts. */
+  needsRestart?: boolean;
+  /** The persisted value echo on a scalar save (the client updates the row's
+   *  file slot from this, never from its own input). `null` ONLY on a
+   *  writeOnly secret replace, paired with `redacted: true` -- the new secret
+   *  NEVER rides the reply. */
+  value?: string | number | boolean | null;
+  /** The persisted JSON text echo on a container (type "json") save; absent
+   *  on every other save. */
+  valueText?: string;
+  /** Set on a successful writeOnly secret replace: the value landed, its
+   *  bytes are not shippable (this is the ONLY echo such a save produces). */
+  redacted?: true;
 };
 
 // ── Workspace file tree + text reader (C2S listDir/readFile → S2C replies) ─

@@ -7,6 +7,7 @@ The `defaults.json` file is the main configuration file for hotdog. It lives in 
 - [Config Directory Resolution](#config-directory-resolution)
 - [File Format & Key Normalization](#file-format--key-normalization)
 - [Resolution Layers](#resolution-layers)
+- [Config Diagnostics & Repair (`hotdog rescue`)](#config-diagnostics--repair-hotdog-rescue)
 - [Core Settings](#core-settings)
 - [Providers & Models](#providers--models)
 - [Profiles (in-config)](#profiles-in-config)
@@ -83,6 +84,24 @@ Each config value is resolved by walking a priority chain **defined per key** in
 | **Default** | Schema defaults | Fallbacks declared in `core.config.json` / extension schemas. |
 
 A numeric schema property may declare `"minimum"`. A layer value that casts to a number below the bound is rejected like a failed cast: resolution skips that layer and continues to the next (legacy alias, then default), so one out-of-bounds value can never override a sane default. Defaults are repo-authored and not bounds-checked. A config-file violation is also a hard startup error (the JSON-Schema validator enforces `minimum` on the merged config); the fall-through covers the CLI/env layers validation never sees. Bounds follow consumer semantics: `0` is kept legal where it is a coherent posture (`uploadLimits.*` reject-all, `maxToolCallsPerIteration: 0` = no tools, `bashTool.maxTimeoutMs: 0` = cap disabled) and illegal where it misfires (`bashTool.bashTimeoutMs: 0` arms a ~1ms kill timer, `contextLimit: 0` poisons compaction math). `taskLanesPerProvider` is deliberately unbounded: below 1 means unlimited.
+
+---
+
+## Config Diagnostics & Repair (`hotdog rescue`)
+
+`hotdog rescue` runs **before** anything loads the config, so it reaches you exactly when startup cannot:
+
+- `hotdog rescue` reports the config-dir resolution chain, per-file verdicts (missing / broken / ok), the exact line and caret for a JSON grammar error, JSONC-isms (comments, trailing commas, BOM), unknown/duplicate/removed keys with did-you-mean, schema violations, and **out-of-set enum values** with key path, line, column, the offending value as shipped, and the accepted set.
+- `hotdog rescue fix` repairs what it can and keeps a `.bak` of the pre-fix bytes: it strips JSONC-isms so the strict loader parses the file again, and resets each out-of-set enum value to the schema's default -- or, **when the schema declares no default, removes the key** so the built-in default applies (it says so plainly in the report). The enum edit is surgical: only the offending value token (plus, for a removal, one separator comma) is touched -- comments, formatting and every other byte of your file survive. Writes are atomic (temp + rename) and re-verified after landing; a repair that cannot be verified is rolled back to the exact pre-fix bytes.
+- `hotdog rescue --json` answers with a pure JSON envelope (findings carry the key, line, column, accepted set, default and whether `fix` repaired it).
+
+Enum coverage is schema-driven: core keys with closed sets (`logLevel`, `logTarget`, `toolExec`, `execFence`) and nested extension leaves (`compaction.strategy`, `webSearch.provider`, ...) ride the same stage -- any future enum gets diagnosis and repair with no special-casing. A value outside its set is a **hard startup error** (invalid settings keep failing boot); when that happens the fatal message names every offending key, its accepted set, and `hotdog rescue fix`:
+
+```text
+ENUM: "logLevel" (line 2, column 15) = "verbos" not in the accepted set ["debug", "info", "warn", "error"]
+```
+
+One honest note on comments: to the strict loader a file with comments is a *broken* file, so `fix` removes the comments too (that is how it makes the file bootable again) -- the `.bak` keeps them. The enum repair itself never touches comment bytes; when both problems share a file, one `fix` pass lands both repairs in one write behind one `.bak`.
 
 ---
 
@@ -324,6 +343,30 @@ Disable session logging. Can also be controlled via environment variables:
 { "noLog": true }
 ```
 
+### `logLevel`
+
+- **Type:** `string` (`debug` | `info` | `warn` | `error`)
+- **Default:** `info`
+- **Resolution:** env `HOTDOG_LOG_LEVEL` > config > default
+
+Minimum level for the diagnostic logger (the `[LEVEL] HH:MM:SS ...` lines on stderr/stdout). Unrelated to `noLog`, which silences the JSONL session log that resume/search read -- this key shapes the diagnostic logger only. Boot-only: the logger is initialized from an early peek at the in-use config file, before the config layer loads, so edits need a restart; an out-of-set value falls back to the default and the logger warns once (naming the value and the accepted set) as soon as it is up -- and a `logTarget` of `none` suppresses that warn by design. Session startup keeps failing hard on an out-of-set value (validation): `hotdog rescue` names the key, line and accepted set, and `hotdog rescue fix` resets the value to `info` (.bak kept).
+
+```json
+{ "logLevel": "debug" }
+```
+
+### `logTarget`
+
+- **Type:** `string` (`stderr` | `stdout` | `none`)
+- **Default:** `stderr`
+- **Resolution:** env `HOTDOG_LOG_TARGET` > config > default
+
+Where the diagnostic logger writes: `stderr`, `stdout`, or `none` (complete silence from the first boot line; unrelated to `noLog`, which kills the JSONL session log, not this logger). Boot-only like `logLevel` -- applied by the same early peek before the config layer loads, so edits need a restart, and `none` also swallows the invalid-value warn described under `logLevel`. Session startup fails hard on an out-of-set value like any enum key; `hotdog rescue fix` resets it to `stderr` (see [Config Diagnostics & Repair](#config-diagnostics--repair-hotdog-rescue)).
+
+```json
+{ "logTarget": "stdout" }
+```
+
 ### `reindex`
 
 - **Type:** `boolean`
@@ -496,7 +539,7 @@ Write compaction output to `compaction.out.json` in the sessions dir for debuggi
 - **Default:** `false`
 - **Resolution:** CLI > env `HOTDOG_HOOK_TRACE` > config > default
 
-Trace hook execution. Requires `HOTDOG_LOG_LEVEL=debug`.
+Trace hook execution. Requires the debug log level: `HOTDOG_LOG_LEVEL=debug` or `"logLevel": "debug"` in the config file.
 
 ```json
 { "hookTrace": true }
@@ -1713,8 +1756,8 @@ These extensions expose a single config knob, `{ "<key>": { "enabled": <boolean,
 | `HOTDOG_LOG` | `noLog` | Set to `false` to disable logging (inverted). |
 | `HOTDOG_NO_LOG` | `noLog` | Set to `true` to disable logging. |
 | `HOTDOG_HOOK_TRACE` | `hookTrace` | Set to `true` to enable hook tracing. |
-| `HOTDOG_LOG_LEVEL` | Logging | Log level (`debug`, `info`, `warn`, `error`). `debug` required for `hookTrace`. |
-| `HOTDOG_LOG_TARGET` | Logging | Log target (`stderr`, `stdout`, `none`). |
+| `HOTDOG_LOG_LEVEL` | `logLevel` | Log level (`debug`, `info`, `warn`, `error`); beats the `logLevel` config key. `debug` required for `hookTrace`. |
+| `HOTDOG_LOG_TARGET` | `logTarget` | Log target (`stderr`, `stdout`, `none`); beats the `logTarget` config key. |
 | `HOTDOG_DATA_DIR` | Data directory | Override the top-level runtime data dir (default `~/.cache/hotdog`). Holds `sessions/`, `workflows/`, `task-lanes/`. Env-only: schema computes resolve during config loading. |
 | `HOTDOG_SESSIONS_DIR` | Session logs | Override the directory where JSONL session logs are stored. Wins over the `HOTDOG_DATA_DIR`-derived `<data>/sessions`. |
 | `BRAVE_API_KEY` | `webSearch.braveApiKey` | Brave Search API key. |

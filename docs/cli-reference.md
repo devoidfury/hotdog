@@ -17,8 +17,8 @@ hotdog sessions cleanup          # Remove old sessions; also reclaims leaked
                                  # <id>.baton.json mirrors (paired mirrors go
                                  # with their session; orphaned mirrors whose log
                                  # is gone go once past the same --older-than cutoff)
-hotdog rescue                    # Diagnose config files (paths, syntax, unknown keys)
-hotdog rescue fix                # ...and repair comments/trailing commas (.bak kept)
+hotdog rescue                    # Diagnose config files (paths, syntax, unknown keys, out-of-set enum values)
+hotdog rescue fix                # ...and repair: strip comments/trailing commas, reset out-of-set enums to their schema default (.bak kept)
 hotdog rescue --json             # ...as a JSON envelope (stdout pure JSON; findings, files, totals)
 hotdog webui                     # Start the web UI server
 hotdog workflow validate <f> [--param key=value]...
@@ -87,7 +87,7 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
 --show-tools                 Show tool calls in output (default; overrides hideTools)
 --show-thinking              Show reasoning/thinking output
 --no-colors                  Disable colors (also honors NO_COLOR / TERM=dumb env)
---hook-trace                 Trace hook execution (requires HOTDOG_LOG_LEVEL=debug)
+--hook-trace                 Trace hook execution (requires debug level: HOTDOG_LOG_LEVEL or config logLevel)
 -v, --version                Show version
 -h, --help                   Show help
 ```

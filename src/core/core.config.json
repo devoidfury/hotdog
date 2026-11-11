@@ -1,6 +1,7 @@
 {
   "baseUrl": {
     "type": "string",
+    "description": "Base URL of the AI API, sent with every request. Resolves provider-first (active provider url, then CLI --ai-url, config aiUrl, env AI_URL/HOTDOG_AI_URL); if nothing resolves it, boot only warns and the first LLM request throws \"No AI URL configured\".",
     "layers": [
       { "source": "provider", "path": "url" },
       { "source": "cli", "key": "aiUrl" },
@@ -12,6 +13,7 @@
   },
   "apiKey": {
     "type": "string",
+    "description": "API key for the AI endpoint (bearer auth). Resolves provider-first, then CLI -k/--api-key, config apiKey, env HOTDOG_API_KEY/AI_API_KEY; the settings panel treats it as a write-only secret.",
     "layers": [
       { "source": "provider", "path": "apiKey" },
       { "source": "cli", "key": "apiKey" },
@@ -23,6 +25,7 @@
   },
   "thinkerFormat": {
     "type": "string",
+    "description": "Format string for thinking/reasoning output in the CLI sinks; {} is replaced by the thinking content (default '[Thinking: {}]'). Display only -- hideThinking drops the output entirely.",
     "cliFlag": {
       "short": "-t",
       "long": "--thinker",
@@ -37,6 +40,7 @@
   },
   "toolCallDisplayFormat": {
     "type": "string",
+    "description": "Layout template for tool-call lines in the CLI sinks: first {} is the tool name, second a human-readable args summary, never raw JSON. Unset, tools print their own semantic header; setting the template opts out of those headers.",
     "cliFlag": {
       "long": "--toolfmt",
       "type": "string",
@@ -50,6 +54,7 @@
   },
   "toolOutputFmt": {
     "type": "string",
+    "description": "Format string for tool-result display in the CLI sinks; {} is the flattened result text, or -- for edit-family tools attesting success -- a capped ANSI diff block. Default fences the output with ---- lines.",
     "cliFlag": {
       "long": "--tool-output-fmt",
       "type": "string",
@@ -63,6 +68,7 @@
   },
   "modelWireFormat": {
     "type": "string",
+    "description": "WireFormat registry name shaping harness wrappers (tool results, file includes, system notices); provider/model wireFormat overrides it. The default xml shape comes from the wire-format-xml extension, and an unregistered name throws at request build -- never a silent fallback.",
     "cliFlag": {
       "long": "--model-wire-format",
       "type": "string",
@@ -76,6 +82,7 @@
   },
   "modelRoleMapping": {
     "type": "string",
+    "description": "RoleMapping registry name deciding where harness messages ride on the wire (system-first sends them as user role, developer as developer role); provider/model roleMapping overrides it. Both built-ins ship in the role-mapping-default extension; an unregistered name throws at request build.",
     "cliFlag": {
       "long": "--model-role-mapping",
       "type": "string",
@@ -89,6 +96,7 @@
   },
   "chatTimeout": {
     "type": "number",
+    "description": "Timeout in seconds for chat/API requests (default 600). Long-lived streams are bounded sooner by the streamIdleTimeout watchdog, which is the knob for wedged backends.",
     "cliFlag": {
       "long": "--chat-timeout",
       "type": "number",
@@ -102,6 +110,7 @@
   },
   "healthCheckTimeout": {
     "type": "number",
+    "description": "Timeout in seconds for provider health-check probes -- both the info connectivity checks and the provider-pool sweep (default 5).",
     "layers": [
       { "source": "config", "key": "healthCheckTimeoutSecs" },
       { "default": 5 }
@@ -109,6 +118,7 @@
   },
   "providerHealthCheckIntervalSecs": {
     "type": "number",
+    "description": "Interval in seconds for the provider-pool health sweep (probes /health, or /v1/models when fetchModels is on); a down provider is skipped by placement. 0 removes the timer but keeps failure-driven demotion; recovery happens through a successful probe or any completing task.",
     "layers": [
       { "source": "config", "key": "providerHealthCheckIntervalSecs" },
       { "default": 30 }
@@ -116,6 +126,7 @@
   },
   "streamIdleTimeout": {
     "type": "number",
+    "description": "Streaming inactivity watchdog in seconds (default 240): a stream yielding no event is aborted and re-issued through the normal retry path, so a wedged local backend fails in minutes rather than at chatTimeout. 0 disables.",
     "layers": [
       { "source": "config", "key": "streamIdleTimeoutSecs" },
       { "default": 240 }
@@ -123,6 +134,7 @@
   },
   "sessionId": {
     "type": "string",
+    "description": "Resumable session ID (CLI --session-id; no config-file layer): the run adopts it and restores the on-disk session log when that ID exists. Default null starts a fresh random session.",
     "cliFlag": {
       "short": "-s",
       "long": "--session-id",
@@ -133,6 +145,7 @@
   },
   "compactDebug": {
     "type": "boolean",
+    "description": "Dump compaction settings and messages to compaction.out.json in the sessions dir for debugging, including manual /compact runs.",
     "cliFlag": {
       "long": "--compact-debug",
       "type": "boolean",
@@ -146,6 +159,7 @@
   },
   "noLog": {
     "type": "boolean",
+    "description": "Disable session logging. Env layers: HOTDOG_LOG=false (inverted) and HOTDOG_NO_LOG=true both arm it; default false keeps the JSONL session log that resume, search and review read.",
     "cliFlag": {
       "long": "--no-log",
       "type": "boolean",
@@ -167,8 +181,27 @@
       { "default": false }
     ]
   },
+  "logLevel": {
+    "type": "string",
+    "enum": ["debug", "info", "warn", "error"],
+    "description": "Minimum level for the diagnostic logger lines on stderr/stdout; env HOTDOG_LOG_LEVEL wins over this config value (default info). Read once at boot by an early peek at the config file (before the logger exists), so edits need a restart and a wrong level can hide the warn naming an out-of-set value; unrelated to noLog, which silences the JSONL session log, not this logger.",
+    "layers": [
+      { "source": "config", "key": "logLevel" },
+      { "default": "info" }
+    ]
+  },
+  "logTarget": {
+    "type": "string",
+    "enum": ["stderr", "stdout", "none"],
+    "description": "Destination for the diagnostic logger: stderr, stdout, or none (silence from the first boot line); env HOTDOG_LOG_TARGET wins over this config value (default stderr). Applied at boot by the same early peek as logLevel (restart to change); 'none' also swallows the warn these keys emit when carrying an out-of-set value; unrelated to noLog, which kills the JSONL session log, not this logger.",
+    "layers": [
+      { "source": "config", "key": "logTarget" },
+      { "default": "stderr" }
+    ]
+  },
   "reindex": {
     "type": "boolean",
+    "description": "Force a full-scan repair of the session index on startup instead of the normal stat-only reconcile; use when the index is suspected to drift from the session logs.",
     "cliFlag": {
       "long": "--reindex",
       "type": "boolean",
@@ -182,6 +215,7 @@
   },
   "showTokenUse": {
     "type": "boolean",
+    "description": "Display token usage stats at the end of responses (default on). With a modelPricing entry for the session model, /tokens appends a cost line.",
     "cliFlag": {
       "long": "--tokens",
       "type": "boolean",
@@ -199,6 +233,7 @@
   },
   "hideTools": {
     "type": "boolean",
+    "description": "Hide tool calls and results from CLI output (default shows them); /tools toggles it mid-session.",
     "cliFlag": {
       "long": "--show-tools",
       "type": "boolean",
@@ -213,6 +248,7 @@
   },
   "hideThinking": {
     "type": "boolean",
+    "description": "Hide thinking/reasoning output from the CLI sinks (default shows it, shaped by thinkerFormat).",
     "cliFlag": {
       "long": "--hide-thinking",
       "type": "boolean",
@@ -231,6 +267,7 @@
   },
   "useColors": {
     "type": "boolean",
+    "description": "Master switch for colored CLI output: layers are CLI --colors/--no-colors, then the config colors entry (which doubles as palette overrides). NO_COLOR or TERM=dumb disables color regardless of this setting.",
     "cliFlag": {
       "long": "--colors",
       "type": "boolean",
@@ -257,6 +294,7 @@
   },
   "theme": {
     "type": "string",
+    "description": "CLI color theme: dark, light, monochrome, or a path to a JSON palette-override file merged over dark. An unreadable or invalid theme file falls back to dark.",
     "cliFlag": {
       "long": "--theme",
       "type": "string",
@@ -278,6 +316,7 @@
   },
   "defaultModel": {
     "type": "string",
+    "description": "Default model as provider/model. Resolution chain: CLI --model, profile model, env HOTDOG_MODEL/AI_MODEL, config defaultModel; nothing resolved means agent creation fails with a no-model-configured error (model-free subcommands keep working).",
     "layers": [
       { "source": "cli", "key": "model", "cast": "string" },
       { "source": "profile", "key": "model", "cast": "string" },
@@ -290,6 +329,7 @@
   "maxIterations": {
     "type": "number",
     "minimum": 1,
+    "description": "Hard cap on agent loop iterations per run (default 1000) -- the runaway-loop safety net; reaching it ends the run.",
     "cliFlag": {
       "long": "--max-iterations",
       "type": "number",
@@ -304,6 +344,7 @@
   "maxToolCallsPerIteration": {
     "type": "number",
     "minimum": 0,
+    "description": "Tool calls allowed per LLM turn (default 10); calls beyond the cap answer with a skipped-due-to-limit error instead of executing. 0 exposes no tools.",
     "cliFlag": {
       "long": "--max-tool-calls",
       "type": "number",
@@ -318,6 +359,7 @@
   "contextLimit": {
     "type": "number",
     "minimum": 1,
+    "description": "Fallback context window in tokens for models without a provider/model contextLimit override, and the compaction budget base (compaction.contextLimit can override). Bound at 1 because 0 poisons compaction math; lower it for small-context local models.",
     "layers": [
       { "source": "config", "key": "contextLimit", "cast": "number" },
       { "default": 128000 }
@@ -325,15 +367,18 @@
   },
   "maxRetries": {
     "type": "number",
+    "description": "Retries after the initial attempt (total attempts = 1 + this) for both LLM request errors and transient tool failures. Schema-default only -- no CLI, config or env layer -- so a panel edit lands in the file but cannot change the resolved value.",
     "layers": [{ "default": 5 }]
   },
   "toolRetryDelay": {
     "type": "number",
+    "description": "Backoff base in seconds for retrying tools that throw a TransientError (delay = 2^(attempt-1) * this). Schema-default only -- no CLI, config or env layer -- so a panel edit lands in the file but cannot change the resolved value.",
     "layers": [{ "default": 1 }]
   },
   "maxEmptyRetries": {
     "type": "number",
     "minimum": 0,
+    "description": "Times the loop re-issues a request when a completion carries neither text nor tool calls (a common local-model stall) before ending the run with the empty_response stop reason; 0 disables re-invoke.",
     "layers": [
       { "source": "config", "key": "maxEmptyRetries", "cast": "number" },
       { "default": 1 }
@@ -350,6 +395,7 @@
   },
   "sandboxMode": {
     "type": "boolean",
+    "description": "Restrict the agent to side-effect-free tools (sideEffects metadata filter; untagged tools are excluded too) and skip MCP server connections. For read-only exploration or untrusted models; it is a tool-surface posture, not an OS boundary.",
     "cliFlag": {
       "long": "--sandbox",
       "type": "boolean",
@@ -363,6 +409,8 @@
   },
   "toolExec": {
     "type": "string",
+    "enum": ["worker", "inline"],
+    "description": "Execution plane for tools tagged execution:worker -- worker runs them in pooled out-of-process executors (crash isolation, cancellation, optional fence), inline runs everything in-process, the pre-plane path. Untagged tools stay inline either way; the plane never silently downgrades.",
     "cliFlag": {
       "long": "--tool-exec",
       "type": "string",
@@ -376,6 +424,8 @@
   },
   "execFence": {
     "type": "string",
+    "enum": ["off", "probe"],
+    "description": "Fence for pooled executor entries: probe jails them when the platform backend exists (bubblewrap on Linux, seatbelt on macOS) to the session workspace roots plus a scratch dir; off spawns plain. A failed probe spawns plain and the posture line says so; /fence toggles at runtime per session.",
     "cliFlag": {
       "long": "--exec-fence",
       "type": "string",
@@ -389,6 +439,7 @@
   },
   "envScrubbing": {
     "type": "boolean",
+    "description": "When true (default), agent-spawned subprocesses (bash tool, MCP stdio servers, pooled executors) inherit a copy of the environment with secret-shaped variable names stripped -- a heuristic, not a boundary. CLI --disable-env-scrubbing passes the full environment, hotdog's own API keys included.",
     "cliFlag": {
       "long": "--disable-env-scrubbing",
       "type": "boolean",
@@ -401,6 +452,7 @@
   },
   "maxToolDifficulty": {
     "type": "number",
+    "description": "Hard cap on the difficulty (1-5) of tools exposed to the model; sits above the per-model registry entry and defaultMaxToolDifficulty in the priority chain; null = no filtering. Declared layer is CLI-only (--max-tool-difficulty).",
     "cliFlag": {
       "long": "--max-tool-difficulty",
       "type": "number",
@@ -413,6 +465,7 @@
   },
   "defaultMaxToolDifficulty": {
     "type": "number",
+    "description": "Config default maximum tool difficulty (1-5) applied to all models; lowest in the priority chain (CLI --max-tool-difficulty beats a model entry, which beats this). null = no filtering.",
     "layers": [
       { "source": "config", "key": "defaultMaxToolDifficulty", "cast": "number" },
       { "default": null }
@@ -420,14 +473,17 @@
   },
   "prompt": {
     "type": "string",
+    "description": "Legacy REPL prompt string. Inert in the current runtime: no CLI, config or env layer and nothing reads the resolved key, so it shows in the panel but no code path consults it.",
     "layers": [{ "default": "> " }]
   },
   "taskProfile": {
     "type": "string",
+    "description": "Profile applied to spawned task agents (subagents), default task-default; top-level sessions use profileName instead.",
     "layers": [{ "default": "task-default" }]
   },
   "taskLanesPerProvider": {
     "type": "number",
+    "description": "Concurrent turns per provider lane -- both subagent turns and top-level session turns; excess work queues instead of thrashing provider caches. Below 1 means unlimited. A provider's own taskLanes overrides it per machine.",
     "layers": [
       { "source": "config", "key": "taskLanesPerProvider", "cast": "number" },
       { "default": 1 }
@@ -435,6 +491,7 @@
   },
   "modelGroups": {
     "type": "object",
+    "description": "Named pools of interchangeable models for delegated placement (referenced as group:<name> from delegate_task, workflow nodes or a profile group): a task takes the first member with a free lane, preferring a warm provider, and queues when all are busy.",
     "layers": [
       { "source": "config", "key": "modelGroups" },
       { "default": {} }
@@ -442,6 +499,7 @@
   },
   "modelPricing": {
     "type": "object",
+    "description": "Opt-in per-model USD per-million-token rates (input, cachedInput, output) that make /tokens print a cost line; computed from the token tracker at display time, never written to the session log. Keys must match the session model name exactly; no entry means no cost guess.",
     "layers": [
       { "source": "config", "key": "modelPricing" },
       { "default": null }
@@ -449,6 +507,7 @@
   },
   "taskLanesDir": {
     "type": "string",
+    "description": "Directory holding the cross-process lane slot ledger (default <dataDir>/task-lanes). Slot files are heartbeat leases swept hourly -- safe to delete when nothing runs, and must never be synced or snapshotted.",
     "layers": [
       { "source": "config", "key": "taskLanesDir" },
       { "compute": "joinDataDir:task-lanes" }
@@ -456,6 +515,7 @@
   },
   "taskSpawnsPath": {
     "type": "string",
+    "description": "Append-only JSONL sidecar of delegate_task spawn/end records (default <dataDir>/task-spawns.jsonl) so a later process reports never-ended tasks as interrupted by restart; surfacing only, nothing auto-respawns. Workflow spawns live in the run journal instead.",
     "layers": [
       { "source": "config", "key": "taskSpawnsPath" },
       { "compute": "joinDataDir:task-spawns.jsonl" }
@@ -463,6 +523,7 @@
   },
   "coreTools": {
     "type": "object",
+    "description": "Config namespace of the core-tools extension (readToolLimit, maxImageSize, findMaxResults, grepMaxResults, maxEditInputSize, ...); the nested fields are documented in docs/config-reference.md.",
     "layers": [
       { "source": "config", "key": "coreTools" },
       { "default": {} }
@@ -470,6 +531,7 @@
   },
   "compaction": {
     "type": "object",
+    "description": "Config namespace of the compaction extension (strategy, reserveTokens, contextLimit, keepRecentMessages and friends); the nested fields are documented in docs/config-reference.md.",
     "layers": [
       { "source": "config", "key": "compaction" },
       { "default": {} }
@@ -477,6 +539,7 @@
   },
   "workspace": {
     "type": "object",
+    "description": "Workspace posture: the roots that bound the file tools and @file expansion, plus the denylist. An empty object means the process CWD is the only root; root and deny semantics are documented in docs/config-reference.md.",
     "layers": [
       { "source": "config", "key": "workspace" },
       { "default": {} }
@@ -484,6 +547,7 @@
     "properties": {
       "deny": {
         "type": "array",
+        "description": "Denylist globs the file tools must not touch, enforced by resolveSafe inside every root: slash-separated component globs at any depth, last match wins, ! negates (default covers .ssh, .git, .env* etc. with .env.example carved back out). An empty array disables the denylist; bash is not mediated by it.",
         "layers": [
           { "source": "config", "key": "workspace.deny", "cast": "array" },
           {
@@ -518,6 +582,7 @@
       "maxFileSize": {
         "type": "integer",
         "minimum": 0,
+        "description": "Per-file byte ceiling for non-image uploads and @file references (default 102400 = 100 KiB), checked after base64 decode. Legacy fileAttachment.maxFileSize is the fallback alias layer.",
         "layers": [
           { "source": "config", "key": "uploadLimits.maxFileSize", "cast": "number" },
           { "source": "config", "key": "fileAttachment.maxFileSize", "cast": "number" },
@@ -527,6 +592,7 @@
       "maxImageSize": {
         "type": "integer",
         "minimum": 0,
+        "description": "Per-file byte ceiling for images (default 10485760 = 10 MiB). The websocket transport frame bound derives from it, and legacy fileAttachment.maxImageSize is the fallback alias layer.",
         "layers": [
           { "source": "config", "key": "uploadLimits.maxImageSize", "cast": "number" },
           { "source": "config", "key": "fileAttachment.maxImageSize", "cast": "number" },
@@ -536,6 +602,7 @@
       "maxFiles": {
         "type": "integer",
         "minimum": 0,
+        "description": "Maximum number of files per message/input (default 10). Legacy fileAttachment.maxFiles is the fallback alias layer.",
         "layers": [
           { "source": "config", "key": "uploadLimits.maxFiles", "cast": "number" },
           { "source": "config", "key": "fileAttachment.maxFiles", "cast": "number" },
@@ -546,10 +613,11 @@
   },
   "hookTrace": {
     "type": "boolean",
+    "description": "Trace hook execution into the debug log; nothing is emitted unless the log level is debug (env HOTDOG_LOG_LEVEL or config logLevel).",
     "cliFlag": {
       "long": "--hook-trace",
       "type": "boolean",
-      "description": "Trace hook execution (requires HOTDOG_LOG_LEVEL=debug)"
+      "description": "Trace hook execution (requires debug level: HOTDOG_LOG_LEVEL or config logLevel)"
     },
     "layers": [
       { "source": "cli", "key": "hookTrace", "cast": "truthy" },
@@ -560,6 +628,7 @@
   },
   "profileName": {
     "type": "string",
+    "description": "Active profile name (CLI --profile > config profile key): picks which profiles entry and/or .profile.md file shapes the session (model, tool allow/deny lists, manager mode).",
     "cliFlag": {
       "long": "--profile",
       "type": "string",
@@ -573,6 +642,7 @@
   },
   "profilesPath": {
     "type": "string",
+    "description": "Directory scanned for .profile.md files: CLI --profiles-path, config profilesPath, else computed as <configDir>/profiles.",
     "cliFlag": {
       "long": "--profiles-path",
       "type": "string",
@@ -586,6 +656,7 @@
   },
   "provider": {
     "type": "string",
+    "description": "Provider selected at boot (CLI --provider > config defaultProvider key): its url and apiKey supply the provider layer of baseUrl and apiKey. An unknown name resolves to no provider with no startup complaint.",
     "cliFlag": {
       "long": "--provider",
       "type": "string",
@@ -599,6 +670,7 @@
   },
   "systemPromptTemplate": {
     "type": "string",
+    "description": "Path to a custom system prompt template file; unset auto-detects system_prompt.md inside the config directory.",
     "cliFlag": {
       "long": "--system-prompt-template",
       "type": "string",
@@ -612,10 +684,12 @@
   },
   "profiles": {
     "type": "object",
+    "description": "In-config profile definitions keyed by name, merged with same-named .profile.md files: file profiles win on whitelistTools, blacklistTools and manager; config wins on model and group.",
     "layers": [{ "source": "config", "key": "profiles" }, { "default": {} }]
   },
   "extensionPaths": {
     "type": "array",
+    "description": "Directories scanned for extensions: @extensions is the built-in set, @experimental the opt-in bundles, anything else a custom path. The value REPLACES the default, so list both aliases to keep the builtins while adding experimental.",
     "layers": [
       { "source": "config", "key": "extensionPaths" },
       { "default": ["@extensions"] }
@@ -623,6 +697,7 @@
   },
   "extensionAutoload": {
     "type": "boolean",
+    "description": "When true (default), every discovered extension that does not mark autoload false is loaded (plus dependencies); when false only the extensions list is loaded -- false with an empty list loads nothing.",
     "layers": [
       { "source": "config", "key": "extensionAutoload" },
       { "default": true }
@@ -630,10 +705,12 @@
   },
   "extensions": {
     "type": "array",
+    "description": "Explicit extension selection consulted when extensionAutoload is false: only these names plus their dependencies load. Ignored while autoload is on.",
     "layers": [{ "source": "config", "key": "extensions" }, { "default": [] }]
   },
   "defaultSubcommand": {
     "type": "string",
+    "description": "Subcommand run when the CLI invocation names none (resolved through the cli-subcommand registry; default cli).",
     "layers": [
       { "source": "config", "key": "defaultSubcommand" },
       { "default": "cli" }
@@ -641,6 +718,7 @@
   },
   "temperature": {
     "type": "number",
+    "description": "Legacy sampling temperature. Inert in the current runtime: the temperature that reaches requests comes only from providers[].temperature and model entries -- no code reads the resolved core key -- so editing it changes nothing.",
     "layers": [
       { "source": "config", "key": "temperature" },
       { "default": null }
@@ -648,6 +726,7 @@
   },
   "defaultProvider": {
     "type": "string",
+    "description": "Default provider name when --provider is absent; its url and apiKey supply the provider layer of baseUrl/apiKey. Read through the provider key config layer (same file key) -- this schema entry adds nothing on top of that.",
     "layers": [
       { "source": "config", "key": "defaultProvider" },
       { "default": null }
@@ -655,6 +734,7 @@
   },
   "sttUrl": {
     "type": "string",
+    "description": "Full URL of an OpenAI-compatible audio transcriptions endpoint for speech-to-text. Unset, the backend auto-picks the first registry model declaring audio input and takes endpoint and key from its provider; credentials riding the URL are moved to a Basic auth header.",
     "cliFlag": {
       "long": "--stt-url",
       "type": "string",
@@ -669,6 +749,7 @@
   },
   "sttModel": {
     "type": "string",
+    "description": "Model name sent to sttUrl in the multipart request; without an explicit sttUrl it pins the registry model used for speech-to-text (must declare audio input). Unset = auto-pick.",
     "cliFlag": {
       "long": "--stt-model",
       "type": "string",

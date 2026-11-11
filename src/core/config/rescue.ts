@@ -1,16 +1,19 @@
 /**
  * `hotdog rescue` -- config diagnostics that don't depend on the config working.
  * 
- * Detects broken JSON, repairs what it can, reports the config-dir resolution chain, unknown/duplicate top-level keys, and schema violations.
+ * Detects broken JSON, repairs what it can, reports the config-dir resolution chain, unknown/duplicate top-level keys, and schema violations --
+ * including out-of-set ENUM values, which parse fine but fail startup validation:
+ * `rescue fix` resets each to its schema default (or removes the key when the
+ * schema declares none), keeping every other byte of the file.
  * main() dispatches to runRescue() before buildConfig() or extension loading.
  */
 
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveConfigDirChain, DEFAULT_CONFIG_FILENAME, DEFAULT_SYSTEM_PROMPT_FILENAME } from "./defaults.ts";
-import { normalizeConfigKeys, validateConfig } from "./index.ts";
+import { interpolateEnvVars, normalizeConfigKeys, validateConfig } from "./index.ts";
 import { CONFIG_SCHEMA, extractConfigLayerKeys } from "./schema-loader.ts";
-import { suggestCandidates } from "@utils/strings.ts";
+import { camelCase, suggestCandidates } from "@utils/strings.ts";
 import type { ConfigParamDef } from "@core/extensions/config.ts";
 
 // Keys a defaults.json may carry that are not in CONFIG_SCHEMA: the providers
@@ -377,6 +380,428 @@ export function errorExcerpt(text: string, index: number): string {
   );
 }
 
+// ── Enum stage ───────────────────────────────────────────────────────────────
+// A file that PARSES can still be fatal: a schema key whose declared enum
+// rejects its value fails startup validation ("value ... not in enum [...]").
+// The SCHEMA stage prints that verdict without position and nothing repairs
+// it. This stage walks the same schema sources the validator uses (core +
+// loaded extension params -- logLevel/logTarget/toolExec/execFence and every
+// future enum ride along with zero special-casing), locates each offending
+// VALUE TOKEN in the shipped bytes, and hands `rescue fix` a surgical splice:
+// rewrite the token to the schema default, or remove the key when the schema
+// declares none. Nothing outside the value token (and, for removals, the one
+// separator comma) is ever touched: comments, formatting and every other byte
+// survive.
+
+/**
+ * JSONC-isms -> SAME-LENGTH whitespace: comments blanked to spaces (newlines
+ * kept), trailing commas to spaces, BOM to a space. Unlike stripJsonc (which
+ * normalizes and shifts every later offset), this preserves byte offsets 1:1,
+ * so a range located in the masked text points at the shipped file -- and
+ * JSON.parse(mask) yields exactly the value loadConfig would see after
+ * stripping. Strings are walked untouched.
+ */
+export function maskJsonc(src: string): string {
+  const n = src.length;
+  let out = "";
+  let i = src.charCodeAt(0) === 0xfeff ? 1 : 0;
+  out += " ".repeat(i); // BOM -> space (length preserved)
+  while (i < n) {
+    const c = src[i]!;
+    if (c === '"') {
+      const end = stringEnd(src, i);
+      if (end < 0) return src.slice(0, i) + " ".repeat(n - i);
+      out += src.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "/") {
+      let j = i;
+      while (j < n && src[j] !== "\n") j++;
+      out += " ".repeat(j - i);
+      i = j;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      let j = i + 2;
+      while (j < n && !(src[j] === "*" && src[j + 1] === "/")) j++;
+      j = Math.min(j + 2, n);
+      for (let k = i; k < j; k++) out += src[k] === "\n" ? "\n" : " ";
+      i = j;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  // Trailing commas (outside strings): stripJsonc's rule -- a comma whose next
+  // significant char is } or ] -- blanked in place.
+  const chars = out.split("");
+  let inStr = false;
+  for (let p = 0; p < chars.length; p++) {
+    const ch = chars[p]!;
+    if (inStr) {
+      if (ch === "\\") p++;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === ",") {
+      let q = p + 1;
+      while (q < chars.length && /\s/.test(chars[q]!)) q++;
+      if (chars[q] === "}" || chars[q] === "]") chars[p] = " ";
+    }
+  }
+  return chars.join("");
+}
+
+/** A key path in the house addressing format: "compaction.strategy", "providers[0].url". */
+export type KeySeg = string | number;
+export function formatKeyPath(segs: readonly KeySeg[]): string {
+  let p = "";
+  for (const s of segs) p += typeof s === "number" ? `[${s}]` : p ? `.${s}` : s;
+  return p;
+}
+
+export interface EnumViolation {
+  /** Schema-addressable key path of the offending leaf ("logLevel", "compaction.strategy"). */
+  path: string;
+  /** Position of the offending VALUE TOKEN in the shipped file. */
+  line: number;
+  column: number;
+  /** Byte range of the value token; keyStart covers the key token too (removals). */
+  start: number;
+  end: number;
+  keyStart: number;
+  /** The offending value exactly as shipped (raw token bytes). */
+  shipped: string;
+  /** The schema's accepted set. */
+  accepted: unknown[];
+  /** Schema default (own `default`, else the first literal `default` layer). */
+  hasDefault: boolean;
+  defaultValue?: unknown;
+}
+
+function enumSchemaSources(configParams: ConfigParamDef[]): Array<Record<string, unknown>> {
+  const sources: Array<Record<string, unknown>> = [CONFIG_SCHEMA as unknown as Record<string, unknown>];
+  for (const p of configParams) if (p.schema) sources.push({ [p.key]: p.schema });
+  return sources;
+}
+
+/** The value's default per the schema node: own `default`, else the first layer declaring one (computed layers carry `compute`, not `default`, and are skipped -- the removal rule covers them). */
+function enumDefaultOf(node: Record<string, unknown>): { has: boolean; value?: unknown } {
+  if (node.default !== undefined) return { has: true, value: node.default };
+  const layers = node.layers;
+  if (Array.isArray(layers)) {
+    for (const l of layers) {
+      if (l && typeof l === "object" && "default" in l) {
+        return { has: true, value: (l as Record<string, unknown>).default };
+      }
+    }
+  }
+  return { has: false };
+}
+
+/** camelCase slot lookup mirroring normalizeConfigKeys + object-literal last-wins semantics. */
+function slotOf(obj: Record<string, unknown>, want: string): unknown {
+  const wantC = camelCase(want);
+  let hit: unknown;
+  for (const k of Object.keys(obj)) if (camelCase(k) === wantC) hit = obj[k];
+  return hit;
+}
+
+interface RawEnumHit {
+  segs: KeySeg[];
+  value: unknown;
+  accepted: unknown[];
+  hasDefault: boolean;
+  defaultValue?: unknown;
+}
+
+function walkEnumNode(value: unknown, node: unknown, segs: KeySeg[], out: RawEnumHit[], depth: number): void {
+  if (depth > MAX_SCAN_DEPTH || !node || typeof node !== "object") return;
+  const n = node as Record<string, unknown>;
+  if (Array.isArray(n.enum)) {
+    // Mirror json-schema.ts exactly: a value equal to the node's own default
+    // passes, membership is JSON.stringify equality. Non-members are
+    // violations even when the type is wrong -- the default fixes both.
+    const accepted = n.enum as unknown[];
+    if (n.default !== undefined && JSON.stringify(value) === JSON.stringify(n.default)) return;
+    if (accepted.some((e) => JSON.stringify(e) === JSON.stringify(value))) return;
+    const d = enumDefaultOf(n);
+    out.push({ segs, value, accepted, hasDefault: d.has, defaultValue: d.value });
+    return;
+  }
+  if (n.properties && value && typeof value === "object" && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    for (const [k, child] of Object.entries(n.properties as Record<string, unknown>)) {
+      const v = slotOf(obj, k);
+      if (v !== undefined && v !== null) walkEnumNode(v, child, [...segs, k], out, depth + 1);
+    }
+  }
+  if (n.items && Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const v = value[i];
+      if (v !== undefined && v !== null) walkEnumNode(v, n.items, [...segs, i], out, depth + 1);
+    }
+  }
+}
+
+/**
+ * Schema-driven enum diagnosis over the shipped file text: every leaf the
+ * schemas declare an enum for whose value is outside the set, with exact
+ * line/column of the value token, the token as shipped, and the accepted set.
+ * Returns [] for files whose shape cannot be read (unparsable, or an env-ref
+ * that cannot interpolate -- the syntax/env error owns those files; guessing
+ * positions there would lie). Fail-closed on location too: an unlocatable
+ * value is never approximated.
+ */
+export function findEnumViolations(text: string, configParams: ConfigParamDef[] = []): EnumViolation[] {
+  const mask = maskJsonc(text);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(mask);
+  } catch {
+    return [];
+  }
+  let effective: unknown;
+  try {
+    effective = interpolateEnvVars(normalizeConfigKeys(raw));
+  } catch {
+    return []; // unset $VAR: loadConfig dies on the interpolation before validation ever sees an enum
+  }
+  if (!effective || typeof effective !== "object" || Array.isArray(effective)) return [];
+  const hits: RawEnumHit[] = [];
+  for (const source of enumSchemaSources(configParams)) {
+    for (const [key, node] of Object.entries(source)) {
+      const v = slotOf(effective as Record<string, unknown>, key);
+      if (v !== undefined && v !== null) walkEnumNode(v, node, [key], hits, 0);
+    }
+  }
+  const seen = new Set<string>();
+  const violations: EnumViolation[] = [];
+  for (const h of hits) {
+    const path = formatKeyPath(h.segs);
+    // Core and an extension schema can both describe a key (compaction); the
+    // first source wins so one violation is reported once.
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const at = locateFrom(mask, skipWs(mask, 0), h.segs);
+    if (!at) continue;
+    const { line, column } = lineColAt(text, at.start);
+    violations.push({
+      path,
+      line,
+      column,
+      start: at.start,
+      end: at.end,
+      keyStart: at.keyStart,
+      shipped: text.slice(at.start, at.end),
+      accepted: h.accepted,
+      hasDefault: h.hasDefault,
+      defaultValue: h.defaultValue,
+    });
+  }
+  violations.sort((a, b) => a.start - b.start);
+  return violations;
+}
+
+const WS_CHARS = " \t\n\r";
+function skipWs(t: string, i: number): number {
+  while (i < t.length && WS_CHARS.includes(t[i]!)) i++;
+  return i;
+}
+
+/** t[i] must be a '"' -> index just past the closing quote, or -1 (unterminated). */
+function stringEnd(t: string, i: number): number {
+  if (t[i] !== '"') return -1;
+  let j = i + 1;
+  while (j < t.length) {
+    const s = t[j]!;
+    if (s === "\\") {
+      j += 2;
+      continue;
+    }
+    if (s === '"') return j + 1;
+    j++;
+  }
+  return -1;
+}
+
+/** End of one JSON value token starting at i (masked text: no comments). */
+function valueEnd(t: string, i: number, depth = 0): number {
+  if (depth > MAX_SCAN_DEPTH || i >= t.length) return -1;
+  const c = t[i]!;
+  if (c === '"') return stringEnd(t, i);
+  if (c === "{" || c === "[") {
+    const close = c === "{" ? "}" : "]";
+    let j = i + 1;
+    let d = 1;
+    while (j < t.length && d > 0) {
+      const s = t[j]!;
+      if (s === '"') {
+        const e = stringEnd(t, j);
+        if (e < 0) return -1;
+        j = e;
+        continue;
+      }
+      if (s === c) d++;
+      else if (s === close) d--;
+      j++;
+    }
+    return d === 0 ? j : -1;
+  }
+  if (c === "-" || (c >= "0" && c <= "9")) {
+    let j = i + 1;
+    while (j < t.length && "0123456789eE+-.".includes(t[j]!)) j++;
+    return j;
+  }
+  for (const lit of ["true", "false", "null"]) if (t.startsWith(lit, i)) return i + lit.length;
+  return -1;
+}
+
+interface LocateHit {
+  keyStart: number;
+  start: number;
+  end: number;
+}
+
+/** Resolve a key path to byte ranges in (masked) text: `pos` points at the value the next segment addresses. Key match = camelCase equality (normalizeConfigKeys semantics); duplicates resolve LAST-wins (what JSON.parse/loader keep); a segment that does not resolve returns null (fail closed). */
+function locateFrom(t: string, pos: number, segs: readonly KeySeg[]): LocateHit | null {
+  if (segs.length === 0) return null;
+  const seg = segs[0]!;
+  const rest = segs.slice(1);
+  if (typeof seg === "string") {
+    if (t[pos] !== "{") return null;
+    let i = skipWs(t, pos + 1);
+    let found: LocateHit | null = null;
+    while (i < t.length && t[i] !== "}") {
+      if (t[i] !== '"') return found;
+      const keyStart = i;
+      const ke = stringEnd(t, i);
+      if (ke < 0) return found;
+      let key: string;
+      try {
+        key = JSON.parse(t.slice(keyStart, ke)) as string;
+      } catch {
+        return found;
+      }
+      let j = skipWs(t, ke);
+      if (t[j] !== ":") return found;
+      j = skipWs(t, j + 1);
+      const ve = valueEnd(t, j);
+      if (ve < 0) return found;
+      if (camelCase(key) === camelCase(seg)) {
+        const hit = rest.length === 0 ? { keyStart, start: j, end: ve } : locateFrom(t, j, rest);
+        if (hit) found = hit;
+      }
+      i = skipWs(t, ve);
+      if (t[i] === ",") i = skipWs(t, i + 1);
+      else break;
+    }
+    return found;
+  }
+  if (t[pos] !== "[") return null;
+  let i = skipWs(t, pos + 1);
+  let idx = 0;
+  let found: LocateHit | null = null;
+  while (i < t.length && t[i] !== "]") {
+    const ve = valueEnd(t, i);
+    if (ve < 0) return found;
+    if (idx === seg) {
+      const hit = rest.length === 0 ? { keyStart: i, start: i, end: ve } : locateFrom(t, i, rest);
+      if (hit) found = hit;
+    }
+    idx++;
+    i = skipWs(t, ve);
+    if (t[i] === ",") i = skipWs(t, i + 1);
+    else break;
+  }
+  return found;
+}
+
+/** Byte cuts for removing one violation: key..value plus the separator comma (trailing, else preceding), and a whole-line collapse when only whitespace would remain. The comma search runs through the MASK so a comment sitting between members cannot hide the separator (an un-removed comma would leave a trailing comma behind); the collapse decision runs on RAW bytes, where a comment keeps its line standing (user data). */
+function removalCuts(t: string, mask: string, v: EnumViolation): Array<[number, number]> {
+  const extra: Array<[number, number]> = [];
+  const a = v.keyStart;
+  let b = v.end;
+  // Forward: raw spaces/tabs and masked (comment) bytes stop at the comma or
+  // at anything real (a masked newline is still \n in the mask, so the scan
+  // never leaves the value's line here).
+  let j = b;
+  while (j < t.length && (t[j] === " " || t[j] === "\t" || (mask[j] === " " && t[j] !== "\n" && t[j] !== "\r"))) j++;
+  if (mask[j] === ",") {
+    b = j + 1;
+    while (b < t.length && (t[b] === " " || t[b] === "\t")) b++;
+  } else {
+    // Last member: take the comma that separates it from the PREVIOUS member,
+    // skipping whitespace AND comments (in mask coordinates) to find it.
+    let p = a - 1;
+    while (p >= 0 && (WS_CHARS.includes(t[p]!) || mask[p] === " ")) p--;
+    if (mask[p] === ",") extra.push([p, p + 1]);
+  }
+  const lineStart = t.lastIndexOf("\n", a - 1) + 1;
+  let lineEnd = t.indexOf("\n", b);
+  if (lineEnd < 0) lineEnd = t.length;
+  else lineEnd += 1;
+  const rest = t.slice(lineStart, a) + t.slice(b, lineEnd);
+  if (rest.trim() === "") return [...extra, [lineStart, lineEnd]];
+  return [...extra, [a, b]];
+}
+
+/**
+ * Splice every violation out in one right-to-left pass: resets rewrite ONLY
+ * the value token; removals drop key+value, one comma, and (when only
+ * whitespace would remain) the line. Every other byte of the text survives.
+ */
+export function applyEnumRepairs(text: string, violations: readonly EnumViolation[]): string {
+  const mask = maskJsonc(text);
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+  for (const v of violations) {
+    if (v.hasDefault) edits.push({ start: v.start, end: v.end, text: JSON.stringify(v.defaultValue) });
+    else for (const [a, b] of removalCuts(text, mask, v)) edits.push({ start: a, end: b, text: "" });
+  }
+  edits.sort((x, y) => y.start - x.start);
+  let out = text;
+  let prevStart = Infinity;
+  for (const e of edits) {
+    if (e.end > prevStart) continue; // overlapping (should be impossible): never double-splice
+    out = out.slice(0, e.start) + e.text + out.slice(e.end);
+    prevStart = e.start;
+  }
+  return out;
+}
+
+/**
+ * Pull the out-of-set keys out of a ConfigError.ValidationError's individual
+ * error strings (the json-schema.ts enum grammar:
+ * `<path>: value <json> not in enum [<json, json]>`) so boot guidance can
+ * name the repair command, the key and the accepted set. Parse-only over
+ * messages this repo generates; anything else is ignored.
+ */
+export function enumHintsFromValidationErrors(
+  errors: readonly string[] | undefined,
+): Array<{ key: string; accepted: string[] }> {
+  const out: Array<{ key: string; accepted: string[] }> = [];
+  for (const err of errors ?? []) {
+    const sep = err.indexOf(": value ");
+    const tail = err.lastIndexOf(" not in enum [");
+    if (sep < 0 || tail <= sep || !err.endsWith("]")) continue;
+    const key = err.slice(0, sep);
+    const inner = err.slice(tail + " not in enum [".length, err.length - 1);
+    let accepted: string[];
+    try {
+      accepted = (JSON.parse(`[${inner}]`) as unknown[]).map((v) => JSON.stringify(v));
+    } catch {
+      accepted = inner.split(", ").map((s) => s.trim());
+    }
+    out.push({ key, accepted });
+  }
+  return out;
+}
+
 export interface FileReport {
   path: string;
   status: "missing" | "broken" | "ok";
@@ -459,11 +884,17 @@ export interface RescueOptions {
 
 /** One structured problem from the key/schema stages (file-level state lives in RescueFileEntry). */
 export interface RescueFinding {
-  type: "missing-config-dir" | "config-file-missing" | "unknown-key" | "duplicate-key" | "removed-key" | "schema";
+  type: "missing-config-dir" | "config-file-missing" | "unknown-key" | "duplicate-key" | "removed-key" | "schema" | "enum";
   message: string;
   key?: string;
   line?: number;
   did_you_mean?: string[];
+  /** enum: column of the value token; the accepted set; the reset default (null = no schema default, the key is removed); whether `fix` repaired this run. */
+  column?: number;
+  accepted?: unknown[];
+  default?: unknown;
+  fix?: "reset-default" | "remove-key";
+  fixed?: boolean;
 }
 
 /** Per-config-file verdict in the --json envelope. */
@@ -529,6 +960,7 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
   const inUse = explicit ?? path.join(configDir, DEFAULT_CONFIG_FILENAME);
 
   let usableText: string | null = null;
+  const enumParams = opts.configParams ?? [];
   for (const file of files) {
     const report = await diagnoseConfigFile(file);
     const tag = file === inUse ? " [in use]" : "";
@@ -552,52 +984,119 @@ export async function runRescue(opts: RescueOptions): Promise<number> {
     if (report.status === "ok") {
       log("  OK (valid JSON)");
       if (file === inUse) usableText = report.parsedText;
-      continue;
+    } else {
+      entry.parse_error = report.parseErrorMessage ?? "invalid JSON";
+      log(`  BROKEN: ${report.parseErrorMessage ?? "invalid JSON"}`);
+      if (report.errorIndex !== null) {
+        log(errorExcerpt(report.rawText, report.errorIndex));
+        if (report.errorIndex >= report.rawText.trimEnd().length) {
+          log("  (error sits at end of input - the file looks truncated)");
+        }
+      }
+      if (report.jsoncIssues.length > 0) {
+        const byKind = new Map<string, number[]>();
+        for (const iss of report.jsoncIssues) {
+          const list = byKind.get(iss.kind) ?? [];
+          list.push(iss.line);
+          byKind.set(iss.kind, list);
+        }
+        entry.jsonc_issues = Array.from(byKind.entries()).map(([kind, lines]) => ({ kind, lines }));
+        for (const [kind, lines] of byKind) {
+          const label =
+            kind === "trailing-comma"
+              ? `trailing comma${lines.length === 1 ? "" : "s"}`
+              : `${kind}${lines.length === 1 ? "" : "s"}`;
+          log(`  found ${lines.length} ${label} (lines ${lines.join(", ")})`);
+        }
+      }
+      entry.fixable = report.fixable === true;
     }
 
-    entry.parse_error = report.parseErrorMessage ?? "invalid JSON";
-    log(`  BROKEN: ${report.parseErrorMessage ?? "invalid JSON"}`);
-    if (report.errorIndex !== null) {
-      log(errorExcerpt(report.rawText, report.errorIndex));
-      if (report.errorIndex >= report.rawText.trimEnd().length) {
-        log("  (error sits at end of input - the file looks truncated)");
+    // Enum stage: schema-driven, over the SHIPPED bytes (maskJsonc keeps
+    // offsets exact for JSONC files). Reported before any repair so the
+    // line/column names the file the user is looking at.
+    const violations = findEnumViolations(report.rawText, enumParams);
+    let enumPlanned: string | null = null;
+    for (const v of violations) {
+      const accepted = v.accepted.map((x) => JSON.stringify(x)).join(", ");
+      log(`ENUM: "${v.path}" (line ${v.line}, column ${v.column}) = ${v.shipped} not in the accepted set [${accepted}]`);
+      log(errorExcerpt(report.rawText, v.start));
+      log(
+        v.hasDefault
+          ? `  \`hotdog rescue fix\` resets it to ${JSON.stringify(v.defaultValue)} (the schema default)`
+          : `  no schema default: \`hotdog rescue fix\` removes the key so the built-in default applies`,
+      );
+      if (!opts.fix) {
+        problems++;
+        findings.push({
+          type: "enum",
+          key: v.path,
+          line: v.line,
+          column: v.column,
+          accepted: v.accepted,
+          default: v.hasDefault ? v.defaultValue : null,
+          fix: v.hasDefault ? "reset-default" : "remove-key",
+          message: `"${v.path}" (line ${v.line}, column ${v.column}) = ${v.shipped} not in the accepted set [${accepted}]`,
+        });
       }
     }
-    if (report.jsoncIssues.length > 0) {
-      const byKind = new Map<string, number[]>();
-      for (const iss of report.jsoncIssues) {
-        const list = byKind.get(iss.kind) ?? [];
-        list.push(iss.line);
-        byKind.set(iss.kind, list);
-      }
-      entry.jsonc_issues = Array.from(byKind.entries()).map(([kind, lines]) => ({ kind, lines }));
-      for (const [kind, lines] of byKind) {
-        const label =
-          kind === "trailing-comma"
-            ? `trailing comma${lines.length === 1 ? "" : "s"}`
-            : `${kind}${lines.length === 1 ? "" : "s"}`;
-        log(`  found ${lines.length} ${label} (lines ${lines.join(", ")})`);
+    // A file that cannot be repaired at all stays the syntax stage's problem;
+    // enum findings there are context, not a second repair promise.
+    if (opts.fix && violations.length > 0 && (report.status === "ok" || report.fixable)) {
+      enumPlanned = applyEnumRepairs(report.rawText, violations);
+    }
+
+    const syntaxRepairable = report.status === "broken" && report.fixable;
+    if (report.status === "broken") {
+      if (report.fixable && !opts.fix) {
+        problems++;
+        log(`  FIXABLE - re-run with \`hotdog rescue fix\` to repair (a .bak backup is kept)`);
+      } else if (!report.fixable) {
+        problems++;
+        log(`  NOT auto-fixable - edit the file and fix the position marked above`);
       }
     }
-    entry.fixable = report.fixable === true;
-    if (report.fixable) {
-      if (opts.fix) {
-        const backup = await repairFile(file, report.parsedText!, log);
-        if (backup) {
-          fixed++;
-          entry.fixed = true;
-          entry.backup = backup;
-          if (file === inUse) usableText = report.parsedText;
-        } else {
-          problems++;
+    // One repair per file: enum splices (on the shipped text) and the JSONC
+    // strip compose into ONE atomic write with ONE .bak of the pre-fix bytes.
+    if (opts.fix && (enumPlanned !== null || syntaxRepairable)) {
+      const target =
+        enumPlanned !== null && syntaxRepairable
+          ? stripJsonc(enumPlanned).text
+          : enumPlanned ?? report.parsedText!;
+      const backup = await repairFile(file, target, enumParams, log);
+      if (backup !== null) {
+        fixed++;
+        entry.fixed = true;
+        entry.backup = backup;
+        if (file === inUse) usableText = target;
+        for (const v of violations) {
+          const accepted = v.accepted.map((x) => JSON.stringify(x)).join(", ");
+          log(
+            v.hasDefault
+              ? `  REPAIRED "${v.path}" (line ${v.line}): ${v.shipped} -> ${JSON.stringify(v.defaultValue)} (accepted: ${accepted})`
+              : `  REPAIRED "${v.path}" (line ${v.line}): removed ${v.shipped}; no schema default - the built-in default now applies (accepted set was [${accepted}])`,
+          );
         }
       } else {
         problems++;
-        log(`  FIXABLE - re-run with \`hotdog rescue fix\` to repair (a .bak backup is kept)`);
       }
-    } else {
-      problems++;
-      log(`  NOT auto-fixable - edit the file and fix the position marked above`);
+      for (const v of violations) {
+        const accepted = v.accepted.map((x) => JSON.stringify(x)).join(", ");
+        findings.push({
+          type: "enum",
+          key: v.path,
+          line: v.line,
+          column: v.column,
+          accepted: v.accepted,
+          default: v.hasDefault ? v.defaultValue : null,
+          fix: v.hasDefault ? "reset-default" : "remove-key",
+          fixed: entry.fixed === true,
+          message:
+            v.hasDefault
+              ? `"${v.path}" was ${v.shipped} (accepted: ${accepted}), ${entry.fixed === true ? `repaired to ${JSON.stringify(v.defaultValue)}` : "repair FAILED"}`
+              : `"${v.path}" was ${v.shipped} with no schema default, ${entry.fixed === true ? "key removed so the built-in default applies" : "repair FAILED"}`,
+        });
+      }
     }
   }
   log();
@@ -676,16 +1175,55 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
+/**
+ * The ONE repair write: .bak of the exact pre-fix bytes first, then temp +
+ * rename in the same directory (the editor's commitVerifiedEdit discipline),
+ * then rescue-verify: the bytes on disk must match what was written, strict-
+ * parse, and come back enum-clean. Any doubt restores the pre-fix bytes the
+ * same atomic way -- a repair that cannot be verified did not happen.
+ * Returns the backup path on success, null on failure (logged).
+ */
 async function repairFile(
   file: string,
   fixedText: string,
+  configParams: ConfigParamDef[],
   log: (s?: string) => void,
 ): Promise<string | null> {
   const original = await fs.readFile(file, "utf-8");
   let backup = `${file}.bak`;
   for (let n = 1; await exists(backup); n++) backup = `${file}.bak.${n}`;
   await fs.writeFile(backup, original, "utf-8");
-  await fs.writeFile(file, fixedText, "utf-8");
+  const tmp = `${file}.${process.pid}.rescue-tmp`;
+  try {
+    await fs.writeFile(tmp, fixedText, "utf-8");
+    await fs.rename(tmp, file);
+  } catch (e) {
+    try {
+      await fs.rm(tmp, { force: true });
+    } catch {}
+    log(`  WRITE FAILED for ${file}: ${e instanceof Error ? e.message : String(e)} (original untouched; backup: ${backup})`);
+    return null;
+  }
+  let doubt: string | null = null;
+  try {
+    const after = await fs.readFile(file, "utf-8");
+    if (after !== fixedText) doubt = "re-read bytes differ from what was written";
+    else JSON.parse(after);
+    if (!doubt && findEnumViolations(after, configParams).length > 0) doubt = "enum violations remain after the repair";
+  } catch (e) {
+    doubt = e instanceof Error ? e.message : String(e);
+  }
+  if (doubt) {
+    const tmpBack = `${file}.${process.pid}.rescue-rollback-tmp`;
+    try {
+      await fs.writeFile(tmpBack, original, "utf-8");
+      await fs.rename(tmpBack, file);
+      log(`  REPAIR REJECTED (${doubt}); ${file} restored to its pre-fix bytes (backup: ${backup})`);
+    } catch (e2) {
+      log(`  REPAIR REJECTED (${doubt}) AND the rollback FAILED: ${e2 instanceof Error ? e2.message : String(e2)}`);
+    }
+    return null;
+  }
   log(`  FIXED ${file} (backup: ${backup})`);
   return backup;
 }
@@ -775,9 +1313,14 @@ function checkSchema(
   // validateConfig only inspects keys present in the config, so the raw
   // (unmerged) file is the right input -- defaults would mask nothing but add noise.
   const result = validateConfig(normalized as never, configParams.filter((p) => p.schema).map((p) => ({ key: p.key, schema: p.schema })));
+  let count = 0;
   for (const err of result.errors) {
+    // The ENUM stage owns out-of-set verdicts (it adds position and the fix);
+    // reporting them twice under SCHEMA would double-count the problem.
+    if (/: value .* not in enum \[/.test(err)) continue;
+    count++;
     findings?.push({ type: "schema", message: err });
     log(`SCHEMA: ${err}`);
   }
-  return result.errors.length;
+  return count;
 }

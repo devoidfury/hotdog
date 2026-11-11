@@ -15,8 +15,15 @@ import {
   scanTopLevelKeys,
   lineColAt,
   diagnoseConfigFile,
+  findEnumViolations,
+  applyEnumRepairs,
+  enumHintsFromValidationErrors,
+  runRescue,
 } from "@core/config/rescue.ts";
+import type { ConfigParamDef } from "@core/extensions/config.ts";
 import { resolveConfigDirChain, resolveConfigDir } from "@core/config/defaults.ts";
+import { ConfigError } from "@core/error.ts";
+import { captureConsole } from "../test-helpers.ts";
 
 // ── stripJsonc ───────────────────────────────────────────────────────────────
 
@@ -664,5 +671,282 @@ describe("fatal config failures keep stdout clean", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ── Enum diagnosis and repair (out-of-set values) ────────────────────────────
+// The boot keeps FAILING hard on an out-of-set enum value (owner ruling);
+// rescue must name the position and make getting out easy: `fix` resets the
+// value to the schema default, or removes the key when the schema declares no
+// default. The stage is schema-driven: logLevel/logTarget/toolExec/execFence
+// and every future (nested/extension) enum ride the same code.
+
+const enumParams = (
+  params: Array<{ key: string; schema: Record<string, unknown> }>,
+): ConfigParamDef[] =>
+  params.map((p) => ({ key: p.key, description: "", defaults: {}, schema: p.schema }));
+
+describe("rescue enum stage: findEnumViolations", () => {
+  it("reports an out-of-set top-level enum with the exact line/column of the value token", () => {
+    const src = '{\n  "logLevel": "verbos"\n}\n';
+    const v = findEnumViolations(src);
+    expect(v).toHaveLength(1);
+    const one = v[0]!;
+    expect(one.path).toBe("logLevel");
+    expect(one.line).toBe(2);
+    expect(one.column).toBe(15); // the value token, not the key
+    expect(one.shipped).toBe('"verbos"'); // as shipped, quotes included
+    expect(one.accepted).toEqual(["debug", "info", "warn", "error"]);
+    expect(one.hasDefault).toBe(true);
+    expect(one.defaultValue).toBe("info");
+  });
+
+  it("keeps offsets exact through comments (masked, length-preserving scan)", () => {
+    const src = '{\n  // a guide comment\n  "toolExec": "sideways" // inline\n}\n';
+    const v = findEnumViolations(src);
+    expect(v).toHaveLength(1);
+    const one = v[0]!;
+    expect(one.path).toBe("toolExec");
+    expect(one.line).toBe(3);
+    expect(one.column).toBe(15);
+    expect(src.slice(one.start, one.end)).toBe('"sideways"');
+  });
+
+  it("walks nested schema leaves with house paths and array indices", () => {
+    const src = '{\n  "compaction": {\n    "strategy": "bogus"\n  },\n  "list": ["a", "z"]\n}\n';
+    const params = enumParams([
+      {
+        key: "compaction",
+        schema: {
+          type: "object",
+          properties: {
+            strategy: { type: "string", enum: ["summarize", "pass-the-baton"], default: "pass-the-baton" },
+          },
+        },
+      },
+      { key: "list", schema: { type: "array", items: { type: "string", enum: ["a", "b"] } } },
+    ]);
+    const v = findEnumViolations(src, params);
+    expect(v.map((x) => x.path)).toEqual(["compaction.strategy", "list[1]"]);
+    expect(v[0]!.line).toBe(3);
+    expect(v[0]!.column).toBe(17);
+    expect(v[1]!.shipped).toBe('"z"');
+  });
+
+  it("mirrors the validator: valid values pass, wrong types are out-of-set, the schema default itself passes", () => {
+    expect(findEnumViolations('{ "logLevel": "debug" }')).toEqual([]);
+    const bad = findEnumViolations('{ "logLevel": 42 }');
+    expect(bad).toHaveLength(1);
+    expect(bad[0]!.shipped).toBe("42");
+    // Unparsable shape: no positions are invented.
+    expect(findEnumViolations('{ "logLevel": ')).toEqual([]);
+  });
+});
+
+describe("rescue enum stage: applyEnumRepairs", () => {
+  it("resets to the default touching nothing but the value token: comments and formatting survive byte-exact", () => {
+    const src = [
+      "{",
+      "  // guide comment above the key",
+      '  "logLevel": "verbos", /* block note beside it */',
+      '  "maxIterations": 5',
+      "}",
+      "",
+    ].join("\n");
+    const v = findEnumViolations(src);
+    expect(v).toHaveLength(1);
+    const out = applyEnumRepairs(src, v);
+    expect(out).toBe(src.replace('"verbos"', '"info"'));
+  });
+
+  it("removes a key with no schema default, keeping every comment (attached notes included)", () => {
+    const src = [
+      "{",
+      '  "maxIterations": 4,',
+      "  // note attached to the doomed key",
+      '  "doomed": "nope" // trailing note',
+      "}",
+      "",
+    ].join("\n");
+    const params = enumParams([{ key: "doomed", schema: { type: "string", enum: ["yes"] } }]); // no default
+    const v = findEnumViolations(src, params);
+    expect(v).toHaveLength(1);
+    expect(v[0]!.hasDefault).toBe(false);
+    const out = applyEnumRepairs(src, v);
+    // Only the key..value bytes and the separator comma after `4` are gone;
+    // the indent before the doomed key survives, so the trailing note keeps
+    // its (now three-space) column. Comments are never inside a cut.
+    expect(out).toBe(
+      [
+        "{",
+        '  "maxIterations": 4',
+        "  // note attached to the doomed key",
+        "   // trailing note",
+        "}",
+        "",
+      ].join("\n"),
+    );
+  });
+});
+
+describe("rescue enum stage: fix path (runRescue)", () => {
+  async function mkdir(prefix: string): Promise<string> {
+    return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  }
+
+  it("fix resets to the schema default, keeps a .bak, and the file rescues to a clean state", async () => {
+    const dir = await mkdir("rescue-enum-fix-");
+    try {
+      const cfg = path.join(dir, "defaults.json");
+      const original = '{\n  "logLevel": "verbos"\n}\n';
+      await fs.writeFile(cfg, original);
+      const { result } = await captureConsole(() =>
+        runRescue({ configDirArg: dir, configFileArg: cfg, fix: true }),
+      );
+      expect(result).toBe(0);
+      expect(await fs.readFile(cfg, "utf-8")).toBe('{\n  "logLevel": "info"\n}\n');
+      expect(await fs.readFile(cfg + ".bak", "utf-8")).toBe(original);
+      const again = await captureConsole(() =>
+        runRescue({ configDirArg: dir, configFileArg: cfg, fix: false }),
+      );
+      expect(again.result).toBe(0);
+      expect(again.output).toContain("No problems found.");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fix removes the key when the schema declares no default; untouched bytes elsewhere", async () => {
+    const dir = await mkdir("rescue-enum-remove-");
+    try {
+      const cfg = path.join(dir, "defaults.json");
+      const original = '{\n  "maxIterations": 4,\n  "doomed": "nope",\n  "hideTools": true\n}\n';
+      await fs.writeFile(cfg, original);
+      const params = enumParams([{ key: "doomed", schema: { type: "string", enum: ["yes"] } }]);
+      const { result } = await captureConsole(() =>
+        runRescue({ configDirArg: dir, configFileArg: cfg, fix: true, configParams: params }),
+      );
+      expect(result).toBe(0);
+      expect(await fs.readFile(cfg, "utf-8")).toBe(
+        '{\n  "maxIterations": 4,\n  "hideTools": true\n}\n',
+      );
+      expect(await fs.readFile(cfg + ".bak", "utf-8")).toBe(original);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("every other byte survives: formatting, spacing and ordering are preserved around the spliced value", async () => {
+    const dir = await mkdir("rescue-enum-bytes-");
+    try {
+      const cfg = path.join(dir, "defaults.json");
+      const original = '{\t"logLevel":     "verbos"  ,\n    "maxIterations" : 7\n\n}';
+      await fs.writeFile(cfg, original);
+      await captureConsole(() =>
+        runRescue({ configDirArg: dir, configFileArg: cfg, fix: true }),
+      );
+      expect(await fs.readFile(cfg, "utf-8")).toBe(original.replace('"verbos"', '"info"'));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a file with two violations reports (and fixes) both, and the fix is idempotent", async () => {
+    const dir = await mkdir("rescue-enum-two-");
+    try {
+      const cfg = path.join(dir, "defaults.json");
+      await fs.writeFile(cfg, '{\n  "logLevel": "verbos",\n  "logTarget": "sideways"\n}\n');
+      const first = await captureConsole(() =>
+        runRescue({ configDirArg: dir, configFileArg: cfg, fix: false }),
+      );
+      expect(first.result).toBe(1);
+      expect(first.output).toContain('ENUM: "logLevel"');
+      expect(first.output).toContain('ENUM: "logTarget"');
+      expect(first.output).toContain("2 problem(s) found.");
+      const { result } = await captureConsole(() =>
+        runRescue({ configDirArg: dir, configFileArg: cfg, fix: true }),
+      );
+      expect(result).toBe(0);
+      expect(JSON.parse(await fs.readFile(cfg, "utf-8"))).toEqual({
+        logLevel: "info",
+        logTarget: "stderr",
+      });
+      // second run: no-op -- zero new backups, still clean.
+      await captureConsole(() =>
+        runRescue({ configDirArg: dir, configFileArg: cfg, fix: true }),
+      );
+      expect((await fs.readdir(dir)).sort()).toEqual(["defaults.json", "defaults.json.bak"]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("rescue enum stage: main integration", () => {
+  it("rescue reports an out-of-set enum with line/column and the accepted set", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-enum-cli-"));
+    try {
+      await fs.writeFile(path.join(dir, "defaults.json"), '{\n  "logLevel": "verbos"\n}\n');
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"]);
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain('ENUM: "logLevel" (line 2, column 15) = "verbos"');
+      expect(stdout).toContain('accepted set ["debug", "info", "warn", "error"]');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("nested extension enums (compaction.strategy) ride the same stage via the real config params", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-enum-nested-"));
+    try {
+      const cfg = path.join(dir, "defaults.json");
+      await fs.writeFile(cfg, '{\n  "compaction": {\n    "strategy": "bogus"\n  }\n}\n');
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"]);
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain('ENUM: "compaction.strategy" (line 3, column 17) = "bogus"');
+      const fix = await runMain(["--config-dir", dir, "rescue", "fix"]);
+      expect(fix.exitCode).toBe(0);
+      expect(JSON.parse(await fs.readFile(cfg, "utf-8"))).toEqual({
+        compaction: { strategy: "pass-the-baton" },
+      });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("boot failure on an out-of-set value names the repair command, every key and its accepted set (stdout stays clean)", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rescue-enum-fatal-"));
+    try {
+      await fs.writeFile(
+        path.join(dir, "defaults.json"),
+        '{\n  "logLevel": "verbos",\n  "logTarget": "sideways"\n}\n',
+      );
+      const { exitCode, stdout, stderr } = await runMain(["--config-dir", dir, "-p", "hi"]);
+      expect(exitCode).toBe(1);
+      expect(stdout).toBe("");
+      // The hard validation failure itself survives...
+      expect(stderr).toContain("Configuration validation failed");
+      // ...and the guidance now names the way out for BOTH keys.
+      expect(stderr).toContain("`hotdog rescue fix`");
+      expect(stderr).toContain('logLevel: accepted "debug" | "info" | "warn" | "error"');
+      expect(stderr).toContain('logTarget: accepted "stderr" | "stdout" | "none"');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("enumHintsFromValidationErrors", () => {
+  it("extracts key + accepted set from the validator's enum grammar and ignores the rest", () => {
+    const err = ConfigError.ValidationError([
+      'logLevel: value "verbos" not in enum ["debug", "info", "warn", "error"]',
+      "maxIterations: expected integer, got string",
+    ]);
+    expect(err.validationErrors).toBeDefined();
+    expect(enumHintsFromValidationErrors(err.validationErrors)).toEqual([
+      { key: "logLevel", accepted: ['"debug"', '"info"', '"warn"', '"error"'] },
+    ]);
+    expect(enumHintsFromValidationErrors(undefined)).toEqual([]);
+    expect(enumHintsFromValidationErrors(["root: must be 1"])).toEqual([]);
   });
 });

@@ -14,6 +14,20 @@ export interface SchemaLayer {
 
 export interface SchemaProperty {
   type?: string;
+  /** JSON-Schema vocabulary for an array's ELEMENTS. The settings editor
+   * renders a primitive-item array as one chrome row plus one stamped row
+   * per element (keyPath `field[i]`); the items declaration is what those
+   * element stamps and the element/append write gates enforce (type,
+   * minimum/maximum, enum). Absent items: a primitive-valued array still
+   * gets the chrome shape, with the element stamps derived from each
+   * element's runtime shape (the file-only doctrine). */
+  items?: SchemaProperty;
+  /** JSON-Schema vocabulary: the closed value set for a string leaf.
+   * Boot resolution does not enforce it (that has never been its job --
+   * consumers validate what they read); the settings editor stamps it so
+   * the panel offers a dropdown AND the write gate refuses values outside
+   * the set. */
+  enum?: string[];
   /** Lower bound for numeric values. A present-but-violating layer value is
    * treated like a failed cast: skip the layer, fall through to the next. */
   minimum?: number;

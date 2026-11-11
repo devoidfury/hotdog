@@ -203,14 +203,21 @@ export class ConfigError extends AppError {
     super(message, "config");
   }
 
+  /** The individual failures behind a ValidationError, kept on the instance so
+   *  boot guidance and rescue can act on them without re-parsing the joined
+   *  message. */
+  validationErrors?: string[];
+
   static LoadFailed(path: string, msg: string): ConfigError {
     return new ConfigError(`Error loading config from ${path}: ${msg}`);
   }
 
   static ValidationError(errors: string[]): ConfigError {
-    return new ConfigError(
+    const err = new ConfigError(
       `Configuration validation failed: ${errors.join("; ")}`,
     );
+    err.validationErrors = errors;
+    return err;
   }
 
   static MissingConfig(name: string): ConfigError {

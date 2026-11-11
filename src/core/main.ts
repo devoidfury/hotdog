@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "@utils/logger.ts";
+import { initializeLogger, logger, resolveLogLevel, resolveLogTarget, logBootConfigWarnings } from "@utils/logger.ts";
 import { suggestCandidates } from "@utils/strings.ts";
 import { createToolRegistry } from "./extensions/tool-registry.ts";
 import {
@@ -18,14 +18,15 @@ import type { CoreContext, ExtensionInstance, ToolMetadataPayload } from "./exte
 import type { ToolMetadata } from "./extensions/tool-registry.ts";
 import { parseArgs, generateHelpText } from "./cli.ts";
 import { loadConfig, buildConfig, getDefaultConfig, type CliArgv } from "./config/index.ts";
-import { runRescue } from "./config/rescue.ts";
+import { peekLogBootPosture } from "./config/boot-posture.ts";
+import { enumHintsFromValidationErrors, runRescue } from "./config/rescue.ts";
 import type { ProfileDef } from "./config/profiles.ts";
 import type { ResolvedConfig } from "./extensions/types.ts";
 import type { ProviderDef } from "./config/providers.ts";
 import { getLayerDefault } from "./config/schema-loader.ts";
 import { cliFlagsFromSchema, CONFIG_SCHEMA, type CoreConfigWithExtensions } from "./config/schema-loader.ts";
 import { ConfigRegistry } from "./extensions/config.ts";
-import { CliError, USAGE_ERROR_EXIT_CODE, formatError } from "./error.ts";
+import { CliError, ConfigError, USAGE_ERROR_EXIT_CODE, formatError } from "./error.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 import { createSubcommandRegistry, type CliSubcommandRegistry } from "./extensions/registries.ts";
 import {
@@ -204,9 +205,20 @@ export function peekConfigFlags(argv: readonly string[]): {
 export async function main(): Promise<number> {
   // Hooks + logger must exist before any error output can happen.
   const hooks = createHooks();
-  const minLevel = resolveLogLevel();
-  const logTarget = resolveLogTarget();
+  // ...but the logger's OWN posture rides the config file, and the file
+  // must be consulted BEFORE init (posture from line one, no stderr-first
+  // fix-up). peekConfigFlags + peekLogBootPosture resolve the same in-use
+  // file loadConfig will; precedence stays env > config > default inside
+  // resolve*, and a failed peek degrades to env/default silently.
+  const earlyConfigFlags = peekConfigFlags(process.argv.slice(2));
+  const logPosture = peekLogBootPosture(earlyConfigFlags);
+  const minLevel = resolveLogLevel(logPosture.logLevel);
+  const logTarget = resolveLogTarget(logPosture.logTarget);
   initializeLogger({ hooks, minLevel, target: logTarget });
+  // An out-of-set config value fell back to the default above; name it once
+  // now that an output channel exists. With logTarget "none" these warns are
+  // suppressed by design (no writer is attached) -- silence was requested.
+  for (const warning of logBootConfigWarnings(logPosture)) logger.warn(warning);
 
   // One-shot sessions/data layout migration (moved workflows/ and
   // task-lanes/ out of the sessions dir). Must run before any extension or
@@ -234,7 +246,6 @@ export async function main(): Promise<number> {
   // going on built-in defaults so `rescue` can reach the user.
   let earlyConfigError: unknown = null;
   let minimalConfig;
-  const earlyConfigFlags = peekConfigFlags(process.argv.slice(2));
   try {
     // Same flag layer parseArgs will apply (flag > env > cwd/etc): a broken
     // host config must not abort a run whose --config/-config-dir points
@@ -259,7 +270,7 @@ export async function main(): Promise<number> {
     });
   cliSubcommandRegistry.register("rescue", {
     description:
-      "Diagnose config files: paths, resolution chain, syntax. 'fix' repairs comments/trailing commas",
+      "Diagnose config files: paths, resolution chain, syntax, invalid enum values. 'fix' repairs comments/trailing commas and resets out-of-set enums to their schema default (.bak kept)",
     handler: rescueHandler,
   });
   await registerExtensionMetadata(
@@ -347,6 +358,17 @@ export async function main(): Promise<number> {
   } catch (e) {
     logger.error(formatError(e));
     console.error("Run `hotdog rescue` for config diagnostics (paths, syntax, unknown keys).");
+    // Out-of-set enum values parse fine and fail here, in validation: name the
+    // repair command the way the broken-syntax path does, plus every offending
+    // key and its accepted set (the owner ruled boot keeps failing; rescue
+    // makes getting out easy).
+    const badEnums = e instanceof ConfigError ? enumHintsFromValidationErrors(e.validationErrors) : [];
+    if (badEnums.length > 0) {
+      console.error(
+        `Out-of-set value${badEnums.length === 1 ? "" : "s"} - \`hotdog rescue fix\` ${badEnums.length === 1 ? "resets it" : "resets each of them"} to the schema default and keeps a .bak:` +
+          badEnums.map((b) => `\n  ${b.key}: accepted ${b.accepted.join(" | ")}`).join(""),
+      );
+    }
     return 1;
   }
   const { resolved, config } = built;

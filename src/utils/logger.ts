@@ -23,20 +23,70 @@ export const LOG_LEVELS: Record<LogLevel, number> = {
   error: 3,
 };
 
-export function resolveLogLevel(configLevel?: string): LogLevel {
+// Closed target set; mirrors the logTarget enum in core.config.json.
+export const LOG_TARGETS: readonly LogTarget[] = ["stderr", "stdout", "none"];
+
+/**
+ * env > config > default. `configLevel` is the RAW config-file entry from the
+ * early boot peek (hence unknown): out-of-set values ("verbos", 3, ...) fall
+ * to the default like unset ones, and logBootConfigWarnings() names them once
+ * so the fallback is never silent. null reads as absent, the way every config
+ * layer reads null (validateConfig skips nulls too).
+ */
+export function resolveLogLevel(configLevel?: unknown): LogLevel {
   const envLevel = process.env.HOTDOG_LOG_LEVEL?.toLowerCase();
   if (envLevel && envLevel in LOG_LEVELS) return envLevel as LogLevel;
-  if (configLevel && configLevel in LOG_LEVELS) return configLevel as LogLevel;
+  if (typeof configLevel === "string" && configLevel in LOG_LEVELS)
+    return configLevel as LogLevel;
   return "info";
 }
 
-export function resolveLogTarget(configTarget?: string): LogTarget {
+/** Same precedence as resolveLogLevel; same tolerance + named-fallback rule. */
+export function resolveLogTarget(configTarget?: unknown): LogTarget {
+  const accepted: readonly string[] = LOG_TARGETS;
   const envTarget = process.env.HOTDOG_LOG_TARGET?.toLowerCase();
-  if (envTarget && ["stderr", "stdout", "none"].includes(envTarget))
-    return envTarget as LogTarget;
-  if (configTarget && ["stderr", "stdout", "none"].includes(configTarget))
+  if (envTarget && accepted.includes(envTarget)) return envTarget as LogTarget;
+  if (typeof configTarget === "string" && accepted.includes(configTarget))
     return configTarget as LogTarget;
   return "stderr";
+}
+
+/**
+ * One-time boot warnings for raw config-file entries (the shape
+ * peekLogBootPosture returns) that resolveLogLevel/resolveLogTarget had to
+ * reject: an out-of-set value falls back to the default instead of being
+ * silently swallowed, and the line names the offending value and the
+ * accepted set. A value only merits a warn when it would have applied --
+ * env beats config, so a valid env value makes the config line moot; null
+ * reads as absent, matching the resolvers. Call AFTER initializeLogger: a
+ * pre-init warn would ride the preload queue anyway, but this keeps the
+ * ordering explicit. With logTarget "none" the warn is suppressed by design
+ * -- the user asked for silence and no writer is attached -- do not fight
+ * it.
+ */
+export function logBootConfigWarnings(config: {
+  logLevel?: unknown;
+  logTarget?: unknown;
+}): string[] {
+  const warns: string[] = [];
+  const check = (
+    name: string,
+    envKey: string,
+    raw: unknown,
+    accepted: readonly string[],
+    def: string,
+  ): void => {
+    if (raw === undefined || raw === null) return;
+    if (typeof raw === "string" && accepted.includes(raw)) return;
+    const env = process.env[envKey]?.toLowerCase();
+    if (env && accepted.includes(env)) return; // env beats config: the value never applied
+    warns.push(
+      `Config "${name}" = ${JSON.stringify(raw)} is not one of ${accepted.join(" | ")}; using the default "${def}".`,
+    );
+  };
+  check("logLevel", "HOTDOG_LOG_LEVEL", config.logLevel, Object.keys(LOG_LEVELS), "info");
+  check("logTarget", "HOTDOG_LOG_TARGET", config.logTarget, LOG_TARGETS, "stderr");
+  return warns;
 }
 
 // ── Singleton Logger ────────────────────────────────────────────────────────

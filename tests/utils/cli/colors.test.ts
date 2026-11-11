@@ -18,7 +18,9 @@ import {
   applyShellHighlight,
   applyArgKeyHighlight,
   applyArgSeparator,
+  applyMarkdown,
 } from '../../../src/utils/cli/colors.ts';
+import { tokenizeMarkdownLine, newMdStreamState } from '@utils/syntax/markdown.ts';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import os from 'node:os';
@@ -360,5 +362,43 @@ describe('applyArgSeparator', () => {
     expect(composed).toBe(
       '\x1b[36mpath:\x1b[0m a.ts\x1b[90m · \x1b[0m\x1b[36mlimit:\x1b[0m 10',
     );
+  });
+});
+
+describe('applyMarkdown', () => {
+  const dark = new ColorPalette(dark_palette());
+  const paint = (line: string): string =>
+    applyMarkdown(tokenizeMarkdownLine(line, newMdStreamState()), dark);
+
+  it('wraps each class in its own color and keeps every byte', () => {
+    expect(paint('# Title')).toBe('\x1b[38;5;208m# Title\x1b[0m');
+    expect(paint('a **b** `c`')).toBe(
+      '\x1b[1;37ma \x1b[0m\x1b[1;31m**b**\x1b[0m\x1b[1;37m \x1b[0m\x1b[31m`c`\x1b[0m',
+    );
+  });
+
+  it('unstyled prose keeps the final_response wash byte-identical to the legacy path', () => {
+    const plain = 'just prose';
+    expect(paint(plain)).toBe(applyFinalResponse(plain, dark));
+  });
+
+  it('shell classes inside a fence reuse the shell pair', () => {
+    const s = newMdStreamState();
+    applyMarkdown(tokenizeMarkdownLine('```sh', s), dark); // open the fence
+    expect(applyMarkdown(tokenizeMarkdownLine('ls | wc', s), dark)).toBe(
+      '\x1b[36mls\x1b[0m\x1b[1;37m \x1b[0m\x1b[90m|\x1b[0m\x1b[1;37m \x1b[0m\x1b[36mwc\x1b[0m',
+    );
+  });
+
+  it('markers ride the text color by default (empty palette name)', () => {
+    // Empty accent -> no wrap at all on the marker run; the wash covers the rest.
+    expect(paint('- one')).toBe('-\x1b[1;37m \x1b[0m\x1b[1;37mone\x1b[0m');
+  });
+
+  it('colors off: runs pass through concatenated untouched', () => {
+    const off = new ColorPalette({ use_colors: false });
+    expect(paint.call(null, '')).toBe('');
+    const runs = tokenizeMarkdownLine('# **a**', newMdStreamState());
+    expect(applyMarkdown(runs, off)).toBe('# **a**');
   });
 });

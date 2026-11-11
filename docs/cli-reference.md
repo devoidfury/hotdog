@@ -80,6 +80,7 @@ render as `[U+XXXX]` tokens, raw bytes never reach the terminal.
     --disable-env-scrubbing  Pass the full environment to subprocesses (bash tool, MCP stdio) without secret scrubbing.
     --shell-mode             Execute lines starting with a recognized system command directly in interactive mode
                                Tip: append | @ to send command output to the agent (e.g., "ls -la | @", "ls -la | @ show me the permissions")
+    --no-markdown            Disable markdown highlighting of assistant prose on the split renderer (config uiInteractiveCli.markdown; on by default)
 -l, --loud                   Print full JSON API responses
 --json                       Output as JSON for the subcommands that support it (info, profiles,
                                sessions, rescue); stdout carries only the JSON, diagnostics go to stderr

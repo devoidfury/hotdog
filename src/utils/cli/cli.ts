@@ -42,7 +42,7 @@ import {
   type PaletteOptions,
 } from "./colors.ts";
 
-const Modes = {
+export const Modes = {
   Default: "default",
   Question: "question",
   Progress: "progress",
@@ -105,6 +105,16 @@ export interface CliOutputSinkOptions {
    * never keys off a tool name. Unwired = every result renders generically.
    */
   display?: (toolName: string) => ToolDisplaySpec[] | undefined;
+  /**
+   * Markdown prose highlighting (split renderer only, wired by
+   * ui-interactive-cli): Default-mode text is emitted spoof-neutralized and
+   * otherwise RAW (no final_response wash) and the bridge paints whole lines
+   * with the markdown tokenizer -- completed lines once at the newline commit, the in-flight row on every
+   * frame repaint. Never set on the legacy/one-shot path (byte-identity).
+   */
+  markdownHighlight?: boolean;
+  /** Output-mode transition observer (same wiring as markdownHighlight). */
+  onOutputMode?: (mode: string) => void;
 }
 
 export function formatCompacting(messageCount: number, keepRecent: number): string {
@@ -307,6 +317,10 @@ export class CliOutputSink extends OutputSink {
   showTokenUse: boolean;
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
   display?: (toolName: string) => ToolDisplaySpec[] | undefined;
+  /** Markdown split path: Default-mode text rides raw; the bridge paints. */
+  markdownHighlight = false;
+  /** Output-mode transition observer (set when markdownHighlight is on). */
+  onOutputMode: ((mode: Mode) => void) | null = null;
   [key: string]: unknown;
 
   // ── Newline buffer for streaming output ────────────────────────────────
@@ -346,6 +360,8 @@ export class CliOutputSink extends OutputSink {
     this.showTokenUse = options.showTokenUse !== false;
     this.argDisplay = options.argDisplay;
     this.display = options.display;
+    this.markdownHighlight = options.markdownHighlight === true;
+    this.onOutputMode = options.onOutputMode ?? null;
 
     // ── Newline buffer for streaming output ────────────────────────────────
     // Buffers trailing newlines to normalize spacing between reasoning and
@@ -383,7 +399,18 @@ export class CliOutputSink extends OutputSink {
       const stream =
         (this as Record<string, unknown>)[modeStreams[mode]] as NodeJS.WriteStream;
       const colorFn =
-        modeColorFns[mode];
+        // Markdown split path: Default-mode prose rides to the bridge with
+        // only spoof neutralization (no wash); the bridge paints whole lines
+        // (commit + live repaint). Neutralize HERE, at the render seam of the
+        // model's bytes, not in the painter: the same out channel also
+        // carries locally-generated rows (sink.log/uiOut during a Default
+        // mode edge) whose ANSI is legitimate and must never be shredded.
+        // Benign text passes through unchanged, so the live row and the
+        // committed line spoof to identical bytes and the repaint skip holds.
+        // Every other mode keeps its legacy wash.
+        this.markdownHighlight && mode === Modes.Default
+          ? (text: string): string => spoofSafe(text)
+          : modeColorFns[mode];
       const colored = colorFn(this.#textBuf, this.palette);
       stream.write(colored);
       this.#textBuf = "";
@@ -430,6 +457,9 @@ export class CliOutputSink extends OutputSink {
   _transitionTo(mode: Mode): void {
     const hadPreviousMode = this.#outputMode !== null;
     this.#outputMode = mode;
+    // The split bridge's markdown painter follows the prose mode (v1: only
+    // the Default mode carries assistant markdown).
+    this.onOutputMode?.(mode);
     // Only add a separator newline when transitioning between modes,
     // not on the very first call when there's no previous segment.
     this.#nlBuf = hadPreviousMode ? 1 : 0;

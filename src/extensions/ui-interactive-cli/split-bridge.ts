@@ -13,6 +13,13 @@
 import { EventEmitter } from "node:events";
 import { formatError } from "@core/error.ts";
 import { STREAM_RETRY_MARKER } from "@utils/cli/cli.ts";
+import { applyMarkdown, type ColorPalette } from "@utils/cli/colors.ts";
+import {
+  newMdStreamState,
+  tokenizeMarkdownLine,
+  tokenizeMarkdownLive,
+  type MdStreamState,
+} from "@utils/syntax/markdown.ts";
 import { RendererCore } from "@utils/cli/renderer/commit.ts";
 import { Grid } from "@utils/cli/renderer/grid.ts";
 import { ProcessTerminal } from "@utils/cli/renderer/terminal.ts";
@@ -495,6 +502,24 @@ export class OutputBridge {
    */
   #attemptOutput = false;
 
+  // ── Markdown prose highlighting (split renderer only) ──────────────────
+  /**
+   * Set by enableProseMarkdown: assistant Default-mode rows arrive from the
+   * sink RAW (the sink's final_response wash is skipped) and every whole line
+   * is painted here -- committed lines once at the newline, the in-flight row
+   * on every frame repaint (the frame's erase/recompose IS the cursor move).
+   * Null = feature off, byte-identical to before.
+   */
+  #mdPalette: ColorPalette | null = null;
+  /** Fence state, advanced ONLY on committed lines; reset per turn/reset. */
+  #mdState: MdStreamState = newMdStreamState();
+  /** The sink's current output mode is assistant prose (Default). */
+  #proseMode = false;
+  /** Whether the out channel's current (unterminated) row is prose. A row's
+   * provenance is fixed when the row STARTS, so the row that a mode change
+   * strands mid-line (the tool-call separator terminates it) still paints. */
+  #outLineProse = false;
+
   constructor(private readonly opts: OutputBridgeOptions) {
     this.core = new RendererCore({
       terminal: opts.terminal,
@@ -513,7 +538,7 @@ export class OutputBridge {
       opts.terminal.columns,
     );
     this.#outChannel = new LineChannel(
-      (lines) => this.#commitLines(lines),
+      (lines) => this.#commitOutLines(lines),
       () => this.#repaintIfStreaming(),
     );
     this.#errChannel = new LineChannel(
@@ -531,14 +556,26 @@ export class OutputBridge {
    * commitText/arbiteText flush the OTHER channel before writing, so at most
    * one channel ever holds an unterminated row. That row is the line being
    * streamed right now -- completed rows already committed into scrollback and
-   * stay there. The partial is already sink-colored, so it needs no restyling.
+   * stay there. Non-prose partials are already sink-colored and pass through;
+   * a PROSE partial is raw markdown and gets re-painted on every repaint (the
+   * live pass is pure: same text + same fence state produce the same bytes, so
+   * the no-op-repaint skip keeps holding and unclosed spans restyle as close).
    * Returns [] when nothing is mid-line (idle, or every line terminated).
    */
   #streamingRows(width: number): string[] {
     this.#lastStreamKey = this.#streamingOpen();
     const open = this.#lastStreamKey;
     if (open === "") return [];
-    return wrapToWidth(open, width);
+    return wrapToWidth(this.#paintLiveProse(open), width);
+  }
+
+  /** Live repaint of the in-flight prose row; verbatim for everything else. */
+  #paintLiveProse(open: string): string {
+    const palette = this.#mdPalette;
+    if (palette === null || !this.#outLineProse || !this.#outChannel.hasPartial) {
+      return open;
+    }
+    return applyMarkdown(tokenizeMarkdownLive(open, this.#mdState), palette);
   }
 
   /** The one open (unterminated) row across both channels, "" when none. */
@@ -595,6 +632,9 @@ export class OutputBridge {
     // rows; flush it first so the two channels keep their temporal order.
     const open = this.#errChannel.hasPartial;
     this.#errChannel.flush();
+    // A stdout row that starts with this write fixes its markdown provenance
+    // NOW (the mode as of this moment); an already-open row keeps its own.
+    if (!this.#outChannel.hasPartial) this.#outLineProse = this.#proseMode;
     this.#outChannel.write(this.#eatTerminator(text, open));
   }
 
@@ -815,6 +855,9 @@ export class OutputBridge {
     this.#attemptOutput = false;
     this.#outChannel.discardPartial();
     this.#errChannel.discardPartial();
+    // The retry re-streams the whole response: the fence document restarts.
+    this.#mdState = newMdStreamState();
+    this.#outLineProse = false;
     this.clearInflightCalls();
     if (deadShown) {
       // One plain marker row at the duplication point, committed like any
@@ -1072,6 +1115,53 @@ export class OutputBridge {
   #commitLines(lines: string[]): void {
     this.transcriptLog.push(...lines);
     this.core.commit(lines);
+  }
+
+  /**
+   * Turn markdown prose highlighting on (split renderer, config default-on).
+   * Pairs with the sink's `markdownHighlight` option: the sink stops washing
+   * Default-mode text and reports mode changes through `setProseMode`; the
+   * tokenizer state lives here because the repaint loop does. Re-enabling
+   * mid-session resets the fence state (a fresh document view).
+   */
+  enableProseMarkdown(palette: ColorPalette): void {
+    this.#mdPalette = palette;
+    this.#mdState = newMdStreamState();
+  }
+
+  /**
+   * The sink's output-mode signal: true while streaming assistant prose.
+   * A rising edge starts a fresh fence document: every Default segment is its
+   * own message surface (message boundaries are the tool calls between them).
+   */
+  setProseMode(prose: boolean): void {
+    if (prose && !this.#proseMode) this.#mdState = newMdStreamState();
+    this.#proseMode = prose;
+  }
+
+  /**
+   * stdout commits pass through the markdown painter for prose rows. The
+   * first row may predate a mode change (a tool call stranding an unterminated
+   * prose line): its provenance is the row-start flag, NOT the mode as of
+   * now. Rows that start inside this write follow the current mode.
+   */
+  #commitOutLines(lines: string[]): void {
+    const palette = this.#mdPalette;
+    if (palette !== null) {
+      let prose = this.#outLineProse;
+      const painted: string[] = [];
+      for (const line of lines) {
+        painted.push(
+          prose ? applyMarkdown(tokenizeMarkdownLine(line, this.#mdState), palette) : line,
+        );
+        prose = this.#proseMode;
+      }
+      // A trailing partial produced by this write started under this mode.
+      this.#outLineProse = prose;
+      this.#commitLines(painted);
+      return;
+    }
+    this.#commitLines(lines);
   }
 
   /**

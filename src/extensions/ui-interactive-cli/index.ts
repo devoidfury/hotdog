@@ -1,7 +1,7 @@
 import pkg from "@package.json" with { type: "json" };
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { CliOutputSink, inflightCallText } from "@utils/cli/cli.ts";
+import { CliOutputSink, Modes, inflightCallText } from "@utils/cli/cli.ts";
 import { resolveQuestionAnswer } from "@utils/question-answer.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 import { ABORTED, raceAbort } from "@utils/promise.ts";
@@ -692,6 +692,15 @@ export async function runInteractiveSession(
   uiBridge = bridge;
   if (bridge) {
     sink.logRouter = (message: string) => bridge.commitText(message + "\n");
+    // Markdown prose highlighting (split renderer only, default-on; colors-off
+    // stays on the plain byte path). The sink stops washing Default-mode text
+    // and reports mode edges; the bridge paints whole lines on commit and
+    // re-paints the in-flight row on every frame repaint.
+    if (uiCli.markdown !== false && cli.noMarkdown !== true && palette.use_colors) {
+      bridge.enableProseMarkdown(palette);
+      sink.markdownHighlight = true;
+      sink.onOutputMode = (mode) => bridge.setProseMode(mode === Modes.Default);
+    }
   }
   uiOut = (message: string) => sink.log(message);
   uiFlush = () => {

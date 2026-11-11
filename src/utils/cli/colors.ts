@@ -1,5 +1,6 @@
 import fsPromises from "node:fs/promises";
 import { tokenizeShell } from "@utils/syntax/shell.ts";
+import type { SyntaxRun } from "@utils/syntax/index.ts";
 
 export interface PaletteOptions {
   thinking?: string;
@@ -24,6 +25,16 @@ export interface PaletteOptions {
   diff_ctx?: string;
   /** Diff chrome: the path/stat header and the elision summary. */
   diff_meta?: string;
+  /** Markdown headings in assistant prose (split renderer only). */
+  md_heading?: string;
+  /** Markdown `**strong**` spans. */
+  md_strong?: string;
+  /** Markdown inline-code spans. */
+  md_code?: string;
+  /** Markdown list/blockquote markers (empty leaves them the text color). */
+  md_marker?: string;
+  /** Markdown fence rule lines (the ``` themselves). */
+  md_fence?: string;
   use_colors?: boolean;
 }
 
@@ -42,6 +53,11 @@ export class ColorPalette {
   diff_del: string;
   diff_ctx: string;
   diff_meta: string;
+  md_heading: string;
+  md_strong: string;
+  md_code: string;
+  md_marker: string;
+  md_fence: string;
   use_colors: boolean;
 
   constructor(options: PaletteOptions = {}) {
@@ -61,6 +77,13 @@ export class ColorPalette {
     this.diff_del = options.diff_del ?? "red";
     this.diff_ctx = options.diff_ctx ?? "bright_black";
     this.diff_meta = options.diff_meta ?? "bright_black";
+    // Markdown accents for assistant prose: hue marks structure, not hue for
+    // its own sake -- headings lead, emphasis and inline code shout once.
+    this.md_heading = options.md_heading ?? "orange";
+    this.md_strong = options.md_strong ?? "bold_red";
+    this.md_code = options.md_code ?? "red";
+    this.md_marker = options.md_marker ?? "";
+    this.md_fence = options.md_fence ?? "bright_black";
     this.use_colors = options.use_colors ?? true;
   }
 
@@ -91,6 +114,11 @@ export function dark_palette(): PaletteOptions {
     diff_del: "red",
     diff_ctx: "bright_black",
     diff_meta: "bright_black",
+    md_heading: "orange",
+    md_strong: "bold_red",
+    md_code: "red",
+    md_marker: "",
+    md_fence: "bright_black",
     use_colors: true,
   };
 }
@@ -112,6 +140,12 @@ export function light_palette(): PaletteOptions {
     diff_del: "red",
     diff_ctx: "bright_black",
     diff_meta: "bright_black",
+    // Orange washes out on light backgrounds; headings darken to blue.
+    md_heading: "blue",
+    md_strong: "bold_red",
+    md_code: "red",
+    md_marker: "",
+    md_fence: "bright_black",
     use_colors: true,
   };
 }
@@ -134,6 +168,13 @@ export function monochrome_palette(): PaletteOptions {
     diff_del: "dim",
     diff_ctx: "dim",
     diff_meta: "dim",
+    // Styles only: headings and strong go bold, inline code underlines, the
+    // fence rules dim out of the way.
+    md_heading: "bold",
+    md_strong: "bold",
+    md_code: "underline",
+    md_marker: "",
+    md_fence: "dim",
     use_colors: true,
   };
 }
@@ -159,6 +200,9 @@ const COLOR_MAP: Record<string, string> = {
   bold: "1",
   dim: "2",
   underline: "4",
+  // 256-color orange: the heading accent the basic 8 cannot name. Terminals
+  // without 256-color support print the sequence's text unstyled-at-worst.
+  orange: "38;5;208",
 };
 
 const RESET = "\x1b[0m";
@@ -186,6 +230,11 @@ export function mergePalette(base: ColorPalette, custom: PaletteOptions): ColorP
     diff_del: custom.diff_del || base.diff_del,
     diff_ctx: custom.diff_ctx || base.diff_ctx,
     diff_meta: custom.diff_meta || base.diff_meta,
+    md_heading: custom.md_heading !== undefined ? custom.md_heading : base.md_heading,
+    md_strong: custom.md_strong !== undefined ? custom.md_strong : base.md_strong,
+    md_code: custom.md_code !== undefined ? custom.md_code : base.md_code,
+    md_marker: custom.md_marker !== undefined ? custom.md_marker : base.md_marker,
+    md_fence: custom.md_fence !== undefined ? custom.md_fence : base.md_fence,
     use_colors:
       custom.use_colors !== undefined ? custom.use_colors : base.use_colors,
   });
@@ -338,6 +387,40 @@ export function applyToolResult(text: string, palette: ColorPalette): string {
 
 export function applyFinalResponse(text: string, palette: ColorPalette): string {
   return applyColor(text, palette.final_response, palette.use_colors);
+}
+
+/**
+ * Paint markdown token runs (from @utils/syntax/markdown.ts) with the
+ * palette: heading/strong/code/marker/fence take their md_* entries, shell
+ * classes reuse the shell pair (a ```sh fence reads like a tool-call line),
+ * every other class -- including the default prose runs -- rides the
+ * final_response color, so unstyled text keeps the legacy wash exactly.
+ * Colors off, or an empty/unknown accent name, leaves runs unstyled.
+ */
+export function applyMarkdown(runs: SyntaxRun[], palette: ColorPalette): string {
+  if (runs.length === 0) return "";
+  if (!palette.use_colors) return runs.map((r) => r.text).join("");
+  let out = "";
+  for (const run of runs) {
+    const name =
+      run.type === "heading"
+        ? palette.md_heading
+        : run.type === "strong"
+          ? palette.md_strong
+          : run.type === "code"
+            ? palette.md_code
+            : run.type === "marker"
+              ? palette.md_marker
+              : run.type === "fence"
+                ? palette.md_fence
+                : run.type === "command"
+                  ? palette.shell_command
+                  : run.type === "operator"
+                    ? palette.shell_operator
+                    : palette.final_response;
+    out += applyColor(run.text, name, true);
+  }
+  return out;
 }
 
 export function applyCompacting(text: string, palette: ColorPalette): string {

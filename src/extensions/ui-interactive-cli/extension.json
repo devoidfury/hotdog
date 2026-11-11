@@ -27,6 +27,11 @@
           "enum": ["legacy", "split"],
           "default": "split",
           "description": "Interactive CLI output renderer (default on). 'split' mounts the managed bottom-region renderer (commits transcript rows into native scrollback) but only when both stdin and stdout are TTYs and TERM is not the dumb convention string; any non-TTY stream or dumb terminal falls back to legacy regardless of this knob. 'legacy' is the kill-switch: today's direct stdout/stderr writes, byte-identical, never touches a global."
+        },
+        "markdown": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight markdown in streamed assistant prose on the split renderer (headings, **strong**, `code`, list markers, fenced blocks with shell/yaml sub-highlighting). Default on; set false for the flat final_response wash. Ignored on the legacy renderer and when colors are disabled."
         }
       },
       "additionalProperties": false,
@@ -41,6 +46,11 @@
     {
       "long": "--shell-mode",
       "description": "Execute lines starting with a recognized system command directly",
+      "type": "boolean"
+    },
+    {
+      "long": "--no-markdown",
+      "description": "Disable markdown highlighting of assistant prose (split renderer; config uiInteractiveCli.markdown)",
       "type": "boolean"
     }
   ],

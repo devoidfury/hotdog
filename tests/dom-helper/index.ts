@@ -246,6 +246,10 @@ const VOID_TAGS = new Set([
 // in the given one. Tests assert `namespaceURI` to prove the JSX runtime routed
 // inline <svg> subtrees through createElementNS (HTMLUnknownElement otherwise).
 const HTML_NS = "http://www.w3.org/1999/xhtml";
+// Tags the disabled attribute applies to (HTML form controls).
+const FORM_CONTROL_TAGS = new Set([
+  "BUTTON", "INPUT", "SELECT", "TEXTAREA", "OPTION", "OPTGROUP", "FIELDSET",
+]);
 const SVG_NS = "http://www.w3.org/2000/svg";
 export { HTML_NS, SVG_NS };
 
@@ -435,7 +439,20 @@ class DElement extends DNode {
     return out;
   }
 
+  // Real-browser parity: click() on a disabled form control is a no-op (the
+  // click never queues to the element). Without this the harness dispatched
+  // clicks onto disabled buttons, which is how an inverted disabled prop
+  // stayed green while the live chip was dead. Both checks because there is
+  // no property/attribute reflection here: jsx sets the attribute, imperative
+  // code (message-list) sets the property.
   click(): void {
+    if (
+      FORM_CONTROL_TAGS.has(this.tagName) &&
+      (this.attributes.has("disabled") ||
+        (this as unknown as { disabled?: boolean }).disabled === true)
+    ) {
+      return;
+    }
     this.dispatchEvent(new DEvent("click", this));
   }
 

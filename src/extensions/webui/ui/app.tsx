@@ -2095,7 +2095,6 @@ function App() {
                   ]
                     .filter(Boolean)
                     .join(" ") || undefined}
-                  disabled={fenceClickable}
                   title={
                     fenceClickable
                       ? `${toolExec} -- click to toggle this session's fence`

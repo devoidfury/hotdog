@@ -1874,6 +1874,12 @@ describe("header fence toggle (real app wiring)", () => {
     const strip = el("#tool-exec-status");
     expect(strip.textContent).toContain("worker (fence: bwrap)");
     expect(strip.getAttribute("class")).toContain("toggleable");
+    // The clickable chip must never carry disabled: an inverted
+    // disabled={fenceClickable} once made the live chip swallow every click
+    // (disabled <button> eats the event) while every harness click still
+    // worked -- the click-suppressing dom-helper now catches that, and this
+    // pin names the invariant directly.
+    expect(strip.hasAttribute("disabled")).toBe(false);
     // Button chrome lives in the class, not an inline style attribute.
     expect(strip.getAttribute("style")).toBeNull();
     expect(strip.getAttribute("title")).toContain("click to toggle this session's fence");
@@ -2647,7 +2653,10 @@ describe("settings viewer (real app wiring)", () => {
     await tick();
     const first = sent<{ requestId: number }>("configSnapshot").pop()!;
     const refresh = els(".settings-btn").find((b) => b.textContent === "Refresh")!;
-    refresh.click();
+    // Opened snapshot still in flight: Refresh is busy-disabled, so this
+    // scripted dispatch (not a trusted click) models the pre-repaint race
+    // and drives the superseded-id drop below.
+    refresh.dispatchEvent(new Event("click"));
     await tick();
     const second = sent<{ requestId: number }>("configSnapshot").pop()!;
     expect(second.requestId).toBeGreaterThan(first.requestId);
@@ -3387,14 +3396,17 @@ describe("settings editor (real app wiring)", () => {
     addCommitBtn().click();
     await tick();
     expect(listFrames()).toHaveLength(1);
-    // Mid-flight the affordances are busy-disabled (the dom-helper still fires
-    // the handler; the STATE queue is the belt that keeps the wire serial).
+    // Mid-flight the affordances are busy-disabled. A real trusted click
+    // cannot land on a disabled control (DOM spec click() returns early),
+    // but a scripted dispatchEvent still fires -- it stands in for the
+    // double-click window before the repaint applies disabled, and the
+    // STATE queue is the belt that keeps the wire serial either way.
     const remove2 = provCard("providers[1]").querySelector(".settings-provider-remove") as unknown as HTMLElement;
     expect(addBtn().hasAttribute("disabled")).toBe(true);
     expect(remove2.hasAttribute("disabled")).toBe(true);
-    remove2.click();
+    remove2.dispatchEvent(new Event("click"));
     await tick();
-    (provCard("providers[1]").querySelector(".settings-provider-remove-yes") as unknown as HTMLElement).click();
+    (provCard("providers[1]").querySelector(".settings-provider-remove-yes") as unknown as HTMLElement).dispatchEvent(new Event("click"));
     await tick();
     expect(listFrames()).toHaveLength(1); // the remove QUEUED; no parallel frame
     // The append reply settles: the queued remove drains (second frame), then
@@ -3626,7 +3638,10 @@ describe("array list ops (generic editConfigList, real app wiring)", () => {
     removeBtn(rowOf("workspace.deny[0]")).click();
     await tick();
     expect(listFrames()).toHaveLength(1);
-    removeBtn(rowOf("workspace.deny[1]")).click();
+    // Second x mid-flight: a trusted click cannot reach a disabled control;
+    // scripted dispatch stands in for the pre-repaint race window (see the
+    // provider queue test) -- the STATE queue must keep the wire serial.
+    removeBtn(rowOf("workspace.deny[1]")).dispatchEvent(new Event("click"));
     await tick();
     expect(listFrames()).toHaveLength(1); // queued, not parallel
     // A reply with the WRONG id drops (stale): the queue NEVER drains on it

@@ -2,6 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { createAgentFactory, wireSessionEndReap } from "@core/agent-factory.ts";
 import { handleTokens } from "@core/command-handlers.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { ProfileManager } from "@core/config/profiles.ts";
+import { createConfigStore } from "@core/config/store.ts";
 
 function makeCore(overrides: Record<string, unknown> = {}) {
   const calls: [string, unknown][] = [];
@@ -382,5 +384,118 @@ describe("wireSessionEndReap", () => {
 
     const worker = await buildWith("worker");
     expect(worker.hooks.handlerCount(HOOKS.SESSION_END)).toBe(1);
+  });
+});
+
+// ── B3: the profile overlay is read PER BUILD through the live surface ──────
+// The reader shape websocket/server.ts wires: the map comes from the manager
+// carried by the store's CURRENT resolved generation, so a profile added
+// after boot lands on the next build instead of never.
+
+describe("profile overlays through the live store (B3 generation swap)", () => {
+  it("the next build sees a profile added by a swapped generation", async () => {
+    const store = createConfigStore();
+    store.adopt(
+      { coreOnly: true } as never,
+      { ...resolved, profileManager: new ProfileManager("/nonexistent-profiles", {}) } as never,
+    );
+    const core = {
+      hooks: { notifyHooks: async () => ({}), on: () => () => {} },
+      toolRegistry: {},
+      config: {},
+      get resolved() {
+        return store.current().resolved;
+      },
+    } as never;
+    const factory = createAgentFactory(core, {
+      profiles: () =>
+        store.current().resolved?.profileManager?.getProfilesForSwitch() ?? {},
+      llmClient: {} as never,
+    });
+
+    // Generation 1: 'late' does not exist -- the build carries no overlay.
+    const before = await factory({ profileName: "late" });
+    expect(before.toolWhitelist).toBeNull();
+
+    // Swap: the manager on the new generation declares 'late'.
+    store.swap({
+      config: { coreOnly: true } as never,
+      resolved: {
+        ...resolved,
+        profileManager: new ProfileManager("/nonexistent-profiles", {
+          late: {
+            name: "late",
+            description: "",
+            body: "",
+            model: null,
+            whitelistTools: ["read"],
+            blacklistTools: [],
+            manager: false,
+            visibleWorker: false,
+          },
+        }),
+      } as never,
+    })();
+
+    // Next build reads the new map (the previous build's field stays what it
+    // was -- build-pinned per the 4.2 invariant).
+    const after = await factory({ profileName: "late" });
+    expect(after.toolWhitelist).toEqual(["read"]);
+    expect(before.toolWhitelist).toBeNull();
+  });
+});
+
+// ── B5: the live view on the default path; explicit hosts pin by construction
+
+describe("createAgentFactory live view (B5, design §4.2)", () => {
+  it("a host passing explicit config/resolved stays PINNED even when the core carries a store", async () => {
+    const store = createConfigStore();
+    store.adopt({ pinnedOnly: true } as never, resolved as never);
+    const { core } = makeCore({ configStore: store });
+    const factory = createAgentFactory(core, {
+      resolved: resolved as never,
+      config: { bagOnly: 1 } as never,
+      llmClient: {} as never,
+    });
+    const agent = await factory();
+    expect((agent.config as Record<string, unknown>).maxRetries).toBe(5);
+
+    store.swap({
+      config: { pinnedOnly: true, changedBag: 1 } as never,
+      resolved: { ...resolved, maxRetries: 99 } as never,
+    })();
+
+    // No proxy on this path: the construction-time copy is the agent's truth.
+    expect((agent.config as Record<string, unknown>).maxRetries).toBe(5);
+    expect((agent.config as Record<string, unknown>).changedBag).toBeUndefined();
+  });
+
+  it("the default core.* path with a store builds the live view: unpinned base keys move, pins and exclusions hold", async () => {
+    const store = createConfigStore();
+    const bag = { coreOnly: true, maxRetries: 5 };
+    store.adopt(bag as never, resolved as never);
+    const { core } = makeCore({ resolved, config: bag, configStore: store });
+    const factory = createAgentFactory(core, { llmClient: {} as never });
+    const agent = await factory();
+    expect((agent.config as Record<string, unknown>).coreOnly).toBe(true);
+    expect((agent.config as Record<string, unknown>).maxRetries).toBe(5);
+
+    store.swap({
+      config: { ...bag, maxRetries: 2, changedBag: 1 } as never,
+      resolved: { ...resolved, maxRetries: 8, workspaceRoots: ["/moved"] } as never,
+    })();
+
+    // maxRetries rides the resolved-aware base (unpinned): live read NEW,
+    // resolved-first (the bag's 2 loses to the resolved layer's 8).
+    expect((agent.config as Record<string, unknown>).maxRetries).toBe(8);
+    // Config-tier keys are visible through the bag tier of the chain.
+    expect((agent.config as Record<string, unknown>).changedBag).toBe(1);
+    // workspaceRoots is an overlay trust pin (P5): it does NOT move.
+    expect((agent.config as Record<string, unknown>).workspaceRoots).toEqual(["/tmp"]);
+    // The derived resolved artifacts never enumerate (get still reads them).
+    const spreadKeys = Object.keys({ ...(agent.config as Record<string, unknown>) });
+    expect(spreadKeys).not.toContain("modelRegistry");
+    expect(spreadKeys).not.toContain("model");
+    expect((agent.config as Record<string, unknown>).model).toBe("resolved-model");
   });
 });

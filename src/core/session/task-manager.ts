@@ -79,9 +79,15 @@ export class TaskManager {
         baseUrl: (options.config as Record<string, unknown>).baseUrl as string | undefined,
         apiKey: (options.config as Record<string, unknown>).apiKey as string | undefined,
       });
-    // modelGroups / noSpread ride the resolved config bag, same as providers.
-    const modelGroups =
-      ((options.config as Record<string, unknown>).modelGroups as Record<string, string[]>) ?? {};
+    // modelGroups rides the config bag like providers, but as a READER (B3):
+    // the scheduler calls it per placement, so no generation's map object is
+    // ever pinned. Hosts holding a live core inject an accessor-backed
+    // reader (websocket/server.ts); the default re-reads this manager's own
+    // bag per placement -- bag IDENTITY stays boot-pinned like every other
+    // TaskManager ctor option (P9) until the composition roots pass readers.
+    const getModelGroups =
+      options.getModelGroups ??
+      (() => ((this.#config as Record<string, unknown>).modelGroups as Record<string, string[]>) ?? {});
     // Per-lane caps: the global lanesPerProvider (taskLanesPerProvider) is the  fleet default;
     // a numeric provider taskLanes overrides it for that lane only. Both normalize below 1 to unlimited (shared with session turns).
     const laneCaps = makeLaneCaps(options.lanesPerProvider, providerDefs);
@@ -144,7 +150,7 @@ export class TaskManager {
       laneCaps,
       buildDefaultModel,
       peekLoaded,
-      modelGroups,
+      modelGroups: getModelGroups,
       noSpread,
       lanes,
       lanesRetryMs,

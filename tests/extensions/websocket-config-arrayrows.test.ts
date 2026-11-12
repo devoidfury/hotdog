@@ -275,7 +275,16 @@ describe("chrome gate: the stamp predicate IS the write gate", () => {
     try {
       const shadows = {
         key: "shadows",
-        schema: { type: "array", layers: [{ source: "env", key: "TEST_SHADOW_ARR" }, { default: [] }], items: { type: "string" } },
+        // The config layer keeps the row alive: a leaf whose only layers are
+        // env + default is unreachable from settings.json and ships no row at
+        // all (notFileResolvable), which would leave this probe nothing to
+        // read. Env still shadows the file (it stays the FIRST layer), and the
+        // file carrying no array keeps the "no element rows" half intact.
+        schema: {
+          type: "array",
+          layers: [{ source: "env", key: "TEST_SHADOW_ARR" }, { source: "config", key: "shadows" }, { default: [] }],
+          items: { type: "string" },
+        },
       };
       const dir = dirWith(`{\n  "webui": { "port": 3000 }\n}\n`);
       const payload = await buildConfigSnapshot(fakeCore(dir, [shadows]));

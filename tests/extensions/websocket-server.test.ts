@@ -26,6 +26,7 @@ import { createRoleMappingRegistry } from "@core/extensions/role-mapping.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { createCompletionService } from "@core/completion.ts";
 import { create } from "@extensions/websocket/index.ts";
+import { createConfigStore } from "@core/config/store.ts";
 import { systemFirstRoleMapping, developerRoleMapping } from "@extensions/role-mapping-default/index.ts";
 
 const testRoleReg = createRoleMappingRegistry();
@@ -123,8 +124,6 @@ describe("SessionRegistry", () => {
   beforeEach(() => {
     registry = new SessionRegistry({
       buildAgent: createWsMockAgentFactory(),
-      questionTimeoutSecs: 300,
-      questionStrategy: "wait",
       sessionTimeoutMin: 30,
     });
   });
@@ -3020,6 +3019,32 @@ describe("tool-exec posture on sessionCreated", () => {
     );
   });
 
+  // B3: the real server hands the registry a READER over the live resolved
+  // plane; the strip label follows store.current() per payload instead of
+  // holding the boot bag reference.
+  it("a reader source keeps the posture strip honest across a generation swap", () => {
+    const buildAgent = async () => makeWsMockAgent({});
+    const store = createConfigStore();
+    store.adopt({} as never, { toolExec: "inline", execFence: "probe" } as never);
+    const reg = new SessionRegistry({
+      buildAgent,
+      toolExecResolved: () => (store.current().resolved ?? {}) as Record<string, unknown>,
+    });
+    const before = reg.toolExecLabel("s-swap");
+    expect(before).toBe("inline (unfenced)");
+
+    store.swap({
+      config: {} as never,
+      resolved: { toolExec: "worker", execFence: "off" } as never,
+    })();
+
+    // The NEXT payload read follows the new generation; the label string the
+    // earlier payload produced is a value, unchanged (prior use reads old).
+    expect(reg.toolExecLabel("s-swap")).toBe("worker (fence: off)");
+    expect(before).toBe("inline (unfenced)");
+    reg.stopCleanupLoop();
+  });
+
   it("SessionRegistry labels the posture from resolved values only", () => {
     const buildAgent = async () => makeWsMockAgent({});
     const plain = new SessionRegistry({ buildAgent, toolExecResolved: { toolExec: "inline", execFence: "probe" } });
@@ -3031,5 +3056,108 @@ describe("tool-exec posture on sessionCreated", () => {
     plain.stopCleanupLoop();
     off.stopCleanupLoop();
     probe.stopCleanupLoop();
+  });
+});
+
+// ── Question defaults through the live store (B3) ────────────────────────────
+// The bridge resolves its policy at question-ARMED time (one read before the
+// timer goes off). A swapped websocket block therefore changes the NEXT armed
+// question, while an in-flight question keeps the timer it was armed with --
+// P8's benign twin, pinned in both directions below.
+
+describe("question defaults through the live store (B3)", () => {
+  async function armedServer(store: ReturnType<typeof createConfigStore>) {
+    const core = createWsMockCore();
+    // Mirror createCore's accessor shape (B1) on the mock core.
+    Object.defineProperty(core, "config", {
+      get: () => store.current().config,
+    });
+    const wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    await waitForMessage(ws, S2C.SESSION_CREATED);
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
+
+    function startQuestion(): Promise<Record<string, unknown>> {
+      const handlers = core._registeredHooks["agent:toolContext"];
+      const store2: Record<string, unknown> = {};
+      const toolCtx = {
+        get: (k: string) => store2[k],
+        set: (k: string, v: unknown) => {
+          store2[k] = v;
+        },
+      };
+      handlers[0]!({ toolCtx, toolName: "question", agent: wsServer.sessionRegistry.get(sessionId)!.agent });
+      return (
+        store2["input"] as {
+          collectAnswers: (qs: Array<Record<string, unknown>>) => Promise<Record<string, unknown>>;
+        }
+      ).collectAnswers([{ key: "q1", prompt: "What?" }]);
+    }
+
+    return { wsServer, ws, sessionId, startQuestion };
+  }
+
+  function publishWs(
+    store: ReturnType<typeof createConfigStore>,
+    websocket: Record<string, unknown>,
+  ) {
+    store.swap({ config: { websocket } as never, resolved: {} as never })();
+  }
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it("an armed question keeps its wait posture after a swap; the next question gets the new one", async () => {
+    const store = createConfigStore();
+    store.adopt(
+      { websocket: { questionStrategy: "wait", questionTimeoutSecs: 300 } } as never,
+      {} as never,
+    );
+    const { wsServer, ws, sessionId, startQuestion } = await armedServer(store);
+    try {
+      const p = startQuestion();
+      let settled = false;
+      void p.then(() => {
+        settled = true;
+      });
+
+      // Swap to a fast auto-default policy WHILE the question is in flight.
+      publishWs(store, { questionStrategy: "default", questionTimeoutSecs: 0.05 });
+
+      // The armed question never re-timers: still pending well past 50ms.
+      await sleep(150);
+      expect(settled).toBe(false);
+
+      await wsServer.onMessage(
+        ws,
+        JSON.stringify({ type: C2S.QUESTION_ANSWER, sessionId, answers: { q1: "Ada" } }),
+      );
+      expect(await p).toEqual({ q1: "Ada" });
+
+      // The NEXT question arms under the new generation: default-resolves
+      // after ~50ms without an answer.
+      const p2 = startQuestion();
+      await expect(p2).resolves.toEqual({ q1: "" });
+    } finally {
+      wsServer.stopCleanupLoop();
+    }
+  });
+
+  it("an armed short timer still fires after the block swaps to wait", async () => {
+    const store = createConfigStore();
+    store.adopt(
+      { websocket: { questionStrategy: "default", questionTimeoutSecs: 0.05 } } as never,
+      {} as never,
+    );
+    const { wsServer, startQuestion } = await armedServer(store);
+    try {
+      const p = startQuestion();
+      // Swap to wait BEFORE the timer would fire: the in-flight question keeps
+      // its armed timer (benign twin) and still auto-resolves.
+      publishWs(store, { questionStrategy: "wait", questionTimeoutSecs: 300 });
+      await expect(p).resolves.toEqual({ q1: "" });
+    } finally {
+      wsServer.stopCleanupLoop();
+    }
   });
 });

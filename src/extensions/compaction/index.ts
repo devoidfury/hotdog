@@ -50,13 +50,24 @@ function getModelConfig(agent: Agent): ModelConfig {
 }
 
 export function create(core: CoreContext): ExtensionInstance | null {
-  // Config defaults come from extension.json configSchema
-  const settings = getExtensionConfig<CompactionSettings>(core, "compaction");
+  // Boot gate only: enabled=false at boot means this extension never exists
+  // (X/P1 loader gate, unchanged). A live on->off rides the per-trigger read
+  // in the CONTEXT hook, never a captured block.
+  if (!getExtensionConfig<CompactionSettings>(core, "compaction").enabled) return null;
 
-  if (!settings.enabled) return null;
-
-  // Honor the core contextLimit unless compaction.contextLimit overrides it.
-  settings.contextLimit ??= core.resolved?.contextLimit;
+  /**
+   * Per-run settings view: the live block for this generation plus the
+   * EFFECTIVE context window (compaction.contextLimit overrides the core
+   * resolved contextLimit). The old boot mutator
+   * (`settings.contextLimit ??= core.resolved?.contextLimit`) is deleted: it
+   * wrote the resolved value into the config block once at boot and froze
+   * it. strategies.ts pins that the CALLER resolves the window, so it is
+   * resolved here, per run, and the config block stays byte-untouched.
+   */
+  function runSettings(): CompactionSettings {
+    const s = getExtensionConfig<CompactionSettings>(core, "compaction");
+    return { ...s, contextLimit: s.contextLimit ?? core.resolved?.contextLimit };
+  }
 
   const strategyRegistry = new CompactionStrategyRegistry();
   strategyRegistry.register(new SummarizeStrategy());
@@ -77,14 +88,15 @@ export function create(core: CoreContext): ExtensionInstance | null {
    */
   const batonStash = new Map<string, { popped: Message[]; replayPending: boolean }>();
 
-  // Helpers are nested in create() so they close over core, settings, and the registry.
+  // Helpers are nested in create() so they close over core and the registry;
+  // every config value is read per run through getExtensionConfig (runSettings).
 
   /**
    * Ensure the conversation ends with a user turn.
    * Some strict chat templates (e.g. in LM Studio/llama.cpp) fail if the
    * message history ends with an assistant or tool message.
    */
-  function ensureUserTurnGuard(messages: Message[]): Message[] {
+  function ensureUserTurnGuard(messages: Message[], userTurnGuardPrompt: string): Message[] {
     if (messages.length === 0) return messages;
     const lastMsg = messages[messages.length - 1];
     // "harness" acts as a user turn on the wire in system-first format.
@@ -96,7 +108,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       // The prompt is config text (trusted layer), so no inner escaping.
       new Message({
         role: "harness",
-        content: settings.userTurnGuardPrompt,
+        content: userTurnGuardPrompt,
         source: "harness",
       }),
     ];
@@ -123,9 +135,15 @@ export function create(core: CoreContext): ExtensionInstance | null {
   /**
    * Perform the actual compaction. Returns false when compaction is
    * declined or fails (including a strategy boundary that would orphan a
-   * tool message) so the caller leaves the context untouched.
+   * tool message) so the caller leaves the context untouched. `s` is the
+   * caller's settings view (one live read, shared by canCompact +
+   * execute so the pair always agrees).
    */
-  async function _performCompaction(agent: Agent, strategy: CompactionStrategy): Promise<boolean> {
+  async function _performCompaction(
+    agent: Agent,
+    strategy: CompactionStrategy,
+    s: CompactionSettings,
+  ): Promise<boolean> {
     const messages = agent.context.getMessages(); // defensive copy — strategies expect Message[]
     const model = agent.model;
     const modelConfig = getModelConfig(agent);
@@ -203,7 +221,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
     };
 
     try {
-      const result = await strategy.execute(messages, settings, llmChat, model, wire);
+      const result = await strategy.execute(messages, s, llmChat, model, wire);
       if (!result) return false;
 
       const compactedCount = result.messagesCompacted;
@@ -282,7 +300,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         );
       }
 
-      agent.replaceContext(ensureUserTurnGuard(newContext));
+      agent.replaceContext(ensureUserTurnGuard(newContext, s.userTurnGuardPrompt));
 
       // Normalized to the CompactionResultEvent shape (core/context/
       // output.ts) so any sink bridge can forward it verbatim: token
@@ -418,6 +436,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
   }
 
   async function _handleCompactCommand(agent: Agent, opts: { keep: number | null; debug: boolean }): Promise<Record<string, unknown>> {
+    const s = runSettings(); // one live read for this command run
     const nonSystemMessages = agent.context.getNonSystem();
     const debug = opts.debug || core.resolved?.compactDebug === true;
 
@@ -436,7 +455,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       let start = Math.max(0, nonSystemMessages.length - requested);
       while (start > 0 && nonSystemMessages[start]!.role === "tool") start--;
       const keptMessages = nonSystemMessages.slice(start);
-      agent.replaceContext(ensureUserTurnGuard([...systemMessages, ...keptMessages]));
+      agent.replaceContext(ensureUserTurnGuard([...systemMessages, ...keptMessages], s.userTurnGuardPrompt));
       const keepContent = `Context compacted to ${keptMessages.length} messages.`;
       if (debug) {
         const written = await writeCompactionDump({
@@ -445,7 +464,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
           mode: "keep",
           keep_requested: opts.keep,
           strategy: null,
-          settings: { ...settings },
+          settings: { ...s },
           messages: { before: nonSystemMessages.length, after: keptMessages.length },
         });
         if (written) {
@@ -455,26 +474,26 @@ export function create(core: CoreContext): ExtensionInstance | null {
       return { action: ACTIONS.DISPLAY, content: keepContent };
     }
 
-    const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
+    const strategy = strategyRegistry.get(s.strategy) || strategyRegistry.getDefault();
     if (!strategy) {
       return { action: ACTIONS.ERROR, error: "No compaction strategy available." };
     }
 
-    if (!strategy.canCompact(nonSystemMessages, settings)) {
+    if (!strategy.canCompact(nonSystemMessages, s)) {
       return { action: ACTIONS.DISPLAY, content: "Compaction not applicable with current settings." };
     }
 
-    await _performCompaction(agent, strategy);
+    await _performCompaction(agent, strategy, s);
 
-    const resultContent = `Context compacted using '${settings.strategy}' strategy.`;
+    const resultContent = `Context compacted using '${s.strategy}' strategy.`;
     if (debug) {
       const written = await writeCompactionDump({
         ts: new Date().toISOString(),
         session_id: agent.sessionId ?? null,
         mode: "strategy",
         keep_requested: null,
-        strategy: settings.strategy,
-        settings: { ...settings },
+        strategy: s.strategy,
+        settings: { ...s },
         messages: {
           before: nonSystemMessages.length,
           after: agent.context.getNonSystem().length,
@@ -515,11 +534,15 @@ export function create(core: CoreContext): ExtensionInstance | null {
           return { messages: agent.buildMessages() };
         }
 
-        if (!settings.enabled) return;
+        // One live read per auto-trigger: an enabled on->off swap stops the
+        // NEXT trigger from compacting (a run already in flight finishes --
+        // P8's benign twin).
+        const s = runSettings();
+        if (!s.enabled) return;
 
         const nonSystemMessages = messages.filter((m) => m.role !== "system");
 
-        if (nonSystemMessages.length <= settings.keepRecentMessages * 2) return;
+        if (nonSystemMessages.length <= s.keepRecentMessages * 2) return;
 
         const modelConfig = getModelConfig(agent);
         // The trigger bills the FULL window: the system prompt (base prompt +
@@ -537,20 +560,20 @@ export function create(core: CoreContext): ExtensionInstance | null {
           !shouldCompact(
             messages,
             modelConfig.contextLimit,
-            settings.reserveTokens,
+            s.reserveTokens,
             wireFor(agent, modelConfig),
             actualPromptTokens,
           )
         )
           return;
 
-        const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
+        const strategy = strategyRegistry.get(s.strategy) || strategyRegistry.getDefault();
         if (!strategy) return;
 
-        if (!strategy.canCompact(nonSystemMessages, settings)) return;
+        if (!strategy.canCompact(nonSystemMessages, s)) return;
 
         // _performCompaction rewrites agent.context in place.
-        const compacted = await _performCompaction(agent, strategy);
+        const compacted = await _performCompaction(agent, strategy, s);
         if (!compacted) return;
 
         return { messages: agent.buildMessages() };
@@ -586,7 +609,9 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
         // The handoff tool's registered name ("handoff" in the handoff-tool
         // extension; referenced by name only — no dependency on it).
-        const notice = settings.batonNoticePrompt ?? BATON_NOTICE_PROMPT;
+        const notice =
+          getExtensionConfig<CompactionSettings>(core, "compaction").batonNoticePrompt ??
+          BATON_NOTICE_PROMPT;
         if (toolResults?.some((tr) => tr.toolName === "handoff")) {
           // Path A, armed on a precondition instead of the call alone: the
           // handoff tool cleared the context on success, so our notice is
@@ -673,22 +698,25 @@ export function create(core: CoreContext): ExtensionInstance | null {
         //    and passes it.
         // A second overflow propagates -- the core provider:error seam
         // retries once and the retry is not itself re-caught.
+        // One live read for the whole rescue chain: baton/trim/drop attempt the
+        // same settings the overflow saw, and the NEXT rescue reads fresh.
+        const s = runSettings();
         let rescued = false;
         const baton = strategyRegistry.get("pass-the-baton");
-        if (baton && baton.canCompact(agent.context.getMessages(), settings)) {
-          rescued = await _performCompaction(agent, baton);
+        if (baton && baton.canCompact(agent.context.getMessages(), s)) {
+          rescued = await _performCompaction(agent, baton, s);
         }
         if (!rescued) {
           // trim stays ungated (as before): its execute self-checks the fit,
           // so a genuine overflow of few but huge messages is rescued even
           // below the message-count gate.
           const trim = strategyRegistry.get("trim");
-          if (trim) rescued = await _performCompaction(agent, trim);
+          if (trim) rescued = await _performCompaction(agent, trim, s);
         }
         if (!rescued) {
           const drop = strategyRegistry.get("drop");
-          if (drop && drop.canCompact(agent.context.getMessages(), settings)) {
-            rescued = await _performCompaction(agent, drop);
+          if (drop && drop.canCompact(agent.context.getMessages(), s)) {
+            rescued = await _performCompaction(agent, drop, s);
           }
         }
         if (!rescued) {
@@ -721,7 +749,11 @@ export function create(core: CoreContext): ExtensionInstance | null {
               error: `Unknown compaction strategy: '${name}'. Available: ${strategyNames()}`,
             };
           }
-          settings.strategy = name;
+          // Command-side switch writes the CURRENT generation's block in place
+          // (same posture as before; the notify/transaction wiring is B4's job
+          // -- writing through the live read keeps the current bag honest
+          // instead of mutating a captured one).
+          getExtensionConfig<CompactionSettings>(core, "compaction").strategy = name;
           return { action: ACTIONS.DISPLAY, content: `Compaction strategy set to: ${name}` };
         };
 
@@ -779,9 +811,13 @@ export function create(core: CoreContext): ExtensionInstance | null {
       },
     },
 
-    // Expose for external use
+    // Exposed for external use: the CURRENT generation's block (tests and
+    // hosts read/write through it; a create-time capture is exactly what B3
+    // removes).
     registry: strategyRegistry,
-    settings,
+    get settings(): CompactionSettings {
+      return getExtensionConfig<CompactionSettings>(core, "compaction");
+    },
 
     getStrategyList() {
       return strategyRegistry.getAll().map((s) => ({

@@ -287,6 +287,15 @@ export interface TaskManagerOptions {
    * would sit behind the question forever.
    */
   resolvePendingQuestion?: (sessionId: string, text: string) => boolean;
+  /**
+   * Reader for the config modelGroups map (B3 live-surface convention): the
+   * scheduler calls it per placement instead of pinning the boot bag's map at
+   * construction. Hosts that hold a live core pass an accessor-backed reader
+   * (`() => core.config.modelGroups ?? {}`); absent, the manager re-reads its
+   * own `config` bag per placement -- bag identity stays boot-pinned like the
+   * other ctor options (P9) until the composition roots pass live readers.
+   */
+  getModelGroups?: () => Record<string, string[]>;
 }
 
 export interface TaskManagerRequiredOptions {

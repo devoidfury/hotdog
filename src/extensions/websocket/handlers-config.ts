@@ -5,8 +5,11 @@
 // feed, so staleness only ends at the next open/Refresh, never mid-visit).
 // The bottom of this file adds the
 // settings EDITOR (C2S setConfigKey -> S2C setConfigKeyResult): the file's
-// one write path -- ALL-FIELDS editability per the owner ruling 2026-11-09
-// ("it needs to be ALL the settings"), gated by the two honest refusals +
+// one write path -- editability for EVERY SETTING THE CONFIG FILE CAN AFFECT
+// (owner ruling 2026-11-09 "it needs to be ALL the settings", scoped honestly
+// 2026-11-11: a schema leaf whose declared layers never read the file -- the
+// CLI-only and default-only keys -- is not a setting the panel can write, so it
+// ships no row and its write is refused), gated by the two honest refusals +
 // schema/shape revalidation + surgical JSONC edit + atomic rescue-verified
 // write described there.
 //
@@ -55,8 +58,16 @@ import {
   type ConfigSchema,
   type SchemaProperty,
 } from "@core/config/schema-loader.ts";
-import { normalizeConfigKeys } from "@core/config/index.ts";
+import { normalizeConfigKeys, type CliArgv } from "@core/config/index.ts";
 import { resolveConfigDir, DEFAULT_CONFIG_FILENAME } from "@core/config/defaults.ts";
+import { diffChanged, type ConfigGeneration, type ConfigStore } from "@core/config/store.ts";
+import { reresolveConfig } from "@core/config/reresolve.ts";
+import {
+  hooksForPhase,
+  runConfigApplyHook,
+  type ApplyHookRunReport,
+  type ConfigApplyContext,
+} from "@core/config/apply-hooks.ts";
 import { suggestCandidates } from "@utils/strings.ts";
 import { getNested } from "@utils/objects.ts";
 import { formatError } from "@core/error.ts";
@@ -90,6 +101,34 @@ function normalizeKey(s: string): string {
 
 const removedHit = (key: string) =>
   REMOVED_KEYS.find((r) => normalizeKey(r.key) === normalizeKey(key));
+
+/** Depth-aware tombstone match: a topLevelOnly entry judges its ROOT occurrence
+ *  only -- temperature's replacement is providers[].temperature, so nested
+ *  fields of the surviving class stay themselves. */
+const removedHitAt = (key: string, depth: number) =>
+  REMOVED_KEYS.find((r) => normalizeKey(r.key) === normalizeKey(key) && (!r.topLevelOnly || depth === 1));
+
+/** The write-gate tombstone refusal, shared by both write gates (the rescue /
+ *  snapshot verdict already owns the file side; the gate must not contradict it
+ *  by adding dead bytes). Matches a path SEGMENT: non-topLevelOnly tombstones
+ *  judge at any nesting (bashTool.maxToolOutputLines), topLevelOnly ones judge
+ *  the ROOT path only (providers[0].temperature keeps writing -- it is the
+ *  replacement). No restart hint: a reboot would not make these bytes mean
+ *  anything. */
+function removedKeyRefusal(keyPath: string, segs: KeySeg[]): string | null {
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
+    if (typeof seg !== "string") continue;
+    const r = removedHitAt(seg, i + 1);
+    if (r) {
+      return (
+        `"${keyPath}" is a removed key -- no longer read; replaced by "${r.replacement}"` +
+        `${r.note ? ` (${r.note})` : ""}; refusing to write dead bytes`
+      );
+    }
+  }
+  return null;
+}
 
 // ── Value wire-shaping (redaction + truncation) ─────────────────────────────
 
@@ -195,7 +234,10 @@ interface LeafEntry {
 }
 
 /** One row per LEAF: objects with declared properties recurse; everything
- *  else (scalars, arrays, free-form maps like bashTool.env) is its own row. */
+ *  else (scalars, arrays, free-form maps like bashTool.env) is its own row.
+ *  Config-file-unreachable leaves are STILL collected here (they own their
+ *  path in `covered`, so a stale file byte for one stays silent instead of
+ *  surfacing as a file-only row); the row-emission loop is what drops them. */
 function collectLeaves(prefix: string, prop: SchemaProperty, out: LeafEntry[]): void {
   const props = prop.properties;
   if (props && typeof props === "object" && Object.keys(props).length > 0) {
@@ -205,6 +247,56 @@ function collectLeaves(prefix: string, prop: SchemaProperty, out: LeafEntry[]): 
     return;
   }
   out.push({ path: prefix, prop });
+}
+
+/** THE shared config-file-reachability predicate (owner ruling 2026-11-11).
+ *  resolveKey walks ONLY the declared layers chain, so a leaf that declares
+ *  layers but none of them reads the settings file can never be affected by
+ *  one: a cli-only key resolves from its flag and a default-only key never
+ *  moves at all -- writing either lands dead bytes. Such leaves ship no row
+ *  and accept no write, in core and in every extension section, unconditionally
+ *  (a flag present in argv does not resurrect the row: the cli-slot
+ *  attestation retires with it). Leaves declaring NO layers stay visible --
+ *  they inherit resolution from their parent section's config layer. Consulted
+ *  by the row-emission loop AND both write gates. */
+export function notFileResolvable(prop: SchemaProperty | null | undefined): boolean {
+  const layers = prop?.layers;
+  return layers !== undefined && layers.length > 0 && !layers.some((l) => l.source === "config");
+}
+
+/** Honest refusal for one of those keys, shipped by both write gates. It names
+ *  the source that actually decides the value -- the declared flag for a cli
+ *  layer (the property's own cliFlag, else the registry's flag table: the same
+ *  table the row builder consults) -- and says plainly that the file entry
+ *  would be ignored. No needsRestart, no restart hint: a reboot would not make
+ *  the bytes mean anything. */
+function notSettableFromFileDialog(keyPath: string, prop: SchemaProperty, core: CoreContext): string {
+  if ((prop.layers ?? []).some((l) => l.source === "cli")) {
+    const flag =
+      prop.cliFlag?.long ??
+      (core.configRegistry?.getCliFlags?.() ?? []).find((f) => normalizeKey(f.key ?? "") === normalizeKey(keyPath))?.long;
+    return `"${keyPath}" is not settable from the config file -- it resolves from ${flag ?? "the command line"}; a settings.json entry would be ignored`;
+  }
+  return `"${keyPath}" is not resolvable from the config file; the entry would be ignored`;
+}
+
+/** The write-side form of the ship filter, shared by setConfigKey and
+ *  editConfigList: walk the path's schema ancestors (trailing array indices
+ *  stripped, so an ELEMENT of a hidden list inherits its key's posture) and
+ *  refuse on the first config-file-unreachable LEAF the schema declares. Only
+ *  leaves decide -- an interior node's own layers govern the container's value,
+ *  never its children, whose layers are consulted against the config by
+ *  resolveNestedProperties (the row filter drops leaves for the same reason).
+ *  Null when the path is file-reachable. */
+function unreachableLeaf(unified: ConfigSchema, segs: KeySeg[]): SchemaProperty | null {
+  for (let d = segs.length; d >= 1; d--) {
+    const prefix = segs.slice(0, d);
+    while (prefix.length > 0 && typeof prefix[prefix.length - 1] === "number") prefix.pop();
+    if (prefix.length === 0) continue;
+    const prop = findLeafProp(unified, prefix);
+    if (prop && (!prop.properties || Object.keys(prop.properties).length === 0) && notFileResolvable(prop)) return prop;
+  }
+  return null;
 }
 
 /** The config-file key a layer reads (its declared `key`, else the dotted path). */
@@ -1033,7 +1125,7 @@ function collectFileRows(
     const childSegs = [...segs, k];
     const sp = spellPath(childSegs);
     if (covered.has(sp)) continue; // a schema row (or its class-A children) owns this path
-    if (removedHit(k)) continue; // tombstone findings own removed keys; the loader ignores them
+    if (removedHitAt(k, childSegs.length)) continue; // tombstone findings own removed keys (topLevelOnly: root only); the loader ignores them
     if (interiors.has(sp)) {
       collectFileRows(v as Record<string, unknown>, childSegs, covered, interiors, ctx, depth + 1, out);
       continue; // known schema object: its own rows ride the schema walk
@@ -1130,7 +1222,7 @@ function buildFindings(usableText: string, unified: ConfigSchema, configParamKey
     }
   }
   for (const hit of scanKeys(usableText, Number.POSITIVE_INFINITY)) {
-    const r = removedHit(hit.key);
+    const r = removedHitAt(hit.key, hit.depth);
     if (!r) continue;
     push({
       type: "removed-key",
@@ -1271,6 +1363,13 @@ export async function buildConfigSnapshot(
   const sectionNameOf = (topKey: string): string => (Object.hasOwn(CONFIG_SCHEMA, topKey) ? "core" : topKey);
 
   for (const leaf of allLeaves) {
+    // THE SHIP FILTER (owner ruling 2026-11-11): a leaf the config file cannot
+    // affect ships no row, so the panel never offers a file write for it (and
+    // the rail counts, the search and the every-row stamp sweep simply lose it
+    // -- the client renders what arrives, zero webui changes). Still collected
+    // above, so `covered` keeps the path schema-owned: a stale file byte for
+    // one rides silent + unknown-key-free, never as a file-only row.
+    if (notFileResolvable(leaf.prop)) continue;
     for (const row of buildRows(leaf, ctx)) {
       if (!addRow(sectionNameOf(leaf.path.split(".")[0]!), row)) break;
     }
@@ -1339,8 +1438,11 @@ export async function handleConfigSnapshot(ctx: RouteContext): Promise<void> {
 }
 
 // ── Settings EDITOR (C2S setConfigKey → S2C setConfigKeyResult) ────────────
-// Owner ruling (2026-11-09): ALL the settings are editable -- the whitelist
-// is retired. The invariant moved from a constant list to the STAMP: every
+// Owner ruling (2026-11-09, scoped honestly 2026-11-11): every setting the
+// CONFIG FILE CAN AFFECT is editable -- the whitelist is retired.
+// Config-file-unreachable leaves (notFileResolvable: layers, none of them the
+// file) never reach this path: no row, and both write gates refuse them before
+// any byte moves. The invariant moved from a constant list to the STAMP: every
 // row the snapshot renders carries row.edit except the two honest refusals
 // (class A: the shipped payload is a redacted/stubbed summary, never the
 // bytes -- editing it would write stubs over real values; class B: the
@@ -1951,8 +2053,27 @@ const realConfigEditDeps: ConfigEditDeps = {
   unlink: (p) => fs.unlink(p),
 };
 
+/** §7.1 attestation classes (the wire type lives in ./protocol.ts; the write
+ *  path produces the same union). */
+type ConfigAppliedClass = "live" | "rebind" | "next-session" | "restart-required";
+
 export type ConfigKeyEditOutcome =
-  | { ok: true; needsRestart: true; value?: EditScalar | null; valueText?: string; redacted?: true }
+  | {
+      ok: true;
+      /** LEGACY shim, DERIVED from `applied` at reply build, never maintained
+       *  by hand: true iff applied === "restart-required" (§7.1). */
+      needsRestart: boolean;
+      /** What actually happened in THIS process for THIS write (§7.1). */
+      applied: ConfigAppliedClass;
+      /** Human one-liners rendered verbatim under the row; the §2.3 last-good
+       *  error text rides here (the wire type has no liveApplyError field). */
+      appliedNotices?: string[];
+      /** Per-hook ledger for this batch (§3); omitted when no hook ran. */
+      applyHooks?: ApplyHookRunReport[];
+      value?: EditScalar | null;
+      valueText?: string;
+      redacted?: true;
+    }
   | { ok: false; error: string };
 
 /** What the write path receives from the frame: scalars ride `value`;
@@ -2103,6 +2224,24 @@ async function applyConfigKeyEditLocked(
     return { ok: false, error: `refusing to write "${keyPath}": no new value entered` };
   }
 
+  // 1b. NOT REACHABLE FROM THE FILE (same predicate that retired the row). The
+  //     panel cannot offer these keys any more, but the gate is the gate: a
+  //     stale tab, a scripted client or an older bundle can still replay the
+  //     keyPath, and writing dead bytes is exactly the lie the row filter
+  //     exists to stop. Resolved off the RUNNING server's schema before the
+  //     file is even opened (zero bytes touched, zero restart promised -- a
+  //     restart would not make the entry mean anything).
+  const unified = unifiedSchemaFor(core);
+  const hidden = unreachableLeaf(unified, segs);
+  if (hidden) return { ok: false, error: notSettableFromFileDialog(keyPath, hidden, core) };
+  // Tombstone gate (shares rescue's table): a retired key gets the named
+  // REMOVED verdict from diagnose and NO new bytes from the write path --
+  // the same dead-bytes rule the row filter applies, refused before the
+  // schema lookup and before the file is opened.
+  const dead = removedKeyRefusal(keyPath, segs);
+  if (dead) return { ok: false, error: dead };
+  const prop = findLeafProp(unified, segs);
+
   // 2. Read the file (the one write target) and gate on rescue's verdict.
   const report = await diagnoseConfigFile(filePath);
   const hadFile = report.status !== "missing";
@@ -2123,8 +2262,7 @@ async function applyConfigKeyEditLocked(
   const fileShape = cur.found ? shapeClass(cur.value) : undefined;
 
   // 4. Kind resolution + validation -> newValueText + canonical + echo.
-  const unified = unifiedSchemaFor(core);
-  const prop = findLeafProp(unified, segs);
+  //    (unified + prop came from the reachability gate in 1b.)
   const schemaKind =
     prop && (!prop.properties || Object.keys(prop.properties).length === 0)
       ? prop.type === "array"
@@ -2381,8 +2519,13 @@ async function applyConfigKeyEditLocked(
   }
 
   // 6/7. Atomic write + verify + rollback (the shared write tail; the list
-  // ops run through the very same one).
-  return commitVerifiedEdit({
+  // ops run through the very same one). The chain itself is UNTOUCHED; on a
+  // clean verify the §2.4 live transaction continues below -- still inside
+  // the SAME withConfigEditLock span (applyConfigKeyEdit wraps this whole
+  // function), so file truth, store truth, and the reply can never
+  // interleave with another writer, and the reply is composed before the
+  // lock releases (§7.2: the transaction completes BEFORE the reply).
+  const fileResult = await commitVerifiedEdit({
     filePath,
     newText,
     hadFile,
@@ -2391,8 +2534,207 @@ async function applyConfigKeyEditLocked(
     refusal,
     logTag: "setConfigKey",
     verify: (after) => verifyEdit(after, segs, canonical),
-    onOk: () => ({ ok: true, needsRestart: true, ...echo } as ConfigKeyEditOutcome),
+    onOk: () => ({ ok: true, needsRestart: true }),
   });
+  if (!fileResult.ok) return fileResult;
+
+  // 8. Live transaction (B4, design §2.4): reresolve -> prepare hooks ->
+  //    swap -> apply hooks (awaited, per-hook timeout) -> commit -> attestation.
+  const live = await runLiveConfigApply(core, keyPath, filePath);
+  return {
+    ok: true,
+    ...echo,
+    applied: live.applied,
+    // The legacy shim DERIVED server-side (§7.1), never hand-maintained:
+    // true iff applied === "restart-required".
+    needsRestart: live.applied === "restart-required",
+    ...(live.appliedNotices.length > 0 ? { appliedNotices: live.appliedNotices } : {}),
+    ...(live.applyHooks.length > 0 ? { applyHooks: live.applyHooks } : {}),
+  };
+}
+
+/**
+ * The static per-keyPath live-class table (design §7.1: the `applied` CLASS
+ * comes from a table, not from a runtime "a hook ran" guess). B4's rows are
+ * exactly the migrated hook-backed keys (§3.3's four); every key WITHOUT a
+ * migrated live path keeps replying "restart-required" exactly as before.
+ *
+ * Keys are the WRITABLE file-key spellings; values are the hook keyPaths
+ * (the RESOLVED-bag roots, the names the consumers read). They differ where
+ * the schema resolves under an alias -- the `aiUrl` file member feeds
+ * resolved `baseUrl`, `chatTimeoutSecs` feeds resolved `chatTimeout` etc. --
+ * and a write only moves the resolved root when the resolution chain
+ * actually honors it -- a provider/cli/env layer can shadow it, and the
+ * attestation below catches exactly that: the hook never runs while other
+ * canonical values moved, so the reply is restart-required with a notice
+ * naming the shadow (B4 review F1; only a TRUE no-op -- empty `changed` --
+ * keeps a live claim without a hook having run).
+ */
+const LIVE_APPLIED_KEYS: Readonly<Record<string, string>> = {
+  hookTrace: "hookTrace",
+  "websocket.sessionTimeoutMin": "websocket.sessionTimeoutMin",
+  providerHealthCheckIntervalSecs: "providerHealthCheckIntervalSecs",
+  aiUrl: "baseUrl",
+  apiKey: "apiKey",
+  chatTimeoutSecs: "chatTimeout",
+  healthCheckTimeoutSecs: "healthCheckTimeout",
+  streamIdleTimeoutSecs: "streamIdleTimeout",
+  maxRetries: "maxRetries",
+  modelWireFormat: "modelWireFormat",
+  modelRoleMapping: "modelRoleMapping",
+};
+
+/** Value at keyPath in a generation: config bag first, resolved bag as the
+ *  fallback (the same two-bag namespace the changed-diff spans; live.ts's
+ *  seam reads identically). Hook ARGUMENTS only -- the §3.1 generic pair;
+ *  hooks that need the resolution chain's authoritative value read
+ *  ctx.store.current().resolved themselves (post-swap truth, §1.5). */
+function generationValueAt(
+  bags: { config: object; resolved?: object },
+  keyPath: string,
+): unknown {
+  const v = getNested(bags.config, keyPath);
+  return v === undefined ? getNested(bags.resolved, keyPath) : v;
+}
+
+/**
+ * The §2.4 transaction, run INSIDE withConfigEditLock after a verified file
+ * write. Returns the §7.1 attestation for the reply. Never throws: every
+ * failure mode answers with a plain, honest restart-required story.
+ */
+async function runLiveConfigApply(
+  core: CoreContext,
+  keyPath: string,
+  filePath: string,
+): Promise<{ applied: ConfigAppliedClass; appliedNotices: string[]; applyHooks: ApplyHookRunReport[] }> {
+  const notices: string[] = [];
+  const reports: ApplyHookRunReport[] = [];
+  const store: ConfigStore | undefined = core.configStore;
+  if (!store) {
+    // No store on this host (hand-built/embedded core): the pre-C7 posture,
+    // verbatim -- persisted, restart-required, nothing live happened.
+    return { applied: "restart-required", appliedNotices: notices, applyHooks: reports };
+  }
+
+  // reresolve (may throw -> §2.3 last-good). The live argv: the parsed CLI
+  // bag main() bound at boot (the cli layer cannot change at runtime but
+  // MUST keep applying, §4.2's provenance argument), with `config` pinned to
+  // the exact file the write chain just verified -- the same bytes the
+  // snapshot's in-use path resolved (peekConfigFlags/resolveConfigDir are
+  // boot-stable; pinning keeps the re-read pointed at what was written even
+  // for an explicit --config host).
+  let previous: ConfigGeneration;
+  let candidate;
+  try {
+    previous = store.current();
+    const cliArgv: CliArgv = { ...(core.cliArgv ?? {}), config: filePath };
+    candidate = await reresolveConfig(cliArgv, core.configRegistry, previous);
+  } catch (e) {
+    // LAST-GOOD (§2.3): the file keeps the write (verified bytes; next boot's
+    // truth; a broken-boot file is rescue's domain, not the runtime's). The
+    // store keeps the PREVIOUS generation, untouched. Plain reply, formatError
+    // text included -- liveApplyError ruling (§7.1-canonical): the wire type
+    // carries no such field, the error text rides appliedNotices verbatim.
+    // No retry machinery; the next successful write re-runs the whole chain.
+    notices.push(
+      `persisted; the running process kept its current values because re-resolution failed: ${formatError(e)} -- fix the file (or export the referenced variable) and the next write applies live, otherwise restart.`,
+    );
+    return { applied: "restart-required", appliedNotices: notices, applyHooks: reports };
+  }
+
+  const changed = diffChanged(previous, candidate);
+  const ctx: ConfigApplyContext = {
+    store,
+    // §5.3 audit floor: the one grep-able shape ("[config-live] <keyPath>:
+    // <summary>" -- hooks author the "<keyPath>: <summary>" half, secret-free
+    // text by construction). The session/log-surface fan-out joins this
+    // helper in B8.
+    notice: (text: string) => logger.warn(`[config-live] ${text}`),
+    core,
+  };
+
+  // PREPARE hooks (before the swap): a throw REFUSES the swap. The value
+  // stays persisted in the file, the runtime untouched, applied
+  // "restart-required" + the refuse reason (§2.4).
+  for (const hook of hooksForPhase("prepare", changed)) {
+    const report = await runConfigApplyHook(
+      ctx,
+      hook,
+      generationValueAt(previous, hook.keyPath),
+      generationValueAt(candidate, hook.keyPath),
+    );
+    reports.push(report);
+    if (report.status !== "applied") {
+      notices.push(
+        `persisted; the live apply was refused before the swap at "${report.keyPath}": ${report.error ?? "prepare hook failed"}`,
+      );
+      return { applied: "restart-required", appliedNotices: notices, applyHooks: reports };
+    }
+  }
+
+  // SWAP: reads are NEW from here on; the changed prefixes are "applying"
+  // until commit (§1.5 F5 window). APPLY hooks run after the swap, awaited,
+  // each under its timeoutMs -- a throw/timeout is a degraded report and the
+  // store NEVER re-swaps (§3.2).
+  const commit = store.swap(candidate);
+  const degraded: Array<{ keyPath: string; why: string }> = [];
+  try {
+    for (const hook of hooksForPhase("apply", changed)) {
+      const report = await runConfigApplyHook(
+        ctx,
+        hook,
+        generationValueAt(previous, hook.keyPath),
+        generationValueAt(candidate, hook.keyPath),
+      );
+      reports.push(report);
+      if (report.status !== "applied") {
+        degraded.push({ keyPath: report.keyPath, why: report.error ?? "apply hook failed" });
+        notices.push(
+          `"${report.keyPath}": the new value is live in the store but its apply hook reported ${report.status}${report.error ? `: ${report.error}` : ""}; the previous behavior stays in effect until a restart.`,
+        );
+      }
+    }
+  } finally {
+    // ONE notify pass (batchId+1, applying clears, degraded attaches via
+    // B1's commit(degraded?) channel -- clearing per the prefix rule).
+    commit(degraded.length > 0 ? degraded : undefined);
+  }
+
+  // The `applied` attestation: static class, downgraded by what actually
+  // happened to this key's live path (§7.1). Three demotions, then the one
+  // quiet pass. (1) A degraded primary effect means the new value is NOT in
+  // effect (the old side effect still runs): restart-required, with the
+  // degraded notice stated above. (2) The hook ran nothing and the resolved
+  // root DID move: no live holder is registered on this host, say so. (3) The
+  // hook ran nothing, other canonical values moved, but THIS key's root did
+  // not -- a higher layer (provider/cli/env) decides it and the file's new
+  // value reached nobody but the store: restart-required, notice names the
+  // shadow (B4 review F1). (4) Nothing at all in `changed`: a genuine no-op,
+  // the running value already equals the file, so the live claim stands
+  // unconfirmed and honest.
+  let applied: ConfigAppliedClass = keyPath in LIVE_APPLIED_KEYS ? "live" : "restart-required";
+  if (applied === "live") {
+    const hookKeyPath = LIVE_APPLIED_KEYS[keyPath]!;
+    const ran = reports.filter((r) => r.phase === "apply" && r.keyPath === hookKeyPath);
+    const root = hookKeyPath.split(".")[0]!;
+    if (ran.some((r) => r.status !== "applied")) {
+      applied = "restart-required";
+    } else if (ran.length === 0 && changed.includes(root)) {
+      applied = "restart-required";
+      notices.push(
+        `no live holder is registered for "${keyPath}" on this host: the value is live in the store but takes effect at restart.`,
+      );
+    } else if (ran.length === 0 && changed.length > 0 && !changed.includes(root)) {
+      // The write DID move canonical values, just not this key's resolved
+      // root: a higher layer (provider/cli/env) decides it, so the hook never
+      // ran and nothing re-read the new value -- restart-required, named.
+      applied = "restart-required";
+      notices.push(
+        `persisted; a higher layer decides "${keyPath}" than the config file: the file holds the new value but the running value does not -- clear the shadowing layer and the next write applies live, otherwise restart without it.`,
+      );
+    }
+  }
+  return { applied, appliedNotices: notices, applyHooks: reports };
 }
 
 /** The ONE write tail: temp+rename in the same directory, re-read + verify,
@@ -2828,6 +3170,17 @@ async function applyConfigListEditLocked(
 
   const segs = parseKeyPath(keyPath);
   if (!segs || segs.length === 0) return { ok: false, error: `"${keyPath}" is not an addressable config path -- ${refusal}` };
+
+  // Same predicate as the snapshot filter and the key-write gate (defense in
+  // depth -- a hidden chrome row means no append/remove button exists, yet a
+  // hand-built frame must not land dead bytes either). Refuses before the file
+  // is opened: the array path and its element paths inherit the leaf's posture.
+  const hiddenList = unreachableLeaf(unifiedSchemaFor(core), segs);
+  if (hiddenList) return { ok: false, error: notSettableFromFileDialog(keyPath, hiddenList, core) };
+  // Tombstone gate, same table and same refusal as the scalar write gate:
+  // list ops must not land bytes under a retired key either.
+  const deadList = removedKeyRefusal(keyPath, segs);
+  if (deadList) return { ok: false, error: deadList };
 
   // Frame shape. The providers list keeps its historic shape verbatim (the
   // client's add/remove rides `name` because its elements are OBJECTS):

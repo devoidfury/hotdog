@@ -408,7 +408,7 @@ describe("setConfigKey scalar writes", () => {
     const dir = dirWith(FULL);
     const file = cfgFile(dir);
     const res = await edit(dir, "webui.port", { value: 4321 });
-    expect(res).toEqual({ ok: true, value: 4321, needsRestart: true });
+    expect(res).toEqual({ ok: true, value: 4321, needsRestart: true, applied: "restart-required" });
 
     const after = readFileSync(file, "utf-8");
     const diff = onlyLineDiffers(FULL, after);
@@ -424,7 +424,7 @@ describe("setConfigKey scalar writes", () => {
   it("an enum leaf accepts a member of its set and inserts honestly when absent", async () => {
     const dir = dirWith(FULL);
     const res = await edit(dir, "websocket.questionStrategy", { value: "cancel" });
-    expect(res).toEqual({ ok: true, value: "cancel", needsRestart: true });
+    expect(res).toEqual({ ok: true, value: "cancel", needsRestart: true, applied: "restart-required" });
     const after = readFileSync(cfgFile(dir), "utf-8");
     expect((parseLoose(after).websocket as Record<string, unknown>).questionStrategy).toBe("cancel");
     expect(readdirSync(dir)).toEqual(["defaults.json"]);
@@ -535,7 +535,7 @@ describe("setConfigKey indexed paths (providers[0].url roundtrip)", () => {
     const dir = dirWith(FULL);
     const file = cfgFile(dir);
     const res = await edit(dir, "providers[0].url", { value: "http://127.0.0.1:9100/v1" });
-    expect(res).toEqual({ ok: true, value: "http://127.0.0.1:9100/v1", needsRestart: true });
+    expect(res).toEqual({ ok: true, value: "http://127.0.0.1:9100/v1", needsRestart: true, applied: "restart-required" });
     const after = readFileSync(file, "utf-8");
     expect(after).toContain(`{ "name": "p1", "url": "http://127.0.0.1:9100/v1", "apiKey": "FILE-SECRET-PROV", "models": ["m1"] }`);
     expect(after).toContain(`{ "name": "p2", "url": "http://127.0.0.1:8001/v1" }`); // element 1 untouched
@@ -575,7 +575,7 @@ describe("setConfigKey indexed paths (providers[0].url roundtrip)", () => {
 `;
     const dir = dirWith(text);
     const res = await edit(dir, "block", { valueText: `{"a": 2}` });
-    expect(res).toEqual({ ok: true, valueText: `{"a": 2}`, needsRestart: true });
+    expect(res).toEqual({ ok: true, valueText: `{"a": 2}`, needsRestart: true, applied: "restart-required" });
     const after = readFileSync(cfgFile(dir), "utf-8");
     expect(after).toContain("// outer comment above survives");
     expect(after).toContain("// outer comment below survives");
@@ -591,7 +591,7 @@ describe("setConfigKey json edits", () => {
   it("an unknown container roundtrips through valueText (the echo carries the accepted text)", async () => {
     const dir = dirWith(FULL);
     const res = await edit(dir, "themee", { valueText: `{\n  "nested": 2\n}` });
-    expect(res).toEqual({ ok: true, valueText: `{\n  "nested": 2\n}`, needsRestart: true });
+    expect(res).toEqual({ ok: true, valueText: `{\n  "nested": 2\n}`, needsRestart: true, applied: "restart-required" });
     const themee = parseLoose(readFileSync(cfgFile(dir), "utf-8")).themee as Record<string, unknown>;
     expect(themee.nested).toBe(2);
   });
@@ -652,7 +652,7 @@ describe("setConfigKey class-A refusal enforced server-side", () => {
     expect((await edit(dir, "providers[0].url", { value: "http://127.0.0.1:9999/v1" })).ok).toBe(true);
     const gh = await edit(dir, "bashTool.env.GITHUB_TOKEN", { valueText: JSON.stringify("NEW-TOKEN") });
     expect(gh.ok).toBe(true);
-    expect(gh).toEqual({ ok: true, value: null, redacted: true, needsRestart: true }); // still never echoed
+    expect(gh).toEqual({ ok: true, value: null, redacted: true, needsRestart: true, applied: "restart-required" }); // still never echoed
   });
 
   it("stamped containers still roundtrip; a provider element header is chrome (refused)", async () => {
@@ -1178,7 +1178,7 @@ describe("setConfigKey logger boot keys", () => {
   it("a logLevel write reports needsRestart:true honestly (boot-bound, the running logger will not move)", async () => {
     const dir = dirWith(FULL);
     const res = await edit(dir, "logLevel", { value: "debug" });
-    expect(res).toEqual({ ok: true, value: "debug", needsRestart: true });
+    expect(res).toEqual({ ok: true, value: "debug", needsRestart: true, applied: "restart-required" });
     const after = readFileSync(cfgFile(dir), "utf-8");
     expect(parseLoose(after).logLevel).toBe("debug");
     expect(readdirSync(dir)).toEqual(["defaults.json"]);
@@ -1187,7 +1187,7 @@ describe("setConfigKey logger boot keys", () => {
   it("a logTarget write reports needsRestart:true and round-trips through the enum gate", async () => {
     const dir = dirWith(FULL);
     const res = await edit(dir, "logTarget", { value: "stdout" });
-    expect(res).toEqual({ ok: true, value: "stdout", needsRestart: true });
+    expect(res).toEqual({ ok: true, value: "stdout", needsRestart: true, applied: "restart-required" });
     expect(parseLoose(readFileSync(cfgFile(dir), "utf-8")).logTarget).toBe("stdout");
   });
 

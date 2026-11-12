@@ -18,6 +18,8 @@ import type { CoreContext, ExtensionInstance, ToolMetadataPayload } from "./exte
 import type { ToolMetadata } from "./extensions/tool-registry.ts";
 import { parseArgs, generateHelpText } from "./cli.ts";
 import { loadConfig, buildConfig, getDefaultConfig, type CliArgv } from "./config/index.ts";
+import { createConfigStore, type ConfigStore } from "./config/store.ts";
+import { registerConfigApplyHook } from "./config/apply-hooks.ts";
 import { peekLogBootPosture } from "./config/boot-posture.ts";
 import { enumHintsFromValidationErrors, runRescue } from "./config/rescue.ts";
 import type { ProfileDef } from "./config/profiles.ts";
@@ -93,6 +95,8 @@ export function createCore(
     profileName?: string;
     profile?: ProfileDef | null;
     buildConfig?: typeof buildConfig;
+    /** Inject a store (embeds/tests); defaults to a fresh createConfigStore(). */
+    store?: ConfigStore;
   } = {},
 ): CoreInfrastructure {
   const hooks = options.hooks || createHooks();
@@ -112,6 +116,13 @@ export function createCore(
     profileDef: options.profile || config.profileDef,
   };
 
+  // The store owns the config/resolved surface: it adopts this boot bag now
+  // (the main.ts resolved-adopt is the second adopt), and the core's config/
+  // resolved properties below delegate to it. At boot nobody publishes, so
+  // current() answers exactly this bag -- byte-identical to the pre-store core.
+  const store = options.store ?? createConfigStore();
+  store.adopt(coreConfig);
+
   // Extensions is set after construction to break the circular dependency;
   // the loader must receive this same core reference main() uses.
   const core = {
@@ -120,7 +131,19 @@ export function createCore(
     extensions: null!,
     services,
     completion,
-    config: coreConfig,
+    // Property access at call time against the current generation: the stable
+    // read surface, live from the first swap onward (the CoreContext interface
+    // stays property-shaped so hand-built test cores keep plain properties).
+    get config(): CoreConfigWithExtensions {
+      return store.current().config;
+    },
+    set resolved(r: ResolvedConfig) {
+      store.adopt(coreConfig, r); // boot path: the single production assignment at main.ts (resolved-adopt)
+    },
+    get resolved(): ResolvedConfig | undefined {
+      return store.current().resolved as ResolvedConfig;
+    },
+    configStore: store,
     cliSubcommandRegistry,
     configRegistry,
     wireFormatRegistry,
@@ -175,6 +198,27 @@ export function createCore(
   } as CoreInfrastructure;
 
   core.extensions = createExtensionLoader(core as LoaderCore);
+
+  // §3.3 hookTrace row (B4): the once-at-boot reassignment in main() stays
+  // (boot posture); this is its live twin. Registered here, in createCore --
+  // core hooks land in the table before extension hooks by load order
+  // (createCore runs before loadExtensions), and every host that builds a
+  // core gets the row without extra wiring. Apply phase: a one-line reassign
+  // of the public hooks.trace, reading the RESOLVED bag (the CLI/env/config
+  // chain the boot posture used -- the raw config-bag member alone would
+  // miss the --hook-trace flag layer).
+  registerConfigApplyHook({
+    keyPath: "hookTrace",
+    phase: "apply",
+    handle: (ctx) => {
+      const v = ctx.store.current().resolved?.hookTrace;
+      // A resolved bag without the key (hand-built embeds) leaves the running
+      // posture alone; a real re-resolve always resolves it (schema default
+      // false, --hook-trace/env layers above).
+      if (v === undefined) return;
+      ctx.core.hooks.trace = v as boolean | HookTraceOptions;
+    },
+  });
 
   return core;
 }
@@ -404,6 +448,11 @@ export async function main(): Promise<number> {
   });
 
   core.resolved = resolved as ResolvedConfig;
+  // Keep the parsed CLI bag reachable for the config re-resolve (§2.1): the
+  // daemon's live argv IS the boot argv (it cannot change at runtime), and
+  // re-resolve must keep honoring its layers (the §4.2 provenance rule --
+  // dropping it would silently discard the operator's flag overrides).
+  core.cliArgv = cli as CliArgv;
 
   // bail early when we won't be running any subcommand
   if (!cli.subcommand && !process.stdin.isTTY) {

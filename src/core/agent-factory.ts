@@ -3,6 +3,7 @@ import { Agent, type ModelRegistry, type OutputSink } from "./agent.ts";
 import type { LlmClient } from "./llm-client/client.ts";
 import { HOOKS, type HookSystem } from "./hooks.ts";
 import { getLayerDefault, CONFIG_SCHEMA } from "./config/schema-loader.ts";
+import { liveAgentConfig } from "./config/agent-view.ts";
 import type { CoreContext, ResolvedConfig } from "./extensions/types.ts";
 import type { SwitchProfile } from "./config/profiles.ts";
 import { sharedToolExecBroker, toolExecPlaneSettings } from "./tool-exec-broker.ts";
@@ -19,9 +20,12 @@ export interface AgentFactoryOptions {
   llmClient: LlmClient;
   /**
    * Session-profile overlays keyed by profile name (websocket/webui pass
-   * their own map; CLI sites leave it unset and take body from resolved).
+   * their map; CLI sites leave it unset and take body from resolved).
+   * A FUNCTION is read per build (B3): the factory then follows whatever the
+   * host's live source answers -- a profile added after boot lands on the
+   * NEXT build instead of never.
    */
-  profiles?: Record<string, SwitchProfile> | null;
+  profiles?: Record<string, SwitchProfile> | (() => Record<string, SwitchProfile>) | null;
 }
 
 export type AgentBuildFn = (agentConfig?: Record<string, unknown>) => Promise<Agent>;
@@ -69,8 +73,25 @@ export function createAgentFactory(
 ): AgentBuildFn {
   return async (agentConfig: Record<string, unknown> = {}) => {
     const resolved = (options.resolved ?? core.resolved ?? {}) as ResolvedConfig;
+    // B5 (design §4.2): the live view applies ONLY on the default core.* path
+    // -- a host that passes EITHER base explicitly (ui-interactive-cli,
+    // ui-one-shot, workflows, test doubles) is PINNED BY CONSTRUCTION and
+    // keeps today's point-in-time copy; a core without a store (fake/embedded)
+    // pins the same way.
+    const store =
+      options.config == null && options.resolved == null ? core.configStore : undefined;
     const profileName = (agentConfig.profileName as string) || resolved.profileName || "default";
-    const profile = options.profiles?.[profileName] || null;
+    // Profile overlay read PER BUILD (B3): a reader re-resolves the map from
+    // the host's live source each time; a static map keeps the old behavior.
+    // On the live path the construction-time map goes away when unset: the
+    // current generation's profileManager output (resolved.profiles) is read
+    // per build, so a profile added after boot lands on the NEXT build.
+    const profilesMap =
+      typeof options.profiles === "function"
+        ? options.profiles()
+        : options.profiles ??
+          (store ? (resolved as { profiles?: Record<string, SwitchProfile> }).profiles : undefined);
+    const profile = profilesMap?.[profileName] || null;
     // The startup profile picked by the config chain (CLI --profile / config.profile).
     // CLI entry points pass no profiles overlay, so its tool filters live only on profileDef --
     // without this fallback a `--profile X` session runs unfiltered.
@@ -129,12 +150,75 @@ export function createAgentFactory(
       envScrubExtra: envScrubExtraKeys(baseConfig),
     };
 
+    // Resolved-sourced values the agent needs (the §4.2 bucket ledger). On
+    // the pinned path they become own-props of the copied bag exactly as
+    // before; on the live path they become the per-agent OVERLAY (build pins)
+    // or ride the resolved-aware base unpin -- never re-sourced from the raw
+    // bag as an independent second truth.
+    const maxIterationsValue = (agentConfig.maxIterations as number) || resolved.maxIterations;
+    const maxEmptyRetriesValue =
+      (resolved.maxEmptyRetries as number) ??
+      (getLayerDefault(CONFIG_SCHEMA.maxEmptyRetries) as number);
+    const workspaceRootsPin = (resolved.workspaceRoots as string[]) || [process.cwd()];
+    // Carry the resolved deny list through verbatim, including an
+    // explicit [] (denylist disabled by config). null means unresolved
+    // so ToolExecutor applies the built-in DEFAULT_DENY_PATTERNS.
+    const workspaceDenyPin =
+      (resolved.workspaceDeny as readonly string[] | undefined) ?? null;
+    // Trust pins (P5): agent.ts reads these per request off the config view
+    // (getToolDefs); without a pin they would move mid-session, so they ride
+    // the overlay. Resolved-first here too (maxToolDifficulty has a cli layer)
+    // -- same chain the base would answer, frozen at build.
+    const pinFromLive = (k: string): unknown =>
+      (resolved as Record<string, unknown>)[k] ?? baseConfig[k];
+
+    // agent.config: the live view on the default path -- overlay own props
+    // win, everything else reads store.current() resolved-first at USE time
+    // (maxRetries / toolRetryDelay / maxToolResultChars are deliberately NOT
+    // overlay pins; the ToolExecutor reads the cap per finalize). Pinned
+    // hosts keep the byte-identical point-in-time copy.
+    const agentConfigView = store
+      ? (liveAgentConfig(store, {
+          // profile pin: resolved/profile-derived filter (applyProfile writes
+          // land in the same overlay).
+          blacklistTools: toolBlacklist ?? undefined,
+          // trust pins (P5): stay pinned for the agent's lifetime.
+          workspaceRoots: workspaceRootsPin,
+          workspaceDeny: workspaceDenyPin,
+          sandboxMode: pinFromLive("sandboxMode"),
+          maxToolDifficulty: pinFromLive("maxToolDifficulty"),
+          defaultMaxToolDifficulty: pinFromLive("defaultMaxToolDifficulty"),
+          // loop/exec scalars frozen with the build: the loop reads the ctor
+          // field; the overlay keeps the view honest (explicit per-call
+          // agentConfig.maxIterations included). Live class: next-session.
+          maxIterations: maxIterationsValue,
+          maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
+          maxEmptyRetries: maxEmptyRetriesValue,
+        }) as NonNullable<Agent["config"]>)
+      : {
+          ...baseConfig,
+          blacklistTools: toolBlacklist ?? undefined,
+          maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
+          maxRetries: resolved.maxRetries as number,
+          toolRetryDelay: resolved.toolRetryDelay as number,
+          // Schema-default fallback like main.ts's createLlmClient maxRetries:
+          // hand-built resolved bags (tests, embedded hosts) stay valid.
+          maxEmptyRetries: maxEmptyRetriesValue,
+          // Hand-built resolved bags (tests, embedded hosts) fall back to the
+          // schema default layer, same posture as maxEmptyRetries above.
+          maxToolResultChars:
+            (resolved.maxToolResultChars as number) ??
+            (getLayerDefault(CONFIG_SCHEMA.maxToolResultChars) as number),
+          workspaceRoots: workspaceRootsPin,
+          workspaceDeny: workspaceDenyPin,
+        };
+
     const agent = new Agent({
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
       llmClient: (agentConfig.llmClient as LlmClient | undefined) || options.llmClient,
       model: (agentConfig.model as string) || resolved.model || "",
-      maxIterations: (agentConfig.maxIterations as number) || resolved.maxIterations,
+      maxIterations: maxIterationsValue,
       contextLimit: (agentConfig.contextLimit as number) || resolved.contextLimit,
       hideTools: pickBoolean(agentConfig.hideTools, resolved.hideTools),
       hideThinking: pickBoolean(agentConfig.hideThinking, resolved.hideThinking),
@@ -155,28 +239,7 @@ export function createAgentFactory(
       // process-global template state (multi-session hosts resolve config
       // per entry point).
       systemPromptTemplate: resolved.systemPromptTemplate,
-      config: {
-        ...baseConfig,
-        blacklistTools: toolBlacklist ?? undefined,
-        maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
-        maxRetries: resolved.maxRetries as number,
-        toolRetryDelay: resolved.toolRetryDelay as number,
-        // Schema-default fallback like main.ts's createLlmClient maxRetries:
-        // hand-built resolved bags (tests, embedded hosts) stay valid.
-        maxEmptyRetries:
-          (resolved.maxEmptyRetries as number) ??
-          (getLayerDefault(CONFIG_SCHEMA.maxEmptyRetries) as number),
-        // Hand-built resolved bags (tests, embedded hosts) fall back to the
-        // schema default layer, same posture as maxEmptyRetries above.
-        maxToolResultChars:
-          (resolved.maxToolResultChars as number) ??
-          (getLayerDefault(CONFIG_SCHEMA.maxToolResultChars) as number),
-        workspaceRoots: (resolved.workspaceRoots as string[]) || [process.cwd()],
-        // Carry the resolved deny list through verbatim, including an
-        // explicit [] (denylist disabled by config). null means unresolved
-        // so ToolExecutor applies the built-in DEFAULT_DENY_PATTERNS.
-        workspaceDeny: (resolved.workspaceDeny as readonly string[] | undefined) ?? null,
-      },
+      config: agentConfigView,
       sessionId: (agentConfig.sessionId as string) || crypto.randomUUID(),
       abortSignal: (agentConfig.abortSignal as AbortSignal | null | undefined) ?? null,
       toolWhitelist,

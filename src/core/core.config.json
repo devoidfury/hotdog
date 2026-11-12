@@ -367,13 +367,21 @@
   },
   "maxRetries": {
     "type": "number",
-    "description": "Retries after the initial attempt (total attempts = 1 + this) for both LLM request errors and transient tool failures. Schema-default only -- no CLI, config or env layer -- so a panel edit lands in the file but cannot change the resolved value.",
-    "layers": [{ "default": 5 }]
+    "minimum": 0,
+    "description": "Retries after the initial attempt (total attempts = 1 + this) for both LLM request errors and transient tool failures; 0 disables retrying. Resolved at boot, so an edit lands on the next start.",
+    "layers": [
+      { "source": "config", "key": "maxRetries", "cast": "number" },
+      { "default": 5 }
+    ]
   },
   "toolRetryDelay": {
     "type": "number",
-    "description": "Backoff base in seconds for retrying tools that throw a TransientError (delay = 2^(attempt-1) * this). Schema-default only -- no CLI, config or env layer -- so a panel edit lands in the file but cannot change the resolved value.",
-    "layers": [{ "default": 1 }]
+    "minimum": 0,
+    "description": "Backoff base in seconds for retrying tools that throw a TransientError (delay = 2^(attempt-1) * this); 0 retries without waiting. Resolved at boot, so an edit lands on the next start.",
+    "layers": [
+      { "source": "config", "key": "toolRetryDelay", "cast": "number" },
+      { "default": 1 }
+    ]
   },
   "maxEmptyRetries": {
     "type": "number",
@@ -439,14 +447,15 @@
   },
   "envScrubbing": {
     "type": "boolean",
-    "description": "When true (default), agent-spawned subprocesses (bash tool, MCP stdio servers, pooled executors) inherit a copy of the environment with secret-shaped variable names stripped -- a heuristic, not a boundary. CLI --disable-env-scrubbing passes the full environment, hotdog's own API keys included.",
+    "description": "When true (default), agent-spawned subprocesses (bash tool, MCP stdio servers, pooled executors) inherit a copy of the environment with secret-shaped variable names stripped -- a heuristic, not a boundary. Set \"envScrubbing\": false in the config file to turn it off (the flagless spelling of the same opt-out); --disable-env-scrubbing overrides the file and passes the full environment, hotdog's own API keys included. The cli layer reads the INVERTED parse key (disableEnvScrubbing, falsy cast), the config layer reads this key's own plain boolean -- nothing re-inverts the file entry.",
     "cliFlag": {
       "long": "--disable-env-scrubbing",
       "type": "boolean",
-      "description": "Pass the full environment to subprocesses (bash tool, MCP stdio) without secret scrubbing"
+      "description": "Pass the full environment to subprocesses (bash tool, MCP stdio) without secret scrubbing (overrides config envScrubbing)"
     },
     "layers": [
       { "source": "cli", "key": "disableEnvScrubbing", "cast": "falsy" },
+      { "source": "config", "key": "envScrubbing" },
       { "default": true }
     ]
   },
@@ -471,15 +480,13 @@
       { "default": null }
     ]
   },
-  "prompt": {
-    "type": "string",
-    "description": "Legacy REPL prompt string. Inert in the current runtime: no CLI, config or env layer and nothing reads the resolved key, so it shows in the panel but no code path consults it.",
-    "layers": [{ "default": "> " }]
-  },
   "taskProfile": {
     "type": "string",
-    "description": "Profile applied to spawned task agents (subagents), default task-default; top-level sessions use profileName instead.",
-    "layers": [{ "default": "task-default" }]
+    "description": "Profile applied to spawned task agents (subagents), default task-default; top-level sessions use profileName instead. Resolved at boot, so an edit lands on the next start.",
+    "layers": [
+      { "source": "config", "key": "taskProfile" },
+      { "default": "task-default" }
+    ]
   },
   "taskLanesPerProvider": {
     "type": "number",
@@ -714,14 +721,6 @@
     "layers": [
       { "source": "config", "key": "defaultSubcommand" },
       { "default": "cli" }
-    ]
-  },
-  "temperature": {
-    "type": "number",
-    "description": "Legacy sampling temperature. Inert in the current runtime: the temperature that reaches requests comes only from providers[].temperature and model entries -- no code reads the resolved core key -- so editing it changes nothing.",
-    "layers": [
-      { "source": "config", "key": "temperature" },
-      { "default": null }
     ]
   },
   "defaultProvider": {

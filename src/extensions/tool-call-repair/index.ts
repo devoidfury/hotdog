@@ -127,8 +127,9 @@ export function stripCorruptToolCalls(messages: Message[]): {
 }
 
 export function create(core: CoreContext): ExtensionInstance {
-  const config = getExtensionConfig<RepairConfig>(core, "toolCallRepair");
-  if (config.enabled === false) {
+  // Boot gate only (X/P1): enabled=false at boot means these hooks never
+  // exist; the per-turn value reads below go through the live surface.
+  if (getExtensionConfig<RepairConfig>(core, "toolCallRepair").enabled === false) {
     return {};
   }
 
@@ -175,6 +176,9 @@ export function create(core: CoreContext): ExtensionInstance {
         if (agent.iterationCount >= agent.maxIterations) return;
 
         const used = repairsUsed.get(agent.sessionId) ?? 0;
+        // Budget read per turn through the live surface: a mid-session change
+        // to maxRepairsPerTurn lands on the NEXT turn, not never.
+        const { maxRepairsPerTurn } = getExtensionConfig<RepairConfig>(core, "toolCallRepair");
 
         const sources = ["fullText", "fullReasoning"] as const;
         for (const field of sources) {
@@ -183,14 +187,14 @@ export function create(core: CoreContext): ExtensionInstance {
           const result = repairCallsInText(src);
           if (!result.repaired) continue;
 
-          if (config.maxRepairsPerTurn >= 0 && used >= config.maxRepairsPerTurn) {
+          if (maxRepairsPerTurn >= 0 && used >= maxRepairsPerTurn) {
             logger.warn(
-              `[tool-call-repair] repair budget (${config.maxRepairsPerTurn}) reached this turn; leaving call in text`,
+              `[tool-call-repair] repair budget (${maxRepairsPerTurn}) reached this turn; leaving call in text`,
             );
             // Chat-visible: the call is stranded in the transcript and the user should know why.
             agent.sink?.emit({
               type: OUTPUT_EVENT.SYSTEM_MESSAGE,
-              content: `Tool-call repair budget (${config.maxRepairsPerTurn}/turn) reached; leaving the malformed call(s) in the text.`,
+              content: `Tool-call repair budget (${maxRepairsPerTurn}/turn) reached; leaving the malformed call(s) in the text.`,
             });
             return;
           }

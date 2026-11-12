@@ -37,15 +37,29 @@ export const EXTRA_KNOWN_KEYS = [
  * did-you-mean would mislead); they get a tombstone verdict that names the
  * replacement, with a caret at the offending line. Checked at every nesting
  * depth: `maxToolOutputLines` lived inside the bashTool/coreTools blocks, so
- * a top-level-only scan would miss exactly what users carry.
+ * a top-level-only scan would miss exactly what users carry. Exception:
+ * `topLevelOnly` entries judge their ROOT occurrence only -- `temperature`'s
+ * named replacement is `providers[].temperature` / `providers[].models[].temperature`,
+ * so flagging those nested fields would contradict the tombstone itself.
  */
-export const REMOVED_KEYS: Array<{ key: string; replacement: string; note?: string }> = [
+export const REMOVED_KEYS: Array<{ key: string; replacement: string; note?: string; topLevelOnly?: boolean }> = [
   {
     key: "maxToolOutputLines",
     replacement: "maxToolResultChars",
     note:
       "line-shaping knobs retired for one central char cap on every tool result " +
       "(the tools keep internal line shaping below it)",
+  },
+  {
+    key: "temperature",
+    replacement:
+      "per-provider / per-model temperature definitions (providers[].temperature, providers[].models[].temperature)",
+    topLevelOnly: true,
+  },
+  {
+    key: "prompt",
+    replacement: "the interactive CLI's own prompt surface",
+    topLevelOnly: true,
   },
 ];
 
@@ -309,12 +323,13 @@ export function scanTopLevelKeys(text: string): Array<{ key: string; line: numbe
 }
 
 /**
- * Quoted keys at object depth 1..maxDepth (string-aware). maxDepth > 1 feeds
- * the REMOVED_KEYS tombstone stage: retired keys lived nested inside the
+ * Quoted keys at object depth 1..maxDepth (string-aware), each carrying its
+ * depth (topLevelOnly tombstones judge depth 1 only). maxDepth > 1 feeds the
+ * REMOVED_KEYS tombstone stage: retired keys lived nested inside the
  * bashTool/coreTools blocks, so a top-level-only scan would miss them.
  */
-export function scanKeys(text: string, maxDepth: number): Array<{ key: string; line: number }> {
-  const keys: Array<{ key: string; line: number }> = [];
+export function scanKeys(text: string, maxDepth: number): Array<{ key: string; line: number; depth: number }> {
+  const keys: Array<{ key: string; line: number; depth: number }> = [];
   const n = text.length;
   let i = 0;
   let depth = 0;
@@ -343,7 +358,7 @@ export function scanKeys(text: string, maxDepth: number): Array<{ key: string; l
       let k = j + 1;
       while (k < n && /\s/.test(text[k]!)) k++;
       if (depth >= 1 && depth <= maxDepth && text[k] === ":") {
-        keys.push({ key: text.slice(i + 1, j), line: startLine });
+        keys.push({ key: text.slice(i + 1, j), line: startLine, depth });
       }
       i = j + 1;
       continue;
@@ -1247,6 +1262,11 @@ async function checkKeys(
   ];
   const removedHit = (key: string) =>
     REMOVED_KEYS.find((r) => normalizeKey(r.key) === normalizeKey(key));
+  // Depth-aware twin: a topLevelOnly tombstone judges its ROOT occurrence only
+  // (temperature's replacement is providers[].temperature -- flagging those
+  // nested fields would contradict the tombstone itself).
+  const removedHitAt = (key: string, depth: number) =>
+    REMOVED_KEYS.find((r) => normalizeKey(r.key) === normalizeKey(key) && (!r.topLevelOnly || depth === 1));
   const seen = new Map<string, number>();
   for (const { key, line } of scanTopLevelKeys(text)) {
     const norm = normalizeKey(key);
@@ -1272,10 +1292,11 @@ async function checkKeys(
       log(message);
     }
   }
-  // Tombstone stage: REMOVED_KEYS occurrences at any nesting depth, each with
-  // a caret under the key (same pointing style as the JSON-error excerpt).
+  // Tombstone stage: REMOVED_KEYS occurrences at any nesting depth (root-only
+  // for topLevelOnly entries), each with a caret under the key (same pointing
+  // style as the JSON-error excerpt).
   for (const hit of scanKeys(text, Number.POSITIVE_INFINITY)) {
-    const r = removedHit(hit.key);
+    const r = removedHitAt(hit.key, hit.depth);
     if (!r) continue;
     problems++;
     const message =

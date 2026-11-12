@@ -227,3 +227,53 @@ describe("provider-health interval timer", () => {
     expect(counted.n).toBe(after);
   });
 });
+
+describe("provider-health setIntervalSecs (config-live re-arm seam, B4 §3.3)", () => {
+  // The cadence argument is SECONDS (resolved providerHealthCheckIntervalSecs
+  // scale); tests drive fractions so the wall time stays suite-friendly.
+
+  it("arms a real cadence from a disabled start; 0 disables again; the failure-driven demotion doctrine is intact in every state", async () => {
+    const counted = { n: 0 };
+    const health = makeProviderHealth({
+      providers: [def("p1")],
+      intervalMs: 0,
+      timeoutMs: 1000,
+      probe: tableProbe({}, { count: counted }),
+    });
+    await Bun.sleep(50);
+    expect(counted.n).toBe(0); // intervalMs 0: no timer ever armed (boot posture)
+
+    health.setIntervalSecs(0.02); // 20ms cadence
+    await Bun.sleep(90);
+    expect(counted.n).toBeGreaterThanOrEqual(1); // the sweep runs on the new interval
+
+    health.setIntervalSecs(0); // 0 disables (the config's "no periodic sweep")
+    const settled = counted.n;
+    await Bun.sleep(90);
+    expect(counted.n).toBe(settled); // stop+recreate closed the previous interval -- no ghost timers
+
+    // Failure-DRIVEN demotion lives outside the timer: mark/note keep working
+    // disabled, exactly as the request path relies on.
+    health.markDown("p1", "request-path failure");
+    expect(health.isDown("p1")).toBe(true);
+    health.noteUp("p1");
+    expect(health.isDown("p1")).toBe(false);
+    health.stop(); // safe on an already-disabled registry
+  });
+
+  it("re-arming replaces the old cadence instead of stacking timers", async () => {
+    const counted = { n: 0 };
+    const health = makeProviderHealth({
+      providers: [def("p1")],
+      intervalMs: 15,
+      timeoutMs: 1000,
+      probe: tableProbe({}, { count: counted }),
+    });
+    await Bun.sleep(40); // let the boot immediate-sweep + a tick or two land
+    health.setIntervalSecs(0); // kills the boot timer
+    const afterDisable = counted.n;
+    await Bun.sleep(60);
+    expect(counted.n).toBe(afterDisable);
+    health.stop();
+  });
+});

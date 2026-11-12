@@ -45,7 +45,8 @@ export class TaskScheduler {
   /** Resolved process default model (agent-factory's own fallback); last chain link for spawn placement. */
   #buildDefaultModel: string;
   #peekLoaded: (provider: string) => Promise<Set<string>>;
-  #modelGroups: Record<string, string[]>;
+  /** Live modelGroups reader (B3): called per placement, never a pinned map. */
+  #getModelGroups: () => Record<string, string[]>;
   #noSpread: Set<string>;
   /** Cross-process lane slot ledger (null when lanesDir is unset: caps apply to this process only). */
   #lanes: LaneLedger | null;
@@ -66,7 +67,8 @@ export class TaskScheduler {
     laneCaps: LaneCaps;
     buildDefaultModel: string;
     peekLoaded: (provider: string) => Promise<Set<string>>;
-    modelGroups: Record<string, string[]>;
+    /** Reader, not a snapshot: placement re-reads the current generation's map. */
+    modelGroups: () => Record<string, string[]>;
     noSpread: Set<string>;
     lanes: LaneLedger | null;
     lanesRetryMs: number;
@@ -80,7 +82,7 @@ export class TaskScheduler {
     this.#laneCaps = options.laneCaps;
     this.#buildDefaultModel = options.buildDefaultModel;
     this.#peekLoaded = options.peekLoaded;
-    this.#modelGroups = options.modelGroups;
+    this.#getModelGroups = options.modelGroups;
     this.#noSpread = options.noSpread;
     this.#lanes = options.lanes;
     this.#lanesRetryMs = options.lanesRetryMs;
@@ -203,7 +205,7 @@ export class TaskScheduler {
         pin: options.pin,
         group: groupRef,
         requires: options.requires,
-        modelGroups: this.#modelGroups,
+        modelGroups: this.#getModelGroups(),
         noSpread: this.#noSpread,
         peekLoaded: this.#peekLoaded,
       });

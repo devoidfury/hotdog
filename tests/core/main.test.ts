@@ -354,8 +354,10 @@ describe("createCore.createLlmClient (modelWireFormat layering)", () => {
 
   it("a falsy resolved maxRetries (0) survives instead of falling back", async () => {
     const core = await buildCore({}, {});
-    // The schema has no config/cli layer for maxRetries, so exercise the
-    // resolved value directly: 0 must not be clobbered by the fallback.
+    // The loader resolves a file `maxRetries: 0` to the number 0 (the
+    // minimum:0 bound keeps zero legitimate -- pinned in
+    // tests/core/config-resolution.test.ts); exercise the consumer directly:
+    // the ?? fallback must not clobber a resolved 0.
     (core.resolved as Record<string, unknown>).maxRetries = 0;
     expect(core.createLlmClient().maxRetries).toBe(0);
   });

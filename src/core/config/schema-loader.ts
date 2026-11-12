@@ -430,13 +430,12 @@ export interface CoreConfig {
   /** Base context window size in tokens; fallback for models without a per-model override. */
   contextLimit?: number;
   sandboxMode?: boolean;
-  /** Env scrubbing for agent-spawned subprocesses (default true; --disable-env-scrubbing). */
+  /** Env scrubbing for agent-spawned subprocesses (default true; config envScrubbing, overridden by --disable-env-scrubbing). */
   envScrubbing?: boolean;
   /** CLI override for max tool difficulty. Highest priority. */
   maxToolDifficulty?: number | null;
   /** Config-file default for max tool difficulty. Overridden by CLI and model config. */
   defaultMaxToolDifficulty?: number | null;
-  prompt?: string;
   taskProfile?: string;
   coreTools?: Record<string, unknown>;
   /** Upload ceilings (webui uploads, @refs); legacy fileAttachment.* alias layer. */
@@ -459,7 +458,6 @@ export interface CoreConfig {
   extensionAutoload?: boolean;
   extensions?: string[];
   defaultSubcommand?: string;
-  temperature?: number;
   defaultProvider?: string;
   /** OpenAI-compatible audio transcriptions endpoint; null disables speech-to-text. */
   sttUrl?: string | null;

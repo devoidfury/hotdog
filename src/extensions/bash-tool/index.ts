@@ -33,7 +33,7 @@ interface BashToolOptions {
   maxTimeoutMs?: number;
   /** Extra env keys to scrub (config: envScrub.extra). */
   envScrubExtra?: readonly string[];
-  /** Env scrubbing on/off (CLI: --disable-env-scrubbing). Defaults to true. */
+  /** Env scrubbing on/off (config `envScrubbing`; --disable-env-scrubbing overrides). Defaults to true. */
   envScrubbing?: boolean;
   /** Extra environment variables for spawned shells (config: bashTool.env). */
   env?: Record<string, string>;

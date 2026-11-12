@@ -49,8 +49,15 @@ interface SessionMetadata {
   createdAt: number;
   lastActivityAt: number;
   connectedClients: number;
-  questionStrategy: string;
-  questionTimeoutSecs: number;
+  /**
+   * EXPLICIT per-session question policy (C2S create message). Unset means
+   * "no explicit choice": the defaults are read at question-armed time
+   * (createWsServer's getPolicy, through the live surface) -- a session row
+   * never freezes a boot copy of them (B3). An armed question keeps the
+   * policy its timer was armed with (P8 benign twin).
+   */
+  questionStrategy?: string;
+  questionTimeoutSecs?: number;
   /**
    * Last token_usage snapshot (per-call totalTokens + contextWindow), the
    * same numbers the chat token bubble shows. Cached for the sidebar's ctx
@@ -85,8 +92,8 @@ interface SessionRegistryOptions {
     profileName?: string;
   }) => Promise<AgentLike>;
   llmClient?: LlmClient;
-  questionTimeoutSecs?: number;
-  questionStrategy?: string;
+  // No questionTimeoutSecs/questionStrategy here by design: defaults resolve
+  // at question-armed time (server.ts getPolicy), not as a per-session copy.
   sessionTimeoutMin?: number;
   profiles?: Record<string, SwitchProfile>;
   /** Resolved STT backend (explicit sttUrl or audio-capable registry model); advertised as sttEnabled. */
@@ -94,10 +101,13 @@ interface SessionRegistryOptions {
   /** Invoked when a session is deleted (cancels its pending questions). */
   onSessionDeleted?: (sessionId: string) => void;
   /**
-   * Resolved bag the tool-exec plane posture is read from. Omitted
-   * = inline (unfenced): a registry built without it advertises no plane.
+   * Resolved bag the tool-exec plane posture is read from. Pass the BAG for
+   * a pinned snapshot (tests, embedded hosts) or a READER for a live strip
+   * (the real server hands one over, so the label follows store.current()
+   * per payload -- B3). Omitted = inline (unfenced): a registry built
+   * without it advertises no plane.
    */
-  toolExecResolved?: Record<string, unknown>;
+  toolExecResolved?: Record<string, unknown> | (() => Record<string, unknown>);
   /** Provider-lane coordinator for session turns. Without it webui turns
    *  run uncoordinated: two live sessions double up requests on one backend
    *  instead of queueing on the lane. */
@@ -111,8 +121,6 @@ export class SessionRegistry {
     sessionId?: string;
     profileName?: string;
   }) => Promise<AgentLike>;
-  #questionTimeoutSecs: number;
-  #questionStrategy: string;
   #cleanupTimer: ReturnType<typeof setInterval> | null = null;
   #timeoutMin: number;
   #allConnections = new Set<HotdogServerSocket<unknown>>();
@@ -129,7 +137,7 @@ export class SessionRegistry {
   #taskActivityHistory = new Map<string, TaskActivityWire[]>();
   /** Resolved STT backend; every sessionCreated payload advertises its presence as sttEnabled. */
   readonly sttTarget: SttTarget | null;
-  #toolExecResolved: Record<string, unknown>;
+  #getToolExecResolved: () => Record<string, unknown>;
 
   get sttEnabled(): boolean {
     return this.sttTarget !== null;
@@ -146,10 +154,14 @@ export class SessionRegistry {
    * attach or session switch re-reads it.
    */
   toolExecLabel(sessionId: string): string {
+    // Plane keys read PER PAYLOAD through the injected source: with a reader
+    // (the real server's wiring) a swapped generation changes the label of
+    // the NEXT payload -- the strip no longer holds the boot bag ref.
+    const resolved = this.#getToolExecResolved();
     return toolExecModeLabel(
-      this.#toolExecResolved,
+      resolved,
       sharedToolExecDegraded(),
-      sharedExecFenceDisplay(sessionId, this.#toolExecResolved),
+      sharedExecFenceDisplay(sessionId, resolved),
     );
   }
 
@@ -223,8 +235,6 @@ export class SessionRegistry {
   constructor({
     buildAgent,
     llmClient,
-    questionTimeoutSecs = 300,
-    questionStrategy = "wait",
     sessionTimeoutMin = 30,
     profiles = {},
     sttTarget = null,
@@ -233,11 +243,12 @@ export class SessionRegistry {
     toolExecResolved = {},
   }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
-    this.#questionTimeoutSecs = questionTimeoutSecs;
-    this.#questionStrategy = questionStrategy;
     this.#timeoutMin = sessionTimeoutMin;
     this.sttTarget = sttTarget;
-    this.#toolExecResolved = toolExecResolved;
+    this.#getToolExecResolved =
+      typeof toolExecResolved === "function"
+        ? toolExecResolved
+        : () => toolExecResolved ?? {};
     this.#metadata = new Map();
     this.#channels = new Map();
     this.#profiles = profiles;
@@ -323,8 +334,10 @@ export class SessionRegistry {
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
       connectedClients: 0,
-      questionStrategy: questionStrategy || this.#questionStrategy,
-      questionTimeoutSecs: questionTimeoutSecs || this.#questionTimeoutSecs,
+      // Explicit caller values only (unset = resolve at question-armed time);
+      // the old per-session copy of the host defaults froze the boot values.
+      questionStrategy,
+      questionTimeoutSecs,
     });
 
     this.#sessionManager.registerAgent(agent, {

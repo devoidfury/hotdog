@@ -11,6 +11,7 @@ import { contentToText } from "@core/context/message.ts";
 import { createHooks } from "@core/hooks.ts";
 import { initializeLogger, resetLoggerForTesting, type LogEvent } from "@utils/logger.ts";
 import { LlmError } from "@core/error.ts";
+import { createConfigStore } from "@core/config/store.ts";
 
 /** The harness structure a task result is delivered as. */
 function resultParts(taskId: string, result: string) {
@@ -1943,6 +1944,37 @@ describe("placement fanout (cross-provider)", () => {
     await settle(() => built.length === 1, "group task placed");
     expect(built[0]!.model).toBe("n1/qwen"); // group's first member in declaration order
     manager.interruptTask("t1");
+  });
+
+  // B3: the scheduler no longer pins the boot generation's map. The reader
+  // shape mirrors websocket/server.ts (a real store behind the placement
+  // read), and the config bag here deliberately carries NOTHING: only the
+  // live reader can resolve a group, so a green placement proves the read.
+  it("modelGroups is read per placement: placement N+1 sees the swapped member set", async () => {
+    const store = createConfigStore();
+    const bag = (groups: Record<string, string[]>) => ({ modelGroups: groups });
+    store.adopt(bag({ basicTechnician: ["qwen"] }) as never, {} as never);
+    const { manager, built } = makeFanoutManager({
+      config: {} as never,
+      getModelGroups: () =>
+        ((store.current().config as { modelGroups?: Record<string, string[]> }).modelGroups) ?? {},
+    });
+
+    // Placement 1: the group does not exist in this generation -- loud failure,
+    // the same error path the boot-captured map produced (old read pin).
+    await expect(
+      manager.spawnTask("t1", "a", { workerModel: "group:mid" } as never),
+    ).rejects.toThrow(/unknown model group 'mid'/);
+
+    // Swap adds the group; the NEXT placement resolves it from the new map.
+    store.swap({
+      config: bag({ basicTechnician: ["qwen"], mid: ["n3/other"] }) as never,
+      resolved: {} as never,
+    })();
+    await manager.spawnTask("t2", "b", { workerModel: "group:mid" } as never);
+    await settle(() => built.length === 1, "placement 2 built on the swapped member");
+    expect(built[0]!.model).toBe("n3/other");
+    manager.interruptTask("t2");
   });
 
   it("worker_model with an unknown group ref fails loud at spawn", async () => {

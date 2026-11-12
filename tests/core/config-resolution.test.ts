@@ -1,10 +1,14 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterAll } from "bun:test";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { TMP_PARENT } from "../mocks/io.ts";
 import {
   resolveKey,
   resolveAll,
   CONFIG_SCHEMA as CONFIG_KEYS,
   type ResolutionContext,
 } from "@core/config/schema-loader.ts";
+import { loadConfig } from "@core/config/index.ts";
 import { uploadLimits } from "@core/config/upload-limits.ts";
 import { ConfigError } from "@core/error.ts";
 
@@ -65,11 +69,34 @@ describe("CONFIG_KEYS schema", () => {
     }
   });
 
-  it("envScrubbing defaults true and inverts with the disable flag", () => {
+  it("envScrubbing: default true, config file boolean, the disable flag overrides both", () => {
+    // The layer chain is cli(disableEnvScrubbing, falsy cast) > config(envScrubbing)
+    // > default true (owner ruling 2026-11-11: the key became file-configurable).
+    expect(CONFIG_KEYS.envScrubbing!.layers!.map((l) => [l.source ?? "default", l.key])).toEqual([
+      ["cli", "disableEnvScrubbing"],
+      ["config", "envScrubbing"],
+      ["default", undefined],
+    ]);
+    // 1. No flag, no file value -> the default.
     expect(resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, baseContext)).toBe(true);
+    // 2. No flag, file false -> the file is effective, read under the PLAIN name
+    //    and NOT re-inverted (the inversion lives only in the cli layer's cast).
+    expect(resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, { ...baseContext, config: { envScrubbing: false } })).toBe(false);
+    expect(resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, { ...baseContext, config: { envScrubbing: true } })).toBe(true);
+    // 3. Flag present -> false, whatever the file says (falsy cast on the
+    //    INVERTED parse key; a false-valued layer is still a SET value).
     expect(
       resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, { ...baseContext, cli: { disableEnvScrubbing: true } }),
     ).toBe(false);
+    expect(
+      resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, {
+        ...baseContext,
+        cli: { disableEnvScrubbing: true },
+        config: { envScrubbing: true },
+      }),
+    ).toBe(false);
+    // resolveAll (the startup chain) agrees with the single-key walk.
+    expect(resolveAll(CONFIG_KEYS, { ...baseContext, config: { envScrubbing: false } }).envScrubbing).toBe(false);
   });
 
   it("hideTools respects cli and config flags", () => {
@@ -497,5 +524,172 @@ describe("uploadLimits", () => {
     // The message echoes the offending value so the diagnosis points at the
     // config (e.g. uploadLimits given a string), not at resolveAll.
     expect(() => uploadLimits({ resolved: { uploadLimits: "nope" } } as any)).toThrow(/got "nope"/);
+  });
+});
+
+// ── envScrubbing through the REAL loader (owner ruling 2026-11-11: the key is
+//    file-configurable; --disable-env-scrubbing overrides the file) ──────────
+
+describe("envScrubbing resolves from the config file bytes", () => {
+  const dirs: string[] = [];
+  function cfgWith(text: string): string {
+    const dir = mkdtempSync(join(TMP_PARENT, "hotdog-envscrub-cfg-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "defaults.json"), text);
+    return join(dir, "defaults.json");
+  }
+  const context = (config: Record<string, unknown>, cli: Record<string, unknown> = {}): ResolutionContext => ({
+    cli,
+    config: config as never,
+    configDir: ".",
+  });
+
+  afterAll(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("the three precedence rows, read through loadConfig with the bytes untouched", async () => {
+    // Row 1: file false, no flag -> false (the file decides; the value is read
+    // under the plain key and NOTHING re-inverts it).
+    const offFile = cfgWith('{\n  "envScrubbing": false\n}\n');
+    const offText = readFileSync(offFile, "utf-8");
+    let resolved = resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, context(await loadConfig(offFile) as never));
+    expect(resolved).toBe(false);
+    // Row 2: file true, no flag -> true.
+    const onFile = cfgWith('{\n  "envScrubbing": true\n}\n');
+    resolved = resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, context(await loadConfig(onFile) as never));
+    expect(resolved).toBe(true);
+    // Row 3: file true + the flag (the INVERTED parse key) -> false: flag beats file.
+    resolved = resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, context(await loadConfig(onFile) as never, { disableEnvScrubbing: true }));
+    expect(resolved).toBe(false);
+    // No file value at all -> the schema default, and the resolveAll chain agrees.
+    const bareFile = cfgWith('{\n  "theme": "dark"\n}\n');
+    const bare = await loadConfig(bareFile);
+    expect(resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, context(bare as never))).toBe(true);
+    expect(resolveAll(CONFIG_KEYS, context(bare as never)).envScrubbing).toBe(true);
+    // bytes-exact: resolution reads, it never rewrites (the panel is the writer).
+    expect(readFileSync(offFile, "utf-8")).toBe(offText);
+  });
+
+  it("the kebab/snake spellings normalize onto the same key (loader semantics)", async () => {
+    const file = cfgWith('{\n  "env-scrubbing": false\n}\n');
+    const cfg = await loadConfig(file);
+    expect(resolveKey("envScrubbing", CONFIG_KEYS.envScrubbing, context(cfg as never))).toBe(false);
+  });
+});
+
+// ── The revived trio through the REAL loader (B0 inert-key fix): maxRetries,
+//    toolRetryDelay and taskProfile gained config layers; the file bytes now
+//    decide what resolution returns ──────────────────────────────────────────
+
+describe("maxRetries / toolRetryDelay / taskProfile resolve from the config file bytes", () => {
+  const dirs: string[] = [];
+  function cfgWith(text: string): string {
+    const dir = mkdtempSync(join(TMP_PARENT, "hotdog-revived-cfg-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "defaults.json"), text);
+    return join(dir, "defaults.json");
+  }
+  const context = (config: Record<string, unknown>, cli: Record<string, unknown> = {}): ResolutionContext => ({
+    cli,
+    config: config as never,
+    configDir: ".",
+  });
+
+  afterAll(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("the layer chains are spelled as the design pins them (config layer BEFORE the default)", () => {
+    // CONFIG_SCHEMA arrives COMPILED (cast:"number" becomes the cast fn), so
+    // the chains are pinned as [source, key] pairs + the compiled cast, the
+    // way the envScrubbing pin reads them.
+    expect(CONFIG_KEYS.maxRetries!.layers!.map((l) => [l.source ?? "default", l.key])).toEqual([
+      ["config", "maxRetries"],
+      ["default", undefined],
+    ]);
+    expect(typeof CONFIG_KEYS.maxRetries!.layers?.[0]?.cast).toBe("function");
+    expect(CONFIG_KEYS.maxRetries!.minimum).toBe(0);
+    expect(CONFIG_KEYS.toolRetryDelay!.layers!.map((l) => [l.source ?? "default", l.key])).toEqual([
+      ["config", "toolRetryDelay"],
+      ["default", undefined],
+    ]);
+    expect(typeof CONFIG_KEYS.toolRetryDelay!.layers?.[0]?.cast).toBe("function");
+    expect(CONFIG_KEYS.toolRetryDelay!.minimum).toBe(0);
+    expect(CONFIG_KEYS.taskProfile!.layers!.map((l) => [l.source ?? "default", l.key])).toEqual([
+      ["config", "taskProfile"],
+      ["default", undefined],
+    ]);
+  });
+
+  it("absent file entries resolve to the defaults (5 / 1 / task-default)", async () => {
+    const cfg = await loadConfig(cfgWith('{\n  "theme": "dark"\n}\n')) as never;
+    expect(resolveKey("maxRetries", CONFIG_KEYS.maxRetries, context(cfg))).toBe(5);
+    expect(resolveKey("toolRetryDelay", CONFIG_KEYS.toolRetryDelay, context(cfg))).toBe(1);
+    expect(resolveKey("taskProfile", CONFIG_KEYS.taskProfile, context(cfg))).toBe("task-default");
+    const all = resolveAll(CONFIG_KEYS, context(cfg));
+    expect(all.maxRetries).toBe(5);
+    expect(all.toolRetryDelay).toBe(1);
+    expect(all.taskProfile).toBe("task-default");
+  });
+
+  it("file numbers resolve; a numeric STRING casts to the number; junk and NEGATIVES fall through to the default", async () => {
+    // Numbers and the cast:"number" leg (a numeric string becomes the number).
+    let cfg = await loadConfig(cfgWith('{\n  "maxRetries": 2,\n  "toolRetryDelay": 0.25,\n  "taskProfile": "task-fast"\n}\n')) as never;
+    expect(resolveKey("maxRetries", CONFIG_KEYS.maxRetries, context(cfg))).toBe(2);
+    expect(resolveKey("toolRetryDelay", CONFIG_KEYS.toolRetryDelay, context(cfg))).toBe(0.25);
+    expect(resolveKey("taskProfile", CONFIG_KEYS.taskProfile, context(cfg))).toBe("task-fast");
+    cfg = await loadConfig(cfgWith('{\n  "maxRetries": "3",\n  "toolRetryDelay": "2.5"\n}\n')) as never;
+    expect(resolveKey("maxRetries", CONFIG_KEYS.maxRetries, context(cfg))).toBe(3);
+    expect(resolveKey("toolRetryDelay", CONFIG_KEYS.toolRetryDelay, context(cfg))).toBe(2.5);
+    // Junk strings fail the cast and negative values fail minimum:0 bounds --
+    // documented loader posture: bounds on a NON-default layer behave like a
+    // failed cast (skip the layer, let the next speak, schema-loader.ts
+    // resolveKey), so both land on the trusted default.
+    cfg = await loadConfig(cfgWith('{\n  "maxRetries": "lots",\n  "toolRetryDelay": -1\n}\n')) as never;
+    expect(resolveKey("maxRetries", CONFIG_KEYS.maxRetries, context(cfg))).toBe(5);
+    expect(resolveKey("toolRetryDelay", CONFIG_KEYS.toolRetryDelay, context(cfg))).toBe(1);
+    cfg = await loadConfig(cfgWith('{\n  "maxRetries": -1,\n  "toolRetryDelay": -0.5\n}\n')) as never;
+    expect(resolveKey("maxRetries", CONFIG_KEYS.maxRetries, context(cfg))).toBe(5);
+    expect(resolveKey("toolRetryDelay", CONFIG_KEYS.toolRetryDelay, context(cfg))).toBe(1);
+  });
+
+  it("EXPLICIT ZERO resolves as zero (bounds keep 0 legitimate; the consumers' ?? doctrine preserves it)", async () => {
+    // 0 is a real setting ("no retries" / "retry without waiting"), NOT unset:
+    // the bounds leg accepts it (0 < minimum 0 is false) and resolveKey ships
+    // the number itself. Consumers read resolved.* through ??-preserving reads
+    // (main.ts createLlmClient `resolved?.maxRetries ?? default` keeps 0 --
+    // pinned live in tests/core/main.test.ts "a falsy resolved maxRetries (0)
+    // survives"; agent-factory.ts copies resolved.maxRetries/toolRetryDelay
+    // straight into the agent config, 0 included).
+    const cfg = await loadConfig(cfgWith('{\n  "maxRetries": 0,\n  "toolRetryDelay": 0\n}\n')) as never;
+    expect(resolveKey("maxRetries", CONFIG_KEYS.maxRetries, context(cfg))).toBe(0);
+    expect(resolveKey("toolRetryDelay", CONFIG_KEYS.toolRetryDelay, context(cfg))).toBe(0);
+    const all = resolveAll(CONFIG_KEYS, context(cfg));
+    expect(all.maxRetries).toBe(0);
+    expect(all.toolRetryDelay).toBe(0);
+  });
+
+  it("the trio is no longer default-only: notFileResolvable semantics (config layer present)", async () => {
+    // A file value that only the config layer can read: if the layer were
+    // missing (the old shape) these would resolve to the defaults regardless.
+    const cfg = await loadConfig(cfgWith('{\n  "maxRetries": 9,\n  "toolRetryDelay": 8,\n  "taskProfile": "task-x"\n}\n')) as never;
+    expect(resolveAll(CONFIG_KEYS, context(cfg))).toMatchObject({
+      maxRetries: 9,
+      toolRetryDelay: 8,
+      taskProfile: "task-x",
+    });
+  });
+
+  it("temperature and prompt are RETIRED: the schema carries neither, resolution answers undefined", async () => {
+    // The keys left core.config.json for REMOVED_KEYS tombstones (rescue.ts);
+    // resolution cannot see them any more even when the file still carries them.
+    expect(CONFIG_KEYS.temperature).toBeUndefined();
+    expect(CONFIG_KEYS.prompt).toBeUndefined();
+    const cfg = await loadConfig(cfgWith('{\n  "temperature": 0.7,\n  "prompt": "> "\n}\n')) as never;
+    expect((cfg as Record<string, unknown>).temperature).toBe(0.7); // loadConfig keeps unknown bytes
+    const all = resolveAll(CONFIG_KEYS, context(cfg));
+    expect(all.temperature).toBeUndefined();
+    expect(all.prompt).toBeUndefined();
   });
 });

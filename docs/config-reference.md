@@ -198,18 +198,6 @@ field. Without one: pins the registry model used for speech-to-text (must
 declare audio input; entries with absent modality data are never
 auto-picked).
 
-### `temperature`
-
-- **Type:** `number`
-- **Default:** `null` (provider/model default)
-- **Resolution:** config > default
-
-Sampling temperature for the LLM. `null` uses the provider/model default.
-
-```json
-{ "temperature": 0.7 }
-```
-
 ### `thinker`
 
 - **Type:** `string`
@@ -582,15 +570,22 @@ disabled when the `NO_COLOR` environment variable is set to a non-empty value or
 ### `sessionId`
 
 - **Type:** `string`
-- **CLI flag:** `--session-id`
+- **CLI flag:** `--session-id` (`-s`)
 - **Default:** `null`
-- **Resolution:** CLI > default
+- **Resolution:** CLI only (no config-file layer)
 
 Resumable session ID. Restores from disk if a session with this ID exists.
 
-```json
-{ "sessionId": "my-session-id" }
+The schema declares only a `cli` layer plus the default, and resolution walks
+just that chain: a `sessionId` entry in `defaults.json` is never read. Set it on
+the command line:
+
+```bash
+hotdog --session-id my-session-id
 ```
+
+(Entries a settings panel may have written there earlier are inert bytes; delete
+them by hand if you want a tidy file.)
 
 ### `chatTimeoutSecs`
 
@@ -672,6 +667,34 @@ Maximum number of tool calls allowed per LLM turn.
 { "maxToolCallsPerIteration": 5 }
 ```
 
+### `maxRetries`
+
+- **Type:** `number` (minimum `0`)
+- **Default:** `5`
+- **Resolution:** config > default
+
+Retries after the initial attempt (total attempts = `1 + maxRetries`) for both
+LLM request errors and transient tool failures; `0` disables retrying. Resolved
+at boot, so an edit lands on the next start.
+
+```json
+{ "maxRetries": 3 }
+```
+
+### `toolRetryDelay`
+
+- **Type:** `number` (minimum `0`)
+- **Default:** `1`
+- **Resolution:** config > default
+
+Backoff base in seconds for retrying tools that throw a `TransientError`
+(`delay = 2^(attempt-1) * toolRetryDelay`); `0` retries without waiting.
+Resolved at boot, so an edit lands on the next start.
+
+```json
+{ "toolRetryDelay": 0.5 }
+```
+
 ### `maxEmptyRetries`
 
 - **Type:** `number`
@@ -728,10 +751,12 @@ Base context window size in tokens. Used as the fallback for models that have no
 - **Default:** `"task-default"`
 - **Resolution:** config > default
 
-Profile used for spawned task agents (subagents).
+Profile used for spawned task agents (subagents); top-level sessions use
+`profile` / `--profile` instead. Resolved at boot, so an edit lands on the
+next start (like all file config).
 
 ```json
-{ "taskProfile": "task-default" }
+{ "taskProfile": "task-fast" }
 ```
 
 ### `taskLanesPerProvider`
@@ -895,7 +920,22 @@ The built-in filter is a substring denylist (`KEY`, `SECRET`, `TOKE`, `PASS`, `_
 
 This is a leak heuristic, not a boundary. Caller-supplied env (`mcpServers[].env`) is user-trusted and never scrubbed.
 
-Scrubbing can be turned off entirely with the `--disable-env-scrubbing` CLI flag — spawned processes then inherit hotdog's full environment, including its own API keys. Only use it when a subprocess genuinely needs a variable the heuristic strips.
+Scrubbing can be turned off entirely with the `--disable-env-scrubbing` CLI flag or the top-level [`envScrubbing`](#envscrubbing) config key — spawned processes then inherit hotdog's full environment, including its own API keys. Only use it when a subprocess genuinely needs a variable the heuristic strips.
+
+### `envScrubbing`
+
+- **Type:** `boolean`
+- **CLI flag:** `--disable-env-scrubbing` (inverted override)
+- **Default:** `true`
+- **Resolution:** CLI > config > default
+
+Master switch for the subprocess env scrubbing described above. `false` in the config file turns it off:
+
+```json
+{ "envScrubbing": false }
+```
+
+The file entry is read under this plain name and is **not** re-inverted -- the inversion lives only in the CLI layer, whose parse key is `disableEnvScrubbing`. So the precedence reads: flag present -> off (the flag beats the file even when the file says `true`); no flag + `"envScrubbing": false` -> off; nothing set -> on. This is a leak heuristic being switched off, not a boundary: with it off, every secret-shaped variable in hotdog's own environment reaches the spawned process.
 
 ### `skillsPath` (top-level, backward compatible)
 
@@ -1807,7 +1847,6 @@ These extensions expose a single config knob, `{ "<key>": { "enabled": <boolean,
   "showTokenUse": true,
   "skillsPath": "/skills",
   "chatTimeoutSecs": 900,
-  "temperature": 0.7,
   "profile": "default",
   "extensionPaths": ["@extensions"],
   "extensionAutoload": true,

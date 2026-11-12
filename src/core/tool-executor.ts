@@ -64,11 +64,14 @@ export interface ToolExecutorDeps {
   /** Per-tool config scalars the runner needs (bash caps, coreTools limits, env policy). */
   toolExecConfig?: WireToolConfig;
   /**
-   * Central char cap (resolved `maxToolResultChars`) enforced on every
-   * finalized tool result: once before the TOOL_RESULT pipeline (in-pipeline
-   * observers see capped bytes) and once, binding, on the stored part after
-   * hook replacement. 0/unset (hand-built callers) disables enforcement;
-   * production plumbing is agent-factory -> Agent config -> here.
+   * Central char cap enforced on every finalized tool result: once before the
+   * TOOL_RESULT pipeline (in-pipeline observers see capped bytes) and once,
+   * binding, on the stored part after hook replacement. Read through the
+   * agent view PER FINALIZE (B5), so a mid-session `maxToolResultChars`
+   * publish lands on the next finalize, not at executor construction; this
+   * plain number is the fallback for hand-built callers whose agent carries
+   * no view (0/unset disables enforcement, production plumbing is
+   * agent-factory -> Agent config -> ToolExecutor's agent ref).
    */
   maxToolResultChars?: number;
 }
@@ -77,16 +80,27 @@ export class ToolExecutor {
   #deps: ToolExecutorDeps;
   /** Non-null only when toolExec is "worker" AND a link was provided: the one fork point. */
   #execPlane: { link: ToolExecLink; config: WireToolConfig } | null;
-  /** Resolved maxToolResultChars; 0 disables the seam cap (see ToolExecutorDeps). */
-  #maxResultChars: number;
 
   constructor(deps: ToolExecutorDeps) {
     this.#deps = deps;
-    this.#maxResultChars = deps.maxToolResultChars ?? 0;
     this.#execPlane =
       deps.toolExec === "worker" && deps.toolExecLink
         ? { link: deps.toolExecLink, config: deps.toolExecConfig ?? {} }
         : null;
+  }
+
+  /**
+   * maxToolResultChars at finalize time (B5): the agent's config IS the live
+   * view (config/agent-view.ts), so the overlay/base answer at THIS moment
+   * caps the result -- a publish between two finalizes changes the next one,
+   * with no ctor freeze. Hand-built callers (mock deps, standalone agents)
+   * carry no view value and keep their deps snapshot; 0 disables the cap,
+   * exactly like before.
+   */
+  #resultCharCap(): number {
+    const view = this.#deps.agent?.config as Record<string, unknown> | null | undefined;
+    const v = view?.maxToolResultChars ?? this.#deps.maxToolResultChars ?? 0;
+    return typeof v === "number" ? v : 0;
   }
 
   /**
@@ -328,7 +342,7 @@ export class ToolExecutor {
     const resultPayload = {
       toolCallId,
       toolName,
-      result: capToolResult(result, this.#maxResultChars),
+      result: capToolResult(result, this.#resultCharCap()),
       success,
       input,
       agent,
@@ -348,7 +362,10 @@ export class ToolExecutor {
     // bounded before #writeToolResult hands it to context / the session log /
     // the UI sink; idempotent, so an already-capped part passes through.
     const content: ToolResultContent = [
-      capToolResultPart(formatToolResult(result, toolName, success, hint), this.#maxResultChars),
+      capToolResultPart(
+        formatToolResult(result, toolName, success, hint),
+        this.#resultCharCap(),
+      ),
     ];
     const durationMs = Date.now() - t0;
     const resultSize = toolContentSize(content);

@@ -22,8 +22,9 @@ import type { ToolResultContent } from "../context/wrappers.ts";
 import type { LlmProtocolRegistry } from "../llm-client/protocol.ts";
 import type { ConfigRegistry } from "./config.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
-import type { BuildAgentConfig } from "../config/index.ts";
+import type { BuildAgentConfig, CliArgv } from "../config/index.ts";
 import type { CoreConfigWithExtensions, UploadLimits } from "../config/schema-loader.ts";
+import type { ConfigStore } from "../config/store.ts";
 import type { Agent } from "../agent.ts";
 import type { AgentLike } from "../session/index.ts";
 import type { ImageAttachment, Message, MessageSource } from "../context/message.ts";
@@ -272,6 +273,19 @@ export interface CoreContext {
   // Attached after buildConfig() resolves.
   resolved?: ResolvedConfig;
 
+  /** Owner of the config/resolved surface: createCore-produced cores carry it
+   *  and their config/resolved are accessors over store.current(). Optional
+   *  on the interface so hand-built test cores keep plain config/resolved
+   *  properties and simply omit it. */
+  configStore?: ConfigStore;
+
+  /** The parsed CLI bag main() ran with (B4). Captured once at boot so the
+   *  config re-resolve keeps honoring the cli layer (argv is fixed for the
+   *  process lifetime; dropping it would silently discard flag overrides --
+   *  §4.2's provenance rule). Optional: embedded/test hosts may omit it, in
+   *  which case reresolve runs on the file/env layers only. */
+  cliArgv?: CliArgv;
+
   // For subcommand handlers that need to rebuild config at runtime.
   buildConfig?: (cli: Record<string, unknown>) => Promise<{
     resolved: BuildAgentConfig;
@@ -435,6 +449,7 @@ export interface CommandsRegisterPayload {
 
 // Extract an extension's config block from core.config. If a schema is
 // registered for the key, the value is validated and a warning logged on mismatch.
+// Call it at the point of use; a block captured at `create()` time belongs to that generation.
 export function getExtensionConfig<T = Record<string, unknown>>(
   core: CoreContext,
   key: string,

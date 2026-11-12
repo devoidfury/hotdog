@@ -74,17 +74,21 @@ export const C2S = {
   // byte-identical. Binary files are refused honestly with zero content
   // bytes. Replied with READ_FILE_RESULT, requesting socket only.
   READ_FILE: "readFile",
-  // Edit ONE config value (settings editor, ALL the settings): { type,
-  // requestId, keyPath, value? , valueText? }. keyPath is a dotted CONFIG
-  // PATH that may address array elements by index ("providers[0].url");
-  // zero path components come off the wire as filesystem paths. Scalars ride
-  // `value` (string|number|boolean); JSON containers and writeOnly secret
-  // replaces ride `valueText` (raw text the server parses/revalidates). The
-  // write is a surgical JSONC text edit of exactly that value (comments and
-  // formatting outside the value are user data and survive), atomic,
-  // rescue-verified with rollback. Success carries needsRestart: config
-  // resolves at startup, so the server NEVER claims live effect. A secret
-  // replace echoes value:null + redacted:true -- never the new value.
+  // Edit ONE config value (settings editor, every setting the CONFIG FILE can
+  // affect): { type, requestId, keyPath, value?, valueText? }. keyPath is a
+  // dotted CONFIG PATH that may address array elements by index
+  // ("providers[0].url"); zero path components come off the wire as filesystem
+  // paths. Scalars ride `value` (string|number|boolean); JSON containers and
+  // writeOnly secret replaces ride `valueText` (raw text the server
+  // parses/revalidates). The write is a surgical JSONC text edit of exactly that
+  // value (comments and formatting outside the value are user data and survive),
+  // atomic, rescue-verified with rollback. Success carries needsRestart: config
+  // resolves at startup, so the server NEVER claims live effect -- and it only
+  // ever answers keys the file can resolve at all: a schema key whose declared
+  // layers never read the settings file (a CLI-flag-only or default-only key)
+  // is refused with zero bytes written, since no restart makes such an entry
+  // mean anything. A secret replace echoes value:null + redacted:true -- never
+  // the new value.
   // Replied with SET_CONFIG_KEY_RESULT, requesting socket only.
   SET_CONFIG_KEY: "setConfigKey",
   // LIST edit (settings editor, ONE additive pair alongside setConfigKey):
@@ -512,9 +516,16 @@ export interface ConfigFindingWire {
 }
 
 /**
- * One leaf config key with its per-layer slots. A slot that the server cannot
- * attest rides OMITTED (never a fabricated default or a lying "unset"):
- * the UI renders source badges only for the slots present. `redacted: true`
+ * One leaf config key with its per-layer slots. ONE ROW PER LEAF THE CONFIG
+ * FILE CAN AFFECT: a leaf whose declared layers include no `source: "config"`
+ * layer (a CLI-flag-only key, or a schema-default-only key) is unreachable from
+ * settings.json -- resolveKey walks only the declared chain, so a file entry is
+ * dead bytes -- and such keys are OMITTED AT THE SOURCE: no row, in core or in
+ * any extension section, whatever the server's argv holds. Keys declaring no
+ * layers of their own stay (they resolve through their section's config layer).
+ * A slot that the server cannot attest rides OMITTED (never a fabricated
+ * default or a lying "unset"): the UI renders source badges only for the slots
+ * present. `redacted: true`
  * means every value on this row was replaced with null by the secret rule
  * (the row itself may still show description/default presence and the
  * set/unset distinction for env).
@@ -557,8 +568,11 @@ export interface ConfigKeyEntryWire {
    *  json stamp or the provider-card / class-A child posture. */
   arrayChrome?: true;
   /** Settings EDITOR affordance: present on EVERY row the write path would
-   *  accept from setConfigKey (owner ruling 2026-11-09: ALL the settings --
-   *  the whitelist is retired) and ABSENT only on the honest refusal classes,
+   *  accept from setConfigKey (owner ruling 2026-11-09, read whole: EVERY
+   *  SETTING THE CONFIG FILE CAN AFFECT -- the whitelist is retired, and a key
+   *  the file cannot resolve ships no row at all, so its absence here is an
+   *  omitted row rather than a missing stamp) and ABSENT only on the honest
+   *  refusal classes,
    *  whose writes the SERVER refuses too (the stamp predicate is the write
    *  gate, not just the button):
    *  (1) a CONTAINER whose shipped payload is not byte-faithful (secrets were
@@ -635,8 +649,11 @@ export type ConfigSnapshotResultWire = {
 // ── Config key edit (C2S setConfigKey → S2C setConfigKeyResult) ────────────
 // The settings editor's write path (see ./handlers-config.ts). One value,
 // one addressable keyPath, one atomic surgical edit of the resolved config
-// file. The reply NEVER claims live effect: config resolves at startup, so
-// success rides needsRestart:true until the process restarts.
+// file. The reply attests the IN-PROCESS outcome, hook by hook (design §7.1):
+// `applied` names the class the value actually landed in ("live" only when a
+// migrated live path honored it), `needsRestart` is the legacy shim the
+// server DERIVES (true iff applied === "restart-required"), and success with
+// no migrated live path still says "restart-required" truthfully.
 
 /** What the client sends as the new value: scalars ride `value`; JSON
  *  containers and writeOnly secret replaces ride `valueText` (raw text --
@@ -655,9 +672,27 @@ export type SetConfigKeyResultWire = {
    *  replace / write or verification failure). Rendered verbatim; stacks stay
    *  server-side in the log. */
   error?: string;
-  /** True on ok: the value is persisted to the config file but the RUNNING
-   *  server keeps its startup-resolved value until it restarts. */
+  /** LEGACY shim, kept: true iff applied === "restart-required". Clients read
+   *  `applied` first and fall back to this (old client / new server, new
+   *  client / old server -- both degrade honestly). DERIVED server-side,
+   *  never maintained by hand. */
   needsRestart?: boolean;
+  /** What actually happened in this process for THIS write:
+   *  "live"            -- store swapped, effect observable now (hooks ok or none needed)
+   *  "rebind"          -- store swapped + socket/listen-level rebind performed (notice says the cost)
+   *  "next-session"    -- store swapped; new sessions/builds honor it; running artifacts keep theirs
+   *  "restart-required"-- value persisted only (pre-C7 posture; also every
+   *                       still-unruled §5 row, prepare-refusals, and last-good §2.3 outcomes) */
+  applied?: "live" | "rebind" | "next-session" | "restart-required";
+  /** Human one-liners, rendered verbatim under the row: downtime warnings,
+   *  "new pool entries only", "keeps current values because re-resolution
+   *  failed", in-flight semantics. formatError text where an error is cited
+   *  (the §2.3 last-good error rides HERE -- §7.1's type is the wire
+   *  contract and carries no separate liveApplyError field; see b4-notes). */
+  appliedNotices?: string[];
+  /** Per-hook ledger for this batch (§3): the truth of the side effects. */
+  applyHooks?: Array<{ keyPath: string; phase: "prepare" | "apply";
+                      status: "applied" | "degraded" | "refused"; error?: string }>;
   /** The persisted value echo on a scalar save (the client updates the row's
    *  file slot from this, never from its own input). `null` ONLY on a
    *  writeOnly secret replace, paired with `redacted: true` -- the new secret

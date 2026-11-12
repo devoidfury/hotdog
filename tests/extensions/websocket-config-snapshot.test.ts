@@ -80,8 +80,13 @@ const WEBUI_SCHEMA = {
       type: "string",
       default: null,
       description: "Login cache namespace (env var name is secret-shaped).",
+      // The config layer is what keeps this row in the snapshot: a leaf whose
+      // only layers are env + default is unreachable from settings.json, so it
+      // ships no row at all (notFileResolvable) and this probe would have
+      // nothing to read. The env-name redaction being pinned is unchanged.
       layers: [
         { source: "env", key: "HOTDOG_LOGIN_TOKEN" },
+        { source: "config", key: "webui.loginCache" },
         { default: null },
       ],
     },
@@ -303,9 +308,11 @@ describe("configSnapshot layer slots", () => {
 
   it("long string values truncate with the marker", async () => {
     const fatCore = fakeCore(TMP) as unknown as { config: Record<string, unknown> };
-    fatCore.config.prompt = "P".repeat(5000);
+    // systemPromptTemplate, not `prompt`: the prose-shaped key the panel can
+    // actually reach (prompt declares no config layer, so it ships no row).
+    fatCore.config.systemPromptTemplate = "P".repeat(5000);
     const payload = await buildConfigSnapshot(fatCore as unknown as CoreContext);
-    const row = payload.sections.find((s) => s.name === "core")!.rows.find((r) => r.key === "prompt")!;
+    const row = payload.sections.find((s) => s.name === "core")!.rows.find((r) => r.key === "systemPromptTemplate")!;
     expect(typeof row.resolved).toBe("string");
     expect((row.resolved as string).length).toBeLessThan(5000);
     expect((row.resolved as string).endsWith("...[truncated]")).toBe(true);
@@ -402,8 +409,9 @@ describe("configSnapshot wire-surface hardening", () => {
     expect(profiles.bare).toEqual({});
     expect(profiles.manager!.model).toBe("m1"); // short scalars ride
     expect(String(profiles.manager!.systemPrompt)).toMatch(/^\[\d+-char text omitted\]$/);
-    // And a top-level long string keeps the OLD truncation posture (row
-    // "prompt" test in layer slots) -- the stub is container-members only.
+    // And a top-level long string keeps the OLD truncation posture (the
+    // "systemPromptTemplate" test in layer slots) -- the stub is
+    // container-members only.
   });
 
   it("unknown file-only keys become ROWS: non-secret rides stamped, secret-shaped redacts to a writeOnly box", async () => {

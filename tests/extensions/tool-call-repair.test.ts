@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { repairCallsInText } from "@extensions/tool-call-repair/grammar.ts";
 import { create as createRepairExtension, stripCorruptToolCalls } from "@extensions/tool-call-repair/index.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { createConfigStore } from "@core/config/store.ts";
 import { Message } from "@core/context/message.ts";
 import { createFixture, MockLLMClient, buildStreamResponse, simpleTool } from "../helpers.ts";
 import { expectCompletion } from "../test-helpers.ts";
@@ -887,5 +888,51 @@ describe("PROVIDER_ERROR recovery in the agent loop", () => {
 
     await expect(agent.run("continue")).rejects.toThrow("Failed to parse tool call arguments");
     expect(mockLLM.requests).toHaveLength(1);
+  });
+});
+
+// ── B3: maxRepairsPerTurn is a live per-turn read ───────────────────────────
+// A REAL ConfigStore behind a createCore-shaped accessor (B1): swap() lands
+// the new budget on the NEXT turn's read, and the reads before the swap stay
+// pinned to the generation they saw.
+
+describe("maxRepairsPerTurn through the live store (B3 generation swap)", () => {
+  it("a swapped budget lands on the next turn; the turn before kept the old one", () => {
+    const store = createConfigStore();
+    const bag = (budget: number) => ({
+      toolCallRepair: { enabled: true, maxRepairsPerTurn: budget },
+    });
+    store.adopt(bag(1) as never, {} as never);
+    const core = {
+      hooks: new HookSystem(),
+      get config() {
+        return store.current().config;
+      },
+    } as any;
+    const ext = createRepairExtension(core);
+    const hook = ((ext.hooks as any) ?? {})[HOOKS.PROVIDER_RESPONSE] as (p: any) => unknown;
+
+    const mk = () => streamResult({ fullText: hermes("read", [["path", "f"]]) });
+
+    // Generation 1 (budget 1): first repair of the turn lands, second blocked.
+    const r1 = mk();
+    const r2 = mk();
+    hook({ response: r1, modelConfig: {}, agent: fakeAgent({ iterationCount: 1 }) });
+    hook({ response: r2, modelConfig: {}, agent: fakeAgent({ iterationCount: 2 }) });
+    expect(r1.finalToolCalls).toHaveLength(1);
+    expect(r2.finalToolCalls).toBeNull();
+
+    // Swap to 2: the NEXT turn (iteration 1 resets the per-turn counter)
+    // repairs twice before the new ceiling bites.
+    store.swap({ config: bag(2) as never, resolved: {} as never })();
+    const r3 = mk();
+    const r4 = mk();
+    const r5 = mk();
+    hook({ response: r3, modelConfig: {}, agent: fakeAgent({ iterationCount: 1 }) });
+    hook({ response: r4, modelConfig: {}, agent: fakeAgent({ iterationCount: 2 }) });
+    hook({ response: r5, modelConfig: {}, agent: fakeAgent({ iterationCount: 3 }) });
+    expect(r3.finalToolCalls).toHaveLength(1);
+    expect(r4.finalToolCalls).toHaveLength(1);
+    expect(r5.finalToolCalls).toBeNull();
   });
 });

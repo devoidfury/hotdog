@@ -10,6 +10,7 @@ import {
   completion as compactCompletion,
 } from "@extensions/compaction/completions.ts";
 import { ToolRegistry } from "@core/extensions/tool-registry.ts";
+import { createConfigStore } from "@core/config/store.ts";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { TMP_PARENT } from "../mocks/io.ts";
@@ -129,16 +130,14 @@ describe("Compaction Extension Creation", () => {
     expect((ext as any).settings.reserveTokens).toBe(8192);
   });
 
-  it("threads the core contextLimit into settings when compaction.contextLimit is unset", () => {
+  // Pin for the B3 deletion of the `settings.contextLimit ??= core.resolved
+  // ?.contextLimit` boot mutator (contract 4.3 compaction row): the config
+  // block is exactly what was loaded, forever. The effective window is a
+  // PER-RUN read (asserted through the debug dump below).
+  it("never mutates the config block at boot (contextLimit ??= mutator deleted)", () => {
     const core = { ...createMockCore(), resolved: { contextLimit: 32000 } };
-    const ext = createCompactionExtension(core);
-    expect((ext as any).settings.contextLimit).toBe(32000);
-  });
-
-  it("prefers compaction.contextLimit over the core contextLimit", () => {
-    const core = { ...createMockCore({ contextLimit: 16000 }), resolved: { contextLimit: 32000 } };
-    const ext = createCompactionExtension(core);
-    expect((ext as any).settings.contextLimit).toBe(16000);
+    createCompactionExtension(core);
+    expect((core.config as any).compaction.contextLimit).toBeUndefined();
   });
 
   it("should provide getStrategyList with all built-in strategies, correct names and order", () => {
@@ -701,6 +700,52 @@ describe("compact debug dump", () => {
     expect(dump.keep_requested).toBe(3);
     expect(dump.messages.before).toBe(6);
     expect(dump.messages.after).toBeGreaterThanOrEqual(3);
+  });
+
+  // The boot-mutator deletion's flip side: the effective window is resolved
+  // per run (runSettings), so the debug dump shows the CURRENT generation's
+  // value while the config block stays exactly as loaded.
+  it("the per-run effective contextLimit follows core.resolved across a swap (block untouched)", async () => {
+    rmSync(DUMP, { force: true });
+    const store = createConfigStore();
+    store.adopt(compactionBag({ keepRecentMessages: 2 }) as never, { contextLimit: 32000 } as never);
+    const core = storeBackedCore(store);
+    const ext = createCompactionExtension(core)!;
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext.hooks as any)[HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const cmd = commandRegistry.get("compact")!;
+
+    expect((core.config as any).compaction.contextLimit).toBeUndefined();
+
+    await cmd.handler!(createMockAgent(makeMessages(6)), "compact 3 --compact-debug");
+    expect(JSON.parse(readFileSync(DUMP, "utf-8")).settings.contextLimit).toBe(32000);
+
+    publish(store, compactionBag({ keepRecentMessages: 2 }), { contextLimit: 16000 });
+    await cmd.handler!(createMockAgent(makeMessages(6)), "compact 3 --compact-debug");
+    const dump2 = JSON.parse(readFileSync(DUMP, "utf-8"));
+    expect(dump2.settings.contextLimit).toBe(16000);
+    expect((core.config as any).compaction.contextLimit).toBeUndefined();
+  });
+
+  it("compaction.contextLimit still overrides the resolved window, per run", async () => {
+    rmSync(DUMP, { force: true });
+    const store = createConfigStore();
+    store.adopt(
+      compactionBag({ keepRecentMessages: 2, contextLimit: 16000 }) as never,
+      { contextLimit: 32000 } as never,
+    );
+    const ext = createCompactionExtension(storeBackedCore(store))!;
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext.hooks as any)[HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const cmd = commandRegistry.get("compact")!;
+
+    await cmd.handler!(createMockAgent(makeMessages(6)), "compact 3 --compact-debug");
+    expect(JSON.parse(readFileSync(DUMP, "utf-8")).settings.contextLimit).toBe(16000);
+
+    // A generation without the override falls through to resolved again.
+    publish(store, compactionBag({ keepRecentMessages: 2 }), { contextLimit: 32000 });
+    await cmd.handler!(createMockAgent(makeMessages(6)), "compact 3 --compact-debug");
+    expect(JSON.parse(readFileSync(DUMP, "utf-8")).settings.contextLimit).toBe(32000);
   });
 
   it("compactDebug config enables the dump without the flag", async () => {
@@ -1441,5 +1486,137 @@ describe("Compaction Extension — context-overflow rescue", () => {
     expect(result).toBeUndefined();
     expect(agent.log.getAll().length).toBe(6);
     expect(params.messages).toHaveLength(6);
+  });
+});
+
+// ── B3 live surface: generation swaps against a REAL ConfigStore ────────────
+// createCore wires core.config/core.resolved as accessors over the store (B1);
+// these helpers mirror that shape on a mock core so a swap() lands on the NEXT
+// read exactly like production does. adopt + swap + commit, no mocks of the
+// store itself.
+
+function compactionBag(extra: Record<string, unknown> = {}) {
+  return {
+    compaction: {
+      enabled: true,
+      reserveTokens: 8000,
+      keepRecentMessages: 3,
+      strategy: "summarize",
+      userTurnGuardPrompt: "Continue from the compressed conversation context above.",
+      ...extra,
+    },
+  };
+}
+
+function storeBackedCore(store: any, resolved: Record<string, unknown> = {}) {
+  return {
+    hooks: new HookSystem(),
+    toolRegistry: new ToolRegistry(),
+    modelRegistry: {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 32000 },
+    },
+    get config() {
+      return store.current().config;
+    },
+    get resolved() {
+      return store.current().resolved ?? resolved;
+    },
+  } as any;
+}
+
+function publish(store: any, config: Record<string, unknown>, resolved: Record<string, unknown>) {
+  store.swap({ config: config as never, resolved: resolved as never })();
+}
+
+describe("compaction live reads (B3 generation swaps)", () => {
+  function dropAgent(n = 40, ch = "x") {
+    const big = makeMessages(n, ch.repeat(500));
+    const agent = createMockAgent(big);
+    agent.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 8000 },
+    };
+    return { big, agent };
+  }
+
+  it("enabled on->off lands on the NEXT trigger; the trigger before the swap still compacted", async () => {
+    const store = createConfigStore();
+    store.adopt(
+      compactionBag({ keepRecentMessages: 2, reserveTokens: 100, strategy: "drop" }) as never,
+      { contextLimit: 8000 } as never,
+    );
+    const ext = createCompactionExtension(storeBackedCore(store))!;
+    const ctxHook = (ext.hooks as any)[HOOKS.CONTEXT];
+
+    // Generation 1 (enabled): the auto-trigger compacts (~12.5k estimated
+    // tokens against the 8000-100 gate).
+    const a1 = dropAgent(100);
+    const r1 = await ctxHook({ messages: [new Message({ role: "system", content: "" }), ...a1.big] as any, agent: a1.agent });
+    expect(r1).toBeDefined();
+    expect(a1.agent.log.length).toBeLessThan(a1.big.length);
+
+    // Swap the block with enabled=false: the NEXT trigger no-ops (the block is
+    // a fresh object -- a captured reference would not even see the flip).
+    publish(
+      store,
+      compactionBag({ enabled: false, keepRecentMessages: 2, reserveTokens: 100, strategy: "drop" }),
+      { contextLimit: 8000 },
+    );
+    const a2 = dropAgent(40, "y");
+    const r2 = await ctxHook({ messages: [new Message({ role: "system", content: "" }), ...a2.big] as any, agent: a2.agent });
+    expect(r2).toBeUndefined();
+    expect(a2.agent.log.length).toBe(a2.big.length);
+  });
+
+  it("reserveTokens is read per trigger: the swap moves the NEXT gate", async () => {
+    const store = createConfigStore();
+    store.adopt(
+      compactionBag({ keepRecentMessages: 2, reserveTokens: 100, strategy: "drop" }) as never,
+      { contextLimit: 8000 } as never,
+    );
+    const ext = createCompactionExtension(storeBackedCore(store))!;
+    const ctxHook = (ext.hooks as any)[HOOKS.CONTEXT];
+
+    // gen1: gate = 8000-100; a small conversation stays under it -- no trigger.
+    const a1 = dropAgent(8);
+    const r1 = await ctxHook({ messages: [new Message({ role: "system", content: "" }), ...a1.big] as any, agent: a1.agent });
+    expect(r1).toBeUndefined();
+
+    // gen2: reserve 7900 puts the gate at ~100 tokens -- same conversation now trips.
+    publish(
+      store,
+      compactionBag({ keepRecentMessages: 2, reserveTokens: 7900, strategy: "drop" }),
+      { contextLimit: 8000 },
+    );
+    const a2 = dropAgent(8, "z");
+    const r2 = await ctxHook({ messages: [new Message({ role: "system", content: "" }), ...a2.big] as any, agent: a2.agent });
+    expect(r2).toBeDefined();
+    expect(a2.agent.log.length).toBeLessThan(a2.big.length);
+  });
+
+  it("the command run follows the swapped strategy scalar, and /compact writes the CURRENT generation block", async () => {
+    const store = createConfigStore();
+    store.adopt(compactionBag({ strategy: "summarize" }) as never, { contextLimit: 8000 } as never);
+    const core = storeBackedCore(store);
+    const ext = createCompactionExtension(core)!;
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext.hooks as any)[HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const cmd = commandRegistry.get("compact")!;
+
+    const agent = createMockAgent(makeMessages(30, "x".repeat(500)));
+    agent.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+    };
+    const r1 = (await cmd.handler!(agent, "compact drop")) as any;
+    expect(r1.content).toContain("strategy set to: drop");
+    // The write landed on the CURRENT generation's block (not a captured one).
+    expect((core.config as any).compaction.strategy).toBe("drop");
+
+    // A new generation carries the write forward (same bag identity semantics
+    // as the real store: the swapped bag is whatever the transaction built).
+    publish(store, compactionBag({ strategy: "trim" }), { contextLimit: 8000 });
+    const r2 = (await cmd.handler!(createMockAgent(makeMessages(6)), "compact")) as any;
+    expect(r2.content).toMatch(/'trim' strategy|Compaction not applicable|Not enough messages/);
+    // The live settings handle answers from the store, not from create() time.
+    expect((ext as any).settings.strategy).toBe("trim");
   });
 });

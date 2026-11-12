@@ -20,7 +20,14 @@ const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf8")) as Record<string, a
 // ade5edfd... = sha256 of the stable JSON.stringify of the schema with all
 // description keys stripped, as of the descriptions sweep (61 additions).
 // 48140af4... = recomputed with the logLevel/logTarget additions (2026-11-11).
-const SHAPE_PIN = "48140af4de2731a42c05d9765e7cb024d8eee7ccfe1df3d786b2e16f204bdbb6";
+// 7e0ad013... = recomputed for the envScrubbing config layer (owner ruling
+// 2026-11-11 mid-run: the key became file-settable, {source:"config"} inserted
+// between the cli falsy layer and {default:true}; the settings panel ships and
+// writes it from that change -- see tests/extensions/websocket-config-clionly).
+// 75637d0d... = recomputed for the inert-key fix: maxRetries/toolRetryDelay got
+// config layers + minimum:0 bounds and taskProfile a config layer, and the dead
+// temperature/prompt keys were RETIRED (REMOVED_KEYS tombstones in rescue.ts).
+const SHAPE_PIN = "75637d0dbe652fbebb206b6d355ea27fe0a46e50ad70e5429df7618f2649004b";
 
 /** Every schema node with its keyPath: each top-level entry, each nested
  *  properties child, and each items.properties child, recursively. */
@@ -51,10 +58,10 @@ describe("core schema descriptions", () => {
   const nodes: Array<[string, any]> = [];
   for (const [key, prop] of Object.entries(schema)) collectNodes(prop, key, nodes);
 
-  it("covers the whole schema (65 nodes: 63 leaves + 2 groups)", () => {
+  it("covers the whole schema (63 nodes: 61 leaves + 2 groups)", () => {
     // Guards the walker itself: if the schema grows a node, this count moving
     // is the reminder that the new node needs a description too.
-    expect(nodes.length).toBe(65);
+    expect(nodes.length).toBe(63);
   });
 
   it("every node carries a non-empty single-line description", () => {

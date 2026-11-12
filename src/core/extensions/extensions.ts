@@ -5,6 +5,7 @@ import { HOOKS, EXTENSION_PROVIDES, type HookSystem, type HookHandlerAny } from 
 import { ConfigError, ExtensionError } from "../error.ts";
 import { logger } from "@utils/logger.ts";
 import { camelCase } from "@utils/strings.ts";
+import { parseVersionRange, rangeMatches } from "@utils/version.ts";
 import { CompletionService } from "../completion.ts";
 import type { ToolRegistry } from "./tool-registry.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
@@ -162,6 +163,21 @@ async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata
 
   const configSchema = meta.configSchema == null ? null : fieldObject(meta, "configSchema", metaPath);
 
+  // "sdk" is a compatibility contract: unlike display-ish fields, ignoring a
+  // malformed value would silently drop the very signal it declares, so a bad
+  // one is a broken manifest (fatal at load for the extensions that load it).
+  let sdk: string | undefined;
+  if (meta.sdk !== undefined && meta.sdk !== null) {
+    if (typeof meta.sdk !== "string" || parseVersionRange(meta.sdk) === null) {
+      return brokenMetadata(
+        name,
+        metaPath,
+        `invalid "sdk" range: ${JSON.stringify(meta.sdk)} (expected comparators like ">=0.16" or ">=0.16 <1.0")`,
+      );
+    }
+    sdk = meta.sdk.trim();
+  }
+
   const cliSubcommands = fieldArray<Record<string, unknown>>(meta, "cli:subcommands", metaPath).map((sc) => ({
     name: (sc?.name as string) || "",
     description: (sc?.description as string) || "",
@@ -184,6 +200,7 @@ async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata
     description: typeof meta.description === "string" ? meta.description : "",
     dependsOn: fieldArray<string>(meta, "dependsOn", metaPath),
     autoload: meta.autoload !== false,
+    sdk,
     configSchema,
     cliSubcommands,
     cliFlags,
@@ -206,6 +223,14 @@ export async function discoverExtensionsInDir(dirPath: string): Promise<Discover
       return extensions;
     }
   } catch {
+    return extensions;
+  }
+
+  // An extensionPath may name one extension directly (the directory itself
+  // holds extension.json + index.ts) instead of a bundle root to scan.
+  if (await isExtensionDirectory(dirPath)) {
+    const metadata = await readExtensionMetadata(dirPath);
+    extensions.push({ ...metadata, path: metadata.path || "", dirPath });
     return extensions;
   }
 
@@ -379,6 +404,29 @@ function buildServiceProviderMap(
   return serviceMap;
 }
 
+/**
+ * Load-time check for the manifest `sdk` range: a mismatch is a loud warning,
+ * never a refusal -- the extension may well work, and silently skipping it
+ * would strand a session whose operator expected it (probe-and-degrade, the
+ * fence doctrine's sibling). Ranges were validated fail-closed at discovery,
+ * so an unparsable one reaching here means metadata built without discovery.
+ */
+export function sdkCompatibilityWarning(
+  ext: { name: string; sdk?: string },
+  currentVersion: string,
+): string | null {
+  if (!ext.sdk) return null;
+  const comparators = parseVersionRange(ext.sdk);
+  if (comparators === null) {
+    return `[extensions] "${ext.name}": unparseable sdk range "${ext.sdk}" — declaration ignored`;
+  }
+  if (rangeMatches(currentVersion, comparators)) return null;
+  return (
+    `[extensions] "${ext.name}" declares sdk "${ext.sdk}" but this hotdog is ${currentVersion} — ` +
+    `loading anyway; the extension may misbehave`
+  );
+}
+
 export async function discoverExtensions(
   extensionPaths: string[],
   serviceOverrides: Record<string, string> = {},
@@ -407,6 +455,7 @@ export async function discoverExtensions(
         loadOrder: ext.loadOrder,
         dependsOn: ext.dependsOn,
         autoload: ext.autoload,
+        sdk: ext.sdk,
         configSchema: ext.configSchema,
         cliSubcommands: ext.cliSubcommands || [],
         cliFlags: ext.cliFlags || [],

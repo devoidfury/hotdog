@@ -1,0 +1,31 @@
+{
+  "name": "extension-starter",
+  "sdk": ">=0.16",
+  "provides": ["tools"],
+  "loadOrder": 10,
+  "description": "Starter extension: a word_count tool demonstrating the authoring contract (SDK-only imports, configSchema-owned defaults)",
+  "configSchema": {
+    "extensionStarter": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        },
+        "topWords": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 25,
+          "description": "How many most-frequent words the word_count tool reports. 0 disables the ranking."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "extensionStarter" },
+        { "default": {} }
+      ]
+    }
+  }
+}

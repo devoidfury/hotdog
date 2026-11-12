@@ -31,6 +31,7 @@ extension loader uses `extension.json` presence to identify valid extensions; lo
 ```json
 {
   "name": "extension-name",
+  "sdk": ">=0.16",
   "provides": ["tools", "cli:subcommands"],
   "loadOrder": 10,
   "description": "Brief description of what this extension does",
@@ -75,6 +76,7 @@ extension loader uses `extension.json` presence to identify valid extensions; lo
 | `provides` | string[] | No | Capabilities: `"tools"`, `"cli:subcommands"` |
 | `loadOrder` | number | No | Load priority (lower = earlier). Defaults to 10. |
 | `dependsOn` | string[] | No | Names of extensions that must load before this one |
+| `sdk` | string | No | Hotdog versions this extension was written against, e.g. `">=0.16"` or `">=0.16 <1.0"` (space-separated comparators `>= > <= < =`, bare version means `=`; no wildcards/carets). Malformed values break the manifest; a mismatch against the running version logs a loud warning and loads anyway |
 | `description` | string | No | Human-readable description |
 | `cli:subcommands` | array | No | Subcommand declarations for static discovery (help text, `--help`) |
 | `cli:flags` | array | No | CLI flag declarations for static discovery |
@@ -90,6 +92,8 @@ extension loader uses `extension.json` presence to identify valid extensions; lo
 - `10` — DEFAULT (most extensions)
 
 **Discovery flow**: `extension.json` exists → valid extension (load additionally requires `index.ts`).
+
+Check any manifest + entry point + config schema with `hotdog extension validate <dir>` (a bundle root scans; `--json` for the envelope). It runs above the config layer, so it works even when `defaults.json` is broken.
 
 **Static discovery**: CLI flags, subcommand declarations, and config params from `configSchema` are read at startup without loading extension code. This enables `--help`, subcommand discovery, and config defaults to work immediately.
 
@@ -223,3 +227,15 @@ The `ExtensionLoader` exposes methods to query extension capabilities:
 - `loader.getDependsOn(name)` — get `dependsOn` array for an extension
 
 When `extensionAutoload: false`, the loader auto-resolves transitive dependencies — if extension A depends on B, and A is explicitly listed but B is not, B is automatically included.
+
+### Testing Your Extension
+
+`@read-receipt/hotdog/testing` is the published test kit: `createTestCore({ config })` returns a
+minimal core double (the real hook/tool/service/config registries plus a mutable config bag) that
+feeds `new ExtensionLoader(core)` with no cast; `fakeQuestionSeam(answer, opts)` covers the seam's
+fail-closed cases (non-interactive, throwing, rejecting, never-settling) and records every question
+asked; `makeToolContext` and `toolResultPayload` build a real `ToolContext` and a properly-shaped
+`tool:result` payload for driving the pipeline. Flip config knobs by direct assignment on
+`core.config` -- the extension's next point-of-use read sees it. Both example tests
+(`examples/*/*.test.ts`) run on the kit; the double stays minimal by design (no LLM client, no
+resolved bag).

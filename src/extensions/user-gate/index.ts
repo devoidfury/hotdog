@@ -23,6 +23,7 @@ import {
   getExtensionConfig,
 } from "@core/extensions/types.ts";
 import type { HookPayloads } from "@core/extensions/types.ts";
+import type { QuestionSeam } from "@core/context/input.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
 import {
@@ -42,14 +43,7 @@ import { ABORTED, raceAbort } from "@utils/promise.ts";
 type ToolCallPayload = HookPayloads["tool:call"];
 
 /** The question-tool seam: the one route from an extension to the human. */
-interface InputLike {
-  isInteractive(): boolean;
-  /** `signal` is the run's abort: the input bails out of its prompt loop and releases readline when the run is cancelled. */
-  collectAnswers(
-    questions: Record<string, unknown>[],
-    signal?: AbortSignal | null,
-  ): Promise<Record<string, unknown>> | Record<string, unknown>;
-}
+type InputLike = QuestionSeam;
 
 const ANSWER_KEY = "approve";
 const OPTIONS = ["allow once", "allow for session", "deny"];

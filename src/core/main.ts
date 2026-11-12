@@ -7,6 +7,7 @@ import {
   createExtensionLoader,
   registerExtensionMetadata,
   resolveExtensionsToLoad,
+  sdkCompatibilityWarning,
   validateServiceContracts,
   type LoaderCore,
 } from "./extensions/extensions.ts";
@@ -22,6 +23,7 @@ import { createConfigStore, type ConfigStore } from "./config/store.ts";
 import { registerConfigApplyHook } from "./config/apply-hooks.ts";
 import { peekLogBootPosture } from "./config/boot-posture.ts";
 import { enumHintsFromValidationErrors, runRescue } from "./config/rescue.ts";
+import { runExtensionValidate } from "./extensions/validate.ts";
 import type { ProfileDef } from "./config/profiles.ts";
 import type { ResolvedConfig } from "./extensions/types.ts";
 import type { ProviderDef } from "./config/providers.ts";
@@ -55,6 +57,8 @@ async function loadExtensions(
 
   for (const ext of extensionsToLoad) {
     if (core.extensions.has(ext.name)) continue;
+    const sdkWarn = sdkCompatibilityWarning(ext, pkg.version);
+    if (sdkWarn) logger.warn(sdkWarn);
     const extInstance = await core.extensions.load(ext.name, ext.path ?? "", {
       taskManager,
       provides: ext.provides,
@@ -317,6 +321,18 @@ export async function main(): Promise<number> {
       "Diagnose config files: paths, resolution chain, syntax, invalid enum values. 'fix' repairs comments/trailing commas and resets out-of-set enums to their schema default (.bak kept)",
     handler: rescueHandler,
   });
+  // Extension diagnostics ride the same above-the-config seat: validating an
+  // extension directory must work even when defaults.json is broken.
+  const extensionHandler = (cliArgs: CliArgv) =>
+    runExtensionValidate({
+      args: Array.isArray(cliArgs.args) ? (cliArgs.args as string[]) : [],
+      json: cliArgs.wantsJson === true,
+    });
+  cliSubcommandRegistry.register("extension", {
+    description:
+      "Extension diagnostics: 'validate <dir>' checks the manifest (strict JSON, field types, sdk range), the entry point, config defaults, service contracts, and dry-loads through the real loader; names unanchored SDK imports with the bun link fix",
+    handler: extensionHandler,
+  });
   await registerExtensionMetadata(
     minimalConfig as CoreConfigWithExtensions,
     configRegistry,
@@ -372,6 +388,12 @@ export async function main(): Promise<number> {
   // rescue runs before anything that reads the config it is diagnosing.
   if (cli.subcommand === "rescue") {
     return await rescueHandler(cli as CliArgv);
+  }
+
+  // Same above-the-config seat as rescue: extension validation reads a
+  // directory the user named, not the config being diagnosed.
+  if (cli.subcommand === "extension") {
+    return await extensionHandler(cli as CliArgv);
   }
 
   if (earlyConfigError) {

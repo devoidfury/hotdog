@@ -783,6 +783,33 @@ describe('ToolExecutor', () => {
       expect(toolExecuted).toBe(true);
       expect(toolContentText(result.toolResults[0]!.content)).toContain('ran fine');
     });
+
+    it('carries the toolCtx to the TOOL_RESULT pipeline (seam reachability)', async () => {
+      // The result-gate contract: the same toolCtx instance the gate saw
+      // reaches the result pipeline, so a handler there can prompt through
+      // toolCtx.get("input") just like a tool:call gate does.
+      const deps = createMockDeps();
+      const seam = { isInteractive: () => true, collectAnswers: () => ({ verdict: 'redact' }) };
+
+      deps.hooks.on('agent:toolContext', ({ toolCtx }: { toolCtx: { set: (k: string, v: unknown) => void } }) => {
+        toolCtx.set('input', seam);
+      });
+      let seen: unknown = null;
+      deps.hooks.on('tool:result', (payload: { toolCtx?: { get: (k: string) => unknown } | undefined }) => {
+        seen = payload.toolCtx?.get('input');
+      });
+
+      deps.toolRegistry.register('seam_test', makeTestTool('seam_test', async () => 'ok'));
+
+      const executor = createToolExecutor(deps);
+      await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'seam_test', arguments: '{}' },
+      }]);
+
+      expect(seen).toBe(seam);
+    });
   });
 
   describe('availability resolution', () => {

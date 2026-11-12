@@ -39,6 +39,7 @@
     "tests/**/*.tsx",
     "bin/**/*",
     "evals/**/*.ts",
+    "examples/**/*.ts",
   ],
-  "exclude": ["node_modules", "coverage", "tmp", "examples"],
+  "exclude": ["node_modules", "coverage", "tmp"],
 }

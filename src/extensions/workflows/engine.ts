@@ -541,6 +541,21 @@ export class WorkflowRun {
         this.#settleNode(nr, "cancelled");
         return;
       }
+      // A kill through the task seam (task_interrupt / task_cancel / session
+      // delete) ends the backing worker's turn "cancelled" with both flags
+      // clear -- the manager stopped work the user asked to stop, so the
+      // attempt chain is TERMINAL: mirror the flag-cancel route exactly (no
+      // attempt-failed, no cold re-admission; descendants block through the
+      // ordinary dependency rule, siblings ride). Excluded: runtimeKilled --
+      // the cap kill also arrives as a cancelled turn and owns the
+      // failed-max_runtime route below.
+      if (turn.status === "cancelled" && !nr.runtimeKilled) {
+        // Record the cancel on the node before settling: cancelRequested is the node's per-node user-cancel record, the same footprint cancelNode leaves, so anything consulting it after the settle sees "user cancelled" rather than "worker died".
+        nr.cancelRequested = true;
+        this.#releaseTask(nr);
+        this.#settleNode(nr, "cancelled");
+        return;
+      }
       if (turn.status !== "completed") {
         task = null;
         nr.task = null;
@@ -760,6 +775,20 @@ export class WorkflowRun {
         if (!TERMINAL.has(jnr.state)) {
           this.#settleJudge(jnr, "cancelled", owner.cancelRequested ? `owner '${owner.node.id}' cancelled` : undefined);
         }
+        return { kind: "cancel" };
+      }
+      // A direct task_interrupt (task_cancel / session delete) on the JUDGE's
+      // backing task ends its turn "cancelled" with nothing set: terminal --
+      // settle the judge cancelled and hand the producer the EXISTING
+      // jres.kind === "cancel" route (owner settles cancelled with it, no
+      // respawn). Deliberately NOT mirrored onto jnr.cancelRequested: that
+      // flag means "workflow_control cancelled this judge" and its route must
+      // keep BLOCKING the producer (recoverable, verdict never landed) -- the
+      // one distinction between the two cancels worth preserving.
+      // runtimeKilled stays on the cold-respawn ladder below (cap semantics).
+      if (turn.status === "cancelled" && !jnr.runtimeKilled && !jnr.cancelRequested) {
+        this.#releaseTask(jnr);
+        if (!TERMINAL.has(jnr.state)) this.#settleJudge(jnr, "cancelled");
         return { kind: "cancel" };
       }
       if (turn.status !== "completed") {

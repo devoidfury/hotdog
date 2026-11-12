@@ -493,10 +493,14 @@ describe("engine: state machine & gates", () => {
     expect(fake.manager.interruptTask("r:a#1")).toBe(true);
     releaseS();
     const summary = await runP; // hung forever before the engine fix
-    expect(summary.states.a).toBe(NODE_STATE.FAILED);
+    // A kill through the task seam is a TERMINAL user-cancel, not a failed
+    // attempt: the node settles cancelled (no attempt-failed, no cold
+    // re-admission burning the last attempt into "attempts exhausted").
+    expect(summary.states.a).toBe(NODE_STATE.CANCELLED);
     expect(summary.states.s).toBe(NODE_STATE.SUCCEEDED);
     expect(fake.turns["a"]).toBe(1); // the queued retry never became an agent turn
     expect(fake.builds()).toBe(2); // a + s; no cold re-admission after the kill
+    expect(readLog(dir).some((e) => e.id === "a" && e.state === "attempt-failed")).toBe(false);
   });
 
   it("retryOn selects which verdicts retry: fail with retryOn [reject] fails fast", async () => {

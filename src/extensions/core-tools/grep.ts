@@ -14,7 +14,7 @@ import {
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
 import type { Workspace } from "@utils/workspace.ts";
-import { ToolContext } from "@core/extensions/types.ts";
+import { ToolContext, type ConfigKnob, readKnob } from "@core/extensions/types.ts";
 
 const execFileAsync = util.promisify(execFile);
 
@@ -63,7 +63,9 @@ const TYPE_EXTENSIONS: Record<string, string[]> = {
 };
 
 interface GrepToolOptions {
-  maxResults: number;
+  /** B6a (§4.1): scalar-or-reader; the extension entry reads the live coreTools block per execute. */
+  maxResults: ConfigKnob<number>;
+  /** Internal line-shaping constant (the maxToolOutputLines config key is removed); a plain scalar, not a knob. */
   maxOutputLines: number;
 }
 
@@ -368,13 +370,17 @@ export class GrepTool {
   static readonly TOOL_NAME = "grep";
   metadata: ToolMetadata = { sideEffects: false, difficulty: 1, execution: "worker", tags: ["files"] };
 
-  private readonly maxResults: number;
+  #maxResults: ConfigKnob<number>;
   private readonly maxOutputLines: number;
 
   constructor(options: GrepToolOptions) {
 
-    this.maxResults = options.maxResults;
+    this.#maxResults = options.maxResults;
     this.maxOutputLines = options.maxOutputLines;
+  }
+
+  get maxResults(): number {
+    return readKnob(this.#maxResults);
   }
 
   toToolDef() {

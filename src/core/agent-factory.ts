@@ -137,6 +137,14 @@ export function createAgentFactory(
     // the tool's internal line-shaping default is injected AFTER the spread: a
     // stale user key in the raw config bag can never drift the plane away from
     // what the inline tool factories do with the same constant.
+    // EXEMPTION E1 (B6a, design §4.3/§5.2): this is the WORKER-PLANE SNAPSHOT.
+    // Runners never boot the config, so these scalars are pinned at plane
+    // entry, not read live -- a live config write changes NEW POOL ENTRIES
+    // ONLY (P3); existing entries keep their spawn-time posture and the
+    // broker's drift/keep-pinned behavior (postureDrift in tool-exec-broker.ts)
+    // stands exactly as ruled. The INLINE plane is the live one: the
+    // core-tools / bash-tool entries hand their tools scalar-or-reader knobs
+    // over the store (design §4.1, batch B6a).
     const toolExecConfig: WireToolConfig = {
       bashTool: {
         ...(baseConfig.bashTool as Record<string, unknown> | undefined),

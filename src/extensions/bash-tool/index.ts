@@ -10,7 +10,7 @@ import {
 import { HOOKS } from "@core/hooks.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { AssistantRetryableError, ToolError } from "@core/error.ts";
-import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig } from "@core/extensions/types.ts";
+import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig, type ConfigKnob, readKnob } from "@core/extensions/types.ts";
 import { copyScrubbedEnv, envScrubExtraKeys } from "@utils/env.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";
@@ -27,15 +27,26 @@ const MAX_OUTPUT_CHARS = 1_000_000;
 const KILL_GRACE_MS = 2000;
 
 interface BashToolOptions {
-  timeoutMs: number;
+  /** Command default timeout (config: bashTool.bashTimeoutMs). B6a (§4.1):
+   *  scalar-or-reader -- the extension entry reads the live bashTool block
+   *  per execute; the pooled runner's wire snapshot stays a pinned scalar. */
+  timeoutMs: ConfigKnob<number>;
   maxOutputLines: number;
-  /** Hard cap on a model-requested timeoutMs (config: bashTool.maxTimeoutMs). */
-  maxTimeoutMs?: number;
-  /** Extra env keys to scrub (config: envScrub.extra). */
-  envScrubExtra?: readonly string[];
-  /** Env scrubbing on/off (config `envScrubbing`; --disable-env-scrubbing overrides). Defaults to true. */
-  envScrubbing?: boolean;
-  /** Extra environment variables for spawned shells (config: bashTool.env). */
+  /** Hard cap on a model-requested timeoutMs (config: bashTool.maxTimeoutMs). Scalar-or-reader (undefined = no cap). */
+  maxTimeoutMs?: ConfigKnob<number | undefined>;
+  /** Extra env keys to scrub (config: envScrub.extra). Scalar-or-reader: the
+   *  inline spawn re-reads, so an operator write lands on the NEXT exec. */
+  envScrubExtra?: ConfigKnob<readonly string[] | undefined>;
+  /** Env scrubbing on/off (resolved posture `envScrubbing`; --disable-env-scrubbing
+   *  overrides the file). Scalar-or-reader; defaults to true. The extension
+   *  entry passes a SPAWN-TIME reader over core.resolved (owner override
+   *  2026-11-11: cli > config > default -- the resolved bag carries the
+   *  precedence, and reading it live respects the cli layer). */
+  envScrubbing?: ConfigKnob<boolean>;
+  /** Extra environment variables for spawned shells (config: bashTool.env).
+   *  NOT a knob -- §5.4 exception (ruled 2026-11-10, restart-bound): a
+   *  subprocess env map is a code-execution channel, snapshotted at tool
+   *  construction (boot registration / pool-entry spawn). Values never echoed. */
   env?: Record<string, string>;
 }
 
@@ -108,19 +119,22 @@ export class BashTool {
     headerKeys: ["timeoutMs"],
   };
 
-  readonly timeoutMs: number;
+  // B6a knobs (design §4.1): the public accessors below resolve a scalar knob
+  // as pinned (byte-identical to the old fields) and re-call a reader knob at
+  // each use, so an inline execute/spawn follows the live store.
+  #timeoutMs: ConfigKnob<number>;
   readonly maxOutputLines: number;
-  readonly maxTimeoutMs?: number;
-  readonly envScrubExtra?: readonly string[];
-  readonly envScrubbing: boolean;
+  #maxTimeoutMs: ConfigKnob<number | undefined>;
+  #envScrubExtra: ConfigKnob<readonly string[] | undefined>;
+  #envScrubbing: ConfigKnob<boolean>;
   readonly env?: Record<string, string>;
 
   constructor(options: BashToolOptions) {
-    this.timeoutMs = options.timeoutMs;
+    this.#timeoutMs = options.timeoutMs;
     this.maxOutputLines = options.maxOutputLines;
-    this.maxTimeoutMs = options.maxTimeoutMs;
-    this.envScrubExtra = options.envScrubExtra;
-    this.envScrubbing = options.envScrubbing ?? true;
+    this.#maxTimeoutMs = options.maxTimeoutMs;
+    this.#envScrubExtra = options.envScrubExtra;
+    this.#envScrubbing = options.envScrubbing ?? true;
     // Only string values make it into the shell (the schema says string;
     // anything else is a config typo, not a variable).
     const env: Record<string, string> = {};
@@ -128,6 +142,22 @@ export class BashTool {
       if (typeof value === "string") env[name] = value;
     }
     this.env = env;
+  }
+
+  get timeoutMs(): number {
+    return readKnob(this.#timeoutMs);
+  }
+
+  get maxTimeoutMs(): number | undefined {
+    return readKnob(this.#maxTimeoutMs);
+  }
+
+  get envScrubExtra(): readonly string[] | undefined {
+    return readKnob(this.#envScrubExtra);
+  }
+
+  get envScrubbing(): boolean {
+    return readKnob(this.#envScrubbing);
   }
 
   toToolDef() {
@@ -159,9 +189,12 @@ export class BashTool {
     const workspace = ctx?.get?.("workspace") as Workspace | undefined;
     const cwd = workspace?.root;
     const command = args.command as string;
+    // B6a: the timeout knobs resolve per execute (one live read shared by the
+    // requested-value fallback and the default, so no torn mid-call posture).
+    const defaultTimeoutMs = this.timeoutMs;
     const timeout = resolveBashTimeout(
-      args.timeoutMs ?? args.timeout_ms ?? this.timeoutMs,
-      this.timeoutMs,
+      args.timeoutMs ?? args.timeout_ms ?? defaultTimeoutMs,
+      defaultTimeoutMs,
       this.maxTimeoutMs,
     );
 
@@ -186,6 +219,10 @@ export class BashTool {
       ...OWN_PROCESS_GROUP,
       // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
       stdio: ["ignore", "pipe", "pipe"],
+      // SPAWN-TIME reads (§5.2 row + owner override 2026-11-11): scrub posture
+      // (resolved: cli > config > default) and the extra-key list are resolved
+      // right here, so a config write changes the NEXT spawn, never this one's
+      // successor through a stale capture. `env` stays the boot snapshot (§5.4).
       env: agentSpawnEnv(this.envScrubExtra, this.env, this.envScrubbing),
     });
 
@@ -338,30 +375,41 @@ export class BashTool {
 // ── Extension Entry Point ───────────────────────────────────────────────────
 
 export function create(core: CoreContext): ExtensionInstance {
-  // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig<{
-    bashTimeoutMs: number;
-    maxTimeoutMs?: number;
-    env?: Record<string, unknown>;
-  }>(core, "bashTool");
-  const timeoutMs = config.bashTimeoutMs;
-  // maxToolOutputLines config key removed: line shaping keeps the internal
-  // default (the seam's maxToolResultChars char cap is the binding constraint).
-  const maxOutputLines = INTERNAL_MAX_OUTPUT_LINES;
-  const maxTimeoutMs = config.maxTimeoutMs;
-  const envScrubExtra = envScrubExtraKeys(core.config);
-  const envScrubbing = core.resolved?.envScrubbing !== false;
+  // Config defaults come from extension.json configSchema. B6a (§4.1): the
+  // knobs reach the tool as READERS over the live store -- timeoutMs/
+  // maxTimeoutMs resolve per execute, the scrub posture and extra-key list
+  // per spawn, so an operator write lands on the NEXT exec (design §4.3 +
+  // §5.2 rows). Nothing from the block is captured at create()/registration
+  // scope except bashTool.env, deliberately (see the §5.4 note below).
+  const block = () =>
+    getExtensionConfig<{
+      bashTimeoutMs: number;
+      maxTimeoutMs?: number;
+      env?: Record<string, unknown>;
+    }>(core, "bashTool");
 
   return {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         const tool = new BashTool({
-          timeoutMs,
-          maxOutputLines,
-          maxTimeoutMs,
-          envScrubExtra,
-          envScrubbing,
-          env: config.env as Record<string, string> | undefined,
+          timeoutMs: () => block().bashTimeoutMs,
+          // maxToolOutputLines config key removed: line shaping keeps the internal
+          // default (the seam's maxToolResultChars char cap is the binding constraint).
+          maxOutputLines: INTERNAL_MAX_OUTPUT_LINES,
+          maxTimeoutMs: () => block().maxTimeoutMs,
+          envScrubExtra: () => envScrubExtraKeys(core.config),
+          // OWNER OVERRIDE (2026-11-11) vs the contract row (§4.3/§5.2 claimed
+          // cli-layer-only, no config-file layer): envScrubbing now resolves
+          // cli(disableEnvScrubbing, falsy) > config(envScrubbing) > default(true),
+          // so the SPAWN-TIME read goes through the resolved bag, which carries
+          // that precedence -- the cli flag still outranks the file, and a file
+          // write reaches the next inline spawn (pool: new entries, E1/P3).
+          envScrubbing: () => core.resolved?.envScrubbing !== false,
+          // §5.4 EXCEPTION (ruled 2026-11-10): bashTool.env stays restart-bound
+          // -- a subprocess env map is a code-execution channel, not a knob.
+          // Read ONCE at registration (boot) and stored as a plain map; a
+          // config write reaches the tool only after restart. Values never echoed.
+          env: block().env as Record<string, string> | undefined,
         });
         registry.register(BashTool.TOOL_NAME, tool);
       },

@@ -447,6 +447,22 @@ export interface CommandsRegisterPayload {
   agent: Agent;
 }
 
+/**
+ * A config knob held across a use boundary (B6a, design §4.1): either a
+ * PINNED scalar -- hosts that never boot the config pass the value itself and
+ * answer byte-identically forever (the pooled runner's wire snapshot, plain-
+ * scalar test doubles) -- or a READER re-evaluated at each use. Live hosts
+ * pass `() => getExtensionConfig(core, key).<field>` (or a `core.resolved`
+ * read) so every execute answers from the current store generation.
+ */
+export type ConfigKnob<T> = T | (() => T);
+
+/** Resolve a ConfigKnob at the point of use. A function knob is called; a
+ *  scalar knob (including undefined, for optional knobs) answers as-is. */
+export function readKnob<T>(knob: ConfigKnob<T>): T {
+  return typeof knob === "function" ? (knob as () => T)() : knob;
+}
+
 // Extract an extension's config block from core.config. If a schema is
 // registered for the key, the value is validated and a warning logged on mismatch.
 // Call it at the point of use; a block captured at `create()` time belongs to that generation.

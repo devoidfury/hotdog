@@ -7,7 +7,7 @@ import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { compileGitignore } from "@utils/gitignore.ts";
-import { ToolContext } from "@core/extensions/types.ts";
+import { ToolContext, type ConfigKnob, readKnob } from "@core/extensions/types.ts";
 
 const execFileAsync = util.promisify(execFile);
 
@@ -28,11 +28,16 @@ export class ProjectInfoTool {
   static readonly TOOL_NAME = "project_info";
   metadata: ToolMetadata = { sideEffects: false, difficulty: 1, tags: ["files"] };
 
-  /** File-listing ceiling, plumbed from coreTools.grepMaxResults. */
-  private readonly maxFiles: number;
+  /** File-listing ceiling, plumbed from coreTools.grepMaxResults.
+   *  B6a (§4.1): scalar-or-reader; live per execute through the getter. */
+  #maxFiles: ConfigKnob<number>;
 
-  constructor(options: { maxFiles: number }) {
-    this.maxFiles = options.maxFiles;
+  constructor(options: { maxFiles: ConfigKnob<number> }) {
+    this.#maxFiles = options.maxFiles;
+  }
+
+  get maxFiles(): number {
+    return readKnob(this.#maxFiles);
   }
 
   toToolDef() {

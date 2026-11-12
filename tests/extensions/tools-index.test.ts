@@ -1,9 +1,17 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import fsSync from "node:fs";
+import path from "node:path";
 import {
   CORE_TOOL_NAMES,
   createToolFactory,
+  create as createCoreToolsExtension,
 } from "@extensions/core-tools/index.ts";
 import { ToolRegistry } from "@core/extensions/tool-registry.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { createConfigStore, type ConfigStore } from "@core/config/store.ts";
+import type { CoreConfigWithExtensions } from "@core/config/schema-loader.ts";
+import type { ResolvedConfig } from "@core/extensions/types.ts";
+import { resultStr, tmpDir, toolCtx, cleanupDir } from "../helpers.ts";
 
 // Mirrors the configSchema defaults in core-tools/extension.json
 const config = {
@@ -233,5 +241,194 @@ describe("core tool domain tags (ToolMetadata.tags)", () => {
       const tool = factory.createTool(name, [name]);
       expect(tool!.metadata.tags, `${name} tags`).toEqual(["files"]);
     }
+  });
+});
+
+// ── B6a: the live coreTools block moves the NEXT execute (design §4.1) ──────
+//
+// Drives a REAL createConfigStore() through adopt+swap+commit (the same
+// publish shape as config-store.test.ts / the B2-B5 live suites): the fake
+// core answers config through store.current() exactly like the createCore
+// accessors, tools are registered ONCE against it, and each migrated key must
+// change the NEXT execute/read of the already-registered tool. The
+// static-scalar twin at the top of this file is the pinned-host pin (the
+// worker plane builds its tools from plain wire scalars the same way): those
+// answer byte-identically forever and NEVER see a publish.
+
+describe("B6a live coreTools block (store publishes, one registration)", () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = tmpDir();
+  });
+  afterAll(() => {
+    cleanupDir(dir);
+  });
+
+  function bootStore(): ConfigStore {
+    const store = createConfigStore();
+    store.adopt({ coreTools: { ...config } } as CoreConfigWithExtensions);
+    return store;
+  }
+
+  // The only publish shape the store allows: swap + its one-shot commit.
+  // The whole block is rebuilt per publish (re-resolve semantics: fresh
+  // object, only the probed key differs).
+  function publish(store: ConfigStore, overrides: Record<string, unknown> = {}): void {
+    store.swap({
+      config: { coreTools: { ...config, ...overrides } } as CoreConfigWithExtensions,
+      resolved: {} as ResolvedConfig,
+    })();
+  }
+
+  function registerAll(store: ConfigStore): Map<string, any> {
+    const liveCore = {
+      get config() {
+        return store.current().config;
+      },
+      get resolved() {
+        return store.current().resolved;
+      },
+      configStore: store,
+    };
+    const tools = new Map<string, any>();
+    const registry = {
+      register: (name: string, tool: unknown) => tools.set(name, tool),
+      getAll: () => [],
+    };
+    createCoreToolsExtension(liveCore as any).hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
+    return tools;
+  }
+
+  it("readToolLimit: the NEXT execute caps at the published value; prior use answered old", async () => {
+    fsSync.writeFileSync(path.join(dir, "many.txt"), Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n"));
+    const store = bootStore();
+    const tools = registerAll(store);
+    const read = tools.get("read");
+
+    // Prior use answers the boot value (all 30 lines under the 500 default).
+    const before = await read.execute({ path: "many.txt" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(resultStr(before).split("\n")).toHaveLength(30);
+    expect(before.metadata?.get("limit")).toBe("500");
+
+    publish(store, { readToolLimit: 10 });
+
+    const after = await read.execute({ path: "many.txt" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(resultStr(after).split("\n")).toHaveLength(10);
+    expect(after.metadata?.get("limit")).toBe("10");
+    // The advertised arg default follows the same read (toToolDef is a use site).
+    const props = read.toToolDef().function.parameters.properties as Record<string, { default?: number }>;
+    expect(props.limit!.default).toBe(10);
+  });
+
+  it("maxImageSize: the NEXT image read enforces the published cap", async () => {
+    fsSync.writeFileSync(path.join(dir, "tiny.png"), Buffer.alloc(64, 7));
+    const store = bootStore();
+    const read = registerAll(store).get("read");
+
+    const before = await read.execute({ path: "tiny.png" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(before.isOk(), resultStr(before)).toBe(true);
+
+    publish(store, { maxImageSize: 10 });
+    const after = await read.execute({ path: "tiny.png" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(after.isOk()).toBe(false);
+    expect(resultStr(after)).toContain("Image file too large");
+  });
+
+  it("maxEditInputSize: the NEXT edit enforces the published cap", async () => {
+    fsSync.writeFileSync(path.join(dir, "editme.txt"), "alpha");
+    const store = bootStore();
+    const edit = registerAll(store).get("edit");
+
+    // Prior use answers old: a 6-char total rides under the 16000 boot cap.
+    const before = await edit.execute(
+      { path: "editme.txt", oldString: "alpha", newString: "beta" },
+      toolCtx({ workspaceRoots: [dir] }),
+    );
+    expect(before.isOk(), resultStr(before)).toBe(true);
+
+    publish(store, { maxEditInputSize: 4 });
+    await expect(
+      edit.execute(
+        { path: "editme.txt", oldString: "beta", newString: "gamma" },
+        toolCtx({ workspaceRoots: [dir] }),
+      ),
+    ).rejects.toThrow(/Edit input too large: 9 characters \(max 4\)/);
+  });
+
+  it("grepMaxResults: the NEXT grep truncates at the published cap", async () => {
+    fsSync.mkdirSync(path.join(dir, "grepdir"));
+    for (const name of ["a.txt", "b.txt", "c.txt"]) {
+      fsSync.writeFileSync(
+        path.join(dir, "grepdir", name),
+        ["needle one", "clean", "needle two", "needle three"].join("\n"),
+      );
+    }
+    const store = bootStore();
+    const grep = registerAll(store).get("grep");
+
+    const before = await grep.execute({ pattern: "needle", path: "grepdir" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(before.metadata?.get("truncated")).toBeUndefined();
+
+    publish(store, { grepMaxResults: 2 });
+    const after = await grep.execute({ pattern: "needle", path: "grepdir" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(after.metadata?.get("truncated")).toBe("true");
+    expect(after.metadata?.get("max_results")).toBe("2");
+    // rg's JSON line text carries its trailing newline; count match lines, not blanks.
+    expect(resultStr(after).split("\n").filter(Boolean)).toHaveLength(2);
+  });
+
+  it("findMaxResults: the NEXT find truncates at the published cap", async () => {
+    fsSync.mkdirSync(path.join(dir, "finddir"));
+    for (const name of ["f1.txt", "f2.txt", "f3.txt", "f4.txt"]) {
+      fsSync.writeFileSync(path.join(dir, "finddir", name), "x");
+    }
+    const store = bootStore();
+    const find = registerAll(store).get("find");
+
+    const before = await find.execute({ pattern: "*.txt", path: "finddir" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(before.metadata?.get("truncated")).toBeUndefined();
+
+    publish(store, { findMaxResults: 2 });
+    const after = await find.execute({ pattern: "*.txt", path: "finddir" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(after.metadata?.get("truncated")).toBe("true");
+    expect(resultStr(after).trim().split("\n")).toHaveLength(2);
+  });
+
+  it("grepMaxResults feeds project_info's file ceiling (the shared knob, live)", async () => {
+    fsSync.mkdirSync(path.join(dir, "infodir"));
+    for (const name of ["p1.txt", "p2.txt", "p3.txt", "p4.txt"]) {
+      fsSync.writeFileSync(path.join(dir, "infodir", name), "x");
+    }
+    const store = bootStore();
+    const info = registerAll(store).get("project_info");
+
+    const before = await info.execute({ path: "infodir" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(before.metadata?.get("file_count")).toBe("4");
+
+    publish(store, { grepMaxResults: 2 });
+    const after = await info.execute({ path: "infodir" }, toolCtx({ workspaceRoots: [dir] }));
+    expect(after.metadata?.get("file_count")).toBe("2");
+  });
+
+  it("static-scalar hosts (the worker-plane shape) stay pinned forever", () => {
+    // The plain-scalar factory at the top of this file is what the pooled
+    // runner mirrors (src/workers/tool-exec.ts builds from wire scalars):
+    // no store exists behind it, and the getters answer the same values a
+    // byte-identical field would have.
+    const store = bootStore();
+    const staticTools = createToolFactory(config);
+    const read = staticTools.createTool("read")! as any;
+    const grep = staticTools.createTool("grep")! as any;
+
+    expect(read.readLimit).toBe(500);
+    expect(read.maxImageSize).toBe(10485760);
+    expect(grep.maxResults).toBe(100);
+    // A publish on an unrelated live store changes nothing for a scalar host.
+    publish(store, { readToolLimit: 10, grepMaxResults: 2, maxImageSize: 1 });
+    expect(read.readLimit).toBe(500);
+    expect(read.maxImageSize).toBe(10485760);
+    expect(grep.maxResults).toBe(100);
+    const props = read.toToolDef().function.parameters.properties as Record<string, { default?: number }>;
+    expect(props.limit!.default).toBe(500);
   });
 });

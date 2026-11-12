@@ -9,11 +9,12 @@ import {
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { AssistantRetryableError } from "@core/error.ts";
-import { ToolContext } from "@core/extensions/types.ts";
+import { ToolContext, type ConfigKnob, readKnob } from "@core/extensions/types.ts";
 import { detectFileStyle, stripFileStyle, applyFileStyle } from "@utils/file-utils.ts";
 
 interface EditToolOptions {
-  maxEditInputSize: number;
+  /** B6a (§4.1): scalar-or-reader; the extension entry reads the live coreTools block per execute. */
+  maxEditInputSize: ConfigKnob<number>;
 }
 
 interface EditArgs {
@@ -39,10 +40,14 @@ export class EditTool {
   static readonly TOOL_NAME = "edit";
   metadata: ToolMetadata = { sideEffects: true, difficulty: 2, tags: ["files"] };
 
-  private readonly maxEditInputSize: number;
+  #maxEditInputSize: ConfigKnob<number>;
 
   constructor(options: EditToolOptions) {
-    this.maxEditInputSize = options.maxEditInputSize;
+    this.#maxEditInputSize = options.maxEditInputSize;
+  }
+
+  get maxEditInputSize(): number {
+    return readKnob(this.#maxEditInputSize);
   }
 
   toToolDef() {

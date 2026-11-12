@@ -33,6 +33,12 @@ import { GrepTool } from "@extensions/core-tools/grep.ts";
  * create() mapping (bash-tool/index.ts, core-tools/index.ts) minus the config
  * layer: the scalars are required, because a silently-defaulted second copy
  * of every tool cap is exactly how a plane drifts from its config.
+ *
+ * EXEMPTION E1 (B6a, design §4.3): this host PASSES PLAIN SCALARS on purpose.
+ * The runner never boots the config, so the tools it builds answer from the
+ * broker's snapshot forever (pinned per pool entry -- a live config write
+ * changes NEW POOL ENTRIES ONLY, P3). The scalar half of the ConfigKnob union
+ * is exactly that pinned contract; nothing here reads a store.
  */
 const TOOL_FACTORIES: Record<string, (cfg: WireToolConfig) => Tool> = {
   bash: (cfg) => {

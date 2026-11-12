@@ -5,6 +5,9 @@ import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { Workspace } from '../../src/utils/workspace.ts';
 import { resultStr, tmpDir, cleanupDir, processAlive, waitForExit } from '../helpers.ts';
 import { HOOKS } from '../../src/core/hooks.ts';
+import { createConfigStore, type ConfigStore } from '@core/config/store.ts';
+import type { CoreConfigWithExtensions } from '@core/config/schema-loader.ts';
+import type { ResolvedConfig } from '@core/extensions/types.ts';
 
 describe('BashTool', () => {
   it('has correct tool name', () => {
@@ -496,5 +499,188 @@ describe('BashTool cancellation (abortSignal on the tool context)', () => {
     // Nothing left to abort: no throw, no hanging listener callables.
     expect(signal.aborted).toBe(false);
     controller.abort();
+  });
+});
+
+// ── B6a: the live bashTool block moves the NEXT execute/spawn (design §4.1, §5.2 row) ──
+//
+// A REAL createConfigStore() drives the fake core's accessors (the createCore
+// shape, §1.2): the tool is registered ONCE, publishes go through
+// adopt+swap+commit, and each migrated knob answers from the CURRENT
+// generation on the next execute. envScrubbing is read at SPAWN TIME through
+// core.resolved -- the owner override (2026-11-11) against the contract row's
+// "cli-layer-only" claim: the resolved chain is cli(--disable-env-scrubbing,
+// falsy) > config(envScrubbing) > default(true), and reading the resolved bag
+// live respects that precedence (the layer resolution itself is pinned in
+// tests/core/config-resolution.test.ts, unmodified). bashTool.env stays the
+// boot snapshot (§5.4 exception, pinned below). Static-scalar hosts -- the
+// pooled runner's wire shape (src/workers/tool-exec.ts) -- answer byte-
+// identically forever and never see a publish.
+
+describe('B6a live bashTool knobs (store-backed create)', () => {
+  // Unique env names: HOTDOG_* is scrubbed by the substring heuristic, so the
+  // scrub posture is observable; B6A_PLAIN_* survives the heuristic until an
+  // envScrub.extra entry names it exactly.
+  const SECRET_ENV = 'HOTDOG_B6A_SCUB';
+  const EXTRA_ENV = 'B6A_PLAIN_VAR';
+
+  function bootStore(
+    bashTool: Record<string, unknown>,
+    resolved: Record<string, unknown> = {},
+  ): ConfigStore {
+    const store = createConfigStore();
+    store.adopt(
+      { bashTool } as CoreConfigWithExtensions,
+      resolved as ResolvedConfig,
+    );
+    return store;
+  }
+
+  function publish(
+    store: ConfigStore,
+    bashTool: Record<string, unknown>,
+    resolved: Record<string, unknown> = {},
+  ): void {
+    store.swap({
+      config: { bashTool } as CoreConfigWithExtensions,
+      resolved: resolved as ResolvedConfig,
+    })();
+  }
+
+  function register(store: ConfigStore): any {
+    const liveCore = {
+      get config() {
+        return store.current().config;
+      },
+      get resolved() {
+        return store.current().resolved;
+      },
+      configStore: store,
+    };
+    let tool: any = null;
+    const registry = { register: (_name: string, t: unknown) => { tool = t; }, getAll: () => [] };
+    create(liveCore as any).hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
+    return tool;
+  }
+
+  it('timeoutMs: the NEXT execute uses the published default; prior use answered old', async () => {
+    const store = bootStore({ bashTimeoutMs: 30000 });
+    const tool = register(store);
+    expect(tool.timeoutMs).toBe(30000);
+
+    // Prior use answers old: 30s easily outlives the sleep.
+    const before = await tool.execute(JSON.stringify({ command: 'sleep 0.3' }), new ToolContext({}));
+    expect(resultStr(before)).toBe('');
+
+    publish(store, { bashTimeoutMs: 150 });
+    expect(tool.timeoutMs).toBe(150);
+    await expect(
+      tool.execute(JSON.stringify({ command: 'sleep 5' }), new ToolContext({})),
+    ).rejects.toThrow(/timed out after 150ms/);
+  });
+
+  it('maxTimeoutMs: a publish clamps model timeouts and re-advertises the cap', async () => {
+    const store = bootStore({ bashTimeoutMs: 1000 });
+    const tool = register(store);
+    expect(tool.maxTimeoutMs).toBeUndefined();
+    expect((tool.toToolDef().function.parameters as any).properties.timeoutMs.description).not.toContain('Capped');
+
+    publish(store, { bashTimeoutMs: 1000, maxTimeoutMs: 150 });
+    expect(tool.maxTimeoutMs).toBe(150);
+    expect((tool.toToolDef().function.parameters as any).properties.timeoutMs.description).toContain('Capped at 150ms');
+    await expect(
+      tool.execute(JSON.stringify({ command: 'sleep 5', timeoutMs: 999999 }), new ToolContext({})),
+    ).rejects.toThrow(/timed out after 150ms/);
+  });
+
+  it('envScrubbing: the SPAWN-TIME resolved read flips the scrub posture both ways', async () => {
+    process.env[SECRET_ENV] = 'leaky';
+    try {
+      const store = bootStore({ bashTimeoutMs: 5000 }, {});
+      const tool = register(store);
+
+      // Scrubbing on (default posture): the HOTDOG_* name never reaches the shell.
+      const scrubbed = await tool.execute(JSON.stringify({ command: `echo "[$${SECRET_ENV}]"` }), new ToolContext({}));
+      expect(resultStr(scrubbed).trim()).toBe('[]');
+      expect(tool.envScrubbing).toBe(true);
+
+      // Resolved flips to false -> the very NEXT spawn carries the full env
+      // (§5.2 row, owner override: resolved = cli > config > default; the
+      // inline plane follows the store per spawn).
+      publish(store, { bashTimeoutMs: 5000 }, { envScrubbing: false });
+      expect(tool.envScrubbing).toBe(false);
+      const leaked = await tool.execute(JSON.stringify({ command: `echo "[$${SECRET_ENV}]"` }), new ToolContext({}));
+      expect(resultStr(leaked).trim()).toBe('[leaky]');
+
+      // And back on: a security posture never latches loose through a stale capture.
+      publish(store, { bashTimeoutMs: 5000 }, { envScrubbing: true });
+      const rescrubbed = await tool.execute(JSON.stringify({ command: `echo "[$${SECRET_ENV}]"` }), new ToolContext({}));
+      expect(resultStr(rescrubbed).trim()).toBe('[]');
+    } finally {
+      delete process.env[SECRET_ENV];
+    }
+  });
+
+  it('envScrubExtra: a published envScrub.extra scrubs on the NEXT exec', async () => {
+    process.env[EXTRA_ENV] = 'plainvalue';
+    try {
+      // Root key envScrub.extra (see envScrubExtraKeys in utils/env.ts).
+      const store = createConfigStore();
+      store.adopt({ bashTool: { bashTimeoutMs: 5000 } } as CoreConfigWithExtensions);
+      const tool = register(store);
+
+      // Not in the denylist yet, and the substring heuristic misses it: visible.
+      const before = await tool.execute(JSON.stringify({ command: `echo "[$${EXTRA_ENV}]"` }), new ToolContext({}));
+      expect(resultStr(before).trim()).toBe('[plainvalue]');
+
+      store.swap({
+        config: {
+          bashTool: { bashTimeoutMs: 5000 },
+          envScrub: { extra: [EXTRA_ENV.toLowerCase()] },
+        } as CoreConfigWithExtensions,
+        resolved: {} as ResolvedConfig,
+      })();
+
+      // Case-insensitive exact entry: the next spawn drops it.
+      const after = await tool.execute(JSON.stringify({ command: `echo "[$${EXTRA_ENV}]"` }), new ToolContext({}));
+      expect(resultStr(after).trim()).toBe('[]');
+    } finally {
+      delete process.env[EXTRA_ENV];
+    }
+  });
+
+  it('bashTool.env stays the boot snapshot (§5.4 restart-bound exception)', async () => {
+    const store = bootStore({ bashTimeoutMs: 5000, env: { B6A_ENVVAR: 'boot' } });
+    const tool = register(store);
+
+    const before = await tool.execute(JSON.stringify({ command: 'echo "[$B6A_ENVVAR]"' }), new ToolContext({}));
+    expect(resultStr(before).trim()).toBe('[boot]');
+
+    // A write lands in the bag... but the map is a code-execution channel:
+    // the registered tool keeps its boot snapshot until restart (§5.4).
+    publish(store, { bashTimeoutMs: 5000, env: { B6A_ENVVAR: 'written' } });
+    const after = await tool.execute(JSON.stringify({ command: 'echo "[$B6A_ENVVAR]"' }), new ToolContext({}));
+    expect(resultStr(after).trim()).toBe('[boot]');
+    expect(tool.env).toEqual({ B6A_ENVVAR: 'boot' });
+  });
+
+  it('static-scalar hosts (the pooled runner shape) stay pinned forever', () => {
+    // src/workers/tool-exec.ts builds exactly this shape from wire scalars.
+    const tool = new BashTool({
+      timeoutMs: 5000,
+      maxOutputLines: 100,
+      maxTimeoutMs: 300000,
+      envScrubExtra: ['CORP_SSO_TOKEN'],
+      envScrubbing: false,
+      env: { PINNED: 'yes' },
+    });
+    expect(tool.timeoutMs).toBe(5000);
+    expect(tool.maxTimeoutMs).toBe(300000);
+    expect(tool.envScrubExtra).toEqual(['CORP_SSO_TOKEN']);
+    expect(tool.envScrubbing).toBe(false);
+    expect(tool.env).toEqual({ PINNED: 'yes' });
+    // The advertised default is the pinned scalar, byte-identically.
+    const props = tool.toToolDef().function.parameters.properties as Record<string, { default?: number }>;
+    expect(props.timeoutMs!.default).toBe(5000);
   });
 });

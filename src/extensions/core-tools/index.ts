@@ -4,6 +4,7 @@ import {
   ExtensionInstance,
   ToolsRegisterPayload,
   getExtensionConfig,
+  type ConfigKnob,
 } from "@core/extensions/types.ts";
 import { Tool } from "@core/extensions/tool-registry.ts";
 import { INTERNAL_MAX_OUTPUT_LINES } from "@core/extensions/tool-utils.ts";
@@ -46,12 +47,21 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
 
 export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
 
+/**
+ * The knobs the core tools are built with (B6a, design §4.1): scalar-or-reader.
+ * Static scalars stay pinned forever (plain-scalar hosts: test doubles, the
+ * mirrored websocket registration pins); the extension entry below passes
+ * readers over the live store, so every execute reads the CURRENT generation's
+ * coreTools block. Nothing reads a block captured at create()/registration
+ * scope. The `enabled` loader gate is untouched (X/P1: false at boot still
+ * means this extension does not exist).
+ */
 interface CoreToolConfig {
-  readToolLimit: number;
-  maxImageSize: number;
-  maxEditInputSize: number;
-  grepMaxResults: number;
-  findMaxResults: number;
+  readToolLimit: ConfigKnob<number>;
+  maxImageSize: ConfigKnob<number>;
+  maxEditInputSize: ConfigKnob<number>;
+  grepMaxResults: ConfigKnob<number>;
+  findMaxResults: ConfigKnob<number>;
 }
 
 const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
@@ -161,14 +171,33 @@ export function createToolFactory(config: CoreToolConfig): ToolFactory {
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
 
+// The raw coreTools block shape (scalar fields on the store's bag).
+interface RawCoreToolConfig {
+  readToolLimit: number;
+  maxImageSize: number;
+  maxEditInputSize: number;
+  grepMaxResults: number;
+  findMaxResults: number;
+}
+
 export function create(core: CoreContext): ExtensionInstance {
-  // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig<CoreToolConfig>(core, "coreTools");
+  // Config defaults come from extension.json configSchema. B6a (§4.1): the
+  // knobs reach the tools as READERS over the live block -- nothing from the
+  // block is captured at create() scope, so a store publish changes the NEXT
+  // execute of an already-registered tool (design §4.3 row: read/grep/find/
+  // edit read the coreTools block per execute).
+  const block = () => getExtensionConfig<RawCoreToolConfig>(core, "coreTools");
 
   return {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: (registry: ToolsRegisterPayload) => {
-        const factory = createToolFactory(config);
+        const factory = createToolFactory({
+          readToolLimit: () => block().readToolLimit,
+          maxImageSize: () => block().maxImageSize,
+          maxEditInputSize: () => block().maxEditInputSize,
+          grepMaxResults: () => block().grepMaxResults,
+          findMaxResults: () => block().findMaxResults,
+        });
 
         for (const descriptor of TOOL_DESCRIPTORS) {
           const tool = factory.createTool(descriptor.name);

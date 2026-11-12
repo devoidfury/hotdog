@@ -13,7 +13,7 @@ import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "@utils/file-utils.ts";
 import type { Workspace } from "@utils/workspace.ts";
 import { AssistantRetryableError } from "@core/error.ts";
-import { ToolContext } from "@core/extensions/types.ts";
+import { ToolContext, type ConfigKnob, readKnob } from "@core/extensions/types.ts";
 
 /**
  * Files at or below this size are read whole; larger files go through the streaming reader
@@ -30,8 +30,11 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 };
 
 interface ReadToolOptions {
-  readLimit: number;
-  maxImageSize: number;
+  // B6a (§4.1): scalar-or-reader knobs. Static scalars (the pooled runner,
+  // test doubles) stay pinned; the extension entry passes readers so every
+  // execute reads the live coreTools block.
+  readLimit: ConfigKnob<number>;
+  maxImageSize: ConfigKnob<number>;
 }
 
 
@@ -45,12 +48,22 @@ export class ReadTool {
   static readonly TOOL_NAME = "read";
   metadata: ToolMetadata = { sideEffects: false, difficulty: 1, execution: "worker", tags: ["files"] };
 
-  private readonly readLimit: number;
-  private readonly maxImageSize: number;
+  #readLimit: ConfigKnob<number>;
+  #maxImageSize: ConfigKnob<number>;
 
   constructor(options: ReadToolOptions) {
-    this.readLimit = options.readLimit;
-    this.maxImageSize = options.maxImageSize;
+    this.#readLimit = options.readLimit;
+    this.#maxImageSize = options.maxImageSize;
+  }
+
+  // Resolved per use (each toToolDef/execute answers from the current store
+  // generation; a scalar knob answers as pinned, byte-identically).
+  get readLimit(): number {
+    return readKnob(this.#readLimit);
+  }
+
+  get maxImageSize(): number {
+    return readKnob(this.#maxImageSize);
   }
 
   toToolDef() {

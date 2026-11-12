@@ -267,8 +267,14 @@ export function FileView(p: FileViewProps) {
       <div className="file-view-header">
         <span className="file-view-name" title={p.path}>{name}</span>
         <span className="file-view-status" role="status">{statusLine}</span>
-        <button type="button" className="file-view-btn" title="Re-read the file from the top" onClick={() => p.onReload(p.path)}>
-          Reload
+        <button
+          type="button"
+          className="file-reload-btn"
+          title="Re-read the file from the top"
+          aria-label="Reload"
+          onClick={() => p.onReload(p.path)}
+        >
+          <span className="file-reload-glyph" aria-hidden="true"></span>
         </button>
       </div>
       {loading ? <div className="file-view-note">Reading file...</div> : null}

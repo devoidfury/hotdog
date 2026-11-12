@@ -14,6 +14,7 @@ import {
 } from "@extensions/subagents/subagents.ts";
 import { ToolContext } from "@core/extensions/tool-context.ts";
 import { TaskManager } from "@core/session/task-manager.ts";
+import { toolContentText } from "@utils/tool-content.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -410,6 +411,11 @@ describe("WaitTool", () => {
     const result = await tool.execute(JSON.stringify({}));
     expect(result.output).toContain("Waiting for user input");
     expect(result.output).not.toContain("Note:");
+    // Zero meta (owner ruling 2026-11-11): the meta entry only duplicated
+    // the output; the flattening used to tack META: {"message":...} onto
+    // every display surface for it.
+    expect(result.metadata).toBeNull();
+    expect(result.toApiContent("wait").meta).toEqual([]);
   });
 
   it("returns wait message with note when message provided", async () => {
@@ -419,6 +425,14 @@ describe("WaitTool", () => {
     );
     expect(result.output).toContain("Waiting for user input");
     expect(result.output).toContain("Waiting for build");
+    // The Note rides the output text alone: empty meta, and the display
+    // flattening carries the note WITHOUT any META dump.
+    expect(result.metadata).toBeNull();
+    const part = result.toApiContent("wait");
+    expect(part.meta).toEqual([]);
+    expect(toolContentText([part])).toBe(
+      "Manager has nothing more to do. Waiting for user input. Note: Waiting for build",
+    );
   });
 
   it("toToolDef returns correct definition", () => {

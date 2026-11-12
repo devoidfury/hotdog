@@ -109,6 +109,23 @@ export interface SettingsQueuedSave {
   shown: string;
 }
 
+/** A list op waiting behind the in-flight one (one entry per path; a newer
+ *  request for a queued path REPLACES the entry). `name` is the providers-
+ *  append shape; `value` the typed scalar a primitive-array append ships;
+ *  `index` the optional echo the provider remove still rides. */
+export interface QueuedListOp {
+  op: ConfigListOp;
+  keyPath: string;
+  name?: string;
+  index?: number;
+  value?: EditScalar;
+}
+
+/** A list op the pure state machine decided to put on the wire. */
+export interface ListOpSend extends QueuedListOp {
+  reqId: number;
+}
+
 export interface SettingsPanelState {
   open: boolean;
   /** A snapshot request is in flight. */
@@ -140,23 +157,29 @@ export interface SettingsPanelState {
   /** The selected rail category (title), or null = all. While searching it
    *  narrows the matches (a selection with no matches is neutralized, kept). */
   category: string | null;
-  // ── Provider-LIST editing (owner 2026-11-11: one card per provider + add/remove) ──
-  // A list op edits the providers ARRAY itself (append/remove) through the
-  // additive editConfigList pair. It shares the one-op-in-flight doctrine: a
-  // second op on the path while one is in flight queues last-write-wins.
-  /** The inline "+ Add provider" name field is open. */
-  addingProvider: boolean;
+  // ── LIST editing (arrays of primitives + providers, owner 2026-11-11) ──
+  // A list op edits an array ITSELF (append/remove) through the additive
+  // editConfigList pair. It shares the one-op-in-flight doctrine: a second op
+  // while one is in flight queues last-write-wins on its path (one entry per
+  // path, newest wins). Providers were the first consumer; the machinery is
+  // generic (any arrayChrome field), providers just keep their name/card shape.
+  /** The inline add field is open ON THIS list (the chrome row's keyPath;
+   *  "providers" for the provider add), or null. */
+  addingList: string | null;
   /** The providers[i] card whose two-step Remove confirm is armed (its key),
-   *  or null. Escape / clicking away cancels it with ZERO wire traffic. */
+   *  or null. Escape / clicking away cancels it with ZERO wire traffic.
+   *  (Whole-provider deletion keeps its confirm; single-click x is for the
+   *  ELEMENTS of a list block only.) */
   confirmRemoveKey: string | null;
-  /** The last list-op rejection, rendered VERBATIM under the add affordance
-   *  (a duplicate name, a referenced provider, a write failure) OR the local
-   *  honest "name is empty" refusal (no wire traffic went out for that one). */
-  providerListError: string | null;
+  /** The last list-op rejection, rendered VERBATIM under the owning block's
+   *  add affordance (`key` is the chrome keyPath: a duplicate name, a mixed-
+   *  type append, an out-of-range index) OR the local honest empty-input
+   *  refusal (no wire traffic went out for that one). */
+  listError: { key: string; message: string } | null;
   /** A list op in flight, correlated by its own id sequence (listReqId). */
   pendingList: { reqId: number; op: ConfigListOp; keyPath: string; name?: string } | null;
   /** List ops waiting behind the in-flight one (last-write-wins per path). */
-  queuedList: Array<{ op: ConfigListOp; keyPath: string; name?: string; index?: number }>;
+  queuedList: Array<QueuedListOp>;
   /** Monotonic list-op request sequence (separate from reqId AND saveReqId). */
   listReqId: number;
   /** After a successful append, the new provider's name: the app focuses that
@@ -178,9 +201,9 @@ export const initialSettingsPanelState: SettingsPanelState = {
   editedKeys: [],
   query: "",
   category: null,
-  addingProvider: false,
+  addingList: null,
   confirmRemoveKey: null,
-  providerListError: null,
+  listError: null,
   pendingList: null,
   queuedList: [],
   listReqId: 0,
@@ -409,29 +432,76 @@ export function applySetConfigReply(
   return { ...s, pendingSave: null, editError: { key, message: result.error ?? "save failed" } };
 }
 
-// ── Provider-LIST ops (add / remove a whole provider, owner 2026-11-11) ──────
-// These edit the providers ARRAY through the additive editConfigList pair; the
-// server writes the file with the SAME verified transaction setConfigKey uses.
-// The client doctrine mirrors the value editor: ONE op in flight, a second on
-// the same path queues last-write-wins, stale replies drop by id. Success
-// refreshes the snapshot (the file is the source of truth); the running server
-// keeps its startup providers until restart, so needsRestart rides the reply.
+// ── LIST ops (append / remove on a list block; providers keep their shape) ──
+// These edit an array through the additive editConfigList pair; the server
+// writes the file with the SAME verified transaction setConfigKey uses. The
+// client doctrine mirrors the value editor: ONE op in flight, a second op
+// queues last-write-wins, stale replies drop by id. Success refreshes the
+// snapshot (the file is the source of truth -- rows are NEVER patched
+// locally); the running server keeps its startup values until restart, so
+// needsRestart rides the reply.
 
-/** Open the inline "+ Add provider" name field (a prior list refusal clears). */
-export function startProviderAdd(s: SettingsPanelState): SettingsPanelState {
-  return { ...s, addingProvider: true, confirmRemoveKey: null, providerListError: null };
+/** The chrome keyPath that OWNS a list-op keyPath: the array itself for an
+ *  append, the array the element lives in for a remove. Errors and the
+ *  re-opened add field land on THAT block. */
+export function listOwnerKey(keyPath: string): string {
+  return keyPath.replace(/\[\d+\]$/, "");
+}
+
+/** Open a list block's inline add field (a prior list refusal clears). */
+export function startListAdd(s: SettingsPanelState, keyPath: string): SettingsPanelState {
+  return { ...s, addingList: keyPath, confirmRemoveKey: null, listError: null };
 }
 
 /** Close the add field (Cancel / Escape / click-away). Zero wire traffic. */
-export function cancelProviderAdd(s: SettingsPanelState): SettingsPanelState {
-  if (!s.addingProvider && s.providerListError === null) return s;
-  return { ...s, addingProvider: false, providerListError: null };
+export function cancelListAdd(s: SettingsPanelState): SettingsPanelState {
+  if (s.addingList === null && s.listError === null) return s;
+  return { ...s, addingList: null, listError: null };
 }
 
-/** Arm the two-step Remove on a card (Remove clicked, awaiting Confirm). Zero
- *  wire traffic -- the op goes out only on confirm. */
+/** A local (never-sent) add refusal: the field stays OPEN for a fix, the
+ *  honest hint renders under the block's affordance. */
+export function rejectListAdd(s: SettingsPanelState, key: string, message: string): SettingsPanelState {
+  return { ...s, listError: { key, message } };
+}
+
+/** Client-side parse of a list-add input against the list's element stamp
+ *  (the FIRST shipped element row's `edit`, when one exists). Types:
+ *  integer/number -> a real number (unparseable refused locally, never sent
+ *  as a string); boolean -> a real JSON boolean; string (incl. an enum pick)
+ *  -> a string; writeOnly secret -> the typed string (the list-op frame has
+ *  no valueText channel and the reply echoes no bytes). No stamp at all (an
+ *  empty or absent list ships no element rows) -> plain string; the server's
+ *  kind gate stays honest if the guess is wrong. Empty/whitespace always
+ *  refuses locally -- an append of nothing is never worth a frame. */
+export function parseListAddValue(
+  edit: ConfigKeyEditWire | undefined,
+  raw: string,
+): { ok: true; value: EditScalar } | { ok: false; error: string } {
+  if (edit === undefined) {
+    if (raw.trim() === "") return { ok: false, error: "a value is required" };
+    return { ok: true, value: raw };
+  }
+  if (edit.type === "json") return { ok: false, error: "a list element is not a container" };
+  if (edit.writeOnly === true) {
+    // An all-whitespace new secret is the "I did not type anything" mistake
+    // (same belt the scalar REPLACE box keeps, widened to whitespace for the
+    // ADD path -- an append of nothing is never worth a frame).
+    if (raw.trim() === "") return { ok: false, error: "no new value entered" };
+    return { ok: true, value: raw };
+  }
+  if (edit.type === "string" && raw.trim() === "") return { ok: false, error: "a value is required" };
+  const parsed = parseEditValue(edit, raw);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  if ("valueText" in parsed.payload) return { ok: false, error: "a list element is not a container" }; // belt: json only (refused above)
+  return { ok: true, value: parsed.payload.value };
+}
+
+/** Arm the two-step Remove on a provider card (Remove clicked, awaiting
+ *  Confirm). Zero wire traffic -- the op goes out only on confirm. Whole-
+ *  provider deletion keeps its confirm; single-click x is for list ELEMENTS. */
 export function armProviderRemove(s: SettingsPanelState, cardKey: string): SettingsPanelState {
-  return { ...s, confirmRemoveKey: cardKey, addingProvider: false, providerListError: null };
+  return { ...s, confirmRemoveKey: cardKey, addingList: null, listError: null };
 }
 
 /** Dismiss the armed Remove (Cancel / Escape / click-away). Zero wire traffic. */
@@ -439,36 +509,45 @@ export function cancelProviderRemove(s: SettingsPanelState): SettingsPanelState 
   return { ...s, confirmRemoveKey: null };
 }
 
-/** Request an append or a remove. An APPEND name is validated HERE, client-
- *  side: an empty or whitespace-only name is refused locally with honest text
- *  and ZERO wire traffic (the field stays open for a fix). Otherwise the op
- *  goes out if nothing is in flight, else queues last-write-wins on its path
- *  (`keyPath`: "providers" for append, "providers[i]" for remove). */
-export function requestProviderListOp(
+/** Request an append or a remove. An APPEND that carries a NAME (providers)
+ *  is validated HERE: an empty/whitespace name refuses locally with honest
+ *  text and ZERO wire traffic (the field stays open for a fix). A typed-
+ *  value append arrives pre-parsed (parseListAddValue rejected the garbage
+ *  locally). Otherwise the op goes out if nothing is in flight, else queues
+ *  last-write-wins on its path (`keyPath`: the array for append,
+ *  "<array>[i]" for remove -- the remove index rides IN the keyPath; the
+ *  provider shape still passes its optional echo). */
+export function requestListOp(
   s: SettingsPanelState,
   op: ConfigListOp,
   keyPath: string,
-  opts: { name?: string; index?: number } = {},
-): { state: SettingsPanelState; send: { reqId: number; op: ConfigListOp; keyPath: string; name?: string; index?: number } | null } {
+  opts: { name?: string; index?: number; value?: EditScalar } = {},
+): { state: SettingsPanelState; send: ListOpSend | null } {
   if (op === "append") {
-    const name = (opts.name ?? "").trim();
-    if (name === "") {
-      return { state: { ...s, providerListError: "Provider names can't be empty -- type a name first." }, send: null };
+    if (opts.name !== undefined) {
+      const name = opts.name.trim();
+      if (name === "") {
+        return {
+          state: { ...s, listError: { key: listOwnerKey(keyPath), message: "Provider names can't be empty -- type a name first." } },
+          send: null,
+        };
+      }
+      return enqueueListOp(s, { op, keyPath, name });
     }
-    return enqueueListOp(s, { op, keyPath, name });
+    return enqueueListOp(s, { op, keyPath, ...(opts.value !== undefined ? { value: opts.value } : {}) });
   }
-  return enqueueListOp(s, { op, keyPath, index: opts.index });
+  return enqueueListOp(s, { op, keyPath, ...(opts.index !== undefined ? { index: opts.index } : {}) });
 }
 
 /** One-op-in-flight for the list path: free -> a fresh listReqId goes out;
  *  busy -> the entry REPLACES any queued entry for the same keyPath. */
 function enqueueListOp(
   s: SettingsPanelState,
-  entry: { op: ConfigListOp; keyPath: string; name?: string; index?: number },
-): { state: SettingsPanelState; send: { reqId: number; op: ConfigListOp; keyPath: string; name?: string; index?: number } | null } {
+  entry: QueuedListOp,
+): { state: SettingsPanelState; send: ListOpSend | null } {
   if (s.pendingList !== null) {
     const rest = s.queuedList.filter((q) => q.keyPath !== entry.keyPath);
-    return { state: { ...s, queuedList: [...rest, entry], addingProvider: false, confirmRemoveKey: null }, send: null };
+    return { state: { ...s, queuedList: [...rest, entry], addingList: null, confirmRemoveKey: null }, send: null };
   }
   const reqId = s.listReqId + 1;
   return {
@@ -476,22 +555,34 @@ function enqueueListOp(
       ...s,
       listReqId: reqId,
       pendingList: { reqId, op: entry.op, keyPath: entry.keyPath, ...(entry.name !== undefined ? { name: entry.name } : {}) },
-      addingProvider: false,
+      addingList: null,
       confirmRemoveKey: null,
-      providerListError: null,
+      listError: null,
     },
     send: { reqId, ...entry },
   };
 }
 
+/** The defined-fields-only send shape (a provider frame never carries a
+ *  `value` key; a primitive frame never carries `name`). */
+function listSendShape(entry: QueuedListOp): Omit<ListOpSend, "reqId"> {
+  return {
+    op: entry.op,
+    keyPath: entry.keyPath,
+    ...(entry.name !== undefined ? { name: entry.name } : {}),
+    ...(entry.index !== undefined ? { index: entry.index } : {}),
+    ...(entry.value !== undefined ? { value: entry.value } : {}),
+  };
+}
+
 /** Drain the next queued list op once the in-flight one settles (the app sends
  *  it and, on success, refreshes again). */
-export function flushProviderList(s: SettingsPanelState): {
+export function flushListOp(s: SettingsPanelState): {
   state: SettingsPanelState;
-  send: { reqId: number; op: ConfigListOp; keyPath: string; name?: string; index?: number } | null;
+  send: ListOpSend | null;
 } {
   if (s.pendingList !== null || s.queuedList.length === 0) return { state: s, send: null };
-  const [next, ...rest] = s.queuedList as [SettingsPanelState["queuedList"][number], ...SettingsPanelState["queuedList"]];
+  const [next, ...rest] = s.queuedList as [QueuedListOp, ...QueuedListOp[]];
   const reqId = s.listReqId + 1;
   return {
     state: {
@@ -500,16 +591,17 @@ export function flushProviderList(s: SettingsPanelState): {
       pendingList: { reqId, op: next.op, keyPath: next.keyPath, ...(next.name !== undefined ? { name: next.name } : {}) },
       queuedList: rest,
     },
-    send: { reqId, op: next.op, keyPath: next.keyPath, ...(next.name !== undefined ? { name: next.name } : {}), ...(next.index !== undefined ? { index: next.index } : {}) },
+    send: { reqId, ...listSendShape(next) },
   };
 }
 
-/** editConfigList reply: stale ids drop here. ok -> clear the in-flight op, the
- *  add field and the armed confirm, fold needsRestart from the REPLY FIELD, and
- *  (for an append) mark the new provider for focus after the refresh. refusal
- *  -> the server text verbatim under the add affordance (the card / confirm is
- *  cleared so the row is re-editable; the name field re-opens so the user can
- *  fix a duplicate). Then the app drains any queued op and refreshes on ok. */
+/** editConfigList reply: stale ids drop here. ok -> clear the in-flight op,
+ *  the add field and the armed confirm, fold needsRestart from the REPLY
+ *  FIELD, and (for a provider append) mark the new provider for focus after
+ *  the refresh. refusal -> the server text verbatim under the OWNING block's
+ *  affordance (the card / confirm is cleared so the row is re-editable; the
+ *  add field re-opens so the user can fix a duplicate name or a mixed-
+ *  type value). Then the app drains any queued op and refreshes on ok. */
 export function applyListOpReply(
   s: SettingsPanelState,
   requestId: number | undefined,
@@ -521,20 +613,22 @@ export function applyListOpReply(
     return {
       ...s,
       pendingList: null,
-      providerListError: null,
-      addingProvider: false,
+      listError: null,
+      addingList: null,
       confirmRemoveKey: null,
       needsRestart: s.needsRestart || result.needsRestart === true,
       focusProviderName: op === "append" ? s.pendingList.name ?? null : s.focusProviderName,
     };
   }
+  const owner = listOwnerKey(s.pendingList.keyPath);
   return {
     ...s,
     pendingList: null,
-    providerListError: result.error ?? "provider change failed",
-    // Re-open the add field on a REFUSED append so the typed name survives to fix
-    // a duplicate; a refused remove just disarms (the card stays as it is).
-    addingProvider: op === "append" ? true : s.addingProvider,
+    listError: { key: owner, message: result.error ?? "list change failed" },
+    // Re-open the add field on a REFUSED append so the typed input survives
+    // to fix a duplicate/off-kind value; a refused remove just closes
+    // (the block stays as it is -- its rows are snapshot truth).
+    addingList: op === "append" ? owner : s.addingList,
     confirmRemoveKey: null,
   };
 }
@@ -845,6 +939,22 @@ function differsFromDefault(row: ConfigKeyEntryWire): boolean {
 
 // ── Row rendering (immediate-save controls) ─────────────────────────────────
 
+/** The list-block editing context (shared by every chrome'd list and the
+ *  provider section; the app folds it straight from SettingsPanelState). */
+interface ListCtx {
+  /** A list op is in flight -> every add/remove affordance is busy (the
+   *  queue is the wire-serializing belt; disabled is the visible half). */
+  busy: boolean;
+  /** The chrome keyPath whose inline add field is open (addingList). */
+  adding: string | null;
+  /** The last list-op refusal, keyed to the block that owns it. */
+  error: { key: string; message: string } | null;
+  onAddStart: (keyPath: string) => void;
+  onAddCommit: (keyPath: string, raw: string, edit?: ConfigKeyEditWire) => void;
+  onAddCancel: () => void;
+  onRemove: (elementKey: string) => void;
+}
+
 /** Everything a row needs from the panel's editor context (props are threaded
  *  one level through the row to keep rows render-pure). */
 interface RowUI {
@@ -868,6 +978,8 @@ interface RowUI {
   /** Raw control text + the server-stamped edit descriptor (the app parses
    *  with parseEditValue and sends/queues on parse success). */
   onSave: (keyPath: string, raw: string, edit: ConfigKeyEditWire) => void;
+  /** The list-block editing context (chrome'd arrays + provider cards). */
+  lists: ListCtx;
 }
 
 /** Seed the scalar control from the layer the edit targets: the file slot
@@ -1210,7 +1322,23 @@ function SettingsControl({ row, ui }: { row: ConfigKeyEntryWire; ui: RowUI }) {
   );
 }
 
-function SettingsRow({ row, ui, catLabel = null }: { row: ConfigKeyEntryWire; ui: RowUI; catLabel?: string | null }) {
+function SettingsRow({
+  row,
+  ui,
+  catLabel = null,
+  onRemove = null,
+  removeBusy = false,
+}: {
+  row: ConfigKeyEntryWire;
+  ui: RowUI;
+  catLabel?: string | null;
+  /** Element rows of a list block carry a trailing x: ONE click, no confirm,
+   *  the remove frame for THAT index goes out immediately (duplicates address
+   *  by occurrence -- the keyPath is the row's own [i]). Whole-provider
+   *  deletion is NOT this button; it keeps its two-step card Remove. */
+  onRemove?: (() => void) | null;
+  removeBusy?: boolean;
+}) {
   // A writeOnly stamp is the ONE secret row that edits (the REPLACE box shows
   // no value); every other secret row stays inert. canEdit is the server's
   // stamp's wire twin -- the client-side checks are belts so a hostile or
@@ -1314,6 +1442,18 @@ function SettingsRow({ row, ui, catLabel = null }: { row: ConfigKeyEntryWire; ui
         ) : (
           <SettingsControl row={row} ui={ui} />
         )}
+        {onRemove !== null ? (
+          <button
+            type="button"
+            className="settings-btn settings-list-remove"
+            title={`Remove ${row.key} (this element only)`}
+            aria-label={`Remove ${row.key}`}
+            disabled={removeBusy}
+            onClick={onRemove}
+          >
+            x
+          </button>
+        ) : null}
       </div>
       {error !== null ? (
         // Verbatim server text (or the local parse hint) -- no rewording.
@@ -1322,6 +1462,201 @@ function SettingsRow({ row, ui, catLabel = null }: { row: ConfigKeyEntryWire; ui
         </div>
       ) : null}
     </div>
+  );
+}
+
+// ── List blocks (owner 2026-11-11: arrayChrome rows render as ONE list) ─────
+// The chrome row IS the array field's header: label + description + its
+// attested layer/source badges + an element-count summary derived from the
+// SHIPPED element rows -- NEVER a flattened dump of the array value (the
+// exact posture the owner rejected for providers, generalized). Below it:
+// one element row per shipped index, each rendered through the UNTOUCHED
+// SettingsControl machinery (stepper, enum dropdown, writeOnly REPLACE, seed
+// formatter -- seeds never re-route through displayConfigValue) with a
+// trailing one-click x. The ONE "+ add" affordance lives ON THE HEADER: the
+// server always ships the chrome row ahead of its elements, so a truncated
+// snapshot (row cap) can never strand the add from its array. An empty
+// chrome array (or a schema-declared list the file omits) renders header +
+// add with ZERO element rows -- no phantom inputs.
+
+const ELEMENT_CHILD = /^(.*)\[(\d+)\]$/;
+
+/** One render block: a chrome'd list (chrome row + its DIRECT element rows,
+ *  shipped order kept) or a plain row. */
+export type ListBlockPart =
+  | { kind: "list"; chrome: ConfigKeyEntryWire; elements: ConfigKeyEntryWire[] }
+  | { kind: "row"; row: ConfigKeyEntryWire };
+
+/** Partition a row list into chrome'd list blocks and plain rows. An element
+ *  row (key === chromeKey + "[i]" -- DIRECT children only, one trailing
+ *  index) belongs to its chrome row wherever it ships; every other row stays
+ *  flat. A chrome row whose elements are absent is an empty/omitted list
+ *  (header + add only). Nothing is dropped: every shipped row lands in
+ *  exactly one part. */
+export function splitListBlocks(rows: ConfigKeyEntryWire[]): ListBlockPart[] {
+  const elementsBy = new Map<string, ConfigKeyEntryWire[]>();
+  for (const r of rows) if (r.arrayChrome === true) elementsBy.set(r.key, []);
+  const claimed = new Set<string>();
+  for (const r of rows) {
+    if (r.arrayChrome === true) continue;
+    const m = ELEMENT_CHILD.exec(r.key);
+    const els = m !== null ? elementsBy.get(m[1]!) : undefined;
+    if (els !== undefined) {
+      els.push(r);
+      claimed.add(r.key);
+    }
+  }
+  const parts: ListBlockPart[] = [];
+  for (const r of rows) {
+    if (claimed.has(r.key)) continue;
+    const els = elementsBy.get(r.key);
+    parts.push(els !== undefined ? { kind: "list", chrome: r, elements: els } : { kind: "row", row: r });
+  }
+  return parts;
+}
+
+/** Is `key` a DIRECT element row of some chrome'd array in `context` (the
+ *  full group, so search subsets still address their x)? */
+export function isChromeElementRow(key: string, context: ConfigKeyEntryWire[]): boolean {
+  const m = ELEMENT_CHILD.exec(key);
+  if (m === null) return false;
+  return context.some((r) => r.key === m[1]! && r.arrayChrome === true);
+}
+
+/** One list block: the compact chrome header (label/description/badges/count
+ *  + the typed inline add) over its element rows. THE array value itself is
+ *  never painted anywhere on this block. */
+function ListBlock({ chrome, elements, ui }: { chrome: ConfigKeyEntryWire; elements: ConfigKeyEntryWire[]; ui: RowUI }) {
+  const lists = ui.lists;
+  const adding = lists.adding === chrome.key;
+  const error = lists.error !== null && lists.error.key === chrome.key ? lists.error.message : null;
+  // The add input is TYPED from the list's element stamp where one is
+  // attestable (the FIRST shipped element row's edit). No elements shipped
+  // (empty/absent list) -> plain string; the server's kind gate stays honest.
+  const addEdit = elements.length > 0 ? elements[0]!.edit : undefined;
+  const commit = (e: Event): void => {
+    const src = ((e as { currentTarget?: unknown }).currentTarget ?? (e as { target?: unknown }).target) as
+      | (HTMLElement & { parentNode?: unknown })
+      | null;
+    const holder = (src?.parentElement ?? src?.parentNode) as HTMLElement | null | undefined;
+    const field = holder?.querySelector(".settings-list-add-input") as unknown as { value: string } | null;
+    lists.onAddCommit(chrome.key, field?.value ?? "", addEdit);
+  };
+  const onEnter = (e: KeyboardEvent): void => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      commit(e);
+    }
+    // Escape belongs to the dialog's staged ladder (zero wire on cancel).
+  };
+  const n = elements.length;
+  const isEnum = addEdit !== undefined && addEdit.type === "string" && Array.isArray(addEdit.enum) && addEdit.enum.length > 0;
+  const isBool = addEdit !== undefined && addEdit.type === "boolean";
+  const isNum = addEdit !== undefined && (addEdit.type === "number" || addEdit.type === "integer");
+  return (
+    <div className="settings-list-block" data-key={chrome.key}>
+      <div className="settings-list-header" title={chrome.key}>
+        <span className="settings-row-label">{friendlyLabel(chrome.key)}</span>
+        {chrome.description !== undefined && chrome.description !== "" ? (
+          <span className="settings-row-desc">{chrome.description}</span>
+        ) : (
+          // No schema description: the raw keyPath in monospace (row doctrine;
+          // the panel never invents prose).
+          <span className="settings-row-desc settings-row-key">{chrome.key}</span>
+        )}
+        <span className="settings-row-meta">
+          {/* Count derived from the SHIPPED element rows -- under a truncated
+              snapshot this says what the ship holds, and the banner attests
+              the cut. */}
+          <span className="settings-badge settings-list-count" title="Element rows shipped in this snapshot">
+            {n} {n === 1 ? "element" : "elements"}
+          </span>
+          {sourceBadges(chrome).map((b) => (
+            <span key={b.label} className="settings-badge" title={b.title}>
+              {b.label}
+            </span>
+          ))}
+        </span>
+        <span className="settings-list-add settings-list-affordance">
+          {adding ? (
+            <span className="settings-list-add-row">
+              {isEnum ? (
+                // Enum element: a dropdown of EXACTLY the enum values.
+                <select className="settings-list-add-input" aria-label={`New value for ${chrome.key}`} onKeydown={onEnter}>
+                  {(addEdit!.enum ?? []).map((v, i) => (
+                    <option key={v} value={v} selected={i === 0}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              ) : isBool ? (
+                <select className="settings-list-add-input" aria-label={`New value for ${chrome.key}`} onKeydown={onEnter}>
+                  <option value="true" selected={true}>
+                    true
+                  </option>
+                  <option value="false">false</option>
+                </select>
+              ) : (
+                <input
+                  className="settings-list-add-input"
+                  type={addEdit?.writeOnly === true ? "password" : isNum ? "number" : "text"}
+                  placeholder={addEdit?.writeOnly === true ? "new value (never shown)" : "new value"}
+                  autocomplete={addEdit?.writeOnly === true ? "new-password" : undefined}
+                  min={isNum ? addEdit?.minimum : undefined}
+                  max={isNum ? addEdit?.maximum : undefined}
+                  aria-label={`New value for ${chrome.key}`}
+                  onKeydown={onEnter}
+                />
+              )}
+              <button type="button" className="settings-btn settings-list-add-go" disabled={lists.busy} onClick={(e: MouseEvent) => commit(e)}>
+                Add
+              </button>
+              <button type="button" className="settings-btn" onClick={lists.onAddCancel}>
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="settings-btn settings-list-add-btn"
+              title={`Append a new ${friendlyLabel(chrome.key)} element`}
+              disabled={lists.busy}
+              onClick={() => lists.onAddStart(chrome.key)}
+            >
+              + add
+            </button>
+          )}
+        </span>
+        {error !== null ? (
+          // Verbatim server text (or the local honest refusal) -- the panel
+          // adds no prose of its own to a refusal.
+          <div className="settings-edit-error settings-list-error" role="alert">
+            {error}
+          </div>
+        ) : null}
+      </div>
+      {elements.map((el) => (
+        <SettingsRow key={el.key} row={el} ui={ui} onRemove={() => lists.onRemove(el.key)} removeBusy={lists.busy} />
+      ))}
+    </div>
+  );
+}
+
+/** Render a row list (a category group, a provider card's fields) with the
+ *  chrome'd arrays gathered into their list blocks; plain rows keep their
+ *  existing flat rendering untouched. */
+function ListAwareRows({ rows, ui, catLabel = null }: { rows: ConfigKeyEntryWire[]; ui: RowUI; catLabel?: string | null }) {
+  return (
+    <>
+      {splitListBlocks(rows).map((part) =>
+        part.kind === "list" ? (
+          <ListBlock key={part.chrome.key} chrome={part.chrome} elements={part.elements} ui={ui} />
+        ) : (
+          <SettingsRow key={part.row.key} row={part.row} ui={ui} catLabel={catLabel} />
+        ),
+      )}
+    </>
   );
 }
 
@@ -1348,16 +1683,17 @@ function SettingsRow({ row, ui, catLabel = null }: { row: ConfigKeyEntryWire; ui
 
 const PROVIDERS_NAMESPACE = "providers";
 
-/** True when `node` or an ancestor carries the affordance marker, so a
- *  "click-away" that lands inside the Add field or the two-step Remove does NOT
- *  cancel it. (Manual walk -- the shared dom helper has no closest().) */
+/** True when `node` or an ancestor carries a list-affordance marker (the
+ *  provider add/remove pair or a generic list block's inline add), so a
+ *  "click-away" that lands inside one of them does NOT cancel it. (Manual
+ *  walk -- the shared dom helper has no closest().) */
 function insideProviderAffordance(node: unknown): boolean {
   let cur = node as { getAttribute?: (n: string) => string | null; parentNode?: unknown } | null | undefined;
   const seen = new Set<unknown>();
   while (cur && !seen.has(cur)) {
     seen.add(cur);
     const cls = cur.getAttribute?.("class") ?? "";
-    if (cls.includes("settings-provider-affordance")) return true;
+    if (cls.includes("settings-provider-affordance") || cls.includes("settings-list-affordance")) return true;
     cur = cur.parentNode as typeof cur;
   }
   return false;
@@ -1511,9 +1847,10 @@ function ProviderCard({ card, ui, confirmRemoveKey, listBusy, focusName, onArm, 
         ) : null}
       </div>
       <div className="settings-provider-card-body">
-        {card.fields.map((row) => (
-          <SettingsRow key={row.key} row={row} ui={ui} />
-        ))}
+        {/* A chrome'd field inside the card (e.g. providers[0].models and its
+            element rows) uses the SAME list block component -- models never
+            renders as a dump row. Plain fields render flat as before. */}
+        <ListAwareRows rows={card.fields} ui={ui} />
       </div>
     </div>
   );
@@ -1600,15 +1937,13 @@ function ProviderAddControl({ adding, busy, error, onAdd, onCommit, onCancel }: 
  *  chrome -- carrying its data-key so the shipped row renders exactly once), one
  *  card per provider, the read-only fallback blocks, any un-placed rows flat, and
  *  the add affordance. No whole-array dump and no per-element JSON container row
- *  renders while the leaf rows render. */
+ *  renders while the leaf rows render. The add/remove busy/adding/error posture
+ *  comes from the SHARED list context on ui (providers are just one list). */
 interface ProviderSectionProps {
   rows: ConfigKeyEntryWire[];
   ui: RowUI;
   confirmRemoveKey: string | null;
-  listBusy: boolean;
   focusProviderName: string | null;
-  addingProvider: boolean;
-  providerListError: string | null;
   onAdd: () => void;
   onCommitAdd: (name: string) => void;
   onCancelAdd: () => void;
@@ -1619,6 +1954,7 @@ interface ProviderSectionProps {
 
 function ProviderSection(p: ProviderSectionProps) {
   const split = splitProviderRows(p.rows);
+  const error = p.ui.lists.error !== null && p.ui.lists.error.key === PROVIDERS_NAMESPACE ? p.ui.lists.error.message : null;
   return (
     <>
       <h3 className="settings-section-title settings-providers-heading" data-key={PROVIDERS_NAMESPACE}>
@@ -1630,7 +1966,7 @@ function ProviderSection(p: ProviderSectionProps) {
           card={card}
           ui={p.ui}
           confirmRemoveKey={p.confirmRemoveKey}
-          listBusy={p.listBusy}
+          listBusy={p.ui.lists.busy}
           focusName={p.focusProviderName}
           onArm={p.onArm}
           onConfirm={p.onConfirm}
@@ -1640,9 +1976,7 @@ function ProviderSection(p: ProviderSectionProps) {
       {split.fallbacks.map((f) => (
         <ProviderFallbackCard key={`provider-fb-${f.name}`} name={f.name} rows={f.rows} ui={p.ui} />
       ))}
-      {split.leftovers.map((row) => (
-        <SettingsRow key={row.key} row={row} ui={p.ui} />
-      ))}
+      <ListAwareRows rows={split.leftovers} ui={p.ui} />
       {split.cards.length === 0 && split.fallbacks.length > 0 ? (
         // Fallback-shape section (dotted providers.<name>.<field> rows): the file's
         // `providers` value is no parseable array, so the list ops cannot run and
@@ -1653,9 +1987,9 @@ function ProviderSection(p: ProviderSectionProps) {
         </div>
       ) : (
         <ProviderAddControl
-          adding={p.addingProvider}
-          busy={p.listBusy}
-          error={p.providerListError}
+          adding={p.ui.lists.adding === PROVIDERS_NAMESPACE}
+          busy={p.ui.lists.busy}
+          error={error}
           onAdd={p.onAdd}
           onCommit={p.onCommitAdd}
           onCancel={p.onCancelAdd}
@@ -1763,23 +2097,30 @@ export interface SettingsViewerProps {
   /** Raw control text + the server-stamped edit descriptor (the app parses
    *  with parseEditValue and sends/queues on parse success). */
   onSaveEdit: (keyPath: string, raw: string, edit: ConfigKeyEditWire) => void;
-  // ── Provider-card context (owner 2026-11-11) ──
-  /** The inline "+ Add provider" field is open. */
-  addingProvider: boolean;
+  // ── List-block + provider-card context (owner 2026-11-11) ──
+  /** The chrome keyPath whose inline add field is open (providers included:
+   *  "providers"), or null. */
+  addingList: string | null;
   /** The providers[i] card whose two-step Remove confirm is armed, or null. */
   confirmRemoveKey: string | null;
-  /** Last list-op refusal, verbatim under the add affordance (or the local
-   *  empty-name refusal). */
-  providerListError: string | null;
-  /** A provider list op (append/remove) is in flight -> the add/remove affordances
-   *  are disabled (one op in flight). */
+  /** The last list-op refusal (verbatim server text, or the local honest
+   *  empty-input hint), owned by the block whose chrome keyPath it carries. */
+  listError: { key: string; message: string } | null;
+  /** A list op (append/remove) is in flight -> every add/remove affordance
+   *  is busy (one op in flight; the queue serializes the wire). */
   listBusy: boolean;
   /** A just-added provider's name to bring into view/focus (the app focuses the
    *  matching card once the refreshed snapshot lands). */
   focusProviderName: string | null;
-  onProviderAdd: () => void;
-  onProviderAddCommit: (name: string) => void;
-  onProviderAddCancel: () => void;
+  onListAddStart: (keyPath: string) => void;
+  /** Raw add text + the list's element stamp (when attestable). The app
+   *  parses it client-side (typed scalar; garbage refused locally with zero
+   *  wire) and sends/queues the append. Providers keep their name shape. */
+  onListAddCommit: (keyPath: string, raw: string, edit?: ConfigKeyEditWire) => void;
+  onListAddCancel: () => void;
+  /** One-click x on an element row: the remove frame for THAT index rides
+   *  immediately (no confirm; duplicates address by occurrence). */
+  onListRemove: (elementKey: string) => void;
   onProviderRemoveArm: (cardKey: string, index: number, name: string) => void;
   onProviderRemoveConfirm: (index: number, name: string) => void;
   onProviderRemoveCancel: () => void;
@@ -1804,14 +2145,15 @@ export function SettingsViewer({
   onEdit,
   onCancelEdit,
   onSaveEdit,
-  addingProvider,
+  addingList,
   confirmRemoveKey,
-  providerListError,
+  listError,
   listBusy,
   focusProviderName,
-  onProviderAdd,
-  onProviderAddCommit,
-  onProviderAddCancel,
+  onListAddStart,
+  onListAddCommit,
+  onListAddCancel,
+  onListRemove,
   onProviderRemoveArm,
   onProviderRemoveConfirm,
   onProviderRemoveCancel,
@@ -1835,6 +2177,15 @@ export function SettingsViewer({
     onEdit,
     onCancel: onCancelEdit,
     onSave: onSaveEdit,
+    lists: {
+      busy: listBusy,
+      adding: addingList,
+      error: listError,
+      onAddStart: onListAddStart,
+      onAddCommit: onListAddCommit,
+      onAddCancel: onListAddCancel,
+      onRemove: onListRemove,
+    },
   };
   const groups = snapshot ? categoryGroups(snapshot) : [];
   const searching = query.trim() !== "";
@@ -1847,7 +2198,7 @@ export function SettingsViewer({
     ? groups
         .map((g) => {
           const rows = g.rows.filter((r) => rowMatchesQuery(r, query));
-          return { title: g.title, rows, units: fieldUnitKeys(rows, g.rows).length };
+          return { title: g.title, rows, context: g.rows, units: fieldUnitKeys(rows, g.rows).length };
         })
         .filter((g) => g.rows.length > 0)
     : [];
@@ -1866,10 +2217,15 @@ export function SettingsViewer({
   // search a clicked category narrows the pane to that category's matches.
   const activeCategory =
     searching && category !== null && !rail.some((e) => e.title === category) ? null : category;
+  // Both render modes carry the FULL group as `context` (idle: the rows are
+  // the context): chrome membership in search mode resolves against snapshot
+  // truth, not just the matched subset.
   const shownGroups =
     activeCategory === null
-      ? searching ? matches : groups
-      : (searching ? matches : groups).filter((g) => g.title === activeCategory);
+      ? searching
+        ? matches
+        : groups.map((g) => ({ ...g, context: g.rows }))
+      : (searching ? matches : groups.map((g) => ({ ...g, context: g.rows }))).filter((g) => g.title === activeCategory);
   return (
     <div
       id="settings-view"
@@ -1893,7 +2249,7 @@ export function SettingsViewer({
           e.preventDefault();
           e.stopPropagation();
           if (confirmRemoveKey !== null) onProviderRemoveCancel();
-          else if (addingProvider) onProviderAddCancel();
+          else if (addingList !== null) onListAddCancel();
           else if (editing !== null) onCancelEdit();
           else if (query !== "") {
             onQuery("");
@@ -1913,15 +2269,15 @@ export function SettingsViewer({
         }
       }}
       onMousedown={(e: MouseEvent) => {
-        // "Click away" cancels a pending provider add/remove (the two-step
-        // Remove and the inline Add field) with zero wire traffic -- but only a
-        // click OUTSIDE the affordance itself, so pressing Add/Cancel/Remove
-        // still reaches its handler. (Manual ancestor walk: the shared dom
-        // helper has no closest().)
-        if (confirmRemoveKey === null && !addingProvider) return;
+        // "Click away" cancels a pending add/remove (the provider two-step
+        // Remove and any open inline Add field) with zero wire traffic -- but
+        // only a click OUTSIDE the affordance itself, so pressing Add/Cancel/
+        // Remove still reaches its handler. (Manual ancestor walk: the shared
+        // dom helper has no closest().)
+        if (confirmRemoveKey === null && addingList === null) return;
         if (insideProviderAffordance((e as unknown as { target?: unknown }).target)) return;
         if (confirmRemoveKey !== null) onProviderRemoveCancel();
-        if (addingProvider) onProviderAddCancel();
+        if (addingList !== null) onListAddCancel();
       }}
     >
       <div className="settings-view-header">
@@ -2052,6 +2408,29 @@ export function SettingsViewer({
                           <span className="settings-provider-path">{row.key}</span>
                         </div>
                       )
+                    ) : row.arrayChrome === true ? (
+                      // Generic chrome obeys the SAME ruling: a matched array
+                      // field renders in HEADING form (label + path), never as a
+                      // flattened value dump. The + affordance is NOT required
+                      // here -- the category view owns it (a search hit on the
+                      // heading still names the list and its keyPath; the
+                      // element rows below stay individually editable).
+                      <div key={row.key} className="settings-list-chrome-heading" data-key={row.key} title={row.key}>
+                        <span className="settings-row-label">{friendlyLabel(row.key)}</span>
+                        <span className="settings-provider-path">{row.key}</span>
+                      </div>
+                    ) : isChromeElementRow(row.key, g.context) ? (
+                      // A matched element row keeps its identity as ONE
+                      // searchable unit: the full editable row + its one-click
+                      // x (address by occurrence -- the keyPath is its own [i]).
+                      <SettingsRow
+                        key={row.key}
+                        row={row}
+                        ui={ui}
+                        catLabel={g.title}
+                        onRemove={() => onListRemove(row.key)}
+                        removeBusy={listBusy}
+                      />
                     ) : (
                       <SettingsRow key={row.key} row={row} ui={ui} catLabel={g.title} />
                     ),
@@ -2066,13 +2445,10 @@ export function SettingsViewer({
                       rows={g.rows}
                       ui={ui}
                       confirmRemoveKey={confirmRemoveKey}
-                      listBusy={listBusy}
                       focusProviderName={focusProviderName}
-                      addingProvider={addingProvider}
-                      providerListError={providerListError}
-                      onAdd={onProviderAdd}
-                      onCommitAdd={onProviderAddCommit}
-                      onCancelAdd={onProviderAddCancel}
+                      onAdd={() => onListAddStart(PROVIDERS_NAMESPACE)}
+                      onCommitAdd={(name) => onListAddCommit(PROVIDERS_NAMESPACE, name)}
+                      onCancelAdd={onListAddCancel}
                       onArm={onProviderRemoveArm}
                       onConfirm={onProviderRemoveConfirm}
                       onCancelRemove={onProviderRemoveCancel}
@@ -2081,9 +2457,9 @@ export function SettingsViewer({
                 ) : (
                   <section className="settings-section" key={g.title}>
                     <h3 className="settings-section-title">{g.title}</h3>
-                    {g.rows.map((row) => (
-                      <SettingsRow key={row.key} row={row} ui={ui} />
-                    ))}
+                    {/* Chrome'd arrays gather into their list blocks (header +
+                        element rows + add); plain rows render exactly as before. */}
+                    <ListAwareRows rows={g.rows} ui={ui} />
                   </section>
                 ),
               )

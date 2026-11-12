@@ -221,10 +221,15 @@ describe("viewer rendering", () => {
     expect(errored.querySelector(".file-view-more")).toBeNull();
   });
 
-  it("Reload re-reads", () => {
+  it("Reload re-reads: the glyph button carries no text, keeps title + aria-label, and fires the same reload", () => {
     let reloaded = "";
     const root = renderView({ view: { status: "ready", lines: ["a"], truncated: false }, onReload: (p) => { reloaded = p; } });
-    click(root.querySelector(".file-view-btn"));
+    const btn = root.querySelector(".file-reload-btn")!;
+    expect(text(btn)).toBe(""); // glyph-only: no text label
+    expect(btn.getAttribute("aria-label")).toBe("Reload");
+    expect(btn.getAttribute("title")).toBe("Re-read the file from the top");
+    expect(btn.querySelector(".file-reload-glyph[aria-hidden='true']")).toBeTruthy();
+    click(btn);
     expect(reloaded).toBe(PATH);
   });
 

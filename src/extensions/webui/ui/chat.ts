@@ -635,11 +635,21 @@ export interface ChatController {
    *  { valueText }. Arrives via onSetConfigKey with the same id. The server
    *  revalidates and says needsRestart -- the client never claims live effect. */
   setConfigKey: (requestId: number, keyPath: string, payload: ConfigEditPayload) => void;
-  /** Append/remove a whole provider through the additive editConfigList pair.
-   *  `append`: keyPath "providers" + name; `remove`: keyPath "providers[i]"
-   *  (+ the same index, which the server requires to agree). Arrives via
-   *  onEditConfigList with the same id; the reply carries no value echo. */
-  editConfigList: (requestId: number, keyPath: string, op: ConfigListOp, name?: string, index?: number) => void;
+  /** Append/remove through the additive editConfigList pair (array-of-
+   *  primitives AND providers alike). `append` targets the array path:
+   *  a primitive list carries the typed `value`, providers carry `name` (their
+   *  elements are objects). `remove` targets "<array>[<index>]" -- the index
+   *  rides IN the keyPath (the optional `index` echo, when set, must agree).
+   *  Arrives via onEditConfigList with the same id; the reply carries no
+   *  value echo (the rows refresh from a re-read snapshot, never from this). */
+  editConfigList: (
+    requestId: number,
+    keyPath: string,
+    op: ConfigListOp,
+    name?: string,
+    index?: number,
+    value?: string | number | boolean,
+  ) => void;
   /** List a workspace dir (workbench tree); arrives via onListDir. No path = the roots. */
   listDir: (requestId: number, path?: string) => void;
   /** Read a line-window page of a text file (workbench viewer); arrives via onReadFile. */
@@ -1511,12 +1521,23 @@ export function createChat({
     send({ type: "setConfigKey", requestId, keyPath, ...payload });
   }
 
-  /** Append/remove a whole provider (settings provider cards). Append carries
-   *  the name, remove the index echo (the server refuses a keyPath/index
-   *  disagreement). The reply rides onEditConfigList with the same id; stale
-   *  replies drop client-side. No value bytes ride this frame in either
-   *  direction -- an append's only payload is the caller's own name. */
-  function editConfigList(requestId: number, keyPath: string, op: ConfigListOp, name?: string, index?: number): void {
+  /** Append/remove on the additive editConfigList pair (generic arrays AND
+   *  providers). append: the array path + the typed `value` (a primitive
+   *  list) or `name` (providers -- their elements are objects); remove:
+   *  "<array>[<index>]" with the index riding IN the keyPath (the optional
+   *  echo must agree). Each field rides ONLY when defined -- a provider
+   *  frame carries no value key, a primitive frame no name key. The reply
+   *  rides onEditConfigList with the same id; stale replies drop client-side.
+   *  No value bytes ride this frame in either direction -- an append's only
+   *  payload is the caller's own name/scalar, never a secret. */
+  function editConfigList(
+    requestId: number,
+    keyPath: string,
+    op: ConfigListOp,
+    name?: string,
+    index?: number,
+    value?: string | number | boolean,
+  ): void {
     send({
       type: "editConfigList",
       requestId,
@@ -1524,6 +1545,7 @@ export function createChat({
       op,
       ...(name !== undefined ? { name } : {}),
       ...(index !== undefined ? { index } : {}),
+      ...(value !== undefined ? { value } : {}),
     });
   }
 

@@ -439,11 +439,16 @@ export class WaitTool extends SubagentTool {
     const args = parseToolInput(input) ?? {};
     const message = args.message as string | null;
     const note = message ? ` Note: ${message}` : "";
+    // ZERO meta, on purpose (owner ruling 2026-11-11): the note already rides
+    // the output text, and a meta entry re-enters every flattened display as
+    // META: {"message":...} (toolContentText, utils/tool-content.ts) plus a
+    // duplicated <message> child on the xml wire (it is not a short key).
+    // The consumer hunt came back empty: toolContentMeta readers only ask for
+    // "start_line" (wire-messages.ts, message-list.ts, cli.ts), and nothing
+    // anywhere reads a meta key "message".
     return ToolResult.stop(
       `Manager has nothing more to do. Waiting for user input.${note}`,
-    ).withEntries({
-      ...(message ? { message } : {}),
-    });
+    );
   }
 
   override toToolDef() {

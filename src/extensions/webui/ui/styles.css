@@ -943,7 +943,8 @@ body.sidebar-resizing {
 
 .sidebar-header-secondary {
     margin-top: 4px;
-    padding-top: 4px;
+    padding-top: 2px;
+    padding-bottom: 2px;
     border-top: 1px solid var(--border);
 }
 
@@ -2719,7 +2720,8 @@ body.workbench-resizing {
 }
 
 .workbench-tab-close {
-    padding: 2px 8px;
+    padding: 6px 8px;
+    margin-right: 4px;
     background: transparent;
     border: none;
     color: var(--text-muted);
@@ -2785,19 +2787,48 @@ body.workbench-resizing {
     letter-spacing: 0.04em;
 }
 
-.ft-btn {
-    padding: 2px 8px;
+/* Header reload affordances (the file tree's Refresh and the file viewer's
+   Reload share one shape): the #search-btn standard -- transparent box,
+   muted -> accent over accent-soft on hover, and the 16px clockwise-arrow
+   glyph as a CSS mask data URI tinted by currentColor (the .search-btn-glyph
+   / .row-glyph idiom: no raw <svg> in the mount, no hardcoded color). The
+   border keeps its 1px width transparent at rest, so hover/focus never
+   shifts the layout. */
+.file-reload-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
     background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-secondary);
-    font: inherit;
+    color: var(--text-muted);
+    border: 1px solid transparent;
     cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
-.ft-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
+.file-reload-btn:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+/* Same focus grammar as #logs-toggle: an inset outline, no layout change. */
+.file-reload-btn:focus-visible {
+    background: var(--accent-soft);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.file-reload-glyph {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    background-color: currentColor;
+    --glyph: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M23 4 L23 10 L17 10 M20.49 15 A9 9 0 1 1 18.36 5.64 L23 10' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    -webkit-mask: var(--glyph) center / contain no-repeat;
+    mask: var(--glyph) center / contain no-repeat;
 }
 
 .ft-row {
@@ -4203,6 +4234,88 @@ body.workbench-resizing {
     font-size: 0.7rem;
     color: var(--danger, #e05252);
     overflow-wrap: anywhere;
+}
+
+/* ── List blocks (arrayChrome arrays: header + element rows + one add) ─────
+   The chrome row is the array's header: label / description / attested layer
+   badges + an element-count summary, with the ONE "+ add" affordance riding
+   on it (the chrome row always ships ahead of its elements, so a truncated
+   snapshot cannot strand the add from its array). The array VALUE never
+   paints here. Element rows are ordinary .settings-row wearing a trailing
+   one-click x. */
+.settings-list-block {
+    margin: 2px 0 8px;
+}
+
+.settings-list-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 4px 0 6px;
+}
+
+.settings-list-count {
+    color: var(--text-muted);
+}
+
+.settings-list-add {
+    display: inline-flex;
+    align-items: center;
+}
+
+.settings-list-add-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.settings-list-add-input {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--text-primary);
+    background: var(--bg-input, var(--bg-secondary));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px 6px;
+    min-width: 140px;
+    max-width: 220px;
+}
+
+.settings-list-add-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.settings-btn.settings-list-add-go {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.settings-list-error {
+    grid-column: auto;
+    width: 100%;
+}
+
+/* One-click element remove: the index rides IN the keyPath, duplicates
+   address by occurrence. Subtle ink; the danger tone only on hover. */
+.settings-btn.settings-list-remove {
+    color: var(--text-muted);
+}
+
+.settings-btn.settings-list-remove:hover {
+    color: var(--danger, #e05252);
+    border-color: var(--danger, #e05252);
+}
+
+/* Search-mode chrome heading: label + mono path, never a value dump. */
+.settings-list-chrome-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 10px 0 2px;
+    border-top: 1px solid var(--border-light);
+    margin-top: 8px;
 }
 
 /* ── Provider cards (owner 2026-11-11: one card per provider) ───────────────

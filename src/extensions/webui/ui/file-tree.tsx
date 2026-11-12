@@ -19,6 +19,11 @@
 //   the socket (this module never touches chat), which keeps correlation
 //   honest: the id is minted here, recorded in `pending`, and the reply is
 //   matched there or dropped.
+// - ONE side channel breaks the purity on purpose: the expanded-path set
+//   persists to sessionStorage (see "Expansion memory" below). emptyFileTree
+//   seeds from it, so restoration rides the re-request machinery above with
+//   no new fetch path and no app.tsx wiring; toggleDir writes it back on
+//   every expand/collapse.
 
 import type { DirEntryWire, FileRootWire, ListDirResultWire } from "@extensions/websocket/protocol.ts";
 import type { WorkbenchTab } from "./workbench-state.ts";
@@ -68,8 +73,81 @@ export interface TreeFetch {
   path?: string;
 }
 
+// ── Expansion memory (sessionStorage) ───────────────────────────────────────
+// WHICH paths are expanded survives a reload, per TAB. sessionStorage, never
+// localStorage: the localStorage half of the webui doctrine (drafts, prefs)
+// is deliberately shared across tabs, and every tab would otherwise inherit
+// (and overwrite) every other tab's tree. Same guard shape as chat.ts's
+// reconnect identity. Only the expanded-true path set rides, sorted, under
+// one key. Restoration seeds `expanded`; the open/refresh machinery then
+// re-requests the roots AND every expanded dir exactly as it does for a
+// tree the user opened by hand. Honest failures: a stored path that no
+// longer lists answers with the server's one-liner (error row, collapsible,
+// pending drains -- never a hang), and the roots reply prunes expansions
+// that live under no current root, so the next persist drops them quietly.
+
+export const FILE_TREE_EXPANDED_STORAGE_KEY = "hotdog-webui-file-tree-expanded";
+
+/** Resolved per call (chat.ts:781-789 guard, re-read rather than cached:
+ *  the dom-helper installs and tears down window storage per test). */
+function expandedStorage(): Storage | null {
+  return typeof window !== "undefined" && "sessionStorage" in window
+    ? (window as unknown as { sessionStorage: Storage }).sessionStorage
+    : null;
+}
+
+/** The stored expanded set. Missing key, throwing storage, or corrupt /
+ *  non-string-array JSON all mean the same honest thing: start flat. */
+function storedExpanded(): string[] {
+  const storage = expandedStorage();
+  if (!storage) return [];
+  let raw: string | null;
+  try {
+    raw = storage.getItem(FILE_TREE_EXPANDED_STORAGE_KEY);
+  } catch {
+    return [];
+  }
+  if (raw === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p): p is string => typeof p === "string");
+  } catch {
+    return [];
+  }
+}
+
+/** Called from toggleDir on every expand/collapse. An empty set removes the
+ *  key outright (that is also how a fully-collapsed tree forgets vanished
+ *  roots). Storage failures (quota, blocked) keep the tree in memory. */
+function persistExpanded(expanded: Record<string, boolean>): void {
+  const storage = expandedStorage();
+  if (!storage) return;
+  const paths = Object.keys(expanded).filter((p) => expanded[p]).sort();
+  try {
+    if (paths.length === 0) storage.removeItem(FILE_TREE_EXPANDED_STORAGE_KEY);
+    else storage.setItem(FILE_TREE_EXPANDED_STORAGE_KEY, JSON.stringify(paths));
+  } catch {
+    // The tree stays true in memory; nothing to retry, nothing to announce.
+  }
+}
+
+/** A path is live only under a current root (the server's confinement says
+ *  the same thing: listDir refuses everything else). Trailing separators on
+ *  a root path do not double up; both separators count for Windows roots. */
+function underAnyRoot(path: string, roots: FileRootWire[]): boolean {
+  return roots.some((r) => {
+    const base = r.path.replace(/[/\\]+$/, "");
+    return path === r.path || path === base || path.startsWith(`${base}/`) || path.startsWith(`${base}\\`);
+  });
+}
+
+/** Seed the map from storage: the restored tree re-requests itself the
+ *  moment it opens (see the header doctrine); no key -> flat. */
 export function emptyFileTree(): FileTreeState {
-  return { roots: null, dirs: {}, expanded: {}, seq: 0, pending: {} };
+  const expanded: Record<string, boolean> = {};
+  for (const path of storedExpanded()) expanded[path] = true;
+  return { roots: null, dirs: {}, expanded, seq: 0, pending: {} };
 }
 
 /**
@@ -113,18 +191,23 @@ export function toggleDir(s: FileTreeState, path: string): { state: FileTreeStat
   if (s.expanded[path]) {
     const expanded = { ...s.expanded };
     delete expanded[path];
+    persistExpanded(expanded);
     return { state: { ...s, expanded }, fetch: null };
   }
   const cached = s.dirs[path];
   if (cached && cached.status !== "error") {
-    return { state: { ...s, expanded: { ...s.expanded, [path]: true } }, fetch: null };
+    const expanded = { ...s.expanded, [path]: true };
+    persistExpanded(expanded);
+    return { state: { ...s, expanded }, fetch: null };
   }
   const seq = s.seq + 1;
+  const expanded = { ...s.expanded, [path]: true };
+  persistExpanded(expanded);
   const state: FileTreeState = {
     ...s,
     seq,
     dirs: { ...s.dirs, [path]: { status: "loading", entries: [] } },
-    expanded: { ...s.expanded, [path]: true },
+    expanded,
     pending: { ...s.pending, [String(seq)]: path },
   };
   return { state, fetch: { requestId: seq, path } };
@@ -142,10 +225,24 @@ export function applyListDir(
   const pending = { ...s.pending };
   delete pending[String(requestId)];
   if (key === "") {
-    const roots: FileTreeRootsState = result.error
-      ? { status: "error", entries: [], error: result.error }
-      : { status: "ok", entries: result.roots ?? [] };
-    return { ...s, pending, roots };
+    if (result.error) {
+      // Roots unknown: nothing is pruned (an error must not collapse the tree).
+      return { ...s, pending, roots: { status: "error", entries: [], error: result.error } };
+    }
+    const roots = result.roots ?? [];
+    // The roots reply is the authority on what exists. An expansion living
+    // under no current root (a vanished workspace) can never render -- its
+    // row is gone -- so it leaves the state here and the next expand/collapse
+    // persist drops it from the store quietly. Errored listings of paths that
+    // DO live under a root keep their expanded posture: the machinery renders
+    // the server's line as a collapsible error row.
+    let expanded = s.expanded;
+    const dead = Object.keys(s.expanded).filter((p) => s.expanded[p] && !underAnyRoot(p, roots));
+    if (dead.length > 0) {
+      expanded = { ...s.expanded };
+      for (const p of dead) delete expanded[p];
+    }
+    return { ...s, pending, expanded, roots: { status: "ok", entries: roots } };
   }
   const dir: FileTreeDirState = result.error
     ? { status: "error", entries: [], error: result.error }
@@ -280,11 +377,12 @@ export function FileTree(p: FileTreeProps) {
         <span className="ft-header-label">Workspace</span>
         <button
           type="button"
-          className="ft-btn"
+          className="file-reload-btn"
           title="Re-list the roots and every expanded directory"
+          aria-label="Refresh"
           onClick={p.onRefresh}
         >
-          Refresh
+          <span className="file-reload-glyph" aria-hidden="true"></span>
         </button>
       </div>
       {!roots || roots.status === "loading" ? (

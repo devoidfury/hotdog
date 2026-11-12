@@ -110,6 +110,19 @@ const CANNED: ConfigSnapshotResultWire = {
       ],
     },
     {
+      // A chrome'd array-of-primitives (the server's list doctrine): the
+      // HEADER row carries arrayChrome + NO edit (its bulk write refuses);
+      // the elements ride as their own stamped rows. The category view must
+      // render this as ONE list block (header + 2 element rows + add), never
+      // as a flattened value dump.
+      name: "workspace",
+      rows: [
+        { key: "workspace.deny", description: "Denied path globs", arrayChrome: true, file: ["dist", "build"] },
+        { key: "workspace.deny[0]", file: "dist", edit: { type: "string" } },
+        { key: "workspace.deny[1]", file: "build", edit: { type: "string" } },
+      ],
+    },
+    {
       name: "providers",
       rows: [
         { key: "providers[0].url", description: "Provider base URL", file: "http://127.0.0.1:8000/v1", edit: { type: "string" } },
@@ -156,14 +169,15 @@ function renderPanel(
     onEdit?: (key: string) => void;
     onCancelEdit?: () => void;
     onSaveEdit?: (key: string, raw: string, edit: ConfigKeyEditWire) => void;
-    addingProvider?: boolean;
+    onListAddStart?: (key: string) => void;
+    onListAddCommit?: (key: string, raw: string, edit?: ConfigKeyEditWire) => void;
+    onListAddCancel?: () => void;
+    onListRemove?: (elementKey: string) => void;
+    addingList?: string | null;
     confirmRemoveKey?: string | null;
-    providerListError?: string | null;
+    listError?: { key: string; message: string } | null;
     listBusy?: boolean;
     focusProviderName?: string | null;
-    onProviderAdd?: () => void;
-    onProviderAddCommit?: (name: string) => void;
-    onProviderAddCancel?: () => void;
     onProviderRemoveArm?: (cardKey: string, index: number, name: string) => void;
     onProviderRemoveConfirm?: (index: number, name: string) => void;
     onProviderRemoveCancel?: () => void;
@@ -190,14 +204,15 @@ function renderPanel(
       onEdit={opts.onEdit ?? noop}
       onCancelEdit={opts.onCancelEdit ?? noop}
       onSaveEdit={opts.onSaveEdit ?? noop}
-      addingProvider={opts.addingProvider ?? false}
+      addingList={opts.addingList ?? null}
       confirmRemoveKey={opts.confirmRemoveKey ?? null}
-      providerListError={opts.providerListError ?? null}
+      listError={opts.listError ?? null}
       listBusy={opts.listBusy ?? false}
       focusProviderName={opts.focusProviderName ?? null}
-      onProviderAdd={opts.onProviderAdd ?? noop}
-      onProviderAddCommit={opts.onProviderAddCommit ?? noop}
-      onProviderAddCancel={opts.onProviderAddCancel ?? noop}
+      onListAddStart={opts.onListAddStart ?? noop}
+      onListAddCommit={opts.onListAddCommit ?? noop}
+      onListAddCancel={opts.onListAddCancel ?? noop}
+      onListRemove={opts.onListRemove ?? noop}
       onProviderRemoveArm={opts.onProviderRemoveArm ?? noop}
       onProviderRemoveConfirm={opts.onProviderRemoveConfirm ?? noop}
       onProviderRemoveCancel={opts.onProviderRemoveCancel ?? noop}
@@ -256,12 +271,14 @@ describe("settings viewer panel", () => {
     const cats = Array.from(rail.querySelectorAll(".settings-cat")) as unknown as HTMLElement[];
     const titles = cats.map((c) => c.querySelector(".settings-cat-title")!.textContent);
     // General first, curated namespaces in map order, Other last; only PRESENT groups.
-    expect(titles).toEqual(["All settings", "General", "WebUI", "Providers", "Loop Detect", "Bash Tool", OTHER_CATEGORY]);
+    expect(titles).toEqual(["All settings", "General", "WebUI", "Providers", "Loop Detect", "Bash Tool", "Workspace", OTHER_CATEGORY]);
     // Counts ride -- in FIELD UNITS (owner ruling 2026-11-11): `providers[0].url`
     // counts as its provider (Providers = 2: that card + the dotted models
-    // array), the `myTools` object rolls up into its shipped child (Other = 2).
+    // array), the `myTools` object rolls up into its shipped child (Other = 2),
+    // and the chrome'd `workspace.deny` array is ONE field no matter how many
+    // element rows ship (Workspace = 1).
     const counts = cats.map((c) => c.querySelector(".settings-cat-count")!.textContent);
-    expect(counts).toEqual(["16", "5", "3", "2", "2", "2", "2"]);
+    expect(counts).toEqual(["17", "5", "3", "2", "2", "2", "1", "2"]);
     expect(root.querySelector(".settings-content")).toBeTruthy();
     expect(root.querySelector(".settings-dir")!.textContent).toContain("/home/u/.config/hotdog");
   });
@@ -269,17 +286,44 @@ describe("settings viewer panel", () => {
   it("categories render in display order and EVERY row lands in exactly one", () => {
     const root = renderPanel(CANNED);
     const titles = Array.from(root.querySelectorAll(".settings-section-title")).map((t) => t.textContent);
-    expect(titles).toEqual(["General", "WebUI", "Providers", "Loop Detect", "Bash Tool", OTHER_CATEGORY]);
-    // The sweep: DOM rows == snapshot rows, each key exactly once.
+    expect(titles).toEqual(["General", "WebUI", "Providers", "Loop Detect", "Bash Tool", "Workspace", OTHER_CATEGORY]);
+    // The sweep: EVERY snapshot row renders exactly once, chrome included.
+    // Chrome rows render as list-block headers (their own data-key nodes),
+    // not as .settings-row; the sweep counts all RENDER nodes so a chrome can
+    // never hide a dump AND can never double-paint (header + row).
     const allKeys = CANNED.sections.flatMap((s) => s.rows.map((r) => r.key));
-    const domKeys = rows(root).map((r) => r.getAttribute("data-key"));
-    expect(domKeys.length).toBe(allKeys.length);
-    for (const k of allKeys) expect(domKeys.filter((d) => d === k)).toHaveLength(1);
+    const domKeys = (Array.from(root.querySelectorAll(".settings-row, .settings-list-block, .settings-list-chrome-heading, .settings-providers-heading, .settings-provider-card")) as unknown as HTMLElement[]).map(
+      (el) => el.getAttribute("data-key"),
+    );
+    // Each SNAPSHOT key appears exactly once among the render nodes (extra
+    // structural data-keys the snapshot never shipped -- the providers
+    // heading/card built from field rows -- are not snapshot rows and stay).
+    const renderKeys = domKeys.filter((k): k is string => k !== null && allKeys.includes(k));
+    expect(renderKeys.length).toBe(allKeys.length);
+    for (const k of allKeys) expect(renderKeys.filter((d) => d === k)).toHaveLength(1);
+    // The chrome'd array renders as a list-block header (never a flat row).
+    expect(rows(root).some((r) => r.getAttribute("data-key") === "workspace.deny")).toBe(false);
+    expect(domKeys.filter((d) => d === "workspace.deny")).toHaveLength(1);
     // "Other" catches the file-only unknowns.
     const other = Array.from(root.querySelectorAll(".settings-section")) as unknown as HTMLElement[];
     const otherSection = other.find((s) => s.querySelector(".settings-section-title")!.textContent === OTHER_CATEGORY)!;
     expect(Array.from(otherSection.querySelectorAll(".settings-row")).map((r) => (r as unknown as HTMLElement).getAttribute("data-key")))
       .toEqual(["themee", "myTools.legacy", "myTools"]);
+  });
+
+  it("the chrome row renders as a list-block header, not a dumpable row", () => {
+    const root = renderPanel(CANNED);
+    // A chrome'd array field renders its header block (data-key rides the
+    // block) and its elements below -- the chrome itself never becomes a
+    // .settings-row with a value cell (that is the exact dump posture).
+    const block = listBlock(root, "workspace.deny");
+    expect(block).toBeTruthy();
+    expect(block.querySelector(".settings-list-count")!.textContent).toBe("2 elements");
+    expect(block.querySelector(".settings-value")).toBeNull();
+    expect(rows(root).some((r) => r.getAttribute("data-key") === "workspace.deny")).toBe(false);
+    expect(root.textContent).not.toContain("dist, build");
+    // The element rows live inside the block, order kept.
+    expect(blockRows(block).map((r) => r.getAttribute("data-key"))).toEqual(["workspace.deny[0]", "workspace.deny[1]"]);
   });
 
   it("rows: derived bold label + description line (raw keyPath mono when none)", () => {
@@ -552,6 +596,43 @@ describe("field-unit counting doctrine", () => {
       rows: [urow("modelGroups", { file: { fast: ["m1"] }, edit: { type: "json" } })],
       want: 1,
     },
+    {
+      // The server's arrayChrome doctrine (2026-11-11): the chrome row IS the
+      // field (rule 4 makes it the heading), and per-index rows roll into it
+      // (rule 2) -- the chrome + N elements = ONE unit, never N+1.
+      name: "a chrome'd array with 3 element rows is ONE (rules 2+4)",
+      rows: [
+        urow("workspace.deny", { arrayChrome: true, file: ["a", "b", "c"] }),
+        urow("workspace.deny[0]", { file: "a" }),
+        urow("workspace.deny[1]", { file: "b" }),
+        urow("workspace.deny[2]", { file: "c" }),
+      ],
+      want: 1,
+    },
+    {
+      name: "an EMPTY chrome array is ONE (header only, append creates it)",
+      rows: [urow("workspace.deny", { arrayChrome: true, file: [] })],
+      want: 1,
+    },
+    {
+      // A schema-declared list the file omits ships chrome with no slots set
+      // (no file, no elements): still ONE countable field.
+      name: "an absent-file schema-list chrome is ONE (chrome alone)",
+      rows: [urow("workspace.allow", { arrayChrome: true, default: [] })],
+      want: 1,
+    },
+    {
+      // Rule 3 with chrome inside the card: the chrome'd models list and its
+      // elements contribute 0 extra to the provider's unit.
+      name: "chrome'd models inside a provider card count 0 extra (rule 3)",
+      rows: [
+        urow("providers[0]", { file: { name: "p" } }),
+        urow("providers[0].models", { arrayChrome: true, file: ["m1", "m2"] }),
+        urow("providers[0].models[0]", { file: "m1" }),
+        urow("providers[0].models[1]", { file: "m2" }),
+      ],
+      want: 1,
+    },
   ];
   for (const c of cases) {
     it(c.name, () => {
@@ -592,6 +673,22 @@ describe("field-unit counting doctrine", () => {
     ];
     expect(fieldUnitCount([paths[1]!, paths[2]!], paths)).toBe(1);
     expect(fieldUnitCount(paths)).toBe(1);
+    // The chrome seam in SEARCH mode (SAME function, context = the full
+    // group): chrome + elements = one unit; a heading-only match claims
+    // nothing (the elements own the seam); an element-only match claims the
+    // ONE field; an empty chrome (no elements to match) counts through the
+    // same seam as its own unit.
+    const deny = [
+      urow("workspace.deny", { arrayChrome: true, file: ["a", "b"] }),
+      urow("workspace.deny[0]", { file: "a" }),
+      urow("workspace.deny[1]", { file: "b" }),
+    ];
+    expect(fieldUnitKeys(deny, deny)).toEqual(["workspace.deny"]);
+    expect(fieldUnitCount([deny[0]!], deny)).toBe(0);
+    expect(fieldUnitCount([deny[0]!, deny[1]!], deny)).toBe(1);
+    expect(fieldUnitCount([deny[1]!], deny)).toBe(1);
+    const emptyChrome = [urow("workspace.tags", { arrayChrome: true, file: [] })];
+    expect(fieldUnitCount([emptyChrome[0]!], emptyChrome)).toBe(1);
   });
 
   // A rendered panel over a fixture that exercises the rules together.
@@ -1282,6 +1379,313 @@ describe("provider cards", () => {
 
 // ── Panel state doctrine (pure): fresh id per request, stale dropped ────────
 
+// ── Array-of-primitives list blocks (the chrome doctrine, generalized) ───────
+// The arrayChrome row renders as ONE list block: a compact header (label +
+// description + attested layer badges + an element-count summary derived from
+// the shipped element rows, NEVER a flattened value dump) over its element
+// rows (existing control machinery, untouched), each with a one-click x, and
+// exactly ONE + add affordance living ON the header (the chrome row ships
+// ahead of its elements, so truncation can never strand the add). Empty chrome
+// = header + add, zero phantom rows. writeOnly elements keep the REPLACE
+// idiom with zero bytes anywhere. Search mode: chrome in HEADING form,
+// elements individually editable WITH their x (the + stays in the category
+// view -- documented decision).
+
+const LIST_SECRET = "SENTINEL-LIST-4471-NEVER-IN-THE-DOM";
+
+const LISTS_SNAP: ConfigSnapshotResultWire = {
+  type: "configSnapshotResult",
+  ts: 1700000000000,
+  configDir: "/home/u/.config/hotdog",
+  files: [{ path: "/home/u/.config/hotdog/defaults.json", inUse: true, status: "ok" }],
+  findings: [],
+  sections: [
+    {
+      name: "workspace",
+      rows: [
+        { key: "workspace.deny", description: "Denied path globs", arrayChrome: true, file: ["dist", "build"] },
+        { key: "workspace.deny[0]", file: "dist", edit: { type: "string" } },
+        { key: "workspace.deny[1]", file: "build", edit: { type: "string" } },
+        { key: "workspace.ports", description: "Allowed ports", arrayChrome: true, file: [8080] },
+        { key: "workspace.ports[0]", file: 8080, edit: { type: "integer", minimum: 1, maximum: 65535 } },
+        { key: "workspace.modes", description: "Active modes", arrayChrome: true, file: ["fast"] },
+        { key: "workspace.modes[0]", file: "fast", edit: { type: "string", enum: ["fast", "balanced", "thorough"] } },
+        { key: "workspace.flags", description: "Feature booleans", arrayChrome: true, file: [true] },
+        { key: "workspace.flags[0]", file: true, edit: { type: "boolean" } },
+        { key: "workspace.tokens", description: "Rotate these tokens", arrayChrome: true, leafSecret: true, file: null, redacted: true },
+        { key: "workspace.tokens[0]", leafSecret: true, file: null, redacted: true, resolved: LIST_SECRET, edit: { type: "string", writeOnly: true } },
+        { key: "workspace.tags", description: "Nothing appended yet", arrayChrome: true, file: [] },
+      ],
+    },
+  ],
+};
+
+const listBlock = (root: HTMLElement, key: string): HTMLElement =>
+  (Array.from(root.querySelectorAll(".settings-list-block")) as unknown as HTMLElement[]).find(
+    (b) => b.getAttribute("data-key") === key,
+  )!;
+const blockRows = (block: HTMLElement): HTMLElement[] =>
+  Array.from(block.querySelectorAll(".settings-row")) as unknown as HTMLElement[];
+const addBtnIn = (scope: HTMLElement): HTMLElement | undefined =>
+  (Array.from(scope.querySelectorAll(".settings-list-add-btn")) as unknown as HTMLElement[])[0];
+const removeBtnsIn = (scope: HTMLElement): HTMLElement[] =>
+  Array.from(scope.querySelectorAll(".settings-list-remove")) as unknown as HTMLElement[];
+
+describe("array list blocks (chrome doctrine, generalized)", () => {
+  it("chrome header: label + description + count + badges, NEVER the value dump", () => {
+    const root = renderPanel(LISTS_SNAP);
+    const block = listBlock(root, "workspace.deny");
+    const header = block.querySelector(".settings-list-header")!;
+    expect(header.querySelector(".settings-row-label")!.textContent).toBe("Deny");
+    expect(header.querySelector(".settings-row-desc")!.textContent).toBe("Denied path globs");
+    // Element-count summary derived from the SHIPPED element rows.
+    expect(header.querySelector(".settings-list-count")!.textContent).toBe("2 elements");
+    // The attested layer badge rides (file is set); no value cell anywhere.
+    expect(badgesOf(header as unknown as HTMLElement)).toEqual(["2 elements", "file"]);
+    expect(header.querySelector(".settings-value")).toBeNull();
+    // THE dump the owner rejected is absent from the whole panel.
+    expect(root.textContent).not.toContain("dist, build");
+    // One element row per index, shipped order, plus exactly ONE + on the block.
+    expect(blockRows(block).map((r) => r.getAttribute("data-key"))).toEqual(["workspace.deny[0]", "workspace.deny[1]"]);
+    expect((Array.from(block.querySelectorAll(".settings-list-add-btn")) as unknown as HTMLElement[])).toHaveLength(1);
+    // The chrome row is NOT a flat .settings-row (header form only).
+    expect(rows(root).some((r) => r.getAttribute("data-key") === "workspace.deny")).toBe(false);
+  });
+
+  it("element rows: existing control machinery + trailing one-click x", () => {
+    const removed: string[] = [];
+    const root = renderPanel(LISTS_SNAP, { onListRemove: (k) => removed.push(k) });
+    const el0 = rowForKey(root, "workspace.deny[0]");
+    // Seeds ride the RAW bytes through the untouched control machinery (the
+    // dom-helper never reflects the value attribute into .value at mount --
+    // the attribute is the seam here, exactly like the existing pins).
+    expect((el0.querySelector(".settings-edit-input") as unknown as HTMLElement).getAttribute("value")).toBe("dist");
+    const x = removeBtnsIn(el0)[0]!;
+    expect(x.getAttribute("aria-label")).toBe("Remove workspace.deny[0]");
+    // ONE click, no confirm: the frame decision rides immediately.
+    x.click();
+    expect(removed).toEqual(["workspace.deny[0]"]);
+    expect(root.textContent).not.toContain("Confirm");
+    // Every element row carries its own x (both deny rows).
+    expect(removeBtnsIn(rowForKey(root, "workspace.deny[1]"))).toHaveLength(1);
+    // The integer element got the stepper, the boolean the toggle, the enum
+    // the dropdown -- unchanged SettingsControl, no re-routing.
+    expect(rowForKey(root, "workspace.ports[0]").querySelector(".settings-stepper")).toBeTruthy();
+    expect(rowForKey(root, "workspace.flags[0]").querySelector(".settings-toggle")).toBeTruthy();
+    expect(rowForKey(root, "workspace.modes[0]").querySelector(".settings-select-input")).toBeTruthy();
+  });
+
+  it("empty chrome array: header + add only, zero element rows", () => {
+    const root = renderPanel(LISTS_SNAP);
+    const block = listBlock(root, "workspace.tags");
+    expect(block.querySelector(".settings-list-count")!.textContent).toBe("0 elements");
+    expect(blockRows(block)).toHaveLength(0);
+    expect(addBtnIn(block)).toBeTruthy();
+  });
+
+  it("writeOnly elements: REPLACE box with ZERO bytes in the DOM, x still there", () => {
+    const root = renderPanel(LISTS_SNAP);
+    const block = listBlock(root, "workspace.tokens");
+    const el = blockRows(block)[0]!;
+    const box = el.querySelector(".settings-edit-secret") as unknown as HTMLElement;
+    expect(box).toBeTruthy();
+    expect(box.getAttribute("type")).toBe("password");
+    expect(box.getAttribute("value")).toBe("");
+    // No element byte anywhere in the panel (the hostile resolved slot included).
+    expect(root.textContent).not.toContain(LIST_SECRET);
+    for (const node of Array.from(root.querySelectorAll("*")) as unknown as HTMLElement[]) {
+      for (const attr of ["value", "placeholder", "title", "aria-label"]) {
+        const v = node.getAttribute(attr);
+        expect(v === null || !v.includes(LIST_SECRET)).toBe(true);
+      }
+    }
+    // The count rides; the header never dumps. And x still removes a secret
+    // element (the frame carries only the keyPath).
+    expect(block.querySelector(".settings-list-count")!.textContent).toBe("1 element");
+    expect(removeBtnsIn(el)).toHaveLength(1);
+  });
+
+  it("+ opens a TYPED inline field per element stamp (text/number/enum/bool/secret)", () => {
+    const root = renderPanel(LISTS_SNAP, { addingList: "workspace.deny" });
+    const deny = listBlock(root, "workspace.deny");
+    const input = deny.querySelector(".settings-list-add-input") as unknown as HTMLElement;
+    expect(input).toBeTruthy();
+    expect(input.getAttribute("type")).toBe("text");
+    expect((Array.from(deny.querySelectorAll(".settings-list-add-go")) as unknown as HTMLElement[])).toHaveLength(1);
+
+    const num = renderPanel(LISTS_SNAP, { addingList: "workspace.ports" });
+    expect((listBlock(num, "workspace.ports").querySelector(".settings-list-add-input") as unknown as HTMLElement).getAttribute("type")).toBe("number");
+
+    const en = renderPanel(LISTS_SNAP, { addingList: "workspace.modes" });
+    const sel = en.querySelectorAll("select.settings-list-add-input")[0] as unknown as HTMLElement;
+    const opts = Array.from(sel.querySelectorAll("option")).map((o) => (o as unknown as HTMLElement).textContent);
+    expect(opts).toEqual(["fast", "balanced", "thorough"]); // EXACTLY the enum set
+
+    const bool = renderPanel(LISTS_SNAP, { addingList: "workspace.flags" });
+    const bsel = bool.querySelectorAll("select.settings-list-add-input")[0] as unknown as HTMLElement;
+    expect(Array.from(bsel.querySelectorAll("option")).map((o) => (o as unknown as HTMLElement).textContent)).toEqual(["true", "false"]);
+
+    const secret = renderPanel(LISTS_SNAP, { addingList: "workspace.tokens" });
+    expect((listBlock(secret, "workspace.tokens").querySelector(".settings-list-add-input") as unknown as HTMLElement).getAttribute("type")).toBe("password");
+  });
+
+  it("+ commit reports the raw text WITH the element stamp; Cancel is pure", () => {
+    const commits: Array<[string, string, ConfigKeyEditWire | undefined]> = [];
+    let cancels = 0;
+    const root = renderPanel(LISTS_SNAP, {
+      addingList: "workspace.deny",
+      onListAddCommit: (k, raw, edit) => commits.push([k, raw, edit]),
+      onListAddCancel: () => cancels++,
+    });
+    const block = listBlock(root, "workspace.deny");
+    const input = block.querySelector(".settings-list-add-input") as unknown as HTMLElement & { value: string };
+    input.value = "node_modules";
+    (Array.from(block.querySelectorAll(".settings-list-add-go")) as unknown as HTMLElement[])[0]!.click();
+    expect(commits).toEqual([["workspace.deny", "node_modules", { type: "string" }]]);
+    // The element stamp rides (the FIRST shipped element row's edit) -- the
+    // app parses the typed value with it.
+    (Array.from(block.querySelectorAll(".settings-btn")).find((b) => (b as unknown as HTMLElement).textContent === "Cancel") as unknown as HTMLElement).click();
+    expect(cancels).toBe(1);
+  });
+
+  it("busy (one list op in flight) disables every x and + in every block", () => {
+    const root = renderPanel(LISTS_SNAP, { listBusy: true });
+    for (const x of removeBtnsIn(root)) expect(x.hasAttribute("disabled")).toBe(true);
+    const adds = Array.from(root.querySelectorAll(".settings-list-add-btn")) as unknown as HTMLElement[];
+    expect(adds.length).toBeGreaterThan(0);
+    for (const a of adds) expect(a.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("a refusal renders VERBATIM under the owning block only", () => {
+    const root = renderPanel(LISTS_SNAP, { listError: { key: "workspace.deny", message: '"workspace.deny" holds string elements -- appending a number would mix types' } });
+    expect(listBlock(root, "workspace.deny").querySelector(".settings-list-error")!.textContent).toContain("would mix types");
+    expect(listBlock(root, "workspace.ports").querySelector(".settings-list-error")).toBeNull();
+  });
+
+  it("Escape with an open add field cancels FIRST (zero wire, dialog stays)", () => {
+    let closes = 0;
+    let cancels = 0;
+    const root = renderPanel(LISTS_SNAP, { addingList: "workspace.deny", onClose: () => closes++, onListAddCancel: () => cancels++ });
+    (root as unknown as HTMLElement).dispatchEvent({ type: "keydown", key: "Escape", currentTarget: root } as unknown as Event);
+    expect(cancels).toBe(1);
+    expect(closes).toBe(0);
+  });
+
+  it("click-away cancels an open add; a click inside the affordance does not", () => {
+    let cancels = 0;
+    const root = renderPanel(LISTS_SNAP, { addingList: "workspace.deny", onListAddCancel: () => cancels++ });
+    const inside = listBlock(root, "workspace.deny").querySelector(".settings-list-add-row")!;
+    root.dispatchEvent({ type: "mousedown", target: inside } as unknown as Event);
+    expect(cancels).toBe(0);
+    root.dispatchEvent({ type: "mousedown", target: root.querySelector(".settings-search") } as unknown as Event);
+    expect(cancels).toBe(1);
+  });
+
+  it("search: chrome renders HEADING form (never a dump), elements stay editable WITH x", () => {
+    const root = renderPanel(LISTS_SNAP, { query: "deny" });
+    // The chrome matched (key AND description) -> heading form: label + path.
+    const head = root.querySelector(".settings-list-chrome-heading") as unknown as HTMLElement;
+    expect(head).toBeTruthy();
+    expect(head.getAttribute("data-key")).toBe("workspace.deny");
+    expect(head.textContent).toContain("workspace.deny");
+    // No flattened dump anywhere in the search pane.
+    expect(root.textContent).not.toContain("dist, build");
+    // Element rows are matched searchable units: each keeps its control + x.
+    const hit = rows(root).map((r) => r.getAttribute("data-key"));
+    expect(hit).toContain("workspace.deny[0]");
+    expect(hit).toContain("workspace.deny[1]");
+    for (const k of ["workspace.deny[0]", "workspace.deny[1]"]) {
+      expect(removeBtnsIn(rowForKey(root, k))).toHaveLength(1);
+    }
+    // A description-only match surfaces the HEADING alone (no dump, no rows).
+    const g = renderPanel(LISTS_SNAP, { query: "globs" });
+    expect((g.querySelector(".settings-list-chrome-heading") as unknown as HTMLElement).getAttribute("data-key")).toBe("workspace.deny");
+    expect(rows(g).filter((r) => (r.getAttribute("data-key") ?? "").startsWith("workspace.deny["))).toHaveLength(0);
+    // The rail agrees with the chrome doctrine: a heading-ONLY match claims
+    // zero units, so the search rail carries no Workspace entry (the same
+    // "chrome never counts" rule pinned for the providers heading).
+    const railCats = Array.from(g.querySelectorAll(".settings-cat")) as unknown as HTMLElement[];
+    expect(railCats.map((c) => c.querySelector(".settings-cat-title")!.textContent)).toEqual(["All settings"]);
+    expect(railCats.map((c) => c.querySelector(".settings-cat-count")!.textContent)).toEqual(["0"]);
+  });
+
+  it("a 450-element truncated snapshot renders promptly with the header + add intact", () => {
+    const rows450: ConfigKeyEntryWire[] = [
+      { key: "workspace.deny", description: "Denied path globs", arrayChrome: true, file: Array.from({ length: 450 }, (_, i) => `p${i}`) },
+      ...Array.from({ length: 450 }, (_, i) => ({
+        key: `workspace.deny[${i}]`,
+        file: `p${i}`,
+        edit: { type: "string" as const },
+      })),
+    ];
+    const root = renderPanel({ ...LISTS_SNAP, truncated: true, sections: [{ name: "workspace", rows: rows450 }] });
+    // Completes (no hang) -- the header is present, the + survives the cut,
+    // and the honest truncation notice attests it.
+    const block = listBlock(root, "workspace.deny");
+    expect(block).toBeTruthy();
+    expect(blockRows(block)).toHaveLength(450);
+    expect(addBtnIn(block)).toBeTruthy();
+    expect(root.textContent).toContain("List truncated");
+  });
+});
+
+// ── Provider-card list blocks (chrome inside the card) ───────────────────────
+// Inside a provider card, a chrome'd field (providers[0].models and its
+// element rows, landing in the card fields via splitProviderRows) uses the
+// SAME list block component: models never renders as a dump row. The card's
+// two-step Remove and the section's "+ Add provider" keep their doctrine.
+
+describe("provider card list blocks", () => {
+  const PROV_MODELS: ConfigSnapshotResultWire = {
+    type: "configSnapshotResult",
+    ts: 1700000000000,
+    configDir: "/home/u/.config/hotdog",
+    files: [{ path: "/home/u/.config/hotdog/defaults.json", inUse: true, status: "ok" }],
+    findings: [],
+    sections: [
+      {
+        name: "providers",
+        rows: [
+          { key: "providers", description: "Model providers", file: [{ name: "p1" }] },
+          { key: "providers[0]", description: "Provider entry", file: { name: "p1", url: "http://a/v1" } },
+          { key: "providers[0].url", description: "Provider base URL", file: "http://a/v1", edit: { type: "string" } },
+          { key: "providers[0].models", description: "Models served by this provider", arrayChrome: true, file: ["m1", "m2"] },
+          { key: "providers[0].models[0]", file: "m1", edit: { type: "string" } },
+          { key: "providers[0].models[1]", file: "m2", edit: { type: "string" } },
+        ],
+      },
+    ],
+  };
+
+  it("models renders as a list block inside the card: per-model x + ONE +", () => {
+    const root = renderPanel(PROV_MODELS);
+    const card = providerCard(root, "providers[0]");
+    // Same component as everywhere: chrome header (no dump), element rows, add.
+    const block = listBlock(card, "providers[0].models");
+    expect(block).toBeTruthy();
+    expect(card.textContent).not.toContain("m1, m2");
+    expect(blockRows(block).map((r) => r.getAttribute("data-key"))).toEqual(["providers[0].models[0]", "providers[0].models[1]"]);
+    expect(removeBtnsIn(block)).toHaveLength(2); // one x per model
+    expect((Array.from(block.querySelectorAll(".settings-list-add-btn")) as unknown as HTMLElement[])).toHaveLength(1);
+    // The card's own two-step Remove + the section's "+ Add provider" are the
+    // PROVIDER list's affordances -- unchanged doctrine, separate from models.
+    expect(card.querySelector(".settings-provider-remove")).toBeTruthy();
+    const addProvider = (Array.from(root.querySelectorAll(".settings-btn")) as unknown as HTMLElement[]).find(
+      (b) => b.textContent === "+ Add provider",
+    );
+    expect(addProvider).toBeTruthy();
+    // url stays a plain field row (not swallowed into a list).
+    expect(rowIn(card, "providers[0].url")).toBeTruthy();
+    // The sweep keeps faith: every shipped row renders exactly once (chrome
+    // via the block header, models elements via their rows).
+    const allKeys = PROV_MODELS.sections[0]!.rows.map((r) => r.key);
+    const domKeys = (Array.from(root.querySelectorAll(".settings-row, .settings-list-block, .settings-providers-heading, .settings-provider-card")) as unknown as HTMLElement[])
+      .map((el) => el.getAttribute("data-key"))
+      .filter((k): k is string => k !== null && allKeys.includes(k));
+    for (const k of allKeys) expect(domKeys.filter((d) => d === k)).toHaveLength(1);
+  });
+});
+
 describe("settings panel state", () => {
   it("open re-fetches: pending, no stale snapshot, fresh id", () => {
     const opened = openSettingsPanel(initialSettingsPanelState);
@@ -1299,9 +1703,9 @@ describe("settings panel state", () => {
       editedKeys: [],
       query: "",
       category: null,
-      addingProvider: false,
+      addingList: null,
       confirmRemoveKey: null,
-      providerListError: null,
+      listError: null,
       pendingList: null,
       queuedList: [],
       listReqId: 0,

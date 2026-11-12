@@ -56,15 +56,18 @@ import {
   applySetConfigReply,
   setSettingsQuery,
   setSettingsCategory,
-  startProviderAdd,
-  cancelProviderAdd,
+  startListAdd,
+  cancelListAdd,
   armProviderRemove,
   cancelProviderRemove,
-  requestProviderListOp,
+  requestListOp,
   applyListOpReply,
-  flushProviderList,
+  flushListOp,
+  parseListAddValue,
+  rejectListAdd,
   clearProviderFocus,
   type SettingsPanelState,
+  type ListOpSend,
 } from "./settings-view.tsx";
 import { createCoalescer } from "./batch.ts";
 import { audioBlobToWav } from "./wav.ts";
@@ -393,41 +396,97 @@ function onSetConfigKey(requestId: number | undefined, result: SetConfigKeyResul
   if (drained.send) chat?.setConfigKey(drained.send.reqId, drained.send.key, drained.send.payload);
 }
 
-// ── Provider cards: add / remove (owner 2026-11-11) ──────────────────────────
-// The card's Add / two-step Remove drive the additive editConfigList pair. A
-// list op obeys the one-op-in-flight doctrine (requestProviderListOp queues on
-// a busy path). On success the snapshot is RE-READ (the file is the truth); on
-// refusal the server text renders verbatim under the add affordance.
+// ── List ops: array add / remove + provider cards (owner 2026-11-11) ────────
+// The provider cards' Add / two-step Remove and every chrome'd list block's
+// + / one-click x drive the additive editConfigList pair. A list op obeys the
+// one-op-in-flight doctrine (requestListOp queues on a busy path). On success
+// the snapshot is RE-READ (the file is the truth -- rows are never patched
+// locally); on refusal the server text renders verbatim under the owning
+// block's affordance.
+
+const PROVIDERS_KEY = "providers";
 
 /** Send a requested list op (append/remove) if the pure state decided to fire
- *  it (nothing in flight). Empty/whitespace names never reach here as a send --
- *  requestProviderListOp refuses them locally with zero wire traffic. */
-function sendProviderListOp(send: { reqId: number; op: "append" | "remove"; keyPath: string; name?: string; index?: number } | null): void {
+ *  it (nothing in flight). Empty/whitespace input never reaches here as a
+ *  send -- the local refusals (provider name, typed add parse) keep the wire
+ *  silent. Each field rides the frame only when defined (chat.editConfigList). */
+function sendListOp(send: ListOpSend | null): void {
   if (!send) return;
-  chat?.editConfigList(send.reqId, send.keyPath, send.op, send.name, send.index);
+  chat?.editConfigList(send.reqId, send.keyPath, send.op, send.name, send.index, send.value);
 }
 
-function providerAddStart(): void {
-  settingsAtom(startProviderAdd(settingsAtom()));
+/** Open a list block's inline add field. Providers keep their name-field
+ *  idiom; every other list gets the typed field ON THE HEADER, focused via
+ *  the attribute walk (a keyPath is user data full of dots/brackets -- no
+ *  selector is ever built from it). */
+function listAddStart(keyPath: string): void {
+  settingsAtom(startListAdd(settingsAtom(), keyPath));
   queueMicrotask(() => {
-    (settingsRootEl?.querySelector(".settings-provider-add-input") as HTMLElement | null)?.focus();
+    if (keyPath === PROVIDERS_KEY) {
+      (settingsRootEl?.querySelector(".settings-provider-add-input") as HTMLElement | null)?.focus();
+      return;
+    }
+    const field = findSettingsNodeByDataKey("settings-list-block", keyPath)?.querySelector(".settings-list-add-input");
+    focusRevealed((field as HTMLElement | null) ?? null);
   });
 }
 
-function providerAddCommit(name: string): void {
-  const r = requestProviderListOp(settingsAtom(), "append", "providers", { name });
+/** Commit an open add field. Providers keep the NAME shape (their elements
+ *  are objects); every other list ships the TYPED scalar parsed from the
+ *  list's element stamp -- unparseable/off-kind/empty input is refused LOCALLY
+ *  with honest text and zero wire traffic (the field stays open for a fix). */
+function listAddCommit(keyPath: string, raw: string, edit?: ConfigKeyEditWire): void {
+  if (keyPath === PROVIDERS_KEY) {
+    const r = requestListOp(settingsAtom(), "append", PROVIDERS_KEY, { name: raw });
+    settingsAtom(r.state);
+    sendListOp(r.send);
+    return;
+  }
+  const parsed = parseListAddValue(edit, raw);
+  if (!parsed.ok) {
+    settingsAtom(rejectListAdd(settingsAtom(), keyPath, parsed.error));
+    return;
+  }
+  const r = requestListOp(settingsAtom(), "append", keyPath, { value: parsed.value });
   settingsAtom(r.state);
-  sendProviderListOp(r.send);
+  sendListOp(r.send);
 }
 
-function providerAddCancel(): void {
-  settingsAtom(cancelProviderAdd(settingsAtom()));
+/** Cancel / Escape on an open add field (provider or generic): pure client
+ *  state, zero wire traffic. Cancel destroys the focused field (the
+ *  affordance re-renders as the + button), so hand focus back to the + the
+ *  re-render just created -- the cancelSettingsEditRow doctrine; without it
+ *  the browser drops focus to body and Tab restarts from the top.
+ *  refocusStranded (not focusRevealed): a click-away that landed on a live
+ *  control already moved focus; this never steals it back. */
+function listAddCancel(): void {
+  const keyPath = settingsAtom().addingList;
+  settingsAtom(cancelListAdd(settingsAtom()));
+  if (keyPath === null) return;
+  queueMicrotask(() => {
+    const btn =
+      keyPath === PROVIDERS_KEY
+        ? (settingsRootEl?.querySelector(".settings-provider-add-btn") ?? null)
+        : (findSettingsNodeByDataKey("settings-list-block", keyPath)?.querySelector(".settings-list-add-btn") ?? null);
+    refocusStranded(btn as HTMLElement | null);
+  });
 }
 
-/** Remove clicked: arm the two-step confirm. The arm REPLACES the focused
- *  Remove button with the confirm pair (positional diff, different tags), so
- *  focus would drop to body exactly like the JSON reveal did -- hand it to
- *  the Confirm control the render just created. */
+/** One-click x on a list ELEMENT row: the remove frame for THAT index rides
+ *  immediately (the index lives IN the keyPath; duplicates address by
+ *  occurrence). Whole-provider deletion is NOT this path -- the card keeps
+ *  its two-step confirm below. */
+function listElementRemove(elementKey: string): void {
+  const r = requestListOp(settingsAtom(), "remove", elementKey);
+  settingsAtom(r.state);
+  sendListOp(r.send);
+}
+
+/** Arm the two-step Remove on a provider card (whole-block delete keeps its
+ *  confirm -- single-click x is for list elements only). The arm REPLACES the
+ *  focused Remove button with the confirm pair (positional diff, different
+ *  tags), so focus would drop to body exactly like the JSON reveal did --
+ *  hand it to the Confirm control the render just created. */
 function providerRemoveArm(cardKey: string, _index: number, _name: string): void {
   settingsAtom(armProviderRemove(settingsAtom(), cardKey));
   queueMicrotask(() => {
@@ -439,9 +498,9 @@ function providerRemoveArm(cardKey: string, _index: number, _name: string): void
 }
 
 function providerRemoveConfirm(index: number, _name: string): void {
-  const r = requestProviderListOp(settingsAtom(), "remove", `providers[${index}]`, { index });
+  const r = requestListOp(settingsAtom(), "remove", `providers[${index}]`, { index });
   settingsAtom(r.state);
-  sendProviderListOp(r.send);
+  sendListOp(r.send);
 }
 
 /** Disarm (Cancel button / Escape / click-away): the confirm pair is
@@ -463,14 +522,14 @@ function providerRemoveCancel(): void {
 /** editConfigList reply: stale ids drop in the pure state fn. ok folds
  *  needsRestart + (for an append) marks the new provider for focus; refusal
  *  renders verbatim. Then any queued list op drains, and a SUCCESS re-reads the
- *  snapshot so the card list reflects the file. */
+ *  snapshot so the list blocks (and the card list) reflect the file. */
 function onEditConfigList(requestId: number | undefined, result: EditConfigListResultWire): void {
   const settled = applyListOpReply(settingsAtom(), requestId, result);
-  const drained = flushProviderList(settled);
+  const drained = flushListOp(settled);
   settingsAtom(drained.state);
-  if (drained.send) sendProviderListOp(drained.send);
+  if (drained.send) sendListOp(drained.send);
   if (result.ok) {
-    // Re-read: the file changed; bring the card list (and the new card) current.
+    // Re-read: the file changed; bring the rows current (never patch locally).
     const next = refreshSettingsPanel(settingsAtom());
     settingsAtom(next);
     chat?.requestConfigSnapshot(next.reqId);
@@ -2329,14 +2388,15 @@ function App() {
             onEdit={startSettingsEditRow}
             onCancelEdit={cancelSettingsEditRow}
             onSaveEdit={saveSettingsEditRow}
-            addingProvider={settings.addingProvider}
+            addingList={settings.addingList}
             confirmRemoveKey={settings.confirmRemoveKey}
-            providerListError={settings.providerListError}
+            listError={settings.listError}
             listBusy={settings.pendingList !== null}
             focusProviderName={settings.focusProviderName}
-            onProviderAdd={providerAddStart}
-            onProviderAddCommit={providerAddCommit}
-            onProviderAddCancel={providerAddCancel}
+            onListAddStart={listAddStart}
+            onListAddCommit={listAddCommit}
+            onListAddCancel={listAddCancel}
+            onListRemove={listElementRemove}
             onProviderRemoveArm={providerRemoveArm}
             onProviderRemoveConfirm={providerRemoveConfirm}
             onProviderRemoveCancel={providerRemoveCancel}

@@ -135,13 +135,14 @@ function renderPanel(
     onCancelEdit?: () => void;
     onSaveEdit?: (key: string, raw: string, edit: ConfigKeyEditWire) => void;
     onClose?: () => void;
-    addingProvider?: boolean;
+    addingList?: string | null;
     confirmRemoveKey?: string | null;
-    providerListError?: string | null;
+    listError?: { key: string; message: string } | null;
     listBusy?: boolean;
-    onProviderAdd?: () => void;
-    onProviderAddCommit?: (name: string) => void;
-    onProviderAddCancel?: () => void;
+    onListAddStart?: (key: string) => void;
+    onListAddCommit?: (key: string, raw: string, edit?: ConfigKeyEditWire) => void;
+    onListAddCancel?: () => void;
+    onListRemove?: (elementKey: string) => void;
     onProviderRemoveArm?: (cardKey: string, index: number, name: string) => void;
     onProviderRemoveConfirm?: (index: number, name: string) => void;
     onProviderRemoveCancel?: () => void;
@@ -168,14 +169,15 @@ function renderPanel(
       onEdit={opts.onEdit ?? noop}
       onCancelEdit={opts.onCancelEdit ?? noop}
       onSaveEdit={opts.onSaveEdit ?? noop}
-      addingProvider={opts.addingProvider ?? false}
+      addingList={opts.addingList ?? null}
       confirmRemoveKey={opts.confirmRemoveKey ?? null}
-      providerListError={opts.providerListError ?? null}
+      listError={opts.listError ?? null}
       listBusy={opts.listBusy ?? false}
       focusProviderName={null}
-      onProviderAdd={opts.onProviderAdd ?? noop}
-      onProviderAddCommit={opts.onProviderAddCommit ?? noop}
-      onProviderAddCancel={opts.onProviderAddCancel ?? noop}
+      onListAddStart={opts.onListAddStart ?? noop}
+      onListAddCommit={opts.onListAddCommit ?? noop}
+      onListAddCancel={opts.onListAddCancel ?? noop}
+      onListRemove={opts.onListRemove ?? noop}
       onProviderRemoveArm={opts.onProviderRemoveArm ?? noop}
       onProviderRemoveConfirm={opts.onProviderRemoveConfirm ?? noop}
       onProviderRemoveCancel={opts.onProviderRemoveCancel ?? noop}

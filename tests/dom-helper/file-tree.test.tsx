@@ -17,7 +17,9 @@ import {
   applyListDir,
   filesTab,
   FILES_TAB_ID,
+  FILE_TREE_EXPANDED_STORAGE_KEY,
   type FileTreeState,
+  type TreeFetch,
 } from "@extensions/webui/ui/file-tree.tsx";
 import { WorkbenchPanel } from "@extensions/webui/ui/workbench.tsx";
 import { createWorkbenchStore } from "@extensions/webui/ui/workbench-state.ts";
@@ -54,7 +56,25 @@ function renderTree(props: Partial<Parameters<typeof FileTree>[0]> = {}): HTMLEl
 afterEach(() => {
   current?.unmount();
   current = null;
+  // Expansion memory: never leak a window.sessionStorage / localStorage stub
+  // into the next test (file-tree persists seeded state at emptyFileTree()).
+  const w = window as unknown as Record<string, unknown>;
+  delete w.sessionStorage;
+  delete w.localStorage;
 });
+
+// ── Storage stubs (chat.ts guard: the tree reads sessionStorage on window) ──
+
+/** Map-backed window.sessionStorage; returns the map for direct pinning. */
+function fakeSession(): Map<string, string> {
+  const map = new Map<string, string>();
+  (window as unknown as Record<string, unknown>).sessionStorage = {
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => void map.set(k, String(v)),
+    removeItem: (k: string) => void map.delete(k),
+  };
+  return map;
+}
 
 const text = (el: Element | null): string => el?.textContent ?? "";
 const click = (el: Element | null): void => (el as unknown as HTMLElement).click();
@@ -257,11 +277,31 @@ describe("file tree rendering", () => {
     expect(seen).toEqual(["contextmenu:/rootA", "keydown:/rootA"]);
   });
 
-  it("Refresh re-issues", () => {
+  it("Refresh: glyph-only button (title + aria-label carry it) re-issues", () => {
     let refreshes = 0;
     const root = renderTree({ onRefresh: () => refreshes++ });
-    click(root.querySelector(".ft-btn"));
+    const btn = root.querySelector(".file-reload-btn")!;
+    expect(text(btn)).toBe(""); // glyph-only: no text label
+    expect(btn.getAttribute("aria-label")).toBe("Refresh");
+    expect(btn.getAttribute("title")).toBe("Re-list the roots and every expanded directory");
+    expect(btn.querySelector(".file-reload-glyph[aria-hidden='true']")).toBeTruthy();
+    click(btn);
     expect(refreshes).toBe(1);
+  });
+
+  it("the Refresh click drives the exact same frames: roots + every expanded dir, fresh ids", () => {
+    let s = treeWith({ expanded: { "/rootA/sub": true } });
+    let frames: TreeFetch[] = [];
+    const root = renderTree({
+      tree: s,
+      onRefresh: () => {
+        const r = openFileTree(s);
+        s = r.state;
+        frames = r.fetches;
+      },
+    });
+    click(root.querySelector(".file-reload-btn"));
+    expect(frames).toEqual([{ requestId: 1 }, { requestId: 2, path: "/rootA/sub" }]);
   });
 });
 
@@ -338,5 +378,111 @@ describe("file tabs on the workbench", () => {
     store.activate("/rootA/a.txt");
     const host3 = panelHarness(store);
     expect(host3.querySelector(".file-view")).toBeTruthy();
+  });
+});
+
+// ── Expansion memory (sessionStorage, per tab) ──────────────────────────────
+
+describe("file tree expansion memory", () => {
+  it("no stored key: the tree starts flat and the open issues the roots frame only", () => {
+    expect(emptyFileTree().expanded).toEqual({});
+    const { fetches } = openFileTree(emptyFileTree());
+    expect(fetches).toEqual([{ requestId: 1 }]);
+  });
+
+  it("expand persists sorted; reconstructing the state restores it and the re-request machinery lists it", () => {
+    const map = fakeSession();
+    const s0 = treeWith({ roots: { status: "ok", entries: [{ name: "rootB", path: "/rootB" }, { name: "rootA", path: "/rootA" }] } });
+    const s1 = toggleDir(s0, "/rootB").state; // expansion order: /rootB first...
+    toggleDir(s1, "/rootA"); // ...but the stored set sorts
+    expect(JSON.parse(map.get(FILE_TREE_EXPANDED_STORAGE_KEY)!)).toEqual(["/rootA", "/rootB"]);
+    // Page reload: state constructed from the store, tree opened -> the ONE
+    // existing machinery (openFileTree) re-requests roots + both dirs.
+    expect(emptyFileTree().expanded).toEqual({ "/rootA": true, "/rootB": true });
+    const { fetches } = openFileTree(emptyFileTree());
+    expect(fetches).toEqual([
+      { requestId: 1 },
+      { requestId: 2, path: "/rootA" },
+      { requestId: 3, path: "/rootB" },
+    ]);
+  });
+
+  it("collapse persists; dropping the last path removes the key outright", () => {
+    const map = fakeSession();
+    const s1 = toggleDir(treeWith(), "/rootA/sub").state;
+    expect(JSON.parse(map.get(FILE_TREE_EXPANDED_STORAGE_KEY)!)).toEqual(["/rootA/sub"]);
+    toggleDir(s1, "/rootA/sub");
+    expect(map.has(FILE_TREE_EXPANDED_STORAGE_KEY)).toBe(false);
+  });
+
+  it("corrupt stored JSON starts flat; non-string entries drop out", () => {
+    const map = fakeSession();
+    map.set(FILE_TREE_EXPANDED_STORAGE_KEY, "{not json");
+    expect(emptyFileTree().expanded).toEqual({});
+    map.set(FILE_TREE_EXPANDED_STORAGE_KEY, JSON.stringify({ nope: true }));
+    expect(emptyFileTree().expanded).toEqual({});
+    map.set(FILE_TREE_EXPANDED_STORAGE_KEY, JSON.stringify(["/rootA", 7, null]));
+    expect(emptyFileTree().expanded).toEqual({ "/rootA": true });
+  });
+
+  it("a stored dir that no longer lists: the server's line renders under its row, collapsible; no hang", () => {
+    const map = fakeSession();
+    map.set(FILE_TREE_EXPANDED_STORAGE_KEY, JSON.stringify(["/rootA", "/rootA/gone"]));
+    const opened = openFileTree(emptyFileTree());
+    expect(opened.fetches).toEqual([
+      { requestId: 1 },
+      { requestId: 2, path: "/rootA" },
+      { requestId: 3, path: "/rootA/gone" },
+    ]);
+    let s = applyListDir(opened.state, 1, { type: "listDirResult", requestId: 1, roots: [{ name: "rootA", path: "/rootA" }] });
+    s = applyListDir(s, 2, { type: "listDirResult", requestId: 2, path: "/rootA", entries: [entry("gone", true)] });
+    s = applyListDir(s, 3, { type: "listDirResult", requestId: 3, path: "/rootA/gone", error: "not found: /rootA/gone" });
+    expect(s.pending).toEqual({}); // every reply consumed: never a hang
+    expect(s.expanded["/rootA/gone"]).toBe(true); // the honest error posture stays
+    const root = renderTree({ tree: s });
+    expect(text(root.querySelector(".ft-error"))).toBe("not found: /rootA/gone");
+    // Collapsing the error row drops it from the set on the next persist.
+    const { state: s2 } = toggleDir(s, "/rootA/gone");
+    expect(JSON.parse(map.get(FILE_TREE_EXPANDED_STORAGE_KEY)!)).toEqual(["/rootA"]);
+    expect(s2.expanded["/rootA/gone"]).toBeUndefined();
+  });
+
+  it("a vanished root drops from the state on the roots reply and from the store on the next persist", () => {
+    const map = fakeSession();
+    map.set(FILE_TREE_EXPANDED_STORAGE_KEY, JSON.stringify(["/gone-root", "/gone-root/sub", "/rootA"]));
+    const opened = openFileTree(emptyFileTree());
+    let s = applyListDir(opened.state, 1, { type: "listDirResult", requestId: 1, roots: [{ name: "rootA", path: "/rootA" }] });
+    // Gone root AND its stored subpath leave the expanded map quietly...
+    expect(s.expanded).toEqual({ "/rootA": true });
+    // ...and the stale dir reply for the gone path cannot resurrect it.
+    s = applyListDir(s, 2, { type: "listDirResult", requestId: 2, path: "/gone-root", error: "not a workspace root" });
+    expect(s.expanded["/gone-root"]).toBeUndefined();
+    // The store catches up on the next persist: expanding a survivor writes
+    // exactly the live set (the gone paths are simply not there).
+    toggleDir(s, "/rootA/sub");
+    expect(JSON.parse(map.get(FILE_TREE_EXPANDED_STORAGE_KEY)!)).toEqual(["/rootA", "/rootA/sub"]);
+  });
+
+  it("roots are the authority: paths under a CURRENT root keep their expanded posture", () => {
+    fakeSession().set(FILE_TREE_EXPANDED_STORAGE_KEY, JSON.stringify(["/rootA", "/rootA/deep/deeper"]));
+    const opened = openFileTree(emptyFileTree());
+    const s = applyListDir(opened.state, 1, { type: "listDirResult", requestId: 1, roots: [{ name: "rootA", path: "/rootA/" }] });
+    // Trailing separator on the root path does not double up the prefix check.
+    expect(s.expanded).toEqual({ "/rootA": true, "/rootA/deep/deeper": true });
+  });
+
+  it("sessionStorage only: localStorage is never written", () => {
+    const calls: string[] = [];
+    (window as unknown as Record<string, unknown>).localStorage = {
+      getItem: () => void calls.push("get"),
+      setItem: () => void calls.push("set"),
+      removeItem: () => void calls.push("remove"),
+    };
+    fakeSession();
+    const s1 = toggleDir(emptyFileTree(), "/rootA").state;
+    toggleDir(s1, "/rootA");
+    emptyFileTree();
+    openFileTree(emptyFileTree());
+    expect(calls).toEqual([]);
   });
 });

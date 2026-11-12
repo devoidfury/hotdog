@@ -97,31 +97,40 @@ export class HandoffTool {
 // ── Extension Entry Point ──────────────────────────────────────────────────
 
 export function create(core: CoreContext): ExtensionInstance {
-  const config = getExtensionConfig<{
-    enabled?: boolean;
-    autoIncludeFilesUnderBytes?: number;
-  }>(core, "handoffTool");
+  // The boot gate ONLY (X/P1: false-at-boot means the extension does not
+  // exist; untouched). The one live knob, autoIncludeFilesUnderBytes, is read
+  // per handoff below -- nothing else from the block is captured here.
+  const config = getExtensionConfig<{ enabled?: boolean }>(core, "handoffTool");
 
   if (config.enabled === false) {
     return {};
   }
 
-  // The resolved config always carries the schema default from
-  // extension.json; fail loudly if it is missing or invalid rather than
-  // silently falling back to a second copy of the default here.
-  const rawAutoIncludeBytes = config.autoIncludeFilesUnderBytes;
-  if (
-    typeof rawAutoIncludeBytes !== "number" ||
-    !Number.isFinite(rawAutoIncludeBytes) ||
-    rawAutoIncludeBytes < 0
-  ) {
-    throw new ConfigError(
-      `handoffTool.autoIncludeFilesUnderBytes must be a non-negative number, got: ${String(rawAutoIncludeBytes)}`,
-    );
-  }
-  // Fresh const so the narrowed type (number) is visible inside the
-  // closures below, where the guard's narrowing does not carry over.
-  const autoIncludeBytes = rawAutoIncludeBytes;
+  // B6b (§4.1): autoIncludeFilesUnderBytes is read PER HANDOFF (at the point
+  // of use in collectFiles), no longer captured at create(). FAIL-LOUD
+  // doctrine kept, moved with the read: an invalid value REFUSES the
+  // file-carrying handoff with a ConfigError that surfaces as the TURN_END
+  // "Handoff error: ..." emission BEFORE any context is cleared -- never a
+  // silent default, never a zeroed feature (a handoff with no files uses no
+  // bytes limit and is untouched, honestly: the value is not consulted).
+  // The old boot-time throw is retired BY RULING of this migration (a
+  // captured boot value is exactly what §4.1 removes); a bad live write lands
+  // on the NEXT file-carrying handoff instead of at startup.
+  const resolveAutoIncludeBytes = (): number => {
+    const raw = getExtensionConfig<{ autoIncludeFilesUnderBytes?: number }>(
+      core,
+      "handoffTool",
+    ).autoIncludeFilesUnderBytes;
+    // The resolved config always carries the schema default from
+    // extension.json; fail loudly if it is missing or invalid rather than
+    // silently falling back to a second copy of the default here.
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
+      throw new ConfigError(
+        `handoffTool.autoIncludeFilesUnderBytes must be a non-negative number, got: ${String(raw)}`,
+      );
+    }
+    return raw;
+  };
 
   // Keyed by session id: the tool instance is shared across all sessions
   // (e.g. multiple webui clients), so pending handoffs must be namespaced.
@@ -138,6 +147,11 @@ export function create(core: CoreContext): ExtensionInstance {
     files: string[],
     workspace: Workspace,
   ): Promise<{ includes: Array<Record<string, unknown>>; notes: string[] }> {
+    // ONE per-handoff read (§4.1): the value the whole file pass enforces,
+    // resolved at use. An invalid published value throws ConfigError from
+    // here; the TURN_END catch renders it as the loud "Handoff error" line
+    // with the session and its context fully intact (refusal, not default).
+    const autoIncludeBytes = resolveAutoIncludeBytes();
     const includes: Array<Record<string, unknown>> = [];
     const notes: string[] = [];
     // Dedup by resolved path: the model can list the same file twice, or

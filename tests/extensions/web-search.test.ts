@@ -1,6 +1,8 @@
-import { describe, it, expect } from "bun:test";
-import { WebSearchTool, ddgSolveService } from "@extensions/web-search/index.ts";
+import { describe, it, expect, spyOn } from "bun:test";
+import { WebSearchTool, ddgSolveService, create as createWebSearchExtension } from "@extensions/web-search/index.ts";
 import { resultStr, withMockFetch, jsonResponse, textResponse } from "../helpers.ts";
+import { logger } from "@utils/logger.ts";
+import { bootLiveStore, publishLive, registerWithLiveStore } from "../mocks/config-live.ts";
 import { AssistantRetryableError } from "@core/error.ts";
 import { ServiceRegistry } from "@core/extensions/service-registry.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
@@ -559,5 +561,205 @@ describe("WebSearchTool SearXNG parser", () => {
     expect(resultStr(result)).toContain("SearXNG Result");
     expect(resultStr(result)).toContain("via SearXNG");
     });
+  });
+});
+
+// ── B6b: the live webSearch block moves the NEXT search (design §4.1, §5.2/§5.3) ──
+//
+// A REAL createConfigStore() drives the fake core's accessors (the createCore
+// shape, §1.2): one registration, publishes through adopt+swap+commit, and
+// provider/maxResults/timeout AND the keys/endpoint read from the CURRENT
+// generation at the next search (§5.2 row: per-search reads incl. secrets).
+// REDACTION doctrine UNCHANGED, pinned with canaries: the §5.3 change lines
+// name an endpoint HOST only and keys only as set/unset/changed -- a published
+// secret must never appear in any log line, however it moves.
+
+describe("B6b live webSearch block (store publishes, one registration)", () => {
+  const webResults = (n: number) => ({
+    web: {
+      results: Array.from({ length: n }, (_, i) => ({
+        title: `t${i}`,
+        url: `https://e.com/${i}`,
+        description: `d${i}`,
+      })),
+    },
+  });
+  const warnSpy = () => spyOn(logger, "warn").mockImplementation(() => {});
+  const liveLines = (spy: ReturnType<typeof warnSpy>): string[] =>
+    spy.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[config-live]"));
+
+  function braveTool() {
+    const store = bootLiveStore({
+      webSearch: {
+        provider: "brave",
+        maxResults: 3,
+        timeout: 15,
+        braveApiKey: "boot-key-1",
+        tavilyApiKey: "",
+        searxngInstanceUrl: "",
+      },
+    });
+    const tool = registerWithLiveStore(store, createWebSearchExtension, { services: new ServiceRegistry() }).get(
+      WebSearchTool.TOOL_NAME,
+    );
+    return { store, tool };
+  }
+
+  it("maxResults + provider: the NEXT search follows the published block; prior use answered old", async () => {
+    const { store, tool } = braveTool();
+    const urls: string[] = [];
+    await withMockFetch((url) => {
+      urls.push(String(url));
+      // Brave ships {web:{results}}, SearXNG ships {results} -- the real shapes.
+      return String(url).includes("searx")
+        ? jsonResponse({ results: Array.from({ length: 8 }, (_, i) => ({ title: `t${i}`, url: `https://e.com/${i}`, content: `d${i}` })) })
+        : jsonResponse(webResults(8));
+    }, async () => {
+      // Prior use answers boot: count=3 and a 3-slice.
+      const before = await tool.execute(JSON.stringify({ query: "hotdog" }));
+      expect(urls[0]).toContain("api.search.brave.com");
+      expect(urls[0]).toContain("count=3");
+      expect(before.metadata?.get("results")).toBe("3");
+
+      publishLive(store, {
+        webSearch: {
+          provider: "searxng",
+          maxResults: 5,
+          timeout: 15,
+          braveApiKey: "boot-key-1",
+          tavilyApiKey: "",
+          searxngInstanceUrl: "http://searx.local/search",
+        },
+      });
+      await tool.execute(JSON.stringify({ query: "hotdog" }));
+      expect(urls[1]).toContain("searx.local/search");
+      const after = await tool.execute(JSON.stringify({ query: "hotdog" }));
+      expect(after.metadata?.get("results")).toBe("5");
+    });
+  });
+
+  it("braveApiKey: the secret rides the NEXT request, the audit line carries ZERO key bytes (canary)", async () => {
+    const spy = warnSpy();
+    const CANARY = "BraveCanary-DO-NOT-LOG-9f3a";
+    try {
+      const store = bootLiveStore({
+        webSearch: {
+          provider: "brave",
+          maxResults: 3,
+          timeout: 15,
+          braveApiKey: "",
+          tavilyApiKey: "",
+          searxngInstanceUrl: "",
+        },
+      });
+      const tool = registerWithLiveStore(store, createWebSearchExtension, { services: new ServiceRegistry() }).get(
+        WebSearchTool.TOOL_NAME,
+      );
+
+      // Prior use answers old (unset): the honest "not configured" refusal.
+      const before = await tool.execute(JSON.stringify({ query: "hotdog" }));
+      expect(resultStr(before)).toContain("Brave API key not configured");
+
+      publishLive(store, {
+        webSearch: {
+          provider: "brave",
+          maxResults: 3,
+          timeout: 15,
+          braveApiKey: CANARY,
+          tavilyApiKey: "",
+          searxngInstanceUrl: "",
+        },
+      });
+      const sentTokens: string[] = [];
+      await withMockFetch((_url, opts) => {
+        sentTokens.push(String((opts?.headers as Record<string, string>)?.["X-Subscription-Token"]));
+        return jsonResponse(webResults(2));
+      }, async () => {
+        const after = await tool.execute(JSON.stringify({ query: "hotdog" }));
+        expect(after.isOk()).toBe(true);
+        // The per-search read proves itself: this request carries the canary.
+        expect(sentTokens).toEqual([CANARY]);
+
+        // And again: the change line fired ONCE for the change, not per search.
+        await tool.execute(JSON.stringify({ query: "hotdog again" }));
+      });
+
+      const lines = liveLines(spy);
+      expect(lines).toEqual(["[config-live] webSearch.braveApiKey: unset -> set"]);
+      // The whole captured log surface carries zero canary bytes.
+      expect(lines.join("\n")).not.toContain(CANARY);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("searxngInstanceUrl: the NEXT search hits the new host; the line names the HOST only", async () => {
+    const spy = warnSpy();
+    const PATH_SECRET = "pathKey-DO-NOT-LOG";
+    try {
+      const { store, tool } = braveTool();
+      publishLive(store, {
+        webSearch: {
+          provider: "searxng",
+          maxResults: 3,
+          timeout: 15,
+          braveApiKey: "",
+          tavilyApiKey: "",
+          searxngInstanceUrl: "http://old.example.org/search",
+        },
+      });
+      // First search SEEDS the baseline silently (the boot posture is not a
+      // change) -- even though the block changed since registration.
+      await tool.execute(JSON.stringify({ query: "seed" }));
+      expect(liveLines(spy)).toEqual([]);
+
+      const urls: string[] = [];
+      await withMockFetch((url) => {
+        urls.push(String(url));
+        return jsonResponse({ results: [] });
+      }, async () => {
+        await tool.execute(JSON.stringify({ query: "hotdog" }));
+        expect(urls[0]).toContain("old.example.org/search");
+
+        publishLive(store, {
+          webSearch: {
+            provider: "searxng",
+            maxResults: 3,
+            timeout: 15,
+            braveApiKey: "",
+            tavilyApiKey: "",
+            searxngInstanceUrl: `http://new.example.net:8888/search?k=${PATH_SECRET}`,
+          },
+        });
+        await tool.execute(JSON.stringify({ query: "hotdog" }));
+        // The NEXT search hit the new endpoint...
+        expect(urls[1]).toContain("new.example.net:8888");
+        // ...and the line printed host -> host, never the secret-shaped path.
+        expect(liveLines(spy)).toEqual([
+          "[config-live] webSearch.searxngInstanceUrl: old.example.org -> new.example.net:8888",
+        ]);
+        expect(liveLines(spy).join("\n")).not.toContain(PATH_SECRET);
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("static-scalar hosts stay pinned forever (no store behind them)", () => {
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
+    const store = bootLiveStore({
+      webSearch: { ...defaultWebSearchOptions, provider: "brave", maxResults: 100 },
+    });
+    publishLive(store, {
+      webSearch: { ...defaultWebSearchOptions, provider: "brave", maxResults: 100, braveApiKey: "x" },
+    });
+    expect(tool.provider).toBe("duckduckgo");
+    expect(tool.maxResults).toBe(5);
+    expect(tool.timeout).toBe(15);
+    expect(tool.braveApiKey).toBe("");
+    // The ctor clamps moved into the reads: scalar answers stay clamped.
+    const clamped = new WebSearchTool({ ...defaultWebSearchOptions, maxResults: 100, timeout: 0 });
+    expect(clamped.maxResults).toBe(10);
+    expect(clamped.timeout).toBe(1);
   });
 });

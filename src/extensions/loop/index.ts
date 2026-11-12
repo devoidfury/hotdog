@@ -12,13 +12,19 @@ interface LoopState {
 }
 
 export function create(core: CoreContext): ExtensionInstance {
-  const config = getExtensionConfig<{ enabled: boolean; maxLoops: number }>(core, "loop");
+  const config = getExtensionConfig<{ enabled: boolean }>(core, "loop");
 
   if (config.enabled === false) {
     return {};
   }
 
-  const maxLoops = config.maxLoops;
+  // B6b (§4.1): maxLoops is read at EACH loop check (the TURN_END cap test
+  // below), not captured here. P8's benign twin, pinned in tests: a loop
+  // already running its Nth lap is a turn enqueued under the cap in force
+  // when that lap count was evaluated -- a later lower write cannot reach
+  // into the running lap (nothing here cancels a live turn); the lap
+  // finishes, and the NEXT check answers with the current cap.
+  const block = () => getExtensionConfig<{ maxLoops: number }>(core, "loop");
 
   // Loop state keyed by agent session id. A shared tool/hook instance is
   // used across all sessions, so per-session state must be namespaced.
@@ -106,6 +112,10 @@ export function create(core: CoreContext): ExtensionInstance {
           return;
         }
 
+        // Read the cap at THIS check (§4.1): a published change lands on the
+        // next boundary, never mid-lap (P8 benign twin -- the running lap
+        // completes under the cap its count was evaluated against).
+        const maxLoops = block().maxLoops;
         if (maxLoops > 0 && loop.count >= maxLoops) {
           emit(agent, `Max loops (${maxLoops}) reached.`);
           loop.active = false;

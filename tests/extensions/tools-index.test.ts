@@ -7,10 +7,8 @@ import {
   create as createCoreToolsExtension,
 } from "@extensions/core-tools/index.ts";
 import { ToolRegistry } from "@core/extensions/tool-registry.ts";
-import { HOOKS } from "@core/hooks.ts";
-import { createConfigStore, type ConfigStore } from "@core/config/store.ts";
-import type { CoreConfigWithExtensions } from "@core/config/schema-loader.ts";
-import type { ResolvedConfig } from "@core/extensions/types.ts";
+import type { ConfigStore } from "@core/config/store.ts";
+import { bootLiveStore, publishLive, registerWithLiveStore } from "../mocks/config-live.ts";
 import { resultStr, tmpDir, toolCtx, cleanupDir } from "../helpers.ts";
 
 // Mirrors the configSchema defaults in core-tools/extension.json
@@ -264,39 +262,20 @@ describe("B6a live coreTools block (store publishes, one registration)", () => {
     cleanupDir(dir);
   });
 
+  // The boot/publish/register trio lives in tests/mocks/config-live.ts
+  // (shared with the bash-tool B6a suite and the B6b families). The whole
+  // block is rebuilt per publish (re-resolve semantics: fresh object, only
+  // the probed key differs).
   function bootStore(): ConfigStore {
-    const store = createConfigStore();
-    store.adopt({ coreTools: { ...config } } as CoreConfigWithExtensions);
-    return store;
+    return bootLiveStore({ coreTools: { ...config } });
   }
 
-  // The only publish shape the store allows: swap + its one-shot commit.
-  // The whole block is rebuilt per publish (re-resolve semantics: fresh
-  // object, only the probed key differs).
   function publish(store: ConfigStore, overrides: Record<string, unknown> = {}): void {
-    store.swap({
-      config: { coreTools: { ...config, ...overrides } } as CoreConfigWithExtensions,
-      resolved: {} as ResolvedConfig,
-    })();
+    publishLive(store, { coreTools: { ...config, ...overrides } });
   }
 
   function registerAll(store: ConfigStore): Map<string, any> {
-    const liveCore = {
-      get config() {
-        return store.current().config;
-      },
-      get resolved() {
-        return store.current().resolved;
-      },
-      configStore: store,
-    };
-    const tools = new Map<string, any>();
-    const registry = {
-      register: (name: string, tool: unknown) => tools.set(name, tool),
-      getAll: () => [],
-    };
-    createCoreToolsExtension(liveCore as any).hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
-    return tools;
+    return registerWithLiveStore(store, createCoreToolsExtension);
   }
 
   it("readToolLimit: the NEXT execute caps at the published value; prior use answered old", async () => {

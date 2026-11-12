@@ -13,6 +13,7 @@ import {
   describeLoop,
 } from "@extensions/loop-detect/detector.ts";
 import { HookSystem, HOOKS } from "@core/hooks.ts";
+import { bootLiveStore, publishLive, liveStoreCore } from "../mocks/config-live.ts";
 
 // ── Pure detector ───────────────────────────────────────────────────────────
 
@@ -466,5 +467,90 @@ describe("loop-detect extension", () => {
     }
     expect(detections).toHaveLength(0);
     expect(agent.cancelled).toBe(false);
+  });
+});
+
+// ── B6b: the live loopDetect block moves the NEXT turn (design §4.1) ──
+//
+// A REAL createConfigStore() drives the fake core's accessors (the createCore
+// shape, §1.2): both thresholds are read PER TURN and the history window is
+// DERIVED AT USE from the same turn's thresholds -- no cached window. Verdicts
+// are a pure function of (history tail, current thresholds): a publish
+// re-scores the existing streak at the next TOOL_RESULT and never rewrites
+// in-flight state. Static-mock cores (every suite above, unchanged) are the
+// pinned-host proof: a plain config bag answers the same values forever.
+
+describe("B6b live loopDetect thresholds (store publishes, per-turn reads)", () => {
+  function liveLoopDetect(loopDetect: Record<string, unknown>) {
+    const store = bootLiveStore({ loopDetect });
+    const core = liveStoreCore(store, { hooks: new HookSystem() }) as any;
+    const ext = createLoopDetect(core);
+    const agent = createMockAgent();
+    const detections: any[] = [];
+    core.hooks.on(HOOKS.LOOP_DETECTED, ((p: any) => detections.push(p)) as any);
+    return { store, ext, agent, detections };
+  }
+
+  it("repeatThreshold: the NEXT turn fires under the published threshold; prior turns answered old", async () => {
+    const { store, ext, agent, detections } = liveLoopDetect({
+      enabled: true,
+      repeatThreshold: 3,
+      pingPongThreshold: 4,
+    });
+
+    await feed(ext, agent, "read", '{"p":"a.txt"}');
+    await feed(ext, agent, "read", '{"p":"a.txt"}'); // streak 2 < 3 (old): silent
+    expect(detections).toHaveLength(0);
+
+    publishLive(store, {
+      loopDetect: { enabled: true, repeatThreshold: 2, pingPongThreshold: 4 },
+    });
+    await feed(ext, agent, "read", '{"p":"a.txt"}'); // streak 3 >= 2 (new): nudge
+    expect(detections).toHaveLength(1);
+    expect(detections[0]).toMatchObject({ level: 1, streak: 3, kind: "repeat" });
+    // The deferred notice rides the next CONTEXT pass exactly once.
+    expect(contextOf(ext, agent, [])?.messages).toHaveLength(1);
+    expect(contextOf(ext, agent, [])).toBeUndefined();
+  });
+
+  it("pingPongThreshold: the NEXT turn sees the published bar; the old bar would have stayed silent", async () => {
+    const { store, ext, agent, detections } = liveLoopDetect({
+      enabled: true,
+      repeatThreshold: 100,
+      pingPongThreshold: 8,
+    });
+
+    // A/B/A/B: alternation run 4 -- under the boot bar 8, silent.
+    await feed(ext, agent, "alpha");
+    await feed(ext, agent, "beta");
+    await feed(ext, agent, "alpha");
+    await feed(ext, agent, "beta");
+    expect(detections).toHaveLength(0);
+
+    publishLive(store, {
+      loopDetect: { enabled: true, repeatThreshold: 100, pingPongThreshold: 2 },
+    });
+    await feed(ext, agent, "alpha"); // run 5 >= new bar -> escalation
+    expect(detections).toHaveLength(1);
+    expect(detections[0]).toMatchObject({ kind: "ping_pong", streak: 5 });
+  });
+
+  it("window derived at use (no cached window): a raised bar can reach level 3 PAST the boot window", async () => {
+    const { store, ext, agent, detections } = liveLoopDetect({
+      enabled: true,
+      repeatThreshold: 4,
+      pingPongThreshold: 4,
+    });
+    // Boot window is 3*4=12. Raise the bar before any turn: the CURRENT
+    // window grows to 3*10=30. A window cached at boot would cap the streak
+    // at 12 and the stop band (3t=30) could NEVER fire.
+    publishLive(store, {
+      loopDetect: { enabled: true, repeatThreshold: 10, pingPongThreshold: 4 },
+    });
+
+    for (let i = 0; i < 30; i++) await feed(ext, agent, "read", '{"p":"a.txt"}');
+    expect(detections.map((d) => d.level)).toEqual([1, 2, 3]);
+    expect(agent.cancelled).toBe(true);
+    expect(agent.getEmitted().some((e) => e.content.includes("Run stopped."))).toBe(true);
   });
 });

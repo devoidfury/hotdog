@@ -82,12 +82,19 @@ export function create(core: CoreContext): ExtensionInstance {
     return {};
   }
 
-  // Both thresholds are schema-owned (extension.json defaults 3 and 4); the
-  // config layer merges them into the resolved block, so consume directly.
-  const repeatThreshold = config.repeatThreshold;
-  const pingPongThreshold = config.pingPongThreshold;
-  // Streaks longer than the stop band (3t) are all level 3; no need to remember more.
-  const window = 3 * Math.max(repeatThreshold, pingPongThreshold);
+  // B6b (§4.1): both thresholds are read PER TURN through the live block
+  // (schema-owned, extension.json defaults 3 and 4; the config layer merges
+  // them). The window is DERIVED AT USE from the same turn's thresholds --
+  // never a cached window. Streaks live in the tail of `history` and
+  // detectLoop is a pure function of (tail, current thresholds), so a
+  // threshold change RE-SCORES the existing history without ever rewriting
+  // it: an in-flight episode cannot be corrupted mid-streak by a publish, it
+  // just gets re-measured against the new bar at the next TOOL_RESULT. The
+  // trim uses the CURRENT window: a shrink drops oldest signatures on the
+  // next push (same newest-last history, less memory behind it), a growth
+  // extends the lookback -- the tail the streak was measured on is untouched
+  // either way.
+  const block = () => getExtensionConfig<LoopDetectConfig>(core, "loopDetect");
 
   const sessions = new Map<string, SessionState>();
 
@@ -106,8 +113,13 @@ export function create(core: CoreContext): ExtensionInstance {
         if (!agent || agent.isRestoring) return;
 
         const st = getState(agent.sessionId);
+        // Per-turn threshold reads + window derived at use (§4.1, above).
+        const repeatThreshold = block().repeatThreshold;
+        const pingPongThreshold = block().pingPongThreshold;
+        // Streaks longer than the stop band (3t) are all level 3; no need to remember more.
+        const window = 3 * Math.max(repeatThreshold, pingPongThreshold);
         st.history.push(callSignature(toolName, input, resultDigest(success, result)));
-        if (st.history.length > window) st.history.shift();
+        if (st.history.length > window) st.history.splice(0, st.history.length - window);
 
         const verdict = detectLoop(st.history, { repeatThreshold, pingPongThreshold });
         if (!verdict) {

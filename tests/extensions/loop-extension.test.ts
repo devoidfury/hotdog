@@ -7,6 +7,7 @@ import { ToolContext } from "@core/extensions/tool-context.ts";
 import { contentToText } from "@core/context/message.ts";
 import { ACTIONS } from "@core/commands.ts";
 import type { Agent } from "@core/agent.ts";
+import { bootLiveStore, publishLive, liveStoreCore } from "../mocks/config-live.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -759,5 +760,81 @@ describe("Loop extension", () => {
       expect(afterResume).toHaveLength(3);
       expect(afterResume[2]).toBe("tick");
     });
+  });
+});
+
+// ── B6b: the live loop block moves the NEXT loop check (design §4.1, P8 twin) ──
+//
+// A REAL createConfigStore() drives the fake core's accessors (the createCore
+// shape, §1.2): maxLoops is read at EACH TURN_END cap test, so a published
+// change lands on the NEXT check in either direction. P8's benign twin is
+// pinned alongside: a loop already running its Nth lap is a turn enqueued
+// under the cap in force when that count was evaluated -- the write cannot
+// reach into the running lap (nothing here cancels a live turn); the lap
+// finishes and the stop happens at the boundary. The static-mock suites
+// above (unchanged) are the pinned-host proof.
+
+describe("B6b live loop maxLoops (store publishes, read at each check)", () => {
+  function liveLoop(maxLoops: number) {
+    const store = bootLiveStore({ loop: { enabled: true, maxLoops } });
+    const core = liveStoreCore(store);
+    const ext = createLoopExtension(core as any);
+    const registry = createCommandRegistry();
+    const agent = createMockAgent();
+    ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
+    registry.get("loop")!.handler!(agent as unknown as Agent, "loop test");
+    const turnEnd = () =>
+      ext.hooks![HOOKS.TURN_END]!(turnEndPayload({ stopped: true, agent: agent as any }));
+    const laps = () => agent.getEnqueued().filter((t: string) => t === "test").length;
+    return { store, ext, agent, turnEnd, laps };
+  }
+
+  it("a tightened cap stops the loop at the NEXT check; earlier checks answered old", async () => {
+    const { store, agent, turnEnd, laps } = liveLoop(5);
+
+    await turnEnd(); // count 0 -> 1 (old cap 5: keep looping)
+    await turnEnd(); // count 1 -> 2
+    expect(laps()).toBe(3); // initial + two re-enqueues
+    expect(agent.getEmitted().some((e) => e.content?.includes("Max loops"))).toBe(false);
+
+    publishLive(store, { loop: { enabled: true, maxLoops: 2 } });
+    await turnEnd(); // count 2 >= 2 (new cap): stop at the boundary
+    expect(agent.getEmitted().some((e) => e.content?.includes("Max loops (2) reached"))).toBe(true);
+    expect(laps()).toBe(3); // no re-enqueue after the stop
+    await turnEnd();
+    expect(laps()).toBe(3);
+  });
+
+  it("a loosened cap keeps the loop running where the old cap would have stopped it", async () => {
+    const { store, agent, turnEnd, laps } = liveLoop(1);
+
+    await turnEnd(); // count 0 < 1 -> lap 2 enqueues
+    publishLive(store, { loop: { enabled: true, maxLoops: 2 } });
+    await turnEnd(); // count 1 < 2 (new cap): the OLD cap 1 would have stopped here
+    expect(agent.getEmitted().some((e) => e.content?.includes("Max loops"))).toBe(false);
+    expect(laps()).toBe(3);
+
+    await turnEnd(); // count 2 >= 2 -> stop
+    expect(agent.getEmitted().some((e) => e.content?.includes("Max loops (2) reached"))).toBe(true);
+  });
+
+  it("P8 benign twin: a write landing mid-lap never aborts the running lap", async () => {
+    const { store, agent, turnEnd, laps } = liveLoop(3);
+
+    await turnEnd(); // count 0 < 3 (cap at THIS check) -> lap 2 now RUNNING
+    expect(laps()).toBe(2);
+
+    // The operator tightens the cap WHILE lap 2 runs. Nothing here can reach
+    // into the live turn: no cancel fires, the lap finishes (its TURN_END is
+    // a normally completed turn), and only the NEXT boundary consults the
+    // new cap.
+    publishLive(store, { loop: { enabled: true, maxLoops: 1 } });
+    expect(agent.cancelled).toBe(false);
+    expect(agent.getEmitted().some((e) => e.content?.includes("Max loops"))).toBe(false);
+
+    await turnEnd(); // lap 2 completed; the check at its boundary reads the new cap
+    expect(agent.cancelled).toBe(false); // a clean stop, not a cancel
+    expect(agent.getEmitted().some((e) => e.content?.includes("Max loops (1) reached"))).toBe(true);
+    expect(laps()).toBe(2); // the running lap was the last one
   });
 });

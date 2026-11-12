@@ -9,6 +9,7 @@ import { HOOKS } from "@core/hooks.ts";
 import { ToolContext } from "@core/extensions/tool-context.ts";
 import { contentToText } from "@core/context/message.ts";
 import type { CoreContext } from "@core/extensions/types.ts";
+import { bootLiveStore, publishLive, createWithLiveStore } from "../mocks/config-live.ts";
 
 interface TestPayload {
   content: string;
@@ -655,23 +656,54 @@ describe("handoff auto-inline files", () => {
     expect(result.text).not.toContain("(300B)");
   });
 
-  it("throws ConfigError when autoIncludeFilesUnderBytes is missing or invalid", () => {
-    // The resolved config always carries the schema default from
-    // extension.json; without the registry the raw block is used as-is,
-    // so a missing or bad value must fail loudly in create().
-    expect(() =>
-      create({ config: { handoffTool: {} } } as unknown as CoreContext),
-    ).toThrow("autoIncludeFilesUnderBytes");
-    expect(() =>
-      create({
-        config: { handoffTool: { autoIncludeFilesUnderBytes: -1 } },
-      } as unknown as CoreContext),
-    ).toThrow("non-negative");
-    expect(() =>
-      create({
-        config: { handoffTool: { autoIncludeFilesUnderBytes: "24576" } },
-      } as unknown as CoreContext),
-    ).toThrow("non-negative");
+  it("invalid autoIncludeFilesUnderBytes REFUSES the next file-carrying handoff loudly (B6b use-time doctrine)", async () => {
+    // B6b (§4.1): the boot-time throw left with the boot-time capture; the
+    // fail-loud doctrine moved to the point of use. create() no longer
+    // throws; the file-carrying handoff fails at TURN_END with the
+    // ConfigError text BEFORE any context is cleared -- a refusal, never a
+    // silent default, never a zeroed feature (design §4.3 row + notes).
+    for (const handoffConfig of [{}, { autoIncludeFilesUnderBytes: -1 }, { autoIncludeFilesUnderBytes: "24576" }]) {
+      const ext = create({
+        config: { handoffTool: handoffConfig },
+      } as unknown as CoreContext);
+      const hooks = ext.hooks! as Record<string, unknown>;
+
+      let tool: HandoffTool | undefined;
+      const registry = {
+        register: (_name: string, t: unknown) => {
+          tool = t as HandoffTool;
+        },
+        getAll: () => [],
+      };
+      await (hooks[HOOKS.TOOLS_REGISTER] as Function)(registry);
+      await tool!.execute(
+        JSON.stringify({ content: "Plan", files: ["small.txt"] }),
+        null!,
+      );
+
+      const emitted: Array<{ type: string; data: unknown }> = [];
+      const agent = {
+        clearContext: vi.fn().mockResolvedValue(undefined),
+        ensureSystemPrompt: vi.fn().mockResolvedValue(undefined),
+        enqueue: vi.fn(),
+        emitOutput: (type: string, data: unknown) => emitted.push({ type, data }),
+        config: { workspaceRoots: [tmpDir] },
+      };
+      await (hooks[HOOKS.TURN_END] as Function)({
+        stopped: true,
+        cancelled: false,
+        agent,
+        toolResults: [{ toolName: "handoff", input: "{}", result: "ok" }],
+      });
+
+      expect(emitted).toHaveLength(1);
+      const content = String((emitted[0]!.data as { content: string }).content);
+      expect(content).toContain("Handoff error");
+      expect(content).toContain("autoIncludeFilesUnderBytes must be a non-negative number");
+      // Refusal, not partial apply: context untouched, nothing enqueued.
+      expect(agent.clearContext).not.toHaveBeenCalled();
+      expect(agent.enqueue).not.toHaveBeenCalled();
+    }
   });
 
   it("lists everything when autoIncludeFilesUnderBytes is 0", async () => {
@@ -754,5 +786,90 @@ describe("handoff auto-inline files", () => {
     );
 
     expect(includesOf(result)).toEqual([{ path: "small.txt", content: "hello world\n" }]);
+  });
+});
+
+// ── B6b: the live handoffTool block moves the NEXT handoff (design §4.1) ──
+//
+// A REAL createConfigStore() drives the fake core's accessors (the createCore
+// shape, §1.2): autoIncludeFilesUnderBytes is read PER HANDOFF inside
+// collectFiles, so a publish flips what the NEXT file-carrying handoff does
+// while prior handoffs answered the old cap. Fail-loud is per-handoff too:
+// an invalid published value REFUSES the next handoff (loud "Handoff error"
+// emission, context intact) and a later valid publish recovers it -- the
+// feature never latches off and never silently defaults.
+
+describe("B6b live handoffTool block (store publishes, per-handoff reads)", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "hotdog-handoff-live-"));
+    writeFileSync(join(tmp, "small.txt"), "hello world\n"); // 12B
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function liveExt(store: ReturnType<typeof bootLiveStore>) {
+    return createWithLiveStore(store, create);
+  }
+
+  async function drive(ext: ReturnType<typeof liveExt>["ext"], tool: HandoffTool, files: string[]) {
+    await tool.execute(JSON.stringify({ content: "Plan", files }), null!);
+    const enqueued: Array<Array<Record<string, unknown>>> = [];
+    const emitted: Array<{ type: string; data: unknown }> = [];
+    const agent = {
+      clearContext: vi.fn().mockResolvedValue(undefined),
+      ensureSystemPrompt: vi.fn().mockResolvedValue(undefined),
+      enqueue: (content: Array<Record<string, unknown>>) => enqueued.push(content),
+      emitOutput: (type: string, data: unknown) => emitted.push({ type, data }),
+      config: { workspaceRoots: [tmp] },
+    };
+    await (ext.hooks![HOOKS.TURN_END] as Function)({
+      stopped: true,
+      cancelled: false,
+      agent,
+      toolResults: [{ toolName: "handoff", input: "{}", result: "ok" }],
+    });
+    return { enqueued, emitted, agent };
+  }
+
+  it("autoIncludeFilesUnderBytes: the NEXT handoff enforces the published cap; prior handoff answered old", async () => {
+    const store = bootLiveStore({ handoffTool: { autoIncludeFilesUnderBytes: 100 } });
+    const { ext, tools } = liveExt(store);
+    const tool = tools.get("handoff") as HandoffTool;
+
+    const before = await drive(ext, tool, ["small.txt"]);
+    expect(before.enqueued).toHaveLength(1);
+    expect(before.enqueued[0]!.some((p) => p.type === "file-include")).toBe(true);
+
+    publishLive(store, { handoffTool: { autoIncludeFilesUnderBytes: 10 } });
+    const after = await drive(ext, tool, ["small.txt"]);
+    expect(after.enqueued).toHaveLength(1);
+    expect(after.enqueued[0]!.some((p) => p.type === "file-include")).toBe(false);
+    expect(contentToText(after.enqueued[0]!)).toContain("- small.txt (12B)");
+  });
+
+  it("a published invalid value refuses the NEXT handoff loudly, then a valid publish recovers it", async () => {
+    const store = bootLiveStore({ handoffTool: { autoIncludeFilesUnderBytes: 100 } });
+    const { ext, tools } = liveExt(store);
+    const tool = tools.get("handoff") as HandoffTool;
+
+    publishLive(store, { handoffTool: { autoIncludeFilesUnderBytes: -5 } });
+    const refused = await drive(ext, tool, ["small.txt"]);
+    expect(refused.emitted).toHaveLength(1);
+    const content = String((refused.emitted[0]!.data as { content: string }).content);
+    expect(content).toContain("Handoff error");
+    expect(content).toContain("autoIncludeFilesUnderBytes must be a non-negative number");
+    expect(refused.agent.clearContext).not.toHaveBeenCalled();
+    expect(refused.enqueued).toHaveLength(0);
+
+    // Per-handoff read: the very next handoff after a valid publish works
+    // again -- the bad value never latched a default or zeroed the feature.
+    publishLive(store, { handoffTool: { autoIncludeFilesUnderBytes: 100 } });
+    const recovered = await drive(ext, tool, ["small.txt"]);
+    expect(recovered.enqueued).toHaveLength(1);
+    expect(recovered.enqueued[0]!.some((p) => p.type === "file-include")).toBe(true);
   });
 });

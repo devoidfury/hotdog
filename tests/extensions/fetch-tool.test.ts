@@ -1,14 +1,17 @@
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
   FetchTool,
   isPrivateAddress,
   assertPublicHost,
+  create as createFetchExtension,
   fetchWithSafeRedirects,
 } from "@extensions/fetch-tool/index.ts";
 import { buildUnifiedSchema, resolveKey } from "@core/config/schema-loader.ts";
 import { TransientError } from "@core/error.ts";
-import { getDisplay } from "../helpers.ts";
+import { logger } from "@utils/logger.ts";
+import { getDisplay, resultStr, withMockFetch, textResponse } from "../helpers.ts";
+import { bootLiveStore, publishLive, registerWithLiveStore } from "../mocks/config-live.ts";
 
 // ── Local Test Server ──────────────────────────────────────────────────────
 
@@ -1131,5 +1134,175 @@ describe("allowPrivateHosts env layer (config schema)", () => {
     expect(resolved.maxBodyLength).toBe(20000);
     expect(resolved.fetchTimeoutMs).toBe(30000);
     expect(resolved.allowedSchemes).toEqual(["http", "https"]);
+  });
+});
+
+// ── B6b: the live fetchTool block moves the NEXT request (design §4.1, §5.2/§5.3) ──
+//
+// A REAL createConfigStore() drives the fake core's accessors (the createCore
+// shape, §1.2): the tool registers ONCE, publishes go through adopt+swap+
+// commit, and every migrated knob -- the caps AND the SSRF posture -- answers
+// from the CURRENT generation at the next request. The posture keys are the
+// §5.2 DANGER row RULED LIVE 2026-11-10: per-request reads with the §5.3
+// audit floor as the mitigation (one line per CHANGE seen at a request, never
+// per request). Static-scalar hosts (every suite above) stay pinned forever,
+// unchanged. The HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS env layer is resolved
+// INTO the block upstream (pinned unmodified in "allowPrivateHosts env layer"
+// above), so these per-request getExtensionConfig reads inherit it by
+// construction.
+
+describe("B6b live fetchTool block (store publishes, one registration)", () => {
+  // Mirrors the extension.json schema defaults the real block carries.
+  const bootBlock = (): Record<string, unknown> => ({
+    maxBodyLength: 8000,
+    maxImageSize: 10485760,
+    fetchTimeoutMs: 30000,
+    allowedSchemes: ["http", "https"],
+    allowPrivateHosts: true, // mock-hosted tests: keep the host gate off the network
+  });
+  const warnSpy = () => spyOn(logger, "warn").mockImplementation(() => {});
+  const liveLines = (spy: ReturnType<typeof warnSpy>): string[] =>
+    spy.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[config-live]"));
+
+  it("maxBodyLength: the NEXT request truncates at the published cap; prior use answered old", async () => {
+    const store = bootLiveStore({ fetchTool: bootBlock() });
+    const tool = registerWithLiveStore(store, createFetchExtension).get("fetch");
+    await withMockFetch(() => textResponse("x".repeat(100)), async () => {
+      const before = await tool.execute(JSON.stringify({ url: "http://8.8.8.8/a" }));
+      expect(String(before.output)).toBe("x".repeat(100));
+      expect(before.metadata?.get("truncated")).toBeUndefined();
+
+      publishLive(store, { fetchTool: { ...bootBlock(), maxBodyLength: 10 } });
+      const after = await tool.execute(JSON.stringify({ url: "http://8.8.8.8/a" }));
+      expect(String(after.output)).toBe("x".repeat(10));
+      expect(after.metadata?.get("truncated")).toBe("true");
+    });
+  });
+
+  it("fetchTimeoutMs: the NEXT request races the published timeout; prior use answered old", async () => {
+    const store = bootLiveStore({ fetchTool: bootBlock() });
+    const tool = registerWithLiveStore(store, createFetchExtension).get("fetch");
+    // Prior use answers the boot 30s cap: a fast mock settles with room to spare.
+    await withMockFetch(() => textResponse("done"), async () => {
+      const before = await tool.execute(JSON.stringify({ url: "http://8.8.8.8/fast" }));
+      expect(resultStr(before)).toBe("done");
+    });
+    publishLive(store, { fetchTool: { ...bootBlock(), fetchTimeoutMs: 1 } });
+    // A fetch that only settles when its abort signal fires (the 1ms cap).
+    const slowFetch = (_url: string, opts?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        opts?.signal?.addEventListener("abort", () => {
+          const err = new Error("timed out");
+          err.name = "TimeoutError";
+          reject(err);
+        });
+      });
+    await withMockFetch(slowFetch as never, async () => {
+      // GET -> TransientError carrying the timeout that was in force.
+      await expect(
+        tool.execute(JSON.stringify({ url: "http://8.8.8.8/slow" })),
+      ).rejects.toThrow(/timed out after 1ms/);
+    });
+  });
+
+  it("allowedSchemes (DANGER, live per ruling): the NEXT request honors the published list", async () => {
+    const store = bootLiveStore({ fetchTool: bootBlock() });
+    const tool = registerWithLiveStore(store, createFetchExtension).get("fetch");
+
+    // Prior use answers old: ftp refused, and the advertised def names the gate.
+    const before = await tool.execute(JSON.stringify({ url: "ftp://8.8.8.8/x" }));
+    expect(resultStr(before)).toContain("URL scheme 'ftp' is not allowed");
+
+    publishLive(store, { fetchTool: { ...bootBlock(), allowedSchemes: ["http", "https", "ftp"] } });
+    await withMockFetch(() => textResponse("ftp ok"), async () => {
+      const after = await tool.execute(JSON.stringify({ url: "ftp://8.8.8.8/x" }));
+      expect(resultStr(after)).toBe("ftp ok");
+    });
+  });
+
+  it("allowPrivateHosts (DANGER, live per ruling): flips the SSRF gate both ways, notice honest", async () => {
+    const store = bootLiveStore({ fetchTool: { ...bootBlock(), allowPrivateHosts: false } });
+    const tool = registerWithLiveStore(store, createFetchExtension).get("fetch");
+
+    // Gate ON (boot): the private target is refused before any bytes move.
+    const blocked = await tool.execute(JSON.stringify({ url: "http://127.0.0.1:9/x" }));
+    expect(resultStr(blocked)).toContain("Private hosts are not allowed");
+    expect(tool.toToolDef().function.description).toContain("Private or reserved hosts");
+
+    publishLive(store, { fetchTool: { ...bootBlock(), allowPrivateHosts: true } });
+    await withMockFetch(() => textResponse("metadata-ish"), async () => {
+      const opened = await tool.execute(JSON.stringify({ url: "http://127.0.0.1:9/x" }));
+      expect(resultStr(opened)).toBe("metadata-ish");
+    });
+    expect(tool.toToolDef().function.description).not.toContain("Private or reserved hosts");
+
+    // And back off: a security posture never latches loose through a stale capture.
+    publishLive(store, { fetchTool: { ...bootBlock(), allowPrivateHosts: false } });
+    const reblocked = await tool.execute(JSON.stringify({ url: "http://127.0.0.1:9/x" }));
+    expect(resultStr(reblocked)).toContain("Private hosts are not allowed");
+  });
+
+  it("§5.3 audit floor: ONE line per posture change at the next request, never per request", async () => {
+    const spy = warnSpy();
+    try {
+      const store = bootLiveStore({ fetchTool: { ...bootBlock(), allowPrivateHosts: false } });
+      const tool = registerWithLiveStore(store, createFetchExtension).get("fetch");
+
+      // First requests seed the baseline silently (boot posture is not a
+      // change). Mocked: with the gate on, 8.8.8.8 passes the IP check
+      // without DNS, but nothing leaves the process.
+      await withMockFetch(() => textResponse("ok"), async () => {
+        await tool.execute(JSON.stringify({ url: "http://8.8.8.8/a" }));
+        await tool.execute(JSON.stringify({ url: "http://8.8.8.8/b" }));
+      });
+      expect(liveLines(spy)).toHaveLength(0);
+
+      publishLive(store, {
+        fetchTool: { ...bootBlock(), allowPrivateHosts: true, allowedSchemes: ["http", "https", "file"] },
+      });
+      await withMockFetch(() => textResponse("ok"), async () => {
+        await tool.execute(JSON.stringify({ url: "http://8.8.8.8/c" }));
+        await tool.execute(JSON.stringify({ url: "http://8.8.8.8/d" }));
+        await tool.execute(JSON.stringify({ url: "http://8.8.8.8/e" }));
+      });
+
+      // One line per CHANGED vector (the scheme list and the boolean are not
+      // secrets -- the ruling prints both sides), zero for the repeat requests.
+      const lines = liveLines(spy);
+      expect(lines).toEqual([
+        "[config-live] fetchTool.allowedSchemes: http,https -> http,https,file",
+        "[config-live] fetchTool.allowPrivateHosts: false -> true",
+      ]);
+
+      // A no-op publish (same posture) changes nothing and logs nothing.
+      publishLive(store, {
+        fetchTool: { ...bootBlock(), allowPrivateHosts: true, allowedSchemes: ["http", "https", "file"] },
+      });
+      await withMockFetch(() => textResponse("ok"), async () => {
+        await tool.execute(JSON.stringify({ url: "http://8.8.8.8/f" }));
+      });
+      expect(liveLines(spy)).toHaveLength(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("static-scalar hosts stay pinned forever (no store behind them)", () => {
+    const tool = new FetchTool({
+      timeoutMs: 30000,
+      maxBodyLength: 8000,
+      maxImageSize: 10485760,
+      allowedSchemes: ["HTTP", "https"],
+      allowPrivateHosts: true,
+    });
+    expect(tool.timeoutMs).toBe(30000);
+    expect(tool.maxBodyLength).toBe(8000);
+    expect(tool.maxImageSize).toBe(10485760);
+    expect(tool.allowedSchemes).toEqual(["http", "https"]);
+    expect(tool.allowPrivateHosts).toBe(true);
+    const store = bootLiveStore({ fetchTool: { ...bootBlock(), maxBodyLength: 1 } });
+    publishLive(store, { fetchTool: { ...bootBlock(), maxBodyLength: 1, allowPrivateHosts: false } });
+    expect(tool.maxBodyLength).toBe(8000);
+    expect(tool.allowPrivateHosts).toBe(true);
   });
 });

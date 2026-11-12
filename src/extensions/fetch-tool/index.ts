@@ -16,10 +16,13 @@ import { TransientError } from "@core/error.ts";
 import { HOOKS } from "@core/hooks.ts";
 import {
   type CoreContext,
+  type ConfigKnob,
   type ExtensionInstance,
   type ToolContext,
   getExtensionConfig,
+  readKnob,
 } from "@core/extensions/types.ts";
+import { logger } from "@utils/logger.ts";
 
 /**
  * Content negotiation: hotdog converts HTML to markdown, but servers that
@@ -61,40 +64,105 @@ interface ParseResult {
   error: string | null;
 }
 
+/**
+ * The knobs the fetch tool is built with (B6b, design §4.1): scalar-or-reader.
+ * Plain scalars stay pinned forever (test doubles, any host without a store);
+ * the extension entry passes readers over the live fetchTool block, so every
+ * request resolves its own caps AND its SSRF posture (§5.2 DANGER row, ruled
+ * LIVE 2026-11-10 with the §5.3 audit floor as mitigation).
+ */
 interface FetchToolOptions {
-  timeoutMs: number;
-  maxBodyLength: number;
+  timeoutMs: ConfigKnob<number>;
+  maxBodyLength: ConfigKnob<number>;
   /**
    * Image response cap in bytes; larger images are rejected. Schema-owned:
    * fetchTool.maxImageSize.
    */
-  maxImageSize: number;
-  /** URL schemes permitted by the fetch tool (schema-owned: fetchTool.allowedSchemes). */
-  allowedSchemes: string[];
+  maxImageSize: ConfigKnob<number>;
+  /** URL schemes permitted by the fetch tool (schema-owned: fetchTool.allowedSchemes).
+   *  DANGER-class (§5.2): adding `file:` opens a local-read channel. Live per-request. */
+  allowedSchemes: ConfigKnob<string[]>;
   /**
    * When false (default), hosts that are -- or resolve to -- private or
    * reserved addresses (loopback, RFC1918, link-local/metadata, ULA, CGNAT,
-   * IPv4-mapped) are refused.
+   * IPv4-mapped) are refused. DANGER-class (§5.2): true opens the
+   * link-local/cloud-metadata class (169.254.169.254-style credential
+   * endpoints). Live per-request; the ruling's mitigation is the audit line.
    */
-  allowPrivateHosts?: boolean;
+  allowPrivateHosts?: ConfigKnob<boolean | undefined>;
 }
 
 export class FetchTool {
   static readonly TOOL_NAME = "fetch";
   metadata: ToolMetadata = { sideEffects: true, difficulty: 1, tags: ["network"] };
 
-  readonly timeoutMs: number;
-  readonly maxBodyLength: number;
-  readonly maxImageSize: number;
-  readonly allowedSchemes: string[];
-  readonly allowPrivateHosts: boolean;
+  // B6b knobs (design §4.1): the accessors below answer a scalar knob exactly
+  // as the old readonly fields did and re-call a reader knob at each use.
+  #timeoutMs: ConfigKnob<number>;
+  #maxBodyLength: ConfigKnob<number>;
+  #maxImageSize: ConfigKnob<number>;
+  #allowedSchemes: ConfigKnob<string[]>;
+  #allowPrivateHosts: ConfigKnob<boolean | undefined>;
+  /** Last posture SEEN by execute() -- the baseline for the §5.3 audit lines. */
+  #lastPosture: { schemes: string[]; allowPrivate: boolean } | null = null;
 
   constructor(options: FetchToolOptions) {
-    this.timeoutMs = options.timeoutMs;
-    this.maxBodyLength = options.maxBodyLength;
-    this.maxImageSize = options.maxImageSize;
-    this.allowedSchemes = options.allowedSchemes.map((s) => s.toLowerCase());
-    this.allowPrivateHosts = options.allowPrivateHosts ?? false;
+    this.#timeoutMs = options.timeoutMs;
+    this.#maxBodyLength = options.maxBodyLength;
+    this.#maxImageSize = options.maxImageSize;
+    this.#allowedSchemes = options.allowedSchemes;
+    this.#allowPrivateHosts = options.allowPrivateHosts;
+  }
+
+  get timeoutMs(): number {
+    return readKnob(this.#timeoutMs);
+  }
+
+  get maxBodyLength(): number {
+    return readKnob(this.#maxBodyLength);
+  }
+
+  get maxImageSize(): number {
+    return readKnob(this.#maxImageSize);
+  }
+
+  /** Scheme normalization moved from the ctor into the read: scalar and
+   *  reader knobs both answer a lower-cased copy per use (byte-identical to
+   *  the old ctor-normalized field for scalar hosts). */
+  get allowedSchemes(): string[] {
+    return readKnob(this.#allowedSchemes).map((s) => s.toLowerCase());
+  }
+
+  get allowPrivateHosts(): boolean {
+    return readKnob(this.#allowPrivateHosts) ?? false;
+  }
+
+  /**
+   * §5.3 audit floor for the §5.2 DANGER row (RULED LIVE 2026-11-10): the
+   * posture reads live, so a trust change must never pass silently. Diff
+   * against the posture last SEEN at a request; the first observation seeds
+   * the baseline without logging (boot posture is not a change), then ONE
+   * line per changed vector fires at the next request -- never per request.
+   * Grep shape "[config-live] <keyPath>: <summary>". Schemes and the boolean
+   * are NOT secrets (the ruling: scheme list / boolean may print); the vectors
+   * stay explicit: `file:` in schemes opens local read, allowPrivateHosts
+   * true opens the link-local/metadata class.
+   */
+  #auditPosture(schemes: string[], allowPrivate: boolean): void {
+    const last = this.#lastPosture;
+    if (last) {
+      if (last.schemes.join(",") !== schemes.join(",")) {
+        logger.warn(
+          `[config-live] fetchTool.allowedSchemes: ${last.schemes.join(",")} -> ${schemes.join(",")}`,
+        );
+      }
+      if (last.allowPrivate !== allowPrivate) {
+        logger.warn(
+          `[config-live] fetchTool.allowPrivateHosts: ${last.allowPrivate} -> ${allowPrivate}`,
+        );
+      }
+    }
+    this.#lastPosture = { schemes, allowPrivate };
   }
 
   toToolDef() {
@@ -130,7 +198,18 @@ export class FetchTool {
   }
 
   async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
-    const { args, error } = parseArgs(input, this.allowedSchemes);
+    // B6b (§4.1): one live read per request for the knobs used below (no torn
+    // mid-call posture: the scheme gate, the redirect re-validation and the
+    // timeout message all see the same generation). The DANGER vectors are
+    // per-request by ruling (§5.2); a posture change audited here (§5.3).
+    const allowedSchemes = this.allowedSchemes;
+    const allowPrivateHosts = this.allowPrivateHosts;
+    const timeoutMs = this.timeoutMs;
+    const maxBodyLength = this.maxBodyLength;
+    const maxImageSize = this.maxImageSize;
+    this.#auditPosture(allowedSchemes, allowPrivateHosts);
+
+    const { args, error } = parseArgs(input, allowedSchemes);
     if (!args) {
       return ToolResult.err(error);
     }
@@ -138,7 +217,7 @@ export class FetchTool {
     const { url, method, showOriginal, host } = args;
     const fetchArgs = { ...args, headers: withDefaultAccept(args.headers, showOriginal) };
 
-    if (!this.allowPrivateHosts && host) {
+    if (!allowPrivateHosts && host) {
       const hostError = await assertPublicHost(host);
       if (hostError) {
         return ToolResult.err(hostError);
@@ -149,10 +228,10 @@ export class FetchTool {
       // Default fetch() follows redirects blindly, so a public host that 302s
       // to a private one would bypass the private-host gate. With protection
       // on, follow redirects manually and re-validate every hop.
-      const resp = this.allowPrivateHosts
-        ? await hotdogFetch(url, fetchArgs, this.timeoutMs)
-        : await fetchWithSafeRedirects(url, fetchArgs, this.timeoutMs, {
-            allowedSchemes: this.allowedSchemes,
+      const resp = allowPrivateHosts
+        ? await hotdogFetch(url, fetchArgs, timeoutMs)
+        : await fetchWithSafeRedirects(url, fetchArgs, timeoutMs, {
+            allowedSchemes,
             checkHost: assertPublicHost,
           });
       const contentType = resp.headers.get("content-type") || "";
@@ -172,7 +251,7 @@ export class FetchTool {
       // Must run before readCappedBody (utf-8 decoding corrupts binary) and before any bytes are read the vision gate rejects
       const imageMime = imageMimeFor(contentType);
       if (imageMime) {
-        return await readImageResponse(resp, imageMime, url, method, reason, this.maxImageSize, ctx);
+        return await readImageResponse(resp, imageMime, url, method, reason, maxImageSize, ctx);
       }
 
       // Hard cap on what we read, so a huge or never-ending response cannot exhaust memory before the display cap applies.
@@ -189,17 +268,17 @@ export class FetchTool {
 
       let bodyLength = respBody.length;
 
-      let truncated = readTruncated || bodyLength > this.maxBodyLength;
+      let truncated = readTruncated || bodyLength > maxBodyLength;
 
       // When showOriginal is not true, convert HTML to GFM using our
       // built-in HTMLRewriter-based converter.
       if (!showOriginal && !isJson && contentType.includes("html")) {
         respBody = htmlToMarkdown(respBody);
         bodyLength = respBody.length;
-        truncated = readTruncated || bodyLength > this.maxBodyLength;
+        truncated = readTruncated || bodyLength > maxBodyLength;
       }
 
-      return ToolResult.ok(truncated ? respBody.slice(0, this.maxBodyLength) : respBody).withEntries({
+      return ToolResult.ok(truncated ? respBody.slice(0, maxBodyLength) : respBody).withEntries({
         url,
         method,
         status: String(resp.status),
@@ -221,7 +300,7 @@ export class FetchTool {
         return ToolResult.err(message);
       };
       if (err.name === "TimeoutError" || msg.includes("timed out") || msg.includes("timeout")) {
-        return fail(`Request to ${url} timed out after ${this.timeoutMs}ms`);
+        return fail(`Request to ${url} timed out after ${timeoutMs}ms`);
       }
       if (err.name === "AbortError" || msg.includes("aborted")) {
         return fail(`Request to ${url} was aborted`);
@@ -618,19 +697,28 @@ const MAX_RESPONSE_CHARS = 2_000_000;
 export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema
   // (allowPrivateHosts carries the HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS env layer there)
-  const config = getExtensionConfig<{
-    maxBodyLength: number;
-    maxImageSize: number;
-    fetchTimeoutMs: number;
-    allowedSchemes: string[];
-    allowPrivateHosts?: boolean;
-  }>(core, "fetchTool");
+  // B6b (§4.1): the knobs reach the tool as READERS over the live block, so a
+  // store publish changes the NEXT request of the already-registered tool.
+  // The env/file/schema layering resolves upstream of the block, so these
+  // per-request getExtensionConfig reads inherit it (including the
+  // HOTDOG_FETCH_ALLOW_PRIVATE_HOSTS env layer) by construction.
+  const block = () =>
+    getExtensionConfig<{
+      maxBodyLength: number;
+      maxImageSize: number;
+      fetchTimeoutMs: number;
+      allowedSchemes: string[];
+      allowPrivateHosts?: boolean;
+    }>(core, "fetchTool");
+
   const fetchTool = new FetchTool({
-    maxBodyLength: config.maxBodyLength,
-    timeoutMs: config.fetchTimeoutMs,
-    maxImageSize: config.maxImageSize,
-    allowedSchemes: config.allowedSchemes,
-    allowPrivateHosts: config.allowPrivateHosts ?? false,
+    maxBodyLength: () => block().maxBodyLength,
+    timeoutMs: () => block().fetchTimeoutMs,
+    maxImageSize: () => block().maxImageSize,
+    // §5.2 DANGER row (RULED LIVE 2026-11-10): both SSRF posture vectors are
+    // read per request; every change audited per §5.3 (see #auditPosture).
+    allowedSchemes: () => block().allowedSchemes,
+    allowPrivateHosts: () => block().allowPrivateHosts,
   });
 
   return {

@@ -10,9 +10,15 @@ import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 
 import { HOOKS } from "@core/hooks.ts";
 
-import { getExtensionConfig } from "@core/extensions/types.ts";
-import type { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
+import {
+  getExtensionConfig,
+  readKnob,
+  type ConfigKnob,
+  type CoreContext,
+  type ExtensionInstance,
+} from "@core/extensions/types.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
+import { logger } from "@utils/logger.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -22,13 +28,23 @@ interface SearchResult {
   description: string;
 }
 
+/**
+ * The knobs the web-search tool is built with (B6b, design §4.1):
+ * scalar-or-reader. Plain scalars stay pinned forever (test doubles); the
+ * extension entry passes readers over the live webSearch block, so every
+ * search -- provider, caps, AND the provider keys/endpoint -- answers from the
+ * current generation (§5.2 row: per-search reads incl. secrets).
+ * REDACTION DOCTRINE UNCHANGED: secret values never cross wire or log; the
+ * §5.3 change line may name an endpoint HOST and, for keys, only
+ * set/unset/changed -- never any key material, ever.
+ */
 interface WebSearchToolOptions {
-  provider: string;
-  maxResults: number;
-  timeout: number;
-  braveApiKey: string;
-  tavilyApiKey: string;
-  searxngInstanceUrl: string;
+  provider: ConfigKnob<string>;
+  maxResults: ConfigKnob<number>;
+  timeout: ConfigKnob<number>;
+  braveApiKey: ConfigKnob<string>;
+  tavilyApiKey: ConfigKnob<string>;
+  searxngInstanceUrl: ConfigKnob<string>;
 }
 
 interface WebSearchConfig {
@@ -490,34 +506,100 @@ function formatResults(results: SearchResult[], query: string, provider: string)
 
 // ── Tool Class ──────────────────────────────────────────────────────────────
 
+/** Audit summary for an API-key change: STATE WORDS ONLY -- key material is
+ *  never rendered, in either direction (the §5.3 redaction floor). */
+function keyChangeSummary(oldKey: string, newKey: string): string | null {
+  if (oldKey === newKey) return null;
+  if (!oldKey) return "unset -> set";
+  if (!newKey) return "set -> unset";
+  return "changed";
+}
+
+/** Host of a provider endpoint, or null if it doesn't parse. URL.host drops
+ *  userinfo and path -- the only part an audit line may name. */
+function endpointHost(url: string): string | null {
+  try {
+    return new URL(url).host || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Audit summary for an endpoint change: host -> host when both parse, plain
+ *  "(unset)" sides when one is absent, "changed" when either side is junk --
+ *  junk is never echoed (it may itself be key-shaped). */
+function endpointChangeSummary(oldUrl: string, newUrl: string): string | null {
+  if (oldUrl === newUrl) return null;
+  const from = oldUrl ? endpointHost(oldUrl) : "(unset)";
+  const to = newUrl ? endpointHost(newUrl) : "(unset)";
+  return from && to ? `${from} -> ${to}` : "changed";
+}
+
 export class WebSearchTool {
   static readonly TOOL_NAME = "web_search";
   metadata: ToolMetadata = { sideEffects: true, difficulty: 1, tags: ["network"] };
 
-  #provider: string;
-  #maxResults: number;
-  #timeout: number;
-  private braveApiKey: string;
-  private tavilyApiKey: string;
-  private searxngInstanceUrl: string;
+  #provider: ConfigKnob<string>;
+  #maxResults: ConfigKnob<number>;
+  #timeout: ConfigKnob<number>;
+  #braveApiKey: ConfigKnob<string>;
+  #tavilyApiKey: ConfigKnob<string>;
+  #searxngInstanceUrl: ConfigKnob<string>;
+  /** Trust values last SEEN by execute() -- the baseline for the §5.3 lines. */
+  #lastTrust: { brave: string; tavily: string; searxng: string } | null = null;
 
+  // The caps clamp at the READ (they used to clamp in the ctor): a scalar knob
+  // answers the same clamped value the old stored field held; a reader
+  // re-clamps the current value at each search.
   get provider(): string {
-    return this.#provider;
+    return readKnob(this.#provider);
   }
   get maxResults(): number {
-    return this.#maxResults;
+    return Math.min(10, Math.max(1, readKnob(this.#maxResults)));
   }
   get timeout(): number {
-    return this.#timeout;
+    return Math.max(1, readKnob(this.#timeout));
+  }
+  get braveApiKey(): string {
+    return readKnob(this.#braveApiKey);
+  }
+  get tavilyApiKey(): string {
+    return readKnob(this.#tavilyApiKey);
+  }
+  get searxngInstanceUrl(): string {
+    return readKnob(this.#searxngInstanceUrl);
   }
 
   constructor(options: WebSearchToolOptions) {
     this.#provider = options.provider;
-    this.#maxResults = Math.min(10, Math.max(1, options.maxResults));
-    this.#timeout = Math.max(1, options.timeout);
-    this.braveApiKey = options.braveApiKey;
-    this.tavilyApiKey = options.tavilyApiKey;
-    this.searxngInstanceUrl = options.searxngInstanceUrl;
+    this.#maxResults = options.maxResults;
+    this.#timeout = options.timeout;
+    this.#braveApiKey = options.braveApiKey;
+    this.#tavilyApiKey = options.tavilyApiKey;
+    this.#searxngInstanceUrl = options.searxngInstanceUrl;
+  }
+
+  /**
+   * §5.3 audit floor for the §5.2 webSearch row (LIVE per-search reads): an
+   * endpoint/key change must never pass silently. Diff against the values
+   * last SEEN at a search; the first observation seeds the baseline without
+   * logging (boot posture is not a change), then ONE line per changed key
+   * fires at the next search -- never per search. REDACTION IS THE POINT:
+   * keys print as set/unset/changed states only, the SearXNG endpoint as
+   * HOST only (no path, no userinfo); unparseable endpoints degrade to the
+   * word "changed". Zero key bytes, ever, in any summary.
+   */
+  #auditTrustChange(trust: { brave: string; tavily: string; searxng: string }): void {
+    const last = this.#lastTrust;
+    if (last) {
+      const brave = keyChangeSummary(last.brave, trust.brave);
+      if (brave) logger.warn(`[config-live] webSearch.braveApiKey: ${brave}`);
+      const tavily = keyChangeSummary(last.tavily, trust.tavily);
+      if (tavily) logger.warn(`[config-live] webSearch.tavilyApiKey: ${tavily}`);
+      const searxng = endpointChangeSummary(last.searxng, trust.searxng);
+      if (searxng) logger.warn(`[config-live] webSearch.searxngInstanceUrl: ${searxng}`);
+    }
+    this.#lastTrust = trust;
   }
 
   toToolDef() {
@@ -549,22 +631,30 @@ export class WebSearchTool {
     }
 
     const tiles = typeof args.tiles === "string" && args.tiles.trim() ? args.tiles.trim() : undefined;
+    // B6b (§4.1): ONE live read per search for every knob (no torn mid-search
+    // values), then the §5.3 change line for the trust keys (§5.2 row).
     const provider = this.provider.toLowerCase().trim();
+    const maxResults = this.maxResults;
+    const timeout = this.timeout;
+    const braveApiKey = this.braveApiKey;
+    const tavilyApiKey = this.tavilyApiKey;
+    const searxngInstanceUrl = this.searxngInstanceUrl;
+    this.#auditTrustChange({ brave: braveApiKey, tavily: tavilyApiKey, searxng: searxngInstanceUrl });
 
     try {
       let results: SearchResult[];
       switch (provider) {
         case "duckduckgo":
-          results = await searchDuckDuckGo(query, this.maxResults, this.timeout, { tiles });
+          results = await searchDuckDuckGo(query, maxResults, timeout, { tiles });
           break;
         case "brave":
-          results = await searchBrave(query, this.maxResults, this.timeout, this.braveApiKey);
+          results = await searchBrave(query, maxResults, timeout, braveApiKey);
           break;
         case "tavily":
-          results = await searchTavily(query, this.maxResults, this.timeout, this.tavilyApiKey);
+          results = await searchTavily(query, maxResults, timeout, tavilyApiKey);
           break;
         case "searxng":
-          results = await searchSearXNG(query, this.maxResults, this.timeout, this.searxngInstanceUrl);
+          results = await searchSearXNG(query, maxResults, timeout, searxngInstanceUrl);
           break;
         default:
           return ToolResult.err(`Unknown search provider: ${provider}`);
@@ -593,7 +683,11 @@ export class WebSearchTool {
 }
 
 export function create(core: CoreContext): ExtensionInstance {
-  const config = getExtensionConfig<WebSearchConfig>(core, "webSearch");
+  // B6b (§4.1): the knobs reach the tool as READERS over the live webSearch
+  // block; nothing from the block is captured at create()/registration scope.
+  // Per-search reads incl. the secrets (§5.2 row) -- redaction doctrine
+  // unchanged, the values never ride the wire or the log.
+  const block = () => getExtensionConfig<WebSearchConfig>(core, "webSearch");
 
   // Offer the captcha solve routes to any HTTP front end that wants them
   // (the webui server mounts them on its own port). Plain interactive-cli
@@ -604,12 +698,12 @@ export function create(core: CoreContext): ExtensionInstance {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         const tool = new WebSearchTool({
-          provider: config.provider,
-          maxResults: config.maxResults,
-          timeout: config.timeout,
-          braveApiKey: config.braveApiKey,
-          tavilyApiKey: config.tavilyApiKey,
-          searxngInstanceUrl: config.searxngInstanceUrl,
+          provider: () => block().provider,
+          maxResults: () => block().maxResults,
+          timeout: () => block().timeout,
+          braveApiKey: () => block().braveApiKey,
+          tavilyApiKey: () => block().tavilyApiKey,
+          searxngInstanceUrl: () => block().searxngInstanceUrl,
         });
         registry.register(WebSearchTool.TOOL_NAME, tool);
       },

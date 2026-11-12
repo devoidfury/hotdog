@@ -8,6 +8,7 @@ import { HOOKS } from '../../src/core/hooks.ts';
 import { createConfigStore, type ConfigStore } from '@core/config/store.ts';
 import type { CoreConfigWithExtensions } from '@core/config/schema-loader.ts';
 import type { ResolvedConfig } from '@core/extensions/types.ts';
+import { bootLiveStore, publishLive, registerWithLiveStore } from '../mocks/config-live.ts';
 
 describe('BashTool', () => {
   it('has correct tool name', () => {
@@ -524,16 +525,13 @@ describe('B6a live bashTool knobs (store-backed create)', () => {
   const SECRET_ENV = 'HOTDOG_B6A_SCUB';
   const EXTRA_ENV = 'B6A_PLAIN_VAR';
 
+  // The boot/publish/register trio lives in tests/mocks/config-live.ts
+  // (shared with the tools-index B6a suite and the B6b families).
   function bootStore(
     bashTool: Record<string, unknown>,
     resolved: Record<string, unknown> = {},
   ): ConfigStore {
-    const store = createConfigStore();
-    store.adopt(
-      { bashTool } as CoreConfigWithExtensions,
-      resolved as ResolvedConfig,
-    );
-    return store;
+    return bootLiveStore({ bashTool }, resolved);
   }
 
   function publish(
@@ -541,26 +539,11 @@ describe('B6a live bashTool knobs (store-backed create)', () => {
     bashTool: Record<string, unknown>,
     resolved: Record<string, unknown> = {},
   ): void {
-    store.swap({
-      config: { bashTool } as CoreConfigWithExtensions,
-      resolved: resolved as ResolvedConfig,
-    })();
+    publishLive(store, { bashTool }, resolved);
   }
 
   function register(store: ConfigStore): any {
-    const liveCore = {
-      get config() {
-        return store.current().config;
-      },
-      get resolved() {
-        return store.current().resolved;
-      },
-      configStore: store,
-    };
-    let tool: any = null;
-    const registry = { register: (_name: string, t: unknown) => { tool = t; }, getAll: () => [] };
-    create(liveCore as any).hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
-    return tool;
+    return registerWithLiveStore(store, create).get('bash');
   }
 
   it('timeoutMs: the NEXT execute uses the published default; prior use answered old', async () => {

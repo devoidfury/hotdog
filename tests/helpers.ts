@@ -14,3 +14,4 @@ export { resultStr, getDisplay, tmpDir, cleanupDir, toolCtx, TMP_PARENT } from '
 export { processAlive, waitForExit } from './mocks/process.ts';
 export { withMockFetch, jsonResponse, textResponse } from './mocks/fetch.ts';
 export { walLifecycleProbe } from './mocks/wal-lifecycle.ts';
+export { bootLiveStore, publishLive, liveStoreCore, createWithLiveStore, registerWithLiveStore } from './mocks/config-live.ts';

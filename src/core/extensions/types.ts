@@ -49,6 +49,12 @@ export interface ExtensionMetadata {
   description: string;
   dependsOn: string[];
   autoload: boolean;
+  /**
+   * Hotdog versions this extension was written against (extension.json "sdk"),
+   * e.g. ">=0.16". Parsed fail-closed at discovery (malformed = broken manifest);
+   * checked at load, where a mismatch warns loudly and loads anyway.
+   */
+  sdk?: string;
   configSchema: Record<string, unknown> | null;
   cliSubcommands: Array<{
     name: string;
@@ -185,6 +191,10 @@ export interface HookPayloads {
   },
 
   // Returns ToolResultHookResult ({ result } replaces the result).
+  // `toolCtx` is the same instance the `tool:call` gate saw, so a
+  // result-mediating handler (e.g. an ask-before-the-model-sees-it redactor)
+  // can reach the human through the context's `input` seam.
+  // Optional: standalone callers may omit it.
   "tool:result": {
     toolCallId: string;
     toolName: string;
@@ -192,6 +202,7 @@ export interface HookPayloads {
     success: boolean;
     input: string;
     agent: Agent;
+    toolCtx?: ToolContext;
   };
 
   // messages/modelConfig/toolDefs replace their payload field

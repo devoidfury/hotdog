@@ -464,3 +464,66 @@ describe("extension.json manifest validation", async () => {
     }
   });
 });
+
+describe("manifest sdk compatibility field", async () => {
+  const fs = await import("node:fs/promises");
+  const os = await import("node:os");
+  const nodePath = await import("node:path");
+
+  async function makeTmpExt(manifest: string): Promise<string> {
+    const tmp = await fs.mkdtemp(nodePath.join(os.tmpdir(), "hotdog-ext-sdk-"));
+    const extDir = nodePath.join(tmp, "sdk-ext");
+    await fs.mkdir(extDir);
+    await fs.writeFile(nodePath.join(extDir, "extension.json"), manifest);
+    await fs.writeFile(nodePath.join(extDir, "index.ts"), "export default {};");
+    return tmp;
+  }
+
+  it("parses a valid range onto the metadata", async () => {
+    const tmp = await makeTmpExt('{"name": "sdk-ext", "sdk": ">=0.16 <1.0"}');
+    try {
+      const { discoverExtensionsInDir } = await import("@core/extensions/extensions.ts");
+      const result = await discoverExtensionsInDir(tmp);
+      expect(result[0]!.manifestError).toBeUndefined();
+      expect(result[0]!.sdk).toBe(">=0.16 <1.0");
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fail-closes a malformed range as a broken manifest (the contract cannot be silently dropped)", async () => {
+    const tmp = await makeTmpExt('{"name": "sdk-ext", "sdk": "banana"}');
+    try {
+      const { discoverExtensionsInDir } = await import("@core/extensions/extensions.ts");
+      const result = await discoverExtensionsInDir(tmp);
+      expect(result[0]!.manifestError).toContain('invalid "sdk" range');
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fail-closes a non-string sdk value too", async () => {
+    const tmp = await makeTmpExt('{"name": "sdk-ext", "sdk": 16}');
+    try {
+      const { discoverExtensionsInDir } = await import("@core/extensions/extensions.ts");
+      const result = await discoverExtensionsInDir(tmp);
+      expect(result[0]!.manifestError).toContain('invalid "sdk" range');
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("sdkCompatibilityWarning: silent on match and on absence, loud and named on mismatch", async () => {
+    const { sdkCompatibilityWarning } = await import("@core/extensions/extensions.ts");
+    expect(sdkCompatibilityWarning({ name: "x" }, "0.16.0")).toBeNull();
+    expect(sdkCompatibilityWarning({ name: "x", sdk: ">=0.16" }, "0.16.0")).toBeNull();
+    const warn = sdkCompatibilityWarning({ name: "x", sdk: ">=9.9" }, "0.16.0");
+    expect(warn).toContain('"x"');
+    expect(warn).toContain(">=9.9");
+    expect(warn).toContain("0.16.0");
+    expect(warn).toContain("loading anyway");
+    expect(sdkCompatibilityWarning({ name: "x", sdk: "broken" }, "0.16.0")).toContain(
+      "unparseable",
+    );
+  });
+});

@@ -1,0 +1,39 @@
+{
+  "name": "extension-redactor",
+  "sdk": ">=0.16",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "Result gate: on a secret-shaped tool result, ask the human (redact / allow once / allow for session) before it reaches the model",
+  "configSchema": {
+    "extensionRedactor": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        },
+        "prompt": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask the human on a match. Set false to redact without asking (headless posture). A missing or non-interactive UI also redacts without asking - fail closed."
+        },
+        "patterns": {
+          "type": "object",
+          "default": {
+            "aws-access-key": "AKIA[0-9A-Z]{16}",
+            "github-token": "gh[pousr]_[A-Za-z0-9]{36,}",
+            "private-key-header": "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"
+          },
+          "additionalProperties": { "type": "string" },
+          "description": "label -> regex source (JavaScript RegExp, case-sensitive). The label is what the human sees and what the allow-for-session grant is keyed by. A user block replaces this map wholesale, so re-include any defaults you want kept. A malformed regex fails the redactor closed: every result is withheld until the config is fixed."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "extensionRedactor" },
+        { "default": {} }
+      ]
+    }
+  }
+}

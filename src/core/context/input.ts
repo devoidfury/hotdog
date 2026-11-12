@@ -15,10 +15,25 @@ export interface QuestionDef {
 }
 
 /**
+ * The question seam: the one route from an extension to the human. The
+ * interactive UI mounts an implementation on the tool context
+ * (`toolCtx.get("input")`), reachable from the `tool:call` gate and the
+ * `tool:result` pipeline; callers fail closed when it is absent.
+ */
+export interface QuestionSeam {
+  isInteractive(): boolean;
+  /** `signal` is the run's abort: the input bails out of its prompt loop and releases readline when the run is cancelled. */
+  collectAnswers(
+    questions: QuestionDef[],
+    signal?: AbortSignal | null,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+}
+
+/**
  * No-op input implementation that silently returns defaults.
  * Used in non-interactive modes (CI, pipes, one-shot).
  */
-export class NoopInput {
+export class NoopInput implements QuestionSeam {
   constructor() {}
 
   isInteractive(): boolean {

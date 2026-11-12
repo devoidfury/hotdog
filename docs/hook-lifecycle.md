@@ -268,7 +268,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | `TOOL_BEFORE_EXECUTE` | `tool:beforeExecute` | awaited notify | Before a tool executes |
 | `TOOL_AFTER_EXECUTE` | `tool:afterExecute` | awaited notify | After a tool executes (settled before the `TOOL_RESULT` pipeline) |
 | `TOOL_CALL` | `tool:call` | pipeline | Gate — block, modify, or allow tool calls. Payload: `toolCallId`, `toolName`, `input`, `agent`, `toolCtx` (built and settled before this pipeline, so a handler can prompt through `toolCtx.get("input")`) |
-| `TOOL_RESULT` | `tool:result` | pipeline | Modify tool result before LLM sees it |
+| `TOOL_RESULT` | `tool:result` | pipeline | Modify tool result before LLM sees it. Payload: `toolCallId`, `toolName`, `result`, `success`, `input`, `agent`, `toolCtx` (the same instance the `tool:call` gate saw, so a result-mediating handler can prompt through `toolCtx.get("input")`) |
 | `AGENT_TOOL_CONTEXT` | `agent:toolContext` | awaited notify | Enrich shared tool context — awaited before the `TOOL_CALL` gate, so handler mounts (even from async handlers) are complete for the gate and `tool.execute()`; the same `toolCtx` instance reaches both |
 | `TOOL_METRICS` | `tool:metrics` | awaited notify | After each individual tool execution — telemetry, profiling |
 

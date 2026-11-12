@@ -346,6 +346,9 @@ export class ToolExecutor {
       success,
       input,
       agent,
+      // Same instance the TOOL_CALL gate saw: a result-mediating handler
+      // reaches the human through toolCtx.get("input").
+      toolCtx,
     };
     await hooks.runHookPipeline<ToolResultHookResult | undefined, "tool:result">(
       HOOKS.TOOL_RESULT,

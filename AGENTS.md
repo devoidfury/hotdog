@@ -10,6 +10,7 @@
   - `bun bin/hotdog show-prompt` — render system prompt to stdout
   - `bun bin/hotdog profiles` — list all available profiles
   - `bun bin/hotdog rescue` — diagnose config files (paths, resolution chain, JSON syntax, unknown keys); `rescue fix` repairs comments/trailing commas; `rescue --json` prints a machine envelope (stdout carries only JSON; diagnostics go to stderr in `--json` mode everywhere)
+  - `bun bin/hotdog extension validate <dir>` — diagnose one extension directory or a bundle root: strict-JSON manifest findings with line/column, field types, sdk-range verdict, entry point, config defaults, service contracts, dry-load through the real loader; names unanchored SDK imports with the bun link fix; `--json` envelope; runs above the config layer (works with a broken defaults.json)
   - `bun bin/hotdog prompt "text"` — one-shot mode
 - Run Tests: `bun run test` (expected runtime < 10 seconds)
   - with Coverage report: `bun run coverage`
@@ -37,6 +38,21 @@ Across alias scopes, use alias instead of `../../core` or `../../utils` climbing
 ### Marker Mangler
 Protected markers are rewritten to a random per-session alias (`<m_...>`) in ALL text you receive.
 Never write one to a file or edit based on it. Verify real bytes via the HEX column of `xxd` (not the ASCII column) or `sed -n 'Np' file | sha256sum` vs `printf '<expected>\n' | sha256sum`.
+
+### Published Surface
+Public API is exactly the `package.json` `"exports"` entries: `.` (`src/index.ts`, embedder host
+primitives + the full author surface), `./sdk` (`src/sdk.ts`, the extension-authoring contract),
+`./testing` (`src/testing.ts`, the extension test kit: a minimal core double, fakes, and payload
+builders), and `./utils/*` (every leaf utility under `src/utils/`, mapped to `./src/utils/*.ts`);
+plus `./package.json` for tooling. Everything else under `src/` is internal and moves freely between
+minors. The `./testing` kit follows the same surface policy (additive within a major) and the double
+stays minimal by design: registries plus a config bag, nothing the authoring contract does not give.
+A few utils carry core types in their signatures (`workspace`, `tool-content`, the approvals
+family); they resolve through the package's own anchors, but treat their parameter/return shapes as
+internal-adjacent. Extensions import the SDK by package name (`@read-receipt/hotdog/sdk`); it
+resolves by self-reference in the clone, by `bun link` for external bundles, and by install for
+projects. Surface policy: additive within a major, breaking at majors. Pinned by
+`tests/lints/package-exports.test.ts` and `tests/core/package-entry.test.ts`.
 
 ### Centralized Defaults
 The source of truth for all configurable values in core is `src/core/core.config.json`.

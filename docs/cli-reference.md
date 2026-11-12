@@ -20,6 +20,13 @@ hotdog sessions cleanup          # Remove old sessions; also reclaims leaked
 hotdog rescue                    # Diagnose config files (paths, syntax, unknown keys, out-of-set enum values)
 hotdog rescue fix                # ...and repair: strip comments/trailing commas, reset out-of-set enums to their schema default (.bak kept)
 hotdog rescue --json             # ...as a JSON envelope (stdout pure JSON; findings, files, totals)
+hotdog extension validate <dir>  # Diagnose an extension (or a bundle root to scan): strict-JSON manifest
+                                 # with line/column findings, field types, sdk-range verdict, entry point,
+                                 # config defaults, service contracts, then a dry-load through the real
+                                 # loader. Unanchored "@read-receipt/hotdog" imports get the bun link fix.
+                                 # Works with a broken defaults.json (above-the-config seat, like rescue)
+hotdog extension validate <dir> --json
+                                 # ...as a JSON envelope (per-extension reports, findings, totals)
 hotdog webui                     # Start the web UI server
 hotdog workflow validate <f> [--param key=value]...
                                  # Validate a .workflow.yaml graph (errors + warnings, exit code).

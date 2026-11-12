@@ -1,7 +1,13 @@
 {
   "name": "@read-receipt/hotdog",
   "version": "0.16.0",
-  "main": "bin/hotdog",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sdk": "./src/sdk.ts",
+    "./testing": "./src/testing.ts",
+    "./utils/*": "./src/utils/*.ts",
+    "./package.json": "./package.json"
+  },
   "dependencies": {},
   "devDependencies": {
     "@types/bun": "^1.4.3",

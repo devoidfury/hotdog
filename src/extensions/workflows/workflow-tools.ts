@@ -19,6 +19,7 @@ import {
 } from "@core/extensions/tool-utils.ts";
 import type { ToolDef, ToolMetadata } from "@core/extensions/tool-registry.ts";
 import type { ToolContext } from "@core/extensions/types.ts";
+import { readKnob, type ConfigKnob } from "@core/extensions/types.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
@@ -206,14 +207,24 @@ async function loadListing(
  * (mtime+size keyed cache; invalid files stay cached until they change).
  */
 export function createWorkflowScanner(
-  dir: string,
-  limits?: Partial<WorkflowLimits>,
+  dir: ConfigKnob<string | null>,
+  limits?: ConfigKnob<Partial<WorkflowLimits> | undefined>,
 ): () => Promise<WorkflowListing[]> {
   const cache = new Map<string, { mtimeMs: number; size: number; entry: WorkflowListing | null }>();
+  // The cached entries belong to the dir they were parsed from: when the
+  // live reader starts answering a different dir (B7), the cache is dropped
+  // rather than served under the wrong root.
+  let cacheDir: string | null = null;
   return async () => {
+    const root = readKnob(dir);
+    if (!root) return []; // workflows.path unset: nothing to list (same as a failed readdir)
+    if (root !== cacheDir) {
+      cacheDir = root;
+      cache.clear();
+    }
     let names: string[];
     try {
-      names = (await readdir(dir)).filter((f) => /\.ya?ml$/i.test(f));
+      names = (await readdir(root)).filter((f) => /\.ya?ml$/i.test(f));
     } catch {
       cache.clear();
       return [];
@@ -225,7 +236,7 @@ export function createWorkflowScanner(
     for (const f of names) {
       let st;
       try {
-        st = await stat(join(dir, f));
+        st = await stat(join(root, f));
       } catch {
         cache.delete(f); // vanished between readdir and stat
         continue;
@@ -235,7 +246,7 @@ export function createWorkflowScanner(
         if (hit.entry) out.push(hit.entry);
         continue;
       }
-      const entry = await loadListing(join(dir, f), f, limits);
+      const entry = await loadListing(join(root, f), f, readKnob(limits));
       cache.set(f, { mtimeMs: st.mtimeMs, size: st.size, entry });
       if (entry) out.push(entry);
     }
@@ -266,12 +277,18 @@ export interface WorkflowToolOptions {
   getRunsRoot: () => string | null;
   /** The workflows directory holding `*.workflow.yaml` graphs; null when unset. */
   getWorkflowsDir: () => string | null;
-  /** Soft limits from resolved config (workflows.maxNodes, workflows.maxRuntimeMins). */
-  limits: Partial<WorkflowLimits>;
-  /** Resolved workflows.enableRuntimeTimeouts; gates the engine caps of dispatched runs. */
-  enableRuntimeTimeouts?: boolean;
+  /** Soft limits (workflows.maxNodes, workflows.maxRuntimeMins). B7 (§4.1):
+   *  a plain object stays PINNED forever (test/embedded hosts), a reader
+   *  resolves at each validate/dispatch -- the object handed to parseWorkflow
+   *  / WorkflowRun is the CURRENT one, and the run then freezes it (P8). */
+  limits: ConfigKnob<Partial<WorkflowLimits>>;
+  /** workflows.enableRuntimeTimeouts; gates the engine caps of dispatched
+   *  runs. B7: reader-or-scalar, read at DISPATCH (the toggle's documented
+   *  landing), never captured at registration. */
+  enableRuntimeTimeouts?: ConfigKnob<boolean>;
   /** Resolved config modelGroups: enables declared-group resolution in validate/dispatch.
-   *  When absent the group field is shape-checked only (runtime still resolves loudly). */
+   *  When absent the group field is shape-checked only (runtime still resolves loudly).
+   *  Already a reader; B7 makes the live host's reader re-read the bag. */
   getModelGroups?: () => Record<string, string[]>;
   registry: RunRegistry;
 }
@@ -352,7 +369,7 @@ export class WorkflowValidateTool extends WorkflowTool {
         "validate",
         ref.path,
         ref.text,
-        this.opts.limits,
+        readKnob(this.opts.limits),
         undefined,
         this.opts.getModelGroups?.(),
       );
@@ -367,12 +384,12 @@ export class WorkflowValidateTool extends WorkflowTool {
       "validate",
       "designed workflow",
       yaml!,
-      this.opts.limits,
+      readKnob(this.opts.limits),
       undefined,
       this.opts.getModelGroups?.(),
     );
     if (r.code !== 0) return ToolResult.err([...r.err, ...r.out].join("\n"));
-    const wf = parseWorkflow(yaml!, { limits: this.opts.limits, modelGroups: this.opts.getModelGroups?.() }).workflow!; // validated above
+    const wf = parseWorkflow(yaml!, { limits: readKnob(this.opts.limits), modelGroups: this.opts.getModelGroups?.() }).workflow!; // validated above
 
     const dir = this.opts.getWorkflowsDir();
     if (!dir) return ToolResult.err("Error: workflows.path is not configured");
@@ -381,7 +398,7 @@ export class WorkflowValidateTool extends WorkflowTool {
     const target = join(dir, `${wf.name}.workflow.yaml`);
     // The availability listing keys by name, so two files claiming one name
     // would shadow each other; refuse instead of creating the second author.
-    for (const w of await listWorkflows(dir, this.opts.limits)) {
+    for (const w of await listWorkflows(dir, readKnob(this.opts.limits))) {
       if (w.name === wf.name && w.file !== target) {
         return ToolResult.err(
           `workflow name '${wf.name}' is already defined by '${w.file}'; save over that graph or rename this one`,
@@ -465,7 +482,7 @@ export class WorkflowDispatchTool extends WorkflowTool {
     // STRICT param mode: params is always at least an empty object, so a graph with an
     // undecided required param fails here, not mid-run.
     const parsed = parseWorkflow(ref.text, {
-      limits: this.opts.limits,
+      limits: readKnob(this.opts.limits),
       params: params ?? {},
       modelGroups: this.opts.getModelGroups?.(),
     });
@@ -540,8 +557,11 @@ export class WorkflowDispatchTool extends WorkflowTool {
       runId,
       runDir,
       tasks,
-      limits: this.opts.limits,
-      enableRuntimeTimeouts: this.opts.enableRuntimeTimeouts === true,
+      // Per-dispatch reads: this run freezes these values (the parsed graph
+      // stamps its own limits, WorkflowRun re-freezes at construction), so a
+      // later publish cannot re-arm a run that is already going (P8).
+      limits: readKnob(this.opts.limits),
+      enableRuntimeTimeouts: readKnob(this.opts.enableRuntimeTimeouts) === true,
       ...(parentModel ? { parentModel } : {}),
       ...(callingSessionId ? { managerSessionId: callingSessionId } : {}),
     });
@@ -602,8 +622,8 @@ export class WorkflowDispatchTool extends WorkflowTool {
       "The run completes asynchronously with a completion message; use workflow_status to inspect, and do NOT redesign the graph just to change an output: reconcile / resume with args instead.",
     ];
     // Cap guidance only exists when caps are enforced -- off costs zero prompt bytes.
-    if (this.opts.enableRuntimeTimeouts === true) {
-      const defaultMax = resolveWorkflowLimits(this.opts.limits).maxRuntimeMins;
+    if (readKnob(this.opts.enableRuntimeTimeouts) === true) {
+      const defaultMax = resolveWorkflowLimits(readKnob(this.opts.limits)).maxRuntimeMins;
       lines.push(
         `A node over its maxRuntimeMins (default: ${defaultMax}) is interrupted and fails immediately, remaining attempts not retried.`,
       );
@@ -906,7 +926,7 @@ export class WorkflowControlTool extends WorkflowTool {
     }
     const dir = this.opts.getWorkflowsDir();
     if (!dir) return ToolResult.err("Error: workflows.path is not configured");
-    const graph = (await listWorkflows(dir, this.opts.limits)).find((w) => w.name === s.workflow);
+    const graph = (await listWorkflows(dir, readKnob(this.opts.limits))).find((w) => w.name === s.workflow);
     if (!graph) {
       return ToolResult.err(
         `workflow '${s.workflow}' is no longer saved in ${dir}; ` +

@@ -22,19 +22,32 @@ const LOAD_SKILL_TOOL_NAME = "load_skill";
 
 /** Create the skills extension. Config defaults come from extension.json configSchema. */
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
-  // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig<SkillsLoaderConfig>(core, "skills");
+  // B7 (§4.1/§4.3 skills row): the block is read through a lazy reader, never
+  // destructured into create-scope consts. `path` CONSUMERS resolve per use --
+  // the loader holds a reader, so a listing/re-read (`directories()`, a later
+  // `loadSkills()`) answers from the current generation. The boot fs import
+  // and `preloadSkills` below stay create-time acts, honestly: preload turns
+  // a skill's `loaded` flag on at load, so a published preloadSkills list
+  // reaches the NEXT session (the 4.3 row's "preloadSkills = next-session");
+  // forcing it live would mean un-loading skills under a running session.
+  // Not X: no code loading is involved -- skills are data.
+  const block = () => getExtensionConfig<SkillsLoaderConfig>(core, "skills");
 
-  if (!config.path) {
+  // The boot throw keeps its meaning exactly: an unset path is refused at
+  // activation, before any loader exists -- boot validation, not a live knob
+  // (there is no consumer to re-read a path into yet).
+  const bootPath = block().path;
+  if (!bootPath) {
     throw ExtensionError.ConfigFailed("skills", "skills path not configured");
   }
-  const skillsPath = config.path;
 
-  const loader = new SkillsLoader(skillsPath);
+  // The reader falls back to the boot path when a live write UNSETS `path`,
+  // so a bad publish can never zero the loader out from under a session.
+  const loader = new SkillsLoader(() => block().path ?? bootPath);
   await loader.loadSkills();
 
-  // Preload skills from config
-  const preloadSkills = config.preloadSkills;
+  // Preload skills from config -- one create-time act (see the note above).
+  const preloadSkills = block().preloadSkills;
   if (preloadSkills && preloadSkills.length > 0) {
     loader.preloadSkills(preloadSkills);
   }
@@ -197,7 +210,11 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         sections: [
           {
             fields: [
-              { key: "path", value: skillsPath },
+              // Loader state (the dirs the boot import walked), resolved at
+              // call: reporting the live configured path here would claim
+              // work a path change has not actually done -- the loaded set
+              // belongs to the dirs it came from.
+              { key: "path", value: loader.loadedDirectories().join(":") },
               { key: "loaded", value: skills.length },
             ],
           },

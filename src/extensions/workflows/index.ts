@@ -37,6 +37,7 @@ import {
   managedRunLines,
   workflowsPreamble,
   type ManagedRun,
+  type WorkflowToolOptions,
 } from "./workflow-tools.ts";
 import { resolveWorkflowLimits, type WorkflowLimits } from "./workflow.ts";
 import { buildTaskConfigOptions } from "@core/session/index.ts";
@@ -49,23 +50,43 @@ interface WorkflowsExtensionConfig {
 }
 
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
-  const wfConfig = getExtensionConfig<WorkflowsExtensionConfig>(core, "workflows");
+  // B7 (§4.1/§4.3 workflows row): the create() snapshot is GONE. Every value
+  // below is a reader resolved where it is used:
+  //  - limits: resolved per validate/dispatch, so a raised
+  //    workflows.maxNodes / maxRuntimeMins lands on the NEXT one. A run that
+  //    is already going keeps its start-time limits (P8/P3 flavor): the graph
+  //    parse stamps its own limits and WorkflowRun re-freezes at construction.
+  //  - enableRuntimeTimeouts: read at DISPATCH -- the toggle's own doc says
+  //    dispatch, and now it is true (the engine re-freezes it per run).
+  //  - path: per lookup; a published change sends the next dispatch to the
+  //    new dir while existing runs keep the dirs they were written to (each
+  //    ManagedRun carries its own runDir). The boot durability scan below is
+  //    boot machinery and reads the boot value once, as before.
+  //  - modelGroups: read per group-ref resolution -- B3's scheduler precedent
+  //    (a reader over the live CONFIG bag; modelGroups is a config-bag root,
+  //    read exactly like task-manager.ts / websocket/server.ts do).
+  const block = () => getExtensionConfig<WorkflowsExtensionConfig>(core, "workflows");
+
   // Only the schema-owned config fields (maxNodes, maxRuntimeMins) override;
   // the non-raisable ceilings (hardMaxNodes, maxAttempts) come from
   // workflow.ts via the normalizer.
-  const limits: WorkflowLimits = resolveWorkflowLimits({
-    ...(typeof wfConfig.maxNodes === "number" ? { maxNodes: wfConfig.maxNodes } : {}),
-    ...(typeof wfConfig.maxRuntimeMins === "number"
-      ? { maxRuntimeMins: wfConfig.maxRuntimeMins }
-      : {}),
-  });
-  const workflowsDir = wfConfig.path?.trim() ? wfConfig.path.trim() : null;
-  const runsRoot = workflowsDir ? join(workflowsDir, "runs") : null;
-  // Resolved at extension load like limits; the engine ctor re-freezes it per run.
-  const enableRuntimeTimeouts = wfConfig.enableRuntimeTimeouts === true;
-  // Resolved modelGroups (config model-groups, camelCased keys): lets validate/
-  // dispatch resolve node `group` refs against declared names.
-  const modelGroups =
+  const currentLimits = (): WorkflowLimits => {
+    const { maxNodes, maxRuntimeMins } = block();
+    return resolveWorkflowLimits({
+      ...(typeof maxNodes === "number" ? { maxNodes } : {}),
+      ...(typeof maxRuntimeMins === "number" ? { maxRuntimeMins } : {}),
+    });
+  };
+  const workflowsDir = (): string | null => {
+    const trimmed = block().path?.trim();
+    return trimmed ? trimmed : null;
+  };
+  const runsRoot = (): string | null => {
+    const dir = workflowsDir();
+    return dir ? join(dir, "runs") : null;
+  };
+  const runtimeTimeoutsEnabled = (): boolean => block().enableRuntimeTimeouts === true;
+  const declaredModelGroups = (): Record<string, string[]> =>
     ((core.config as Record<string, unknown> | undefined)?.modelGroups as
       | Record<string, string[]>
       | undefined) ?? {};
@@ -73,18 +94,21 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // Restart durability: mark runs whose owner died (warn + one `interrupted`
   // journal event each), never auto-resume -- a restart often means deliberate
   // tree changes. Cost is one readdir + small journal tail reads; nothing here
-  // builds an agent.
-  if (runsRoot) {
+  // builds an agent. Boot machinery, unchanged: ONE read at activation.
+  const bootRunsRoot = runsRoot();
+  if (bootRunsRoot) {
     try {
-      await markInterruptedRuns(runsRoot);
+      await markInterruptedRuns(bootRunsRoot);
     } catch (e: unknown) {
       logger.warn(`[workflows] interrupted-run scan failed: ${formatError(e)}`);
     }
   }
 
   // Live availability listing: rescanned (stat-gated) per system-prompt build,
-  // so graphs saved mid-session reach managers without a restart.
-  const scanAvailability = workflowsDir ? createWorkflowScanner(workflowsDir, limits) : null;
+  // so graphs saved mid-session reach managers without a restart. Both the dir
+  // and the limits ride readers, so a published path change re-roots the
+  // listing on the next build (the scanner drops its cache when the dir moves).
+  const scanAvailability = createWorkflowScanner(workflowsDir, currentLimits);
 
   const registry = new RunRegistry();
 
@@ -114,19 +138,22 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     return host;
   };
 
-  const cliDeps: WorkflowCliDeps = {
-    runsRoot: runsRoot ?? undefined,
-    limits,
-    enableRuntimeTimeouts,
-    modelGroups,
+  // The CLI deps are rebuilt PER invocation: `hotdog workflow ...` on a live
+  // host (the subcommand registry) reads limits/dir/groups/toggle as they are
+  // when the verb runs, not as they were when the extension loaded.
+  const cliDeps = (): WorkflowCliDeps => ({
+    runsRoot: runsRoot() ?? undefined,
+    limits: currentLimits(),
+    enableRuntimeTimeouts: runtimeTimeoutsEnabled(),
+    modelGroups: declaredModelGroups(),
     runHost,
     emit: (line) => console.log(line),
-  };
+  });
 
   async function handleWorkflowSubcommand(cli: CliArgv): Promise<number> {
     const outcome = await runWorkflowCommand(
       ((cli as { args?: unknown }).args as string[]) ?? [],
-      cliDeps,
+      cliDeps(),
     );
     for (const line of outcome.out) console.log(line);
     for (const line of outcome.err) console.error(line);
@@ -224,13 +251,16 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       },
 
       [HOOKS.TOOLS_REGISTER]: async (toolRegistry) => {
-        const opts = {
+        // Readers all the way down (B7): each validate/dispatch/status call
+        // resolves dir, limits, the timeout toggle and the group bag against
+        // the CURRENT generation.
+        const opts: WorkflowToolOptions = {
           taskManagerProvider,
-          getRunsRoot: () => runsRoot,
-          getWorkflowsDir: () => workflowsDir,
-          limits,
-          enableRuntimeTimeouts,
-          getModelGroups: () => modelGroups,
+          getRunsRoot: runsRoot,
+          getWorkflowsDir: workflowsDir,
+          limits: currentLimits,
+          enableRuntimeTimeouts: runtimeTimeoutsEnabled,
+          getModelGroups: declaredModelGroups,
           registry,
         };
         for (const [name, ctor] of Object.entries(WORKFLOW_TOOL_CONSTRUCTORS)) {
@@ -245,7 +275,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       /** Manager-facing availability listing (skills-style): saved workflow graphs by name + description. */
       [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }: { agent?: Agent }) => {
         if (!agent?.managerProfile) return;
-        const availability = scanAvailability ? await scanAvailability() : [];
+        const availability = await scanAvailability();
         const content = workflowsPreamble(availability);
         if (content) return { name: "workflows", priority: 410, content };
       },

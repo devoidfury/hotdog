@@ -36,12 +36,32 @@ describe("config-live B4 canonical liveness (real transaction, no restart)", () 
         if (res.ok) {
           // Every probe row is a migrated live-class key with its hook
           // registered on this host: the attestation must claim LIVE.
-          expect(res.applied).toBe("live");
-          expect(res.needsRestart).toBe(false); // the legacy shim DERIVES off applied
+          // Rows carrying an attest() (B7: the one process-pollution-
+          // sensitive row) pin their attestation exactly through it; every
+          // other row -- the committed B4 set -- keeps the strict claim.
+          if (row.attest) {
+            expect(row.attest(res), `${row.keyPath} attestation violations`).toEqual([]);
+          } else {
+            expect(res.applied).toBe("live");
+            expect(res.needsRestart).toBe(false); // the legacy shim DERIVES off applied
+          }
         }
       });
 
       expect(row.observe(env)).toEqual(row.expect);
+
+      // Optional write-back (B7): a value the shared host must not keep is
+      // restored through a second real transaction, so the rows after this one
+      // and the agent-plane test below run on boot semantics.
+      if (row.restore) {
+        await withShadowEnvCleared(async () => {
+          const back = await applyConfigKeyEdit(env.core, row.keyPath, row.restore!, { deps: fsDeps });
+          expect(back.ok, `${row.keyPath} restore write must land: ${back.ok ? "" : back.error}`).toBe(true);
+        });
+      }
+      // A row that installed a global spy (the health-sweep re-arm) hands it
+      // back here, whether or not the assertion path took it.
+      (env as LiveEnv & { __b7Restore?: () => void }).__b7Restore?.();
     });
   }
 

@@ -7,6 +7,7 @@ import { parseFrontMatter, validateNameable } from "@utils/file-utils.ts";
 import { render } from "@utils/render.ts";
 import { logger } from "@utils/logger.ts";
 import { ParseError, formatError } from "@core/error.ts";
+import { readKnob, type ConfigKnob } from "@core/extensions/types.ts";
 
 export interface Skill {
   name: string;
@@ -194,24 +195,41 @@ async function collectAdditionalFiles(
  * SkillsLoader — loads and manages skills.
  */
 export class SkillsLoader {
-  private readonly paths: string[];
+  /**
+   * Where the skills live: a plain string/array stays PINNED forever (test
+   * doubles, embedded hosts -- byte-identical behavior, B6a's ConfigKnob
+   * convention), a reader resolves the CURRENT configured path at every use
+   * (B7, design §4.1: the constructor holds the reader, never a config
+   * scalar). Colon-separated spellings normalize identically either way.
+   */
+  private readonly paths: ConfigKnob<string | string[]>;
+  /** Dirs the LAST loadSkills() actually walked (loader state, not config). */
+  private loadedFrom: string[] = [];
   private readonly skills: Map<string, Skill>;
   private skillContentTemplate: string | null = null;
 
-  constructor(paths: string | string[]) {
-    this.paths = Array.isArray(paths)
-      ? paths
-      : (paths
+  constructor(paths: ConfigKnob<string | string[]>) {
+    this.paths = paths;
+    this.skills = new Map();
+  }
+
+  /** The dirs as configured RIGHT NOW (a reader is re-evaluated per call). */
+  resolvedPaths(): string[] {
+    const value = readKnob(this.paths);
+    return Array.isArray(value)
+      ? value
+      : (value
           .split(":")
           .map((p: string) => p.trim())
           .filter(Boolean) as string[]);
-    this.skills = new Map();
   }
 
   /** Load all skills from configured directories. Returns the number loaded. */
   async loadSkills(): Promise<number> {
     let count = 0;
-    for (const dir of this.paths) {
+    const dirs = this.resolvedPaths();
+    this.loadedFrom = [...dirs];
+    for (const dir of dirs) {
       count += await this.loadFromDirectory(dir);
     }
     return count;
@@ -325,7 +343,14 @@ export class SkillsLoader {
   }
 
   directories(): string[] {
-    return [...this.paths];
+    return this.resolvedPaths();
+  }
+
+  /** The dirs the last loadSkills() walked -- what the skills on disk here
+   *  came from (loader state, so a published path change never rewrites it
+   *  into a claim about work that has not happened). */
+  loadedDirectories(): string[] {
+    return [...this.loadedFrom];
   }
 
   private async loadSkillContentTemplate(): Promise<string> {

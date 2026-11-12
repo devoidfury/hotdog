@@ -9,6 +9,7 @@ import { ParseError, formatError } from "@core/error.ts";
 import { render } from "@utils/render.ts";
 import { ACTIONS } from "@core/commands.ts";
 import type { Agent } from "@core/agent.ts";
+import { readKnob, type ConfigKnob } from "@core/extensions/types.ts";
 
 interface Prompt {
   name: string;
@@ -63,11 +64,18 @@ export function parsePromptFromMd(
  * PromptsLoader — loads and manages prompt templates.
  */
 export class PromptsLoader {
+  /** The dirs the loader IMPORTED from: a plain value, by design (B7 §4.3
+   *  prompts row -- `path` is loader lifecycle = next-session). The fs import
+   *  list is activation machinery; repointing it mid-session would mean
+   *  un-loading prompt templates a running conversation may be quoting. */
   private readonly paths: string[];
   private readonly prompts: Map<string, Prompt>;
-  readonly displayPrompt: boolean;
+  /** B7 (§4.1): a knob, not a stored boolean -- the extension entry passes a
+   *  reader over the live `prompts` block, so `displayPrompt` resolves per
+   *  prompt execution (a plain boolean host keeps its pinned answer). */
+  private readonly display: ConfigKnob<boolean>;
 
-  constructor(paths: string | string[] | undefined, display = true) {
+  constructor(paths: string | string[] | undefined, display: ConfigKnob<boolean> = true) {
     // paths can be a string (colon-separated) or array
     this.paths = Array.isArray(paths)
       ? paths
@@ -76,7 +84,12 @@ export class PromptsLoader {
           .map((p: string) => p.trim())
           .filter(Boolean) as string[];
     this.prompts = new Map();
-    this.displayPrompt = display;
+    this.display = display;
+  }
+
+  /** The posture for THIS read (the per-use resolution). */
+  get displayPrompt(): boolean {
+    return readKnob(this.display) !== false;
   }
 
   /**
@@ -191,7 +204,9 @@ export class PromptsLoader {
     // DISPLAY is added when displayPrompt is true so the rendered prompt
     // appears in chat before the LLM responds.
     let action = ACTIONS.PROMPT;
-    if (this.displayPrompt !== false) {
+    // One read per execution (§4.1): the posture is whatever the CURRENT
+    // generation says, so a live write lands on the very next `prompt:<name>`.
+    if (this.displayPrompt) {
       action |= ACTIONS.DISPLAY;
     }
 

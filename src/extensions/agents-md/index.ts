@@ -31,12 +31,16 @@ async function buildAgentsMdChunk(autoload: boolean): Promise<string> {
 }
 
 export function create(core: CoreContext): ExtensionInstance {
-  const config = getExtensionConfig<{ autoload?: boolean }>(core, "agentsMd");
-  const autoload = config.autoload !== false;
-
+  // B7 (§4.1/§4.3 agentsMd.autoload row): nothing is captured here. The gate
+  // is read at EVERY SYSTEM_PROMPT_BUILD, so a live write lands on the next
+  // prompt rebuild -- both directions: `false` stops shipping the chunk from
+  // the next build, a later `true` brings it back. A rebuild is the natural
+  // boundary: an in-flight request already carries the prompt it was built
+  // with (P8's general rule, nothing retroactively rewrites it).
   return {
     hooks: {
       [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data) => {
+        const autoload = getExtensionConfig<{ autoload?: boolean }>(core, "agentsMd").autoload !== false;
         const content = await buildAgentsMdChunk(autoload);
         return { name: "project-context", priority: 300, content };
       },

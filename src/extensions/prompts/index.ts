@@ -15,17 +15,29 @@ import { matcher, completion } from "./completions.ts";
  * Create the prompts extension.
  */
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
-  const config = getExtensionConfig<{
+  // B7 (§4.1/§4.3 prompts row): ONE split, stated honestly.
+  //  - `displayPrompt` is a LIVE knob: the loader holds a reader and resolves
+  //    it per prompt execution (`prompt:<name>` answers the current value).
+  //  - `path` (and the deprecated top-level `promptsPath` compat below) is
+  //    loader lifecycle: the fs import list is activation machinery, so a
+  //    published path change reaches the NEXT session, never the running one
+  //    -- the loader keeps the dirs it imported from and nothing yanks them
+  //    out mid-conversation. Reading them here at create is therefore the
+  //    correct scope, not a stale capture (see the no-stale-capture allow-list).
+  const boot = getExtensionConfig<{
     path?: string;
     promptsPath?: string;
     displayPrompt?: boolean;
   }>(core, "prompts");
   // Backward compat: support old top-level promptsPath key alongside new path key.
-  const resolvedPath = config.path ?? config.promptsPath;
-  if (config.promptsPath != null && config.path == null) {
+  const resolvedPath = boot.path ?? boot.promptsPath;
+  if (boot.promptsPath != null && boot.path == null) {
     logger.warn("prompts.promptsPath is deprecated; use prompts.path instead");
   }
-  const loader = new PromptsLoader(resolvedPath, config.displayPrompt);
+  const loader = new PromptsLoader(
+    resolvedPath,
+    () => getExtensionConfig<{ displayPrompt?: boolean }>(core, "prompts").displayPrompt ?? true,
+  );
   await loader.loadPrompts();
 
   const instance: ExtensionInstance & {

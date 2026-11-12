@@ -117,9 +117,12 @@ export interface RunConfig {
    *  An explicit override enforces regardless of enableRuntimeTimeouts. */
   maxRuntimeMsOverride?: number;
   /**
-   * The effective workflows.enableRuntimeTimeouts, captured by the caller at
-   * dispatch time. False keeps every runtime-cap kill point dormant; the run
-   * duration accounting (and the run.jsonl stats it feeds) is untouched.
+   * The effective workflows.enableRuntimeTimeouts AT DISPATCH: the caller
+   * reads the live value when it builds this run (B7 -- the extension hands
+   * over a per-dispatch read, not a load-time snapshot), and this constructor
+   * freezes it for the life of the run. False keeps every runtime-cap kill
+   * point dormant; the run duration accounting (and the run.jsonl stats it
+   * feeds) is untouched. A publish mid-run changes the NEXT dispatch only.
    */
   enableRuntimeTimeouts?: boolean;
   /** Test seam for the run-dir ownership claim (pid/host/liveness). Defaults to this process. */

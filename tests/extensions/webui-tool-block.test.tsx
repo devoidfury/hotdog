@@ -376,6 +376,46 @@ describe("codeRuns (shared tokenizer seam)", () => {
       { cls: "tok-keyword", text: "pass" },
     ]);
   });
+
+  it("tokenizes c and dockerfile through the registry", () => {
+    // Adjacent default runs merge (" x"), and the directive line rides tok-preproc.
+    expect(codeRuns("#include <x.h>\nint x;", "c")).toEqual([
+      { cls: "tok-preproc", text: "#include <x.h>" },
+      { cls: null, text: "\n" },
+      { cls: "tok-type", text: "int" },
+      { cls: null, text: " x" },
+      { cls: "tok-operator", text: ";" },
+    ]);
+    expect(codeRuns("int main(void) { return 0; } // c", "c")).toEqual([
+      { cls: "tok-type", text: "int" },
+      { cls: null, text: " " },
+      { cls: "tok-fn", text: "main" },
+      { cls: "tok-operator", text: "(" },
+      { cls: "tok-type", text: "void" },
+      { cls: "tok-operator", text: ")" },
+      { cls: null, text: " " },
+      { cls: "tok-operator", text: "{" },
+      { cls: null, text: " " },
+      { cls: "tok-keyword", text: "return" },
+      { cls: null, text: " " },
+      { cls: "tok-number", text: "0" },
+      { cls: "tok-operator", text: ";" },
+      { cls: null, text: " " },
+      { cls: "tok-operator", text: "}" },
+      { cls: null, text: " " },
+      { cls: "tok-comment", text: "// c" },
+    ]);
+    expect(codeRuns("FROM alpine\n# cache\nENV PATH=$P", "dockerfile")).toEqual([
+      { cls: "tok-keyword", text: "FROM" },
+      { cls: null, text: " alpine\n" },
+      { cls: "tok-comment", text: "# cache" },
+      { cls: null, text: "\n" },
+      { cls: "tok-keyword", text: "ENV" },
+      { cls: null, text: " PATH" },
+      { cls: "tok-operator", text: "=" },
+      { cls: "tok-variable", text: "$P" },
+    ]);
+  });
 });
 
 describe("proseHtml", () => {

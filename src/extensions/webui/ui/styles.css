@@ -2373,6 +2373,22 @@ body.logs-resizing .sidebar-header-resize {
    hue, strings triple-quoted included the warm family, True/False/None
    the scalar literals, dict keys accent. No new classes. */
 
+/* C rides the JavaScript/TypeScript class set above too (the scanner is
+   standalone but the readings match): keywords accent, primitives and
+   Capitalized typedef names the secondary type hue, calls fn, strings and
+   char literals the warm family (one quote scan), comments muted italic,
+   numbers/operators the shared families. One new class: preproc -- the
+   line-leading # directives (#include, #define, #ifdef) are the file's
+   loud declarations, the same divider family as at-rules and doctype. */
+.tok-preproc { color: var(--text-primary); font-weight: 600; }
+
+/* Dockerfile reuses the classes above entirely: instruction words keyword
+   (accent, the scannable structure), # comments muted italic, quoted
+   arguments the warm string family, $VAR/${VAR} the css variable hue, =
+   operator; the RUN shell bodies and continuation tails ride the wash
+   (no shell-inside-RUN parsing -- the documented ceiling). No new
+   classes. */
+
 /* PROSE part: a quiet agent-message row with a left icon gutter. */
 .tool-prose {
     display: flex;

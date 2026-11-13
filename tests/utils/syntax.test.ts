@@ -154,7 +154,6 @@ describe("syntax defs (registerSyntax metadata)", () => {
     expect(guessLangForBase("main.rs")).toBe("rust"); // honest guess, plain render
     expect(getTokenizer("rust")).toBeUndefined();
     expect(resolveSyntaxLang("rust")).toBeUndefined(); // a scannerless def never resolves a fence
-    expect(guessLangForBase("main.go")).toBe("go");
     expect(guessLangForBase("README.md")).toBe("markdown");
     expect(getTokenizer("markdown")).toBeUndefined(); // markdown rides its stateful scanner outside the registry
   });

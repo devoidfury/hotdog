@@ -2389,6 +2389,30 @@ body.logs-resizing .sidebar-header-resize {
    (no shell-inside-RUN parsing -- the documented ceiling). No new
    classes. */
 
+/* Go rides the JavaScript/TypeScript class set above too (the scanner is
+   c.ts-family): the 25 reserved words accent, the predeclared primitives
+   and Capitalized names the secondary type hue, calls fn, all three
+   string forms (interpreted, rune, raw backtick) the warm family -- raw
+   strings ride string, not template, Go interpolates nothing -- comments
+   muted italic, numbers and the :=/<- operators the shared families. No
+   new classes. */
+
+/* SQL rides the same shared families: keywords accent matched
+   case-insensitively (the dockerfile-instruction reading, mid-sentence),
+   NULL/TRUE/FALSE the scalar-literal hues, both quote forms the warm
+   string family (quoted identifiers ride string too -- the documented
+   MySQL leniency), calls fn, -- and block comments muted italic, plain
+   numbers cool; the operator accent is the structural ; . , only, so
+   arithmetic and comparison stay prose. No new classes. */
+
+/* Make reuses the classes above entirely: directive words keyword, the
+   target/variable names the yaml key accent (one accent for both, the
+   precedent stands), the glued assignment/rule operators operator, #
+   comments muted italic -- in recipes too, make strips them there --
+   $(VAR)/${VAR}/$@ the css variable hue; the recipe shell bodies ride
+   the wash (no shell-in-recipe parsing, same ceiling as Dockerfile RUN).
+   No new classes. */
+
 /* PROSE part: a quiet agent-message row with a left icon gutter. */
 .tool-prose {
     display: flex;

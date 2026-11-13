@@ -68,7 +68,22 @@ describe("viewer language + tokens", () => {
     expect(guessLang("app.tsx")).toBe("typescript");
     expect(guessLang("notes.txt")).toBeUndefined();
     expect(guessLang("LICENSE")).toBeUndefined();
-    expect(guessLang(".bashrc")).toBeUndefined(); // dotfile, no stem => no guess
+    // Dotfiles miss the last-dot rule, so the basename index claims them.
+    expect(guessLang(".bashrc")).toBe("shell");
+    expect(guessLang("/home/u/.zshrc")).toBe("shell");
+    expect(guessLang(".profile")).toBe("shell");
+    expect(guessLang("/app/.env")).toBe("ini"); // KEY=value: the ini dialect reads it
+    expect(guessLang(".editorconfig")).toBe("ini");
+    expect(guessLang(".gitconfig")).toBe("ini");
+    expect(guessLang("weird.dotfile")).toBeUndefined(); // unclaimed basename AND ext
+    // Alias-free extension claims (the format IS the lang).
+    expect(guessLang("assets/icon.svg")).toBe("xml");
+    expect(guessLang("schema.xsd")).toBe("xml");
+    expect(guessLang("page.xhtml")).toBe("html");
+    expect(guessLang("events.jsonl")).toBe("json");
+    expect(guessLang("stubs.pyi")).toBe("python");
+    expect(guessLang("Containerfile")).toBe("dockerfile"); // the podman spelling
+    expect(guessLang("Containerfile.dev")).toBe("dockerfile");
     // The batch's new guesses (.ini/.xml) plus the pre-existing .toml one.
     expect(guessLang("config.ini")).toBe("ini");
     expect(guessLang("page.xml")).toBe("xml");

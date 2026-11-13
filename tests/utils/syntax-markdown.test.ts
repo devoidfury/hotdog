@@ -291,6 +291,20 @@ describe("fence state machine", () => {
     expect(tokenizeMarkdownLine("# base", s)).toEqual([run("comment", "# base")]); // comments are their own line, as in the parser
   });
 
+  it("routes jsonl fences through the json tokenizer (one value per line)", () => {
+    const s = newMdStreamState();
+    tokenizeMarkdownLine("```jsonl", s);
+    expect(s.lang).toBe("json");
+    expect(tokenizeMarkdownLine('{"a": 1}', s)).toEqual([
+      run("operator", "{"),
+      run("key", '"a"'),
+      run("operator", ":"),
+      run("default", " "),
+      run("number", "1"),
+      run("operator", "}"),
+    ]);
+  });
+
   it("requires same-char closers of at least the opening width", () => {
     const s = newMdStreamState();
     tokenizeMarkdownLine("````", s);

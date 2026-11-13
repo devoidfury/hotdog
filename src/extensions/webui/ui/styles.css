@@ -2167,6 +2167,22 @@ body.logs-resizing .sidebar-header-resize {
 .tok-entity { color: var(--success); }
 .tok-doctype { color: var(--text-primary); font-weight: 600; }
 
+/* JavaScript/TypeScript token classes (both langs share this vocabulary;
+   the scanner is shared too). Keywords are the control-flow structure
+   (accent); types sit right beside them one notch down (secondary --
+   denser on the page than keywords); call/declaration
+   names take the reference hue, templates and regexes the literal warm
+   family (they are string-shaped), decorators the reference hue with a
+   bolder stance. Strings, comments, numbers, booleans/null and object keys
+   reuse the shared families above; `default` rides the wash. jsx/tsx share
+   these -- their tag markup rides the same identifier/string classes. */
+.tok-keyword { color: var(--accent); }
+.tok-type { color: var(--text-secondary); }
+.tok-fn { color: var(--success); }
+.tok-template { color: var(--warning); }
+.tok-regexp { color: var(--warning); font-style: italic; }
+.tok-decorator { color: var(--success); font-weight: 600; }
+
 /* Markdown token classes (the streaming tokenizer's vocabulary; tok-marker
    and tok-operator already exist from the yaml/shell blocks). Delimiters --
    fences AND frontmatter rules -- recede like the terminal's md_fence; the

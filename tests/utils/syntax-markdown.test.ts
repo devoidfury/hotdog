@@ -172,6 +172,39 @@ describe("fence state machine", () => {
     ]);
   });
 
+  it("routes javascript/typescript fences and their aliases (js, node, ts, jsx, tsx)", () => {
+    for (const [info, lang] of [
+      ["javascript", "javascript"],
+      ["js", "javascript"],
+      ["node", "javascript"],
+      ["jsx", "jsx"],
+      ["typescript", "typescript"],
+      ["ts", "typescript"],
+      ["tsx", "tsx"],
+    ] as const) {
+      const s = newMdStreamState();
+      tokenizeMarkdownLine(`\`\`\`${info}`, s);
+      expect(s.lang).toBe(lang);
+    }
+    const s = newMdStreamState();
+    tokenizeMarkdownLine("```ts", s);
+    expect(tokenizeMarkdownLine("const x: Foo = 1; // t", s)).toEqual([
+      run("keyword", "const"),
+      run("default", " "),
+      run("key", "x"),
+      run("operator", ":"),
+      run("default", " "),
+      run("type", "Foo"),
+      run("default", " "),
+      run("operator", "="),
+      run("default", " "),
+      run("number", "1"),
+      run("operator", ";"),
+      run("default", " "),
+      run("comment", "// t"),
+    ]);
+  });
+
   it("requires same-char closers of at least the opening width", () => {
     const s = newMdStreamState();
     tokenizeMarkdownLine("````", s);

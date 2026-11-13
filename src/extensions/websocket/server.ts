@@ -11,8 +11,14 @@ import { HOOKS } from "@core/hooks.ts";
 import { buildTaskConfigOptions, type AgentLike } from "@core/session/index.ts";
 import { createTurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
-import { registerConfigApplyHook } from "@core/config/apply-hooks.ts";
+import { canonEqual, registerConfigApplyHook, type ConfigApplyContext } from "@core/config/apply-hooks.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
+import {
+  buildProviderModels,
+  fetchRemoteModelsOutcome,
+  type ModelConfig,
+  type ProviderDef,
+} from "@core/config/providers.ts";
 import { S2C, taskActivityMessage, C2SMessage } from "./protocol.ts";
 import { TaskManager } from "@core/session/task-manager.ts";
 import type { TaskObserverEvent } from "@core/session/task-types.ts";
@@ -408,6 +414,187 @@ export function createWsServer(
       },
     });
   }
+
+  // ── Provider list: shared-client re-point + model-catalog refresh ────────
+  // The `providers` root fires for every write under it (card edits, the list
+  // ops, a `providers[2].url` REPLACE), so the value-changed guard is the hook
+  // itself: an unchanged list does nothing at all, no network, no notice.
+  //
+  // Two halves, deliberately different in failure posture:
+  //  1. the SHARED CLIENT re-point -- synchronous, cannot fail, and the part
+  //     the agents actually use. `sharedLlmClient.providers` is reassigned in
+  //     place on the one object the agent factory and the session registry
+  //     both hold, and every request re-reads its fields, so the NEXT attempt
+  //     resolves against the new list (a request already sent finishes with
+  //     the body it built).
+  //  2. the MODEL CATALOG -- awaited here under an explicit timeout, because a
+  //     catalog read is a network call and this transaction holds the panel's
+  //     own reply. A dead endpoint therefore reports degraded while the store
+  //     stays on the new value (a failed apply never re-swaps); the periodic
+  //     health sweep retries on its own schedule. The entries land as an UPSERT
+  //     into the registry object the store carries -- the same piggyback the
+  //     sweep uses, never a replacement: live sessions, locked placements and
+  //     the profile manager all hold that object's identity.
+  //
+  // What this does NOT rebuild is the sweep's PROBE SET: the health registry
+  // snapshot of provider definitions is taken once at construction, so a
+  // provider added or removed here is invisible to the sweep until restart. The
+  // notice says exactly that rather than implying full coverage.
+  registerConfigApplyHook({
+    keyPath: "providers",
+    phase: "apply",
+    timeoutMs: 12_000,
+    handle: async (ctx, previous, next) => {
+      if (canonEqual(previous, next)) return; // root match with no list change
+      const generation = ctx.store.current();
+      // `providers` is a config-bag passthrough key: the resolution chain reads
+      // it to build the registry but never copies it into the resolved bag, so
+      // the file's array -- not `resolved.providers` -- is the authority here.
+      // (Reading the wrong bag would blank the client's list on every write.)
+      const providers =
+        (((generation.config as Record<string, unknown>)?.providers as ProviderDef[] | undefined) ??
+          ((generation.resolved as Record<string, unknown>)?.providers as ProviderDef[] | undefined) ??
+          []);
+      sharedLlmClient.providers = providers;
+
+      const resolved = generation.resolved as Record<string, unknown> | undefined;
+      const registry = resolved?.modelRegistry as Record<string, ModelConfig> | undefined;
+      const contextLimit = resolved?.contextLimit as number | undefined;
+      const globals = {
+        baseUrl: resolved?.baseUrl as string | undefined,
+        apiKey: resolved?.apiKey as string | undefined,
+      };
+      const fetchers = providers
+        .filter((p) => p.fetchModels && registry)
+        .map(async (p) => {
+          const baseUrl = p.url || globals.baseUrl;
+          if (!baseUrl) return; // no endpoint to read: the static models stand
+          const outcome = await fetchRemoteModelsOutcome(baseUrl, p.apiKey || globals.apiKey);
+          if (!outcome.reachable) {
+            throw new Error(
+              `provider "${p.name}" catalog unreadable at ${hostOnly(baseUrl)} (${outcome.reason ?? "unreachable"})`,
+            );
+          }
+          Object.assign(registry!, await buildProviderModels(p, contextLimit ?? 0, globals, outcome.entries));
+        });
+      // Concurrent, same doctrine as the boot build and the sweep: a dead
+      // backend costs one timeout, not one per provider.
+      const settled = await Promise.allSettled(fetchers);
+      const failures = settled
+        .filter((s): s is PromiseRejectedResult => s.status === "rejected")
+        .map((s) => formatError(s.reason));
+
+      ctx.notice(
+        `providers: list re-pointed on the shared client (${providers.length} entries; live on the next request attempt), ` +
+          (failures.length === 0
+            ? `model catalog refreshed${registry ? " into the live registry" : ""}; probe set: restart-bound -- the health sweep keeps the provider set it built with until restart`
+            : `model catalog INCOMPLETE (${failures.join("; ")}); the health sweep retries, and previously catalogued models stay as they were; probe set: restart-bound -- the health sweep keeps the provider set it built with until restart`),
+      );
+      if (failures.length > 0) {
+        // Report the degradation to the reply after the notice above has said
+        // precisely what did and did not move.
+        throw new Error(
+          `${failures.length} provider catalog(s) unreadable; the list is live, the catalog is not: ${failures.join("; ")}`,
+        );
+      }
+    },
+  });
+
+  // ── Speech-to-text target rebuild ────────────────────────────────────────
+  // The boot resolve lives once in this closure today; these rows re-run it
+  // against the swapped resolved bag so the NEXT dictation upload (and the next
+  // attach's sttEnabled flag) follows the file. An upload already in flight
+  // keeps the target it read when it started: the transcribe handler grabs the
+  // field once per request, which is the same next-use posture every other row
+  // in this host ships.
+  const applySttRebuild = (ctx: ConfigApplyContext, summary: string): void => {
+    const resolved = ctx.store.current().resolved as Record<string, unknown> | undefined;
+    const next = resolveSttTarget(
+      resolved as unknown as Parameters<typeof resolveSttTarget>[0],
+      sharedLlmClient,
+    );
+    const enabledFlipped = registry.setSttTarget(next);
+    if (enabledFlipped) {
+      // The mic affordance is the one part of this a client renders, and the
+      // flag is SERVER-wide (unlike the toolExec posture, which is per session
+      // because `/fence` is per session), so every live session's sockets get
+      // the frame. Same sessionState channel and frame shape as the fence
+      // push; the client echo lives in webui/ui/chat.ts.
+      for (const row of registry.list()) {
+        registry.broadcastScoped(row.id, {
+          type: S2C.SESSION_STATE,
+          sessionId: row.id,
+          key: "sttEnabled",
+          value: registry.sttEnabled,
+        });
+      }
+    }
+    ctx.notice(
+      `${summary}; new sessions advertise sttEnabled=${registry.sttEnabled}` +
+        (enabledFlipped
+          ? ` and every connected client was pushed the sessionState flip (an upload already in flight keeps the target it started with)`
+          : ` (the mic affordance does not move: enabledness is unchanged)`),
+    );
+  };
+
+  registerConfigApplyHook({
+    keyPath: "sttUrl",
+    phase: "apply",
+    handle: (ctx, previous, next) => {
+      if (canonEqual(previous, next)) return;
+      applySttRebuild(
+        ctx,
+        // The line names only the host:port a parse of the URL yields; the
+        // full value (path, query, any userinfo) never reaches a log.
+        `sttUrl: transcription endpoint now ${hostOnly(next)} (host:port only, value not shown)`,
+      );
+    },
+  });
+
+  registerConfigApplyHook({
+    keyPath: "sttModel",
+    phase: "apply",
+    handle: (ctx, previous, next) => {
+      if (canonEqual(previous, next)) return;
+      applySttRebuild(
+        ctx,
+        `sttModel: transcription model selection now ${JSON.stringify(next ?? null)} (registry-resolved; no credential involved)`,
+      );
+    },
+  });
+
+  // ── Tool-exec plane: the two file keys whose reach is decided by physics ─
+  // A pool entry's isolation IS its spawn argv, so no hook can retro-fit a
+  // running entry: the new posture is what the next spawn gets (the broker
+  // reads the plan-time posture off the live store through its fence reader),
+  // an entry that is already up keeps the fence it was born with, and an
+  // invoke in flight keeps the fence the frame it was sent under carried.
+  // The attestation therefore claims the new-entry class, and what this row
+  // adds is the audit line -- a posture change is a trust change, so it is
+  // logged the same way an endpoint or a credential change is.
+  registerConfigApplyHook({
+    keyPath: "execFence",
+    phase: "apply",
+    handle: (ctx, previous, next) => {
+      if (canonEqual(previous, next)) return;
+      ctx.notice(
+        `execFence: pool-entry fence posture is now ${JSON.stringify(next)} (was ${JSON.stringify(previous)})` +
+          `${ctx.actor ? ` (written by session ${ctx.actor})` : ""} -- entries spawned from here follow it; a running entry keeps its kernel fence, a call already in flight keeps the fence its frame carried, and a per-session /fence override still outranks the file for its own session`,
+      );
+    },
+  });
+
+  registerConfigApplyHook({
+    keyPath: "toolExec",
+    phase: "apply",
+    handle: (ctx, previous, next) => {
+      if (canonEqual(previous, next)) return;
+      ctx.notice(
+        `toolExec: execution plane is now ${JSON.stringify(next)} (was ${JSON.stringify(previous)}) for the next agent build` +
+          `${ctx.actor ? ` (written by session ${ctx.actor})` : ""} -- running agents keep the plane they were built on, and worker pool entries drain through the idle reaper and session end`,
+      );
+    },
+  });
 
   // Give every tool call for WS agents an Input implementation that resolves
   // via the bridge (same pattern as ui-interactive-cli, which sets it

@@ -7,7 +7,8 @@ import { formatError } from "@core/error.ts";
 async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Promise<number> {
   try {
     const config = getExtensionConfig<WebuiConfig>(core, "webui");
-    const { server, wsServer, authMiddleware } = await createWebuiServer(core, config);
+    const webui = await createWebuiServer(core, config);
+    const { wsServer } = webui;
 
     await new Promise<void>((resolve) => {
       let shuttingDown = false;
@@ -19,9 +20,12 @@ async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Prom
         // reach their next fsynced commit point (bounded at 10s), then
         // interrupt stragglers, so a planned restart never exits mid-write.
         await wsServer.drainSessions();
-        server.stop();
+        // Through the server handle, never a captured listener: a port rebind
+        // during this process's life replaced it, and dispose() is also what
+        // takes the live-config hooks and the audit surface down (a stopped
+        // server must not be the thing a later config write "applies" to).
+        webui.dispose();
         wsServer.stopTaskManager();
-        authMiddleware.stopCleanup();
         resolve();
       };
 

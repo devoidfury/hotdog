@@ -61,14 +61,17 @@ import {
 import { normalizeConfigKeys, type CliArgv } from "@core/config/index.ts";
 import { resolveConfigDir, DEFAULT_CONFIG_FILENAME } from "@core/config/defaults.ts";
 import { diffChanged, type ConfigGeneration, type ConfigStore } from "@core/config/store.ts";
+import { configAuditNotice } from "@core/config/audit.ts";
 import { reresolveConfig } from "@core/config/reresolve.ts";
 import {
+  canonEqual,
   hooksForPhase,
   runConfigApplyHook,
   type ApplyHookRunReport,
   type ConfigApplyContext,
 } from "@core/config/apply-hooks.ts";
 import { suggestCandidates } from "@utils/strings.ts";
+import { compileApprovalRules, type ResolvedUserGateConfig } from "@utils/approvals/rules.ts";
 import { getNested } from "@utils/objects.ts";
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
@@ -2107,12 +2110,14 @@ function withConfigEditLock<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** Serialized entry point: see withConfigEditLock. Exported for tests. */
+/** Serialized entry point: see withConfigEditLock. Exported for tests.
+ *  `opts.actor`: the writing panel's session id, threaded to
+ *  the audit lines of the trust-class hooks; tests/direct callers omit it. */
 export function applyConfigKeyEdit(
   core: CoreContext,
   keyPath: string,
   input: ConfigKeyEditInput,
-  opts: { argv?: string[]; deps?: ConfigEditDeps } = {},
+  opts: { argv?: string[]; deps?: ConfigEditDeps; actor?: string } = {},
 ): Promise<ConfigKeyEditOutcome> {
   return withConfigEditLock(() => applyConfigKeyEditLocked(core, keyPath, input, opts));
 }
@@ -2193,7 +2198,7 @@ async function applyConfigKeyEditLocked(
   core: CoreContext,
   keyPath: string,
   input: ConfigKeyEditInput,
-  opts: { argv?: string[]; deps?: ConfigEditDeps } = {},
+  opts: { argv?: string[]; deps?: ConfigEditDeps; actor?: string } = {},
 ): Promise<ConfigKeyEditOutcome> {
   const deps = opts.deps ?? realConfigEditDeps;
   const argv = opts.argv ?? process.argv;
@@ -2525,6 +2530,12 @@ async function applyConfigKeyEditLocked(
   // function), so file truth, store truth, and the reply can never
   // interleave with another writer, and the reply is composed before the
   // lock releases (§7.2: the transaction completes BEFORE the reply).
+  // Approvals pre-compile, BEFORE any byte is written: a userGate write that
+  // would leave rules the compiler rejects is refused here, not by the boot
+  // that never happens. See candidateRuleBlockRefusal.
+  const gateRefusal = candidateRuleBlockRefusal(core, segs, canonical);
+  if (gateRefusal) return { ok: false, error: gateRefusal };
+
   const fileResult = await commitVerifiedEdit({
     filePath,
     newText,
@@ -2540,7 +2551,7 @@ async function applyConfigKeyEditLocked(
 
   // 8. Live transaction (B4, design §2.4): reresolve -> prepare hooks ->
   //    swap -> apply hooks (awaited, per-hook timeout) -> commit -> attestation.
-  const live = await runLiveConfigApply(core, keyPath, filePath);
+  const live = await runLiveConfigApply(core, keyPath, filePath, opts.actor);
   return {
     ok: true,
     ...echo,
@@ -2558,31 +2569,82 @@ async function applyConfigKeyEditLocked(
  * comes from a table, not from a runtime "a hook ran" guess). B4's rows are
  * exactly the migrated hook-backed keys (§3.3's four); every key WITHOUT a
  * migrated live path keeps replying "restart-required" exactly as before.
+ * The side-effect-class rows extend it: the webui
+ * rebind/auth pair, the userGate rule fields, providers (+ the stamped
+ * `providers[<i>].<field>` writable spellings, index-normalized at lookup),
+ * sttUrl/sttModel, and the execFence/toolExec pair -- the latter TWO land in
+ * "next-session" (the class the derivation can state truthfully: entries
+ * spawned after the publish honor the new posture, running entries and
+ * in-flight turns keep theirs -- the "live (new pool entries
+ * only)" wording rides the hook's audit notice verbatim).
  *
- * Keys are the WRITABLE file-key spellings; values are the hook keyPaths
- * (the RESOLVED-bag roots, the names the consumers read). They differ where
- * the schema resolves under an alias -- the `aiUrl` file member feeds
- * resolved `baseUrl`, `chatTimeoutSecs` feeds resolved `chatTimeout` etc. --
- * and a write only moves the resolved root when the resolution chain
- * actually honors it -- a provider/cli/env layer can shadow it, and the
- * attestation below catches exactly that: the hook never runs while other
- * canonical values moved, so the reply is restart-required with a notice
- * naming the shadow (B4 review F1; only a TRUE no-op -- empty `changed` --
- * keeps a live claim without a hook having run).
+ * Keys are the WRITABLE file-key spellings; values name the hook keyPath
+ * (the RESOLVED-bag roots, the names the consumers read) and optionally the
+ * class the reply claims. They differ where the schema resolves under an
+ * alias -- the `aiUrl` file member feeds resolved `baseUrl`,
+ * `chatTimeoutSecs` feeds resolved `chatTimeout` etc. -- and a write only
+ * moves the resolved root when the resolution chain actually honors it -- a
+ * provider/cli/env layer can shadow it, and the attestation below catches
+ * exactly that: the hook never runs while other canonical values moved, so
+ * the reply is restart-required with a notice naming the shadow
+ * (only a TRUE no-op -- empty `changed` -- keeps a live claim without a
+ * hook having run). The auth pair shares ONE hook keyPath ("webui": one
+ * prepare+apply pair reads the whole candidate block); each field's row
+ * points at it, so the ran-check sees the auth hook run for its field.
  */
-const LIVE_APPLIED_KEYS: Readonly<Record<string, string>> = {
-  hookTrace: "hookTrace",
-  "websocket.sessionTimeoutMin": "websocket.sessionTimeoutMin",
-  providerHealthCheckIntervalSecs: "providerHealthCheckIntervalSecs",
-  aiUrl: "baseUrl",
-  apiKey: "apiKey",
-  chatTimeoutSecs: "chatTimeout",
-  healthCheckTimeoutSecs: "healthCheckTimeout",
-  streamIdleTimeoutSecs: "streamIdleTimeout",
-  maxRetries: "maxRetries",
-  modelWireFormat: "modelWireFormat",
-  modelRoleMapping: "modelRoleMapping",
+interface LiveAppliedRow {
+  /** The apply-hook keyPath whose reports attest this row (ran-check). */
+  hook: string;
+  /** The claimed class; default "live". "rebind" (webui.port,
+   *  reply-first) and "next-session" (execFence/toolExec, new pool entries
+   *  only) are the honest non-live-here-now classes the table can name. */
+  class?: ConfigAppliedClass;
+}
+
+const LIVE_APPLIED_KEYS: Readonly<Record<string, LiveAppliedRow>> = {
+  hookTrace: { hook: "hookTrace" },
+  "websocket.sessionTimeoutMin": { hook: "websocket.sessionTimeoutMin" },
+  providerHealthCheckIntervalSecs: { hook: "providerHealthCheckIntervalSecs" },
+  aiUrl: { hook: "baseUrl" },
+  apiKey: { hook: "apiKey" },
+  chatTimeoutSecs: { hook: "chatTimeout" },
+  healthCheckTimeoutSecs: { hook: "healthCheckTimeout" },
+  streamIdleTimeoutSecs: { hook: "streamIdleTimeout" },
+  maxRetries: { hook: "maxRetries" },
+  modelWireFormat: { hook: "modelWireFormat" },
+  modelRoleMapping: { hook: "modelRoleMapping" },
+  // ── The side-effect class rows ────────────────────────────────────────────
+  "webui.port": { hook: "webui.port", class: "rebind" },
+  "webui.apiKey": { hook: "webui" },
+  "webui.sessionTokenTtlMin": { hook: "webui" },
+  "webui.trustedProxy": { hook: "webui" },
+  "userGate.allow": { hook: "userGate" },
+  "userGate.deny": { hook: "userGate" },
+  "userGate.default": { hook: "userGate" },
+  "userGate.tools": { hook: "userGate" },
+  providers: { hook: "providers" },
+  // The snapshot's create-on-write / card spellings stamp array indices;
+  // the lookup normalizes them to these entries (see liveRowForWrite).
+  "providers[].url": { hook: "providers" },
+  "providers[].apiKey": { hook: "providers" },
+  "providers[].models": { hook: "providers" },
+  sttUrl: { hook: "sttUrl" },
+  sttModel: { hook: "sttModel" },
+  toolExec: { hook: "toolExec", class: "next-session" },
+  execFence: { hook: "execFence", class: "next-session" },
 };
+
+/** Table lookup for a written keyPath: exact first, then INDEX-ONLY
+ *  normalization (every `[<digits>]` collapses to `[]`) so the panel's
+ *  stamped `providers[0].url` / `providers[12].apiKey` spellings land on
+ *  the same honest row as the class the write belongs to -- the lookup
+ *  never index-matches (`providers[0].models.extra` normalizes segment by
+ *  segment and still finds nothing beyond the declared spellings). */
+function liveRowForWrite(keyPath: string): LiveAppliedRow | undefined {
+  const direct = LIVE_APPLIED_KEYS[keyPath];
+  if (direct) return direct;
+  return LIVE_APPLIED_KEYS[keyPath.replace(/\[\d+\]/g, "[]")];
+}
 
 /** Value at keyPath in a generation: config bag first, resolved bag as the
  *  fallback (the same two-bag namespace the changed-diff spans; live.ts's
@@ -2606,6 +2668,7 @@ async function runLiveConfigApply(
   core: CoreContext,
   keyPath: string,
   filePath: string,
+  actor?: string,
 ): Promise<{ applied: ConfigAppliedClass; appliedNotices: string[]; applyHooks: ApplyHookRunReport[] }> {
   const notices: string[] = [];
   const reports: ApplyHookRunReport[] = [];
@@ -2645,12 +2708,16 @@ async function runLiveConfigApply(
   const changed = diffChanged(previous, candidate);
   const ctx: ConfigApplyContext = {
     store,
-    // §5.3 audit floor: the one grep-able shape ("[config-live] <keyPath>:
-    // <summary>" -- hooks author the "<keyPath>: <summary>" half, secret-free
-    // text by construction). The session/log-surface fan-out joins this
-    // helper in B8.
-    notice: (text: string) => logger.warn(`[config-live] ${text}`),
+    // The audit floor: the shared primitive (core/config/audit.ts) -- the
+    // grep-able `logger.warn("[config-live] <keyPath>: <summary>")` PLUS the
+    // webui surface push when a server is serving. The hooks registered
+    // before this seam keep their exact bytes: the log line the primitive
+    // writes IS "[config-live] " + the hook's text, as before.
+    notice: (text: string) => configAuditNotice(text),
     core,
+    // WHO wrote, for the trust-class audit lines; undefined when the
+    // write arrived without a session context (direct/test callers).
+    actor,
   };
 
   // PREPARE hooks (before the swap): a throw REFUSES the swap. The value
@@ -2705,16 +2772,31 @@ async function runLiveConfigApply(
   // quiet pass. (1) A degraded primary effect means the new value is NOT in
   // effect (the old side effect still runs): restart-required, with the
   // degraded notice stated above. (2) The hook ran nothing and the resolved
-  // root DID move: no live holder is registered on this host, say so. (3) The
+  // root DID move: no live holder is registered on this host, say so (this
+  // is what makes "a host not serving webui" answer webui.port/rebind rows
+  // honestly with restart-required -- there IS no hook, and no lie). (3) The
   // hook ran nothing, other canonical values moved, but THIS key's root did
   // not -- a higher layer (provider/cli/env) decides it and the file's new
   // value reached nobody but the store: restart-required, notice names the
   // shadow (B4 review F1). (4) Nothing at all in `changed`: a genuine no-op,
   // the running value already equals the file, so the live claim stands
-  // unconfirmed and honest.
-  let applied: ConfigAppliedClass = keyPath in LIVE_APPLIED_KEYS ? "live" : "restart-required";
-  if (applied === "live") {
-    const hookKeyPath = LIVE_APPLIED_KEYS[keyPath]!;
+  // unconfirmed and honest -- EXCEPT for "rebind", which claims an act that
+  // a no-op does not perform: it is downgraded to "live" (the port is
+  // already the one listening). The "rebind" claim additionally carries the
+  // static notice: the reply MUST leave the socket BEFORE the rebind
+  // runs, so the follow-up truth lives on the audit log (and, on failure,
+  // on store.reportDegraded for the next snapshot's row) -- the reply says
+  // "expect a brief drop", plainly.
+  const row = liveRowForWrite(keyPath);
+  // The written key's own value across this publish. Canonical comparison, so a
+  // re-resolve that rebuilt the subtree with fresh identities is not a change.
+  const valueAtKeyPathMoved = !canonEqual(
+    generationValueAt(previous, keyPath),
+    generationValueAt(candidate, keyPath),
+  );
+  let applied: ConfigAppliedClass = row ? row.class ?? "live" : "restart-required";
+  if (row) {
+    const hookKeyPath = row.hook;
     const ran = reports.filter((r) => r.phase === "apply" && r.keyPath === hookKeyPath);
     const root = hookKeyPath.split(".")[0]!;
     if (ran.some((r) => r.status !== "applied")) {
@@ -2731,6 +2813,23 @@ async function runLiveConfigApply(
       applied = "restart-required";
       notices.push(
         `persisted; a higher layer decides "${keyPath}" than the config file: the file holds the new value but the running value does not -- clear the shadowing layer and the next write applies live, otherwise restart without it.`,
+      );
+    } else if (applied === "rebind" && !valueAtKeyPathMoved) {
+      // "rebind" is the only class that claims an ACT instead of a re-read, so
+      // it is the one class the table cannot grant on the hook-ran evidence
+      // alone: a hook that matched this root, guarded its own keyPath, and did
+      // nothing still reports "applied" (a sibling write under the same root --
+      // webui.apiKey -- matches webui.port's row). The port did not move, so no
+      // listener moves: the claim drops to the truth, "live".
+      applied = "live";
+      notices.push(`the value did not change; nothing had to be rebound and the current listener stays up.`);
+    } else if (applied === "rebind") {
+      // The reply is the drop notice: it leaves the socket BEFORE the move (the
+      // hook defers the rebind past this turn), so the follow-up truth lives on
+      // the audit log and, on a failed move, on the generation's degraded list
+      // for the NEXT snapshot's row to render.
+      notices.push(
+        `rebinding: the reply reaches you BEFORE the listener moves, expect a brief drop; connected sockets drop and the webui reconnects. The rebind result lands on the audit log and (on failure) on the next snapshot's row.`,
       );
     }
   }
@@ -2810,6 +2909,59 @@ function commitVerifiedEdit(args: {
   })();
 }
 
+/**
+ * The panel-side pre-compile for the approvals gate (defense in depth): a write
+ * under `userGate` compiles the CANDIDATE rule block -- the live block with this
+ * write's value spliced in -- and refuses before a single byte is written.
+ * Without it a malformed rule would persist in the file, the prepare hook would
+ * refuse the live swap, and the operator would be left holding a file whose
+ * next boot fails closed (every tool blocked) while the reply only said
+ * "restart-required". The compile error rides the refusal verbatim, so the row
+ * the user just edited names exactly what is wrong with it.
+ *
+ * Returns null when the write is fine OR when there is nothing to check: only
+ * the `userGate` root is the gate's, and a host whose live bag carries no gate
+ * block at all has no rules for the candidate to disagree with.
+ */
+function candidateRuleBlockRefusal(core: CoreContext, segs: KeySeg[], proposed: unknown): string | null {
+  if (segs[0] !== "userGate") return null;
+  const live = (core.config as Record<string, unknown> | undefined)?.userGate;
+  if (live === undefined || live === null) return null;
+  let candidate: unknown;
+  try {
+    candidate = spliceAtSegs(structuredClone(live), segs.slice(1), proposed);
+  } catch {
+    return null; // a shape this splice cannot model is the prepare hook's problem, not a reason to refuse
+  }
+  try {
+    compileApprovalRules(candidate as ResolvedUserGateConfig);
+  } catch (e: unknown) {
+    return `"${spellPath(segs)}" would leave approval rules that do not compile: ${errorText(e)} -- nothing was written`;
+  }
+  return null;
+}
+
+/** Set `value` at `path` inside `root` (object keys and array indices), over a
+ *  structure the caller already cloned. A path that walks out of a scalar or
+ *  off the end of an array throws -- the caller reads that as "cannot check",
+ *  never as a refusal. */
+function spliceAtSegs(root: unknown, path: KeySeg[], value: unknown): unknown {
+  if (path.length === 0) return value;
+  const head = path[0];
+  const rest = path.slice(1);
+  if (head === undefined) throw new Error("empty path segment");
+  if (typeof head === "number") {
+    if (!Array.isArray(root)) throw new Error("path walks out of an array");
+    const next = [...root];
+    next[head] = spliceAtSegs(next[head], rest, value);
+    return next;
+  }
+  if (root !== null && typeof root !== "object") throw new Error("path walks out of a scalar");
+  const obj = { ...(root as Record<string, unknown>) };
+  obj[head] = spliceAtSegs(obj[head], rest, value);
+  return obj;
+}
+
 export async function handleConfigKeySet(ctx: RouteContext): Promise<void> {
   const { ws, msg, core } = ctx;
   const requestId = typeof msg.requestId === "number" ? msg.requestId : undefined;
@@ -2832,7 +2984,10 @@ export async function handleConfigKeySet(ctx: RouteContext): Promise<void> {
     return;
   }
   // Awaited for the settle contract: this writes (and re-reads) a file.
-  await applyConfigKeyEdit(core, keyPath, { value, valueText })
+  // `actor` is the writing session: the trust-class audit lines name who asked
+  // for the change (an attached socket's active session; a socket that never
+  // attached an agent has none, and the line says nothing it cannot support).
+  await applyConfigKeyEdit(core, keyPath, { value, valueText }, { actor: ws.activeSessionId })
     .then((result) => {
       SessionRegistry.sendSafe(ws, { ...result, type: S2C.SET_CONFIG_KEY_RESULT, requestId });
     })
@@ -3413,6 +3568,13 @@ async function applyConfigListEditLocked(
     newText = edit.newText;
     verifyPath = parent;
   }
+
+  // The same approvals pre-compile as the value editor: an appended or removed
+  // element must leave a rule block that still compiles, or the file stays as it
+  // was. `expected` is the whole array this op produces, spliced at the array's
+  // own path -- which is exactly what a list op edits.
+  const gateRefusal = candidateRuleBlockRefusal(core, verifyPath, expected);
+  if (gateRefusal) return { ok: false, error: gateRefusal };
 
   return commitVerifiedEdit({
     filePath,

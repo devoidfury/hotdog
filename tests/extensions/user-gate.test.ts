@@ -3,12 +3,30 @@
 // and every fail-closed path is pinned, because a gate that fails open is
 // worse than no gate.
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterAll } from "bun:test";
 import { HookSystem, HOOKS, type GateAction } from "@core/hooks.ts";
 import type { CoreContext, HookPayloads } from "@core/extensions/types.ts";
 import { Workspace } from "@utils/workspace.ts";
-import { create } from "@extensions/user-gate/index.ts";
+import { create as createUserGate } from "@extensions/user-gate/index.ts";
 import type { UserGateConfig } from "@utils/approvals/rules.ts";
+
+// Sequential-run isolation: every enabled create() registers live-config
+// hooks in a process-wide table, and `bun test` runs all files in ONE
+// process when not --parallel. Track what this file boots and drain it at
+// file end through the same SHUTDOWN_CLEANUP seam the extension uses; a
+// later file's hook-coverage walk must only ever see its own rows.
+const gated: Array<ReturnType<typeof createUserGate>> = [];
+function create(core: CoreContext): ReturnType<typeof createUserGate> {
+  const instance = createUserGate(core);
+  gated.push(instance);
+  return instance;
+}
+afterAll(() => {
+  for (const instance of gated.splice(0)) {
+    const shutdown = instance.hooks?.[HOOKS.SHUTDOWN_CLEANUP] as (() => void) | undefined;
+    shutdown?.();
+  }
+});
 
 type ToolCallPayload = HookPayloads["tool:call"];
 

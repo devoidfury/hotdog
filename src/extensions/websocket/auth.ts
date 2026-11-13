@@ -232,11 +232,40 @@ export function apiKeyEquals(provided: string, expected: string): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-interface AuthMiddlewareOptions {
+/** The swappable half of the middleware: what a request-time decision reads.
+ *  A config write to webui.apiKey / sessionTokenTtlMin / webui.trustedProxy
+ *  produces a NEW policy object and an AuthRef swaps it over unchanged state. */
+export interface AuthPolicy {
   validateApiKey: (apiKey: string) => Promise<boolean>;
   tokenTtlMin?: number;
   /** Resolved webui.trustedProxy: an IP or CIDR, or ""/unset to disable. */
   trustedProxy?: string;
+}
+
+/**
+ * The CARRIED state: everything a middleware REBUILD must not touch. Sessions,
+ * throttle buckets, the x-forwarded-for once-flag and the cleanup-timer handle
+ * belong here rather than in the middleware closure, so swapping policy over
+ * the SAME state keeps: issued tokens alive to the expiresAt stamped at THEIR
+ * issuance, a lockout ladder a probing client already climbed, the once-only
+ * xff warning, and exactly ONE 60s sweep for the server's life. Rebuilding
+ * inside the closure instead would silently log everyone out, hand an
+ * under-throttle attacker a fresh ladder mid-probe, and leak a sweep timer per
+ * config write.
+ */
+export interface AuthState {
+  /** token -> issuance record (expiresAt is stamped from the TTL in force AT issuance). */
+  sessions: Map<string, SessionEntry>;
+  /** throttle key -> failure record; survives a rebuild so a rebuild is never a throttle reset. */
+  rateLimits: Map<string, RateLimitEntry>;
+  /** Carried once-flag: the warning is per server, not per middleware instance. */
+  xffWarned: boolean;
+  /** The single sweep handle; startCleanup on any instance over this state re-arms nothing. */
+  cleanupInterval: ReturnType<typeof setInterval> | null;
+}
+
+export function createAuthState(): AuthState {
+  return { sessions: new Map(), rateLimits: new Map(), xffWarned: false, cleanupInterval: null };
 }
 
 export interface AuthMiddleware {
@@ -247,31 +276,46 @@ export interface AuthMiddleware {
   stopCleanup: () => void;
 }
 
-export function createAuthMiddleware({
-  validateApiKey,
-  tokenTtlMin = 1440,
-  trustedProxy,
-}: AuthMiddlewareOptions): AuthMiddleware {
-  // A malformed trustedProxy fails loudly at init: silently falling back to
-  // "trust nothing" would leave the operator thinking the proxy is believed.
-  let trusted: TrustedProxy | null = null;
-  if (trustedProxy && trustedProxy.trim() !== "") {
-    trusted = parseTrustedProxy(trustedProxy);
-    if (!trusted) {
-      throw ExtensionError.ConfigFailed(
-        "webui",
-        `Invalid webui.trustedProxy "${trustedProxy}": expected an IP address ` +
-          `or CIDR (e.g. "203.0.113.10" or "10.0.0.0/8").`,
-      );
-    }
+/**
+ * Parse webui.trustedProxy into the matcher the throttle uses, or throw the
+ * one canonical message. Shared by every path that adopts the value: boot (a
+ * malformed CIDR fails the boot -- silently trusting nothing would leave the
+ * operator thinking the proxy is believed) and the runtime prepare hook (the
+ * same throw, one level up, becomes a refused write while the running
+ * middleware keeps serving). One home for the message means the reply the
+ * panel shows is the message boot would have printed.
+ */
+export function assertTrustedProxy(trustedProxy?: string): TrustedProxy | null {
+  if (!trustedProxy || trustedProxy.trim() === "") return null;
+  const parsed = parseTrustedProxy(trustedProxy);
+  if (!parsed) {
+    throw ExtensionError.ConfigFailed(
+      "webui",
+      `Invalid webui.trustedProxy "${trustedProxy}": expected an IP address ` +
+        `or CIDR (e.g. "203.0.113.10" or "10.0.0.0/8").`,
+    );
   }
+  return parsed;
+}
+
+/** One middleware instance: the POLICY (key compare, the TTL stamped on the
+ *  NEXT issuance, the parsed proxy) over the state it operates on. A malformed
+ *  trustedProxy throws here -- at boot that is a failed boot (silently falling
+ *  back to "trust nothing" would lie about the throttle), and at runtime the
+ *  webui prepare hook builds the candidate instance BEFORE the store swap, so
+ *  the same throw refuses the write instead of killing a live server. */
+function buildAuth(
+  { validateApiKey, tokenTtlMin = 1440, trustedProxy }: AuthPolicy,
+  state: AuthState,
+): AuthMiddleware {
+  const trusted = assertTrustedProxy(trustedProxy);
 
   // One proxy-looking header is enough to tell the operator the throttle is
   // mis-keyed; repeating it per request would turn a probe into a log flood.
-  let xffWarned = false;
+  // The flag is CARRIED state: a policy rebuild must not re-warn.
   function warnXffWithoutTrustedProxy(): void {
-    if (xffWarned) return;
-    xffWarned = true;
+    if (state.xffWarned) return;
+    state.xffWarned = true;
     logger.warn(
       "[auth] x-forwarded-for received but webui.trustedProxy is unset -- " +
         "the login throttle keys on the direct peer: behind a reverse proxy " +
@@ -282,9 +326,11 @@ export function createAuthMiddleware({
     );
   }
 
-  const sessions = new Map<string, SessionEntry>();
-  const rateLimits = new Map<string, RateLimitEntry>();
-  let cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  // Aliases onto the CARRIED maps: the instance owns no state of its own, so
+  // a rebuild over the same AuthState keeps every token, every throttle bucket,
+  // and the sweep handle exactly where the clients left them.
+  const sessions = state.sessions;
+  const rateLimits = state.rateLimits;
 
   function recordFailure(ip: string, now: number): void {
     const entry = rateLimits.get(ip) || { failures: 0, lastFailedAt: now };
@@ -388,14 +434,18 @@ export function createAuthMiddleware({
   }
 
   function startCleanup(): void {
-    if (cleanupInterval) return;
-    cleanupInterval = setInterval(cleanup, 60_000);
+    // The handle lives on the CARRIED state: a rebuilt instance re-arming is a
+    // no-op, so the server holds exactly one sweep however many policies it
+    // goes through. The old interval keeps firing THIS function shape after a
+    // swap -- cleanup() only touches the carried maps, so it stays correct.
+    if (state.cleanupInterval) return;
+    state.cleanupInterval = setInterval(cleanup, 60_000);
   }
 
   function stopCleanup(): void {
-    if (cleanupInterval) {
-      clearInterval(cleanupInterval);
-      cleanupInterval = null;
+    if (state.cleanupInterval) {
+      clearInterval(state.cleanupInterval);
+      state.cleanupInterval = null;
     }
   }
 
@@ -405,5 +455,49 @@ export function createAuthMiddleware({
     cleanup,
     startCleanup,
     stopCleanup,
+  };
+}
+
+/** A middleware over fresh state -- the boot shape (webui start, tests). */
+export function createAuthMiddleware(options: AuthPolicy): AuthMiddleware {
+  return buildAuth(options, createAuthState());
+}
+
+/**
+ * The holder every consumer holds (webui routes, the websocket AUTH chain, the
+ * upgrade-time validateToken, the shutdown stopCleanup). Its methods resolve
+ * the CURRENT instance per call, so one swap reaches every consumer at once --
+ * a captured instance reference would leave whichever consumer grabbed it
+ * first serving the retired policy while the reply claimed the change was
+ * live. `swap` builds the candidate BEFORE replacing anything, so a policy that
+ * throws (malformed trustedProxy) leaves the running instance untouched.
+ */
+export interface AuthRef extends AuthMiddleware {
+  /** Rebuild policy over the carried state; returns the new instance. Throws
+   *  with the new instance uncommitted if the policy is malformed. */
+  swap(policy: AuthPolicy): AuthMiddleware;
+  /** The instance in force right now (test/inspection seam). */
+  current(): AuthMiddleware;
+  /** The carried state (test/inspection seam). */
+  state(): AuthState;
+}
+
+export function createAuthRef(initialPolicy: AuthPolicy, state: AuthState = createAuthState()): AuthRef {
+  let instance = buildAuth(initialPolicy, state);
+  return {
+    loginHandler: (req) => instance.loginHandler(req),
+    validateToken: (token) => instance.validateToken(token),
+    cleanup: () => instance.cleanup(),
+    startCleanup: () => instance.startCleanup(),
+    stopCleanup: () => instance.stopCleanup(),
+    swap(policy: AuthPolicy): AuthMiddleware {
+      // Build first: a throw here is the refuse-the-swap signal, and nothing
+      // on the state or on `instance` moved.
+      const next = buildAuth(policy, state);
+      instance = next;
+      return next;
+    },
+    current: () => instance,
+    state: () => state,
   };
 }

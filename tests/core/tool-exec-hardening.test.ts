@@ -568,6 +568,131 @@ describe("fence argv (seam fence, real spawn)", () => {
   });
 });
 
+// ── The file-key posture as a live reader (a config write is a plan-time fact) ─
+//
+// A broker built with `fencePolicy` asks the READER on every plan, so the
+// posture the file holds at dispatch decides what the next frame carries --
+// and what the next ENTRY is spawned under. A pool entry's isolation is its
+// spawn argv: the entry born before the flip keeps its jail (or its absence)
+// for its whole life, and the flip reaches the pool only by REPLACING it.
+// A call already in flight when the posture changes is answered where it
+// started -- no retro-jailing, no retro-freeing.
+
+describe("fence posture from a live reader (seam fence, real spawn)", () => {
+  it("entries spawned before the flip keep their posture; entries after follow the file", async () => {
+    let posture: "off" | "probe" = "off";
+    const broker = new ToolExecBroker({
+      fence: "off",
+      fencePolicy: () => posture,
+      fencePlan: () => envFence("live-posture"),
+    });
+    try {
+      const first = await broker.invoke({
+        session: "harden-live",
+        tool: "bash",
+        args: { command: "echo $PPID fence=[${FAKE_FENCE_MARK:-absent}]" },
+        ctx: ctx("harden-live"),
+      });
+      expect(text(first)).toContain("fence=[absent]");
+      const bornOff = pidOf(first);
+
+      // Still off: the SAME entry answers (posture is a spawn fact, the entry
+      // is reused while the plan matches).
+      const second = await broker.invoke({
+        session: "harden-live",
+        tool: "bash",
+        args: { command: "echo $PPID fence=[${FAKE_FENCE_MARK:-absent}]" },
+        ctx: ctx("harden-live"),
+      });
+      expect(text(second)).toContain("fence=[absent]");
+      expect(pidOf(second)).toBe(bornOff);
+
+      // The write lands: the NEXT plan asks the reader and gets probe, so the
+      // next frame carries the fence and the pool gets a NEW entry -- the
+      // unfenced one is never converted, it is replaced.
+      posture = "probe";
+      const after = await broker.invoke({
+        session: "harden-live",
+        tool: "bash",
+        args: { command: "echo $PPID fence=$FAKE_FENCE_MARK" },
+        ctx: ctx("harden-live"),
+      });
+      expect(text(after)).toContain("fence=1");
+      expect(pidOf(after)).not.toBe(bornOff);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("a call in flight when the posture flips answers where it started", async () => {
+    let posture: "off" | "probe" = "off";
+    const broker = new ToolExecBroker({
+      fence: "off",
+      fencePolicy: () => posture,
+      fencePlan: () => envFence("live-twin"),
+    });
+    try {
+      const marker = join(dir, `live-flip-${process.pid}-${Date.now()}`);
+      const running = startSignalled(
+        broker,
+        "harden-liveinflight",
+        marker,
+        "echo fence=[${FAKE_FENCE_MARK:-absent}]; sleep 1",
+      );
+      await waitSignalled(marker); // the frame is with the runner on the unfenced entry
+      posture = "probe"; // a config write mid-call
+      const result = await running;
+      // The in-flight call keeps the fence its frame carried: the flip is a
+      // PLAN-TIME decision and this plan already happened.
+      expect(text(result)).toContain("fence=[absent]");
+      // The NEXT call replans and gets the fence.
+      const next = await broker.invoke({
+        session: "harden-liveinflight",
+        tool: "bash",
+        args: { command: "echo fence=$FAKE_FENCE_MARK" },
+        ctx: ctx("harden-liveinflight"),
+      });
+      expect(text(next)).toContain("fence=1");
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("a throwing reader never picks a posture by guess: the last answer stands", async () => {
+    let mode: "probe" | "throw" = "probe";
+    const broker = new ToolExecBroker({
+      fence: "off",
+      fencePolicy: () => {
+        if (mode === "throw") throw new Error("the store is having a bad day");
+        return "probe";
+      },
+      fencePlan: () => envFence("live-throw"),
+    });
+    try {
+      const fenced = await broker.invoke({
+        session: "harden-throw",
+        tool: "bash",
+        args: { command: "echo $PPID fence=$FAKE_FENCE_MARK" },
+        ctx: ctx("harden-throw"),
+      });
+      expect(text(fenced)).toContain("fence=1");
+      mode = "throw";
+      // Same posture as before the failure: same entry, same jail, no throw
+      // out of the invoke, no silent un-jailing.
+      const kept = await broker.invoke({
+        session: "harden-throw",
+        tool: "bash",
+        args: { command: "echo $PPID fence=$FAKE_FENCE_MARK" },
+        ctx: ctx("harden-throw"),
+      });
+      expect(text(kept)).toContain("fence=1");
+      expect(pidOf(kept)).toBe(pidOf(fenced));
+    } finally {
+      await broker.close();
+    }
+  });
+});
+
 // ── Reap takes the live shell with it (increment-3 review) ──────────────────
 //
 // The runner is not the leak: bash is spawned DETACHED (its own process

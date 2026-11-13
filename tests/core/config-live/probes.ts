@@ -53,6 +53,7 @@ import { createSubcommandRegistry } from "@core/extensions/registries.ts";
 import type { ResolvedConfig } from "@core/extensions/types.ts";
 import type { ConfigEditDeps } from "@extensions/websocket/handlers-config.ts";
 import { createWsServer, type WsServer } from "@extensions/websocket/server.ts";
+import { sharedExecFenceDisplay } from "@core/tool-exec-broker.ts";
 import type { ConfigKeyEditInput } from "@extensions/websocket/handlers-config.ts";
 
 /** Env vars whose set values would shadow the file's resolution chain and
@@ -67,6 +68,8 @@ const SHADOWING_ENV = [
   "HOTDOG_MODEL",
   "AI_MODEL",
   "HOTDOG_CONFIG_DIR",
+  "HOTDOG_STT_URL",
+  "HOTDOG_STT_MODEL",
 ] as const;
 
 export async function withShadowEnvCleared<T>(fn: () => Promise<T>): Promise<T> {
@@ -116,8 +119,24 @@ function fakeRegistry(): never {
     getConfigParams: () => [WEBSOCKET_ENTRY],
     getCliFlags: () => [],
     getConfigParamsRaw: () => [WEBSOCKET_ENTRY],
+    // getExtensionConfig validates the block it hands an extension. This
+    // harness mirrors no extension schema beyond `websocket`, so the answer is
+    // "accepted": the write gate's own value checks and whatever the extension
+    // compiles (user-gate compiles its rules and fails loudly) stay the real
+    // validators on every path these suites exercise.
+    validateConfigByKey: () => ({ valid: true, errors: [] as string[] }),
   } as never;
 }
+
+/** One provider element in the seed file, fresh-copied into each bag: the
+ *  provider-list rows need a real element to point at, and the honest writable
+ *  spelling for them is the scalar child `providers[0].url` (a whole-array
+ *  write is a container write through the file gate). `fetchModels` stays
+ *  unset so no probe row reaches the network. Both bags MUST agree: the
+ *  resolution chain passes the file's provider array through untouched, and a
+ *  boot value that disagrees with the re-resolve reads as CHANGED on every
+ *  unrelated write -- firing any hook registered on that root. */
+const seedProviders = () => [{ name: "seedcard", url: "http://seed.invalid/v1" }];
 
 /** Hand-built boot resolved bag (the config-store/config-live suites build
  *  theirs the same way; the boot pipeline that WOULD produce it needs the
@@ -145,8 +164,15 @@ export function bootResolved(dir: string, over: Record<string, unknown> = {}): R
     profileName: "default",
     workspaceRoots: [dir],
     workspaceDeny: [],
-    toolExec: "inline",
+    // Each of these MUST agree with what the seed file resolves to: the first
+    // publish of a harness host diffs the whole bag against the re-resolve, and
+    // a root that differs here shows up as CHANGED on every unrelated write --
+    // firing any apply hook registered on that root. toolExec "inline" was the
+    // stale one (the schema default the file resolves is "worker").
+    toolExec: "worker",
     execFence: "probe",
+    sttUrl: null,
+    sttModel: null,
     ...over,
   } as unknown as ResolvedConfig;
 }
@@ -166,6 +192,10 @@ export function seedFile(): Record<string, unknown> {
     maxRetries: 5,
     modelWireFormat: "xml",
     providerHealthCheckIntervalSecs: 30,
+    // The provider list is a config-bag passthrough key (the resolution chain
+    // reads it but never copies it into the resolved bag), so this element is
+    // the boot truth the provider-list rows diff against.
+    providers: seedProviders(),
     websocket: { sessionTimeoutMin: 30, questionTimeoutSecs: 300 },
   };
 }
@@ -450,7 +480,95 @@ export const PROBES: LiveProbeRow[] = [
     expect: true,
     before: false,
   },
+  {
+    // The provider list: the hook re-points the ONE providers array the shared
+    // client holds (the agent factory and the session registry alias the same
+    // object), so the observable is what that client resolves endpoints from
+    // after the publish. The honest writable spelling is the scalar child
+    // `providers[0].url` -- `providers` itself is a container -- and the hook
+    // lives on the root, hence the explicit coverage claim. No `fetchModels`
+    // on the seed entry: this row must not reach the network (the catalog
+    // sweep and its degrade path are pinned in
+    // tests/core/config-live/side-effects.test.ts).
+    keyPath: "providers[0].url",
+    hooks: ["providers"], // the root the apply hook registered under
+    input: { value: "http://live-provider.invalid/v1" },
+    observe: (e) => ((e.ws.llmClient.providers ?? []) as { url?: string }[]).map((p) => p.url),
+    before: ["http://seed.invalid/v1"],
+    expect: ["http://live-provider.invalid/v1"],
+  },
+  {
+    // The speech-to-text target, endpoint half: re-resolved against the swapped
+    // bag, so the registry's target (what every dictation upload reads per
+    // request and every new session advertises as sttEnabled) answers the new
+    // URL. Boot has no backend at all -- sttUrl/sttModel are null and no
+    // registry model declares audio -- so `before` is the honest "mic off".
+    keyPath: "sttUrl",
+    input: { value: "http://stt.invalid/v1/audio/transcriptions" },
+    observe: (e) => e.ws.sessionRegistry.sttTarget?.url ?? null,
+    before: null,
+    expect: "http://stt.invalid/v1/audio/transcriptions",
+  },
+  {
+    // ... and the model half, AFTER the endpoint row (a model only resolves
+    // into a target once a target exists): the same rebuild re-runs on this
+    // root, so the multipart `model` field follows without a restart.
+    keyPath: "sttModel",
+    input: { value: "whisper-live" },
+    observe: (e) => e.ws.sessionRegistry.sttTarget?.model ?? null,
+    before: null,
+    expect: "whisper-live",
+  },
+  {
+    // The exec-fence file key. Its honest observable is the posture the live
+    // bag answers for a session with no runtime override: `off` never touches
+    // the platform, so the display says "off" from the write on, whatever the
+    // host's probe backend is (or is not). The pool entry that is already up
+    // keeps the kernel fence it was spawned with -- that half is physics,
+    // pinned against real spawns in tests/core/tool-exec-hardening.test.ts. The
+    // reply class is "next-session", never "live": a running entry cannot move.
+    keyPath: "execFence",
+    input: { value: "off" },
+    observe: (e) =>
+      sharedExecFenceDisplay("exec-fence-probe", e.core.resolved as Record<string, unknown>) === "off",
+    before: false,
+    expect: true,
+    hooks: ["execFence"],
+    attest: attestNextSessionClass,
+  },
+  {
+    // The plane key: what the next agent build gets, read through the same
+    // live consumer the webui status strip uses (an inline plane never shows a
+    // fence, so the label is deterministic whichever way the platform probe
+    // went). RESTORED through the same transaction: the shared host must go on
+    // running the plane it booted.
+    keyPath: "toolExec",
+    input: { value: "inline" },
+    restore: { value: "worker" },
+    observe: (e) => e.ws.sessionRegistry.toolExecLabel("tool-exec-probe").startsWith("inline"),
+    before: false,
+    expect: true,
+    hooks: ["toolExec"],
+    attest: attestNextSessionClass,
+  },
 ];
+
+/** The two plane keys share one attestation: the class is "next-session" (the
+ *  new-entry posture the row can state truthfully), the legacy shim still
+ *  derives off it, and the hook must have run clean -- a degraded or refused
+ *  report there would mean the audit line never landed. */
+function attestNextSessionClass(res: {
+  applied?: string;
+  needsRestart?: boolean;
+  applyHooks?: readonly { keyPath: string; status: string; error?: string | null }[];
+}): string[] {
+  const problems: string[] = [];
+  if (res.applied !== "next-session") problems.push(`applied must be "next-session", got ${String(res.applied)}`);
+  if (res.needsRestart !== false) problems.push("needsRestart must DERIVE off applied (legacy shim)");
+  const bad = (res.applyHooks ?? []).filter((r) => r.status !== "applied");
+  if (bad.length) problems.push(`non-applied report(s): ${bad.map((r) => `${r.keyPath}:${r.status}`).join(", ")}`);
+  return problems;
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // THE FAMILY LIVENESS TABLE (B3 sites, B6a/B6b families, B7 families)

@@ -16,6 +16,7 @@
 // payload.agent.sessionId) plus a printed config line. Nothing is ever written to config from here.
 
 import { HOOKS, type GateAction } from "@core/hooks.ts";
+import { canonEqual, registerConfigApplyHook } from "@core/config/apply-hooks.ts";
 import {
   CoreContext,
   ExtensionInstance,
@@ -221,15 +222,56 @@ function runSignal(agent: unknown, toolCtx?: { get(key: string): unknown } | nul
   return controller?.signal ?? null;
 }
 
+/** The candidate userGate block a hook should compile. The hook arguments are
+ *  the generation's value at "userGate" -- the RESOLVED extension block (the
+ *  re-resolve merges the resolved blocks back into the config bag), so defaults
+ *  are already in it; falling back to the live accessor covers a hook fired by
+ *  a host whose generation carries no block for this extension. */
+function candidateBlock(next: unknown, core: CoreContext): ResolvedUserGateConfig {
+  return ((next ?? getExtensionConfig<ResolvedUserGateConfig>(core, "userGate")) ??
+    {}) as ResolvedUserGateConfig;
+}
+
+/** Did a write under the userGate root move anything the compiled rules read?
+ *  `enabled` is deliberately NOT one of them: the boot gate owns that field
+ *  (toggling it mid-run is a restart-bound decision), so an enabled-adjacent
+ *  sibling write must not churn the rule set. */
+function ruleFieldsMoved(previous: unknown, next: unknown): boolean {
+  const pick = (v: unknown) => {
+    const b = (v ?? {}) as Record<string, unknown>;
+    return { default: b.default ?? null, allow: b.allow ?? null, deny: b.deny ?? null, tools: b.tools ?? null };
+  };
+  return !canonEqual(pick(previous), pick(next));
+}
+
+/** Rule-set shape, secret-free: counts + the default posture. The rule strings
+ *  themselves are patterns the operator wrote, not secrets, but the audit line
+ *  stays a summary rather than a dump -- a large allow list would otherwise
+ *  bury the one fact that matters (what changed shape). */
+function describeRuleSwap(before: ApprovalRules, after: ApprovalRules): string {
+  const shape = (r: ApprovalRules) =>
+    `default=${r.default}, ${r.allow.length} allow, ${r.deny.length} deny, ${r.tools.length} tool patterns`;
+  const b = shape(before);
+  const a = shape(after);
+  return b === a ? `same shape, rule contents changed (${a})` : `${b} -> ${a}`;
+}
+
 export function create(core: CoreContext): ExtensionInstance {
   const raw = getExtensionConfig<ResolvedUserGateConfig>(core, "userGate");
   // OFF by default: with `default: "ask"` an on-by-default gate would prompt
   // every existing user on every tool call.
   if (raw.enabled !== true) return {};
 
-  let rules: ApprovalRules;
+  // Mutable on purpose: the config-write path swaps a freshly compiled rule
+  // set in here (see the prepare/apply rows below), and the tool-call handler
+  // reads the holder per call, so the NEXT gated call is decided by the rules
+  // the file holds now. The boot compile below stays boot-only: its fail-closed
+  // block-everything branch is the posture of a config that could never have
+  // booted, and it is not reachable from a runtime write (the prepare hook
+  // refuses those before the store moves).
+  const gate: { rules: ApprovalRules } = { rules: undefined as unknown as ApprovalRules };
   try {
-    rules = compileApprovalRules(raw);
+    gate.rules = compileApprovalRules(raw);
   } catch (e) {
     // A malformed rule must not be silently dropped, and must not fail open:
     // every call is blocked until the config is fixed or the gate is disabled.
@@ -278,10 +320,10 @@ export function create(core: CoreContext): ExtensionInstance {
           bailReason: "no workspace on the tool context",
         };
       } else {
-        call = extractTargets(payload.toolName, parsedArgs.args, workspace, rules);
+        call = extractTargets(payload.toolName, parsedArgs.args, workspace, gate.rules);
       }
 
-      const decision = decide(call, rules);
+      const decision = decide(call, gate.rules);
       // Allow returns NOTHING (no-opinion), matching how file-watch defers:
       // an explicit `{ action: "continue" }` is still adopted onto the
       // payload and rewrites an earlier handler's verdict record. With the
@@ -360,8 +402,47 @@ export function create(core: CoreContext): ExtensionInstance {
     }
   };
 
+  // ── Live rule swap (config writes under the userGate root) ───────────────
+  // Registered here, inside create() and only when the gate is enabled: a gate
+  // that is off at boot has no hook, so a write to userGate.deny on that host
+  // answers restart-required, which is the truth (there is no gate to re-gate).
+  // PREPARE does the compile so a bad rule set can never reach the holder:
+  // the hook match is root-granular (any userGate.* write lands here), hence
+  // the value-changed guard on the fields the compile actually reads.
+  const unregisterPrepare = registerConfigApplyHook({
+    keyPath: "userGate",
+    phase: "prepare",
+    handle: (_ctx, previous, next) => {
+      if (!ruleFieldsMoved(previous, next)) return;
+      // Throws -> the swap is refused: the file keeps the write, the running
+      // rules keep gating, and the reply carries this error verbatim.
+      compileApprovalRules(candidateBlock(next, core));
+    },
+  });
+
+  const unregisterApply = registerConfigApplyHook({
+    keyPath: "userGate",
+    phase: "apply",
+    handle: (ctx, previous, next) => {
+      if (!ruleFieldsMoved(previous, next)) return;
+      const block = candidateBlock(next, core);
+      const before = gate.rules;
+      const after = compileApprovalRules(block);
+      gate.rules = after;
+      ctx.notice(
+        `userGate: approval rules recompiled (${describeRuleSwap(before, after)})${ctx.actor ? ` (written by session ${ctx.actor})` : ""} -- in-memory session grants survive the swap, and a decision already in flight keeps the answer that was asked about it`,
+      );
+    },
+  });
+
   return {
     hooks: {
+      // A process winding down drops its rows from the shared hook table; a
+      // later host in the same process compiles its own.
+      [HOOKS.SHUTDOWN_CLEANUP]: () => {
+        unregisterPrepare();
+        unregisterApply();
+      },
       [HOOKS.TOOL_CALL]: handler,
       // A dead session must not keep its grants alive forever: in a 24/7
       // host (webui/ws) sessionGrants would grow with every session that

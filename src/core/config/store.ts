@@ -57,9 +57,12 @@
 //   toolExecConfig.coreTools snapshot +    | X (E1) / P3    | a spawned runner never boots config; the snapshot  | §4.3 core-tools row,
 //   workers/tool-exec.ts wire scalars      |                | is pinned per pool entry -- a write changes NEW    | B6a (E1)            
 //                                          |                | entries only                                       |                     
-//   execFence (file key)                   | P3             | an in-flight runner keeps its kernel fence; live   | §5.2 row            
-//                                          |                | for NEW pool entries only, and the per-session     |                     
-//                                          |                | /fence toggle stays the mid-run control            |                     
+//   execFence (file key)                   | H (shipped)    | an in-flight runner keeps its kernel fence; the    | core/tool-exec-    
+//                                          |                | broker's plan-time default posture reads the LIVE  | broker.ts fencePolicy
+//                                          |                | store through its fence-policy reader -- writes    | + plan-time read;  
+//                                          |                | reach NEW pool entries only (audited per change);  | broker-main        
+//                                          |                | the per-session /fence toggle stays the mid-run    | ensureEntry swaps  
+//                                          |                | control (interactive, not file-key machinery)      | on fence mismatch  
 //   bashTool.env                           | DANGER + pool- | a subprocess env map is a code-execution channel   | §5.4 (ruled         
 //                                          | pinned         | (PATH/LD_PRELOAD/NODE_OPTIONS shaping every next   | 2026-11-10)         
 //                                          |                | exec); boot-snapshotted, values never echoed       |                     
@@ -67,11 +70,12 @@
 //                                          |                | cleartext credential surface across a network      |                     
 //                                          |                | boundary mid-run; restart keeps the decision       |                     
 //                                          |                | conscious                                          |                     
-//   Bun.serve maxPayloadLength             | P4             | fixed at serve construction, no setter; picked up  | §3.4 P4             
-//   (frameBound)                           |                | at any rebind (webui.port's H row, B8)             |                     
-//   taskLanesDir + websocket turnLanes     | X / P7 (+P9)   | the cross-process lane ledger: swapping dirs mid-  | §3.4 P7, §4.3 row   
-//   caps/dir (server.ts:105-112)           |                | run orphans live slots and double-books against    |                     
-//                                          |                | the old ledger                                     |                     
+//   Bun.serve maxPayloadLength             | X (no setter)  | fixed at serve construction, no setter; picked     | webui/server.ts    
+//   (frameBound)                           |                | up at EVERY rebind (the webui.port H row           | frameBound() --    
+//                                          |                | recomputes it from live uploadLimits)              | every bind derives one
+//   taskLanesDir + websocket turnLanes     | X (dir swap)   | the cross-process lane ledger: swapping dirs mid-  | a lane slot is a   
+//   caps/dir (server.ts:222-228)           |                | run orphans live slots and double-books against    | lockfile on a dir; 
+//                                          |                | the old ledger                                     | no reopen story    
 //   TaskManager ctor options               | X / P9         | built once per host; the scheduler/lanes/options   | §3.4 P9, §4.3 row   
 //   (session/index.ts:557-571):            |                | have no reconfigure surface today (its health-     |                     
 //   taskProfile, taskLanesPerProvider,     |                | timer half IS an H row and shipped B4)             |                     
@@ -210,26 +214,48 @@
 //   webSearch.braveApiKey / tavilyApiKey / | A + §5 audit   | per-search reads incl. secrets; redaction doctrine | §5.2, §5.3          
 //   searxngInstanceUrl                     | (B6b, shipped) | unchanged -- change lines name HOST and            |                     
 //                                          |                | set/unset/changed only                             |                     
-//   webui.port                             | H (B8) + P4    | rebind with a downtime notice; the P4 frame cap is | §3.3, §5.2          
-//                                          |                | picked up at the rebind                            |                     
-//   webui.apiKey / sessionTokenTtlMin /    | H (B8) + §5    | auth-middleware REBUILD over the carried AuthState | §3.3, §5.2, §9 tests
-//   trustedProxy (+ auth.ts middleware     |                | (issued tokens live to their stamped expiresAt,    | 4/4b                
-//   ctor)                                  |                | throttle buckets survive); prepare refuses         |                     
-//                                          |                | malformed trustedProxy and a blank key             |                     
-//   userGate.allow / deny / default        | H (B8) + §5    | prepare-recompile: bad rules refused pre-swap,     | §3.3, §5.2, §9 test 
-//                                          |                | grant state survives, boot fail-closed unchanged;  | 4                   
-//                                          |                | the highest-value audit line in §5.2               |                     
-//   providers[].url / providers[].apiKey   | H (B4 half, B8 | the shared-client re-point shipped in B4; the      | §3.3, §5.2          
-//   (+ root baseUrl/apiKey; + models)      | rest) + §5     | modelRegistry refresh and the writeOnly secret     |                     
-//                                          |                | replace are the owner-gated B8 half; providers[].  |                     
-//                                          |                | models rides the carried registry identity (new    |                     
-//                                          |                | values reach builds through re-resolve -- the      |                     
-//                                          |                | B4 probe pins the carry-forward itself)            |                     
-//   sttTarget / sttUrl / sttModel          | H (B8) + §5    | rebuild the STT target; an endpoint change is      | §3.3, §5.2          
-//                                          |                | always audited                                     |                     
-//   toolExec (worker <-> inline plane)     | H (B8) + P5    | live for NEW agent builds; the pool drains via     | §3.3, §5.2          
-//                                          |                | idle-reap/SESSION_END, the posture-strip label     |                     
-//                                          |                | honest per-session                                 |                     
+//   webui.port                             | H (shipped)    | rebind with a downtime notice, REPLY-FIRST; a      | webui/server.ts    
+//                                          |                | failed rebind re-listens the old port and the      | rebind() + the     
+//                                          |                | degraded truth lands on the log + the next         | webui.port hook;   
+//                                          |                | snapshot; the frame cap recomputes at every        | writing the SAME   
+//                                          |                | rebind (a host not serving webui has no hook       | port claims no     
+//                                          |                | and honestly answers restart-required)             | drop (pinned)      
+//   webui.apiKey / sessionTokenTtlMin /    | H (shipped)    | auth-middleware REBUILD over the carried           | websocket/auth.ts  
+//   trustedProxy (+ auth.ts middleware     |                | AuthState (issued tokens live to their stamped     | AuthState + AuthRef;
+//   ctor)                                  |                | expiresAt, throttle buckets + the xff once-flag    | webui/server.ts the
+//                                          |                | survive, ONE cleanup timer); every consumer        | one prepare+apply  
+//                                          |                | resolves the CURRENT instance per request via      | pair guards the    
+//                                          |                | the authRef facade; prepare refuses malformed      | whole block        
+//                                          |                | trustedProxy and a blank key (verbatim parse       |                    
+//                                          |                | error)                                             |                    
+//   userGate.allow / deny / default        | H (shipped)    | prepare-recompile of the CANDIDATE block (a        | user-gate/index.ts 
+//   (+ userGate.tools; rule fields only)   |                | throw refuses the swap) + post-swap holder swap;   | the rule holder +  
+//                                          |                | grant state survives, boot fail-closed             | hooks; handlers-   
+//                                          |                | unchanged; the panel pre-compiles too (bad         | config.ts          
+//                                          |                | rules never reach the file); an approval-          | candidateRuleBlock 
+//                                          |                | posture change is the highest-value audit line     | Refusal            
+//   providers[].url / providers[].apiKey   | H (shipped)    | both halves live: the shared-client re-point       | websocket/server.ts
+//   (+ root baseUrl/apiKey; + models)      |                | and the modelRegistry refresh (upsert into the     | the providers hook;
+//                                          |                | CARRIED registry, never store-swapped) + the       | the shared         
+//                                          |                | writeOnly secret replace; endpoint lines           | LlmClient's public 
+//                                          |                | host-only, credentials set/unset/changed only;     | fields (client.ts  
+//                                          |                | the health-sweep PROBE LIST stays                  | per-request reads) 
+//                                          |                | restart-bound (the hook notice says "probe         |                    
+//                                          |                | set: restart-bound"); providers[].models rides     |                    
+//                                          |                | the carried registry identity (the liveness        |                    
+//                                          |                | probe pins the carry-forward itself)               |                    
+//   sttTarget / sttUrl / sttModel          | H (shipped)    | rebuild the STT target on the live resolved bag;   | websocket/server.ts
+//                                          |                | an endpoint change is always audited (host         | the stt hooks;     
+//                                          |                | only); the sttEnabled flip rides the               | session-registry   
+//                                          |                | sessionState posture channel to live sessions      | .setSttTarget      
+//                                          |                | (in-flight uploads keep the target they started    |                    
+//                                          |                | with)                                              |                    
+//   toolExec (worker <-> inline plane)     | H (shipped)    | LIVE for NEW agent builds (the per-build plane     | agent-factory.ts   
+//                                          |                | read is already live) + NEW pool entries via       | the fencePolicy    
+//                                          |                | the fence knob; the pool drains via idle-reap/     | reader; the plane  
+//                                          |                | SESSION_END, the posture-strip label honest        | read at each build 
+//                                          |                | per-session; attested next-session with the        |                    
+//                                          |                | "new pool entries only" audit notice               |                    
 //   modelSwitch.commandEnabled             | OPEN (not      | the row says A per-build and COMMANDS_REGISTER     | §4.3 row; no batch  
 //                                          | exempt)        | does fire per build -- but model-                  | yet                 
 //                                          |                | switch/index.ts:41 still captures the block at     |                     
@@ -309,6 +335,16 @@ export interface ConfigStore {
     config: CoreConfigWithExtensions;
     resolved: ResolvedConfig;
   }): (degraded?: Array<{ keyPath: string; why: string }>) => ConfigGeneration;
+
+  /** Attach a degraded report to the CURRENT generation WITHOUT publishing
+   *  (the rebind exception): a rebind closes the socket that would
+   *  carry its own receipt, so the reply goes out BEFORE the side effect and
+   *  the outcome settles after the commit. Its durable truth rides this
+   *  seam so the NEXT snapshot's row attestation renders it. Same clearing
+   *  discipline as commit-attached reports: the next successful publish
+   *  touching the prefix decides it. No-op-safe: requires an adopted
+   *  generation (throws like current() before boot adopt). */
+  reportDegraded(report: { keyPath: string; why: string }): void;
 }
 
 /** Canonical JSON for the changed-diff: key-sorted stringify, so a
@@ -420,6 +456,17 @@ export function createConfigStore(): ConfigStore {
 
     applying() {
       return applyingNow;
+    },
+
+    reportDegraded(report) {
+      // Post-commit attach (the rebind exception): the generation is
+      // already published and the reply already sent, so this cannot ride
+      // commit()'s channel -- it decorates the CURRENT generation's durable
+      // degraded list the same way commit does, without a second publish.
+      // The next successful publish touching the prefix clears it (the
+      // commit-side publishTouches rule runs then).
+      const gen = current();
+      gen.degraded = [...(gen.degraded ?? []), report];
     },
 
     swap(next) {

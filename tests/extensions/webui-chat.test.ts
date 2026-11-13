@@ -178,6 +178,38 @@ describe("createChat.transcribe", () => {
     expect(chat.sttEnabledAtom()).toBe(false);
   });
 
+  it("follows the sttEnabled push a live endpoint write sends", () => {
+    // The channel half of the affordance: sessionCreated seeds the flag (the row
+    // above), and an sttUrl/sttModel write that moves enabledness pushes the
+    // flip afterwards. This double needs a mounted list: a frame with nowhere to
+    // render is dropped before the sessionState cases, and the push is delivered
+    // cross-session (server-wide flag, no per-session variant to re-target).
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const container = makeContainer();
+    chat = createChat({
+      token: null,
+      host: "localhost",
+      getMessageListContainer: () => container as unknown as HTMLElement,
+      onSessionCreated: (d) => chat!.setSession(d.sessionId, d.replayDelta === true),
+    });
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+
+    ws.emit({ type: "sessionCreated", sessionId: "s1", sttEnabled: false });
+    expect(chat.sttEnabledAtom()).toBe(false);
+
+    ws.emit({ type: "sessionState", sessionId: "s1", key: "sttEnabled", value: true });
+    expect(chat.sttEnabledAtom()).toBe(true);
+
+    // A flip addressed to a different open session is the same server-wide truth.
+    ws.emit({ type: "sessionState", sessionId: "s2", key: "sttEnabled", value: false });
+    expect(chat.sttEnabledAtom()).toBe(false);
+
+    // A sibling key on the same channel never moves it.
+    ws.emit({ type: "sessionState", sessionId: "s1", key: "sttEnabled", value: true });
+    ws.emit({ type: "sessionState", sessionId: "s1", key: "title", value: "renamed" });
+    expect(chat.sttEnabledAtom()).toBe(true);
+  });
+
   it("tracks the tool-exec posture from the sessionCreated payload", () => {
     const { chat, ws } = makeChat();
     expect(chat.toolExecAtom()).toBe("");

@@ -1,6 +1,6 @@
 // ToolExecutor tests — tests the tool execution pipeline independently of Agent.
 
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, afterAll } from 'bun:test';
 import path from 'node:path';
 import { createToolExecutor, type ToolExecutorDeps } from '../../src/core/tool-executor.ts';
 import type { Workspace } from '../../src/utils/workspace.ts';
@@ -14,6 +14,21 @@ import { xmlWireFormat } from '@extensions/wire-format-xml/index.ts';
 import { toolContentText } from '@utils/tool-content.ts';
 import { renderWrapperForWire, type ToolResultPart } from '../../src/core/context/wrappers.ts';
 import { MarkerMangler, CORE_PROTECTED_PREFIXES } from '../../src/core/marker-mangler.ts';
+
+// Sequential-run isolation: an enabled userGate create() registers live-config
+// rows in a process-wide table, and `bun test` runs every file in ONE process
+// when not --parallel. Track what this file boots and drain it at file end --
+// a mid-test failure must not skip the drain -- so a later file's hook-coverage
+// walk only ever sees its own rows.
+const liveGates: Array<Record<string, unknown>> = [];
+afterAll(() => {
+  for (const instance of liveGates.splice(0)) {
+    const shutdown = (instance.hooks as Record<string, (() => void) | undefined> | undefined)?.[
+      HOOKS.SHUTDOWN_CLEANUP
+    ];
+    shutdown?.();
+  }
+});
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -538,6 +553,7 @@ describe('ToolExecutor', () => {
         data.toolCtx.set('input', fakeInput);
       });
       const instance = createUserGate({ hooks: deps.hooks, config: { userGate: { enabled: true, default: "ask" } } } as never);
+      liveGates.push(instance as unknown as Record<string, unknown>);
       for (const [name, handler] of Object.entries(instance.hooks ?? {})) {
         deps.hooks.on(name, handler as never, 'user-gate');
       }

@@ -22,6 +22,7 @@ import { copyScrubbedEnv } from "@utils/env.ts";
 import { execFenceBackend, planFor } from "@utils/exec-plan.ts";
 import { formatError, ConfigError, ToolError } from "./error.ts";
 import { idleReapMsOrDefault, PROJECT_ROOT, RUNNER_ENTRY } from "./tool-exec-layout.ts";
+import { readKnob, type ConfigKnob } from "./extensions/types.ts";
 import {
   encodeFrame,
   LineDecoder,
@@ -210,7 +211,10 @@ export function resetExecFenceOverridesForTesting(): void {
 /** Posture keys a later caller asks for that differ from the pinned ones ("", ""). */
 export function postureDrift(pinned: SharedPosture, opts: ToolExecBrokerOptions): string[] {
   const drift: string[] = [];
-  if (opts.fence !== undefined && opts.fence !== pinned.fence) {
+  // A caller handing over a fence READER is not asking for a different
+  // posture -- it is saying "the file decides from here" -- so its scalar
+  // `fence` (the value the file held at that one build) is not drift.
+  if (opts.fence !== undefined && opts.fence !== pinned.fence && opts.fencePolicy === undefined) {
     drift.push(`fence: kept "${pinned.fence}", ignored "${opts.fence}"`);
   }
   if (opts.envScrubbing !== undefined && String(opts.envScrubbing) !== pinned.envScrubbing) {
@@ -362,6 +366,19 @@ export interface ToolExecBrokerOptions {
    */
   fence?: "off" | "probe";
   /**
+   * The same posture as a READER instead of a snapshot. A host whose config
+   * lives in a store passes one, and every plan-time decision then follows the
+   * file: the invoke that lands after a write is planned under the new posture,
+   * the broker child replaces the pool entry whose fence no longer matches
+   * (the entry's kernel fence is what it was spawned with), and an invoke
+   * already in flight keeps the fence its frame carried. Sessions with a
+   * runtime override are unaffected -- the override outranks the file for its
+   * own session either way. Read once per plan; a reader that throws is
+   * reported and answered with the last posture it returned (never with a
+   * guess: this decides whether a spawn is jailed).
+   */
+  fencePolicy?: ConfigKnob<"off" | "probe">;
+  /**
    * Scrub secret-shaped env keys at the broker spawn. Default true. `false`
    * is the `envScrubbing: false` / `--disable-env-scrubbing` opt-out, and it
    * must reach this spawn too: pool entries inherit the broker's env, so a
@@ -406,6 +423,8 @@ export class ToolExecBroker implements ToolExecLink {
   #fencePlan: FencePlanner | null;
   /** The BOOT shape: do sessions without an override consult the machinery at all? */
   #bootFenced: boolean;
+  /** The last posture a fence POLICY READER answered (also the fallback when a reader throws). */
+  #lastFence: "off" | "probe";
   /** Per-session runtime overrides (the `/fence` command surface). */
   #sessionFence = new Map<string, "off" | "probe">();
 
@@ -422,6 +441,7 @@ export class ToolExecBroker implements ToolExecLink {
       opts.fencePlan !== undefined
         ? opts.fencePlan
         : createFencePlanner(opts.fence ?? "probe");
+    this.#lastFence = opts.fence ?? "probe";
   }
 
   /** True once consecutive crash-respawns exhausted the cap. */
@@ -446,10 +466,34 @@ export class ToolExecBroker implements ToolExecLink {
    * empty; nothing pre-boot is resurrected).
    */
   #planFence(session: string, cls: ExecClass, roots: string[]): WireFence | null {
-    const policy = this.#sessionFence.get(session) ?? (this.#bootFenced ? "probe" : "off");
+    const policy = this.#sessionFence.get(session) ?? this.#currentFence();
     if (policy === "off") return null;
     if (!this.#fencePlan) this.#fencePlan = createFencePlanner("probe");
     return this.#fencePlan?.(session, cls, roots) ?? null;
+  }
+
+  /**
+   * The posture for a session with no runtime override: the reader's answer
+   * when this broker was built with one, the pinned boot posture otherwise.
+   * A throwing reader is logged and answered with the last value this broker
+   * served (boot posture on the first plan) -- an unreadable config must not
+   * silently pick a spawn posture, and the alternative (throwing out of an
+   * invoke) would fail the tool call for a config the plane was already
+   * running under.
+   */
+  #currentFence(): "off" | "probe" {
+    if (this.#opts.fencePolicy === undefined) return this.#bootFenced ? "probe" : "off";
+    try {
+      const read = readKnob(this.#opts.fencePolicy);
+      if (read !== "off" && read !== "probe") throw new Error(`fence policy reader answered ${JSON.stringify(read)}`);
+      this.#lastFence = read;
+      return read;
+    } catch (e: unknown) {
+      logger.error(
+        `[tool-exec] the fence-policy reader failed (${formatError(e)}); keeping the last posture "${this.#lastFence}"`,
+      );
+      return this.#lastFence;
+    }
   }
 
   /**

@@ -33,13 +33,18 @@ export type HookStatus = "applied" | "degraded" | "refused";
 
 export interface ConfigApplyContext {
   store: ConfigStore;
-  /** Audit-notice fan-out: logger.warn("[config-live] ...") (the §5.3 floor;
-   *  the shared session/log-surface notice rides the same helper in B8).
-   *  Secret-free by construction: callers pass human text, never raw values
-   *  for secret paths. */
+  /** Audit-notice fan-out: logger.warn "[config-live] <keyPath>: <summary>"
+   *  PLUS the registered webui surface push (core/config/audit.ts).
+   *  Secret-free by construction: callers pass hook-authored human text,
+   *  never raw values for secret paths. */
   notice: (text: string) => void;
   /** The live core (registries, services) for rebuild hooks that need it. */
   core: CoreContext;
+  /** WHO wrote: the writing panel's session id when the write arrived on an
+   *  attached socket; undefined for direct/CLI/test callers. Audit lines for
+   *  the trust-class rows name it; hooks that do not use it keep their
+   *  byte-identical lines. */
+  actor?: string;
 }
 
 export interface ConfigApplyHook {
@@ -86,6 +91,29 @@ export function registeredHooks(): readonly ConfigApplyHook[] {
   return [...hooks];
 }
 
+/** The value-changed guard: the hook-match rule above fires on a whole
+ *  changed ROOT, so rows that rebind/rebuild/re-point (webui.port vs a
+ *  webui.apiKey write, one userGate field vs another) compare the value AT
+ *  their own keyPath and no-op on siblings. Key-sorted canonical JSON, the
+ *  identical technique store.swap's changed-diff and live.ts's filter use
+ *  (a re-resolve rebuilds subtrees with fresh identities and sometimes a
+ *  different key order -- a ref compare would fire on the rebuild, and an
+ *  insertion-order stringify would fire on the reorder; neither is a
+ *  change). */
+export function canonEqual(a: unknown, b: unknown): boolean {
+  const sortKeys = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sortKeys);
+    if (value !== null && typeof value === "object") {
+      const src = value as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(src).sort()) out[key] = sortKeys(src[key]);
+      return out;
+    }
+    return value;
+  };
+  return JSON.stringify(sortKeys(a) ?? null) === JSON.stringify(sortKeys(b) ?? null);
+}
+
 /** Effective per-hook timeout: default when unset/non-finite/non-positive,
  *  always capped. (A hook cannot opt out of the cap -- the edit lock is
  *  shared with the panel's own reply.) */
@@ -106,9 +134,9 @@ export function hookTimeoutMs(hook: ConfigApplyHook): number {
  *  the row -- observed: a `websocket.questionTimeoutSecs` write fires the
  *  `sessionTimeoutMin` hook (harmless today: it re-arms the age it just read
  *  from the swapped bag; the cost is a noisy audit line). Fine-grained rows
- *  that rebind/recompile (webui.port vs webui.apiKey, userGate.allow vs deny
- *  -- B8's set) MUST NOT trust this match alone: they add a value-changed
- *  guard (compare generationValueAt(previous/next, keyPath)) or they act on
+ *  that rebind/recompile (webui.port vs webui.apiKey, userGate.allow vs deny)
+ *  MUST NOT trust this match alone: they add a value-changed guard (compare
+ *  generationValueAt(previous/next, keyPath), canonEqual) or they act on
  *  sibling writes. */
 export function hookMatchesChangedRoot(hookKeyPath: string, changedRoots: readonly string[]): boolean {
   if (hookKeyPath === "") return true;

@@ -6,8 +6,8 @@
 // transport silently eating 10-16 MiB frames, and so oversized frames die at
 // the socket instead of paying JSON parse + base64 decode first.
 
-import { describe, it, expect, afterEach } from "bun:test";
-import { createWebuiServer } from "@extensions/webui/server.ts";
+import { describe, it, expect, afterEach, afterAll } from "bun:test";
+import { createWebuiServer as createWebuiServerServed } from "@extensions/webui/server.ts";
 import type { createWsServer } from "@extensions/websocket/server.ts";
 import { C2S, S2C } from "@extensions/websocket/protocol.ts";
 import { LlmClient } from "@core/llm-client/client.ts";
@@ -17,6 +17,22 @@ import {
   systemFirstRoleMapping,
   developerRoleMapping,
 } from "@extensions/role-mapping-default/index.ts";
+
+// Sequential-run isolation: a served webui registers live-config hooks and
+// an audit surface process-wide, and `bun test` runs every file in ONE
+// process when not --parallel. Track every server this file boots and drain
+// it through dispose() (idempotent alongside the per-test teardown).
+const served: Array<{ dispose(): void }> = [];
+async function createWebuiServer(
+  ...args: Parameters<typeof createWebuiServerServed>
+): Promise<Awaited<ReturnType<typeof createWebuiServerServed>>> {
+  const result = await createWebuiServerServed(...args);
+  served.push(result);
+  return result;
+}
+afterAll(() => {
+  for (const webui of served.splice(0)) webui.dispose();
+});
 
 // The root uploadLimits.maxImageSize schema default (10MB), mirrored as a
 // plain literal -- tests hand the resolved value, not a DEFAULT_ import.

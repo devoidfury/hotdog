@@ -1,11 +1,11 @@
 // Tests for webui/server.ts — WebUI server creation and configuration.
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import net from "node:net";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
-import { createWebuiServer, attachSocketPeerIp } from "@extensions/webui/server.ts";
+import { createWebuiServer as createWebuiServerServed, attachSocketPeerIp } from "@extensions/webui/server.ts";
 import { DDG_SOLVE_SERVICE } from "@extensions/web-search/index.ts";
 import { ServiceRegistry } from "@core/extensions/service-registry.ts";
 import { logger } from "@utils/logger.ts";
@@ -18,6 +18,22 @@ const testRoleReg = createRoleMappingRegistry();
 testRoleReg.register(systemFirstRoleMapping);
 testRoleReg.register(developerRoleMapping);
 
+// Sequential-run isolation: a served webui registers live-config hooks and
+// an audit surface process-wide, and `bun test` runs every file in ONE
+// process when not --parallel. Track every server this file boots and drain
+// them at file end through dispose() -- idempotent, so the per-test
+// teardowns keep stopping their own listeners.
+const served: Array<{ dispose(): void }> = [];
+async function createWebuiServer(
+  ...args: Parameters<typeof createWebuiServerServed>
+): Promise<Awaited<ReturnType<typeof createWebuiServerServed>>> {
+  const result = await createWebuiServerServed(...args);
+  served.push(result);
+  return result;
+}
+afterAll(() => {
+  for (const webui of served.splice(0)) webui.dispose();
+});
 
 function createMockCore(config: Record<string, unknown> = {}) {
   return createBaseMockCore({

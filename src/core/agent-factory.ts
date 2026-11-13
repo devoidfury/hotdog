@@ -123,6 +123,21 @@ export function createAgentFactory(
       plane.mode === "worker"
         ? sharedToolExecBroker({
             fence: plane.fence,
+            // The fence posture is a plan-time decision, not a boot pin: what a
+            // pool entry enforces is whatever its spawn argv asked for, so the
+            // broker follows the file for every plan that lands after a write
+            // (an entry already running keeps its kernel fence; the supervisor
+            // swaps an entry only when a frame arrives under a different plan,
+            // and a call in flight when that happens answers with the loud
+            // "replaced" shape rather than a silent re-fence). A host pinned by
+            // construction -- one that handed this factory an explicit bag --
+            // keeps the scalar it booted with, exactly like every other knob
+            // here.
+            fencePolicy: store
+              ? () =>
+                  toolExecPlaneSettings(store.current().resolved as unknown as Record<string, unknown>)
+                    .fence
+              : plane.fence,
             // The plane's env policy is the resolved one: with scrubbing on,
             // provider keys never enter it; with `envScrubbing: false`, the
             // full copy reaches bash, exactly as `--disable-env-scrubbing`

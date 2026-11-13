@@ -135,12 +135,31 @@ export class SessionRegistry {
   #onSessionDeleted: ((sessionId: string) => void) | null;
   #taskManager: TaskManager | null = null;
   #taskActivityHistory = new Map<string, TaskActivityWire[]>();
-  /** Resolved STT backend; every sessionCreated payload advertises its presence as sttEnabled. */
-  readonly sttTarget: SttTarget | null;
+  /** Resolved STT backend; every sessionCreated payload advertises its presence as sttEnabled.
+   *  Re-pointable: a config write to sttUrl/sttModel re-resolves and swaps it here, so the
+   *  NEXT upload (handlers-transcribe.ts reads this per request) and the next attach see the
+   *  new backend while an upload already in flight keeps the target it started with. */
+  #sttTarget: SttTarget | null;
   #getToolExecResolved: () => Record<string, unknown>;
 
+  get sttTarget(): SttTarget | null {
+    return this.#sttTarget;
+  }
+
   get sttEnabled(): boolean {
-    return this.sttTarget !== null;
+    return this.#sttTarget !== null;
+  }
+
+  /**
+   * Swap the resolved STT backend. Returns whether ENABLEDNESS flipped -- the
+   * mic affordance is the only part clients track, so the caller pushes the
+   * sessionState frame exactly when a repaint is warranted (a same-value
+   * re-resolve must not spam every open panel).
+   */
+  setSttTarget(next: SttTarget | null): boolean {
+    const before = this.#sttTarget !== null;
+    this.#sttTarget = next;
+    return before !== (next !== null);
   }
 
   /**
@@ -244,7 +263,7 @@ export class SessionRegistry {
   }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
     this.#timeoutMin = sessionTimeoutMin;
-    this.sttTarget = sttTarget;
+    this.#sttTarget = sttTarget;
     this.#getToolExecResolved =
       typeof toolExecResolved === "function"
         ? toolExecResolved

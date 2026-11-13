@@ -1157,6 +1157,13 @@ export function createChat({
         if (data.key === "title") {
           sessionTitleAtom(typeof data.value === "string" ? data.value : null);
         }
+        if (data.key === "sttEnabled") {
+          // The mic affordance follows the server's live STT target: the
+          // sessionCreated payload seeds it, and a sttUrl/sttModel write pushes
+          // the flip here (the flag is server-wide, so every panel takes it --
+          // unlike toolExec there is no per-session variant to re-target).
+          sttEnabledAtom(Boolean(data.value));
+        }
         if (data.key === "toolExec") {
           // Per-session posture push after a webui fence flip. sessionState
           // is delivered cross-session (sidebar working indicators), so

@@ -1102,17 +1102,20 @@ describe("settings viewer interactions", () => {
     const root = renderPanel(CANNED, { onClose: () => closes++, onRefresh: () => refreshes++ });
     (root.querySelector(".settings-close") as unknown as HTMLElement).click();
     expect(closes).toBe(1);
-    const refresh = (Array.from(root.querySelectorAll(".settings-btn")) as unknown as HTMLElement[]).find(
-      (b) => b.textContent === "Refresh",
+    // Refresh is the glyph-button standard (no text node): aria-label
+    // carries it.
+    const refresh = (Array.from(root.querySelectorAll(".file-reload-btn")) as unknown as HTMLElement[]).find(
+      (b) => b.getAttribute("aria-label") === "Refresh",
     )!;
+    expect(refresh.querySelector("svg.file-reload-glyph[aria-hidden='true']")).toBeTruthy();
     refresh.click();
     expect(refreshes).toBe(1);
   });
 
   it("refresh is disabled while pending (no double request)", () => {
     const root = renderPanel(CANNED, { pending: true });
-    const refresh = (Array.from(root.querySelectorAll(".settings-btn")) as unknown as HTMLElement[]).find(
-      (b) => b.textContent === "Refresh",
+    const refresh = (Array.from(root.querySelectorAll(".file-reload-btn")) as unknown as HTMLElement[]).find(
+      (b) => b.getAttribute("aria-label") === "Refresh",
     )!;
     expect(refresh.hasAttribute("disabled")).toBe(true);
   });

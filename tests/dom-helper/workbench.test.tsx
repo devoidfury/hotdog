@@ -9,7 +9,13 @@
 // alive (seam doctrine).
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { WorkbenchPanel } from "@extensions/webui/ui/workbench.tsx";
+import {
+  loadStoredWorkbenchTabs,
+  persistWorkbenchTabs,
+  seedWorkbenchStoreFromStorage,
+  WORKBENCH_TABS_KEY,
+  WorkbenchPanel,
+} from "@extensions/webui/ui/workbench.tsx";
 import { createWorkbenchStore, type WorkbenchStore } from "@extensions/webui/ui/workbench-state.ts";
 import { createPanelResize, type PanelEnv, type PanelResize } from "@extensions/webui/ui/panel-resize.ts";
 import { mount, type DomNode, type Mounted } from "@utils/jsx";
@@ -402,5 +408,160 @@ describe("workbench with blocked storage", () => {
     expect(tabButtons()).toHaveLength(1);
     h.panel.toggle(); // close
     expect(h.q("#workbench-panel")).toBeNull();
+  });
+});
+
+// ── Tab persistence codec (sessionStorage, per tab) ─────────────────────────
+// Units for the record documented in workbench.tsx's tab-persistence header:
+// load/persist/seed semantics against a Map-backed window.sessionStorage
+// (the guard reads window per call). The app-side wiring (boot seed, persist
+// subscription, attach-time restored reads) is pinned in app.test.tsx's
+// persistence suite.
+
+describe("workbench tab persistence codec", () => {
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).sessionStorage;
+  });
+
+  /** Map-backed window.sessionStorage; returns the map for direct pinning. */
+  function fakeSession(): Map<string, string> {
+    const map = new Map<string, string>();
+    (window as unknown as Record<string, unknown>).sessionStorage = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, String(v)),
+      removeItem: (k: string) => void map.delete(k),
+    };
+    return map;
+  }
+
+  it("no key and no storage: load answers null; persist without storage is a silent no-op", () => {
+    delete (window as unknown as Record<string, unknown>).sessionStorage;
+    expect(loadStoredWorkbenchTabs()).toBeNull();
+    expect(() =>
+      persistWorkbenchTabs({ tabs: [{ id: "a", kind: "file", label: "a", dirty: false }], activeId: "a" }),
+    ).not.toThrow();
+  });
+
+  it("roundtrip: order, labels, kinds and the active tab survive; dirty is not part of the record", () => {
+    const map = fakeSession();
+    persistWorkbenchTabs({
+      tabs: [
+        { id: "files", kind: "files", label: "Files", dirty: false },
+        { id: "/rootA/x.ts", kind: "file", label: "x.ts", dirty: true },
+      ],
+      activeId: "/rootA/x.ts",
+    });
+    expect(JSON.parse(map.get(WORKBENCH_TABS_KEY)!)).toEqual({
+      tabs: [
+        { id: "files", kind: "files", label: "Files" },
+        { id: "/rootA/x.ts", kind: "file", label: "x.ts" },
+      ],
+      activeId: "/rootA/x.ts",
+    });
+    expect(loadStoredWorkbenchTabs()).toEqual({
+      tabs: [
+        { id: "files", kind: "files", label: "Files", dirty: false },
+        { id: "/rootA/x.ts", kind: "file", label: "x.ts", dirty: false },
+      ],
+      activeId: "/rootA/x.ts",
+    });
+  });
+
+  it("placeholders never persist; an active placeholder falls back to the first persisted tab", () => {
+    const map = fakeSession();
+    persistWorkbenchTabs({
+      tabs: [
+        { id: "w1", kind: "placeholder", label: "demo", dirty: false },
+        { id: "/a", kind: "file", label: "a", dirty: false },
+      ],
+      activeId: "w1",
+    });
+    // The record names ONLY decodable tabs -- an activeId outside them would
+    // make the whole record garbage on the next boot.
+    expect(JSON.parse(map.get(WORKBENCH_TABS_KEY)!)).toEqual({
+      tabs: [{ id: "/a", kind: "file", label: "a" }],
+      activeId: "/a",
+    });
+    persistWorkbenchTabs({ tabs: [{ id: "w1", kind: "placeholder", label: "demo", dirty: false }], activeId: "w1" });
+    expect(JSON.parse(map.get(WORKBENCH_TABS_KEY)!)).toEqual({ tabs: [], activeId: null });
+  });
+
+  it("empty persists as empty and decodes as empty (close all, reload, see none)", () => {
+    const map = fakeSession();
+    persistWorkbenchTabs({ tabs: [], activeId: null });
+    expect(map.has(WORKBENCH_TABS_KEY)).toBe(true);
+    expect(loadStoredWorkbenchTabs()).toEqual({ tabs: [], activeId: null });
+  });
+
+  it("garbage decodes to null (zero tabs, silently): junk JSON, wrong shapes, unknown kinds, empty/dup ids, a bad activeId", () => {
+    const map = fakeSession();
+    const junk: Array<[string, unknown]> = [
+      ["unparseable", "{not json"],
+      ["array record", "[]"],
+      ["string record", '"tabs"'],
+      ["null record", "null"],
+      ["tabs not an array", { tabs: "nope", activeId: null }],
+      ["unknown kind", { tabs: [{ id: "a", kind: "editor", label: "a" }], activeId: "a" }],
+      ["empty id", { tabs: [{ id: "", kind: "file", label: "a" }], activeId: "" }],
+      ["non-string label", { tabs: [{ id: "a", kind: "file", label: 7 }], activeId: "a" }],
+      ["entry not an object", { tabs: [7], activeId: "a" }],
+      ["duplicate ids", { tabs: [{ id: "a", kind: "file", label: "a" }, { id: "a", kind: "files", label: "b" }], activeId: "a" }],
+      ["activeId outside the list", { tabs: [{ id: "a", kind: "file", label: "a" }], activeId: "ghost" }],
+      ["non-empty with activeId null", { tabs: [{ id: "a", kind: "file", label: "a" }], activeId: null }],
+      ["empty with an activeId", { tabs: [], activeId: "a" }],
+    ];
+    for (const [, raw] of junk) {
+      map.set(WORKBENCH_TABS_KEY, typeof raw === "string" ? raw : JSON.stringify(raw));
+      expect(loadStoredWorkbenchTabs()).toBeNull(); // the row label above names a failure
+    }
+  });
+
+  it("throwing storage: load decodes null, persist swallows -- the pane lives on in memory", () => {
+    (window as unknown as Record<string, unknown>).sessionStorage = new ThrowingStorage();
+    expect(loadStoredWorkbenchTabs()).toBeNull();
+    expect(() => persistWorkbenchTabs({ tabs: [], activeId: null })).not.toThrow();
+  });
+
+  it("sessionStorage only: localStorage is never read, never written (chat.ts:781-789 doctrine)", () => {
+    const calls: string[] = [];
+    (window as unknown as Record<string, unknown>).localStorage = {
+      getItem: () => void calls.push("get"),
+      setItem: () => void calls.push("set"),
+      removeItem: () => void calls.push("remove"),
+    };
+    try {
+      expect(loadStoredWorkbenchTabs()).toBeNull(); // no window.sessionStorage installed
+      persistWorkbenchTabs({ tabs: [{ id: "a", kind: "file", label: "a", dirty: false }], activeId: "a" });
+    } finally {
+      delete (window as unknown as Record<string, unknown>).localStorage;
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("seed re-docks the stored set in order on the target store and lands the stored active tab", () => {
+    const map = fakeSession();
+    const store = createWorkbenchStore();
+    map.set(WORKBENCH_TABS_KEY, "{garbage");
+    seedWorkbenchStoreFromStorage(store); // null record: the store keeps what it has
+    expect(store.get()).toEqual({ tabs: [], activeId: null });
+    map.set(
+      WORKBENCH_TABS_KEY,
+      JSON.stringify({
+        tabs: [
+          { id: "files", kind: "files", label: "Files" },
+          { id: "/a", kind: "file", label: "a" },
+          { id: "/b", kind: "file", label: "b" },
+        ],
+        activeId: "/a",
+      }),
+    );
+    seedWorkbenchStoreFromStorage(store);
+    expect(store.get().tabs.map((t) => t.id)).toEqual(["files", "/a", "/b"]);
+    // The STORED active tab wins, not the last-opened one (open activates as
+    // it docks; the trailing activate corrects it).
+    expect(store.get().activeId).toBe("/a");
+    map.set(WORKBENCH_TABS_KEY, JSON.stringify({ tabs: [], activeId: null }));
+    seedWorkbenchStoreFromStorage(store); // empty record re-opens nothing
+    expect(store.get().activeId).toBe("/a");
   });
 });

@@ -74,6 +74,7 @@
 //   does NOT close: config values are selection targets.
 
 import type { Ref } from "@utils/jsx";
+import { IconReload } from "./icons.tsx";
 import type {
   ConfigEditPayload,
   ConfigSnapshotResultWire,
@@ -2284,12 +2285,13 @@ export function SettingsViewer({
         <h2 id="settings-view-title">Settings</h2>
         <button
           type="button"
-          className="settings-btn"
+          className="file-reload-btn"
           title="Re-read the config from disk and recompute the snapshot"
+          aria-label="Refresh"
           disabled={pending}
           onClick={onRefresh}
         >
-          Refresh
+          <IconReload className="file-reload-glyph" />
         </button>
         <button type="button" className="settings-btn settings-close" title="Close (Esc)" onClick={onClose}>
           ✕

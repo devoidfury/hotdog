@@ -3,7 +3,17 @@
 // atoms hold view state and a single render() re-renders on change. The
 // message list container is handed to the imperative renderer via ref.
 
-import { mount, type Mounted, type Ref, type DomNode } from "@utils/jsx";
+import { mount, type JsxChild, type Mounted, type Ref, type DomNode } from "@utils/jsx";
+import {
+  IconBan,
+  IconCheck,
+  IconCopy,
+  IconGear,
+  IconPalette,
+  IconShield,
+  IconShieldCheck,
+  IconWorkbench,
+} from "./icons.tsx";
 import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH, WORKBENCH_DEFAULT_WIDTH } from "./utils.ts";
 import { createPanelResize } from "./panel-resize.ts";
 import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
@@ -15,12 +25,24 @@ import {
   loginAtoms,
 } from "./login.tsx";
 import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
+import {
+  applyStoredTheme,
+  applyThemeId,
+  labelForTheme,
+  nextThemeId,
+  saveThemeId,
+} from "./theme-pref.ts";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire } from "./chat.ts";
 import type { ConfigKeyEditWire, EditConfigListResultWire } from "@extensions/websocket/protocol.ts";
 import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
-import { WorkbenchPanel, workbenchStore } from "./workbench.tsx";
+import {
+  persistWorkbenchTabs,
+  seedWorkbenchStoreFromStorage,
+  WorkbenchPanel,
+  workbenchStore,
+} from "./workbench.tsx";
 import {
   emptyFileTree,
   openFileTree,
@@ -589,10 +611,6 @@ const completionAtom = reactiveState<CompletionMenu | null>(null);
 // restored when the composer mounts (same lifecycle as the draft). Size and
 // vision limits are enforced server-side; rejections surface as chat errors.
 const attachmentsAtom = reactiveState<PendingAttachment[]>([]);
-
-// When checked, messages are injected into the next seam (mid-turn steering)
-// rather than queued. This is useful for redirecting the agent while it works.
-const steerAtom = reactiveState<boolean>(true);
 
 // Bumped whenever the app stops caring about a pending completion response
 // (escape, blur, edit, apply), so a late reply cannot reopen the menu;
@@ -1369,6 +1387,21 @@ function startChat(): void {
       chat!.listSessions();
       chat!.listProfiles();
       clearLogView();
+      // Restored "file" tabs (init's sessionStorage seed, or a login landing
+      // after boot) read their first page the moment the wire is alive:
+      // ensureFileView fetches only unseen paths, so loaded tabs are a
+      // zero-traffic no-op. chat.ts drops pre-OPEN frames, so this is THE
+      // attach-time dispatch point.
+      for (const tab of workbenchStore.get().tabs) {
+        if (tab.kind === "file") ensureFileView(tab.id);
+        else if (tab.kind === "files" && fileTreeAtom().roots === null) {
+          // A restored tree tab on a page that has NEVER listed: activation
+          // was the re-request, so run the open/refresh machinery now. A
+          // session that already listed rides its cache -- no surprise
+          // re-requests on re-attach.
+          onTreeRefresh();
+        }
+      }
     },
     onSessionsUpdate: (sessions) => {
       // The display pointer must not move here: the socket stays attached to
@@ -1528,7 +1561,10 @@ function onChatSubmit(e: Event): void {
   if (text.startsWith("/") && !files) {
     chat?.sendSlashCommand(text);
   } else {
-    chat?.sendMessage(text, files, steerAtom());
+    // Steering-on is the webui default: every send steers. The wire shape is
+    // unchanged -- chat.ts sendMessage still adds `steering: true`
+    // conditionally and its parameter default stays false for other callers.
+    chat?.sendMessage(text, files, true);
   }
 }
 
@@ -1915,6 +1951,84 @@ function onFenceToggle(): void {
   chat?.setExecFencePolicy("off");
 }
 
+/* Fence chip posture classification (icon-only: the full posture truth the
+ * text used to carry rides title + aria-label). The vocabulary is
+ * toolExecModeLabel's (src/core/tool-exec-broker.ts):
+ *   "worker (fence: bwrap|seatbelt)"        jail in force               -> shield-check
+ *   "worker (fence: off)"                   deliberately unfenced       -> no-symbol, error tint
+ *   "worker (fence: none -- probe failed)"  policy wants a jail the host cannot give -> no-symbol, warning tint
+ *                                                                                       (an accident, not a choice)
+ *   "... [degraded: broker respawn cap]"    unhealthy plane             -> plain shield inside the
+ *                                                                          chip's existing error chrome
+ *   "inline (unfenced)" / unrecognized      inert or unknown posture    -> muted neutral shield
+ * An unrecognized token NEVER gets a shield-check: if nothing can be said
+ * about what confines the tools, the shield carries no checkmark.
+ */
+type FenceState = "on" | "off" | "probe-failed" | "degraded" | "neutral";
+
+function classifyFence(toolExec: string): FenceState {
+  if (toolExec.includes("degraded")) return "degraded";
+  if (toolExec.includes("fence: off")) return "off";
+  if (toolExec.includes("none -- probe failed")) return "probe-failed";
+  if (toolExec.includes("fence: bwrap") || toolExec.includes("fence: seatbelt")) return "on";
+  return "neutral";
+}
+
+/* Hover wording: "Sandbox Mode: enabled (worker, bwrap)" /
+ * "Sandbox Mode: off (inline)" / "Sandbox Mode: partial (worker, fence off)".
+ * The rest of the vocabulary reads in the same grammar: seatbelt names the
+ * backend, a failed probe reads "Sandbox Mode: partial (worker, fence
+ * failed)" (nothing confined, but an accident rather than a choice),
+ * degraded adds the respawn-cap truth on top of whatever jail sentence
+ * applies, and an unrecognized posture claims nothing ("unknown").
+ * The RAW server posture text stays in the aria-label; the title is the
+ * human sentence. A live control rides the toggle hint; a log view names the
+ * scope limit instead.
+ */
+function fenceTitle(state: FenceState, toolExec: string, clickable: boolean, logView: boolean): string {
+  const jail = toolExec.includes("fence: off")
+    ? "partial (worker, fence off)"
+    : `enabled (worker, ${toolExec.includes("fence: seatbelt") ? "seatbelt" : "bwrap"})`;
+  let base: string;
+  switch (state) {
+    case "on":
+      base = `Sandbox Mode: ${jail}`;
+      break;
+    case "off":
+      base = "Sandbox Mode: partial (worker, fence off)";
+      break;
+    case "probe-failed":
+      base = "Sandbox Mode: partial (worker, fence failed)";
+      break;
+    case "degraded":
+      base = `Sandbox Mode: ${jail} -- degraded: broker respawn cap`;
+      break;
+    case "neutral":
+      base = toolExec.includes("inline") ? "Sandbox Mode: off (inline)" : "Sandbox Mode: unknown posture";
+      break;
+  }
+  if (clickable) return `${base} -- click to toggle this session's fence`;
+  if (logView) return `${base} -- the fence toggle acts on live sessions only, not on a viewed log`;
+  return base;
+}
+
+/** The chip's icon for one posture; the fence-* class is the CSS tint hook
+ *  (error / warning) and the identity the tests pin. */
+function fenceGlyph(state: FenceState): JsxChild {
+  switch (state) {
+    case "on":
+      return <IconShieldCheck className="fence-on" />;
+    case "off":
+      return <IconBan className="fence-off" />;
+    case "probe-failed":
+      return <IconBan className="fence-probe-failed" />;
+    case "degraded":
+      return <IconShield className="fence-degraded" />;
+    case "neutral":
+      return <IconShield className="fence-neutral" />;
+  }
+}
+
 // Header fingerprint badge: copy the FULL session id (the message-footer
 // .footer-copy idiom, message-list.ts makeCopyButton -- copyText's seam and
 // a transient confirmed flash on the same 1.2s budget; the check rides a
@@ -1934,6 +2048,22 @@ function onCopySessionId(sessionId: string): void {
   });
 }
 
+// ── Theme switcher ──────────────────────────────────────────────────────────
+// A per-browser palette (theme-pref.ts): click cycles THEME_REGISTRY order,
+// each step persisting to localStorage and re-tagging <html> data-theme.
+// The header button re-renders off the atom so its title names the CURRENT
+// palette and the one the next click brings; boot applies the stored pref
+// (init) after an index.html inline mirror already painted it.
+
+const themeIdAtom = reactiveState<string>("");
+
+function cycleTheme(): void {
+  const next = nextThemeId(themeIdAtom());
+  themeIdAtom(next);
+  saveThemeId(next);
+  applyThemeId(next);
+}
+
 // ── View ────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -1947,6 +2077,10 @@ function App() {
   const toolExec = chat?.toolExecAtom() ?? "";
   // Reasoning visibility (localStorage; survives reload, applies to live transcripts and browsed cold logs alike).
   const hideThinking = chat?.hideThinkingAtom() ?? false;
+  // Active color theme (localStorage view setting, see theme-pref.ts); the
+  // title names where the next click lands so the cycle is discoverable.
+  const themeId = themeIdAtom();
+  const themeTitle = `Theme: ${labelForTheme(themeId)} -- click to switch to ${labelForTheme(nextThemeId(themeId))}`;
   // The strip becomes a control exactly when the ATTACHED live session shows a worker-plane fence;
   // inline/degraded postures and log view stay inert.
   const fenceClickable =
@@ -1954,6 +2088,9 @@ function App() {
     !toolExec.includes("degraded") &&
     !activeLogId &&
     sessionId !== null;
+  // The chip's posture (classifyFence above). The chip is icon-only: the
+  // full posture text lives in the title and an aria-label naming it.
+  const fenceState = classifyFence(toolExec);
   const menu = contextMenuAtom();
   const completionMenu = completionAtom();
   const attachments = attachmentsAtom();
@@ -2053,8 +2190,13 @@ function App() {
               >
                 {/* Fingerprint ONLY: the badge is the full-id copy button,
                     never a title slot (titles live on the sidebar row; a
-                    derived one is far too long for the header). */}
+                    derived one is far too long for the header). Copy
+                    affordance: the inline icon/check pair (CSS swaps them
+                    on .copied); the empty glyphs add nothing to
+                    textContent, so the badge stays pure id text. */}
                 {sessionId ? sessionId.slice(0, 8) : ""}
+                <IconCopy className="session-copy-icon" />
+                <IconCheck className="session-copy-check" />
               </button>
             </span>
             {activeLogId ? (
@@ -2086,6 +2228,10 @@ function App() {
                 reasoning {hideThinking ? "hidden" : "shown"}
               </button>
               {toolExec ? (
+                // Exec-fence posture, icon-only: the posture -> shape/tint
+                // table lives with classifyFence; the raw server posture
+                // rides the aria-label and the "Sandbox Mode: ..." sentence
+                // the title (fenceTitle) -- nothing is icon-decoded.
                 <button
                   id="tool-exec-status"
                   className={[
@@ -2095,31 +2241,13 @@ function App() {
                   ]
                     .filter(Boolean)
                     .join(" ") || undefined}
-                  title={
-                    fenceClickable
-                      ? `${toolExec} -- click to toggle this session's fence`
-                      : activeLogId
-                        ? `Tool execution plane (config keys: toolExec, execFence). The fence toggle acts on live sessions only, not on a viewed log.`
-                        : "Tool execution plane (config keys: toolExec, execFence)"
-                  }
+                  title={fenceTitle(fenceState, toolExec, fenceClickable, activeLogId !== null)}
+                  aria-label={`Tool execution: ${toolExec}`}
                   onClick={fenceClickable ? onFenceToggle : undefined}
                 >
-                  tools: {toolExec}
+                  {fenceGlyph(fenceState)}
                 </button>
               ) : null}
-              {/* Workbench disclosure: opens the right-docked pane (see
-                      workbench.tsx). Same toggleable idiom as its neighbors;
-                      aria-expanded mirrors the OPEN state like #logs-toggle. */}
-              <button
-                type="button"
-                id="workbench-toggle"
-                className="header-btn toggleable"
-                aria-expanded={workbenchCollapsedAtom() ? "false" : "true"}
-                title="Workbench (right-docked pane): show or hide. Width and open state persist in this browser."
-                onClick={onToggleWorkbench}
-              >
-                workbench
-              </button>
               {/* Settings viewer: a live-at-open read of the resolved config
                   (a fresh snapshot is requested on every open; diagnostics +
                   per-key sources, secrets redacted server-side). Opens a
@@ -2131,14 +2259,50 @@ function App() {
                 aria-label="Settings"
                 aria-haspopup="dialog"
                 aria-expanded={settingsAtom().open ? "true" : "false"}
-                title="Settings: resolved config snapshot, re-read on every open"
+                title="Settings Menu"
                 onClick={openSettings}
               >
-                settings
+                {/* Icon-only: the solid gear carries the button; the hover
+                    text is the plain "Settings Menu". aria-label,
+                    haspopup/expanded and the open handler unchanged; zero
+                    text renders. */}
+                <IconGear />
               </button>
-              <span id="connection-status" className={connected ? "status-connected" : "status-disconnected"}>
-                {connected ? "Connected" : "Disconnected"}
-              </span>
+              {/* Theme switcher: cycles the palette registry (hotdog ->
+                  purple -> ...); a click persists and re-tags <html>.
+                  Native button = Enter/Space work for free. The inline SVG
+                  glyph is tinted by currentColor, so it recolors with
+                  whatever palette is on screen (see #theme-btn in
+                  styles.css). Position rides after settings so the header
+                  group's pinned children keep their slots. */}
+              <button
+                type="button"
+                id="theme-btn"
+                title={themeTitle}
+                aria-label={themeTitle}
+                onClick={cycleTheme}
+              >
+                <IconPalette />
+              </button>
+              {/* Workbench disclosure: the header's LAST control (the
+                  connection indicator left for the composer), at the
+                  group's absolute right edge. The glyph reads as a panel
+                  with its RIGHT column solid-filled, the fill's left edge
+                  being the single divider -- the dock this button opens --
+                  so icon and dock sit side by side at rest. aria-label
+                  carries the name; aria-expanded mirrors the OPEN state
+                  like #logs-toggle. */}
+              <button
+                type="button"
+                id="workbench-toggle"
+                className="header-btn toggleable"
+                aria-label="Toggle workbench pane"
+                aria-expanded={workbenchCollapsedAtom() ? "false" : "true"}
+                title="Toggle Workbench (right pane sidebar)"
+                onClick={onToggleWorkbench}
+              >
+                <IconWorkbench />
+              </button>
             </span>
           </div>
 
@@ -2239,7 +2403,7 @@ function App() {
                   onClick={() => fileInputEl?.click()}
                 >
                   {/* currentColor idiom from icons.tsx; 1.8 stroke for the weight. */}
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" tabindex="-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                   </svg>
                 </button>
@@ -2249,10 +2413,24 @@ function App() {
                     id="mic-btn"
                     className={sttPhase === "recording" ? "recording" : undefined}
                     title="Hold to record; the transcript is inserted into the input"
+                    aria-label="Hold to record; the transcript is inserted into the input"
                     disabled={activeLogId !== null || sttPhase === "transcribing"}
                     onMousedown={onMicMousedown}
                   >
-                    {sttPhase === "recording" ? "● Recording" : sttPhase === "transcribing" ? "..." : "Mic"}
+                    {/* Idle = glyph only: aria-label + title carry the name.
+                        The glyph follows the neighboring #attach-btn paperclip
+                        idiom: aria-hidden decoration, currentColor stroke, so
+                        the .recording red ink repaints it for free. The
+                        transient phases keep their EXPLICIT text
+                        ("● Recording" / "..."): a live state needs a visible
+                        tell, an aria-label is not one. An empty svg sibling
+                        never changes textContent, so idle is "". */}
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" tabindex="-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <path d="M12 19v3" />
+                    </svg>
+                    {sttPhase === "recording" ? "● Recording" : sttPhase === "transcribing" ? "..." : null}
                   </button>
                 ) : null}
                 <label id="profile-selector">
@@ -2275,17 +2453,21 @@ function App() {
                     ))}
                   </select>
                 </label>
-                <label id="steer-label">
-                  <input
-                    type="checkbox"
-                    id="steer-checkbox"
-                    checked={steerAtom()}
-                    onChange={(e: Event) =>
-                      steerAtom((e.target as HTMLInputElement).checked)
-                    }
-                  />
-                  Steer
-                </label>
+                {/* No steer control: every send steers (see the send site). */}
+                {/* Connection truth, moved out of the header: it renders
+                    ONLY while disconnected -- zero DOM when connected, not a
+                    hidden span -- immediately LEFT of Stop/Send in this row.
+                    Its margin-left:auto absorbs the slack (the buttons' own
+                    auto margin is handed over while it's present, see
+                    styles.css), so the right-anchored pair never shifts when
+                    the indicator appears or vanishes; nothing is reserved. A
+                    plain span: no tab stop, no interference with the
+                    focusable-ids ordering pins. */}
+                {connected ? null : (
+                  <span id="connection-status" className="status-disconnected">
+                    Disconnected
+                  </span>
+                )}
                 {working ? (
                   // type=button: it lives inside #chat-form; without it the
                   // click would submit the composer before cancelling. The
@@ -2413,6 +2595,10 @@ function App() {
 async function init(): Promise<void> {
   const root = document.getElementById("app");
   if (!root) return;
+  // Boot the stored palette onto <html> before the first render. The
+  // index.html inline script already did this pre-paint; this is the same
+  // value re-applied with the registry's validation behind it.
+  themeIdAtom(applyStoredTheme());
   sidebarPanel.restore();
   logsPanel.restore();
   workbenchPanel.restore();
@@ -2423,7 +2609,16 @@ async function init(): Promise<void> {
   // persists, so later visits are decided by restore() alone.
   if (!hasStoredWorkbenchCollapsed()) workbenchPanel.toggle();
   workbenchCollapsedAtom(workbenchPanel.collapsed());
+  // Restored tabs reappear BEFORE the first paint (order + active tab from
+  // the sessionStorage record; garbage/absent -> zero tabs, silently). The
+  // seed runs ahead of the subscriptions so it neither repaints nor rewrites
+  // the record it just read; tab content lands through the existing read
+  // machinery on the first sessionCreated (see startChat's onSessionCreated).
+  seedWorkbenchStoreFromStorage();
   workbenchStore.subscribe(render);
+  // Persist on every actual change (open/close/activate -- the store's one
+  // notify per change is the trigger; no-ops write nothing).
+  workbenchStore.subscribe(() => persistWorkbenchTabs(workbenchStore.get()));
   mounted = mount(<App />, root as unknown as DomNode);
   effect(render, [
     screenAtom,
@@ -2446,6 +2641,7 @@ async function init(): Promise<void> {
     settingsAtom,
     fileTreeAtom,
     fileViewsAtom,
+    themeIdAtom,
   ]);
 
   document.addEventListener("keydown", (e: KeyboardEvent) => {

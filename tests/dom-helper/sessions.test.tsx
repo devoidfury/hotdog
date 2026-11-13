@@ -164,10 +164,10 @@ describe("live row (owner fixture)", () => {
 
     expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
     // The client count rides the card's bottom-right as a plug icon, trailing
-    // line 3 (the glyph itself lives in a CSS mask, so no DOM text at 1
-    // client; tooltip on the native title). aria-hidden decoration: a glyph
-    // is not a stop on the way to the row's controls. Never a text metric,
-    // and no row text ever mentions clients.
+    // line 3 (the glyph is the inline svg idiom -- an empty glyph adds no
+    // DOM text at 1 client; tooltip on the native title). aria-hidden
+    // decoration: a glyph is not a stop on the way to the row's controls.
+    // Never a text metric, and no row text ever mentions clients.
     const plug = row.querySelector(".row-clients")!;
     expect(plug).toBeTruthy();
     expect(plug.textContent).toBe("");
@@ -268,7 +268,7 @@ describe("live row (owner fixture)", () => {
 
     const asked = rows[0]!.querySelector(".row-status")!;
     expect(asked.getAttribute("title")).toBe("Awaiting question");
-    expect(asked.querySelector(".row-glyph-awaiting_question")).toBeTruthy();
+    expect(asked.querySelector("svg.row-glyph-awaiting_question")).toBeTruthy();
     expect(asked.className).toContain("log-state-awaiting_question");
     expect(asked.querySelector(".row-glyph-working")).toBeNull();
     // Stop still rides: interrupting settles the pending question.
@@ -318,7 +318,7 @@ describe("cold row", () => {
     expect(row.querySelector(".row-model")!.textContent).toBe("ai365/qwen3.8-flash-next");
     const status = row.querySelector(".row-status")!;
     expect(status.getAttribute("title")).toBe("Interrupted");
-    expect(status.querySelector(".row-glyph-interrupted")).toBeTruthy();
+    expect(status.querySelector("svg.row-glyph-interrupted")).toBeTruthy();
     expect(row.querySelector(".row-profile")!.textContent).toBe("manager");
     expect(texts(row, ".row-metric")).toEqual(["69k/262k", "42 msgs"]);
     // Same bottom-row grammar as the live list: date · ctx · msgs [menu].
@@ -372,7 +372,7 @@ describe("cold row", () => {
     expect(status.getAttribute("title")).toBe("Awaiting question");
     expect(status.textContent).toBe("");
     expect(status.className).toContain("log-state-awaiting_question");
-    expect(status.querySelector(".row-glyph-awaiting_question")).toBeTruthy();
+    expect(status.querySelector("svg.row-glyph-awaiting_question")).toBeTruthy();
   });
 
   it("unknown state tokens fall back to text: no glyph, nothing vanishes", () => {
@@ -664,8 +664,9 @@ describe("Recent Logs titlebar", () => {
     expect(toggle.getAttribute("aria-controls")).toBe("log-list");
     expect(toggle.getAttribute("aria-label")).toBe("Collapse recent logs");
     // Chevron down while expanded; the glyph is decoration (aria-hidden).
-    expect(root.querySelector(".logs-toggle-glyph")!.getAttribute("class")).not.toContain("-up");
-    expect(root.querySelector(".logs-toggle-glyph")!.getAttribute("aria-hidden")).toBe("true");
+    // The flip rides the same class names (CSS rotates the svg).
+    expect(root.querySelector("svg.logs-toggle-glyph")!.getAttribute("class")).not.toContain("-up");
+    expect(root.querySelector("svg.logs-toggle-glyph")!.getAttribute("aria-hidden")).toBe("true");
     // The list is present and the live-sessions section above it untouched.
     expect(root.querySelector("#log-list")).not.toBeNull();
     expect(root.querySelector("#session-list")).not.toBeNull();
@@ -686,7 +687,7 @@ describe("Recent Logs titlebar", () => {
     const toggle = root.querySelector("#logs-toggle")!;
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(toggle.getAttribute("aria-label")).toBe("Expand recent logs");
-    expect(root.querySelector(".logs-toggle-glyph")!.getAttribute("class")).toContain("logs-toggle-glyph-up");
+    expect(root.querySelector("svg.logs-toggle-glyph")!.getAttribute("class")).toContain("logs-toggle-glyph-up");
     // The class that hides the list rides the aside (CSS drops #log-list out
     // of the flow; the live-sessions list keeps its own slot).
     expect(root.querySelector("aside")!.getAttribute("class")).toContain("logs-collapsed");

@@ -228,7 +228,7 @@ describe("viewer rendering", () => {
     expect(text(btn)).toBe(""); // glyph-only: no text label
     expect(btn.getAttribute("aria-label")).toBe("Reload");
     expect(btn.getAttribute("title")).toBe("Re-read the file from the top");
-    expect(btn.querySelector(".file-reload-glyph[aria-hidden='true']")).toBeTruthy();
+    expect(btn.querySelector("svg.file-reload-glyph[aria-hidden='true']")).toBeTruthy();
     click(btn);
     expect(reloaded).toBe(PATH);
   });

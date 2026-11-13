@@ -21,7 +21,7 @@ import {
   MAX_DIFF_LINES,
   type DiffLine,
 } from "@utils/diff.ts";
-import { TOOL_ICONS } from "./icons.tsx";
+import { IconChevron, TOOL_ICONS } from "./icons.tsx";
 import { copyText } from "./utils.ts";
 import type { ToolDisplayWire } from "@extensions/websocket/protocol.ts";
 
@@ -509,6 +509,7 @@ function CopyPath({ path }: { path: string }): JsxChild {
         width="12"
         height="12"
         aria-hidden="true"
+        tabindex="-1"
         fill="none"
         stroke="currentColor"
         stroke-width="2"
@@ -522,6 +523,7 @@ function CopyPath({ path }: { path: string }): JsxChild {
         width="12"
         height="12"
         aria-hidden="true"
+        tabindex="-1"
         fill="none"
         stroke="currentColor"
         stroke-width="2.5"
@@ -577,6 +579,9 @@ function PartHeader({
       </span>
       <CopyPath path={path} />
       <span className="part-meta">{meta}</span>
+      {/* Fold chevron (only when the row IS a toggle): the open attestation
+          stays :has(+ pre) on the row, CSS rotates this. */}
+      {onToggle ? <IconChevron className="fold-chevron" /> : null}
     </div>
   );
 }
@@ -770,6 +775,7 @@ export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBo
     <div className={"tool-result-box" + (status === "error" ? " tool-result-error" : "")}>
       <button type="button" className="tool-box-summary" onClick={() => onToggleBox("g", boxOpen)}>
         {genericResultSummary(result)}
+        <IconChevron className="fold-chevron" />
       </button>
       {boxOpen ? (
         <>

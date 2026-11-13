@@ -24,7 +24,17 @@ import { FakeWebSocket, SVG_NS } from "./index.ts";
 import { DRAFT_STORAGE_KEY } from "@extensions/webui/ui/draft.ts";
 import { ATTACHMENTS_STORAGE_KEY } from "@extensions/webui/ui/attachment-store.ts";
 import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts";
-import { workbenchStore } from "@extensions/webui/ui/workbench.tsx";
+import {
+  applyStoredTheme,
+  DEFAULT_THEME_ID,
+  THEME_REGISTRY,
+  THEME_STORAGE_KEY,
+} from "@extensions/webui/ui/theme-pref.ts";
+import {
+  seedWorkbenchStoreFromStorage,
+  WORKBENCH_TABS_KEY,
+  workbenchStore,
+} from "@extensions/webui/ui/workbench.tsx";
 
 const SID = "s-ui-0001";
 const L1 = "l-ui-0001";
@@ -196,6 +206,12 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const el = (sel: string): HTMLElement => document.querySelector(sel) as unknown as HTMLElement;
 const els = (sel: string): HTMLElement[] => Array.from(document.querySelectorAll(sel)) as unknown as HTMLElement[];
 
+/** The settings dialog header's Refresh is the glyph-button standard
+ *  (.file-reload-btn, no text node): find it by aria-label, scoped to the
+ *  dialog so a workbench pane elsewhere can never shadow the lookup. */
+const settingsRefresh = (): HTMLElement =>
+  els(".settings-view .file-reload-btn").find((b) => b.getAttribute("aria-label") === "Refresh")!;
+
 function sent<T = Record<string, unknown>>(type: string): T[] {
   return ws.sent
     .map((s) => JSON.parse(s) as T & { type: string })
@@ -266,10 +282,15 @@ describe("app boot (stored token)", () => {
   it("auto-login opens main-ui with the composer draft restored", () => {
     expect(el("#main-ui").getAttribute("class")).not.toContain("hidden");
     expect(el("#login-screen").getAttribute("class")).toContain("hidden");
-    expect(el("#connection-status").textContent).toBe("Connected");
+    // The connection indicator left the header and renders ONLY while
+    // disconnected: connected means zero DOM, not a hidden span.
+    expect(document.querySelector("#connection-status")).toBeNull();
     // chatInputRef brought the stored draft back and autoResized.
     expect((el("#chat-input") as unknown as { value: string }).value).toBe("restored draft");
-    expect(el("#steer-checkbox").hasAttribute("checked")).toBe(true);
+    // The steer switch is gone; nothing may resurrect it (steering-on is the
+    // default; see the send pin below).
+    expect(document.querySelector("#steer-checkbox")).toBeNull();
+    expect(document.querySelector("#steer-label")).toBeNull();
   });
 
   it("attachments staged before the reload come back as chips; dismissing clears the key", async () => {
@@ -741,7 +762,13 @@ describe("push-to-talk", () => {
     mic.resolve();
     await tick(2);
     expect(FakeMediaRecorder.instances).toHaveLength(0);
-    expect(el("#mic-btn").textContent).toBe("Mic");
+    // Idle is glyph-only; the name rides aria-label + title, the glyph is
+    // the aria-hidden svg.
+    expect(el("#mic-btn").textContent).toBe("");
+    expect(el("#mic-btn").getAttribute("aria-label")).toBe(
+      "Hold to record; the transcript is inserted into the input",
+    );
+    expect(el("#mic-btn").querySelector("svg[aria-hidden='true']")).toBeTruthy();
   });
 
   it("empty recording: back to idle with no transcribe", async () => {
@@ -751,7 +778,7 @@ describe("push-to-talk", () => {
     expect(el("#mic-btn").textContent).toBe("● Recording");
     release();
     await tick(3);
-    expect(el("#mic-btn").textContent).toBe("Mic");
+    expect(el("#mic-btn").textContent).toBe("");
     expect(sent("transcribe")).toHaveLength(0);
   });
 
@@ -772,7 +799,7 @@ describe("push-to-talk", () => {
     ws.fireMessage({ type: "transcript", id: req.id, ok: true, text: "dictated words" });
     await tick(2);
     expect((el("#chat-input") as unknown as { value: string }).value).toBe("hello dictated words");
-    expect(el("#mic-btn").textContent).toBe("Mic");
+    expect(el("#mic-btn").textContent).toBe("");
   });
 
   it("failed transcription lands as a system message", async () => {
@@ -786,13 +813,13 @@ describe("push-to-talk", () => {
     ws.fireMessage({ type: "transcript", id: req.id, ok: false, error: "backend down" });
     await tick(2);
     expect(el("#message-list").textContent).toContain("backend down");
-    expect(el("#mic-btn").textContent).toBe("Mic");
+    expect(el("#mic-btn").textContent).toBe("");
   });
 });
 
-// ── Selects & steer ─────────────────────────────────────────────────────────
+// ── Selects ─────────────────────────────────────────────────────────────────
 
-describe("profile / model / steer controls", () => {
+describe("profile / model controls", () => {
   it("profile change switches the attached session's profile", async () => {
     await attach();
     const select = el("#profile-select");
@@ -815,17 +842,19 @@ describe("profile / model / steer controls", () => {
     expect(sent("command")).toHaveLength(0);
   });
 
-  it("the steer checkbox flips future sends", async () => {
-    const box = el("#steer-checkbox");
-    (box as unknown as { checked: boolean }).checked = false;
-    box.dispatchEvent({ type: "change", target: box } as unknown as Event);
-    await tick();
-    setComposer("queued please");
+  it("every webui send carries steering: true (the switch retired; the wire shape did not move)", async () => {
+    // The composer's send site passes steer=true unconditionally; chat.ts
+    // still ADDS the field conditionally (its default false is for other
+    // callers), so the frame matches the old steer-checked case.
+    await attach();
+    setComposer("first line");
     clearSent();
     await submitComposer();
-    expect(sent<{ steering?: boolean }>("send")[0]?.steering).toBeUndefined(); // steer off: field omitted
-    (box as unknown as { checked: boolean }).checked = true;
-    box.dispatchEvent({ type: "change", target: box } as unknown as Event);
+    setComposer("second line");
+    await submitComposer();
+    const sends = sent<{ steering?: boolean }>("send");
+    expect(sends).toHaveLength(2);
+    expect(sends.every((m) => m.steering === true)).toBe(true);
   });
 });
 
@@ -1872,7 +1901,12 @@ describe("header fence toggle (real app wiring)", () => {
   it("worker posture renders the clickable affordance and a naming tooltip", async () => {
     await attachWithPosture("worker (fence: bwrap)");
     const strip = el("#tool-exec-status");
-    expect(strip.textContent).toContain("worker (fence: bwrap)");
+    // Icon-only: the posture truth rides the aria-label (always) and the
+    // title (clickable case); the icon identity (shield-check for an
+    // in-force jail) rides the svg class.
+    expect(strip.textContent).toBe("");
+    expect(strip.getAttribute("aria-label")).toBe("Tool execution: worker (fence: bwrap)");
+    expect(strip.querySelector("svg.fence-on")).toBeTruthy();
     expect(strip.getAttribute("class")).toContain("toggleable");
     // The clickable chip must never carry disabled: an inverted
     // disabled={fenceClickable} once made the live chip swallow every click
@@ -1882,6 +1916,9 @@ describe("header fence toggle (real app wiring)", () => {
     expect(strip.hasAttribute("disabled")).toBe(false);
     // Button chrome lives in the class, not an inline style attribute.
     expect(strip.getAttribute("style")).toBeNull();
+    // Hover text is the Sandbox Mode sentence (raw posture stays in the
+    // aria-label); the toggle hint still rides for the live control.
+    expect(strip.getAttribute("title")).toContain("Sandbox Mode: enabled (worker, bwrap)");
     expect(strip.getAttribute("title")).toContain("click to toggle this session's fence");
   });
 
@@ -1920,7 +1957,12 @@ describe("header fence toggle (real app wiring)", () => {
       value: "worker (fence: off)",
     });
     await tick();
-    expect(el("#tool-exec-status").textContent).toContain("fence: off");
+    // The repaint's truth rides the aria-label + the no-symbol identity
+    // (deliberate off, error-tinted -- never a silent shield-check).
+    expect(el("#tool-exec-status").getAttribute("aria-label")).toContain("fence: off");
+    expect(el("#tool-exec-status").getAttribute("title")).toContain("Sandbox Mode: partial (worker, fence off)");
+    expect(el("#tool-exec-status").querySelector("svg.fence-off")).toBeTruthy();
+    expect(el("#tool-exec-status").querySelector("svg.fence-on")).toBeNull();
     // Still the clickable worker shape: clicking now proposes the tighten.
     ws.sent.length = 0;
     el("#tool-exec-status").click();
@@ -1937,9 +1979,10 @@ describe("header fence toggle (real app wiring)", () => {
       value: "worker (fence: seatbelt)",
     });
     await tick();
-    // The strip still carries OUR last server-pushed posture.
-    expect(el("#tool-exec-status").textContent).toContain("fence: off");
-    expect(el("#tool-exec-status").textContent).not.toContain("seatbelt");
+    // The strip still carries OUR last server-pushed posture (the aria-label
+    // carries it now).
+    expect(el("#tool-exec-status").getAttribute("aria-label")).toContain("fence: off");
+    expect(el("#tool-exec-status").getAttribute("aria-label")).not.toContain("seatbelt");
   });
 
   it("inline posture: inert strip, no class, no click effect", async () => {
@@ -1948,6 +1991,10 @@ describe("header fence toggle (real app wiring)", () => {
     const strip = el("#tool-exec-status");
     expect(strip.getAttribute("class") ?? "").not.toContain("toggleable");
     expect(strip.getAttribute("style")).toBeNull();
+    // Inert inline posture: muted NEUTRAL shield, never a no-symbol and
+    // never shield-check (nothing about confinement can be claimed here).
+    expect(strip.querySelector("svg.fence-neutral")).toBeTruthy();
+    expect(strip.getAttribute("title")).toBe("Sandbox Mode: off (inline)");
     ws.sent.length = 0;
     strip.click();
     expect(fenceMsgs()).toEqual([]);
@@ -1962,6 +2009,7 @@ describe("header fence toggle (real app wiring)", () => {
     expect(el("#log-view-label")).toBeTruthy();
     const strip = el("#tool-exec-status");
     expect(strip.getAttribute("class") ?? "").not.toContain("toggleable");
+    expect(strip.getAttribute("title")).toContain("Sandbox Mode: enabled (worker, bwrap)");
     expect(strip.getAttribute("title")).toContain("live sessions only");
     ws.sent.length = 0;
     strip.click();
@@ -1972,14 +2020,43 @@ describe("header fence toggle (real app wiring)", () => {
     lvAttachBurst("back live");
     await tick();
   });
+
+  it("degraded posture: the chip's error chrome + a plain CHECKLESS shield (never shield-check)", async () => {
+    await attachWithPosture("worker (fence: bwrap) [degraded: broker respawn cap]");
+    const strip = el("#tool-exec-status");
+    expect(strip.getAttribute("class")).toContain("tool-exec-degraded");
+    expect(strip.getAttribute("class") ?? "").not.toContain("toggleable"); // degraded stays inert
+    expect(strip.querySelector("svg.fence-degraded")).toBeTruthy();
+    expect(strip.querySelector("svg.fence-on")).toBeNull();
+    expect(strip.getAttribute("aria-label")).toContain("degraded");
+    expect(strip.getAttribute("title")).toContain("-- degraded: broker respawn cap");
+  });
+
+  it("an unrecognized posture falls back to the neutral shield, never a lie", async () => {
+    await attachWithPosture("worker (no plane)"); // outside the bwrap|seatbelt|off|probe-failed vocabulary
+    const strip = el("#tool-exec-status");
+    expect(strip.querySelector("svg.fence-neutral")).toBeTruthy();
+    expect(strip.querySelector("svg.fence-on")).toBeNull();
+    expect(strip.getAttribute("title")).toContain("Sandbox Mode: unknown posture");
+    expect(strip.getAttribute("class") ?? "").not.toContain("toggleable");
+  });
+
+  it("a failed probe reads as the no-symbol on WARNING, not the deliberate-off error tint", async () => {
+    await attachWithPosture("worker (fence: none -- probe failed)");
+    const strip = el("#tool-exec-status");
+    expect(strip.querySelector("svg.fence-probe-failed")).toBeTruthy();
+    expect(strip.querySelector("svg.fence-off")).toBeNull();
+    expect(strip.getAttribute("aria-label")).toContain("fence: none -- probe failed");
+    expect(strip.getAttribute("title")).toContain("Sandbox Mode: partial (worker, fence failed)");
+  });
 });
 
 // ── Client plug on live cards (bottom-right, from the sessions payload) ─────
 // The count renders as the card's trailing plug icon (see sessions.test.tsx
 // for the row grammar); through real app wiring that means every live row's
 // figure comes straight from the payload's connectedClients. Render rules:
-// 0/unattested renders nothing; 1 is icon-only (the plug lives in the CSS
-// mask, so textContent stays empty); 2+ appends the number; native title is
+// 0/unattested renders nothing; 1 is icon-only (the plug is the inline svg
+// idiom, so textContent stays empty); 2+ appends the number; native title is
 // the tooltip, singular for one; aria-hidden decoration, not a tab stop.
 
 describe("client plug on live cards", () => {
@@ -2070,6 +2147,10 @@ describe("header reasoning-visibility chip", () => {
     expect(group).toHaveLength(1);
     expect(group[0]!.children[0]!.getAttribute("id")).toBe("thinking-toggle");
     expect(group[0]!.children[1]!.getAttribute("id")).toBe("tool-exec-status");
+    // The group ENDS with the workbench toggle: the connection indicator left
+    // for the composer, so the dock's own control owns the absolute edge.
+    const kids = group[0]!.children;
+    expect(kids[kids.length - 1]!.getAttribute("id")).toBe("workbench-toggle");
   });
 
   it("click sweeps committed AND in-flight blocks, persists, and sends nothing", async () => {
@@ -2141,6 +2222,129 @@ describe("header reasoning-visibility chip", () => {
     el("#thinking-toggle").click();
     await tick();
     expect(el("#thinking-toggle").getAttribute("aria-pressed")).toBeNull();
+  });
+});
+
+// ── Header theme switcher (ui/theme-pref.ts + THEME_REGISTRY) ──────────────
+// Per-browser palette: click cycles the registry, persisting to the store
+// and re-tagging documentElement's data-theme. The default hotdog renders
+// from the bare :root (attribute REMOVED); index.html's inline script
+// pre-paints a stored pref and boot re-applies the same value. init() ran
+// once per file (single-booter doctrine), so the "boot with a stored pref"
+// cases call applyStoredTheme() -- the exact line init() runs.
+
+describe("header theme switcher", () => {
+  const root = document.documentElement;
+  const btn = () => el("#theme-btn");
+
+  it("boots hotdog with no stored pref and renders the glyph control", async () => {
+    await attach();
+    // init() ran with no THEME_STORAGE_KEY: the bare-:root default means NO
+    // attribute, and boot writes nothing to storage.
+    expect(root.getAttribute("data-theme")).toBeNull();
+    expect(store.get(THEME_STORAGE_KEY)).toBeUndefined();
+    expect(btn().localName).toBe("button"); // native: Enter/Space activate
+    const title = btn().getAttribute("title")!;
+    expect(title).toContain("Hotdog");
+    expect(btn().getAttribute("aria-label")).toBe(title);
+    const glyph = btn().querySelector("svg[aria-hidden='true']");
+    expect(glyph).toBeTruthy(); // the inline palette glyph
+    expect(glyph!.getAttribute("tabindex")).toBe("-1"); // no svg tab stops
+    // Sits in the header group without disturbing the pinned slots.
+    const group = els(".header-status-group")[0]!;
+    expect(Array.from(group.children).some((c) => c.getAttribute("id") === "theme-btn")).toBe(true);
+  });
+
+  it("click applies purple: attribute flips, title follows, persists, wire silent", async () => {
+    const before = ws.sent.length;
+    btn().click();
+    await tick();
+    expect(root.getAttribute("data-theme")).toBe("purple");
+    expect(btn().getAttribute("title")).toContain("Purple");
+    expect(store.get(THEME_STORAGE_KEY)).toBe("purple");
+    expect(ws.sent.length).toBe(before); // a view toggle never touches the wire
+  });
+
+  it("click again cycles back to hotdog: attribute removed, persisted", async () => {
+    btn().click();
+    await tick();
+    expect(root.getAttribute("data-theme")).toBeNull();
+    expect(btn().getAttribute("title")).toContain("Hotdog");
+    expect(store.get(THEME_STORAGE_KEY)).toBe("hotdog");
+  });
+
+  it("a boot with the pref stored applies purple (init's exact line)", async () => {
+    store.set(THEME_STORAGE_KEY, "purple");
+    expect(applyStoredTheme()).toBe("purple");
+    expect(root.getAttribute("data-theme")).toBe("purple");
+    // A stored DEFAULT (hotdog) is an attribute no-op: hotdog IS the bare
+    // :root now, so no attribute appears even when the id was saved.
+    store.set(THEME_STORAGE_KEY, "hotdog");
+    expect(applyStoredTheme()).toBe(DEFAULT_THEME_ID);
+    expect(root.getAttribute("data-theme")).toBeNull();
+    // Leave for the suites that follow: hotdog (default) path, key cleared.
+    store.delete(THEME_STORAGE_KEY);
+    expect(applyStoredTheme()).toBe(DEFAULT_THEME_ID);
+    expect(root.getAttribute("data-theme")).toBeNull();
+  });
+
+  it("a garbage stored value falls back to hotdog", async () => {
+    store.set(THEME_STORAGE_KEY, "ketchup");
+    expect(applyStoredTheme()).toBe(DEFAULT_THEME_ID);
+    expect(root.getAttribute("data-theme")).toBeNull();
+    store.delete(THEME_STORAGE_KEY);
+  });
+
+  it("throwing storage degrades to the default and never breaks anything", async () => {
+    const win = window as unknown as { localStorage: unknown };
+    const prev = win.localStorage;
+    try {
+      win.localStorage = {
+        getItem() {
+          throw new Error("SecurityError: storage access denied");
+        },
+        setItem() {
+          throw new Error("SecurityError: storage access denied");
+        },
+        removeItem() {
+          throw new Error("SecurityError: storage access denied");
+        },
+      };
+      expect(() => applyStoredTheme()).not.toThrow();
+      expect(root.getAttribute("data-theme")).toBeNull();
+      // The switcher stays fully operable; a failed save only costs the reload.
+      expect(() => btn().click()).not.toThrow();
+      await tick();
+      expect(root.getAttribute("data-theme")).toBe("purple");
+      expect(btn().getAttribute("title")).toContain("Purple");
+      expect(store.get(THEME_STORAGE_KEY)).toBeUndefined(); // nothing got through
+    } finally {
+      win.localStorage = prev;
+    }
+    // Sync back to hotdog (the default) for the suites that follow (real
+    // storage again).
+    btn().click();
+    await tick();
+    expect(root.getAttribute("data-theme")).toBeNull();
+  });
+
+  it("a third registry entry joins the cycle without touching the switcher", async () => {
+    THEME_REGISTRY.push({ id: "mustard", label: "Mustard" });
+    try {
+      btn().click();
+      await tick(); // hotdog -> purple: the title promises the new entry
+      expect(btn().getAttribute("title")).toContain("Mustard");
+      btn().click();
+      await tick(); // purple -> mustard
+      expect(root.getAttribute("data-theme")).toBe("mustard");
+      expect(btn().getAttribute("title")).toContain("Mustard");
+      expect(store.get(THEME_STORAGE_KEY)).toBe("mustard");
+      btn().click();
+      await tick(); // wraps back to the default (atom hotdog, store "hotdog")
+      expect(root.getAttribute("data-theme")).toBeNull();
+    } finally {
+      THEME_REGISTRY.pop();
+    }
   });
 });
 
@@ -2482,6 +2686,7 @@ describe("workbench pane (real app wiring)", () => {
     await tick();
     expect(el("#workbench-panel")).toBeTruthy();
     expect(el("#workbench-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(el("#workbench-toggle").getAttribute("title")).toBe("Toggle Workbench (right pane sidebar)");
     expect(store.get("hotdog.workbenchCollapsed")).toBe("0");
     const h = wbHandle();
     expect(h.getAttribute("role")).toBe("separator");
@@ -2595,6 +2800,8 @@ describe("settings viewer (real app wiring)", () => {
     // Chip chrome (the .toggleable fill, not the browser-default grey) +
     // the pressed state mirrors the dialog (owner 2026-11-09).
     expect(el("#settings-btn").getAttribute("class")).toContain("toggleable");
+    expect(el("#settings-btn").getAttribute("title")).toBe("Settings Menu");
+    expect(el("#settings-btn").textContent).toBe("");
     expect(el("#settings-btn").getAttribute("aria-expanded")).toBe("false");
     el("#settings-btn").click();
     await tick();
@@ -2652,7 +2859,11 @@ describe("settings viewer (real app wiring)", () => {
     el("#settings-btn").click();
     await tick();
     const first = sent<{ requestId: number }>("configSnapshot").pop()!;
-    const refresh = els(".settings-btn").find((b) => b.textContent === "Refresh")!;
+    const refresh = settingsRefresh();
+    // The glyph-button standard: zero text; the aria-label (above) + the
+    // glyph carry the button.
+    expect(refresh.textContent).toBe("");
+    expect(refresh.querySelector(".file-reload-glyph[aria-hidden='true']")).toBeTruthy();
     // Opened snapshot still in flight: Refresh is busy-disabled, so this
     // scripted dispatch (not a trusted click) models the pre-repaint race
     // and drives the superseded-id drop below.
@@ -2992,7 +3203,7 @@ describe("settings editor (real app wiring)", () => {
     // A snapshot refresh rides the OTHER sequence: the in-flight save survives
     // it, and a write reply carrying the SNAPSHOT id is not the reply this row
     // waits for.
-    els(".settings-btn").find((b) => b.textContent === "Refresh")!.click();
+    settingsRefresh().click();
     await tick();
     const refreshed = sent<{ requestId: number }>("configSnapshot").pop()!.requestId;
     expect(refreshed).toBeGreaterThan(snapId);
@@ -3333,7 +3544,7 @@ describe("settings editor (real app wiring)", () => {
     // A LATER snapshot still applies cleanly (the stranded-marker re-throw
     // loop is gone): Refresh repaints the three cards.
     clearSent();
-    const refreshBtn = els(".settings-btn").find((b) => b.textContent === "Refresh")!;
+    const refreshBtn = settingsRefresh();
     refreshBtn.click();
     await tick();
     ws.fireMessage(editPayload(sent<{ requestId: number }>("configSnapshot").pop()!.requestId));
@@ -3934,6 +4145,184 @@ describe("workbench file tree (real app wiring)", () => {
   });
 });
 
+// ── Workbench tab persistence (real app wiring) ─────────────────────────────
+// One sessionStorage key (hotdog.workbenchTabs) records the real tabs and
+// the active tab on every store change (app.tsx's persist subscription; the
+// codec/garbage units live in workbench.test.tsx). The stub installs HERE,
+// not before the app import: the storage guard resolves per call, so the
+// first-run workbench suites above stay first-run (boot's seed reads missing
+// storage = no key = zero tabs). init() runs once per file, so the reload
+// test calls the exact line init() calls (seedWorkbenchStoreFromStorage),
+// then fires the attach where the restored reads dispatch (onSessionCreated
+// -- chat.ts drops pre-OPEN frames, so attach is THE dispatch point).
+
+describe("workbench tab persistence (real app wiring)", () => {
+  const session = new Map<string, string>();
+  beforeAll(() => {
+    (window as unknown as Record<string, unknown>).sessionStorage = {
+      getItem: (k: string) => session.get(k) ?? null,
+      setItem: (k: string, v: string) => void session.set(k, String(v)),
+      removeItem: (k: string) => void session.delete(k),
+    };
+  });
+  afterAll(() => {
+    delete (window as unknown as Record<string, unknown>).sessionStorage;
+  });
+  const openPane = async (): Promise<void> => {
+    if (!document.querySelector("#workbench-panel")) {
+      el("#workbench-toggle").click();
+      await tick();
+    }
+  };
+  afterEach(async () => {
+    for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
+    if (document.querySelector("#workbench-panel")) {
+      el("#workbench-toggle").click();
+      await tick();
+    }
+    session.clear();
+    await tick();
+  });
+  const storedTabs = (): { tabs: { id: string; kind: string; label: string }[]; activeId: string | null } =>
+    JSON.parse(session.get(WORKBENCH_TABS_KEY)!) as ReturnType<typeof storedTabs>;
+
+  it("open / tree-click / activate / close persist the set; empty persists as empty; never localStorage", async () => {
+    await attach();
+    await openPane();
+    clearSent();
+    el("#workbench-open-files").click();
+    await tick();
+    expect(storedTabs()).toEqual({ tabs: [{ id: "files", kind: "files", label: "Files" }], activeId: "files" });
+    // Land a file listing through the real tree flow (shape-addressed: the
+    // shared atom may carry an expansion from the suite above).
+    const reqs = sent<{ requestId: number; path?: string }>("listDir");
+    ws.fireMessage({
+      type: "listDirResult",
+      requestId: reqs.find((r) => r.path === undefined)!.requestId,
+      roots: [{ name: "rootA", path: "/rootA" }],
+    });
+    await tick();
+    let expReq = reqs.find((r) => r.path === "/rootA");
+    if (!expReq) {
+      el(".ft-root .ft-row-btn").click();
+      await tick();
+      expReq = sent<{ requestId: number; path: string }>("listDir").pop()!;
+    }
+    ws.fireMessage({
+      type: "listDirResult",
+      requestId: expReq.requestId,
+      path: "/rootA",
+      entries: [
+        { name: "persist-a.txt", path: "/rootA/persist-a.txt", isDir: false, size: 2 },
+        { name: "persist-b.txt", path: "/rootA/persist-b.txt", isDir: false, size: 2 },
+      ],
+    });
+    await tick();
+    els(".ft-file .ft-row-btn")[0]!.click();
+    await tick();
+    // Back to the tree before the next click: opening a file tab ACTIVATES
+    // it, and the tree body unmounts with the tab switch.
+    els("#workbench-tabs [role=tab]")[0]!.click();
+    await tick();
+    els(".ft-file .ft-row-btn")[1]!.click();
+    await tick();
+    // Both file tabs recorded IN OPEN ORDER (ids = paths, labels = basenames),
+    // the last-opened active.
+    expect(storedTabs()).toEqual({
+      tabs: [
+        { id: "files", kind: "files", label: "Files" },
+        { id: "/rootA/persist-a.txt", kind: "file", label: "persist-a.txt" },
+        { id: "/rootA/persist-b.txt", kind: "file", label: "persist-b.txt" },
+      ],
+      activeId: "/rootA/persist-b.txt",
+    });
+    // Activation persists too.
+    els("#workbench-tabs [role=tab]")[0]!.click();
+    await tick();
+    expect(storedTabs().activeId).toBe("files");
+    // Closing the tree tab records the survivor set...
+    els(".workbench-tab-close")[0]!.click();
+    await tick();
+    expect(storedTabs().tabs.map((t) => t.id)).toEqual(["/rootA/persist-a.txt", "/rootA/persist-b.txt"]);
+    // ...and closing EVERYTHING persists an EMPTY list under a LIVE key
+    // (close all, reload, see none; the decoded list decides, not key
+    // presence).
+    for (let i = els(".workbench-tab-close").length; i > 0; i = els(".workbench-tab-close").length) {
+      els(".workbench-tab-close")[0]!.click();
+      await tick();
+    }
+    expect(session.has(WORKBENCH_TABS_KEY)).toBe(true);
+    expect(storedTabs()).toEqual({ tabs: [], activeId: null });
+    // sessionStorage ONLY: the seam's own localStorage keys are one question
+    // (collapsed/width), the tab record must never join them.
+    expect(store.has(WORKBENCH_TABS_KEY)).toBe(false);
+  });
+
+  it("reload: the seed re-docks in order with the stored active tab; restored file tabs read on attach; a vanished path renders the viewer's error, the pane stays operable", async () => {
+    session.set(
+      WORKBENCH_TABS_KEY,
+      JSON.stringify({
+        tabs: [
+          { id: "files", kind: "files", label: "Files" },
+          { id: "/rootA/reloaded.txt", kind: "file", label: "reloaded.txt" },
+          { id: "/rootA/vanished.txt", kind: "file", label: "vanished.txt" },
+        ],
+        activeId: "/rootA/reloaded.txt",
+      }),
+    );
+    seedWorkbenchStoreFromStorage(); // init()'s exact boot line
+    clearSent();
+    await attach(); // sessionCreated: the restored reads dispatch here
+    await tick();
+    const reads = sent<{ requestId: number; path: string; offset: number }>("readFile").filter((r) =>
+      r.path.endsWith("reloaded.txt") || r.path.endsWith("vanished.txt"),
+    );
+    expect(reads.map((r) => r.path)).toEqual(["/rootA/reloaded.txt", "/rootA/vanished.txt"]);
+    expect(reads.every((r) => r.offset === 0)).toBe(true);
+    await openPane();
+    expect(els("#workbench-tabs [role=tab]").map((b) => b.textContent)).toEqual([
+      "Files",
+      "reloaded.txt",
+      "vanished.txt",
+    ]);
+    expect(els("#workbench-tabs [role=tab]").map((b) => b.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "true",
+      "false",
+    ]);
+    const readOf = (path: string): number => reads.find((r) => r.path === path)!.requestId;
+    ws.fireMessage({
+      type: "readFileResult",
+      requestId: readOf("/rootA/reloaded.txt"),
+      path: "/rootA/reloaded.txt",
+      offset: 0,
+      content: "still here\nsecond line\n",
+    });
+    // The vanished path gets the server's honest one-liner (deleted/denied).
+    ws.fireMessage({
+      type: "readFileResult",
+      requestId: readOf("/rootA/vanished.txt"),
+      path: "/rootA/vanished.txt",
+      offset: 0,
+      error: "not found: /rootA/vanished.txt",
+    });
+    await tick();
+    expect(els(".file-line").map((r) => r.getAttribute("data-line"))).toEqual(["1", "2"]);
+    // The errored tab is one click away and renders the verbatim error --
+    // no hang, no wedge, the pane keeps operating.
+    els("#workbench-tabs [role=tab]").at(-1)!.click();
+    await tick();
+    expect(el(".file-view-error").textContent).toBe("not found: /rootA/vanished.txt");
+    expect(el("#workbench-toggle").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("a corrupt stored record is invisible to the boot line: seed leaves the store at zero tabs, silently", () => {
+    session.set(WORKBENCH_TABS_KEY, "{not json");
+    seedWorkbenchStoreFromStorage();
+    expect(workbenchStore.get()).toEqual({ tabs: [], activeId: null });
+  });
+});
+
 // Live region: the terminal matrix and the teardown. This describe runs LAST
 // before the auth lifecycle -- its final test logs the app out, and the auth
 // section begins by firing authError anyway.
@@ -4013,6 +4402,19 @@ describe("a11y: aria-live terminals and teardown", () => {
     ws.onclose?.();
     await tick();
     expect(el("#live-status").textContent).toBe("Connection lost");
+    // The indicator left the header: it renders ONLY now, inside
+    // #composer-actions immediately LEFT of the Stop/Send cluster (the
+    // non-focusable span is a DOM-order sibling, never a tab stop).
+    const indicator = el("#connection-status");
+    expect(indicator.textContent).toBe("Disconnected");
+    expect(indicator.getAttribute("class")).toContain("status-disconnected");
+    const ids = Array.from(el("#composer-actions").children).map((c) => c.getAttribute("id"));
+    const at = ids.indexOf("connection-status");
+    expect(at).toBeGreaterThanOrEqual(0);
+    // The drop itself flipped working(false) (chat's connected=false path),
+    // so Stop is already gone; the indicator's next sibling is Send --
+    // immediately LEFT of the Stop/Send cluster either way.
+    expect(ids[at + 1]).toBe("send-btn");
   });
 
   it("logout unsubscribes the announce effect: teardown flips never announce", async () => {
@@ -4080,7 +4482,9 @@ describe("auth lifecycle", () => {
       title: null, currentModel: "m1", models: ["m1"],
     });
     await tick();
-    expect(el("#connection-status").textContent).toBe("Connected");
+    // Re-connected through a fresh socket: still zero indicator DOM (the
+    // composer never saw it come or go -- the buttons own the auto margin).
+    expect(document.querySelector("#connection-status")).toBeNull();
 
     // Ctrl+Shift+L logs out through the same teardown.
     document.dispatchEvent({ type: "keydown", ctrlKey: true, shiftKey: true, key: "L", preventDefault: () => {} } as unknown as Event);

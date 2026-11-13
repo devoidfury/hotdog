@@ -3,11 +3,14 @@
 // every operation is (state, args) -> new state, so a producer mutates by
 // handing the current value to an operation and storing the result back.
 //
-// NO PERSISTENCE IN THIS PHASE, on purpose: no tab producers exist yet (the
-// file tree / settings viewer are later phases), so tabs are born with the
-// page and die with it. Persisting placeholder tabs across reloads would
-// encode nothing true. When the first real tab kind lands, its open/close
-// writes ride the same localStorage doctrine the panels already use.
+// PERSISTENCE: which tabs are open and which is active survives an in-tab
+// reload. The codec and the seed live in workbench.tsx (this module keeps
+// its zero-storage purity), app.tsx boots from it and writes every
+// open/close/activate back. sessionStorage, never localStorage: the pane is
+// per-TAB -- shared storage would make every browser tab inherit and clobber
+// every other tab's tab set. Garbage decodes to zero tabs; an empty list
+// persists as empty. See workbench.tsx's tab-persistence header for the
+// record shape and validation rules.
 //
 // `kind` widened with the first real producers: "files" is the workspace
 // tree (its id keys the root list), "file" is a read-only viewer whose id IS

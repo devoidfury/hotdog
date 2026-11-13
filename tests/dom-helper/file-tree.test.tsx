@@ -284,7 +284,7 @@ describe("file tree rendering", () => {
     expect(text(btn)).toBe(""); // glyph-only: no text label
     expect(btn.getAttribute("aria-label")).toBe("Refresh");
     expect(btn.getAttribute("title")).toBe("Re-list the roots and every expanded directory");
-    expect(btn.querySelector(".file-reload-glyph[aria-hidden='true']")).toBeTruthy();
+    expect(btn.querySelector("svg.file-reload-glyph[aria-hidden='true']")).toBeTruthy();
     click(btn);
     expect(refreshes).toBe(1);
   });

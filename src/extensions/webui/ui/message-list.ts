@@ -483,11 +483,11 @@ export function createMessageList(
   // ── Assistant message footer ─────────────────────────────────────────────
   // Static icon markup (never carries wire data; innerHTML on a constant).
   const ICON_COPY =
-    '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+    '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" tabindex="-1">' +
     '<rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>' +
     '<path d="M5 15V6a2 2 0 0 1 2-2h9" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
   const ICON_CHECK =
-    '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+    '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" tabindex="-1">' +
     '<path d="M4 12l5 5L20 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   function makeCopyButton(rawMarkdown: string): HTMLButtonElement {

@@ -26,6 +26,7 @@
 //   every expand/collapse.
 
 import type { DirEntryWire, FileRootWire, ListDirResultWire } from "@extensions/websocket/protocol.ts";
+import { IconReload } from "./icons.tsx";
 import type { WorkbenchTab } from "./workbench-state.ts";
 
 /** The tree tab's stable id (openTab reuses it; the tab keys the root list). */
@@ -382,7 +383,7 @@ export function FileTree(p: FileTreeProps) {
           aria-label="Refresh"
           onClick={p.onRefresh}
         >
-          <span className="file-reload-glyph" aria-hidden="true"></span>
+          <IconReload className="file-reload-glyph" />
         </button>
       </div>
       {!roots || roots.status === "loading" ? (

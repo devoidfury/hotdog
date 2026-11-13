@@ -2,31 +2,33 @@
 // The workbench: a right-docked, resizable, collapsible pane that lives
 // beside the chat column. The shell (this file) rides the panel-resize seam
 // (axis x, nearEdge: its handle is on the panel's left edge, so dragging
-// left GROWS it) and the WAI tab strip; the real tab bodies arrived with the
-// file-tree phase: kind "files" (workspace tree) and kind "file" (read-only
-// viewer), both wired by app.tsx through the optional wire props. The
-// placeholder kind stays byte-identical for anything else.
+// left GROWS it) and the WAI tab strip; the real kinds "files" (workspace
+// tree) and "file" (read-only viewer) are wired by app.tsx through the
+// optional wire props. The placeholder kind stays byte-identical for
+// anything else.
 //
-// Documented decisions:
 // - ZERO TABS HIDES THE STRIP: with nothing to select or close, a tablist
 //   would be an empty widget; the body shows one muted line instead (plus
 //   the file-tree entry-point button when the app wires one).
-// - COLLAPSED UNMOUNTS the panel entirely (returns null): today's layout
-//   renders exactly as before until the user opens the pane, and a detached
-//   handle cannot be dragged by anything (the seam's enabled() gate is the
-//   second lock).
-// - DRAG-REORDER IS DEFERRED to the phase that ships real tabs (file tree /
-//   settings viewer): reordering placeholder tabs exercises nothing, and the
-//   pointer machinery would fight tab-switching for the same gesture.
+// - COLLAPSED UNMOUNTS the panel (returns null): a default-closed pane
+//   costs nothing at rest, and a detached handle cannot be dragged anyway
+//   (the seam's enabled() gate is the second lock).
+// - DRAG-REORDER deferred: the pointer machinery would fight tab-switching
+//   for the same gesture.
 // - MOBILE (max-width 768px): the open panel becomes a full-width overlay
-//   and the handle hides -- like the sidebar drawer, CSS owns the width, so
-//   there is nothing to drag (the seam's offsetParent guard agrees). The
-//   header toggle stays the only entry point.
+//   and the handle hides -- CSS owns the width there, nothing to drag (the
+//   seam's offsetParent guard agrees); the header toggle is the only entry
+//   point.
 //
 // Storage doctrine rides the seam (panel-resize.ts): blocked storage costs
 // the reload, never the interaction.
 
-import { createWorkbenchStore, type WorkbenchTab, type WorkbenchTabState } from "./workbench-state.ts";
+import {
+  createWorkbenchStore,
+  type WorkbenchStore,
+  type WorkbenchTab,
+  type WorkbenchTabState,
+} from "./workbench-state.ts";
 import { FileTree, type FileTreeState } from "./file-tree.tsx";
 import { FileView, type FileViewEntry } from "./file-view.tsx";
 
@@ -50,6 +52,108 @@ export interface WorkbenchFileViewsWire {
 /** The app's tab store. Tab producers (the phases that open files, settings,
  *  diffs) import this and call open(); app.tsx subscribes render() to it. */
 export const workbenchStore = createWorkbenchStore();
+
+// ── Tab persistence (sessionStorage, per tab) ──────────────────────────────
+// WHICH tabs were open (ids + labels + kinds) and WHICH was active survives
+// an in-tab reload. sessionStorage, never localStorage: localStorage is
+// shared across browser tabs, so tab B's pane would inherit (and clobber)
+// tab A's tabs. Every storage op is swallowed at the boundary: blocked or
+// quota'd storage costs the reload, never the pane. The pane's collapsed
+// state + width stay on the panel-resize seam's own localStorage keys --
+// a browser-wide view preference, a different question.
+//
+// Record: {"tabs":[{id,kind,label}],"activeId":...}. Only the real kinds
+// ("files", "file") persist -- placeholders are demo content (an active
+// placeholder falls back to the first persisted tab, so the record never
+// names a tab the decoder would reject). `dirty` is not stored (display-
+// only, no writer). An empty list persists AS empty: close the last tab,
+// reload, see none. Anything failing validation decodes to null and boots
+// zero tabs, silently: garbage JSON, a non-object record, unknown kinds,
+// empty or duplicate ids, or an activeId violating the state invariant
+// (non-null exactly when non-empty, always naming a live tab). A half-open
+// tab set is worse than none: ids double as paths and DOM ids.
+
+export const WORKBENCH_TABS_KEY = "hotdog.workbenchTabs";
+
+/** Resolved per call, never cached: tests install and tear down window
+ *  storage between tests. */
+function tabsStorage(): Storage | null {
+  return typeof window !== "undefined" && "sessionStorage" in window
+    ? (window as unknown as { sessionStorage: Storage }).sessionStorage
+    : null;
+}
+
+function isStoredTab(v: unknown): v is WorkbenchTab {
+  if (typeof v !== "object" || v === null) return false;
+  const t = v as Record<string, unknown>;
+  return (
+    typeof t.id === "string" &&
+    t.id !== "" &&
+    typeof t.label === "string" &&
+    (t.kind === "files" || t.kind === "file")
+  );
+}
+
+/** The stored tab set; null for a missing key, throwing storage, or anything
+ *  failing validation (start from zero, never half-load). */
+export function loadStoredWorkbenchTabs(): WorkbenchTabState | null {
+  const storage = tabsStorage();
+  if (!storage) return null;
+  let raw: string | null;
+  try {
+    raw = storage.getItem(WORKBENCH_TABS_KEY);
+  } catch {
+    return null;
+  }
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const { tabs, activeId } = parsed as Record<string, unknown>;
+    if (!Array.isArray(tabs)) return null;
+    const stored: WorkbenchTab[] = [];
+    for (const entry of tabs) {
+      if (!isStoredTab(entry)) return null;
+      stored.push({ id: entry.id, kind: entry.kind, label: entry.label, dirty: false });
+    }
+    const ids = new Set(stored.map((t) => t.id));
+    if (ids.size !== stored.length) return null;
+    if (stored.length === 0) return activeId === null ? { tabs: [], activeId: null } : null;
+    if (typeof activeId !== "string" || !ids.has(activeId)) return null;
+    return { tabs: stored, activeId };
+  } catch {
+    return null;
+  }
+}
+
+/** Write the current tab set (app.tsx subscribes this to the store: every
+ *  open/close/activate lands here). Storage failures keep the pane true in
+ *  memory. */
+export function persistWorkbenchTabs(state: WorkbenchTabState): void {
+  const storage = tabsStorage();
+  if (!storage) return;
+  const tabs = state.tabs
+    .filter((t) => t.kind === "files" || t.kind === "file")
+    .map((t) => ({ id: t.id, kind: t.kind, label: t.label }));
+  const activeId = tabs.some((t) => t.id === state.activeId) ? state.activeId : tabs[0]?.id ?? null;
+  try {
+    storage.setItem(WORKBENCH_TABS_KEY, JSON.stringify({ tabs, activeId }));
+  } catch {
+    // Swallowed at the boundary.
+  }
+}
+
+/** Boot seed (app.tsx init() -- call BEFORE the render/persist
+ *  subscriptions): re-dock the stored tabs in order and land on the stored
+ *  active tab through the store's own open/activate, so idempotence and the
+ *  neighbor rules stay in one place. Absent/garbage record: the store keeps
+ *  what it has (a real boot: zero tabs). */
+export function seedWorkbenchStoreFromStorage(target: WorkbenchStore = workbenchStore): void {
+  const stored = loadStoredWorkbenchTabs();
+  if (!stored) return;
+  for (const tab of stored.tabs) target.open(tab);
+  if (stored.activeId !== null) target.activate(stored.activeId);
+}
 
 interface WorkbenchPanelProps {
   /** Collapsed = unmounted. Mirrors the seam's flag via app.tsx's atom. */

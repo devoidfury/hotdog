@@ -13,6 +13,7 @@
 
 import type { TaskInfoWire } from "@extensions/websocket/protocol.ts";
 import { mount, type DomNode, type Ref } from "@utils/jsx";
+import { SubagentStatusGlyph } from "./icons.tsx";
 import type { TaskActivityBlock } from "./chat.ts";
 
 /**
@@ -95,18 +96,10 @@ export function runDiscriminators(tasks: TaskInfoWire[]): Map<string, string> {
   return out;
 }
 
-const STATUS_GLYPHS: Record<string, string> = {
-  completed: "✓",
-  failed: "✗",
-  cancelled: "⊘",
-  running: "◐",
-  queued: "○",
-};
-
-/** Status as a glyph (color comes from the chip's status-* class). */
-export function statusGlyph(status: string): string {
-  return STATUS_GLYPHS[status] ?? "•";
-}
+/* The chip's status glyph is the inline-SVG map in icons.tsx
+ * (SubagentStatusGlyph); the tint still comes from the chip's status-*
+ * class through currentColor, and a parked task keeps its dashed ring.
+ */
 
 interface StripProps {
   tasks: TaskInfoWire[];
@@ -155,9 +148,7 @@ export function SubagentsStrip({
             title={`${t.taskId}: ${t.description || "(no description)"} — ${parked ? "waiting" : t.status}`}
             onClick={() => onOpen(t.taskId)}
           >
-            <span className="subagent-glyph" aria-hidden="true">
-              {parked ? "\u25cc" : statusGlyph(t.status)}
-            </span>
+            <SubagentStatusGlyph status={t.status} parked={parked} />
             <span className="subagent-id">{disc ? `${disc}:` : ""}{chipLabel(t)}</span>
             <span className={`subagent-elapsed${parked ? " waiting" : ""}`}>{formatElapsed(t, now)}</span>
           </button>

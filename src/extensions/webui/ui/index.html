@@ -5,6 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>hotdog WebUI</title>
   <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Pre-paint theme application. Mirrors ui/theme-pref.ts: a stored
+    // non-default palette ("purple") lands on <html> BEFORE the first
+    // paint, so a purple user never sees a hotdog flash; the module
+    // re-applies the same value at boot (applyStoredTheme). Two pinned
+    // strings: storage key "hotdog-webui-theme", default id "hotdog" = NO
+    // data-theme attribute (an unknown stored id renders that same bare
+    // :root look; the module normalizes it). Every access is swallowed:
+    // localStorage can throw before the app even loads.
+    try {
+      var storedTheme = localStorage.getItem("hotdog-webui-theme");
+      if (storedTheme && storedTheme !== "hotdog") {
+        document.documentElement.setAttribute("data-theme", storedTheme);
+      }
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <div id="app"></div>

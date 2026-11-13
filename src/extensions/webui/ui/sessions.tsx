@@ -9,7 +9,7 @@
 // 0/unattested) -- never a text metric.
 //
 // No literal parens anywhere: status renders as a glyph badge (custom
-// stroke-SVG set through a CSS mask, tinted by currentColor, native title
+// inline-SVG set in icons.tsx, tinted by currentColor, native title
 // tooltip), profile as quiet muted text. Missing segments are omitted
 // outright, never rendered empty; " · " (middle dot, U+00B7) is the segment
 // separator between the slots the example dot-joins (the profile/model join
@@ -19,6 +19,7 @@
 // pin/export identifier and handler argument -- never card text.
 
 import { formatTokenCount, SIDEBAR_MIN_WIDTH, shortId } from "./utils.ts";
+import { IconChevron, IconKebab, IconPlug, IconSearch, RowStatusGlyph } from "./icons.tsx";
 import type { JsxChild, Ref } from "@utils/jsx";
 import type { SearchHitWire } from "@extensions/websocket/protocol.ts";
 
@@ -261,7 +262,7 @@ export function SidebarRow(p: SidebarRowProps) {
         title={label}
         aria-hidden="true"
       >
-        {hasGlyph ? <span className={`row-glyph row-glyph-${p.status}`}></span> : label}
+        {hasGlyph ? <RowStatusGlyph status={p.status!} /> : label}
       </span>,
     );
   }
@@ -270,8 +271,8 @@ export function SidebarRow(p: SidebarRowProps) {
   // Bottom row: date · ctx · msgs. The date always leads, so every metric
   // that rides gets a sep; unattested slots are omitted outright (legacy
   // logs: date · msgs). The live plug trails at the card's bottom-right
-  // (row-action-right idiom, margin-left:auto): a CSS mask glyph (see
-  // .row-clients in styles.css), no raw svg through the client mount.
+  // (row-action-right idiom, margin-left:auto): the inline plug glyph
+  // (icons.tsx IconPlug) inside the decorated span (see .row-clients).
   // Rules: 0/unattested renders nothing; 1 is icon-only; 2+ rides the
   // number; the native title is the tooltip.
   const line3: JsxChild[] = [<span className="row-date">{formatDateTime(p.createdAt)}</span>];
@@ -295,6 +296,7 @@ export function SidebarRow(p: SidebarRowProps) {
         title={`${clients} client${clients === 1 ? "" : "s"} connected`}
         aria-hidden="true"
       >
+        <IconPlug />
         {clients > 1 ? <span className="row-clients-count">{clients}</span> : null}
       </span>,
     );
@@ -324,7 +326,7 @@ export function SidebarRow(p: SidebarRowProps) {
           if (row) p.onContextMenu?.(e, row);
         }}
       >
-        <span className="row-menu-glyph" aria-hidden="true"></span>
+        <IconKebab />
       </button>,
     );
   }
@@ -457,7 +459,7 @@ function SearchPanel(p: {
   return (
     <div id="search-panel">
       <div id="search-bar">
-        <span className="search-bar-glyph" aria-hidden="true"></span>
+        <IconSearch size={14} className="search-bar-glyph" />
         <input
           id="search-input"
           type="text"
@@ -488,7 +490,7 @@ export function Sidebar(p: SidebarProps) {
             className={p.search.open ? "active" : undefined}
             onClick={() => (p.search.open ? p.onCloseSearch() : p.onOpenSearch())}
           >
-            <span className="search-btn-glyph" aria-hidden="true"></span>
+            <IconSearch />
           </button>
           <button id="new-session-btn" title="New session" onClick={p.onCreate}>+</button>
         </div>
@@ -597,10 +599,11 @@ export function Sidebar(p: SidebarProps) {
           onPointerdown={(e: MouseEvent) => e.stopPropagation()}
           onDblclick={(e: MouseEvent) => e.stopPropagation()}
         >
-          <span
+          {/* The flip rides a rotation class on the chevron svg: -up turns
+              the down-chevron 180 degrees. */}
+          <IconChevron
             className={p.logsCollapsed ? "logs-toggle-glyph logs-toggle-glyph-up" : "logs-toggle-glyph"}
-            aria-hidden="true"
-          ></span>
+          />
         </button>
       </div>
       <div id="log-list" role={p.logs.length > 0 ? "list" : undefined}>

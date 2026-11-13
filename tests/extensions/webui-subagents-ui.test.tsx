@@ -4,7 +4,8 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { createChat, type ChatController } from "@extensions/webui/ui/chat.ts";
-import { createActivityRegistry, formatElapsed, SubagentsStrip, TaskPanel, chipLabel, runDiscriminators, statusGlyph, MAX_STRIP_CHIPS, type ActivityRegistry } from "@extensions/webui/ui/subagents.tsx";
+import { createActivityRegistry, formatElapsed, SubagentsStrip, TaskPanel, chipLabel, runDiscriminators, MAX_STRIP_CHIPS, type ActivityRegistry } from "@extensions/webui/ui/subagents.tsx";
+import { SubagentStatusGlyph } from "@extensions/webui/ui/icons.tsx";
 import { createCoalescer } from "@extensions/webui/ui/batch.ts";
 import { mount, renderToString } from "@utils/jsx";
 import type { TaskInfoWire } from "@extensions/websocket/protocol.ts";
@@ -610,7 +611,10 @@ describe("SubagentsStrip", () => {
     const chip = host.querySelector(".subagent-chip")!;
     // Suffix after the last ':'; single run -> NO run discriminator.
     expect(chip.querySelector(".subagent-id")!.textContent).toBe("report-review#2");
-    expect(chip.querySelector(".subagent-glyph")!.textContent).toBe("\u2713");
+    // Identity rides the svg class (subagent-glyph-<kind>); the empty svg
+    // adds nothing to textContent.
+    expect(chip.querySelector("svg.subagent-glyph-completed")).toBeTruthy();
+    expect(chip.querySelector(".subagent-glyph")!.textContent).toBe("");
     // Status badge text is gone; the full id lives in the tooltip.
     expect(chip.textContent).not.toContain("COMPLETED");
     expect(chip.getAttribute("title")).toContain("20261017-1848-hotdog-archeology:report-review#2");
@@ -691,13 +695,22 @@ describe("SubagentsStrip", () => {
     expect(host.children[0]!.getAttribute("class")).toContain("expanded");
   });
 
-  it("statusGlyph maps known statuses and dots the unknown", () => {
-    expect(statusGlyph("completed")).toBe("\u2713");
-    expect(statusGlyph("failed")).toBe("\u2717");
-    expect(statusGlyph("cancelled")).toBe("\u2298");
-    expect(statusGlyph("running")).toBe("\u25d0");
-    expect(statusGlyph("queued")).toBe("\u25cb");
-    expect(statusGlyph("weird")).toBe("\u2022");
+  it("the status map picks one inline-SVG glyph per token (parked wins, unknown dots)", () => {
+    // The map names the shape on the svg class; decoration and
+    // tab-invisibility are pinned on the same render.
+    const cls = (status: string, parked = false): string =>
+      renderToString(<SubagentStatusGlyph status={status} parked={parked} />);
+    expect(cls("completed")).toContain('class="subagent-glyph subagent-glyph-completed"');
+    expect(cls("failed")).toContain("subagent-glyph-failed");
+    expect(cls("cancelled")).toContain("subagent-glyph-cancelled");
+    expect(cls("running")).toContain("subagent-glyph-running");
+    expect(cls("queued")).toContain("subagent-glyph-queued");
+    expect(cls("weird")).toContain("subagent-glyph-unknown");
+    expect(cls("running", true)).toContain("subagent-glyph-parked");
+    const one = cls("queued");
+    expect(one).toContain('aria-hidden="true"');
+    expect(one).toContain('tabindex="-1"');
+    expect(one).toContain('stroke="currentColor"');
   });
 });
 

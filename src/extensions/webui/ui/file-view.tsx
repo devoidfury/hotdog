@@ -27,6 +27,7 @@
 
 import { getTokenizer, type SyntaxRun } from "@utils/syntax/index.ts";
 import type { ReadFileResultWire } from "@extensions/websocket/protocol.ts";
+import { IconReload } from "./icons.tsx";
 
 // ── Language guessing (display only) ────────────────────────────────────────
 // Small local extension -> lang map. Registry contract: getTokenizer returns
@@ -274,7 +275,7 @@ export function FileView(p: FileViewProps) {
           aria-label="Reload"
           onClick={() => p.onReload(p.path)}
         >
-          <span className="file-reload-glyph" aria-hidden="true"></span>
+          <IconReload className="file-reload-glyph" />
         </button>
       </div>
       {loading ? <div className="file-view-note">Reading file...</div> : null}

@@ -2195,6 +2195,26 @@ body.logs-resizing .sidebar-header-resize {
 .tok-strong { font-weight: 600; }
 .tok-code { color: var(--warning); }
 
+/* TOML/INI token classes (one shared scanner, two dialects): section
+   headers are the loud dividers -- the [table]/[[array]]/[section] lines
+   carve the file up, same reading as yaml doc markers and css at-rules.
+   Everything else reuses the shared families above: dotted keys accent,
+   strings the warm family (ini values ride string, there are no typed
+   literals there), numbers/booleans scalar literals (TOML datetimes ride
+   number too), comments muted italic, = and : operators. */
+.tok-section { color: var(--text-primary); font-weight: 600; }
+
+/* XML rides the HTML class set above (one scanner, two dialect configs):
+   tag names accent, attributes secondary, values string, comments and
+   entities as in html; processing instructions ride doctype (loud, they
+   are the file's declarations) and CDATA sections ride string (raw
+   literal text). No new classes. */
+
+/* Python rides the JavaScript/TypeScript class set above: keywords
+   accent, def/class names and calls fn, decorators the bolder reference
+   hue, strings triple-quoted included the warm family, True/False/None
+   the scalar literals, dict keys accent. No new classes. */
+
 /* PROSE part: a quiet agent-message row with a left icon gutter. */
 .tool-prose {
     display: flex;

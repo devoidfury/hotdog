@@ -205,6 +205,51 @@ describe("fence state machine", () => {
     ]);
   });
 
+  it("routes toml/ini/xml/python fences and the py alias", () => {
+    for (const [info, lang] of [
+      ["toml", "toml"],
+      ["ini", "ini"],
+      ["xml", "xml"],
+      ["python", "python"],
+      ["py", "python"],
+    ] as const) {
+      const s = newMdStreamState();
+      tokenizeMarkdownLine(`\`\`\`${info}`, s);
+      expect(s.lang).toBe(lang);
+    }
+    const s = newMdStreamState();
+    tokenizeMarkdownLine("```toml", s);
+    expect(tokenizeMarkdownLine("[package] # head", s)).toEqual([
+      run("section", "[package]"),
+      run("default", " "),
+      run("comment", "# head"),
+    ]);
+    tokenizeMarkdownLine("```", s);
+    tokenizeMarkdownLine("```ini", s);
+    expect(tokenizeMarkdownLine("port = 8080", s)).toEqual([
+      run("key", "port"),
+      run("default", " "),
+      run("operator", "="),
+      run("default", " "),
+      run("string", "8080"),
+    ]);
+    tokenizeMarkdownLine("```", s);
+    tokenizeMarkdownLine("```xml", s);
+    expect(tokenizeMarkdownLine('<?xml version="1.0"?>', s)).toEqual([run("doctype", '<?xml version="1.0"?>')]);
+    tokenizeMarkdownLine("```", s);
+    tokenizeMarkdownLine("```py", s);
+    expect(tokenizeMarkdownLine("def f(): pass", s)).toEqual([
+      run("keyword", "def"),
+      run("default", " "),
+      run("fn", "f"),
+      run("operator", "("),
+      run("operator", ")"),
+      run("operator", ":"),
+      run("default", " "),
+      run("keyword", "pass"),
+    ]);
+  });
+
   it("requires same-char closers of at least the opening width", () => {
     const s = newMdStreamState();
     tokenizeMarkdownLine("````", s);

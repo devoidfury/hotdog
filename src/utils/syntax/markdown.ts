@@ -19,7 +19,8 @@ import { getTokenizer, type SyntaxRun } from "./index.ts";
  * "strong" (`**…**`) and "code" (inline backtick span) inside paragraphs;
  * everything else "default". A
  * fenced line whose language resolves in the registry (`sh|bash|zsh` ->
- * shell, `yml` -> yaml, `js|node` -> javascript, `ts` -> typescript) runs
+ * shell, `yml` -> yaml, `js|node` -> javascript, `ts` -> typescript,
+ * `py` -> python) runs
  * through that tokenizer instead -- its classes
  * (command/operator/key/…) pass through and the sink styles what it knows.
  * Markdown spans are suppressed inside fences.
@@ -216,6 +217,7 @@ const LANG_ALIASES: Record<string, string> = {
   js: "javascript",
   node: "javascript",
   ts: "typescript",
+  py: "python",
 };
 
 function resolveLang(info: string): string | null {

@@ -8,9 +8,13 @@
 import { tokenizeShell } from "./shell.ts";
 import { tokenizeCss } from "./css.ts";
 import { tokenizeHtml } from "./html.ts";
+import { tokenizeIni } from "./ini.ts";
 import { tokenizeJavaScript } from "./javascript.ts";
 import { tokenizeJson } from "./json.ts";
+import { tokenizePython } from "./python.ts";
+import { tokenizeToml } from "./toml.ts";
 import { tokenizeTypeScript } from "./typescript.ts";
+import { tokenizeXml } from "./xml.ts";
 import { tokenizeYaml } from "./yaml.ts";
 
 /** One token run: a contiguous slice of the input sharing a token class. */
@@ -36,6 +40,10 @@ const TOKENIZERS = new Map<string, SyntaxTokenizer>([
   ["json", tokenizeJson],
   ["css", tokenizeCss],
   ["html", tokenizeHtml],
+  ["toml", tokenizeToml],
+  ["ini", tokenizeIni],
+  ["xml", tokenizeXml],
+  ["python", tokenizePython],
   ["javascript", tokenizeJavaScript],
   ["jsx", tokenizeJavaScript],
   ["typescript", tokenizeTypeScript],

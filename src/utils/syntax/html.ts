@@ -1,7 +1,21 @@
 import type { SyntaxRun } from "./index.ts";
 
+/** Dialect seams over the shared markup scanner. */
+export interface MarkupScannerConfig {
+  /** Tag-name continuation characters after the initial letter (html: ASCII
+   * letters; xml adds the namespaced/dotted/dashed name charset). */
+  nameRest: RegExp;
+  /** Recognize `<![CDATA[ raw ]]>` as one "string" run (xml; html reads it
+   * as default decl junk). */
+  cdata: boolean;
+  /** Class for `<?...?>` runs: html degrades them to default, xml reads
+   * processing instructions as declarations alongside the doctype. */
+  piType: string;
+}
+
 /**
- * HTML tokenizer.
+ * HTML tokenizer (also the shared markup scanning core: xml.ts layers its
+ * dialect over `tokenizeMarkup`).
  *
  * One pass over text and markup: outside tags, "&amp;"-style named and
  * numeric character references are "entity" and everything else is
@@ -22,6 +36,11 @@ import type { SyntaxRun } from "./index.ts";
  * raw-text-element awareness.
  */
 export function tokenizeHtml(text: string): SyntaxRun[] {
+  return tokenizeMarkup(text, { nameRest: /[a-zA-Z]/, cdata: false, piType: "default" });
+}
+
+/** The shared markup scan (see MarkupScannerConfig for the dialect knobs). */
+export function tokenizeMarkup(text: string, cfg: MarkupScannerConfig): SyntaxRun[] {
   const runs: SyntaxRun[] = [];
   const push = (type: string, chunk: string): void => {
     if (chunk !== "") runs.push({ type, text: chunk });
@@ -52,7 +71,21 @@ export function tokenizeHtml(text: string): SyntaxRun[] {
       i = j;
       continue;
     }
-    if (text.startsWith("<!", i) || text.startsWith("<?", i)) {
+    if (cfg.cdata && text.startsWith("<![CDATA[", i)) {
+      const end = text.indexOf("]]>", i + 9);
+      const j = end === -1 ? n : end + 3;
+      push("string", text.slice(i, j));
+      i = j;
+      continue;
+    }
+    if (text.startsWith("<?", i)) {
+      const end = text.indexOf(">", i + 2);
+      const j = end === -1 ? n : end + 1;
+      push(cfg.piType, text.slice(i, j));
+      i = j;
+      continue;
+    }
+    if (text.startsWith("<!", i)) {
       const end = text.indexOf(">", i + 2);
       const j = end === -1 ? n : end + 1;
       push("default", text.slice(i, j));
@@ -72,7 +105,7 @@ export function tokenizeHtml(text: string): SyntaxRun[] {
     }
     push("operator", closing ? "</" : "<");
     const nameStart = j;
-    while (j < n && TAG_NAME_RE.test(text[j]!)) j++;
+    while (j < n && cfg.nameRest.test(text[j]!)) j++;
     push("name", text.slice(nameStart, j));
     i = scanTagRest(text, j, push);
   }

@@ -65,6 +65,10 @@ describe("viewer language + tokens", () => {
     expect(guessLang("notes.txt")).toBeUndefined();
     expect(guessLang("LICENSE")).toBeUndefined();
     expect(guessLang(".bashrc")).toBeUndefined(); // dotfile, no stem => no guess
+    // The batch's new guesses (.ini/.xml) plus the pre-existing .toml one.
+    expect(guessLang("config.ini")).toBe("ini");
+    expect(guessLang("page.xml")).toBe("xml");
+    expect(guessLang("Cargo.toml")).toBe("toml");
   });
 
   it("shell lines tokenize; unknown lang renders ONE plain run (the registry contract)", () => {
@@ -72,8 +76,13 @@ describe("viewer language + tokens", () => {
     expect(runs[0]).toEqual({ type: "command", text: "ls" });
     // Lossless: concatenating runs reproduces the line exactly.
     expect(runs.map((r) => r.text).join("")).toBe("ls -l | wc -l");
-    expect(tokenizeLine("anything { 1", "python")).toEqual([{ type: "default", text: "anything { 1" }]);
+    expect(tokenizeLine("anything { 1", "rust")).toEqual([{ type: "default", text: "anything { 1" }]);
     expect(tokenizeLine("anything", undefined)).toEqual([{ type: "default", text: "anything" }]);
+    // The four new langs resolve (the registry contract, now held for them).
+    expect(tokenizeLine("[table]", "toml")[0]).toEqual({ type: "section", text: "[table]" });
+    expect(tokenizeLine("k = v", "ini")[0]).toEqual({ type: "key", text: "k" });
+    expect(tokenizeLine("<a/>", "xml")[0]).toEqual({ type: "operator", text: "<" });
+    expect(tokenizeLine("def f():", "python")[0]).toEqual({ type: "keyword", text: "def" });
   });
 });
 

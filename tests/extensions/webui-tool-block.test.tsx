@@ -270,9 +270,45 @@ describe("codeRuns (shared tokenizer seam)", () => {
   });
 
   it("returns null for unknown or absent langs (plain <pre> render)", () => {
-    expect(codeRuns("a: 1", "json")).toBeNull();
+    expect(codeRuns("x = 1", "python")).toBeNull();
     expect(codeRuns("a: 1")).toBeNull();
     expect(codeRuns("a: 1", "constructor")).toBeNull();
+  });
+
+  it("tokenizes json/css/html through the registry", () => {
+    expect(codeRuns('{"a": 1}', "json")).toEqual([
+      { cls: "tok-operator", text: "{" },
+      { cls: "tok-key", text: '"a"' },
+      { cls: "tok-operator", text: ":" },
+      { cls: null, text: " " },
+      { cls: "tok-number", text: "1" },
+      { cls: "tok-operator", text: "}" },
+    ]);
+    expect(codeRuns("a { b: #fff }", "css")).toEqual([
+      { cls: "tok-selector", text: "a" },
+      { cls: null, text: " " },
+      { cls: "tok-operator", text: "{" },
+      { cls: null, text: " " },
+      { cls: "tok-property", text: "b" },
+      { cls: "tok-operator", text: ":" },
+      { cls: null, text: " " },
+      { cls: "tok-color", text: "#fff" },
+      { cls: null, text: " " },
+      { cls: "tok-operator", text: "}" },
+    ]);
+    expect(codeRuns('<a href="x">y</a>', "html")).toEqual([
+      { cls: "tok-operator", text: "<" },
+      { cls: "tok-name", text: "a" },
+      { cls: null, text: " " },
+      { cls: "tok-attribute", text: "href" },
+      { cls: "tok-operator", text: "=" },
+      { cls: "tok-string", text: '"x"' },
+      { cls: "tok-operator", text: ">" },
+      { cls: null, text: "y" },
+      { cls: "tok-operator", text: "</" },
+      { cls: "tok-name", text: "a" },
+      { cls: "tok-operator", text: ">" },
+    ]);
   });
 });
 
@@ -1158,7 +1194,7 @@ describe("code part (DOM)", () => {
     const { block } = mountBlock({
       name: "check",
       args: JSON.stringify({ yaml }),
-      display: [{ kind: "code", source: "args", arg: "yaml", lang: "json" }],
+      display: [{ kind: "code", source: "args", arg: "yaml", lang: "python" }],
     });
     const pre = block.querySelector(".tool-code")!;
     // REAL content, never a JSON object with escaped \n.

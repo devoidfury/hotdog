@@ -141,6 +141,8 @@ const LANG_ALIASES: Record<string, string> = {
   bash: "shell",
   zsh: "shell",
   yml: "yaml",
+  jsonc: "json",
+  htm: "html",
 };
 
 function resolveLang(info: string): string | null {

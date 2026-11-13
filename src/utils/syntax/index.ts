@@ -6,6 +6,9 @@
  */
 
 import { tokenizeShell } from "./shell.ts";
+import { tokenizeCss } from "./css.ts";
+import { tokenizeHtml } from "./html.ts";
+import { tokenizeJson } from "./json.ts";
 import { tokenizeYaml } from "./yaml.ts";
 
 /** One token run: a contiguous slice of the input sharing a token class. */
@@ -26,6 +29,9 @@ export type SyntaxTokenizer = (text: string) => SyntaxRun[];
 const TOKENIZERS = new Map<string, SyntaxTokenizer>([
   ["shell", tokenizeShell],
   ["yaml", tokenizeYaml],
+  ["json", tokenizeJson],
+  ["css", tokenizeCss],
+  ["html", tokenizeHtml],
 ]);
 
 /** Register (or replace) the tokenizer for a lang name. */

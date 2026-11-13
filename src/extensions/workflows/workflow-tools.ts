@@ -344,7 +344,7 @@ abstract class WorkflowTool {
 export class WorkflowValidateTool extends WorkflowTool {
   static readonly TOOL_NAME = "workflow_validate";
   // The yaml arg is real authored content: sinks print it as a code block
-  // (the yaml tokenizer lands later; unknown lang renders plain, never a
+  // (through the yaml tokenizer; unknown lang renders plain, never a
   // JSON object with escaped newlines).
   metadata: ToolMetadata = {
     sideEffects: true,

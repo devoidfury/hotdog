@@ -31,7 +31,7 @@ import type { ReadFileResultWire } from "@extensions/websocket/protocol.ts";
 // ── Language guessing (display only) ────────────────────────────────────────
 // Small local extension -> lang map. Registry contract: getTokenizer returns
 // undefined for an unknown lang and the viewer renders PLAIN TEXT, so the
-// map may name langs that have no tokenizer yet (json, python, ...); naming
+// map may name langs that have no tokenizer yet (python, rust, ...); naming
 // them here is the honest guess, styling arrives when a tokenizer lands.
 
 const EXT_LANG: Record<string, string> = {

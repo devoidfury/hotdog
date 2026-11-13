@@ -2143,6 +2143,30 @@ body.logs-resizing .sidebar-header-resize {
 .tok-tag { color: var(--error); }
 .tok-marker { color: var(--text-primary); font-weight: 600; }
 
+/* JSON token classes: shares key/string/number/boolean/null/comment with
+   yaml (same reading, same hues); operators are the structural scaffolding. */
+
+/* CSS token classes: selectors are the scannable structure (the accent,
+   like yaml keys); declarations split property (accent) from value
+   (secondary); literals keep the shared families; custom properties ride
+   the reference hue; at-rules are loud (they divide the file, like yaml
+   doc markers). */
+.tok-selector { color: var(--accent); }
+.tok-property { color: var(--accent); }
+.tok-value { color: var(--text-secondary); }
+.tok-color { color: var(--success); }
+.tok-variable { color: var(--success); }
+.tok-atrule { color: var(--text-primary); font-weight: 600; }
+
+/* HTML token classes: tag names ("name", not the yaml tag class) carry the
+   accent as the structure, attributes the secondary hue (present on almost
+   every tag, so one notch down from the name), doctype loud, entities the
+   reference hue. */
+.tok-name { color: var(--accent); }
+.tok-attribute { color: var(--text-secondary); }
+.tok-entity { color: var(--success); }
+.tok-doctype { color: var(--text-primary); font-weight: 600; }
+
 /* PROSE part: a quiet agent-message row with a left icon gutter. */
 .tool-prose {
     display: flex;

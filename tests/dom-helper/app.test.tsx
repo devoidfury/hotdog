@@ -3,7 +3,8 @@
 // FakeWebSocket standing in for the server. Covers the interactive surface
 // (composer send/draft, tab completion, attachments, push-to-talk, selects,
 // sidebar glue: create/switch/cancel/resize, context menus, the subagent
-// strip and task panels, log-view header controls) plus the auth lifecycle
+// sidebar list and its main-view transcript, log-view header controls) plus
+// the auth lifecycle
 // (socket authError teardown, login form, Ctrl+Shift+L) at the end.
 //
 // Single-booter doctrine: app.tsx boots its singleton at import, so exactly
@@ -20,7 +21,7 @@
 // All browser stubs below are installed before the import and torn down after.
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
-import { FakeWebSocket, SVG_NS } from "./index.ts";
+import { FakeWebSocket, SVG_NS, TEXTAREA_LINE_PX } from "./index.ts";
 import { DRAFT_STORAGE_KEY } from "@extensions/webui/ui/draft.ts";
 import { ATTACHMENTS_STORAGE_KEY } from "@extensions/webui/ui/attachment-store.ts";
 import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts";
@@ -52,10 +53,14 @@ const prev = {
   MediaRecorder: g.MediaRecorder,
 };
 
+// Three lines on purpose: the boot pin asserts the composer autoExpands a
+// restored multi-line draft WITHOUT any key event (the draft-restore seam
+// re-measures once the node is connected).
+const SEEDED_DRAFT = "restored draft\nsecond line of the draft\nthird";
 const store = new Map<string, string>([
   ["hotdog-webui-token", "tok"],
   // The composer mounts with this draft restored (ref contract).
-  [DRAFT_STORAGE_KEY, "restored draft"],
+  [DRAFT_STORAGE_KEY, SEEDED_DRAFT],
   // ...and with one attachment staged by the previous page load.
   [
     ATTACHMENTS_STORAGE_KEY,
@@ -285,8 +290,12 @@ describe("app boot (stored token)", () => {
     // The connection indicator left the header and renders ONLY while
     // disconnected: connected means zero DOM, not a hidden span.
     expect(document.querySelector("#connection-status")).toBeNull();
-    // chatInputRef brought the stored draft back and autoResized.
-    expect((el("#chat-input") as unknown as { value: string }).value).toBe("restored draft");
+    // chatInputRef brought the stored draft back, and the SAME autoResize the
+    // input handler runs has ALREADY re-measured the connected node: a
+    // restored multi-line draft is expanded at boot, before any key event.
+    const box = el("#chat-input") as unknown as { value: string; style: { height: string } };
+    expect(box.value).toBe(SEEDED_DRAFT);
+    expect(box.style.height).toBe(`${SEEDED_DRAFT.split("\n").length * TEXTAREA_LINE_PX}px`);
     // The steer switch is gone; nothing may resurrect it (steering-on is the
     // default; see the send pin below).
     expect(document.querySelector("#steer-checkbox")).toBeNull();
@@ -373,7 +382,7 @@ describe("composer", () => {
     clearSent();
     await submitComposer(); // draft text restored -> non-empty
     const [msg] = sent<{ type: string; content: string; steering: boolean }>("send");
-    expect(msg?.content).toBe("restored draft");
+    expect(msg?.content).toBe(SEEDED_DRAFT);
     expect(msg?.steering).toBe(true);
     expect((el("#chat-input") as unknown as { value: string }).value).toBe("");
     expect(store.has(DRAFT_STORAGE_KEY)).toBe(false);
@@ -1455,9 +1464,9 @@ describe("context menus", () => {
   });
 });
 
-// ── Subagents strip + panels ────────────────────────────────────────────────
+// ── Subagents sidebar + main-view transcript ────────────────────────────────
 
-describe("subagents strip and task panels", () => {
+describe("subagents sidebar and main-view transcript", () => {
   const task = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
     taskId: "task-1",
     description: "do the thing",
@@ -1472,32 +1481,48 @@ describe("subagents strip and task panels", () => {
     ...over,
   });
 
-  async function openPanel(): Promise<void> {
+  async function openSubagent(): Promise<void> {
     ws.fireMessage({ type: "taskList", tasks: [task()] });
     await tick();
-    els(".subagent-chip")[0]!.click();
+    els(".subagent-row")[0]!.click();
     await tick();
   }
 
-  it("chips scope to the attached session; null-parent tasks never show", async () => {
+  it("sidebar rows scope to the attached session; null-parent tasks never show", async () => {
     await attach();
     ws.fireMessage({
       type: "taskList",
       tasks: [task(), task({ taskId: "task-2", sessionId: "other-session" }), task({ taskId: "task-3", sessionId: null })],
     });
     await tick();
-    expect(els(".subagent-chip")).toHaveLength(1);
+    // The section nests under the manager card; task-2 has no card in this
+    // fixture's sidebar and the null-parent task belongs to none at all.
+    expect(els(".subagents-section")).toHaveLength(1);
+    const rows = els(".subagent-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.getAttribute("data-task-id")).toBe("task-1");
     // chipLabel falls back to the description words when the id has no ":".
-    expect(els(".subagent-chip")[0]!.textContent).toContain("do the thing");
+    expect(rows[0]!.textContent).toContain("do the thing");
+    // Disclosure grammar: the header names the section, the chevron is open.
+    expect(el(".subagents-header").textContent).toContain("Subagents");
+    expect(el("#subagents-toggle").getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("opening fetches buffered activity and renders the panel", async () => {
-    await openPanel();
-    expect(sent<{ taskId: string }>("taskActivityRequest")[0]?.taskId).toBe("task-1");
-    const panel = el(".task-overlay");
-    expect(panel.getAttribute("data-task-id")).toBe("task-1");
-    expect(el(".task-overlay-desc").textContent).toBe("do the thing");
+  it("the collapse chevron folds the list and persists the choice", async () => {
+    el("#subagents-toggle").click();
+    await tick();
+    expect(el(".subagents-section").getAttribute("class")).toContain("collapsed");
+    expect(el("#subagents-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(store.get("hotdog.subagentsCollapsed")).toBe("1");
+    el("#subagents-toggle").click();
+    await tick();
+    expect(el(".subagents-section").getAttribute("class")).not.toContain("collapsed");
+    expect(store.get("hotdog.subagentsCollapsed")).toBe("0");
+  });
 
+  it("clicking a row opens the transcript in the main view (history seeded)", async () => {
+    await openSubagent();
+    expect(sent<{ taskId: string }>("taskActivityRequest")[0]?.taskId).toBe("task-1");
     ws.fireMessage({
       type: "taskActivityHistory",
       taskId: "task-1",
@@ -1507,86 +1532,533 @@ describe("subagents strip and task panels", () => {
         { kind: "tool_result", name: "bash", output: "file.txt", error: undefined },
       ],
     });
-    await sleep(40); // activity views flush on the rAF-style coalescer
-    expect(el(".task-overlay-body").textContent).toContain("thinking out loud");
-    expect(el(".task-overlay-body").textContent).toContain("tool: bash");
+    await tick();
+    expect(el("#message-list").textContent).toContain("thinking out loud");
+    expect(el("#message-list").textContent).toContain("bash");
+    // Header affordance (the log-view label idiom): what is on screen + exit.
+    expect(el("#subagent-view-label").textContent).toContain("do the thing");
+    expect(el("#current-subagent-label").getAttribute("title")).toBe("task-1");
+    // Doctrine (owner ruling 2026-11-13): viewing a subagent works like any
+    // other live view -- the composer stays enabled (it steers the task).
+    // The ONLY thing that locks in this mode is the profile/model switching.
+    expect(el("#chat-input").hasAttribute("disabled")).toBe(false);
+    expect(el("#input-area").getAttribute("class")).not.toContain("read-only");
+    expect(el("#profile-select").hasAttribute("disabled")).toBe(true);
+    expect(el("#model-select").hasAttribute("disabled")).toBe(true);
+    // The viewed row carries the active mark.
+    expect(els(".subagent-row")[0]!.getAttribute("class")).toContain("active");
   });
 
-  it("re-opening the same task does not stack a second panel", async () => {
-    els(".subagent-chip")[0]!.click();
+  it("live task output streams into the MAIN transcript; manager events stay out", async () => {
+    ws.fireMessage({
+      type: "taskActivity",
+      taskId: "task-1",
+      activity: { kind: "text", content: "chunk one" },
+    });
     await tick();
-    expect(els(".task-overlay")).toHaveLength(1);
+    expect(el("#message-list").textContent).toContain("chunk one");
+
+    // The manager keeps streaming underneath the viewed transcript: dropped
+    // (LOG_VIEW_SINK), and it never dirties the attach cursor (chat-side
+    // doctrine, pinned in webui-chat.test.ts).
+    ws.fireMessage({ type: "assistantMessage", sessionId: SID, content: "MANAGER LEAK" });
+    await tick();
+    expect(el("#message-list").textContent).not.toContain("MANAGER LEAK");
+
+    // Another task delta rides the same streaming row.
+    ws.fireMessage({
+      type: "taskActivity",
+      taskId: "task-1",
+      activity: { kind: "text", content: " chunk two" },
+    });
+    await tick();
+    expect(el("#message-list").textContent).toContain("chunk one chunk two");
+
+    // Turn boundary (inRun false) commits the row: no streaming class left.
+    ws.fireMessage({ type: "taskUpdate", task: task({ inRun: false }) });
+    await tick();
+    expect(el("#message-list").querySelectorAll(".message.assistant.streaming")).toHaveLength(0);
   });
 
-  it("followup steering ships and clears the input", async () => {
-    const field = el(".task-followup-input");
-    (field as unknown as { value: string }).value = " steer text ";
-    el(".task-followup-form").dispatchEvent(new Event("submit"));
-    await tick();
-    const [msg] = sent<{ taskId: string; message: string }>("taskFollowup");
-    expect(msg).toMatchObject({ taskId: "task-1", message: "steer text" });
-    expect((el(".task-followup-input") as unknown as { value: string }).value).toBe("");
+  it("clicking the manager row switches back to the live transcript", async () => {
     clearSent();
-    el(".task-followup-form").dispatchEvent(new Event("submit")); // blank -> nothing
-    expect(sent("taskFollowup")).toHaveLength(0);
+    els(".session-item")[0]!.click(); // the ATTACHED manager: the browse view ends
+    expect(sent<{ sessionId: string }>("switchSession")[0]?.sessionId).toBe(SID);
+    await attach(); // the server answers with the re-attach burst
+    expect(document.querySelector("#subagent-view-label")).toBeNull();
+    expect(el("#chat-input").hasAttribute("disabled")).toBe(false);
+    // Live manager output flows again.
+    ws.fireMessage({ type: "assistantMessage", sessionId: SID, content: "back live" });
+    await tick();
+    expect(el("#message-list").textContent).toContain("back live");
   });
 
-  it("a control reply shows in the panel note", async () => {
-    ws.fireMessage({ type: "taskControl", taskId: "task-1", action: "steer", ok: true });
-    await tick();
-    expect(el(".task-control-note").textContent).toBe("Steering sent");
-    ws.fireMessage({ type: "taskControl", taskId: "task-1", action: "steer", ok: false, error: "no seam" });
-    await tick();
-    expect(el(".task-control-note").textContent).toBe("no seam");
+  it("the header close button re-switches too (onCloseLogView idiom)", async () => {
+    await openSubagent();
+    clearSent();
+    el("#close-subagent-view-btn").click();
+    expect(sent<{ sessionId: string }>("switchSession")[0]?.sessionId).toBe(SID);
+    await attach();
+    expect(document.querySelector("#subagent-view-label")).toBeNull();
   });
 
-  it("live tasks drive the elapsed tick; the last one ending stops it", async () => {
-    const before = el(".task-overlay-elapsed").textContent;
-    await sleep(1100); // the once-per-second nowAtom tick while a task is live
-    expect(el(".task-overlay-elapsed").textContent).not.toBe(before);
+  it("the header shows the VIEWED subagent's identity; returning to the manager reverts", async () => {
+    await openSubagent();
+    // The badge is the pane's subject id: while the task transcript is on
+    // screen the identity speaks for the task, not for the hidden manager.
+    expect(el("#session-label").textContent).toContain("Subagent:");
+    expect(el("#current-session-id").textContent).toBe("task-1".slice(0, 8));
+    expect(el("#current-session-id").getAttribute("title")).toBe("Copy full subagent id");
+    // Not dimmed: the badge is what the pane is showing (log view keeps the
+    // dim, where the badge is NOT the record on screen).
+    expect(el("#session-label").getAttribute("style")).toBeNull();
+    const copied: string[] = [];
+    const prevNav = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      value: { clipboard: { writeText: async (t: string) => { copied.push(t); } } },
+      configurable: true,
+    });
+    try {
+      clearSent();
+      el("#current-session-id").click();
+      await tick();
+      // The copy button copies the FULL task id (session badge idiom kept).
+      expect(copied).toEqual(["task-1"]);
+      expect(ws.sent).toHaveLength(0); // copy stays inert on the wire
+    } finally {
+      if (prevNav) Object.defineProperty(globalThis, "navigator", prevNav);
+      else delete (globalThis as Record<string, unknown>).navigator;
+    }
+    // Re-switching back to the manager reverts the whole identity block.
+    el("#close-subagent-view-btn").click();
+    await attach();
+    expect(el("#session-label").textContent).toContain("Session:");
+    expect(el("#current-session-id").textContent).toBe(SID.slice(0, 8));
+    expect(el("#current-session-id").getAttribute("title")).toBe("Copy full session id");
+    // The profile/model dropdowns unlock with the mode.
+    expect(el("#profile-select").hasAttribute("disabled")).toBe(false);
+    expect(el("#model-select").hasAttribute("disabled")).toBe(false);
+  });
 
-    confirmSeen = [];
+  it("the composer steers the viewed subagent (taskFollowup frame addressed to the task)", async () => {
+    await openSubagent();
+    // No staged attachments: steering is text-only on the wire, and the
+    // fixture's restored attachment must not skew this pin.
+    els(".attachment-remove").forEach((b) => b.click());
+    clearSent();
+    setComposer("use the -la flag");
+    await submitComposer();
+    // Exactly the existing C2S taskFollowup frame, scoped to the VIEWED task.
+    expect(sent<{ type: string; taskId: string; message: string }>("taskFollowup")).toEqual([
+      { type: "taskFollowup", taskId: "task-1", message: "use the -la flag" },
+    ]);
+    // Nothing rides the manager's send frame; the working flip is the
+    // manager's own state and steering never forges it.
+    expect(sent("send")).toHaveLength(0);
+    // The steering row shows up in the viewed transcript right away.
+    expect(el("#message-list").querySelector(".message.user")).toBeTruthy();
+    expect(el("#message-list").textContent).toContain("use the -la flag");
+    // A refusal (the requester-only taskControl reply) lands as a notice.
+    ws.fireMessage({
+      type: "taskControl",
+      taskId: "task-1",
+      action: "followup",
+      ok: false,
+      error: "Steering needs a running task with a live turn",
+    });
+    await tick();
+    expect(el("#message-list").textContent).toContain("Steering needs a running task with a live turn");
+  });
+
+  it("subagent rows carry an honest context menu (right-click, kebab, keyboard twins)", async () => {
+    // Start from a clean pane: a leftover viewed task would blur the
+    // "kebab does not row-click-open" pin below.
+    if (document.querySelector("#close-subagent-view-btn")) {
+      el("#close-subagent-view-btn").click();
+      await attach();
+    }
+    ws.fireMessage({ type: "taskList", tasks: [task(), task({ taskId: "task-2" })] });
+    await tick();
+    const menuItems = () => els(".context-menu-item").map((b) => b.textContent);
+    const rows = els(".subagent-row");
+    expect(rows).toHaveLength(2);
+
+    // Right-click: the task-honest action set (live task -> Cancel rides).
+    rows[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    expect(menuItems()).toEqual(["Open", "Copy task id", "Cancel"]);
+    key(el(".context-menu"), "Escape");
+    await tick();
+    expect(document.querySelector(".context-menu")).toBeNull();
+
+    // The visible trigger: the row-menu-btn idiom, same menu, and a
+    // kebab press must NOT row-click-open the transcript.
+    const kebab = rows[0]!.querySelector(".row-menu-btn") as HTMLElement;
+    expect(kebab).toBeTruthy();
+    expect(kebab.getAttribute("aria-label")).toBe("Subagent actions");
+    kebab.click();
+    await tick();
+    expect(menuItems()).toEqual(["Open", "Copy task id", "Cancel"]);
+    expect(document.querySelector("#subagent-view-label")).toBeNull();
+    key(el(".context-menu"), "Escape");
+    await tick();
+
+    // Keyboard twin on the row itself.
+    key(rows[1]!, "ContextMenu");
+    await tick();
+    expect(menuItems()).toEqual(["Open", "Copy task id", "Cancel"]);
+    // "Open" is the row-click action, aimed at the menu's task.
+    clearSent();
+    menuItems(); // no-op read keeps the ordering explicit
+    els(".context-menu-item").find((b) => b.textContent === "Open")!.click();
+    await tick();
+    expect(el("#current-subagent-label").getAttribute("title")).toBe("task-2");
+    expect(sent<{ taskId: string }>("taskActivityRequest")[0]?.taskId).toBe("task-2");
+
+    // Cancel is confirm-gated and refuses stay silent on the wire.
+    rows[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
     clearSent();
     confirmAnswer = false;
-    el(".task-overlay-cancel").click(); // confirm declined -> nothing sent
+    els(".context-menu-item").find((b) => b.textContent === "Cancel")!.click();
+    await tick();
     expect(sent("taskInterrupt")).toHaveLength(0);
     confirmAnswer = true;
-    el(".task-overlay-cancel").click();
-    expect(sent<{ taskId: string }>("taskInterrupt")[0]?.taskId).toBe("task-1");
-    expect(confirmSeen.join()).toContain("Cancel task task-1");
+    rows[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    els(".context-menu-item").find((b) => b.textContent === "Cancel")!.click();
+    await tick();
+    expect(sent<{ type: string; taskId: string }>("taskInterrupt")).toEqual([{ type: "taskInterrupt", taskId: "task-1" }]);
 
-    // Settle the task: the tick timer stops and the followup form disables.
+    // Copy task id lands the full id on the clipboard seam.
+    const copied: string[] = [];
+    const prevNav = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      value: { clipboard: { writeText: async (t: string) => { copied.push(t); } } },
+      configurable: true,
+    });
+    try {
+      rows[1]!.dispatchEvent(new Event("contextmenu"));
+      await tick();
+      els(".context-menu-item").find((b) => b.textContent === "Copy task id")!.click();
+      await tick();
+      expect(copied).toEqual(["task-2"]);
+    } finally {
+      if (prevNav) Object.defineProperty(globalThis, "navigator", prevNav);
+      else delete (globalThis as Record<string, unknown>).navigator;
+    }
+
+    // Settled tasks lose Cancel (zero dead menu items).
+    ws.fireMessage({ type: "taskUpdate", task: task({ taskId: "task-1", status: "completed", inRun: false, endedAt: Date.now() }) });
+    ws.fireMessage({ type: "taskUpdate", task: task({ taskId: "task-2", status: "completed", inRun: false, endedAt: Date.now() }) });
+    await tick();
+    els(".subagent-row")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    expect(menuItems()).toEqual(["Open", "Copy task id"]);
+    key(el(".context-menu"), "Escape");
+    await tick();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("the row menu grows Export/Copy-log-path on the worker session and Reveal on runDir (matrix)", async () => {
+    const menuItems = () => els(".context-menu-item").map((b) => b.textContent);
+    // Address rows by their data-task-id (the section re-sorts live-first).
+    const rowOf = (taskId: string): HTMLElement =>
+      els(".subagent-row").find((r) => r.getAttribute("data-task-id") === taskId)! as HTMLElement;
+    const openMenu = async (taskId: string): Promise<void> => {
+      rowOf(taskId).dispatchEvent(new Event("contextmenu"));
+      await tick();
+    };
+    const dismiss = async (): Promise<void> => {
+      key(el(".context-menu"), "Escape");
+      await tick();
+    };
+    // Four shapes: LIVE task with every field; SETTLED task with the worker
+    // session but no run dir; QUEUED engine task whose agent never built
+    // (no worker session, runDir present); plain delegate task (nothing).
+    ws.fireMessage({
+      type: "taskList",
+      tasks: [
+        task({
+          taskId: "run-a:fix#1",
+          agentSessionId: "worker-101",
+          agentLogPath: "/srv/sessions/worker-101.jsonl",
+          runDir: "/rootA/runs/run-a",
+        }),
+        task({
+          taskId: "task-settled",
+          status: "completed",
+          inRun: false,
+          endedAt: Date.now(),
+          agentSessionId: "worker-202",
+          agentLogPath: "/srv/sessions/worker-202.jsonl",
+        }),
+        task({
+          taskId: "run-b:juge#1",
+          status: "queued",
+          inRun: false,
+          startedAt: null,
+          runDir: "/rootA/runs/run-b",
+        }),
+        task({ taskId: "task-plain" }),
+      ],
+    });
+    await tick();
+    try {
+      // Live workflow task: full set, Cancel last.
+      await openMenu("run-a:fix#1");
+      expect(menuItems()).toEqual([
+        "Open",
+        "Copy task id",
+        "Copy log file path",
+        "Export",
+        "Reveal run directory",
+        "Cancel",
+      ]);
+      // Copy log file path lands the SERVER-computed path (copy idiom).
+      const copied: string[] = [];
+      const prevNav = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+      Object.defineProperty(globalThis, "navigator", {
+        value: { clipboard: { writeText: async (t: string) => { copied.push(t); } } },
+        configurable: true,
+      });
+      try {
+        els(".context-menu-item").find((b) => b.textContent === "Copy log file path")!.click();
+        await tick();
+        expect(copied).toEqual(["/srv/sessions/worker-101.jsonl"]);
+      } finally {
+        if (prevNav) Object.defineProperty(globalThis, "navigator", prevNav);
+        else delete (globalThis as Record<string, unknown>).navigator;
+      }
+      // Export keys the EXISTING /export/:id route with the WORKER session
+      // id (never the task id, never the manager session): the hidden anchor
+      // carries the whole download request. The click never bubbles (the
+      // anchor is a detached body child), so capture the element itself.
+      const created: HTMLElement[] = [];
+      const docAny = document as unknown as { createElement: (t: string) => HTMLElement };
+      const prevCreate = docAny.createElement;
+      docAny.createElement = (tag: string) => {
+        const el = prevCreate.call(document, tag);
+        if (tag === "a") created.push(el);
+        return el;
+      };
+      try {
+        rowOf("run-a:fix#1").dispatchEvent(new Event("contextmenu"));
+        await tick();
+        els(".context-menu-item").find((b) => b.textContent === "Export")!.click();
+        await tick();
+      } finally {
+        (document as unknown as { createElement: (t: string) => HTMLElement }).createElement = prevCreate;
+      }
+      expect(created).toHaveLength(1);
+      const anchor = created[0] as unknown as { href: string; download: string };
+      expect(anchor.href.startsWith("/export/worker-101?token=")).toBe(true);
+      expect(anchor.download).toBe("worker-101.jsonl");
+
+      // Settled task: the log stays reachable (triage!), no Reveal (no dir).
+      await openMenu("task-settled");
+      expect(menuItems()).toEqual(["Open", "Copy task id", "Copy log file path", "Export"]);
+      await dismiss();
+
+      // Queued engine task (agent never built -> no log): Reveal rides, the
+      // log items do NOT (absent, never dead), Cancel does.
+      await openMenu("run-b:juge#1");
+      expect(menuItems()).toEqual(["Open", "Copy task id", "Reveal run directory", "Cancel"]);
+      await dismiss();
+
+      // Plain LIVE delegate task: nothing new (exactly the pre-existing menu).
+      await openMenu("task-plain");
+      expect(menuItems()).toEqual(["Open", "Copy task id", "Cancel"]);
+      await dismiss();
+    } finally {
+      ws.fireMessage({ type: "taskList", tasks: [] });
+      await tick();
+    }
+  });
+
+  it("Reveal run directory opens/focuses the tree tab, expands the chain, selects the dir", async () => {
+    const RUN = "/wsfxA/runs/run-c";
+    ws.fireMessage({
+      type: "taskList",
+      tasks: [task({ taskId: "run-c:fix#1", runDir: RUN })],
+    });
+    await tick();
+    // Open the pane from whatever state the earlier sections left it in.
+    if (document.querySelector("#workbench-panel")) {
+      for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
+      await tick();
+    }
+    clearSent();
+    els(".subagent-row")[0]!.dispatchEvent(new Event("contextmenu"));
+    await tick();
+    els(".context-menu-item").find((b) => b.textContent === "Reveal run directory")!.click();
+    await tick();
+
+    // The pane is visible and the Files tab is open AND active (focus).
+    expect(document.querySelector("#workbench-panel")).toBeTruthy();
+    const tabs = els("#workbench-tabs [role=tab]");
+    expect(tabs.map((b) => b.textContent)).toEqual(["Files"]);
+    expect(tabs[0]!.getAttribute("aria-selected")).toBe("true");
+
+    // The reveal re-ran the tree-open machinery: roots + every expanded
+    // ancestor of the run dir, through the plain listDir frame.
+    const reqs = sent<{ requestId: number; path?: string }>("listDir");
+    const paths = reqs.map((r) => r.path ?? "<roots>");
+    expect(paths).toContain("<roots>");
+    expect(paths).toContain("/wsfxA");
+    expect(paths).toContain("/wsfxA/runs");
+    expect(paths).toContain(RUN);
+
+    // Serve the listings: root -> runs -> run-c (empty dir).
+    for (const r of reqs) {
+      if (r.path === undefined) {
+        ws.fireMessage({
+          type: "listDirResult",
+          requestId: r.requestId,
+          roots: [{ name: "wsfxA", path: "/wsfxA" }],
+        });
+      } else if (r.path === "/wsfxA") {
+        ws.fireMessage({
+          type: "listDirResult",
+          requestId: r.requestId,
+          path: r.path,
+          entries: [{ name: "runs", path: "/wsfxA/runs", isDir: true }],
+        });
+      } else if (r.path === "/wsfxA/runs") {
+        ws.fireMessage({
+          type: "listDirResult",
+          requestId: r.requestId,
+          path: r.path,
+          entries: [{ name: "run-c", path: RUN, isDir: true }],
+        });
+      } else {
+        ws.fireMessage({
+          type: "listDirResult",
+          requestId: r.requestId,
+          path: r.path,
+          entries: [],
+        });
+      }
+    }
+    await tick();
+    // The run dir rendered, expanded, and carries the selection mark.
+    const rows = els(".ft-row").filter((r) => r.getAttribute("data-path") === RUN);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.getAttribute("class")).toContain("ft-selected");
+    expect(rows[0]!.getAttribute("aria-current")).toBe("true");
+    expect(rows[0]!.getAttribute("class")).toContain("ft-dir");
+    // Cleanup: collapse the revealed chain (deepest first) -- module-level
+    // tree state must not leak into the later file-tree sections (their
+    // roots/expand requests would ride the leftover expansions). The reveal
+    // uses a DEDICATED root ("/wsfxA") so its cached listings can never be
+    // mistaken for the later sections' "/rootA" fixture either.
+    for (const p of [RUN, "/wsfxA/runs", "/wsfxA"]) {
+      const row = els(".ft-row").find((r) => r.getAttribute("data-path") === p);
+      if (row) (row.querySelector(".ft-row-btn") as HTMLElement).click();
+    }
+
+    for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
+    if (document.querySelector("#workbench-panel")) el("#workbench-toggle").click();
+    await tick();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("running rows tick; the last live task ending freezes the clocks", async () => {
+    ws.fireMessage({ type: "taskList", tasks: [task()] });
+    await tick();
+    const before = el(".subagent-row-elapsed").textContent;
+    await sleep(1100); // the once-per-second nowAtom tick while a task is live
+    expect(el(".subagent-row-elapsed").textContent).not.toBe(before);
+
+    // Settle the task: the tick timer stops and the row freezes.
     ws.fireMessage({ type: "taskUpdate", task: task({ status: "done", endedAt: Date.now(), inRun: false }) });
     await tick();
-    expect(el(".task-followup-input").hasAttribute("disabled")).toBe(true);
-    const after = el(".task-overlay-elapsed").textContent;
+    const after = el(".subagent-row-elapsed").textContent;
     await sleep(1100);
-    expect(el(".task-overlay-elapsed").textContent).toBe(after); // no more ticking
+    expect(el(".subagent-row-elapsed").textContent).toBe(after); // no more ticking
   });
 
-  it("the close button dismisses the panel", async () => {
-    el(".task-overlay-close").click();
-    await tick();
+  it("the strip and the popup path are gone from the DOM", async () => {
+    // The retired surface may not resurrect anywhere: no strip, no overlay,
+    // no steering form, no control note.
+    expect(document.querySelector("#subagents-strip")).toBeNull();
+    expect(document.querySelector(".subagent-chip")).toBeNull();
     expect(document.querySelector(".task-overlay")).toBeNull();
+    expect(document.querySelector(".task-followup-form")).toBeNull();
+    expect(document.querySelector(".task-control-note")).toBeNull();
     ws.fireMessage({ type: "taskList", tasks: [] });
     await tick();
   });
 
-  it("overflow past the strip cap gets a +N chip that expands and collapses", async () => {
-    const many = Array.from({ length: 9 }, (_, i) => task({ taskId: `t${i}`, sessionId: SID, status: "done", inRun: false }));
-    ws.fireMessage({ type: "taskList", tasks: many });
+  it("the reasoning toggle sweeps the viewed subagent's transcript (doctrine: only the dropdowns lock)", async () => {
+    // The owner doctrine (2026-11-13) locks ONLY the profile/model switching
+    // dropdowns while a subagent is viewed; everything else in the header keeps
+    // working, reasoning visibility included. This is the attempt-1 open
+    // question pinned: the toggle is a per-browser VIEW setting that must stay
+    // operable while a task transcript is on screen and sweep its reasoning
+    // block (which renders into the one MessageListManager, exactly like a live
+    // session view), and never touch the wire.
+    await openSubagent();
+    ws.fireMessage({
+      type: "taskActivity",
+      taskId: "task-1",
+      activity: { kind: "reasoning", content: "planning the next move" },
+    });
     await tick();
-    const more = el(".subagent-more");
-    expect(more.textContent).toBe("+1");
-    more.click();
+    const flags = () => els(".thinking-block").map((b) => b.classList.contains("hidden"));
+    const chip = el("#thinking-toggle");
+    expect(chip.hasAttribute("disabled")).toBe(false); // never locked by the view mode
+    expect(flags()).toEqual([false]); // shown at rest
+
+    const before = ws.sent.length;
+    chip.click();
     await tick();
-    expect(el("#subagents-strip").classList.contains("expanded")).toBe(true);
-    expect(els(".subagent-chip")).toHaveLength(10); // 9 tasks + collapse chip
-    el(".subagent-more").click();
+    expect(flags()).toEqual([true]); // swept the subagent's reasoning row
+    expect(el("#thinking-toggle").getAttribute("aria-label")).toContain("Reasoning hidden");
+    expect(store.get(HIDE_THINKING_STORAGE_KEY)).toBe("1");
+    expect(ws.sent.length).toBe(before); // a view toggle never touches the wire
+
+    // Restore shown for the suites that follow (default is reasoning shown).
+    el("#thinking-toggle").click();
     await tick();
-    expect(el("#subagents-strip").classList.contains("expanded")).toBe(false);
+    expect(flags()).toEqual([false]);
+    expect(store.get(HIDE_THINKING_STORAGE_KEY)).toBe("0");
     ws.fireMessage({ type: "taskList", tasks: [] });
     await tick();
+  });
+
+  it("opening a subagent from log view clears the stale log label (browse mirrors stay honest)", async () => {
+    // Sidebar-batch finding 1 is FIXED in the tree and now pinned. viewSubagent
+    // already drops the chat-side viewedLogId; app.tsx's onOpenTask clears the
+    // app-side activeLogId mirror in the SAME click, so the header never carries
+    // both #log-view-label and #subagent-view-label and the cold log row drops
+    // its highlight (browse modes are exclusive -- owner doctrine).
+    await attach();
+    els(".log-item")[0]!.click(); // onViewLog -> chat.viewLog
+    ws.fireMessage({ type: "logViewed", logId: L1, entries: [{ source: "prompt", content: "cold line" }] });
+    await tick();
+    expect(el("#log-view-label")).toBeTruthy();
+    expect(activeRows(".log-item")).toHaveLength(1); // the cold log row is highlighted
+
+    // The task feed keeps flowing in log view; opening a row hands the header
+    // over to the task cleanly -- no double label, no stale log highlight. A
+    // fresh id keeps the module-level activity buffer cold so the open drives a
+    // history request (prior cases in this describe already warmed "task-1").
+    ws.fireMessage({ type: "taskList", tasks: [task({ taskId: "task-hand" })] });
+    await tick();
+    clearSent();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    expect(document.querySelector("#log-view-label")).toBeNull(); // mirror cleared in-click
+    expect(el("#subagent-view-label")).toBeTruthy();              // only the task label now
+    expect(activeRows(".log-item")).toHaveLength(0);              // log row highlight gone
+    expect(sent<{ taskId: string }>("taskActivityRequest")[0]?.taskId).toBe("task-hand");
+
+    // Exit the browse mode for the suites that follow.
+    el("#close-subagent-view-btn").click();
+    await attach();
   });
 });
 
@@ -2140,7 +2612,17 @@ describe("header reasoning-visibility chip", () => {
     await attachWithChip();
     const chip = el("#thinking-toggle");
     expect(chip.localName).toBe("button");
-    expect(chip.textContent).toBe("reasoning shown");
+    // Glyph-only chrome (the .file-reload-btn / #settings-btn idiom): zero text
+    // node, a decorative aria-hidden svg carries the picture, and the STATE --
+    // once read from the words -- now rides the aria-label + title. Shown reads
+    // the FILLED thought bubble (thinking-on, text lines and all); the empty
+    // thinking-off bubble must not be present.
+    expect(chip.textContent).toBe("");
+    expect(chip.querySelector("svg[aria-hidden='true']")).toBeTruthy();
+    expect(chip.querySelector("svg.thinking-on")).toBeTruthy();
+    expect(chip.querySelector("svg.thinking-off")).toBeNull();
+    expect(chip.getAttribute("aria-label")).toContain("Reasoning shown");
+    expect(chip.getAttribute("title")).toContain("Reasoning shown");
     expect(chip.getAttribute("title")).toContain("view setting only");
     expect(chip.getAttribute("title")).toContain("/thinking");
     const group = els(".header-status-group");
@@ -2166,13 +2648,20 @@ describe("header reasoning-visibility chip", () => {
     el("#thinking-toggle").click();
     await tick();
     expect(hiddenFlags()).toEqual([true, true]);
-    expect(el("#thinking-toggle").textContent).toBe("reasoning hidden");
+    // Hidden state: the SAME bubble with its text lines gone (thinking-off
+    // present, thinking-on gone) and the aria-label names the state -- the
+    // old text-label pin's truth, re-homed onto the glyph + accessible name.
+    expect(el("#thinking-toggle").getAttribute("aria-label")).toContain("Reasoning hidden");
+    expect(el("#thinking-toggle").querySelector("svg.thinking-off")).toBeTruthy();
+    expect(el("#thinking-toggle").querySelector("svg.thinking-on")).toBeNull();
     expect(store.get(HIDE_THINKING_STORAGE_KEY)).toBe("1");
 
     el("#thinking-toggle").click();
     await tick();
     expect(hiddenFlags()).toEqual([false, false]);
-    expect(el("#thinking-toggle").textContent).toBe("reasoning shown");
+    expect(el("#thinking-toggle").getAttribute("aria-label")).toContain("Reasoning shown");
+    expect(el("#thinking-toggle").querySelector("svg.thinking-on")).toBeTruthy();
+    expect(el("#thinking-toggle").querySelector("svg.thinking-off")).toBeNull();
     expect(store.get(HIDE_THINKING_STORAGE_KEY)).toBe("0");
     expect(ws.sent.length).toBe(before); // a view toggle never touches the wire
   });
@@ -2184,7 +2673,8 @@ describe("header reasoning-visibility chip", () => {
     ws.fireMessage({ type: "sessionState", sessionId: LV_SID, key: "hideThinking", value: true });
     await tick();
     expect(hiddenFlags()).toEqual([false]);
-    expect(el("#thinking-toggle").textContent).toBe("reasoning shown");
+    expect(el("#thinking-toggle").getAttribute("aria-label")).toContain("Reasoning shown");
+    expect(el("#thinking-toggle").querySelector("svg.thinking-on")).toBeTruthy();
   });
 
   it("stays clickable in log view and sweeps the cold log's reasoning", async () => {
@@ -2201,7 +2691,8 @@ describe("header reasoning-visibility chip", () => {
     el("#thinking-toggle").click(); // always clickable -- log view is the point
     await tick();
     expect(hiddenFlags()).toEqual([true]);
-    expect(el("#thinking-toggle").textContent).toBe("reasoning hidden");
+    expect(el("#thinking-toggle").getAttribute("aria-label")).toContain("Reasoning hidden");
+    expect(el("#thinking-toggle").querySelector("svg.thinking-off")).toBeTruthy();
 
     // Leave cleanly for the suites that follow.
     el("#thinking-toggle").click();

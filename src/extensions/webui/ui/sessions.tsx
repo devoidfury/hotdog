@@ -20,8 +20,9 @@
 
 import { formatTokenCount, SIDEBAR_MIN_WIDTH, shortId } from "./utils.ts";
 import { IconChevron, IconKebab, IconPlug, IconSearch, RowStatusGlyph } from "./icons.tsx";
+import { SubagentsSection } from "./subagents.tsx";
 import type { JsxChild, Ref } from "@utils/jsx";
-import type { SearchHitWire } from "@extensions/websocket/protocol.ts";
+import type { SearchHitWire, TaskInfoWire } from "@extensions/websocket/protocol.ts";
 
 export interface SessionInfo {
   id: string;
@@ -126,10 +127,29 @@ interface SidebarProps {
   logsHeight: number;
   logsMin: number;
   logsMax: number;
+  /** Server-global subagent task feed; the section nested under each session
+   *  card filters it to its own manager (null-parent tasks match no row and
+   *  never render -- same scoping rule the retired strip enforced). */
+  tasks: TaskInfoWire[];
+  /** Task whose transcript the main view is showing (row highlight). */
+  viewedTaskId: string | null;
+  /** Subagents-section collapse, shared across cards (view setting; the
+   *  feed only ever populates the attached manager anyway). */
+  subagentsCollapsed: boolean;
+  /** Wall clock for the rows' elapsed clocks (app ticks it once per second
+   *  while any task is live; finished rows freeze on their own). */
+  now: number;
   onCreate: () => void;
   onSwitch: (sessionId: string) => void;
   onCancel: (sessionId: string) => void;
   onViewLog: (logId: string) => void;
+  /** Open a task's transcript in the main view (chat.viewSubagent). */
+  onOpenTask: (taskId: string) => void;
+  /** A task row's context menu (right-click + kebab + keyboard twins; the
+   *  app builds the honest task action set on the shared ContextMenu
+   *  machinery -- same open/positioning/focus path as the session/log rows). */
+  onTaskMenu: (e: MouseEvent | KeyboardEvent, task: TaskInfoWire, rowEl: HTMLElement) => void;
+  onToggleSubagents: () => void;
   onSessionMenu: (e: MouseEvent | KeyboardEvent, session: SessionInfo, rowEl: HTMLElement) => void;
   onLogMenu: (e: MouseEvent | KeyboardEvent, logId: string, rowEl: HTMLElement) => void;
   /** Search panel state + handlers (header magnifier toggles `open`). */
@@ -508,9 +528,10 @@ export function Sidebar(p: SidebarProps) {
       ) : (
         <>
       <div id="session-list" role={p.sessions.length > 0 ? "list" : undefined}>
-        {sortPinned(p.sessions, p.pinnedIds).map((s) => {
+        {sortPinned(p.sessions, p.pinnedIds).flatMap((s) => {
           const isWorking = p.workingMap.get(s.id) ?? false;
-          return (
+          const owned = p.tasks.filter((t) => t.sessionId === s.id);
+          return [
             <SidebarRow
               key={s.id}
               kindClass="session-item"
@@ -551,8 +572,25 @@ export function Sidebar(p: SidebarProps) {
               }
               onSelect={() => p.onSwitch(s.id)}
               onContextMenu={(e, rowEl) => p.onSessionMenu(e, s, rowEl)}
-            />
-          );
+            />,
+            // The collapsible Subagents section nests directly under the
+            // manager card. Only the attached session ever owns rows: the
+            // server scopes the task feed to it, so other cards honestly
+            // show nothing rather than an empty section.
+            owned.length > 0 ? (
+              <SubagentsSection
+                key={`${s.id}:subagents`}
+                sid={s.id}
+                tasks={owned}
+                now={p.now}
+                collapsed={p.subagentsCollapsed}
+                viewedTaskId={p.viewedTaskId}
+                onToggle={p.onToggleSubagents}
+                onOpenTask={p.onOpenTask}
+                onTaskMenu={p.onTaskMenu}
+              />
+            ) : null,
+          ];
         })}
       </div>
 

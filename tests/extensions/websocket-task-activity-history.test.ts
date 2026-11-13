@@ -219,7 +219,10 @@ describe("subagent feed session scoping", () => {
 
     const before = ws2.messages.length;
     ws1.messages.length = 0;
-    wsServer.onMessage(
+    // Awaited: the settled-task reply may ride the durable-log read (real
+    // I/O, route settle contract); this fixture has no log, so the content
+    // below is still the buffer's exact bytes.
+    await wsServer.onMessage(
       ws1,
       JSON.stringify({ type: C2S.TASK_ACTIVITY_REQUEST, taskId: "task-1" }),
     );
@@ -269,7 +272,9 @@ describe("subagent feed session scoping", () => {
     // the trim stops at the tool block -- a rebuilt panel cannot see the
     // dead partial, and cannot receive a reset that would clear it.
     ws1.messages.length = 0;
-    wsServer.onMessage(
+    // Awaited: settled replies may ride the durable-log read; no log here,
+    // so the exact buffer bytes below still answer (fallback path).
+    await wsServer.onMessage(
       ws1,
       JSON.stringify({ type: C2S.TASK_ACTIVITY_REQUEST, taskId: "task-1" }),
     );
@@ -277,7 +282,9 @@ describe("subagent feed session scoping", () => {
     expect(replies).toHaveLength(1);
     expect(replies[0].activity).toEqual([
       { kind: "text", content: "kept " },
-      { kind: "tool_call", name: "bash", args: "ls" },
+      // The tool_call carries the posture fold (argsSummary, computed like
+      // the session TOOL_CALL frame: no hints here, so the hint-free fold).
+      { kind: "tool_call", name: "bash", args: "ls", argsSummary: "ls" },
       { kind: "text", content: "fresh take" },
     ]);
   });

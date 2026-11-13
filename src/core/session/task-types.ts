@@ -39,13 +39,20 @@ export function isTerminalStatus(status: TaskStatus): boolean {
  */
 export const MAX_TERMINAL_TASKS = 200;
 
-/** Display-oriented snapshot of one task (webui subagents panel, diagnostics). */
+/** Display-oriented snapshot of one task (webui subagent sidebar rows, diagnostics). */
 export interface TaskInfo {
   taskId: string;
   /** Spawn description, whitespace-flattened and truncated. */
   description: string;
   /** The delegating session (null: no parent, e.g. workflow-engine spawns). */
   sessionId: string | null;
+  /**
+   * The worker agent's own session id (key of its durable session log);
+   * omitted until an agent is built. Additive: old observers ignore it.
+   */
+  agentSessionId?: string;
+  /** Absolute workflow run dir (engine spawns only); omitted otherwise. */
+  runDir?: string;
   status: TaskStatus;
   createdAt: number;
   /** Set when the task first enters RUNNING; null while queued. */
@@ -217,6 +224,12 @@ export interface SpawnTaskOptions {
    */
   park?: boolean;
   /**
+   * Absolute workflow run dir (workflow-engine only): travels to TaskInfo so
+   * the webui can reveal the run directory in the file tree. Delegate-style
+   * spawns never set it -- the absence IS the discriminator.
+   */
+  runDir?: string;
+  /**
    * Fires after every agent turn (including the one that ends a parked task),
    * and with a synthesized failed/cancelled result when a task dies without
    * ever running a turn -- a parked consumer waiting on onTurn can never hang.
@@ -327,7 +340,7 @@ export interface TaskManagerRequiredOptions {
 export interface TaskEntry {
   /** Spawn id, for diagnostics. */
   taskId: string;
-  /** Display metadata for observers (webui subagents panel). */
+  /** Display metadata for observers (webui subagent sidebar rows). */
   description: string;
   createdAt: number;
   startedAt: number | null;
@@ -337,6 +350,22 @@ export interface TaskEntry {
   statusRef: { value: TaskStatus };
   /** The delegating session that spawned this task (null if none). Used to abort the task when that session is deleted. */
   sessionId: string | null;
+  /**
+   * The worker agent's OWN session id -- the key of its durable session log
+   * (a finished subagent is a finished session: the webui replays a settled
+   * task's transcript from that log, not from the capped in-memory buffer).
+   * Stamped when the agent is built and KEPT past release: entry.agent goes
+   * null exactly when the log becomes the only transcript source. null: the
+   * agent was never built (queued / plan-failed).
+   */
+  agentSessionId: string | null;
+  /**
+   * Absolute workflow run dir for engine spawns (stamped at spawnTask from
+   * the engine's RunConfig.runDir); null for delegate-style tasks. The webui
+   * reveal action's only path source -- absence is what makes the menu item
+   * honest-by-construction for non-workflow tasks.
+   */
+  runDir: string | null;
   /** Provider lane this task occupies while RUNNING. "" until a multi-candidate placement locks it. */
   provider: string;
   /** Locked "provider/model", or the intent string while a multi-candidate task is still unplaced. */

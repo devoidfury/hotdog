@@ -1,23 +1,21 @@
 /// <reference lib="dom" />
-// Subagents strip + overlay panels. The strip lists every task agent the
-// server has reported (id, truncated description, status, elapsed); clicking
-// a chip opens an overlay streaming that task's activity. Panels stack: the
-// last opened renders above earlier ones; each is dismissible, and terminal
-// tasks stay openable for the rest of the session.
+// Subagents sidebar section: a collapsible "Subagents" list nested directly
+// under the manager session card that delegated the tasks (Recent Logs'
+// disclosure idiom: label + chevron, aria-expanded/aria-controls). One row
+// per task agent -- status glyph, step label, elapsed clock -- clicking a row
+// opens that task's transcript in the FULL main view (chat.viewSubagent feeds
+// the transcript from the same task feed; there is no second render path).
 //
-// The streaming activity body is its own mounted tree per panel, kept out of
-// App: the feed can emit hundreds of deltas per second, and inside App each
-// one would diff the whole UI. TaskPanel's body div has no children prop --
-// childless host elements have no child slots, so App re-renders never touch
-// it -- and the registry's ref callback mounts an ActivityBody into it.
+// App re-renders never carry task streaming: activity frames go straight from
+// chat.ts into the MessageListManager (the main transcript's imperative DOM
+// path), so the App tree repaints only when tasksAtom flips (per taskUpdate)
+// or the once-per-second elapsed tick lands.
 
 import type { TaskInfoWire } from "@extensions/websocket/protocol.ts";
-import { mount, type DomNode, type Ref } from "@utils/jsx";
-import { SubagentStatusGlyph } from "./icons.tsx";
-import type { TaskActivityBlock } from "./chat.ts";
+import { IconChevron, IconKebab, SubagentStatusGlyph } from "./icons.tsx";
 
 /**
- * Milliseconds the chip's clock shows. Only the task's own agent-turn time
+ * Milliseconds the row's clock shows. Only the task's own agent-turn time
  * counts: queued tasks tick their wall-clock wait, an in-flight turn ticks
  * from its anchor on top of the banked total, and a parked RUNNING task
  * (judge running for it, waiting on a lane slot, between warm retries) sits
@@ -42,15 +40,14 @@ function isParked(info: TaskInfoWire): boolean {
   return info.status === "running" && !info.inRun;
 }
 
-/** Chips rendered before the strip collapses behind a "+N" overflow chip. */
-export const MAX_STRIP_CHIPS = 8;
-
 /**
- * Chip label: the task_id suffix after the last ':' (the step name, e.g.
- * `report-review#2`); without a ':' the first few words of the description;
- * failing everything, the raw id. The full id + description ride the title.
+ * Row label: the task_id suffix after the last ':' (the step name, e.g.
+ * `chrome#2`); without a ':' the first few words of the description; failing
+ * everything, the raw id. The full id + description ride the title. Only the
+ * two display fields are read, so the header can label an evicted task from
+ * its bare id too.
  */
-export function chipLabel(task: TaskInfoWire): string {
+export function chipLabel(task: Pick<TaskInfoWire, "taskId" | "description">): string {
   const at = task.taskId.lastIndexOf(":");
   if (at !== -1 && at < task.taskId.length - 1) return task.taskId.slice(at + 1);
   const words = (task.description || "").trim().split(/\s+/).slice(0, 5).join(" ");
@@ -64,8 +61,8 @@ function runOf(taskId: string): string | null {
 }
 
 /**
- * Per-task run discriminator, present ONLY when the strip spans 2+ distinct
- * runs (one run's chips need no prefix). The shortest trailing dash-segment
+ * Per-task run discriminator, present ONLY when the list spans 2+ distinct
+ * runs (one run's rows need no prefix). The shortest trailing dash-segment
  * group that no other run also ends with, so `hotdog-archeology` beats
  * reprinting `20261017-1848-hotdog-archeology`.
  */
@@ -96,289 +93,130 @@ export function runDiscriminators(tasks: TaskInfoWire[]): Map<string, string> {
   return out;
 }
 
-/* The chip's status glyph is the inline-SVG map in icons.tsx
- * (SubagentStatusGlyph); the tint still comes from the chip's status-*
- * class through currentColor, and a parked task keeps its dashed ring.
- */
-
-interface StripProps {
+interface SectionProps {
+  /** The section's manager session (ids are keys/aria anchors, never text). */
+  sid: string;
+  /** This manager's tasks (the Sidebar scopes the global feed per row). */
   tasks: TaskInfoWire[];
   now: number;
-  openTaskIds: string[];
-  onOpen: (taskId: string) => void;
-  /** Overflow revealed (the strip lists every task instead of +N behind a chip). */
-  expanded?: boolean;
-  onToggleExpanded?: () => void;
+  collapsed: boolean;
+  /** Task whose transcript is on screen in the main view (row highlight). */
+  viewedTaskId: string | null;
+  onToggle: () => void;
+  onOpenTask: (taskId: string) => void;
+  /** The row's context menu: right-click, the row's visible kebab trigger,
+   *  and the keyboard twins all route here (the app runs the shared
+   *  ContextMenu machinery; rowEl anchors/receives focus back). */
+  onTaskMenu: (e: MouseEvent | KeyboardEvent, task: TaskInfoWire, rowEl: HTMLElement) => void;
 }
 
-export function SubagentsStrip({
-  tasks,
-  now,
-  openTaskIds,
-  onOpen,
-  expanded = false,
-  onToggleExpanded,
-}: StripProps) {
-  if (tasks.length === 0) return null;
+/**
+ * The collapsible section. Hidden with the section rather than unmounted:
+ * the disclosure keeps its slot (the `#sidebar.logs-collapsed` idiom one
+ * list down) and the rows' state (scroll, focus) survives a fold.
+ */
+export function SubagentsSection(p: SectionProps) {
   // Live tasks first, newest before oldest among the settled ones.
-  const ordered = tasks.slice().sort((a, b) => {
+  const ordered = p.tasks.slice().sort((a, b) => {
     const liveA = a.status === "running" || a.status === "queued" ? 1 : 0;
     const liveB = b.status === "running" || b.status === "queued" ? 1 : 0;
     if (liveA !== liveB) return liveB - liveA;
     return b.createdAt - a.createdAt;
   });
   const discriminators = runDiscriminators(ordered);
-  const overflow = !expanded && ordered.length > MAX_STRIP_CHIPS ? ordered.length - MAX_STRIP_CHIPS : 0;
-  const visible = overflow > 0 ? ordered.slice(0, MAX_STRIP_CHIPS) : ordered;
+  const listId = `subagent-list-${p.sid}`;
   return (
-    <div
-      id="subagents-strip"
-      className={expanded ? "expanded" : undefined}
-      title="Background task agents"
-    >
-      <span className="subagents-label">Subagents</span>
-      {visible.map((t) => {
-        const disc = discriminators.get(t.taskId);
-        const parked = isParked(t);
-        return (
-          <button
-            type="button"
-            key={t.taskId}
-            className={`subagent-chip status-${t.status}${parked ? " waiting" : ""}${openTaskIds.includes(t.taskId) ? " open" : ""}`}
-            title={`${t.taskId}: ${t.description || "(no description)"} — ${parked ? "waiting" : t.status}`}
-            onClick={() => onOpen(t.taskId)}
-          >
-            <SubagentStatusGlyph status={t.status} parked={parked} />
-            <span className="subagent-id">{disc ? `${disc}:` : ""}{chipLabel(t)}</span>
-            <span className={`subagent-elapsed${parked ? " waiting" : ""}`}>{formatElapsed(t, now)}</span>
-          </button>
-        );
-      })}
-      {overflow > 0 ? (
+    <div className={`subagents-section${p.collapsed ? " collapsed" : ""}`} role="listitem">
+      <div className="subagents-header">
+        <span className="subagents-label">Subagents</span>
+        {/* Chevron idiom, #logs-toggle grammar: the flip rides a rotation
+            class on the same svg, the label names the next click. */}
         <button
+          id="subagents-toggle"
           type="button"
-          className="subagent-chip subagent-more"
-          title={`Show ${overflow} more task agent${overflow === 1 ? "" : "s"}`}
-          onClick={onToggleExpanded}
+          className="subagents-toggle"
+          aria-expanded={p.collapsed ? "false" : "true"}
+          aria-controls={listId}
+          aria-label={p.collapsed ? "Expand subagents" : "Collapse subagents"}
+          title={p.collapsed ? "Expand subagents" : "Collapse subagents"}
+          onClick={p.onToggle}
         >
-          +{overflow}
-        </button>
-      ) : null}
-      {expanded && ordered.length > MAX_STRIP_CHIPS ? (
-        <button
-          type="button"
-          className="subagent-chip subagent-more"
-          title="Collapse the strip"
-          onClick={onToggleExpanded}
-        >
-          −
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-// Steering inputs are uncontrolled (the App tree re-renders on status/tick
-// updates, and re-binding a value prop would clobber the draft). Refs are
-// stable per task id so patch() does not detach them.
-const followupInputs = new Map<string, HTMLInputElement>();
-const followupRefs = new Map<string, Ref>();
-function followupInputRef(taskId: string): Ref {
-  let ref = followupRefs.get(taskId);
-  if (!ref) {
-    ref = (el) => {
-      if (el) followupInputs.set(taskId, el as unknown as HTMLInputElement);
-      else followupInputs.delete(taskId);
-    };
-    followupRefs.set(taskId, ref);
-  }
-  return ref;
-}
-
-interface PanelProps {
-  task: TaskInfoWire;
-  now: number;
-  zBase: number;
-  /** Most recent server reply for a Cancel/steer on this task, if any. */
-  control: { ok: boolean; text: string } | null;
-  /** Ref onto the activity body div; its content is owned by the per-panel
-   * ActivityBody mount (see createActivityRegistry). */
-  bodyRef: Ref;
-  onClose: (taskId: string) => void;
-  onCancel: (taskId: string) => void;
-  onFollowup: (taskId: string, message: string) => void;
-}
-
-export function TaskPanel({
-  task,
-  now,
-  zBase,
-  control,
-  bodyRef,
-  onClose,
-  onCancel,
-  onFollowup,
-}: PanelProps) {
-  const steerable = task.status === "running";
-  const cancellable = steerable || task.status === "queued";
-  const parked = isParked(task);
-  return (
-    <div className="task-overlay" data-task-id={task.taskId} style={{ zIndex: String(zBase) }}>
-      <div className="task-overlay-header">
-        <span className="subagent-status">{parked ? "waiting" : task.status}</span>
-        <span className="task-overlay-title" title={task.description}>
-          {task.taskId}
-        </span>
-        <span className={`task-overlay-elapsed${parked ? " waiting" : ""}`}>{formatElapsed(task, now)}</span>
-        {cancellable ? (
-          <button
-            type="button"
-            className="task-overlay-cancel"
-            title="Cancel this task agent (queued or running)"
-            onClick={() => onCancel(task.taskId)}
-          >
-            Cancel
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="task-overlay-close"
-          title="Close panel"
-          onClick={() => onClose(task.taskId)}
-        >
-          ×
-        </button>
-      </div>
-      <div className="task-overlay-desc">{task.description || "(no description)"}</div>
-      <div className="task-overlay-body" ref={bodyRef}></div>
-      <div className="task-overlay-footer">
-        {control ? (
-          <div className={`task-control-note${control.ok ? "" : " error"}`}>
-            {control.text}
-          </div>
-        ) : null}
-        <form
-          className="task-followup-form"
-          onSubmit={(e: Event) => {
-            e.preventDefault();
-            const input = followupInputs.get(task.taskId);
-            const message = input ? input.value.trim() : "";
-            if (!message) return;
-            onFollowup(task.taskId, message);
-            if (input) input.value = "";
-          }}
-        >
-          <input
-            type="text"
-            className="task-followup-input"
-            placeholder={steerable ? "Steer this task..." : "Task not running -- steering disabled"}
-            disabled={!steerable}
-            ref={followupInputRef(task.taskId)}
+          <IconChevron
+            className={
+              p.collapsed
+                ? "subagents-toggle-glyph subagents-toggle-glyph-up"
+                : "subagents-toggle-glyph"
+            }
           />
-          <button
-            type="submit"
-            className="task-followup-send"
-            disabled={!steerable}
-            title="Inject the message at the task's next seam"
-          >
-            Steer
-          </button>
-        </form>
+        </button>
+      </div>
+      <div id={listId} className="subagent-list" role="list">
+        {ordered.map((t) => {
+          const disc = discriminators.get(t.taskId);
+          const parked = isParked(t);
+          // Callback-ref handle to the mounted row (house escape hatch,
+          // SidebarRow idiom): the kebab's click resolves its owning row
+          // from the DOM, not from the event's currentTarget.
+          let rowEl: HTMLElement | null = null;
+          return (
+            // The row shares the session/log row grammar (not a <button>:
+            // the kebab trigger nests inside it): a focusable list item
+            // with click-to-open, Enter/Space twins, and the right-click
+            // plus Menu/Shift+F10 route to the same task context menu.
+            <div
+              key={t.taskId}
+              data-task-id={t.taskId}
+              className={`subagent-row status-${t.status}${parked ? " waiting" : ""}${t.taskId === p.viewedTaskId ? " active" : ""}`}
+              title={`${t.taskId}: ${t.description || "(no description)"} — ${parked ? "waiting" : t.status}`}
+              aria-current={t.taskId === p.viewedTaskId ? "true" : undefined}
+              role="listitem"
+              tabindex="0"
+              ref={(el) => {
+                if (el) rowEl = el as unknown as HTMLElement;
+              }}
+              onClick={() => p.onOpenTask(t.taskId)}
+              onKeydown={(e: KeyboardEvent) => {
+                // Direct presses on the row only; keys landing on the
+                // kebab belong to the kebab (SidebarRow guard idiom).
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault(); // Space must not page-scroll while focused
+                  p.onOpenTask(t.taskId);
+                } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+                  e.preventDefault();
+                  p.onTaskMenu(e, t, e.currentTarget as HTMLElement);
+                }
+              }}
+              onContextMenu={(e: MouseEvent) => {
+                e.preventDefault();
+                p.onTaskMenu(e, t, e.currentTarget as HTMLElement);
+              }}
+            >
+              <SubagentStatusGlyph status={t.status} parked={parked} />
+              <span className="subagent-row-label">{disc ? `${disc}:` : ""}{chipLabel(t)}</span>
+              <span className={`subagent-row-elapsed${parked ? " waiting" : ""}`}>{formatElapsed(t, p.now)}</span>
+              {/* The visible twin of the right-click (session/log rows'
+                  anchor idiom: same .row-menu-btn class, same kebab, same
+                  hover/focus reveal; native button = Enter/Space free, and
+                  the click never leaks into row-to-open). */}
+              <button
+                className="row-menu-btn"
+                type="button"
+                aria-label="Subagent actions"
+                title="Subagent actions"
+                onClick={(e: MouseEvent) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const row = rowEl ?? (e.currentTarget as HTMLElement | null)?.parentElement ?? null;
+                  if (row) p.onTaskMenu(e, t, row);
+                }}
+              >
+                <IconKebab />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
-}
-
-// ── Per-panel activity body mount ──────────────────────────────────────────
-// Rows are keyed by block-object identity (chat.ts merges deltas into the
-// same object), so the keyed diff alone handles appends, merged-tail text
-// patches, and eviction at the MAX_ACTIVITY_BLOCKS cap.
-
-type GetBlocks = (taskId: string) => TaskActivityBlock[];
-
-interface BodyProps {
-  taskId: string;
-  getBlocks: GetBlocks;
-  /** Stable row ids per block object (per panel; dies with the mount). */
-  keys: WeakMap<TaskActivityBlock, number>;
-  seq: { next: number };
-}
-
-function ActivityBody({ taskId, getBlocks, keys, seq }: BodyProps) {
-  const blocks = getBlocks(taskId);
-  if (blocks.length === 0)
-    return <div className="task-act task-act-empty">Waiting for activity...</div>;
-  return blocks.map((block) => {
-    let key = keys.get(block);
-    if (key === undefined) {
-      key = ++seq.next;
-      keys.set(block, key);
-    }
-    if (block.kind === "text" || block.kind === "reasoning") {
-      return (
-        <div key={key} className={`task-act task-act-${block.kind}`}>
-          {block.text}
-        </div>
-      );
-    }
-    if (block.kind === "tool_call") {
-      return (
-        <div key={key} className="task-act task-act-tool">
-          <span className="task-act-name">{`tool: ${block.name}`}</span>
-          <pre className="task-act-pre">{block.args}</pre>
-        </div>
-      );
-    }
-    return (
-      <div key={key} className={`task-act task-act-result${block.error ? " error" : ""}`}>
-        <span className="task-act-name">{`${block.error ? "error" : "result"}: ${block.name}`}</span>
-        <pre className="task-act-pre">{block.error ?? block.output}</pre>
-      </div>
-    );
-  });
-}
-
-interface ActivityPanel {
-  render: () => void;
-  destroy: () => void;
-}
-
-export interface ActivityRegistry {
-  /** Stable callback ref per task id (patch() must not detach it between App
-   * renders): set mounts the panel's body, null unmounts and forgets it. */
-  ref: (taskId: string) => Ref;
-  /** Re-render every live panel body. Wire to a coalescer + activityVersionAtom. */
-  renderAll: () => void;
-}
-
-export function createActivityRegistry(getBlocks: GetBlocks): ActivityRegistry {
-  const panels = new Map<string, ActivityPanel>();
-  const refs = new Map<string, Ref>();
-  return {
-    ref(taskId) {
-      let ref = refs.get(taskId);
-      if (!ref) {
-        ref = (el) => {
-          if (el) {
-            // A set without a preceding null (rebind) must not orphan the
-            // previous mount: drop it first so nothing renders or leaks there.
-            panels.get(taskId)?.destroy();
-            const keys = new WeakMap<TaskActivityBlock, number>();
-            const seq = { next: 0 };
-            const body = () => <ActivityBody taskId={taskId} getBlocks={getBlocks} keys={keys} seq={seq} />;
-            const mounted = mount(body(), el as unknown as DomNode);
-            panels.set(taskId, { render: () => mounted.render(body()), destroy: () => mounted.unmount() });
-          } else {
-            panels.get(taskId)?.destroy();
-            panels.delete(taskId);
-          }
-        };
-        refs.set(taskId, ref);
-      }
-      return ref;
-    },
-    renderAll() {
-      for (const panel of panels.values()) panel.render();
-    },
-  };
 }

@@ -253,6 +253,11 @@ const FORM_CONTROL_TAGS = new Set([
 const SVG_NS = "http://www.w3.org/2000/svg";
 export { HTML_NS, SVG_NS };
 
+// One row of textarea content, in the px the derived scrollHeight reports
+// (see DElement.scrollHeight). Tests compute expected autoResize heights
+// from this instead of hardcoding the model.
+export const TEXTAREA_LINE_PX = 20;
+
 class DElement extends DNode {
   nodeType = 1;
   tagName: string;
@@ -263,8 +268,32 @@ class DElement extends DNode {
 
   // Scroll geometry — plain fields tests can set to drive auto-scroll logic.
   scrollTop = 0;
-  scrollHeight = 0;
   clientHeight = 0;
+  // scrollHeight is an ACCESSOR: an explicitly-set value (what the auto-scroll
+  // tests do) always wins; otherwise a CONNECTED TEXTAREA reports one
+  // TEXTAREA_LINE_PX row per line of its value and every other element 0.
+  // This models the browser geometry the composer autoResize depends on: a
+  // DETACHED textarea measures 0 (verified against headless Chromium), which
+  // is exactly the trap the draft-restore seam had to step around -- pinning
+  // height:"0px" over a multi-line draft looked fine until a keypress
+  // re-measured the connected node.
+  _pinnedScrollHeight: number | null = null;
+  get scrollHeight(): number {
+    if (this._pinnedScrollHeight !== null) return this._pinnedScrollHeight;
+    if (this.tagName === "TEXTAREA" && this._connectedToDocument()) {
+      return this.value.split("\n").length * TEXTAREA_LINE_PX;
+    }
+    return 0;
+  }
+  set scrollHeight(value: number) {
+    this._pinnedScrollHeight = value;
+  }
+  _connectedToDocument(): boolean {
+    for (let n: DNode | null = this; n !== null; n = n.parentNode) {
+      if (n instanceof DDocument) return true;
+    }
+    return false;
+  }
 
   // scrollIntoView — there is no layout here, so the call is recorded rather
   // than honored; tests assert the row that was targeted (and with what).

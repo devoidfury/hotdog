@@ -122,6 +122,12 @@
        stored height hydrates it on load). */
     --logs-height: 240px;
     --input-height: 64px;
+    /* The TOP BAND: the sidebar's SESSIONS header and the main pane's
+       Session:/Subagent: bar are ONE visual row across the split (owner
+       ruling 2026-11-13). 45px is the sidebar header's existing natural
+       height (32px action buttons + 6px+6px padding + the 1px seam); both
+       rules read this token, so the two panes can never drift apart again. */
+    --header-band-height: 45px;
 
     /* Transitions */
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -438,6 +444,11 @@ body.sidebar-resizing {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    /* Band height (see --header-band-height): 45 = 6+32+6+1, the 32px
+       action buttons fit the content box EXACTLY, so their hit targets
+       are untouched and the h2's centerline pins to the band's middle --
+       the same middle the main pane's #session-info text centers on. */
+    height: var(--header-band-height);
     padding: 6px 6px 6px 12px;
     border-bottom: 1px solid var(--border);
 }
@@ -949,6 +960,9 @@ body.sidebar-resizing {
 
 .sidebar-header-secondary {
     margin-top: 4px;
+    /* The band pin is the TOP row's; the Recent Logs titlebar keeps its own
+       natural height (2+32+2+2 seams) -- opt back out of the token. */
+    height: auto;
     padding-top: 2px;
     padding-bottom: 2px;
     border-top: 1px solid var(--border);
@@ -1107,6 +1121,11 @@ body.logs-resizing .sidebar-header-resize {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    /* Same token as .sidebar-header: one band across the split (see
+       --header-band-height). The bar grows 37 -> 45px; the glyph cluster's
+       32px boxes center inside the 40px content box, and the header text's
+       centerline lands on the band's middle exactly like the sidebar h2's. */
+    height: var(--header-band-height);
     padding: 2px 6px;
     background: var(--bg-primary);
     border-bottom: 1px solid var(--border);
@@ -1224,6 +1243,17 @@ body.logs-resizing .sidebar-header-resize {
     opacity: 0.5;
 }
 
+/* Subagent view (owner ruling 2026-11-13): the profile/model switching
+   dropdowns are the ONE exception to "works like a live session" -- they
+   act on the ATTACHED manager, never the viewed task. The native disabled
+   attribute drops them from the tab order; this reuses the read-only
+   pills' exact dim so the disabled posture is one treatment, not two. */
+#input-area.selects-locked #model-selector,
+#input-area.selects-locked #profile-selector {
+    opacity: 0.5;
+    cursor: default;
+}
+
 /* ── Model & Profile Switchers (composer pills) ───────────────────────────── */
 
 /* The label is the pill; the select sits inside it borderless. */
@@ -1315,11 +1345,13 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* Reasoning chip + fence icon + settings + theme + workbench, grouped so
-   the strip stays right-aligned as items come and go. */
+   the strip stays right-aligned as items come and go. 8px (owner-specified):
+   the 12px default spaced the icon-only chips further apart than their 32px
+   boxes wanted. */
 .header-status-group {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
 }
 
 /* A degraded plane (broker respawn cap) must not look calm. */
@@ -1328,16 +1360,17 @@ body.logs-resizing .sidebar-header-resize {
     font-weight: 600;
 }
 
-/* Icon-only header chips (the fence chip + settings gear) join the
-   #search-btn/#theme-btn/#workbench-toggle glyph standard: a 32px box whose
-   1px border is merely transparent at rest (width kept -- hover shifts no
-   layout), no fill, muted ink -> accent over accent-soft. The classes
-   (.header-btn toggleable / tool-exec-degraded) keep their BEHAVIOR
-   meaning; these ID rules just paint over the chip's rest chrome. The text
-   chips next door (reasoning) keep the bordered chip -- they carry words,
-   not glyphs. */
+/* Icon-only header chips (the reasoning toggle, the fence chip + settings
+   gear) join the #search-btn/#theme-btn/#workbench-toggle glyph standard: a
+   32px box whose 1px border is merely transparent at rest (width kept --
+   hover shifts no layout), no fill, muted ink -> accent over accent-soft. The
+   classes (.header-btn toggleable / tool-exec-degraded) keep their BEHAVIOR
+   meaning; these ID rules just paint over the chip's rest chrome. No header
+   chip carries words any more -- the reasoning toggle went glyph-only too, so
+   the text-chip carve-out is gone. */
 #tool-exec-status,
-#settings-btn {
+#settings-btn,
+#thinking-toggle {
     width: 32px;
     height: 32px;
     padding: 0;
@@ -1354,7 +1387,8 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 #tool-exec-status:hover:not(.tool-exec-degraded),
-#settings-btn:hover {
+#settings-btn:hover,
+#thinking-toggle:hover {
     color: var(--accent);
     background: var(--accent-soft);
 }
@@ -1366,7 +1400,8 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 #tool-exec-status:focus-visible,
-#settings-btn:focus-visible {
+#settings-btn:focus-visible,
+#thinking-toggle:focus-visible {
     background: var(--accent-soft);
     outline: 1px solid var(--accent);
     outline-offset: -1px;
@@ -2569,11 +2604,32 @@ body.logs-resizing .sidebar-header-resize {
 
 #input-area {
     display: flex;
+    /* Floating composer: the slab is gone. #input-area and #chat-form carry
+       no fill and no box -- the field sits directly on the pane's own
+       --bg-primary, which is what #message-list already renders on. Position
+       is the scrim anchor. */
+    position: relative;
     padding: 16px 20px;
-    background: var(--bg-primary);
-    border-top: 1px solid var(--border);
     gap: 10px;
     flex-shrink: 0;
+}
+
+/* Transcript seam. The bottom area is a flex sibling of #message-list (its
+   own scroll box), so text never scrolls literally under the field -- but
+   with the slab gone, the last lines would stop dead at the composer edge.
+   A pointer-transparent gradient scrim hangs above the seam: rows fade into
+   the pane background as they approach the floating field, so the seam
+   reads as depth, never as a collision. (Drawn under #completion-menu,
+   which keeps its z-index and rides on top.) */
+#input-area::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: 24px;
+    background: linear-gradient(to bottom, transparent, var(--bg-primary));
+    pointer-events: none;
 }
 
 #chat-form {
@@ -2582,8 +2638,11 @@ body.logs-resizing .sidebar-header-resize {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
+    /* No slab: the form is a transparent layout box. The 1px border keeps
+       its WIDTH color-invisible at rest so the drag-over posture swaps in
+       without shifting anything (the composer blend idiom, one level up). */
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: var(--radius-lg);
     padding: 12px 14px 10px;
     transition:
@@ -2591,12 +2650,9 @@ body.logs-resizing .sidebar-header-resize {
         box-shadow 0.2s;
 }
 
-#chat-form:focus-within {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-/* File drag hovering the composer (see onComposerDragenter in app.tsx). */
+/* File drag hovering the composer (see onComposerDragenter in app.tsx):
+   the ONLY resting-state border the form can wear, and it appears with the
+   drag, so the float stays clean. */
 #chat-form.drag-over {
     border-style: dashed;
     border-color: var(--accent);
@@ -2606,7 +2662,11 @@ body.logs-resizing .sidebar-header-resize {
 #chat-input {
     width: 100%;
     padding: 2px 4px;
+    /* Borderless/transparent field on the page background. The hairline
+       under it is the quietest honest posture carrier: it says "there is a
+       field here" at rest without a box, and it is what focus recolors. */
     border: none;
+    border-bottom: 1px solid var(--border);
     background: transparent;
     color: var(--text-primary);
     font-size: 0.92rem;
@@ -2616,6 +2676,11 @@ body.logs-resizing .sidebar-header-resize {
     min-height: 22px;
     max-height: 160px;
     line-height: 1.5;
+    transition: border-color 0.2s;
+}
+
+#chat-input:focus {
+    border-bottom-color: var(--accent);
 }
 
 #chat-input::placeholder {
@@ -2980,6 +3045,14 @@ body.workbench-resizing {
 
 .ft-row-btn:hover {
     background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+/* Reveal target (the subagent row menu's "Reveal run directory"): the
+   revealed row carries aria-current + this accent wash, the same soft-accent
+   idiom the sidebar's active rows ride. Paint only -- no size change. */
+.ft-row.ft-selected>.ft-row-btn {
+    background: var(--accent-soft);
     color: var(--text-primary);
 }
 
@@ -3400,21 +3473,23 @@ body.workbench-resizing {
     color: var(--error, #e55);
 }
 
-/* Composer blend: #chat-form's own --bg-tertiary fills this button, and the
-   1px border keeps its WIDTH but goes color-invisible at rest (never
-   absent->present, so nothing shifts) -- the button disappears into the form
-   until hovered/focused. Hover returns the affordance: the existing fill
-   change plus a real border; focus restores a visible border through
-   --border-focus, the var-driven accent token the theme recipe says to
-   ride. */
+/* Composer blend (floating field): the removed slab's --bg-tertiary tint
+   made these two glyph buttons read as mini-slabs on the transparent
+   floating field. Rest now BLEND: transparent fill, 1px border kept at the
+   SAME width but color-invisible (never absent->present, so nothing shifts
+   -- the exact composer-blend idiom one level up on #chat-form). Hover and
+   focus return the affordance per that shared idiom: the fill change plus a
+   real border (hover --border-light, focus --border-focus, the var-driven
+   accent token the theme recipe says to ride). No size or movement changes:
+   padding, border width and radius are untouched. */
 #attach-btn {
     padding: 6px 10px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--bg-tertiary);
+    border: 1px solid transparent;
     border-radius: var(--radius, 8px);
-    background: var(--bg-tertiary);
+    background: transparent;
     color: var(--text, inherit);
     cursor: pointer;
 }
@@ -3433,20 +3508,20 @@ body.workbench-resizing {
     cursor: not-allowed;
 }
 
-/* Push-to-talk: same shell as #attach-btn (rest blend + hover/focus border
-   return), red while holding to record. The recording state's RED border
-   must survive a hover (it is the only live-recording cue), so the
-   border-return rules carry :not(.recording); the hover fill still lands.
-   The inline-SVG mic glyph (see app.tsx) rides inline-flex + gap beside the
-   phase label. */
+/* Push-to-talk: same blended rest shell as #attach-btn (transparent fill +
+   color-invisible 1px border; hover/focus return the affordance), red while
+   holding to record. The recording state's RED border must survive a hover
+   (it is the only live-recording cue), so the border-return rules carry
+   :not(.recording); the hover fill still lands. The inline-SVG mic glyph
+   (see app.tsx) rides inline-flex + gap beside the phase label. */
 #mic-btn {
     padding: 6px 12px;
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    border: 1px solid var(--bg-tertiary);
+    border: 1px solid transparent;
     border-radius: var(--radius, 8px);
-    background: var(--bg-tertiary);
+    background: transparent;
     color: var(--text, inherit);
     cursor: pointer;
     white-space: nowrap;
@@ -3474,23 +3549,30 @@ body.workbench-resizing {
     color: var(--error, #e55);
 }
 
-/* ── Subagents strip + overlay panels ────────────────────────────────────── */
+/* ── Subagents sidebar section (nested under the manager card) ────────────
+   A collapsible list of the tasks the session delegated: header ("Subagents"
+   + chevron, the #logs-toggle disclosure idiom) then one row per task --
+   status glyph, step label, elapsed clock, and the shared .row-menu-btn
+   kebab trigger (the session/log rows' anchor idiom: hover/focus-revealed,
+   opens the same context menu as right-click). Rows are focusable list
+   items; the full task id and status ride the native title. */
 
-#subagents-strip {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-xl);
-    border-top: 1px solid var(--border);
-    background: var(--bg-primary);
-    /* Bounded at two chip rows; the "+N" chip reveals the rest. */
-    max-height: 62px;
-    overflow: hidden;
+.subagents-section {
+    /* Children of the card, not a third-level indent: NO left margin -- the
+       header label and the row glyph align on the manager card's OWN content
+       edge (10px insets below, the .session-item padding, one canonical
+       value documented in both rules it feeds). */
+    margin: 2px 0 4px;
 }
 
-#subagents-strip.expanded {
-    max-height: none;
+.subagents-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    /* 10px: the .session-item content inset -- the label aligns on the
+       card's title text (the alignment reference). */
+    padding: 0 6px 0 10px;
 }
 
 .subagents-label {
@@ -3498,38 +3580,92 @@ body.workbench-resizing {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-muted);
-    margin-right: 4px;
 }
 
-.subagent-chip {
-    display: inline-flex;
+/* Chevron button: the #logs-toggle grammar at list scale (aria-expanded +
+   a rotated glyph while collapsed; the rotation class is the test pin). */
+#subagents-toggle {
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+#subagents-toggle:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+#subagents-toggle:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.subagents-toggle-glyph-up {
+    transform: rotate(180deg);
+}
+
+/* Collapsed drops the rows out of the flow (the #sidebar.logs-collapsed
+   idiom one list down): the header keeps its slot. */
+.subagents-section.collapsed .subagent-list {
+    display: none;
+}
+
+.subagent-row {
+    display: flex;
     align-items: center;
     gap: 6px;
-    max-width: 320px;
-    padding: 3px 10px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--bg-secondary);
+    width: 100%;
+    /* 10px: the .session-item content inset again -- the status-glyph column
+       stacks under the section label, both under the card's title text. */
+    padding: 3px 8px 3px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
     color: var(--text-primary);
     font-size: 12px;
+    text-align: left;
     white-space: nowrap;
     cursor: pointer;
 }
 
-.subagent-chip:hover {
+.subagent-row:hover {
     background: var(--bg-hover);
 }
 
-.subagent-chip.open {
+/* Focusable list item (the shared row grammar): keyboard focus reads like
+   the session/log rows. */
+.subagent-row:focus-visible {
+    background: var(--bg-hover);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.subagent-row.active {
     border-color: var(--accent);
 }
 
-.subagent-chip .subagent-id {
+.subagent-row-label {
     font-family: var(--font-mono);
     color: var(--accent);
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
+}
+
+.subagent-row-elapsed {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
 }
 
 .subagent-glyph {
@@ -3538,276 +3674,49 @@ body.workbench-resizing {
     color: var(--text-muted);
 }
 
-.subagent-chip.status-running .subagent-glyph {
+.subagent-row.status-running .subagent-glyph {
     color: var(--accent);
 }
 
-.subagent-chip.status-completed .subagent-glyph {
+.subagent-row.status-completed .subagent-glyph {
     color: var(--success);
 }
 
-.subagent-chip.status-failed .subagent-glyph {
+.subagent-row.status-failed .subagent-glyph {
     color: var(--error);
 }
 
-.subagent-chip.status-cancelled .subagent-glyph {
+.subagent-row.status-cancelled .subagent-glyph {
     color: var(--text-muted);
 }
 
-.subagent-chip.subagent-more {
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-}
-
-.subagent-status {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: var(--bg-elevated);
-    color: var(--text-secondary);
-}
-
-.status-running .subagent-status,
-.subagent-chip.status-running .subagent-status {
-    background: var(--accent-soft);
-    color: var(--accent);
-}
-
-.status-completed .subagent-status,
-.subagent-chip.status-completed .subagent-status {
-    background: var(--success-soft);
-    color: var(--success);
-}
-
-.status-failed .subagent-status,
-.subagent-chip.status-failed .subagent-status {
-    background: var(--error-soft);
-    color: var(--error);
-}
-
-.status-cancelled .subagent-status,
-.subagent-chip.status-cancelled .subagent-status {
-    background: var(--bg-elevated);
+/* Parked (RUNNING, no turn in flight): the dashed ring rides the svg, the
+   muted tint and clock read like a settled row -- the clock is frozen. */
+.subagent-row.waiting .subagent-glyph {
     color: var(--text-muted);
 }
 
-.subagent-elapsed {
-    font-family: var(--font-mono);
-    font-size: 11px;
+.subagent-row-elapsed.waiting {
     color: var(--text-muted);
 }
 
-/* Parked RUNNING task (its judge running, waiting on a lane slot, between
-   warm retries): no agent turn in flight, so the clock is frozen at the
-   accumulated active total. Muted treatment reads as paused, not working. */
-.subagent-chip.waiting .subagent-glyph {
-    color: var(--text-muted);
+/* The task row's context-menu kebab: the shared .row-menu-btn treatment,
+   revealed with the row (same hover/focus rule the session/log rows use).
+   The elapsed clock keeps the auto margin, so the button rides tight off
+   its shoulder (.row-clients + .row-menu-btn idiom). */
+.subagent-row:hover .row-menu-btn,
+.subagent-row:focus-within .row-menu-btn {
+    visibility: visible;
+    opacity: 1;
 }
 
-.subagent-elapsed.waiting,
-.task-overlay-elapsed.waiting {
-    opacity: 0.55;
-    font-style: italic;
-}
-
-.task-overlay {
-    position: fixed;
-    top: 12%;
-    right: 4%;
-    width: min(620px, 88vw);
-    max-height: 74vh;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-light);
-    border-radius: 10px;
-    box-shadow: var(--shadow-lg);
-}
-
-.task-overlay-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-}
-
-.task-overlay-title {
-    font-family: var(--font-mono);
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-}
-
-.task-overlay-elapsed {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-muted);
-}
-
-.task-overlay-close {
-    border: none;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 16px;
-    cursor: pointer;
-    padding: 0 4px;
-}
-
-.task-overlay-close:hover {
-    color: var(--text-primary);
-}
-
-.task-overlay-desc {
-    padding: 6px 12px;
-    font-size: 12px;
-    color: var(--text-secondary);
-    border-bottom: 1px solid var(--border);
-}
-
-.task-overlay-body {
-    overflow-y: auto;
-    padding: 8px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.task-act {
-    font-size: 13px;
-    color: var(--text-primary);
-}
-
-.task-act-empty {
-    color: var(--text-muted);
-    font-style: italic;
-}
-
-.task-act-text {
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
-/* Reasoning lane -- dimmer/italic, mirroring .thinking-block in the main chat. */
-.task-act-reasoning {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 12px;
-    font-style: italic;
-    color: var(--text-muted);
-    border-left: 2px solid var(--border);
-    padding-left: 8px;
-}
-
-.task-act-name {
-    display: block;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--accent);
-    margin-bottom: 2px;
-}
-
-.task-act-result.error .task-act-name {
-    color: var(--error);
-}
-
-.task-act-pre {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    background: var(--bg-base);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 8px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: var(--text-secondary);
-}
-
-.task-overlay-cancel {
-    padding: 3px 10px;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: var(--error-soft);
-    color: var(--error);
-    font-size: 0.75rem;
-    font-weight: 600;
-    font-family: var(--font-sans);
-    cursor: pointer;
-    transition: all 0.15s;
-}
-
-.task-overlay-cancel:hover {
-    background: var(--error);
-    color: var(--bg-base);
-}
-
-.task-overlay-footer {
-    padding: 8px 12px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.task-control-note {
-    font-size: 0.78rem;
-    color: var(--text-secondary);
-}
-
-.task-control-note.error {
-    color: var(--error);
-}
-
-.task-followup-form {
-    display: flex;
-    gap: 6px;
-}
-
-.task-followup-input {
-    flex: 1;
-    padding: 6px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-base);
-    color: var(--text-primary);
-    font-family: var(--font-sans);
-    font-size: 0.82rem;
-}
-
-.task-followup-input:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-.task-followup-input:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.task-followup-send {
-    padding: 6px 12px;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: var(--accent);
-    color: var(--bg-base);
-    font-size: 0.78rem;
-    font-weight: 600;
-    font-family: var(--font-sans);
-    cursor: pointer;
-}
-
-.task-followup-send:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+.subagent-row .row-menu-btn {
+    margin-left: 2px;
 }
 
 /* ── Settings viewer (settings button in the chat header) ────────────────
-   An overlay dialog (task-overlay posture, not a docked pane): a snapshot
-   read of the resolved config with a Zed-style two-pane body (redesign C6):
+   An overlay dialog (fixed-position, dimmed backdrop, not a docked pane): a
+   snapshot read of the resolved config with a Zed-style two-pane body (redesign C6):
    a LEFT RAIL (search input on top, the category list with row counts, the
    config dir at the bottom) and a RIGHT PANE (diagnostics notice at the top,
    then the scrollable grouped settings). */

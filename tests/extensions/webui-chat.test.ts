@@ -255,12 +255,13 @@ describe("createChat.dismissSession", () => {
 });
 
 // ── Subagent task feed ──────────────────────────────────────────────────────
-// taskList/taskUpdate/taskActivity/taskActivityHistory/taskControl are
-// handled before the message-list/session guard, so a container-less chat
-// exercises the whole feed over the faked socket.
-// NOTE: tasksAtom/taskActivity/activityVersionAtom/taskControlAtom are
-// module-level state shared across createChat() instances; afterEach clears
-// them via clearTasks() so runs cannot contaminate each other.
+// taskList/taskUpdate/taskActivity/taskActivityHistory are handled before
+// the message-list/session guard, so a container-less chat exercises the
+// whole buffer over the faked socket (the main-view rendering lives in the
+// describe below, on a container-backed chat).
+// NOTE: tasksAtom/taskActivity/viewedTaskIdAtom are module-level state
+// shared across createChat() instances; afterEach clears them via
+// clearTasks() so runs cannot contaminate each other.
 
 function taskInfo(taskId: string, status = "running"): TaskInfoWire {
   return {
@@ -327,7 +328,6 @@ describe("createChat subagent task feed", () => {
     const { chat, ws } = makeTaskChat();
     const feed = (activity: Record<string, unknown>) =>
       ws.emit({ type: "taskActivity", taskId: "t", activity });
-    const v0 = chat.activityVersionAtom();
 
     feed({ kind: "text", content: "he" });
     feed({ kind: "text", content: "llo" });
@@ -345,8 +345,6 @@ describe("createChat subagent task feed", () => {
       { kind: "tool_result", name: "bash", output: "ok" },
       { kind: "tool_result", name: "bash", output: "", error: "bad" },
     ]);
-    // Every activity bumps the version, merges included.
-    expect(chat.activityVersionAtom()).toBe(v0 + 7);
   });
 
   it("caps a task's display blocks at MAX_ACTIVITY_BLOCKS, evicting the oldest", () => {
@@ -410,7 +408,6 @@ describe("createChat subagent task feed", () => {
     feed({ kind: "tool_call", name: "bash", args: "" });
     feed({ kind: "text", content: "dead " });
     feed({ kind: "reasoning", content: "dead-think" });
-    const vBefore = chat.activityVersionAtom();
     feed({ kind: "reset" });
 
     // The dead attempt's streamed fragments retract; the earlier tool
@@ -419,7 +416,6 @@ describe("createChat subagent task feed", () => {
       { kind: "text", text: "kept " },
       { kind: "tool_call", name: "bash", args: "" },
     ]);
-    expect(chat.activityVersionAtom()).toBe(vBefore + 1);
 
     // The retry opens a fresh block instead of merging into dead text.
     feed({ kind: "text", content: "fresh take" });
@@ -428,10 +424,8 @@ describe("createChat subagent task feed", () => {
 
   it("a taskActivity reset with nothing in flight is a pure no-op (history re-seed still lands)", () => {
     const { chat, ws } = makeTaskChat();
-    const v0 = chat.activityVersionAtom();
     ws.emit({ type: "taskActivity", taskId: "z", activity: { kind: "reset" } });
     expect(chat.getTaskActivity("z")).toEqual([]);
-    expect(chat.activityVersionAtom()).toBe(v0);
     // The stray reset must not have created the map entry: the seedTaskActivity
     // skip guard stays honest, so a reconnect racing a reset still gets its replay.
     ws.emit({
@@ -447,7 +441,7 @@ describe("createChat subagent task feed", () => {
     expect(chat.getTaskActivity("nope")).toEqual([]);
   });
 
-  it("clearTasks empties tasks, activity, and resets the version", () => {
+  it("clearTasks empties tasks and activity buffers", () => {
     const { chat, ws } = makeTaskChat();
     ws.emit({ type: "taskList", tasks: [taskInfo("a")] });
     ws.emit({
@@ -458,21 +452,304 @@ describe("createChat subagent task feed", () => {
     chat.clearTasks();
     expect(chat.tasksAtom()).toEqual([]);
     expect(chat.getTaskActivity("a")).toEqual([]);
-    expect(chat.activityVersionAtom()).toBe(0);
   });
 
-  it("taskControl stores a readable reply per task", () => {
+  it("tool activity keeps the display descriptors for replay (posture parity)", () => {
     const { chat, ws } = makeTaskChat();
-    ws.emit({ type: "taskControl", taskId: "a", action: "interrupt", ok: true });
-    ws.emit({ type: "taskControl", taskId: "b", action: "followup", ok: true });
-    ws.emit({ type: "taskControl", taskId: "c", action: "interrupt", ok: false, error: "boom" });
-    ws.emit({ type: "taskControl", taskId: "d", action: "followup", ok: false });
-    expect(chat.taskControlAtom()).toEqual({
-      a: { ok: true, text: "Task cancelled" },
-      b: { ok: true, text: "Steering sent" },
-      c: { ok: false, text: "boom" },
-      d: { ok: false, text: "Task control failed" },
+    // The relayed frames carry the same ToolDisplayWire fold the session
+    // TOOL_CALL frame does; the buffer must retain them so a re-opened view
+    // paints the same posture (the doctrine: viewing a subagent renders
+    // like any session view -- the display DSL reaches handleToolCall).
+    ws.emit({
+      type: "taskActivity",
+      taskId: "a",
+      activity: {
+        kind: "tool_call",
+        name: "bash",
+        args: '{"command":"ls -la"}',
+        argsSummary: "ls -la",
+        display: [{ kind: "code", source: "args", arg: "command", lang: "shell" }],
+      },
     });
+    ws.emit({
+      type: "taskActivity",
+      taskId: "a",
+      activity: { kind: "tool_result", name: "edit", output: "ok", startLine: 42 },
+    });
+    expect(chat.getTaskActivity("a")).toEqual([
+      {
+        kind: "tool_call",
+        name: "bash",
+        args: '{"command":"ls -la"}',
+        argsSummary: "ls -la",
+        display: [{ kind: "code", source: "args", arg: "command", lang: "shell" }],
+      },
+      { kind: "tool_result", name: "edit", output: "ok", startLine: 42 },
+    ]);
+  });
+
+  it("taskFollowup sends the existing C2S frame trimmed; blanks no-op", () => {
+    const { chat, ws } = makeTaskChat();
+    chat.taskFollowup("t1", "  steer left  ");
+    expect(ws.sent).toEqual([{ type: "taskFollowup", taskId: "t1", message: "steer left" }]);
+    chat.taskFollowup("", "hi");
+    chat.taskFollowup("t1", "   ");
+    expect(ws.sent).toHaveLength(1);
+  });
+
+  it("interruptTask sends the existing C2S frame; blank id no-ops", () => {
+    const { chat, ws } = makeTaskChat();
+    chat.interruptTask("t1");
+    expect(ws.sent).toEqual([{ type: "taskInterrupt", taskId: "t1" }]);
+    chat.interruptTask("");
+    expect(ws.sent).toHaveLength(1);
+  });
+});
+
+// ── Subagent main-view transcript ───────────────────────────────────────────
+// The task feed drives the MAIN transcript: viewSubagent replays the buffer
+// into the MessageListManager, live taskActivity frames stream into it, the
+// manager's own transcript events are suppressed while viewing (browse-view
+// doctrine), and the attach (sessionCreated) ends the mode. Container-backed
+// chat over the dom-helper DOM (same runtime the message-list suite uses).
+
+describe("createChat subagent main-view", () => {
+  const RealWebSocket = globalThis.WebSocket;
+  let chat: ChatController | null = null;
+
+  afterEach(() => {
+    chat?.clearTasks();
+    chat?.disconnect();
+    chat = null;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = RealWebSocket;
+  });
+
+  function makeViewChat(): { chat: ChatController; ws: FakeWebSocket; pane: Element } {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const host = document.createElement("div");
+    chat = createChat({
+      token: null,
+      host: "localhost",
+      getMessageListContainer: () => host as unknown as HTMLElement,
+      // The app's own attach contract: sessionCreated binds (reuses) the
+      // MessageListManager and clears the transcript unless it is a delta.
+      onSessionCreated: ({ sessionId, replayDelta }) =>
+        chat!.setSession(sessionId, replayDelta === true),
+      // ...and the app's log-view paint (clear + render entries) rides here
+      // too, so the browse-mode exclusivity pin sees the real handover.
+      onLogViewed: (_logId, entries) => {
+        const list = chat!.messageListAtom();
+        if (list) {
+          list.clear();
+          list.renderLogEntries(entries);
+        }
+      },
+    });
+    chat.clearTasks();
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+    ws.emit({ type: "sessionCreated", sessionId: "mgr-1", profile: "manager" });
+    return { chat, ws, pane: host };
+  }
+
+  it("viewSubagent replays the buffered activity into the main pane", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t1", "running")] });
+    ws.emit({ type: "taskActivity", taskId: "t1", activity: { kind: "text", content: "thinking out loud" } });
+    ws.emit({ type: "taskActivity", taskId: "t1", activity: { kind: "tool_call", name: "bash", args: '{"cmd":"ls"}' } });
+    ws.emit({ type: "taskActivity", taskId: "t1", activity: { kind: "tool_result", name: "bash", output: "file.txt" } });
+
+    chat.viewSubagent("t1");
+    expect(chat.viewedTaskIdAtom()).toBe("t1");
+    // A populated buffer opens WITHOUT a history request (the panel idiom).
+    expect(ws.sent.some((m) => m.type === "taskActivityRequest")).toBe(false);
+    expect(pane.textContent).toContain("thinking out loud");
+    expect(pane.textContent).toContain("bash");
+  });
+
+  it("an empty buffer fetches the replay, and the history paints when it lands", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t2", "completed")] });
+    chat.viewSubagent("t2");
+    const req = ws.sent[ws.sent.length - 1]!;
+    expect(req).toEqual({ type: "taskActivityRequest", taskId: "t2" });
+    ws.emit({
+      type: "taskActivityHistory",
+      taskId: "t2",
+      activity: [{ kind: "text", content: "seeded tail" }],
+    });
+    expect(pane.textContent).toContain("seeded tail");
+  });
+
+  it("live deltas stream into the transcript while manager events stay suppressed", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t3", "running")] });
+    chat.viewSubagent("t3");
+
+    ws.emit({ type: "taskActivity", taskId: "t3", activity: { kind: "text", content: "partial" } });
+    expect(pane.textContent).toContain("partial");
+    const streaming = pane.querySelectorAll(".message.assistant.streaming");
+    expect(streaming).toHaveLength(1);
+
+    // The manager keeps talking underneath: dropped, never appended.
+    ws.emit({ type: "assistantMessage", sessionId: "mgr-1", content: "MANAGER LEAK" });
+    expect(pane.textContent).not.toContain("MANAGER LEAK");
+
+    // Another delta merges into the SAME streaming row (parser accumulates).
+    ws.emit({ type: "taskActivity", taskId: "t3", activity: { kind: "text", content: " done speaking" } });
+    expect(streaming[0]!.textContent).toContain("partial done speaking");
+
+    // A foreign task's deltas never touch this view.
+    ws.emit({ type: "taskActivity", taskId: "other", activity: { kind: "text", content: "ELSEWHERE" } });
+    expect(pane.textContent).not.toContain("ELSEWHERE");
+
+    // Turn boundary: inRun=false commits the row (streaming class gone).
+    ws.emit({ type: "taskUpdate", task: { ...taskInfo("t3", "running"), inRun: false } });
+    expect(pane.querySelectorAll(".message.assistant.streaming")).toHaveLength(0);
+    expect(pane.textContent).toContain("partial done speaking");
+
+    // Re-attach ends the mode: manager transcript flows again.
+    ws.emit({ type: "sessionCreated", sessionId: "mgr-1", profile: "manager" });
+    expect(chat.viewedTaskIdAtom()).toBeNull();
+    ws.emit({ type: "assistantMessage", sessionId: "mgr-1", content: "back live" });
+    expect(pane.textContent).toContain("back live");
+  });
+
+  it("the reset sentinel retracts the dead attempt's streamed row", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t4", "running")] });
+    chat.viewSubagent("t4");
+    ws.emit({ type: "taskActivity", taskId: "t4", activity: { kind: "text", content: "dead attempt " } });
+    expect(pane.querySelectorAll(".message.assistant.streaming")).toHaveLength(1);
+    ws.emit({ type: "taskActivity", taskId: "t4", activity: { kind: "reset" } });
+    expect(pane.textContent).not.toContain("dead attempt");
+    ws.emit({ type: "taskActivity", taskId: "t4", activity: { kind: "text", content: "retry text" } });
+    expect(pane.textContent).toContain("retry text");
+  });
+
+  it("a terminal task's trailing row commits quiet (no footer to invent)", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t5", "completed")] });
+    ws.emit({ type: "taskActivity", taskId: "t5", activity: { kind: "text", content: "final words" } });
+    chat.viewSubagent("t5");
+    expect(pane.textContent).toContain("final words");
+    // Committed: no in-flight streaming row remains...
+    expect(pane.querySelectorAll(".message.assistant.streaming")).toHaveLength(0);
+    // ...and no footer row (no ts was ever observed for the settled task).
+    expect(pane.querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+  });
+
+  it("opening a cold log ends the subagent mode (browse views are exclusive)", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t6", "running")] });
+    chat.viewSubagent("t6");
+    ws.emit({ type: "taskActivity", taskId: "t6", activity: { kind: "text", content: "task words" } });
+    expect(pane.textContent).toContain("task words");
+
+    ws.emit({ type: "logViewed", logId: "log-9", entries: [{ source: "prompt", content: "cold line" }] });
+    expect(chat.viewedTaskIdAtom()).toBeNull();
+    expect(pane.textContent).toContain("cold line");
+    // The task feed no longer paints into the log window.
+    ws.emit({ type: "taskActivity", taskId: "t6", activity: { kind: "text", content: "MORE TASK NOISE" } });
+    expect(pane.textContent).not.toContain("MORE TASK NOISE");
+  });
+
+  it("task tool frames render the SAME posture as session tool frames (display DSL)", () => {
+    const { chat, ws, pane } = makeViewChat();
+    // Bash declares (bash-tool/index.ts): argDisplay first-line + a code
+    // display part; the session channel resolves these server-side.
+    const display = [{ kind: "code", source: "args", arg: "command", lang: "shell" }];
+    // 1) The session baseline: the live TOOL_CALL frame path.
+    ws.emit({
+      type: "toolCall",
+      sessionId: "mgr-1",
+      name: "bash",
+      args: '{"command":"ls -la"}',
+      argsSummary: "ls -la",
+      display,
+      toolCallId: "c1",
+    });
+    ws.emit({
+      type: "toolResult",
+      sessionId: "mgr-1",
+      name: "bash",
+      output: "file.txt",
+      toolCallId: "c1",
+    });
+    const sessionPre = pane.querySelector(".tool-code");
+    expect(sessionPre).not.toBeNull();
+    const sessionHtml = sessionPre!.innerHTML;
+
+    // 2) The same call through the task relay into the subagent view: the
+    // descriptors must reach handleToolCall/handleToolResult, so the block
+    // reaches the identical code posture (not the generic fallback).
+    ws.emit({ type: "taskList", tasks: [taskInfo("t7", "running")] });
+    ws.emit({
+      type: "taskActivity",
+      taskId: "t7",
+      activity: {
+        kind: "tool_call",
+        name: "bash",
+        args: '{"command":"ls -la"}',
+        argsSummary: "ls -la",
+        display,
+      },
+    });
+    ws.emit({
+      type: "taskActivity",
+      taskId: "t7",
+      activity: { kind: "tool_result", name: "bash", output: "file.txt" },
+    });
+    chat.viewSubagent("t7");
+    const taskPre = pane.querySelector(".tool-code");
+    expect(taskPre).not.toBeNull();
+    expect(taskPre!.innerHTML).toBe(sessionHtml);
+
+    // An edit result's start_line rides too: the diff gutters number from
+    // the real file line, exactly like the session frame path.
+    ws.emit({ type: "taskActivity", taskId: "t7", activity: {
+      kind: "tool_call",
+      name: "edit",
+      args: '{"path":"a.txt","oldString":"one","newString":"two"}',
+      display: [{ kind: "diff", oldArg: "oldString", newArg: "newString", pathArg: "path" }],
+    } });
+    ws.emit({ type: "taskActivity", taskId: "t7", activity: {
+      kind: "tool_result", name: "edit", output: "edited a.txt", startLine: 42,
+    } });
+    const diff = pane.querySelectorAll(".tool-diff");
+    expect(diff).toHaveLength(1);
+    expect(diff[0]!.textContent).toContain("42");
+  });
+
+  it("steering the viewed task echoes the user row; a refused followup says so", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t8", "running")] });
+    chat.viewSubagent("t8");
+    chat.taskFollowup("t8", "look at the tests instead");
+    // The frame rides the socket addressed to the task, and the pane shows
+    // the steering right away (the task relay has no userMessage lane).
+    expect(ws.sent).toContainEqual({
+      type: "taskFollowup",
+      taskId: "t8",
+      message: "look at the tests instead",
+    });
+    expect(pane.querySelector(".message.user")).toBeTruthy();
+    expect(pane.textContent).toContain("look at the tests instead");
+
+    // A refusal (the server's taskControl reply) lands as an honest notice.
+    ws.emit({
+      type: "taskControl",
+      taskId: "t8",
+      action: "followup",
+      ok: false,
+      error: "Steering needs a running task with a live turn",
+    });
+    expect(pane.textContent).toContain("Steering needs a running task with a live turn");
+
+    // An accept adds nothing (no double echo) and never warns.
+    const before = pane.textContent;
+    ws.emit({ type: "taskControl", taskId: "t8", action: "followup", ok: true });
+    expect(pane.textContent).toBe(before);
   });
 });
 
@@ -706,28 +983,12 @@ describe("createChat task controls", () => {
     expect(ws.sent).toEqual([]);
   });
 
-  it("interruptTask and requestTaskActivity no-op on a blank id", () => {
+  it("requestTaskActivity no-ops on a blank id and ships the request otherwise", () => {
     const { chat, ws } = makeChat();
-    chat.interruptTask("");
     chat.requestTaskActivity("");
     expect(ws.sent).toEqual([]);
-    chat.interruptTask("t1");
-    expect(ws.sent[ws.sent.length - 1]).toEqual({ type: "taskInterrupt", taskId: "t1" });
     chat.requestTaskActivity("t1");
     expect(ws.sent[ws.sent.length - 1]).toEqual({ type: "taskActivityRequest", taskId: "t1" });
-  });
-
-  it("taskFollowup requires a nonblank id and message, and trims the message", () => {
-    const { chat, ws } = makeChat();
-    chat.taskFollowup("", "hi");
-    chat.taskFollowup("t1", "   ");
-    expect(ws.sent).toEqual([]);
-    chat.taskFollowup("t1", "  keep going  ");
-    expect(ws.sent[ws.sent.length - 1]).toEqual({
-      type: "taskFollowup",
-      taskId: "t1",
-      message: "keep going",
-    });
   });
 });
 

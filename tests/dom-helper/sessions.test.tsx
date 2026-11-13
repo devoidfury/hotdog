@@ -29,7 +29,7 @@ import {
   type LogInfo,
   type SearchState,
 } from "@extensions/webui/ui/sessions.tsx";
-import type { SearchHitWire } from "@extensions/websocket/protocol.ts";
+import type { SearchHitWire, TaskInfoWire } from "@extensions/websocket/protocol.ts";
 import { mount, type DomNode, type Mounted } from "@utils/jsx";
 
 // ── Fixture + harness ───────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ const noop = (): void => {};
 // Search closed by default; individual search tests override `search`.
 const CLOSED_SEARCH = { open: false, query: "", pending: false, results: null } as const;
 
-function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; logsCollapsed?: boolean }): Mounted {
+function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; logsCollapsed?: boolean; tasks?: TaskInfoWire[]; viewedTaskId?: string | null; subagentsCollapsed?: boolean; now?: number }): Mounted {
   return mount(
     <Sidebar
       sessions={opts.sessions ?? []}
@@ -58,12 +58,19 @@ function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs
       logsHeight={240}
       logsMin={96}
       logsMax={450}
+      tasks={opts.tasks ?? []}
+      viewedTaskId={opts.viewedTaskId ?? null}
+      subagentsCollapsed={opts.subagentsCollapsed ?? false}
+      now={opts.now ?? STAMP}
       onCreate={noop}
       onSwitch={noop}
       onCancel={noop}
       onViewLog={noop}
+      onOpenTask={noop}
+      onToggleSubagents={noop}
       onSessionMenu={noop}
       onLogMenu={noop}
+      onTaskMenu={noop}
       search={opts.search ?? CLOSED_SEARCH}
       searchInputRef={noop}
       onOpenSearch={noop}
@@ -442,7 +449,7 @@ describe("formatDateTime", () => {
 
 function mountInteractive(
   container: Element,
-  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; activeSessionId?: string | null; activeLogId?: string | null },
+  opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; activeSessionId?: string | null; activeLogId?: string | null; tasks?: TaskInfoWire[]; viewedTaskId?: string | null; subagentsCollapsed?: boolean; now?: number },
   calls: string[],
 ): Mounted {
   return mount(
@@ -459,12 +466,19 @@ function mountInteractive(
       logsHeight={240}
       logsMin={96}
       logsMax={450}
+      tasks={opts.tasks ?? []}
+      viewedTaskId={opts.viewedTaskId ?? null}
+      subagentsCollapsed={opts.subagentsCollapsed ?? false}
+      now={opts.now ?? STAMP}
       onCreate={() => calls.push("create")}
       onSwitch={(id) => calls.push(`switch:${id}`)}
       onCancel={(id) => calls.push(`cancel:${id}`)}
       onViewLog={(id) => calls.push(`view:${id}`)}
+      onOpenTask={(id) => calls.push(`openTask:${id}`)}
+      onToggleSubagents={() => calls.push("toggleSubagents")}
       onSessionMenu={(_e, s) => calls.push(`sessionMenu:${s.id}`)}
       onLogMenu={(_e, id) => calls.push(`logMenu:${id}`)}
+      onTaskMenu={(_e, t) => calls.push(`taskMenu:${t.taskId}`)}
       search={opts.search ?? CLOSED_SEARCH}
       searchInputRef={noop}
       onOpenSearch={() => calls.push("openSearch")}
@@ -725,6 +739,206 @@ describe("Recent Logs titlebar", () => {
     const header = root.querySelector(".sidebar-header-secondary")!;
     pointer(header, "keydown", { key: "ArrowDown", currentTarget: header });
     expect(calls).toEqual(["logsResizeKey"]);
+  });
+});
+
+// ── Subagents section (nested under the manager card) ───────────────────────
+// The collapsible disclosure under a live session row: header "Subagents" +
+// chevron (#logs-toggle grammar), one row per task agent with a status glyph,
+// a chipLabel idiom label, and an elapsed clock. Rows are the task feed
+// scoped to that manager; clicking a row asks the app to open the task's
+// transcript in the main view (openTask routing).
+
+const subTask = (over: Partial<TaskInfoWire> & { taskId: string }): TaskInfoWire => ({
+  description: `task ${over.taskId}`,
+  sessionId: FULL_ID,
+  status: "running",
+  createdAt: STAMP - 5000,
+  startedAt: STAMP - 4000,
+  endedAt: null,
+  activeMs: 1000,
+  inRun: true,
+  turnStartedAt: STAMP - 1000,
+  ...over,
+});
+
+describe("Subagents section", () => {
+  it("rows render under the owning card only; foreign and null-parent tasks stay away", () => {
+    const root = render({
+      sessions: [liveSession(), liveSession({ id: "other-session", profile: "coder" })],
+      tasks: [
+        subTask({ taskId: "2:chrome#1" }),
+        subTask({ taskId: "x1", sessionId: "other-session" }),
+        subTask({ taskId: "orphan", sessionId: null }),
+      ],
+      now: STAMP,
+    });
+    // Every task rides the section of ITS manager card (the server scopes the
+    // feed to the attached session, so in practice one section populates;
+    // the filter routes, it does not leak).
+    const sections = root.querySelectorAll(".subagents-section");
+    expect(sections).toHaveLength(2);
+    expect(sections[0]!.querySelectorAll(".subagent-row")).toHaveLength(1);
+    expect(sections[1]!.querySelectorAll(".subagent-row")).toHaveLength(1);
+    const rows = sections[0]!.querySelectorAll(".subagent-row");
+    expect(rows[0]!.getAttribute("data-task-id")).toBe("2:chrome#1");
+    // chipLabel: the step name after the last ':', the clock right-aligned.
+    expect(rows[0]!.querySelector(".subagent-row-label")!.textContent).toBe("chrome#1");
+    expect(rows[0]!.querySelector(".subagent-row-elapsed")!.textContent).toBe("2s");
+    // The glyph slot reuses the subagent status vocabulary (running here).
+    expect(rows[0]!.querySelector("svg")!.getAttribute("class")).toContain("subagent-glyph-running");
+    // No card text leaks the raw task id (title only); sessions keep their
+    // data-sid anchors, rows ride data-task-id (scrollHitIntoView stays
+    // session-id-only).
+    expect(rows[0]!.getAttribute("data-sid")).toBeNull();
+    expect(rows[0]!.getAttribute("title")).toContain("2:chrome#1");
+    // The null-parent task (workflow-engine spawn) belongs to no card.
+    expect(root.textContent).not.toContain("orphan");
+  });
+
+  it("live tasks lead, settled ones trail newest-first; one run needs no prefix", () => {
+    const root = render({
+      sessions: [liveSession()],
+      tasks: [
+        subTask({ taskId: "runx:doneOld", status: "completed", inRun: false, createdAt: STAMP - 9000 }),
+        subTask({ taskId: "runx:liveNow", createdAt: STAMP - 1000 }),
+        subTask({ taskId: "runx:doneNew", status: "completed", inRun: false, createdAt: STAMP - 2000 }),
+      ],
+      now: STAMP,
+    });
+    const ids = Array.from(root.querySelectorAll(".subagent-row")).map((r) => r.getAttribute("data-task-id"));
+    expect(ids).toEqual(["runx:liveNow", "runx:doneNew", "runx:doneOld"]);
+    // Single run: labels are bare step names (no discriminator prefix).
+    const labels = Array.from(root.querySelectorAll(".subagent-row-label")).map((n) => n.textContent);
+    expect(labels).toEqual(["liveNow", "doneNew", "doneOld"]);
+  });
+
+  it("two runs in one list get the shortest discriminating prefix", () => {
+    const root = render({
+      sessions: [liveSession()],
+      tasks: [
+        subTask({ taskId: "20261017-1848-hotdog-archeology:review#1" }),
+        subTask({ taskId: "20261017-1848-hotdog-reprint:pass#1" }),
+      ],
+      now: STAMP,
+    });
+    const labels = Array.from(root.querySelectorAll(".subagent-row-label")).map((n) => n.textContent);
+    // The shared timestamp prefix stays off the row: the discriminating tail
+    // (last dash segment, unique across runs) rides instead.
+    expect(labels).toEqual(["archeology:review#1", "reprint:pass#1"]);
+  });
+
+  it("a parked-running row reads waiting with a frozen clock; the header keeps the disclosure grammar", () => {
+    const root = render({
+      sessions: [liveSession()],
+      tasks: [subTask({ taskId: "p#1", activeMs: 12_000, inRun: false, turnStartedAt: null })],
+      now: STAMP,
+    });
+    const row = root.querySelector(".subagent-row")!;
+    expect(row.getAttribute("class")).toContain("status-running");
+    expect(row.getAttribute("class")).toContain("waiting");
+    expect(row.querySelector(".subagent-row-elapsed")!.getAttribute("class")).toContain("waiting");
+    expect(row.querySelector(".subagent-row-elapsed")!.textContent).toBe("12s"); // frozen
+    expect(row.querySelector("svg")!.getAttribute("class")).toContain("subagent-glyph-parked");
+
+    const header = root.querySelector(".subagents-header")!;
+    expect(header.textContent).toContain("Subagents");
+    const toggle = root.querySelector("#subagents-toggle")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.getAttribute("aria-controls")).toBe(`subagent-list-${FULL_ID}`);
+    expect(root.querySelector(`#subagent-list-${FULL_ID}`)).toBeTruthy();
+    expect(root.querySelector("svg.subagents-toggle-glyph")!.getAttribute("class")).not.toContain("-up");
+  });
+
+  it("collapse hides the rows, flips the chevron, and routes to onToggleSubagents", () => {
+    const calls: string[] = [];
+    const root = renderInteractive(
+      { sessions: [liveSession()], tasks: [subTask({ taskId: "c#1" })] },
+      calls,
+    );
+    clickable(root, "#subagents-toggle").click();
+    expect(calls).toEqual(["toggleSubagents"]);
+    // Collapsed rendering (the app drives the prop; mount again to see it).
+    const folded = render({
+      sessions: [liveSession()],
+      tasks: [subTask({ taskId: "c#1" })],
+      subagentsCollapsed: true,
+    });
+    expect(folded.querySelector(".subagents-section")!.getAttribute("class")).toContain("collapsed");
+    expect(folded.querySelector("#subagents-toggle")!.getAttribute("aria-expanded")).toBe("false");
+    expect(folded.querySelector("svg.subagents-toggle-glyph")!.getAttribute("class")).toContain("subagents-toggle-glyph-up");
+    // The header stays on screen (the rows are hidden by CSS, the disclosure
+    // must remain operable): aria-controls still points at the list.
+    expect(folded.querySelector(".subagents-header")).toBeTruthy();
+    expect(folded.querySelector("#subagent-list-" + FULL_ID)).toBeTruthy();
+  });
+
+  it("row clicks route the task id to onOpenTask; the viewed row carries the active mark", () => {
+    const calls: string[] = [];
+    const root = renderInteractive(
+      {
+        sessions: [liveSession()],
+        tasks: [subTask({ taskId: "run:alpha#1" }), subTask({ taskId: "run:beta#2" })],
+        viewedTaskId: "run:beta#2",
+      },
+      calls,
+    );
+    const rows = root.querySelectorAll(".subagent-row");
+    (rows[0] as HTMLElement).click();
+    expect(calls).toEqual(["openTask:run:alpha#1"]);
+    // The viewed task highlights in the list (same aria-current idiom as the
+    // session/log rows), and re-clicking it re-routes (the main view re-opens).
+    expect(rows[1]!.getAttribute("class")).toContain("active");
+    expect(rows[1]!.getAttribute("aria-current")).toBe("true");
+    expect(rows[0]!.getAttribute("class")).not.toContain("active");
+    (rows[1] as HTMLElement).click();
+    expect(calls[calls.length - 1]).toBe("openTask:run:beta#2");
+  });
+
+  it("subagent rows: right-click, kebab, and keyboard twins route the task menu", () => {
+    const calls: string[] = [];
+    const root = renderInteractive(
+      { sessions: [liveSession()], tasks: [subTask({ taskId: "run:one#1" })] },
+      calls,
+    );
+    const row = root.querySelector(".subagent-row")!;
+    // The row shares the session/log row grammar: a focusable list item.
+    expect(row.getAttribute("role")).toBe("listitem");
+    expect(row.getAttribute("tabindex")).toBe("0");
+    // Right-click routes the task to onTaskMenu (the app's context menu).
+    row.dispatchEvent({
+      type: "contextmenu",
+      currentTarget: row,
+      preventDefault: () => {},
+    } as unknown as Event);
+    expect(calls).toEqual(["taskMenu:run:one#1"]);
+    calls.length = 0;
+    // Keyboard twin on the row itself.
+    keyOn(row, "ContextMenu");
+    keyOn(row, "F10", { shiftKey: true });
+    expect(calls).toEqual(["taskMenu:run:one#1", "taskMenu:run:one#1"]);
+    calls.length = 0;
+    // The visible trigger (owner 2026-11-13): the row-menu-btn idiom inside
+    // the row, named, and opening the SAME menu without leaking into the
+    // row's click-to-open.
+    const kebab = root.querySelector(".subagent-row .row-menu-btn") as HTMLElement;
+    expect(kebab.getAttribute("aria-label")).toBe("Subagent actions");
+    kebab.click();
+    expect(calls).toEqual(["taskMenu:run:one#1"]);
+    calls.length = 0;
+    // Enter/Space on the row open the transcript; a keydown that STARTED on
+    // the kebab never double-activates the row (target guard, session idiom).
+    expect(keyOn(row, "Enter")).toBe(false); // prevented
+    expect(calls).toEqual(["openTask:run:one#1"]);
+    calls.length = 0;
+    kebab.dispatchEvent({
+      type: "keydown",
+      key: "Enter",
+      target: kebab,
+      currentTarget: row,
+      preventDefault: () => {},
+    } as unknown as Event);
+    expect(calls).toEqual([]);
   });
 });
 

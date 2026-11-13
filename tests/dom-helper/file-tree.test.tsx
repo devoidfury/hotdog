@@ -13,6 +13,7 @@ import {
   FileTree,
   emptyFileTree,
   openFileTree,
+  revealDir,
   toggleDir,
   applyListDir,
   filesTab,
@@ -184,6 +185,38 @@ describe("file tree state ops", () => {
     });
     expect(capped.dirs["/rootA"]?.truncated).toBe(true);
   });
+
+  it("revealDir expands the whole ancestor chain + the dir, re-runs the open machinery, marks the selection", () => {
+    const { state, fetches } = revealDir(emptyFileTree(), "/rootA/runs/run-9");
+    // Selection rides; the exact chain is expanded (root + ancestors + self).
+    expect(state.selected).toBe("/rootA/runs/run-9");
+    expect(Object.keys(state.expanded).sort()).toEqual([
+      "/rootA",
+      "/rootA/runs",
+      "/rootA/runs/run-9",
+    ]);
+    // The fetches are exactly what opening a tree with those expansions mints.
+    expect(fetches).toEqual([
+      {}, // roots (no path)
+      { path: "/rootA" },
+      { path: "/rootA/runs" },
+      { path: "/rootA/runs/run-9" },
+    ].map((f, i) => ({ requestId: i + 1, ...f })));
+  });
+
+  it("revealDir is additive: existing expansions survive, repeated slashes and a relative path expand nothing bogus", () => {
+    const base = treeWith({ expanded: { "/rootA/docs": true } });
+    const { state } = revealDir(base, "/rootA//runs/run-9/");
+    expect(state.expanded["/rootA/docs"]).toBe(true);
+    expect(state.expanded["/rootA/runs"]).toBe(true);
+    expect(state.expanded["/rootA/runs/run-9"]).toBe(true);
+    expect(state.expanded[""]).toBeUndefined();
+    const rel = revealDir(emptyFileTree(), "relative/dir");
+    expect(rel.state.selected).toBe("relative/dir");
+    // No leading slash: nothing new expands (the row can only come from a
+    // root anyway; the roots reply prunes anything that lists outside).
+    expect(Object.keys(rel.state.expanded)).toEqual([]);
+  });
 });
 
 // ── Rendering ────────────────────────────────────────────────────────────────
@@ -203,6 +236,26 @@ describe("file tree rendering", () => {
     expect(rows.map((r) => text(r.querySelector(".ft-name")))).toEqual(["rootA", "rootB"]);
     click(rows[0]!.querySelector(".ft-row-btn"));
     expect(toggled).toBe("/rootA");
+  });
+
+  it("the REVEALED dir's row carries the ft-selected class + aria-current (roots and nested rows alike)", () => {
+    const root = renderTree({
+      tree: treeWith({
+        roots: { status: "ok", entries: [{ name: "rootA", path: "/rootA" }] },
+        selected: "/rootA/sub",
+        expanded: { "/rootA": true },
+        dirs: { "/rootA": { status: "ok", entries: [{ name: "sub", path: "/rootA/sub", isDir: true }] } },
+      }),
+    });
+    const sel = root.querySelector(".ft-selected") as unknown as HTMLElement;
+    expect(sel).toBeTruthy();
+    expect(sel.getAttribute("data-path")).toBe("/rootA/sub");
+    expect(sel.getAttribute("aria-current")).toBe("true");
+    // No reveal: no row is marked.
+    const plain = renderTree({
+      tree: treeWith({ roots: { status: "ok", entries: [{ name: "rootA", path: "/rootA" }] } }),
+    });
+    expect(plain.querySelector(".ft-selected")).toBeNull();
   });
 
   it("empty roots answer honestly; loading states render", () => {

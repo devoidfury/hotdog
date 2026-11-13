@@ -20,6 +20,7 @@ import {
   type ProviderDef,
 } from "@core/config/providers.ts";
 import { S2C, taskActivityMessage, C2SMessage } from "./protocol.ts";
+import { taskActivityWithPosture, taskWire } from "./wire-messages.ts";
 import { TaskManager } from "@core/session/task-manager.ts";
 import type { TaskObserverEvent } from "@core/session/task-types.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
@@ -253,7 +254,7 @@ export function createWsServer(
   // Subagent tasks for webui/ws sessions: the registry's SessionManager is built without taskConfig,
   // so the TaskManager lives here. Publishing it as the taskManager service lets delegate_task
   // resolve lazily; the observer relays spawn/status/activity to every connected client --
-  // the webui subagents panel consumes it, and nothing reaches the main chat transcript.
+  // the webui subagent feed consumes it, and nothing reaches the main chat transcript.
   // Hoisted so the returned stopTaskManager() can reach it (null when no registry).
   let taskManager: TaskManager | null = null;
   if (resolvedCore?.modelRegistry) {
@@ -283,7 +284,8 @@ export function createWsServer(
         if (ev.task.sessionId) {
           registry.broadcastScoped(ev.task.sessionId, {
             type: S2C.TASK_UPDATE,
-            task: ev.task,
+            // Wire-mapped beside the snapshot idiom (agentLogPath rides).
+            task: taskWire(ev.task),
           });
         }
         // A terminal task has no live turn left to resolve its pending
@@ -303,6 +305,17 @@ export function createWsServer(
       }
       const activityMsg = taskActivityMessage(ev.taskId, ev.event);
       if (!activityMsg) return;
+      // Posture parity (owner ruling 2026-11-13): the display-DSL
+      // descriptors the session TOOL_CALL frames carry ride here too,
+      // resolved from the worker agent's own tool registry -- so the
+      // subagent transcript's ToolBlocks reach the identical read-box /
+      // inline-diff / code-block postures. Enriched BEFORE buffering, so
+      // live delivery and taskActivityHistory replay carry the same bytes.
+      activityMsg.activity = taskActivityWithPosture(
+        activityMsg.activity,
+        ev.event,
+        (toolName) => tm.getTaskToolMetadata(ev.taskId, toolName),
+      );
       // Buffer always for replay (the reset sentinel trims instead of
       // storing; see recordTaskActivity); live delivery only to the owning
       // session (orphan tasks belong to no tab).

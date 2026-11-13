@@ -16,6 +16,7 @@ import type { TurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
 import { S2C, type TaskActivityWire } from "./protocol.ts";
+import { taskWire } from "./wire-messages.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import { sharedExecFenceDisplay, toolExecModeLabel, sharedToolExecDegraded } from "@core/tool-exec-broker.ts";
@@ -184,7 +185,7 @@ export class SessionRegistry {
     );
   }
 
-  /** Publish the TaskManager whose observer feeds the webui subagents panel. */
+  /** Publish the TaskManager whose observer feeds the webui subagent feed. */
   setTaskManager(taskManager: TaskManager | null): void {
     this.#taskManager = taskManager;
   }
@@ -205,8 +206,8 @@ export class SessionRegistry {
    * Bounded: items per task, tasks per server (oldest-inserted evicted).
    * The live-only `reset` sentinel is consumed here as a trim, never stored:
    * the retry replaces the dead attempt, so its trailing streamed items leave
-   * the buffer too -- a panel rebuilt after reconnect must not resurrect text
-   * the live panel already dropped. */
+   * the buffer too -- a transcript view rebuilt after reconnect must not
+   * resurrect text the live view already dropped. */
   recordTaskActivity(taskId: string, activity: TaskActivityWire): void {
     if (activity.kind === "reset") {
       const buffered = this.#taskActivityHistory.get(taskId);
@@ -247,7 +248,7 @@ export class SessionRegistry {
     if (!sessionId || !this.#taskManager) return;
     SessionRegistry.sendSafe(ws, {
       type: S2C.TASK_LIST,
-      tasks: this.#taskManager.listTasks().filter((t) => t.sessionId === sessionId),
+      tasks: this.#taskManager.listTasks().filter((t) => t.sessionId === sessionId).map(taskWire),
     });
   }
 

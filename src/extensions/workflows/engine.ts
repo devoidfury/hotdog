@@ -491,6 +491,9 @@ export class WorkflowRun {
             parentModel: this.#cfg.parentModel,
             ...this.#managerAgentOpt(),
             park: true,
+            // The run dir rides to the webui task feed (reveal action); the
+            // journal dir IS this run's, so every node/judge task points home.
+            runDir: this.#cfg.runDir,
             onTurn: (t) => {
               this.#turnEnded(nr);
               nr.gate?.deliver(t);
@@ -749,6 +752,7 @@ export class WorkflowRun {
           parentModel: this.#cfg.parentModel,
           ...this.#managerAgentOpt(),
           park: true,
+          runDir: this.#cfg.runDir,
           onTurn: (t) => {
             this.#turnEnded(jnr);
             jnr.gate?.deliver(t);

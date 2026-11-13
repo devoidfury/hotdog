@@ -158,6 +158,48 @@ export function IconWorkbench(): JsxChild {
   );
 }
 
+/** Reasoning-visibility toggle glyph: a thought bubble carrying the reasoning
+ *  TEXT inside it -- two lines (the long, then the short) when reasoning is
+ *  shown, the same bubble empty when hidden. The flip is presence-vs-absence
+ *  of the content itself in the bubble's empty interior, the same structural
+ *  code that beat every mark-addition when the bulb's rays were chosen; the
+ *  bulb is gone entirely (owner: "a different icon than the bulb").
+ *
+ *  The candidates were rasterized at true 20px before choosing (sheets +
+ *  device-pixel peeps under tmp/, batch notes in the run dir): a BRAIN -- the
+ *  stock Lucide/Tabler brains weld into a scribble at 20px/stroke-2
+ *  (rendered as reference) and every simplified left-profile survives only
+ *  as a potato blob whose 1-2 creases change ~18 of 400 device pixels
+ *  (flip delta ~1590); a thought CLOUD v2 (scalloped outline, NO trailing
+ *  dots, nub low-left) -- a dozen redrafts all failed the same way at the
+ *  device level: scallop junctions weld into a wall or a stray dot, shallow
+ *  bumps read as a starfish, and the 3-lobe cloud reads as a HEART (even
+ *  Lucide's own cloud, rasterized here as proof) -- so the comic cloud is
+ *  dead at this size, exactly like its trailing dots were; and zzz, the
+ *  sparsest glyph in the field (79 ink px vs ~180) with an unreadable 3px
+ *  second Z. This bubble survives: both lines rasterize as separate marks
+ *  (flip delta 3577 muted / 4570 bright, 42 changed device px, max swing
+ *  full ink-to-bg) and the empty interior says "content hidden" at any ink
+ *  level. A pure opacity treatment dims more pixels (5842+) but was rejected
+ *  anyway: a faded glyph reads as DISABLED rather than toggled, and the
+ *  hover accent at the lightest still-legible alpha (~0.6, muted ink holds
+ *  >=3.5:1 on both theme headers) drops the purple hover ink to 2.2:1. Ink
+ *  is 18x16 device px in both states (the shield beside it is 16x18),
+ *  nothing shifts between states.
+ *
+ *  Color stays currentColor on both states: hiding reasoning is a benign
+ *  per-browser VIEW preference, so nothing borrows the fence's error tint
+ *  (color-honesty). The thinking-on / thinking-off class is the identity
+ *  the tests pin plus the CSS hook; both states keep it. */
+export function IconThinking({ off = false }: { off?: boolean }): JsxChild {
+  return (
+    <Glyph size={HEADER_ICON_SIZE} strokeWidth={2} className={off ? "thinking-off" : "thinking-on"}>
+      <path d="M20.75 6v8a2 2 0 0 1-2 2H7.75l-4 3.5V16H4.75a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" />
+      {off ? null : <path d="M7.25 9h9M7.25 12h5.5" />}
+    </Glyph>
+  );
+}
+
 /** Clockwise reload arrow (tree Refresh / viewer Reload / dialog Refresh). */
 export function IconReload({ className }: { className?: string }): JsxChild {
   return (

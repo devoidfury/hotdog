@@ -48,7 +48,8 @@ export const C2S = {
   // Subagent task control (delegates to TaskManager primitives)
   TASK_INTERRUPT: "taskInterrupt",
   TASK_FOLLOWUP: "taskFollowup",
-  // Replay buffered activity for one task (reconnecting panel; see TASK_ACTIVITY_HISTORY)
+  // Replay buffered activity for one task (subagent view opening with an
+  // empty buffer; see TASK_ACTIVITY_HISTORY)
   TASK_ACTIVITY_REQUEST: "taskActivityRequest",
   // Per-session exec-fence flip from the webui header strip:
   // { type, sessionId, policy: "off" | "probe" }. The server answers with a
@@ -195,7 +196,10 @@ export const S2C = {
   TASK_LIST: "taskList",
   TASK_UPDATE: "taskUpdate",
   TASK_ACTIVITY: "taskActivity",
-  // Reply to C2S TASK_ACTIVITY_REQUEST: buffered tail, requesting socket only
+  // Reply to C2S TASK_ACTIVITY_REQUEST, requesting socket only. ONE source
+  // per task state, picked server-side (handleTaskActivityRequest): settled
+  // tasks replay their durable session log; unsettled tasks get the
+  // in-memory buffer. A missing log degrades to the buffer, never to silence.
   TASK_ACTIVITY_HISTORY: "taskActivityHistory",
   // Subagent task control reply (sent to the requesting socket only; the
   // status change itself rides the broadcast taskUpdate observer feed)
@@ -825,7 +829,8 @@ export type ReadFileResultWire = {
 // ── Subagent task feed ──────────────────────────────────────────────────────
 
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
-import { toolContentText } from "@utils/tool-content.ts";
+import { toolContentText, wrapperContentText } from "@utils/tool-content.ts";
+import { conversationContent, LOG_SOURCE } from "@core/session/session-log.ts";
 
 /**
  * Display snapshot of one task agent (TaskManager.TaskInfo on the wire).
@@ -846,6 +851,27 @@ export interface TaskInfoWire {
   inRun: boolean;
   /** Wall start of the in-flight turn, null when none; live display adds (now - turnStartedAt). */
   turnStartedAt: number | null;
+  /**
+   * The worker agent's own session id -- the key of its durable session log
+   * (a finished subagent is a finished session). Additive: old clients ignore
+   * it; the row menu uses it for Export/Copy-path, and the server's
+   * TASK_ACTIVITY_HISTORY replay reads that log for settled tasks.
+   */
+  agentSessionId?: string;
+  /**
+   * Server-derived display field (taskWire): the absolute log FILE path of
+   * the worker's session, present iff agentSessionId rides and the core
+   * path helper accepts it -- the cold rows' logPath grammar, feeding the
+   * row menu's "Copy log file path" (hidden when omitted, never dead).
+   */
+  agentLogPath?: string;
+  /**
+   * Absolute workflow run dir (engine spawns only), straight from the
+   * spawn-time metadata. Absent for delegate-style tasks -- which is what
+   * makes the webui's Reveal-run-dir item honest-by-construction (no dir, no
+   * item; never a clickable dead entry).
+   */
+  runDir?: string;
 }
 
 /**
@@ -858,18 +884,48 @@ export interface TaskInfoWire {
  * trailing streamed blocks on receiving it, and the server buffer consumes it
  * as a trim instead of storing it (see SessionRegistry.recordTaskActivity),
  * so a replayed taskActivityHistory can never carry one and can never clear
- * a rebuilt panel view.
+ * a rebuilt subagent transcript view.
+ *
+ * The tool kinds carry the SAME display-descriptor fields the session
+ * TOOL_CALL/TOOL_RESULT frames do (argsSummary = the registry-resolved fold,
+ * display = the declared ToolDisplayWire parts, startLine = the edit's
+ * landing line). The subagent transcript renders through the same
+ * MessageListManager a session rides, so the posture data must ride here too
+ * (owner ruling 2026-11-13: viewing a subagent renders like any session
+ * view); the relay resolves them from the worker agent's own tool registry
+ * via taskActivityWithPosture in wire-messages.ts -- the s2cToolCall/
+ * s2cToolResult computation, not a copy. Fully additive optional fields: a
+ * tool with no declared display parts rides no `display` (the fold it does
+ * ride is the hint-free one the session frame computes too -- parity, not
+ * presence), and old clients ignore what they do not know.
  */
 export type TaskActivityWire =
   | { kind: "text"; content: string }
   | { kind: "reasoning"; content: string }
-  | { kind: "tool_call"; name: string; args: string }
-  | { kind: "tool_result"; name: string; output: string; error?: string }
+  | {
+      kind: "tool_call";
+      name: string;
+      args: string;
+      /** s2cToolCall's fold, tri-state on purpose: "" = "no summary, no
+       *  client fallback header" (the declaring tool's parts are the story). */
+      argsSummary?: string;
+      /** Declared display parts, forwarded exactly like the session frame. */
+      display?: ToolDisplayWire[];
+    }
+  | {
+      kind: "tool_result";
+      name: string;
+      output: string;
+      error?: string;
+      /** Where the edit landed (positive integer gate, see s2cToolResult):
+       *  numbers the diff gutters with real file lines. */
+      startLine?: number;
+    }
   | { kind: "reset" };
 
 /**
  * Ceiling on relayed tool args/output per activity item. Task agents can emit
- * megabyte tool results; the panel shows a summary, and the socket should not
+ * megabyte tool results; the webui transcript view shows a summary, and the socket should not
  * carry whole file dumps.
  */
 export const MAX_TASK_ACTIVITY_CHARS = 4000;
@@ -881,7 +937,7 @@ function truncateActivity(value: string): string {
 
 /**
  * Serialize one task-agent OutputEvent into a wire activity payload, or null when the
- * event is not part of the panel's view (usage, session plumbing...). Reasoning
+ * event is not part of the webui subagent view (usage, session plumbing...). Reasoning
  * deltas get their own kind for separate styling.
  * The task id is NOT part of payload -- the enclosing taskActivity message has it (see taskActivityMessage).
  */
@@ -894,7 +950,7 @@ export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | nu
       return event.content ? { kind: "reasoning", content: event.content } : null;
     case OUTPUT_EVENT.STREAM_RESET:
       // The relay's counterpart of the main-chat streamReset S2C: the dead
-      // attempt's streamed fragments must retract in the task panel too.
+      // attempt's streamed fragments must retract in the subagent transcript too.
       return { kind: "reset" };
     case OUTPUT_EVENT.TOOL_CALL:
       return { kind: "tool_call", name: event.toolName, args: truncateActivity(event.input) };
@@ -910,6 +966,77 @@ export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | nu
     default:
       return null;
   }
+}
+
+/**
+ * The settled-task counterpart of taskActivityFromEvent: fold a durable
+ * session log (readSessionEntries' EPOCH view -- the same cold-log read the
+ * session replay and /export ride) into transcript items. Doctrine: a viewed
+ * subagent is a session view, and a FINISHED subagent is a finished session,
+ * so a settled task's full transcript replays from its own session log while
+ * the in-memory buffer (300-item ring, reset-trim, whole-task eviction)
+ * serves only live tasks. ONE authority per task state, chosen server-side in
+ * handleTaskActivityRequest -- the client keeps its single render path and
+ * can never double-render.
+ *
+ * Per-entry mapping mirrors replayLogSlice's log semantics but keeps the
+ * RELAY's item order (reasoning -> text -> calls): the transcript view was
+ * painted live in relay order, and a settled replay must look identical.
+ * Sources the live feed never had (input prompts, system_prompt, turn and
+ * other bookkeeping markers, token_usage) render nothing: the activity
+ * grammar has no user lane (see the relay's no-userMessage note), and
+ * fabricating one would paint a transcript the live view never showed.
+ * Tool-result names resolve tool_name -> the producing llm entry's call name
+ * (old logs predate tool_name; replay's own resolution) -> "unknown". Texts
+ * ride the same MAX_TASK_ACTIVITY_CHARS cap as the live relay (one surface,
+ * one ceiling). Display-DSL posture is deliberately NOT folded here: the
+ * cold browse (handleViewLog) resolves it at entry level for the full log
+ * view; the task transcript's fold would need the released worker's registry,
+ * which no longer exists -- a settled block renders the honest hint-free fold
+ * the client computes from the args.
+ */
+export function taskActivityFromLogEntries(
+  entries: Array<{ source?: unknown } & Record<string, unknown>>,
+): TaskActivityWire[] {
+  const callNames = new Map<string, string>();
+  for (const e of entries) {
+    if (e.source !== LOG_SOURCE.LLM || !Array.isArray(e.tool_calls)) continue;
+    for (const tc of e.tool_calls as Array<{ id?: string; function?: { name?: string } }>) {
+      if (tc?.id && tc.function?.name) callNames.set(tc.id, tc.function.name);
+    }
+  }
+  const items: TaskActivityWire[] = [];
+  for (const e of entries) {
+    if (e.source === LOG_SOURCE.LLM) {
+      const reasoning = e.reasoning_content;
+      if (typeof reasoning === "string" && reasoning !== "") {
+        items.push({ kind: "reasoning", content: truncateActivity(reasoning) });
+      }
+      const text = wrapperContentText(conversationContent(e as never));
+      if (text !== "") items.push({ kind: "text", content: truncateActivity(text) });
+      const calls = Array.isArray(e.tool_calls)
+        ? (e.tool_calls as Array<{ id?: string; name?: string; function?: { name?: string; arguments?: string } }>)
+        : [];
+      for (const tc of calls) {
+        const name = tc?.function?.name || tc?.name || "unknown";
+        const rawArgs = tc?.function?.arguments ?? (typeof (tc as { arguments?: unknown }).arguments === "string" ? (tc as { arguments: string }).arguments : "{}");
+        items.push({ kind: "tool_call", name, args: truncateActivity(rawArgs) });
+      }
+    } else if (e.source === LOG_SOURCE.TOOL_RESULT) {
+      const callId = typeof e.tool_call_id === "string" ? e.tool_call_id : undefined;
+      const name =
+        (typeof e.tool_name === "string" && e.tool_name !== "" ? e.tool_name : undefined) ||
+        (callId ? callNames.get(callId) : undefined) ||
+        "unknown";
+      items.push({
+        kind: "tool_result",
+        name,
+        output: truncateActivity(toolContentText(conversationContent(e as never))),
+      });
+    }
+    // Every other source is bookkeeping or a lane the relay never had.
+  }
+  return items;
 }
 
 /**

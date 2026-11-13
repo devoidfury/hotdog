@@ -61,6 +61,12 @@ export interface FileTreeState {
   /** Cache + live state per expanded-or-expanding directory (absolute path). */
   dirs: Record<string, FileTreeDirState>;
   expanded: Record<string, boolean>;
+  /**
+   * The revealed path (revealDir): the row matching it renders selected
+   * until the next reveal or refresh. Pure display state -- no storage, no
+   * fetch consequence; null = nothing revealed.
+   */
+  selected: string | null;
   /** Monotonic request sequence. */
   seq: number;
   /** requestId (string-keyed, JSON-safe) -> the dir it asked for ("" = roots). */
@@ -148,7 +154,7 @@ function underAnyRoot(path: string, roots: FileRootWire[]): boolean {
 export function emptyFileTree(): FileTreeState {
   const expanded: Record<string, boolean> = {};
   for (const path of storedExpanded()) expanded[path] = true;
-  return { roots: null, dirs: {}, expanded, seq: 0, pending: {} };
+  return { roots: null, dirs: {}, expanded, selected: null, seq: 0, pending: {} };
 }
 
 /**
@@ -177,9 +183,39 @@ export function openFileTree(s: FileTreeState): { state: FileTreeState; fetches:
     if (s.expanded[dir]) dirs[dir] = { status: "loading", entries: [] };
   }
   return {
-    state: { roots: { status: "loading", entries: [] }, dirs, expanded: s.expanded, seq, pending },
+    state: { roots: { status: "loading", entries: [] }, dirs, expanded: s.expanded, selected: s.selected, seq, pending },
     fetches,
   };
+}
+
+/**
+ * REVEAL a path (the subagent row menu's "Reveal run directory"): expand
+ * every ancestor plus the path itself, mark it selected, then run the tree
+ * through the EXISTING open machinery (roots re-request + every expanded dir
+ * re-request -- the doctrine's "re-request on every tree open", so reveal
+ * adds zero new fetch logic). Honest degradation for free: the roots reply
+ * already prunes expansions that live under no current root, so a run dir
+ * outside the workspace roots self-clears and simply renders no row; a dir
+ * that lists-error keeps the server's verbatim one-liner on its row. Paths
+ * are absolute POSIX (the server's join() built them); relative input
+ * expands nothing new and only re-selects.
+ */
+export function revealDir(s: FileTreeState, path: string): { state: FileTreeState; fetches: TreeFetch[] } {
+  const expanded = { ...s.expanded };
+  // Absolute paths only: a relative one has no meaningful ancestor chain in
+  // the tree's coordinate space (rows live under absolute roots), so it just
+  // selects -- and no row can match it anyway. Run dirs are absolute by
+  // construction (the engine's join of an absolute runs root).
+  if (path.startsWith("/")) {
+    let cur = "";
+    for (const seg of path.split("/")) {
+      if (!seg) continue; // absolute leading "" and any doubled slashes
+      cur = `${cur}/${seg}`;
+      expanded[cur] = true;
+    }
+  }
+  persistExpanded(expanded);
+  return openFileTree({ ...s, expanded, selected: path });
 }
 
 /**
@@ -334,6 +370,7 @@ function TreeRow({ tree, entry, depth, onToggleDir, onOpenFile, onContextMenu }:
   onContextMenu: FileTreeProps["onContextMenu"];
 }) {
   const expanded = entry.isDir === true && tree.expanded[entry.path] === true;
+  const selected = tree.selected === entry.path;
   const open = (): void => (entry.isDir ? onToggleDir(entry.path) : onOpenFile(entry.path));
   const title = entry.isSymlink
     ? `${entry.path} (symlink -- target not resolved)`
@@ -341,7 +378,12 @@ function TreeRow({ tree, entry, depth, onToggleDir, onOpenFile, onContextMenu }:
       ? `${entry.path} (${entry.size} bytes)`
       : entry.path;
   return (
-    <div className={`ft-row${entry.isDir ? " ft-dir" : " ft-file"}`} data-path={entry.path} data-depth={depth}>
+    <div
+      className={`ft-row${entry.isDir ? " ft-dir" : " ft-file"}${selected ? " ft-selected" : ""}`}
+      data-path={entry.path}
+      data-depth={depth}
+      aria-current={selected ? "true" : undefined}
+    >
       <button
         type="button"
         className="ft-row-btn"
@@ -397,8 +439,15 @@ export function FileTree(p: FileTreeProps) {
       {roots && roots.status === "ok"
         ? roots.entries.map((root) => {
             const expanded = p.tree.expanded[root.path] === true;
+            const selected = p.tree.selected === root.path;
             return (
-              <div className="ft-row ft-root" data-path={root.path} data-depth={0} key={root.path}>
+              <div
+                className={`ft-row ft-root${selected ? " ft-selected" : ""}`}
+                data-path={root.path}
+                data-depth={0}
+                key={root.path}
+                aria-current={selected ? "true" : undefined}
+              >
                 <button
                   type="button"
                   className="ft-row-btn"

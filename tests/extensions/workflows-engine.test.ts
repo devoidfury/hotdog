@@ -292,6 +292,9 @@ describe("engine: state machine & gates", () => {
     const infos = fake.manager.listTasks();
     expect(infos.length).toBeGreaterThan(0);
     for (const t of infos) expect(t.sessionId).toBeNull();
+    // EVERY engine spawn carries its run dir (the webui Reveal source): the
+    // run's own dir, stamped from RunConfig on node AND judge spawns.
+    for (const t of infos) expect(t.runDir).toBe(dir);
   });
 
   it("runs a linear graph; downstream sees upstream pointer summaries", async () => {

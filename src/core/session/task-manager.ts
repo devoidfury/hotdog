@@ -19,6 +19,7 @@ import { makeProviderHealth, type ProviderHealth } from "./provider-health.ts";
 import { TaskScheduler } from "./task-scheduler.ts";
 import { TaskExecution } from "./task-execution.ts";
 import type { AgentLike } from "./index.ts";
+import type { ToolMetadata } from "../extensions/tool-registry.ts";
 
 import {
   TASK_STATUS,
@@ -209,6 +210,10 @@ export class TaskManager {
       taskId: entry.taskId,
       description: entry.description,
       sessionId: entry.sessionId,
+      // Additive display fields (omit-when-absent keeps old wire frames
+      // byte-identical): the worker's durable-log key + the engine run dir.
+      ...(entry.agentSessionId !== null ? { agentSessionId: entry.agentSessionId } : {}),
+      ...(entry.runDir !== null ? { runDir: entry.runDir } : {}),
       status: entry.statusRef.value,
       createdAt: entry.createdAt,
       startedAt: entry.startedAt,
@@ -304,6 +309,32 @@ export class TaskManager {
     const entry = this.#tasks.get(taskId);
     if (!entry) return undefined;
     return entry.agent ? entry.agent.sessionId : null;
+  }
+
+  /**
+   * Display metadata (ToolMetadata) for one tool of a task's WORKER agent,
+   * resolved from the worker's own tool registry -- the same source the
+   * websocket channel reads for a session's live TOOL_CALL frames. The
+   * webui task relay consults it to stamp display-DSL posture fields onto
+   * relayed activity (see taskActivityWithPosture in websocket/
+   * wire-messages.ts), so a subagent transcript renders the same postures
+   * as a session view. Undefined for unknown ids, a released agent (the
+   * terminal slim record carries no agent), or a host agent without a
+   * registry: the relay then falls back to the same hint-free fold the
+   * session channel computes for an undeclared tool (no display parts).
+   * Structural read -- AgentLike has no toolRegistry slot, the host's real
+   * Agent does (same cast posture as SessionRegistry.createChannel).
+   */
+  getTaskToolMetadata(
+    taskId: string,
+    toolName: string,
+  ): ToolMetadata | undefined {
+    const entry = this.#tasks.get(taskId);
+    if (!entry?.agent) return undefined;
+    const registry = (entry.agent as unknown as {
+      toolRegistry?: { getMetadata?: (name: string) => ToolMetadata | undefined };
+    }).toolRegistry;
+    return registry?.getMetadata?.(toolName);
   }
 
   /** Exposed for extensions. */
@@ -421,6 +452,10 @@ export class TaskManager {
       // Capture the delegating session with the reservation, so a session
       // teardown during the planning window can abort the task too.
       sessionId: options.managerAgent ? options.managerAgent.sessionId : null,
+      // Log-key of the worker's own session (set when the agent is built) and
+      // the engine's run dir (reveal). Both ride TaskInfo additively.
+      agentSessionId: null,
+      runDir: options.runDir ?? null,
       provider: "",
       model: "",
       intent: "",

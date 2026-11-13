@@ -12,10 +12,11 @@ import {
   IconPalette,
   IconShield,
   IconShieldCheck,
+  IconThinking,
   IconWorkbench,
 } from "./icons.tsx";
 import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH, WORKBENCH_DEFAULT_WIDTH } from "./utils.ts";
-import { createPanelResize } from "./panel-resize.ts";
+import { createPanelResize, decodeCollapsed, encodeCollapsed } from "./panel-resize.ts";
 import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
 import {
   LoginScreen,
@@ -35,8 +36,8 @@ import {
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire } from "./chat.ts";
-import type { ConfigKeyEditWire, EditConfigListResultWire } from "@extensions/websocket/protocol.ts";
-import { SubagentsStrip, TaskPanel, createActivityRegistry } from "./subagents.tsx";
+import type { ConfigKeyEditWire, EditConfigListResultWire, TaskInfoWire } from "@extensions/websocket/protocol.ts";
+import { chipLabel } from "./subagents.tsx";
 import {
   persistWorkbenchTabs,
   seedWorkbenchStoreFromStorage,
@@ -46,6 +47,7 @@ import {
 import {
   emptyFileTree,
   openFileTree,
+  revealDir,
   toggleDir,
   applyListDir,
   filesTab,
@@ -91,7 +93,6 @@ import {
   type SettingsPanelState,
   type ListOpSend,
 } from "./settings-view.tsx";
-import { createCoalescer } from "./batch.ts";
 import { audioBlobToWav } from "./wav.ts";
 
 type Screen = "login" | "main";
@@ -558,13 +559,31 @@ function onEditConfigList(requestId: number | undefined, result: EditConfigListR
   }
 }
 
-// Subagent overlay panels: task ids with an open panel, bottom-first; the
-// last entry renders above the others. nowAtom ticks once per second while a
-// task is live so elapsed times refresh.
-const openTasksAtom = reactiveState<string[]>([]);
-const stripExpandedAtom = reactiveState<boolean>(false);
+// Subagent sidebar rows: nowAtom ticks once per second while a task is live
+// so the rows' elapsed clocks refresh (running rows advance, parked and
+// finished rows freeze on their own -- see formatElapsed). The section's
+// collapse is a plain view setting: the same "1"/"0" codec the panel seam
+// uses, persisted across reloads and logins, no resize machinery (the
+// section is content-sized).
 const nowAtom = reactiveState<number>(Date.now());
 let taskTickTimer: ReturnType<typeof setInterval> | null = null;
+
+const SUBAGENTS_COLLAPSED_KEY = "hotdog.subagentsCollapsed";
+const subagentsCollapsedAtom = reactiveState<boolean>(false);
+
+function restoreSubagentsCollapsed(): void {
+  try {
+    subagentsCollapsedAtom(decodeCollapsed(window.localStorage.getItem(SUBAGENTS_COLLAPSED_KEY)));
+  } catch {}
+}
+
+function onToggleSubagents(): void {
+  const next = !subagentsCollapsedAtom();
+  subagentsCollapsedAtom(next);
+  try {
+    window.localStorage.setItem(SUBAGENTS_COLLAPSED_KEY, encodeCollapsed(next));
+  } catch {}
+}
 
 function syncTaskTick(): void {
   const tasks = chat?.tasksAtom() ?? [];
@@ -577,23 +596,13 @@ function syncTaskTick(): void {
   }
 }
 
-function openTask(taskId: string): void {
-  // Panel opened after a page refresh: fetch the buffered history first.
-  if (chat && chat.getTaskActivity(taskId).length === 0) chat.requestTaskActivity(taskId);
-  // Re-opening brings the panel to the front instead of duplicating it.
-  openTasksAtom([...openTasksAtom().filter((id) => id !== taskId), taskId]);
-}
-
-function closeTask(taskId: string): void {
-  openTasksAtom(openTasksAtom().filter((id) => id !== taskId));
-}
-
-function cancelTask(taskId: string): void {
-  // Server delegates to TaskManager.interruptTask; the taskUpdate feed
-  // flips the panel status to cancelled on the way back.
-  if (confirm(`Cancel task ${taskId}? In-flight work is aborted.`)) {
-    chat?.interruptTask(taskId);
-  }
+/** The main pane shows something other than the live manager transcript
+ *  (a browsed cold log OR an open subagent transcript): file drops and the
+ *  fence toggle stay inert in both -- they act on the ATTACHED session, not
+ *  on the pane's subject. The composer differs by mode (see App's
+ *  composerLocked): a cold log locks it, a subagent view steers the task. */
+function inBrowseView(): boolean {
+  return activeLogIdAtom() !== null || (chat?.viewedTaskIdAtom() ?? null) !== null;
 }
 
 // Tab-completion popup for the composer (server-driven, see C2S.COMPLETE).
@@ -668,6 +677,16 @@ const chatInputRef = domRef<HTMLTextAreaElement>((el) => {
     if (draft !== null && el.value === "") {
       el.value = draft;
       autoResize(el);
+      // create() fires refs while the node is still detached, and a detached
+      // textarea measures scrollHeight 0 (verified in headless Chromium), so
+      // the call above pins height:"0px" -- CSS min-height then clamps it to
+      // a collapsed one-liner and only the first keypress would re-measure.
+      // Re-run the SAME routine one microtask later: the synchronous mount/
+      // patch has inserted the subtree by then, so scrollHeight is real. The
+      // identity guard skips a composer unmounted before the microtask ran.
+      queueMicrotask(() => {
+        if (chatInputEl === el) autoResize(el);
+      });
     }
     // Same reload-survival for staged attachments (never clobber live ones).
     if (attachmentsAtom().length === 0) {
@@ -700,13 +719,6 @@ const contextMenuRef = domRef<HTMLDivElement>((el) => {
 const fileInputRef = domRef<HTMLInputElement>((el) => {
   fileInputEl = el;
 });
-
-// Panel activity bodies are per-panel declarative mounts (see subagents.tsx):
-// a delta re-renders only the open panels' small trees, coalesced to one
-// pass per frame. activityVersionAtom is deliberately NOT in the App render
-// effect -- streaming subagent output must never re-render the transcript.
-const activityRegistry = createActivityRegistry((taskId) => chat?.getTaskActivity(taskId) ?? []);
-const flushActivityViews = createCoalescer(() => activityRegistry.renderAll());
 
 // Several atoms usually flip within one WS message (e.g. sessionInfo sets
 // title, model, and models); coalesce to one render per microtask so each
@@ -757,8 +769,6 @@ function handleAuthFailure(): void {
     clearInterval(taskTickTimer);
     taskTickTimer = null;
   }
-  openTasksAtom([]);
-  stripExpandedAtom(false);
   // The message-list div persists across login screens (main-ui is only
   // class-hidden), and each new chat attaches a fresh MessageListManager.
   // Clear the container so stale messages from the old chat do not pile up.
@@ -812,6 +822,17 @@ function clearLogView(): void {
 function onCloseLogView(): void {
   clearLogView();
   // Re-switching to the same session makes the server replay history.
+  const currentSessionId = chat?.sessionIdAtom();
+  if (currentSessionId && chat) {
+    chat.switchSession(currentSessionId);
+  }
+}
+
+/** Leave the subagent transcript: the pane goes back to the manager exactly
+ *  like closing a log view (re-switch replays the live transcript, and the
+ *  sessionCreated attach lifts chat's transcript suppression). */
+function onCloseSubagentView(): void {
+  chat?.closeSubagentView();
   const currentSessionId = chat?.sessionIdAtom();
   if (currentSessionId && chat) {
     chat.switchSession(currentSessionId);
@@ -1137,6 +1158,124 @@ function onLogMenu(e: MouseEvent | KeyboardEvent, logId: string, rowEl: HTMLElem
   armContextMenu(rowEl);
 }
 
+/**
+ * Subagent row menu (owner 2026-11-13): the SAME context-menu machinery as
+ * the session/log rows (rowMenuPoint anchor, armContextMenu focus-return and
+ * WAI navigation), with an action set honest for a task row -- zero dead
+ * items. "Open" is exactly the row-click action; Cancel rides only while the
+ * task is live (taskInterrupt refuses non-active tasks, so a settled row
+ * never shows it). The manager card's own menu above it stays untouched.
+ *
+ * Log actions ride the SESSION idioms exactly (doctrine: a subagent's
+ * transcript IS a session log):
+ *  - "Copy log file path" appears iff agentLogPath rode, and "Export" iff
+ *    agentSessionId rode -- the rowMenuTail "hidden when the server omitted
+ *    it" precedent, item by item (taskWire emits both from the same worker
+ *    id, so a queued/plan-failed task -- no agent, no log -- hides both;
+ *    absent, never disabled-but-dead). Export is the EXACT existing
+ *    /export/:id route keyed by that id -- token validation and sessions-dir
+ *    containment are that route's own, unchanged (no new endpoint).
+ *  - "Reveal run directory" appears iff runDir rode the feed (workflow
+ *    spawns only; delegate tasks have no run dir, so the item is absent --
+ *    absence IS the truthful treatment for an inapplicable action).
+ * Matrix: queued (agent never built) hides both log items; running and every
+ * settled state keep them (the log persists past settle -- Export must stay
+ * reachable to triage a failure); reveal is state-agnostic, run-dir-or-absent
+ * only.
+ */
+function onSubagentMenu(
+  e: MouseEvent | KeyboardEvent,
+  t: TaskInfoWire,
+  rowEl: HTMLElement,
+): void {
+  const { x, y } = rowMenuPoint(e, rowEl);
+  const live = t.status === "running" || t.status === "queued";
+  // Narrow the optional fields once into consts: the spreads below build
+  // closures, and a closure over `t.x` loses the truthiness narrowing.
+  const workerSid = t.agentSessionId;
+  const logPath = t.agentLogPath;
+  const runDir = t.runDir;
+  contextMenuAtom({
+    x,
+    y,
+    items: [
+      {
+        label: "Open",
+        onSelect: () => {
+          chat?.viewSubagent(t.taskId);
+          dismissContextMenu();
+        },
+      },
+      {
+        label: "Copy task id",
+        onSelect: () => {
+          copyRowValue(t.taskId, "Task id");
+          dismissContextMenu();
+        },
+      },
+      // Copy-path rides agentLogPath and Export rides agentSessionId -- the
+      // rowMenuTail precedent exactly: each item is HIDDEN when the server
+      // omitted its field (taskWire sends both from the same id, so in
+      // practice they appear together). The copy idiom's own toast refuses
+      // a clipboard-less page; nothing here is ever click-and-dead.
+      ...(logPath
+        ? [
+            {
+              label: "Copy log file path",
+              onSelect: () => {
+                copyRowValue(logPath, "Log file path");
+                dismissContextMenu();
+              },
+            },
+          ]
+        : []),
+      ...(workerSid
+        ? [
+            {
+              label: "Export",
+              onSelect: () => {
+                exportSessionLog(workerSid);
+                dismissContextMenu();
+              },
+            },
+          ]
+        : []),
+      ...(runDir
+        ? [
+            {
+              label: "Reveal run directory",
+              onSelect: () => {
+                revealTaskRunDir(runDir);
+                dismissContextMenu();
+              },
+            },
+          ]
+        : []),
+      ...(live
+        ? [
+            {
+              label: "Cancel",
+              // Confirm like the retired panel's Cancel (it tears down a
+              // running agent); the stop itself is the server-validated
+              // taskInterrupt, and a refusal lands as a taskControl notice.
+              onSelect: () => {
+                if (
+                  confirm(
+                    `Cancel subagent ${shortId(t.taskId)}? The task agent stops and the task is marked cancelled.`,
+                  )
+                ) {
+                  chat?.interruptTask(t.taskId);
+                }
+                dismissContextMenu();
+              },
+            },
+          ]
+        : []),
+    ],
+  });
+  armContextMenu(rowEl);
+}
+
 // Close the menu on any mousedown outside it. No deferral needed: the
 // mousedown that opens a menu lands before contextMenuAtom is set, and a
 // right-click on another item closes the old menu and reopens via contextmenu.
@@ -1282,6 +1421,24 @@ function dispatchTreeFetches(fetches: TreeFetch[]): void {
 function openFilesTab(): void {
   workbenchStore.open(filesTab());
   const { state, fetches } = openFileTree(fileTreeAtom());
+  fileTreeAtom(state);
+  dispatchTreeFetches(fetches);
+}
+
+/**
+ * Reveal a task's workflow RUN DIR (subagent row menu): open/focus the tree
+ * tab (the onOpenFilePath visibility idiom -- a reveal into a collapsed pane
+ * would otherwise be invisible), expand every ancestor + the dir and select
+ * it (revealDir), and dispatch the minted fetches through the SAME listDir
+ * path as a hand-opened tree. Confinement is the server's (handlers-files
+ * resolveSafe): a run dir outside the workspace roots answers with the
+ * honest one-liner, and the roots reply prunes expansions under no root --
+ * the reveal degrades to "nothing to show", never to a lie.
+ */
+function revealTaskRunDir(path: string): void {
+  workbenchStore.open(filesTab());
+  if (workbenchCollapsedAtom()) onToggleWorkbench();
+  const { state, fetches } = revealDir(fileTreeAtom(), path);
   fileTreeAtom(state);
   dispatchTreeFetches(fetches);
 }
@@ -1463,8 +1620,11 @@ function startChat(): void {
   });
 
   // Re-render on any chat atom change; also refresh the sidebar when the
-  // model changes, and pull profiles once connected. activityVersionAtom is
-  // absent on purpose -- it drives flushActivityViews, not the JSX tree.
+  // model changes, and pull profiles once connected. Streaming subagent
+  // output must NEVER land in this list: activity frames go straight from
+  // chat.ts into the MessageListManager's imperative DOM path, so a task
+  // streaming hundreds of deltas per second repaints nothing here -- the
+  // sidebar rows refresh on tasksAtom (per taskUpdate) and the 1 s tick.
   stopChatEffects = effect(render, [
     chat.connectedAtom,
     chat.workingAtom,
@@ -1474,13 +1634,12 @@ function startChat(): void {
     chat.profilesAtom,
     chat.currentProfileAtom,
     chat.tasksAtom,
-    chat.taskControlAtom,
+    chat.viewedTaskIdAtom,
     chat.sttEnabledAtom,
     chat.toolExecAtom,
     chat.hideThinkingAtom,
     sttPhaseAtom,
   ]);
-  const stopActivitySync = chat.activityVersionAtom.effect(flushActivityViews);
   const stopModelRefresh = chat.currentModelAtom.effect(() => {
     chat?.listSessions();
   });
@@ -1522,7 +1681,6 @@ function startChat(): void {
     stopProfilesRefresh();
     stopTaskTick();
     stopLiveAnnounce();
-    stopActivitySync();
   };
 }
 
@@ -1540,6 +1698,29 @@ function onChatSubmit(e: Event): void {
   const text = el.value.trim();
   const attachments = attachmentsAtom();
   if (!text && attachments.length === 0) return;
+
+  // Subagent view steers the VIEWED task (owner ruling 2026-11-13): the
+  // follow-up route is text-only on the wire (taskFollowup carries no
+  // files), and a slash command would act on the attached manager, which
+  // is not what the pane is showing. With staged attachments the box and
+  // the draft stay intact -- the bytes are the user's until a route can
+  // carry them.
+  const viewedTaskId = chat?.viewedTaskIdAtom() ?? null;
+  if (viewedTaskId !== null) {
+    if (attachments.length > 0) {
+      showCopyToast("Attachments can't ride subagent steering -- send text only");
+      return;
+    }
+    if (!text) return;
+    el.value = "";
+    autoResize(el);
+    cancelDraftSave();
+    clearDraft();
+    dismissCompletion();
+    chat?.taskFollowup(viewedTaskId, text);
+    return;
+  }
+
   el.value = "";
   autoResize(el);
   // Send consumes the draft: drop the pending save too, or a later unload
@@ -1682,14 +1863,14 @@ function setDragHighlight(el: EventTarget | null, on: boolean): void {
 }
 
 function onComposerDragenter(e: DragEvent): void {
-  if (!hasFiles(e.dataTransfer) || activeLogIdAtom()) return;
+  if (!hasFiles(e.dataTransfer) || inBrowseView()) return;
   e.preventDefault(); // without this the drop never fires on the composer
   dragDepth++;
   setDragHighlight(e.currentTarget, true);
 }
 
 function onComposerDragover(e: DragEvent): void {
-  if (hasFiles(e.dataTransfer) && !activeLogIdAtom()) e.preventDefault();
+  if (hasFiles(e.dataTransfer) && !inBrowseView()) e.preventDefault();
 }
 
 function onComposerDragleave(e: DragEvent): void {
@@ -1701,7 +1882,7 @@ function onComposerDragleave(e: DragEvent): void {
 function onComposerDrop(e: DragEvent): void {
   dragDepth = 0;
   setDragHighlight(e.currentTarget, false);
-  if (activeLogIdAtom()) return; // read-only log view: ignore file drops
+  if (inBrowseView()) return; // read-only browse view: ignore file drops
   const files = Array.from(e.dataTransfer?.files ?? []);
   if (files.length === 0) return;
   e.preventDefault();
@@ -1935,7 +2116,7 @@ function onCancelSession(sessionId: string): void {
  * push -- never optimistically -- so a refusal can never leave it lying.
  */
 function onFenceToggle(): void {
-  if (activeLogIdAtom()) return; // log view: no live session to act on
+  if (inBrowseView()) return; // browse view: no live session to act on
   const sid = chat?.sessionIdAtom() ?? null;
   const posture = chat?.toolExecAtom() ?? "";
   if (!sid || !posture.includes("fence:")) return;
@@ -1985,7 +2166,7 @@ function classifyFence(toolExec: string): FenceState {
  * human sentence. A live control rides the toggle hint; a log view names the
  * scope limit instead.
  */
-function fenceTitle(state: FenceState, toolExec: string, clickable: boolean, logView: boolean): string {
+function fenceTitle(state: FenceState, toolExec: string, clickable: boolean, browseView: boolean): string {
   const jail = toolExec.includes("fence: off")
     ? "partial (worker, fence off)"
     : `enabled (worker, ${toolExec.includes("fence: seatbelt") ? "seatbelt" : "bwrap"})`;
@@ -2008,7 +2189,7 @@ function fenceTitle(state: FenceState, toolExec: string, clickable: boolean, log
       break;
   }
   if (clickable) return `${base} -- click to toggle this session's fence`;
-  if (logView) return `${base} -- the fence toggle acts on live sessions only, not on a viewed log`;
+  if (browseView) return `${base} -- the fence toggle acts on live sessions only, not on a viewed log or subagent transcript`;
   return base;
 }
 
@@ -2071,7 +2252,23 @@ function App() {
   const connected = chat?.connectedAtom() ?? false;
   const working = chat?.workingAtom() ?? false;
   const activeLogId = activeLogIdAtom();
+  // Subagent transcript on screen (the chat-side browse pointer; the sidebar
+  // row highlight and the header label both read it).
+  const viewedTaskId = chat?.viewedTaskIdAtom() ?? null;
+  // A cold log is a read-only record: it locks the composer. A subagent
+  // transcript is a LIVE view (owner ruling 2026-11-13): the composer stays
+  // operable and STEERS the viewed task; the only thing the mode locks is
+  // the profile/model switching dropdowns (selects-locked). fence/drops
+  // stay inert in both browse modes alike.
+  const composerLocked = activeLogId !== null;
+  // Either browse mode keeps the fence strip and file drops inert: both act
+  // on the ATTACHED session, which is not what the pane is showing.
+  const browseView = activeLogId !== null || viewedTaskId !== null;
   const sessionId = chat?.sessionIdAtom() ?? null;
+  // The header identity follows the pane's subject: the viewed task's id
+  // while its transcript is on screen, the attached session's otherwise
+  // (the copy button always copies the full id of what it names).
+  const badgeId = viewedTaskId ?? sessionId;
   // Tool-exec plane posture: "worker (fence: bwrap | seatbelt | off | none -- probe failed)" / "inline (unfenced)",
   // plus anything carrying [degraded: ...].
   const toolExec = chat?.toolExecAtom() ?? "";
@@ -2082,11 +2279,11 @@ function App() {
   const themeId = themeIdAtom();
   const themeTitle = `Theme: ${labelForTheme(themeId)} -- click to switch to ${labelForTheme(nextThemeId(themeId))}`;
   // The strip becomes a control exactly when the ATTACHED live session shows a worker-plane fence;
-  // inline/degraded postures and log view stay inert.
+  // inline/degraded postures and either browse mode stay inert.
   const fenceClickable =
     toolExec.includes("fence:") &&
     !toolExec.includes("degraded") &&
-    !activeLogId &&
+    !browseView &&
     sessionId !== null;
   // The chip's posture (classifyFence above). The chip is icon-only: the
   // full posture text lives in the title and an aria-label naming it.
@@ -2096,9 +2293,9 @@ function App() {
   const attachments = attachmentsAtom();
   const allTasks = chat ? chat.tasksAtom() : [];
   // Scope the server-global feed to the open session; null-parent tasks
-  // (workflow-engine spawns) belong to no session and never show.
+  // (workflow-engine spawns) belong to no session and never show. The
+  // sidebar re-scopes per card; this copy labels the viewed subagent.
   const tasks = allTasks.filter((t) => sessionId !== null && t.sessionId === sessionId);
-  const openTasks = openTasksAtom();
   const sttPhase = sttPhaseAtom();
   const settings = settingsAtom();
   // Workbench file-tab bodies read their state here (atoms flip on WS
@@ -2133,12 +2330,27 @@ function App() {
           pinnedIds={pinnedIdsAtom()}
           onCreate={() => chat?.createSession({})}
           onSwitch={(id) => {
-            // Clicking the active session only matters in log view mode (switches back).
-            if (id === sessionId && !activeLogId) return;
+            // Clicking the active session only matters in a browse mode
+            // (log view or a subagent transcript): it switches back.
+            if (id === sessionId && !browseView) return;
             chat?.switchSession(id);
           }}
           onCancel={onCancelSession}
           onViewLog={(id) => chat?.viewLog(id)}
+          onOpenTask={(id) => {
+            // Browse modes are exclusive (chat-side); clear the app-side log
+            // mirror in the SAME click so the header never carries both
+            // labels (and the log row drops its highlight). The chat already
+            // dropped its viewedLogId; this keeps the mirrors honest.
+            if (activeLogIdAtom() !== null) clearLogView();
+            chat?.viewSubagent(id);
+          }}
+          onTaskMenu={onSubagentMenu}
+          onToggleSubagents={onToggleSubagents}
+          tasks={allTasks}
+          viewedTaskId={viewedTaskId}
+          subagentsCollapsed={subagentsCollapsedAtom()}
+          now={nowAtom()}
           onSessionMenu={onSessionMenu}
           onLogMenu={onLogMenu}
           search={searchAtom()}
@@ -2169,21 +2381,40 @@ function App() {
 
         <main id="chat-area">
           <div id="session-info">
-            <span id="session-label" style={activeLogId ? { opacity: "0.5" } : undefined}>
-              Session:{" "}
+            {/* The pane's subject identity (owner ruling 2026-11-13): a
+                subagent view names itself -- "Subagent:" + the viewed task's
+                id badge, copy landing the FULL task id -- and reverts to the
+                attached "Session:" the moment the mode ends. The dim is log
+                view only: there the badge shows the attached id while the
+                pane is a cold record, so it must read as not-the-subject;
+                in subagent view the badge IS the subject, so it never dims. */}
+            <span id="session-label" style={activeLogId !== null ? { opacity: "0.5" } : undefined}>
+              {viewedTaskId !== null ? "Subagent:" : "Session:"}{" "}
               <button
                 type="button"
                 id="current-session-id"
                 className={copyFlashAtom() ? "copied" : undefined}
-                title={sessionId ? "Copy full session id" : undefined}
-                aria-label={sessionId ? "Copy full session id" : undefined}
+                title={
+                  badgeId
+                    ? viewedTaskId !== null
+                      ? "Copy full subagent id"
+                      : "Copy full session id"
+                    : undefined
+                }
+                aria-label={
+                  badgeId
+                    ? viewedTaskId !== null
+                      ? "Copy full subagent id"
+                      : "Copy full session id"
+                    : undefined
+                }
                 onClick={
-                  sessionId
+                  badgeId
                     ? (e: MouseEvent) => {
                         // The badge had no click action before the copy; stop
                         // so it never bubbles into an ancestor handler.
                         e.stopPropagation();
-                        onCopySessionId(sessionId);
+                        onCopySessionId(badgeId);
                       }
                     : undefined
                 }
@@ -2194,7 +2425,7 @@ function App() {
                     affordance: the inline icon/check pair (CSS swaps them
                     on .copied); the empty glyphs add nothing to
                     textContent, so the badge stays pure id text. */}
-                {sessionId ? sessionId.slice(0, 8) : ""}
+                {badgeId ? badgeId.slice(0, 8) : ""}
                 <IconCopy className="session-copy-icon" />
                 <IconCheck className="session-copy-check" />
               </button>
@@ -2207,11 +2438,40 @@ function App() {
                 </button>
               </span>
             ) : null}
+            {/* The subagent mirror of the log-view label: what is on screen
+                (step label idiom; full task id on the native title) and how
+                to leave. An evicted task falls back to labeling from its
+                bare id. */}
+            {viewedTaskId !== null ? (
+              <span id="subagent-view-label">
+                Viewing subagent:{" "}
+                <span id="current-subagent-label" title={viewedTaskId}>
+                  {chipLabel(
+                    tasks.find((t) => t.taskId === viewedTaskId) ?? {
+                      taskId: viewedTaskId,
+                      description: "",
+                    },
+                  )}
+                </span>{" "}
+                <button
+                  id="close-subagent-view-btn"
+                  title="Close subagent view"
+                  onClick={onCloseSubagentView}
+                >
+                  ✕
+                </button>
+              </span>
+            ) : null}
             <span className="header-status-group">
-              {/* Reasoning visibility chip: a per-browser view toggle (chat
+              {/* Reasoning visibility toggle: a per-browser view switch (chat
                   toggleHideThinking -> localStorage + a sweep of every thinking
-                  block). Always clickable -- including in log view, where it is
-                  the only way to hide a cold log's reasoning. */}
+                  block). Glyph-only chrome now, to match the fence/gear/theme/
+                  workbench siblings: icons.tsx IconThinking -- the thought
+                  bubble WITH its two text lines while reasoning is shown, the
+                  same bubble empty when it is hidden -- with zero text node;
+                  the full truth rides title + aria-label. Always
+                  clickable -- including in log view, where it is the only way
+                  to hide a cold log's reasoning. */}
               <button
                 type="button"
                 id="thinking-toggle"
@@ -2220,12 +2480,15 @@ function App() {
                 // Pressed = the view deviation is engaged (reasoning hidden);
                 // the default "shown" state reads unpressed.
                 aria-pressed={hideThinking}
+                aria-label={`Reasoning ${hideThinking ? "hidden" : "shown"}: click to ${
+                  hideThinking ? "show" : "hide"
+                } reasoning in this browser`}
                 title={
-                  "Show or hide reasoning in this browser (view setting only: it does not change the CLI's /thinking session state, and it applies to the log being browsed too)"
+                  `Reasoning ${hideThinking ? "hidden" : "shown"} in this browser -- show or hide it here (view setting only: it does not change the CLI's /thinking session state, and it applies to the log being browsed too)`
                 }
                 onClick={() => chat?.toggleHideThinking()}
               >
-                reasoning {hideThinking ? "hidden" : "shown"}
+                <IconThinking off={hideThinking} />
               </button>
               {toolExec ? (
                 // Exec-fence posture, icon-only: the posture -> shape/tint
@@ -2241,7 +2504,7 @@ function App() {
                   ]
                     .filter(Boolean)
                     .join(" ") || undefined}
-                  title={fenceTitle(fenceState, toolExec, fenceClickable, activeLogId !== null)}
+                  title={fenceTitle(fenceState, toolExec, fenceClickable, browseView)}
                   aria-label={`Tool execution: ${toolExec}`}
                   onClick={fenceClickable ? onFenceToggle : undefined}
                 >
@@ -2309,17 +2572,18 @@ function App() {
           {/* Imperatively managed by MessageListManager via ref (streaming markdown). */}
           <div id="message-list" ref={messageListRef}></div>
 
-          {/* Live background task agents; clicking a chip opens its overlay. */}
-          <SubagentsStrip
-            tasks={tasks}
-            now={nowAtom()}
-            openTaskIds={openTasks}
-            onOpen={openTask}
-            expanded={stripExpandedAtom()}
-            onToggleExpanded={() => stripExpandedAtom(!stripExpandedAtom())}
-          />
-
-          <div id="input-area" className={activeLogId ? "read-only" : undefined}>
+          {/* Subagent view is NOT read-only (composer steers the task);
+              only a browsed cold log locks the input area. selects-locked:
+              the profile/model switching dropdowns are the one exception
+              to "works like a live session" while a subagent is viewed. */}
+          <div
+            id="input-area"
+            className={
+              [composerLocked ? "read-only" : "", viewedTaskId !== null ? "selects-locked" : ""]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
+          >
             <form
               id="chat-form"
               onSubmit={onChatSubmit}
@@ -2365,10 +2629,10 @@ function App() {
               </div>
               <textarea
                 id="chat-input"
-                placeholder="Type a message..."
+                placeholder={viewedTaskId !== null ? "Steer the subagent..." : "Type a message..."}
                 autocomplete="off"
                 rows="1"
-                disabled={activeLogId !== null}
+                disabled={composerLocked}
                 ref={chatInputRef}
                 onInput={() => {
                   if (chatInputEl) autoResize(chatInputEl);
@@ -2397,9 +2661,17 @@ function App() {
                 <button
                   type="button"
                   id="attach-btn"
-                  title="Attach files to the next message"
-                  aria-label="Attach files to the next message"
-                  disabled={activeLogId !== null}
+                  title={
+                    viewedTaskId !== null && !composerLocked
+                      ? "Attachments can't ride subagent steering (text only)"
+                      : "Attach files to the next message"
+                  }
+                  aria-label={
+                    viewedTaskId !== null && !composerLocked
+                      ? "Attachments can't ride subagent steering (text only)"
+                      : "Attach files to the next message"
+                  }
+                  disabled={composerLocked || viewedTaskId !== null}
                   onClick={() => fileInputEl?.click()}
                 >
                   {/* currentColor idiom from icons.tsx; 1.8 stroke for the weight. */}
@@ -2414,7 +2686,9 @@ function App() {
                     className={sttPhase === "recording" ? "recording" : undefined}
                     title="Hold to record; the transcript is inserted into the input"
                     aria-label="Hold to record; the transcript is inserted into the input"
-                    disabled={activeLogId !== null || sttPhase === "transcribing"}
+                    // The mic only EDITS the box, so it keeps working in a
+                    // subagent view (the text it inserts steers the task).
+                    disabled={composerLocked || sttPhase === "transcribing"}
                     onMousedown={onMicMousedown}
                   >
                     {/* Idle = glyph only: aria-label + title carry the name.
@@ -2435,7 +2709,17 @@ function App() {
                 ) : null}
                 <label id="profile-selector">
                   Profile:{" "}
-                  <select id="profile-select" ref={profileSelectRef} onChange={onProfileChange}>
+                  {/* Profile/model switching belongs to the ATTACHED manager,
+                      never to the viewed subagent (owner ruling 2026-11-13:
+                      the one exception). Native disabled drops the selects
+                      from the tab order; the .selects-locked CSS carries the
+                      same dim the read-only composer pills use. */}
+                  <select
+                    id="profile-select"
+                    ref={profileSelectRef}
+                    disabled={viewedTaskId !== null}
+                    onChange={onProfileChange}
+                  >
                     {chat
                       ? Object.keys(chat.profilesAtom()).map((name) => (
                           <option key={name} value={name}>{name}</option>
@@ -2445,7 +2729,12 @@ function App() {
                 </label>
                 <label id="model-selector">
                   Model:{" "}
-                  <select id="model-select" ref={modelSelectRef} onChange={onModelChange}>
+                  <select
+                    id="model-select"
+                    ref={modelSelectRef}
+                    disabled={viewedTaskId !== null}
+                    onChange={onModelChange}
+                  >
                     {chat?.modelsAtom().map((name) => (
                       <option key={name} value={name}>
                         {name}
@@ -2453,7 +2742,8 @@ function App() {
                     ))}
                   </select>
                 </label>
-                {/* No steer control: every send steers (see the send site). */}
+                {/* No steer control: every send steers (see the send site;
+                    in a subagent view steering rides taskFollowup). */}
                 {/* Connection truth, moved out of the header: it renders
                     ONLY while disconnected -- zero DOM when connected, not a
                     hidden span -- immediately LEFT of Stop/Send in this row.
@@ -2526,24 +2816,6 @@ function App() {
           onOpenFiles={openFilesTab}
         />
 
-        {/* Stacked task overlays; the most recently opened sits on top. */}
-        {openTasks.map((id, i) => {
-          const task = tasks.find((t) => t.taskId === id);
-          if (!task || !chat) return null;
-          return (
-            <TaskPanel
-              key={id}
-              task={task}
-              now={nowAtom()}
-              zBase={100 + i}
-              control={chat.taskControlAtom()[id] ?? null}
-              bodyRef={activityRegistry.ref(id)}
-              onClose={closeTask}
-              onCancel={cancelTask}
-              onFollowup={(tid, message) => chat?.taskFollowup(tid, message)}
-            />
-          );
-        })}
         {/* Settings viewer + immediate-save editor dialog (settings button in the
             header). Mounted only while open; Escape closes (or collapses an
             expanded JSON container), ✕ closes, click-outside does NOT (values
@@ -2602,6 +2874,7 @@ async function init(): Promise<void> {
   sidebarPanel.restore();
   logsPanel.restore();
   workbenchPanel.restore();
+  restoreSubagentsCollapsed();
   // First-run default-collapsed: restore() honors a STORED choice ("0"
   // keeps the pane open across visits), but "no key" decodes as expanded
   // and an unopened workbench must never dock itself into the layout. Seed
@@ -2633,8 +2906,7 @@ async function init(): Promise<void> {
     logsCollapsedAtom,
     completionAtom,
     attachmentsAtom,
-    openTasksAtom,
-    stripExpandedAtom,
+    subagentsCollapsedAtom,
     nowAtom,
     copyFlashAtom,
     workbenchCollapsedAtom,

@@ -10,7 +10,7 @@
 ## Quick Start
 
 First, get your bun ready - you can snag one here if you don't have one already: [Bun](https://bun.sh)  
-(make sure it's version >= 1.4.2)
+(make sure it's version >= 1.4.3)
 
 ```sh
 git clone https://github.com/devoidfury/hotdog.git && cd hotdog

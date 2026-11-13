@@ -45,6 +45,11 @@ const EXT_LANG: Record<string, string> = {
   jsx: "jsx",
   mjs: "javascript",
   cjs: "javascript",
+  c: "c",
+  h: "c",
+  cc: "c",
+  cpp: "c",
+  hpp: "c",
   json: "json",
   jsonc: "json",
   md: "markdown",
@@ -62,9 +67,15 @@ const EXT_LANG: Record<string, string> = {
   hotdog: "toml",
 };
 
-/** Guess the tokenizer lang from the path's extension; undefined = plain. */
+/** Guess the tokenizer lang from the path's extension; undefined = plain.
+ *  Dockerfile has no extension to guess from, so the basename gets its own
+ *  case: `Dockerfile` and the build-variant spelling `Dockerfile.dev` both
+ *  name the dockerfile lang (the last-dot rule would answer undefined /
+ *  "dev" respectively). */
 export function guessLang(path: string): string | undefined {
   const base = path.split(/[/\\]/).pop() ?? "";
+  const lowered = base.toLowerCase();
+  if (lowered === "dockerfile" || lowered.startsWith("dockerfile.")) return "dockerfile";
   const dot = base.lastIndexOf(".");
   if (dot <= 0) return undefined;
   return EXT_LANG[base.slice(dot + 1).toLowerCase()];

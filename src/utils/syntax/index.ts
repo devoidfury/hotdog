@@ -6,7 +6,9 @@
  */
 
 import { tokenizeShell } from "./shell.ts";
+import { tokenizeC } from "./c.ts";
 import { tokenizeCss } from "./css.ts";
+import { tokenizeDockerfile } from "./dockerfile.ts";
 import { tokenizeHtml } from "./html.ts";
 import { tokenizeIni } from "./ini.ts";
 import { tokenizeJavaScript } from "./javascript.ts";
@@ -36,6 +38,8 @@ export type SyntaxTokenizer = (text: string) => SyntaxRun[];
 // default noise there, which is the documented ceiling (no JSX parser).
 const TOKENIZERS = new Map<string, SyntaxTokenizer>([
   ["shell", tokenizeShell],
+  ["c", tokenizeC],
+  ["dockerfile", tokenizeDockerfile],
   ["yaml", tokenizeYaml],
   ["json", tokenizeJson],
   ["css", tokenizeCss],

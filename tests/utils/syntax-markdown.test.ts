@@ -250,6 +250,47 @@ describe("fence state machine", () => {
     ]);
   });
 
+  it("routes c/dockerfile fences and the docker alias", () => {
+    for (const [info, lang] of [
+      ["c", "c"],
+      ["dockerfile", "dockerfile"],
+      ["docker", "dockerfile"],
+    ] as const) {
+      const s = newMdStreamState();
+      tokenizeMarkdownLine(`\`\`\`${info}`, s);
+      expect(s.lang).toBe(lang);
+    }
+    const s = newMdStreamState();
+    tokenizeMarkdownLine("```c", s);
+    expect(tokenizeMarkdownLine("int main(void) { return 0; } // done", s)).toEqual([
+      run("type", "int"),
+      run("default", " "),
+      run("fn", "main"),
+      run("operator", "("),
+      run("type", "void"),
+      run("operator", ")"),
+      run("default", " "),
+      run("operator", "{"),
+      run("default", " "),
+      run("keyword", "return"),
+      run("default", " "),
+      run("number", "0"),
+      run("operator", ";"),
+      run("default", " "),
+      run("operator", "}"),
+      run("default", " "),
+      run("comment", "// done"),
+    ]);
+    tokenizeMarkdownLine("```", s);
+    tokenizeMarkdownLine("```docker", s);
+    expect(tokenizeMarkdownLine("FROM alpine:latest", s)).toEqual([
+      run("keyword", "FROM"),
+      run("default", " "),
+      run("default", "alpine:latest"),
+    ]);
+    expect(tokenizeMarkdownLine("# base", s)).toEqual([run("comment", "# base")]); // comments are their own line, as in the parser
+  });
+
   it("requires same-char closers of at least the opening width", () => {
     const s = newMdStreamState();
     tokenizeMarkdownLine("````", s);

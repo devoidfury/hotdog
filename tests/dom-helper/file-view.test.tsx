@@ -69,6 +69,19 @@ describe("viewer language + tokens", () => {
     expect(guessLang("config.ini")).toBe("ini");
     expect(guessLang("page.xml")).toBe("xml");
     expect(guessLang("Cargo.toml")).toBe("toml");
+    // The C family all guesses "c" (one registry name, no per-spelling alias).
+    expect(guessLang("main.c")).toBe("c");
+    expect(guessLang("header.h")).toBe("c");
+    expect(guessLang("widget.cc")).toBe("c");
+    expect(guessLang("widget.cpp")).toBe("c");
+    expect(guessLang("widget.hpp")).toBe("c");
+    // Dockerfile has no extension: the basename special case catches the
+    // bare name and the build-variant spelling (case-insensitive), while a
+    // plain stemless dotfile still answers undefined.
+    expect(guessLang("/repo/Dockerfile")).toBe("dockerfile");
+    expect(guessLang("Dockerfile.dev")).toBe("dockerfile");
+    expect(guessLang("dockerfile")).toBe("dockerfile");
+    expect(guessLang("my.Dockerfile")).toBeUndefined(); // not the Dockerfile.* shape
   });
 
   it("shell lines tokenize; unknown lang renders ONE plain run (the registry contract)", () => {
@@ -83,6 +96,9 @@ describe("viewer language + tokens", () => {
     expect(tokenizeLine("k = v", "ini")[0]).toEqual({ type: "key", text: "k" });
     expect(tokenizeLine("<a/>", "xml")[0]).toEqual({ type: "operator", text: "<" });
     expect(tokenizeLine("def f():", "python")[0]).toEqual({ type: "keyword", text: "def" });
+    // The two newest resolve too.
+    expect(tokenizeLine("#include <x.h>", "c")[0]).toEqual({ type: "preproc", text: "#include <x.h>" });
+    expect(tokenizeLine("FROM alpine", "dockerfile")[0]).toEqual({ type: "keyword", text: "FROM" });
   });
 });
 

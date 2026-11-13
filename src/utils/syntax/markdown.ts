@@ -218,6 +218,7 @@ const LANG_ALIASES: Record<string, string> = {
   node: "javascript",
   ts: "typescript",
   py: "python",
+  docker: "dockerfile",
 };
 
 function resolveLang(info: string): string | null {

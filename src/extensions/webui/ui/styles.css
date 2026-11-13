@@ -2167,6 +2167,18 @@ body.logs-resizing .sidebar-header-resize {
 .tok-entity { color: var(--success); }
 .tok-doctype { color: var(--text-primary); font-weight: 600; }
 
+/* Markdown token classes (the streaming tokenizer's vocabulary; tok-marker
+   and tok-operator already exist from the yaml/shell blocks). Delimiters --
+   fences AND frontmatter rules -- recede like the terminal's md_fence; the
+   frontmatter block itself is the yaml class set above (same tokenizer).
+   Headings take the accent bold, strong bold only, inline code the warm
+   literal family, unstyled fenced lines the secondary wash. */
+.tok-heading { color: var(--accent); font-weight: 600; }
+.tok-fence { color: var(--text-muted); }
+.tok-code_block { color: var(--text-secondary); }
+.tok-strong { font-weight: 600; }
+.tok-code { color: var(--warning); }
+
 /* PROSE part: a quiet agent-message row with a left icon gutter. */
 .tool-prose {
     display: flex;

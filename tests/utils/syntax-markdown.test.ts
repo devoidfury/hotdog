@@ -8,6 +8,8 @@ import {
   tokenizeMarkdownLive,
   newMdStreamState,
   cloneMdStreamState,
+  hasFrontmatter,
+  tokenizeMarkdownDoc,
 } from "@utils/syntax/markdown.ts";
 import type { SyntaxRun } from "@utils/syntax/index.ts";
 
@@ -304,5 +306,149 @@ describe("lossless contract", () => {
       expect(committed.every((r) => r.text !== "")).toBe(true);
       expect(live.every((r) => r.text !== "")).toBe(true);
     }
+  });
+});
+
+describe("yaml frontmatter (opt-in document mode)", () => {
+  it("default state never detects: line-1 `---` stays an hr", () => {
+    const s = newMdStreamState();
+    expect(tok("---", s)).toEqual([run("marker", "---")]);
+    expect(s.frontmatter).toBe("off");
+  });
+
+  it("opens on line 1, yaml-routes the content, closes, resumes markdown", () => {
+    const s = newMdStreamState(true);
+    expect(tok("---", s)).toEqual([run("fence", "---")]);
+    expect(s.frontmatter).toBe("open");
+    expect(tok("name: explorer # scout", s)).toEqual([
+      run("key", "name"),
+      run("operator", ":"),
+      run("default", " "),
+      run("string", "explorer"),
+      run("default", " "),
+      run("comment", "# scout"),
+    ]);
+    expect(tok("manager: false", s)).toEqual([
+      run("key", "manager"),
+      run("operator", ":"),
+      run("default", " "),
+      run("boolean", "false"),
+    ]);
+    expect(tok("---", s)).toEqual([run("fence", "---")]);
+    expect(s.frontmatter).toBe("off");
+    expect(tok("# Your job", s)).toEqual([run("heading", "# Your job")]);
+  });
+
+  it("closes on the yaml document-end marker too", () => {
+    const s = newMdStreamState(true);
+    tok("---", s);
+    tok("a: 1", s);
+    expect(tok("...", s)).toEqual([run("fence", "...")]);
+    expect(s.frontmatter).toBe("off");
+  });
+
+  it("opens on line 1 only and never reopens", () => {
+    const s = newMdStreamState(true);
+    expect(tok("# Title", s)[0]!.type).toBe("heading");
+    expect(s.frontmatter).toBe("off"); // the await window is line 1, spent
+    expect(tok("---", s)).toEqual([run("marker", "---")]);
+    const t = newMdStreamState(true);
+    tok("---", t);
+    tok("a: 1", t);
+    tok("---", t);
+    expect(tok("---", t)).toEqual([run("marker", "---")]);
+    expect(tok("b: 2", t).map((r) => r.type)).toEqual(["default"]);
+  });
+
+  it("an indented or trailing-text opener is not frontmatter", () => {
+    const s = newMdStreamState(true);
+    expect(tok(" ---", s)[0]!.type).toBe("marker"); // hr grace, not frontmatter
+    const t = newMdStreamState(true);
+    expect(tok("--- oops", t)[0]!.type).toBe("default");
+    expect(t.frontmatter).toBe("off");
+  });
+
+  it("fences are inert inside frontmatter", () => {
+    const s = newMdStreamState(true);
+    tok("---", s);
+    const runs = tok("```js", s); // yaml reads it as one plain scalar
+    expect(runs).toEqual([run("string", "```js")]);
+    expect(s.fence).toBeNull();
+    tok("---", s);
+    expect(s.frontmatter).toBe("off");
+    // And a real fence after the block still opens.
+    tok("```sh", s);
+    expect(s.fence).toBe("```");
+  });
+
+  it("an unclosed opener keeps the rest of the document as yaml (streaming honesty)", () => {
+    const s = newMdStreamState(true);
+    tok("---", s);
+    expect(tok("no closer here", s).map((r) => r.type)).toEqual(["string"]);
+    // `--- text` does NOT close (the closer is a bare line) -- the yaml
+    // tokenizer itself reads it as its document-start marker plus content.
+    expect(tok("--- also not really ---", s).map((r) => r.type)).toEqual(["marker", "default", "string"]);
+    expect(s.frontmatter).toBe("open");
+  });
+
+  it("live pass: pure and repaint-stable in every phase", () => {
+    const s = newMdStreamState(true);
+    const fresh = JSON.stringify(s);
+    expect(tokenizeMarkdownLive("---", s)).toEqual([run("fence", "---")]);
+    expect(tokenizeMarkdownLive("---", s)).toEqual([run("fence", "---")]);
+    expect(JSON.stringify(s)).toBe(fresh); // await not spent by speculation
+    tok("---", s);
+    const live = tokenizeMarkdownLive("name: x", s);
+    const live2 = tokenizeMarkdownLive("name: x", s);
+    expect(live2).toEqual(live);
+    expect(live).toEqual(tokenizeMarkdownLine("name: x", cloneMdStreamState(s))); // bytes agree with the line pass
+    expect(JSON.stringify(s)).toBe('{"fence":null,"lang":null,"frontmatter":"open"}');
+  });
+
+  it("clone carries the frontmatter phase", () => {
+    const s = newMdStreamState(true);
+    expect(cloneMdStreamState(s)).toEqual({ fence: null, lang: null, frontmatter: "await" });
+    tok("---", s);
+    expect(cloneMdStreamState(s).frontmatter).toBe("open");
+  });
+
+  it("hasFrontmatter prescan: opener on line 1 AND a closer in view", () => {
+    expect(hasFrontmatter(["---", "a: 1", "---", "body"])).toBe(true);
+    expect(hasFrontmatter(["--- ", "..."])).toBe(true); // trailing ws + document-end closer
+    expect(hasFrontmatter(["---"])).toBe(false);
+    expect(hasFrontmatter(["---", "a: 1"])).toBe(false); // never closes
+    expect(hasFrontmatter(["", "---", "a", "---"])).toBe(false); // opener must be line 1
+    expect(hasFrontmatter([" ---", "---"])).toBe(false); // indented
+    expect(hasFrontmatter(["***", "---"])).toBe(false);
+    expect(hasFrontmatter([])).toBe(false);
+  });
+
+  it("tokenizeMarkdownDoc: a profile-shaped file, frontmatter then body", () => {
+    const lines = [
+      "---",
+      "name: explorer",
+      "description: A codebase scout",
+      "whitelist-tools: [\"find\", \"read\", \"grep\"]",
+      "visible-worker: true",
+      "---",
+      "",
+      "# Your job: codebase explorer",
+      "- read **everything**",
+      "---",
+      "```yaml",
+      "fenced: yaml",
+      "```",
+    ];
+    const rows = tokenizeMarkdownDoc(lines, hasFrontmatter(lines));
+    // Lossless per row: every row's runs rejoin to the row.
+    expect(rows.map((r) => r.map((x) => x.text).join(""))).toEqual(lines);
+    expect(types(rows[0]!)).toEqual(["fence"]);
+    expect(rows[1]!.filter((r) => r.type === "key").map((r) => r.text)).toEqual(["name"]);
+    expect(rows[3]!.filter((r) => r.type === "key").map((r) => r.text)).toEqual(["whitelist-tools"]);
+    expect(types(rows[4]!)).toEqual(["key", "operator", "default", "boolean"]);
+    expect(types(rows[5]!)).toEqual(["fence"]);
+    expect(types(rows[7]!)).toEqual(["heading"]);
+    expect(types(rows[9]!)).toEqual(["marker"]); // body hr after the closed block
+    expect(rows[11]!.filter((r) => r.type === "key").map((r) => r.text)).toEqual(["fenced"]);
   });
 });

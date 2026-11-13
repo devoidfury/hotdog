@@ -26,6 +26,7 @@
 //   returns false rather than guessing.
 
 import { getTokenizer, type SyntaxRun } from "@utils/syntax/index.ts";
+import { hasFrontmatter, tokenizeMarkdownDoc } from "@utils/syntax/markdown.ts";
 import type { ReadFileResultWire } from "@extensions/websocket/protocol.ts";
 
 // ── Language guessing (display only) ────────────────────────────────────────
@@ -77,6 +78,22 @@ export function tokenizeLine(line: string, lang: string | undefined): SyntaxRun[
   } catch {
     return [{ type: "default", text: line }];
   }
+}
+
+/**
+ * Tokenize the whole loaded window for rendering. Markdown is the one lang
+ * with line-crossing state (fences, YAML frontmatter) and is deliberately
+ * NOT in the stateless registry, so it drives `tokenizeMarkdownDoc` across
+ * the loaded lines instead; frontmatter opens only behind the `hasFrontmatter`
+ * prescan (opener on line 1 AND a visible closer), so a leading hr pair
+ * never paints as yaml and profile-style files light up. The pager honest
+ * limit: a frontmatter whose closer sits on an unread page reads plain
+ * until that page lands. Every other lang keeps the per-line registry
+ * path exactly as before.
+ */
+export function tokenizeFileLines(lines: string[], lang: string | undefined): SyntaxRun[][] {
+  if (lang === "markdown") return tokenizeMarkdownDoc(lines, hasFrontmatter(lines));
+  return lines.map((line) => tokenizeLine(line, lang));
 }
 
 // ── Pure state ───────────────────────────────────────────────────────────────
@@ -252,6 +269,10 @@ function LineRow({ n, text, runs }: { n: number; text: string; runs: SyntaxRun[]
 export function FileView(p: FileViewProps) {
   const view = p.view;
   const lang = guessLang(p.path);
+  // Tokenized once per render pass, in line order: markdown carries
+  // cross-line state (see tokenizeFileLines); everything else is the same
+  // per-line registry path, just hoisted out of the row map.
+  const rows = view ? tokenizeFileLines(view.lines, lang) : [];
   const name = p.path.split(/[/\\]/).pop() || p.path;
   const loading = !view || view.status === "loading";
   const failedHard = view?.status === "error";
@@ -289,7 +310,7 @@ export function FileView(p: FileViewProps) {
       {!failedHard && view ? (
         <div className="file-view-rows">
           {view.lines.map((line, i) => (
-            <LineRow key={i + 1} n={i + 1} text={line} runs={tokenizeLine(line, lang)} />
+            <LineRow key={i + 1} n={i + 1} text={line} runs={rows[i]!} />
           ))}
         </div>
       ) : null}

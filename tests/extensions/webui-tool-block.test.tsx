@@ -270,7 +270,7 @@ describe("codeRuns (shared tokenizer seam)", () => {
   });
 
   it("returns null for unknown or absent langs (plain <pre> render)", () => {
-    expect(codeRuns("x = 1", "python")).toBeNull();
+    expect(codeRuns("fn main() {}", "rust")).toBeNull();
     expect(codeRuns("a: 1")).toBeNull();
     expect(codeRuns("a: 1", "constructor")).toBeNull();
   });
@@ -333,6 +333,47 @@ describe("codeRuns (shared tokenizer seam)", () => {
       { cls: "tok-operator", text: "=" },
       { cls: null, text: " " },
       { cls: "tok-number", text: "1" },
+    ]);
+  });
+
+  it("tokenizes toml, ini, xml and python through the registry", () => {
+    expect(codeRuns('title = "hotdog" # n', "toml")).toEqual([
+      { cls: "tok-key", text: "title" },
+      { cls: null, text: " " },
+      { cls: "tok-operator", text: "=" },
+      { cls: null, text: " " },
+      { cls: "tok-string", text: '"hotdog"' },
+      { cls: null, text: " " },
+      { cls: "tok-comment", text: "# n" },
+    ]);
+    expect(codeRuns("[s]\nk=1", "ini")).toEqual([
+      { cls: "tok-section", text: "[s]" },
+      { cls: null, text: "\n" },
+      { cls: "tok-key", text: "k" },
+      { cls: "tok-operator", text: "=" },
+      { cls: "tok-string", text: "1" },
+    ]);
+    expect(codeRuns('<a b="c">&amp;</a>', "xml")).toEqual([
+      { cls: "tok-operator", text: "<" },
+      { cls: "tok-name", text: "a" },
+      { cls: null, text: " " },
+      { cls: "tok-attribute", text: "b" },
+      { cls: "tok-operator", text: "=" },
+      { cls: "tok-string", text: '"c"' },
+      { cls: "tok-operator", text: ">" },
+      { cls: "tok-entity", text: "&amp;" },
+      { cls: "tok-operator", text: "</" },
+      { cls: "tok-name", text: "a" },
+      { cls: "tok-operator", text: ">" },
+    ]);
+    // Adjacent same-class operator runs merge (codeRuns coalescing).
+    expect(codeRuns("def f(): pass", "python")).toEqual([
+      { cls: "tok-keyword", text: "def" },
+      { cls: null, text: " " },
+      { cls: "tok-fn", text: "f" },
+      { cls: "tok-operator", text: "():" },
+      { cls: null, text: " " },
+      { cls: "tok-keyword", text: "pass" },
     ]);
   });
 });
@@ -1219,7 +1260,7 @@ describe("code part (DOM)", () => {
     const { block } = mountBlock({
       name: "check",
       args: JSON.stringify({ yaml }),
-      display: [{ kind: "code", source: "args", arg: "yaml", lang: "python" }],
+      display: [{ kind: "code", source: "args", arg: "yaml", lang: "rust" }],
     });
     const pre = block.querySelector(".tool-code")!;
     // REAL content, never a JSON object with escaped \n.

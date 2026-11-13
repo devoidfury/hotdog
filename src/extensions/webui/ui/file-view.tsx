@@ -33,7 +33,7 @@ import { IconReload } from "./icons.tsx";
 // ── Language guessing (display only) ────────────────────────────────────────
 // Small local extension -> lang map. Registry contract: getTokenizer returns
 // undefined for an unknown lang and the viewer renders PLAIN TEXT, so the
-// map may name langs that have no tokenizer yet (python, rust, ...); naming
+// map may name langs that have no tokenizer yet (rust, go, ...); naming
 // them here is the honest guess, styling arrives when a tokenizer lands.
 
 const EXT_LANG: Record<string, string> = {
@@ -55,8 +55,10 @@ const EXT_LANG: Record<string, string> = {
   go: "go",
   css: "css",
   html: "html",
+  xml: "xml",
   yml: "yaml",
   yaml: "yaml",
+  ini: "ini",
   toml: "toml",
   hotdog: "toml",
 };

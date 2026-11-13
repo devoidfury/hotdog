@@ -11,10 +11,12 @@ export function expectCompletion(result: AgentRunResult | undefined | null): { t
   return result as { type: 'completion'; content: string };
 }
 
-/** Assert result is a tool_return and return it narrowed. */
-export function expectToolReturn(result: AgentRunResult | undefined | null): { type: 'tool_return'; outcome: string } {
+/** Assert result is a tool_return and return it narrowed (tracks the union). */
+export function expectToolReturn(
+  result: AgentRunResult | undefined | null,
+): Extract<AgentRunResult, { type: 'tool_return' }> {
   expect(result?.type).toBe('tool_return');
-  return result as { type: 'tool_return'; outcome: string };
+  return result as Extract<AgentRunResult, { type: 'tool_return' }>;
 }
 
 /**

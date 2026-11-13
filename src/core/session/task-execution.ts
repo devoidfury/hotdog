@@ -1,4 +1,5 @@
 import { logger } from "@utils/logger.ts";
+import { toolContentText } from "@utils/tool-content.ts";
 import { HOOKS } from "../hooks.ts";
 import { LlmError, formatError, isExpectedError } from "../error.ts";
 import type { AgentLike } from "./index.ts";
@@ -87,6 +88,10 @@ export class TaskExecution {
       return;
     }
     entry.agent = agent;
+    // Stamp the durable-log key beside the agent: terminal finalize nulls
+    // entry.agent, and a settled task's transcript replay needs the worker's
+    // session id exactly then (the log outlives the agent).
+    entry.agentSessionId = agent.sessionId;
     await this.#runTask(taskId, entry, agent, description);
   }
 
@@ -163,7 +168,15 @@ export class TaskExecution {
       if (runResult?.type === "completion") {
         turn = { status: "completed", result: runResult.content };
       } else if (runResult?.type === "tool_return") {
-        turn = { status: "completed", result: `Task completed via tool return: ${runResult.outcome}` };
+        // The stopping tool's content IS the result (a handoff summary or a
+        // wait note); the bare outcome word read as a fault to the manager.
+        const content = toolContentText(runResult.content);
+        turn = {
+          status: "completed",
+          result: content
+            ? `Completed via tool return: ${content}`
+            : `Task completed via tool return: ${runResult.outcome}`,
+        };
       } else {
         turn = { status: "completed", result: `Task provided no response` };
       }

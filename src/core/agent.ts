@@ -6,6 +6,7 @@ import { Message, contentToText, type ImageAttachment, type ToolCall, type Messa
 import { OUTPUT_EVENT, OutputEvent, EVENT_NAME_MAP, type EventName } from "./context/output.ts";
 import { createContextManager, type ContextManager } from "./context/context-manager.ts";
 import type { ForkCut } from "./context/rewind.ts";
+import type { ToolResultContent } from "./context/wrappers.ts";
 import { AgentError, ConfigError, formatError, LlmError } from "./error.ts";
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
 import { createStreamProcessor, StreamProcessor, type StreamRetryInfo, type StreamResult } from "./llm-client/stream-processor.ts";
@@ -39,7 +40,14 @@ export type TurnEndReason =
 
 export type AgentRunResult =
   | { type: 'completion'; content: string }
-  | { type: 'tool_return'; outcome: string }
+  /**
+   * A tool signaled stopLoop. `outcome` is the executor's stop word alone;
+   * `content` is the STOPPING tool result's content (the handoff summary, a
+   * wait note -- hosts deliver it as the turn result, `toolContentText`
+   * flattens it for display). Absent when no stopping result carried one,
+   * so the variant stays honest for stopLoop callers without content.
+   */
+  | { type: 'tool_return'; outcome: string; content?: ToolResultContent }
   /** Empty-completion budget spent; the run did not complete normally. */
   | { type: 'empty_response' };
 
@@ -613,7 +621,10 @@ export class Agent implements AgentLike {
         if (outcome !== "continue") {
           await this.#emitTurnEnd(iteration, response.fullText, toolResults, true, this.cancelled, "tool_return");
           turnEnded = true;
-          return { type: 'tool_return', outcome };
+          // The stopping tool's content is the turn's deliverable (the bare
+          // outcome word told hosts nothing); absent if none carried one.
+          const stopping = toolResults.find((tr) => tr.stopLoop);
+          return { type: 'tool_return', outcome, ...(stopping ? { content: stopping.content } : {}) };
         }
 
         await this.#emitTurnEnd(iteration, response.fullText, toolResults, false, this.cancelled, "continue");

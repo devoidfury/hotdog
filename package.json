@@ -10,15 +10,14 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@types/bun": "^1.4.3",
-    "typescript": "^7.0.2"
+    "@types/bun": "^1.4.3"
   },
   "bin": {
     "hotdog": "bin/hotdog"
   },
   "description": "AI agent harness with tool calling support. Zero dependencies, just bun.",
   "engines": {
-    "bun": ">=1.4.2"
+    "bun": ">=1.4.3"
   },
   "author": "Thomas Hunkapiller <tom@furycodes.com> (https://furycodes.com/)",
   "repository": {
@@ -30,11 +29,14 @@
     "loud-test": "bun test --parallel",
     "test": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --parallel",
     "coverage": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --coverage",
-    "check": "bun x tsc --noEmit",
+    "check": "bun check",
     "gen-fixtures": "bun evals/tools/prepare.ts"
   },
   "files": ["bin", "src", "examples", "tsconfig.json"],
-  "publishConfig": { "access": "public", "provenance": true },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "license": "MIT"
 }

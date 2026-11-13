@@ -31,8 +31,8 @@ import type { ReadFileResultWire } from "@extensions/websocket/protocol.ts";
 
 // ── Language guessing (display only) ────────────────────────────────────────
 // The registry owns the name metadata: every SyntaxDef names its own
-// extensions and basenames (see index.ts), including the guess-only langs
-// (rust, go) that have no tokenizer. Registry contract: getTokenizer
+// extensions and basenames (see index.ts), including the guess-only lang
+// (rust) that has no tokenizer. Registry contract: getTokenizer
 // returns undefined for an unknown or scannerless lang and the viewer
 // renders PLAIN TEXT -- a def that guesses honestly without a scanner is
 // exactly that posture, table entries and plain render agreeing.

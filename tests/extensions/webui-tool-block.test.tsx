@@ -416,6 +416,44 @@ describe("codeRuns (shared tokenizer seam)", () => {
       { cls: "tok-variable", text: "$P" },
     ]);
   });
+
+  it("tokenizes go, sql and make through the registry", () => {
+    // codeRuns coalesces adjacent same-class runs; default rides cls null.
+    expect(codeRuns('x := 3 // c\nfmt.Println("hi")', "go")).toEqual([
+      { cls: null, text: "x " },
+      { cls: "tok-operator", text: ":=" },
+      { cls: null, text: " " },
+      { cls: "tok-number", text: "3" },
+      { cls: null, text: " " },
+      { cls: "tok-comment", text: "// c" },
+      { cls: null, text: "\nfmt" },
+      { cls: "tok-operator", text: "." },
+      { cls: "tok-fn", text: "Println" },
+      { cls: "tok-operator", text: "(" },
+      { cls: "tok-string", text: '"hi"' },
+      { cls: "tok-operator", text: ")" },
+    ]);
+    expect(codeRuns("SELECT COUNT(*) FROM t; -- tail", "sql")).toEqual([
+      { cls: "tok-keyword", text: "SELECT" },
+      { cls: null, text: " " },
+      { cls: "tok-fn", text: "COUNT" },
+      { cls: null, text: "(*) " },
+      { cls: "tok-keyword", text: "FROM" },
+      { cls: null, text: " t" },
+      { cls: "tok-operator", text: ";" },
+      { cls: null, text: " " },
+      { cls: "tok-comment", text: "-- tail" },
+    ]);
+    expect(codeRuns("CC = gcc\n\t$(CC) -o app # link", "make")).toEqual([
+      { cls: "tok-key", text: "CC" },
+      { cls: null, text: " " },
+      { cls: "tok-operator", text: "=" },
+      { cls: null, text: " gcc\n\t" }, // the recipe tab coalesces into the wash
+      { cls: "tok-variable", text: "$(CC)" },
+      { cls: null, text: " -o app " },
+      { cls: "tok-comment", text: "# link" },
+    ]);
+  });
 });
 
 describe("proseHtml", () => {

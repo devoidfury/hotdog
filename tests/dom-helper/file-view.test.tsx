@@ -94,6 +94,17 @@ describe("viewer language + tokens", () => {
     expect(guessLang("widget.cc")).toBe("c");
     expect(guessLang("widget.cpp")).toBe("c");
     expect(guessLang("widget.hpp")).toBe("c");
+    // The batch's three: .go keeps its (now scanning) guess, .mk/.mak land,
+    // and Makefile is the extensionless basename shape (variant spelling and
+    // GNUmakefile included).
+    expect(guessLang("main.go")).toBe("go");
+    expect(guessLang("query.sql")).toBe("sql");
+    expect(guessLang("build.mk")).toBe("make");
+    expect(guessLang("rules.mak")).toBe("make");
+    expect(guessLang("/repo/Makefile")).toBe("make");
+    expect(guessLang("GNUmakefile")).toBe("make");
+    expect(guessLang("Makefile.dev")).toBe("make");
+    expect(guessLang("my.Makefile")).toBeUndefined(); // not the Makefile.* shape
     // Dockerfile has no extension: the basename special case catches the
     // bare name and the build-variant spelling (case-insensitive), while a
     // plain stemless dotfile still answers undefined.
@@ -118,6 +129,10 @@ describe("viewer language + tokens", () => {
     // The two newest resolve too.
     expect(tokenizeLine("#include <x.h>", "c")[0]).toEqual({ type: "preproc", text: "#include <x.h>" });
     expect(tokenizeLine("FROM alpine", "dockerfile")[0]).toEqual({ type: "keyword", text: "FROM" });
+    // This batch resolves: go/sql/make all answer through the registry now.
+    expect(tokenizeLine("x := 3", "go")[2]).toEqual({ type: "operator", text: ":=" });
+    expect(tokenizeLine("SELECT 1;", "sql")[0]).toEqual({ type: "keyword", text: "SELECT" });
+    expect(tokenizeLine("all: app", "make")[0]).toEqual({ type: "key", text: "all" });
   });
 });
 

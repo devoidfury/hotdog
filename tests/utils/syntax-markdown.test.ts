@@ -291,6 +291,51 @@ describe("fence state machine", () => {
     expect(tokenizeMarkdownLine("# base", s)).toEqual([run("comment", "# base")]); // comments are their own line, as in the parser
   });
 
+  it("routes go/sql/make fences and the makefile alias", () => {
+    for (const [info, lang] of [
+      ["go", "go"],
+      ["sql", "sql"],
+      ["make", "make"],
+      ["makefile", "make"], // the alias rides the basename spelling
+    ] as const) {
+      const s = newMdStreamState();
+      tokenizeMarkdownLine(`\`\`\`${info}`, s);
+      expect(s.lang).toBe(lang);
+    }
+    const s = newMdStreamState();
+    tokenizeMarkdownLine("```go", s);
+    expect(tokenizeMarkdownLine("x := 3 // c", s)).toEqual([
+      run("default", "x"),
+      run("default", " "),
+      run("operator", ":="),
+      run("default", " "),
+      run("number", "3"),
+      run("default", " "),
+      run("comment", "// c"),
+    ]);
+    tokenizeMarkdownLine("```", s);
+    tokenizeMarkdownLine("```sql", s);
+    expect(tokenizeMarkdownLine("SELECT 1;", s)).toEqual([
+      run("keyword", "SELECT"),
+      run("default", " "),
+      run("number", "1"),
+      run("operator", ";"),
+    ]);
+    tokenizeMarkdownLine("```", s);
+    tokenizeMarkdownLine("```makefile", s);
+    expect(tokenizeMarkdownLine("all: app", s)).toEqual([
+      run("key", "all"),
+      run("operator", ":"),
+      run("default", " "),
+      run("default", "app"),
+    ]);
+    expect(tokenizeMarkdownLine("\t$(CC) -o app", s)).toEqual([
+      run("default", "\t"),
+      run("variable", "$(CC)"),
+      run("default", " -o app"),
+    ]); // recipes read per line, tab and all
+  });
+
   it("routes jsonl fences through the json tokenizer (one value per line)", () => {
     const s = newMdStreamState();
     tokenizeMarkdownLine("```jsonl", s);

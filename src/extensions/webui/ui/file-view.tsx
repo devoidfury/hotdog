@@ -25,60 +25,21 @@
 //   legitimately resolve to nothing until their page lands; revealLine
 //   returns false rather than guessing.
 
-import { getTokenizer, type SyntaxRun } from "@utils/syntax/index.ts";
+import { getTokenizer, guessLangForBase, type SyntaxRun } from "@utils/syntax/index.ts";
 import { hasFrontmatter, tokenizeMarkdownDoc } from "@utils/syntax/markdown.ts";
 import type { ReadFileResultWire } from "@extensions/websocket/protocol.ts";
 
 // ── Language guessing (display only) ────────────────────────────────────────
-// Small local extension -> lang map. Registry contract: getTokenizer returns
-// undefined for an unknown lang and the viewer renders PLAIN TEXT, so the
-// map may name langs that have no tokenizer yet (rust, go, ...); naming
-// them here is the honest guess, styling arrives when a tokenizer lands.
+// The registry owns the name metadata: every SyntaxDef names its own
+// extensions and basenames (see index.ts), including the guess-only langs
+// (rust, go) that have no tokenizer. Registry contract: getTokenizer
+// returns undefined for an unknown or scannerless lang and the viewer
+// renders PLAIN TEXT -- a def that guesses honestly without a scanner is
+// exactly that posture, table entries and plain render agreeing.
 
-const EXT_LANG: Record<string, string> = {
-  sh: "shell",
-  bash: "shell",
-  zsh: "shell",
-  ts: "typescript",
-  tsx: "tsx",
-  js: "javascript",
-  jsx: "jsx",
-  mjs: "javascript",
-  cjs: "javascript",
-  c: "c",
-  h: "c",
-  cc: "c",
-  cpp: "c",
-  hpp: "c",
-  json: "json",
-  jsonc: "json",
-  md: "markdown",
-  markdown: "markdown",
-  py: "python",
-  rs: "rust",
-  go: "go",
-  css: "css",
-  html: "html",
-  xml: "xml",
-  yml: "yaml",
-  yaml: "yaml",
-  ini: "ini",
-  toml: "toml",
-  hotdog: "toml",
-};
-
-/** Guess the tokenizer lang from the path's extension; undefined = plain.
- *  Dockerfile has no extension to guess from, so the basename gets its own
- *  case: `Dockerfile` and the build-variant spelling `Dockerfile.dev` both
- *  name the dockerfile lang (the last-dot rule would answer undefined /
- *  "dev" respectively). */
+/** Guess the tokenizer lang from the path's basename; undefined = plain. */
 export function guessLang(path: string): string | undefined {
-  const base = path.split(/[/\\]/).pop() ?? "";
-  const lowered = base.toLowerCase();
-  if (lowered === "dockerfile" || lowered.startsWith("dockerfile.")) return "dockerfile";
-  const dot = base.lastIndexOf(".");
-  if (dot <= 0) return undefined;
-  return EXT_LANG[base.slice(dot + 1).toLowerCase()];
+  return guessLangForBase(path.split(/[/\\]/).pop() ?? "");
 }
 
 /** Tokenize one line; unknown/absent lang (or a tokenizer-less line) means

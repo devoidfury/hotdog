@@ -4,7 +4,14 @@
 // corpus -- the same goldens the unchanged colors.test.ts pins extend.
 
 import { describe, it, expect } from "bun:test";
-import { getTokenizer, registerTokenizer, type SyntaxRun } from "@utils/syntax/index.ts";
+import {
+  getTokenizer,
+  guessLangForBase,
+  registerSyntax,
+  registerTokenizer,
+  resolveSyntaxLang,
+  type SyntaxRun,
+} from "@utils/syntax/index.ts";
 import { tokenizeShell } from "@utils/syntax/shell.ts";
 import { ColorPalette, applyShellHighlight } from "@utils/cli/colors.ts";
 
@@ -111,6 +118,55 @@ describe("tokenizer registry", () => {
     registerTokenizer("unit-test-lang", upper);
     expect(getTokenizer("unit-test-lang")).toBe(upper);
     expect(getTokenizer("unit-test-lang")!("abc")).toEqual([run("default", "abc")]);
+  });
+});
+
+describe("syntax defs (registerSyntax metadata)", () => {
+  const id = (text: string): SyntaxRun[] => [{ type: "default", text }];
+
+  it("a def carries fence aliases and file guesses; basenames outrank extensions", () => {
+    registerSyntax({
+      lang: "unit-dsl",
+      tokenize: id,
+      aliases: ["ud"],
+      extensions: ["udsl"],
+      basenames: ["UnitFile"],
+    });
+    expect(getTokenizer("unit-dsl")).toBe(id);
+    expect(resolveSyntaxLang("unit-dsl")).toBe("unit-dsl");
+    expect(resolveSyntaxLang("ud")).toBe("unit-dsl"); // fence aliases resolve to canonical
+    expect(resolveSyntaxLang("UD")).toBe("unit-dsl"); // the alias index is case-insensitive
+    expect(guessLangForBase("main.udsl")).toBe("unit-dsl");
+    expect(guessLangForBase("UnitFile")).toBe("unit-dsl"); // the extensionless shape
+    expect(guessLangForBase("unitfile.prod")).toBe("unit-dsl"); // variant spellings too
+    expect(guessLangForBase("ud")).toBeUndefined(); // aliases never guess files
+  });
+
+  it("re-registration keeps omitted fields (registerTokenizer never strips metadata)", () => {
+    registerSyntax({ lang: "unit-keep", tokenize: id, aliases: ["uk"], extensions: ["ukl"] });
+    registerTokenizer("unit-keep", (text) => [{ type: "keyword", text }]);
+    expect(getTokenizer("unit-keep")!("x")).toEqual([run("keyword", "x")]);
+    expect(guessLangForBase("main.ukl")).toBe("unit-keep"); // the extension survived the retarget
+    expect(resolveSyntaxLang("uk")).toBe("unit-keep");
+  });
+
+  it("built-in metadata-only defs guess but never tokenize", () => {
+    expect(guessLangForBase("main.rs")).toBe("rust"); // honest guess, plain render
+    expect(getTokenizer("rust")).toBeUndefined();
+    expect(resolveSyntaxLang("rust")).toBeUndefined(); // a scannerless def never resolves a fence
+    expect(guessLangForBase("main.go")).toBe("go");
+    expect(guessLangForBase("README.md")).toBe("markdown");
+    expect(getTokenizer("markdown")).toBeUndefined(); // markdown rides its stateful scanner outside the registry
+  });
+
+  it("a later registration wins a collision; lists are replaced whole, never appended", () => {
+    registerSyntax({ lang: "unit-col-a", tokenize: id, extensions: ["ucol"] });
+    expect(guessLangForBase("f.ucol")).toBe("unit-col-a");
+    registerSyntax({ lang: "unit-col-b", tokenize: id, extensions: ["ucol"] });
+    expect(guessLangForBase("f.ucol")).toBe("unit-col-b");
+    registerSyntax({ lang: "unit-col-b", extensions: [] }); // omitted tokenize stays; the list replaces
+    expect(guessLangForBase("f.ucol")).toBe("unit-col-a");
+    expect(getTokenizer("unit-col-b")).toBe(id);
   });
 });
 

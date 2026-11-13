@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 import { tokenizeWithDialect, type ValueSpan } from "./toml.ts";
 
 /**
@@ -49,3 +49,10 @@ function readIniValue(text: string, from: number): ValueSpan {
 }
 
 const isWs = (c: string | undefined): boolean => c === " " || c === "\t" || c === "\n" || c === "\r";
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const INI_SYNTAX: SyntaxDef = {
+  lang: "ini",
+  tokenize: tokenizeIni,
+  extensions: ["ini"],
+};

@@ -5,7 +5,7 @@
 // deterministic fragment generator, and the registry wiring pins.
 
 import { describe, it, expect } from "bun:test";
-import { getTokenizer } from "@utils/syntax/index.ts";
+import { getTokenizer, resolveSyntaxLang } from "@utils/syntax/index.ts";
 import { tokenizeJavaScript } from "@utils/syntax/javascript.ts";
 import type { SyntaxRun } from "@utils/syntax/index.ts";
 
@@ -466,9 +466,10 @@ describe("tokenizeJavaScript losslessness", () => {
 });
 
 describe("javascript tokenizer wiring", () => {
-  it("getTokenizer resolves javascript and jsx to tokenizeJavaScript", () => {
+  it("getTokenizer resolves javascript; jsx is a def alias, not a second name", () => {
     expect(getTokenizer("javascript")).toBe(tokenizeJavaScript);
-    expect(getTokenizer("jsx")).toBe(tokenizeJavaScript);
+    expect(resolveSyntaxLang("jsx")).toBe("javascript");
+    expect(getTokenizer("jsx")).toBeUndefined(); // resolve the alias, fetch by canonical name
     const sample = 'import { get } from "./x.ts"; const ok = /y/.test(v); // end';
     const runs = getTokenizer("javascript")!(sample);
     expect(runs.map((r) => r.text).join("")).toBe(sample); // the registry contract, held

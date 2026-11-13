@@ -1,4 +1,4 @@
-import { getTokenizer, type SyntaxRun } from "./index.ts";
+import { getTokenizer, resolveSyntaxLang, type SyntaxRun } from "./index.ts";
 
 /**
  * Markdown line tokenizer for streaming surfaces.
@@ -18,9 +18,8 @@ import { getTokenizer, type SyntaxRun } from "./index.ts";
  * (a fenced line with no resolvable language -- rides the text wash),
  * "strong" (`**…**`) and "code" (inline backtick span) inside paragraphs;
  * everything else "default". A
- * fenced line whose language resolves in the registry (`sh|bash|zsh` ->
- * shell, `yml` -> yaml, `js|node` -> javascript, `ts` -> typescript,
- * `py` -> python) runs
+ * fenced line whose language resolves in the registry (canonical name or a
+ * def-shipped alias like `sh`/`py`/`js`; see index.ts) runs
  * through that tokenizer instead -- its classes
  * (command/operator/key/…) pass through and the sink styles what it knows.
  * Markdown spans are suppressed inside fences.
@@ -205,27 +204,14 @@ const QUOTE_RE = /^( {0,3}>+\s?)(.*)$/;
 // following space, so `**bold**` at line start never reads as a bullet.
 const BULLET_RE = /^( *)([-*+]|\d{1,9}[.)])( +)(.*)$/;
 
-// Fence info languages beyond the registry's own names: the aliases models
-// actually type. Unknown info strings resolve to null (plain code).
-const LANG_ALIASES: Record<string, string> = {
-  sh: "shell",
-  bash: "shell",
-  zsh: "shell",
-  yml: "yaml",
-  jsonc: "json",
-  htm: "html",
-  js: "javascript",
-  node: "javascript",
-  ts: "typescript",
-  py: "python",
-  docker: "dockerfile",
-};
-
+// Fence-info languages resolve through the registry: canonical names and
+// the aliases shipped on each lang's SyntaxDef (see index.ts). Unknown
+// info strings -- and names whose def has no tokenizer, rust -- resolve to
+// null (plain code).
 function resolveLang(info: string): string | null {
   const word = info.trim().split(/\s+/)[0]?.toLowerCase();
   if (!word) return null;
-  const name = LANG_ALIASES[word] ?? word;
-  return getTokenizer(name) ? name : null;
+  return resolveSyntaxLang(word) ?? null;
 }
 
 /**

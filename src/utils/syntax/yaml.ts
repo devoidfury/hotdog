@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /**
  * YAML tokenizer.
@@ -208,3 +208,11 @@ function classifyScalar(word: string): string {
 // an optional trailing comment -- and nothing else to the end of line.
 const BLOCK_HEADER_RE = /^[|>](?:[+-]\d|\d[+-]|[+-]|\d)?[ \t]*(?:#.*)?$/;
 const BLOCK_INDICATOR_RE = /^[|>](?:[+-]\d|\d[+-]|[+-]|\d)?/;
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const YAML_SYNTAX: SyntaxDef = {
+  lang: "yaml",
+  tokenize: tokenizeYaml,
+  aliases: ["yml"],
+  extensions: ["yaml", "yml"],
+};

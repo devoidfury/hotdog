@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 import { tokenizeMarkup } from "./html.ts";
 
 /**
@@ -27,3 +27,10 @@ import { tokenizeMarkup } from "./html.ts";
 export function tokenizeXml(text: string): SyntaxRun[] {
   return tokenizeMarkup(text, { nameRest: /[A-Za-z0-9:._\-]/, cdata: true, piType: "doctype" });
 }
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const XML_SYNTAX: SyntaxDef = {
+  lang: "xml",
+  tokenize: tokenizeXml,
+  extensions: ["xml"],
+};

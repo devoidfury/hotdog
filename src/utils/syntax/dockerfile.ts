@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /**
  * Dockerfile tokenizer.
@@ -138,3 +138,11 @@ function endOfString(text: string, from: number): number {
 /** Characters that break a plain-run anywhere (a mid-line `#` is literal
  * Dockerfile bytes, so it is NOT here). */
 const SPECIAL_RE = /["'$=]/;
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const DOCKERFILE_SYNTAX: SyntaxDef = {
+  lang: "dockerfile",
+  tokenize: tokenizeDockerfile,
+  aliases: ["docker"],
+  basenames: ["Dockerfile"],
+};

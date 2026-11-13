@@ -253,7 +253,7 @@ export interface CodeRun {
  * Tokenize code through the shared @utils/syntax registry: token runs map
  * to `tok-<type>` CSS classes (default runs stay unstyled), adjacent same-
  * class runs coalesce. Null means "no tokenizer for this lang" -- the caller
- * renders plain text (never a failure: e.g. json has no tokenizer yet).
+ * renders plain text (never a failure: e.g. python has no tokenizer yet).
  */
 export function codeRuns(text: string, lang?: string): CodeRun[] | null {
   const tokenizer = lang ? getTokenizer(lang) : undefined;

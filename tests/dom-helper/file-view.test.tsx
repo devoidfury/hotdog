@@ -71,7 +71,7 @@ describe("viewer language + tokens", () => {
     expect(runs[0]).toEqual({ type: "command", text: "ls" });
     // Lossless: concatenating runs reproduces the line exactly.
     expect(runs.map((r) => r.text).join("")).toBe("ls -l | wc -l");
-    expect(tokenizeLine("anything { 1", "json")).toEqual([{ type: "default", text: "anything { 1" }]);
+    expect(tokenizeLine("anything { 1", "python")).toEqual([{ type: "default", text: "anything { 1" }]);
     expect(tokenizeLine("anything", undefined)).toEqual([{ type: "default", text: "anything" }]);
   });
 });

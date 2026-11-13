@@ -31,7 +31,7 @@
         "markdown": {
           "type": "boolean",
           "default": true,
-          "description": "Highlight markdown in streamed assistant prose on the split renderer (headings, **strong**, `code`, list markers, fenced blocks with shell/yaml sub-highlighting). Default on; set false for the flat final_response wash. Ignored on the legacy renderer and when colors are disabled."
+          "description": "Highlight markdown in streamed assistant prose on the split renderer (headings, **strong**, `code`, list markers, fenced blocks with shell/yaml/json/css/html sub-highlighting). Default on; set false for the flat final_response wash. Ignored on the legacy renderer and when colors are disabled."
         }
       },
       "additionalProperties": false,

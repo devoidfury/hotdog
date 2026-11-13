@@ -146,6 +146,30 @@ describe("fence state machine", () => {
     expect(tokenizeMarkdownLine("anything", s)).toEqual([run("code_block", "anything")]);
   });
 
+  it("routes json, css and html fences (aliases included)", () => {
+    for (const [info, lang] of [
+      ["json", "json"],
+      ["jsonc", "json"],
+      ["css", "css"],
+      ["html", "html"],
+      ["htm", "html"],
+    ] as const) {
+      const s = newMdStreamState();
+      tokenizeMarkdownLine(`\`\`\`${info}`, s);
+      expect(s.lang).toBe(lang);
+    }
+    const s = newMdStreamState();
+    tokenizeMarkdownLine("```json", s);
+    expect(tokenizeMarkdownLine('{"a": true}', s)).toEqual([
+      run("operator", "{"),
+      run("key", '"a"'),
+      run("operator", ":"),
+      run("default", " "),
+      run("boolean", "true"),
+      run("operator", "}"),
+    ]);
+  });
+
   it("requires same-char closers of at least the opening width", () => {
     const s = newMdStreamState();
     tokenizeMarkdownLine("````", s);

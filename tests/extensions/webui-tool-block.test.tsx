@@ -310,6 +310,31 @@ describe("codeRuns (shared tokenizer seam)", () => {
       { cls: "tok-operator", text: ">" },
     ]);
   });
+
+  it("tokenizes javascript and typescript through the registry", () => {
+    expect(codeRuns("const x = fn(/re/); // c", "javascript")).toEqual([
+      { cls: "tok-keyword", text: "const" },
+      { cls: null, text: " x " },
+      { cls: "tok-operator", text: "=" },
+      { cls: null, text: " " },
+      { cls: "tok-fn", text: "fn" },
+      { cls: "tok-operator", text: "(" },
+      { cls: "tok-regexp", text: "/re/" },
+      { cls: "tok-operator", text: ");" },
+      { cls: null, text: " " },
+      { cls: "tok-comment", text: "// c" },
+    ]);
+    expect(codeRuns("x: Foo = 1", "typescript")).toEqual([
+      { cls: "tok-key", text: "x" },
+      { cls: "tok-operator", text: ":" },
+      { cls: null, text: " " },
+      { cls: "tok-type", text: "Foo" },
+      { cls: null, text: " " },
+      { cls: "tok-operator", text: "=" },
+      { cls: null, text: " " },
+      { cls: "tok-number", text: "1" },
+    ]);
+  });
 });
 
 describe("proseHtml", () => {

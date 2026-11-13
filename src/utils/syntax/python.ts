@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /**
  * Python tokenizer.
@@ -249,3 +249,11 @@ const KEYWORDS: ReadonlySet<string> = new Set([
   "with",
   "yield",
 ]);
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const PYTHON_SYNTAX: SyntaxDef = {
+  lang: "python",
+  tokenize: tokenizePython,
+  aliases: ["py"],
+  extensions: ["py"],
+};

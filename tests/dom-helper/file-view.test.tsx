@@ -62,6 +62,10 @@ describe("viewer language + tokens", () => {
   it("extension map: shell guesses shell; unknown/absent extensions read undefined", () => {
     expect(guessLang("/a/b/run.sh")).toBe("shell");
     expect(guessLang("main.ts")).toBe("typescript");
+    // jsx/tsx are def aliases: the guess answers the scanner's canonical
+    // name now (byte-identical render; one def per family).
+    expect(guessLang("app.jsx")).toBe("javascript");
+    expect(guessLang("app.tsx")).toBe("typescript");
     expect(guessLang("notes.txt")).toBeUndefined();
     expect(guessLang("LICENSE")).toBeUndefined();
     expect(guessLang(".bashrc")).toBeUndefined(); // dotfile, no stem => no guess

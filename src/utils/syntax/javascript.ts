@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /**
  * JavaScript tokenizer (also the shared scanning core: typescript.ts layers
@@ -462,3 +462,11 @@ export const JS_CONTEXTUAL: ReadonlySet<string> = new Set([
   "from",
   "constructor",
 ]);
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const JAVASCRIPT_SYNTAX: SyntaxDef = {
+  lang: "javascript",
+  tokenize: tokenizeJavaScript,
+  aliases: ["js", "node", "jsx"],
+  extensions: ["js", "jsx", "mjs", "cjs"],
+};

@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /** Dialect seams over the shared markup scanner. */
 export interface MarkupScannerConfig {
@@ -209,3 +209,11 @@ function endOfString(text: string, from: number): number {
   }
   return text.length;
 }
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const HTML_SYNTAX: SyntaxDef = {
+  lang: "html",
+  tokenize: tokenizeHtml,
+  aliases: ["htm"],
+  extensions: ["html", "htm"],
+};

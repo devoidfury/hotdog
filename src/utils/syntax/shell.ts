@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /**
  * Shell tokenizer.
@@ -37,3 +37,11 @@ export function tokenizeShell(text: string): SyntaxRun[] {
   }
   return runs;
 }
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const SHELL_SYNTAX: SyntaxDef = {
+  lang: "shell",
+  tokenize: tokenizeShell,
+  aliases: ["sh", "bash", "zsh"],
+  extensions: ["sh", "bash", "zsh"],
+};

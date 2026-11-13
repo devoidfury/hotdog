@@ -177,10 +177,10 @@ describe("fence state machine", () => {
       ["javascript", "javascript"],
       ["js", "javascript"],
       ["node", "javascript"],
-      ["jsx", "jsx"],
+      ["jsx", "javascript"],
       ["typescript", "typescript"],
       ["ts", "typescript"],
-      ["tsx", "tsx"],
+      ["tsx", "typescript"],
     ] as const) {
       const s = newMdStreamState();
       tokenizeMarkdownLine(`\`\`\`${info}`, s);

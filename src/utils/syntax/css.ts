@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /**
  * CSS tokenizer.
@@ -308,3 +308,10 @@ function pushGroupRuns(chunk: string, push: (type: string, text: string) => void
     }
   }
 }
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const CSS_SYNTAX: SyntaxDef = {
+  lang: "css",
+  tokenize: tokenizeCss,
+  extensions: ["css"],
+};

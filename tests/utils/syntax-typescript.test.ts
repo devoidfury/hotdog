@@ -6,7 +6,7 @@
 // casts, contextual `type`, and the losslessness sweep + registry wiring.
 
 import { describe, it, expect } from "bun:test";
-import { getTokenizer, type SyntaxRun } from "@utils/syntax/index.ts";
+import { getTokenizer, resolveSyntaxLang, type SyntaxRun } from "@utils/syntax/index.ts";
 import { tokenizeTypeScript } from "@utils/syntax/typescript.ts";
 
 const run = (type: string, text: string): SyntaxRun => ({ type, text });
@@ -260,9 +260,10 @@ describe("tokenizeTypeScript losslessness", () => {
 });
 
 describe("typescript tokenizer wiring", () => {
-  it("getTokenizer resolves typescript and tsx to tokenizeTypeScript", () => {
+  it("getTokenizer resolves typescript; tsx is a def alias, not a second name", () => {
     expect(getTokenizer("typescript")).toBe(tokenizeTypeScript);
-    expect(getTokenizer("tsx")).toBe(tokenizeTypeScript);
+    expect(resolveSyntaxLang("tsx")).toBe("typescript");
+    expect(getTokenizer("tsx")).toBeUndefined(); // resolve the alias, fetch by canonical name
     const sample = 'import type { X } from "./y"; const v: Foo = g(); // tsc';
     const runs = getTokenizer("typescript")!(sample);
     expect(runs.map((r) => r.text).join("")).toBe(sample); // the registry contract, held

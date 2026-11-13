@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /**
  * C tokenizer.
@@ -286,3 +286,10 @@ const KEYWORDS: ReadonlySet<string> = new Set([
   "volatile",
   "while",
 ]);
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const C_SYNTAX: SyntaxDef = {
+  lang: "c",
+  tokenize: tokenizeC,
+  extensions: ["c", "h", "cc", "cpp", "hpp"],
+};

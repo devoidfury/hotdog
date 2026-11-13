@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /**
  * TOML tokenizer (also the shared sectioned-line scanning core: ini.ts
@@ -250,3 +250,10 @@ const NUM_RE =
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:[Zz]|[+-]\d{2}:\d{2})?)?$/;
 const TIME_RE = /^\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const TOML_SYNTAX: SyntaxDef = {
+  lang: "toml",
+  tokenize: tokenizeToml,
+  extensions: ["toml"],
+};

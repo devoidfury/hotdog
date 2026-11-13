@@ -1,4 +1,4 @@
-import type { SyntaxRun } from "./index.ts";
+import type { SyntaxDef, SyntaxRun } from "./index.ts";
 
 /**
  * JSON tokenizer (JSONC-tolerant: line and block comments plus trailing
@@ -96,3 +96,11 @@ const NUM_CHARS = new Set(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "."
 const NUM_RE = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?$/;
 const LETTER_RE = /[A-Za-z_$]/;
 const STRUCTURAL = new Set(["{", "}", "[", "]", ":", ","]);
+
+/** The registry entry for this lang (assembly list: index.ts). */
+export const JSON_SYNTAX: SyntaxDef = {
+  lang: "json",
+  tokenize: tokenizeJson,
+  aliases: ["jsonc"],
+  extensions: ["json", "jsonc"],
+};

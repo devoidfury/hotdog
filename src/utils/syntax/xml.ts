@@ -32,5 +32,5 @@ export function tokenizeXml(text: string): SyntaxRun[] {
 export const XML_SYNTAX: SyntaxDef = {
   lang: "xml",
   tokenize: tokenizeXml,
-  extensions: ["xml"],
+  extensions: ["xml", "svg", "xsd"],
 };

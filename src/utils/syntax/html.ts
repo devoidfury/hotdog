@@ -215,5 +215,5 @@ export const HTML_SYNTAX: SyntaxDef = {
   lang: "html",
   tokenize: tokenizeHtml,
   aliases: ["htm"],
-  extensions: ["html", "htm"],
+  extensions: ["html", "htm", "xhtml"],
 };

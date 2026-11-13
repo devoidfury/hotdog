@@ -144,5 +144,5 @@ export const DOCKERFILE_SYNTAX: SyntaxDef = {
   lang: "dockerfile",
   tokenize: tokenizeDockerfile,
   aliases: ["docker"],
-  basenames: ["Dockerfile"],
+  basenames: ["Dockerfile", "Containerfile"],
 };

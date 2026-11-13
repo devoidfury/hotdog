@@ -44,4 +44,6 @@ export const SHELL_SYNTAX: SyntaxDef = {
   tokenize: tokenizeShell,
   aliases: ["sh", "bash", "zsh"],
   extensions: ["sh", "bash", "zsh"],
+  // Dotfiles miss the last-dot rule; the basename index claims them.
+  basenames: [".bashrc", ".bash_profile", ".zshrc", ".zshenv", ".profile"],
 };

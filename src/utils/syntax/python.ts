@@ -255,5 +255,5 @@ export const PYTHON_SYNTAX: SyntaxDef = {
   lang: "python",
   tokenize: tokenizePython,
   aliases: ["py"],
-  extensions: ["py"],
+  extensions: ["py", "pyi"],
 };

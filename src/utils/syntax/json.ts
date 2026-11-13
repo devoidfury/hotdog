@@ -101,6 +101,6 @@ const STRUCTURAL = new Set(["{", "}", "[", "]", ":", ","]);
 export const JSON_SYNTAX: SyntaxDef = {
   lang: "json",
   tokenize: tokenizeJson,
-  aliases: ["jsonc"],
-  extensions: ["json", "jsonc"],
+  aliases: ["jsonc", "jsonl"],
+  extensions: ["json", "jsonc", "jsonl"],
 };

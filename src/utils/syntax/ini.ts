@@ -55,4 +55,6 @@ export const INI_SYNTAX: SyntaxDef = {
   lang: "ini",
   tokenize: tokenizeIni,
   extensions: ["ini"],
+  // KEY=value lands: these dotfiles are what the ini dialect already reads.
+  basenames: [".env", ".editorconfig", ".gitconfig"],
 };

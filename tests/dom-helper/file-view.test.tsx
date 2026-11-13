@@ -16,6 +16,7 @@ import {
   applyReadFile,
   guessLang,
   tokenizeLine,
+  tokenizeFileLines,
   revealLine,
   type FileViewsState,
 } from "@extensions/webui/ui/file-view.tsx";
@@ -251,5 +252,70 @@ describe("viewer rendering", () => {
     expect(text(part.querySelector(".file-view-status"))).toBe("1 line so far");
     const err = renderView({ view: { status: "error", lines: [], truncated: false, error: "x" } });
     expect(text(err.querySelector(".file-view-status"))).toBe("unread");
+  });
+});
+
+// ── Markdown documents: frontmatter + carried fence state ───────────────────
+
+const PROFILE_LINES = [
+  "---",
+  "name: explorer",
+  "description: A codebase scout # gather context",
+  "whitelist-tools: [\"find\", \"read\", \"grep\"]",
+  "visible-worker: true",
+  "---",
+  "# Your job: codebase explorer",
+  "- read **everything**",
+  "---",
+];
+
+describe("markdown file rendering (frontmatter behind prescan)", () => {
+  it("profiles light up: fence rules, yaml-routed keys, markdown body", () => {
+    const host = renderView({
+      path: "/rootA/config/profiles/explorer.profile.md",
+      view: { status: "ready", lines: PROFILE_LINES, truncated: false },
+    });
+    const rows = host.querySelectorAll(".file-line");
+    expect(rows.length).toBe(PROFILE_LINES.length);
+    // Rows still rejoin their source exactly (spans never eat bytes; the
+    // empty-line nbsp never fires here -- no empty rows in the sample).
+    for (let i = 0; i < PROFILE_LINES.length; i++) {
+      expect((rows[i] as Element).querySelector("code")!.textContent).toBe(PROFILE_LINES[i]!);
+    }
+    const rowSpans = (n: number, cls: string): Element[] =>
+      [...(rows[n] as Element).querySelectorAll(`.${cls}`)];
+    expect(rowSpans(0, "tk-fence").map((s) => s.textContent)).toEqual(["---"]);
+    expect(rowSpans(1, "tk-key").map((s) => s.textContent)).toEqual(["name"]);
+    expect(rowSpans(2, "tk-comment").map((s) => s.textContent)).toEqual(["# gather context"]);
+    expect(rowSpans(3, "tk-key").map((s) => s.textContent)).toEqual(["whitelist-tools"]);
+    expect(rowSpans(4, "tk-boolean").map((s) => s.textContent)).toEqual(["true"]);
+    expect(rowSpans(5, "tk-fence").map((s) => s.textContent)).toEqual(["---"]);
+    expect(rowSpans(6, "tk-heading").map((s) => s.textContent)).toEqual(["# Your job: codebase explorer"]);
+    expect(rowSpans(7, "tk-strong").map((s) => s.textContent)).toEqual(["**everything**"]);
+    expect(rowSpans(8, "tk-marker").map((s) => s.textContent)).toEqual(["---"]); // body hr, not frontmatter
+  });
+
+  it("prescan false (no closer on the loaded page): line-1 `---` stays an hr", () => {
+    const host = renderView({
+      path: "/rootA/NOTES.md",
+      view: { status: "ready", lines: ["---", "just a leading rule", "text"], truncated: false },
+    });
+    const rows = host.querySelectorAll(".file-line");
+    expect((rows[0] as Element).querySelectorAll(".tk-fence").length).toBe(0);
+    expect([...(rows[0] as Element).querySelectorAll(".tk-marker")].map((s) => s.textContent)).toEqual(["---"]);
+  });
+
+  it("tokenizeFileLines: fence state carries across rows; other langs stay per-line", () => {
+    const lines = ["para **a**", "```", "**literal**", "```", "after **b**"];
+    const rows = tokenizeFileLines(lines, "markdown");
+    expect(rows.map((r) => r.map((x) => x.text).join(""))).toEqual(lines);
+    expect(rows[0]!.some((r) => r.type === "strong")).toBe(true);
+    expect(rows[2]!.map((r) => r.type)).toEqual(["code_block"]); // inert inside the fence
+    expect(rows[4]!.some((r) => r.type === "strong")).toBe(true);
+    // Non-markdown langs keep the registry contract, one row per line.
+    expect(tokenizeFileLines(["a: 1"], "yaml")[0]![0]).toEqual({ type: "key", text: "a" });
+    expect(tokenizeFileLines(['{"k": 1}'], "json")[0]!.some((r) => r.type === "key")).toBe(true);
+    expect(tokenizeFileLines(["x"], undefined)).toEqual([[{ type: "default", text: "x" }]]);
+    expect(tokenizeFileLines([], "markdown")).toEqual([]);
   });
 });

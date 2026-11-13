@@ -13,7 +13,8 @@ import { getTokenizer, type SyntaxRun } from "./index.ts";
  * the live pass produced for it once the closing construct lands.
  *
  * Line classes: "heading" (whole ATX line), "marker" (list bullet/ordered
- * bullet/blockquote prefix/hr), "fence" (a ``` / ~~~ rule line), "code_block"
+ * bullet/blockquote prefix/hr), "fence" (a ``` / ~~~ rule line, or a YAML
+ * frontmatter delimiter), "code_block"
  * (a fenced line with no resolvable language -- rides the text wash),
  * "strong" (`**…**`) and "code" (inline backtick span) inside paragraphs;
  * everything else "default". A
@@ -21,6 +22,20 @@ import { getTokenizer, type SyntaxRun } from "./index.ts";
  * shell, `yml` -> yaml) runs through that tokenizer instead -- its classes
  * (command/operator/key/…) pass through and the sink styles what it knows.
  * Markdown spans are suppressed inside fences.
+ *
+ * YAML frontmatter is an OPT-IN document feature: a state created with
+ * `newMdStreamState(true)` starts in "await" and opens a block when line 1
+ * is exactly `---`; the delimiter lines ride "fence", the content lines run
+ * through the registry's yaml tokenizer (key/string/comment/... pass
+ * through -- no second yaml scanner exists), and the block closes on a
+ * column-0 `---` or `...`, never reopening. The default state is "off": a
+ * streamed assistant message whose first line is `---` means an hr, exactly
+ * as before, so no prose surface changes. Static callers that hold their
+ * lines prescan with `hasFrontmatter` (opener on line 1 AND a closer
+ * exists), which is what stops a leading hr pair from painting its
+ * between-block as yaml; streaming has no such lookahead and commits blind.
+ * `tokenizeMarkdownDoc(lines, frontmatter)` drives a whole document in one
+ * call. Fences are inert inside frontmatter.
  *
  * v1 scope, deliberately: headings, bullet/ordered markers, blockquote
  * prefixes, hrs, fences, `**strong**` and backtick code. No `*em*`/`__`
@@ -33,39 +48,79 @@ import { getTokenizer, type SyntaxRun } from "./index.ts";
  * implementation.
  */
 
-/** Fenced-code state carried across lines (and repaints) by the caller. */
+/** Fenced-code and frontmatter state carried across lines (and repaints) by the caller. */
 export interface MdStreamState {
   /** The opening fence marker ("```" / "~~~") while inside a fence; null outside. */
   fence: string | null;
   /** Registry language resolved from the fence info string; null = plain code. */
   lang: string | null;
+  /**
+   * YAML frontmatter phase. "off": delimiters never open a block (the
+   * streaming-prose default -- a message whose first line is `---` means an
+   * hr). "await": line 1 may open a block (document surfaces opt in with
+   * `newMdStreamState(true)`, ideally behind the `hasFrontmatter` prescan).
+   * "open": inside the block -- markdown is inert and every content line
+   * runs through the registry's yaml tokenizer.
+   */
+  frontmatter: "off" | "await" | "open";
 }
 
-export function newMdStreamState(): MdStreamState {
-  return { fence: null, lang: null };
+export function newMdStreamState(frontmatter = false): MdStreamState {
+  return { fence: null, lang: null, frontmatter: frontmatter ? "await" : "off" };
 }
 
 /** Snapshot for speculative (live-row) passes; never mutates the original. */
 export function cloneMdStreamState(state: MdStreamState): MdStreamState {
-  return { fence: state.fence, lang: state.lang };
+  return { fence: state.fence, lang: state.lang, frontmatter: state.frontmatter };
 }
 
 /**
- * Classify one COMPLETE line (no line terminator) and advance fence state.
+ * Prescan for document surfaces that hold their lines: true only when line 1
+ * is the opener AND a closer line exists. Streaming cannot afford this (the
+ * opener must commit blind); static views can, and do -- it is what keeps a
+ * leading hr pair from painting its between-block as yaml.
+ */
+export function hasFrontmatter(lines: string[]): boolean {
+  return lines.length > 1 && FRONTMATTER_OPEN_RE.test(lines[0]!) && lines.slice(1).some((l) => FRONTMATTER_CLOSE_RE.test(l));
+}
+
+/**
+ * Tokenize a whole document (lines without terminators) with fresh state --
+ * fences and (opt-in) frontmatter carry across lines exactly as a live
+ * stream would. Frontmatter detection is the caller's choice, normally
+ * `hasFrontmatter(lines)`; once every line is visible, a document whose
+ * opener never closes still reads as yaml to the end, so prescan first.
+ */
+export function tokenizeMarkdownDoc(lines: string[], frontmatter = false): SyntaxRun[][] {
+  const state = newMdStreamState(frontmatter);
+  return lines.map((line) => tokenizeMarkdownLine(line, state));
+}
+
+/**
+ * Classify one COMPLETE line (no line terminator) and advance fence and
+ * frontmatter state.
  */
 export function tokenizeMarkdownLine(line: string, state: MdStreamState): SyntaxRun[] {
   const runs = classify(line, state);
-  // Fence open/close is the only stateful transition, decided after
-  // classification so the closing line itself renders as "fence".
-  if (state.fence === null) {
-    const open = FENCE_RE.exec(line);
-    if (open && fenceOpens(open[2]!, open[3] ?? "")) {
-      state.fence = open[2]!;
-      state.lang = resolveLang(open[3] ?? "");
+  // Stateful transitions are decided after classification so the closing
+  // line itself renders as "fence".
+  if (state.frontmatter === "open") {
+    if (FRONTMATTER_CLOSE_RE.test(line)) state.frontmatter = "off";
+  } else if (state.frontmatter === "await") {
+    state.frontmatter = FRONTMATTER_OPEN_RE.test(line) ? "open" : "off";
+  }
+  // Fence grammar is inert inside frontmatter (a ``` line there is yaml text).
+  if (state.frontmatter !== "open") {
+    if (state.fence === null) {
+      const open = FENCE_RE.exec(line);
+      if (open && fenceOpens(open[2]!, open[3] ?? "")) {
+        state.fence = open[2]!;
+        state.lang = resolveLang(open[3] ?? "");
+      }
+    } else if (isFenceClose(line, state.fence)) {
+      state.fence = null;
+      state.lang = null;
     }
-  } else if (isFenceClose(line, state.fence)) {
-    state.fence = null;
-    state.lang = null;
   }
   return runs;
 }
@@ -79,6 +134,14 @@ export function tokenizeMarkdownLive(line: string, state: MdStreamState): Syntax
 }
 
 function classify(line: string, state: MdStreamState): SyntaxRun[] {
+  if (state.frontmatter === "open") {
+    // Inside frontmatter: markdown is inert; the shared yaml tokenizer
+    // (the very one fences route `yml` through) owns every content line.
+    if (FRONTMATTER_CLOSE_RE.test(line)) return [{ type: "fence", text: line }];
+    const yaml = getTokenizer("yaml");
+    if (yaml) return yaml(line);
+    return line === "" ? [] : [{ type: "default", text: line }];
+  }
   if (state.fence !== null) {
     // Inside a fence: markdown spans are inert.
     if (isFenceClose(line, state.fence)) return [{ type: "fence", text: line }];
@@ -90,6 +153,7 @@ function classify(line: string, state: MdStreamState): SyntaxRun[] {
   }
   const open = FENCE_RE.exec(line);
   if (open && fenceOpens(open[2]!, open[3] ?? "")) return [{ type: "fence", text: line }];
+  if (state.frontmatter === "await" && FRONTMATTER_OPEN_RE.test(line)) return [{ type: "fence", text: line }];
   if (/^ {0,3}#{1,6}(\s|$)/.test(line)) return [{ type: "heading", text: line }];
   if (HR_RE.test(line)) return [{ type: "marker", text: line }];
   const quote = QUOTE_RE.exec(line);
@@ -129,6 +193,11 @@ const CLOSE_TICK_RE = /^ {0,3}(`{3,})[ \t]*$/;
 const CLOSE_TILDE_RE = /^ {0,3}(~{3,})[ \t]*$/;
 
 const HR_RE = /^ {0,3}(?:([-*_])\s*){3,}$/;
+// Frontmatter delimiters are column-0 by YAML convention (no indent, unlike
+// the hr's three-space grace); the closer also takes `...` (the yaml
+// document-end marker the yaml tokenizer itself styles "marker").
+const FRONTMATTER_OPEN_RE = /^---[ \t]*$/;
+const FRONTMATTER_CLOSE_RE = /^(?:---|\.\.\.)[ \t]*$/;
 const QUOTE_RE = /^( {0,3}>+\s?)(.*)$/;
 // `1.` and `1)` ordered markers need a digit-run; plain `-`/`*`/`+` need the
 // following space, so `**bold**` at line start never reads as a bullet.

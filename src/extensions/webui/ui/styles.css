@@ -3288,15 +3288,96 @@ body.workbench-resizing {
     color: var(--text-primary);
 }
 
-/* Token classes: sinks own the coloring (see @utils/syntax). Only the kinds
-   the shell tokenizer emits are styled; unknown runs pass through plain. */
+/* Token classes: sinks own the coloring (see @utils/syntax). The file view
+   renders every tokenizer run as `tk tk-<type>` spans (file-view.tsx); the
+   registry's languages emit the full vocabulary below, so the whole union
+   is styled here -- the same semantic palette the tool block's tok- section
+   defines above (file-view.tsx renders `tk tk-<type>`; tool-block.tsx
+   renders `tok-<type>`; one reading, one hue, both sinks). Shared classes
+   get exactly ONE rule regardless of language; everything rides theme vars
+   so both palettes read alike. Unknown token classes (a custom extension
+   lang) still pass through plain, and "default" has no rule on purpose. */
+
+/* Shell command (the viewer's original, kept verbatim). Operators moved to
+   the shared vocabulary below, muted like the tool block's tok-operator --
+   as accent they were indistinguishable from keywords. */
 .tk-command {
     color: #8bd5a0;
 }
 
 .tk-operator {
-    color: var(--accent);
+    color: var(--text-muted);
 }
+
+/* Shared programming vocabulary (the c-family, go, rust, java, kotlin,
+   groovy, dart, swift, zig, elixir, php, python, ruby, js/ts, sql, lua):
+   keywords are the scannable structure (accent), types sit one notch down
+   (secondary), call/declaration names take the reference green, decorators
+   the bolder green stance, variables the same green (lifetimes, $vars,
+   css vars, elixir atoms all ride it). Strings -- every quote form, raw
+   strings, charlists, backticks -- the warm literal family; templates and
+   regexes are string-shaped, same family (regex italic so it never reads
+   as a doubled string). Numeric literals (number/boolean/null, radix
+   forms, datetimes, nil/None/undefined) the cool literal family; comments
+   muted italic so they recede. The hotdog palette keeps accent (#e0a32e)
+   and warning (#fbbf24) as adjacent mustards, so the structural accent
+   roles carry a bold stance -- the same weight cue the heading/marker
+   family uses -- and separate from plain amber literals without a new hue.
+   */
+.tk-string { color: var(--warning); }
+.tk-template { color: var(--warning); }
+.tk-regexp { color: var(--warning); font-style: italic; }
+.tk-number { color: var(--diff-info-ink); }
+.tk-boolean { color: var(--diff-info-ink); }
+.tk-null { color: var(--diff-info-ink); }
+.tk-comment { color: var(--text-muted); font-style: italic; }
+.tk-keyword { color: var(--accent); font-weight: 600; }
+.tk-type { color: var(--text-secondary); }
+.tk-fn { color: var(--success); }
+.tk-decorator { color: var(--success); font-weight: 600; }
+.tk-variable { color: var(--success); }
+
+/* Data/config vocabulary (json, yaml, toml, ini, env, make, dockerfile,
+   graphql): keys accent (the structure you scan), assignment/collection
+   scaffolding secondary, section headers and directives (TOML tables, INI
+   sections, make macros, cmake/c/php line-leading # directives) the loud
+   divider family -- same reading as yaml doc markers and css at-rules. */
+.tk-key { color: var(--accent); font-weight: 600; }
+.tk-value { color: var(--text-secondary); }
+.tk-section { color: var(--text-primary); font-weight: 600; }
+.tk-preproc { color: var(--text-primary); font-weight: 600; }
+
+/* Markup vocabulary (html, xml): tag names accent as the structure,
+   attributes one notch down, entities the reference green, doctype/PI the
+   loud declaration family. */
+.tk-name { color: var(--accent); font-weight: 600; }
+.tk-attribute { color: var(--text-secondary); }
+.tk-entity { color: var(--success); }
+.tk-doctype { color: var(--text-primary); font-weight: 600; }
+
+/* CSS vocabulary: selectors and properties accent, values secondary,
+   literals the reference green, at-rules loud dividers. */
+.tk-selector { color: var(--accent); font-weight: 600; }
+.tk-property { color: var(--accent); font-weight: 600; }
+.tk-color { color: var(--success); }
+.tk-atrule { color: var(--text-primary); font-weight: 600; }
+
+/* YAML reference family: anchors/aliases share the reference green, tags
+   the error red (rare and loud), doc markers the divider family. */
+.tk-anchor { color: var(--success); }
+.tk-alias { color: var(--success); }
+.tk-tag { color: var(--error); }
+.tk-marker { color: var(--text-primary); font-weight: 600; }
+
+/* Markdown vocabulary: delimiters -- fences AND frontmatter rules --
+   recede; headings accent bold; strong weight only; inline code the warm
+   literal family; unstyled fenced lines the secondary wash. (Fenced code
+   inside re-enters the programming vocabulary above.) */
+.tk-heading { color: var(--accent); font-weight: 600; }
+.tk-fence { color: var(--text-muted); }
+.tk-code_block { color: var(--text-secondary); }
+.tk-strong { font-weight: 600; }
+.tk-code { color: var(--warning); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    RESPONSIVE

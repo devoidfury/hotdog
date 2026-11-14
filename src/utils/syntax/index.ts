@@ -8,11 +8,10 @@
  * fence-info aliases (markdown) and file-name guesses (webui file-view:
  * extensions plus dotless basenames like Dockerfile). Each def lives in
  * the file of the tokenizer it describes; the BUILTINS list below is the
- * single assembly point. A def with no tokenize is either a GUESS-ONLY
- * lang (rust: the name is the honest guess, the scanner has not landed)
- * or a lang driven outside this registry (markdown: its scanner is
- * stateful and lives in markdown.ts) -- guessLangForBase answers the
- * name, getTokenizer answers undefined, and the sink renders plain text.
+ * single assembly point. A def with no tokenize is a lang driven outside
+ * this registry (markdown: its scanner is stateful and lives in
+ * markdown.ts) -- guessLangForBase answers the name, getTokenizer answers
+ * undefined, and the sink renders plain text.
  *
  * Registration is replace-per-field: re-registering a lang keeps the
  * fields the new def omits, so registerTokenizer(lang, fn) retargets a
@@ -29,13 +28,18 @@
 import { C_SYNTAX } from "./c.ts";
 import { CSS_SYNTAX } from "./css.ts";
 import { DOCKERFILE_SYNTAX } from "./dockerfile.ts";
+import { ENV_SYNTAX } from "./env.ts";
+import { GITIGNORE_SYNTAX } from "./gitignore.ts";
 import { GO_SYNTAX } from "./go.ts";
+import { GRAPHQL_SYNTAX } from "./graphql.ts";
 import { HTML_SYNTAX } from "./html.ts";
 import { INI_SYNTAX } from "./ini.ts";
 import { JAVASCRIPT_SYNTAX } from "./javascript.ts";
 import { JSON_SYNTAX } from "./json.ts";
+import { LUA_SYNTAX } from "./lua.ts";
 import { MAKE_SYNTAX } from "./make.ts";
 import { PYTHON_SYNTAX } from "./python.ts";
+import { RUST_SYNTAX } from "./rust.ts";
 import { SHELL_SYNTAX } from "./shell.ts";
 import { SQL_SYNTAX } from "./sql.ts";
 import { TOML_SYNTAX } from "./toml.ts";
@@ -101,13 +105,16 @@ const BUILTINS: readonly SyntaxDef[] = [
   GO_SYNTAX,
   SQL_SYNTAX,
   MAKE_SYNTAX,
+  ENV_SYNTAX,
+  GITIGNORE_SYNTAX,
+  GRAPHQL_SYNTAX,
+  LUA_SYNTAX,
+  RUST_SYNTAX,
   // Metadata-only registrations: names the file view guesses honestly
   // while getTokenizer stays undefined (the registry contract). markdown
   // is deliberately stateless-registry-less -- the sink drives its
-  // stateful scanner (markdown.ts) -- rust waits for its tokenizer; its
-  // file renders plain until one lands.
+  // stateful scanner (markdown.ts).
   { lang: "markdown", extensions: ["md", "markdown"] },
-  { lang: "rust", extensions: ["rs"] },
 ];
 
 /** Register (or replace fields of) a language. Provide only what changes:

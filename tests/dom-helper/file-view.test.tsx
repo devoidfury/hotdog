@@ -72,9 +72,12 @@ describe("viewer language + tokens", () => {
     expect(guessLang(".bashrc")).toBe("shell");
     expect(guessLang("/home/u/.zshrc")).toBe("shell");
     expect(guessLang(".profile")).toBe("shell");
-    expect(guessLang("/app/.env")).toBe("ini"); // KEY=value: the ini dialect reads it
+    expect(guessLang("/app/.env")).toBe("env"); // dotenv gets its own tokenizer
     expect(guessLang(".editorconfig")).toBe("ini");
     expect(guessLang(".gitconfig")).toBe("ini");
+    expect(guessLang(".gitignore")).toBe("gitignore");
+    expect(guessLang("schema.graphql")).toBe("graphql");
+    expect(guessLang("init.lua")).toBe("lua");
     expect(guessLang("weird.dotfile")).toBeUndefined(); // unclaimed basename AND ext
     // Alias-free extension claims (the format IS the lang).
     expect(guessLang("assets/icon.svg")).toBe("xml");
@@ -104,6 +107,7 @@ describe("viewer language + tokens", () => {
     expect(guessLang("/repo/Makefile")).toBe("make");
     expect(guessLang("GNUmakefile")).toBe("make");
     expect(guessLang("Makefile.dev")).toBe("make");
+    expect(guessLang("main.rs")).toBe("rust");
     expect(guessLang("my.Makefile")).toBeUndefined(); // not the Makefile.* shape
     // Dockerfile has no extension: the basename special case catches the
     // bare name and the build-variant spelling (case-insensitive), while a
@@ -119,8 +123,15 @@ describe("viewer language + tokens", () => {
     expect(runs[0]).toEqual({ type: "command", text: "ls" });
     // Lossless: concatenating runs reproduces the line exactly.
     expect(runs.map((r) => r.text).join("")).toBe("ls -l | wc -l");
-    expect(tokenizeLine("anything { 1", "rust")).toEqual([{ type: "default", text: "anything { 1" }]);
     expect(tokenizeLine("anything", undefined)).toEqual([{ type: "default", text: "anything" }]);
+    // rust's scanner landed: the last guess-only def renders runs now.
+    expect(tokenizeLine("anything { 1", "rust")).toEqual([
+      { type: "default", text: "anything" },
+      { type: "default", text: " " },
+      { type: "operator", text: "{" },
+      { type: "default", text: " " },
+      { type: "number", text: "1" },
+    ]);
     // The four new langs resolve (the registry contract, now held for them).
     expect(tokenizeLine("[table]", "toml")[0]).toEqual({ type: "section", text: "[table]" });
     expect(tokenizeLine("k = v", "ini")[0]).toEqual({ type: "key", text: "k" });

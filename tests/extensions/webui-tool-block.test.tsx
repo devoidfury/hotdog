@@ -270,7 +270,7 @@ describe("codeRuns (shared tokenizer seam)", () => {
   });
 
   it("returns null for unknown or absent langs (plain <pre> render)", () => {
-    expect(codeRuns("fn main() {}", "rust")).toBeNull();
+    expect(codeRuns("fn main() {}", "cobol")).toBeNull();
     expect(codeRuns("a: 1")).toBeNull();
     expect(codeRuns("a: 1", "constructor")).toBeNull();
   });
@@ -1338,7 +1338,7 @@ describe("code part (DOM)", () => {
     const { block } = mountBlock({
       name: "check",
       args: JSON.stringify({ yaml }),
-      display: [{ kind: "code", source: "args", arg: "yaml", lang: "rust" }],
+      display: [{ kind: "code", source: "args", arg: "yaml", lang: "cobol" }],
     });
     const pre = block.querySelector(".tool-code")!;
     // REAL content, never a JSON object with escaped \n.

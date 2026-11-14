@@ -206,7 +206,7 @@ const BULLET_RE = /^( *)([-*+]|\d{1,9}[.)])( +)(.*)$/;
 
 // Fence-info languages resolve through the registry: canonical names and
 // the aliases shipped on each lang's SyntaxDef (see index.ts). Unknown
-// info strings -- and names whose def has no tokenizer, rust -- resolve to
+// info strings -- and names whose def has no tokenizer -- resolve to
 // null (plain code).
 function resolveLang(info: string): string | null {
   const word = info.trim().split(/\s+/)[0]?.toLowerCase();

@@ -106,7 +106,7 @@ describe("tokenizeShell runs", () => {
 describe("tokenizer registry", () => {
   it("resolves shell and misses unknown langs (plain-text fallback signal)", () => {
     expect(getTokenizer("shell")).toBe(tokenizeShell);
-    expect(getTokenizer("rust")).toBeUndefined();
+    expect(getTokenizer("cobol")).toBeUndefined();
     expect(getTokenizer("")).toBeUndefined();
     // A lang name shadowing Object.prototype must miss, not resolve.
     expect(getTokenizer("constructor")).toBeUndefined();
@@ -151,9 +151,6 @@ describe("syntax defs (registerSyntax metadata)", () => {
   });
 
   it("built-in metadata-only defs guess but never tokenize", () => {
-    expect(guessLangForBase("main.rs")).toBe("rust"); // honest guess, plain render
-    expect(getTokenizer("rust")).toBeUndefined();
-    expect(resolveSyntaxLang("rust")).toBeUndefined(); // a scannerless def never resolves a fence
     expect(guessLangForBase("README.md")).toBe("markdown");
     expect(getTokenizer("markdown")).toBeUndefined(); // markdown rides its stateful scanner outside the registry
   });

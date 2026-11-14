@@ -692,11 +692,16 @@ describe("ui-one-shot extension", () => {
     });
 
     /** Run the prompt subcommand with the given CLI argv and return the buildAgent
-     *  that SessionManager.create would call (the one-shot's wrapped factory). */
-    async function captureBuildAgent(cli: Record<string, unknown>) {
+     *  that SessionManager.create would call (the one-shot's wrapped factory).
+     *  prepareCore mutates the mock core before create() (e.g. profileManager). */
+    async function captureBuildAgent(
+      cli: Record<string, unknown>,
+      prepareCore?: (core: any) => void,
+    ) {
       const { create } = await import("@extensions/ui-one-shot/index.ts");
       const { SessionManager } = await import("@core/session/index.ts");
       const core = createMockCore();
+      prepareCore?.(core);
       const ext = create(core);
 
       let buildAgentFn: any = null;
@@ -790,6 +795,66 @@ describe("ui-one-shot extension", () => {
       const agent = await buildAgentFn(cli);
       // A fresh UUID can never match an existing log.
       expect(agent.getMessages().length).toBe(0);
+    });
+
+    it("restores the profile the session ended on", async () => {
+      const { LOG_SOURCE } = await import("@core/session/session-log.ts");
+      const sessionId = "oneshot-resume-profile";
+      await writeFile(
+        join(sessionsDir, `${sessionId}.jsonl`),
+        [
+          { ts: "2024-01-01T00:00:00Z", session_id: sessionId, source: LOG_SOURCE.SESSION_START, content: "", profile: "alpha" },
+          { ts: "2024-01-01T00:00:01Z", session_id: sessionId, source: LOG_SOURCE.INPUT, content: "Earlier question" },
+        ]
+          .map((e) => JSON.stringify(e))
+          .join("\n") + "\n",
+      );
+
+      const cli = { prompt: "continue", sessionId };
+      const buildAgentFn = await captureBuildAgent(cli, (core) => {
+        core.resolved.profileManager = {
+          getProfilesForSwitch: () => ({ alpha: { body: "PROFILED BODY", model: "profiled-model" } }),
+        };
+      });
+      const agent = await buildAgentFn(cli);
+
+      // applyProfile ran: the resumed agent carries the ended-on profile's
+      // name and body (and its model, absent an explicit -m or attestation).
+      expect(agent.profileName).toBe("alpha");
+      expect(agent.profileBody).toBe("PROFILED BODY");
+      expect(agent.model).toBe("profiled-model");
+    });
+
+    it("closes a held question as unanswered (no human on a one-shot resume)", async () => {
+      const { LOG_SOURCE } = await import("@core/session/session-log.ts");
+      const { contentToText } = await import("@core/context/message.ts");
+      const sessionId = "oneshot-resume-question";
+      const questions = [{ key: "mode", prompt: "Which mode?" }];
+      await writeFile(
+        join(sessionsDir, `${sessionId}.jsonl`),
+        [
+          {
+            ts: "2024-01-01T00:00:00Z", session_id: sessionId, source: LOG_SOURCE.LLM, content: "let me ask",
+            tool_calls: [{ id: "call_q", type: "function", function: { name: "question", arguments: "{}" } }],
+          },
+          { ts: "2024-01-01T00:00:01Z", session_id: sessionId, source: LOG_SOURCE.TOOL_STARTED, tool_call_id: "call_q", tool_name: "question" },
+          { ts: "2024-01-01T00:00:02Z", session_id: sessionId, source: LOG_SOURCE.QUESTION_ASKED, tool_call_id: "call_q", content: questions },
+        ]
+          .map((e) => JSON.stringify(e))
+          .join("\n") + "\n",
+      );
+
+      const cli = { prompt: "continue", sessionId };
+      const buildAgentFn = await captureBuildAgent(cli);
+      const agent = await buildAgentFn(cli);
+
+      // The replay holds the call open; the one-shot entry point must close
+      // it with an honest wire-valid tool result, never leave a dangling call.
+      const messages = agent.getMessages() as Message[];
+      const toolMsg = messages.find((m) => m.role === "tool");
+      expect(toolMsg).toBeDefined();
+      expect((toolMsg as { toolCallId?: string }).toolCallId).toBe("call_q");
+      expect(contentToText(toolMsg!.content)).toContain("User is not connected");
     });
 
     // ── resume model fidelity: the CLI consumes the log's attestation ──────
@@ -969,4 +1034,67 @@ describe("ui-one-shot extension", () => {
       }
     });
   });
+describe("one-shot sink argDisplay wiring", () => {
+  it("a tool_call event consults the tool registry for display hints", async () => {
+    const { create } = await import("@extensions/ui-one-shot/index.ts");
+    const { SessionManager } = await import("@core/session/index.ts");
+    const { OUTPUT_EVENT } = await import("@core/context/output.ts");
+    const core = createMockCore();
+
+    const asked: string[] = [];
+    core.toolRegistry.getMetadata = (name: string) => {
+      asked.push(name);
+      return name === "echo"
+        ? { argDisplay: { text: { preview: "first-line" } }, display: undefined }
+        : undefined;
+    };
+
+    const ext = create(core);
+    let listener: ((event: any) => void) | null = null;
+    const mockBus = {
+      runUntilCancelled: async () => {
+        listener?.({
+          type: OUTPUT_EVENT.TOOL_CALL,
+          toolName: "echo",
+          input: '{"text":"hi"}',
+          toolCallId: "call_1",
+        });
+      },
+    };
+    (SessionManager as any).create = async () => ({
+      sessionId: () => "argdisplay-session",
+      getAgent: () => ({ sessionId: "argdisplay-session" }),
+      getBus: () => mockBus,
+      getTaskManager: () => null,
+      enqueue: () => {},
+      executeCommand: async () => 0,
+      onSessionEvents: (_sessionId: string, cb: (event: any) => void) => {
+        listener = cb;
+        return () => {};
+      },
+    });
+
+    const registry: Record<string, SubcommandDefinition> = {};
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
+
+    const stdoutSpy = spyOn(process.stdout, "write").mockImplementation((() => true) as never);
+    try {
+      const exitCode = await (registry.prompt as any).handler({ prompt: "run echo" }, core);
+      expect(exitCode).toBe(0);
+      // The hint lookup fired for the streamed tool, and the tool line printed.
+      expect(asked).toContain("echo");
+      const writes = stdoutSpy.mock.calls.map((c) => String(c[0]));
+      expect(writes.some((w) => w.includes("echo"))).toBe(true);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
 });
+
+});
+
+// ── Sink display wiring: the registry reaches the terminal ─────────────────
+// The one-shot sink is built with argDisplay/display lookups into the tool
+// registry. A tool_call event streaming through the channel must consult the
+// registry for the tool's declared display hints (the seam the interactive
+// CLI shares; pinned here byte-simple).

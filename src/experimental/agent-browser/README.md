@@ -2,7 +2,7 @@
 
 One model-facing tool, `agent_browser`, driving headless browser views on
 [`Bun.WebView`](https://bun.com/docs/runtime/webview) (experimental API; requires
-bun >= 1.4.2). Opt-in: nothing loads until the user adds `@experimental` to
+bun >= 1.4.3). Opt-in: nothing loads until the user adds `@experimental` to
 `extensionPaths` (which **replaces** the default `@extensions` list, so keep both).
 
 ```json

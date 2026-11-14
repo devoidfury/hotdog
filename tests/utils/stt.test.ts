@@ -14,7 +14,7 @@ interface CapturedRequest {
   fileText: string;
 }
 
-let mode: "ok" | "error" | "notjson" | "notext" = "ok";
+let mode: "ok" | "error" | "bodyfail" | "notjson" | "notext" = "ok";
 let lastRequest: CapturedRequest | null = null;
 
 const fakeStt = Bun.serve({
@@ -42,6 +42,20 @@ const fakeStt = Bun.serve({
         { error: { message: "backend exploded" } },
         { status: 500 },
       );
+    }
+    if (mode === "bodyfail") {
+      // Headers land, the body dies mid-stream (the first chunk flushes, a
+      // later pull rejects): a client-side body read rejects with ECONNRESET
+      // and the status error must still ride without a snippet.
+      const stream = new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode('{"partial":'));
+        },
+        pull() {
+          return new Promise((_, rej) => setTimeout(() => rej(new Error("body died")), 15));
+        },
+      });
+      return new Response(stream, { status: 502 });
     }
     if (mode === "notjson") return new Response("<html>not json</html>");
     if (mode === "notext") return Response.json({ result: "wrong shape" });
@@ -122,6 +136,15 @@ describe("transcribeAudio", () => {
     expect(caught!.message).toContain("STT request failed");
     expect(caught!.message).toContain("500");
     expect(caught!.message).toContain("backend exploded");
+  });
+
+  it("a failed body read on a non-ok response still throws the status error", async () => {
+    // The snippet read is best-effort (catch(() => "")): a body that dies
+    // mid-stream must not swallow the status line the operator needs.
+    mode = "bodyfail";
+    expect(
+      transcribeAudio({ url: endpoint(), audio: new TextEncoder().encode("x") }),
+    ).rejects.toThrow(/STT request failed: 502/);
   });
 
   it("throws when the response body is not JSON", async () => {

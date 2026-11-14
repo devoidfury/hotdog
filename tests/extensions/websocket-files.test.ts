@@ -21,6 +21,7 @@ import {
   mkdirSync,
   writeFileSync,
   symlinkSync,
+  chmodSync,
   rmSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -438,5 +439,69 @@ describe("file handlers plumbing", () => {
     expect((await listDirPayload(ws, "/etc")).error).toContain("Path escape rejected");
     expect((await readPayload(ws, ".ssh/id_ed25519", 0, 10)).error).toContain("Denylisted path rejected");
     expect((await listDirPayload(ws, 42 as never)).error).toContain("Invalid path");
+  });
+});
+
+// ── Degraded fs paths (the honest one-liners behind the catches) ────────────
+// Declared last on purpose: these fixtures land in ROOT_A, and the listing
+// shape tests above assert exact directory sets.
+
+describe("file handlers degraded fs paths", () => {
+  it("listing a missing directory: 'not found' with the requested spelling", async () => {
+    const reply = parse<ListDirResultWire>(
+      (await send(createWsMockWs(), { type: C2S.LIST_DIR, requestId: 80, path: "no-such-dir" }))[0]!,
+    );
+    expect(reply.error).toBe("not found: no-such-dir");
+    expect("entries" in reply).toBe(false);
+  });
+
+  it("listing a dangling final link: 'not found' (stat follows, resolveSafe already passed it)", async () => {
+    const reply = parse<ListDirResultWire>(
+      (await send(createWsMockWs(), { type: C2S.LIST_DIR, requestId: 81, path: "dangle" }))[0]!,
+    );
+    expect(reply.error).toBe("not found: dangle");
+  });
+
+  it("invalid UTF-8 inside the probe window: binary refusal, ZERO content bytes", async () => {
+    // No NUL: the verdict must come from the fatal UTF-8 decode, not the
+    // NUL sniff, and the sentinel bytes beside the garbage stay off the wire.
+    writeFileSync(
+      join(ROOT_A, "bad-utf8.bin"),
+      Buffer.from([...Buffer.from("head SENTINEL-BAD"), 0xc3, 0x28, 0xff, ...Buffer.from("tail")]),
+    );
+    const raw = (await send(createWsMockWs(), { type: C2S.READ_FILE, requestId: 82, path: "bad-utf8.bin" }))[0]!;
+    expectNoSentinel(raw);
+    const reply = parse<ReadFileResultWire>(raw);
+    expect(reply.error).toContain("binary file");
+    expect("content" in reply).toBe(false);
+  });
+
+  it("invalid bytes past the probe window: the final decode refuses too", async () => {
+    // 8193 valid bytes push the garbage past BINARY_PROBE_BYTES: the probe
+    // passes, and the fatal decode of the picked content delivers the verdict.
+    const bytes = Buffer.concat([Buffer.from("a".repeat(8193)), Buffer.from([0xff, 0xfe, 0xfd])]);
+    writeFileSync(join(ROOT_A, "bad-tail.bin"), bytes);
+    const raw = (await send(createWsMockWs(), { type: C2S.READ_FILE, requestId: 83, path: "bad-tail.bin" }))[0]!;
+    const reply = parse<ReadFileResultWire>(raw);
+    expect(reply.error).toBe(`binary file (${bytes.length} bytes) -- not displayed`);
+    expect("content" in reply).toBe(false);
+  });
+
+  // chmod says nothing to root: a privileged test process would read the
+  // 000 dir happily, so the whole test rides the skip.
+  const AS_ROOT = typeof process.getuid === "function" && process.getuid() === 0;
+  it.skipIf(AS_ROOT)("readdir refused after the stat passed: honest permission line", async () => {
+    const lockbox = join(ROOT_A, "lockbox");
+    mkdirSync(lockbox);
+    chmodSync(lockbox, 0o000);
+    try {
+      const reply = parse<ListDirResultWire>(
+        (await send(createWsMockWs(), { type: C2S.LIST_DIR, requestId: 84, path: "lockbox" }))[0]!,
+      );
+      expect(reply.error).toBe("permission denied: lockbox");
+      expect("entries" in reply).toBe(false);
+    } finally {
+      chmodSync(lockbox, 0o755); // keep the afterAll rm working
+    }
   });
 });

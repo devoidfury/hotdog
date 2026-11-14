@@ -18,7 +18,7 @@ jobs:
     name: "bun test + typecheck before publish"
     runs-on: ubuntu-latest
     env:
-      BUN_VERSION: "1.4.2"
+      BUN_VERSION: "1.4.3"
       HOTDOG_CONFIG_DIR: "./examples/minimal-config/config"
     steps:
       # Bootstrap checkout, inline for the same reason as test.yml (a local

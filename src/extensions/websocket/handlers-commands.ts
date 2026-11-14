@@ -26,7 +26,7 @@ export function handleCommand(ctx: RouteContext): void {
     const { cut, prompt } = parseForkArg(cmdText.slice("fork".length));
     registry
       .fork(msg.sessionId as string, { cut })
-      .then(({ sessionId: newSessionId, agent }) => {
+      .then(async ({ sessionId: newSessionId, agent }) => {
         if (ws.activeSessionId && ws.activeChannel) {
           registry.removeChannel(ws.activeSessionId, ws.activeChannel);
         }
@@ -37,7 +37,8 @@ export function handleCommand(ctx: RouteContext): void {
         SessionRegistry.sendSafe(ws, sessionCreatedMsg);
         registry.broadcast(sessionCreatedMsg);
         // A fresh fork id owns no tasks, so it inherits none of the source's chips.
-        registry.sendTaskSnapshot(ws);
+        // Awaited so it keeps its slot ahead of the history replay below.
+        await registry.sendTaskSnapshot(ws);
 
         // After the fork's sessionCreated lands (the client clears its list and
         // re-targets), replay the copied history, then start the optional prompt.

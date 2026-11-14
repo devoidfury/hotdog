@@ -797,7 +797,7 @@ Directory holding the cross-process lane slot ledger: one subdir per provider la
 - **Default:** `<dataDir>/task-spawns.jsonl` (i.e. `~/.cache/hotdog/task-spawns.jsonl`, or `$HOTDOG_DATA_DIR/task-spawns.jsonl`)
 - **Resolution:** config > compute
 
-Append-only JSONL restart sidecar for `delegate_task` records: one spawn line per non-parked task (id, description, calling session, timestamp, writer pid/host) and one end line per terminal transition. A later process reads it to list never-ended tasks from dead processes as "interrupted by restart" (`plan_status`) and to answer `task_status` on such ids honestly -- surfacing only, nothing is ever auto-respawned. Workflow-engine (parked) spawns are not recorded; their lifecycle lives in the run's `run.jsonl`.
+Append-only JSONL restart sidecar for task records: one spawn line per task (id, description, calling session, timestamp, writer pid/host; workflow-engine spawns additionally carry a `parked` mark and their `run` dir) and one end line per terminal transition. A later process reads it to list never-ended tasks from dead processes as "interrupted by restart" (`plan_status`) and to answer `task_status` on such ids honestly -- surfacing only, nothing is ever auto-respawned. Parked (workflow-engine) spawns rebuild the webui subagent lineage but never appear as orphans: the run's own `run.jsonl` journal owns their reconciliation.
 
 ```json
 { "taskSpawnsPath": "/var/tmp/hotdog-spawns.jsonl" }

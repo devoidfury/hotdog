@@ -11,6 +11,7 @@ import { toolContentMeta, toolContentText } from "@utils/tool-content.ts";
 import type { CtxUsage } from "@utils/session-turns.ts";
 import { trySessionPath } from "@core/session/session-log.ts";
 import type { TaskInfo } from "@core/session/task-types.ts";
+import type { LineageRecord } from "@core/session/spawn-log.ts";
 import { S2C, type S2CType, type TaskActivityWire, type ToolDisplayWire, wireImages } from "./protocol.ts";
 
 /**
@@ -29,6 +30,55 @@ export function taskWire(info: TaskInfo): Record<string, unknown> {
   return {
     ...info,
     ...(logPath !== undefined ? { agentLogPath: logPath } : {}),
+  };
+}
+
+/**
+ * LineageRecord -> task row for the RESTART-REBUILT subagent feed (the boot
+ * snapshot on live rows, the nested `subagents` array on cold rows). The row
+ * speaks the TaskInfoWire grammar so the client renders it with the one
+ * sidebar component, plus ONE new derived field, `durable: true`: there is no
+ * live task behind it, so the client opens the worker's durable log (viewLog
+ * / LOG_VIEWED) instead of requesting the process-local activity replay.
+ *
+ * Honesty rules (the durability batch's interrupted-task doctrine, restated
+ * for the sidebar):
+ *  - An OPEN sidecar record means the writing process died mid-task: the
+ *    status is "interrupted" -- never a claim that a dead worker runs.
+ *  - A closed record carries its RECORDED outcome through untouched (an
+ *    end line that lost its outcome yields "", which the client's unknown-
+ *    glyph fallback shows; nothing is upgraded to "completed").
+ *  - startedAt is unattested (null). The elapsed clock rides the sidecar's
+ *    own wall stamps -- spawn->end for a closed record, spawn->observation
+ *    for an interrupted one -- frozen at read time (turnStartedAt null,
+ *    inRun false), so a dead row never ticks.
+ *  - agentSessionId rides only when the sidecar recorded the worker join;
+ *    pre-join records render as labelled, unopenable rows (the client hides
+ *    Open/menu items whose fields are absent, the rowMenuTail idiom).
+ *  - The engine run dir (workflow spawns record it on the spawn line) rides
+ *    the same gate taskWire uses, so a restart survivor keeps Reveal.
+ */
+export function taskLineageWire(rec: LineageRecord): Record<string, unknown> {
+  const logPath = rec.agentSessionId ? trySessionPath(rec.agentSessionId) : undefined;
+  const elapsed =
+    rec.spawnedAt === null
+      ? 0
+      : Math.max(0, (rec.endedAt ?? rec.observedAt) - rec.spawnedAt);
+  return {
+    taskId: rec.taskId,
+    description: rec.description,
+    sessionId: rec.sessionId,
+    status: rec.outcome ?? "interrupted",
+    createdAt: rec.spawnedAt ?? 0,
+    startedAt: null,
+    endedAt: rec.endedAt,
+    activeMs: elapsed,
+    inRun: false,
+    turnStartedAt: null,
+    durable: true,
+    ...(rec.agentSessionId !== null ? { agentSessionId: rec.agentSessionId } : {}),
+    ...(logPath !== undefined ? { agentLogPath: logPath } : {}),
+    ...(rec.runDir !== null ? { runDir: rec.runDir } : {}),
   };
 }
 

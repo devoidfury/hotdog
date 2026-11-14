@@ -9,6 +9,7 @@ import { describe, it, expect } from "bun:test";
 import {
   formatElapsed,
   chipLabel,
+  openTargetFor,
   runDiscriminators,
 } from "@extensions/webui/ui/subagents.tsx";
 import { SubagentStatusGlyph } from "@extensions/webui/ui/icons.tsx";
@@ -121,5 +122,41 @@ describe("SubagentStatusGlyph", () => {
     expect(one).toContain('aria-hidden="true"');
     expect(one).toContain('tabindex="-1"');
     expect(one).toContain('stroke="currentColor"');
+  });
+});
+
+// ── Durable (restart-rebuilt) rows ──────────────────────────────────────────
+
+describe("openTargetFor", () => {
+  it("live and settled-live rows open the task transcript", () => {
+    expect(openTargetFor(taskInfoWire)).toEqual({ taskId: "t1" });
+    expect(openTargetFor({ ...taskInfoWire, status: "completed" })).toEqual({ taskId: "t1" });
+  });
+
+  it("a durable row with a recorded worker key opens the worker's durable log", () => {
+    expect(
+      openTargetFor({
+        ...taskInfoWire,
+        status: "interrupted",
+        durable: true,
+        agentSessionId: "worker-9",
+      }),
+    ).toEqual({ logId: "worker-9" });
+  });
+
+  it("a durable row written before the agent join has NO target (no dead click)", () => {
+    expect(openTargetFor({ ...taskInfoWire, status: "completed", durable: true })).toBeNull();
+  });
+});
+
+describe("SubagentStatusGlyph: interrupted", () => {
+  it("severs its own broken-ring shape, not the unknown dot", () => {
+    const cls = renderToString(<SubagentStatusGlyph status="interrupted" />);
+    expect(cls).toContain("subagent-glyph-interrupted");
+    expect(cls).not.toContain("subagent-glyph-unknown");
+    // Parked still wins its dashed ring over any status token.
+    expect(renderToString(<SubagentStatusGlyph status="interrupted" parked />)).toContain(
+      "subagent-glyph-parked",
+    );
   });
 });

@@ -1795,7 +1795,7 @@ body.logs-resizing .sidebar-header-resize {
 
 /* Paragraphs */
 .md-content p {
-    margin: 0.4em 0;
+    margin: 0.8em 0;
 }
 
 .md-content p:first-child {
@@ -3862,7 +3862,7 @@ body.workbench-resizing {
 
 /* Chevron button: the #logs-toggle grammar at list scale (aria-expanded +
    a rotated glyph while collapsed; the rotation class is the test pin). */
-#subagents-toggle {
+.subagents-toggle {
     width: 22px;
     height: 22px;
     border-radius: var(--radius-sm);
@@ -3876,12 +3876,12 @@ body.workbench-resizing {
     flex-shrink: 0;
 }
 
-#subagents-toggle:hover {
+.subagents-toggle:hover {
     color: var(--accent);
     background: var(--accent-soft);
 }
 
-#subagents-toggle:focus-visible {
+.subagents-toggle:focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: -1px;
 }

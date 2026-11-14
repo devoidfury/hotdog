@@ -103,11 +103,30 @@ interface SectionProps {
   /** Task whose transcript is on screen in the main view (row highlight). */
   viewedTaskId: string | null;
   onToggle: () => void;
-  onOpenTask: (taskId: string) => void;
+  /** Row press. The row itself rides along (additive second arg) so the app
+   *  can route it through openTargetFor without a lookup. */
+  onOpenTask: (taskId: string, task: TaskInfoWire) => void;
   /** The row's context menu: right-click, the row's visible kebab trigger,
    *  and the keyboard twins all route here (the app runs the shared
    *  ContextMenu machinery; rowEl anchors/receives focus back). */
   onTaskMenu: (e: MouseEvent | KeyboardEvent, task: TaskInfoWire, rowEl: HTMLElement) => void;
+}
+
+/**
+ * Where a row press lands. Live and settled-live rows open the task
+ * transcript (chat.viewSubagent). A DURABLE row (restart survivor rebuilt
+ * from the sidecar) has no task behind it in this process -- it opens the
+ * worker's OWN durable log through the existing cold-log machinery
+ * (viewLog / LOG_VIEWED). Sidecar records written before the agent join
+ * carry no worker key: nothing can honestly be opened, so the row stays
+ * informational (the menu still copies the id) -- never a dead click
+ * pretending otherwise.
+ */
+export function openTargetFor(
+  t: TaskInfoWire,
+): { taskId: string } | { logId: string } | null {
+  if (t.durable !== true) return { taskId: t.taskId };
+  return t.agentSessionId !== undefined ? { logId: t.agentSessionId } : null;
 }
 
 /**
@@ -125,6 +144,9 @@ export function SubagentsSection(p: SectionProps) {
   });
   const discriminators = runDiscriminators(ordered);
   const listId = `subagent-list-${p.sid}`;
+  // Per-section ids: the sidebar renders this section once per manager (live
+  // cards AND cold lineage rows), so a static toggle id would duplicate it.
+  const toggleId = `subagents-toggle-${p.sid}`;
   return (
     <div className={`subagents-section${p.collapsed ? " collapsed" : ""}`} role="listitem">
       <div className="subagents-header">
@@ -132,7 +154,7 @@ export function SubagentsSection(p: SectionProps) {
         {/* Chevron idiom, #logs-toggle grammar: the flip rides a rotation
             class on the same svg, the label names the next click. */}
         <button
-          id="subagents-toggle"
+          id={toggleId}
           type="button"
           className="subagents-toggle"
           aria-expanded={p.collapsed ? "false" : "true"}
@@ -154,6 +176,10 @@ export function SubagentsSection(p: SectionProps) {
         {ordered.map((t) => {
           const disc = discriminators.get(t.taskId);
           const parked = isParked(t);
+          // Durable rows without a recorded worker key have nothing to open
+          // (see openTargetFor): the press affordances drop, the row stays
+          // readable and its menu stays available.
+          const target = openTargetFor(t);
           // Callback-ref handle to the mounted row (house escape hatch,
           // SidebarRow idiom): the kebab's click resolves its owning row
           // from the DOM, not from the event's currentTarget.
@@ -167,21 +193,23 @@ export function SubagentsSection(p: SectionProps) {
               key={t.taskId}
               data-task-id={t.taskId}
               className={`subagent-row status-${t.status}${parked ? " waiting" : ""}${t.taskId === p.viewedTaskId ? " active" : ""}`}
-              title={`${t.taskId}: ${t.description || "(no description)"} — ${parked ? "waiting" : t.status}`}
+              title={`${t.taskId}: ${t.description || "(no description)"} — ${parked ? "waiting" : t.status}${target === null ? " (transcript not on record)" : ""}`}
               aria-current={t.taskId === p.viewedTaskId ? "true" : undefined}
               role="listitem"
               tabindex="0"
               ref={(el) => {
                 if (el) rowEl = el as unknown as HTMLElement;
               }}
-              onClick={() => p.onOpenTask(t.taskId)}
+              onClick={() => {
+                if (target) p.onOpenTask(t.taskId, t);
+              }}
               onKeydown={(e: KeyboardEvent) => {
                 // Direct presses on the row only; keys landing on the
                 // kebab belong to the kebab (SidebarRow guard idiom).
                 if (e.target !== e.currentTarget) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault(); // Space must not page-scroll while focused
-                  p.onOpenTask(t.taskId);
+                  if (target) p.onOpenTask(t.taskId, t);
                 } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
                   e.preventDefault();
                   p.onTaskMenu(e, t, e.currentTarget as HTMLElement);

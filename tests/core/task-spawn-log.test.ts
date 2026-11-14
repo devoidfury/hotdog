@@ -1,6 +1,7 @@
-// Restart sidecar for delegate_task records (spawn-log): spawn/terminal lines,
-// orphan enumeration across a simulated process restart, plan_status /
-// task_status surfacing, and the never-break-execution rule for write failures.
+// Restart sidecar for task records (spawn-log): spawn/terminal lines (engine
+// spawns marked), orphan enumeration across a simulated process restart,
+// plan_status / task_status surfacing, and the never-break-execution rule
+// for write failures.
 
 import { describe, it, expect, afterAll } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
@@ -122,15 +123,40 @@ describe("spawn sidecar records", () => {
     expect(ends.map((l) => `${l.id}:${l.outcome}`).sort()).toEqual(["t2:cancelled", "t3:failed"]);
   });
 
-  it("parked (workflow-engine) spawns are never recorded", async () => {
+  it("parked (workflow-engine) spawns are recorded, marked, with their run dir", async () => {
     const path = join(freshDir(), "task-spawns.jsonl");
     const { manager } = managerWithSidecar(path);
-    await manager.spawnTask("p1", "parked node work", { park: true });
-    await settle(() => manager.taskStatus("p1") === "running", "p1 running");
-    manager.interruptTask("p1");
-    await settle(() => manager.taskStatus("p1") === "cancelled", "p1 cancelled");
-    await new Promise((r) => setTimeout(r, 20)); // give any stray fire-and-forget write a chance
-    expect(existsSync(path)).toBe(false);
+    await manager.spawnTask("run:n#1", "parked node work", {
+      park: true,
+      runDir: "/runs/abc",
+      managerAgent: { sessionId: "mgr-w" },
+    });
+    await settle(() => manager.taskStatus("run:n#1") === "running", "run:n#1 running");
+    manager.interruptTask("run:n#1");
+    await settle(() => manager.taskStatus("run:n#1") === "cancelled", "run:n#1 cancelled");
+    await settle(
+      () => existsSync(path) && readLines(path).some((l) => l.ev === "end"),
+      "parked end line",
+    );
+    const lines = readLines(path);
+    const spawn = lines.find((l) => l.ev === "spawn")!;
+    expect(spawn.id).toBe("run:n#1");
+    expect(spawn.session).toBe("mgr-w");
+    expect(spawn.parked).toBe(true);
+    expect(spawn.run).toBe("/runs/abc");
+    const end = lines.find((l) => l.ev === "end")!;
+    expect(`${end.id}:${end.outcome}`).toBe("run:n#1:cancelled");
+  });
+
+  it("delegate spawn lines stay byte-identical: no parked/run keys", async () => {
+    const path = join(freshDir(), "task-spawns.jsonl");
+    const { manager } = managerWithSidecar(path);
+    const handle = await manager.spawnTask("t1", "bare delegate");
+    await handle.done;
+    await settle(() => existsSync(path) && readLines(path).some((l) => l.ev === "end"), "end line");
+    const spawn = readLines(path).find((l) => l.ev === "spawn")!;
+    expect("parked" in spawn).toBe(false);
+    expect("run" in spawn).toBe(false);
   });
 
   it("unset spawnLogPath disables the sidecar entirely", async () => {
@@ -250,6 +276,24 @@ describe("restart orphans", () => {
     // Sanity: the very same file with dead pids DOES enumerate the open task.
     const deadWatcher = managerWithSidecar(path);
     expect((await deadWatcher.manager.orphanedTasks()).map((o) => o.taskId)).toEqual(["t5"]);
+  });
+
+  it("parked (engine-owned) spawns never read as orphans: the run journal reconciles them", async () => {
+    // An OPEN parked record with a dead pid would orphan-report like any
+    // other spawn if the parked mark did not park it: plan_status would
+    // double-report a run the workflow journal already accounts for.
+    const path = join(freshDir(), "task-spawns.jsonl");
+    writeFileSync(
+      path,
+      `${JSON.stringify({ ev: "spawn", id: "run:x#1", desc: "engine node", session: "mgr-w", parked: true, run: "/runs/x", pid: 999999, host: "x" })}\n` +
+        `${JSON.stringify({ ev: "spawn", id: "bare-open", desc: "delegate", session: "mgr-w", pid: 999999, host: "x" })}\n`,
+    );
+    const { manager } = managerWithSidecar(path);
+    const orphans = await manager.orphanedTasks();
+    expect(orphans.map((o) => o.taskId)).toEqual(["bare-open"]); // only the delegate one
+    const plan = await new PlanStatusTool({ taskManager: manager }).execute({});
+    expect(plan.output).toContain("bare-open");
+    expect(plan.output).not.toContain("run:x#1");
   });
 
   it("torn and foreign lines in the sidecar are skipped, never fatal", async () => {

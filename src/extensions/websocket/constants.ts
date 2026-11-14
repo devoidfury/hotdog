@@ -7,6 +7,15 @@
 export const MAX_TASK_ACTIVITY_HISTORY_ITEMS = 300;
 export const MAX_TASK_ACTIVITY_HISTORY_TASKS = 50;
 
+/**
+ * Rebuilt-subagent-lineage rows kept PER MANAGER SESSION on the wire (boot
+ * snapshot on live rows, cold rows' nested `subagents`). Same retention the
+ * live registry gives terminal tasks (MAX_TERMINAL_TASKS): a sidecar file
+ * spans every lifetime, one sidebar row list stays bounded; the oldest rows
+ * age out first, exactly like their live counterparts.
+ */
+export const MAX_SUBAGENT_LINEAGE_ROWS = 200;
+
 // How long a socket that never authenticates is kept before the cleanup
 // loop closes it. Comfortably longer than a legit AUTH round-trip (first
 // message after open), short enough that anonymous sockets do not pile up.

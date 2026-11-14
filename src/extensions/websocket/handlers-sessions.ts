@@ -25,7 +25,7 @@ export function handleCreateSession(ctx: RouteContext): void {
       questionStrategy: msg.questionStrategy as string | undefined,
       questionTimeoutSecs: msg.questionTimeoutSecs as number | undefined,
     })
-    .then(({ sessionId }) => {
+    .then(async ({ sessionId }) => {
       const channel = registry.createChannel(sessionId, ws);
       ws.activeSessionId = sessionId;
       ws.activeChannel = channel;
@@ -33,7 +33,7 @@ export function handleCreateSession(ctx: RouteContext): void {
       const sessionCreatedMsg = sessionCreatedPayload(registry, sessionId);
       SessionRegistry.sendSafe(ws, sessionCreatedMsg);
       registry.broadcast(sessionCreatedMsg);
-      registry.sendTaskSnapshot(ws);
+      await registry.sendTaskSnapshot(ws);
     })
     .catch((err: unknown) => {
       SessionRegistry.sendSafe(ws, errorFrame(err));

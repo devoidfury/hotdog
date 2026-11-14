@@ -841,6 +841,12 @@ export interface TaskInfoWire {
   description: string;
   /** The delegating session (null: no parent); webui scopes its task strip to it. */
   sessionId: string | null;
+  /**
+   * Status token: running/queued/completed/failed/cancelled for live rows,
+   * plus "interrupted" on durable rows (taskLineageWire): an open sidecar
+   * record whose writer died. Additive token -- old clients render it with
+   * the unknown-glyph fallback, never as a running task.
+   */
   status: string;
   createdAt: number;
   startedAt: number | null;
@@ -872,6 +878,16 @@ export interface TaskInfoWire {
    * item; never a clickable dead entry).
    */
   runDir?: string;
+  /**
+   * Row rebuilt from the durable spawn sidecar (taskLineageWire): a restart
+   * survivor, NOT a task this process runs. The clock is frozen sidecar wall
+   * time and the status is the recorded outcome or "interrupted". The webui
+   * routes Open to the worker's durable log (agentSessionId -> viewLog /
+   * LOG_VIEWED) -- never to the task-activity replay, which has no bytes for
+   * a past lifetime. Additive: old clients render the row with the unknown-
+   * glyph fallback and an inert transcript click.
+   */
+  durable?: boolean;
 }
 
 /**

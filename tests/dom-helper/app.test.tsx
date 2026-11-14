@@ -1519,16 +1519,16 @@ describe("subagents sidebar and main-view transcript", () => {
     expect(rows[0]!.textContent).toContain("do the thing");
     // Disclosure grammar: the header names the section, the chevron is open.
     expect(el(".subagents-header").textContent).toContain("Subagents");
-    expect(el("#subagents-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(el(`#subagents-toggle-${SID}`).getAttribute("aria-expanded")).toBe("true");
   });
 
   it("the collapse chevron folds the list and persists the choice", async () => {
-    el("#subagents-toggle").click();
+    el(`#subagents-toggle-${SID}`).click();
     await tick();
     expect(el(".subagents-section").getAttribute("class")).toContain("collapsed");
-    expect(el("#subagents-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(el(`#subagents-toggle-${SID}`).getAttribute("aria-expanded")).toBe("false");
     expect(store.get("hotdog.subagentsCollapsed")).toBe("1");
-    el("#subagents-toggle").click();
+    el(`#subagents-toggle-${SID}`).click();
     await tick();
     expect(el(".subagents-section").getAttribute("class")).not.toContain("collapsed");
     expect(store.get("hotdog.subagentsCollapsed")).toBe("0");

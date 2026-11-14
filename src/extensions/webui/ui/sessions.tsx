@@ -74,6 +74,14 @@ export interface LogInfo {
   logPath?: string;
   /** Server-persisted pin flag; the sidebar's pin marks hydrate from it. */
   pinned?: boolean;
+  /**
+   * Durable subagent lineage the restart sidecar attests for this cold
+   * manager (LOGS_LISTED's additive nested field, taskLineageWire grammar:
+   * recorded outcomes or "interrupted", frozen clocks, `durable: true`).
+   * Absent when there is no lineage -- the section then renders nowhere,
+   * exactly as before. Rows open through the cold log-view machinery.
+   */
+  subagents?: TaskInfoWire[];
 }
 
 export interface ContextMenuItem {
@@ -148,8 +156,10 @@ interface SidebarProps {
   onSwitch: (sessionId: string) => void;
   onCancel: (sessionId: string) => void;
   onViewLog: (logId: string) => void;
-  /** Open a task's transcript in the main view (chat.viewSubagent). */
-  onOpenTask: (taskId: string) => void;
+  /** Open a task row in the main view: the app routes by row kind (see
+   *  openTargetFor) -- live tasks ride chat.viewSubagent, durable restart-
+   *  survivor rows ride the cold log-view machinery (chat.viewLog). */
+  onOpenTask: (taskId: string, task: TaskInfoWire) => void;
   /** A task row's context menu (right-click + kebab + keyboard twins; the
    *  app builds the honest task action set on the shared ContextMenu
    *  machinery -- same open/positioning/focus path as the session/log rows). */
@@ -658,7 +668,7 @@ export function Sidebar(p: SidebarProps) {
             No recent logs
           </div>
         ) : (
-          sortPinned(p.logs, p.pinnedIds).map((log) => (
+          sortPinned(p.logs, p.pinnedIds).flatMap((log) => [
             <SidebarRow
               key={log.id}
               kindClass="log-item"
@@ -677,8 +687,26 @@ export function Sidebar(p: SidebarProps) {
               createdAt={log.createdAt}
               onSelect={() => p.onViewLog(log.id)}
               onContextMenu={(e, rowEl) => p.onLogMenu(e, log.id, rowEl)}
-            />
-          ))
+            />,
+            // The same nested Subagents section the live cards get, riding
+            // the cold row's sidecar-attested lineage (rows carry
+            // durable:true; opening one reads the worker's durable log
+            // through the cold log-view machinery). No lineage -- and the
+            // section renders nowhere, as before.
+            log.subagents && log.subagents.length > 0 ? (
+              <SubagentsSection
+                key={`${log.id}:subagents`}
+                sid={log.id}
+                tasks={log.subagents}
+                now={p.now}
+                collapsed={p.subagentsCollapsed}
+                viewedTaskId={p.viewedTaskId}
+                onToggle={p.onToggleSubagents}
+                onOpenTask={p.onOpenTask}
+                onTaskMenu={p.onTaskMenu}
+              />
+            ) : null,
+          ])
         )}
       </div>
         </>

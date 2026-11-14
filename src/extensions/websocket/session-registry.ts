@@ -16,7 +16,7 @@ import type { TurnLanes } from "@core/session/turn-lanes.ts";
 import type { SwitchProfile } from "@core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
 import { S2C, type TaskActivityWire } from "./protocol.ts";
-import { taskWire } from "./wire-messages.ts";
+import { taskWire, taskLineageWire } from "./wire-messages.ts";
 import type { TaskManager } from "@core/session/task-manager.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import { sharedExecFenceDisplay, toolExecModeLabel, sharedToolExecDegraded } from "@core/tool-exec-broker.ts";
@@ -33,6 +33,7 @@ import {
   DRAIN_SETTLE_MS,
   DRAIN_TIMEOUT_MS,
   MAX_HOT_IDLE_SESSIONS,
+  MAX_SUBAGENT_LINEAGE_ROWS,
   MAX_TASK_ACTIVITY_HISTORY_ITEMS,
   MAX_TASK_ACTIVITY_HISTORY_TASKS,
   PENDING_AUTH_TIMEOUT_MS,
@@ -242,13 +243,24 @@ export class SessionRegistry {
     return this.#taskActivityHistory.get(taskId) ?? [];
   }
 
-  /** Current subagent task snapshot for one socket (sent when it attaches to a session). */
-  sendTaskSnapshot(ws: HotdogServerSocket<unknown>): void {
+  /** Current subagent task snapshot for one socket (sent when it attaches to a
+   * session): this lifetime's tasks, plus the sidecar-rebuilt durable rows for
+   * managers whose tasks predate a restart (taskLineageWire owns their honest
+   * grammar). Awaited: the sidecar read is real I/O (once-cached per process). */
+  async sendTaskSnapshot(ws: HotdogServerSocket<unknown>): Promise<void> {
     const sessionId = ws.activeSessionId;
     if (!sessionId || !this.#taskManager) return;
+    const live = this.#taskManager
+      .listTasks()
+      .filter((t) => t.sessionId === sessionId)
+      .map(taskWire);
+    const durable = (await this.#taskManager.lineageTasks())
+      .filter((r) => r.sessionId === sessionId)
+      .slice(-MAX_SUBAGENT_LINEAGE_ROWS)
+      .map(taskLineageWire);
     SessionRegistry.sendSafe(ws, {
       type: S2C.TASK_LIST,
-      tasks: this.#taskManager.listTasks().filter((t) => t.sessionId === sessionId).map(taskWire),
+      tasks: [...live, ...durable],
     });
   }
 

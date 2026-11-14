@@ -266,12 +266,14 @@ export interface TaskManagerOptions {
    */
   lanesDir?: string | null;
   /**
-   * Append-only restart sidecar for delegate_task records (resolved config:
-   * taskSpawnsPath, a JSONL file in the data dir). One spawn line per
-   * non-parked spawn, one end line per terminal transition; the next process
-   * lifetime reads it to surface restart orphans (plan_status / task_status).
-   * Unset disables the sidecar entirely. Parked (workflow-engine) spawns are
-   * skipped: their lifecycle lives in the run journal, not here.
+   * Append-only restart sidecar for task records (resolved config:
+   * taskSpawnsPath, a JSONL file in the data dir). One spawn line per spawn,
+   * one end line per terminal transition; the next process lifetime reads it
+   * to surface restart orphans (plan_status / task_status) and to rebuild the
+   * webui subagent lineage. Unset disables the sidecar entirely. Parked
+   * (workflow-engine) spawns record with a `parked` mark (plus their run
+   * dir): they rebuild the lineage but never read as orphans, since the
+   * run's own journal reconciles them.
    */
   spawnLogPath?: string | null;
   /** Test seam for the spawn sidecar's owner-liveness check (default: signal-0 on this host). */

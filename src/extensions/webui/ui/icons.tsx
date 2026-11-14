@@ -322,6 +322,10 @@ const SUBAGENT_SHAPES: Record<string, JsxChild> = {
   queued: <circle cx="12" cy="12" r="8" />,
   // dashed ring: parked/waiting
   parked: <circle cx="12" cy="12" r="8" stroke-dasharray="3.2 3.2" />,
+  // broken ring (open arc): interrupted -- the worker's lifetime ended
+  // mid-task (restart survivor rows); distinct from cancelled's slashed
+  // ring and parked's dashed one: the line itself is SEVERED.
+  interrupted: <path d="M12 4a8 8 0 1 1-5.66 2.34" />,
   // dot: the "no shape for this token" fallback
   unknown: <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />,
 };

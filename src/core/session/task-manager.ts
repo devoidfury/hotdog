@@ -13,7 +13,7 @@ import {
   makeRunningPeeker,
 } from "./model-resolver.ts";
 import { LaneLedger } from "./lane-ledger.ts";
-import { SpawnLog, type OrphanedTask } from "./spawn-log.ts";
+import { SpawnLog, type LineageRecord, type OrphanedTask } from "./spawn-log.ts";
 import { resolveLanesRetryMs } from "./turn-lanes.ts";
 import { makeProviderHealth, type ProviderHealth } from "./provider-health.ts";
 import { TaskScheduler } from "./task-scheduler.ts";
@@ -160,6 +160,14 @@ export class TaskManager {
     this.#execution = new TaskExecution({
       setStatus: (entry, status) => this.#setStatus(entry, status),
       notifyTask: (entry) => this.#notify({ kind: "task", task: this.#infoOf(entry) }),
+      recordAgentSession: (entry) => {
+        // Every spawn line rides the sidecar now (parked ones marked), so
+        // every built agent answers too -- the lineage join is honest for
+        // engine workers just like delegate ones.
+        if (typeof entry.agentSessionId === "string") {
+          this.#spawnLog?.recordAgent(entry.taskId, entry.agentSessionId);
+        }
+      },
       buildAgent: (config) => this.#buildAgent(config),
       scheduler: this.#scheduler,
     });
@@ -251,9 +259,11 @@ export class TaskManager {
     // (natural finish, queued cancel, parked cancel) passes through here,
     // so the terminal-record bound holds at all times.
     if (isTerminalStatus(status)) {
-      // Restart sidecar: the end line for this lifetime's spawn (parked tasks
-      // were never recorded; a stray end line stays inert on read).
-      if (!entry.parked) this.#spawnLog?.recordEnd(entry.taskId, status);
+      // Restart sidecar: the end line for this lifetime's spawn. Parked
+      // (engine) spawns are recorded too: the end line closes their LINEAGE
+      // record (the sidebar needs the outcome); orphans() ignores parked
+      // records either way (the run journal reconciles the run).
+      this.#spawnLog?.recordEnd(entry.taskId, status);
       this.#evictTerminalTasks();
     }
   }
@@ -528,12 +538,18 @@ export class TaskManager {
     // would duplicate every result into a session context.
     const parked = options.park === true;
 
-    // Restart sidecar (fire-and-forget): parked spawns are workflow-engine
-    // owned -- their lifecycle lives in the run journal, so only delegate-style
-    // tasks are recorded here. A failed write never disturbs execution.
-    if (!parked) {
-      this.#spawnLog?.recordSpawn({ taskId, description: entry.description, sessionId: entry.sessionId });
-    }
+    // Restart sidecar (fire-and-forget): every spawn is recorded; parked
+    // (workflow-engine) ones carry the parked mark + their run dir so they
+    // rebuild the webui lineage without ever reading as restart orphans (the
+    // run journal owns the run's own reconciliation). A failed write never
+    // disturbs execution.
+    this.#spawnLog?.recordSpawn({
+      taskId,
+      description: entry.description,
+      sessionId: entry.sessionId,
+      parked,
+      runDir: options.runDir,
+    });
 
     // Task agents are silent to the UI; only onTaskComplete matters -- unless an
     // observer (websocket/webui relay) is attached, forwarding every agent
@@ -724,6 +740,18 @@ export class TaskManager {
    */
   orphanedTasks(): Promise<OrphanedTask[]> {
     return this.#spawnLog ? this.#spawnLog.orphans() : Promise.resolve([]);
+  }
+
+  /**
+   * Durable subagent lineage for the webui sidebar: every task the sidecar
+   * attests, minus ids THIS lifetime's registry already answers live (an
+   * evicted id reappears here, matching its "reads like a post-restart id"
+   * rule). Consumers group by `sessionId`. Empty when the sidecar is unset;
+   * records are a boot-time snapshot (the orphans() doctrine).
+   */
+  lineageTasks(): Promise<LineageRecord[]> {
+    if (!this.#spawnLog) return Promise.resolve([]);
+    return this.#spawnLog.lineage().then((recs) => recs.filter((r) => !this.#tasks.has(r.taskId)));
   }
 
   /** Locked model + provider lane for a spawned task, or null if unknown. Provider is null while a multi-candidate task waits unplaced (model then shows the intent). */

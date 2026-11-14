@@ -119,7 +119,9 @@ export async function attachLiveSession(
   const isRunning = registry.getSessionManager().isSessionRunning(sessionId);
   SessionRegistry.sendSafe(ws, { type: S2C.SESSION_STATE, sessionId, key: "working", value: isRunning });
   replayPendingQuestion(bridge, sessionId, ws);
-  registry.sendTaskSnapshot(ws);
+  // Awaited: the rebuilt-lineage read is I/O (once-cached), and the snapshot
+  // is the last frame of the attach burst.
+  await registry.sendTaskSnapshot(ws);
   return true;
 }
 

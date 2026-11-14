@@ -37,7 +37,7 @@ import { loadAttachments, saveAttachments, type PendingAttachment } from "./atta
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire } from "./chat.ts";
 import type { ConfigKeyEditWire, EditConfigListResultWire, TaskInfoWire } from "@extensions/websocket/protocol.ts";
-import { chipLabel } from "./subagents.tsx";
+import { chipLabel, openTargetFor } from "./subagents.tsx";
 import {
   persistWorkbenchTabs,
   seedWorkbenchStoreFromStorage,
@@ -1158,6 +1158,29 @@ function onLogMenu(e: MouseEvent | KeyboardEvent, logId: string, rowEl: HTMLElem
   armContextMenu(rowEl);
 }
 
+/** Row-press routing shared by the sidebar row and the context menu's Open
+ *  (openTargetFor decides the landing): live/settled-live tasks open the task
+ *  transcript; a DURABLE restart-survivor row opens the worker's OWN durable
+ *  log through the existing cold log-view machinery (viewLog -> LOG_VIEWED);
+ *  a pre-join record has nothing honest to open (the caller hides the item). */
+function openTaskRow(t: TaskInfoWire): void {
+  const target = openTargetFor(t);
+  if (target === null) return;
+  if ("logId" in target) {
+    // Chat drops the task browse pointer when the log lands (logViewed
+    // case); the app-side activeLogId rides onLogViewed, like any other
+    // cold-row click.
+    chat?.viewLog(target.logId);
+    return;
+  }
+  // Browse modes are exclusive (chat-side); clear the app-side log mirror
+  // in the SAME click so the header never carries both labels (and the log
+  // row drops its highlight). The chat already dropped its viewedLogId;
+  // this keeps the mirrors honest.
+  if (activeLogIdAtom() !== null) clearLogView();
+  chat?.viewSubagent(t.taskId);
+}
+
 /**
  * Subagent row menu (owner 2026-11-13): the SAME context-menu machinery as
  * the session/log rows (rowMenuPoint anchor, armContextMenu focus-return and
@@ -1195,17 +1218,25 @@ function onSubagentMenu(
   const workerSid = t.agentSessionId;
   const logPath = t.agentLogPath;
   const runDir = t.runDir;
+  // Open routes by row kind (openTargetFor): a pre-join durable record has
+  // nothing to open, so the item is HIDDEN -- the rowMenuTail
+  // honest-by-construction rule.
+  const openTarget = openTargetFor(t);
   contextMenuAtom({
     x,
     y,
     items: [
-      {
-        label: "Open",
-        onSelect: () => {
-          chat?.viewSubagent(t.taskId);
-          dismissContextMenu();
-        },
-      },
+      ...(openTarget
+        ? [
+            {
+              label: "Open",
+              onSelect: () => {
+                openTaskRow(t);
+                dismissContextMenu();
+              },
+            },
+          ]
+        : []),
       {
         label: "Copy task id",
         onSelect: () => {
@@ -2353,14 +2384,7 @@ function App() {
           }}
           onCancel={onCancelSession}
           onViewLog={(id) => chat?.viewLog(id)}
-          onOpenTask={(id) => {
-            // Browse modes are exclusive (chat-side); clear the app-side log
-            // mirror in the SAME click so the header never carries both
-            // labels (and the log row drops its highlight). The chat already
-            // dropped its viewedLogId; this keeps the mirrors honest.
-            if (activeLogIdAtom() !== null) clearLogView();
-            chat?.viewSubagent(id);
-          }}
+          onOpenTask={(_id, task) => openTaskRow(task)}
           onTaskMenu={onSubagentMenu}
           onToggleSubagents={onToggleSubagents}
           tasks={allTasks}

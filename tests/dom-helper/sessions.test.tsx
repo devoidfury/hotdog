@@ -871,7 +871,7 @@ describe("Subagents section", () => {
 
     const header = root.querySelector(".subagents-header")!;
     expect(header.textContent).toContain("Subagents");
-    const toggle = root.querySelector("#subagents-toggle")!;
+    const toggle = root.querySelector(`#subagents-toggle-${FULL_ID}`)!;
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(toggle.getAttribute("aria-controls")).toBe(`subagent-list-${FULL_ID}`);
     expect(root.querySelector(`#subagent-list-${FULL_ID}`)).toBeTruthy();
@@ -884,7 +884,7 @@ describe("Subagents section", () => {
       { sessions: [liveSession()], tasks: [subTask({ taskId: "c#1" })] },
       calls,
     );
-    clickable(root, "#subagents-toggle").click();
+    clickable(root, `#subagents-toggle-${FULL_ID}`).click();
     expect(calls).toEqual(["toggleSubagents"]);
     // Collapsed rendering (the app drives the prop; mount again to see it).
     const folded = render({
@@ -893,7 +893,7 @@ describe("Subagents section", () => {
       subagentsCollapsed: true,
     });
     expect(folded.querySelector(".subagents-section")!.getAttribute("class")).toContain("collapsed");
-    expect(folded.querySelector("#subagents-toggle")!.getAttribute("aria-expanded")).toBe("false");
+    expect(folded.querySelector(`#subagents-toggle-${FULL_ID}`)!.getAttribute("aria-expanded")).toBe("false");
     expect(folded.querySelector("svg.subagents-toggle-glyph")!.getAttribute("class")).toContain("subagents-toggle-glyph-up");
     // The header stays on screen (the rows are hidden by CSS, the disclosure
     // must remain operable): aria-controls still points at the list.
@@ -1282,5 +1282,115 @@ describe("clampMenuAnchor", () => {
 
   it("honors a custom pad", () => {
     expect(clampMenuAnchor(300, 795, 140, 90, 1280, 800, 20)).toEqual({ left: 300, top: 690 });
+  });
+});
+
+// ── Cold-row Subagents section (restart-survivor lineage) ───────────────────
+// The sidecar-rebuilt lineage nests under the COLD manager row in the same
+// section grammar the live cards use. Rows ride durable:true with honest
+// interrupted/completed badges and frozen clocks (they never tick). A durable
+// row opens only when the sidecar recorded the worker key; a log WITHOUT
+// lineage renders no section at all (the unchanged absence).
+
+const durableRow = (over: Partial<TaskInfoWire> & { taskId: string }): TaskInfoWire => ({
+  description: `task ${over.taskId}`,
+  sessionId: "cold-mgr",
+  status: "interrupted",
+  createdAt: STAMP - 300_000,
+  startedAt: null,
+  endedAt: null,
+  activeMs: 90_000,
+  inRun: false,
+  turnStartedAt: null,
+  durable: true,
+  ...over,
+});
+
+describe("Cold-row Subagents section", () => {
+  it("a cold manager with lineage nests the same section; a log without lineage renders none", () => {
+    const root = render({
+      logs: [
+        coldLog({
+          id: "cold-mgr",
+          subagents: [
+            durableRow({ taskId: "run:one#1" }),
+            durableRow({
+              taskId: "run:two#2",
+              status: "completed",
+              createdAt: STAMP - 100_000,
+              endedAt: STAMP - 60_000,
+              agentSessionId: "worker-a",
+            }),
+          ],
+        }),
+        coldLog({ id: "plain-cold" }),
+      ],
+      now: STAMP,
+    });
+    // Exactly one section: only the row WITH lineage gets one.
+    expect(root.querySelectorAll("#log-list .subagents-section")).toHaveLength(1);
+    const rows = root.querySelectorAll("#log-list .subagent-row");
+    expect(rows).toHaveLength(2);
+    // All-durable lists are settled: newest-first (the section's own sort).
+    expect(Array.from(rows).map((r) => r.getAttribute("data-task-id"))).toEqual([
+      "run:two#2",
+      "run:one#1",
+    ]);
+    // The interrupted row: status class, its own broken-ring glyph, the FROZEN
+    // sidecar clock (activeMs, no live tick), and the honest status word.
+    const interrupted = rows[1]!;
+    expect(interrupted.getAttribute("class")).toContain("status-interrupted");
+    expect(interrupted.querySelector("svg")!.getAttribute("class")).toContain("subagent-glyph-interrupted");
+    expect(interrupted.querySelector(".subagent-row-elapsed")!.textContent).toBe("1m 30s");
+    expect(interrupted.getAttribute("title")).toContain("interrupted");
+    // The completed row keeps its recorded outcome as its badge.
+    expect(rows[0]!.getAttribute("class")).toContain("status-completed");
+    // The disclosure anchors on the log id (the live cards' grammar).
+    expect(root.querySelector("#subagent-list-cold-mgr")).toBeTruthy();
+    // The cold rows themselves are untouched: both stay plain selectable rows.
+    expect(root.querySelectorAll(".log-item")).toHaveLength(2);
+  });
+
+  it("collapses with the shared flag like every other section", () => {
+    const root = render({
+      logs: [coldLog({ id: "cold-mgr", subagents: [durableRow({ taskId: "run:one#1" })] })],
+      subagentsCollapsed: true,
+    });
+    expect(root.querySelector(".subagents-section")!.getAttribute("class")).toContain("collapsed");
+    // Hidden, not unmounted: the list keeps its slot (the live idiom).
+    expect(root.querySelector("#subagent-list-cold-mgr")).toBeTruthy();
+  });
+
+  it("durable rows route clicks to openTask; one WITHOUT a worker key stays inert", () => {
+    const calls: string[] = [];
+    const root = renderInteractive(
+      {
+        logs: [
+          coldLog({
+            id: "cold-mgr",
+            subagents: [
+              durableRow({ taskId: "joined#1", agentSessionId: "worker-a" }),
+              durableRow({ taskId: "prejoin#2", createdAt: STAMP - 400_000 }),
+            ],
+          }),
+        ],
+      },
+      calls,
+    );
+    const rows = root.querySelectorAll(".subagent-row");
+    expect(rows).toHaveLength(2);
+    (rows[0] as HTMLElement).click();
+    expect(calls).toEqual(["openTask:joined#1"]);
+    // A pre-join record (no transcript key): the click does nothing, Enter is
+    // swallowed, and the title says why; the row keeps its menu (the kebab
+    // still reaches the task context menu with its honest items).
+    (rows[1] as HTMLElement).click();
+    expect(calls).toHaveLength(1);
+    expect(keyOn(rows[1]!, "Enter")).toBe(false); // prevented, never forwarded
+    expect(calls).toHaveLength(1);
+    expect(rows[1]!.getAttribute("title")).toContain("transcript not on record");
+    expect(rows[0]!.getAttribute("title")).not.toContain("transcript not on record");
+    (rows[1]!.querySelector(".row-menu-btn") as HTMLElement).click();
+    expect(calls).toEqual(["openTask:joined#1", "taskMenu:prejoin#2"]);
   });
 });

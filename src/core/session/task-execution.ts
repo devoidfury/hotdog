@@ -18,6 +18,9 @@ interface ExecutionEnv {
   setStatus(entry: TaskEntry, status: TaskStatus): void;
   /** Emit a fresh task snapshot to the observer (turn start/end display anchors). */
   notifyTask(entry: TaskEntry): void;
+  /** Report the freshly-stamped worker session id to the restart sidecar
+   *  (the manager validates the stamp). */
+  recordAgentSession(entry: TaskEntry): void;
   buildAgent(config: Record<string, unknown>): Promise<AgentLike>;
   /** The scheduler: lane release, admit re-runs, and health notes. */
   scheduler: TaskScheduler;
@@ -90,8 +93,11 @@ export class TaskExecution {
     entry.agent = agent;
     // Stamp the durable-log key beside the agent: terminal finalize nulls
     // entry.agent, and a settled task's transcript replay needs the worker's
-    // session id exactly then (the log outlives the agent).
+    // session id exactly then (the log outlives the agent). The sidecar
+    // records the same key: it is the durable manager->worker join the next
+    // process lifetime rebuilds the subagent transcript link from.
     entry.agentSessionId = agent.sessionId;
+    this.#env.recordAgentSession(entry);
     await this.#runTask(taskId, entry, agent, description);
   }
 

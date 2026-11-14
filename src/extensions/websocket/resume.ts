@@ -254,7 +254,7 @@ export function createAndAttachSession(
   // AHEAD of the sessionCreated the client needs first.
   return registry
     .create({})
-    .then(({ sessionId }) => {
+    .then(async ({ sessionId }) => {
       const channel = registry.createChannel(sessionId, ws);
       ws.activeSessionId = sessionId;
       ws.activeChannel = channel;
@@ -268,8 +268,8 @@ export function createAndAttachSession(
         key: "cursor",
         value: 0,
       });
-      // Always empty here, but every attach path sends its snapshot.
-      registry.sendTaskSnapshot(ws);
+      // A fresh id owns no tasks, but every attach path sends its snapshot.
+      await registry.sendTaskSnapshot(ws);
     })
     .catch((err: unknown) => {
       SessionRegistry.sendSafe(ws, errorFrame(err));

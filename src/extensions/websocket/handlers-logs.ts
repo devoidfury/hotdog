@@ -15,7 +15,9 @@ import {
 } from "./protocol.ts";
 import { SessionRegistry } from "./session-registry.ts";
 import { registryArgDisplay, registryDisplay, registryHeaderKeys } from "./replay.ts";
-import { wireToolDisplay } from "./wire-messages.ts";
+import { taskLineageWire, wireToolDisplay } from "./wire-messages.ts";
+import { MAX_SUBAGENT_LINEAGE_ROWS } from "./constants.ts";
+import type { LineageRecord } from "@core/session/spawn-log.ts";
 import { summarizeHeaderArgs } from "@core/extensions/tool-utils.ts";
 import { attachResumedSession } from "./attach.ts";
 import { dropPinned, isPinned } from "./pin-store.ts";
@@ -24,13 +26,31 @@ import type { RouteContext } from "./route-types.ts";
 /** Build the LOGS_LISTED payload: cold logs only (live ids filtered out),
  *  enriched with the index row, the absolute log path, and the server-side
  *  pin flag. Shared between the listLogs reply and the setPinned sidebar
- *  broadcast so both wires speak the exact same grammar. */
+ *  broadcast so both wires speak the exact same grammar.
+ *
+ *  Additive nested lineage: a cold manager row whose delegations the restart
+ *  sidecar still attests carries `subagents` (taskLineageWire rows, same
+ *  grammar the live task feed uses, capped per manager). A row without
+ *  lineage carries NO field -- no section, exactly as before. The lineage is
+ *  the process-lifetime boot snapshot (SpawnLog.lineage doctrine). */
 export async function coldLogsPayload(registry: SessionRegistry): Promise<Array<Record<string, unknown>>> {
   // Awaited so the reply has settled when routeMessage resolves (the
   // directory read is real I/O; fire-and-forget raced the caller).
   const logs = await listSessionLogs();
   // Only return cold logs, not sessions that are still live.
   const activeIds = new Set(registry.list().map((s) => s.id));
+  // Group the sidecar lineage by manager session once for the whole payload.
+  // A manager with no sidecar history yields no group (no field, no section).
+  const lineageByManager = new Map<string, LineageRecord[]>();
+  const taskManager = registry.getTaskManager();
+  if (taskManager) {
+    for (const rec of await taskManager.lineageTasks()) {
+      if (rec.sessionId === null) continue; // no parent, no card to nest under
+      const group = lineageByManager.get(rec.sessionId);
+      if (group) group.push(rec);
+      else lineageByManager.set(rec.sessionId, [rec]);
+    }
+  }
   return logs
     .filter((log) => !activeIds.has(log.id))
     .map((log) => {
@@ -48,15 +68,25 @@ export async function coldLogsPayload(registry: SessionRegistry): Promise<Array<
         ...(logPath !== undefined ? { logPath } : {}),
         pinned: isPinned(log.id),
       };
-      if (!row) return withPath;
+      const enriched = !row
+        ? withPath
+        : {
+            ...withPath,
+            state: row.state,
+            ...(row.model ? { model: row.model } : {}),
+            ...(row.profile ? { profile: row.profile } : {}),
+            ...(row.title ? { title: row.title } : {}),
+            ...(row.ctx_used != null ? { ctxUsed: row.ctx_used } : {}),
+            ...(row.ctx_total != null ? { ctxTotal: row.ctx_total } : {}),
+          };
+      // Nested subagent lineage (spawn order, capped): omitted outright when
+      // the sidecar attests none -- the client renders no section without a
+      // field, so "no subagents" stays byte-identical to the old wire.
+      const group = lineageByManager.get(log.id);
+      if (group === undefined) return enriched;
       return {
-        ...withPath,
-        state: row.state,
-        ...(row.model ? { model: row.model } : {}),
-        ...(row.profile ? { profile: row.profile } : {}),
-        ...(row.title ? { title: row.title } : {}),
-        ...(row.ctx_used != null ? { ctxUsed: row.ctx_used } : {}),
-        ...(row.ctx_total != null ? { ctxTotal: row.ctx_total } : {}),
+        ...enriched,
+        subagents: group.slice(-MAX_SUBAGENT_LINEAGE_ROWS).map(taskLineageWire),
       };
     });
 }

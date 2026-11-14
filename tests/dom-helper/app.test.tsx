@@ -3745,9 +3745,12 @@ describe("chat/editor mode (top-band toggle)", () => {
     expect(el("#chat-area").getAttribute("class")).toContain("chat-dock-hidden");
     expect(el("#chat-area")).toBe(chatBefore);
     expect(el("#message-list")).toBe(listBefore);
-    // The sessions rail travels with the dock: still there, still on its
-    // own pref (mode flips never rewrite it), and its disclosure stays
-    // live -- in this shape the rail sits right beside the chat header.
+    // The sessions rail travels with the dock: still mounted (while the dock
+    // is CLOSED the CSS hides it -- owner ruling 2026-11-14, pinned in
+    // webui-editor-dock-css.test.ts; the dom-helper has no CSSOM), still on
+    // its own pref (mode flips never rewrite it), and its disclosure's
+    // machinery stays live -- in this shape the rail sits right beside the
+    // chat header.
     const disclosure = el("#sidebar-toggle");
     expect(disclosure.getAttribute("aria-expanded")).toBe(sidebarPrefBefore === "1" ? "false" : "true");
     expect(el("#sidebar").classList.contains("sidebar-hidden")).toBe(sidebarPrefBefore === "1");

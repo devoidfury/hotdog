@@ -2983,6 +2983,11 @@ body.logs-resizing .sidebar-header-resize {
     display: flex;
     align-items: center;
     gap: 8px;
+    /* Wrapping is the BASE rule's job: every column can get narrower than
+       this row of pills (the editor-mode dock floors the chat at 280px),
+       and #send-btn's margin-left:auto collapses to nothing on a full row,
+       so without wrap the send button rides off-screen. */
+    flex-wrap: wrap;
 }
 
 #send-btn {
@@ -3144,10 +3149,13 @@ body.logs-resizing .sidebar-header-resize {
    flip in place. Editor shape, left to right: the workbench pane leads the
    row (order:-1) in the pinned shape the projection forces (tree column |
    strip+viewer), then the DOCK -- the SESSIONS SIDEBAR and the CHAT, one
-   block riding the far right. The dock flag (#workbench-toggle) hides the
-   chat (.chat-dock-hidden: display:none, never unmounted; the composer's
-   staged state rides along hidden); the sessions rail stays reachable while
-   the chat hides.
+   block riding the far right. The dock flag (#workbench-toggle) closes the
+   WHOLE block (owner ruling 2026-11-14): the chat gets .chat-dock-hidden
+   (display:none, never unmounted; the composer's staged state rides along
+   hidden) and the rail LEAVES WITH IT -- in this shape the rail is dock
+   furniture, never a lone column at the row's end, and tree+viewer take the
+   row back. The rail lives in the row's DOM, not under #chat-area, so the
+   hide is a :has() lookup across the row: display only, pref untouched.
    TWO NUMBERS for that block (owner ruling): D = --editor-dock-width is the
    BLOCK's width, dragged at the block's LEFT border (the viewer<->sessions
    line) by #dock-resize, which is mounted on #workspace-row and anchored
@@ -3173,8 +3181,10 @@ body.logs-resizing .sidebar-header-resize {
     /* The handle that sizes the block is a child of the ROW, not of either
        docked column: its anchor must be the row's right edge, independent of
        S (anchoring inside #chat-area would make the offset move when the rail
-       grows). */
-    .editor-mode #workspace-row {
+       grows). Written on the compound selector: editor-mode rides THIS
+       element, so a descendant `.editor-mode #workspace-row` could never
+       match and the handle would anchor to the viewport instead. */
+    #workspace-row.editor-mode {
         position: relative;
     }
 
@@ -3218,6 +3228,19 @@ body.logs-resizing .sidebar-header-resize {
     }
 
     .editor-mode #chat-area.chat-dock-hidden {
+        display: none;
+    }
+
+    /* A closed dock closes the BLOCK (owner ruling 2026-11-14): the sessions
+       rail is dock furniture here, so it leaves with the chat instead of
+       standing alone at the row's end. The rail is the ROW's child, not the
+       chat's, so the hide reads the row's own class + the chat's flag
+       (:has(), the same tool #workbench-body:has(.file-view) uses). Display
+       only, never unmounted: the disclosure's pref stays orthogonal, so
+       reopening the dock restores the rail exactly as left, and
+       #sidebar-resize rides inside -- it leaves with it, and the seam's
+       offsetParent guard no-ops any gesture meanwhile. */
+    .editor-mode:has(#chat-area.chat-dock-hidden) #sidebar {
         display: none;
     }
 
@@ -3956,13 +3979,14 @@ body.sidebar-resizing #tree-col-resize {
         margin-left: 8px;
     }
 
-    /* Composer: let the pills wrap and shrink on narrow screens */
+    /* Composer: pills shrink on narrow screens (the wrap itself lives on
+       the base #composer-actions rule now; only the tighter row-gap is
+       phone-specific) */
     #input-area {
         padding: 12px;
     }
 
     #composer-actions {
-        flex-wrap: wrap;
         row-gap: 6px;
     }
 

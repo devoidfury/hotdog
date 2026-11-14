@@ -2742,7 +2742,10 @@ function App() {
             the transcript DOM and the composer's staged state ride along),
             and the column is the dock's remainder, --editor-dock-width minus
             --sidebar-width (its own handle would sit on the block's outer
-            border, which the dock seam already owns -- see #dock-resize). */}
+            border, which the dock seam already owns -- see #dock-resize).
+            Closing hides the WHOLE block: the rail leaves with the chat in
+            CSS (owner ruling 2026-11-14, CHAT/EDITOR MODE block) -- the DOM
+            never learns the difference. */}
         <main
           id="chat-area"
           className={editorMode && dockCollapsed ? "chat-dock-hidden" : undefined}

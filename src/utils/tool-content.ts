@@ -9,7 +9,18 @@
 
 import { isToolResultPart, isWrapperPart, type ToolResultContent } from "@core/context/wrappers.ts";
 
-export function toolContentText(content: ToolResultContent | Array<unknown> | null | undefined): string {
+/**
+ * `paint` transforms each part's OWN bytes (e.g. the CLI's syntax-lit
+ * posture for a declared file part). The chrome lines flattening itself
+ * synthesizes (`Error:`, `HINT:`, `META:`) never pass through it: they are
+ * harness vocabulary, and a painter that dresses them as payload says the
+ * file ends with a line that never existed in it. A bare-string content is
+ * likewise never painted -- it is harness text, not a part's bytes.
+ */
+export function toolContentText(
+  content: ToolResultContent | Array<unknown> | null | undefined,
+  paint?: (body: string) => string,
+): string {
   if (content == null) return "";
   if (typeof content === "string") return content;
   // Persisted entries may carry the bookkeeping plain-object shape (see
@@ -18,7 +29,7 @@ export function toolContentText(content: ToolResultContent | Array<unknown> | nu
   const lines: string[] = [];
   for (const part of content) {
     if (!isToolResultPart(part)) continue;
-    if (part.output) lines.push(part.output);
+    if (part.output) lines.push(paint ? paint(part.output) : part.output);
     if (part.error !== null) lines.push(`Error: ${part.error}`);
     if (part.hint !== null) lines.push(`HINT: ${part.hint}`);
     // Metadata is part of the result (exit codes, pagination, durations);

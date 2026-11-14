@@ -49,6 +49,27 @@ describe('toolContentText', () => {
     expect(toolContentText([p])).toBe('META: {"b":"2","a":"1"}');
   });
 
+  it('paint transforms each part\'s own bytes only: chrome and harness strings stay raw', () => {
+    const paint = (s: string) => `[${s}]`;
+    const p = part({
+      status: 'failure',
+      output: 'partial',
+      error: 'boom',
+      hint: 'try again',
+      meta: [['exit_code', '1']],
+    });
+    expect(toolContentText([p], paint)).toBe(
+      '[partial]\nError: boom\nHINT: try again\nMETA: {"exit_code":"1"}',
+    );
+    // per part, in order; absent output paints nothing
+    expect(toolContentText([part({ output: 'a' }), part({ output: 'b', meta: [['k', 'v']] })], paint)).toBe(
+      '[a]\n[b]\nMETA: {"k":"v"}',
+    );
+    expect(toolContentText([part({ output: '' })], paint)).toBe('');
+    // bare string content is harness text: never painted
+    expect(toolContentText('plain', paint)).toBe('plain');
+  });
+
   it('degrades the bookkeeping plain-object shape to "" (cold-log entries)', () => {
     expect(toolContentText({ session: 'x', foo: 'bar' } as unknown as never)).toBe('');
   });

@@ -290,6 +290,123 @@ describe("CliOutputSink", () => {
     expect(stdoutWrites).toHaveLength(0);
   });
 
+  describe("emitToolResult file syntax (declared result-sourced file part)", () => {
+    // read's shipped declaration, mirrored through the display seam.
+    const READ_FILE: ToolDisplaySpec[] = [
+      { kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" },
+    ];
+    const litSink = (display?: (name: string) => ToolDisplaySpec[] | undefined) =>
+      new CliOutputSink({
+        palette: new ColorPalette({ use_colors: true }),
+        toolOutputFmt: "{}",
+        display,
+      });
+
+    // Real read results ride as attested parts; a bare string is harness
+    // text, which never takes the lit posture.
+    const okPart = (output: string, meta: [string, string][] = []) => [
+      {
+        type: "tool-result" as const,
+        tool: "read",
+        status: "success" as const,
+        meta,
+        error: null,
+        hint: null,
+        output,
+      },
+    ];
+
+    it("a read of a scannable file gets syntax-lit lines", () => {
+      litSink(() => READ_FILE).emit({
+        type: OUTPUT_EVENT.TOOL_RESULT,
+        toolName: "read",
+        input: '{"path":"src/a.ts"}',
+        content: okPart("const x = 1"),
+        toolCallId: "1",
+      });
+      const written = stdoutWrites.join("");
+      expect(written).toContain("\x1b[35mconst\x1b[0m");
+      expect(written).toContain("\x1b[32mx\x1b[0m");
+    });
+
+    it("paints the part's bytes, never the flattened META chrome", () => {
+      litSink(() => READ_FILE).emit({
+        type: OUTPUT_EVENT.TOOL_RESULT,
+        toolName: "read",
+        input: '{"path":"src/a.ts"}',
+        content: okPart("const x = 1", [["total_lines", "1"]]),
+        toolCallId: "1",
+      });
+      const written = stdoutWrites.join("");
+      expect(written).toContain("\x1b[35mconst\x1b[0m");
+      // The chrome line rides the block's plain wash: no painter sequence
+      // from its start to the block's closing reset.
+      expect(written).toContain('\x1b[0m\nMETA: {"total_lines":"1"}\x1b[0m');
+    });
+
+    it("undeclared tools and scannerless guesses keep the plain box byte-for-byte", () => {
+      const readGeneric = (display: (name: string) => ToolDisplaySpec[] | undefined, input: string) => {
+        stdoutWrites = [];
+        litSink(display).emit({
+          type: OUTPUT_EVENT.TOOL_RESULT,
+          toolName: "read",
+          input,
+          content: okPart("const x = 1"),
+          toolCallId: "1",
+        });
+        return stdoutWrites.join("");
+      };
+      const noPart = readGeneric(() => undefined, '{"path":"src/a.ts"}');
+      const plainGuess = readGeneric(() => READ_FILE, '{"path":"README.md"}');
+      const noPath = readGeneric(() => READ_FILE, "{}");
+      // One green wrap from the mode applier, no painter sequences inside.
+      expect(plainGuess).toBe(noPart);
+      expect(noPath).toBe(noPart);
+      expect(noPart).toContain("\x1b[32mconst x = 1\x1b[0m");
+      expect(noPart).not.toContain("\x1b[35m");
+    });
+
+    it("a failed read result never paints: the generic box keeps the whole story", () => {
+      litSink(() => READ_FILE).emit({
+        type: OUTPUT_EVENT.TOOL_RESULT,
+        toolName: "read",
+        input: '{"path":"src/a.ts"}',
+        content: [
+          {
+            type: "tool-result",
+            tool: "read",
+            status: "failure",
+            meta: [],
+            error: "boom",
+            hint: "try the directory",
+            output: "partial",
+          },
+        ],
+        toolCallId: "1",
+      });
+      const written = stdoutWrites.join("");
+      expect(written).not.toContain("\x1b[35m");
+      expect(written).toContain("HINT: try the directory");
+    });
+
+    it("colors off stays on the plain byte path with a declaration wired", () => {
+      const dull = new CliOutputSink({
+        palette: new ColorPalette({ use_colors: false }),
+        toolOutputFmt: "{}",
+        display: () => READ_FILE,
+      });
+      dull.emit({
+        type: OUTPUT_EVENT.TOOL_RESULT,
+        toolName: "read",
+        input: '{"path":"src/a.ts"}',
+        content: okPart("const x = 1"),
+        toolCallId: "1",
+      });
+      expect(stdoutWrites.join("")).toContain("const x = 1");
+      expect(stdoutWrites.join("")).not.toContain("\x1b[");
+    });
+  });
+
   it("emitCompacting writes to stderr", () => {
     sink.emit({ type: OUTPUT_EVENT.COMPACTING, message: "Compacting messages" });
     expect(stderrWrites.some((w) => w.includes("Compacting"))).toBe(true);

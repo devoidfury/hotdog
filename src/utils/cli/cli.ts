@@ -22,6 +22,7 @@ import {
 } from "@core/context/output.ts";
 import { toolContentMeta, toolContentSuccess, toolContentText } from "@utils/tool-content.ts";
 import { resolveCliDiff, renderCliDiff } from "@utils/cli/diff-render.ts";
+import { renderCliCode, resolveCliFileSyntax } from "@utils/cli/code-render.ts";
 import { spoofSafe } from "@utils/spoof.ts";
 import { summarizeToolArgs, firstLinePreview } from "@core/extensions/tool-utils.ts";
 import type { ArgDisplay, ToolDisplaySpec } from "@core/extensions/tool-registry.ts";
@@ -605,8 +606,9 @@ export class CliOutputSink extends OutputSink {
     // The block rides the same toolOutputFmt box and the same mode pipeline as
     // any other result: legacy stdout and the split bridge's commit channel
     // both see one multi-line text, as before.
+    const failed = event.error !== undefined || !toolContentSuccess(event.content);
     const diff = resolveCliDiff(this.display?.(event.toolName), event.input, {
-      failed: event.error !== undefined || !toolContentSuccess(event.content),
+      failed,
       startLine: resultStartLine(event.content),
     });
     let text: string;
@@ -618,7 +620,18 @@ export class CliOutputSink extends OutputSink {
       // inherits it).
       if (envelope !== "") text += "\n" + applyToolResult(envelope, this.palette);
     } else {
-      text = toolContentText(event.content);
+      // A declared result-sourced "file" part whose path guesses a language
+      // (shared registry, same table the workbench file viewer reads) gets
+      // its bytes syntax-lit through the flattener's paint seam, which
+      // reaches the part's own output only -- the synthesized `META:` chrome
+      // stays chrome. Anything else -- no part, dotless name, scannerless
+      // guess like markdown, failed call -- stays the generic plain box,
+      // byte-identical to before.
+      const lang = resolveCliFileSyntax(this.display?.(event.toolName), event.input, { failed });
+      text =
+        lang === null
+          ? toolContentText(event.content)
+          : toolContentText(event.content, (body) => renderCliCode(body, lang, this.palette));
     }
     this._processContent(formatToolResult(text, this.toolOutputFmt || "{}"));
   }

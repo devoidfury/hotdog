@@ -50,10 +50,13 @@ import { JSON_SYNTAX } from "./json.ts";
 import { KOTLIN_SYNTAX } from "./kotlin.ts";
 import { LUA_SYNTAX } from "./lua.ts";
 import { MAKE_SYNTAX } from "./make.ts";
+import { NIX_SYNTAX } from "./nix.ts";
 import { PHP_SYNTAX } from "./php.ts";
+import { PROTOBUF_SYNTAX } from "./protobuf.ts";
 import { PYTHON_SYNTAX } from "./python.ts";
 import { RUBY_SYNTAX } from "./ruby.ts";
 import { RUST_SYNTAX } from "./rust.ts";
+import { SCSS_SYNTAX } from "./scss.ts";
 import { SHELL_SYNTAX } from "./shell.ts";
 import { SQL_SYNTAX } from "./sql.ts";
 import { SWIFT_SYNTAX } from "./swift.ts";
@@ -142,6 +145,9 @@ const BUILTINS: readonly SyntaxDef[] = [
   CRYSTAL_SYNTAX,
   ERLANG_SYNTAX,
   HCL_SYNTAX,
+  SCSS_SYNTAX,
+  NIX_SYNTAX,
+  PROTOBUF_SYNTAX,
   // Metadata-only registrations: names the file view guesses honestly
   // while getTokenizer stays undefined (the registry contract). markdown
   // is deliberately stateless-registry-less -- the sink drives its

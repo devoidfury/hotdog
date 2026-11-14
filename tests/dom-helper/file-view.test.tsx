@@ -148,6 +148,24 @@ describe("viewer language + tokens", () => {
     expect(guessLang("main.tf")).toBe("hcl");
     expect(guessLang("terraform.tfvars")).toBe("hcl");
     expect(guessLang("main.hcl")).toBe("hcl");
+    // SCSS: the braced superset claims .scss (partials and capitals too);
+    // the indented .sass syntax is honestly UNCLAIMED (no scanner speaks it
+    // line-wise -- the .ecr/.heex ruling).
+    expect(guessLang("main.scss")).toBe("scss");
+    expect(guessLang("_variables.scss")).toBe("scss");
+    expect(guessLang("MAIN.SCSS")).toBe("scss");
+    expect(guessLang("index.sass")).toBeUndefined();
+    // Nix: the one extension carries everything (flake.nix, default.nix and
+    // shell.nix included -- no basenames needed).
+    expect(guessLang("default.nix")).toBe("nix");
+    expect(guessLang("flake.nix")).toBe("nix");
+    expect(guessLang("shell.nix")).toBe("nix");
+    expect(guessLang("file.nixx")).toBeUndefined();
+    // Protobuf: canonical "protobuf" with "proto" as the fence alias (the
+    // graphql precedent); the extension lands the guess, and the wrong
+    // extension stays unclaimed.
+    expect(guessLang("user.proto")).toBe("protobuf");
+    expect(guessLang("message.protos")).toBeUndefined();
     // The cheap claims (no scanner needed, the shape is already covered):
     // CUDA/shaders ride c, module spellings ride the script langs,
     // GeoJSON/Avro ARE json, systemd units are ini.

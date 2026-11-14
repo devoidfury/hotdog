@@ -2724,7 +2724,10 @@ function App() {
                   </button>
                 ) : null}
                 <label id="profile-selector">
-                  Profile:{" "}
+                  {/* Label text is screen-reader-only (house .visually-hidden
+                      clip: keeps the accessible name, drops the visible
+                      "Profile:" the owner hid 2026-11-14). */}
+                  <span className="visually-hidden">Profile</span>
                   {/* Profile/model switching belongs to the ATTACHED manager,
                       never to the viewed subagent (owner ruling 2026-11-13:
                       the one exception). Native disabled drops the selects
@@ -2744,7 +2747,7 @@ function App() {
                   </select>
                 </label>
                 <label id="model-selector">
-                  Model:{" "}
+                  <span className="visually-hidden">Model</span>
                   <select
                     id="model-select"
                     ref={modelSelectRef}

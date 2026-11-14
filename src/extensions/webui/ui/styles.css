@@ -12,6 +12,78 @@
     padding: 0;
 }
 
+/* ── Webfonts: Reddit Sans / Reddit Mono ──────────────────────────────────
+   The webui's loaded faces (owner choice 2026-11-14). Served as bundler
+   assets through index.html's css import; swap display so text is never
+   invisible while they load. The zip's web/full woff2 builds, but only the
+   weights the ui uses (400/600/700; the vendor maps SemiBold=600, and a
+   requested 500 resolves to the 400 face per the CSS matching rules, so
+   Light/ExtraBold are dead weight). Sans ships real italics; the mono
+   family has none. */
+@font-face {
+    font-family: "Reddit Sans";
+    src: url("./fonts/RedditSans-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Reddit Sans";
+    src: url("./fonts/RedditSans-SemiBold.woff2") format("woff2");
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Reddit Sans";
+    src: url("./fonts/RedditSans-Bold.woff2") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Reddit Sans";
+    src: url("./fonts/RedditSans-Italic.woff2") format("woff2");
+    font-weight: 400;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Reddit Sans";
+    src: url("./fonts/RedditSans-BoldItalic.woff2") format("woff2");
+    font-weight: 700;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Reddit Mono";
+    src: url("./fonts/RedditMono-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Reddit Mono";
+    src: url("./fonts/RedditMono-SemiBold.woff2") format("woff2");
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Reddit Mono";
+    src: url("./fonts/RedditMono-Bold.woff2") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
 /* ── Design tokens ──────────────────────────────────────────────────────────
    :root carries TWO kinds of values: theme-invariant ones (spacing,
    typography, radii, shadows, layout, the semantic colors, the diff-ruler
@@ -35,7 +107,7 @@
 
     /* Text */
     --text-primary: #edeae8;
-    --text-secondary: #b0a49a;
+    --text-secondary: #d4cec9;
     --text-muted: #a9a9a9;
     --text-inverse: #161312;
 
@@ -92,15 +164,15 @@
     --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5);
     --shadow-glow: 0 0 20px var(--accent-glow);
 
-    /* Typography -- system stack only: no webfont is loaded anywhere in the
-       webui, so naming "Inter" here was aspirational and misleading. The
-       mono list leads with fonts people install, which is legitimate local
-       detection (no network cost). */
+    /* Typography -- both stacks lead with the loaded Reddit faces (owner
+       choice 2026-11-14; see the @font-face blocks above), then fonts
+       people install, then the generic. */
     --font-sans:
-        system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-        sans-serif;
+        "Reddit Sans", system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", Roboto, sans-serif;
     --font-mono:
-        "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", monospace;
+        "Reddit Mono", "JetBrains Mono", "Fira Code", "SF Mono",
+        "Cascadia Code", monospace;
 
     /* Density scale -- the chat/tool surfaces snap to these; older pockets
        keep their literal values until touched. */
@@ -197,7 +269,7 @@ body {
     font-family: var(--font-sans);
     background: var(--bg-base);
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -291,7 +363,7 @@ body {
 }
 
 .login-container h1 {
-    font-size: 2.2rem;
+    font-size: 2.325rem;
     font-weight: 700;
     margin-bottom: 6px;
     background: linear-gradient(
@@ -308,7 +380,7 @@ body {
 .login-container .subtitle {
     color: var(--text-secondary);
     margin-bottom: 36px;
-    font-size: 0.9rem;
+    font-size: 1.025rem;
 }
 
 #login-form {
@@ -323,7 +395,7 @@ body {
     border-radius: var(--radius);
     background: var(--bg-tertiary);
     color: var(--text-primary);
-    font-size: 0.95rem;
+    font-size: 1.075rem;
     font-family: var(--font-sans);
     transition:
         border-color 0.2s,
@@ -346,7 +418,7 @@ body {
     border-radius: var(--radius);
     background: var(--accent);
     color: var(--text-inverse);
-    font-size: 0.95rem;
+    font-size: 1.075rem;
     font-weight: 600;
     font-family: var(--font-sans);
     cursor: pointer;
@@ -367,7 +439,7 @@ body {
 
 .error-message {
     color: var(--error);
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     margin-top: 14px;
     padding: 8px 12px;
     background: var(--error-soft);
@@ -454,7 +526,7 @@ body.sidebar-resizing {
 }
 
 .sidebar-header h2 {
-    font-size: 0.8rem;
+    font-size: 0.925rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 1.2px;
@@ -468,7 +540,7 @@ body.sidebar-resizing {
     background: var(--accent-soft);
     color: var(--accent);
     border: 1px solid transparent;
-    font-size: 1.3rem;
+    font-size: 1.425rem;
     line-height: 1;
     cursor: pointer;
     transition: all 0.2s;
@@ -549,7 +621,7 @@ body.sidebar-resizing {
     background: var(--bg-base);
     color: var(--text-primary);
     font-family: var(--font-sans);
-    font-size: 0.82rem;
+    font-size: 0.945rem;
 }
 
 #search-input:focus {
@@ -562,7 +634,7 @@ body.sidebar-resizing {
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: 1.025rem;
     padding: 4px 6px;
     border-radius: var(--radius-sm);
 }
@@ -580,7 +652,7 @@ body.sidebar-resizing {
 
 .search-status {
     padding: 10px;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
     text-align: center;
 }
@@ -603,7 +675,7 @@ body.sidebar-resizing {
 /* live/cold scope tag on the result's line-1. */
 .search-scope {
     margin-left: 6px;
-    font-size: 0.6rem;
+    font-size: 0.725rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: var(--text-muted);
@@ -619,7 +691,7 @@ body.sidebar-resizing {
 
 .search-snippet {
     margin-top: 5px;
-    font-size: 0.68rem;
+    font-size: 0.805rem;
     line-height: 1.45;
     color: var(--text-muted);
     overflow-wrap: anywhere;
@@ -685,7 +757,7 @@ body.sidebar-resizing {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 0.9rem;
+    font-size: 1.025rem;
     font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 3px;
@@ -694,7 +766,7 @@ body.sidebar-resizing {
 }
 
 .log-item .row-l1 {
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     color: var(--text-secondary);
 }
 
@@ -703,7 +775,7 @@ body.sidebar-resizing {
    carries the full value (the status-glyph tooltip idiom). */
 .session-item .row-l2,
 .log-item .row-l2 {
-    font-size: 0.78rem;
+    font-size: 0.905rem;
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
@@ -712,7 +784,7 @@ body.sidebar-resizing {
 }
 
 .log-item .row-l2 {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
 }
 
@@ -725,6 +797,9 @@ body.sidebar-resizing {
 }
 
 .row-model {
+    /* Matches the dot-joined profile tag; row-l1's size is the line's title
+       voice, which made the model read bigger than the rest of the card. */
+    font-size: 0.875rem;
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
@@ -746,7 +821,7 @@ body.sidebar-resizing {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
-    font-size: 0.7rem;
+    font-size: 0.825rem;
     line-height: 1.5;
 }
 
@@ -760,7 +835,7 @@ body.sidebar-resizing {
     align-items: center;
     gap: 5px;
     font-weight: 400;
-    font-size: 0.68rem;
+    font-size: 0.805rem;
     color: var(--text-muted);
     background: var(--bg-elevated);
     border: 1px solid var(--border-light);
@@ -805,7 +880,7 @@ body.sidebar-resizing {
    badge -- plain muted text, no badge treatment so the status stays the
    loudest slot; the model keeps the ellipsizing role (.row-model). */
 .row-profile {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     font-weight: 400;
     color: var(--text-muted);
 }
@@ -896,7 +971,7 @@ body.sidebar-resizing {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.7rem;
+    font-size: 0.825rem;
     color: var(--text-muted);
     line-height: 1.4;
     white-space: nowrap;
@@ -909,7 +984,7 @@ body.sidebar-resizing {
     overflow: hidden;
     text-overflow: ellipsis;
     font-family: var(--font-mono);
-    font-size: 0.68rem;
+    font-size: 0.805rem;
 }
 
 /* Bottom-row metrics (ctx / msgs): the ellipsizing tail role, riding the
@@ -937,7 +1012,7 @@ body.sidebar-resizing {
     border-radius: var(--radius-sm);
     background: var(--error-soft);
     color: var(--error);
-    font-size: 0.7rem;
+    font-size: 0.825rem;
     font-weight: 600;
     font-family: var(--font-sans);
     cursor: pointer;
@@ -1129,7 +1204,7 @@ body.logs-resizing .sidebar-header-resize {
     padding: 2px 6px;
     background: var(--bg-primary);
     border-bottom: 1px solid var(--border);
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     flex-shrink: 0;
 }
 
@@ -1144,7 +1219,7 @@ body.logs-resizing .sidebar-header-resize {
 #current-session-id {
     color: var(--text-muted);
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     background: var(--bg-tertiary);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
@@ -1195,7 +1270,7 @@ body.logs-resizing .sidebar-header-resize {
 #log-view-label {
     color: var(--warning);
     font-weight: 500;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1208,7 +1283,7 @@ body.logs-resizing .sidebar-header-resize {
 #current-log-id {
     color: var(--warning);
     font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: 0.825rem;
 }
 
 #close-log-view-btn {
@@ -1216,7 +1291,7 @@ body.logs-resizing .sidebar-header-resize {
     border: none;
     color: var(--warning);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: 1.025rem;
     padding: 0 2px;
     line-height: 1;
     opacity: 0.7;
@@ -1266,7 +1341,7 @@ body.logs-resizing .sidebar-header-resize {
 #model-selector,
 #profile-selector {
     color: var(--text-muted);
-    font-size: 0.72rem;
+    font-size: 0.845rem;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1287,7 +1362,7 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text-secondary);
     border: none;
     padding: 0;
-    font-size: 0.72rem;
+    font-size: 0.845rem;
     font-family: var(--font-mono);
     cursor: pointer;
     outline: none;
@@ -1338,7 +1413,7 @@ body.logs-resizing .sidebar-header-resize {
 
 .status-disconnected {
     color: var(--error);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     display: flex;
     align-items: center;
     gap: 5px;
@@ -1437,7 +1512,7 @@ body.logs-resizing .sidebar-header-resize {
     padding: 2px 8px;
     transition: border-color 0.15s, background 0.15s;
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     font-family: var(--font-mono);
 }
 
@@ -1586,7 +1661,7 @@ body.logs-resizing .sidebar-header-resize {
     padding: 8px 12px;
     border-radius: var(--radius-lg);
     line-height: 1.55;
-    font-size: 0.92rem;
+    font-size: 1.045rem;
     position: relative;
     overflow-wrap: break-word;
     word-break: break-word;
@@ -1619,7 +1694,7 @@ body.logs-resizing .sidebar-header-resize {
     align-items: center;
     gap: 10px;
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     line-height: 1.4;
     opacity: 0.75;
     padding: 4px 2px 16px;
@@ -1904,7 +1979,7 @@ body.logs-resizing .sidebar-header-resize {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 0.82rem;
+    font-size: 0.945rem;
     /* Static typographic row: the name carries the emphasis (primary), the
        path summary stays the muted mono badge (below). Muted remainder, so a
        pending block is already the resting state -- nothing to brighten until
@@ -1926,7 +2001,7 @@ body.logs-resizing .sidebar-header-resize {
 
 .tool-call-display {
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -1950,7 +2025,7 @@ body.logs-resizing .sidebar-header-resize {
 .tool-args {
     margin: 0;
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: 0.905rem;
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -1972,7 +2047,7 @@ body.logs-resizing .sidebar-header-resize {
     border: none;
     padding: 6px 10px;
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
     cursor: pointer;
     white-space: nowrap;
@@ -2043,7 +2118,7 @@ body.logs-resizing .sidebar-header-resize {
     min-width: 0;
     padding: 5px 0;
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-secondary);
 }
 
@@ -2141,7 +2216,7 @@ body.logs-resizing .sidebar-header-resize {
     padding: 8px 10px;
     background: var(--bg-base);
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: 0.905rem;
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-secondary);
@@ -2156,7 +2231,7 @@ body.logs-resizing .sidebar-header-resize {
     margin: 0;
     padding: 4px 10px 6px;
     font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: 0.825rem;
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -2181,7 +2256,7 @@ body.logs-resizing .sidebar-header-resize {
     padding: 2px 0;
     color: var(--text-muted);
     font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: 0.825rem;
     cursor: pointer;
 }
 
@@ -2202,7 +2277,7 @@ body.logs-resizing .sidebar-header-resize {
 .tool-diff {
     margin: var(--space-xs) var(--space-lg);
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: 0.905rem;
     overflow: hidden;
 }
 
@@ -2282,7 +2357,7 @@ body.logs-resizing .sidebar-header-resize {
     margin: var(--space-xs) var(--space-lg);
     padding: 4px 10px;
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: 0.905rem;
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-secondary);
@@ -2442,7 +2517,7 @@ body.logs-resizing .sidebar-header-resize {
 /* Pending chip: quiet muted mono text (no bubble, no fill). */
 .tool-prose-chip {
     font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: 0.845rem;
     color: var(--text-muted);
     padding: 1px 0;
 }
@@ -2452,7 +2527,7 @@ body.logs-resizing .sidebar-header-resize {
     flex: 1;
     min-width: 0;
     white-space: normal;
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     color: var(--text-primary);
 }
 
@@ -2467,7 +2542,7 @@ body.logs-resizing .sidebar-header-resize {
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     margin: 4px 0 4px 8px;
     padding: 8px 14px;
-    font-size: 0.82rem;
+    font-size: 0.945rem;
     color: var(--text-muted);
     font-family: var(--font-mono);
     white-space: pre-wrap;
@@ -2494,7 +2569,7 @@ body.logs-resizing .sidebar-header-resize {
        alpha as the old hardcoded value, every theme its own flavor. */
     border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
     color: var(--accent);
-    font-size: 0.82rem;
+    font-size: 0.945rem;
     font-weight: 500;
     text-align: center;
     padding: 6px 16px;
@@ -2511,7 +2586,7 @@ body.logs-resizing .sidebar-header-resize {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     color: var(--text-secondary);
-    font-size: 0.82rem;
+    font-size: 0.945rem;
     font-family: var(--font-mono);
     padding: 6px 14px;
     border-radius: var(--radius-sm);
@@ -2531,7 +2606,7 @@ body.logs-resizing .sidebar-header-resize {
     background: color-mix(in srgb, var(--accent) 15%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
     color: var(--accent);
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     padding: 8px 16px;
     border-radius: var(--radius-full);
     display: inline-block;
@@ -2547,7 +2622,7 @@ body.logs-resizing .sidebar-header-resize {
     border-radius: var(--radius, 8px);
     padding: 6px 12px;
     margin: 4px 0;
-    font-size: 0.85rem;
+    font-size: 0.975rem;
 }
 
 .attachment-box summary {
@@ -2581,7 +2656,7 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--accent);
     display: block;
     margin-bottom: 6px;
-    font-size: 0.85rem;
+    font-size: 0.975rem;
 }
 
 .message.question .question-card {
@@ -2599,7 +2674,7 @@ body.logs-resizing .sidebar-header-resize {
 
 .message.question .q-prompt {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 1.025rem;
 }
 
 .message.question .q-options {
@@ -2615,7 +2690,7 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text);
     border-radius: var(--radius-full);
     padding: 3px 12px;
-    font-size: 0.82rem;
+    font-size: 0.945rem;
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
 }
@@ -2636,7 +2711,7 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--text);
     border-radius: var(--radius);
     padding: 4px 10px;
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     min-width: 180px;
 }
 
@@ -2647,7 +2722,7 @@ body.logs-resizing .sidebar-header-resize {
 
 .message.question .q-error {
     color: var(--danger, #e5484d);
-    font-size: 0.78rem;
+    font-size: 0.905rem;
     min-height: 0.9em;
 }
 
@@ -2658,7 +2733,7 @@ body.logs-resizing .sidebar-header-resize {
     border: none;
     border-radius: var(--radius);
     padding: 6px 16px;
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     cursor: pointer;
 }
 
@@ -2674,7 +2749,7 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .message.question .q-answers {
-    font-size: 0.82rem;
+    font-size: 0.945rem;
     color: var(--text-secondary);
     border-top: 1px solid var(--border);
     padding-top: 8px;
@@ -2689,7 +2764,7 @@ body.logs-resizing .sidebar-header-resize {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     color: var(--text-secondary);
-    font-size: 0.8rem;
+    font-size: 0.925rem;
     padding: 4px 14px;
     border-radius: var(--radius-full);
     display: inline-block;
@@ -2704,7 +2779,7 @@ body.logs-resizing .sidebar-header-resize {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     color: var(--text-muted);
-    font-size: 0.8rem;
+    font-size: 0.925rem;
     padding: 6px 14px;
     border-radius: var(--radius-sm);
     display: inline-block;
@@ -2791,7 +2866,7 @@ body.logs-resizing .sidebar-header-resize {
     border-bottom: 1px solid var(--border);
     background: transparent;
     color: var(--text-primary);
-    font-size: 0.92rem;
+    font-size: 1.045rem;
     font-family: var(--font-sans);
     outline: none;
     resize: none;
@@ -2827,7 +2902,7 @@ body.logs-resizing .sidebar-header-resize {
 .completion-item {
     padding: 4px 12px;
     font-family: var(--font-mono);
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     color: var(--text-primary);
     white-space: pre;
     cursor: pointer;
@@ -2851,7 +2926,7 @@ body.logs-resizing .sidebar-header-resize {
     border-radius: var(--radius-sm);
     background: var(--accent);
     color: var(--text-inverse);
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     font-weight: 600;
     font-family: var(--font-sans);
     cursor: pointer;
@@ -2882,7 +2957,7 @@ body.logs-resizing .sidebar-header-resize {
     border-radius: var(--radius-sm);
     background: var(--error-soft);
     color: var(--error);
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     font-weight: 600;
     font-family: var(--font-sans);
     cursor: pointer;
@@ -3083,7 +3158,7 @@ body.workbench-resizing {
 /* ── Workbench file tree ─────────────────────────────────────────────────── */
 
 .file-tree {
-    font-size: 13px;
+    font-size: 15px;
 }
 
 .ft-header {
@@ -3096,7 +3171,7 @@ body.workbench-resizing {
 
 .ft-header-label {
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }
@@ -3216,7 +3291,7 @@ body.workbench-resizing {
 /* ── Workbench read-only file viewer ─────────────────────────────────────── */
 
 .file-view {
-    font-size: 12px;
+    font-size: 14px;
 }
 
 .file-view-header {
@@ -3469,7 +3544,7 @@ body.workbench-resizing {
     .tool-result-pre,
     .part-head,
     .tool-box-summary {
-        font-size: 0.72rem;
+        font-size: 0.845rem;
     }
 
     .tool-file-pre,
@@ -3544,7 +3619,7 @@ body.workbench-resizing {
     padding: 8px 14px;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: 0.975rem;
     color: var(--text-primary);
     transition: all 0.1s;
     user-select: none;
@@ -3588,7 +3663,7 @@ body.workbench-resizing {
     border: 1px solid var(--border);
     box-shadow: var(--shadow-lg);
     color: var(--text-primary);
-    font-size: 0.8rem;
+    font-size: 0.925rem;
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.2s var(--ease-out);
@@ -3623,7 +3698,7 @@ body.workbench-resizing {
 }
 
 .image-skipped {
-    font-size: 0.8rem;
+    font-size: 0.925rem;
     font-style: italic;
     color: var(--text-secondary, #888);
 }
@@ -3647,7 +3722,7 @@ body.workbench-resizing {
     border: 1px solid var(--border);
     border-radius: 12px;
     background: var(--bg-secondary, #2a2a2a);
-    font-size: 0.8rem;
+    font-size: 0.925rem;
     max-width: 240px;
 }
 
@@ -3668,7 +3743,7 @@ body.workbench-resizing {
     color: var(--text-secondary, #888);
     cursor: pointer;
     padding: 0 2px;
-    font-size: 1rem;
+    font-size: 1.125rem;
     line-height: 1;
 }
 
@@ -3779,7 +3854,7 @@ body.workbench-resizing {
 }
 
 .subagents-label {
-    font-size: 11px;
+    font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-muted);
@@ -3833,7 +3908,7 @@ body.workbench-resizing {
     border-radius: var(--radius-sm);
     background: none;
     color: var(--text-primary);
-    font-size: 12px;
+    font-size: 14px;
     text-align: left;
     white-space: nowrap;
     cursor: pointer;
@@ -3867,7 +3942,7 @@ body.workbench-resizing {
     margin-left: auto;
     flex-shrink: 0;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-secondary);
 }
 
@@ -3955,7 +4030,7 @@ body.workbench-resizing {
 
 .settings-view-header h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: 1.125rem;
     flex: 1;
 }
 
@@ -3964,7 +4039,7 @@ body.workbench-resizing {
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-secondary);
-    font-size: 0.76rem;
+    font-size: 0.885rem;
     padding: 3px 10px;
     cursor: pointer;
 }
@@ -3980,14 +4055,14 @@ body.workbench-resizing {
 }
 
 .settings-close {
-    font-size: 0.9rem;
+    font-size: 1.025rem;
     line-height: 1;
 }
 
 .settings-pending {
     padding: 18px;
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: 0.975rem;
 }
 
 /* The two-pane body: rail + scrollable content column. */
@@ -4014,7 +4089,7 @@ body.workbench-resizing {
 
 .settings-search {
     font-family: var(--font-sans);
-    font-size: 0.78rem;
+    font-size: 0.905rem;
     color: var(--text-primary);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -4057,7 +4132,7 @@ body.workbench-resizing {
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-muted);
-    font-size: 0.7rem;
+    font-size: 0.825rem;
     line-height: 1;
     padding: 2px 5px;
     cursor: pointer;
@@ -4084,7 +4159,7 @@ body.workbench-resizing {
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-secondary);
-    font-size: 0.78rem;
+    font-size: 0.905rem;
     text-align: left;
     padding: 4px 8px;
     cursor: pointer;
@@ -4103,7 +4178,7 @@ body.workbench-resizing {
 
 .settings-cat-count {
     font-family: var(--font-mono);
-    font-size: 0.66rem;
+    font-size: 0.785rem;
     color: var(--text-muted);
 }
 
@@ -4135,13 +4210,13 @@ body.workbench-resizing {
     flex-wrap: wrap;
     gap: 6px;
     align-items: baseline;
-    font-size: 0.8rem;
+    font-size: 0.925rem;
 }
 
 .settings-diag-key {
     color: var(--warning, #d9a441);
     text-transform: uppercase;
-    font-size: 0.66rem;
+    font-size: 0.785rem;
     letter-spacing: 0.03em;
 }
 
@@ -4166,7 +4241,7 @@ body.workbench-resizing {
 
 .settings-dir {
     font-family: var(--font-mono);
-    font-size: 0.68rem;
+    font-size: 0.805rem;
     color: var(--text-muted);
     padding: 4px 8px;
     border-top: 1px solid var(--border);
@@ -4180,7 +4255,7 @@ body.workbench-resizing {
 
 .settings-section-title {
     margin: 0 0 2px;
-    font-size: 0.72rem;
+    font-size: 0.845rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -4211,7 +4286,7 @@ body.workbench-resizing {
 }
 
 .settings-row-label {
-    font-size: 0.84rem;
+    font-size: 0.965rem;
     font-weight: 600;
     color: var(--text-primary);
     overflow-wrap: break-word;
@@ -4219,14 +4294,14 @@ body.workbench-resizing {
 }
 
 .settings-row-desc {
-    font-size: 0.74rem;
+    font-size: 0.865rem;
     color: var(--text-muted);
     overflow-wrap: anywhere;
 }
 
 .settings-row-key {
     font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: 0.845rem;
 }
 
 .settings-row-meta {
@@ -4249,7 +4324,7 @@ body.workbench-resizing {
 
 .settings-value {
     font-family: var(--font-mono);
-    font-size: 0.76rem;
+    font-size: 0.885rem;
     color: var(--text-secondary);
     overflow-wrap: anywhere;
 }
@@ -4260,7 +4335,7 @@ body.workbench-resizing {
 }
 
 .settings-badge {
-    font-size: 0.62rem;
+    font-size: 0.745rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
     border: 1px solid var(--border);
@@ -4297,7 +4372,7 @@ body.workbench-resizing {
 
 .settings-edit-input {
     font-family: var(--font-mono);
-    font-size: 0.76rem;
+    font-size: 0.885rem;
     color: var(--text-primary);
     background: var(--bg-input, var(--bg-secondary));
     border: 1px solid var(--border);
@@ -4373,7 +4448,7 @@ body.workbench-resizing {
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-secondary);
-    font-size: 0.82rem;
+    font-size: 0.945rem;
     line-height: 1;
     padding: 3px 7px;
     cursor: pointer;
@@ -4411,7 +4486,7 @@ body.workbench-resizing {
     top: 50%;
     transform: translateY(-50%);
     color: var(--text-muted);
-    font-size: 0.62rem;
+    font-size: 0.745rem;
     pointer-events: none;
 }
 
@@ -4461,7 +4536,7 @@ body.workbench-resizing {
 }
 
 .settings-file-hint {
-    font-size: 0.62rem;
+    font-size: 0.745rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
     border: 1px dashed var(--border);
@@ -4473,7 +4548,7 @@ body.workbench-resizing {
 
 .settings-edit-error {
     grid-column: 1 / -1;
-    font-size: 0.7rem;
+    font-size: 0.825rem;
     color: var(--danger, #e05252);
     overflow-wrap: anywhere;
 }
@@ -4514,7 +4589,7 @@ body.workbench-resizing {
 
 .settings-list-add-input {
     font-family: var(--font-mono);
-    font-size: 0.76rem;
+    font-size: 0.885rem;
     color: var(--text-primary);
     background: var(--bg-input, var(--bg-secondary));
     border: 1px solid var(--border);
@@ -4581,7 +4656,7 @@ body.workbench-resizing {
 }
 
 .settings-provider-name {
-    font-size: 0.84rem;
+    font-size: 0.965rem;
     font-weight: 600;
     color: var(--text-primary);
     overflow-wrap: break-word;
@@ -4590,7 +4665,7 @@ body.workbench-resizing {
 
 .settings-provider-path {
     font-family: var(--font-mono);
-    font-size: 0.68rem;
+    font-size: 0.805rem;
     color: var(--text-muted);
     overflow-wrap: anywhere;
 }
@@ -4646,7 +4721,7 @@ body.workbench-resizing {
 
 .settings-provider-add-input {
     font-family: var(--font-mono);
-    font-size: 0.76rem;
+    font-size: 0.885rem;
     color: var(--text-primary);
     background: var(--bg-input, var(--bg-secondary));
     border: 1px solid var(--border);
@@ -4679,7 +4754,7 @@ body.workbench-resizing {
     border-radius: var(--radius-sm);
     background: rgba(90, 160, 255, 0.07);
     color: var(--text-secondary);
-    font-size: 0.78rem;
+    font-size: 0.905rem;
     padding: 8px 10px;
     margin: 0 14px 10px;
 }
@@ -4687,5 +4762,5 @@ body.workbench-resizing {
 .settings-empty {
     padding: 18px 4px;
     color: var(--text-muted);
-    font-size: 0.82rem;
+    font-size: 0.945rem;
 }

@@ -653,7 +653,7 @@ export function Sidebar(p: SidebarProps) {
         {p.logs.length === 0 ? (
           <div
             className="log-empty"
-            style={{ padding: "10px", "font-size": "0.75rem", color: "var(--text-muted)", "text-align": "center" }}
+            style={{ padding: "10px", "font-size": "0.875rem", color: "var(--text-muted)", "text-align": "center" }}
           >
             No recent logs
           </div>

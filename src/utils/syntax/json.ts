@@ -97,10 +97,11 @@ const NUM_RE = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?$/;
 const LETTER_RE = /[A-Za-z_$]/;
 const STRUCTURAL = new Set(["{", "}", "[", "]", ":", ","]);
 
-/** The registry entry for this lang (assembly list: index.ts). */
+/** The registry entry for this lang (assembly list: index.ts). GeoJSON
+ * and Avro schemas ARE json; the guesses just stop them rendering plain. */
 export const JSON_SYNTAX: SyntaxDef = {
   lang: "json",
   tokenize: tokenizeJson,
   aliases: ["jsonc", "jsonl"],
-  extensions: ["json", "jsonc", "jsonl"],
+  extensions: ["json", "jsonc", "jsonl", "geojson", "avsc"],
 };

@@ -54,7 +54,8 @@ const isWs = (c: string | undefined): boolean => c === " " || c === "\t" || c ==
 export const INI_SYNTAX: SyntaxDef = {
   lang: "ini",
   tokenize: tokenizeIni,
-  extensions: ["ini"],
+  // systemd units ([Unit]/[Service] sections, key=value lands).
+  extensions: ["ini", "service", "socket", "timer"],
   // KEY=value lands: these dotfiles are what the ini dialect reads. The
   // `.env` basename now belongs to the dedicated env tokenizer.
   basenames: [".editorconfig", ".gitconfig"],

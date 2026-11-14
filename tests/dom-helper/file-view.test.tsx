@@ -108,6 +108,24 @@ describe("viewer language + tokens", () => {
     expect(guessLang("GNUmakefile")).toBe("make");
     expect(guessLang("Makefile.dev")).toBe("make");
     expect(guessLang("main.rs")).toBe("rust");
+    expect(guessLang("index.php")).toBe("php");
+    expect(guessLang("Main.java")).toBe("java");
+    expect(guessLang("Program.cs")).toBe("csharp");
+    expect(guessLang("app.rb")).toBe("ruby");
+    // The cheap claims (no scanner needed, the shape is already covered):
+    // CUDA/shaders ride c, module spellings ride the script langs,
+    // GeoJSON/Avro ARE json, systemd units are ini.
+    expect(guessLang("kernel.cu")).toBe("c");
+    expect(guessLang("kernels.cuh")).toBe("c");
+    expect(guessLang("blur.glsl")).toBe("c");
+    expect(guessLang("post.hlsl")).toBe("c");
+    expect(guessLang("chunk.mts")).toBe("typescript");
+    expect(guessLang("legacy.cts")).toBe("typescript");
+    expect(guessLang("map.geojson")).toBe("json");
+    expect(guessLang("user.avsc")).toBe("json");
+    expect(guessLang("myapp.service")).toBe("ini");
+    expect(guessLang("notify.socket")).toBe("ini");
+    expect(guessLang("nightly.timer")).toBe("ini");
     expect(guessLang("my.Makefile")).toBeUndefined(); // not the Makefile.* shape
     // Dockerfile has no extension: the basename special case catches the
     // bare name and the build-variant spelling (case-insensitive), while a

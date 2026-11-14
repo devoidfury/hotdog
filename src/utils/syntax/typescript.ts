@@ -92,10 +92,11 @@ const PRIMITIVE_TYPES = new Set([
   "void",
 ]);
 
-/** The registry entry for this lang (assembly list: index.ts). */
+/** The registry entry for this lang (assembly list: index.ts). `.mts`/
+ * `.cts` are the ESM/CJS module-declaration spellings: same scanner. */
 export const TYPESCRIPT_SYNTAX: SyntaxDef = {
   lang: "typescript",
   tokenize: tokenizeTypeScript,
   aliases: ["ts", "tsx"],
-  extensions: ["ts", "tsx"],
+  extensions: ["ts", "tsx", "mts", "cts"],
 };

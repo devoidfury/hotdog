@@ -287,9 +287,12 @@ const KEYWORDS: ReadonlySet<string> = new Set([
   "while",
 ]);
 
-/** The registry entry for this lang (assembly list: index.ts). */
+/** The registry entry for this lang (assembly list: index.ts). CUDA and
+ * the shading dialects are C-shaped enough that the c scanner is the
+ * honest display for them (no per-dialect parsing -- the documented
+ * ceiling: `__global`, `varying` etc. ride plain words). */
 export const C_SYNTAX: SyntaxDef = {
   lang: "c",
   tokenize: tokenizeC,
-  extensions: ["c", "h", "cc", "cpp", "hpp"],
+  extensions: ["c", "h", "cc", "cpp", "hpp", "cu", "cuh", "glsl", "hlsl"],
 };

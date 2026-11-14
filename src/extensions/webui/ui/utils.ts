@@ -46,6 +46,42 @@ export const WORKBENCH_DEFAULT_WIDTH = 420;
 // pin releases to tab mode and its button hides; the stored preference
 // waits for the next wide pane. Default 420 satisfies it at rest.
 export const WORKBENCH_TREE_PIN_MIN_WIDTH = 420;
+// What the tab strip + viewer keep when the tree column is docked INSIDE the
+// dock: the tree seam's ceiling in chat mode is the dock's width minus this,
+// and the column's CSS cap says the same (see --tree-col-used in styles.css),
+// so dragging the tree right can never starve the viewer side -- at the pin's
+// 420 floor the tree lands on 220, close to the retired 42% clamp's 176 and
+// never wider than the dock allows. A number carried in from a wider shape
+// (the editor pane reaches 480) RENDERS capped and the handle rides the
+// capped edge, so the only divergence is aria-valuenow reading high until the
+// next gesture clamps it -- and since the render was already at the cap, that
+// first gesture moves nothing, it just tells the truth.
+export const WORKBENCH_VIEWER_MIN_WIDTH = 200;
+
+// The EDITOR-mode dock: the sessions rail + the chat column as ONE block on
+// the right of the viewer (see the CHAT/EDITOR MODE block in styles.css).
+// Two numbers own the shape: D = --editor-dock-width, the block's width,
+// dragged at the block's LEFT border (the viewer<->sessions line); S =
+// --sidebar-width, the rail, dragged at the rail's right border (the
+// sessions<->chat line) so the CHAT absorbs the difference and the block's
+// outer edges never move. The chat column renders calc(D - S), hence the
+// chat's own floor below.
+export const CHAT_DOCK_MIN_WIDTH = 280;
+// The narrowest honest dock: the rail's floor plus a readable chat column.
+export const EDITOR_DOCK_MIN_WIDTH = SIDEBAR_MIN_WIDTH + CHAT_DOCK_MIN_WIDTH;
+export const EDITOR_DOCK_MAX_WIDTH = WORKBENCH_MAX_WIDTH + SIDEBAR_MAX_WIDTH;
+// Default = the two tenants' own defaults side by side (420 + 300), so the
+// swap neither grows nor shrinks the space the chat-mode layout occupied.
+export const EDITOR_DOCK_DEFAULT_WIDTH = WORKBENCH_DEFAULT_WIDTH + SIDEBAR_DEFAULT_WIDTH;
+
+// The workspace tree COLUMN: the file tree docked as a fixed column, in the
+// chat-mode dock's left slot as well as the editor pane's. Its own width, its
+// own seam, its own key -- the sessions rail owns --sidebar-width in every
+// shape, so the tree must never shadow it -- and its ceiling is shape-aware
+// (the dock minus the viewer's floor, versus the wide pane's fraction).
+export const TREE_COL_MIN_WIDTH = 150;
+export const TREE_COL_MAX_WIDTH = 480;
+export const TREE_COL_DEFAULT_WIDTH = 260;
 
 // ── Formatting & sanitisation ───────────────────────────────────────────────
 

@@ -56,6 +56,7 @@ interface H {
   panel: PanelResize;
   storage: FakeStorage;
   tabs: WorkbenchStore;
+  resizeCounts: { start: number; reset: number };
   q: (sel: string) => HTMLElement | null;
   destroy: () => void;
 }
@@ -70,8 +71,15 @@ interface PinOpt {
   onToggle: () => void;
 }
 
-function harness(opts: { throwing?: boolean; seedCollapsed?: "0" | "1"; wireTree?: boolean; treePin?: PinOpt } = {}): H {
+function harness(opts: {
+  throwing?: boolean;
+  seedCollapsed?: "0" | "1";
+  wireTree?: boolean;
+  treePin?: PinOpt;
+  treeResize?: boolean;
+} = {}): H {
   const storage = opts.throwing ? new ThrowingStorage() : new FakeStorage();
+  const resizeCounts = { start: 0, reset: 0 };
   // Pre-seeded visit: the stored choice lands BEFORE restore(), so the
   // seed-skip branch (app.tsx init()'s hasStoredWorkbenchCollapsed mirror)
   // is what decides the boot state -- an unconditional-seed regression
@@ -137,6 +145,20 @@ function harness(opts: { throwing?: boolean; seedCollapsed?: "0" | "1"; wireTree
             : undefined
         }
         treePin={opts.treePin}
+        treeResize={
+          opts.treeResize
+            ? {
+                width: 240,
+                min: 150,
+                max: 400,
+                onResizeStart: () => resizeCounts.start++,
+                onResizeMove: () => {},
+                onResizeEnd: () => resizeCounts.start--,
+                onResizeKey: () => {},
+                onResizeReset: () => resizeCounts.reset++,
+              }
+            : undefined
+        }
       />
     </div>
   );
@@ -162,6 +184,7 @@ function harness(opts: { throwing?: boolean; seedCollapsed?: "0" | "1"; wireTree
     panel,
     storage,
     tabs,
+    resizeCounts,
     q: (sel) => container.querySelector(sel) as HTMLElement | null,
     destroy: () => {
       app?.unmount();
@@ -663,5 +686,43 @@ describe("workspace-tree dock pin (shell projection)", () => {
     expect(h.q("#workbench-tree-pin")).toBeNull();
     expect((h.q("#workbench-panel")!.getAttribute("class") ?? "")).not.toContain("workbench-tree-pinned");
     expect(h.q("#wtab-files")).toBeTruthy();
+  });
+
+  it("the tree-resize seam twin mounts ONLY beside a docked column (pinned + wired)", () => {
+    // Pinned + wired: a focusable separator rides the column's right edge.
+    const h = harness({
+      wireTree: true,
+      treePin: { pinned: true, available: true, onToggle: () => {} },
+      treeResize: true,
+    });
+    h.panel.toggle();
+    h.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    const twin = h.q("#tree-col-resize");
+    expect(twin).toBeTruthy();
+    expect(twin!.getAttribute("role")).toBe("separator");
+    expect(twin!.getAttribute("aria-orientation")).toBe("vertical");
+    expect(twin!.getAttribute("aria-label")).toBe("Resize workspace tree width");
+    expect(twin!.getAttribute("aria-valuenow")).toBe("240");
+    expect(twin!.getAttribute("tabindex")).toBe("0");
+    // The handlers are the app's (a real seam on the app side; app.test.tsx
+    // drives the actual drag). Here: the twin forwards the gestures.
+    twin!.dispatchEvent({ type: "dblclick", currentTarget: twin } as unknown as Event);
+    expect(h.resizeCounts.reset).toBe(1);
+  });
+
+  it("the twin is absent when the column is not docked (unpinned) or the seam is unwired", () => {
+    const off = harness({
+      wireTree: true,
+      treePin: { pinned: false, available: true, onToggle: () => {} },
+      treeResize: true,
+    });
+    off.panel.toggle();
+    off.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    expect(off.q("#tree-col-resize")).toBeNull(); // flat life: no column, no twin
+
+    const bare = harness({ wireTree: true, treePin: { pinned: true, available: true, onToggle: () => {} } });
+    bare.panel.toggle();
+    bare.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    expect(bare.q("#tree-col-resize")).toBeNull(); // the shell mounts it ONLY when the app wires the seam
   });
 });

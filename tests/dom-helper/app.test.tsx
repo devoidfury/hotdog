@@ -71,6 +71,10 @@ const store = new Map<string, string>([
   // doctrine), so the sidebar-visibility section verifies the restore and
   // then reopens the panel -- the shape every later section expects.
   ["hotdog.sidebarCollapsed", "1"],
+  // Chat mode (the default side) seeded EXPLICITLY so the chat/editor-mode
+  // section can observe the boot read without ever booting the app swapped:
+  // the whole suite renders the chat layout. The section flips and returns.
+  ["hotdog.editorMode", "0"],
 ]);
 g.localStorage = {
   getItem: (k: string) => store.get(k) ?? null,
@@ -306,11 +310,13 @@ describe("app boot (stored token)", () => {
     expect(kids.indexOf(row)).toBe(kids.indexOf(header) + 1);
     expect(row.querySelector("#sidebar")).not.toBeNull();
     expect(row.querySelector("#chat-area")).not.toBeNull();
-    // The band holds the three global controls only (settings/theme/workbench).
+    // The band holds the four global controls only (settings/theme/mode/
+    // workbench).
     const bandBtns = Array.from(el("#session-info").querySelectorAll("button"));
     expect(bandBtns.map((b) => b.getAttribute("id"))).toEqual([
       "settings-btn",
       "theme-btn",
+      "editor-mode-toggle",
       "workbench-toggle",
     ]);
     // #chat-header opens the chat column and owns the moved controls.
@@ -390,7 +396,7 @@ describe("sessions sidebar visibility (chat-header disclosure)", () => {
     expect(btn.localName).toBe("button");
     expect(btn.getAttribute("aria-expanded")).toBe("false");
     expect(btn.getAttribute("aria-label")).toBe("Toggle sessions sidebar");
-    expect(btn.getAttribute("title")).toBe("Toggle Sessions sidebar (left pane)");
+    expect(btn.getAttribute("title")).toBe("Toggle Sessions sidebar"); // position-free: the rail docks left in chat mode, right (beside the chat) in the editor shape
     // First position in the header: the cluster leads with the disclosure,
     // the Session: chip rides right behind it, the status group stays last.
     const kids = el("#chat-header").children;
@@ -3584,6 +3590,22 @@ describe("workbench workspace-tree dock pin (real app wiring)", () => {
     expect(document.querySelector("#workbench-open-files")).toBeNull(); // docked already: no entry into a seatless tab
     expect(el("#workbench-empty").textContent).toBe("Files will open here");
     expect(el(".workbench-tree-col #workbench-tree-pin").getAttribute("aria-expanded")).toBe("true");
+    // The docked column carries its OWN handle at its right border (the tree
+    // <> file-viewer line) in THIS shape too: the seam is wired in both modes,
+    // so the docked tree is resizable and can never starve the viewer side.
+    // Stubbed viewport 1200: the 0.3 fraction says 360, but the dock's own 420
+    // minus the 200 viewer floor binds first -- and the reported value is
+    // shape-clamped like the CSS cap (the tree's 260 default renders 220 here
+    // and grows back to 260 with the wide editor pane), so the handle never
+    // claims a width the dock cannot show.
+    const seam = el("#tree-col-resize");
+    expect(seam.getAttribute("role")).toBe("separator");
+    expect(seam.getAttribute("aria-orientation")).toBe("vertical");
+    expect(seam.getAttribute("aria-label")).toBe("Resize workspace tree width");
+    expect(seam.getAttribute("aria-valuenow")).toBe("220"); // 260 default, dock-capped
+    expect(seam.getAttribute("aria-valuemin")).toBe("150");
+    expect(seam.getAttribute("aria-valuemax")).toBe("220");
+    expect(store.has("hotdog.treeColWidth")).toBe(false); // a mount writes nothing
     expect(store.get("hotdog.workbenchTreePinned")).toBe("1");
     expect(ws.sent.length).toBe(before); // a view preference speaks no wire
   });
@@ -3633,6 +3655,240 @@ describe("workbench workspace-tree dock pin (real app wiring)", () => {
     el("#workbench-toggle").click();
     await tick();
     expect(document.querySelector("#workbench-panel")).toBeNull();
+  });
+});
+
+// ── Chat/Editor mode (top-band swap; the dock flag keeps its meaning) ──────
+// One class on #workspace-row is the whole structural story the DOM can
+// show (no CSS engine here -- the layout's truth is the CHAT/EDITOR MODE
+// block in styles.css): the mode swaps what the slots WEAR, never re-parents
+// anything, and the collapse flag keeps meaning "the right dock is closed"
+// whichever tenant the dock carries, and the SESSIONS SIDEBAR travels to
+// the right dock beside the chat -- it never disappears, so neither does
+// its disclosure. Entering the mode PINS the tree through
+// the pref's own path (the default is [tree | viewer]) but the pin button
+// stays live: one release frees the viewer to the full workspace -- the
+// focus shape -- and the tree rides as a tab again. The dock is TWO numbers
+// and each border carries the handle that owns it: #dock-resize (mounted on
+// #workspace-row) sizes the sessions+chat BLOCK at its left border, the
+// sidebar's own handle sizes the RAIL at the sessions<->chat line, and
+// #tree-col-resize stays the tree rail's own seam. The suite
+// starts from the shape the dock-pin teardown left (chat mode, dock
+// collapsed, tree unpinned) and leaves exactly that shape behind it.
+
+describe("chat/editor mode (top-band toggle)", () => {
+  const wireSeam = (id: string): HTMLElement => {
+    const h = el(id);
+    const any = h as unknown as Record<string, unknown>;
+    any.offsetParent ??= {};
+    any.setPointerCapture ??= () => {};
+    return h;
+  };
+  const dragSeam = (id: string, type: string, over: Record<string, unknown> = {}): void => {
+    const h = wireSeam(id);
+    h.dispatchEvent({ type, currentTarget: h, ...over } as unknown as Event);
+  };
+  const treePinBtn = (): HTMLElement | null =>
+    els("#workbench-panel .file-reload-btn").find(
+      (b) => b.getAttribute("aria-label") === "Toggle workspace tree dock",
+    ) ?? null;
+
+  it("boots in chat mode from the stored '0': no swap class, the key never rewritten", async () => {
+    await attach();
+    expect(store.get("hotdog.editorMode")).toBe("0");
+    expect((el("#workspace-row").getAttribute("class") ?? "")).not.toContain("editor-mode");
+    const btn = el("#editor-mode-toggle");
+    expect(btn.getAttribute("aria-pressed")).toBe("false");
+    expect(btn.getAttribute("aria-label")).toBe("Toggle chat/editor mode");
+    expect(btn.getAttribute("title")).toContain("Editor mode off");
+    expect(btn.textContent).toBe(""); // glyph-only chrome, like the whole band
+    expect(btn.querySelector("svg[aria-hidden='true']")).toBeTruthy();
+    expect(btn.querySelectorAll("path")).toHaveLength(4); // two mirrored arrow runs
+    // Chat mode owns the labels: the dock's tenant is the workbench.
+    expect(el("#workbench-toggle").getAttribute("aria-label")).toBe("Toggle workbench pane");
+    expect(document.querySelector("#dock-resize")).toBeNull(); // the dock's seam is editor-only
+    expect(document.querySelector("#tree-col-resize")).toBeNull(); // and the tree's follows the COLUMN (unpinned here)
+  });
+
+  it("enters with the dock CLOSED and leaves it closed: the panel mounts, tree PINNED by default (the button stays live), the chat hides without unmounting", async () => {
+    expect(document.querySelector("#workbench-panel")).toBeNull(); // the resting shape
+    const chatBefore = el("#chat-area");
+    const listBefore = el("#message-list"); // the imperative transcript's home
+    const sidebarPrefBefore = store.get("hotdog.sidebarCollapsed"); // whatever the suite left
+    clearSent();
+    el("#editor-mode-toggle").click();
+    await tick();
+    expect(el("#workspace-row").getAttribute("class")).toContain("editor-mode");
+    expect(el("#editor-mode-toggle").getAttribute("aria-pressed")).toBe("true");
+    expect(el("#editor-mode-toggle").getAttribute("title")).toContain("Editor mode on");
+    expect(store.get("hotdog.editorMode")).toBe("1");
+    // The workspace default: [tree | viewer]. The pin rides the SAME pref the
+    // dock uses (entering the mode wrote it through the toggle's own path;
+    // leaving takes it back -- one preference, two shapes, no shadow).
+    expect(store.get("hotdog.workbenchTreePinned")).toBe("1");
+    expect(el("#workbench-panel").getAttribute("class")).toContain("workbench-tree-pinned");
+    expect(document.querySelector(".workbench-tree-col .file-tree")).toBeTruthy();
+    expect(els("#workbench-panel .file-reload-btn").map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Refresh",
+      "Toggle workspace tree dock", // the release stays ONE CLICK away even here
+    ]);
+    expect(treePinBtn()!.getAttribute("aria-expanded")).toBe("true");
+    // The tree column carries its own seam's handle (not the rail's).
+    expect(el("#tree-col-resize").getAttribute("aria-label")).toBe("Resize workspace tree width");
+    // Zero file tabs: the strip stays silent, the empty line speaks, and the
+    // tree-entry button cannot re-activate a seatless tab.
+    expect(document.querySelector("#workbench-tabs")).toBeNull();
+    expect(el("#workbench-empty").textContent).toBe("Files will open here");
+    expect(document.querySelector("#workbench-open-files")).toBeNull();
+    // The chat is the docked thing, HIDDEN by the shared flag -- hidden,
+    // never gone: the same live nodes ride under the hide.
+    expect(el("#chat-area").getAttribute("class")).toContain("chat-dock-hidden");
+    expect(el("#chat-area")).toBe(chatBefore);
+    expect(el("#message-list")).toBe(listBefore);
+    // The sessions rail travels with the dock: still there, still on its
+    // own pref (mode flips never rewrite it), and its disclosure stays
+    // live -- in this shape the rail sits right beside the chat header.
+    const disclosure = el("#sidebar-toggle");
+    expect(disclosure.getAttribute("aria-expanded")).toBe(sidebarPrefBefore === "1" ? "false" : "true");
+    expect(el("#sidebar").classList.contains("sidebar-hidden")).toBe(sidebarPrefBefore === "1");
+    expect(store.get("hotdog.sidebarCollapsed")).toBe(sidebarPrefBefore);
+    disclosure.click();
+    await tick();
+    expect(el("#sidebar").classList.contains("sidebar-hidden")).toBe(sidebarPrefBefore !== "1");
+    expect(store.get("hotdog.sidebarCollapsed")).toBe(sidebarPrefBefore === "1" ? "0" : "1");
+    disclosure.click(); // back where the suite found it
+    await tick();
+    expect(store.get("hotdog.sidebarCollapsed")).toBe(sidebarPrefBefore);
+    // The dock toggle changes tenant honestly.
+    expect(el("#workbench-toggle").getAttribute("aria-label")).toBe("Toggle chat dock");
+    expect(el("#workbench-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(el("#dock-resize").getAttribute("aria-label")).toBe("Resize the right dock");
+    // Entering the mode IS a tree open: exactly the roots listing goes out
+    // (no path), so the rail never stares at a request nobody sent.
+    expect(sent("listDir")).toHaveLength(1);
+    expect("path" in sent<{ path?: unknown }>("listDir")[0]!).toBe(false);
+  });
+
+  it("one pin release frees the FULLSCREEN viewer: the tree drops to a tab, its handle goes; re-pinning docks it back", async () => {
+    treePinBtn()!.click();
+    await tick();
+    expect((el("#workbench-panel").getAttribute("class") ?? "")).not.toContain("workbench-tree-pinned");
+    expect(document.querySelector(".workbench-tree-col")).toBeNull();
+    expect(store.get("hotdog.workbenchTreePinned")).toBe("0");
+    // No column, no handle for a column that is not there.
+    expect(document.querySelector("#tree-col-resize")).toBeNull();
+    // The store never learned the tab in this suite, so the freed workspace
+    // shows the honest empty line -- WITH its entry button back (unpinned).
+    expect(el("#workbench-empty").textContent).toBe("Files will open here");
+    clearSent();
+    el("#workbench-open-files").click();
+    await tick();
+    expect(sent("listDir")).toHaveLength(1); // opening the tree re-requests (doctrine)
+    expect(el("#wtab-files").getAttribute("aria-selected")).toBe("true");
+    expect(el("#workbench-body .file-tree")).toBeTruthy(); // the tree as a TAB
+    // And the pin button rides the tab body's header too (same FileTree).
+    expect(treePinBtn()!.getAttribute("aria-expanded")).toBe("false");
+    treePinBtn()!.click();
+    await tick();
+    expect(document.querySelector(".workbench-tree-col .file-tree")).toBeTruthy();
+    expect(document.querySelector("#wtab-files")).toBeNull(); // back off its seat
+    expect(el("#tree-col-resize")).toBeTruthy(); // the handle follows the column
+    expect(store.get("hotdog.workbenchTreePinned")).toBe("1");
+  });
+
+  it("the shared flag now steers the CHAT: the disclosure opens the dock; each handle sizes the border it owns", async () => {
+    el("#workbench-toggle").click();
+    await tick();
+    expect((el("#chat-area").getAttribute("class") ?? "")).not.toContain("chat-dock-hidden");
+    expect(el("#workbench-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(el("#workbench-panel").getAttribute("class")).toContain("workbench-tree-pinned");
+    expect(store.get("hotdog.workbenchCollapsed")).toBe("0");
+    // THE BLOCK (D). #dock-resize rides the dock's LEFT edge (the
+    // viewer<->sessions line) on its own seam: nearEdge, so dragging LEFT by
+    // 60 grows the whole sessions+chat block, and the RAIL's number is none
+    // of its business. Stubbed viewport 1200 caps D at 0.6*1200 = 720 --
+    // exactly the default -- so the drag lifts the window first and puts it
+    // back (the workbench suite's wide-End idiom). Starts read live, never
+    // hardcoded: the seam is shared module state.
+    const dockStart = Number(el("#dock-resize").getAttribute("aria-valuenow"));
+    const railStart = Number(el("#sidebar-resize").getAttribute("aria-valuenow"));
+    const railKeyBefore = store.get("hotdog.sidebarWidth");
+    win.innerWidth = 2000;
+    dragSeam("#dock-resize", "pointerdown", { pointerId: 7, clientX: 900 });
+    dragSeam("#dock-resize", "pointermove", { pointerId: 7, clientX: 840 });
+    dragSeam("#dock-resize", "pointerup", { pointerId: 7, clientX: 840 });
+    win.innerWidth = 1200;
+    await tick();
+    expect(el("#dock-resize").getAttribute("aria-valuenow")).toBe(String(dockStart + 60));
+    expect(store.get("hotdog.editorDockWidth")).toBe(String(dockStart + 60));
+    expect(store.get("hotdog.sidebarWidth")).toBe(railKeyBefore); // the rail did not move
+    // The tree rail's OWN seam sizes it through #tree-col-resize (the
+    // column flexes to --tree-col-width): far-edge grammar, drag RIGHT by
+    // 60 grows it by 60. It never touches --sidebar-width (that stays the
+    // docked sessions rail's number).
+    const treeStart = Number(el("#tree-col-resize").getAttribute("aria-valuenow"));
+    dragSeam("#tree-col-resize", "pointerdown", { pointerId: 8, clientX: 200 });
+    dragSeam("#tree-col-resize", "pointermove", { pointerId: 8, clientX: 260 });
+    dragSeam("#tree-col-resize", "pointerup", { pointerId: 8, clientX: 260 });
+    await tick();
+    expect(el("#tree-col-resize").getAttribute("aria-valuenow")).toBe(String(treeStart + 60));
+    expect(store.get("hotdog.treeColWidth")).toBe(String(treeStart + 60));
+    expect(store.get("hotdog.sidebarWidth")).not.toBe(String(treeStart + 60));
+    // THE RAIL (S). The sidebar's own handle stays live in this shape -- its
+    // border IS the sessions<->chat line -- and it drags the RAIL only:
+    // far-edge grammar (drag RIGHT by 60 widens the rail), the chat column
+    // absorbs the difference, so D and the block's outer edges hold. The
+    // seam caps the rail at D - CHAT_DOCK_MIN_WIDTH (280) in editor mode
+    // and 0.6*1200 = 720 on the stub, both far above a +60 step.
+    dragSeam("#sidebar-resize", "pointerdown", { pointerId: 9, clientX: 600 });
+    dragSeam("#sidebar-resize", "pointermove", { pointerId: 9, clientX: 660 });
+    dragSeam("#sidebar-resize", "pointerup", { pointerId: 9, clientX: 660 });
+    await tick();
+    expect(el("#sidebar-resize").getAttribute("aria-valuenow")).toBe(String(railStart + 60));
+    expect(store.get("hotdog.sidebarWidth")).toBe(String(railStart + 60));
+    expect(el("#dock-resize").getAttribute("aria-valuenow")).toBe(String(dockStart + 60));
+    expect(store.get("hotdog.editorDockWidth")).toBe(String(dockStart + 60));
+  });
+
+  it("leaving the mode hands the layout back with both flags intact; the teardown restores the first-visit shape", async () => {
+    // Forget every width the drags wrote (each seam forgets its own key on
+    // reset). The rail's pref must end UNWRITTEN like the rest of the suite
+    // left it -- later sections never saw a stored sidebarWidth.
+    dragSeam("#dock-resize", "dblclick");
+    dragSeam("#tree-col-resize", "dblclick");
+    dragSeam("#sidebar-resize", "dblclick");
+    await tick();
+    expect(store.has("hotdog.editorDockWidth")).toBe(false);
+    expect(store.has("hotdog.treeColWidth")).toBe(false);
+    expect(store.has("hotdog.sidebarWidth")).toBe(false);
+    el("#editor-mode-toggle").click(); // back to chat -- the dock is OPEN, so the pane returns open
+    await tick();
+    expect((el("#workspace-row").getAttribute("class") ?? "")).not.toContain("editor-mode");
+    expect((el("#chat-area").getAttribute("class") ?? "")).not.toContain("chat-dock-hidden");
+    expect(el("#workbench-panel")).toBeTruthy(); // the shared flag: dock open means the pane shows
+    // The pin pref rode along into the dock (420 passes the gate): one
+    // preference means the same column question in either shape.
+    expect(el("#workbench-panel").getAttribute("class")).toContain("workbench-tree-pinned");
+    expect(el("#sidebar-toggle").localName).toBe("button"); // the disclosure never left
+    expect(el("#sidebar")).toBeTruthy(); // and neither did the rail
+    expect(el("#workbench-toggle").getAttribute("aria-label")).toBe("Toggle workbench pane");
+    expect(document.querySelector("#dock-resize")).toBeNull(); // the editor dock's seam leaves with the mode
+    // The tree column's handle does NOT: it follows the COLUMN, and the pin
+    // rode along into the dock, so the chat-mode tree <> viewer border keeps
+    // its seam (which is exactly where it lives in the docked shape).
+    expect(el("#tree-col-resize").getAttribute("aria-label")).toBe("Resize workspace tree width");
+    expect(store.get("hotdog.editorMode")).toBe("0");
+    // Suite hygiene: release the pin (the dock-pin section's shape), close
+    // the injected tab, collapse the dock -- first-visit shape.
+    treePinBtn()!.click();
+    await tick();
+    expect(store.get("hotdog.workbenchTreePinned")).toBe("0");
+    for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
+    await tick();
+    el("#workbench-toggle").click();
+    await tick();
+    expect(document.querySelector("#workbench-panel")).toBeNull();
+    expect(store.get("hotdog.workbenchCollapsed")).toBe("1");
   });
 });
 

@@ -190,6 +190,17 @@
     --radius-xl: 18px;
     --radius-full: 9999px;
     --sidebar-width: 300px;
+    /* The editor-mode tree rail (treeColPanel in app.tsx writes it on drag;
+       the stored width hydrates it on load). Its OWN number: in the editor
+       shape the sessions rail rides --sidebar-width beside the chat, and
+       one number cannot size two visible rails. */
+    --tree-col-width: 260px;
+    /* The EDITOR-mode dock: the sessions rail + chat block on the viewer's
+       right (editorDockPanel in app.tsx writes it on drag; the stored width
+       hydrates it on load). It is D in the two-number story -- the chat
+       column renders calc(D - --sidebar-width), so the rail's own handle
+       resizes the rail without moving the block's outer edges. */
+    --editor-dock-width: 720px;
     /* Recent Logs list cap (panel-resize.ts writes it on drag; the user's
        stored height hydrates it on load). */
     --logs-height: 240px;
@@ -1208,10 +1219,10 @@ body.logs-resizing .sidebar-header-resize {
 /* ── Top Band (global controls) ───────────────────────────────────────────── */
 
 /* The app's top band: a full-width child of #main-ui carrying ONLY the
-   global controls (.header-status-group: settings / theme / workbench),
-   pinned right. Content-hugging: the 28px glyph boxes set the height
-   (2+28+2 over the 1px seam = 33px); sidebar and workspace live below it
-   in #workspace-row, so nothing here can be pushed by a pane. */
+   global controls (.header-status-group: settings / theme / chat-editor
+   mode / workbench), pinned right. Content-hugging: the 28px glyph boxes
+   set the height (2+28+2 over the 1px seam = 33px); sidebar and workspace
+   live below it in #workspace-row, so nothing here can be pushed by a pane. */
 #session-info {
     display: flex;
     align-items: center;
@@ -1622,9 +1633,14 @@ body.logs-resizing .sidebar-header-resize {
    status group's last element). Inline SVG tinted by currentColor
    (icons.tsx IconWorkbench). The chat-header's #sidebar-toggle copies the
    recipe verbatim: same 28px glyph-box standard, its glyph the mirror (fill
-   on the LEFT column) pointing at the sessions dock left of the chat. */
+   on the LEFT column) pointing at the sessions dock left of the chat. The
+   top band's #editor-mode-toggle rides this SAME standard (its band
+   neighbors): without the ID override it would sit on the raw
+   .header-btn.toggleable chrome (visible border + --bg-secondary fill) that
+   these glyph boxes all reset to a transparent box at rest. */
 #workbench-toggle,
-#sidebar-toggle {
+#sidebar-toggle,
+#editor-mode-toggle {
     width: 28px;
     height: 28px;
     padding: 0;
@@ -1642,13 +1658,15 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 #workbench-toggle:hover,
-#sidebar-toggle:hover {
+#sidebar-toggle:hover,
+#editor-mode-toggle:hover {
     color: var(--accent);
     background: var(--accent-soft);
 }
 
 #workbench-toggle:focus-visible,
-#sidebar-toggle:focus-visible {
+#sidebar-toggle:focus-visible,
+#editor-mode-toggle:focus-visible {
     background: var(--accent-soft);
     outline: 1px solid var(--accent);
     outline-offset: -1px;
@@ -3074,6 +3092,20 @@ body.logs-resizing .sidebar-header-resize {
    gate + persistence live in app.tsx (workbenchTreePinnedAtom, gated on
    WORKBENCH_TREE_PIN_MIN_WIDTH via workbenchSizeAtom). */
 #workbench-panel.workbench-tree-pinned {
+    /* The docked column's USED width: the seam's number, capped so the tab
+       strip + viewer side keeps its floor (WORKBENCH_VIEWER_MIN_WIDTH). In the
+       wide editor pane the cap is inert; in chat mode the dock can be as slim
+       as the pin's 420 floor while the stored number came from wherever the
+       user last dragged it (the wide pane reaches 480), so this is what stops
+       a stale number from collapsing the viewer side. Both the column's
+       flex-basis and #tree-col-resize's offset read ONE capped number, so the
+       handle can never sit off the border it claims; the seam clamps the
+       number itself on the next gesture (treeColPanel's chat-mode cap is the
+       same dock width minus the same floor). A carried-in 480 therefore
+       RENDERS 220 in the 420 dock and only aria-valuenow reads high until a
+       drag -- and since the render already sits at the cap, that first drag
+       moves nothing, it just tells the truth. */
+    --tree-col-used: min(var(--tree-col-width), calc(100% - 200px));
     flex-direction: row;
 }
 
@@ -3089,7 +3121,8 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 .workbench-tree-col {
-    flex: 0 0 clamp(150px, 42%, 260px);
+    /* The seam's number, dock-capped: see --tree-col-used on the pinned panel. */
+    flex: 0 0 var(--tree-col-used);
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -3100,6 +3133,116 @@ body.logs-resizing .sidebar-header-resize {
        the column's right border keeps the dock seam (owner ruling: stays). */
     padding: 4px 12px 12px;
     border-right: 1px solid var(--border);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHAT/EDITOR MODE (desktop swap; the top band's #editor-mode-toggle)
+   ═══════════════════════════════════════════════════════════════════════════
+   One class on #workspace-row (app.tsx editorModeAtom, "hotdog.editorMode")
+   is the whole swap: DOM identity never changes (CSS owns order/width -- the
+   drawer's grammar), so the imperatively-rendered transcript survives every
+   flip in place. Editor shape, left to right: the workbench pane leads the
+   row (order:-1) in the pinned shape the projection forces (tree column |
+   strip+viewer), then the DOCK -- the SESSIONS SIDEBAR and the CHAT, one
+   block riding the far right. The dock flag (#workbench-toggle) hides the
+   chat (.chat-dock-hidden: display:none, never unmounted; the composer's
+   staged state rides along hidden); the sessions rail stays reachable while
+   the chat hides.
+   TWO NUMBERS for that block (owner ruling): D = --editor-dock-width is the
+   BLOCK's width, dragged at the block's LEFT border (the viewer<->sessions
+   line) by #dock-resize, which is mounted on #workspace-row and anchored
+   from its right edge so it tracks D whatever S is. S = --sidebar-width is
+   the RAIL, dragged at the rail's right border (the sessions<->chat line) by
+   the sidebar seam's own handle -- there the CHAT absorbs the difference, so
+   a rail drag never moves the block's outer edges. The chat column renders
+   calc(D - S). --tree-col-width keeps sizing the tree column through its own
+   seam (in every shape, docked), and --workbench-width goes back to being the
+   CHAT-mode pane's number only: the editor dock is nobody's workbench. Handles
+   follow the borders they own: #dock-resize is this mode's own seam (released
+   here, display:none outside the block); #tree-col-resize rides the docked
+   tree column in EVERY desktop shape -- chat's dock as well as this pane --
+   so its release lives with the seam family instead; the pane's own handle
+   hides (its number sizes nothing here); and the SIDEBAR handle
+   stays LIVE -- its border is the rail's right edge, and inside the dock
+   that border means something: it is the sessions<->chat line, and the rail
+   really does move under a drag there. DESKTOP-ONLY (@media): at phone widths
+   the overlay + drawer already own these shapes; the class rules stop
+   applying, the toggle hides, and the stored side waits for the next wide
+   viewport -- the tree-pin width gate's doctrine. */
+@media (min-width: 769px) {
+    /* The handle that sizes the block is a child of the ROW, not of either
+       docked column: its anchor must be the row's right edge, independent of
+       S (anchoring inside #chat-area would make the offset move when the rail
+       grows). */
+    .editor-mode #workspace-row {
+        position: relative;
+    }
+
+    /* The rail's divider flips side with the rail: its LEFT edge now meets
+       the viewer (that seam needs the line), while its right edge IS the
+       chat dock's border-left -- keeping border-right here would draw the
+       same line twice. When the rail's pref hides it, the chat's own
+       divider keeps the seam whole. */
+    .editor-mode #sidebar {
+        border-right: 0;
+        border-left: 1px solid var(--border);
+    }
+
+    .editor-mode #workbench-panel {
+        order: -1;
+        flex: 1;
+        width: auto;
+        min-width: 0;
+        border-left: 0; /* it leads the row now; the seam rides the chat dock */
+    }
+
+    /* (The tree column needs no editor override: it rides its own
+       --tree-col-used in every shape -- see the pinned-panel rule above.) */
+    .editor-mode #chat-area {
+        /* The dock's remainder: D - S. min-width is the extreme guard --
+           the seams keep them apart independently (D >= 520 = the rail's own
+           floor + 280, S <= D - 280 via the seam's editor-mode viewportMax),
+           so it only binds if the two numbers arrive from a wider window in
+           a contradiction; there the render floors the column and the stored
+           numbers may disagree with it by the difference (accepted ceiling). */
+        flex: 0 0 calc(var(--editor-dock-width, 720px) - var(--sidebar-width));
+        min-width: 280px;
+        border-left: 1px solid var(--border); /* the seam's divider follows the dock */
+    }
+
+    /* Rail hidden, the block IS the chat: the chat takes the rail's share so
+       the dock keeps its D and #dock-resize stays on a real border instead
+       of hovering S pixels out in the viewer. */
+    .editor-mode #sidebar.sidebar-hidden + #chat-area {
+        flex-basis: var(--editor-dock-width, 720px);
+    }
+
+    .editor-mode #chat-area.chat-dock-hidden {
+        display: none;
+    }
+
+    /* A closed dock has no handle to drag: the block's handle rides the row,
+       so it goes with the dock it points at (the seam's offsetParent guard
+       is the second lock, and the node stays in the DOM for the mode's own
+       aria story -- display, never unmount). */
+    .editor-mode #chat-area.chat-dock-hidden ~ #dock-resize {
+        display: none;
+    }
+
+    /* Only the pane's own handle hides: it belongs to --workbench-width,
+       which sizes nothing in this shape. #sidebar-resize stays put -- see
+       the header (it is the dock's INNER seam now, not a dead one).
+       #dock-resize is the EDITOR dock's seam, so the mode releases it;
+       #tree-col-resize rides the docked tree column in EVERY desktop shape,
+       so its release lives with the seam family instead. Both are
+       display:none outside a release (see the family block). */
+    .editor-mode #workbench-resize {
+        display: none;
+    }
+
+    .editor-mode #dock-resize {
+        display: block;
+    }
 }
 
 /* Left-edge handle: the sidebar's strip one border over. nearEdge means the
@@ -3139,6 +3282,93 @@ body.workbench-resizing #workbench-resize {
 body.workbench-resizing {
     cursor: col-resize;
     user-select: none;
+}
+
+/* ── The docked column's seams ─────────────────────────────────────────────
+   Two handles, each bound to the one seam object that owns its number:
+   - #tree-col-resize is the tree column's OWN seam at the column's right
+     border (geometry = #sidebar-resize -- drag RIGHT grows the column), in
+     BOTH shapes: chat mode's narrow dock (the WORKSPACE-tree <> file-viewer
+     line) and the wide editor pane. It anchors on #workbench-panel
+     (position:relative), offset by the column's USED width, so it never
+     rides the column's scroll and never sits off the border it claims.
+   - #dock-resize is the editor dock BLOCK's seam (editorDockPanel) at the
+     block's LEFT border, i.e. the viewer<->sessions line (geometry =
+     #workbench-resize; nearEdge -- drag LEFT grows the block). It is a child
+     of #workspace-row anchored from the row's RIGHT edge by the same number,
+     so it tracks the border no matter how wide the rail inside the block is.
+   Both are DISPLAY-NONE by default and released by a min-width block -- the
+   tree column's handle by the rule below (every desktop shape), the dock's by
+   the editor-mode block above (the mode's own shape). Which also keeps the
+   seams' offsetParent guards honest wherever a handle is hidden: the phone
+   overlay stacks the tree column and CSS owns its size, so the handle has
+   nothing to drag there. */
+#dock-resize,
+#tree-col-resize {
+    display: none;
+    position: absolute;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    touch-action: none;
+    z-index: 10;
+}
+
+#dock-resize {
+    /* Straddles the block's left border: the block is the last D pixels of
+       the row (see the CHAT/EDITOR MODE block). */
+    right: calc(var(--editor-dock-width, 720px) - 3px);
+}
+
+#tree-col-resize {
+    /* Straddles the tree column's right border: the column's flex-basis is
+       exactly --tree-col-used (the seam's number, dock-capped -- see the
+       pinned-panel rule), and the handle reads the SAME variable, so a
+       dock-capped column and its handle agree. */
+    left: calc(var(--tree-col-used) - 3px);
+}
+
+/* The tree column's handle belongs to every DESKTOP shape: chat mode's dock
+   (tree <> file-viewer) and the editor pane both dock the column, both on the
+   seam's number. Below the cap the overlay stacks it and CSS owns the size. */
+@media (min-width: 769px) {
+    #tree-col-resize {
+        display: block;
+    }
+}
+
+#dock-resize::after,
+#tree-col-resize::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    right: -4px;
+}
+
+#dock-resize:hover,
+body.workbench-resizing #dock-resize {
+    background: var(--accent-soft);
+}
+
+#dock-resize:focus-visible {
+    background: var(--accent-soft);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+#tree-col-resize:hover,
+body.sidebar-resizing #tree-col-resize {
+    background: var(--accent-soft);
+}
+
+#tree-col-resize:focus-visible {
+    background: var(--accent-soft);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
 }
 
 /* Tab strip: scrolls sideways instead of overflowing; the active tab lifts
@@ -3216,6 +3446,18 @@ body.workbench-resizing {
     min-height: 0;
     overflow-y: auto;
     padding: 12px;
+}
+
+/* Full-bleed code (owner ruling): when the body holds a FILE tab, the pane's
+   12px gutter does not surround the dark code block -- the block runs edge to
+   edge and its top border is the one line under the header. The gutter does
+   not disappear, it MOVES onto the file view's own parts (header, notes,
+   pager below), so every other body -- the tree tab, the empty line, a
+   placeholder -- keeps the padding it has always had. :has() is the honest
+   selector for "the body that holds one" (precedent: the fold-chevron rules
+   on the tool boxes). */
+#workbench-body:has(.file-view) {
+    padding: 0;
 }
 
 .workbench-empty,
@@ -3394,7 +3636,10 @@ body.workbench-resizing {
     display: flex;
     align-items: baseline;
     gap: 8px;
-    margin-bottom: 6px;
+    /* The house gutter now lives on the parts that sit ON the panel, not on
+       the body around the code sheet: 12px sides, 12 above, 6 before the
+       sheet -- the same rhythm the body's padding used to supply. */
+    padding: 12px 12px 6px;
 }
 
 .file-view-name {
@@ -3425,10 +3670,17 @@ body.workbench-resizing {
     color: var(--text-primary);
 }
 
+/* The pager sits BELOW the full-bleed sheet, on the panel's own surface, so
+   it carries the gutter the sheet no longer gets from the body: 12px sides
+   and air above/below (the sheet's last row would otherwise butt into it). */
+.file-view-more {
+    margin: 8px 12px 12px;
+}
+
 .file-view-note {
     color: var(--text-muted);
     font-style: italic;
-    padding: 2px 0;
+    padding: 2px 12px;
 }
 
 .file-view-error {
@@ -3441,8 +3693,12 @@ body.workbench-resizing {
     display: block;
     font-family: var(--font-mono);
     background: var(--bg-base);
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    /* Full-bleed (owner ruling): the sheet runs edge to edge, so it keeps ONE
+       border -- the top line under the header, stretching the whole width --
+       and no radius or side/bottom frame (a 6px corner would stop that line
+       short at both edges and read as a card floating in a gutter). See the
+       :has(.file-view) rule on #workbench-body for the gutter's new home. */
+    border-top: 1px solid var(--border);
     overflow-x: auto;
 }
 
@@ -3458,7 +3714,9 @@ body.workbench-resizing {
 .file-ln {
     flex: none;
     width: 4em;
-    padding-right: 8px;
+    /* The sheet has no inner padding, so the gutter carries the left one: the
+       numbers stay off the panel's border. */
+    padding: 0 8px 0 12px;
     text-align: right;
     color: var(--text-muted);
     user-select: none;
@@ -3565,6 +3823,15 @@ body.workbench-resizing {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @media (max-width: 768px) {
+    /* Chat/Editor mode is a desktop layout preference: the overlay + drawer
+       already own the phone shapes, the .editor-mode rules (a min-width
+       block) stop applying, and the toggle goes -- a control whose effect
+       the viewport refuses has no business on screen. The stored side
+       survives for the next wide visit (the tree-pin gate's doctrine). */
+    #editor-mode-toggle {
+        display: none;
+    }
+
     #sidebar {
         display: none;
         position: fixed;

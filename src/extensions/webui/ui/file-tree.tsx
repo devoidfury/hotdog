@@ -308,7 +308,9 @@ export interface FileTreeProps {
    *  right of Refresh that pins the tree as a fixed sidebar beside the
    *  workbench tabs, or releases it back to a plain tab (the panel owns the
    *  layout -- see workbench.tsx treePin). `available` gates the button on
-   *  the pane being wide enough for two columns; `pinned` is the EFFECTIVE
+   *  the shape allowing two columns (the narrow DOCK: its seam width; the
+   *  wide editor shape always allows it, so the button stays live there and
+   *  one release frees the fullscreen viewer). `pinned` is the EFFECTIVE
    *  state (preference AND width), so the glyph never promises what the
    *  gate would refuse. Absent = no button (settings-style trees). */
   pin?: FileTreePin;

@@ -9,13 +9,14 @@ import {
   IconCheck,
   IconCopy,
   IconGear,
+  IconModeSwap,
   IconPalette,
   IconShield,
   IconShieldCheck,
   IconThinking,
   IconWorkbench,
 } from "./icons.tsx";
-import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH, WORKBENCH_DEFAULT_WIDTH, WORKBENCH_TREE_PIN_MIN_WIDTH } from "./utils.ts";
+import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH, WORKBENCH_DEFAULT_WIDTH, WORKBENCH_TREE_PIN_MIN_WIDTH, WORKBENCH_VIEWER_MIN_WIDTH, CHAT_DOCK_MIN_WIDTH, EDITOR_DOCK_DEFAULT_WIDTH, EDITOR_DOCK_MIN_WIDTH, EDITOR_DOCK_MAX_WIDTH, TREE_COL_MIN_WIDTH, TREE_COL_MAX_WIDTH, TREE_COL_DEFAULT_WIDTH } from "./utils.ts";
 import { createPanelResize, decodeCollapsed, encodeCollapsed } from "./panel-resize.ts";
 import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
 import {
@@ -1333,10 +1334,19 @@ const sidebarPanel = createPanelResize({
   defaultSize: SIDEBAR_DEFAULT_WIDTH,
   min: SIDEBAR_MIN_WIDTH,
   max: SIDEBAR_MAX_WIDTH,
-  // 60% of the viewport, whatever that is today: on a narrow window the
-  // seam's min-wins rule still takes the wheel (below the ~334px crossover
-  // the fraction falls under SIDEBAR_MIN_WIDTH and the min holds the floor).
-  viewportMax: () => window.innerWidth * 0.6,
+  // CHAT mode: 60% of the viewport, whatever that is today; on a narrow
+  // window the seam's min-wins rule still takes the wheel (below the ~334px
+  // crossover the fraction falls under SIDEBAR_MIN_WIDTH and the min holds
+  // the floor). EDITOR mode the rail lives INSIDE the dock block, so its
+  // ceiling is the block's number minus a readable chat column: dragging the
+  // rail right pushes the chat, never the block's outer edges (owner
+  // ruling), and the chat keeps CHAT_DOCK_MIN_WIDTH at the worst case.
+  // editorDockPanel/editorModeAtom are declared below -- the closure reads
+  // them at gesture time, so the TDZ is never reached.
+  viewportMax: () =>
+    editorModeAtom()
+      ? Math.min(window.innerWidth * 0.6, editorDockPanel.size() - CHAT_DOCK_MIN_WIDTH)
+      : window.innerWidth * 0.6,
   step: 16,
   coarseStep: 48,
   bodyClass: "sidebar-resizing",
@@ -1486,6 +1496,132 @@ function onToggleWorkbenchTreePin(): void {
   } catch {}
 }
 
+// ── Chat/Editor mode (top band) ─────────────────────────────────────────────
+// One stored "1"/"0" preference (the siblings' codec) swaps what the three
+// workspace slots wear. CHAT (the default): sessions sidebar, chat centered,
+// workbench docked right (collapsed = absent, the pane's own doctrine).
+// EDITOR: the workbench takes the workspace in its pinned shape (tree column
+// + strip/viewer) and the SESSIONS RAIL + CHAT form the DOCK on its right.
+// The collapse flag is shared ON PURPOSE: it always means "the right dock is
+// closed", whatever the dock carries -- so the disclosure that used to hide
+// the workbench hides the chat in the editor shape (its label rides the mode,
+// and aria-expanded keeps honestly meaning "dock visible"). The SESSIONS
+// SIDEBAR TRAVELS with the chat: it docks beside it on the far right,
+// keeping its own preference and its disclosure in both shapes (the tree
+// owns the slot it left). The dock is TWO numbers, not one (owner ruling):
+// D --editor-dock-width is the BLOCK, dragged at its left border, and S
+// --sidebar-width is the RAIL, dragged at the rail's right border with the
+// chat absorbing the difference; the tree keeps its own seam (treeColPanel
+// below) and --workbench-width goes back to being the chat-mode pane's
+// number alone.
+// DOM-STABLE BY DESIGN: a flip changes the editor-mode class
+// on #workspace-row (CSS owns order/width -- the drawer's grammar) and the
+// panel's mount flag; nothing re-parents, so the imperatively-rendered
+// transcript never rebuilds, and the hidden chat hides by display, never by
+// unmount. Desktop-only: below the media cap the class rules stop applying
+// and the toggle hides (the overlay + drawer already own those shapes); the
+// stored side waits for the next wide viewport, the tree-pin gate's doctrine.
+
+const EDITOR_MODE_KEY = "hotdog.editorMode";
+const editorModeAtom = reactiveState<boolean>(false);
+
+function restoreEditorMode(): void {
+  try {
+    editorModeAtom(decodeCollapsed(window.localStorage.getItem(EDITOR_MODE_KEY)));
+  } catch {}
+}
+
+function onToggleEditorMode(): void {
+  const next = !editorModeAtom();
+  editorModeAtom(next);
+  try {
+    window.localStorage.setItem(EDITOR_MODE_KEY, encodeCollapsed(next));
+  } catch {}
+  if (next) {
+    // The editor shape's default is [tree | viewer]: a released pin would
+    // land the mode on a bare viewer, so entering PINS the tree through the
+    // pref's own persist path. The pin button stays live in this shape --
+    // one release frees the viewer to the full workspace (focus mode) and
+    // the tree rides as a tab; re-pinning docks it back. Leaving the mode
+    // takes the pin back with it: one preference, two shapes, no shadow.
+    if (!workbenchTreePinnedAtom()) onToggleWorkbenchTreePin();
+    // Entering the mode IS a tree open, and the tree doctrine re-requests
+    // on every open -- the rail must never stare at "Listing workspace..."
+    // for a request nobody sent. (A boot RESTORED into the mode runs the
+    // same open from the first sessionCreated, where the wire is alive.)
+    onTreeRefresh();
+  }
+}
+
+// The workspace tree rail's OWN width seam (axis x, far edge: the handle rides
+// the column's RIGHT border, drag right grows the rail). The docked column is
+// the SAME column in both shapes -- the narrow chat-mode dock and the wide
+// editor pane -- so it has one number in both: --tree-col-width, its own key.
+// --sidebar-width consequently belongs to the sessions rail alone in every
+// shape (shadowing it would weld two visible rails to one drag). No collapse
+// flag (the pin disclosure owns the column's presence), no enable gate (the
+// handle mounts only while the column is docked; the seam's offsetParent guard
+// covers everything else, the phone overlay included -- there the column
+// stacks and CSS owns its size).
+const TREE_COL_WIDTH_KEY = "hotdog.treeColWidth";
+
+const treeColPanel = createPanelResize({
+  axis: "x",
+  sizeKey: TREE_COL_WIDTH_KEY,
+  defaultSize: TREE_COL_DEFAULT_WIDTH,
+  min: TREE_COL_MIN_WIDTH,
+  max: TREE_COL_MAX_WIDTH,
+  // A third of the screen at most: this rail is a list, not the show. In
+  // EDITOR mode the pane is workspace-wide, so the fraction is the whole
+  // story; in CHAT mode the rail lives INSIDE the dock, so the ceiling is the
+  // dock's own number minus WORKBENCH_VIEWER_MIN_WIDTH -- dragging the tree
+  // right can never starve the tab strip + viewer beside it. workbenchPanel is
+  // declared above and its size() is read at gesture time.
+  viewportMax: () =>
+    editorModeAtom()
+      ? window.innerWidth * 0.3
+      : Math.min(window.innerWidth * 0.3, workbenchPanel.size() - WORKBENCH_VIEWER_MIN_WIDTH),
+  step: 16,
+  coarseStep: 48,
+  bodyClass: "sidebar-resizing",
+  paint: (width, el) => {
+    document.documentElement.style.setProperty("--tree-col-width", `${width}px`);
+    el?.setAttribute("aria-valuenow", String(width));
+  },
+});
+
+// The editor dock's BLOCK seam (axis x, nearEdge: the handle rides the
+// block's LEFT border -- the viewer<->sessions line -- so dragging LEFT
+// grows the block). Owner ruling: the handle on that border sizes the WHOLE
+// sessions+chat block; the handle on the sessions<->chat line is the sidebar
+// seam above and sizes only the rail, with the chat absorbing the difference
+// (the block's outer edges never move). The chat column is the remainder,
+// calc(D - S), so this number plus --sidebar-width fully describe the dock.
+// No collapse flag: the shared dock flag (#workbench-toggle) owns the block's
+// presence, and no render reads D (the seam's paint is the whole story), so
+// there is no width atom to sync here.
+const EDITOR_DOCK_WIDTH_KEY = "hotdog.editorDockWidth";
+
+const editorDockPanel = createPanelResize({
+  axis: "x",
+  sizeKey: EDITOR_DOCK_WIDTH_KEY,
+  defaultSize: EDITOR_DOCK_DEFAULT_WIDTH,
+  min: EDITOR_DOCK_MIN_WIDTH,
+  max: EDITOR_DOCK_MAX_WIDTH,
+  // The same 0.6 fraction the chat-mode docks got singly: the block now
+  // carries both tenants, so the fraction lands where the old pair's total
+  // did, and on a tight window the seam's min-wins rule holds the floor.
+  viewportMax: () => window.innerWidth * 0.6,
+  step: 16,
+  coarseStep: 48,
+  nearEdge: true,
+  bodyClass: "workbench-resizing",
+  paint: (width, el) => {
+    document.documentElement.style.setProperty("--editor-dock-width", `${width}px`);
+    el?.setAttribute("aria-valuenow", String(width));
+  },
+});
+
 // The seam's width is deliberately imperative (pointermove never re-renders
 // the tree), so renders get their own view of it: read live at render,
 // bumped by syncWorkbenchWidth() when a gesture LANDS a size (release,
@@ -1536,7 +1672,9 @@ function openFilesTab(): void {
  */
 function revealTaskRunDir(path: string): void {
   workbenchStore.open(filesTab());
-  if (workbenchCollapsedAtom()) onToggleWorkbench();
+  // In the editor shape the tree rail never hides (the dock flag gates the
+  // CHAT), so the un-collapse belongs to chat mode only.
+  if (!editorModeAtom() && workbenchCollapsedAtom()) onToggleWorkbench();
   const { state, fetches } = revealDir(fileTreeAtom(), path);
   fileTreeAtom(state);
   dispatchTreeFetches(fetches);
@@ -1584,7 +1722,9 @@ function onActivateWorkbenchTab(id: string): void {
  *  no auto-open on tab close). */
 function onOpenFilePath(path: string): void {
   workbenchStore.open({ id: path, kind: "file", label: baseName(path), dirty: false });
-  if (workbenchCollapsedAtom()) onToggleWorkbench();
+  // The editor shape's viewer is the workspace center itself -- always
+  // visible -- so only chat mode's collapsed pane needs the un-collapse.
+  if (!editorModeAtom() && workbenchCollapsedAtom()) onToggleWorkbench();
   ensureFileView(path);
 }
 
@@ -1658,6 +1798,11 @@ function startChat(): void {
           onTreeRefresh();
         }
       }
+      // The same honest open for a boot RESTORED into editor mode: the rail
+      // is mounted without a files tab ever being activated, so this wire
+      // point is its "tree open". (The loop above already flipped roots off
+      // null when a tab was involved -- no double request.)
+      if (editorModeAtom() && fileTreeAtom().roots === null) onTreeRefresh();
     },
     onSessionsUpdate: (sessions) => {
       // The display pointer must not move here: the socket stays attached to
@@ -2420,6 +2565,19 @@ function App() {
   // exactly when the gate allows it and the aria carries the EFFECTIVE
   // pinned state.
   const treePinWide = workbenchSizeAtom() >= WORKBENCH_TREE_PIN_MIN_WIDTH;
+  // The dock flag reads the same localStorage key in both shapes but drives
+  // a different tenant: chat mode collapses the workbench (absent), editor
+  // mode hides the docked chat (the tree + viewer pane never leaves).
+  const editorMode = editorModeAtom();
+  const dockCollapsed = workbenchCollapsedAtom();
+  // Editor mode brings the tree column on by DEFAULT (entering the mode
+  // pins through the pref's own path); the pin BUTTON stays available in
+  // this shape so the viewer can be freed to the full workspace -- focus
+  // mode -- and the tree put back. One preference drives the column in
+  // both shapes; the seam-number width gate belongs to the narrow DOCK
+  // only (the editor pane is workspace-wide by definition, so the clamp
+  // itself is the floor there).
+  const treeColumnPinned = workbenchTreePinnedAtom() && (editorMode || treePinWide);
 
   return (
     <>
@@ -2477,6 +2635,27 @@ function App() {
             >
               <IconPalette />
             </button>
+            {/* Chat/Editor mode swap: hands the workspace to the file tree +
+                viewer (the chat docks right in the workbench's slot, and the
+                workbench disclosure then hides the CHAT), or takes it back.
+                aria-pressed names the EDITOR side (the thinking-toggle
+                idiom for a two-state view flip); the title carries the full
+                truth of both shapes. */}
+            <button
+              type="button"
+              id="editor-mode-toggle"
+              className="header-btn toggleable"
+              aria-label="Toggle chat/editor mode"
+              aria-pressed={editorMode ? "true" : "false"}
+              title={
+                editorMode
+                  ? "Editor mode on: file tree + viewer own the workspace, the chat docks right - click for the chat layout"
+                  : "Editor mode off: click to hand the workspace to the file tree + viewer (the chat docks right)"
+              }
+              onClick={onToggleEditorMode}
+            >
+              <IconModeSwap />
+            </button>
             {/* Workbench disclosure: the header's LAST control (the
                 connection indicator left for the composer), at the
                 group's absolute right edge. The glyph reads as a panel
@@ -2484,14 +2663,16 @@ function App() {
                 being the single divider -- the dock this button opens --
                 so icon and dock sit side by side at rest. aria-label
                 carries the name; aria-expanded mirrors the OPEN state
-                like #logs-toggle. */}
+                like #logs-toggle. In the editor shape the dock's tenant
+                is the CHAT (the shared flag means "right dock closed"),
+                so the label honestly changes tenant with the mode. */}
             <button
               type="button"
               id="workbench-toggle"
               className="header-btn toggleable"
-              aria-label="Toggle workbench pane"
-              aria-expanded={workbenchCollapsedAtom() ? "false" : "true"}
-              title="Toggle Workbench (right pane sidebar)"
+              aria-label={editorMode ? "Toggle chat dock" : "Toggle workbench pane"}
+              aria-expanded={dockCollapsed ? "false" : "true"}
+              title={editorMode ? "Toggle Chat (right pane sidebar)" : "Toggle Workbench (right pane sidebar)"}
               onClick={onToggleWorkbench}
             >
               <IconWorkbench />
@@ -2499,7 +2680,11 @@ function App() {
           </span>
         </div>
 
-        <div id="workspace-row">
+        {/* The editor-mode class is the ONLY structural change on a flip:
+            styles.css re-orders the row and re-homes the dock width (see the
+            CHAT/EDITOR MODE block). DOM identity never changes, so the
+            imperatively-rendered transcript rides along untouched. */}
+        <div id="workspace-row" className={editorMode ? "editor-mode" : undefined}>
         <Sidebar
           sessions={sessionsAtom()}
           activeSessionId={sessionId}
@@ -2552,11 +2737,21 @@ function App() {
           onLogsResizeReset={logsPanel.onDoubleClick}
         />
 
-        <main id="chat-area">
+        {/* In the editor shape the chat is the DOCKED thing: the shared
+            collapse flag hides it here (display:none -- never unmounted,
+            the transcript DOM and the composer's staged state ride along),
+            and the column is the dock's remainder, --editor-dock-width minus
+            --sidebar-width (its own handle would sit on the block's outer
+            border, which the dock seam already owns -- see #dock-resize). */}
+        <main
+          id="chat-area"
+          className={editorMode && dockCollapsed ? "chat-dock-hidden" : undefined}
+        >
           {/* Chat-column header (2026-11-14): the pane's identity (the id
               copy badge, the browse chips) plus the pane's own controls
               (reasoning visibility, exec fence). The GLOBAL controls
-              (settings/theme/workbench) stay in the top #session-info band. */}
+              (settings/theme/chat-editor mode/workbench) stay in the top
+              #session-info band. */}
           <div id="chat-header">
             {/* Left cluster (2026-11-14): the sidebar disclosure, the pane's
                 identity chip and the browse chips ride together so the
@@ -2570,14 +2765,18 @@ function App() {
                   left of this column. One preference, two shapes: desktop
                   drops #sidebar out of the flex row, mobile opens/closes
                   the fixed drawer (see sidebarCollapsedAtom). aria-expanded
-                  mirrors the OPEN state like #workbench-toggle. */}
+                  mirrors the OPEN state like #workbench-toggle. In editor
+                  mode the header itself docks right and the sidebar rides
+                  right beside it, so the glyph's mirror is the one honest
+                  direction to hide here -- the disclosure keeps working in
+                  both shapes, on the rail it always owned. */}
               <button
                 type="button"
                 id="sidebar-toggle"
                 className="header-btn toggleable"
                 aria-label="Toggle sessions sidebar"
                 aria-expanded={sidebarCollapsedAtom() ? "false" : "true"}
-                title="Toggle Sessions sidebar (left pane)"
+                title="Toggle Sessions sidebar"
                 onClick={onToggleSidebar}
               >
                 <IconWorkbench flip />
@@ -2949,10 +3148,13 @@ function App() {
         </main>
 
         {/* Right-docked workbench; a sibling of the chat column inside the
-            #workspace-row flex row (under the full-width #session-info band).
-            Collapsed (the default on first run) renders nothing at all. */}
+            #workspace-row flex row (under the full-width #session-info
+            band). Collapsed (the default on first run) renders nothing at
+            all -- EXCEPT in editor mode, where this pane IS the workspace
+            (tree column + viewer) and the shared dock flag gates the chat
+            instead, so the panel mounts whatever the flag says. */}
         <WorkbenchPanel
-          collapsed={workbenchCollapsedAtom()}
+          collapsed={dockCollapsed && !editorMode}
           width={workbenchSizeAtom()}
           min={WORKBENCH_MIN_WIDTH}
           max={workbenchPanel.maxSize()}
@@ -2990,11 +3192,57 @@ function App() {
           }}
           onOpenFiles={openFilesTab}
           treePin={{
-            pinned: treePinWide && workbenchTreePinnedAtom(),
-            available: treePinWide,
+            pinned: treeColumnPinned,
+            available: editorMode || treePinWide,
             onToggle: onToggleWorkbenchTreePin,
           }}
+          // The tree column's resize seam, wired in BOTH shapes: the docked
+          // column is the same column at the dock's left edge (chat) and the
+          // workspace's (editor), and it carries one number (--tree-col-width,
+          // its own key) in both. Its ceiling is mode-aware (see treeColPanel);
+          // the panel mounts the handle only while the column IS docked, so an
+          // undocked tree has no seam to drag. The reported width is the
+          // SHAPE-clamped number (size vs the live ceiling), because the CSS
+          // caps the column the same way: a preference carried in from the
+          // wide editor pane must not have the handle claim 480 in a 420 dock.
+          treeResize={{
+            width: Math.min(treeColPanel.size(), treeColPanel.maxSize()),
+            min: TREE_COL_MIN_WIDTH,
+            max: treeColPanel.maxSize(),
+            onResizeStart: treeColPanel.onPointerDown,
+            onResizeMove: treeColPanel.onPointerMove,
+            onResizeEnd: treeColPanel.onPointerUp,
+            onResizeKey: treeColPanel.onKeyDown,
+            onResizeReset: treeColPanel.onDoubleClick,
+          }}
         />
+
+        {/* The editor dock's block handle (editor mode only, and a child of
+            #workspace-row rather than the dock's own columns: it is anchored
+            from the row's right edge by --editor-dock-width, so it tracks
+            the block's LEFT border whatever the rail's width is). nearEdge
+            grammar: drag LEFT grows the block, RIGHT shrinks it (the viewer
+            takes the space). Nothing in render reads D -- the seam's paint
+            writes --editor-dock-width plus this handle's aria-valuenow, so
+            the handlers bind straight through. */}
+        {editorMode ? (
+          <div
+            id="dock-resize"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the right dock"
+            aria-valuenow={editorDockPanel.size()}
+            aria-valuemin={EDITOR_DOCK_MIN_WIDTH}
+            aria-valuemax={editorDockPanel.maxSize()}
+            tabindex="0"
+            onPointerdown={editorDockPanel.onPointerDown}
+            onPointermove={editorDockPanel.onPointerMove}
+            onPointerup={editorDockPanel.onPointerUp}
+            onPointercancel={editorDockPanel.onPointerUp}
+            onKeydown={editorDockPanel.onKeyDown}
+            onDblclick={editorDockPanel.onDoubleClick}
+          />
+        ) : null}
         </div>
 
         {/* Settings viewer + immediate-save editor dialog (settings button in the
@@ -3058,6 +3306,9 @@ async function init(): Promise<void> {
   restoreSubagentsCollapsed();
   restoreSidebarCollapsed();
   restoreWorkbenchTreePinned();
+  restoreEditorMode();
+  treeColPanel.restore();
+  editorDockPanel.restore();
   // First-run default-collapsed: restore() honors a STORED choice ("0"
   // keeps the pane open across visits), but "no key" decodes as expanded
   // and an unopened workbench must never dock itself into the layout. Seed
@@ -3099,6 +3350,7 @@ async function init(): Promise<void> {
     workbenchCollapsedAtom,
     workbenchTreePinnedAtom,
     workbenchSizeAtom,
+    editorModeAtom,
     settingsAtom,
     fileTreeAtom,
     fileViewsAtom,

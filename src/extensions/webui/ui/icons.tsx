@@ -160,6 +160,27 @@ export function IconWorkbench({ flip = false }: { flip?: boolean }): JsxChild {
   );
 }
 
+/** Chat/Editor mode swap (top band): two mirrored arrows -- the top running
+ *  right, the bottom running left, exact mirrors about x=12 (lines span
+ *  4..17.5 / 20..6.5 at y 8.5 / 15.5, heads meeting the line ends). The
+ *  glyph says "these two contents trade places", not "open a pane" -- the
+ *  state rides aria-pressed, not a fill flip, because BOTH modes own the
+ *  whole layout (there is no empty side to depict). Rasterized at true
+ *  20px beside its band siblings before shipping (muted ink, sheets in
+ *  tmp/modeswap-*.{svg,png}): both arrows keep separate strokes at the
+ *  header size and the pair reads at optical weight with the workbench
+ *  fill, gear, palette, and thinking bubble. */
+export function IconModeSwap(): JsxChild {
+  return (
+    <Glyph size={HEADER_ICON_SIZE} strokeWidth={2}>
+      <path d="M4 8.5h13.5" />
+      <path d="m14 5 3.5 3.5-3.5 3.5" />
+      <path d="M20 15.5H6.5" />
+      <path d="M10 12l-3.5 3.5L10 19" />
+    </Glyph>
+  );
+}
+
 /** Workspace-tree dock: the workbench panel's outline with the LEFT column
  *  built out of stacked bars instead of one solid fill -- a lined dock, for
  *  the tree that pins itself beside the workbench tabs (file-tree header,

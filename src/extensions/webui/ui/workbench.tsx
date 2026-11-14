@@ -192,6 +192,20 @@ interface WorkbenchPanelProps {
    *  Only meaningful with the fileTree wire: a pin with no tree to dock
    *  docks nothing, so the panel ignores it. */
   treePin?: FileTreePin;
+  /** The tree column's resize seam (the app's own treeColPanel instance:
+   *  one number for the docked column in BOTH shapes, chat's narrow dock and
+   *  the wide editor pane). The handle mounts beside the column itself:
+   *  pinned + wired, never else. */
+  treeResize?: {
+    width: number;
+    min: number;
+    max: number;
+    onResizeStart: (e: PointerEvent) => void;
+    onResizeMove: (e: PointerEvent) => void;
+    onResizeEnd: (e: PointerEvent) => void;
+    onResizeKey: (e: KeyboardEvent) => void;
+    onResizeReset: (e: MouseEvent) => void;
+  };
 }
 
 /**
@@ -265,6 +279,30 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
         onKeydown={p.onResizeKey}
         onDblclick={p.onResizeReset}
       />
+      {/* The tree column's seam twin (see the WorkbenchPanelProps.treeResize
+          doc): the column's OWN seam handle riding its right border, mounted
+          only when the column IS docked and the app wired the seam (the wide
+          editor shape). Same separator idiom: focusable, arrow steps,
+          double-click reset -- and the seam's paint lands the
+          width plus this handle's aria-valuenow. */}
+      {pinned && p.treeResize ? (
+        <div
+          id="tree-col-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize workspace tree width"
+          aria-valuenow={p.treeResize.width}
+          aria-valuemin={p.treeResize.min}
+          aria-valuemax={p.treeResize.max}
+          tabindex="0"
+          onPointerdown={p.treeResize.onResizeStart}
+          onPointermove={p.treeResize.onResizeMove}
+          onPointerup={p.treeResize.onResizeEnd}
+          onPointercancel={p.treeResize.onResizeEnd}
+          onKeydown={p.treeResize.onResizeKey}
+          onDblclick={p.treeResize.onResizeReset}
+        />
+      ) : null}
       {pinned ? (
         // The docked tree: full panel height, its own scroll (CSS owns the
         // column), header and all -- the pin button rides along in it.

@@ -28,16 +28,19 @@
 import { C_SYNTAX } from "./c.ts";
 import { CS_SYNTAX } from "./cs.ts";
 import { CSS_SYNTAX } from "./css.ts";
+import { DART_SYNTAX } from "./dart.ts";
 import { DOCKERFILE_SYNTAX } from "./dockerfile.ts";
 import { ENV_SYNTAX } from "./env.ts";
 import { GITIGNORE_SYNTAX } from "./gitignore.ts";
 import { GO_SYNTAX } from "./go.ts";
 import { GRAPHQL_SYNTAX } from "./graphql.ts";
+import { GROOVY_SYNTAX } from "./groovy.ts";
 import { HTML_SYNTAX } from "./html.ts";
 import { INI_SYNTAX } from "./ini.ts";
 import { JAVA_SYNTAX } from "./java.ts";
 import { JAVASCRIPT_SYNTAX } from "./javascript.ts";
 import { JSON_SYNTAX } from "./json.ts";
+import { KOTLIN_SYNTAX } from "./kotlin.ts";
 import { LUA_SYNTAX } from "./lua.ts";
 import { MAKE_SYNTAX } from "./make.ts";
 import { PHP_SYNTAX } from "./php.ts";
@@ -118,6 +121,9 @@ const BUILTINS: readonly SyntaxDef[] = [
   JAVA_SYNTAX,
   CS_SYNTAX,
   RUBY_SYNTAX,
+  KOTLIN_SYNTAX,
+  GROOVY_SYNTAX,
+  DART_SYNTAX,
   // Metadata-only registrations: names the file view guesses honestly
   // while getTokenizer stays undefined (the registry contract). markdown
   // is deliberately stateless-registry-less -- the sink drives its

@@ -112,6 +112,10 @@ describe("viewer language + tokens", () => {
     expect(guessLang("Main.java")).toBe("java");
     expect(guessLang("Program.cs")).toBe("csharp");
     expect(guessLang("app.rb")).toBe("ruby");
+    expect(guessLang("Main.kt")).toBe("kotlin");
+    expect(guessLang("build.gradle")).toBe("groovy");
+    expect(guessLang("Jenkinsfile")).toBe("groovy");
+    expect(guessLang("main.dart")).toBe("dart");
     // The cheap claims (no scanner needed, the shape is already covered):
     // CUDA/shaders ride c, module spellings ride the script langs,
     // GeoJSON/Avro ARE json, systemd units are ini.

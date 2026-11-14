@@ -115,7 +115,7 @@ Status markers: entries tagged **(planned)** are design intent -- nothing in the
 - `config/system_prompt.md`: System prompt template.
 - `config/prompts/*.prompt.md`: Named prompt templates.
 - `config/aspects/*.aspect.md`: Aspect snippets loaded by profiles.
-- Resolution priority: per-key layer chains defined in `core.config.json` / extension `configSchema` (commonly CLI → config → default; some keys deliberately place provider, profile, or env layers at specific positions). Per-key chains: `docs/config-reference.md`.
+- Resolution priority: per-key layer chains defined in `core.config.json` / extension `configSchema` (commonly CLI → config → default; some keys deliberately place provider, profile, or env layers at specific positions). Per-key chains: `docs/config-reference.md`; live mid-run application and the restart-required list: `docs/config-live.md`.
 
 ## Architecture
 

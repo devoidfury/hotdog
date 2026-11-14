@@ -72,6 +72,8 @@ Each config value is resolved by walking a priority chain **defined per key** in
 - **Env-aware keys:** an env layer is included where declared (see per-key entries)
 - **`aiUrl`/`apiKey`:** resolve from the active **provider first** (provider > CLI > config > env > default), since the provider's URL and API key are the natural source
 
+This document covers resolution (which layer wins); what a mid-run save actually applies to the live process, and what still needs a restart, is in [config-live.md](config-live.md).
+
 ### Available Layer Sources
 
 | Layer | Source | Description |

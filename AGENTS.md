@@ -87,4 +87,5 @@ All error catches must use `formatError()` from `src/core/error.ts`:
 | `docs/cli-reference.md` | User-facing CLI reference: subcommands, flags, slash commands |
 | `docs/supply-chain.md` | Supply-chain posture write-up (README carries the summary) |
 | `docs/config-reference.md` | Complete `defaults.json` config reference — all settings, extensions, providers |
+| `docs/config-live.md` | Live config application: what a settings-panel save does without restart, reply attestation, the restart-required list |
 | `docs/hook-lifecycle.md` | Hook system lifecycle and extension registration patterns |

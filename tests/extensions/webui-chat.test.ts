@@ -751,6 +751,128 @@ describe("createChat subagent main-view", () => {
     ws.emit({ type: "taskControl", taskId: "t8", action: "followup", ok: true });
     expect(pane.textContent).toBe(before);
   });
+
+  it("the steering echo rides the transcript buffer, so a pane switch repaints it", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t9", "running")] });
+    chat.viewSubagent("t9");
+    ws.emit({ type: "taskActivity", taskId: "t9", activity: { kind: "text", content: "streamed prose" } });
+    chat.taskFollowup("t9", "check the fixtures first");
+    // The row is a transcript block like any other, in send order -- not a
+    // DOM-only decoration that the next render of this pane would drop.
+    expect(chat.getTaskActivity("t9").map((b) => b.kind)).toEqual(["text", "user"]);
+
+    // Leave for another transcript and come back: the pane rebuilds with the
+    // steer still standing where it was sent.
+    chat.viewSubagent("other");
+    chat.viewSubagent("t9");
+    expect(pane.textContent).toContain("streamed prose");
+    expect(pane.querySelectorAll(".message.user")).toHaveLength(1);
+    expect(pane.textContent).toContain("check the fixtures first");
+    // Re-opening a buffer the server already fed asks for no second replay.
+    const requests = ws.sent.filter((m) => m.type === "taskActivityRequest");
+    expect(requests.map((m) => m.taskId)).toEqual(["t9", "other"]);
+  });
+
+  it("an echo sent before the replay lands merges under the server bytes", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t10", "running")] });
+    chat.viewSubagent("t10"); // the buffer was empty, so the replay was requested
+    chat.taskFollowup("t10", "hurry it up");
+    ws.emit({
+      type: "taskActivityHistory",
+      taskId: "t10",
+      activity: [{ kind: "text", content: "the real transcript" }],
+    });
+    // A client echo alone never blinds the replay: the server bytes seed, the
+    // echo keeps its slot after them (it was sent later), and the pane is
+    // rebuilt from the merged buffer instead of doubling the row.
+    expect(chat.getTaskActivity("t10").map((b) => b.kind)).toEqual(["text", "user"]);
+    expect(pane.querySelectorAll(".message.user")).toHaveLength(1);
+    const text = pane.textContent ?? "";
+    expect(text).toContain("the real transcript");
+    expect(text).toContain("hurry it up");
+    expect(text.indexOf("the real transcript")).toBeLessThan(text.indexOf("hurry it up"));
+  });
+
+  it("a settled replay's user lane renders through the session's user-row path", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t11", "completed")] });
+    chat.viewSubagent("t11");
+    ws.emit({
+      type: "taskActivityHistory",
+      taskId: "t11",
+      activity: [
+        { kind: "text", content: "working on it" },
+        { kind: "user", content: "use the -la flag" },
+        { kind: "text", content: "rerunning with -la" },
+      ],
+    });
+    // Same row a session send rides (MessageListManager.handleUserMessage):
+    // there is no second renderer for the subagent view.
+    const rows = pane.querySelectorAll(".message.user");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("use the -la flag");
+    const text = pane.textContent ?? "";
+    expect(text.indexOf("working on it")).toBeLessThan(text.indexOf("use the -la flag"));
+    expect(text.indexOf("use the -la flag")).toBeLessThan(text.indexOf("rerunning with -la"));
+  });
+
+  it("a refused steer leaves no row behind for the next repaint; an accepted one stays", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t13", "completed")] });
+    chat.viewSubagent("t13");
+    chat.taskFollowup("t13", "one more thing");
+    expect(chat.getTaskActivity("t13").map((b) => b.kind)).toEqual(["user"]);
+    ws.emit({
+      type: "taskControl",
+      taskId: "t13",
+      action: "followup",
+      ok: false,
+      error: "Steering needs a running task with a live turn",
+    });
+    expect(pane.textContent).toContain("Steering needs a running task with a live turn");
+    // The row the user watched stays on screen under the notice, but the
+    // transcript's source (what every later repaint reads) no longer carries a
+    // steer the worker never received.
+    expect(chat.getTaskActivity("t13")).toEqual([]);
+    chat.viewSubagent("t13");
+    expect(pane.querySelectorAll(".message.user")).toHaveLength(0);
+
+    // An ACCEPTED steer keeps its row: the reply confirms it, it does not
+    // cancel it.
+    chat.taskFollowup("t13", "actually, do this instead");
+    ws.emit({ type: "taskControl", taskId: "t13", action: "followup", ok: true });
+    expect(chat.getTaskActivity("t13").map((b) => b.kind)).toEqual(["user"]);
+    chat.viewSubagent("t13");
+    expect(pane.querySelectorAll(".message.user")).toHaveLength(1);
+    expect(pane.textContent).toContain("actually, do this instead");
+  });
+
+  it("a refused Stop lands the server's text; an accept and a foreign task say nothing", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t12", "running")] });
+    chat.viewSubagent("t12");
+    chat.interruptTask("t12");
+    ws.emit({
+      type: "taskControl",
+      taskId: "t12",
+      action: "interrupt",
+      ok: false,
+      error: "Task not found or no longer active",
+    });
+    expect(pane.textContent).toContain("Stop refused: Task not found or no longer active");
+    const before = pane.textContent;
+    ws.emit({ type: "taskControl", taskId: "t12", action: "interrupt", ok: true });
+    ws.emit({
+      type: "taskControl",
+      taskId: "elsewhere",
+      action: "interrupt",
+      ok: false,
+      error: "NOT MY TASK",
+    });
+    expect(pane.textContent).toBe(before);
+  });
 });
 
 // ── Slash-command completions ───────────────────────────────────────────────

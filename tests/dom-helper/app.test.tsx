@@ -1684,6 +1684,118 @@ describe("subagents sidebar and main-view transcript", () => {
     expect(el("#message-list").textContent).toContain("Steering needs a running task with a live turn");
   });
 
+  it("the steering row survives the pane switch: reopening repaints it (real layout)", async () => {
+    // A task id of its own: the client transcript buffer outlives the pane,
+    // and this pin is about what a REOPEN paints.
+    ws.fireMessage({ type: "taskList", tasks: [task({ taskId: "task-echo", inRun: true })] });
+    await tick();
+    if (document.querySelector("#close-subagent-view-btn")) {
+      el("#close-subagent-view-btn").click();
+      await attach();
+    }
+    els(".subagent-row")[0]!.click();
+    await tick();
+    els(".attachment-remove").forEach((b) => b.click());
+    setComposer("check the fixtures first");
+    await submitComposer();
+    expect(el("#message-list").querySelector(".message.user")).toBeTruthy();
+
+    // Leave for the manager (the re-attach clears the pane and replays the
+    // manager's transcript)...
+    el("#close-subagent-view-btn").click();
+    await attach();
+    // ...and back. The steering row is still part of the transcript, rendered
+    // by the same MessageListManager path -- no second render path, and no
+    // row that only survived in the DOM until something cleared it.
+    els(".subagent-row")[0]!.click();
+    await tick();
+    const rows = el("#message-list").querySelectorAll(".message.user");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("check the fixtures first");
+    expect(els(".subagent-row")[0]!.getAttribute("data-task-id")).toBe("task-echo");
+  });
+
+  it("the composer Stop is the VIEWED task's: taskInterrupt for it, never the manager's cancel", async () => {
+    // A task with a live turn, viewed, and the ATTACHED manager idle: the
+    // pane's Stop affordance belongs to the task on screen (owner ruling
+    // 2026-11-13 -- "the send/stop buttons you see are for THAT subagent
+    // session, not the parent session").
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
+    ws.fireMessage({ type: "taskList", tasks: [task({ inRun: true })] });
+    await tick();
+    els(".subagent-row")[0]!.click(); // the one and only row: task-1
+    await tick();
+    const stop = el("#composer-actions #cancel-btn");
+    expect(stop.textContent).toContain("Stop");
+    expect(stop.querySelector(".spinner")).toBeTruthy();
+    clearSent();
+    stop.click();
+    // Exactly the existing C2S taskInterrupt frame, addressed to the task...
+    expect(sent<{ type: string; taskId: string }>("taskInterrupt")).toEqual([
+      { type: "taskInterrupt", taskId: "task-1" },
+    ]);
+    // ...and the manager's cancel frame is never sent.
+    expect(sent("cancel")).toHaveLength(0);
+    // The task's own turn boundary retires the button (server truth; the
+    // click never flips a working flag optimistically).
+    ws.fireMessage({ type: "taskUpdate", task: task({ inRun: false, status: "cancelled" }) });
+    await tick();
+    expect(document.querySelector("#cancel-btn")).toBeNull();
+    // The manager's aria-live narration stays honest: a task Stop is not a
+    // user-initiated end of the MANAGER's run, so the next manager turn still
+    // announces a completion, not "Work stopped".
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    await tick();
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
+    await tick();
+    expect(el("#live-status").textContent).toBe("Reply complete");
+  });
+
+  it("a refused task Stop lands the server's text in the viewed transcript", async () => {
+    ws.fireMessage({ type: "taskList", tasks: [task({ inRun: true })] });
+    await tick();
+    els(".subagent-row")[0]!.click(); // the one and only row: task-1
+    await tick();
+    el("#composer-actions #cancel-btn").click();
+    ws.fireMessage({
+      type: "taskControl",
+      taskId: "task-1",
+      action: "interrupt",
+      ok: false,
+      error: "Task not found or no longer active",
+    });
+    await tick();
+    expect(el("#message-list").textContent).toContain(
+      "Stop refused: Task not found or no longer active",
+    );
+  });
+
+  it("the working posture tracks the VIEWED task, never the hidden manager", async () => {
+    // Manager busy, viewed task parked (no turn in flight): the pane is the
+    // task's, and a parked task has nothing to stop -- no Stop.
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
+    ws.fireMessage({ type: "taskList", tasks: [task({ inRun: false })] });
+    await tick();
+    els(".subagent-row")[0]!.click(); // the one and only row: task-1
+    await tick();
+    expect(document.querySelector("#cancel-btn")).toBeNull();
+    expect(el("#chat-input").hasAttribute("disabled")).toBe(false);
+    // The task opens a turn: the Stop returns on the TASK's word alone.
+    ws.fireMessage({ type: "taskUpdate", task: task({ inRun: true }) });
+    await tick();
+    expect(el("#composer-actions #cancel-btn").textContent).toContain("Stop");
+    // Leave the view: the manager's own working flag drives the composer again.
+    el("#close-subagent-view-btn").click();
+    await attach();
+    expect(el("#composer-actions #cancel-btn").textContent).toContain("Stop");
+    clearSent();
+    el("#composer-actions #cancel-btn").click();
+    expect(sent("cancel")).toHaveLength(1);
+    expect(sent("taskInterrupt")).toHaveLength(0);
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
+    await tick();
+  });
+
   it("subagent rows carry an honest context menu (right-click, kebab, keyboard twins)", async () => {
     // Start from a clean pane: a leftover viewed task would blur the
     // "kebab does not row-click-open" pin below.

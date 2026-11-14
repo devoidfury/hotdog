@@ -2252,11 +2252,25 @@ function cycleTheme(): void {
 function App() {
   const screen = screenAtom();
   const connected = chat?.connectedAtom() ?? false;
-  const working = chat?.workingAtom() ?? false;
   const activeLogId = activeLogIdAtom();
   // Subagent transcript on screen (the chat-side browse pointer; the sidebar
-  // row highlight and the header label both read it).
+  // row highlight, the header label and the composer's busy posture all read
+  // it).
   const viewedTaskId = chat?.viewedTaskIdAtom() ?? null;
+  // The composer's working posture follows the PANE's subject (owner ruling
+  // 2026-11-13: the send/stop controls you see belong to the session on
+  // screen). While a subagent transcript is open that is the task's own live
+  // turn -- TaskInfoWire.inRun, server truth arriving on every taskUpdate,
+  // so the button flips with the task's turn boundaries exactly like the
+  // manager's working flag does for its session, and can never claim a turn
+  // the server never attested (deliberately not optimistic: taskInterrupt can
+  // be refused, and a refused Stop must not leave a lying button). A queued
+  // or parked task has no turn in flight, so it shows Send, like an idle
+  // session. The hidden manager's working flag never drives this pane.
+  const working =
+    viewedTaskId === null
+      ? (chat?.workingAtom() ?? false)
+      : (chat?.tasksAtom().find((t) => t.taskId === viewedTaskId)?.inRun ?? false);
   // A cold log is a read-only record: it locks the composer. A subagent
   // transcript is a LIVE view (owner ruling 2026-11-13): the composer stays
   // operable and STEERS the viewed task; the only thing the mode locks is
@@ -2764,10 +2778,24 @@ function App() {
                   // type=button: it lives inside #chat-form; without it the
                   // click would submit the composer before cancelling. The
                   // in-button spinner is the chat column's only busy tell.
+                  // Same button, two addressees (owner ruling 2026-11-13):
+                  // the viewed subagent's Stop rides taskInterrupt for THAT
+                  // task, never the manager's cancel frame.
                   <button
                     type="button"
                     id="cancel-btn"
+                    title={
+                      viewedTaskId !== null
+                        ? "Stop this subagent: it aborts the task agent's turn, and a task turn has no turn-only interrupt on the wire -- the task ends as cancelled (the sidebar row confirms it)"
+                        : undefined
+                    }
                     onClick={() => {
+                      if (viewedTaskId !== null) {
+                        // No liveStopped marker here: that arms the manager's
+                        // aria-live off-edge, which this click never moves.
+                        chat?.interruptTask(viewedTaskId);
+                        return;
+                      }
                       // Same user-initiated-end marker as the row/menu Stop
                       // (onCancelSession): chat.cancel flips working itself,
                       // so arm before handing it the click.

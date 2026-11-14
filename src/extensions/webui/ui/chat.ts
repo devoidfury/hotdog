@@ -76,6 +76,11 @@ const viewedTaskIdAtom = reactiveState<string | null>(null);
 export type TaskActivityBlock =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
+  /** A human steering row. Client-seeded (taskFollowup's echo; the relay has
+   *  no live user lane) or server-surfaced (a settled task's durable log,
+   *  taskActivityFromLogEntries). Never merged: one row per follow-up, and it
+   *  renders through the session's own user-row path (handleUserMessage). */
+  | { kind: "user"; text: string }
   | {
       kind: "tool_call";
       name: string;
@@ -147,6 +152,10 @@ function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
     } else {
       blocks.push({ kind: activity.kind, text: activity.content });
     }
+  } else if (activity.kind === "user") {
+    // Its own row: a steering row never merges into prose, and prose after it
+    // starts a fresh streaming block (the tool_call branch's posture).
+    blocks.push({ kind: "user", text: activity.content });
   } else if (activity.kind === "tool_call") {
     // The display descriptors ride the buffer alongside the truncated args:
     // a view re-opened from the buffer must paint the same posture as the
@@ -172,23 +181,74 @@ function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
   }
 }
 
-/** Seed blocks from a server replay (taskActivityHistory). Skipped when
- * anything is accumulated: a view opened across the reconnect already has
- * its live tail. Returns whether the replay landed (the view renders the
- * seeded buffer only when it did). */
-function seedTaskActivity(taskId: string, history: TaskActivityWire[]): boolean {
-  if (taskActivity.has(taskId)) return false;
+/** Seed blocks from a server replay (taskActivityHistory). Skipped when a
+ * live tail is accumulated: a view opened across the reconnect already has
+ * its streamed items, and seeding would duplicate them. One exception: the
+ * buffer holding ONLY client steering echoes (the view opened on an empty
+ * buffer, then the user steered before the reply landed) seeds -- the server
+ * bytes are the older half of the transcript, so they go first and the echoes
+ * keep their slots after them. `repaint` says the pane already shows those
+ * echoes, so it must be rebuilt from the merged buffer rather than appended.
+ * Returns whether the view should render the buffer. */
+function seedTaskActivity(
+  taskId: string,
+  history: TaskActivityWire[],
+): { landed: boolean; repaint: boolean } {
+  const existing = taskActivity.get(taskId);
+  if (!existing || existing.length === 0) {
+    for (const activity of history) appendTaskActivity(taskId, activity);
+    return { landed: true, repaint: false };
+  }
+  const echoes = existing.filter(
+    (b): b is Extract<TaskActivityBlock, { kind: "user" }> => b.kind === "user",
+  );
+  if (echoes.length !== existing.length) return { landed: false, repaint: false };
+  taskActivity.delete(taskId);
   for (const activity of history) appendTaskActivity(taskId, activity);
-  return true;
+  for (const echo of echoes) appendTaskActivity(taskId, { kind: "user", content: echo.text });
+  return { landed: true, repaint: true };
 }
 
 function getTaskActivity(taskId: string): TaskActivityBlock[] {
   return taskActivity.get(taskId) ?? [];
 }
 
+/** Whether the buffer holds anything the SERVER fed this task. Steering
+ *  echoes are client-side only (the live relay has no user lane), so a buffer
+ *  of nothing but echoes still needs the replay -- otherwise a steer sent
+ *  before the first open would be the whole transcript. */
+function hasFedActivity(taskId: string): boolean {
+  return getTaskActivity(taskId).some((b) => b.kind !== "user");
+}
+
+/** Follow-ups this client sent and has not heard back about, per task, in send
+ *  order. The taskControl reply carries no correlation id, but one socket's
+ *  replies return in request order (handleTaskFollowup answers every valid
+ *  frame exactly once, blanks never reach the wire), so the head of this queue
+ *  IS the steer the next followup reply speaks for. */
+const pendingFollowups = new Map<string, string[]>();
+
+/** Take the refused steer back out of the transcript buffer: it never entered
+ *  the worker's context, so no later repaint of this view may imply it did.
+ *  The row already on screen stays (the refusal notice lands right beside it);
+ *  a text that no longer matches anything -- the buffer was evicted or re-seeded
+ *  underneath us -- is left alone rather than guessed at. */
+function retractTaskEcho(taskId: string, text: string): void {
+  const blocks = taskActivity.get(taskId);
+  if (!blocks) return;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i]!;
+    if (block.kind === "user" && block.text === text) {
+      blocks.splice(i, 1);
+      return;
+    }
+  }
+}
+
 function clearTasks(): void {
   tasksAtom([]);
   taskActivity.clear();
+  pendingFollowups.clear();
   // The module-global feed must not outlive the socket: a stale viewed-task
   // pointer (or any residue) would blind the next login's serial run.
   viewedTaskIdAtom(null);
@@ -729,9 +789,18 @@ export interface ChatController {
    *  accepted steers echo into the viewed pane, refusals land via the
    *  requester-only taskControl reply. */
   taskFollowup: (taskId: string, message: string) => void;
-  /** Cancel a live task (C2S taskInterrupt, the task_interrupt tool's own
-   *  primitive). The authoritative change rides the taskUpdate broadcast;
-   *  a refusal lands as the taskControl reply. */
+  /**
+   * Stop/cancel a task (C2S taskInterrupt, the task_interrupt tool's own
+   * primitive). Its real semantics are TERMINAL, not turn-only: a queued or
+   * parked-idle task goes straight to cancelled, and a running one aborts the
+   * in-flight turn -- which finalizes the TASK as cancelled, because the
+   * entry's AbortController spans the task, not one turn
+   * (TaskManager#interruptEntry -> TaskExecution.finalizeTurn). The composer's
+   * Stop therefore rides the same primitive as the row menu's "Cancel
+   * subagent"; a session's Stop (turn-only, run stays steerable) has no task
+   * equivalent on the wire. The authoritative change rides the taskUpdate
+   * broadcast; a refusal lands as the taskControl reply.
+   */
   interruptTask: (taskId: string) => void;
   requestTaskActivity: (taskId: string) => void;
   getTaskActivity: (taskId: string) => TaskActivityBlock[];
@@ -1074,32 +1143,44 @@ export function createChat({
         }
         return;
       }
-      case "taskActivityHistory":
+      case "taskActivityHistory": {
         // Replay landed AND this task is on screen: paint the seeded buffer
         // (the open request found the buffer empty, so nothing streamed
         // yet). Skipped replays (a live tail already accumulated) leave the
-        // view exactly as the live feed painted it.
-        if (
-          seedTaskActivity(data.taskId, data.activity || []) &&
-          data.taskId === viewedTaskIdAtom()
-        ) {
+        // view exactly as the live feed painted it. A buffer that held only
+        // the client's steering echoes merges under the server bytes, so the
+        // pane is rebuilt from the merged buffer instead of doubling them.
+        const seed = seedTaskActivity(data.taskId, data.activity || []);
+        if (seed.landed && data.taskId === viewedTaskIdAtom() && messageList) {
+          if (seed.repaint) messageList.clear();
           renderTaskTranscript(data.taskId);
         }
         return;
-      case "taskControl":
+      }
+      case "taskControl": {
         // Requester-only reply to our taskFollowup/taskInterrupt (the frame
         // shape never left the server; the webui's steering composer drives
         // it again). An accepted followup already echoed optimistically; a
         // refusal must not pass silently -- it lands as a notice in the
-        // viewed transcript of the task it concerns, nowhere else.
+        // viewed transcript of the task it concerns, nowhere else. "Stop" is
+        // the composer's own word for the interrupt action (the sidebar row's
+        // "Cancel subagent" rides the same taskInterrupt, so one wording
+        // covers both affordances).
+        const waiting = data.action === "followup" ? pendingFollowups.get(data.taskId) : undefined;
+        const steer = waiting?.shift();
+        if (waiting && waiting.length === 0) pendingFollowups.delete(data.taskId);
         if (!data.ok && data.taskId === viewedTaskIdAtom()) {
           messageList?.handleSystemMessage({
-            content: `${data.action === "interrupt" ? "Cancel" : "Steering"} refused: ${
+            content: `${data.action === "interrupt" ? "Stop" : "Steering"} refused: ${
               data.error || "the task cannot accept it right now"
             }`,
           });
         }
+        // A refused steer leaves no trace behind in the buffer (its row stays
+        // on screen under the notice, and a settled log never had it).
+        if (!data.ok && steer !== undefined) retractTaskEcho(data.taskId, steer);
         return;
+      }
       case "transcript": {
         // Correlated by id only: the reply is not session-tagged.
         const pending = pendingTranscripts.get(data.id);
@@ -1554,6 +1635,11 @@ export function createChat({
       case "reasoning":
         list.handleStreamingReasoningChunk({ content: activity.content });
         break;
+      case "user":
+        // The steering row: the SAME user-row renderer a session send rides
+        // (no second render path -- see subagents.tsx's header note).
+        list.handleUserMessage({ content: activity.content });
+        break;
       case "tool_call":
         // handleToolCall finalizes the in-flight text row itself (tool
         // boundary), so the streamed prose commits exactly like a live turn.
@@ -1620,6 +1706,8 @@ export function createChat({
           ...(block.error !== undefined ? { error: block.error } : {}),
           ...(block.startLine !== undefined ? { startLine: block.startLine } : {}),
         };
+      case "user":
+        return { kind: "user", content: block.text };
     }
   }
 
@@ -1635,7 +1723,7 @@ export function createChat({
     viewedLogId = null; // browse modes are exclusive (see viewedLogId)
     viewedTaskIdAtom(taskId);
     messageList.clear();
-    if (getTaskActivity(taskId).length === 0) requestTaskActivity(taskId);
+    if (!hasFedActivity(taskId)) requestTaskActivity(taskId);
     renderTaskTranscript(taskId);
   }
 
@@ -1655,14 +1743,26 @@ export function createChat({
    * with a taskControl reply.
    *
    * The task activity relay has no userMessage lane (steer content enters the
-   * worker's context, never its OutputEvent stream), so the viewed pane
-   * echoes the steering row on send -- the same now-you-see-it UX a session
-   * steering gives. A refusal arrives on taskControl (below) and says so.
+   * worker's context through the steering seam, never its OutputEvent stream,
+   * and the worker's USER_MESSAGE event carries no provenance -- the relay
+   * could not tell it from the composed task prompt). So THIS client is the
+   * row's carrier while the task runs, and it rides the transcript's one
+   * source: the activity buffer gets the block (a pane switch or a reopen
+   * repaints it exactly like a streamed block; the MessageListManager path
+   * renders it, never a second renderer), and the viewed pane sees it now --
+   * the same now-you-see-it UX a session steering gives. A settled task's
+   * reload reads the durable log instead, which records the same row
+   * (taskActivityFromLogEntries' user kind). A refusal arrives on taskControl
+   * (below) and says so.
    */
   function taskFollowup(taskId: string, message: string): void {
     const text = message.trim();
     if (!taskId || !text) return;
     send({ type: "taskFollowup", taskId, message: text });
+    appendTaskActivity(taskId, { kind: "user", content: text });
+    const waiting = pendingFollowups.get(taskId);
+    if (waiting) waiting.push(text);
+    else pendingFollowups.set(taskId, [text]);
     if (taskId === viewedTaskIdAtom() && messageList) {
       messageList.handleUserMessage({ content: text });
     }

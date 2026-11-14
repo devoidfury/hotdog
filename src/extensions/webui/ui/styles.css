@@ -1256,7 +1256,13 @@ body.logs-resizing .sidebar-header-resize {
 
 /* ── Model & Profile Switchers (composer pills) ───────────────────────────── */
 
-/* The label is the pill; the select sits inside it borderless. */
+/* The label is the pill; the select sits inside it borderless.
+   min-width:0 on the pills is what lets the composer row squeeze them when
+   the CHAT COLUMN narrows (docked workbench, wide sidebar) -- a viewport
+   media query cannot see a narrow column on a wide screen, and without
+   this the nowrap Stop/Send cluster overflowed the row and laid out under
+   the workbench panel, hit boxes and all (owner dogfood 2026-11-14).
+   With slack the pills still size to content, so nothing moves at rest. */
 #model-selector,
 #profile-selector {
     color: var(--text-muted);
@@ -1269,6 +1275,7 @@ body.logs-resizing .sidebar-header-resize {
     border-radius: 999px;
     padding: 4px 12px;
     cursor: pointer;
+    min-width: 0;
     transition:
         border-color 0.2s,
         color 0.2s;
@@ -1285,6 +1292,9 @@ body.logs-resizing .sidebar-header-resize {
     cursor: pointer;
     outline: none;
     max-width: 220px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #model-selector:hover,

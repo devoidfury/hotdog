@@ -898,10 +898,18 @@ export interface TaskInfoWire {
  * tool with no declared display parts rides no `display` (the fold it does
  * ride is the hint-free one the session frame computes too -- parity, not
  * presence), and old clients ignore what they do not know.
+ *
+ * `user` is the steering lane: one human follow-up the task received
+ * (TaskManager.sendFollowUp -> the worker's steering seam). The LIVE relay
+ * cannot carry it -- the worker's OUTPUT_EVENT.USER_MESSAGE carries no
+ * provenance, so the relay could not tell the composed task prompt from a
+ * human steer -- and the settled fold below does, from the log's `origin`.
+ * Additive: an old client ignores the kind.
  */
 export type TaskActivityWire =
   | { kind: "text"; content: string }
   | { kind: "reasoning"; content: string }
+  | { kind: "user"; content: string }
   | {
       kind: "tool_call";
       name: string;
@@ -982,10 +990,14 @@ export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | nu
  * Per-entry mapping mirrors replayLogSlice's log semantics but keeps the
  * RELAY's item order (reasoning -> text -> calls): the transcript view was
  * painted live in relay order, and a settled replay must look identical.
- * Sources the live feed never had (input prompts, system_prompt, turn and
- * other bookkeeping markers, token_usage) render nothing: the activity
- * grammar has no user lane (see the relay's no-userMessage note), and
- * fabricating one would paint a transcript the live view never showed.
+ * Human follow-ups DO surface here (the `user` kind): the log is the only
+ * place a steering row survives (the live relay cannot carry one -- its
+ * USER_MESSAGE event has no provenance), and `origin` distinguishes a human
+ * steer ("user") from the composed task prompt ("model") and harness
+ * injections ("harness"), which the live view never showed as user turns.
+ * Other sources the live feed never had (system_prompt, turn and other
+ * bookkeeping markers, token_usage) render nothing: fabricating a lane would
+ * paint a transcript the live view never showed.
  * Tool-result names resolve tool_name -> the producing llm entry's call name
  * (old logs predate tool_name; replay's own resolution) -> "unknown". Texts
  * ride the same MAX_TASK_ACTIVITY_CHARS cap as the live relay (one surface,
@@ -1033,8 +1045,14 @@ export function taskActivityFromLogEntries(
         name,
         output: truncateActivity(toolContentText(conversationContent(e as never))),
       });
+    } else if (e.source === LOG_SOURCE.INPUT && e.origin === "user") {
+      // The steering lane: a human follow-up the worker was fed. Legacy
+      // entries carry no origin, so they stay out (unknown is never guessed
+      // into a user row).
+      const steer = wrapperContentText(conversationContent(e as never));
+      if (steer !== "") items.push({ kind: "user", content: truncateActivity(steer) });
     }
-    // Every other source is bookkeeping or a lane the relay never had.
+    // Every other source is bookkeeping or a lane the live relay never had.
   }
   return items;
 }

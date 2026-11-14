@@ -5,7 +5,13 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { createWsServer } from "@extensions/websocket/server.ts";
-import { C2S, S2C } from "@extensions/websocket/protocol.ts";
+import {
+  C2S,
+  S2C,
+  MAX_TASK_ACTIVITY_CHARS,
+  taskActivityFromLogEntries,
+} from "@extensions/websocket/protocol.ts";
+import { LOG_SOURCE } from "@core/session/session-log.ts";
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import {
@@ -318,5 +324,51 @@ describe("subagent feed session scoping", () => {
     ws1.messages.length = 0;
     wsServer.onMessage(ws1, JSON.stringify({ type: C2S.TASK_ACTIVITY_REQUEST }));
     expect(ws1.messages.length).toBe(0);
+  });
+});
+
+// ── The settled fold's steering lane (unit) ─────────────────────────────────
+// A settled task's transcript authority is its worker's durable log, and that
+// log is the ONE place a human follow-up survives: the live relay has no user
+// lane (the worker's USER_MESSAGE event carries no provenance, so it cannot be
+// told apart from the composed task prompt). The fold must therefore gate on
+// provenance: origin "user" is a human steer, origin "model" is the task
+// description the delegating model composed, origin "harness" is injected
+// fuel, and a legacy entry carrying no origin is none of these -- unknown is
+// never guessed into a user row.
+
+describe("taskActivityFromLogEntries -- the steering lane", () => {
+  it("surfaces human follow-ups as user rows, in log order", () => {
+    const items = taskActivityFromLogEntries([
+      { source: LOG_SOURCE.SESSION_START, role: "system", content: "" },
+      // The composed task prompt: a user-role entry, but NOT a human row.
+      { source: LOG_SOURCE.INPUT, role: "user", content: "the delegating model's prompt", origin: "model" },
+      { source: LOG_SOURCE.LLM, role: "assistant", content: "on it" },
+      { source: LOG_SOURCE.INPUT, role: "user", content: "use the -la flag", origin: "user" },
+      { source: LOG_SOURCE.LLM, role: "assistant", content: "rerunning" },
+    ]);
+    expect(items).toEqual([
+      { kind: "text", content: "on it" },
+      { kind: "user", content: "use the -la flag" },
+      { kind: "text", content: "rerunning" },
+    ]);
+  });
+
+  it("keeps harness fuel and origin-less legacy entries out of the user lane", () => {
+    const items = taskActivityFromLogEntries([
+      { source: LOG_SOURCE.INPUT, role: "user", content: "mid-run skill body", origin: "harness" },
+      { source: LOG_SOURCE.INPUT, role: "user", content: "pre-provenance log row" },
+    ]);
+    expect(items).toEqual([]);
+  });
+
+  it("applies the shared activity ceiling to a steering row", () => {
+    const items = taskActivityFromLogEntries([
+      { source: LOG_SOURCE.INPUT, role: "user", content: "x".repeat(MAX_TASK_ACTIVITY_CHARS + 10), origin: "user" },
+    ]);
+    expect(items).toHaveLength(1);
+    expect((items[0] as { content: string }).content).toBe(
+      "x".repeat(MAX_TASK_ACTIVITY_CHARS) + "...[truncated]",
+    );
   });
 });

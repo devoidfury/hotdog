@@ -9,11 +9,11 @@
 // resurrected old prefix is observable. `dropSession` mirrors the built-in
 // planner's per-session memo invalidation.
 
-import { join } from "node:path";
 import type { FencePlanner } from "../../src/core/tool-exec-broker.ts";
 import type { WireFence } from "../../src/core/tool-exec-protocol.ts";
-
-const RUNNER_ENTRY = join(import.meta.dir, "../../src/workers/tool-exec.ts");
+// The seam fence wraps whatever the layout names as RUNNER_ENTRY, so it
+// tracks the plane's real entry without hardcoding a file.
+import { RUNNER_ENTRY } from "../../src/core/tool-exec-layout.ts";
 
 export function recordingPlanner(gen: number): { plan: FencePlanner; calls: () => number } {
   const memo = new Map<string, WireFence>();

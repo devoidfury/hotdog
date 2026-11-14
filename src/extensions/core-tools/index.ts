@@ -8,6 +8,7 @@ import {
 } from "@core/extensions/types.ts";
 import { Tool } from "@core/extensions/tool-registry.ts";
 import { INTERNAL_MAX_OUTPUT_LINES } from "@core/extensions/tool-utils.ts";
+import { reqWireNum, type WireToolConfig } from "@core/tool-exec-protocol.ts";
 
 export * from "./overwrite.ts";
 export * from "./append.ts";
@@ -64,6 +65,33 @@ interface CoreToolConfig {
   findMaxResults: ConfigKnob<number>;
 }
 
+/**
+ * Shared shaping for the two pool-eligible tools (option mapping + display
+ * parts), used by both `create()` and `WIRE_TOOL_FACTORIES` below so the
+ * runner can never drift from the inline registration.
+ */
+function makeReadTool(knobs: {
+  readLimit: ConfigKnob<number>;
+  maxImageSize: ConfigKnob<number>;
+}): Tool {
+  const tool = new ReadTool(knobs);
+  tool.metadata = {
+    ...tool.metadata,
+    display: [{ kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" }],
+    // The file box carries the path header; the block title bar keeps only
+    // the range args (absent on a whole-file read -> no summary at all).
+    headerKeys: ["offset", "limit"],
+  };
+  return tool;
+}
+
+function makeGrepTool(knobs: {
+  maxResults: ConfigKnob<number>;
+  maxOutputLines: number;
+}): Tool {
+  return new GrepTool(knobs);
+}
+
 const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
   overwrite: () => new OverwriteTool(),
   append: () => new AppendTool(),
@@ -72,20 +100,8 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
   // read's result is file-like text; edit's args carry a replace-edit.
   // The *Arg key names must match the tools' real schema parameters
   // (pinned against toToolDef() in tests/extensions/tools-index.test.ts).
-  read: (config) => {
-    const tool = new ReadTool({
-      readLimit: config.readToolLimit,
-      maxImageSize: config.maxImageSize,
-    });
-    tool.metadata = {
-      ...tool.metadata,
-      display: [{ kind: "file", pathArg: "path", offsetArg: "offset", limitArg: "limit" }],
-      // The file box carries the path header; the block title bar keeps only
-      // the range args (absent on a whole-file read -> no summary at all).
-      headerKeys: ["offset", "limit"],
-    };
-    return tool;
-  },
+  read: (config) =>
+    makeReadTool({ readLimit: config.readToolLimit, maxImageSize: config.maxImageSize }),
   edit: (config) => {
     const tool = new EditTool({
       maxEditInputSize: config.maxEditInputSize,
@@ -102,7 +118,7 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
     return tool;
   },
   grep: (config) =>
-    new GrepTool({
+    makeGrepTool({
       maxResults: config.grepMaxResults,
       // maxToolOutputLines config key removed; internal line-shaping default
       // (the seam's maxToolResultChars char cap is the binding constraint).
@@ -213,3 +229,33 @@ export function create(core: CoreContext): ExtensionInstance {
     CORE_TOOL_NAMES,
   };
 }
+
+// ── Pool-runner wire factories ──────────────────────────────────────────────
+
+/**
+ * The factories the POOLED RUNNER builds these tools from: the descriptor
+ * arrives in the runner's register frame and the runner calls
+ * `WIRE_TOOL_FACTORIES.<name>(ctx.toolConfig)` per invoke. Only this
+ * extension's `execution: "worker"` tools (read, grep) belong here.
+ *
+ * Shaping is shared with create() through makeReadTool/makeGrepTool; only
+ * knob provenance differs (E1: create() live readers, the wire frame-pinned
+ * scalars via reqWireNum). `coreTools.maxToolOutputLines` is agent-factory's
+ * internal line-shaping default for a removed config key, not a user knob.
+ */
+export const WIRE_TOOL_FACTORIES: Record<string, (cfg: WireToolConfig) => Tool> = {
+  read: (cfg) => {
+    const c = cfg.coreTools ?? {};
+    return makeReadTool({
+      readLimit: reqWireNum(c.readToolLimit, "coreTools.readToolLimit"),
+      maxImageSize: reqWireNum(c.maxImageSize, "coreTools.maxImageSize"),
+    });
+  },
+  grep: (cfg) => {
+    const c = cfg.coreTools ?? {};
+    return makeGrepTool({
+      maxResults: reqWireNum(c.grepMaxResults, "coreTools.grepMaxResults"),
+      maxOutputLines: reqWireNum(c.maxToolOutputLines, "coreTools.maxToolOutputLines"),
+    });
+  },
+};

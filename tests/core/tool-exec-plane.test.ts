@@ -16,8 +16,12 @@ import {
   reviveWireError,
   type ToolExecLink,
   type WireToolResult,
+  type WireFence,
 } from "@core/tool-exec-protocol.ts";
 import { tmpdir } from "node:os";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { execFenceBackend } from "@utils/exec-plan.ts";
 import {
   createFencePlanner,
   postureDrift,
@@ -515,7 +519,7 @@ describe("run-start warm", () => {
 
 describe("shared broker posture pinning", () => {
   it("computes drift from the pinned posture and ignores unset or matching knobs", () => {
-    const pinned = { fence: "probe", envScrubbing: "true" };
+    const pinned = { fence: "probe", envScrubbing: "true", toolNames: ["bash", "read"] };
     expect(postureDrift(pinned, {})).toEqual([]);
     expect(postureDrift(pinned, { fence: "probe", envScrubbing: true })).toEqual([]);
     expect(postureDrift(pinned, { fence: "off" })).toEqual(['fence: kept "probe", ignored "off"']);
@@ -523,6 +527,30 @@ describe("shared broker posture pinning", () => {
       "envScrubbing: kept true, ignored false",
     ]);
     expect(postureDrift(pinned, { fence: "off", envScrubbing: false })).toHaveLength(2);
+    // Descriptors: the same tool set in any order is no drift; a differing
+    // one warns (the first build's list ships for the process lifetime).
+    expect(
+      postureDrift(pinned, {
+        toolDescriptors: [
+          { tool: "read", module: "file:///x.ts", factory: "WIRE_TOOL_FACTORIES" },
+          { tool: "bash", module: "file:///y.ts", factory: "WIRE_TOOL_FACTORIES" },
+        ],
+      }),
+    ).toEqual([]);
+    expect(
+      postureDrift(pinned, {
+        toolDescriptors: [{ tool: "bash", module: "file:///y.ts", factory: "WIRE_TOOL_FACTORIES" }],
+      }),
+    ).toEqual(["toolDescriptors: kept [bash, read], ignored [bash]"]);
+    expect(
+      postureDrift(pinned, {
+        toolDescriptors: [
+          { tool: "bash", module: "file:///y.ts", factory: "WIRE_TOOL_FACTORIES" },
+          { tool: "read", module: "file:///x.ts", factory: "WIRE_TOOL_FACTORIES" },
+          { tool: "grep", module: "file:///z.ts", factory: "WIRE_TOOL_FACTORIES" },
+        ],
+      }),
+    ).toEqual(["toolDescriptors: kept [bash, read], ignored [bash, read, grep]"]);
   });
 
   it("one broker per process: later opts never mint a second instance", () => {
@@ -550,5 +578,76 @@ describe("createFencePlanner", () => {
     expect(plan!("unit:probe", "rw", roots)).toBe(first); // memoized, same identity
     // A different class replans (null hosts stay null on every tuple).
     expect(plan!("unit:probe", "net", roots) === null || first !== null).toBe(true);
+  });
+});
+
+// ── Scratch dir: ONE per session (defect pin) ───────────────────────────────
+//
+// Every plan tuple of a session shares one dir; dropSession replans a fresh
+// one for ITS session; nothing rm()s. The pins run on ONE planner instance
+// (per-class planners would differ for unrelated reasons); on a backend-less
+// host the pin flips to "no dir at all" on stderr instead of passing
+// silently.
+
+describe("createFencePlanner scratch dir (one per session)", () => {
+  const scratchOf = (fence: WireFence | null): string | null =>
+    fence?.prefix.find((a) => a.startsWith(join(tmpdir(), "hotdog-exec-"))) ?? null;
+  const scratchCount = (session: string): number =>
+    readdirSync(tmpdir()).filter((d) => d.startsWith(`hotdog-exec-${session}-`)).length;
+
+  it("one planner, two classes, two roots-sets: the SAME scratch path every time; no class in the name", () => {
+    const plan = createFencePlanner("probe")!;
+    const s = `unit-scratch-pin-${process.pid}`;
+    const rootA = tmpdir();
+    const rw = plan(s, "rw", [rootA]);
+    const net = plan(s, "net", [rootA]);
+    const rw2 = plan(s, "rw", [rootA, join(rootA, "extra-not-here")]);
+    if (execFenceBackend() === null) {
+      process.stderr.write(
+        "[tool-exec-plane] no jail backend on this host: scratch path-equality is VACUOUS here; pinning the no-dir gate instead\n",
+      );
+      expect(rw).toBeNull();
+      expect(net).toBeNull();
+      expect(scratchCount(s)).toBe(0); // probe-first: no backend, no dir
+      return;
+    }
+    const a = scratchOf(rw);
+    expect(a).not.toBeNull();
+    expect(scratchOf(net)).toBe(a); // PATH EQUALITY, same planner
+    expect(scratchOf(rw2)).toBe(a); // roots-set change: still the session's one dir
+    expect(a).not.toMatch(/-(rw|net)-/); // class never enters the name
+    expect(existsSync(a!)).toBe(true);
+    expect(scratchCount(s)).toBe(1);
+  });
+
+  it("distinct sessions get distinct dirs; dropSession mints a fresh one for ITS session only; nothing is rm()d", () => {
+    const plan = createFencePlanner("probe")!;
+    const tag = `${process.pid}`;
+    const s1 = `unit-scratch-d1-${tag}`;
+    const s2 = `unit-scratch-d2-${tag}`;
+    const roots = [tmpdir()];
+    const f1 = plan(s1, "rw", roots);
+    const f2 = plan(s2, "rw", roots);
+    if (execFenceBackend() === null) {
+      process.stderr.write(
+        "[tool-exec-plane] no jail backend on this host: dropSession scratch freshness is VACUOUS here (both plans are null)\n",
+      );
+      expect(f1).toBeNull();
+      expect(f2).toBeNull();
+      return;
+    }
+    const a = scratchOf(f1)!;
+    const b = scratchOf(f2)!;
+    expect(a).not.toBe(b); // per-session: distinct dirs
+    plan.dropSession!(s1);
+    const f1b = plan(s1, "rw", roots); // replanned: fresh dir for s1
+    const aFresh = scratchOf(f1b)!;
+    expect(aFresh).not.toBe(a);
+    expect(existsSync(a)).toBe(true); // the dropped dir is NEVER rm()d (live binds may reference it)
+    const f2b = plan(s2, "net", roots); // s2 untouched: a new tuple still lands on ITS dir
+    expect(scratchOf(f2b)).toBe(b);
+    expect(existsSync(b)).toBe(true);
+    expect(scratchCount(s1)).toBe(2); // old + fresh, neither removed
+    expect(scratchCount(s2)).toBe(1);
   });
 });

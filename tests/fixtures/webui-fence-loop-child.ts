@@ -20,6 +20,7 @@ import type { WireToolCtx, WireToolResult } from "../../src/core/tool-exec-proto
 import { routeMessage } from "../../src/extensions/websocket/message-routing.ts";
 import { SessionRegistry } from "../../src/extensions/websocket/session-registry.ts";
 import { recordingPlanner } from "./fence-seam-planner.ts";
+import { poolWireDescriptors } from "./wire-descriptors.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs } from "../mocks/websocket.ts";
 
 const step = (name: string, value: unknown): void => {
@@ -45,9 +46,11 @@ const text = (r: WireToolResult): string =>
   r.kind === "tool-result" ? r.output : String((r as { value?: unknown }).value);
 
 // The seam-planned boot posture, consumed as the SHARED broker (what
-// setExecFencePolicy writes to). gen 91 is unique to this process.
+// setExecFencePolicy writes to); gen 91 is unique to this process. The
+// descriptor list mirrors the loaded built-ins (auxiliary seam: this
+// fixture's subject is the webui loop close, not the loader).
 const planner = recordingPlanner(91);
-const broker = sharedToolExecBroker({ fence: "probe", fencePlan: planner.plan });
+const broker = sharedToolExecBroker({ fence: "probe", fencePlan: planner.plan, toolDescriptors: poolWireDescriptors() });
 
 // A real registry + the real routeMessage; only the transport is mocked (and
 // the agent, the same mock every webui server test uses). The registry gets

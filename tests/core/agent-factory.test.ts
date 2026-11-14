@@ -499,3 +499,34 @@ describe("createAgentFactory live view (B5, design §4.2)", () => {
     expect((agent.config as Record<string, unknown>).model).toBe("resolved-model");
   });
 });
+
+// ── Pool tool descriptor collection (the agent-factory hand-off) ────────────
+// The factory build is the one site that sees both the loaded extensions and
+// the broker: a worker build asks the loader for the register frame's
+// payload, an inline build never does. (The collected-list-reaches-a-runner
+// proof lives in tests/core/tool-exec-wire-plane.test.ts.)
+
+describe("pool tool descriptor collection at the plane fork", () => {
+  it("a worker build asks the loader for wire descriptors; an inline build never does", async () => {
+    let asked = 0;
+    const extensions = {
+      wireToolDescriptors: () => {
+        asked++;
+        return [];
+      },
+    };
+    const buildWith = async (toolExec: "worker" | "inline") => {
+      const { core } = makeCore({ extensions });
+      const factory = createAgentFactory(core, {
+        resolved: { ...resolved, toolExec } as never,
+        llmClient: {} as never,
+      });
+      return factory();
+    };
+
+    await buildWith("inline");
+    expect(asked).toBe(0);
+    await buildWith("worker");
+    expect(asked).toBe(1);
+  });
+});

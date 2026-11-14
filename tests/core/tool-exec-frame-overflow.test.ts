@@ -177,7 +177,7 @@ describe("LineDecoder frame cap (real constant)", () => {
 describe("runner frame overflow (broker-child half)", () => {
   it("fails the entry, answers pending executor-died, and reaps the runner", async () => {
     startCapture();
-    const state: BrokerState = { pool: new Map(), idleReapMs: 0 };
+    const state: BrokerState = { pool: new Map(), idleReapMs: 0, descriptors: [] };
     // A hostile runner: one giant newline-free line forever, and it only
     // ever leaves on stdin EOF -- so a later death proves the broker ended
     // the pipe (the interval outlives the stub's own work otherwise).

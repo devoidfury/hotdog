@@ -8,7 +8,11 @@ import {
   INTERNAL_MAX_OUTPUT_LINES,
 } from "@core/extensions/tool-utils.ts";
 import { HOOKS } from "@core/hooks.ts";
-import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import type { Tool, ToolMetadata } from "@core/extensions/tool-registry.ts";
+import {
+  reqWireNum,
+  type WireToolConfig,
+} from "@core/tool-exec-protocol.ts";
 import { AssistantRetryableError, ToolError } from "@core/error.ts";
 import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig, type ConfigKnob, readKnob } from "@core/extensions/types.ts";
 import { copyScrubbedEnv, envScrubExtraKeys } from "@utils/env.ts";
@@ -416,3 +420,33 @@ export function create(core: CoreContext): ExtensionInstance {
     },
   };
 }
+
+// ── Pool-runner wire factories ──────────────────────────────────────────────
+
+/**
+ * The factory the POOLED RUNNER builds this tool from: the descriptor
+ * arrives in the runner's register frame, the runner imports THIS module
+ * and calls `WIRE_TOOL_FACTORIES.bash(ctx.toolConfig)` per invoke.
+ *
+ * Mirrors `create()`'s field list but is not the same function: create()
+ * hands BashTool live reader knobs over the store (§4.1); the wire side
+ * takes the runner's PINNED scalars (EXEMPTION E1, §4.3 -- the runner never
+ * boots config; an operator write changes NEW pool entries only). Keep the
+ * two field lists in sync.
+ *
+ * Env posture: envScrubbing defaults TRUE, envScrubExtra rides the wire,
+ * and `env` merges last.
+ */
+export const WIRE_TOOL_FACTORIES: Record<string, (cfg: WireToolConfig) => Tool> = {
+  bash: (cfg) => {
+    const b = cfg.bashTool ?? {};
+    return new BashTool({
+      timeoutMs: reqWireNum(b.bashTimeoutMs, "bashTool.bashTimeoutMs"),
+      maxOutputLines: reqWireNum(b.maxToolOutputLines, "bashTool.maxToolOutputLines"),
+      maxTimeoutMs: typeof b.maxTimeoutMs === "number" ? b.maxTimeoutMs : undefined,
+      envScrubExtra: cfg.envScrubExtra,
+      envScrubbing: cfg.envScrubbing !== false,
+      env: (b.env ?? {}) as Record<string, string>,
+    });
+  },
+};

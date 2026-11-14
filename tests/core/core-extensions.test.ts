@@ -351,3 +351,81 @@ describe('ExtensionLoader', () => {
     });
   });
 });
+
+// ── Pool-runner wire factories (descriptor collection) ──────────────────────
+
+import { entryPointToFileUrl, resolveExtensionPath } from '../../src/core/extensions/extensions.ts';
+import { WIRE_FACTORIES_EXPORT } from '../../src/core/tool-exec-protocol.ts';
+import { pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
+
+describe('ExtensionLoader wire tool descriptors', () => {
+  let core: LoaderCore;
+  let loader: ExtensionLoader;
+
+  beforeEach(() => {
+    core = {
+      hooks: createHooks(),
+      toolRegistry: createToolRegistry(),
+      services: createServiceRegistry(),
+      configRegistry: new ConfigRegistry(),
+      cliSubcommandRegistry: createSubcommandRegistry(),
+      completion: createCompletionService(),
+    };
+    loader = new ExtensionLoader(core);
+  });
+
+  it('collects the real alias entries as per-tool descriptors and clears them on unload', async () => {
+    await loader.load('core-tools', '@extensions/core-tools/index.ts');
+    const coreDescs = loader.wireToolDescriptors();
+    expect(coreDescs.map((d) => d.tool).sort()).toEqual(['grep', 'read']);
+    for (const d of coreDescs) {
+      expect(d.factory).toBe(WIRE_FACTORIES_EXPORT);
+      expect(d.module).toBe(pathToFileURL(join(resolveExtensionPath('@extensions'), 'core-tools/index.ts')).href);
+    }
+
+    await loader.load('bash-tool', '@extensions/bash-tool/index.ts');
+    expect(loader.wireToolDescriptors().map((d) => d.tool).sort()).toEqual(['bash', 'grep', 'read']);
+
+    await loader.unload('core-tools');
+    const left = loader.wireToolDescriptors();
+    expect(left.map((d) => d.tool)).toEqual(['bash']);
+  });
+
+  it('a namespace-object double (no module URL) contributes no descriptors', async () => {
+    const instance = await loader.load('dbl', {
+      create: () => ({ name: 'dbl' }),
+      [WIRE_FACTORIES_EXPORT]: { dbltool: () => ({}) },
+    });
+    expect(instance).not.toBeNull();
+    expect(loader.wireToolDescriptors()).toEqual([]);
+  });
+
+  describe('entryPointToFileUrl', () => {
+    it('maps alias entries through the extension layout, normalizing bare dirs', () => {
+      const root = resolveExtensionPath('@extensions');
+      expect(entryPointToFileUrl('@extensions/core-tools/index.ts')).toBe(
+        pathToFileURL(join(root, 'core-tools/index.ts')).href,
+      );
+      // A bare alias dir gets the index.ts import() would land on.
+      expect(entryPointToFileUrl('@extensions/core-tools')).toBe(
+        pathToFileURL(join(root, 'core-tools/index.ts')).href,
+      );
+      expect(entryPointToFileUrl('@experimental')).toBe(
+        pathToFileURL(join(resolveExtensionPath('@experimental'), 'index.ts')).href,
+      );
+    });
+
+    it('maps ROOT_DIR-relative discovery paths the way load() resolves them', () => {
+      // ROOT_DIR is src/ (same base load() uses for non-alias entries).
+      const srcRoot = resolve(resolveExtensionPath('@extensions'), '..');
+      expect(entryPointToFileUrl('./extensions/foo/index.ts')).toBe(
+        pathToFileURL(resolve(srcRoot, './extensions/foo/index.ts')).href,
+      );
+    });
+
+    it('refuses bare specifiers with no filesystem layout', () => {
+      expect(entryPointToFileUrl('@scope/pkg')).toBeNull();
+    });
+  });
+});

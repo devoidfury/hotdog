@@ -1,10 +1,11 @@
 // The tool exec plane's broker CHILD program: spawned by the supervisor as
 // `bun <this file> --idle-reap-ms=<n>`. It holds no conversation state, no
 // credentials, no user-data access -- tool code lives only in pool entries
-// (`src/workers/tool-exec.ts`). Pool entries are keyed (sessionId, class);
-// an entry is either the supervisor's fence argv (`bwrap <plan> -- bun
-// <runner>` on Linux, `sandbox-exec -p <profile> /usr/bin/env ... bun
-// <runner>` on macOS; prepended verbatim at spawnEntry()) or a plain
+// (`RUNNER_ENTRY` in `tool-exec-layout.ts`). Pool entries are keyed
+// (sessionId, class); an entry is either the supervisor's fence argv
+// (`bwrap <plan> -- bun <runner>` on Linux, `sandbox-exec -p <profile>
+// /usr/bin/env ... bun <runner>` on macOS; prepended verbatim at
+// spawnEntry()) or a plain
 // `bun <runner>`, because isolation is argv: the child adds no policy here,
 // and the runner can never tell fenced from unfenced -- same code, degraded
 // path included.
@@ -27,6 +28,7 @@ import {
   type InvokeFrame,
   type ExecClass,
   type WireFence,
+  type WireToolDescriptor,
 } from "./tool-exec-protocol.ts";
 
 interface PoolEntry {
@@ -45,6 +47,12 @@ interface PoolEntry {
 interface BrokerState {
   pool: Map<string, PoolEntry>;
   idleReapMs: number;
+  /**
+   * The supervisor's register frame, stored verbatim (this child validates
+   * nothing -- the runner does). Replayed as the FIRST frame to every
+   * runner this child spawns, so no invoke can outrun a runner's tool map.
+   */
+  descriptors: WireToolDescriptor[];
 }
 
 function poolKey(session: string, cls: string): string {
@@ -74,7 +82,11 @@ function parseBrokerArgs(argv: string[]): { idleReapMs: number } {
 }
 
 function runBroker(): void {
-  const state: BrokerState = { pool: new Map(), ...parseBrokerArgs(process.argv.slice(2)) };
+  const state: BrokerState = {
+    pool: new Map(),
+    descriptors: [],
+    ...parseBrokerArgs(process.argv.slice(2)),
+  };
   writeSupervisor({ op: "ready" });
 
   const decoder = new LineDecoder();
@@ -146,6 +158,12 @@ function handleFrame(line: string, state: BrokerState): void {
       return;
     case "reap":
       reapEntries(frame.session, frame.class, state);
+      return;
+    case "register":
+      // The supervisor's first frame, so this lands before the first
+      // warm/invoke; a malformed payload degrades to "no tools", never a
+      // guess.
+      state.descriptors = Array.isArray(frame.tools) ? frame.tools : [];
       return;
   }
 }
@@ -293,6 +311,15 @@ function spawnEntry(key: string, state: BrokerState, fence?: WireFence): PoolEnt
   proc.stdin?.on("error", () => {});
   proc.stdout?.on("error", () => {});
   proc.stderr?.on("error", () => {});
+  // Register first, on EVERY spawn (invoke and warm share this one path):
+  // pipe frames arrive in write order, so no invoke is handled before the
+  // descriptors land. A stillborn pipe dies with the entry through the
+  // error/exit handlers below.
+  try {
+    proc.stdin?.write(encodeFrame({ op: "register", tools: state.descriptors }) + "\n");
+  } catch {
+    // the entry's error/exit handlers answer whatever was asked of it
+  }
 
   const out = new LineDecoder();
   proc.stdout!.setEncoding("utf8");

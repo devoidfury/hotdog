@@ -38,6 +38,7 @@ import {
   FENCE_ON_NOTICE,
 } from "@extensions/ui-interactive-cli/fence-command.ts";
 import { recordingPlanner } from "../fixtures/fence-seam-planner.ts";
+import { poolWireDescriptors } from "../fixtures/wire-descriptors.ts";
 import type { AgentLike } from "@core/session/index.ts";
 import { tmpDir, cleanupDir, processAlive } from "../helpers.ts";
 
@@ -186,7 +187,7 @@ describe("live per-session policy toggle (seam fence, real spawn)", () => {
   it("off -> on: setSessionFencePolicy replaces the entry and the respawn carries the fence prefix", async () => {
     const session = sess("toggle-on");
     const planner = recordingPlanner(11);
-    const broker = new ToolExecBroker({ fencePlan: null }); // the fence-off shape
+    const broker = new ToolExecBroker({ fencePlan: null, toolDescriptors: poolWireDescriptors() }); // the fence-off shape
     try {
       const first = await broker.invoke(spawnProbe(session));
       expect(text(first)).toContain("gen=[absent]");
@@ -206,7 +207,7 @@ describe("live per-session policy toggle (seam fence, real spawn)", () => {
   it("on -> off: the entry is replaced, the respawn is UNFENCED, and no old prefix is ever reused", async () => {
     const session = sess("toggle-off");
     const gen1 = recordingPlanner(21);
-    const broker = new ToolExecBroker({ fencePlan: gen1.plan }); // born ON with the seam fence
+    const broker = new ToolExecBroker({ fencePlan: gen1.plan, toolDescriptors: poolWireDescriptors() }); // born ON with the seam fence
     try {
       const first = await broker.invoke(spawnProbe(session));
       expect(text(first)).toContain("gen=[21]");
@@ -241,7 +242,7 @@ describe("live per-session policy toggle (seam fence, real spawn)", () => {
     const a = sess("iso-a");
     const b = sess("iso-b");
     const planner = recordingPlanner(31);
-    const broker = new ToolExecBroker({ fencePlan: planner.plan }); // boot probe (seam)
+    const broker = new ToolExecBroker({ fencePlan: planner.plan, toolDescriptors: poolWireDescriptors() }); // boot probe (seam)
     try {
       const a1 = await broker.invoke(spawnProbe(a));
       expect(text(a1)).toContain("gen=[31]");
@@ -280,7 +281,7 @@ describe("live per-session policy toggle (seam fence, real spawn)", () => {
     const a = sess("rev-a");
     const b = sess("rev-b");
     const planner = recordingPlanner(41);
-    const broker = new ToolExecBroker({ fencePlan: null }); // boot OFF shape
+    const broker = new ToolExecBroker({ fencePlan: null, toolDescriptors: poolWireDescriptors() }); // boot OFF shape
     try {
       const a1 = await broker.invoke(spawnProbe(a));
       expect(text(a1)).toContain("gen=[absent]");
@@ -302,7 +303,7 @@ describe("live per-session policy toggle (seam fence, real spawn)", () => {
   it("setSessionFencePolicy on a closed-to-invoke broker keeps the plane contract: no spawn is downgraded", async () => {
     // Degraded/closed planes still reject loudly; a policy toggle never
     // turns a worker call into an inline run.
-    const broker = new ToolExecBroker({ fencePlan: null, respawnCap: 0, execPath: "/definitely/not/bun" });
+    const broker = new ToolExecBroker({ fencePlan: null, respawnCap: 0, execPath: "/definitely/not/bun", toolDescriptors: poolWireDescriptors() });
     broker.setSessionFencePolicy(sess("toggle-no-downgrade"), "probe");
     await expect(
       broker.invoke({ session: "toggle-no-downgrade", tool: "bash", args: { command: "echo x" }, ctx: ctx("toggle-no-downgrade") }),

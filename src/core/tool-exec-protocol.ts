@@ -11,6 +11,7 @@
 // (TransientError retry, AssistantRetryableError hint).
 
 import {
+  ConfigError,
   isExpectedError,
   ToolError,
   AssistantRetryableError,
@@ -45,6 +46,41 @@ export interface WireToolCtx {
   session: string;
   workspace: WireWorkspace;
   toolConfig: WireToolConfig;
+}
+
+// ── Pool-tool descriptors (runner-side dynamic loading) ─────────────────────
+
+/**
+ * The named export every pool-capable extension entry declares beside
+ * `create()`: `Record<string, (cfg: WireToolConfig) => Tool>`, one entry per
+ * `execution: "worker"` tool. One shared export name so the descriptor's
+ * `factory` field is a constant the whole fleet agrees on.
+ */
+export const WIRE_FACTORIES_EXPORT = "WIRE_TOOL_FACTORIES";
+
+/**
+ * Where one pool tool's factory lives: `module` is a file: URL string and
+ * `factory` the named map export to read `[tool]` from. The broker is the
+ * trusted host; runner-side validation is a belt against forged frames, not
+ * the containment boundary (the fence is that).
+ */
+export interface WireToolDescriptor {
+  tool: string;
+  module: string;
+  factory: string;
+}
+
+/**
+ * E1 required-scalar doctrine (§4.3): every scalar a pooled tool needs
+ * arrives on the wire ctx as a PLAIN required value -- the runner never
+ * boots config, and a silently-defaulted second copy of a cap is how a
+ * plane drifts from it.
+ */
+export function reqWireNum(value: unknown, what: string): number {
+  if (typeof value !== "number") {
+    throw new ConfigError(`tool-exec ctx: missing numeric config ${what}`);
+  }
+  return value;
 }
 
 // ── Serialized results ───────────────────────────────────────────────────────
@@ -141,7 +177,17 @@ export interface ReapFrame {
   session?: string;
   class?: ExecClass;
 }
-export type OutboundFrame = InvokeFrame | CancelFrame | WarmFrame | ReapFrame;
+/**
+ * Supervisor -> broker child (first frame of every broker spawn) -> every
+ * freshly spawned runner: the complete pool-tool descriptor set. The child
+ * replays it first at each runner spawn, so no invoke can outrun the tool
+ * map; validation (file: URL under PROJECT_ROOT) is runner-side.
+ */
+export interface RegisterFrame {
+  op: "register";
+  tools: WireToolDescriptor[];
+}
+export type OutboundFrame = InvokeFrame | CancelFrame | WarmFrame | ReapFrame | RegisterFrame;
 
 // Runner -> broker -> supervisor.
 export interface OkFrame {

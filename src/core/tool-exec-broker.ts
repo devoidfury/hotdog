@@ -35,6 +35,7 @@ import {
   type ExecutorReplacedError,
   type WireError,
   type WireFence,
+  type WireToolDescriptor,
   type WireToolResult,
   type WireWorkspace,
   type ToolExecLink,
@@ -145,6 +146,8 @@ const pendingFencePolicies = new Map<string, "off" | "probe">();
 export interface SharedPosture {
   fence: string;
   envScrubbing: string;
+  /** Tool names pinned with this posture; a later build's differing list is drift (postureDrift). */
+  toolNames: string[];
 }
 
 /**
@@ -220,6 +223,18 @@ export function postureDrift(pinned: SharedPosture, opts: ToolExecBrokerOptions)
   if (opts.envScrubbing !== undefined && String(opts.envScrubbing) !== pinned.envScrubbing) {
     drift.push(`envScrubbing: kept ${pinned.envScrubbing}, ignored ${opts.envScrubbing}`);
   }
+  // The constructing broker froze the register list for the process, so a
+  // late caller's differing set is drift: it warns here, never evaporates.
+  if (opts.toolDescriptors !== undefined) {
+    const names = opts.toolDescriptors.map((d) => d.tool);
+    const kept = [...pinned.toolNames].sort();
+    const asked = [...names].sort();
+    if (asked.length !== kept.length || asked.some((n, i) => n !== kept[i])) {
+      drift.push(
+        `toolDescriptors: kept [${pinned.toolNames.join(", ")}], ignored [${names.join(", ")}]`,
+      );
+    }
+  }
   return drift;
 }
 
@@ -233,6 +248,7 @@ export function sharedToolExecBroker(opts?: ToolExecBrokerOptions): ToolExecBrok
     sharedPosture = {
       fence,
       envScrubbing: String(opts?.envScrubbing ?? true),
+      toolNames: (opts?.toolDescriptors ?? []).map((d) => d.tool),
     };
     sharedBroker = new ToolExecBroker({ ...opts, fence });
     for (const [session, policy] of pendingFencePolicies) {
@@ -259,10 +275,11 @@ export function sharedToolExecBroker(opts?: ToolExecBrokerOptions): ToolExecBrok
  * the posture line). Lives supervisor-side because the broker child is
  * plumbing only: it prepends argv, it never decides policy.
  *
- * `dropSession` forgets ONE session's memoized plans (the per-session `/fence`
- * toggle calls it so the session replans from scratch while siblings' memo
- * entries survive untouched). Optional: a seam planner with no memo has
- * nothing to drop.
+ * `dropSession` forgets ONE session's memoized plans AND its scratch-dir
+ * mapping (the per-session `/fence` toggle calls it; the session replans
+ * with a fresh scratch dir while siblings' memo entries and mappings
+ * survive untouched). Optional: a seam planner with no memo has nothing to
+ * drop.
  */
 export type FencePlanner = ((
   session: string,
@@ -279,26 +296,38 @@ function sanitizeForPath(s: string): string {
 
 /**
  * The built-in planner: `off` fences nothing (never probes); `probe` pays the
- * cached platform probe (bwrap or seatbelt) on first use, then memoizes per (session, class, roots)
- * -- the scratch dir is created once and lives under the OS tmp dir (entry
- * death does not delete it; the tmp policy does).
+ * cached platform probe (bwrap or seatbelt) on first use, then memoizes per
+ * (session, class, roots) tuple -- the fence spec legitimately differs by
+ * class and roots. The scratch dir is per SESSION: one mkdtemp shared by
+ * every tuple of that session (one tmp bind per session, not one per
+ * class/roots). Nothing here ever removes it: entry death does not delete
+ * it, the tmp policy does (live bwrap binds may still reference it).
  */
 export function createFencePlanner(fence: "off" | "probe"): FencePlanner | null {
   if (fence === "off") return null;
   const memo = new Map<string, WireFence | null>();
+  /** One scratch dir per session, minted on that session's first planned tuple. */
+  const scratchDirs = new Map<string, string>();
   const plan: FencePlanner = (session, cls, roots) => {
     const key = `${session}\u0000${cls}\u0000${roots.join("\u0000")}`;
     const hit = memo.get(key);
     if (hit !== undefined) return hit;
-    // Probe first (cached): on a host with no working jail there is nothing
-    // to plan and no scratch dir to create.
+    // Probe first (cached): a host with no working jail plans nothing and
+    // mints no scratch dir (the scratch map lives only past this gate).
     if (execFenceBackend() === null) {
       memo.set(key, null);
       return null;
     }
-    const scratch = mkdtempSync(
-      `${join(tmpdir(), `hotdog-exec-${sanitizeForPath(session)}-${cls}-`)}`,
-    );
+    // One scratch dir per session: a memo miss for a new class or roots-set
+    // of an already-planned session reuses the session's dir (the name
+    // carries no class segment).
+    let scratch = scratchDirs.get(session);
+    if (scratch === undefined) {
+      scratch = mkdtempSync(
+        `${join(tmpdir(), `hotdog-exec-${sanitizeForPath(session)}-`)}`,
+      );
+      scratchDirs.set(session, scratch);
+    }
     let spec: WireFence | null = null;
     const { prefixArgv, probe } = planFor({
       roots,
@@ -316,12 +345,15 @@ export function createFencePlanner(fence: "off" | "probe"): FencePlanner | null 
     return spec;
   };
   // The memo key starts with `${session}\u0000`, so a prefix drop hits exactly
-  // one session's tuples; sibling memos survive a toggle untouched.
+  // one session's tuples and its scratch mapping (the next plan mints a
+  // FRESH dir); siblings' memos and mappings survive untouched. Never rm()d
+  // -- a live pool entry may still have the dropped dir bound.
   plan.dropSession = (session: string) => {
     const prefix = `${session}\u0000`;
     for (const key of memo.keys()) {
       if (key.startsWith(prefix)) memo.delete(key);
     }
+    scratchDirs.delete(session);
   };
   return plan;
 }
@@ -395,6 +427,14 @@ export interface ToolExecBrokerOptions {
    * on hosts without it. `null` disables the fence, like `fence: "off"`.
    */
   fencePlan?: FencePlanner | null;
+  /**
+   * Pool tool descriptors, shipped to the broker child as the register
+   * frame (first frame of every spawn, replayed by the child to every
+   * runner): no invoke can outrun the runner's tool map. Unset means an
+   * empty list -- the runner starts tool-less and every invoke answers the
+   * loud "not registered in the runner" error, never a silent fallback.
+   */
+  toolDescriptors?: WireToolDescriptor[];
 }
 
 interface PendingCall {
@@ -731,6 +771,12 @@ export class ToolExecBroker implements ToolExecLink {
     proc.stdin?.on("error", () => {});
     proc.stdout?.on("error", () => {});
     proc.stderr?.on("error", () => {});
+    // Descriptors before any other frame: the pipe is FIFO, so write order
+    // here is arrival order at the child and, transitively, at each runner
+    // (the child replays register first at every runner spawn). The pipe
+    // error handlers attach first so a child dying mid-write cannot emit an
+    // unhandled event.
+    this.#writeFrame({ op: "register", tools: this.#opts.toolDescriptors ?? [] });
     // The plane must never be the reason a host process stays alive: a one-shot
     // `hotdog -p` that warmed an entry would otherwise sit holding the broker's
     // stdio open forever. unref drops the claim, and the broker still goes away

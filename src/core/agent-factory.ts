@@ -144,6 +144,12 @@ export function createAgentFactory(
             // promises. See ToolExecBrokerOptions.envScrubbing.
             envScrubbing: resolved.envScrubbing !== false,
             envScrubExtra: envScrubExtraKeys(baseConfig),
+            // Pool tool descriptors: collected HERE, the one site that sees
+            // both the loaded extensions and the broker's construction; the
+            // broker ships them in its register frame at spawn. An empty
+            // list means pool invokes answer the loud "not registered in
+            // the runner" error, never a silent fallback.
+            toolDescriptors: core.extensions?.wireToolDescriptors?.() ?? [],
           })
         : null;
     if (toolExecLink) wireSessionEndReap(core.hooks, toolExecLink);

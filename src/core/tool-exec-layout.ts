@@ -6,7 +6,12 @@
 
 import { fileURLToPath } from "node:url";
 
-export const RUNNER_ENTRY = fileURLToPath(new URL("../workers/tool-exec.ts", import.meta.url));
+/**
+ * The pooled runner program: the descriptor-driven `tool-exec-dynamic.ts`
+ * (its tool set arrives over the wire in the register frame). Resolved per
+ * broker-child boot, so it takes effect on daemon restart.
+ */
+export const RUNNER_ENTRY = fileURLToPath(new URL("../workers/tool-exec-dynamic.ts", import.meta.url));
 
 /**
  * Hotdog's repo root (where tsconfig.json lives). Child processes are spawned

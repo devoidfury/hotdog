@@ -13,6 +13,7 @@ import { extractSchemaDefaults, type ConfigRegistry, type SchemaDefaultEntry } f
 import type { CliSubcommandRegistry } from "./registries.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { ExtensionInstance, ExtensionMetadata } from "./types.ts";
+import { WIRE_FACTORIES_EXPORT, type WireToolDescriptor } from "../tool-exec-protocol.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "../../");
@@ -33,6 +34,27 @@ export function resolveExtensionPath(spec: string): string {
     return spec;
   }
   return path.resolve(process.cwd(), spec);
+}
+
+/**
+ * The absolute file URL of a `load()` entry point -- what a pool-runner
+ * descriptor must carry. Alias specs resolve through `resolveExtensionPath`;
+ * ROOT_DIR-relative discovery paths the way `load()` resolves them. Any
+ * other bare specifier has no filesystem layout (null: cannot back a
+ * descriptor).
+ */
+export function entryPointToFileUrl(entryPoint: string): string | null {
+  for (const alias of ["@extensions", "@experimental"]) {
+    if (entryPoint === alias || entryPoint.startsWith(`${alias}/`)) {
+      let rest = entryPoint.slice(alias.length).replace(/^\//, "");
+      // A bare alias gets the index.ts import() would land on, so the URL
+      // never points at a directory.
+      if (!path.extname(rest)) rest = path.join(rest, "index.ts");
+      return pathToFileURL(path.join(resolveExtensionPath(alias), rest)).href;
+    }
+  }
+  if (entryPoint.startsWith("@")) return null;
+  return pathToFileURL(path.resolve(ROOT_DIR, entryPoint)).href;
 }
 
 export async function getExtensionConfigDefaults(extensionPaths?: string[]): Promise<SchemaDefaultEntry[]> {
@@ -697,6 +719,8 @@ export class ExtensionLoader {
   #entryPoints: Map<string, string>;
   #metadata: Map<string, { provides?: string[]; dependsOn?: string[] }>;
   #toolOwners: Map<string, string[]>;
+  /** Pool-runner descriptors collected per extension from WIRE_FACTORIES_EXPORT. */
+  #wireFactories: Map<string, WireToolDescriptor[]>;
 
   constructor(core: LoaderCore) {
     this.#core = core;
@@ -705,6 +729,7 @@ export class ExtensionLoader {
     this.#entryPoints = new Map();
     this.#metadata = new Map();
     this.#toolOwners = new Map();
+    this.#wireFactories = new Map();
   }
 
   async load(
@@ -738,6 +763,26 @@ export class ExtensionLoader {
 
     if (typeof entryPoint === "string") {
       this.#entryPoints.set(name, entryPoint);
+      // Wire factories: a module exporting WIRE_FACTORIES_EXPORT declares
+      // its pool tools; each function-valued key becomes a descriptor the
+      // supervisor ships in the register frame. A namespace-object double
+      // (test doubles) has no module URL, so it cannot back one.
+      const wireMap = (extModule as Record<string, unknown>)[WIRE_FACTORIES_EXPORT];
+      if (wireMap && typeof wireMap === "object") {
+        const moduleUrl = entryPointToFileUrl(entryPoint);
+        if (moduleUrl === null) {
+          logger.warn(
+            `[extensions] "${name}": exports ${WIRE_FACTORIES_EXPORT} but its entry point "${entryPoint}" has no file URL; its tools cannot load in the pooled runner`,
+          );
+        } else {
+          const descs: WireToolDescriptor[] = [];
+          for (const [toolName, factory] of Object.entries(wireMap as Record<string, unknown>)) {
+            if (typeof factory !== "function") continue;
+            descs.push({ tool: toolName, module: moduleUrl, factory: WIRE_FACTORIES_EXPORT });
+          }
+          if (descs.length > 0) this.#wireFactories.set(name, descs);
+        }
+      }
     }
 
     if (createOptions.provides || createOptions.dependsOn) {
@@ -820,6 +865,7 @@ export class ExtensionLoader {
       this.#extensions.delete(name);
       this.#entryPoints.delete(name);
       this.#metadata.delete(name);
+      this.#wireFactories.delete(name);
     }
   }
 
@@ -833,6 +879,17 @@ export class ExtensionLoader {
 
   entryPoints(): Map<string, string> {
     return this.#entryPoints;
+  }
+
+  /**
+   * Pool tool descriptors captured from loaded extensions'
+   * `WIRE_TOOL_FACTORIES` exports (per load(), cleared on unload()): every
+   * tool name mapped to its module's file URL. The supervisor ships this
+   * list in the register frame, so a runner's tool set is exactly what the
+   * trusted host loaded.
+   */
+  wireToolDescriptors(): WireToolDescriptor[] {
+    return Array.from(this.#wireFactories.values()).flat();
   }
 
   has(name: string): boolean {

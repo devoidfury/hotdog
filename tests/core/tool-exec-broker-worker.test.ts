@@ -63,7 +63,8 @@ async function waitForFrame(pred: (f: any) => boolean, ms = 5000): Promise<any> 
 }
 
 function makeState(overrides: Partial<BrokerState> = {}): BrokerState {
-  return { pool: new Map(), idleReapMs: 0, ...overrides };
+  // Hand-built states start tool-less, like a child awaiting its register.
+  return { pool: new Map(), idleReapMs: 0, descriptors: [], ...overrides };
 }
 
 /** A pool entry whose "process" is a recorder; no spawn, no stdio. */
@@ -513,4 +514,107 @@ describe("spawnEntry stdio plumbing (real short-lived processes)", () => {
       stopCapture();
     }
   });
+});
+
+// ── register frames ──────────────────────────────────────────────────────────
+//
+// Storage (verbatim; a later register REPLACES) pins through the in-process
+// handleFrame seam; ordering pins by real spawn: register as the broker
+// child's first line, and a child-side invoke landing behind the replayed
+// register on one runner stdin.
+
+import { ToolExecBroker } from "@core/tool-exec-broker.ts";
+import { PROJECT_ROOT } from "@core/tool-exec-layout.ts";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const WIRES = [
+  { tool: "bash", module: pathToFileURL(join(PROJECT_ROOT, "src/extensions/bash-tool/index.ts")).href, factory: "WIRE_TOOL_FACTORIES" },
+];
+
+describe("register frames (child storage)", () => {
+  it("stores the list verbatim, replaces on the next register, garbage degrades to empty", () => {
+    const state = makeState();
+    handleFrame(JSON.stringify({ op: "register", tools: WIRES }), state);
+    expect(state.descriptors).toEqual(WIRES);
+
+    const second = [{ tool: "read", module: "file:///x/read.ts", factory: "WIRE_TOOL_FACTORIES" }];
+    handleFrame(JSON.stringify({ op: "register", tools: second }), state);
+    expect(state.descriptors).toEqual(second); // complete-set semantics: REPLACES
+
+    handleFrame(JSON.stringify({ op: "register", tools: "not-an-array" }), state);
+    expect(state.descriptors).toEqual([]); // never a guess
+
+    // Unknown ops never mutate the stored set.
+    handleFrame(JSON.stringify({ op: "reap", session: "x" }), state);
+    expect(state.descriptors).toEqual([]);
+  });
+});
+
+describe("register frames (real spawn ordering)", () => {
+  it("the supervisor stub ships register as the broker child's FIRST frame", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hotdog-regfirst-"));
+    const firstLine = join(dir, "first.txt");
+    const stub = join(dir, "stub-broker.ts");
+    writeFileSync(
+      stub,
+      `import { writeFileSync } from "node:fs";\n` +
+        `process.stdin.setEncoding("utf8");\n` +
+        `let buf = "";\n` +
+        `process.stdin.on("data", (c) => {\n` +
+        `  buf += c;\n` +
+        `  const i = buf.indexOf("\\n");\n` +
+        `  if (i >= 0) { writeFileSync(${JSON.stringify(firstLine)}, buf.slice(0, i)); process.exit(0); }\n` +
+        `});\n`,
+    );
+    const broker = new ToolExecBroker({
+      fence: "off",
+      brokerEntry: stub,
+      respawnCap: 0,
+      toolDescriptors: WIRES,
+    });
+    try {
+      broker.warm("regfirst", "rw"); // fire-and-forget: startup alone ships the register
+      const deadline = Date.now() + 5000;
+      let line = "";
+      while (Date.now() < deadline) {
+        try {
+          line = readFileSync(firstLine, "utf8");
+          if (line) break;
+        } catch {
+          // stub has not written yet
+        }
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      const frame = JSON.parse(line);
+      expect(frame.op).toBe("register");
+      expect(frame.tools).toEqual(WIRES);
+    } finally {
+      await broker.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("spawnEntry replays register before any invoke reaches the runner", async () => {
+    // spawnEntry writes register first, the invoke follows on the same
+    // stdin: a tool result (not the unknown-tool fail) proves the order.
+    startCapture();
+    const state = makeState({ descriptors: WIRES });
+    try {
+      handleFrame(invokeFrame(), state); // session "unit", tool "bash", args {command:"true"}
+      const frame = await waitForFrame((f) => "ok" in f && f.id === "i1", 15_000);
+      expect(frame.ok).toBe(true);
+    } finally {
+      stopCapture();
+      for (const entry of state.pool.values()) {
+        try {
+          entry.proc.stdin?.end();
+          entry.proc.kill();
+        } catch {
+          // already gone
+        }
+      }
+    }
+  }, 20_000);
 });

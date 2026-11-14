@@ -16,6 +16,8 @@ import { join } from "node:path";
 import { ToolExecBroker } from "@core/tool-exec-broker.ts";
 import type { WireFence, WireToolCtx, WireToolResult } from "@core/tool-exec-protocol.ts";
 import { tmpDir, cleanupDir, processAlive, waitForExit } from "../helpers.ts";
+import { RUNNER_ENTRY as layoutRunnerEntry } from "@core/tool-exec-layout.ts";
+import { poolWireDescriptors } from "../fixtures/wire-descriptors.ts";
 
 const TOOL_CONFIG = {
   bashTool: { bashTimeoutMs: 20000, maxToolOutputLines: 100, maxTimeoutMs: 20000 },
@@ -110,7 +112,7 @@ describe("cancel frame (real spawn)", () => {
   let broker: ToolExecBroker;
 
   beforeAll(() => {
-    broker = new ToolExecBroker({ fence: "off" });
+    broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off" });
   });
 
   afterAll(async () => {
@@ -174,7 +176,7 @@ describe("pool entry crash (real spawn)", () => {
   let broker: ToolExecBroker;
 
   beforeAll(() => {
-    broker = new ToolExecBroker({ fence: "off" });
+    broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off" });
   });
 
   afterAll(async () => {
@@ -212,7 +214,7 @@ describe("pool entry crash (real spawn)", () => {
 
 describe("broker death and respawn cap (real spawn)", () => {
   it("errors in-flight calls, respawns within the cap, then degrades without respawning", async () => {
-    const broker = new ToolExecBroker({ fence: "off", respawnCap: 1 });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off", respawnCap: 1 });
     try {
       // Death #1 with a call in flight: the caller learns, and nothing
       // completed, so the budget stays spent.
@@ -261,7 +263,7 @@ describe("broker death and respawn cap (real spawn)", () => {
   });
 
   it("a completed call refreshes the budget (a flapping host is not a crash loop)", async () => {
-    const broker = new ToolExecBroker({ fence: "off", respawnCap: 1 });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off", respawnCap: 1 });
     try {
       const marker = join(dir, "reset-a.marker");
       const first = startSignalled(broker, "harden-reset", marker);
@@ -308,7 +310,7 @@ describe("broker death and respawn cap (real spawn)", () => {
 
 describe("idle reap (real spawn)", () => {
   it("drops an idle entry and refills it on the next call", async () => {
-    const broker = new ToolExecBroker({ fence: "off", idleReapMs: 250 });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off", idleReapMs: 250 });
     try {
       const first = await broker.invoke({
         session: "harden-reap",
@@ -340,7 +342,7 @@ describe("idle reap (real spawn)", () => {
   it("a call in flight is never reaped mid-flight", async () => {
     // The idle window is shorter than the command: arming happens on quiet,
     // so a busy entry survives the whole sleep and answers normally.
-    const broker = new ToolExecBroker({ fence: "off", idleReapMs: 200 });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off", idleReapMs: 200 });
     try {
       const result = await broker.invoke({
         session: "harden-reap-busy",
@@ -359,7 +361,7 @@ describe("idle reap (real spawn)", () => {
 
 describe("warm and reap frames (real spawn)", () => {
   it("warm pre-spawns the entry (idempotent) and reap drops it", async () => {
-    const broker = new ToolExecBroker({ fence: "off" });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off" });
     try {
       // A broker object is not a process: nothing spawns until asked.
       expect(broker.pid).toBeNull();
@@ -385,13 +387,13 @@ describe("warm and reap frames (real spawn)", () => {
     // The SESSION_END reaper fires for every host session; a broker that
     // never served a call has no child and no pool, and the reap frame
     // must not conjure one just to ask it for entries it cannot have.
-    const broker = new ToolExecBroker({ fence: "off" });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off" });
     broker.reap("ghost-session");
     expect(broker.pid).toBeNull();
   });
 
   it("a warmed entry is the one the next call uses", async () => {
-    const broker = new ToolExecBroker({ fence: "off" });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off" });
     try {
       broker.warm("harden-warm2", "rw");
       await settle(() => entries(broker).length === 1, "the warm spawn");
@@ -412,7 +414,7 @@ describe("warm and reap frames (real spawn)", () => {
   });
 
   it("reap of a session leaves other sessions' entries alone", async () => {
-    const broker = new ToolExecBroker({ fence: "off" });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off" });
     try {
       const a = await broker.invoke({
         session: "harden-keep",
@@ -448,7 +450,9 @@ describe("warm and reap frames (real spawn)", () => {
 // child treats the seam fence and a bwrap fence identically -- that is the
 // "isolation is argv" contract under test.
 
-const RUNNER_ENTRY = join(import.meta.dir, "../../src/workers/tool-exec.ts");
+// Follow the layout instead of naming the legacy file: the seam fence
+// must wrap whatever entry the plane actually runs.
+const RUNNER_ENTRY = layoutRunnerEntry;
 
 function envFence(id: string): WireFence {
   return { id, prefix: ["env", "FAKE_FENCE_MARK=1", process.execPath, RUNNER_ENTRY] };
@@ -459,7 +463,7 @@ describe("fence argv (seam fence, real spawn)", () => {
   let broker: ToolExecBroker;
 
   beforeAll(() => {
-    broker = new ToolExecBroker({ fencePlan: () => nextFence });
+    broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fencePlan: () => nextFence });
   });
 
   afterAll(async () => {
@@ -532,7 +536,7 @@ describe("fence argv (seam fence, real spawn)", () => {
   it("a warm that could not plan a fence is corrected by the first invoke", async () => {
     // Warm without a workspace spawns unfenced (there are no roots to plan
     // against); the fenced invoke for the same key must not reuse it.
-    const plain = new ToolExecBroker({ fencePlan: () => envFence("warmfix") });
+    const plain = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fencePlan: () => envFence("warmfix") });
     try {
       plain.warm("harden-warmfix", "rw"); // no workspace -> no fence frame
       await settle(() => entries(plain).length === 1, "the warm spawn");
@@ -552,7 +556,7 @@ describe("fence argv (seam fence, real spawn)", () => {
   });
 
   it("a fence-less broker never wraps (fencePlan null, the fence-off shape)", async () => {
-    const plain = new ToolExecBroker({ fencePlan: null });
+    const plain = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fencePlan: null });
     try {
       const result = await plain.invoke({
         session: "harden-nofence",
@@ -581,7 +585,7 @@ describe("fence argv (seam fence, real spawn)", () => {
 describe("fence posture from a live reader (seam fence, real spawn)", () => {
   it("entries spawned before the flip keep their posture; entries after follow the file", async () => {
     let posture: "off" | "probe" = "off";
-    const broker = new ToolExecBroker({
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(), 
       fence: "off",
       fencePolicy: () => posture,
       fencePlan: () => envFence("live-posture"),
@@ -626,7 +630,7 @@ describe("fence posture from a live reader (seam fence, real spawn)", () => {
 
   it("a call in flight when the posture flips answers where it started", async () => {
     let posture: "off" | "probe" = "off";
-    const broker = new ToolExecBroker({
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(), 
       fence: "off",
       fencePolicy: () => posture,
       fencePlan: () => envFence("live-twin"),
@@ -660,7 +664,7 @@ describe("fence posture from a live reader (seam fence, real spawn)", () => {
 
   it("a throwing reader never picks a posture by guess: the last answer stands", async () => {
     let mode: "probe" | "throw" = "probe";
-    const broker = new ToolExecBroker({
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(), 
       fence: "off",
       fencePolicy: () => {
         if (mode === "throw") throw new Error("the store is having a bad day");
@@ -703,7 +707,7 @@ describe("fence posture from a live reader (seam fence, real spawn)", () => {
 
 describe("reap kills the live process group", () => {
   it("a reap that races a live call kills the shell, not just the runner", async () => {
-    const broker = new ToolExecBroker({ fence: "off" });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off" });
     const pidFile = join(dir, "reap-kill.pid");
     try {
       const running = broker.invoke({
@@ -739,7 +743,7 @@ describe("sliding broker-death window", () => {
     // a flapping host, unreachable for a broker that dies once per served
     // call. The window catches exactly that: three crash deaths inside it
     // degrade regardless of the completions in between.
-    const broker = new ToolExecBroker({ fence: "off", respawnCap: 50 });
+    const broker = new ToolExecBroker({ toolDescriptors: poolWireDescriptors(),  fence: "off", respawnCap: 50 });
     try {
       const marker = join(dir, "window.marker");
       for (let i = 0; i < 3; i++) {

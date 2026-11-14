@@ -22,6 +22,7 @@ import {
   sharedExecFenceDisplay,
 } from "../../src/core/tool-exec-broker.ts";
 import type { WireToolCtx, WireToolResult } from "../../src/core/tool-exec-protocol.ts";
+import { poolWireDescriptors } from "./wire-descriptors.ts";
 import { execFenceBackend } from "../../src/utils/exec-plan.ts";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -73,8 +74,9 @@ step("pending", {
 });
 
 // 3. The shared construction CONSUMES the pending map (per-key: it outranks
-//    the boot fence for its own session).
-const shared = sharedToolExecBroker({ fence: "probe" });
+//    the boot fence for its own session). The descriptor list mirrors what
+//    the real loader collects for a host with the built-ins loaded.
+const shared = sharedToolExecBroker({ fence: "probe", toolDescriptors: poolWireDescriptors() });
 step("constructed", {
   policyOvr: getExecFencePolicy(ovrSession),
   policySib: getExecFencePolicy(sibSession),

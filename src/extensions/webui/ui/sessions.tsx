@@ -100,11 +100,16 @@ export interface SearchState {
   results: SearchHitWire[] | null;
 }
 
-/** Local "YYYY-MM-DD HH:MM" -- the sidebar line-3 stamp. */
+/** Local sidebar line-3 stamp: "MM-DD HH:MM" while the timestamp's year is
+ *  the current one, "YYYY-MM-DD HH:MM" otherwise. The comparison is against
+ *  the render-time clock (no cache), so a Dec-31/Jan-1 flip needs no special
+ *  casing: the same timestamp simply grows its year back on the first render
+ *  after the flip. Display only -- nothing sorts or filters on this string. */
 export function formatDateTime(ts: number): string {
   const d = new Date(ts);
   const p = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const rest = `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return d.getFullYear() === new Date().getFullYear() ? rest : `${d.getFullYear()}-${rest}`;
 }
 
 interface SidebarProps {

@@ -984,7 +984,7 @@ describe("sidebar resize", () => {
     key(el("#sidebar-resize"), "ArrowLeft", { shiftKey: true, currentTarget: el("#sidebar-resize") });
     expect(ariaNow()).toBe("298");
     key(el("#sidebar-resize"), "End", { currentTarget: el("#sidebar-resize") });
-    expect(ariaNow()).toBe("520");
+    expect(ariaNow()).toBe("720"); // End names the static 780; the 0.6x1200 viewport cap binds first
     key(el("#sidebar-resize"), "Home", { currentTarget: el("#sidebar-resize") });
     expect(ariaNow()).toBe("200");
     key(el("#sidebar-resize"), "a", { currentTarget: el("#sidebar-resize") });
@@ -998,6 +998,20 @@ describe("sidebar resize", () => {
     const docStyle = (document.documentElement as unknown as { style: { getPropertyValue: (n: string) => string } }).style;
     expect(docStyle.getPropertyValue("--sidebar-width")).toBe("300px");
     expect(store.has("hotdog.sidebarWidth")).toBe(false);
+  });
+
+  it("the 0.6 viewport fraction binds, and a wide viewport lifts End to the new static max", () => {
+    // Wide screen: 0.6*2000 = 1200 sits above the static 780, so End reaches it.
+    win.innerWidth = 2000;
+    key(el("#sidebar-resize"), "End", { currentTarget: el("#sidebar-resize") });
+    expect(ariaNow()).toBe("780");
+    // Back on the stubbed 1200 viewport the fraction caps again (min(780, 720)).
+    win.innerWidth = 1200;
+    key(el("#sidebar-resize"), "End", { currentTarget: el("#sidebar-resize") });
+    expect(ariaNow()).toBe("720");
+    // Leave the panel at the default for the rest of the suite (also forgets).
+    el("#sidebar-resize").dispatchEvent({ type: "dblclick", currentTarget: el("#sidebar-resize") } as unknown as Event);
+    expect(ariaNow()).toBe("300");
   });
 
   it("a hidden handle (mobile drawer) is inert", () => {
@@ -3182,10 +3196,10 @@ describe("workbench pane (real app wiring)", () => {
     const h = wbHandle();
     expect(h.getAttribute("role")).toBe("separator");
     expect(h.getAttribute("aria-orientation")).toBe("vertical");
-    // Stubbed viewport 1200: max = max(320, min(900, 1200 - 300 - 480)) = 420.
+    // Stubbed viewport 1200: max = max(320, min(1680, 1200*0.6)) = 720.
     expect(h.getAttribute("aria-valuenow")).toBe("420");
     expect(h.getAttribute("aria-valuemin")).toBe("320");
-    expect(h.getAttribute("aria-valuemax")).toBe("420");
+    expect(h.getAttribute("aria-valuemax")).toBe("720");
   });
 
   it("dragging RIGHT shrinks (nearEdge) and release writes hotdog.workbenchWidth", () => {
@@ -3195,6 +3209,21 @@ describe("workbench pane (real app wiring)", () => {
     expect(docStyle.getPropertyValue("--workbench-width")).toBe("360px");
     wbPointer("pointerup", { pointerId: 1, clientX: 960 });
     expect(store.get("hotdog.workbenchWidth")).toBe("360");
+  });
+
+  it("End on a wide viewport lifts the pane to the new static max", () => {
+    // 0.6*3000 = 1800 sits above the static 1680: the px max now binds, so a
+    // wide screen really can hand the workbench most of its width.
+    win.innerWidth = 3000;
+    key(wbHandle(), "End", { currentTarget: wbHandle() });
+    expect(wbHandle().getAttribute("aria-valuenow")).toBe("1680");
+    expect(store.get("hotdog.workbenchWidth")).toBe("1680");
+    // Back to the stubbed viewport; double-click restores the default width
+    // and forgets the key, leaving the suite state clean.
+    win.innerWidth = 1200;
+    wbPointer("dblclick");
+    expect(wbHandle().getAttribute("aria-valuenow")).toBe("420");
+    expect(store.has("hotdog.workbenchWidth")).toBe(false);
   });
 
   it("tabs injected through the state module paint the strip; emptying it brings the honest line", async () => {

@@ -2,7 +2,7 @@
 // owner's fixture row:
 //
 //   manager · ai365/qwen3.8-flash-next    working            Stop
-//   2026-10-31 22:30 · 69k/262k · 42 msgs   [plug]
+//   10-31 22:30 · 69k/262k · 42 msgs   [plug]   (this year, so no "YYYY-")
 //
 // Separators are middle dots (·, U+00B7) -- never a baseline period.
 // No literal parens: status is a glyph badge (label as native title),
@@ -17,7 +17,7 @@
 // as the selection key. Segments that have no data are omitted outright; the
 // legacy-log pins watch for "undefined"/"null" leakage into rendered text.
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, jest } from "bun:test";
 import {
   Sidebar,
   ContextMenu,
@@ -34,8 +34,11 @@ import { mount, type DomNode, type Mounted } from "@utils/jsx";
 
 // ── Fixture + harness ───────────────────────────────────────────────────────
 
-// Local-time constructor: the expected stamp holds in any TZ.
-const STAMP = new Date(2026, 9, 31, 22, 30).getTime();
+// Local-time constructor: the expected stamp holds in any TZ. The year is
+// pinned to the current one so the fixture stays a this-year row (line 3
+// drops "YYYY-" while the year matches); last-year pins offset off CURRENT.
+const CURRENT_YEAR = new Date().getFullYear();
+const STAMP = new Date(CURRENT_YEAR, 9, 31, 22, 30).getTime();
 const FULL_ID = "2s34e9825faaf89878923598";
 
 const noop = (): void => {};
@@ -183,7 +186,7 @@ describe("live row (owner fixture)", () => {
     expect(plug.getAttribute("aria-hidden")).toBe("true");
     expect(row.textContent).not.toContain("client");
 
-    expect(row.querySelector(".row-date")!.textContent).toBe("2026-10-31 22:30");
+    expect(row.querySelector(".row-date")!.textContent).toBe("10-31 22:30");
     // Bottom row: date · ctx · msgs [plug][menu] -- the plug trails the
     // metrics (the bottom-right corner is CSS: margin-left:auto, the
     // row-action-right idiom) and the visible menu button trails the plug,
@@ -413,7 +416,7 @@ describe("legacy log row (no model/profile/ctx attested)", () => {
     const l1 = row.querySelector(".row-l1")!;
     expect(l1.querySelectorAll(".row-sep")).toHaveLength(0);
     // Bottom row: no ctx attestation, so that segment omits -- date · msgs.
-    expect(row.querySelector(".row-date")!.textContent).toBe("2026-10-31 22:30");
+    expect(row.querySelector(".row-date")!.textContent).toBe("10-31 22:30");
     expect([...row.querySelector(".row-l3")!.children].map((n) => n.className)).toEqual([
       "row-date",
       "row-sep",
@@ -436,9 +439,34 @@ describe("legacy log row (no model/profile/ctx attested)", () => {
 // ── Formatting composition ──────────────────────────────────────────────────
 
 describe("formatDateTime", () => {
-  it("pads to YYYY-MM-DD HH:MM in local time", () => {
-    expect(formatDateTime(new Date(2026, 0, 5, 9, 7).getTime())).toBe("2026-01-05 09:07");
-    expect(formatDateTime(STAMP)).toBe("2026-10-31 22:30");
+  it("drops the year for this-year stamps, padded MM-DD HH:MM in local time", () => {
+    expect(formatDateTime(new Date(CURRENT_YEAR, 0, 5, 9, 7).getTime())).toBe("01-05 09:07");
+    expect(formatDateTime(STAMP)).toBe("10-31 22:30");
+  });
+
+  it("keeps the full YYYY-MM-DD HH:MM when the year is not the current one", () => {
+    expect(formatDateTime(new Date(CURRENT_YEAR - 1, 0, 5, 9, 7).getTime())).toBe(
+      `${CURRENT_YEAR - 1}-01-05 09:07`,
+    );
+    // Future years are "not this year" too -- the rule is equality, not "past".
+    expect(formatDateTime(new Date(CURRENT_YEAR + 1, 11, 31, 23, 59).getTime())).toBe(
+      `${CURRENT_YEAR + 1}-12-31 23:59`,
+    );
+  });
+
+  it("compares against the render-time year: a Jan-1 flip re-grows the year with no extra casing", () => {
+    const newYearEve = new Date(2026, 11, 31, 23, 30).getTime();
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(new Date(2026, 11, 31, 23, 59));
+      expect(formatDateTime(newYearEve)).toBe("12-31 23:30");
+      jest.setSystemTime(new Date(2027, 0, 1, 0, 1));
+      // Same timestamp, one render later: the year comparison (new Date() at
+      // call time, nothing cached) simply prints the full form again.
+      expect(formatDateTime(newYearEve)).toBe("2026-12-31 23:30");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 

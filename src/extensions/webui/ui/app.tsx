@@ -1302,9 +1302,10 @@ const sidebarPanel = createPanelResize({
   defaultSize: SIDEBAR_DEFAULT_WIDTH,
   min: SIDEBAR_MIN_WIDTH,
   max: SIDEBAR_MAX_WIDTH,
-  // Half the viewport, whatever that is today: the same floor the old clamp
-  // used, so min wins on sub-400px viewports.
-  viewportMax: () => window.innerWidth / 2,
+  // 60% of the viewport, whatever that is today: on a narrow window the
+  // seam's min-wins rule still takes the wheel (below the ~334px crossover
+  // the fraction falls under SIDEBAR_MIN_WIDTH and the min holds the floor).
+  viewportMax: () => window.innerWidth * 0.6,
   step: 16,
   coarseStep: 48,
   bodyClass: "sidebar-resizing",
@@ -1370,9 +1371,10 @@ const workbenchPanel = createPanelResize({
   defaultSize: WORKBENCH_DEFAULT_WIDTH,
   min: WORKBENCH_MIN_WIDTH,
   max: WORKBENCH_MAX_WIDTH,
-  // Leave the default sidebar plus a readable chat column standing; on
-  // degenerate viewports the seam's min-wins rule takes the wheel.
-  viewportMax: () => window.innerWidth - SIDEBAR_DEFAULT_WIDTH - 480,
+  // Mirror the sidebar's pattern (owner ruling: a wide screen hands the
+  // pane most of its width): 60% of the viewport, and on degenerate
+  // viewports the seam's min-wins rule takes the wheel.
+  viewportMax: () => window.innerWidth * 0.6,
   step: 16,
   coarseStep: 48,
   nearEdge: true,

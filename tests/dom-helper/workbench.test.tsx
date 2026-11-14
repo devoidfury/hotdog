@@ -17,6 +17,7 @@ import {
   WorkbenchPanel,
 } from "@extensions/webui/ui/workbench.tsx";
 import { createWorkbenchStore, type WorkbenchStore } from "@extensions/webui/ui/workbench-state.ts";
+import { WORKBENCH_MAX_WIDTH } from "@extensions/webui/ui/utils.ts";
 import { createPanelResize, type PanelEnv, type PanelResize } from "@extensions/webui/ui/panel-resize.ts";
 import { mount, type DomNode, type Mounted } from "@utils/jsx";
 
@@ -77,8 +78,8 @@ function harness(opts: { throwing?: boolean; seedCollapsed?: "0" | "1" } = {}): 
       collapsedKey: "hotdog.workbenchCollapsed",
       defaultSize: 420,
       min: 320,
-      max: 900,
-      viewportMax: () => 800, // the static 900 never binds here
+      max: WORKBENCH_MAX_WIDTH,
+      viewportMax: () => 800, // the static max (1680) never binds here
       step: 16,
       coarseStep: 48,
       nearEdge: true,
@@ -254,7 +255,7 @@ describe("workbench resize handle", () => {
     expect(el.getAttribute("tabindex")).toBe("0");
     expect(el.getAttribute("aria-valuenow")).toBe("420");
     expect(el.getAttribute("aria-valuemin")).toBe("320");
-    expect(el.getAttribute("aria-valuemax")).toBe("800"); // viewport clamp beats 900
+    expect(el.getAttribute("aria-valuemax")).toBe("800"); // viewport clamp beats the static 1680
   });
 
   it("nearEdge: dragging LEFT grows the pane, release persists; mid-drag writes nothing", () => {

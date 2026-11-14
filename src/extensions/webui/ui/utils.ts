@@ -20,7 +20,7 @@ import { escapeHtml } from "@utils/html.ts";
 // (panel-resize.ts) and both panels configure themselves here.
 
 export const SIDEBAR_MIN_WIDTH = 200;
-export const SIDEBAR_MAX_WIDTH = 520;
+export const SIDEBAR_MAX_WIDTH = 780;
 export const SIDEBAR_DEFAULT_WIDTH = 300;
 
 // Recent Logs list height. The default is the height the CSS cap shipped
@@ -39,7 +39,7 @@ export const LOGS_DEFAULT_HEIGHT = 240;
 // in app.tsx). The static ceiling only binds on huge viewports; the live one
 // is viewport-aware. 320 keeps a usable file tree readable at the floor.
 export const WORKBENCH_MIN_WIDTH = 320;
-export const WORKBENCH_MAX_WIDTH = 900;
+export const WORKBENCH_MAX_WIDTH = 1680;
 export const WORKBENCH_DEFAULT_WIDTH = 420;
 
 // ── Formatting & sanitisation ───────────────────────────────────────────────

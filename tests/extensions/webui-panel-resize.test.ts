@@ -2,10 +2,10 @@
 // codec, and the whole drag/keyboard/reset/collapse lifecycle driven with
 // fake envs -- no browser, no mock.module.
 //
-// The sidebar half of these pins is the migration parity proof: every case is
-// the pre-seam behaviour restated (clamp table, "330" bytes on release, Home
-// jumping to the static 200 rather than the viewport-tight value, reset
-// forgetting the key, the CSS-hidden handle staying inert).
+// The sidebar half of these pins restates the app's clamp under its current
+// config (0.6 viewport fraction, static 780): clamp table, "330" bytes on
+// release, Home jumping to the static 200 rather than the viewport-tight
+// value, reset forgetting the key, the CSS-hidden handle staying inert.
 
 import { describe, it, expect } from "bun:test";
 import {
@@ -115,7 +115,8 @@ function harness(over: Partial<PanelResizeOptions> = {}, storage?: FakeStorage):
       defaultSize: SIDEBAR_DEFAULT_WIDTH,
       min: SIDEBAR_MIN_WIDTH,
       max: SIDEBAR_MAX_WIDTH,
-      viewportMax: () => 1200 / 2,
+      // Mirrors app.tsx on a stubbed 1200px viewport: the 0.6 fraction.
+      viewportMax: () => 1200 * 0.6,
       step: 16,
       coarseStep: 48,
       bodyClass: "resizing",
@@ -178,17 +179,17 @@ describe("clampPanelSize / panelMaxSize", () => {
     expect(clampPanelSize(300, 96, panelMaxSize(96, 480, () => undefined as unknown as number))).toBe(300);
   });
 
-  it("reproduces the pre-seam sidebar clamp table exactly", () => {
-    // Old: min(max(width, 200), max(200, min(520, vw/2)))
+  it("reproduces the app's sidebar clamp table (0.6 viewport, static max)", () => {
+    // app.tsx: min(max(width, 200), max(200, min(SIDEBAR_MAX_WIDTH, vw*0.6)))
     const sidebar = (width: number, viewportWidth: number): number =>
-      clampPanelSize(width, SIDEBAR_MIN_WIDTH, panelMaxSize(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, () => viewportWidth / 2));
+      clampPanelSize(width, SIDEBAR_MIN_WIDTH, panelMaxSize(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, () => viewportWidth * 0.6));
     expect(sidebar(300, 1200)).toBe(300);
     expect(sidebar(50, 1200)).toBe(200);
-    expect(sidebar(800, 1200)).toBe(520);
-    expect(sidebar(500, 900)).toBe(450);
-    expect(sidebar(100, 300)).toBe(200);
+    expect(sidebar(800, 1200)).toBe(720); // the viewport fraction binds below the static max
+    expect(sidebar(600, 900)).toBe(540);
+    expect(sidebar(100, 300)).toBe(200); // degenerate: 0.6*300=180, min still wins
     expect(sidebar(0, 4000)).toBe(SIDEBAR_MIN_WIDTH);
-    expect(sidebar(9999, 4000)).toBe(SIDEBAR_MAX_WIDTH);
+    expect(sidebar(9999, 4000)).toBe(SIDEBAR_MAX_WIDTH); // the new 780 max is reachable on wide screens
     expect(sidebar(SIDEBAR_DEFAULT_WIDTH, 1200)).toBe(SIDEBAR_DEFAULT_WIDTH);
   });
 });
@@ -324,13 +325,13 @@ describe("drag lifecycle", () => {
   it("clamps mid-drag without a clamp-shaped stutter at the limit", () => {
     const h = harness();
     h.panel.onPointerDown(pointer({ pointerId: 1, clientX: 300, currentTarget: h.handle }));
-    for (const x of [700, 900, 1100]) {
+    for (const x of [800, 1000, 1200]) {
       h.panel.onPointerMove(pointer({ pointerId: 1, clientX: x, currentTarget: h.handle }));
     }
-    expect(h.panel.size()).toBe(520); // viewport ceiling here is 600, static 520 wins
-    expect(h.painted).toEqual(["520@el", "520@el", "520@el"]);
-    h.panel.onPointerUp(pointer({ pointerId: 1, clientX: 1100, currentTarget: h.handle }));
-    expect(h.storage.map.get("hotdog.sidebarWidth")).toBe("520");
+    expect(h.panel.size()).toBe(720); // viewport ceiling (0.6*1200) binds below the static 780
+    expect(h.painted).toEqual(["720@el", "720@el", "720@el"]);
+    h.panel.onPointerUp(pointer({ pointerId: 1, clientX: 1200, currentTarget: h.handle }));
+    expect(h.storage.map.get("hotdog.sidebarWidth")).toBe("720");
   });
 
   it("a CSS-hidden handle is inert (mobile drawer)", () => {
@@ -370,9 +371,20 @@ describe("restore / keyboard / reset", () => {
     store.map.set("hotdog.sidebarWidth", "900");
     const h = harness({}, store);
     h.panel.restore();
-    expect(h.panel.size()).toBe(520);
-    expect(h.painted).toEqual(["520"]); // el null: no aria write off-gesture
+    expect(h.panel.size()).toBe(720);
+    expect(h.painted).toEqual(["720"]); // el null: no aria write off-gesture
     expect(h.handle.attrs.size).toBe(0);
+  });
+
+  it("a stored width above the new static max clamps to it on a wide viewport", () => {
+    // Saved on some older or freak layout: restore must land on the static
+    // 780, not keep the oversized byte count or collapse to the default.
+    const store = new FakeStorage();
+    store.map.set("hotdog.sidebarWidth", "2000");
+    const h = harness({ viewportMax: () => 4000 * 0.6 }, store);
+    h.panel.restore();
+    expect(h.panel.size()).toBe(SIDEBAR_MAX_WIDTH);
+    expect(h.painted).toEqual([String(SIDEBAR_MAX_WIDTH)]);
   });
 
   it("restore leaves the default on missing, garbage, or unreadable storage", () => {

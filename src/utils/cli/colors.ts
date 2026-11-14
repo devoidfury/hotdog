@@ -35,8 +35,22 @@ export interface PaletteOptions {
   md_marker?: string;
   /** Markdown fence rule lines (the ``` themselves). */
   md_fence?: string;
+  /**
+   * Terminal colors for the syntax registry's token classes (fenced code in
+   * assistant prose, any registered language). Keyed by the tokenizer class
+   * name (keyword/string/comment/...; the union of the per-tokenizer closed
+   * vocabularies). Classes absent from the map wash to `final_response`, so
+   * a custom extension lang renders with structure only until the palette
+   * learns its classes -- never garbles. Merged per key over the theme's
+   * defaults.
+   */
+  syntax?: SyntaxPalette;
   use_colors?: boolean;
 }
+
+/** Token class -> palette color name. A partial map is fine: unknown
+ * classes wash to `final_response`. */
+export type SyntaxPalette = Record<string, string>;
 
 export class ColorPalette {
   thinking: string;
@@ -58,6 +72,7 @@ export class ColorPalette {
   md_code: string;
   md_marker: string;
   md_fence: string;
+  syntax: SyntaxPalette;
   use_colors: boolean;
 
   constructor(options: PaletteOptions = {}) {
@@ -84,6 +99,10 @@ export class ColorPalette {
     this.md_code = options.md_code ?? "red";
     this.md_marker = options.md_marker ?? "";
     this.md_fence = options.md_fence ?? "bright_black";
+    // Syntax classes: the theme's map wins whole-key; the dark defaults back
+    // whatever a hand-built partial omits (light/mono themes ship the full
+    // key set, so nothing leaks through there).
+    this.syntax = { ...SYNTAX_DARK, ...(options.syntax ?? {}) };
     this.use_colors = options.use_colors ?? true;
   }
 
@@ -96,6 +115,120 @@ export const NAMED_THEMES: Record<string, () => PaletteOptions> = {
   dark: dark_palette,
   light: light_palette,
   monochrome: monochrome_palette,
+};
+
+/**
+ * Syntax token classes (the union of the registry tokenizers' closed
+ * vocabularies; see src/utils/syntax/*) for the dark theme. Groups:
+ * structure and identifiers lead (magenta keywords, cyan key-like names,
+ * orange sections echoing md headings), literals sit in the green/cyan
+ * family, and chrome (comment/meta/doctype/preproc) dims out. `operator`
+ * needs no entry: applyMarkdown routes it to shell_operator, and `value`,
+ * `default` and `code_block` deliberately ride the final_response wash.
+ */
+const SYNTAX_DARK: SyntaxPalette = {
+  keyword: "magenta",
+  fn: "bold_blue",
+  type: "yellow",
+  decorator: "yellow",
+  string: "green",
+  template: "green",
+  color: "bold_green",
+  number: "bold_cyan",
+  boolean: "bold_green",
+  null: "bold_green",
+  regexp: "bold_red",
+  key: "cyan",
+  property: "cyan",
+  attribute: "cyan",
+  selector: "cyan",
+  variable: "cyan",
+  name: "yellow",
+  tag: "yellow",
+  entity: "bold_green",
+  anchor: "bold_green",
+  alias: "bold_green",
+  section: "orange",
+  atrule: "magenta",
+  comment: "bright_black",
+  doctype: "bright_black",
+  meta: "bright_black",
+  preproc: "bright_black",
+  added: "green",
+  removed: "red",
+  hunk: "bold_cyan",
+};
+
+/** Light theme: the basic cyan washes out, so the accents darken to blue
+ * (same move as shell_command); hue roles stay where dark put them. */
+const SYNTAX_LIGHT: SyntaxPalette = {
+  keyword: "magenta",
+  fn: "bold_blue",
+  type: "blue",
+  decorator: "blue",
+  string: "green",
+  template: "green",
+  color: "bold_green",
+  number: "bold_magenta",
+  boolean: "bold_magenta",
+  null: "bold_magenta",
+  regexp: "bold_red",
+  key: "blue",
+  property: "blue",
+  attribute: "blue",
+  selector: "blue",
+  variable: "blue",
+  name: "blue",
+  tag: "blue",
+  entity: "green",
+  anchor: "green",
+  alias: "green",
+  section: "blue",
+  atrule: "magenta",
+  comment: "bright_black",
+  doctype: "bright_black",
+  meta: "bright_black",
+  preproc: "bright_black",
+  added: "green",
+  removed: "red",
+  hunk: "bold_blue",
+};
+
+/** Monochrome: styles only, and one gray. Bold is structure (keywords,
+ * calls, key-like names, sections), underline is literal text (strings,
+ * templates, types), bright_black is constant bulk (numbers, booleans),
+ * dim is chrome. */
+const SYNTAX_MONO: SyntaxPalette = {
+  keyword: "bold",
+  fn: "bold",
+  type: "underline",
+  decorator: "bold",
+  string: "underline",
+  template: "underline",
+  color: "underline",
+  number: "bright_black",
+  boolean: "bright_black",
+  null: "bright_black",
+  regexp: "underline",
+  key: "bold",
+  property: "bold",
+  attribute: "bold",
+  selector: "bold",
+  variable: "bold",
+  name: "bold",
+  tag: "bold",
+  entity: "underline",
+  anchor: "underline",
+  alias: "underline",
+  section: "bold",
+  atrule: "bold",
+  comment: "dim",
+  doctype: "dim",
+  meta: "dim",
+  preproc: "dim",
+  added: "bold",
+  removed: "dim",
+  hunk: "underline",
 };
 
 export function dark_palette(): PaletteOptions {
@@ -119,6 +252,7 @@ export function dark_palette(): PaletteOptions {
     md_code: "red",
     md_marker: "",
     md_fence: "bright_black",
+    syntax: { ...SYNTAX_DARK },
     use_colors: true,
   };
 }
@@ -146,6 +280,7 @@ export function light_palette(): PaletteOptions {
     md_code: "red",
     md_marker: "",
     md_fence: "bright_black",
+    syntax: { ...SYNTAX_LIGHT },
     use_colors: true,
   };
 }
@@ -175,6 +310,7 @@ export function monochrome_palette(): PaletteOptions {
     md_code: "underline",
     md_marker: "",
     md_fence: "dim",
+    syntax: { ...SYNTAX_MONO },
     use_colors: true,
   };
 }
@@ -235,6 +371,9 @@ export function mergePalette(base: ColorPalette, custom: PaletteOptions): ColorP
     md_code: custom.md_code !== undefined ? custom.md_code : base.md_code,
     md_marker: custom.md_marker !== undefined ? custom.md_marker : base.md_marker,
     md_fence: custom.md_fence !== undefined ? custom.md_fence : base.md_fence,
+    // Per-key merge like the string fields: a custom file overrides the
+    // classes it names and keeps the theme's choices for the rest.
+    syntax: { ...base.syntax, ...(custom.syntax ?? {}) },
     use_colors:
       custom.use_colors !== undefined ? custom.use_colors : base.use_colors,
   });
@@ -393,9 +532,14 @@ export function applyFinalResponse(text: string, palette: ColorPalette): string 
  * Paint markdown token runs (from @utils/syntax/markdown.ts) with the
  * palette: heading/strong/code/marker/fence take their md_* entries, shell
  * classes reuse the shell pair (a ```sh fence reads like a tool-call line),
- * every other class -- including the default prose runs -- rides the
- * final_response color, so unstyled text keeps the legacy wash exactly.
- * Colors off, or an empty/unknown accent name, leaves runs unstyled.
+ * every other class -- the registry's syntax vocabulary that markdown
+ * forwards from fenced content of any resolved language -- looks up the
+ * palette's `syntax` map (keyword/string/key/section/... each with a per-
+ * theme color), and what the map does not name (default, code_block, value,
+ * custom extension langs) rides the final_response color, so unstyled text
+ * keeps the legacy wash exactly. Inline `code` stays on md_code: fenced
+ * code is painted per token class, never as one lump. Colors off, or an
+ * empty/unknown accent name, leaves runs unstyled.
  */
 export function applyMarkdown(runs: SyntaxRun[], palette: ColorPalette): string {
   if (runs.length === 0) return "";
@@ -417,7 +561,7 @@ export function applyMarkdown(runs: SyntaxRun[], palette: ColorPalette): string 
                   ? palette.shell_command
                   : run.type === "operator"
                     ? palette.shell_operator
-                    : palette.final_response;
+                    : palette.syntax[run.type] ?? palette.final_response;
     out += applyColor(run.text, name, true);
   }
   return out;

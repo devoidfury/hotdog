@@ -395,10 +395,91 @@ describe('applyMarkdown', () => {
     expect(paint('- one')).toBe('-\x1b[1;37m \x1b[0m\x1b[1;37mone\x1b[0m');
   });
 
+  it('registry token classes from a non-shell fence paint through the syntax palette', () => {
+    const s = newMdStreamState();
+    applyMarkdown(tokenizeMarkdownLine('```ts', s), dark); // open the fence
+    const out = applyMarkdown(tokenizeMarkdownLine('const x = "hi"', s), dark);
+    expect(out).toContain('\x1b[35mconst\x1b[0m'); // keyword magenta
+    expect(out).toContain('\x1b[32m"hi"\x1b[0m'); // string green
+  });
+
+  it('unknown token classes wash to final_response, never garble', () => {
+    expect(applyMarkdown([{ type: 'wat', text: 'x' }], dark)).toBe(
+      applyFinalResponse('x', dark),
+    );
+    // default/code_block ride the text wash exactly as before.
+    expect(applyMarkdown([{ type: 'code_block', text: 'plain fence' }], dark)).toBe(
+      applyFinalResponse('plain fence', dark),
+    );
+  });
+
   it('colors off: runs pass through concatenated untouched', () => {
     const off = new ColorPalette({ use_colors: false });
     expect(paint.call(null, '')).toBe('');
     const runs = tokenizeMarkdownLine('# **a**', newMdStreamState());
     expect(applyMarkdown(runs, off)).toBe('# **a**');
+  });
+});
+
+// The registry's class inventory: the union of every tokenizer's closed
+// TYPES vocabulary (tests/utils/syntax-*.test.ts) minus the classes
+// applyMarkdown dispatches explicitly (command/operator) and the ones that
+// deliberately ride the final_response wash (default/value/code_block).
+// Every name below must resolve in EVERY theme's syntax map; the light and
+// mono maps must cover exactly the dark key set (the constructor backs a
+// partial with dark defaults -- themes may not lean on that).
+const SYNTAX_INVENTORY = [
+  'added', 'alias', 'anchor', 'atrule', 'attribute', 'boolean', 'color',
+  'comment', 'decorator', 'doctype', 'entity', 'fn', 'hunk', 'key',
+  'keyword', 'meta', 'name', 'null', 'number', 'preproc', 'property',
+  'regexp', 'removed', 'section', 'selector', 'string', 'tag', 'template',
+  'type', 'variable',
+];
+
+describe('syntax palette coverage', () => {
+  const themes = { dark: dark_palette(), light: light_palette(), monochrome: monochrome_palette() };
+
+  it('every registry token class resolves in every theme', () => {
+    for (const [name, theme] of Object.entries(themes)) {
+      for (const cls of SYNTAX_INVENTORY) {
+        expect(theme.syntax?.[cls], `${name}: ${cls}`).not.toBeUndefined();
+      }
+    }
+  });
+
+  it('light and monochrome cover exactly the dark key set (no dark defaults leak)', () => {
+    const darkKeys = Object.keys(dark_palette().syntax!).sort().join(',');
+    expect(Object.keys(light_palette().syntax!).sort().join(',')).toBe(darkKeys);
+    expect(Object.keys(monochrome_palette().syntax!).sort().join(',')).toBe(darkKeys);
+  });
+
+  it('keyword/string/comment/number carry real contrast in every theme', () => {
+    // Contrast here means: four classes land on four distinct entries per
+    // theme (no collapse into one undifferentiated wash).
+    for (const [name, theme] of Object.entries(themes)) {
+      const s = theme.syntax!;
+      const four = new Set([s.keyword, s.string, s.comment, s.number]);
+      expect(four.size, name).toBe(4);
+    }
+  });
+
+  it('monochrome themes stay style-only for syntax classes', () => {
+    const styles = new Set(['', 'bold', 'dim', 'underline', 'bright_black']);
+    for (const cls of SYNTAX_INVENTORY) {
+      expect(styles.has(monochrome_palette().syntax![cls]!), cls).toBe(true);
+    }
+  });
+
+  it('mergePalette merges syntax per key', () => {
+    const base = new ColorPalette(light_palette());
+    const merged = mergePalette(base, { syntax: { keyword: 'green' } });
+    expect(merged.syntax.keyword).toBe('green');
+    expect(merged.syntax.string).toBe(light_palette().syntax!.string);
+    expect(merged.syntax.section).toBe(light_palette().syntax!.section);
+  });
+
+  it('a custom syntax class extends the closed set (extension langs stay paintable)', () => {
+    const merged = mergePalette(new ColorPalette(dark_palette()), { syntax: { gadget: 'magenta' } });
+    expect(applyMarkdown([{ type: 'gadget', text: 'z' }], merged)).toBe('\x1b[35mz\x1b[0m');
   });
 });

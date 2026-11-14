@@ -86,6 +86,17 @@ describe("bridge prose commits", () => {
     expect(bridge.transcriptLog.at(-1)).toBe("\x1b[38;5;208m# back\x1b[0m");
   });
 
+  it("non-shell fences paint the language's token classes through the syntax palette", () => {
+    const { bridge } = makeBridge();
+    bridge.enableProseMarkdown(palette);
+    bridge.setProseMode(true);
+    bridge.commitText("```ts\nconst x = 1\n```\n");
+    const code = bridge.transcriptLog[1]!;
+    expect(code).toContain("\x1b[35mconst\x1b[0m"); // keyword magenta
+    expect(code).toContain("\x1b[1;36m1\x1b[0m"); // number bold cyan
+    expect(code.replace(/\x1b\[[\d;]*m/g, "")).toBe("const x = 1"); // lossless
+  });
+
   it("resetStream restarts the fence document (a dead attempt's open fence is gone)", () => {
     const { bridge } = makeBridge();
     bridge.enableProseMarkdown(palette);

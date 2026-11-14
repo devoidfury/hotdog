@@ -247,7 +247,6 @@ export function FileView(p: FileViewProps) {
   // cross-line state (see tokenizeFileLines); everything else is the same
   // per-line registry path, just hoisted out of the row map.
   const rows = view ? tokenizeFileLines(view.lines, lang) : [];
-  const name = p.path.split(/[/\\]/).pop() || p.path;
   const loading = !view || view.status === "loading";
   const failedHard = view?.status === "error";
   const statusLine = view
@@ -259,19 +258,9 @@ export function FileView(p: FileViewProps) {
     : "reading...";
   return (
     <div className="file-view" data-path={p.path}>
-      <div className="file-view-header">
-        <span className="file-view-name" title={p.path}>{name}</span>
-        <span className="file-view-status" role="status">{statusLine}</span>
-        <button
-          type="button"
-          className="file-reload-btn"
-          title="Re-read the file from the top"
-          aria-label="Reload"
-          onClick={() => p.onReload(p.path)}
-        >
-          <IconReload className="file-reload-glyph" />
-        </button>
-      </div>
+      {/* NO HEAD CHROME (owner ruling 2026-11-14): the tab already names the
+          file, so the name row is gone and the sheet starts at the tab
+          strip's hairline. The viewer's whole chrome rides the foot bar. */}
       {loading ? <div className="file-view-note">Reading file...</div> : null}
       {failedHard ? (
         // The server's honest one-liner, verbatim (binary, escape, denied,
@@ -288,19 +277,36 @@ export function FileView(p: FileViewProps) {
           ))}
         </div>
       ) : null}
-      {!loading && view?.truncated ? (
-        <button
-          type="button"
-          className="file-view-btn file-view-more"
-          title={`Read the next page from line ${view.lines.length + 1}`}
-          onClick={() => p.onMore(p.path)}
-        >
-          Load more from line {view.lines.length + 1}
-        </button>
-      ) : null}
       {view?.error && !failedHard ? (
         <div className="file-view-note file-view-error" role="status">{view.error}</div>
       ) : null}
+      {/* The foot bar is the viewer's whole chrome: status left, pager and
+          the one reload affordance right. Sticky-bottom in the scrolling
+          pane (#workbench-body owns the y-scroll) so it holds the foot
+          while long files scroll under it -- chrome that never costs a line
+          at the head. */}
+      <div className="file-view-bar">
+        <span className="file-view-status" role="status">{statusLine}</span>
+        {!loading && view?.truncated ? (
+          <button
+            type="button"
+            className="file-view-btn file-view-more"
+            title={`Read the next page from line ${view.lines.length + 1}`}
+            onClick={() => p.onMore(p.path)}
+          >
+            Load more from line {view.lines.length + 1}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="file-reload-btn"
+          title="Re-read the file from the top"
+          aria-label="Reload"
+          onClick={() => p.onReload(p.path)}
+        >
+          <IconReload className="file-reload-glyph" />
+        </button>
+      </div>
     </div>
   );
 }

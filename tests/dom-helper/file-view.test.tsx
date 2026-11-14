@@ -387,7 +387,24 @@ describe("viewer rendering", () => {
     expect(revealLine(root, 4)).toBe(false);
   });
 
-  it("header states honestly: loaded line count, 'so far' while truncated, unread after a hard error", () => {
+  it("the head is pure sheet: no name row; status, pager and reload ride the foot bar, the view's last node", () => {
+    const root = renderView({ view: { status: "ready", lines: ["a"], truncated: true } });
+    // The tab already names the file (owner ruling 2026-11-14): the header
+    // row -- name + air -- is gone and the sheet starts at the tab strip.
+    expect(root.querySelector(".file-view-header")).toBeNull();
+    expect(root.querySelector(".file-view-name")).toBeNull();
+    // The foot bar is the viewer's whole chrome, rendered LAST: the sticky
+    // foot needs nothing under it in the scrolling pane.
+    const bar = root.querySelector(".file-view-bar") as HTMLElement;
+    expect(bar).toBeTruthy();
+    const kids = (root as unknown as { children: Element[] }).children;
+    expect(kids[kids.length - 1]).toBe(bar);
+    expect(bar.querySelector(".file-view-status")).toBeTruthy();
+    expect(bar.querySelector(".file-view-more")).toBeTruthy(); // the pager rides the foot
+    expect(bar.querySelector(".file-reload-btn")).toBeTruthy();
+  });
+
+  it("status states honestly (foot bar): loaded line count, 'so far' while truncated, unread after a hard error", () => {
     const ready = renderView({ view: { status: "ready", lines: ["a", "b"], truncated: false } });
     expect(text(ready.querySelector(".file-view-status"))).toBe("2 lines");
     const part = renderView({ view: { status: "ready", lines: ["a"], truncated: true } });

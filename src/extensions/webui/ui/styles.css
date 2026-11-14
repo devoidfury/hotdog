@@ -3472,10 +3472,11 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 /* Full-bleed code (owner ruling): when the body holds a FILE tab, the pane's
-   12px gutter does not surround the dark code block -- the block runs edge to
-   edge and its top border is the one line under the header. The gutter does
-   not disappear, it MOVES onto the file view's own parts (header, notes,
-   pager below), so every other body -- the tree tab, the empty line, a
+   12px gutter does not surround the dark code block -- the block runs edge
+   to edge, and since the head chrome died (2026-11-14: the tab already names
+   the file) the tab strip's own hairline is its top line. The gutter does
+   not disappear, it MOVES onto the file view's own parts (the notes and the
+   sticky foot bar), so every other body -- the tree tab, the empty line, a
    placeholder -- keeps the padding it has always had. :has() is the honest
    selector for "the body that holds one" (precedent: the fold-chevron rules
    on the tool boxes). */
@@ -3537,7 +3538,7 @@ body.sidebar-resizing #tree-col-resize {
     gap: 4px;
 }
 
-/* Header reload affordances (the file tree's Refresh, the file viewer's
+/* Reload affordances (the file tree's Refresh, the file viewer's foot-bar
    Reload and the settings dialog's Refresh share one shape): the
    #search-btn standard -- transparent box, muted -> accent over accent-soft
    on hover, and the 16px clockwise-arrow as an inline SVG tinted by
@@ -3655,22 +3656,22 @@ body.sidebar-resizing #tree-col-resize {
     font-size: 14px;
 }
 
-.file-view-header {
+/* The viewer's WHOLE chrome (owner ruling 2026-11-14): the tab names the
+   file, so nothing sits above the sheet -- the name row and its air are
+   gone. This bar is the foot: status left, pager and reload right,
+   sticky-bottom in the scrolling #workbench-body so it holds the foot of
+   the pane while long files scroll under it. It needs the panel's own
+   opaque background, and the hairline above it is the seam the rows'
+   border-top used to keep at the head. */
+.file-view-bar {
+    position: sticky;
+    bottom: 0;
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 8px;
-    /* The house gutter now lives on the parts that sit ON the panel, not on
-       the body around the code sheet: 12px sides, 12 above, 6 before the
-       sheet -- the same rhythm the body's padding used to supply. */
-    padding: 12px 12px 6px;
-}
-
-.file-view-name {
-    font-weight: 600;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    padding: 4px 12px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
 }
 
 .file-view-status {
@@ -3693,12 +3694,8 @@ body.sidebar-resizing #tree-col-resize {
     color: var(--text-primary);
 }
 
-/* The pager sits BELOW the full-bleed sheet, on the panel's own surface, so
-   it carries the gutter the sheet no longer gets from the body: 12px sides
-   and air above/below (the sheet's last row would otherwise butt into it). */
-.file-view-more {
-    margin: 8px 12px 12px;
-}
+/* The pager rides the foot bar (see .file-view-bar) -- the bar carries the
+   gutter, so the button itself stays margin-free. */
 
 .file-view-note {
     color: var(--text-muted);
@@ -3716,12 +3713,13 @@ body.sidebar-resizing #tree-col-resize {
     display: block;
     font-family: var(--font-mono);
     background: var(--bg-base);
-    /* Full-bleed (owner ruling): the sheet runs edge to edge, so it keeps ONE
-       border -- the top line under the header, stretching the whole width --
-       and no radius or side/bottom frame (a 6px corner would stop that line
-       short at both edges and read as a card floating in a gutter). See the
-       :has(.file-view) rule on #workbench-body for the gutter's new home. */
-    border-top: 1px solid var(--border);
+    /* Full-bleed (owner ruling): the sheet runs edge to edge with NO frame of
+       its own -- no radius, no side/bottom border, and no top border either
+       since the head chrome died (2026-11-14): the tab strip's own
+       border-bottom is the hairline the code starts under, and the sticky
+       foot bar (.file-view-bar) owns the bottom seam; a border-top here would
+       draw that line twice. See the :has(.file-view) rule on #workbench-body
+       for the gutter's home. */
     overflow-x: auto;
 }
 

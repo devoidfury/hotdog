@@ -130,6 +130,24 @@ describe("viewer language + tokens", () => {
     expect(guessLang("web.ex")).toBe("elixir");
     expect(guessLang("script.exs")).toBe("elixir");
     expect(guessLang("page.heex")).toBeUndefined(); // HTML-in-a-sigil: honestly unclaimed
+    // Diff/patch: the extension pair, git-format-patch naming included;
+    // the conflict output (.rej) is its own honest shape, unclaimed.
+    expect(guessLang("a.diff")).toBe("diff");
+    expect(guessLang("0001-fix.patch")).toBe("diff");
+    expect(guessLang("MAIN.DIFF")).toBe("diff");
+    expect(guessLang("file.rej")).toBeUndefined();
+    // Crystal: the ruby clone claims .cr; the .ecr template dialect is
+    // html-with-tags and stays unclaimed.
+    expect(guessLang("main.cr")).toBe("crystal");
+    expect(guessLang("index.ecr")).toBeUndefined();
+    // Erlang: the source and the include header, same syntax.
+    expect(guessLang("main.erl")).toBe("erlang");
+    expect(guessLang("header.hrl")).toBe("erlang");
+    // HCL: the Terraform spellings and the native syntax; the JSON
+    // profile (`*.tf.json`) rides json through the last-dot rule.
+    expect(guessLang("main.tf")).toBe("hcl");
+    expect(guessLang("terraform.tfvars")).toBe("hcl");
+    expect(guessLang("main.hcl")).toBe("hcl");
     // The cheap claims (no scanner needed, the shape is already covered):
     // CUDA/shaders ride c, module spellings ride the script langs,
     // GeoJSON/Avro ARE json, systemd units are ini.

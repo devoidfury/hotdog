@@ -28,16 +28,20 @@
 import { C_SYNTAX } from "./c.ts";
 import { CMAKE_SYNTAX } from "./cmake.ts";
 import { CPP_SYNTAX } from "./cpp.ts";
+import { CRYSTAL_SYNTAX } from "./crystal.ts";
 import { CS_SYNTAX } from "./cs.ts";
 import { CSS_SYNTAX } from "./css.ts";
 import { DART_SYNTAX } from "./dart.ts";
+import { DIFF_SYNTAX } from "./diff.ts";
 import { DOCKERFILE_SYNTAX } from "./dockerfile.ts";
 import { ELIXIR_SYNTAX } from "./elixir.ts";
 import { ENV_SYNTAX } from "./env.ts";
+import { ERLANG_SYNTAX } from "./erlang.ts";
 import { GITIGNORE_SYNTAX } from "./gitignore.ts";
 import { GO_SYNTAX } from "./go.ts";
 import { GRAPHQL_SYNTAX } from "./graphql.ts";
 import { GROOVY_SYNTAX } from "./groovy.ts";
+import { HCL_SYNTAX } from "./hcl.ts";
 import { HTML_SYNTAX } from "./html.ts";
 import { INI_SYNTAX } from "./ini.ts";
 import { JAVA_SYNTAX } from "./java.ts";
@@ -134,6 +138,10 @@ const BUILTINS: readonly SyntaxDef[] = [
   CMAKE_SYNTAX,
   ZIG_SYNTAX,
   ELIXIR_SYNTAX,
+  DIFF_SYNTAX,
+  CRYSTAL_SYNTAX,
+  ERLANG_SYNTAX,
+  HCL_SYNTAX,
   // Metadata-only registrations: names the file view guesses honestly
   // while getTokenizer stays undefined (the registry contract). markdown
   // is deliberately stateless-registry-less -- the sink drives its

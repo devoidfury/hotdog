@@ -18,7 +18,14 @@
 // - MOBILE (max-width 768px): the open panel becomes a full-width overlay
 //   and the handle hides -- CSS owns the width there, nothing to drag (the
 //   seam's offsetParent guard agrees); the header toggle is the only entry
-//   point.
+//   point. The pinned tree column STACKS above the tab column there (the
+//   overlay's width is the viewport; two side-by-side columns would lie).
+// - TREE DOCK PIN (file-tree header, beside Refresh): while pinned the
+//   "files" tab leaves the strip and its body becomes a fixed left column
+//   beside strip+viewer -- the sessions-sidebar/chat shape mirrored into
+//   the dock. PURE PROJECTION: the store never learns about it (open/
+//   close/activate/persistence untouched); releasing the pin restores every
+//   tab to its seat. The width gate lives in app.tsx.
 //
 // Storage doctrine rides the seam (panel-resize.ts): blocked storage costs
 // the reload, never the interaction.
@@ -29,7 +36,7 @@ import {
   type WorkbenchTab,
   type WorkbenchTabState,
 } from "./workbench-state.ts";
-import { FileTree, type FileTreeState } from "./file-tree.tsx";
+import { FileTree, type FileTreePin, type FileTreeState } from "./file-tree.tsx";
 import { FileView, type FileViewEntry } from "./file-view.tsx";
 
 /** Body wiring for the two real tab kinds; app.tsx owns the state and the
@@ -181,6 +188,10 @@ interface WorkbenchPanelProps {
   /** Zero-tabs affordance: dock the "files" tab (the app opens it and
    *  re-requests the roots). Absent = no button (shell-only tests). */
   onOpenFiles?: () => void;
+  /** Tree dock pin wiring (see the header and file-tree.tsx FileTreePin).
+   *  Only meaningful with the fileTree wire: a pin with no tree to dock
+   *  docks nothing, so the panel ignores it. */
+  treePin?: FileTreePin;
 }
 
 /**
@@ -224,9 +235,18 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
 
   const tabs = p.state.tabs;
   const active = tabs.find((t) => t.id === p.state.activeId) ?? null;
+  // Dock-pin projection (see the header): a pin without a wired tree docks
+  // nothing, so the wire decides whether the state exists at all. While
+  // pinned the "files" tab IS the fixed column: it leaves the strip, and
+  // its hidden body must not keep the body column occupied either. The
+  // store never sees any of this -- pure projection.
+  const treePin = p.treePin && p.fileTree ? p.treePin : undefined;
+  const pinned = treePin?.pinned === true;
+  const stripTabs = pinned ? tabs.filter((t) => t.kind !== "files") : tabs;
+  const bodyTab = pinned && active?.kind === "files" ? null : active;
 
   return (
-    <aside id="workbench-panel" aria-label="Workbench">
+    <aside id="workbench-panel" aria-label="Workbench" className={pinned ? "workbench-tree-pinned" : undefined}>
       {/* Left-edge handle straddling the border with the chat column.
           nearEdge (see app.tsx workbenchPanel): drag LEFT to grow. */}
       <div
@@ -245,12 +265,29 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
         onKeydown={p.onResizeKey}
         onDblclick={p.onResizeReset}
       />
-      {tabs.length > 0 ? (
+      {pinned ? (
+        // The docked tree: full panel height, its own scroll (CSS owns the
+        // column), header and all -- the pin button rides along in it.
+        <div className="workbench-tree-col">
+          <FileTree
+            tree={p.fileTree!.tree}
+            onToggleDir={p.fileTree!.onToggleDir}
+            onOpenFile={p.fileTree!.onOpenFile}
+            onRefresh={p.fileTree!.onRefresh}
+            onContextMenu={p.fileTree!.onContextMenu}
+            pin={treePin}
+          />
+        </div>
+      ) : null}
+      {/* Flat, this wrapper is display:contents (pixel-identical to the old
+          flat panel); pinned, it is the flex sibling right of the column. */}
+      <div className="workbench-main-col">
+      {stripTabs.length > 0 ? (
         // The strip exists only when there are tabs to operate on (decision:
         // zero tabs -> strip hidden, the empty line speaks). Drag-reorder
         // deferred -- see the header.
         <div id="workbench-tabs" role="tablist" aria-label="Workbench tabs" aria-orientation="horizontal">
-          {tabs.map((t, i) => (
+          {stripTabs.map((t, i) => (
             <div key={t.id} className={`workbench-tab${t.id === p.state.activeId ? " active" : ""}`}>
               <button
                 type="button"
@@ -265,7 +302,7 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
                 tabindex={t.id === p.state.activeId ? "0" : "-1"}
                 title={t.label}
                 onClick={() => p.onActivate(t.id)}
-                onKeydown={(e: KeyboardEvent) => onTabKeydown(e, tabs, i, p.onActivate)}
+                onKeydown={(e: KeyboardEvent) => onTabKeydown(e, stripTabs, i, p.onActivate)}
               >
                 {t.label}
                 {/* Visual dirty marker; the meaning arrives with real tabs
@@ -290,47 +327,51 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
         </div>
       ) : null}
       <div id="workbench-body">
-        {active ? (
+        {bodyTab ? (
           // Keyed by tab id: switching tabs remounts the body instead of
           // patching one placeholder into another. Bodies stay placeholders
           // until real tab kinds land. tabindex="0" per the WAI pattern: the
           // panel body is empty of widgets today, so Tab must be able to
           // reach the content the tab points at.
           <div
-            key={active.id}
-            id={`wpanel-${active.id}`}
+            key={bodyTab.id}
+            id={`wpanel-${bodyTab.id}`}
             className="workbench-tab-body"
             role="tabpanel"
-            aria-labelledby={`wtab-${active.id}`}
+            aria-labelledby={`wtab-${bodyTab.id}`}
             tabindex="0"
           >
-            {active.kind === "files" && p.fileTree ? (
+            {bodyTab.kind === "files" && p.fileTree ? (
               <FileTree
                 tree={p.fileTree.tree}
                 onToggleDir={p.fileTree.onToggleDir}
                 onOpenFile={p.fileTree.onOpenFile}
                 onRefresh={p.fileTree.onRefresh}
                 onContextMenu={p.fileTree.onContextMenu}
+                pin={treePin}
               />
-            ) : active.kind === "file" && p.fileViews ? (
+            ) : bodyTab.kind === "file" && p.fileViews ? (
               <FileView
-                path={active.id}
-                view={p.fileViews.views[active.id]}
+                path={bodyTab.id}
+                view={p.fileViews.views[bodyTab.id]}
                 onReload={p.fileViews.onReload}
                 onMore={p.fileViews.onMore}
               />
             ) : (
               <p className="workbench-placeholder">
-                {active.label} -- placeholder body; real tab content ships with the tab kinds.
+                {bodyTab.label} -- placeholder body; real tab content ships with the tab kinds.
               </p>
             )}
           </div>
         ) : (
           <>
+            {/* Pinned, the tree is already docked right beside this line --
+                the entry button would re-activate a tab that has no seat,
+                so it speaks only in tab mode. */}
             <p id="workbench-empty" className="workbench-empty">
               Files will open here
             </p>
-            {p.onOpenFiles ? (
+            {p.onOpenFiles && !pinned ? (
               // Entry point for the first real tab kind: docks the "files"
               // tab (the app opens it and re-requests the roots).
               <button type="button" id="workbench-open-files" className="workbench-empty-btn" onClick={p.onOpenFiles}>
@@ -339,6 +380,7 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
             ) : null}
           </>
         )}
+      </div>
       </div>
     </aside>
   );

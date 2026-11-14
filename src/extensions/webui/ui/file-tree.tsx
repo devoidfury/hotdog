@@ -26,7 +26,7 @@
 //   every expand/collapse.
 
 import type { DirEntryWire, FileRootWire, ListDirResultWire } from "@extensions/websocket/protocol.ts";
-import { IconReload } from "./icons.tsx";
+import { IconReload, IconTreeDock } from "./icons.tsx";
 import type { WorkbenchTab } from "./workbench-state.ts";
 
 /** The tree tab's stable id (openTab reuses it; the tab keys the root list). */
@@ -304,6 +304,21 @@ export interface FileTreeProps {
   /** Right-click (and Menu/Shift+F10) on any row: the app arms the ContextMenu
    *  (Copy path; focus-return lives with the app's menu machinery). */
   onContextMenu: (e: MouseEvent | KeyboardEvent, path: string, rowEl: HTMLElement) => void;
+  /** Dock pin (the workbench wires it): a disclosure button riding to the
+   *  right of Refresh that pins the tree as a fixed sidebar beside the
+   *  workbench tabs, or releases it back to a plain tab (the panel owns the
+   *  layout -- see workbench.tsx treePin). `available` gates the button on
+   *  the pane being wide enough for two columns; `pinned` is the EFFECTIVE
+   *  state (preference AND width), so the glyph never promises what the
+   *  gate would refuse. Absent = no button (settings-style trees). */
+  pin?: FileTreePin;
+}
+
+/** The pin wire (see FileTreeProps.pin). */
+export interface FileTreePin {
+  pinned: boolean;
+  available: boolean;
+  onToggle: () => void;
 }
 
 /** Row-level keyboard/contextmenu wiring shared by every row kind (the
@@ -418,15 +433,34 @@ export function FileTree(p: FileTreeProps) {
     <div className="file-tree" role="tree" aria-label="Workspace files">
       <div className="ft-header">
         <span className="ft-header-label">Workspace</span>
-        <button
-          type="button"
-          className="file-reload-btn"
-          title="Re-list the roots and every expanded directory"
-          aria-label="Refresh"
-          onClick={p.onRefresh}
-        >
-          <IconReload className="file-reload-glyph" />
-        </button>
+        <span className="ft-header-actions">
+          <button
+            type="button"
+            className="file-reload-btn"
+            title="Re-list the roots and every expanded directory"
+            aria-label="Refresh"
+            onClick={p.onRefresh}
+          >
+            <IconReload className="file-reload-glyph" />
+          </button>
+          {p.pin?.available ? (
+            // Same .file-reload-btn chrome family as Refresh (the header
+            // glyph standard); aria-expanded mirrors the PINNED state like
+            // the header disclosures. The flip lives in the panel, not the
+            // store: this button only says what the tree is wearing.
+            <button
+              type="button"
+              id="workbench-tree-pin"
+              className="file-reload-btn"
+              title="Pin the workspace tree beside the workbench tabs (or release it back to a tab)"
+              aria-label="Toggle workspace tree dock"
+              aria-expanded={p.pin.pinned ? "true" : "false"}
+              onClick={p.pin.onToggle}
+            >
+              <IconTreeDock />
+            </button>
+          ) : null}
+        </span>
       </div>
       {!roots || roots.status === "loading" ? (
         <div className="ft-note ft-loading">Listing workspace...</div>

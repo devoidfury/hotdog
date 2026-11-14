@@ -189,9 +189,10 @@ export interface PanelResizeOptions {
   axis: PanelAxis;
   /** localStorage key for the size. */
   sizeKey: string;
-  /** localStorage key for the collapsed flag. Omit it for a panel that never
-   *  collapses (the sidebar): then collapsed() is always false and toggle()
-   *  is a no-op. */
+  /** localStorage key for the collapsed flag. Omit it for a panel the seam
+   *  never collapses (the sidebar -- its chat-header disclosure is a plain
+   *  view setting, see app.tsx sidebarCollapsedAtom): then collapsed() is
+   *  always false and toggle() is a no-op. */
   collapsedKey?: string;
   /** What a reset (double-click) restores, and what a fresh visitor gets. */
   defaultSize: number;

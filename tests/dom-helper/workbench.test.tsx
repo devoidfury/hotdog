@@ -17,6 +17,7 @@ import {
   WorkbenchPanel,
 } from "@extensions/webui/ui/workbench.tsx";
 import { createWorkbenchStore, type WorkbenchStore } from "@extensions/webui/ui/workbench-state.ts";
+import { emptyFileTree } from "@extensions/webui/ui/file-tree.tsx";
 import { WORKBENCH_MAX_WIDTH } from "@extensions/webui/ui/utils.ts";
 import { createPanelResize, type PanelEnv, type PanelResize } from "@extensions/webui/ui/panel-resize.ts";
 import { mount, type DomNode, type Mounted } from "@utils/jsx";
@@ -61,7 +62,15 @@ interface H {
 
 let current: H | null = null;
 
-function harness(opts: { throwing?: boolean; seedCollapsed?: "0" | "1" } = {}): H {
+/** The dock-pin wire the app would hand the panel (shell tests drive the
+ *  flags directly; the persistence/gate truth is app.test.tsx's). */
+interface PinOpt {
+  pinned: boolean;
+  available: boolean;
+  onToggle: () => void;
+}
+
+function harness(opts: { throwing?: boolean; seedCollapsed?: "0" | "1"; wireTree?: boolean; treePin?: PinOpt } = {}): H {
   const storage = opts.throwing ? new ThrowingStorage() : new FakeStorage();
   // Pre-seeded visit: the stored choice lands BEFORE restore(), so the
   // seed-skip branch (app.tsx init()'s hasStoredWorkbenchCollapsed mirror)
@@ -119,6 +128,15 @@ function harness(opts: { throwing?: boolean; seedCollapsed?: "0" | "1" } = {}): 
         onResizeEnd={panel.onPointerUp}
         onResizeKey={panel.onKeyDown}
         onResizeReset={panel.onDoubleClick}
+        // The tree body wire (an idle tree: roots unlisted, header and all)
+        // plus the optional dock-pin state -- the dock-pin suite drives
+        // both; every other section stays shell-only (no button anywhere).
+        fileTree={
+          opts.wireTree
+            ? { tree: emptyFileTree(), onToggleDir: () => {}, onOpenFile: () => {}, onRefresh: () => {}, onContextMenu: () => {} }
+            : undefined
+        }
+        treePin={opts.treePin}
       />
     </div>
   );
@@ -564,5 +582,86 @@ describe("workbench tab persistence codec", () => {
     map.set(WORKBENCH_TABS_KEY, JSON.stringify({ tabs: [], activeId: null }));
     seedWorkbenchStoreFromStorage(store); // empty record re-opens nothing
     expect(store.get().activeId).toBe("/a");
+  });
+});
+
+// ── Workspace-tree dock pin (shell projection) ─────────────────────────────
+// The pin is PURE PROJECTION (see the workbench.tsx header): while pinned
+// the "files" tab leaves the strip and its body becomes the fixed left
+// column; the store never learns. The app-level truth (persistence, the
+// width gate, the click handler) is pinned in app.test.tsx; this suite
+// pins what the shell renders for each (pinned, available, wired) combo.
+
+describe("workspace-tree dock pin (shell projection)", () => {
+  const idleTree = () => ({ pinned: false, available: true, onToggle: () => {} });
+
+  it("unpinned + available: the button rides right of Refresh in the tree header; the layout stays flat", () => {
+    let toggled = 0;
+    const h = harness({ wireTree: true, treePin: { ...idleTree(), onToggle: () => toggled++ } });
+    h.panel.toggle(); // open the pane
+    h.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    const pin = h.q("#workbench-tree-pin");
+    expect(pin).toBeTruthy();
+    // The header's right group: Refresh first, the pin immediately right.
+    const kids = h.q(".ft-header-actions")!.children;
+    expect(kids[0]!.getAttribute("aria-label")).toBe("Refresh");
+    expect(kids[1]!).toBe(pin!);
+    expect(pin!.getAttribute("aria-expanded")).toBe("false"); // the PINNED state, unpressed
+    expect(pin!.textContent).toBe(""); // glyph-only chrome
+    expect(pin!.querySelector("svg[aria-hidden='true']")).toBeTruthy();
+    // The lined dock: three bars, no solid column (the workbench fill is
+    // height 14 -- the mirror of that is what this is NOT).
+    expect(pin!.querySelectorAll("rect[height='3.2']")).toHaveLength(3);
+    expect(pin!.querySelector("rect[height='14']")).toBeNull();
+    // Flat panel: no column, no class, the tree is the active tab's body.
+    expect(h.q(".workbench-tree-col")).toBeNull();
+    expect((h.q("#workbench-panel")!.getAttribute("class") ?? "")).not.toContain("workbench-tree-pinned");
+    expect(h.q("#workbench-body .file-tree")).toBeTruthy();
+    pin!.click();
+    expect(toggled).toBe(1); // the shell owns no state: it only calls
+  });
+
+  it("pinned with ONLY the files tab: strip gone (nothing to select), tree docked, honest empty body, no entry button", () => {
+    const h = harness({ wireTree: true, treePin: { pinned: true, available: true, onToggle: () => {} } });
+    h.panel.toggle();
+    h.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    expect(h.q("#workbench-panel")!.getAttribute("class")).toContain("workbench-tree-pinned");
+    expect(h.q("#workbench-tabs")).toBeNull(); // zero stripTabs: no empty tablist widget
+    expect(h.q("#workbench-open-files")).toBeNull(); // the tree is already docked
+    expect(h.q("#workbench-empty")!.textContent).toBe("Files will open here");
+    const col = h.q(".workbench-tree-col");
+    expect(col).toBeTruthy();
+    expect(col!.querySelector(".ft-header-label")!.textContent).toBe("Workspace");
+    expect(h.q("#workbench-body .file-tree")).toBeNull(); // never doubled into the body
+    expect(h.q("#workbench-tree-pin")!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("pinned with a file tab: the file keeps the strip and the body column beside the docked tree", () => {
+    const h = harness({ wireTree: true, treePin: { pinned: true, available: true, onToggle: () => {} } });
+    h.panel.toggle();
+    h.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    h.tabs.open({ id: "/a.ts", kind: "file", label: "a.ts", dirty: false });
+    expect(h.q("#wtab-files")).toBeNull(); // the files tab has no seat
+    expect(h.q("#workbench-tabs")!.querySelectorAll(".workbench-tab")).toHaveLength(1);
+    expect(h.q("#workbench-empty")).toBeNull(); // the viewer owns the body again
+    expect(h.q(".workbench-tree-col .file-tree")).toBeTruthy();
+  });
+
+  it("gate refused (available=false): no button anywhere, and nothing docks", () => {
+    const h = harness({ wireTree: true, treePin: { pinned: false, available: false, onToggle: () => {} } });
+    h.panel.toggle();
+    h.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    expect(h.q("#workbench-tree-pin")).toBeNull();
+    expect(h.q("#wtab-files")).toBeTruthy(); // the plain tab life
+    expect(h.q(".workbench-tree-col")).toBeNull();
+  });
+
+  it("a pin without a wired tree docks NOTHING: the shell ignores the state entirely", () => {
+    const h = harness({ treePin: { pinned: true, available: true, onToggle: () => {} } }); // shell-only: no fileTree wire
+    h.panel.toggle();
+    h.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    expect(h.q("#workbench-tree-pin")).toBeNull();
+    expect((h.q("#workbench-panel")!.getAttribute("class") ?? "")).not.toContain("workbench-tree-pinned");
+    expect(h.q("#wtab-files")).toBeTruthy();
   });
 });

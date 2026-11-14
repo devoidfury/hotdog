@@ -194,12 +194,6 @@
        stored height hydrates it on load). */
     --logs-height: 240px;
     --input-height: 64px;
-    /* The TOP BAND: the sidebar's SESSIONS header and the main pane's
-       Session:/Subagent: bar are ONE visual row across the split (owner
-       ruling 2026-11-13). 45px is the sidebar header's existing natural
-       height (32px action buttons + 6px+6px padding + the 1px seam); both
-       rules read this token, so the two panes can never drift apart again. */
-    --header-band-height: 45px;
 
     /* Transitions */
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -450,10 +444,21 @@ body {
    MAIN UI LAYOUT
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Column layout: the full-width #session-info header band pins the top, and
+   #workspace-row takes the rest (sidebar / chat / workbench ride it as a
+   flex row). Opening or resizing the workbench therefore never pushes the
+   header; the band spans the whole viewport. */
 #main-ui {
     display: flex;
+    flex-direction: column;
     height: 100vh;
     background: var(--bg-primary);
+}
+
+#workspace-row {
+    display: flex;
+    flex: 1;
+    min-height: 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -469,6 +474,17 @@ body {
     flex-shrink: 0;
     position: relative; /* anchor for #sidebar-resize */
     transition: transform 0.3s var(--ease-out);
+}
+
+/* The chat-header disclosure's collapsed state: display:none drops the
+   panel out of the #workspace-row flex row, so the chat column takes the
+   space (the resize handle rides inside #sidebar and disappears with it;
+   the seam's offsetParent guard no-ops a CSS-hidden one anyway). The
+   mobile drawer needs no twin rule -- there the panel's default is already
+   display:none, and the same preference simply stops rendering .open
+   (see app.tsx sidebarCollapsedAtom: one preference, honest per viewport). */
+#sidebar.sidebar-hidden {
+    display: none;
 }
 
 /* Sidebar resize handle: a 6px strip straddling the right border, with a
@@ -516,12 +532,11 @@ body.sidebar-resizing {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    /* Band height (see --header-band-height): 45 = 6+32+6+1, the 32px
-       action buttons fit the content box EXACTLY, so their hit targets
-       are untouched and the h2's centerline pins to the band's middle --
-       the same middle the main pane's #session-info text centers on. */
-    height: var(--header-band-height);
-    padding: 6px 6px 6px 12px;
+    /* Content-hugging (the fixed band-height token retired with the old
+       across-the-split alignment): the 28px action buttons set the height,
+       4px vertical padding each side over the 1px seam. The h2 centerline
+       rides the band's middle, level with the chat column's #chat-header. */
+    padding: 4px 6px 4px 12px;
     border-bottom: 1px solid var(--border);
 }
 
@@ -534,8 +549,8 @@ body.sidebar-resizing {
 }
 
 #new-session-btn {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: var(--radius-sm);
     background: var(--accent-soft);
     color: var(--accent);
@@ -566,8 +581,8 @@ body.sidebar-resizing {
 }
 
 #search-btn {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-muted);
@@ -1036,7 +1051,7 @@ body.sidebar-resizing {
 .sidebar-header-secondary {
     margin-top: 4px;
     /* The band pin is the TOP row's; the Recent Logs titlebar keeps its own
-       natural height (2+32+2+2 seams) -- opt back out of the token. */
+       natural height (2+28+2+2 seams) -- opt back out of the token. */
     height: auto;
     padding-top: 2px;
     padding-bottom: 2px;
@@ -1073,8 +1088,8 @@ body.sidebar-resizing {
    stroke svg (icons.tsx IconChevron), tinted by currentColor like every
    glyph in the house idiom. */
 #logs-toggle {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-muted);
@@ -1190,19 +1205,36 @@ body.logs-resizing .sidebar-header-resize {
     background: var(--bg-primary);
 }
 
-/* ── Session Info Bar ─────────────────────────────────────────────────────── */
+/* ── Top Band (global controls) ───────────────────────────────────────────── */
 
+/* The app's top band: a full-width child of #main-ui carrying ONLY the
+   global controls (.header-status-group: settings / theme / workbench),
+   pinned right. Content-hugging: the 28px glyph boxes set the height
+   (2+28+2 over the 1px seam = 33px); sidebar and workspace live below it
+   in #workspace-row, so nothing here can be pushed by a pane. */
 #session-info {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    /* Same token as .sidebar-header: one band across the split (see
-       --header-band-height). The bar grows 37 -> 45px; the glyph cluster's
-       32px boxes center inside the 40px content box, and the header text's
-       centerline lands on the band's middle exactly like the sidebar h2's. */
-    height: var(--header-band-height);
+    justify-content: flex-end;
     padding: 2px 6px;
     background: var(--bg-primary);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+/* ── Chat Header (per-pane identity + toggles) ────────────────────────────── */
+
+/* The chat column's own header, directly under the top band: the id copy
+   badge and the browse chips left, the pane's toggles (reasoning, exec
+   fence) right. Same content band as .sidebar-header (4+28+4 over the
+   1px seam), so the two stacked pane headers read as one row. */
+#chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 6px;
     border-bottom: 1px solid var(--border);
     font-size: 0.975rem;
     flex-shrink: 0;
@@ -1214,6 +1246,17 @@ body.logs-resizing .sidebar-header-resize {
     display: flex;
     align-items: center;
     gap: 6px;
+}
+
+/* Left cluster: the sidebar disclosure leads the identity chip and the
+   browse chips (2026-11-14), so #chat-header keeps exactly two flex
+   children and space-between pins the status group right whatever the
+   chips do. The 8px gap is the header's rhythm (the status group's too). */
+.header-identity-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
 }
 
 #current-session-id {
@@ -1431,7 +1474,7 @@ body.logs-resizing .sidebar-header-resize {
 
 /* Reasoning chip + fence icon + settings + theme + workbench, grouped so
    the strip stays right-aligned as items come and go. 8px (owner-specified):
-   the 12px default spaced the icon-only chips further apart than their 32px
+   the 12px default spaced the icon-only chips further apart than their 28px
    boxes wanted. */
 .header-status-group {
     display: flex;
@@ -1447,7 +1490,7 @@ body.logs-resizing .sidebar-header-resize {
 
 /* Icon-only header chips (the reasoning toggle, the fence chip + settings
    gear) join the #search-btn/#theme-btn/#workbench-toggle glyph standard: a
-   32px box whose 1px border is merely transparent at rest (width kept --
+   28px box whose 1px border is merely transparent at rest (width kept --
    hover shifts no layout), no fill, muted ink -> accent over accent-soft. The
    classes (.header-btn toggleable / tool-exec-degraded) keep their BEHAVIOR
    meaning; these ID rules just paint over the chip's rest chrome. No header
@@ -1456,8 +1499,8 @@ body.logs-resizing .sidebar-header-resize {
 #tool-exec-status,
 #settings-btn,
 #thinking-toggle {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -1539,8 +1582,8 @@ body.logs-resizing .sidebar-header-resize {
    glyph as an inline SVG tinted by currentColor (icons.tsx IconPalette), so
    it recolors itself with whatever palette is on screen. */
 #theme-btn {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-muted);
@@ -1569,7 +1612,7 @@ body.logs-resizing .sidebar-header-resize {
 
 
 /* Header workbench disclosure: the #search-btn / #theme-btn glyph standard
-   (32px box, 1px border merely transparent at rest so hover/focus shift no
+   (28px box, 1px border merely transparent at rest so hover/focus shift no
    layout; hover returns the .toggleable accent border over accent-soft;
    :focus-visible takes #theme-btn's inset-outline grammar -- the
    "header-btn toggleable" class keeps its behavior meaning). The glyph:
@@ -1577,10 +1620,13 @@ body.logs-resizing .sidebar-header-resize {
    left edge IS the single divider (5/16 of the box width from the right) --
    mirroring the right dock this button opens, which it now sits beside (the
    status group's last element). Inline SVG tinted by currentColor
-   (icons.tsx IconWorkbench). */
-#workbench-toggle {
-    width: 32px;
-    height: 32px;
+   (icons.tsx IconWorkbench). The chat-header's #sidebar-toggle copies the
+   recipe verbatim: same 28px glyph-box standard, its glyph the mirror (fill
+   on the LEFT column) pointing at the sessions dock left of the chat. */
+#workbench-toggle,
+#sidebar-toggle {
+    width: 28px;
+    height: 28px;
     padding: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -1595,12 +1641,14 @@ body.logs-resizing .sidebar-header-resize {
     align-self: center;
 }
 
-#workbench-toggle:hover {
+#workbench-toggle:hover,
+#sidebar-toggle:hover {
     color: var(--accent);
     background: var(--accent-soft);
 }
 
-#workbench-toggle:focus-visible {
+#workbench-toggle:focus-visible,
+#sidebar-toggle:focus-visible {
     background: var(--accent-soft);
     outline: 1px solid var(--accent);
     outline-offset: -1px;
@@ -3016,6 +3064,44 @@ body.logs-resizing .sidebar-header-resize {
     position: relative; /* anchor for #workbench-resize */
 }
 
+/* Workspace-tree dock pin (the tree header's disclosure, beside Refresh):
+   pinned, the tree rides a fixed left column and the tab strip + viewer a
+   right one -- the sessions-sidebar/chat-column shape mirrored into the
+   dock. .workbench-main-col is display:contents flat, so the unpinned DOM
+   stays pixel-identical to the old flat panel; the pinned row is what
+   turns it into a flex sibling. The column is content-bounded (clamp):
+   the gate's 420px floor already leaves the viewer side usable. Width
+   gate + persistence live in app.tsx (workbenchTreePinnedAtom, gated on
+   WORKBENCH_TREE_PIN_MIN_WIDTH via workbenchSizeAtom). */
+#workbench-panel.workbench-tree-pinned {
+    flex-direction: row;
+}
+
+.workbench-main-col {
+    display: contents;
+}
+
+#workbench-panel.workbench-tree-pinned .workbench-main-col {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.workbench-tree-col {
+    flex: 0 0 clamp(150px, 42%, 260px);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    /* Rides right up at the top like the SESSIONS header band (4px above
+       it, not the body's 12 -- the column header IS a pane header, not
+       body content); the 12px left rail matches .sidebar-header's, and
+       the column's right border keeps the dock seam (owner ruling: stays). */
+    padding: 4px 12px 12px;
+    border-right: 1px solid var(--border);
+}
+
 /* Left-edge handle: the sidebar's strip one border over. nearEdge means the
    drag grows LEFT (the seam flips the sign); visuals are the house match. */
 #workbench-resize {
@@ -3084,7 +3170,7 @@ body.workbench-resizing {
     align-items: center;
     gap: 6px;
     min-width: 0;
-    padding: 6px 10px;
+    padding: 5px 10px;
     background: transparent;
     border: none;
     color: var(--text-secondary);
@@ -3174,6 +3260,16 @@ body.workbench-resizing {
     font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+}
+
+/* The header's right group: Refresh, then the tree dock pin riding to its
+   right (both .file-reload-btn chrome). A group span keeps the header's
+   space-between pinning the PAIR right -- three loose children would
+   strand Refresh mid-row. */
+.ft-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 /* Header reload affordances (the file tree's Refresh, the file viewer's
@@ -3473,7 +3569,14 @@ body.workbench-resizing {
         display: none;
         position: fixed;
         left: 0;
-        top: 0;
+        /* Under the top band AND the chat column's header, whose
+           #sidebar-toggle is this drawer's only opener/closer (2026-11-14):
+           33px of band chrome (2+28+2+1) + 37px of header band (4+28+4+1)
+           = 70px. At the old 33px the open drawer buried the toggle under
+           its own Sessions titlebar -- a drawer you could open but never
+           close. The workbench overlay keeps 33px: its control rides the
+           band, above the overlay. */
+        top: 70px;
         bottom: 0;
         z-index: 100;
         box-shadow: var(--shadow-lg);
@@ -3495,7 +3598,9 @@ body.workbench-resizing {
         position: fixed;
         left: 0;
         right: 0;
-        top: 0;
+        /* Slides out under the top band, not over it (desktop rule,
+           restated for the overlay; 33px = the band's content height). */
+        top: 33px;
         bottom: 0;
         width: auto;
         z-index: 100;
@@ -3504,6 +3609,22 @@ body.workbench-resizing {
 
     #workbench-resize {
         display: none;
+    }
+
+    /* Pinned tree inside the phone overlay STACKS above the tab column:
+       the overlay's width is the viewport (small) while the pin gate's
+       number is the desktop seam's, so two side-by-side columns would be
+       a squeeze the gate never actually vetted. Stacked, the tree keeps a
+       scrollable half-height band above the tabs. */
+    #workbench-panel.workbench-tree-pinned {
+        flex-direction: column;
+    }
+
+    #workbench-panel.workbench-tree-pinned .workbench-tree-col {
+        flex: 0 0 auto;
+        max-height: 45%;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
     }
 
     /* The Recent Logs titlebar keeps its gestures here: unlike the sidebar
@@ -3517,6 +3638,10 @@ body.workbench-resizing {
         background: transparent;
     }
 
+    /* The drawer's OPEN state, driven by the chat-header disclosure since
+       2026-11-14 (app.tsx sidebarCollapsedAtom renders .open when the one
+       stored preference says shown; collapsed drops the class and the
+       display:none default above reclaims the drawer). */
     #sidebar.open {
         display: flex;
     }

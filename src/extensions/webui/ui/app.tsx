@@ -15,7 +15,7 @@ import {
   IconThinking,
   IconWorkbench,
 } from "./icons.tsx";
-import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH, WORKBENCH_DEFAULT_WIDTH } from "./utils.ts";
+import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH, WORKBENCH_DEFAULT_WIDTH, WORKBENCH_TREE_PIN_MIN_WIDTH } from "./utils.ts";
 import { createPanelResize, decodeCollapsed, encodeCollapsed } from "./panel-resize.ts";
 import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
 import {
@@ -1346,6 +1346,32 @@ const sidebarPanel = createPanelResize({
   },
 });
 
+// Sidebar visibility: a plain view setting (the width seam above owns the
+// size, this owns presence -- same "1"/"0" codec the subagents section
+// persists, no resize machinery). ONE preference drives both shapes: on
+// desktop the collapse class drops #sidebar out of the flex row, on mobile
+// the same preference opens/closes the fixed drawer (#sidebar.open) -- so
+// one click does the honest thing per viewport. The default is expanded
+// everywhere, which on a phone means a first visit sees the drawer open
+// once (the pref honestly says "sidebar shown"); one tap collapses it and
+// the choice persists for both shapes.
+const SIDEBAR_COLLAPSED_KEY = "hotdog.sidebarCollapsed";
+const sidebarCollapsedAtom = reactiveState<boolean>(false);
+
+function restoreSidebarCollapsed(): void {
+  try {
+    sidebarCollapsedAtom(decodeCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)));
+  } catch {}
+}
+
+function onToggleSidebar(): void {
+  const next = !sidebarCollapsedAtom();
+  sidebarCollapsedAtom(next);
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, encodeCollapsed(next));
+  } catch {}
+}
+
 // Recent Logs: a collapsible section the user drags taller/shorter from its
 // titlebar. Collapsed keeps the header and drops the list entirely, so the
 // resize gestures are gated off until it expands again -- and a section that
@@ -1433,6 +1459,46 @@ function hasStoredWorkbenchCollapsed(): boolean {
   } catch {
     return false;
   }
+}
+
+// ── Workspace-tree dock pin ─────────────────────────────────────────────────
+// Pins the workspace tree into a fixed left column INSIDE the workbench
+// (beside the tab strip + viewer -- the sessions-sidebar/chat shape
+// mirrored into the dock) instead of letting it ride as the "files" tab.
+// One stored "1"/"0" preference like the siblings; the layout decision is
+// the panel's projection (workbench.tsx), the WIDTH decision is the gate
+// below. The store never learns about any of it.
+
+const WORKBENCH_TREE_PIN_KEY = "hotdog.workbenchTreePinned";
+const workbenchTreePinnedAtom = reactiveState<boolean>(false);
+
+function restoreWorkbenchTreePinned(): void {
+  try {
+    workbenchTreePinnedAtom(decodeCollapsed(window.localStorage.getItem(WORKBENCH_TREE_PIN_KEY)));
+  } catch {}
+}
+
+function onToggleWorkbenchTreePin(): void {
+  const next = !workbenchTreePinnedAtom();
+  workbenchTreePinnedAtom(next);
+  try {
+    window.localStorage.setItem(WORKBENCH_TREE_PIN_KEY, encodeCollapsed(next));
+  } catch {}
+}
+
+// The seam's width is deliberately imperative (pointermove never re-renders
+// the tree), so renders get their own view of it: read live at render,
+// bumped by syncWorkbenchWidth() when a gesture LANDS a size (release,
+// reset, arrow step). The dock-pin gate below reads it -- below the min the
+// pin releases to tab mode and the button hides, while the stored
+// preference stays true and re-applies once the pane is wide again (a
+// narrow pane pins nothing). On the mobile overlay the seam number is
+// stale -- CSS owns the width there -- so the media query stacks the
+// pinned column instead of trusting the gate; nothing squeezes either way.
+const workbenchSizeAtom = reactiveState<number>(WORKBENCH_DEFAULT_WIDTH);
+
+function syncWorkbenchWidth(): void {
+  workbenchSizeAtom(workbenchPanel.size());
 }
 
 // ── Workbench file tabs (tree + read-only viewer) ───────────────────────────
@@ -2349,6 +2415,11 @@ function App() {
   // replies; the coalesced render repaints the pane).
   const fileTree = fileTreeAtom();
   const fileViews = fileViewsAtom();
+  // Dock-pin gate (see workbenchSizeAtom): the preference is the want, the
+  // pane width is the can. Both flags ride the panel; the button appears
+  // exactly when the gate allows it and the aria carries the EFFECTIVE
+  // pinned state.
+  const treePinWide = workbenchSizeAtom() >= WORKBENCH_TREE_PIN_MIN_WIDTH;
 
   return (
     <>
@@ -2368,6 +2439,67 @@ function App() {
         >
           {liveAnnounceAtom()}
         </div>
+        <div id="session-info">
+          <span className="header-status-group">
+            {/* Settings viewer: a live-at-open read of the resolved config
+                (a fresh snapshot is requested on every open; diagnostics +
+                per-key sources, secrets redacted server-side). Opens a
+                dialog; Escape returns focus here. */}
+            <button
+              type="button"
+              id="settings-btn"
+              className="header-btn toggleable"
+              aria-label="Settings"
+              aria-haspopup="dialog"
+              aria-expanded={settingsAtom().open ? "true" : "false"}
+              title="Settings Menu"
+              onClick={openSettings}
+            >
+              {/* Icon-only: the solid gear carries the button; the hover
+                  text is the plain "Settings Menu". aria-label,
+                  haspopup/expanded and the open handler unchanged; zero
+                  text renders. */}
+              <IconGear />
+            </button>
+            {/* Theme switcher: cycles the palette registry (hotdog ->
+                purple -> ...); a click persists and re-tags <html>.
+                Native button = Enter/Space work for free. The inline SVG
+                glyph is tinted by currentColor, so it recolors with
+                whatever palette is on screen (see #theme-btn in
+                styles.css). Position rides after settings so the header
+                group's pinned children keep their slots. */}
+            <button
+              type="button"
+              id="theme-btn"
+              title={themeTitle}
+              aria-label={themeTitle}
+              onClick={cycleTheme}
+            >
+              <IconPalette />
+            </button>
+            {/* Workbench disclosure: the header's LAST control (the
+                connection indicator left for the composer), at the
+                group's absolute right edge. The glyph reads as a panel
+                with its RIGHT column solid-filled, the fill's left edge
+                being the single divider -- the dock this button opens --
+                so icon and dock sit side by side at rest. aria-label
+                carries the name; aria-expanded mirrors the OPEN state
+                like #logs-toggle. */}
+            <button
+              type="button"
+              id="workbench-toggle"
+              className="header-btn toggleable"
+              aria-label="Toggle workbench pane"
+              aria-expanded={workbenchCollapsedAtom() ? "false" : "true"}
+              title="Toggle Workbench (right pane sidebar)"
+              onClick={onToggleWorkbench}
+            >
+              <IconWorkbench />
+            </button>
+          </span>
+        </div>
+
+        <div id="workspace-row">
         <Sidebar
           sessions={sessionsAtom()}
           activeSessionId={sessionId}
@@ -2402,6 +2534,7 @@ function App() {
           onActivateHit={onActivateHit}
           sidebarWidth={sidebarPanel.size()}
           sidebarMax={sidebarPanel.maxSize()}
+          sidebarCollapsed={sidebarCollapsedAtom()}
           onResizeStart={sidebarPanel.onPointerDown}
           onResizeMove={sidebarPanel.onPointerMove}
           onResizeEnd={sidebarPanel.onPointerUp}
@@ -2420,88 +2553,117 @@ function App() {
         />
 
         <main id="chat-area">
-          <div id="session-info">
-            {/* The pane's subject identity (owner ruling 2026-11-13): a
-                subagent view names itself -- "Subagent:" + the viewed task's
-                id badge, copy landing the FULL task id -- and reverts to the
-                attached "Session:" the moment the mode ends. The dim is log
-                view only: there the badge shows the attached id while the
-                pane is a cold record, so it must read as not-the-subject;
-                in subagent view the badge IS the subject, so it never dims. */}
-            <span id="session-label" style={activeLogId !== null ? { opacity: "0.5" } : undefined}>
-              {viewedTaskId !== null ? "Subagent:" : "Session:"}{" "}
+          {/* Chat-column header (2026-11-14): the pane's identity (the id
+              copy badge, the browse chips) plus the pane's own controls
+              (reasoning visibility, exec fence). The GLOBAL controls
+              (settings/theme/workbench) stay in the top #session-info band. */}
+          <div id="chat-header">
+            {/* Left cluster (2026-11-14): the sidebar disclosure, the pane's
+                identity chip and the browse chips ride together so the
+                header keeps exactly two flex children (cluster left,
+                .header-status-group right); space-between with a bare
+                fourth child would strand a chip mid-band. */}
+            <span className="header-identity-group">
+              {/* Sidebar disclosure: the panel glyph with the fill mirrored
+                  to the LEFT column (icons.tsx IconWorkbench flip), so icon
+                  and dock point the same way -- the sessions sidebar lives
+                  left of this column. One preference, two shapes: desktop
+                  drops #sidebar out of the flex row, mobile opens/closes
+                  the fixed drawer (see sidebarCollapsedAtom). aria-expanded
+                  mirrors the OPEN state like #workbench-toggle. */}
               <button
                 type="button"
-                id="current-session-id"
-                className={copyFlashAtom() ? "copied" : undefined}
-                title={
-                  badgeId
-                    ? viewedTaskId !== null
-                      ? "Copy full subagent id"
-                      : "Copy full session id"
-                    : undefined
-                }
-                aria-label={
-                  badgeId
-                    ? viewedTaskId !== null
-                      ? "Copy full subagent id"
-                      : "Copy full session id"
-                    : undefined
-                }
-                onClick={
-                  badgeId
-                    ? (e: MouseEvent) => {
-                        // The badge had no click action before the copy; stop
-                        // so it never bubbles into an ancestor handler.
-                        e.stopPropagation();
-                        onCopySessionId(badgeId);
-                      }
-                    : undefined
-                }
+                id="sidebar-toggle"
+                className="header-btn toggleable"
+                aria-label="Toggle sessions sidebar"
+                aria-expanded={sidebarCollapsedAtom() ? "false" : "true"}
+                title="Toggle Sessions sidebar (left pane)"
+                onClick={onToggleSidebar}
               >
-                {/* Fingerprint ONLY: the badge is the full-id copy button,
-                    never a title slot (titles live on the sidebar row; a
-                    derived one is far too long for the header). Copy
-                    affordance: the inline icon/check pair (CSS swaps them
-                    on .copied); the empty glyphs add nothing to
-                    textContent, so the badge stays pure id text. */}
-                {badgeId ? badgeId.slice(0, 8) : ""}
-                <IconCopy className="session-copy-icon" />
-                <IconCheck className="session-copy-check" />
+                <IconWorkbench flip />
               </button>
-            </span>
-            {activeLogId ? (
-              <span id="log-view-label">
-                Viewing log: <span id="current-log-id">{activeLogId.slice(0, 8)}</span>{" "}
-                <button id="close-log-view-btn" title="Close log view" onClick={onCloseLogView}>
-                  ✕
-                </button>
-              </span>
-            ) : null}
-            {/* The subagent mirror of the log-view label: what is on screen
-                (step label idiom; full task id on the native title) and how
-                to leave. An evicted task falls back to labeling from its
-                bare id. */}
-            {viewedTaskId !== null ? (
-              <span id="subagent-view-label">
-                Viewing subagent:{" "}
-                <span id="current-subagent-label" title={viewedTaskId}>
-                  {chipLabel(
-                    tasks.find((t) => t.taskId === viewedTaskId) ?? {
-                      taskId: viewedTaskId,
-                      description: "",
-                    },
-                  )}
-                </span>{" "}
+              {/* The pane's subject identity (owner ruling 2026-11-13): a
+                  subagent view names itself -- "Subagent:" + the viewed task's
+                  id badge, copy landing the FULL task id -- and reverts to the
+                  attached "Session:" the moment the mode ends. The dim is log
+                  view only: there the badge shows the attached id while the
+                  pane is a cold record, so it must read as not-the-subject;
+                  in subagent view the badge IS the subject, so it never dims. */}
+              <span id="session-label" style={activeLogId !== null ? { opacity: "0.5" } : undefined}>
+                {viewedTaskId !== null ? "Subagent:" : "Session:"}{" "}
                 <button
-                  id="close-subagent-view-btn"
-                  title="Close subagent view"
-                  onClick={onCloseSubagentView}
+                  type="button"
+                  id="current-session-id"
+                  className={copyFlashAtom() ? "copied" : undefined}
+                  title={
+                    badgeId
+                      ? viewedTaskId !== null
+                        ? "Copy full subagent id"
+                        : "Copy full session id"
+                      : undefined
+                  }
+                  aria-label={
+                    badgeId
+                      ? viewedTaskId !== null
+                        ? "Copy full subagent id"
+                        : "Copy full session id"
+                      : undefined
+                  }
+                  onClick={
+                    badgeId
+                      ? (e: MouseEvent) => {
+                          // The badge had no click action before the copy; stop
+                          // so it never bubbles into an ancestor handler.
+                          e.stopPropagation();
+                          onCopySessionId(badgeId);
+                        }
+                      : undefined
+                  }
                 >
-                  ✕
+                  {/* Fingerprint ONLY: the badge is the full-id copy button,
+                      never a title slot (titles live on the sidebar row; a
+                      derived one is far too long for the header). Copy
+                      affordance: the inline icon/check pair (CSS swaps them
+                      on .copied); the empty glyphs add nothing to
+                      textContent, so the badge stays pure id text. */}
+                  {badgeId ? badgeId.slice(0, 8) : ""}
+                  <IconCopy className="session-copy-icon" />
+                  <IconCheck className="session-copy-check" />
                 </button>
               </span>
-            ) : null}
+              {activeLogId ? (
+                <span id="log-view-label">
+                  Viewing log: <span id="current-log-id">{activeLogId.slice(0, 8)}</span>{" "}
+                  <button id="close-log-view-btn" title="Close log view" onClick={onCloseLogView}>
+                    ✕
+                  </button>
+                </span>
+              ) : null}
+              {/* The subagent mirror of the log-view label: what is on screen
+                  (step label idiom; full task id on the native title) and how
+                  to leave. An evicted task falls back to labeling from its
+                  bare id. */}
+              {viewedTaskId !== null ? (
+                <span id="subagent-view-label">
+                  Viewing subagent:{" "}
+                  <span id="current-subagent-label" title={viewedTaskId}>
+                    {chipLabel(
+                      tasks.find((t) => t.taskId === viewedTaskId) ?? {
+                        taskId: viewedTaskId,
+                        description: "",
+                      },
+                    )}
+                  </span>{" "}
+                  <button
+                    id="close-subagent-view-btn"
+                    title="Close subagent view"
+                    onClick={onCloseSubagentView}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ) : null}
+            </span>
             <span className="header-status-group">
               {/* Reasoning visibility toggle: a per-browser view switch (chat
                   toggleHideThinking -> localStorage + a sweep of every thinking
@@ -2551,64 +2713,8 @@ function App() {
                   {fenceGlyph(fenceState)}
                 </button>
               ) : null}
-              {/* Settings viewer: a live-at-open read of the resolved config
-                  (a fresh snapshot is requested on every open; diagnostics +
-                  per-key sources, secrets redacted server-side). Opens a
-                  dialog; Escape returns focus here. */}
-              <button
-                type="button"
-                id="settings-btn"
-                className="header-btn toggleable"
-                aria-label="Settings"
-                aria-haspopup="dialog"
-                aria-expanded={settingsAtom().open ? "true" : "false"}
-                title="Settings Menu"
-                onClick={openSettings}
-              >
-                {/* Icon-only: the solid gear carries the button; the hover
-                    text is the plain "Settings Menu". aria-label,
-                    haspopup/expanded and the open handler unchanged; zero
-                    text renders. */}
-                <IconGear />
-              </button>
-              {/* Theme switcher: cycles the palette registry (hotdog ->
-                  purple -> ...); a click persists and re-tags <html>.
-                  Native button = Enter/Space work for free. The inline SVG
-                  glyph is tinted by currentColor, so it recolors with
-                  whatever palette is on screen (see #theme-btn in
-                  styles.css). Position rides after settings so the header
-                  group's pinned children keep their slots. */}
-              <button
-                type="button"
-                id="theme-btn"
-                title={themeTitle}
-                aria-label={themeTitle}
-                onClick={cycleTheme}
-              >
-                <IconPalette />
-              </button>
-              {/* Workbench disclosure: the header's LAST control (the
-                  connection indicator left for the composer), at the
-                  group's absolute right edge. The glyph reads as a panel
-                  with its RIGHT column solid-filled, the fill's left edge
-                  being the single divider -- the dock this button opens --
-                  so icon and dock sit side by side at rest. aria-label
-                  carries the name; aria-expanded mirrors the OPEN state
-                  like #logs-toggle. */}
-              <button
-                type="button"
-                id="workbench-toggle"
-                className="header-btn toggleable"
-                aria-label="Toggle workbench pane"
-                aria-expanded={workbenchCollapsedAtom() ? "false" : "true"}
-                title="Toggle Workbench (right pane sidebar)"
-                onClick={onToggleWorkbench}
-              >
-                <IconWorkbench />
-              </button>
             </span>
           </div>
-
           {/* Imperatively managed by MessageListManager via ref (streaming markdown). */}
           <div id="message-list" ref={messageListRef}></div>
 
@@ -2843,11 +2949,11 @@ function App() {
         </main>
 
         {/* Right-docked workbench; a sibling of the chat column inside the
-            #main-ui flex row. Collapsed (the default on first run) renders
-            nothing at all. */}
+            #workspace-row flex row (under the full-width #session-info band).
+            Collapsed (the default on first run) renders nothing at all. */}
         <WorkbenchPanel
           collapsed={workbenchCollapsedAtom()}
-          width={workbenchPanel.size()}
+          width={workbenchSizeAtom()}
           min={WORKBENCH_MIN_WIDTH}
           max={workbenchPanel.maxSize()}
           state={workbenchStore.get()}
@@ -2855,9 +2961,21 @@ function App() {
           onCloseTab={(id) => workbenchStore.close(id)}
           onResizeStart={workbenchPanel.onPointerDown}
           onResizeMove={workbenchPanel.onPointerMove}
-          onResizeEnd={workbenchPanel.onPointerUp}
-          onResizeKey={workbenchPanel.onKeyDown}
-          onResizeReset={workbenchPanel.onDoubleClick}
+          // The three gestures that LAND a size also bump the render's width
+          // atom (the seam itself stays paint-only): the dock-pin gate
+          // re-evaluates on release/reset/arrow-step, never mid-drag.
+          onResizeEnd={(e: PointerEvent) => {
+            workbenchPanel.onPointerUp(e);
+            syncWorkbenchWidth();
+          }}
+          onResizeKey={(e: KeyboardEvent) => {
+            workbenchPanel.onKeyDown(e);
+            syncWorkbenchWidth();
+          }}
+          onResizeReset={(e: MouseEvent) => {
+            workbenchPanel.onDoubleClick(e);
+            syncWorkbenchWidth();
+          }}
           fileTree={{
             tree: fileTree,
             onToggleDir: onTreeToggleDir,
@@ -2871,7 +2989,13 @@ function App() {
             onMore: onFileMore,
           }}
           onOpenFiles={openFilesTab}
+          treePin={{
+            pinned: treePinWide && workbenchTreePinnedAtom(),
+            available: treePinWide,
+            onToggle: onToggleWorkbenchTreePin,
+          }}
         />
+        </div>
 
         {/* Settings viewer + immediate-save editor dialog (settings button in the
             header). Mounted only while open; Escape closes (or collapses an
@@ -2932,6 +3056,8 @@ async function init(): Promise<void> {
   logsPanel.restore();
   workbenchPanel.restore();
   restoreSubagentsCollapsed();
+  restoreSidebarCollapsed();
+  restoreWorkbenchTreePinned();
   // First-run default-collapsed: restore() honors a STORED choice ("0"
   // keeps the pane open across visits), but "no key" decodes as expanded
   // and an unopened workbench must never dock itself into the layout. Seed
@@ -2939,6 +3065,9 @@ async function init(): Promise<void> {
   // persists, so later visits are decided by restore() alone.
   if (!hasStoredWorkbenchCollapsed()) workbenchPanel.toggle();
   workbenchCollapsedAtom(workbenchPanel.collapsed());
+  // The render's width view starts at the restored size (ahead of the first
+  // paint, so the dock-pin gate can never flash a button the width refuses).
+  workbenchSizeAtom(workbenchPanel.size());
   // Restored tabs reappear BEFORE the first paint (order + active tab from
   // the sessionStorage record; garbage/absent -> zero tabs, silently). The
   // seed runs ahead of the subscriptions so it neither repaints nor rewrites
@@ -2961,12 +3090,15 @@ async function init(): Promise<void> {
     liveAnnounceAtom,
     searchAtom,
     logsCollapsedAtom,
+    sidebarCollapsedAtom,
     completionAtom,
     attachmentsAtom,
     subagentsCollapsedAtom,
     nowAtom,
     copyFlashAtom,
     workbenchCollapsedAtom,
+    workbenchTreePinnedAtom,
+    workbenchSizeAtom,
     settingsAtom,
     fileTreeAtom,
     fileViewsAtom,

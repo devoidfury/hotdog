@@ -57,6 +57,7 @@ function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs
       pinnedIds={opts.pinned ?? new Set()}
       sidebarWidth={300}
       sidebarMax={520}
+      sidebarCollapsed={false}
       logsCollapsed={opts.logsCollapsed ?? false}
       logsHeight={240}
       logsMin={96}
@@ -490,6 +491,7 @@ function mountInteractive(
       pinnedIds={opts.pinned ?? new Set()}
       sidebarWidth={300}
       sidebarMax={520}
+      sidebarCollapsed={false}
       logsCollapsed={false}
       logsHeight={240}
       logsMin={96}

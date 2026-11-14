@@ -132,6 +132,11 @@ interface SidebarProps {
   pinnedIds: Set<string>;
   sidebarWidth: number;
   sidebarMax: number;
+  /** Whole-panel visibility (the chat-header disclosure; see app.tsx
+   *  sidebarCollapsedAtom). ONE preference, two shapes: collapsed adds
+   *  .sidebar-hidden (desktop drops the panel out of the flex row); shown
+   *  adds .open (the mobile drawer's shipped open hook, inert on desktop). */
+  sidebarCollapsed: boolean;
   /** Recent Logs section state (see app.tsx logsPanel). `logsCollapsed` hides
    *  the list and drops the titlebar's drag-handle semantics entirely -- a
    *  collapsed section has no height to drag. Height clamps ride as props so
@@ -513,8 +518,17 @@ function SearchPanel(p: {
 }
 
 export function Sidebar(p: SidebarProps) {
+  // The visibility class is never absent: shown rides .open (the drawer
+  // hook), collapsed rides .sidebar-hidden (out of the flex row). Joined
+  // with the logs-section class the same way the fence chip composes.
+  const classes = [
+    p.logsCollapsed ? "logs-collapsed" : "",
+    p.sidebarCollapsed ? "sidebar-hidden" : "open",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <aside id="sidebar" className={p.logsCollapsed ? "logs-collapsed" : undefined}>
+    <aside id="sidebar" className={classes}>
       <div className="sidebar-header">
         <h2>Sessions</h2>
         <div className="sidebar-header-actions">

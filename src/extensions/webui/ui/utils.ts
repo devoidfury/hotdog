@@ -41,6 +41,11 @@ export const LOGS_DEFAULT_HEIGHT = 240;
 export const WORKBENCH_MIN_WIDTH = 320;
 export const WORKBENCH_MAX_WIDTH = 1680;
 export const WORKBENCH_DEFAULT_WIDTH = 420;
+// Floor for the workspace-tree dock pin (tree as a fixed column INSIDE the
+// dock): two usable columns need more than the floor's one. Below it the
+// pin releases to tab mode and its button hides; the stored preference
+// waits for the next wide pane. Default 420 satisfies it at rest.
+export const WORKBENCH_TREE_PIN_MIN_WIDTH = 420;
 
 // ── Formatting & sanitisation ───────────────────────────────────────────────
 

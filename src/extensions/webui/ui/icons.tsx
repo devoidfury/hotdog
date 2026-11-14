@@ -148,12 +148,32 @@ export function IconBan({ className }: { className?: string }): JsxChild {
 
 /** Header workbench disclosure: rectangle outline, the narrow RIGHT column
  *  solid-filled; the fill's left edge is the single divider (5/16 of the box
- *  width from the right). */
-export function IconWorkbench(): JsxChild {
+ *  width from the right). `flip` mirrors the fill onto the LEFT column (x=4,
+ *  the exact mirror about x=12): the same panel grammar worn the other way,
+ *  so the sessions-sidebar disclosure points at the dock LEFT of the chat. */
+export function IconWorkbench({ flip = false }: { flip?: boolean }): JsxChild {
   return (
     <Glyph size={HEADER_ICON_SIZE} strokeWidth={2}>
       <rect x="3" y="4" width="18" height="16" rx="1" />
-      <rect x="15.4" y="5" width="4.6" height="14" fill="currentColor" stroke="none" />
+      <rect x={flip ? "4" : "15.4"} y="5" width="4.6" height="14" fill="currentColor" stroke="none" />
+    </Glyph>
+  );
+}
+
+/** Workspace-tree dock: the workbench panel's outline with the LEFT column
+ *  built out of stacked bars instead of one solid fill -- a lined dock, for
+ *  the tree that pins itself beside the workbench tabs (file-tree header,
+ *  beside Refresh). 16px (the .file-reload-btn row it lives in): the bars
+ *  keep IconThinking's readable-at-size rhythm (3.2u ink / 2.2u gap =
+ *  2.1/1.5 device px), sit flush on the frame's inner edges like the
+ *  workbench fill, and their aligned right ends are the single divider. */
+export function IconTreeDock(): JsxChild {
+  return (
+    <Glyph strokeWidth={2}>
+      <rect x="3" y="4" width="18" height="16" rx="1" />
+      <rect x="4" y="5" width="4.6" height="3.2" fill="currentColor" stroke="none" />
+      <rect x="4" y="10.4" width="4.6" height="3.2" fill="currentColor" stroke="none" />
+      <rect x="4" y="15.8" width="4.6" height="3.2" fill="currentColor" stroke="none" />
     </Glyph>
   );
 }

@@ -66,6 +66,11 @@ const store = new Map<string, string>([
     ATTACHMENTS_STORAGE_KEY,
     JSON.stringify([{ name: "kept.png", mimeType: "image/png", size: 4, data: "QUJDRA==" }]),
   ],
+  // The sessions sidebar boots COLLAPSED from the previous visit's choice:
+  // the boot read is only observable through a seeded key (single-booter
+  // doctrine), so the sidebar-visibility section verifies the restore and
+  // then reopens the panel -- the shape every later section expects.
+  ["hotdog.sidebarCollapsed", "1"],
 ]);
 g.localStorage = {
   getItem: (k: string) => store.get(k) ?? null,
@@ -284,6 +289,44 @@ describe("app boot (stored token)", () => {
     await tick();
   });
 
+  it("the header band spans the top of the app, panes ride the row below it", () => {
+    // Layout contract (2026-11-14): #session-info is a direct child of
+    // #main-ui, full width, with #workspace-row (sidebar + chat + workbench)
+    // as the next sibling. The workbench can open/close without pushing the
+    // header, and the sidebar sits under the band, not beside it. The band
+    // carries ONLY the global controls; the per-pane identity + toggles
+    // (#chat-header) open the chat column.
+    const main = el("#main-ui");
+    const header = el("#session-info");
+    const row = el("#workspace-row");
+    expect(header.parentElement).toBe(main);
+    expect(row.parentElement).toBe(main);
+    expect(el("#chat-area").querySelector("#session-info")).toBeNull();
+    const kids = (main as unknown as { children: Element[] }).children;
+    expect(kids.indexOf(row)).toBe(kids.indexOf(header) + 1);
+    expect(row.querySelector("#sidebar")).not.toBeNull();
+    expect(row.querySelector("#chat-area")).not.toBeNull();
+    // The band holds the three global controls only (settings/theme/workbench).
+    const bandBtns = Array.from(el("#session-info").querySelectorAll("button"));
+    expect(bandBtns.map((b) => b.getAttribute("id"))).toEqual([
+      "settings-btn",
+      "theme-btn",
+      "workbench-toggle",
+    ]);
+    // #chat-header opens the chat column and owns the moved controls.
+    // (The fence chip is conditional on a toolExec posture; the reasoning
+    // toggle always renders. Pin the fence's home in the toggle test, which
+    // attaches a posture.) The sidebar disclosure belongs to this header
+    // too, never the band.
+    const chatHeader = el("#chat-header")!;
+    expect(chatHeader.parentElement).toBe(el("#chat-area"));
+    for (const id of ["sidebar-toggle", "session-label", "thinking-toggle"]) {
+      expect(el("#chat-header").querySelector(`#${id}`)).not.toBeNull();
+    }
+    expect(el("#session-info").querySelector("#thinking-toggle")).toBeNull();
+    expect(el("#session-info").querySelector("#sidebar-toggle")).toBeNull();
+  });
+
   it("auto-login opens main-ui with the composer draft restored", () => {
     expect(el("#main-ui").getAttribute("class")).not.toContain("hidden");
     expect(el("#login-screen").getAttribute("class")).toContain("hidden");
@@ -323,6 +366,80 @@ describe("app boot (stored token)", () => {
     expect((el("#model-select") as unknown as { value: string }).value).toBe("m1");
     expect(els(".session-item")).toHaveLength(1);
     expect(els(".log-item")).toHaveLength(1);
+  });
+});
+
+// ── Sessions sidebar visibility (chat-header disclosure) ────────────────────
+// ONE preference, two shapes (app.tsx sidebarCollapsedAtom): desktop drops
+// #sidebar out of the #workspace-row flex row (.sidebar-hidden); mobile
+// opens/closes the fixed drawer (.open, the rule that shipped with the
+// drawer and had no writer until this button). The class flip is all the
+// DOM shows (no CSS engine here); the rules' truth is the pair
+// #sidebar.sidebar-hidden / #sidebar.open in styles.css. The suite seeded
+// hotdog.sidebarCollapsed="1" before the import so the boot read is
+// observable; this section verifies it, then reopens the panel and leaves
+// it expanded (the canonical default) for the sections behind it.
+
+describe("sessions sidebar visibility (chat-header disclosure)", () => {
+  it("boots from the stored pref: .sidebar-hidden, aria-expanded false, nothing rewritten", async () => {
+    await attach();
+    expect(store.get("hotdog.sidebarCollapsed")).toBe("1"); // read at boot, written only by a toggle
+    expect(el("#sidebar").classList.contains("sidebar-hidden")).toBe(true);
+    expect(el("#sidebar").classList.contains("open")).toBe(false);
+    const btn = el("#sidebar-toggle");
+    expect(btn.localName).toBe("button");
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(btn.getAttribute("aria-label")).toBe("Toggle sessions sidebar");
+    expect(btn.getAttribute("title")).toBe("Toggle Sessions sidebar (left pane)");
+    // First position in the header: the cluster leads with the disclosure,
+    // the Session: chip rides right behind it, the status group stays last.
+    const kids = el("#chat-header").children;
+    expect(kids[0]!.getAttribute("class")).toBe("header-identity-group");
+    expect(kids[0]!.children[0]!).toBe(btn);
+    expect(kids[0]!.children[1]!.getAttribute("id")).toBe("session-label");
+    expect(kids[kids.length - 1]!.getAttribute("class")).toBe("header-status-group");
+  });
+
+  it("the glyph is the workbench panel mirrored: fill LEFT (x=4), zero text node, tint inherited", () => {
+    const btn = el("#sidebar-toggle");
+    expect(btn.textContent).toBe(""); // glyph-only chrome, like its siblings
+    expect(btn.querySelector("svg[aria-hidden='true']")).toBeTruthy();
+    // Mirror geometry: the outline is the workbench's own, and the solid
+    // column lands at x=4 -- the 15.4 fill mirrored about x=12.
+    expect(btn.querySelector("rect[x='4']")).toBeTruthy();
+    expect(btn.querySelector("rect[x='15.4']")).toBeNull();
+    // The workbench toggle keeps its RIGHT fill; the flip is the sidebar's.
+    expect(el("#workbench-toggle").querySelector("rect[x='15.4']")).toBeTruthy();
+    expect(el("#workbench-toggle").querySelector("rect[x='4']")).toBeNull();
+  });
+
+  it("click reopens: .open replaces .sidebar-hidden, aria-expanded follows, the pref persists, the socket stays silent", async () => {
+    const before = ws.sent.length;
+    el("#sidebar-toggle").click();
+    await tick();
+    expect(el("#sidebar").classList.contains("sidebar-hidden")).toBe(false);
+    expect(el("#sidebar").classList.contains("open")).toBe(true);
+    expect(el("#sidebar-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(store.get("hotdog.sidebarCollapsed")).toBe("0");
+    // A view preference: nothing goes to the server.
+    expect(ws.sent.length).toBe(before);
+    // Hiding is CSS-only -- the panel's DOM (and the drawer's state) rides
+    // along, which is exactly what the offsetParent-guarded handle expects.
+    expect(document.querySelector("#sidebar")).not.toBeNull();
+    expect(el("#sidebar").querySelector("#new-session-btn")).toBeTruthy();
+  });
+
+  it("the round trip closes and reopens, leaving the app on the default-expanded side", async () => {
+    el("#sidebar-toggle").click(); // close
+    await tick();
+    expect(el("#sidebar").classList.contains("sidebar-hidden")).toBe(true);
+    expect(el("#sidebar-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(store.get("hotdog.sidebarCollapsed")).toBe("1");
+    el("#sidebar-toggle").click(); // open again: the canonical shape behind us
+    await tick();
+    expect(el("#sidebar").classList.contains("sidebar-hidden")).toBe(false);
+    expect(el("#sidebar-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(store.get("hotdog.sidebarCollapsed")).toBe("0");
   });
 });
 
@@ -2186,6 +2303,51 @@ describe("subagents sidebar and main-view transcript", () => {
     el("#close-subagent-view-btn").click();
     await attach();
   });
+
+  it("a durable lineage row under a cold log card opens the worker's durable log", async () => {
+    // Owner-reported bug (2026-11-14): a subagent row nested under a COLD
+    // Recent Logs card must open the worker's own log (viewLog keyed by
+    // agentSessionId), not the live-task activity route.
+    await attach();
+    ws.fireMessage({
+      type: "logsListed",
+      logs: [
+        {
+          ...logRow,
+          subagents: [
+            {
+              taskId: "run:one#1",
+              description: "durable survivor",
+              sessionId: L1,
+              status: "completed",
+              createdAt: 1,
+              startedAt: null,
+              endedAt: 2,
+              activeMs: 1000,
+              inRun: false,
+              turnStartedAt: null,
+              durable: true,
+              agentSessionId: "worker-log-1",
+            },
+          ],
+        },
+      ],
+    });
+    await tick();
+    // Scope to the cold list: the previous test's LIVE task feed keeps its
+    // own .subagent-row under the attached card.
+    const coldRows = Array.from(
+      el("#log-list").querySelectorAll(".subagent-row"),
+    ) as unknown as HTMLElement[];
+    expect(coldRows).toHaveLength(1);
+    clearSent();
+    coldRows[0]!.click();
+    await tick();
+    expect(sent<{ logId: string }>("viewLog")[0]?.logId).toBe("worker-log-1");
+    expect(sent("taskActivityRequest")).toHaveLength(0);
+    ws.fireMessage({ type: "logsListed", logs: [logRow] });
+    await tick();
+  });
 });
 
 // ── Log-view header controls ────────────────────────────────────────────────
@@ -2752,12 +2914,16 @@ describe("header reasoning-visibility chip", () => {
     expect(chip.getAttribute("title")).toContain("view setting only");
     expect(chip.getAttribute("title")).toContain("/thinking");
     const group = els(".header-status-group");
-    expect(group).toHaveLength(1);
-    expect(group[0]!.children[0]!.getAttribute("id")).toBe("thinking-toggle");
-    expect(group[0]!.children[1]!.getAttribute("id")).toBe("tool-exec-status");
-    // The group ENDS with the workbench toggle: the connection indicator left
-    // for the composer, so the dock's own control owns the absolute edge.
-    const kids = group[0]!.children;
+    expect(group).toHaveLength(2);
+    // The pane's own toggles ride #chat-header: reasoning first, then the
+    // fence posture (the fixture attaches a toolExec state).
+    const chatGroup = el("#chat-header").querySelector(".header-status-group")!;
+    expect(chatGroup.children[0]!.getAttribute("id")).toBe("thinking-toggle");
+    expect(chatGroup.children[1]!.getAttribute("id")).toBe("tool-exec-status");
+    // The top band's group ENDS with the workbench toggle: the connection
+    // indicator left for the composer, so the dock's own control owns the
+    // absolute edge.
+    const kids = el("#session-info .header-status-group")!.children;
     expect(kids[kids.length - 1]!.getAttribute("id")).toBe("workbench-toggle");
   });
 
@@ -2867,8 +3033,8 @@ describe("header theme switcher", () => {
     const glyph = btn().querySelector("svg[aria-hidden='true']");
     expect(glyph).toBeTruthy(); // the inline palette glyph
     expect(glyph!.getAttribute("tabindex")).toBe("-1"); // no svg tab stops
-    // Sits in the header group without disturbing the pinned slots.
-    const group = els(".header-status-group")[0]!;
+    // Sits in the top band's group without disturbing the pinned slots.
+    const group = el("#session-info .header-status-group")!;
     expect(Array.from(group.children).some((c) => c.getAttribute("id") === "theme-btn")).toBe(true);
   });
 
@@ -3353,6 +3519,120 @@ describe("workbench pane (real app wiring)", () => {
     await tick();
     expect(document.querySelector("#workbench-panel")).toBeNull();
     expect(store.get("hotdog.workbenchCollapsed")).toBe("1");
+  });
+});
+
+// ── Workbench workspace-tree dock pin (the tree header's disclosure) ───────
+// ONE stored preference (hotdog.workbenchTreePinned) + the pane-width gate
+// (>= WORKBENCH_TREE_PIN_MIN_WIDTH = the default 420): pinning docks the
+// workspace tree as a fixed left column inside the dock and seats the
+// "files" tab nowhere; releasing restores every seat. Below the min the
+// pin auto-releases and the button hides while the preference survives
+// for the next wide pane. The projection combos live in workbench.test.tsx
+// (shell); this section pins the app wiring, the gate and the storage. The
+// key boots UNWRITTEN (default tab mode) -- pinned below before anything
+// can write it. The section leaves no trace: key back at "0", width key
+// forgotten, tabs closed, pane collapsed.
+
+describe("workbench workspace-tree dock pin (real app wiring)", () => {
+  const treePinBtn = (): HTMLElement | null =>
+    els("#workbench-panel .file-reload-btn").find(
+      (b) => b.getAttribute("aria-label") === "Toggle workspace tree dock",
+    ) ?? null;
+  const handle = (): HTMLElement => {
+    const h = el("#workbench-resize");
+    const any = h as unknown as Record<string, unknown>;
+    any.offsetParent ??= {};
+    any.setPointerCapture ??= () => {};
+    return h;
+  };
+  const seamPointer = (type: string, over: Record<string, unknown> = {}): void => {
+    const h = handle();
+    h.dispatchEvent({ type, currentTarget: h, ...over } as unknown as Event);
+  };
+
+  it("opens at default width: the button rides right of Refresh, unpressed, the key never written", async () => {
+    await attach();
+    expect(store.has("hotdog.workbenchTreePinned")).toBe(false); // read at boot; a toggle is the only writer
+    el("#workbench-toggle").click();
+    await tick();
+    workbenchStore.open({ id: "files", kind: "files", label: "Files", dirty: false });
+    await tick();
+    const btn = treePinBtn();
+    expect(btn).toBeTruthy();
+    expect(btn!.getAttribute("aria-expanded")).toBe("false");
+    expect(btn!.textContent).toBe(""); // glyph-only, like the whole chip family
+    expect(btn!.querySelectorAll("rect[height='3.2']")).toHaveLength(3); // the lined dock
+    // Right of Refresh in the tree header's actions group.
+    const kids = el(".ft-header-actions").children;
+    expect(kids[0]!.getAttribute("aria-label")).toBe("Refresh");
+    expect(kids[1]!).toBe(btn!);
+    // Flat life: the tree is the active tab's body, not a column.
+    expect(document.querySelector(".workbench-tree-col")).toBeNull();
+    expect(el("#wtab-files").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("the click docks: class, column, unseated files tab, honest empty body, pref written; the socket stays silent", async () => {
+    const before = ws.sent.length;
+    treePinBtn()!.click();
+    await tick();
+    expect(el("#workbench-panel").getAttribute("class")).toContain("workbench-tree-pinned");
+    expect(document.querySelector(".workbench-tree-col .file-tree")).toBeTruthy();
+    expect(document.querySelector("#workbench-body .file-tree")).toBeNull(); // not doubled
+    expect(document.querySelector("#wtab-files")).toBeNull(); // no seat while docked
+    expect(document.querySelector("#workbench-tabs")).toBeNull(); // nothing selectable: no tablist
+    expect(document.querySelector("#workbench-open-files")).toBeNull(); // docked already: no entry into a seatless tab
+    expect(el("#workbench-empty").textContent).toBe("Files will open here");
+    expect(el(".workbench-tree-col #workbench-tree-pin").getAttribute("aria-expanded")).toBe("true");
+    expect(store.get("hotdog.workbenchTreePinned")).toBe("1");
+    expect(ws.sent.length).toBe(before); // a view preference speaks no wire
+  });
+
+  it("file tabs ride beside the docked tree", async () => {
+    workbenchStore.open({ id: "/x.ts", kind: "file", label: "x.ts", dirty: false });
+    await tick();
+    expect(els("#workbench-tabs .workbench-tab")).toHaveLength(1); // only the file keeps a seat
+    expect(document.querySelector("#workbench-empty")).toBeNull();
+    expect(el("#workbench-body .workbench-tab-body")).toBeTruthy();
+    expect(document.querySelector(".workbench-tree-col .file-tree")).toBeTruthy();
+  });
+
+  it("drag below 420 RELEASES the pin (button hides, files tab reseats, the pref survives); dragging back re-applies", async () => {
+    // nearEdge: drag RIGHT by 60 shrinks 420 -> 360 (the seam's own pin).
+    seamPointer("pointerdown", { pointerId: 1, clientX: 900 });
+    seamPointer("pointermove", { pointerId: 1, clientX: 960 });
+    seamPointer("pointerup", { pointerId: 1, clientX: 960 });
+    await tick();
+    expect(treePinBtn()).toBeNull(); // a narrow pane pins nothing
+    expect(el("#workbench-panel").getAttribute("class") ?? "").not.toContain("workbench-tree-pinned");
+    expect(document.querySelector(".workbench-tree-col")).toBeNull();
+    expect(el("#wtab-files")).toBeTruthy(); // back in its seat
+    expect(store.get("hotdog.workbenchTreePinned")).toBe("1"); // the want survives the refused can
+    // And wide again: the preference re-applies itself, no re-click.
+    seamPointer("pointerdown", { pointerId: 1, clientX: 960 });
+    seamPointer("pointermove", { pointerId: 1, clientX: 900 });
+    seamPointer("pointerup", { pointerId: 1, clientX: 900 });
+    await tick();
+    expect(el("#workbench-panel").getAttribute("class")).toContain("workbench-tree-pinned");
+    expect(treePinBtn()!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("the release click, the width reset, and the teardown leave the app exactly as it was", async () => {
+    treePinBtn()!.click();
+    await tick();
+    expect(el("#workbench-panel").getAttribute("class") ?? "").not.toContain("workbench-tree-pinned");
+    expect(store.get("hotdog.workbenchTreePinned")).toBe("0");
+    expect(el("#wtab-files")).toBeTruthy();
+    expect(document.querySelector(".workbench-tree-col")).toBeNull();
+    // Suite hygiene: double-click resets the seam width AND forgets the key;
+    // close every injected tab; collapse the pane -- first-visit shape.
+    seamPointer("dblclick");
+    expect(store.has("hotdog.workbenchWidth")).toBe(false);
+    for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
+    await tick();
+    el("#workbench-toggle").click();
+    await tick();
+    expect(document.querySelector("#workbench-panel")).toBeNull();
   });
 });
 

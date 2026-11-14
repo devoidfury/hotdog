@@ -91,12 +91,15 @@ describe("viewer language + tokens", () => {
     expect(guessLang("config.ini")).toBe("ini");
     expect(guessLang("page.xml")).toBe("xml");
     expect(guessLang("Cargo.toml")).toBe("toml");
-    // The C family all guesses "c" (one registry name, no per-spelling alias).
+    // The C family splits at the re-split: c keeps .c/.h (a header's
+    // dialect is undecidable display-wise -- the guard pin) plus the
+    // CUDA/shader spellings; the C++ spellings guess "cpp" now.
     expect(guessLang("main.c")).toBe("c");
     expect(guessLang("header.h")).toBe("c");
-    expect(guessLang("widget.cc")).toBe("c");
-    expect(guessLang("widget.cpp")).toBe("c");
-    expect(guessLang("widget.hpp")).toBe("c");
+    expect(guessLang("widget.cc")).toBe("cpp");
+    expect(guessLang("widget.cpp")).toBe("cpp");
+    expect(guessLang("widget.hpp")).toBe("cpp");
+    expect(guessLang("main.cpp")).toBe("cpp"); // the batch's new pin
     // The batch's three: .go keeps its (now scanning) guess, .mk/.mak land,
     // and Makefile is the extensionless basename shape (variant spelling and
     // GNUmakefile included).
@@ -107,6 +110,12 @@ describe("viewer language + tokens", () => {
     expect(guessLang("/repo/Makefile")).toBe("make");
     expect(guessLang("GNUmakefile")).toBe("make");
     expect(guessLang("Makefile.dev")).toBe("make");
+    // CMake: the extension plus the CMakeLists.txt basename shape (the
+    // .in template variant rides the Dockerfile prefix rule).
+    expect(guessLang("/repo/CMakeLists.txt")).toBe("cmake");
+    expect(guessLang("CMakeLists.txt.in")).toBe("cmake");
+    expect(guessLang("modules.cmake")).toBe("cmake");
+    expect(guessLang("CMakeCache.txt")).toBeUndefined(); // generated ini-shape, unclaimed
     expect(guessLang("main.rs")).toBe("rust");
     expect(guessLang("index.php")).toBe("php");
     expect(guessLang("Main.java")).toBe("java");
@@ -116,6 +125,11 @@ describe("viewer language + tokens", () => {
     expect(guessLang("build.gradle")).toBe("groovy");
     expect(guessLang("Jenkinsfile")).toBe("groovy");
     expect(guessLang("main.dart")).toBe("dart");
+    expect(guessLang("Main.swift")).toBe("swift");
+    expect(guessLang("main.zig")).toBe("zig");
+    expect(guessLang("web.ex")).toBe("elixir");
+    expect(guessLang("script.exs")).toBe("elixir");
+    expect(guessLang("page.heex")).toBeUndefined(); // HTML-in-a-sigil: honestly unclaimed
     // The cheap claims (no scanner needed, the shape is already covered):
     // CUDA/shaders ride c, module spellings ride the script langs,
     // GeoJSON/Avro ARE json, systemd units are ini.

@@ -3,6 +3,12 @@ import type { SyntaxDef, SyntaxRun } from "./index.ts";
 /**
  * C tokenizer.
  *
+ * The shared scan of the C family: cpp.ts grew from this file and carries
+ * the C++ spellings now (cc/cpp/cxx/hpp/hh/hxx/ipp). `.h` stays HERE, the
+ * honest ruling of the re-split: a header's dialect (C or C++) is
+ * undecidable display-wise, and this scanner reads a C++ header honestly
+ * enough either way.
+ *
  * One pass over code: a line-leading `#` (past any indentation) is one
  * "preproc" run through the line end -- C has no `#` comment, so the
  * directives (#include, #define, #ifdef) read whole, trailing comment or
@@ -287,12 +293,15 @@ const KEYWORDS: ReadonlySet<string> = new Set([
   "while",
 ]);
 
-/** The registry entry for this lang (assembly list: index.ts). CUDA and
- * the shading dialects are C-shaped enough that the c scanner is the
- * honest display for them (no per-dialect parsing -- the documented
+/** The registry entry for this lang (assembly list: index.ts). The C++
+ * spellings (cc/cpp/cxx/hpp/hh/hxx/ipp) belong to the cpp def since the
+ * re-split; this list is C plus `.h` -- whose dialect is undecidable
+ * display-wise (see cpp.ts, documented in both places) -- and CUDA and
+ * the shading dialects, which are C-shaped enough that the c scanner is
+ * the honest display for them (no per-dialect parsing -- the documented
  * ceiling: `__global`, `varying` etc. ride plain words). */
 export const C_SYNTAX: SyntaxDef = {
   lang: "c",
   tokenize: tokenizeC,
-  extensions: ["c", "h", "cc", "cpp", "hpp", "cu", "cuh", "glsl", "hlsl"],
+  extensions: ["c", "h", "cu", "cuh", "glsl", "hlsl"],
 };

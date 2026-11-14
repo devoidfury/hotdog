@@ -26,10 +26,13 @@
  */
 
 import { C_SYNTAX } from "./c.ts";
+import { CMAKE_SYNTAX } from "./cmake.ts";
+import { CPP_SYNTAX } from "./cpp.ts";
 import { CS_SYNTAX } from "./cs.ts";
 import { CSS_SYNTAX } from "./css.ts";
 import { DART_SYNTAX } from "./dart.ts";
 import { DOCKERFILE_SYNTAX } from "./dockerfile.ts";
+import { ELIXIR_SYNTAX } from "./elixir.ts";
 import { ENV_SYNTAX } from "./env.ts";
 import { GITIGNORE_SYNTAX } from "./gitignore.ts";
 import { GO_SYNTAX } from "./go.ts";
@@ -49,10 +52,12 @@ import { RUBY_SYNTAX } from "./ruby.ts";
 import { RUST_SYNTAX } from "./rust.ts";
 import { SHELL_SYNTAX } from "./shell.ts";
 import { SQL_SYNTAX } from "./sql.ts";
+import { SWIFT_SYNTAX } from "./swift.ts";
 import { TOML_SYNTAX } from "./toml.ts";
 import { TYPESCRIPT_SYNTAX } from "./typescript.ts";
 import { XML_SYNTAX } from "./xml.ts";
 import { YAML_SYNTAX } from "./yaml.ts";
+import { ZIG_SYNTAX } from "./zig.ts";
 
 /** One token run: a contiguous slice of the input sharing a token class. */
 export interface SyntaxRun {
@@ -124,6 +129,11 @@ const BUILTINS: readonly SyntaxDef[] = [
   KOTLIN_SYNTAX,
   GROOVY_SYNTAX,
   DART_SYNTAX,
+  CPP_SYNTAX,
+  SWIFT_SYNTAX,
+  CMAKE_SYNTAX,
+  ZIG_SYNTAX,
+  ELIXIR_SYNTAX,
   // Metadata-only registrations: names the file view guesses honestly
   // while getTokenizer stays undefined (the registry contract). markdown
   // is deliberately stateless-registry-less -- the sink drives its

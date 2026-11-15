@@ -81,6 +81,24 @@ export type TaskActivityBlock =
    *  taskActivityFromLogEntries). Never merged: one row per follow-up, and it
    *  renders through the session's own user-row path (handleUserMessage). */
   | { kind: "user"; text: string }
+  /** The leading delegated task prompt, CLIENT-seeded on open (owner ruling
+   *  2026-11-15) from TaskInfoWire.description -- the live relay has no user
+   *  lane, so the row's only other carrier is the settled fold's leading
+   *  `user` item, whose wholesale replace retires this seed block. Renders
+   *  through the same user-row path; distinct from `user` so the seed can
+   *  never double up and never masquerades as a steer. */
+  | { kind: "prompt"; text: string }
+  /** A usage footer attestation (TaskActivityWire `usage`, both authorities).
+   *  No text lane of its own: it finalizes the assistant row it closes with
+   *  the footer meta, exactly like the session path folds TOKEN_USAGE. */
+  | {
+      kind: "usage";
+      ts?: number;
+      durationMs?: number;
+      ctx?: Omit<CtxUsage, "callMs">;
+      callMs?: number;
+      callDerived?: boolean;
+    }
   | {
       kind: "tool_call";
       name: string;
@@ -170,6 +188,19 @@ function appendActivityBlock(blocks: TaskActivityBlock[], activity: TaskActivity
     // Its own row: a steering row never merges into prose, and prose after it
     // starts a fresh streaming block (the tool_call branch's posture).
     blocks.push({ kind: "user", text: activity.content });
+  } else if (activity.kind === "usage") {
+    // Footer attestation: its own block, numbers copied, never merged. It
+    // finalizes the streaming row that closes at the next commit (live lane)
+    // or lands with the fold's stamped footer (settled lane) -- see
+    // feedTaskActivity.
+    blocks.push({
+      kind: "usage",
+      ...(activity.ts !== undefined ? { ts: activity.ts } : {}),
+      ...(activity.durationMs !== undefined ? { durationMs: activity.durationMs } : {}),
+      ...(activity.ctx !== undefined ? { ctx: activity.ctx } : {}),
+      ...(activity.callMs !== undefined ? { callMs: activity.callMs } : {}),
+      ...(activity.callDerived === true ? { callDerived: true } : {}),
+    });
   } else if (activity.kind === "tool_call") {
     // The display descriptors ride the buffer alongside the truncated args:
     // a view re-opened from the buffer must paint the same posture as the
@@ -266,12 +297,12 @@ function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
  * live tail is accumulated (a view opened across the reconnect already has its
  * streamed items, and seeding would duplicate them -- the reconnect-
  * duplication protection), with the one exception of a buffer holding ONLY
- * client steering echoes (the view opened on an empty buffer, then the user
+ * client seeds -- steering echoes plus, since the 2026-11-15 ruling, the
+ * leading prompt block (the view opened on an empty buffer, then the user
  * steered before the reply landed). It seeds: the server bytes are the older
- * half of the transcript, so they go first and the echoes keep their slots
- * after them. `repaint` says the pane already shows those echoes, so it must
- * be rebuilt from the merged buffer rather than appended. Returns whether the
- * view should render the buffer. */
+ * half of the transcript, so they go after the prompt (which predates them
+ * all) and the echoes keep their slots at the end. Returns whether the view
+ * should render the buffer. */
 function seedTaskActivity(
   taskId: string,
   history: TaskActivityWire[],
@@ -288,14 +319,89 @@ function seedTaskActivity(
     for (const activity of history) appendTaskActivity(taskId, activity);
     return { landed: true, repaint: false };
   }
-  const echoes = existing.filter(
-    (b): b is Extract<TaskActivityBlock, { kind: "user" }> => b.kind === "user",
-  );
-  if (echoes.length !== existing.length) return { landed: false, repaint: false };
+  // Client-side seeds -- steering echoes AND the leading prompt block (the
+  // latter can only be here on the UNSETTLED path: the settled branch above
+  // replaced the buffer wholesale, and the fold's own leading `user` item is
+  // the prompt there). The prompt goes FIRST (it predates every server
+  // byte), then the server bytes, then the echoes (sent after them).
+  const seeds = existing.filter((b) => b.kind === "user" || b.kind === "prompt");
+  if (seeds.length !== existing.length) return { landed: false, repaint: false };
   taskActivity.delete(taskId);
-  for (const activity of history) appendTaskActivity(taskId, activity);
-  for (const echo of echoes) appendTaskActivity(taskId, { kind: "user", content: echo.text });
+  const blocks: TaskActivityBlock[] = [];
+  for (const seed of seeds) {
+    if (seed.kind === "prompt") blocks.push({ kind: "prompt", text: seed.text });
+  }
+  for (const activity of history) appendActivityBlock(blocks, activity);
+  for (const seed of seeds) {
+    if (seed.kind === "user") blocks.push({ kind: "user", text: seed.text });
+  }
+  if (blocks.length > MAX_ACTIVITY_BLOCKS) {
+    blocks.splice(0, blocks.length - MAX_ACTIVITY_BLOCKS);
+  }
+  setTaskActivityBlocks(taskId, blocks);
   return { landed: true, repaint: true };
+}
+
+/**
+ * Seed the leading delegated task prompt into a UNSETTLED task's transcript
+ * buffer (owner ruling 2026-11-15: the transcript opens with the prompt,
+ * exactly once per task, under both authorities). The live relay cannot carry
+ * it -- the worker's OUTPUT_EVENT.USER_MESSAGE has no provenance, so the
+ * relay could not tell the composed prompt from a human steer (the settled
+ * fold reads the log's `origin` instead and leads with the prompt itself).
+ * TaskInfoWire.description IS the delegated prompt (describeTask's
+ * single-line display form), and it is the row's only live carrier, so a
+ * QUEUED task opens on the prompt alone.
+ *
+ * Exactly-once argument, by construction:
+ *  - the guard (a `prompt` block already in the buffer) makes every later
+ *    open a no-op, and only viewSubagent ever seeds;
+ *  - the settled lane never seeds: the settled task's fold leads with the
+ *    log's own prompt item, and the settle flip's WHOLESALE replace retires
+ *    the seed block as that item arrives (never both, in either order);
+ *  - a degraded settled reply (empty) keeps the seed block alive, so the
+ *    transcript keeps its prompt across the replace path;
+ *  - a warm retry (the id back in the ledger with the old fold in its
+ *    buffer) is covered by the leading-user-row skip: the fold's prompt
+ *    stands, no seed stacks on it;
+ *  - the unsettled merge re-heads the prompt above the server bytes, so a
+ *    socket-reload replay cannot double it or bury it.
+ * The MAX_ACTIVITY_BLOCKS head-trim can evict it on a marathon live run; the
+ * next open re-heads it (the cap bounds the stream, not the label).
+ */
+function seedTaskPromptBlock(taskId: string): void {
+  // Settled authority is the durable fold; its leading `user` item is the
+  // prompt (and a degraded settled buffer stays the buffer's honest bytes).
+  if (settledTasks.has(taskId)) return;
+  const blocks = taskActivity.get(taskId);
+  if (blocks?.some((b) => b.kind === "prompt")) return;
+  // A warm-retry task left the settled ledger with a buffer that IS the old
+  // fold -- its leading user row is already the prompt. Skipping here is the
+  // one honest miss: a client-echo-only buffer (reachable only when nothing
+  // ever opened the pane) stays as the echo doctrine left it.
+  if (blocks && blocks[0]?.kind === "user") return;
+  const task = tasksAtom().find((t) => t.taskId === taskId);
+  const text = task?.description?.trim() ?? "";
+  if (text === "") return;
+  if (blocks) blocks.unshift({ kind: "prompt", text });
+  else setTaskActivityBlocks(taskId, [{ kind: "prompt", text }]);
+}
+
+/** The buffer's most recent LIVE usage attestation (no ts: relay frames),
+ *  backing the footer of the commit a turn flip stamps -- the task pane's
+ *  counterpart of message-list's per-turn hold, read from the buffer so no
+ *  second holder gets invented. Ts-stamped settled-fold frames never feed
+ *  it: their footer rode the fold's own commit. */
+function lastUsageMeta(
+  taskId: string,
+): Extract<TaskActivityBlock, { kind: "usage" }> | undefined {
+  const blocks = taskActivity.get(taskId);
+  if (!blocks) return undefined;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i]!;
+    if (block.kind === "usage" && block.ts === undefined) return block;
+  }
+  return undefined;
 }
 
 function getTaskActivity(taskId: string): TaskActivityBlock[] {
@@ -303,11 +409,13 @@ function getTaskActivity(taskId: string): TaskActivityBlock[] {
 }
 
 /** Whether the buffer holds anything the SERVER fed this task. Steering
- *  echoes are client-side only (the live relay has no user lane), so a buffer
- *  of nothing but echoes still needs the replay -- otherwise a steer sent
- *  before the first open would be the whole transcript. */
+ *  echoes are client-side only (the live relay has no user lane) and so is
+ *  the seeded prompt row (TaskInfoWire.description) -- a buffer of nothing
+ *  but seeds still needs the replay, otherwise a steer sent before the first
+ *  open would be the whole transcript and a queued task would never grow
+ *  past its prompt. */
 function hasFedActivity(taskId: string): boolean {
-  return getTaskActivity(taskId).some((b) => b.kind !== "user");
+  return getTaskActivity(taskId).some((b) => b.kind !== "user" && b.kind !== "prompt");
 }
 
 /** Follow-ups this client sent and has not heard back about, per task, in send
@@ -1250,10 +1358,20 @@ export function createChat({
         upsertTask(data.task);
         // Turn boundary for the task on screen: inRun=false means the
         // streamed row has committed (noteWorking(false) idiom -- client
-        // clock ts, footer honest with no duration segment; a no-op when no
-        // row is in flight).
+        // clock ts, footer honest with no duration segment (no turn clock
+        // was watched here) but with the turn's last usage attestation;
+        // a no-op when no row is in flight).
         if (data.task.taskId === viewedTaskIdAtom() && !data.task.inRun) {
-          messageList?.finalizeAssistant({ ts: Date.now() });
+          // The footer's ctx/call segments ride the turn's last LIVE usage
+          // attestation (the task pane's counterpart of message-list's
+          // per-turn hold, read from the buffer -- see lastUsageMeta).
+          const last = lastUsageMeta(data.task.taskId);
+          messageList?.finalizeAssistant({
+            ts: Date.now(),
+            ...(last?.ctx !== undefined ? { ctx: last.ctx } : {}),
+            ...(last?.callMs !== undefined ? { callMs: last.callMs } : {}),
+            ...(last?.callDerived === true ? { callDerived: true } : {}),
+          });
         }
         // The settle flip is the invalidation edge: whatever this client
         // cached for the task is the relay tail, and the log now holds the
@@ -1795,6 +1913,36 @@ export function createChat({
         // (no second render path -- see subagents.tsx's header note).
         list.handleUserMessage({ content: activity.content });
         break;
+      case "usage": {
+        // Footer attestation, never a lane -- the task fold of the session
+        // TOKEN_USAGE handling. handleTokenUsage holds the gauge/call time for
+        // the NEXT commit (the tool-call boundary and the turn flip already
+        // finalize with them, and flag one per-response bar for a text-less
+        // response). A DERIVED call time never enters the hold -- the held
+        // path carries no derived-disclosure -- it lands on the stamped
+        // commit only. A frame with a `ts` is the settled fold's: the log
+        // stamps the commit here, footer and all (absent fields ride absent;
+        // appendFooterRow itself refuses a footer without a trustworthy ts).
+        const { ts, durationMs, ctx, callMs, callDerived } = activity;
+        list.handleTokenUsage({
+          ...(ctx !== undefined ? { ctxUsed: ctx.used } : {}),
+          ...(ctx?.total !== undefined ? { ctxTotal: ctx.total } : {}),
+          ...(ctx?.cached !== undefined ? { cachedTokens: ctx.cached } : {}),
+          ...(ctx?.prompt !== undefined ? { promptTokens: ctx.prompt } : {}),
+          ...(ctx?.completion !== undefined ? { completionTokens: ctx.completion } : {}),
+          ...(callMs !== undefined && callDerived !== true ? { durationMs: callMs } : {}),
+        });
+        if (ts !== undefined) {
+          list.finalizeAssistant({
+            ts,
+            ...(durationMs !== undefined ? { durationMs } : {}),
+            ...(ctx !== undefined ? { ctx } : {}),
+            ...(callMs !== undefined ? { callMs } : {}),
+            ...(callDerived === true ? { callDerived: true } : {}),
+          });
+        }
+        break;
+      }
       case "tool_call":
         // handleToolCall finalizes the in-flight text row itself (tool
         // boundary), so the streamed prose commits exactly like a live turn.
@@ -1845,6 +1993,19 @@ export function createChat({
       case "text":
       case "reasoning":
         return { kind: block.kind, content: block.text };
+      case "prompt":
+        // Renders through the session's user-row path, same as the settled
+        // fold's leading prompt item -- one renderer for one row grammar.
+        return { kind: "user", content: block.text };
+      case "usage":
+        return {
+          kind: "usage",
+          ...(block.ts !== undefined ? { ts: block.ts } : {}),
+          ...(block.durationMs !== undefined ? { durationMs: block.durationMs } : {}),
+          ...(block.ctx !== undefined ? { ctx: block.ctx } : {}),
+          ...(block.callMs !== undefined ? { callMs: block.callMs } : {}),
+          ...(block.callDerived === true ? { callDerived: true } : {}),
+        };
       case "tool_call":
         return {
           kind: "tool_call",
@@ -1878,12 +2039,17 @@ export function createChat({
    *  for byte). A SETTLED task always re-requests -- its authority is the
    *  worker's durable log, so a warm stale cache must never paint (the
    *  settledTasks ledger + seedTaskActivity's force branch), and the paint
-   *  below is a placeholder that the authoritative reply replaces. */
+   *  below is a placeholder that the authoritative reply replaces.
+   *
+   *  The buffer opens on the delegated prompt: an UNSETTLED task gets the
+   *  client seed (see seedTaskPromptBlock -- a queued task shows the prompt
+   *  alone), a SETTLED task's fold leads with the log's own prompt row. */
   function viewSubagent(taskId: string): void {
     if (!messageList) return;
     viewedLogId = null; // browse modes are exclusive (see viewedLogId)
     viewedTaskIdAtom(taskId);
     messageList.clear();
+    seedTaskPromptBlock(taskId);
     if (!hasFedActivity(taskId) || settledTasks.has(taskId)) requestTaskActivity(taskId);
     renderTaskTranscript(taskId);
   }

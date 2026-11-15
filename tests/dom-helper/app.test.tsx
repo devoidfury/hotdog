@@ -2083,12 +2083,15 @@ describe("subagents sidebar and main-view transcript", () => {
     await attach();
     // ...and back. The steering row is still part of the transcript, rendered
     // by the same MessageListManager path -- no second render path, and no
-    // row that only survived in the DOM until something cleared it.
+    // row that only survived in the DOM until something cleared it. The two
+    // user-grammar rows are the seeded prompt (first, 2026-11-15 ruling) and
+    // the steer; the reopen seeds neither a second prompt nor a second echo.
     els(".subagent-row")[0]!.click();
     await tick();
     const rows = el("#message-list").querySelectorAll(".message.user");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain("check the fixtures first");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.textContent).toContain("do the thing");
+    expect(rows[1]!.textContent).toContain("check the fixtures first");
     expect(els(".subagent-row")[0]!.getAttribute("data-task-id")).toBe("task-echo");
   });
 
@@ -2757,6 +2760,182 @@ describe("subagents sidebar and main-view transcript", () => {
     const pane = el("#message-list");
     expect(pane.textContent).toContain(head);
     expect(pane.textContent).not.toContain("stale tail");
+    el("#close-subagent-view-btn").click();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("a live usage attestation finalizes the viewed subagent's rows with the footer", async () => {
+    // The relay forwards TOKEN_USAGE as the additive `usage` item; the pane
+    // folds it exactly like the session lane: held for the next commit, no
+    // lane of its own, gauge + call time on the footer it feeds.
+    const T = "task-live-footer";
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [task({ taskId: T })] });
+    await tick();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    const feed = (activity: Record<string, unknown>) =>
+      ws.fireMessage({ type: "taskActivity", taskId: T, activity });
+
+    feed({ kind: "text", content: "thinking out loud" });
+    await tick();
+    feed({ kind: "usage", ctx: { used: 62000, total: 262000 }, callMs: 13000 });
+    await tick();
+    // Held, not a lane: no footer yet, no bubble for the attestation.
+    expect(el("#message-list").querySelectorAll(".message-assistant-footer")).toHaveLength(0);
+    expect(el("#message-list").textContent).not.toContain("62k");
+
+    // The tool-call boundary commits the row with the held numbers.
+    feed({ kind: "tool_call", name: "bash", args: "" });
+    await tick();
+    const footer = el("#message-list").querySelector(".message-assistant-footer");
+    expect(footer).toBeTruthy();
+    expect(footer!.querySelector(".footer-ctx")!.textContent).toBe("62k/262k");
+    expect(footer!.querySelector(".footer-call")!.textContent).toBe("13s");
+
+    // The final text row: the turn flip stamps it and the buffer's last LIVE
+    // usage attestation rides the footer (the task pane's turn hold).
+    feed({ kind: "text", content: "final words" });
+    await tick();
+    ws.fireMessage({ type: "taskUpdate", task: task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() }) });
+    await tick();
+    const footers = el("#message-list").querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(2);
+    expect(footers[1]!.querySelector(".footer-ctx")!.textContent).toBe("62k/262k");
+    expect(footers[1]!.querySelector(".footer-call")!.textContent).toBe("13s");
+
+    el("#close-subagent-view-btn").click();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("a settled replay finalizes with the LOG-stamped footer: 9:55 PM 62k/262k 13s Worked for 7m 37s", async () => {
+    // The fold's usage item carries the session-view numbers (same
+    // primitives); the settled replace commits the row at the item with the
+    // log's clock -- the owner's example footer, byte for byte.
+    const T = "task-settled-footer";
+    const ts = new Date(2026, 10, 15, 21, 55, 0, 0).getTime(); // local 9:55 PM
+    await attach();
+    ws.fireMessage({
+      type: "taskList",
+      tasks: [task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() })],
+    });
+    await tick();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    ws.fireMessage({
+      type: "taskActivityHistory",
+      taskId: T,
+      activity: [
+        { kind: "text", content: "FINAL ANSWER" },
+        {
+          kind: "usage",
+          ts,
+          ctx: { used: 62000, total: 262000 },
+          callMs: 13000,
+          durationMs: 457000,
+        },
+      ],
+    });
+    await tick();
+    const footers = el("#message-list").querySelectorAll(".message-assistant-footer");
+    expect(footers).toHaveLength(1);
+    expect(footers[0]!.querySelector(".footer-time")!.textContent).toBe("9:55 PM");
+    expect(footers[0]!.querySelector(".footer-ctx")!.textContent).toBe("62k/262k");
+    expect(footers[0]!.querySelector(".footer-call")!.textContent).toBe("13s");
+    expect(footers[0]!.querySelector(".footer-worked")!.textContent).toBe("Worked for 7m 37s");
+
+    el("#close-subagent-view-btn").click();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("the delegated prompt opens the transcript exactly once: seed, settle-flip replace, re-view", async () => {
+    const T = "task-prompt-once";
+    const fold = [
+      { kind: "user", content: "audit the fixtures (the full log prompt)" },
+      { kind: "text", content: "the whole conversation" },
+    ];
+    await attach();
+    ws.fireMessage({
+      type: "taskList",
+      tasks: [task({ taskId: T, description: "audit the fixtures", status: "queued", inRun: false })],
+    });
+    await tick();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    // Queued task: the prompt ALONE (the live relay has carried nothing).
+    let rows = el("#message-list").querySelectorAll(".message.user");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("audit the fixtures");
+    expect(el("#message-list").querySelectorAll(".message.assistant")).toHaveLength(0);
+
+    // Live bytes ride behind the prompt...
+    ws.fireMessage({ type: "taskActivity", taskId: T, activity: { kind: "text", content: "ring tail" } });
+    await tick();
+    expect(el("#message-list").querySelectorAll(".message.user")).toHaveLength(1);
+
+    // The settle flip: the fold arrives LEADING with the log's own prompt
+    // row, and the wholesale replace retires the client seed -- one row, the
+    // log's version, never both.
+    ws.fireMessage({ type: "taskUpdate", task: task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() }) });
+    await tick();
+    ws.fireMessage({ type: "taskActivityHistory", taskId: T, activity: fold });
+    await tick();
+    rows = el("#message-list").querySelectorAll(".message.user");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("the full log prompt");
+    expect(el("#message-list").textContent).not.toContain("ring tail");
+
+    // Re-view: the settled row refetches (warm cache never wins) and the
+    // placeholder paint + reply both carry the fold's single prompt row; no
+    // client seed stacks on top of it.
+    els(".session-item")[0]!.click();
+    await attach();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    expect(el("#message-list").querySelectorAll(".message.user")).toHaveLength(1);
+    ws.fireMessage({ type: "taskActivityHistory", taskId: T, activity: fold });
+    await tick();
+    expect(el("#message-list").querySelectorAll(".message.user")).toHaveLength(1);
+    expect(el("#message-list").textContent).toContain("the whole conversation");
+
+    el("#close-subagent-view-btn").click();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("the streamReset sentinel still retracts alongside the new kinds (prompt and tool blocks survive the trim)", async () => {
+    const T = "task-reset-kinds";
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [task({ taskId: T })] });
+    await tick();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    const feed = (activity: Record<string, unknown>) =>
+      ws.fireMessage({ type: "taskActivity", taskId: T, activity });
+
+    feed({ kind: "text", content: "kept prose" });
+    feed({ kind: "tool_call", name: "bash", args: "" });
+    feed({ kind: "usage", ctx: { used: 1000 }, callMs: 400 });
+    feed({ kind: "text", content: "dead attempt prose" });
+    await tick();
+    feed({ kind: "reset" });
+    await tick();
+    // The dead attempt's streamed row is gone from the pane; the tool block
+    // and the seeded prompt stand.
+    expect(el("#message-list").textContent).not.toContain("dead attempt");
+    expect(el("#message-list").textContent).toContain("kept prose");
+    expect(el("#message-list").textContent).toContain("do the thing");
+    feed({ kind: "text", content: "retry text" });
+    await tick();
+    expect(el("#message-list").textContent).toContain("retry text");
+
     el("#close-subagent-view-btn").click();
     await attach();
     ws.fireMessage({ type: "taskList", tasks: [] });

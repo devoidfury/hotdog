@@ -87,6 +87,55 @@ describe("taskActivityFromEvent", () => {
     });
   });
 
+  it("maps TOKEN_USAGE to the additive usage footer attestation (owner ruling 2026-11-15)", () => {
+    // The running viewed subagent gets the same footer fold the session lane
+    // does: gauge numbers gated like ctxByIndex/ctxFromUsage, the measured
+    // call time beside them, and NO ts (the client clocks its own commits).
+    const usageEvent = (over: Partial<{ totalTokens: number; contextWindow: number; durationMs: number; cachedTokens: number }> = {}) => ({
+      type: OUTPUT_EVENT.TOKEN_USAGE,
+      sessionPromptTokens: 100,
+      sessionCachedTokens: 40,
+      sessionCompletionTokens: 10,
+      sessionTotalTokens: 110,
+      turns: 1,
+      promptTokens: 20000,
+      cachedTokens: 40000,
+      completionTokens: 2000,
+      totalTokens: 62000,
+      contextWindow: 262000,
+      durationMs: 1300,
+      ...over,
+    }) as Parameters<typeof taskActivityFromEvent>[0];
+    expect(taskActivityFromEvent(usageEvent())).toEqual({
+      kind: "usage",
+      ctx: { used: 62000, total: 262000, cached: 40000, prompt: 20000, completion: 2000 },
+      callMs: 1300,
+    });
+    // 0 is an attested breakdown value (nothing cached); the gauge pair's
+    // gate stays finite>0, so a 0 window leaves the denominator off.
+    expect(taskActivityFromEvent(usageEvent({ cachedTokens: 0, contextWindow: 0 }))).toEqual({
+      kind: "usage",
+      ctx: { used: 62000, cached: 0, prompt: 20000, completion: 2000 },
+      callMs: 1300,
+    });
+    // Provider kept the numbers private: no ctx is invented. The measured
+    // call time still rides (session handleTokenUsage accepts it beside a
+    // missing gauge); with neither, the frame is the bare completion marker.
+    expect(taskActivityFromEvent(usageEvent({ totalTokens: 0 }))).toEqual({
+      kind: "usage",
+      callMs: 1300,
+    });
+    expect(
+      taskActivityFromEvent(usageEvent({ totalTokens: 0, durationMs: undefined })),
+    ).toEqual({ kind: "usage" });
+    // Same envelope as every other activity item.
+    expect(taskActivityMessage("task-7", usageEvent())!.activity).toEqual({
+      kind: "usage",
+      ctx: { used: 62000, total: 262000, cached: 40000, prompt: 20000, completion: 2000 },
+      callMs: 1300,
+    });
+  });
+
   it("skips events that are not part of the panel view", () => {
     const skipped: OutputEvent[] = [
       { type: OUTPUT_EVENT.THINKING, content: "hmm" },

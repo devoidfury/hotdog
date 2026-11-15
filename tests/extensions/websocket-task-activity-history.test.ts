@@ -10,7 +10,13 @@ import {
   S2C,
   MAX_TASK_ACTIVITY_CHARS,
   taskActivityFromLogEntries,
+  type TaskActivityWire,
 } from "@extensions/websocket/protocol.ts";
+import {
+  ctxByIndex,
+  deriveCallDurationsByIndex,
+  turnFinalDurationsByIndex,
+} from "@utils/session-turns.ts";
 import { LOG_SOURCE } from "@core/session/session-log.ts";
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
 import type { AgentLike } from "@core/session/index.ts";
@@ -327,42 +333,70 @@ describe("subagent feed session scoping", () => {
   });
 });
 
-// ── The settled fold's steering lane (unit) ─────────────────────────────────
+// ── The settled fold's user lane (unit) ─────────────────────────────────────
 // A settled task's transcript authority is its worker's durable log, and that
 // log is the ONE place a human follow-up survives: the live relay has no user
-// lane (the worker's USER_MESSAGE event carries no provenance, so it cannot be
-// told apart from the composed task prompt). The fold must therefore gate on
-// provenance: origin "user" is a human steer, origin "model" is the task
-// description the delegating model composed, origin "harness" is injected
-// fuel, and a legacy entry carrying no origin is none of these -- unknown is
-// never guessed into a user row.
+// lane (the worker's USER_MESSAGE event carries no provenance). Since the
+// owner ruling of 2026-11-15 the lane also carries the delegated task prompt:
+// the FIRST `input` entry -- whatever its origin, composed "model" prompts
+// and legacy origin-less rows alike -- folds once as the leading user row.
+// Everything behind it gates on provenance: origin "user" is a human steer,
+// origin "harness" is injected fuel, and a later origin-less row is neither
+// -- unknown is never guessed into a user row.
 
-describe("taskActivityFromLogEntries -- the steering lane", () => {
-  it("surfaces human follow-ups as user rows, in log order", () => {
+describe("taskActivityFromLogEntries -- the user lane (prompt-once + steering)", () => {
+  it("leads with the delegated prompt once, then surfaces human follow-ups in log order", () => {
     const items = taskActivityFromLogEntries([
       { source: LOG_SOURCE.SESSION_START, role: "system", content: "" },
-      // The composed task prompt: a user-role entry, but NOT a human row.
+      // The composed task prompt: the first input, origin "model" -- the
+      // leading row now, not an excluded entry.
       { source: LOG_SOURCE.INPUT, role: "user", content: "the delegating model's prompt", origin: "model" },
       { source: LOG_SOURCE.LLM, role: "assistant", content: "on it" },
       { source: LOG_SOURCE.INPUT, role: "user", content: "use the -la flag", origin: "user" },
       { source: LOG_SOURCE.LLM, role: "assistant", content: "rerunning" },
+      // A second "model" input behind the prompt: another composed hand-off
+      // is not a steer and not THE prompt -- it stays out.
+      { source: LOG_SOURCE.INPUT, role: "user", content: "later model note", origin: "model" },
+      { source: LOG_SOURCE.LLM, role: "assistant", content: "again" },
     ]);
     expect(items).toEqual([
+      { kind: "user", content: "the delegating model's prompt" },
       { kind: "text", content: "on it" },
       { kind: "user", content: "use the -la flag" },
       { kind: "text", content: "rerunning" },
+      { kind: "text", content: "again" },
     ]);
   });
 
-  it("keeps harness fuel and origin-less legacy entries out of the user lane", () => {
+  it("a legacy origin-less first input IS the prompt; later legacy rows stay out", () => {
+    // Prompt-once covers pre-provenance logs: the first input is the
+    // delegated prompt whatever its origin (or absence of one), and unknown
+    // origins behind it are still never guessed into a user row.
     const items = taskActivityFromLogEntries([
+      { source: LOG_SOURCE.INPUT, role: "user", content: "pre-provenance delegated prompt" },
+      { source: LOG_SOURCE.LLM, role: "assistant", content: "working" },
+      { source: LOG_SOURCE.INPUT, role: "user", content: "a second legacy row" },
+    ]);
+    expect(items).toEqual([
+      { kind: "user", content: "pre-provenance delegated prompt" },
+      { kind: "text", content: "working" },
+    ]);
+  });
+
+  it("keeps harness fuel out of the user lane once the prompt row is taken", () => {
+    const items = taskActivityFromLogEntries([
+      { source: LOG_SOURCE.INPUT, role: "user", content: "the delegated prompt", origin: "model" },
       { source: LOG_SOURCE.INPUT, role: "user", content: "mid-run skill body", origin: "harness" },
       { source: LOG_SOURCE.INPUT, role: "user", content: "pre-provenance log row" },
+      { source: LOG_SOURCE.LLM, role: "assistant", content: "answer" },
     ]);
-    expect(items).toEqual([]);
+    expect(items).toEqual([
+      { kind: "user", content: "the delegated prompt" },
+      { kind: "text", content: "answer" },
+    ]);
   });
 
-  it("applies the shared activity ceiling to a steering row", () => {
+  it("applies the shared activity ceiling to the prompt row", () => {
     const items = taskActivityFromLogEntries([
       { source: LOG_SOURCE.INPUT, role: "user", content: "x".repeat(MAX_TASK_ACTIVITY_CHARS + 10), origin: "user" },
     ]);
@@ -370,5 +404,143 @@ describe("taskActivityFromLogEntries -- the steering lane", () => {
     expect((items[0] as { content: string }).content).toBe(
       "x".repeat(MAX_TASK_ACTIVITY_CHARS) + "...[truncated]",
     );
+  });
+});
+
+// ── The settled fold's usage footer (derivation parity, unit) ──────────────
+// Owner ruling 2026-11-15: the settled task transcript carries the same
+// response footer the session view of the SAME log shows -- clock time, ctx
+// gauge, producing-call time, turn total. The fold therefore derives every
+// number from the session cold-log primitives (@utils/session-turns.ts) over
+// the same entries, and stamps the result as a `usage` item on the llm entry
+// it closes. A task's transcript IS that log's session view, so the fold's
+// numbers must equal the primitives' numbers by construction -- pinned here
+// against the primitives run directly on the fixture, plus literal expected
+// values so a drift in EITHER side fails.
+
+describe("taskActivityFromLogEntries -- the usage footer", () => {
+  // A two-call turn bracketed by turn markers. The first call's usage record
+  // carries durationMs (recorded posture); the second is the old record shape
+  // without it, so the strict-adjacency log-gap derivation (tool_result ->
+  // llm, nothing intervening) has to carry the call segment instead.
+  const T = (s: string) => new Date(s).getTime();
+  const footerEntries = (): Array<{ source?: unknown } & Record<string, unknown>> => [
+    { source: "input", role: "user", content: "the delegated prompt", origin: "model", ts: "2026-11-15T00:00:00.000Z" },
+    { source: "turn_started", content: { kind: "input" }, ts: "2026-11-15T00:00:00.500Z" },
+    {
+      source: "llm",
+      role: "assistant",
+      content: "first prose",
+      reasoning_content: null,
+      tool_calls: [{ id: "c1", function: { name: "bash", arguments: '{"command":"ls"}' } }],
+      ts: "2026-11-15T00:00:03.500Z",
+    },
+    {
+      source: "token_usage",
+      content: "",
+      totalTokens: 62000,
+      contextWindow: 262000,
+      cachedTokens: 40000,
+      promptTokens: 20000,
+      completionTokens: 2000,
+      durationMs: 3000,
+      ts: "2026-11-15T00:00:03.600Z",
+    },
+    { source: "tool_result", role: "tool", tool_call_id: "c1", tool_name: "bash", content: "a file", ts: "2026-11-15T00:00:04.000Z" },
+    { source: "llm", role: "assistant", content: "FINAL", reasoning_content: null, tool_calls: null, ts: "2026-11-15T00:07:41.000Z" },
+    {
+      source: "token_usage",
+      content: "",
+      totalTokens: 63000,
+      contextWindow: 262000,
+      cachedTokens: 41000,
+      promptTokens: 21000,
+      completionTokens: 1000,
+      ts: "2026-11-15T00:07:41.100Z",
+    },
+    { source: "turn_end", content: { status: "completed" }, ts: "2026-11-15T00:07:42.000Z" },
+  ];
+
+  it("stamps one usage item per attested call, in relay order, with the session-side numbers", () => {
+    const entries = footerEntries();
+    const items = taskActivityFromLogEntries(entries);
+    // reasoning -> text -> usage -> calls: the live sink's own order.
+    expect(items.map((i) => i.kind)).toEqual([
+      "user",
+      "text",
+      "usage",
+      "tool_call",
+      "tool_result",
+      "text",
+      "usage",
+    ]);
+    const first = items[2] as Extract<TaskActivityWire, { kind: "usage" }>;
+    const second = items[6] as Extract<TaskActivityWire, { kind: "usage" }>;
+    // Literal footer numbers (the session footer's grammar: used/total gauge,
+    // recorded call time, no turn total for a mid-turn round).
+    expect(first).toEqual({
+      kind: "usage",
+      ts: T("2026-11-15T00:00:03.500Z"),
+      ctx: { used: 62000, total: 262000, cached: 40000, prompt: 20000, completion: 2000 },
+      callMs: 3000,
+    });
+    // The turn closer carries the bracket total; its call time is the
+    // derivation (no recorded durationMs), flagged as derived.
+    expect(second).toEqual({
+      kind: "usage",
+      ts: T("2026-11-15T00:07:41.000Z"),
+      durationMs: T("2026-11-15T00:07:42.000Z") - T("2026-11-15T00:00:00.500Z"),
+      ctx: { used: 63000, total: 262000, cached: 41000, prompt: 21000, completion: 1000 },
+      callMs: T("2026-11-15T00:07:41.000Z") - T("2026-11-15T00:00:04.000Z"),
+      callDerived: true,
+    });
+    // PARITY, mechanically: the same primitives the session cold view runs
+    // over these entries yield the same gauge, turn total and derivation.
+    const ctxs = ctxByIndex(entries as never);
+    const turnMs = turnFinalDurationsByIndex(entries as never);
+    const derivedMs = deriveCallDurationsByIndex(entries as never);
+    const { callMs: _c1, ...gauge2 } = ctxs[2]!;
+    const { callMs: _c2, ...gauge5 } = ctxs[5]!;
+    expect(first.ctx).toEqual(gauge2);
+    expect(first.callMs).toBe(ctxs[2]!.callMs);
+    expect(second.ctx).toEqual(gauge5);
+    expect(second.callMs).toBe(derivedMs[5]);
+    expect(second.durationMs).toBe(turnMs[5]);
+    expect(turnMs[2]).toBeUndefined();
+  });
+
+  it("absent or unattested usage means NO usage item: the transcript renders exactly as before", () => {
+    // No records at all, and records whose gauge the provider kept private
+    // (totalTokens 0 -- ctxByIndex claims nothing): inventing a footer
+    // segment is not on the table.
+    const items = taskActivityFromLogEntries([
+      { source: "input", role: "user", content: "prompt", origin: "model", ts: "2026-11-15T00:00:00.000Z" },
+      { source: "turn_started", content: { kind: "input" }, ts: "2026-11-15T00:00:00.500Z" },
+      { source: "llm", role: "assistant", content: "quiet provider", tool_calls: null, ts: "2026-11-15T00:00:02.000Z" },
+      { source: "token_usage", content: "", totalTokens: 0, contextWindow: 0, ts: "2026-11-15T00:00:02.100Z" },
+      { source: "llm", role: "assistant", content: "no records ever", tool_calls: null, ts: "2026-11-15T00:00:05.000Z" },
+      { source: "turn_end", content: { status: "completed" }, ts: "2026-11-15T00:00:05.500Z" },
+    ]);
+    expect(items).toEqual([
+      { kind: "user", content: "prompt" },
+      { kind: "text", content: "quiet provider" },
+      { kind: "text", content: "no records ever" },
+    ]);
+  });
+
+  it("omits footer fields the log did not attest, never zeroing or borrowing them", () => {
+    // Usage WITHOUT durationMs and WITHOUT a derivable gap (a turn marker
+    // sits between the trigger and the llm entry): the call segment stays
+    // off. An llm entry with no ts carries no clock segment either -- the
+    // client footer refuses to render time it cannot trust.
+    const items = taskActivityFromLogEntries([
+      { source: "turn_started", content: { kind: "input" }, ts: "2026-11-15T00:00:00.000Z" },
+      { source: "tool_result", role: "tool", tool_call_id: "c1", tool_name: "bash", content: "ok", ts: "2026-11-15T00:00:01.000Z" },
+      { source: "session_state", key: "working", value: true, ts: "2026-11-15T00:00:01.200Z" },
+      { source: "llm", role: "assistant", content: "no clock", tool_calls: null },
+      { source: "token_usage", content: "", totalTokens: 1200, ts: "2026-11-15T00:00:02.000Z" },
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(["tool_result", "text", "usage"]);
+    expect(items[2]).toEqual({ kind: "usage", ctx: { used: 1200 } });
   });
 });

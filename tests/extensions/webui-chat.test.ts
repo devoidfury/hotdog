@@ -844,15 +844,23 @@ describe("createChat subagent main-view", () => {
     ws.emit({ type: "taskActivity", taskId: "t9", activity: { kind: "text", content: "streamed prose" } });
     chat.taskFollowup("t9", "check the fixtures first");
     // The row is a transcript block like any other, in send order -- not a
-    // DOM-only decoration that the next render of this pane would drop.
-    expect(chat.getTaskActivity("t9").map((b) => b.kind)).toEqual(["text", "user"]);
+    // DOM-only decoration that the next render of this pane would drop. The
+    // prompt seed (2026-11-15 ruling) heads the buffer; the server-fed
+    // transcript follows and the echo keeps its slot after it.
+    expect(chat.getTaskActivity("t9").map((b) => b.kind)).toEqual(["prompt", "text", "user"]);
 
     // Leave for another transcript and come back: the pane rebuilds with the
     // steer still standing where it was sent.
     chat.viewSubagent("other");
     chat.viewSubagent("t9");
     expect(pane.textContent).toContain("streamed prose");
-    expect(pane.querySelectorAll(".message.user")).toHaveLength(1);
+    // Two user-grammar rows, each exactly once: the seeded prompt and the
+    // steer (the reopen does NOT seed a second prompt -- the guard holds).
+    const rows = pane.querySelectorAll(".message.user");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.textContent).toContain("task t9");
+    expect(rows[1]!.textContent).toContain("check the fixtures first");
+    expect(pane.textContent).toContain("streamed prose");
     expect(pane.textContent).toContain("check the fixtures first");
     // Re-opening a buffer the server already fed asks for no second replay.
     const requests = ws.sent.filter((m) => m.type === "taskActivityRequest");
@@ -869,14 +877,16 @@ describe("createChat subagent main-view", () => {
       taskId: "t10",
       activity: [{ kind: "text", content: "the real transcript" }],
     });
-    // A client echo alone never blinds the replay: the server bytes seed, the
-    // echo keeps its slot after them (it was sent later), and the pane is
-    // rebuilt from the merged buffer instead of doubling the row.
-    expect(chat.getTaskActivity("t10").map((b) => b.kind)).toEqual(["text", "user"]);
-    expect(pane.querySelectorAll(".message.user")).toHaveLength(1);
+    // A client echo alone never blinds the replay: the server bytes seed
+    // between the seeded prompt (which predates every server byte) and the
+    // echo (sent after them), and the pane is rebuilt from the merged buffer
+    // instead of doubling either row.
+    expect(chat.getTaskActivity("t10").map((b) => b.kind)).toEqual(["prompt", "text", "user"]);
+    expect(pane.querySelectorAll(".message.user")).toHaveLength(2);
     const text = pane.textContent ?? "";
     expect(text).toContain("the real transcript");
     expect(text).toContain("hurry it up");
+    expect(text.indexOf("task t10")).toBeLessThan(text.indexOf("the real transcript"));
     expect(text.indexOf("the real transcript")).toBeLessThan(text.indexOf("hurry it up"));
   });
 
@@ -901,6 +911,29 @@ describe("createChat subagent main-view", () => {
     const text = pane.textContent ?? "";
     expect(text.indexOf("working on it")).toBeLessThan(text.indexOf("use the -la flag"));
     expect(text.indexOf("use the -la flag")).toBeLessThan(text.indexOf("rerunning with -la"));
+  });
+
+  it("a warm retry re-opens with the fold's prompt row standing alone (no seed stack)", () => {
+    const { chat, ws, pane } = makeViewChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("t14", "completed")] });
+    chat.viewSubagent("t14");
+    ws.emit({
+      type: "taskActivityHistory",
+      taskId: "t14",
+      activity: [
+        { kind: "user", content: "the fold's prompt" },
+        { kind: "text", content: "attempt one" },
+      ],
+    });
+    // The engine warm-retry: the SAME id reads live again and leaves the
+    // settled ledger (the byte-identical unsettled doctrine resumes). The
+    // open must NOT stack a client seed onto the fold's leading prompt row.
+    ws.emit({ type: "taskUpdate", task: taskInfo("t14", "running") });
+    chat.viewSubagent("t14");
+    const rows = pane.querySelectorAll(".message.user");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("the fold's prompt");
+    expect(pane.textContent).toContain("attempt one");
   });
 
   it("a refused steer leaves no row behind for the next repaint; an accepted one stays", () => {

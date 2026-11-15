@@ -213,20 +213,23 @@ describe("settled subagent transcript replays from the durable session log", () 
     await requestHistory(ws2, "task-1");
 
     const activity = historyReply(ws2, "task-1");
-    // Full transcript: the ring-dropped head (d0), the tool round, the final
-    // answer + its reasoning -- in relay order, bookkeeping skipped, and the
-    // prompt NOT repainted (the activity grammar has no user lane).
+    // Full transcript: the delegated prompt leading the fold (owner ruling
+    // 2026-11-15: the transcript opens with the prompt, and the activity
+    // grammar's user lane carries it as the leading row), then the
+    // ring-dropped head (d0), the tool round, the final answer + its
+    // reasoning -- in relay order, bookkeeping skipped.
     const kinds = activity.map((a: any) => a.kind);
-    expect(kinds).toEqual(["text", "tool_call", "tool_result", "reasoning", "text"]);
-    expect(activity[0].content).toContain("d0");
-    expect(activity[0].content).toContain(`d${N - 1}`);
-    expect(activity[1]).toEqual({ kind: "tool_call", name: "bash", args: '{"command":"ls"}' });
-    expect(activity[2]).toEqual({ kind: "tool_result", name: "bash", output: "one file" });
-    expect(activity[3].content).toBe("done thinking");
-    expect(activity[4].content).toBe("FINAL ANSWER");
-    // ONE authority, no double render: exactly five items -- the buffer's
+    expect(kinds).toEqual(["user", "text", "tool_call", "tool_result", "reasoning", "text"]);
+    expect(activity[0].content).toBe("the delegated prompt");
+    expect(activity[1].content).toContain("d0");
+    expect(activity[1].content).toContain(`d${N - 1}`);
+    expect(activity[2]).toEqual({ kind: "tool_call", name: "bash", args: '{"command":"ls"}' });
+    expect(activity[3]).toEqual({ kind: "tool_result", name: "bash", output: "one file" });
+    expect(activity[4].content).toBe("done thinking");
+    expect(activity[5].content).toBe("FINAL ANSWER");
+    // ONE authority, no double render: exactly six items -- the buffer's
     // ring content is NOT appended to the log fold.
-    expect(activity).toHaveLength(5);
+    expect(activity).toHaveLength(6);
   });
 
   it("settled task with NO log degrades to the buffer, never to silence", async () => {
@@ -354,6 +357,9 @@ describe("settled subagent transcript replays from the durable session log", () 
       // The retry checkpoint: everything before it leaves the epoch view.
       { source: "reset", content: { reason: "retry" } },
       { source: "session_start", content: "", model: "test-model", profile: null },
+      // The retry's own delegated prompt (the real think#1 log writes one per
+      // epoch): the epoch view's FIRST input, so it leads the fold.
+      { source: "input", role: "user", content: "the RETRIED prompt", origin: "model" },
       { source: "llm", role: "assistant", content: "ATTEMPT-2 opening", reasoning_content: "a fresh start", tool_calls: [{ id: "c9", function: { name: "read", arguments: '{"path":"x.ts"}' } }] },
       { source: "tool_started", content: { tool: "read", call_id: "c9" } },
       { source: "tool_result", role: "tool", tool_call_id: "c9", tool_name: "read", content: "file bytes" },
@@ -368,20 +374,25 @@ describe("settled subagent transcript replays from the durable session log", () 
 
     // First + last item and the exact count, in relay order.
     expect(activity.map((a: any) => a.kind)).toEqual([
+      "user",
       "reasoning",
       "text",
       "tool_call",
       "tool_result",
       "text",
     ]);
-    expect(activity[0].content).toBe("a fresh start");
-    expect(activity[1].content).toBe("ATTEMPT-2 opening");
-    expect(activity[4].content).toBe("ATTEMPT-2 FINAL");
-    expect(activity).toHaveLength(5);
-    // The trimmed attempt is gone with its prompt line too: the epoch read
-    // cuts the whole dead attempt out of both views.
+    expect(activity[0].content).toBe("the RETRIED prompt");
+    expect(activity[1].content).toBe("a fresh start");
+    expect(activity[2].content).toBe("ATTEMPT-2 opening");
+    expect(activity[5].content).toBe("ATTEMPT-2 FINAL");
+    expect(activity).toHaveLength(6);
+    // The trimmed attempt is gone with its own prompt line (the epoch read
+    // cuts both), while the epoch view's first input leads the fold as the
+    // delegated prompt (owner ruling 2026-11-15 -- prompt-once, whatever its
+    // origin).
     expect(JSON.stringify(activity)).not.toContain("ATTEMPT-1 PROSE");
     expect(JSON.stringify(activity)).not.toContain("the delegated task prompt");
+    expect(JSON.stringify(activity)).toContain("the RETRIED prompt");
     // PARITY, the one-sentence claim made concrete: the reply equals the fold
     // of the SAME default read the session cold view and handleViewLog ride.
     expect(activity).toEqual(taskActivityFromLogEntries(await readSessionEntries(WORKER)));

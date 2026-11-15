@@ -166,12 +166,18 @@ interface TaskProgressMessage { taskId: string; status: string; message?: string
  * window), and durationMs (the producing call's own measured span). The
  * frame no longer renders its own transcript bubble: its data folds into
  * the footer's ctx segment and per-call duration segment.
+ *
+ * Every number is optional BY CONTRACT: the session frame carries the full
+ * set, while the task feed's `usage` attestation (chat.ts feedTaskActivity)
+ * forwards only what its source attested -- and each handler gate already
+ * treats a missing/non-finite field as unattested (omitted from the gauge
+ * and its tooltip, never zeroed in).
  */
 interface TokenUsageMessage {
-  promptTokens: number;
-  cachedTokens: number;
-  completionTokens: number;
-  totalTokens: number;
+  promptTokens?: number;
+  cachedTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
   contextWindow?: number;
   ctxUsed?: number;
   ctxTotal?: number;

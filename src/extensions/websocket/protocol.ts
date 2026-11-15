@@ -835,6 +835,13 @@ export type ReadFileResultWire = {
 
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
 import { toolContentText, wrapperContentText } from "@utils/tool-content.ts";
+import {
+  ctxByIndex,
+  deriveCallDurationsByIndex,
+  parseEntryTs,
+  turnFinalDurationsByIndex,
+  type CtxUsage,
+} from "@utils/session-turns.ts";
 import { conversationContent, LOG_SOURCE } from "@core/session/session-log.ts";
 
 /**
@@ -920,12 +927,32 @@ export interface TaskInfoWire {
  * ride is the hint-free one the session frame computes too -- parity, not
  * presence), and old clients ignore what they do not know.
  *
- * `user` is the steering lane: one human follow-up the task received
- * (TaskManager.sendFollowUp -> the worker's steering seam). The LIVE relay
- * cannot carry it -- the worker's OUTPUT_EVENT.USER_MESSAGE carries no
- * provenance, so the relay could not tell the composed task prompt from a
- * human steer -- and the settled fold below does, from the log's `origin`.
+ * `user` carries two provenances the settled fold reads from the log (owner
+ * ruling 2026-11-15: the transcript opens with the delegated task prompt,
+ * exactly once per task, under both authorities): the FIRST `input` entry of
+ * any origin is the delegated task prompt and renders as the leading row,
+ * while later entries surface only with `origin` "user" (a human follow-up
+ * the task received, TaskManager.sendFollowUp -> the worker's steering seam).
+ * Other non-user origins (harness injections, unknown legacy rows after the
+ * prompt) stay out. The LIVE relay carries neither lane -- the worker's
+ * OUTPUT_EVENT.USER_MESSAGE has no provenance, so the relay could not tell
+ * the composed task prompt from a human steer -- the live view seeds its
+ * prompt row client-side from TaskInfoWire.description, and the fold's
+ * replace (the settle flip) hands the pane the log's own version.
  * Additive: an old client ignores the kind.
+ *
+ * `usage` is the footer attestation (owner ruling 2026-11-15: a subagent
+ * transcript's response rows carry the same footer a session view shows --
+ * clock time, ctx gauge, producing call, turn total). It renders no lane of
+ * its own; the client folds its numbers into the footer of the assistant
+ * message it closes. Live frames carry only what the TOKEN_USAGE event
+ * attested (no `ts`: the client clocks the commit itself); the settled fold
+ * derives every number SERVER-SIDE from the same primitives the session cold
+ * view runs (@utils/session-turns.ts ctxByIndex / turnFinalDurationsByIndex /
+ * deriveCallDurationsByIndex / parseEntryTs), stamped on the item that closes
+ * the entry, so the settled transcript's footer equals the session view's for
+ * the same log. Absent fields are omitted, never invented: a log with no
+ * usable token_usage record renders no usage item at all.
  */
 export type TaskActivityWire =
   | { kind: "text"; content: string }
@@ -949,6 +976,25 @@ export type TaskActivityWire =
       /** Where the edit landed (positive integer gate, see s2cToolResult):
        *  numbers the diff gutters with real file lines. */
       startLine?: number;
+    }
+  | {
+      kind: "usage";
+      /** Settled fold only: the log ts (epoch ms) of the response this call
+       *  closed -- the footer's clock. Live frames ride none: the client
+       *  clocks its own commit, exactly like every other live footer. */
+      ts?: number;
+      /** Settled fold only, and only on the response that CLOSED a turn:
+       *  the turn's wall-clock total (the "Worked for" segment). */
+      durationMs?: number;
+      /** The ctx gauge attested at this message's commit (session CtxUsage
+       *  semantics, minus callMs -- the display number rides beside it). */
+      ctx?: Omit<CtxUsage, "callMs">;
+      /** The producing call's own wall time: the usage record's durationMs
+       *  first, else the strict-adjacency log-gap derivation. */
+      callMs?: number;
+      /** `callMs` is that derivation, not a recorded measurement -- the
+       *  tooltip says so instead of dressing it up. */
+      callDerived?: boolean;
     }
   | { kind: "reset" };
 
@@ -974,10 +1020,28 @@ function truncateActivity(value: string): string {
   return `${value.slice(0, MAX_TASK_ACTIVITY_CHARS)}...[truncated]`;
 }
 
+/** A recorded usage number counts as attested only when finite and > 0;
+ *  0/absent means the provider said nothing (the ctxByIndex/ctxFromUsage
+ *  gate, restated here so live frames and log-fold footers agree). */
+function attestedNumber(n: unknown): number | undefined {
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/** A bare breakdown number: 0 is a real value here (e.g. nothing cached),
+ *  so only non-numbers/NaN drop the field (the CtxUsage gate). */
+function recordedNumber(n: unknown): number | undefined {
+  return typeof n === "number" && Number.isFinite(n) ? n : undefined;
+}
+
 /**
  * Serialize one task-agent OutputEvent into a wire activity payload, or null when the
- * event is not part of the webui subagent view (usage, session plumbing...). Reasoning
- * deltas get their own kind for separate styling.
+ * event is not part of the webui subagent view (session plumbing, the
+ * provenance-less USER_MESSAGE lane...). Reasoning deltas get their own kind
+ * for separate styling. TOKEN_USAGE rides the additive `usage` footer
+ * attestation (owner ruling 2026-11-15): a RUNNING viewed subagent folds it
+ * into the footer of each call's row exactly like the session view folds the
+ * session TOKEN_USAGE frame -- gauge numbers gated like ctxByIndex, call time
+ * only when the event measured one, no `ts` (the client clocks live commits).
  * The task id is NOT part of payload -- the enclosing taskActivity message has it (see taskActivityMessage).
  */
 export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | null {
@@ -991,6 +1055,30 @@ export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | nu
       // The relay's counterpart of the main-chat streamReset S2C: the dead
       // attempt's streamed fragments must retract in the subagent transcript too.
       return { kind: "reset" };
+    case OUTPUT_EVENT.TOKEN_USAGE: {
+      // Same acceptance gates as ctxByIndex/ctxFromUsage (the session
+      // footer's sources): the gauge exists only with an attested used;
+      // breakdown numbers count 0 as a value; the call time rides whenever
+      // the event measured one. All numbers -- nothing unbounded rides here.
+      const item: Extract<TaskActivityWire, { kind: "usage" }> = { kind: "usage" };
+      const used = attestedNumber(event.totalTokens);
+      const total = attestedNumber(event.contextWindow);
+      const cached = recordedNumber(event.cachedTokens);
+      const prompt = recordedNumber(event.promptTokens);
+      const completion = recordedNumber(event.completionTokens);
+      const callMs = recordedNumber(event.durationMs);
+      if (used !== undefined) {
+        item.ctx = {
+          used,
+          ...(total !== undefined ? { total } : {}),
+          ...(cached !== undefined ? { cached } : {}),
+          ...(prompt !== undefined ? { prompt } : {}),
+          ...(completion !== undefined ? { completion } : {}),
+        };
+      }
+      if (callMs !== undefined) item.callMs = callMs;
+      return item;
+    }
     case OUTPUT_EVENT.TOOL_CALL:
       return { kind: "tool_call", name: event.toolName, args: truncateActivity(event.input) };
     case OUTPUT_EVENT.TOOL_RESULT: {
@@ -1019,16 +1107,30 @@ export function taskActivityFromEvent(event: OutputEvent): TaskActivityWire | nu
  * can never double-render.
  *
  * Per-entry mapping mirrors replayLogSlice's log semantics but keeps the
- * RELAY's item order (reasoning -> text -> calls): the transcript view was
- * painted live in relay order, and a settled replay must look identical.
- * Human follow-ups DO surface here (the `user` kind): the log is the only
- * place a steering row survives (the live relay cannot carry one -- its
- * USER_MESSAGE event has no provenance), and `origin` distinguishes a human
- * steer ("user") from the composed task prompt ("model") and harness
- * injections ("harness"), which the live view never showed as user turns.
- * Other sources the live feed never had (system_prompt, turn and other
- * bookkeeping markers, token_usage) render nothing: fabricating a lane would
- * paint a transcript the live view never showed.
+ * RELAY's item order (reasoning -> text -> usage -> calls): the transcript
+ * view was painted live in relay order (the TOKEN_USAGE event lands after the
+ * streamed response and before that call's tool frames), and a settled replay
+ * must look identical.
+ * The `user` kind surfaces twice over (owner ruling 2026-11-15): the FIRST
+ * `input` entry -- whatever its origin, composed "model" prompts and legacy
+ * origin-less rows alike -- is the delegated task prompt and folds as the
+ * leading row, exactly once per task; later `input` entries surface only with
+ * `origin` "user" (the steering lane, the one place a human follow-up
+ * survives -- the live relay cannot carry one, its USER_MESSAGE event has no
+ * provenance). Other non-user-origin INPUTs (harness injections, unknown
+ * legacy rows behind the prompt) stay excluded: unknown is never guessed.
+ * `token_usage` records fold into the additive `usage` footer item stamped on
+ * the entry they close (same ruling: the settled transcript's footer equals
+ * the session view's). The numbers come from the session cold-log primitives
+ * -- ctxByIndex for the gauge, turnFinalDurationsByIndex for the turn total
+ * on the bracket-closing entry, deriveCallDurationsByIndex for a call time
+ * the record did not measure (flagged `callDerived`), parseEntryTs for the
+ * clock -- so the same log yields the same footer bytes on both surfaces.
+ * A call whose usage the provider kept private gets NO item: absent fields
+ * are omitted, never invented, and logs without usable token_usage render
+ * exactly as they did before this ruling. system_prompt and the other
+ * bookkeeping markers still render nothing: fabricating a lane would paint a
+ * transcript the live view never showed.
  * Tool-result names resolve tool_name -> the producing llm entry's call name
  * (old logs predate tool_name; replay's own resolution) -> "unknown". Texts
  * ride the same MAX_TASK_ACTIVITY_CHARS cap as the live relay (one surface,
@@ -1048,8 +1150,18 @@ export function taskActivityFromLogEntries(
       if (tc?.id && tc.function?.name) callNames.set(tc.id, tc.function.name);
     }
   }
+  // The session footer primitives, run over the SAME entries the session
+  // cold view runs them over -- parity by shared derivation, not by copy.
+  const usageEntries = entries as ReadonlyArray<
+    { source?: string | null; ts?: string | null } & Record<string, unknown>
+  >;
+  const ctxs = ctxByIndex(usageEntries);
+  const turnFinalMs = turnFinalDurationsByIndex(usageEntries);
+  const derivedCallMs = deriveCallDurationsByIndex(usageEntries);
   const items: TaskActivityWire[] = [];
-  for (const e of entries) {
+  let promptLaneDone = false;
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]!;
     if (e.source === LOG_SOURCE.LLM) {
       const reasoning = e.reasoning_content;
       if (typeof reasoning === "string" && reasoning !== "") {
@@ -1057,6 +1169,26 @@ export function taskActivityFromLogEntries(
       }
       const text = wrapperContentText(conversationContent(e as never));
       if (text !== "") items.push({ kind: "text", content: truncateActivity(text) });
+      // The footer attestation, stamped where the TOKEN_USAGE event lands in
+      // the live sink: after the response, before its calls. Only a call with
+      // an attested gauge gets one (ctxByIndex's own gate) -- a log without
+      // usable usage records gains no item and renders exactly as before.
+      const usage = ctxs[i];
+      if (usage !== undefined) {
+        const derived = usage.callMs === undefined ? derivedCallMs[i] : undefined;
+        const displayCallMs = usage.callMs ?? derived;
+        const ts = parseEntryTs(e.ts);
+        const worked = turnFinalMs[i];
+        const { callMs: _recorded, ...gauge } = usage;
+        items.push({
+          kind: "usage",
+          ...(ts !== undefined ? { ts } : {}),
+          ...(worked !== undefined ? { durationMs: worked } : {}),
+          ctx: gauge,
+          ...(displayCallMs !== undefined ? { callMs: displayCallMs } : {}),
+          ...(derived !== undefined ? { callDerived: true } : {}),
+        });
+      }
       const calls = Array.isArray(e.tool_calls)
         ? (e.tool_calls as Array<{ id?: string; name?: string; function?: { name?: string; arguments?: string } }>)
         : [];
@@ -1076,12 +1208,18 @@ export function taskActivityFromLogEntries(
         name,
         output: truncateActivity(toolContentText(conversationContent(e as never))),
       });
-    } else if (e.source === LOG_SOURCE.INPUT && e.origin === "user") {
-      // The steering lane: a human follow-up the worker was fed. Legacy
-      // entries carry no origin, so they stay out (unknown is never guessed
-      // into a user row).
-      const steer = wrapperContentText(conversationContent(e as never));
-      if (steer !== "") items.push({ kind: "user", content: truncateActivity(steer) });
+    } else if (e.source === LOG_SOURCE.INPUT) {
+      // The FIRST input is the delegated task prompt -- whatever its origin
+      // (composed "model" prompts and legacy origin-less rows alike) -- and it
+      // folds exactly once, as the leading user row. Later inputs join the
+      // user lane only with provenance "user": a human steer. Harness fuel
+      // and unknown-origin rows behind the prompt stay out.
+      const isPrompt = !promptLaneDone;
+      if (isPrompt) promptLaneDone = true;
+      if (isPrompt || e.origin === "user") {
+        const row = wrapperContentText(conversationContent(e as never));
+        if (row !== "") items.push({ kind: "user", content: truncateActivity(row) });
+      }
     }
     // Every other source is bookkeeping or a lane the live relay never had.
   }

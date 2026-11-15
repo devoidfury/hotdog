@@ -399,6 +399,91 @@ describe("createChat subagent task feed", () => {
     expect(chat.getTaskActivity("h1")).toHaveLength(2);
   });
 
+  it("the settle flip re-reads once when it has a stale view, and speculates when it has none", () => {
+    const { chat, ws } = makeTaskChat();
+    // Cached-but-not-viewed: this client holds bytes for s3, so the flip must
+    // invalidate them...
+    ws.emit({ type: "taskActivity", taskId: "s3", activity: { kind: "text", content: "stale tail" } });
+    // ...and s4 has no buffer and no pane, so nothing is stale: a settled row
+    // nobody has watched costs zero durable-log reads (the open fetches).
+    const settled = (taskId: string) => taskInfo(taskId, "completed");
+    ws.emit({ type: "taskUpdate", task: settled("s3") });
+    expect(ws.sent.filter((m) => m.type === "taskActivityRequest").map((m) => m.taskId)).toEqual(["s3"]);
+    // The flip alone does NOT drop the buffer: the pane keeps its bytes until
+    // the authoritative reply lands.
+    expect(chat.getTaskActivity("s3")).toEqual([{ kind: "text", text: "stale tail" }]);
+    // Double flip (a second terminal frame for the same id) is not a flip.
+    ws.sent.length = 0;
+    ws.emit({ type: "taskUpdate", task: settled("s3") });
+    ws.emit({ type: "taskUpdate", task: settled("s4") });
+    expect(ws.sent.filter((m) => m.type === "taskActivityRequest")).toEqual([]);
+    // A warm retry takes the id OUT of the settled ledger: the live doctrine
+    // resumes byte-identically, so the re-run's reopen asks for nothing.
+    ws.emit({ type: "taskUpdate", task: taskInfo("s3", "running") });
+    ws.emit({ type: "taskActivity", taskId: "s3", activity: { kind: "text", content: " attempt 2" } });
+    expect(chat.getTaskActivity("s3")).toEqual([
+      { kind: "text", text: "stale tail attempt 2" },
+    ]);
+  });
+
+  it("a settled reply REPLACES the live tail wholesale, idempotently across replays", () => {
+    const { chat, ws } = makeTaskChat();
+    ws.emit({ type: "taskActivity", taskId: "s1", activity: { kind: "text", content: "the ring tail" } });
+    ws.emit({ type: "taskList", tasks: [taskInfo("s1", "completed")] }); // the ledger seeds
+    ws.emit({
+      type: "taskActivityHistory",
+      taskId: "s1",
+      activity: [
+        { kind: "text", content: "the head" },
+        { kind: "user", content: "a human steer" },
+        { kind: "text", content: "the tail from the log" },
+      ],
+    });
+    expect(chat.getTaskActivity("s1")).toEqual([
+      { kind: "text", text: "the head" },
+      { kind: "user", text: "a human steer" },
+      { kind: "text", text: "the tail from the log" },
+    ]);
+    // The same reply again (a socket reconnect re-delivering its replay): the
+    // buffer is byte-identical -- replace, never append.
+    ws.emit({
+      type: "taskActivityHistory",
+      taskId: "s1",
+      activity: [
+        { kind: "text", content: "the head" },
+        { kind: "user", content: "a human steer" },
+        { kind: "text", content: "the tail from the log" },
+      ],
+    });
+    expect(chat.getTaskActivity("s1")).toEqual([
+      { kind: "text", text: "the head" },
+      { kind: "user", text: "a human steer" },
+      { kind: "text", text: "the tail from the log" },
+    ]);
+    // An EMPTY settled reply (the server's degradation to nothing) never
+    // blanks the bytes we hold.
+    ws.emit({ type: "taskActivityHistory", taskId: "s1", activity: [] });
+    expect(chat.getTaskActivity("s1")).toHaveLength(3);
+
+    // The edge of the echo rule, on purpose: a steer this client echoed (the
+    // server accepted it into the worker's steering queue) that the log does
+    // NOT carry -- the run ended before the queue drained it, so the worker
+    // never saw it -- leaves with the replace. The log is the record of what
+    // the worker saw; a row claiming a steer it never ran is the phantom the
+    // merge alternatives would have kept alive.
+    chat.taskFollowup("s2", "steer that never landed"); // the real echo path
+    ws.emit({ type: "taskList", tasks: [taskInfo("s2", "completed")] });
+    ws.emit({ type: "taskActivityHistory", taskId: "s2", activity: [{ kind: "text", content: "what the worker actually did" }] });
+    expect(chat.getTaskActivity("s2")).toEqual([{ kind: "text", text: "what the worker actually did" }]);
+
+    // And the unsettled half of the doctrine, byte-identical: the same replay
+    // onto a LIVE warm buffer still skips (the reconnect-duplication guard).
+    ws.emit({ type: "taskActivity", taskId: "u1", activity: { kind: "text", content: "live tail" } });
+    ws.emit({ type: "taskList", tasks: [taskInfo("u1", "running")] });
+    ws.emit({ type: "taskActivityHistory", taskId: "u1", activity: [{ kind: "text", content: "the head" }] });
+    expect(chat.getTaskActivity("u1")).toEqual([{ kind: "text", text: "live tail" }]);
+  });
+
   it("taskActivity reset drops trailing streamed blocks; tool blocks and re-seeding stay safe", () => {
     const { chat, ws } = makeTaskChat();
     const feed = (activity: Record<string, unknown>) =>

@@ -17,12 +17,14 @@
 //    log is never read);
 //  - additive wire fields: agentSessionId / agentLogPath / runDir.
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, afterEach, spyOn } from "bun:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createWsServer } from "@extensions/websocket/server.ts";
-import { C2S, S2C } from "@extensions/websocket/protocol.ts";
+import { C2S, S2C, taskActivityFromLogEntries } from "@extensions/websocket/protocol.ts";
+import { readSessionEntries } from "@core/session/session-log.ts";
+import { logger } from "@utils/logger.ts";
 import { MAX_TASK_ACTIVITY_HISTORY_ITEMS } from "@extensions/websocket/constants.ts";
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
 import type { AgentLike } from "@core/session/index.ts";
@@ -318,6 +320,135 @@ describe("settled subagent transcript replays from the durable session log", () 
     // foreign id, so the gate must refuse before the log is ever opened.)
     await requestHistory(ws2, "task-x");
     expect(historyReply(ws2, "task-x")).toEqual([]);
+  });
+
+  it("settled fold for an ENGINE (workflow) task is the epoch view the session view would show: the mid-log RESET trims the dead attempt", async () => {
+    // The H2 question, pinned: does the durable fold even engage for
+    // engine-spawned tasks (agentSessionId present through the engine's
+    // spawn plumbing), and what does it serve when the worker's log carries a
+    // mid-run RESET (a retry checkpoint)? Answer: the SAME default epoch read
+    // handleViewLog and the session cold view ride, so the settled transcript
+    // IS that log's session view -- the pre-reset attempt is out by replay
+    // semantics, not by a fold defect.
+    const WORKER = nextWorker();
+    wsServer = makeServer({ worker: WORKER, script: [{ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "ring tail" } as OutputEvent] });
+    const ws1 = openSocket(wsServer);
+    const sid = await attachedSessionId(ws1);
+    const tm = wsServer.sessionRegistry.getTaskManager()!;
+    // Engine shape: a run dir rides (delegate-style spawns never set one).
+    const handle = await tm.spawnTask("run:think#1", "engine worker", {
+      managerAgent: { sessionId: sid },
+      runDir: "/tmp/engine-run",
+    } as never);
+    await Promise.race([handle.done, new Promise((r) => setTimeout(r, 2000))]);
+    const row = tm.listTasks().find((t) => t.taskId === "run:think#1")!;
+    expect(row.status).toBe("completed");
+    expect(row.agentSessionId).toBe(WORKER); // the plumbing H2 asked about
+
+    await writeWorkerLog(WORKER, [
+      { source: "session_start", content: "", model: "test-model", profile: null },
+      { source: "input", role: "user", content: "the delegated task prompt", origin: "model" },
+      { source: "turn_started", content: { kind: "input" } },
+      { source: "llm", role: "assistant", content: "ATTEMPT-1 PROSE", reasoning_content: null, tool_calls: null },
+      { source: "turn_end", content: { status: "failed" } },
+      // The retry checkpoint: everything before it leaves the epoch view.
+      { source: "reset", content: { reason: "retry" } },
+      { source: "session_start", content: "", model: "test-model", profile: null },
+      { source: "llm", role: "assistant", content: "ATTEMPT-2 opening", reasoning_content: "a fresh start", tool_calls: [{ id: "c9", function: { name: "read", arguments: '{"path":"x.ts"}' } }] },
+      { source: "tool_started", content: { tool: "read", call_id: "c9" } },
+      { source: "tool_result", role: "tool", tool_call_id: "c9", tool_name: "read", content: "file bytes" },
+      { source: "llm", role: "assistant", content: "ATTEMPT-2 FINAL", reasoning_content: null, tool_calls: null },
+      { source: "turn_end", content: { status: "completed" } },
+    ]);
+
+    const ws2 = openSocket(wsServer);
+    await attachedSessionId(ws2);
+    await requestHistory(ws2, "run:think#1");
+    const activity = historyReply(ws2, "run:think#1");
+
+    // First + last item and the exact count, in relay order.
+    expect(activity.map((a: any) => a.kind)).toEqual([
+      "reasoning",
+      "text",
+      "tool_call",
+      "tool_result",
+      "text",
+    ]);
+    expect(activity[0].content).toBe("a fresh start");
+    expect(activity[1].content).toBe("ATTEMPT-2 opening");
+    expect(activity[4].content).toBe("ATTEMPT-2 FINAL");
+    expect(activity).toHaveLength(5);
+    // The trimmed attempt is gone with its prompt line too: the epoch read
+    // cuts the whole dead attempt out of both views.
+    expect(JSON.stringify(activity)).not.toContain("ATTEMPT-1 PROSE");
+    expect(JSON.stringify(activity)).not.toContain("the delegated task prompt");
+    // PARITY, the one-sentence claim made concrete: the reply equals the fold
+    // of the SAME default read the session cold view and handleViewLog ride.
+    expect(activity).toEqual(taskActivityFromLogEntries(await readSessionEntries(WORKER)));
+  });
+
+  it("fold-to-nothing over a REAL read keeps the buffer; a legitimately tiny log stays tiny", async () => {
+    // The degradation rule must be honest about WHICH volume it compares: the
+    // read's record count and the fold's item count are different measures, so
+    // "nothing folded" is only ever "no transcript lane", never "no log" -- and
+    // it never lets a fragment of neither win.
+    const WORKER = nextWorker();
+    wsServer = makeServer({
+      worker: WORKER,
+      script: [
+        { type: OUTPUT_EVENT.STREAMING_CHUNK, content: "buffer head " },
+        { type: OUTPUT_EVENT.STREAMING_CHUNK, content: "buffer tail" },
+      ] as OutputEvent[],
+    });
+    const ws1 = openSocket(wsServer);
+    const sid = await attachedSessionId(ws1);
+    const tm = wsServer.sessionRegistry.getTaskManager()!;
+    const handle = await tm.spawnTask("task-bookkeeping", "all accounting", {
+      managerAgent: { sessionId: sid },
+    });
+    await Promise.race([handle.done, new Promise((r) => setTimeout(r, 2000))]);
+
+    // A log that EXISTS and holds records, none of them a transcript lane.
+    const warns: string[] = [];
+    const warnSpy = spyOn(logger, "warn").mockImplementation((msg: unknown) => {
+      warns.push(String(msg));
+    });
+    await writeWorkerLog(WORKER, [
+      { source: "session_start", content: "", model: "test-model", profile: null },
+      { source: "turn_started", content: { kind: "input" } },
+      { source: "token_usage", content: { prompt_tokens: 10, completion_tokens: 2 } },
+      { source: "turn_end", content: { status: "completed" } },
+    ]);
+    const ws2 = openSocket(wsServer);
+    await attachedSessionId(ws2);
+    await requestHistory(ws2, "task-bookkeeping");
+    warnSpy.mockRestore();
+    expect(historyReply(ws2, "task-bookkeeping")).toEqual([
+      { kind: "text", content: "buffer head " },
+      { kind: "text", content: "buffer tail" },
+    ]);
+    // The degradation names the case it actually is: a REAL read (4 records)
+    // that folded to nothing -- never "no log", and never a silent fallback.
+    expect(warns.some((w) => w.includes("held 4 record(s) but folded to no transcript"))).toBe(true);
+
+    // And the honest other direction: a tiny log IS the transcript. It replaces
+    // the (larger) buffer instead of merging with it -- one authority per
+    // state, and the fold is never padded out with relay bytes.
+    const handle2 = await tm.spawnTask("task-tiny", "one line", {
+      managerAgent: { sessionId: sid },
+    });
+    await Promise.race([handle2.done, new Promise((r) => setTimeout(r, 2000))]);
+    // The fixture's buildAgent gives every sink agent this server the SAME
+    // worker id, so this write replaces the bookkeeping log above -- which is
+    // exactly why each reply is asserted immediately after its own write.
+    await writeWorkerLog(WORKER, [
+      { source: "llm", role: "assistant", content: "the whole thing", tool_calls: null },
+      { source: "turn_end", content: { status: "completed" } },
+    ]);
+    const ws3 = openSocket(wsServer);
+    await attachedSessionId(ws3);
+    await requestHistory(ws3, "task-tiny");
+    expect(historyReply(ws3, "task-tiny")).toEqual([{ kind: "text", content: "the whole thing" }]);
   });
 
   it("additive wire fields: agentSessionId rides the snapshot + updates; agentLogPath is the absolute log path; runDir only for engine spawns", async () => {

@@ -2564,6 +2564,205 @@ describe("subagents sidebar and main-view transcript", () => {
     await attach();
   });
 
+  // ── Settled/live cache authority (owner ruling 2026-11-15) ────────────────
+  // The symptom: an idle/finished subagent showed only its last message. The
+  // buffer a live view accumulates is the RELAY TAIL (server ring 300 items /
+  // client 200 blocks); the settled task's authority is the worker's durable
+  // log, which the server already answers with (handleTaskActivityRequest) --
+  // what was broken was the CLIENT refusing to ask again (hasFedActivity true
+  // forever) and refusing to reseed (seedTaskActivity's live-tail skip). These
+  // pins own the client half: a settled row never paints from a warm cache, a
+  // settled reply replaces wholesale, and the UNSETTLED doctrine stays
+  // byte-identical (a warm live buffer still wins and still asks for nothing).
+
+  it("a live-tail buffer + the settle flip re-reads ONCE and replaces wholesale (steering row not doubled)", async () => {
+    const T = "task-flip";
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [task({ taskId: T })] });
+    await tick();
+    // The live feed warms the buffer (what a watched worker leaves behind).
+    ws.fireMessage({ type: "taskActivity", taskId: T, activity: { kind: "text", content: "the ring tail " } });
+    await tick();
+    clearSent();
+    els(".subagent-row")[0]!.click(); // the one row, running
+    await tick();
+    // UNSETTLED + warm buffer: the live doctrine, byte-identical -- no request.
+    expect(sent("taskActivityRequest")).toHaveLength(0);
+    expect(el("#message-list").textContent).toContain("the ring tail");
+
+    els(".attachment-remove").forEach((b) => b.click());
+    setComposer("use the -la flag");
+    await submitComposer(); // the client's optimistic steering echo
+
+    clearSent();
+    ws.fireMessage({ type: "taskUpdate", task: task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() }) });
+    await tick();
+    // The flip is the invalidation edge: exactly ONE request for the settled
+    // transcript (and the pane is NOT emptied on the flip -- it keeps its
+    // bytes until the authoritative ones land).
+    expect(sent<{ taskId: string }>("taskActivityRequest").map((m) => m.taskId)).toEqual([T]);
+    expect(el("#message-list").textContent).toContain("the ring tail");
+
+    // The durable fold: the head the ring had already dropped, the human lane,
+    // and the final answer.
+    ws.fireMessage({
+      type: "taskActivityHistory",
+      taskId: T,
+      activity: [
+        { kind: "reasoning", content: "the very first thought of the run" },
+        { kind: "text", content: "opening the workspace" },
+        { kind: "user", content: "use the -la flag" },
+        { kind: "text", content: "FINAL ANSWER" },
+      ],
+    });
+    await tick();
+    const pane = el("#message-list");
+    expect(pane.textContent).toContain("the very first thought of the run");
+    expect(pane.textContent).toContain("FINAL ANSWER");
+    // REPLACED, not appended: the stale tail is gone...
+    expect(pane.textContent).not.toContain("the ring tail");
+    // ...and the steering row exists exactly once (the log's user lane IS the
+    // echo's carrier; re-appending the local echo would double it).
+    expect(pane.querySelectorAll(".message.user")).toHaveLength(1);
+
+    // Double flip (a second terminal frame for the same id) requests nothing
+    // more: the ledger already counts the row settled, so the reply is
+    // idempotent-by-request too, and the replace rule keeps the buffer honest.
+    clearSent();
+    ws.fireMessage({ type: "taskUpdate", task: task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() }) });
+    await tick();
+    expect(sent("taskActivityRequest")).toHaveLength(0);
+
+    el("#close-subagent-view-btn").click();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("reopening a SETTLED row refetches with a warm cache; a live reopen still asks for nothing", async () => {
+    const S = "task-settle-reopen";
+    const L = "task-live-reopen";
+    await attach();
+    // Both buffers warm (the client watched both speak).
+    ws.fireMessage({ type: "taskActivity", taskId: S, activity: { kind: "text", content: "settled tail" } });
+    ws.fireMessage({ type: "taskActivity", taskId: L, activity: { kind: "text", content: "live tail" } });
+    ws.fireMessage({
+      type: "taskList",
+      tasks: [
+        task({ taskId: L }),
+        task({ taskId: S, status: "completed", inRun: false, endedAt: Date.now() }),
+      ],
+    });
+    await tick();
+    clearSent();
+
+    // The settled row (live-first sort: L is row 0, S row 1): warm cache, and
+    // the cache does NOT win.
+    els(".subagent-row")[1]!.click();
+    await tick();
+    expect(sent<{ taskId: string }>("taskActivityRequest").map((m) => m.taskId)).toEqual([S]);
+    // The stale cache paints while the authoritative reply is in flight...
+    expect(el("#message-list").textContent).toContain("settled tail");
+    ws.fireMessage({
+      type: "taskActivityHistory",
+      taskId: S,
+      activity: [{ kind: "text", content: "THE WHOLE CONVERSATION" }],
+    });
+    await tick();
+    expect(el("#message-list").textContent).toContain("THE WHOLE CONVERSATION");
+    expect(el("#message-list").textContent).not.toContain("settled tail");
+
+    // Reopen after navigating away: still refetches (the fresh reply is
+    // identical bytes, so the replace is idempotent -- no doubled rows).
+    els(".session-item")[0]!.click();
+    await attach();
+    clearSent();
+    els(".subagent-row")[1]!.click();
+    await tick();
+    expect(sent<{ taskId: string }>("taskActivityRequest").map((m) => m.taskId)).toEqual([S]);
+    ws.fireMessage({
+      type: "taskActivityHistory",
+      taskId: S,
+      activity: [{ kind: "text", content: "THE WHOLE CONVERSATION" }],
+    });
+    await tick();
+    expect(el("#message-list").textContent).toContain("THE WHOLE CONVERSATION");
+
+    // The live row: the byte-identical doctrine -- warm buffer wins, nothing
+    // on the wire (the same reopen that used to skip still skips).
+    els(".session-item")[0]!.click();
+    await attach();
+    clearSent();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    expect(sent("taskActivityRequest")).toHaveLength(0);
+    expect(el("#message-list").textContent).toContain("live tail");
+
+    el("#close-subagent-view-btn").click();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("an empty settled reply never paints over the bytes this client holds", async () => {
+    // The server's degradation rule (missing/garbage/fold-to-nothing log keeps
+    // the buffer's honest bytes) can also land as [] when the buffer is empty
+    // server-side; either way the client must not blank a pane that has bytes.
+    const T = "task-settle-empty";
+    await attach();
+    ws.fireMessage({ type: "taskActivity", taskId: T, activity: { kind: "text", content: "the only bytes we have" } });
+    ws.fireMessage({
+      type: "taskList",
+      tasks: [task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() })],
+    });
+    await tick();
+    clearSent();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    expect(sent<{ taskId: string }>("taskActivityRequest")).toHaveLength(1);
+    ws.fireMessage({ type: "taskActivityHistory", taskId: T, activity: [] });
+    await tick();
+    expect(el("#message-list").textContent).toContain("the only bytes we have");
+    el("#close-subagent-view-btn").click();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
+  it("the settled replace is UNCAPPED: 205 folded items keep their head (the live cap would re-cut it)", async () => {
+    // MAX_ACTIVITY_BLOCKS=200 bounds an unbounded LIVE stream. Applying it to
+    // the durable fold would re-cut the head of the very transcript this
+    // request fetches (the real run-2155 worker folds 402 items), so the
+    // replace path writes the whole buffer.
+    const T = "task-settle-uncapped";
+    await attach();
+    ws.fireMessage({ type: "taskActivity", taskId: T, activity: { kind: "text", content: "stale tail" } });
+    ws.fireMessage({
+      type: "taskList",
+      tasks: [task({ taskId: T, status: "completed", inRun: false, endedAt: Date.now() })],
+    });
+    await tick();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    const head = "THE HEAD OF A VERY LONG TRANSCRIPT";
+    ws.fireMessage({
+      type: "taskActivityHistory",
+      taskId: T,
+      activity: [
+        { kind: "text", content: head },
+        ...Array.from({ length: 204 }, (_, i) => ({ kind: "tool_call", name: `t${i}`, args: "" })),
+      ],
+    });
+    await tick();
+    const pane = el("#message-list");
+    expect(pane.textContent).toContain(head);
+    expect(pane.textContent).not.toContain("stale tail");
+    el("#close-subagent-view-btn").click();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [] });
+    await tick();
+  });
+
   it("a durable lineage row under a cold log card opens the worker's durable log", async () => {
     // Owner-reported bug (2026-11-14): a subagent row nested under a COLD
     // Recent Logs card must open the worker's own log (viewLog keyed by

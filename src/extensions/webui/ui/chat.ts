@@ -103,6 +103,43 @@ const MAX_ACTIVITY_BLOCKS = 200;
 const MAX_TRACKED_TASKS = 50;
 const taskActivity = new Map<string, TaskActivityBlock[]>();
 
+/**
+ * Task ids this client has seen SETTLE, kept across list refreshes and socket
+ * drops. This is the client half of the settled/live authority split whose
+ * server half is `handleTaskActivityRequest`: a settled task's transcript
+ * authority is the worker's DURABLE SESSION LOG, never this module's relay
+ * buffer (the buffer holds at most MAX_ACTIVITY_BLOCKS merged blocks of a
+ * 300-item ring, i.e. the TAIL of a long conversation -- which is exactly the
+ * "only the very last message" symptom this seam owns). So a settled id
+ * (a) always re-requests on open, (b) makes the reply REPLACE the buffer
+ * (seedTaskActivity's force branch), and (c) is re-read the moment the
+ * running/queued -> terminal flip lands.
+ * Seeded from every taskList snapshot and kept in step by taskUpdate, so a
+ * reconnect that never saw the flip still knows the row is settled; a warm
+ * retry re-uses the task id, and the same bookkeeping takes it back OUT when
+ * the row reads live again (unsettled doctrine is byte-identical).
+ */
+const settledTasks = new Set<string>();
+
+/** The wire's terminal tokens (core's isTerminalStatus set; the webui client
+ *  deliberately reads `TaskInfoWire.status` as a string, since the browser
+ *  must not need the core enum -- see protocol.ts TaskInfoWire). */
+function isSettledStatus(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+/** Track one snapshot row's settled-ness; true when THIS row flipped live ->
+ *  settled (the invalidation edge: the buffer's bytes just became stale). */
+function noteTaskSettled(taskId: string, status: string): boolean {
+  if (!isSettledStatus(status)) {
+    settledTasks.delete(taskId);
+    return false;
+  }
+  const flipped = !settledTasks.has(taskId);
+  settledTasks.add(taskId);
+  return flipped;
+}
+
 function upsertTask(info: TaskInfoWire): void {
   const tasks = tasksAtom().slice();
   const i = tasks.findIndex((t) => t.taskId === info.taskId);
@@ -111,37 +148,14 @@ function upsertTask(info: TaskInfoWire): void {
   tasksAtom(tasks);
 }
 
-function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
-  if (activity.kind === "reset") {
-    // Mid-stream retry of the task agent (the buffer's counterpart of
-    // message-list.handleStreamReset): the trailing text/reasoning blocks
-    // are the dead attempt's streamed fragments -- drop them so the
-    // retry's deltas start a fresh block instead of merging into dead
-    // text. Tool blocks stay (a reset precedes tool execution), and a
-    // reset with nothing in flight is a no-op that must not even create
-    // the map entry: it would blind the seedTaskActivity guard and strand
-    // a later history replay. Sentinels never arrive via replay -- the
-    // server buffer consumes them (see recordTaskActivity).
-    const inFlight = taskActivity.get(taskId);
-    if (!inFlight) return;
-    while (inFlight.length > 0) {
-      const kind = inFlight[inFlight.length - 1]!.kind;
-      if (kind !== "text" && kind !== "reasoning") break;
-      inFlight.pop();
-    }
-    return;
-  }
-  let blocks = taskActivity.get(taskId);
-  if (!blocks) {
-    blocks = [];
-    taskActivity.set(taskId, blocks);
-    // Map is insertion-ordered: evict the oldest task's transcript so a
-    // long-lived server session does not grow unbounded.
-    while (taskActivity.size > MAX_TRACKED_TASKS) {
-      const oldest = taskActivity.keys().next().value as string;
-      taskActivity.delete(oldest);
-    }
-  }
+/** Fold one wire item into `blocks` (consecutive same-kind deltas merge into
+ *  one display block). The cap-free half of the buffer write, shared by the
+ *  live append and the settled replace. */
+function appendActivityBlock(blocks: TaskActivityBlock[], activity: TaskActivityWire): void {
+  // The reset sentinel is a LIVE-stream retract (see appendTaskActivity); the
+  // settled fold never emits one, and a buffer that was just replaced has no
+  // in-flight prose to retract -- dropping it here is the honest no-op.
+  if (activity.kind === "reset") return;
   const last = blocks[blocks.length - 1];
   if (activity.kind === "text" || activity.kind === "reasoning") {
     if (last && last.kind === activity.kind) {
@@ -176,25 +190,100 @@ function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
       ...(activity.startLine !== undefined ? { startLine: activity.startLine } : {}),
     });
   }
+}
+
+/** Give a task the whole buffer write for a settled reply: the map slot is
+ *  replaced (not appended), re-bumped to the newest eviction slot, and NOT
+ *  trimmed to MAX_ACTIVITY_BLOCKS -- see seedTaskActivity's force branch for
+ *  why the cap is live-only. */
+function setTaskActivityBlocks(taskId: string, blocks: TaskActivityBlock[]): void {
+  taskActivity.delete(taskId);
+  taskActivity.set(taskId, blocks);
+  // Map is insertion-ordered: evict the oldest task's transcript so a
+  // long-lived server session does not grow unbounded.
+  while (taskActivity.size > MAX_TRACKED_TASKS) {
+    const oldest = taskActivity.keys().next().value as string;
+    taskActivity.delete(oldest);
+  }
+}
+
+function appendTaskActivity(taskId: string, activity: TaskActivityWire): void {
+  if (activity.kind === "reset") {
+    // Mid-stream retry of the task agent (the buffer's counterpart of
+    // message-list.handleStreamReset): the trailing text/reasoning blocks
+    // are the dead attempt's streamed fragments -- drop them so the
+    // retry's deltas start a fresh block instead of merging into dead
+    // text. Tool blocks stay (a reset precedes tool execution), and a
+    // reset with nothing in flight is a no-op that must not even create
+    // the map entry: it would blind the seedTaskActivity guard and strand
+    // a later history replay. Sentinels never arrive via replay -- the
+    // server buffer consumes them (see recordTaskActivity).
+    const inFlight = taskActivity.get(taskId);
+    if (!inFlight) return;
+    while (inFlight.length > 0) {
+      const kind = inFlight[inFlight.length - 1]!.kind;
+      if (kind !== "text" && kind !== "reasoning") break;
+      inFlight.pop();
+    }
+    return;
+  }
+  let blocks = taskActivity.get(taskId);
+  if (!blocks) {
+    blocks = [];
+    setTaskActivityBlocks(taskId, blocks);
+  }
+  appendActivityBlock(blocks, activity);
   if (blocks.length > MAX_ACTIVITY_BLOCKS) {
     blocks.splice(0, blocks.length - MAX_ACTIVITY_BLOCKS);
   }
 }
 
-/** Seed blocks from a server replay (taskActivityHistory). Skipped when a
- * live tail is accumulated: a view opened across the reconnect already has
- * its streamed items, and seeding would duplicate them. One exception: the
- * buffer holding ONLY client steering echoes (the view opened on an empty
- * buffer, then the user steered before the reply landed) seeds -- the server
- * bytes are the older half of the transcript, so they go first and the echoes
- * keep their slots after them. `repaint` says the pane already shows those
- * echoes, so it must be rebuilt from the merged buffer rather than appended.
- * Returns whether the view should render the buffer. */
+/** Seed blocks from a server replay (taskActivityHistory).
+ *
+ * `force` is the SETTLED path (the id is in `settledTasks`): the durable log
+ * is the ONE authority, so the reply REPLACES this client's buffer wholesale.
+ * The echo rule, decided and pinned here because it is the whole merge design:
+ * client-only steering echoes need no rescue -- a steer is echoed only after
+ * the server ACCEPTED it (the taskControl reply), and an accepted follow-up is
+ * fed to the worker, which writes the log's `input` record with origin
+ * "user" that taskActivityFromLogEntries folds back as the `user` kind; a
+ * refused steer is taken back out of the buffer by retractTaskEcho before any
+ * replace can happen. So re-appending local echoes would duplicate the log's
+ * user lane, and keeping "echoes not yet visible in the log" would need a
+ * fuzzy text match that leaves a phantom row alive forever. Wholesale replace
+ * is also the only rule idempotent across socket reconnects: two identical
+ * replies produce byte-identical buffers. `repaint` is always true here (the
+ * pane shows the bytes being replaced). The reply replaces RATHER THAN
+ * APPENDS and is not trimmed to MAX_ACTIVITY_BLOCKS: that cap exists to hold
+ * an unbounded LIVE stream down, while a settled transcript is bounded by the
+ * log itself -- and trimming it here would re-cut the head of the transcript
+ * this very request fetches (the MAX_TRACKED_TASKS eviction still applies).
+ * An empty reply NEVER paints over a non-empty buffer (a missing/garbage log,
+ * or one that folds to nothing, degrades to the buffer's honest bytes server
+ * side), so the replace runs only when the reply carries items.
+ *
+ * Unsettled replies keep the LIVE doctrine byte-identically: skipped when a
+ * live tail is accumulated (a view opened across the reconnect already has its
+ * streamed items, and seeding would duplicate them -- the reconnect-
+ * duplication protection), with the one exception of a buffer holding ONLY
+ * client steering echoes (the view opened on an empty buffer, then the user
+ * steered before the reply landed). It seeds: the server bytes are the older
+ * half of the transcript, so they go first and the echoes keep their slots
+ * after them. `repaint` says the pane already shows those echoes, so it must
+ * be rebuilt from the merged buffer rather than appended. Returns whether the
+ * view should render the buffer. */
 function seedTaskActivity(
   taskId: string,
   history: TaskActivityWire[],
+  force: boolean,
 ): { landed: boolean; repaint: boolean } {
   const existing = taskActivity.get(taskId);
+  if (force && history.length > 0) {
+    const blocks: TaskActivityBlock[] = [];
+    for (const activity of history) appendActivityBlock(blocks, activity);
+    setTaskActivityBlocks(taskId, blocks);
+    return { landed: true, repaint: true };
+  }
   if (!existing || existing.length === 0) {
     for (const activity of history) appendTaskActivity(taskId, activity);
     return { landed: true, repaint: false };
@@ -248,6 +337,7 @@ function retractTaskEcho(taskId: string, text: string): void {
 function clearTasks(): void {
   tasksAtom([]);
   taskActivity.clear();
+  settledTasks.clear();
   pendingFollowups.clear();
   // The module-global feed must not outlive the socket: a stale viewed-task
   // pointer (or any residue) would blind the next login's serial run.
@@ -1149,9 +1239,14 @@ export function createChat({
       // MessageListManager (imperative DOM path -- no App repaint, see the
       // feed state block above).
       case "taskList":
+        // The settled ledger follows the snapshot (an id re-appearing live --
+        // a warm retry -- leaves it again), so a reconnect that missed the
+        // flip still knows which rows read from the durable log.
+        for (const info of data.tasks) noteTaskSettled(info.taskId, info.status);
         tasksAtom(data.tasks.slice());
         return;
       case "taskUpdate": {
+        const flipped = noteTaskSettled(data.task.taskId, data.task.status);
         upsertTask(data.task);
         // Turn boundary for the task on screen: inRun=false means the
         // streamed row has committed (noteWorking(false) idiom -- client
@@ -1159,6 +1254,24 @@ export function createChat({
         // row is in flight).
         if (data.task.taskId === viewedTaskIdAtom() && !data.task.inRun) {
           messageList?.finalizeAssistant({ ts: Date.now() });
+        }
+        // The settle flip is the invalidation edge: whatever this client
+        // cached for the task is the relay tail, and the log now holds the
+        // whole conversation. Re-request when there is a stale view to make
+        // honest -- the pane is on this task, or this client holds a buffer
+        // for it. The gate is deliberate rather than a request on every flip:
+        // a settled row this client knows nothing about has nothing stale (no
+        // buffer, no paint) and viewSubagent never lets a settled row paint
+        // from cache, so an unconditional request would make a fan-out run
+        // read every worker's durable log for a browser that is not looking.
+        // The reply REPLACES the buffer (seedTaskActivity's force branch); the
+        // buffer is NOT dropped here -- the pane on screen keeps its bytes
+        // until the authoritative ones land.
+        if (
+          flipped &&
+          (taskActivity.has(data.task.taskId) || data.task.taskId === viewedTaskIdAtom())
+        ) {
+          requestTaskActivity(data.task.taskId);
         }
         return;
       }
@@ -1170,13 +1283,18 @@ export function createChat({
         return;
       }
       case "taskActivityHistory": {
-        // Replay landed AND this task is on screen: paint the seeded buffer
-        // (the open request found the buffer empty, so nothing streamed
-        // yet). Skipped replays (a live tail already accumulated) leave the
-        // view exactly as the live feed painted it. A buffer that held only
-        // the client's steering echoes merges under the server bytes, so the
-        // pane is rebuilt from the merged buffer instead of doubling them.
-        const seed = seedTaskActivity(data.taskId, data.activity || []);
+        // SETTLED task (id in the ledger): the reply is the durable log's
+        // fold, and it REPLACES whatever this client cached -- a warm stale
+        // cache never paints for a settled row. Unsettled reply: the live
+        // doctrine is byte-identical (a live tail already accumulated skips;
+        // an echoes-only buffer merges the server bytes under the echoes), so
+        // a skipped replay leaves the view exactly as the live feed painted
+        // it and the reconnect-duplication protection holds.
+        const seed = seedTaskActivity(
+          data.taskId,
+          data.activity || [],
+          settledTasks.has(data.taskId),
+        );
         if (seed.landed && data.taskId === viewedTaskIdAtom() && messageList) {
           if (seed.repaint) messageList.clear();
           renderTaskTranscript(data.taskId);
@@ -1752,15 +1870,21 @@ export function createChat({
    *  the manager session (a task agent is NOT an attachable session -- its
    *  worker id never rides the wire); task frames already bypass the
    *  session guard, and the manager's own transcript events are suppressed
-   *  exactly like log view (LOG_VIEW_SINK + cursor exemption). An empty
-   *  buffer (page refreshed since the task spoke) fetches the server's
-   *  replay first, same as the retired panel did. */
+   *  exactly like log view (LOG_VIEW_SINK + cursor exemption).
+   *
+   *  The cache wins only for an UNSETTLED task: a buffer the server already
+   *  fed IS the live relay view, and re-requesting it would only re-fetch the
+   *  ring's tail (the doctrine: an unsettled transcript is the buffer, byte
+   *  for byte). A SETTLED task always re-requests -- its authority is the
+   *  worker's durable log, so a warm stale cache must never paint (the
+   *  settledTasks ledger + seedTaskActivity's force branch), and the paint
+   *  below is a placeholder that the authoritative reply replaces. */
   function viewSubagent(taskId: string): void {
     if (!messageList) return;
     viewedLogId = null; // browse modes are exclusive (see viewedLogId)
     viewedTaskIdAtom(taskId);
     messageList.clear();
-    if (!hasFedActivity(taskId)) requestTaskActivity(taskId);
+    if (!hasFedActivity(taskId) || settledTasks.has(taskId)) requestTaskActivity(taskId);
     renderTaskTranscript(taskId);
   }
 

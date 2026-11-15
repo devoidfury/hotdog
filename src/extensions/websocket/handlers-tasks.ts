@@ -64,11 +64,23 @@ export function handleTaskFollowup(ctx: RouteContext): void {
  *    session replay and /export ride (readSessionEntries, epoch view) and
  *    folded by taskActivityFromLogEntries. The buffer's caps (300 items /
  *    whole-task eviction / reset trim) may have silently shortened history;
- *    the log has the whole conversation.
- *  - Missing or garbage log: degrade to the buffer (honest last-known bytes,
- *    never fabricated emptiness, never silence-with-data-known).
+ *    the log has the whole conversation. PARITY, one sentence: the default
+ *    epoch read is the SAME one handleViewLog and the session cold view ride,
+ *    so a settled task's fold is exactly what the session view shows for that
+ *    log -- a mid-run RESET trimming the dead attempt out of both is replay
+ *    semantics, not a fold defect (pinned: the reply equals
+ *    taskActivityFromLogEntries(readSessionEntries(workerId))).
+ *  - Degradation to the buffer, in its two honest shapes: no readable log
+ *    (missing or garbage), and a log whose epoch read holds RECORDS that fold
+ *    to no transcript ITEM (the counts measure different things, so they are
+ *    never compared against each other or against the buffer; the second
+ *    shape is logged as the distinct case it is). Honest last-known bytes,
+ *    never fabricated emptiness, never silence-with-data-known.
  *  - ONE source per state, chosen HERE: the client keeps its single render
- *    path, so log and buffer can never both paint the same transcript.
+ *    path, so log and buffer can never both paint the same transcript. The
+ *    client side of the split (src/extensions/webui/ui/chat.ts) keeps a
+ *    settled-id ledger so a warm relay buffer can never win a settled row:
+ *    its reply replaces the cache wholesale.
  *
  * The reply is awaited (real log I/O, per the route settle contract). The
  * session gate runs FIRST and owns the whole reply: an id outside the
@@ -99,11 +111,26 @@ export async function handleTaskActivityRequest(ctx: RouteContext): Promise<void
   let activity = registry.getTaskActivityHistory(taskId);
   if (info.agentSessionId) {
     try {
-      const fromLog = taskActivityFromLogEntries(await readSessionEntries(info.agentSessionId));
-      // A log that exists but folds to NOTHING (every entry bookkeeping, or
-      // a mid-stream RESET with no epoch past it) is not a transcript: the
-      // buffer's bytes stay the honest fallback rather than silence.
-      if (fromLog.length > 0) activity = fromLog;
+      const entries = await readSessionEntries(info.agentSessionId);
+      const fromLog = taskActivityFromLogEntries(entries);
+      if (fromLog.length > 0) {
+        activity = fromLog;
+      } else if (entries.length > 0) {
+        // The honest distinction: these two volumes are DIFFERENT measures and
+        // must never be conflated -- `entries` is what the epoch read returned
+        // (records), `fromLog` is what the fold made of them (transcript
+        // items); on the run-2155 workflow worker that is 537 records folded
+        // to 402 items, and a fold can only ever drop a whole entry, never
+        // half of one. So this branch means exactly one thing: a log that
+        // holds records with no transcript lane in the epoch view (pure
+        // bookkeeping, or a mid-stream RESET with nothing past it). It is NOT
+        // "no log" (an empty read, which stays silent because the buffer is
+        // the only honest thing there), and it is worth saying out loud either
+        // way -- the buffer's bytes still answer, never silence-with-data.
+        logger.warn(
+          `[websocket] settled task ${taskId}: log read held ${entries.length} record(s) but folded to no transcript; keeping the relay buffer`,
+        );
+      }
     } catch (err) {
       logger.warn(`[websocket] settled task log replay failed: ${formatError(err)}`);
     }

@@ -27,7 +27,9 @@ const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf8")) as Record<string, a
 // 75637d0d... = recomputed for the inert-key fix: maxRetries/toolRetryDelay got
 // config layers + minimum:0 bounds and taskProfile a config layer, and the dead
 // temperature/prompt keys were RETIRED (REMOVED_KEYS tombstones in rescue.ts).
-const SHAPE_PIN = "75637d0dbe652fbebb206b6d355ea27fe0a46e50ad70e5429df7618f2649004b";
+// 216e65a9... = recomputed for the thinker retirement: the thinkerFormat node
+// (cliFlag + layers included) is gone; both spellings are REMOVED_KEYS tombstones.
+const SHAPE_PIN = "216e65a91012cdfc801df25b5c5c8257ed25e048f6b87673b7cc0172924efef4";
 
 /** Every schema node with its keyPath: each top-level entry, each nested
  *  properties child, and each items.properties child, recursively. */
@@ -58,10 +60,10 @@ describe("core schema descriptions", () => {
   const nodes: Array<[string, any]> = [];
   for (const [key, prop] of Object.entries(schema)) collectNodes(prop, key, nodes);
 
-  it("covers the whole schema (63 nodes: 61 leaves + 2 groups)", () => {
+  it("covers the whole schema (62 nodes: 60 leaves + 2 groups)", () => {
     // Guards the walker itself: if the schema grows a node, this count moving
     // is the reminder that the new node needs a description too.
-    expect(nodes.length).toBe(63);
+    expect(nodes.length).toBe(62);
   });
 
   it("every node carries a non-empty single-line description", () => {

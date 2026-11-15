@@ -48,8 +48,8 @@ import {
   scanKeys,
   stripJsonc,
   EXTRA_KNOWN_KEYS,
-  REMOVED_KEYS,
 } from "@core/config/rescue.ts";
+import { REMOVED_KEYS } from "@core/config/removed-keys.ts";
 import {
   buildUnifiedSchema,
   getLayerDefault,

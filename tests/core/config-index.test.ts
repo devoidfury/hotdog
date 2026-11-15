@@ -12,6 +12,7 @@ import {
   validateConfig,
   failOnInvalidConfig,
 } from "@core/config/index.ts";
+import { logger } from "@utils/logger.ts";
 import bashToolManifest from "@extensions/bash-tool/extension.json" with { type: "json" };
 import coreToolsManifest from "@extensions/core-tools/extension.json" with { type: "json" };
 
@@ -115,9 +116,8 @@ describe("getDefaultConfig", () => {
     expect(config.providers).toEqual([]);
     expect(config.defaultProvider).toBeNull();
     // Key names come from the schema, not the config-file aliases
-    // (aiUrl/thinker/chatTimeoutSecs/healthCheckTimeoutSecs).
+    // (aiUrl/chatTimeoutSecs/healthCheckTimeoutSecs).
     expect(config.baseUrl).toBeNull();
-    expect(config.thinkerFormat).toBe("[Thinking: {}]");
     expect(config.chatTimeout).toBe(600);
     expect(config.healthCheckTimeout).toBe(5);
     expect(config.providerHealthCheckIntervalSecs).toBe(30);
@@ -250,6 +250,47 @@ describe("loadConfig", () => {
       await expect(loadConfig(tmpFile)).rejects.toThrow();
     } finally {
       try { fs.rmSync(path.dirname(tmpFile), { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  it("warns once per load on a removed key and still loads (presence is not fatal)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-config-removed-"));
+    const tmpFile = path.join(dir, "defaults.json");
+    const warnings: string[] = [];
+    const origWarn = logger.warn;
+    logger.warn = (message: string) => { warnings.push(message); };
+    try {
+      fs.writeFileSync(tmpFile, '{ "thinker": " 🧠 ... {}" }');
+      const config = await loadConfig(tmpFile);
+      expect(config.defaultModel).toBeNull(); // the load happened, defaults intact
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain('config key "thinker" is removed and ignored');
+      expect(warnings[0]).toContain("[Thinking: ...]");
+    } finally {
+      logger.warn = origWarn;
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  it("warns on separator-spelling variants of the removed key and stays silent without it", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-config-removed-"));
+    const tmpFile = path.join(dir, "defaults.json");
+    const warnings: string[] = [];
+    const origWarn = logger.warn;
+    logger.warn = (message: string) => { warnings.push(message); };
+    try {
+      fs.writeFileSync(tmpFile, '{ "thinker_format": "x {}" }');
+      await loadConfig(tmpFile);
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain('config key "thinker_format" is removed');
+
+      warnings.length = 0;
+      fs.writeFileSync(tmpFile, '{ "toolOutputFmt": "  → {}" }');
+      await loadConfig(tmpFile);
+      expect(warnings.length).toBe(0);
+    } finally {
+      logger.warn = origWarn;
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
     }
   });
 });

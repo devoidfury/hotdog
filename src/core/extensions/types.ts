@@ -334,7 +334,6 @@ export interface ResolvedConfig {
   hideTools?: boolean;
   hideThinking?: boolean;
   showTokenUse?: boolean;
-  thinkerFormat?: string;
   /** CLI display format for tool calls. */
   toolCallDisplayFormat?: string;
   /** Global default WireFormat registry name (CLI > config > "xml"). */

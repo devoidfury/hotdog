@@ -6,6 +6,8 @@ import { render } from "@utils/render.ts";
 import { validate as validateSchema, castAs } from "@utils/json-schema.ts";
 import { camelCase } from "@utils/strings.ts";
 import { expandWorkspacePaths, DEFAULT_DENY_PATTERNS } from "@utils/workspace.ts";
+import { findRemovedKeyHit, normalizeRemovedKey } from "./removed-keys.ts";
+import { logger } from "@utils/logger.ts";
 
 export * from "./defaults.ts";
 export * from "./schema-loader.ts";
@@ -174,6 +176,7 @@ export async function loadConfig(
   try {
     const content = await fsPromises.readFile(configPathToUse, "utf-8");
     const raw = JSON.parse(content);
+    warnRemovedConfigKeys(raw);
     return deepMerge(
       getDefaultConfig(extParams),
       normalizeConfigKeys(interpolateEnvVars(raw)) as object,
@@ -183,6 +186,39 @@ export async function loadConfig(
     const err = ConfigError.LoadFailed(configPathToUse, (e as Error).message);
     err.cause = e;
     throw err;
+  }
+}
+
+/**
+ * Boot nudge for removed config keys: presence must not be fatal (the load
+ * path never failed on them, and the value is ignored), but silence lets a
+ * dead knob masquerade as a live one. Every REMOVED_KEYS occurrence at the
+ * file's ROOT warns once per load -- the retired `thinker` knob's file key
+ * lives there. Nested occurrences (maxToolOutputLines inside bashTool) are
+ * rescue's beat, not this pass: it reads the parsed root, not the tree.
+ * The tombstone table is shared with `hotdog rescue`, which carries the full
+ * line-pointing verdict.
+ *
+ * Once per key per process: boot reads the file twice (the pre-config early
+ * error check and buildConfig), and a duplicated nudge reads as a bug.
+ * Ceiling, stated: an embedded host that loads a second config file carrying
+ * the same key stays quiet about the second file.
+ */
+const warnedRemovedKeys = new Set<string>();
+
+function warnRemovedConfigKeys(raw: unknown): void {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+  for (const key of Object.keys(raw as Record<string, unknown>)) {
+    const hit = findRemovedKeyHit(key);
+    if (!hit) continue;
+    const norm = normalizeRemovedKey(key);
+    if (warnedRemovedKeys.has(norm)) continue;
+    warnedRemovedKeys.add(norm);
+    // Name the key as the user wrote it (rescue's style), explain with the tombstone.
+    logger.warn(
+      `config key "${key}" is removed and ignored - replaced by ${hit.replacement}. ` +
+        `${hit.note ?? ""} Run \`hotdog rescue\` for the line.`,
+    );
   }
 }
 

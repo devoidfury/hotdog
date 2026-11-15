@@ -659,7 +659,6 @@ export async function runInteractiveSession(
   const sink = new CliOutputSink({
     ...resolved,
     palette,
-    thinkerFormat: resolved.thinkerFormat,
     toolCallDisplayFormat: resolved.toolCallDisplayFormat,
     toolOutputFmt: resolved.toolOutputFmt,
     hideUserMessage: true,

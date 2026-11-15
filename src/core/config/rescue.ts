@@ -32,36 +32,8 @@ export const EXTRA_KNOWN_KEYS = [
   "skillsPath",
 ];
 
-/**
- * Config keys that once existed and were removed. They are not UNKNOWN (a
- * did-you-mean would mislead); they get a tombstone verdict that names the
- * replacement, with a caret at the offending line. Checked at every nesting
- * depth: `maxToolOutputLines` lived inside the bashTool/coreTools blocks, so
- * a top-level-only scan would miss exactly what users carry. Exception:
- * `topLevelOnly` entries judge their ROOT occurrence only -- `temperature`'s
- * named replacement is `providers[].temperature` / `providers[].models[].temperature`,
- * so flagging those nested fields would contradict the tombstone itself.
- */
-export const REMOVED_KEYS: Array<{ key: string; replacement: string; note?: string; topLevelOnly?: boolean }> = [
-  {
-    key: "maxToolOutputLines",
-    replacement: "maxToolResultChars",
-    note:
-      "line-shaping knobs retired for one central char cap on every tool result " +
-      "(the tools keep internal line shaping below it)",
-  },
-  {
-    key: "temperature",
-    replacement:
-      "per-provider / per-model temperature definitions (providers[].temperature, providers[].models[].temperature)",
-    topLevelOnly: true,
-  },
-  {
-    key: "prompt",
-    replacement: "the interactive CLI's own prompt surface",
-    topLevelOnly: true,
-  },
-];
+// The tombstone table (see ./removed-keys.ts for the why and the depth rules).
+import { REMOVED_KEYS } from "./removed-keys.ts";
 
 export interface JsoncIssue {
   kind: "comment" | "trailing-comma" | "bom";

@@ -23,21 +23,6 @@
       { "default": null }
     ]
   },
-  "thinkerFormat": {
-    "type": "string",
-    "description": "Format string for thinking/reasoning output in the CLI sinks; {} is replaced by the thinking content (default '[Thinking: {}]'). Display only -- hideThinking drops the output entirely.",
-    "cliFlag": {
-      "short": "-t",
-      "long": "--thinker",
-      "type": "string",
-      "description": "Thinking format string"
-    },
-    "layers": [
-      { "source": "cli", "key": "thinker" },
-      { "source": "config", "key": "thinker" },
-      { "default": "[Thinking: {}]" }
-    ]
-  },
   "toolCallDisplayFormat": {
     "type": "string",
     "description": "Layout template for tool-call lines in the CLI sinks: first {} is the tool name, second a human-readable args summary, never raw JSON. Unset, tools print their own semantic header; setting the template opts out of those headers.",
@@ -248,7 +233,7 @@
   },
   "hideThinking": {
     "type": "boolean",
-    "description": "Hide thinking/reasoning output from the CLI sinks (default shows it, shaped by thinkerFormat).",
+    "description": "Hide thinking/reasoning output from the CLI sinks (default shows it in the built-in '[Thinking: ...]' shape).",
     "cliFlag": {
       "long": "--hide-thinking",
       "type": "boolean",

@@ -82,7 +82,6 @@ const modeStreams: Record<Mode, string> = {
 };
 
 export interface CliOutputSinkOptions {
-  thinkerFormat?: string;
   toolCallDisplayFormat?: string;
   toolOutputFmt?: string;
   palette?: ColorPalette;
@@ -258,10 +257,12 @@ export function formatTokenUsage(
   return `Token usage: ${sessionCachedTokens} cached, ${sessionPromptTokens} processed, ${sessionCompletionTokens} generated. (${sessionTotalTokens}/${contextWindow})`;
 }
 
-export function formatThinking(content: string, thinkerFmt: string | null | undefined): string {
-  if (thinkerFmt) {
-    return fillSlots(thinkerFmt, content);
-  }
+/**
+ * The built-in thinking line. The `thinker` format-string knob was retired
+ * (it shipped broken): reasoning output always renders in this shape, and
+ * `hideThinking` is the only control.
+ */
+export function formatThinking(content: string): string {
   return `[Thinking: ${content}]`;
 }
 
@@ -308,7 +309,6 @@ function resultStartLine(content: ToolResultEvent["content"]): number | undefine
  * CLI output sink — extends OutputSink with formatting and color support.
  */
 export class CliOutputSink extends OutputSink {
-  thinkerFormat: string;
   toolCallDisplayFormat?: string;
   toolOutputFmt?: string;
   palette: ColorPalette;
@@ -351,7 +351,6 @@ export class CliOutputSink extends OutputSink {
 
   constructor(options: CliOutputSinkOptions = {}) {
     super();
-    this.thinkerFormat = options.thinkerFormat || "[Thinking: {}]";
     this.toolCallDisplayFormat = options.toolCallDisplayFormat;
     this.toolOutputFmt = options.toolOutputFmt;
     this.palette = options.palette || ColorPalette.default();
@@ -543,7 +542,7 @@ export class CliOutputSink extends OutputSink {
   override emitThinking(event: ThinkingEvent): void {
     if (this.hideThinking) return;
     this._transitionTo(Modes.Thinking);
-    this._processContent(formatThinking(event.content, this.thinkerFormat));
+    this._processContent(formatThinking(event.content));
   }
 
   override emitToolCall(event: ToolCallEvent): void {

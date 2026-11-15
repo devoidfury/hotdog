@@ -25,7 +25,6 @@ bun bin/hotdog prompt "hello"
 - **`--hide-tools`** — hide tool calls (default: hidden)
 - **`--show-thinking`** — show thinking output (default: shown)
 - **`--hide-thinking`** — hide thinking output
-- **`--thinker <fmt>`** — custom thinking format string
 - **`--toolfmt <fmt>`** — custom tool call format string
 - **`--tool-output-fmt <fmt>`** — custom tool result format string
 - **`--session-id <id>`** (`-s`) — resumable session ID (restores from disk)

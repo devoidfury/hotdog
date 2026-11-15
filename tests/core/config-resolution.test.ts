@@ -119,11 +119,6 @@ describe("CONFIG_KEYS schema", () => {
     })).toBe(true);
   });
 
-  it("format strings resolve with correct fallback", () => {
-    expect(resolveKey("thinkerFormat", CONFIG_KEYS.thinkerFormat, { ...baseContext, cli: { thinker: "custom" } })).toBe("custom");
-    expect(resolveKey("thinkerFormat", CONFIG_KEYS.thinkerFormat, baseContext)).toBe("[Thinking: {}]");
-  });
-
   it("toolCallDisplayFormat falls back to the legacy toolfmt config key", () => {
     // New config key wins when both are present
     expect(resolveKey("toolCallDisplayFormat", CONFIG_KEYS.toolCallDisplayFormat, {
@@ -259,7 +254,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
       cli: {
         url: "http://cli-url",
         apiKey: "cli-key",
-        thinker: "custom",
         hideTools: false,
         tokens: true,
         chatTimeout: 300,
@@ -273,7 +267,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
       config: {
         aiUrl: "http://config-url",
         apiKey: "config-key",
-        thinker: "config-thinker",
         toolCallDisplayFormat: "config-tool",
         toolOutputFmt: "config-output",
         chatTimeoutSecs: 900,

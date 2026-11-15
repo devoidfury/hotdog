@@ -2,7 +2,6 @@
   "log_level": "warn",
   "log_target": "stderr",
   "default_model": "ai365/qwen3.8-flash-next",
-  "thinker": " 🧠 ... {}",
   "tool_call_display_format": " 🔧 {} {}",
   "show-token-use": true,
   "extension-paths": ["@extensions", "@experimental"],

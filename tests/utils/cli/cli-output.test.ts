@@ -143,14 +143,10 @@ describe("formatTokenUsage", () => {
 });
 
 describe("formatThinking", () => {
-  it("formats with default formatter", () => {
-    expect(formatThinking("Let me think about this", null)).toBe(
+  it("renders the built-in shape (the thinker format knob is retired)", () => {
+    expect(formatThinking("Let me think about this")).toBe(
       "[Thinking: Let me think about this]",
     );
-  });
-
-  it("formats with custom formatter", () => {
-    expect(formatThinking("Let me think", "🤔 {}")).toBe("🤔 Let me think");
   });
 });
 

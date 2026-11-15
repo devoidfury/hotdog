@@ -2,7 +2,6 @@
   "log_level": "warn",
   "log_target": "stderr",
   "default_model": "provider1/mystic-navel",
-  "thinker": " 🧠 ... {}",
   "tool_call_display_format": " 🔧 {} {}",
   "hide_tools": true,
   "show_token_use": true,

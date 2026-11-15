@@ -1087,6 +1087,6 @@ describe("the {} templaters substitute literally", () => {
     expect(formatToolCall("n", "a", "{} {} {}")).toBe("n a {}");
   });
   it("formatThinking keeps the reasoning bytes literal", () => {
-    expect(formatThinking(hostile, "[think: {}]")).toBe(`[think: ${hostile}]`);
+    expect(formatThinking(hostile)).toBe(`[Thinking: ${hostile}]`);
   });
 });

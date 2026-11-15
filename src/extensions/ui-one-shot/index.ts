@@ -148,7 +148,6 @@ async function handlePromptSubcommand(
     sink = new CliOutputSink({
       ...resolved,
       palette,
-      thinkerFormat: resolved.thinkerFormat,
       toolCallDisplayFormat: resolved.toolCallDisplayFormat,
       toolOutputFmt: resolved.toolOutputFmt,
       // Same as the interactive CLI: -p must not echo the user's prompt back.

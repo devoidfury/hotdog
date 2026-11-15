@@ -200,19 +200,6 @@ field. Without one: pins the registry model used for speech-to-text (must
 declare audio input; entries with absent modality data are never
 auto-picked).
 
-### `thinker`
-
-- **Type:** `string`
-- **CLI flag:** `--thinker` / `-t`
-- **Default:** `"[Thinking: {}]"`
-- **Resolution:** CLI > config > default
-
-Format string for thinking/reasoning output. `{}` is replaced with the thinking content.
-
-```json
-{ "thinker": "🧠 ... {}" }
-```
-
 ### `toolCallDisplayFormat`
 
 - **Type:** `string`
@@ -300,6 +287,11 @@ When `true`, tool calls are hidden from output. Shown by default; set to `true` 
 - **Resolution:** CLI > config > default
 
 When `true`, thinking/reasoning output is hidden.
+
+The old `thinker` format-string knob is retired (its `{}` template shipped
+broken): thinking always prints in the built-in `[Thinking: ...]` shape. A
+`thinker` or `thinkerFormat` key left in `defaults.json` warns at boot and is
+ignored; `hotdog rescue` names the line. `--thinker` / `-t` are gone.
 
 ```json
 { "hideThinking": true }
@@ -1819,7 +1811,6 @@ These extensions expose a single config knob, `{ "<key>": { "enabled": <boolean,
 ```json
 {
   "default_model": "provider1/mystic-navel",
-  "thinker": " 🧠 ... {}",
   "toolfmt": " 🔧 {} {}",
   "hide_tools": true,
   "show_token_use": true,
@@ -1844,7 +1835,6 @@ These extensions expose a single config knob, `{ "<key>": { "enabled": <boolean,
 {
   "defaultModel": "ai365/dsv4",
   "defaultProvider": "ai365",
-  "thinker": " 🧠 ... {}",
   "toolCallDisplayFormat": " 🔧 {} {}",
   "hideTools": true,
   "showTokenUse": true,

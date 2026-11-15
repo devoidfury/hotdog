@@ -164,3 +164,33 @@ describe("rescue removed-key tombstone (temperature / prompt, root-only)", () =>
     });
   });
 });
+
+// ── thinker retirement: the {} think-format knob ─────────────────────────────
+
+describe("rescue removed-key tombstone (thinker / thinkerFormat)", () => {
+  it("tombstones both retired spellings as REMOVED, never UNKNOWN", async () => {
+    const cfg = '{\n  "thinker": " 🧠 ... {}",\n  "thinker_format": "y {}"\n}\n';
+    await withConfig(cfg, async (dir) => {
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue"]);
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain('REMOVED key: "thinker" (line 2)');
+      expect(stdout).toContain('REMOVED key: "thinker_format" (line 3)');
+      expect(stdout).toContain("[Thinking: ...]");
+      expect(stdout).not.toContain('UNKNOWN key: "thinker"');
+      expect(stdout).not.toContain('UNKNOWN key: "thinker_format"');
+    });
+  });
+
+  it("--json carries the thinker finding naming the built-in display", async () => {
+    await withConfig('{\n  "thinker": "x {}"\n}\n', async (dir) => {
+      const { exitCode, stdout } = await runMain(["--config-dir", dir, "rescue", "--json"]);
+      expect(exitCode).toBe(1);
+      const envelope = JSON.parse(stdout);
+      const removed = envelope.findings.filter((f: { type: string }) => f.type === "removed-key");
+      expect(removed.length).toBe(1);
+      expect(removed[0].key).toBe("thinker");
+      expect(removed[0].line).toBe(2);
+      expect(removed[0].message).toContain("hideThinking");
+    });
+  });
+});

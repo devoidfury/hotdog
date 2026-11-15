@@ -168,5 +168,5 @@ The complete list. Anything not listed as live above answers `restart-required`,
 - TaskManager-wide options: `taskProfile`, `taskLanesPerProvider`, and the health-probe provider set (built once per host).
 - Boot/resume flags: `sessionId`, `reindex`, `noLog`, `defaultSubcommand` (no coherent mid-run meaning).
 - The logger's own posture: `logLevel`, `logTarget` (read from the file before the config layer loads).
-- CLI-host display keys (`theme`, `colors`, `thinkerFormat`, `toolCallDisplayFormat`, `toolOutputFmt`, the interactive-CLI renderer keys): the daemon has no consumer of them, and CLI hosts are per-process by definition.
+- CLI-host display keys (`theme`, `colors`, `toolCallDisplayFormat`, `toolOutputFmt`, the interactive-CLI renderer keys): the daemon has no consumer of them, and CLI hosts are per-process by definition.
 - `modelSwitch.commandEnabled`: the commands-registration seam reads the block the extension captured at creation, so it does not move live; treat it as restart-bound.

@@ -1385,6 +1385,22 @@ describe("createChat reconnect identity", () => {
     expect(p2.get("cursor")).toBeNull();
   });
 
+  it("a live streamingToolCall preview leaves the cursor clean (transient render state)", () => {
+    makeChat();
+    const ws1 = lastWs();
+    emitDeltaAttach(ws1, "s1", 2);
+    // The preview renders in-flight args and appends NOTHING to the
+    // transcript (the committed toolCall frame is the durable row, and that
+    // one marks the cursor dirty), so the stored cursor still describes it.
+    ws1.emit({ type: "streamingToolCall", sessionId: "s1", index: 0, name: "bash", args: '{"comm' });
+
+    chat!.disconnect();
+    chat!.connect();
+    const p2 = new URL(lastWs().url).searchParams;
+    expect(p2.get("session")).toBe("s1");
+    expect(p2.get("cursor")).toBe("2");
+  });
+
   it("replay-burst events do not dirty the transcript", () => {
     makeChat();
     const ws1 = lastWs();

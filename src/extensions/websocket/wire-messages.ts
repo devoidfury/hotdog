@@ -12,7 +12,14 @@ import type { CtxUsage } from "@utils/session-turns.ts";
 import { trySessionPath } from "@core/session/session-log.ts";
 import type { TaskInfo } from "@core/session/task-types.ts";
 import type { LineageRecord } from "@core/session/spawn-log.ts";
-import { S2C, type S2CType, type TaskActivityWire, type ToolDisplayWire, wireImages } from "./protocol.ts";
+import {
+  MAX_STREAMING_TOOL_CALL_ARGS_CHARS,
+  S2C,
+  type S2CType,
+  type TaskActivityWire,
+  type ToolDisplayWire,
+  wireImages,
+} from "./protocol.ts";
 
 /**
  * TaskInfo -> TaskInfoWire for the two task frames (snapshot TASK_LIST and
@@ -242,6 +249,48 @@ export function s2cToolResult(
   };
 }
 
+/**
+ * A tool call still growing on the wire. LIVE-ONLY by construction: core
+ * accumulates the partial (ToolCallDeltaEvent), nothing persists it, and no
+ * replay path builds it -- a client that joins mid-stream simply sees the
+ * next delta land. Shape decisions, both forced by the seam:
+ *
+ * - `args` is the ACCUMULATED text so far, not an increment: core already
+ *   hands the whole partial to every delta, so forwarding it verbatim costs
+ *   nothing, while a client-side accumulator would need its own reset
+ *   doctrine (and a dropped frame would corrupt every later one). The client
+ *   REPLACES its preview, so redelivery is idempotent. Capped, see
+ *   MAX_STREAMING_TOOL_CALL_ARGS_CHARS.
+ * - `index` is the frame's identity: the wire's tool-call slot, stable for
+ *   the life of the call (parallel calls interleave deltas, and each keeps
+ *   its slot). The provider's tool-call id is NOT carried -- mid-stream it is
+ *   often still empty, and when a provider never sends one core mints a fresh
+ *   UUID only after the response assembles, so an id could not pair the
+ *   preview to the final `toolCall` frame anyway. The client therefore keys
+ *   the in-progress bubble by `index` and upgrades it when the final frame
+ *   lands, matching same-name previews in arrival order (the
+ *   pendingToolCallsByName doctrine the result pairing already uses).
+ *
+ * `name` is "" until the first toolName delta lands; the client renders a
+ * nameless preview rather than inventing one.
+ */
+export function s2cStreamingToolCall(
+  sessionId: string,
+  o: { index: number; name: string; args: string },
+): Record<string, unknown> {
+  const capped =
+    o.args.length > MAX_STREAMING_TOOL_CALL_ARGS_CHARS
+      ? `${o.args.slice(0, MAX_STREAMING_TOOL_CALL_ARGS_CHARS)}...[truncated]`
+      : o.args;
+  return {
+    type: S2C.STREAMING_TOOL_CALL,
+    sessionId,
+    index: o.index,
+    name: o.name,
+    args: capped,
+  };
+}
+
 /** Per-tool display-metadata view the task-activity relay resolves from the
  *  producing (worker) agent's own tool registry -- the same ToolMetadata
  *  keys createChannel hands to s2cToolCall for live session frames. */
@@ -396,6 +445,16 @@ export function toS2CMessage(
         images: event.images,
         error: event.error,
       });
+    case OUTPUT_EVENT.TOOL_CALL_DELTA:
+      // Live-only preview of a tool call still streaming (see
+      // s2cStreamingToolCall): frame-only in the sense that nothing persists
+      // or replays it, but it DOES ride the wire -- the chat needs the
+      // in-progress posture and the Thinking-line dismissal it drives.
+      return s2cStreamingToolCall(sessionId, {
+        index: event.index,
+        name: event.name,
+        args: event.args,
+      });
     case OUTPUT_EVENT.COMPACTING:
       return { type: S2C.COMPACTING, sessionId, message: event.message };
     case OUTPUT_EVENT.COMMAND_RESULT:
@@ -427,8 +486,9 @@ export function toS2CMessage(
     case OUTPUT_EVENT.SESSION_STATE:
       return { type: S2C.SESSION_STATE, sessionId, key: event.key, value: event.value };
     default:
-      // Frame-only events (QUEUE_UPDATE, TOOL_CALL_DELTA) intentionally stay
-      // off the wire; write() drops what maps to null.
+      // Frame-only events stay off the wire; write() drops what maps to null.
+      // QUEUE_UPDATE is the remaining one (the tool-call delta does ride now,
+      // as the live-only `streamingToolCall` frame above).
       return null;
   }
 }

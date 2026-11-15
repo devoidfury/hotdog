@@ -169,6 +169,9 @@ export const S2C = {
   ASSISTANT_MESSAGE: "assistantMessage",
   THINKING: "thinking",
   TOOL_CALL: "toolCall",
+  // Live-only in-flight tool call (see s2cStreamingToolCall in wire-messages.ts):
+  // additive, frame-only, never persisted and never replayed.
+  STREAMING_TOOL_CALL: "streamingToolCall",
   TOOL_RESULT: "toolResult",
   COMPACTING: "compacting",
   COMMAND_RESULT: "commandResult",
@@ -955,6 +958,16 @@ export type TaskActivityWire =
  * carry whole file dumps.
  */
 export const MAX_TASK_ACTIVITY_CHARS = 4000;
+
+/**
+ * Preview ceiling on a `streamingToolCall` frame's accumulated args (see
+ * s2cStreamingToolCall). The frame repeats the WHOLE partial on every wire
+ * delta, so an uncapped write call (a 200 KB file body streamed in 1 KB
+ * deltas) would push tens of megabytes of preview the transcript can never
+ * show. Beyond the cap the client sees the head plus the marker; the final
+ * `toolCall` frame carries the complete args either way.
+ */
+export const MAX_STREAMING_TOOL_CALL_ARGS_CHARS = 2000;
 
 function truncateActivity(value: string): string {
   if (value.length <= MAX_TASK_ACTIVITY_CHARS) return value;

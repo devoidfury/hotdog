@@ -181,8 +181,10 @@ export interface QueueUpdateEvent {
 /**
  * A tool call growing mid-stream: the accumulated partial, emitted per wire delta.
  * Frame content for the split renderer's in-flight row -- NOT printable output:
- * the base sink ignores it (no switch case) and WebSocket drops it (maps to null in toS2CMessage),
- * the QueueUpdateEvent precedent. `args` carries raw text that is usually NOT valid JSON yet;
+ * the base sink ignores it (no switch case). WebSocket rides it as the live-only
+ * `streamingToolCall` preview frame (see s2cStreamingToolCall in the websocket
+ * extension); QUEUE_UPDATE is the remaining frame-only event that stays off the wire.
+ * `args` carries raw text that is usually NOT valid JSON yet;
  * sinks present it as-is (the summarizer's unparseable passthrough is the fallback).
  * Live-only: never persisted, never replayed.
  */

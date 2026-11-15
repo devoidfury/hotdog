@@ -2096,6 +2096,34 @@ body.logs-resizing .sidebar-header-resize {
     word-break: break-word;
 }
 
+/* ── In-flight Tool Call (live-only streamingToolCall frame) ───────────────
+   The committed block's own posture carries the frame and the header, so the
+   in-progress tell is two things only: the shared .spinner in the status slot
+   (currentColor, so no hue of its own) and the accumulating wire args below.
+   The accent rail says "this call has not committed yet" in the same grammar
+   the thinking block uses; the final toolCall frame replaces the whole block
+   in this element, so the rail disappears with the posture. */
+.tool-call-block.tool-call-streaming {
+    border-left: 2px solid var(--accent);
+    border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* The partial args, shown as-is: mid-stream this is usually NOT valid JSON,
+   so no folding, no highlighting, no prettifying -- a ceiling keeps a huge
+   write call from growing the transcript without limit (the committed frame
+   carries the complete args and renders them properly). */
+.tool-call-stream-preview {
+    margin: 0;
+    padding: 0 12px 8px;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 6rem;
+    overflow: hidden;
+}
+
 /* The generic result posture's collapsed disclosure: one muted centered summary
    line until opened, then lazy content. NOT a box: no border, no fill -- the
    block behind it is the only surface. (Declared-path parts got their own
@@ -2620,6 +2648,53 @@ body.logs-resizing .sidebar-header-resize {
 /* When thinking blocks render markdown, use normal whitespace */
 .thinking-block.md-content {
     white-space: normal;
+}
+
+/* ── Live "Thinking" Row (the chat-log busy tell) ─────────────────────────
+   The transcript-side sibling of the Stop button's spinner: one quiet line at
+   the bottom of the live log while a model call waits with nothing visible on
+   screen yet (text, a tool bubble or a SHOWN reasoning block retires it).
+   `order` pins it as the last visual row of the flex column even while later
+   rows keep landing in DOM order above it -- no re-stacking per append.
+   Theme variables only; the dots' staggered opacity cycle is the whole
+   animation, and it changes no text (the row's aria-live content is set once,
+   the dots are aria-hidden), so a reader hears "Thinking" once per call. */
+
+.thinking-live {
+    order: 1;
+    align-self: flex-start;
+    display: flex;
+    align-items: baseline;
+    gap: 1px;
+    margin: 4px 0 0 8px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.945rem;
+    animation: messageIn 0.25s var(--ease-out) both;
+}
+
+.thinking-live-dot {
+    animation: thinkingPulse 1.2s var(--ease-out) infinite;
+}
+
+/* Staggered: the three dots read as a sequence travelling right, not a blink. */
+.thinking-live-dot:nth-child(2) {
+    animation-delay: 0.18s;
+}
+
+.thinking-live-dot:nth-child(3) {
+    animation-delay: 0.36s;
+}
+
+@keyframes thinkingPulse {
+    0%,
+    60%,
+    100% {
+        opacity: 0.2;
+    }
+    30% {
+        opacity: 1;
+    }
 }
 
 /* ── Special Message Types ────────────────────────────────────────────────── */

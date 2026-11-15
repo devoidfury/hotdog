@@ -84,6 +84,13 @@ interface AssistantMessage {
 interface StreamingChunk { content: string; }
 interface ThinkingMessage { content: string; }
 interface ToolCallMessage { name: string; args: string; argsSummary?: string; display?: ToolDisplayWire[]; toolCallId?: string; }
+/**
+ * Live-only in-flight tool call (S2C `streamingToolCall`): `index` is the
+ * wire's tool-call slot (the frame's identity -- see s2cStreamingToolCall),
+ * `name` is "" until the first toolName delta, `args` is the ACCUMULATED
+ * partial text, so each frame REPLACES the preview (never appends).
+ */
+interface StreamingToolCallMessage { index: number; name: string; args: string; }
 interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; toolCallId?: string; startLine?: number; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
@@ -186,6 +193,20 @@ export interface MessageListManager {
   handleAssistantMessage: (data: AssistantMessage) => void;
   handleStreamingChunk: (data: StreamingChunk) => void;
   handleStreamingReasoningChunk: (data: StreamingChunk) => void;
+  /**
+   * Live-only tool-call preview (S2C `streamingToolCall`): one bubble per
+   * wire slot, its args preview replaced by every delta. The regular
+   * `toolCall` frame upgrades the bubble in place; a retry (handleStreamReset)
+   * or a closing turn drops it.
+   */
+  handleStreamingToolCall: (data: StreamingToolCallMessage) => void;
+  /**
+   * The optimistic request edge (the composer's send / Stop clicks), which
+   * arrives long before the server's working sessionState frame. The live
+   * "Thinking" row follows it; `noteWorking` still owns the turn clock and
+   * the footer, and re-attests the same posture when the wire lands.
+   */
+  setRequestPending: (pending: boolean) => void;
   /** Mid-stream provider-failure retry: drop the in-flight text/thinking
    * accumulators so the retry's deltas render into fresh renderers. */
   handleStreamReset: () => void;
@@ -242,6 +263,129 @@ export function createMessageList(
   const pendingToolCallsByName = new Map<string, ToolBlockController[]>();
   let hasToolCallsSinceLastAssistant = false;
   let hideThinkingValue = hideThinking;
+
+  // ── Live activity: the "Thinking" row and the in-flight tool bubbles ─────
+  // Both are LIVE transcript state: cold logs never paint them (they render
+  // through renderLogEntries, which touches none of this), and while a browse
+  // mode is on the whole manager is bypassed (chat.ts LOG_VIEW_SINK).
+  //
+  // The row is a PER-MODEL-CALL tell, not a per-turn tell: it covers the gap
+  // where the harness is waiting on a response with nothing visible on screen
+  // yet. Two flags hold it:
+  //   requestPending -- a request is in flight (the optimistic send click,
+  //     then the session's "working" edges, which re-attest the same truth).
+  //   streamedVisible -- the CURRENT model call has produced visible output,
+  //     which retires the row until the next call starts. Reasoning chunks
+  //     count only when reasoning is actually visible (the per-browser
+  //     hideThinking preference): hidden reasoning renders nothing, so the row
+  //     stays up through the whole reasoning phase.
+  // Every call boundary resets streamedVisible: the working true-edge, a
+  // retry's streamReset, and a tool result landing (the turn is still working
+  // and the next call has nothing streamed yet).
+  let requestPending = false;
+  let streamedVisible = false;
+  // The session's "working" value as THIS view last saw it, and whether it
+  // has seen one at all. Only a real idle->working edge opens a fresh model
+  // call; a mid-turn attach (or a reconnect) re-attests working, and there
+  // the replay burst is the authority on what that call already showed. Same
+  // doctrine as the turn clock's workingBaseline one flag below.
+  let workingSeen = false;
+  let workingValue = false;
+  let thinkingRow: HTMLElement | null = null;
+
+  /** Put the row on screen (idempotent: one element, so a reset/re-show cycle
+   *  can never leave two rows) or take it off. The dots are markup, not text
+   *  churn: the row's content is set once, so the polite live region says
+   *  "Thinking" once per appearance and never per blink. */
+  function setThinkingRow(visible: boolean): void {
+    if (!visible) {
+      thinkingRow?.remove();
+      thinkingRow = null;
+      return;
+    }
+    if (thinkingRow && container.contains(thinkingRow)) return;
+    thinkingRow = document.createElement("div");
+    thinkingRow.className = "thinking-live";
+    // The app's narration idiom (app.tsx #live-status): a polite status region
+    // the dots are hidden from, so the animation never feeds the reader.
+    thinkingRow.setAttribute("role", "status");
+    thinkingRow.setAttribute("aria-live", "polite");
+    const label = document.createElement("span");
+    label.className = "thinking-live-text";
+    label.textContent = "Thinking";
+    const dots = document.createElement("span");
+    dots.className = "thinking-live-dots";
+    dots.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < 3; i++) {
+      const dot = document.createElement("span");
+      dot.className = "thinking-live-dot";
+      dot.textContent = ".";
+      dots.appendChild(dot);
+    }
+    thinkingRow.appendChild(label);
+    thinkingRow.appendChild(dots);
+    container.appendChild(thinkingRow);
+    scrollBottom();
+  }
+
+  /** Re-derive the row from the two flags. */
+  function syncThinkingRow(): void {
+    setThinkingRow(requestPending && !streamedVisible);
+  }
+
+  /** A tool call is streaming: its bubble takes over from the row. */
+  function noteVisibleOutput(): void {
+    streamedVisible = true;
+    syncThinkingRow();
+  }
+
+  // Committed tool calls still waiting for their result: the round-closed
+  // test the per-call tell uses to come back between model calls (0 means the
+  // harness is about to ask the model again, not run another tool).
+  let pendingToolResults = 0;
+
+  // In-flight tool calls, keyed by the wire slot index the streamingToolCall
+  // frame carries. One host div per slot: the regular toolCall frame mounts
+  // the real ToolBlockController into the SAME host (claimInflightHost), so
+  // the bubble upgrades in place -- same node, no second bubble, no frame
+  // where the row is empty.
+  const inflightToolHosts = new Map<number, HTMLDivElement>();
+  // Slots that already have a bubble, in arrival order: the pairing key for
+  // the final frame (the delta carries no provider tool-call id -- see
+  // s2cStreamingToolCall -- so a same-name preview is claimed first, then the
+  // oldest preview at all, exactly like the name-pairing of results without
+  // ids).
+  let inflightSlots: Array<{ index: number; name: string }> = [];
+
+  /**
+   * Drop every in-flight bubble (retry, turn end, clear) and the committed
+   * ledger beside it: on these paths a pending result can never land again,
+   * and a stale count would mute the per-call tell for the next turn (the
+   * round-closed test could never reach 0).
+   */
+  function clearInflightToolCalls(): void {
+    for (const host of inflightToolHosts.values()) host.remove();
+    inflightToolHosts.clear();
+    inflightSlots = [];
+    pendingToolResults = 0;
+  }
+
+  /** Claim (and remove) the in-flight host a final toolCall frame upgrades.
+   *  A same-name preview wins; the only other pairing is a preview that is
+   *  still NAME-LESS (its args deltas arrived before the toolName delta),
+   *  which is positionally this frame's call. A preview already labelled with
+   *  a different name belongs to a different call, so it is never stolen --
+   *  the frame gets a fresh host, exactly the no-preview path. */
+  function claimInflightHost(name: string): HTMLDivElement | null {
+    let at = inflightSlots.findIndex((s) => s.name !== "" && s.name === name);
+    if (at < 0) at = inflightSlots.findIndex((s) => s.name === "");
+    if (at < 0) return null;
+    const slot = inflightSlots[at]!;
+    inflightSlots.splice(at, 1);
+    const host = inflightToolHosts.get(slot.index) ?? null;
+    inflightToolHosts.delete(slot.index);
+    return host;
+  }
 
   let streamingParser: StreamingMdParser | null = null;
   let thinkingParser: StreamingMdParser | null = null;
@@ -313,6 +457,16 @@ export function createMessageList(
       usageAwaitingBar = false;
       lastBar = null;
       lastBarWorked = false;
+      // Per-model-call tell. Only a transition THIS view watched (it saw the
+      // turn idle, now it runs) opens a call with nothing streamed: a fresh
+      // view attaching mid-turn must trust its replay burst instead, which
+      // already said what the running call showed. Same doctrine as the turn
+      // clock's workingBaseline flag above.
+      requestPending = true;
+      if (workingSeen && !workingValue) streamedVisible = false;
+      workingSeen = true;
+      workingValue = true;
+      syncThinkingRow();
       return;
     }
     // The very first report (idle attach): this view observed no turn, so a
@@ -335,6 +489,76 @@ export function createMessageList(
     }
     lastTurnCtx = undefined;
     lastTurnCallMs = undefined;
+    // Turn over: the tell retires and any call still previewing is a dead
+    // stream (no final frame will ever land for it).
+    requestPending = false;
+    streamedVisible = false;
+    workingSeen = true;
+    workingValue = false;
+    clearInflightToolCalls();
+    syncThinkingRow();
+  }
+
+  /**
+   * The optimistic request edge (composer send / Stop). The row follows the
+   * click, not the round trip; the wire's working edges land afterwards and
+   * re-attest the same posture through noteWorking.
+   */
+  function setRequestPending(pending: boolean): void {
+    if (pending) {
+      // Only a FRESH request re-opens the tell: a mid-run steer must not
+      // resurrect it over the bytes still streaming from the running call.
+      if (!requestPending) streamedVisible = false;
+      requestPending = true;
+    } else {
+      requestPending = false;
+      // A stop ends the turn: nothing will ever stream into an in-flight
+      // preview again, so it goes with it (no bubble stuck "in progress").
+      clearInflightToolCalls();
+    }
+    syncThinkingRow();
+  }
+
+  function handleStreamingToolCall({ index, name, args }: StreamingToolCallMessage): void {
+    // The preview bubble is the visible activity now: the row retires.
+    noteVisibleOutput();
+    let host = inflightToolHosts.get(index);
+    if (!host) {
+      host = document.createElement("div");
+      host.className = "tool-call-block tool-call-streaming status-pending";
+      const header = document.createElement("div");
+      header.className = "tool-call-header";
+      const nameEl = document.createElement("span");
+      nameEl.className = "tool-call-name";
+      const statusEl = document.createElement("span");
+      statusEl.className = "tool-call-status status-pending";
+      // The house busy affordance (composer/sidebar .spinner): a
+      // currentColor ring, so the pending header tints it without a new hue.
+      const spinner = document.createElement("span");
+      spinner.className = "spinner";
+      statusEl.appendChild(spinner);
+      header.appendChild(nameEl);
+      header.appendChild(statusEl);
+      const preview = document.createElement("pre");
+      preview.className = "tool-call-stream-preview";
+      host.appendChild(header);
+      host.appendChild(preview);
+      container.appendChild(host);
+      inflightToolHosts.set(index, host);
+      inflightSlots.push({ index, name });
+    } else {
+      // The name lands in its own delta (some backends resend it): fill the
+      // slot's record once, so the final-frame pairing can use it.
+      const slot = inflightSlots.find((s) => s.index === index);
+      if (slot && slot.name === "" && name !== "") slot.name = name;
+    }
+    // textContent all the way down: wire bytes never reach innerHTML.
+    const nameEl = host.querySelector(".tool-call-name");
+    if (nameEl && name !== "") nameEl.textContent = `🛠 ${name}`;
+    const preview = host.querySelector(".tool-call-stream-preview");
+    // Cumulative args: REPLACE, never append (see s2cStreamingToolCall).
+    if (preview) preview.textContent = args;
+    scrollBottom();
   }
 
   function ensureAssistantEl(): HTMLDivElement {
@@ -378,6 +602,10 @@ export function createMessageList(
     container.querySelectorAll(".thinking-block").forEach((el) => {
       el.classList.toggle("hidden", v);
     });
+    // Revealing reasoning mid-call puts real content on screen, so the row
+    // retires for it. The reverse flip deliberately does NOT bring the row
+    // back: one tell per model call, not a yo-yo on every preference toggle.
+    if (!v && currentThinkingEl?.textContent?.trim()) noteVisibleOutput();
   }
 
   /**
@@ -658,6 +886,9 @@ export function createMessageList(
   }
 
   function handleAssistantMessage({ content, ts, durationMs, ctx, callMs, callDerived }: AssistantMessage): void {
+    // Committed response text IS visible content (the non-streaming shape and
+    // every replay burst land here), so the live tell retires for it too.
+    noteVisibleOutput();
     finalizeAssistant();
     if (!content?.trim()) {
       // A response with no text (tool calls and/or reasoning only). Replay
@@ -687,6 +918,9 @@ export function createMessageList(
   }
 
   function handleStreamingChunk({ content }: StreamingChunk): void {
+    // Plain response text is the visible tell par excellence: the row retires
+    // for the rest of this model call.
+    noteVisibleOutput();
     // If we've had tool calls since the last assistant message, start a new
     // assistant element so tool calls appear sequentially before the final text.
     if (hasToolCallsSinceLastAssistant) {
@@ -718,6 +952,10 @@ export function createMessageList(
   }
 
   function handleStreamingReasoningChunk({ content }: StreamingChunk): void {
+    // Visible reasoning IS visible activity, so the row retires for it. Under
+    // the per-browser hideThinking preference the block renders nothing, so
+    // the row stays up: hidden bytes are not activity the user can see.
+    if (!hideThinkingValue) noteVisibleOutput();
     const el = ensureThinkingEl();
 
     if (!thinkingParser) {
@@ -761,15 +999,26 @@ export function createMessageList(
     streamingBlockCount = 0;
     thinkingBlockCount = 0;
     currentAssistantRaw = "";
+    // The dead attempt's in-flight previews die with its text: the retry
+    // re-streams them into fresh bubbles. Nothing has streamed for the retry
+    // yet, so if the turn is still running the tell takes the gap back (the
+    // single row element makes a second one impossible).
+    clearInflightToolCalls();
+    streamedVisible = false;
+    syncThinkingRow();
   }
 
   function handleThinking({ content }: ThinkingMessage): void {
+    if (!hideThinkingValue) noteVisibleOutput();
     const el = ensureThinkingEl();
     const tree = parseMarkdown(content);
     el.innerHTML = mdTreeToHtml(tree);
   }
 
   function handleToolCall({ name, args, argsSummary, display, toolCallId }: ToolCallMessage): void {
+    // A committed tool block is visible response content -- the row retires
+    // whether or not a preview led it.
+    noteVisibleOutput();
     // Finalize the current assistant message so tool calls appear as
     // separate blocks after the user message, not nested inside the assistant.
     // A text row closed here is a completed message (the model answered, then
@@ -780,13 +1029,28 @@ export function createMessageList(
     // the boundary-commit note in handleStreamingChunk).
     finalizeAssistant({ ts: Date.now(), ctx: lastTurnCtx, callMs: lastTurnCallMs });
 
-    const host = document.createElement("div");
+    // A preview bubble for this call (streamingToolCall) upgrades in place:
+    // the same host element, emptied and re-mounted, so the row never blanks
+    // and no second block appears. Re-appending it keeps the order a
+    // no-preview turn has (the footer finalizeAssistant may have just landed
+    // sits ABOVE the call, not under it). Otherwise: today's fresh host.
+    const upgraded = claimInflightHost(name);
+    const host = upgraded ?? document.createElement("div");
+    if (upgraded) {
+      // Reset the host to what a preview-less call would hand the controller:
+      // no children (mount refuses a non-empty container) and no preview
+      // classes (the in-progress posture and its accent rail must not survive
+      // onto a committed block).
+      host.className = "";
+      host.innerHTML = "";
+    }
     container.appendChild(host);
     const block = new ToolBlockController(host as unknown as DomNode, { name, args, argsSummary, display });
     if (toolCallId) toolBlocksById.set(toolCallId, block);
     const queue = pendingToolCallsByName.get(name);
     if (queue) queue.push(block);
     else pendingToolCallsByName.set(name, [block]);
+    pendingToolResults++;
 
     hasToolCallsSinceLastAssistant = true;
     scrollBottom();
@@ -811,6 +1075,16 @@ export function createMessageList(
     if (!block) {
       const queue = pendingToolCallsByName.get(name);
       block = queue && queue.length > 0 ? queue.shift() : undefined;
+    }
+    if (pendingToolResults > 0 && block) pendingToolResults--;
+    // Round closed (every committed call has its answer): the next thing is a
+    // fresh model call with nothing streamed yet, so the per-call tell comes
+    // back -- and any preview whose call was answered WITHOUT a committed
+    // frame (invalid name, unavailable tool) is dead and drops here.
+    if (pendingToolResults === 0) {
+      clearInflightToolCalls();
+      streamedVisible = false;
+      syncThinkingRow();
     }
     if (!block) return; // orphan result: no matching call to attach to
 
@@ -1126,6 +1400,9 @@ export function createMessageList(
   }
 
   function handleError({ message }: ErrorMessage): void {
+    // Terminal: the tell retires with the turn it was waiting on, and no
+    // preview outlives the request that produced it.
+    setRequestPending(false);
     finalizeAssistant();
     // An errored turn is neither completed nor stopped: no "Worked for"
     // claim on the last bar.
@@ -1233,6 +1510,20 @@ export function createMessageList(
     usageAwaitingBar = false;
     lastBar = null;
     lastBarWorked = false;
+    // Live-activity state is per-view: a session switch / cold log / subagent
+    // transcript never carries the previous view's row or previews (the
+    // container is emptied above, so only the bookkeeping needs it).
+    requestPending = false;
+    streamedVisible = false;
+    // The turn-observation flags are per-view too: a fresh manager (or a
+    // switched-to session) watched no idle->working edge, so its first
+    // working:true is read as a mid-turn attach and trusts the replay burst.
+    workingSeen = false;
+    workingValue = false;
+    thinkingRow = null;
+    inflightToolHosts.clear();
+    inflightSlots = [];
+    pendingToolResults = 0;
   }
 
   /** Best-effort tool name from a tool_result entry: stored part, then JSON "name", then "tool: ..." prefix. */
@@ -1405,6 +1696,8 @@ export function createMessageList(
     handleAssistantMessage,
     handleStreamingChunk,
     handleStreamingReasoningChunk,
+    handleStreamingToolCall,
+    setRequestPending,
     handleStreamReset,
     handleThinking,
     handleToolCall,

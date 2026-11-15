@@ -619,3 +619,65 @@ describe("reasoning visibility preference (chat driver)", () => {
     expect(hiddenFlags(container)).toEqual([true, true]);
   });
 });
+
+// ── Live activity: the Thinking row and the in-flight tool preview ──────────
+// chat.ts owns the two edges the row answers (the send click, the wire's
+// working frames) and routes the live-only streamingToolCall frame; the
+// browse-mode sink must swallow both, or a cold log gets a live tell.
+
+describe("live activity tell + in-flight tool preview routing", () => {
+  function attached() {
+    const h = makeChat();
+    h.ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    h.chat.setSession("s1");
+    return h;
+  }
+  const rows = (c: HTMLElement) => c.querySelectorAll(".thinking-live");
+  const bubbles = (c: HTMLElement) => c.querySelectorAll(".tool-call-streaming");
+
+  it("the send click answers with the row; the working edge keeps it, the first chunk retires it", () => {
+    const { chat, container, ws } = attached();
+    chat.sendMessage("hello");
+    expect(rows(container)).toHaveLength(1);
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: true });
+    expect(rows(container)).toHaveLength(1); // re-attested, not cloned
+    ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "here" });
+    expect(rows(container)).toHaveLength(0);
+  });
+
+  it("Stop clears the row and every in-flight preview on the same click", () => {
+    const { chat, container, ws } = attached();
+    chat.sendMessage("hello");
+    ws.fireMessage({ type: "streamingToolCall", sessionId: "s1", index: 0, name: "bash", args: '{"command":"ls"' });
+    expect(bubbles(container)).toHaveLength(1);
+    chat.cancel();
+    expect(rows(container)).toHaveLength(0);
+    expect(bubbles(container)).toHaveLength(0);
+  });
+
+  it("a streamingToolCall frame renders the preview, and the toolCall frame upgrades it once", () => {
+    const { container, ws } = attached();
+    ws.fireMessage({ type: "streamingToolCall", sessionId: "s1", index: 0, name: "bash", args: '{"comm' });
+    const bubble = container.querySelector(".tool-call-streaming")!;
+    expect(bubble.querySelector(".tool-call-name")!.textContent).toBe("🛠 bash");
+    expect(bubble.querySelector(".tool-call-stream-preview")!.textContent).toBe('{"comm');
+    ws.fireMessage({
+      type: "toolCall", sessionId: "s1", name: "bash", args: '{"command":"ls"}', toolCallId: "t1",
+    });
+    expect(bubbles(container)).toHaveLength(0);
+    expect(container.querySelectorAll(".tool-call-block")).toHaveLength(1);
+    // A frame from another session never touches this transcript.
+    ws.fireMessage({ type: "streamingToolCall", sessionId: "other", index: 0, name: "read", args: "{}" });
+    expect(bubbles(container)).toHaveLength(0);
+  });
+
+  it("browse mode swallows both: no tell and no preview over a cold log", () => {
+    const { container, ws } = attached();
+    ws.fireMessage({ type: "logViewed", logId: "l1", entries: [] });
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: true });
+    ws.fireMessage({ type: "streamingToolCall", sessionId: "s1", index: 0, name: "bash", args: "{}" });
+    ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "not in the log window" });
+    expect(rows(container)).toHaveLength(0);
+    expect(bubbles(container)).toHaveLength(0);
+  });
+});

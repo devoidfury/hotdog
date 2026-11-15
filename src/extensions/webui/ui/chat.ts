@@ -286,6 +286,8 @@ const LOG_VIEW_SINK: MessageListManager = {
   handleAssistantMessage: () => {},
   handleStreamingChunk: () => {},
   handleStreamingReasoningChunk: () => {},
+  handleStreamingToolCall: () => {},
+  setRequestPending: () => {},
   handleStreamReset: () => {},
   handleThinking: () => {},
   handleToolCall: () => {},
@@ -524,6 +526,24 @@ interface StreamingReasoningChunkMessage {
 }
 
 /**
+ * Live-only in-flight tool call (S2C streamingToolCall, built by
+ * s2cStreamingToolCall): the wire's tool-call slot `index` plus the name and
+ * the ACCUMULATED argument text so far, so every frame replaces the client's
+ * preview. Deliberately NOT in CONVERSATION_EVENT_TYPES: it is transient
+ * render state that appends nothing to the transcript (the committed `toolCall`
+ * frame is the durable row, and it marks the cursor dirty itself), and it is
+ * never replayed -- a client that joins mid-stream just waits for the next
+ * delta.
+ */
+interface StreamingToolCallMessage {
+  type: "streamingToolCall";
+  sessionId: string;
+  index: number;
+  name: string;
+  args: string;
+}
+
+/**
  * Mid-stream provider-failure retry (S2C streamReset): the in-flight
  * assistant text/thinking accumulation must be dropped before the retry's
  * deltas arrive. Carries no payload beyond sessionId. Deliberately NOT in
@@ -637,6 +657,7 @@ type ServerMessage =
   | TaskControlWire
   | StreamingChunkMessage
   | StreamingReasoningChunkMessage
+  | StreamingToolCallMessage
   | StreamResetMessage
   | TaskProgressMessage
   | TokenUsageMessage
@@ -990,7 +1011,12 @@ export function createChat({
         viewedLogId = null;
         viewedTaskIdAtom(null);
         // On page reload the server can send working state before
-        // sessionCreated, so restore it from the map here.
+        // sessionCreated, so restore it from the map here. The chat-log tell
+        // needs no restore of its own: the attach burst ends by re-posting
+        // this session's working value (attach.ts), which noteWorking sees
+        // once setSession below has built the manager -- and the replayed
+        // rows ahead of it are exactly what retires the tell when the call
+        // already has something on screen.
         const createdSid = data.sessionId;
         if (sessionWorkingMap.has(createdSid)) {
           workingAtom(sessionWorkingMap.get(createdSid) ?? false);
@@ -1261,6 +1287,11 @@ export function createChat({
       case "streamingReasoningChunk":
         list.handleStreamingReasoningChunk(data);
         break;
+      case "streamingToolCall":
+        // Live in-flight tool preview: dropped by the browse-mode sink like
+        // every other live-session transcript write.
+        list.handleStreamingToolCall(data);
+        break;
       case "streamReset":
         // Drop the dead attempt's in-flight text/thinking before the
         // retry's deltas stream in (see message-list.handleStreamReset).
@@ -1466,6 +1497,9 @@ export function createChat({
       return;
     }
     workingAtom(true);
+    // The Thinking row answers the click, not the round trip (the wire's
+    // working frame re-attests the same posture when it lands).
+    messageList?.setRequestPending(true);
     send({
       type: "send",
       sessionId: sessionIdAtom(),
@@ -1487,6 +1521,9 @@ export function createChat({
     const sid = sessionIdAtom();
     if (sid) sessionWorkingMap.set(sid, false);
     workingAtom(false);
+    // ...and the chat-log tell with it, on the same click (the Stop edge; the
+    // wire's working:false frame that follows is a no-op here).
+    messageList?.setRequestPending(false);
   }
 
   /**

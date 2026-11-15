@@ -1651,3 +1651,344 @@ describe("assistant footer per-call duration segment", () => {
     expect(footer.querySelector(".footer-worked")).toBeNull();
   });
 });
+
+
+// ── Live activity: the "Thinking" row + the in-flight tool bubbles ──────────
+// The per-model-call tell (S2C working edges + the optimistic send) and the
+// live-only preview bubbles (S2C streamingToolCall). These pins walk the
+// lifecycle table: every appearance, every exit path, and the preview ->
+// committed upgrade.
+
+describe("live activity: the Thinking row", () => {
+  const rows = () => container.querySelectorAll(".thinking-live");
+  const shown = () => rows().length > 0;
+  const bubbles = () => container.querySelectorAll(".tool-call-streaming");
+  /** Idle-attach baseline, then the observed idle->working edge. */
+  const startTurn = () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+  };
+
+  it("shows on the optimistic send as one polite status row, and re-attesting never clones it", () => {
+    ml.setRequestPending(true);
+    const row = container.querySelector(".thinking-live")!;
+    expect(row.getAttribute("role")).toBe("status");
+    expect(row.getAttribute("aria-live")).toBe("polite");
+    expect(row.querySelector(".thinking-live-text")!.textContent).toBe("Thinking");
+    const dots = row.querySelector(".thinking-live-dots")!;
+    expect(dots.getAttribute("aria-hidden")).toBe("true");
+    expect([...dots.children].map((d) => d.textContent)).toEqual([".", ".", "."]);
+    // The row's text is written once, so a reader hears "Thinking" once per
+    // appearance: the wire's working edge and a repeat click keep the node.
+    ml.noteWorking(true);
+    ml.setRequestPending(true);
+    expect(rows()).toHaveLength(1);
+    expect(container.querySelector(".thinking-live")).toBe(row);
+  });
+
+  it("a text chunk retires it for the rest of the model call", () => {
+    startTurn();
+    expect(shown()).toBe(true);
+    ml.handleStreamingChunk({ content: "here you go" });
+    expect(shown()).toBe(false);
+    // Nothing short of a call boundary brings it back.
+    ml.handleStreamingChunk({ content: " more" });
+    ml.handleAssistantMessage({ content: "committed", ts: Date.now() });
+    expect(shown()).toBe(false);
+  });
+
+  it("a committed assistant message retires it (the non-streaming shape)", () => {
+    startTurn();
+    expect(shown()).toBe(true);
+    ml.handleAssistantMessage({ content: "all at once", ts: Date.now() });
+    expect(shown()).toBe(false);
+  });
+
+  it("visible reasoning retires it: a shown thinking block is visible activity", () => {
+    startTurn();
+    ml.handleStreamingReasoningChunk({ content: "pondering" });
+    expect(shown()).toBe(false);
+  });
+
+  it("a final thinking frame retires it while reasoning is visible", () => {
+    startTurn();
+    ml.handleThinking({ content: "reasoned" });
+    expect(shown()).toBe(false);
+  });
+
+  it("hidden reasoning keeps it up through the whole reasoning phase", () => {
+    setup({ hideThinking: true });
+    startTurn();
+    ml.handleStreamingReasoningChunk({ content: "hidden thoughts" });
+    ml.handleThinking({ content: "hidden thoughts" });
+    expect(container.querySelector(".thinking-block")!.classList.contains("hidden")).toBe(true);
+    expect(shown()).toBe(true);
+  });
+
+  it("revealing reasoning mid-call retires it, and hiding it again does not bring it back", () => {
+    // One tell per model call: the reveal put real text on screen, and the
+    // preference yo-yo after it must not re-arm the tell.
+    setup({ hideThinking: true });
+    startTurn();
+    ml.handleStreamingReasoningChunk({ content: "thoughts" });
+    expect(shown()).toBe(true);
+    ml.setHideThinking(false);
+    expect(container.querySelector(".thinking-block")!.classList.contains("hidden")).toBe(false);
+    expect(shown()).toBe(false);
+    ml.setHideThinking(true);
+    expect(shown()).toBe(false);
+  });
+
+  it("a mid-turn attach trusts its replay burst instead of re-arming the tell", () => {
+    // Fresh view, turn already running: the burst lands first (rows the log
+    // already holds), and the attach's working frame is this view's first.
+    ml.handleStreamingChunk({ content: "replayed partial" });
+    ml.noteWorking(true);
+    expect(shown()).toBe(false);
+    // The next edge this view actually watched IS a fresh call: it comes back.
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+    expect(shown()).toBe(true);
+  });
+
+  it("a mid-turn attach with nothing visible on screen shows the tell", () => {
+    // The reload/reconnect case: attach ends by re-posting working:true, and
+    // this call has shown no bytes yet (hidden reasoning, or between rounds).
+    ml.noteWorking(true);
+    expect(shown()).toBe(true);
+  });
+
+  it("a mid-run steer does not resurrect it over the bytes still streaming", () => {
+    startTurn();
+    ml.handleStreamingChunk({ content: "streaming" });
+    expect(shown()).toBe(false);
+    ml.setRequestPending(true); // the steer click on a running turn
+    expect(shown()).toBe(false);
+  });
+
+  it("the tool round closing brings it back while the turn is still working", () => {
+    startTurn();
+    ml.handleStreamingChunk({ content: "let me check" });
+    ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c1" });
+    expect(shown()).toBe(false);
+    ml.handleToolResult({ name: "bash", output: "ok", toolCallId: "c1" });
+    expect(shown()).toBe(true); // a per-model-call tell, not a per-turn one
+    ml.handleStreamingChunk({ content: "and the answer is" });
+    expect(shown()).toBe(false);
+  });
+
+  it("a stopped round's unanswered call never mutes the next turn's tell", () => {
+    startTurn();
+    ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c1" });
+    ml.setRequestPending(false); // Stop mid-round: c1's result never lands
+    startTurn();                 // the next turn
+    expect(shown()).toBe(true);
+    ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c2" });
+    expect(shown()).toBe(false);
+    ml.handleToolResult({ name: "bash", output: "ok", toolCallId: "c2" });
+    expect(shown()).toBe(true);
+  });
+
+  it("a retry re-shows the tell without ever leaving a second row", () => {
+    startTurn();
+    ml.handleStreamingChunk({ content: "DEAD" });
+    expect(shown()).toBe(false);
+    ml.handleStreamReset(); // the retry has streamed nothing yet
+    expect(rows()).toHaveLength(1);
+    ml.handleStreamingChunk({ content: "retry" });
+    expect(shown()).toBe(false);
+    ml.handleStreamReset();
+    expect(rows()).toHaveLength(1);
+    // Re-attesting the posture without a hide in between changes nothing.
+    ml.setRequestPending(true);
+    expect(rows()).toHaveLength(1);
+  });
+
+  it("Stop takes the row and every preview with it", () => {
+    ml.setRequestPending(true);
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"ls"' });
+    expect(bubbles()).toHaveLength(1);
+    ml.setRequestPending(false);
+    expect(shown()).toBe(false);
+    expect(bubbles()).toHaveLength(0);
+  });
+
+  it("working:false takes the row and every preview with it", () => {
+    startTurn();
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"ls"' });
+    ml.noteWorking(false);
+    expect(shown()).toBe(false);
+    expect(bubbles()).toHaveLength(0);
+  });
+
+  it("the error frame takes the row and every preview with it", () => {
+    startTurn();
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"ls"' });
+    ml.handleError({ message: "provider exploded" });
+    expect(shown()).toBe(false);
+    expect(bubbles()).toHaveLength(0);
+  });
+
+  it("clear() (session switch, cold log, new session) leaves neither row nor preview", () => {
+    ml.setRequestPending(true);
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: "{}" });
+    ml.clear();
+    expect(shown()).toBe(false);
+    expect(bubbles()).toHaveLength(0);
+    expect(container.children).toHaveLength(0);
+  });
+
+  it("the subagent task feed never arms it: that view gets no working edges", () => {
+    // feedTaskActivity shares this manager for tool frames but never calls
+    // noteWorking/setRequestPending -- the tell is scoped to the viewed live
+    // session, so a round of subagent activity stays row-free.
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"ls"' });
+    ml.handleToolCall({ name: "bash", args: '{"command":"ls"}', toolCallId: "t1" });
+    ml.handleToolResult({ name: "bash", output: "ok", toolCallId: "t1" });
+    expect(shown()).toBe(false);
+    expect(bubbles()).toHaveLength(0);
+  });
+
+  it("a cold-log replay paints neither the tell nor a preview", () => {
+    const t0 = localTs(2026, 5, 4, 1, 5);
+    ml.renderLogEntries([
+      { source: "input", ts: new Date(t0).toISOString(), content: "go" },
+      {
+        source: "llm",
+        ts: new Date(t0 + 1000).toISOString(),
+        content: "",
+        tool_calls: [{ id: "t1", name: "bash", arguments: '{"command":"ls"}' }],
+      },
+      { source: "tool_result", ts: new Date(t0 + 2000).toISOString(), content: "ok" },
+      { source: "llm", ts: new Date(t0 + 3000).toISOString(), content: "done" },
+    ] as never);
+    expect(container.textContent).toContain("done");
+    expect(shown()).toBe(false);
+    expect(bubbles()).toHaveLength(0);
+  });
+});
+
+describe("live activity: the in-flight tool bubble", () => {
+  const bubbles = () => container.querySelectorAll(".tool-call-streaming");
+  const previews = () => container.querySelectorAll(".tool-call-stream-preview");
+  const committed = () => container.querySelectorAll(".tool-call-block:not(.tool-call-streaming)");
+  const startTurn = () => {
+    ml.noteWorking(false);
+    ml.noteWorking(true);
+  };
+
+  it("a delta opens one bubble per slot: spinner, name once known, args REPLACED per frame", () => {
+    startTurn();
+    ml.handleStreamingToolCall({ index: 0, name: "", args: '{"comm' });
+    expect(bubbles()).toHaveLength(1);
+    const host = bubbles()[0]!;
+    // The bubble takes over from the row.
+    expect(container.querySelector(".thinking-live")).toBeNull();
+    // No toolName delta yet: nothing is invented for it.
+    expect(host.querySelector(".tool-call-name")!.textContent).toBe("");
+    expect(host.querySelector(".spinner")).not.toBeNull();
+    expect(previews()[0]!.textContent).toBe('{"comm');
+
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"ls"}' });
+    expect(bubbles()).toHaveLength(1); // same slot: no second bubble
+    expect(host.querySelector(".tool-call-name")!.textContent).toBe("🛠 bash");
+    // Cumulative frames REPLACE; an accumulator would double every redelivery.
+    expect(previews()[0]!.textContent).toBe('{"command":"ls"}');
+
+    // A parallel call keeps its own slot.
+    ml.handleStreamingToolCall({ index: 1, name: "read", args: '{"path":"a.ts"' });
+    expect(bubbles()).toHaveLength(2);
+  });
+
+  it("preview bytes ride textContent only: a hostile name or args never inject markup", () => {
+    ml.handleStreamingToolCall({ index: 0, name: "<img src=x>", args: '<script>alert(1)</script>' });
+    expect(container.innerHTML).not.toContain("<img src=x>");
+    expect(container.innerHTML).not.toContain("<script>alert");
+    const host = bubbles()[0]!;
+    expect(host.querySelector(".tool-call-name")!.textContent).toContain("<img src=x>");
+    expect(previews()[0]!.textContent).toContain("<script>alert(1)</script>");
+  });
+
+  it("the final toolCall frame upgrades its preview in place, exactly once, pairing intact", () => {
+    startTurn();
+    ml.handleStreamingChunk({ content: "let me look" });
+    ml.handleTokenUsage({ totalTokens: 120, ctxUsed: 120, ctxTotal: 1000 } as never);
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"ls"' });
+    const host = bubbles()[0]!;
+
+    ml.handleToolCall({ name: "bash", args: '{"command":"ls"}', toolCallId: "t1" });
+    // The same node carries the committed block: no duplicate, no blank frame.
+    expect(bubbles()).toHaveLength(0);
+    expect(committed()).toHaveLength(1);
+    expect([...container.children]).toContain(host);
+    expect(host.className).toBe(""); // the in-progress posture died with the preview
+    expect(host.querySelector(".tool-call-stream-preview")).toBeNull();
+    expect(host.querySelector(".spinner")).toBeNull();
+    expect(host.querySelector(".tool-call-name")!.textContent).toBe("🛠 bash");
+    // The round's bar stays ABOVE the call, like a preview-less turn orders it.
+    const footer = container.querySelector(".message-assistant-footer")!;
+    const kids = [...container.children];
+    expect(kids.indexOf(footer)).toBeLessThan(kids.indexOf(host));
+
+    // The upgrade leaves result pairing byte-for-byte intact.
+    ml.handleToolResult({ name: "bash", output: "RESULT", toolCallId: "t1" });
+    openResult(host);
+    expect(host.querySelector(".tool-result-pre")!.textContent).toBe("RESULT");
+  });
+
+  it("pairs the final frame by same name first, then a nameless preview, and never steals a mismatch", () => {
+    startTurn();
+    ml.handleStreamingToolCall({ index: 0, name: "read", args: '{"path":"a"' });
+    ml.handleStreamingToolCall({ index: 1, name: "bash", args: '{"command":"ls"' });
+    const [readHost, bashHost] = [bubbles()[0]!, bubbles()[1]!];
+
+    ml.handleToolCall({ name: "bash", args: '{"command":"ls"}', toolCallId: "b" });
+    // Same-name wins even though the read preview arrived first.
+    expect([...container.children]).toContain(bashHost);
+    expect(bashHost.className).toBe("");
+    expect(readHost.classList.contains("tool-call-streaming")).toBe(true);
+
+    // A preview whose name delta never landed is positionally this call's.
+    ml.handleStreamingToolCall({ index: 2, name: "", args: '{"q"' });
+    const nameless = bubbles()[1]!;
+    expect(nameless).not.toBe(readHost);
+    ml.handleToolCall({ name: "grep", args: '{"q":"x"}', toolCallId: "g" });
+    expect([...container.children]).toContain(nameless);
+    expect(nameless.className).toBe("");
+    expect(readHost.classList.contains("tool-call-streaming")).toBe(true);
+
+    // With neither a same-name nor a nameless preview, the frame takes a fresh
+    // host exactly like a preview-less call: the labelled preview is its own.
+    ml.handleToolCall({ name: "grep", args: '{"q":"y"}', toolCallId: "g2" });
+    expect(committed()).toHaveLength(3);
+    expect(bubbles()).toHaveLength(1);
+    expect(readHost.classList.contains("tool-call-streaming")).toBe(true);
+  });
+
+  it("closing the round drops previews whose call was answered without a committed frame", () => {
+    startTurn();
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"ls"' });
+    ml.handleStreamingToolCall({ index: 1, name: "not-a-tool", args: "{}" });
+    ml.handleToolCall({ name: "bash", args: '{"command":"ls"}', toolCallId: "t1" });
+    expect(bubbles()).toHaveLength(1); // the bogus call still only previews
+
+    // Its answer lands, but the round is open until bash answers too.
+    ml.handleToolResult({ name: "not-a-tool", error: "unknown tool" });
+    expect(bubbles()).toHaveLength(1);
+    ml.handleToolResult({ name: "bash", output: "ok", toolCallId: "t1" });
+    // Round closed: the dead preview is gone and the tell takes the gap back.
+    expect(bubbles()).toHaveLength(0);
+    expect(container.querySelector(".thinking-live")).not.toBeNull();
+  });
+
+  it("a retry clears the previews and the retry re-streams fresh ones", () => {
+    startTurn();
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"comm' });
+    ml.handleStreamReset();
+    expect(bubbles()).toHaveLength(0);
+    expect(container.querySelector(".thinking-live")).not.toBeNull();
+    ml.handleStreamingToolCall({ index: 0, name: "bash", args: '{"command":"pwd"' });
+    expect(bubbles()).toHaveLength(1);
+    expect(previews()[0]!.textContent).toBe('{"command":"pwd"'); // fresh, not appended
+  });
+});

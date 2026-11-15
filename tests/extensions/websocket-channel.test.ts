@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { WebSocketChannel } from "@extensions/websocket/websocket-channel.ts";
 import { ChannelSessionManager } from "@core/channel.ts";
 import { OUTPUT_EVENT, OutputEvent } from "@core/context/output.ts";
-import { S2C, MAX_WIRE_IMAGE_BASE64_BYTES, wireImages } from "@extensions/websocket/protocol.ts";
+import { S2C, MAX_WIRE_IMAGE_BASE64_BYTES, MAX_STREAMING_TOOL_CALL_ARGS_CHARS, wireImages } from "@extensions/websocket/protocol.ts";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -493,7 +493,7 @@ describe("WebSocketChannel - write()", () => {
     expect(broadcastCallback).toHaveBeenCalledWith(msg);
   });
 
-  it("drops frame-only events (QUEUE_UPDATE / TOOL_CALL_DELTA stay off the wire)", () => {
+  it("drops the remaining frame-only event (QUEUE_UPDATE) and maps the tool-call delta live", () => {
     let savedHandler: ((event: OutputEvent) => void) | null = null;
     const sm = createMockSessionManager({
       onSessionEvents: mock((_sessionId, handler) => {
@@ -505,8 +505,46 @@ describe("WebSocketChannel - write()", () => {
     new WebSocketChannel({ sessionManager: sm, ws, sessionId: "session-1" });
 
     savedHandler!({ type: OUTPUT_EVENT.QUEUE_UPDATE, pending: 1, preview: "steer" });
-    savedHandler!({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: '{"comm' });
     expect((ws as any)._sentMessages).toEqual([]);
+
+    // The tool-call delta DOES ride now: the live-only `streamingToolCall`
+    // preview frame (nothing persists or replays it).
+    savedHandler!({ type: OUTPUT_EVENT.TOOL_CALL_DELTA, index: 0, name: "bash", args: '{"comm' });
+    const msg = JSON.parse((ws as any)._sentMessages[0]);
+    expect(msg.type).toBe(S2C.STREAMING_TOOL_CALL);
+    expect(msg).toEqual({
+      type: S2C.STREAMING_TOOL_CALL,
+      sessionId: "session-1",
+      index: 0,
+      name: "bash",
+      args: '{"comm',
+    });
+  });
+
+  it("caps the streaming preview so a huge call cannot stream megabytes of it", () => {
+    let savedHandler: ((event: OutputEvent) => void) | null = null;
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, handler) => {
+        savedHandler = handler;
+        return () => {};
+      }),
+    });
+    const ws = createMockWs();
+    new WebSocketChannel({ sessionManager: sm, ws, sessionId: "session-1" });
+
+    // A 200 KB write body streamed in deltas: the preview shows the head plus
+    // the marker; the final toolCall frame still carries the complete args.
+    savedHandler!({
+      type: OUTPUT_EVENT.TOOL_CALL_DELTA,
+      index: 0,
+      name: "write",
+      args: "x".repeat(MAX_STREAMING_TOOL_CALL_ARGS_CHARS + 250),
+    });
+    const msg = JSON.parse((ws as any)._sentMessages[0]);
+    expect(msg.type).toBe(S2C.STREAMING_TOOL_CALL);
+    expect(msg.args).toHaveLength(MAX_STREAMING_TOOL_CALL_ARGS_CHARS + "...[truncated]".length);
+    expect(msg.args.startsWith("xxxx")).toBe(true);
+    expect(msg.args.endsWith("...[truncated]")).toBe(true);
   });
 });
 

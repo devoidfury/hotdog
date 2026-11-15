@@ -36,6 +36,7 @@ import {
 } from "./theme-pref.ts";
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
+import { Combobox, ComboboxPopup, comboboxAtom } from "./combobox.tsx";
 import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire } from "./chat.ts";
 import type { ConfigKeyEditWire, EditConfigListResultWire, TaskInfoWire } from "@extensions/websocket/protocol.ts";
 import { chipLabel, openTargetFor } from "./subagents.tsx";
@@ -646,8 +647,6 @@ function domRef<T>(set: (el: T | null) => void): Ref {
 }
 
 let chatInputEl: HTMLTextAreaElement | null = null;
-let profileSelectEl: HTMLSelectElement | null = null;
-let modelSelectEl: HTMLSelectElement | null = null;
 let messageListEl: HTMLElement | null = null;
 let contextMenuEl: HTMLDivElement | null = null;
 let fileInputEl: HTMLInputElement | null = null;
@@ -706,12 +705,6 @@ const chatInputRef = domRef<HTMLTextAreaElement>((el) => {
     window.removeEventListener("drop", swallowFileDrop);
   }
 });
-const profileSelectRef = domRef<HTMLSelectElement>((el) => {
-  profileSelectEl = el;
-});
-const modelSelectRef = domRef<HTMLSelectElement>((el) => {
-  modelSelectEl = el;
-});
 const messageListRef = domRef<HTMLElement>((el) => {
   messageListEl = el;
 });
@@ -732,18 +725,7 @@ function render(): void {
   queueMicrotask(() => {
     renderQueued = false;
     mounted?.render(<App />);
-    syncSelects();
   });
-}
-
-// Once a user touches a select the browser ignores `selected` attribute
-// changes, so drive the live value imperatively after every render.
-function syncSelects(): void {
-  if (!chat) return;
-  const profile = chat.currentProfileAtom();
-  if (profileSelectEl && profileSelectEl.value !== profile) profileSelectEl.value = profile;
-  const model = chat.currentModelAtom();
-  if (modelSelectEl && modelSelectEl.value !== model) modelSelectEl.value = model;
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -2333,15 +2315,16 @@ function onChatKeydown(e: KeyboardEvent): void {
   }
 }
 
-function onProfileChange(e: Event): void {
-  const profileName = (e.currentTarget as HTMLSelectElement).value;
+// The combobox onSelect arms: the SAME switch paths the native selects'
+// change events drove (a same-value pick never reaches them -- the combobox
+// keeps the native change-event contract).
+function onProfileChange(profileName: string): void {
   if (!chat) return;
   // Switching preserves the conversation (see SessionRegistry.switchProfile).
   chat.switchProfile(profileName);
 }
 
-function onModelChange(e: Event): void {
-  const modelName = (e.currentTarget as HTMLSelectElement).value;
+function onModelChange(modelName: string): void {
   if (!modelName) return;
   chat?.sendSlashCommand(`/model ${modelName}`);
 }
@@ -2507,6 +2490,12 @@ function App() {
   // row highlight, the header label and the composer's busy posture all read
   // it).
   const viewedTaskId = chat?.viewedTaskIdAtom() ?? null;
+  // The combobox controls' current values (server truth: sessionCreated /
+  // profileSwitched / sessionState frames write these atoms, and the trigger
+  // display follows every patch -- the native selects' imperative value pin
+  // (syncSelects) was exactly this job and is gone).
+  const currentProfile = chat?.currentProfileAtom() ?? "";
+  const currentModel = chat?.currentModelAtom() ?? "";
   // The composer's working posture follows the PANE's subject (owner ruling
   // 2026-11-13: the send/stop controls you see belong to the session on
   // screen). While a subagent transcript is open that is the task's own live
@@ -3070,36 +3059,32 @@ function App() {
                   <span className="visually-hidden">Profile</span>
                   {/* Profile/model switching belongs to the ATTACHED manager,
                       never to the viewed subagent (owner ruling 2026-11-13:
-                      the one exception). Native disabled drops the selects
-                      from the tab order; the .selects-locked CSS carries the
-                      same dim the read-only composer pills use. */}
-                  <select
+                      the one exception). Searchable comboboxes replaced the
+                      native selects (long lists filter by typing); the
+                      disabled button drops out of the tab order exactly like
+                      the disabled select did, and the .selects-locked CSS
+                      carries the same dim the read-only composer pills use.
+                      The ids ride the trigger button: same chips, CSS and
+                      test pins re-pointed to the button semantics. */}
+                  <Combobox
                     id="profile-select"
-                    ref={profileSelectRef}
+                    label="Profile"
+                    value={currentProfile}
+                    options={chat ? Object.keys(chat.profilesAtom()) : []}
                     disabled={viewedTaskId !== null}
-                    onChange={onProfileChange}
-                  >
-                    {chat
-                      ? Object.keys(chat.profilesAtom()).map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))
-                      : null}
-                  </select>
+                    onSelect={onProfileChange}
+                  />
                 </label>
                 <label id="model-selector">
                   <span className="visually-hidden">Model</span>
-                  <select
+                  <Combobox
                     id="model-select"
-                    ref={modelSelectRef}
+                    label="Model"
+                    value={currentModel}
+                    options={chat?.modelsAtom() ?? []}
                     disabled={viewedTaskId !== null}
-                    onChange={onModelChange}
-                  >
-                    {chat?.modelsAtom().map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
+                    onSelect={onModelChange}
+                  />
                 </label>
                 {/* No steer control: every send steers (see the send site;
                     in a subagent view steering rides taskFollowup). */}
@@ -3299,6 +3284,11 @@ function App() {
       </div>
 
       {menu ? <ContextMenu menu={menu} rootRef={contextMenuRef} onClose={dismissContextMenu} /> : null}
+
+      {/* The profile/model combobox popup: the one overlay the controls share,
+          mounted at the overlay root (never inside the pill) exactly like the
+          context menu above it. Renders nothing unless a control is open. */}
+      {ComboboxPopup()}
     </>
   );
 }
@@ -3350,6 +3340,7 @@ async function init(): Promise<void> {
     activeLogIdAtom,
     pinnedIdsAtom,
     contextMenuAtom,
+    comboboxAtom,
     liveAnnounceAtom,
     searchAtom,
     logsCollapsedAtom,

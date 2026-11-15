@@ -1374,9 +1374,10 @@ body.logs-resizing .sidebar-header-resize {
 
 /* Subagent view (owner ruling 2026-11-13): the profile/model switching
    dropdowns are the ONE exception to "works like a live session" -- they
-   act on the ATTACHED manager, never the viewed task. The native disabled
-   attribute drops them from the tab order; this reuses the read-only
-   pills' exact dim so the disabled posture is one treatment, not two. */
+   act on the ATTACHED manager, never the viewed task. The disabled attribute
+   on the trigger buttons drops them from the tab order; this reuses the
+   read-only pills' exact dim so the disabled posture is one treatment, not
+   two. */
 #input-area.selects-locked #model-selector,
 #input-area.selects-locked #profile-selector {
     opacity: 0.5;
@@ -1385,7 +1386,7 @@ body.logs-resizing .sidebar-header-resize {
 
 /* ── Model & Profile Switchers (composer pills) ───────────────────────────── */
 
-/* The label is the pill; the select sits inside it borderless.
+/* The label is the pill; the combobox trigger sits inside it borderless.
    min-width:0 on the pills is what lets the composer row squeeze them when
    the CHAT COLUMN narrows (docked workbench, wide sidebar) -- a viewport
    media query cannot see a narrow column on a wide screen, and without
@@ -1412,6 +1413,11 @@ body.logs-resizing .sidebar-header-resize {
 
 #model-select,
 #profile-select {
+    /* The combobox trigger: the borderless inner control the native selects
+       were (same transparent/mono/pointer language), now a button -- so it
+       also sheds the UA button face, left-aligns its text and lays the value
+       beside the caret. */
+    appearance: none;
     background: transparent;
     color: var(--text-secondary);
     border: none;
@@ -1422,8 +1428,41 @@ body.logs-resizing .sidebar-header-resize {
     outline: none;
     max-width: 220px;
     min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-align: left;
+}
+
+/* The caret the native select painted on its own: two hairline borders make
+   a chevron in currentColor, so hover's ink shift carries it for free. Pure
+   CSS -- it adds no text to the control's accessible name. */
+#model-select::after,
+#profile-select::after {
+    content: "";
+    flex: none;
+    width: 0;
+    height: 0;
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+    border-top: 4px solid currentColor;
+    opacity: 0.55;
+}
+
+.combobox-value {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Honest disabled posture (the selects-locked subagent lock sets the
+   attribute): the pill already dims to 0.5 and hands its cursor to default;
+   the trigger must stop claiming pointer, or the disabled chip still begs
+   to be clicked. */
+#model-select:disabled,
+#profile-select:disabled {
+    cursor: default;
 }
 
 #model-selector:hover,
@@ -1441,10 +1480,84 @@ body.logs-resizing .sidebar-header-resize {
     border-color: var(--accent);
 }
 
-#model-select option,
-#profile-select option {
-    background: var(--bg-tertiary);
+/* ── Combobox popup (profile/model switchers) ─────────────────────────────
+   The one popup the switcher comboboxes share, mounted at the overlay root
+   beside the session context menu. It RIDES that menu's stack: same
+   position:fixed, same z-9999 tier, same clampMenuAnchor correction (the
+   app flips it above the trigger when the composer's viewport-bottom seat
+   leaves no room below), same outside-mousedown dismissal -- no third
+   stack. Its surface language is the composer's own completion menu
+   (--bg-elevated over --border/--shadow-lg, the 180px scroll ceiling). */
+.combobox-popup {
+    position: fixed;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    min-width: 220px;
+    max-width: 320px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 4px;
+    animation: contextMenuFadeIn 0.12s var(--ease-out);
+}
+
+.combobox-filter {
+    margin: 2px 2px 4px;
+    padding: 4px 8px;
+    font-family: var(--font-mono);
+    font-size: 0.845rem;
     color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    outline: none;
+}
+
+.combobox-filter:focus {
+    border-color: var(--accent);
+}
+
+.combobox-list {
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.combobox-option {
+    padding: 4px 12px;
+    font-family: var(--font-mono);
+    font-size: 0.975rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    user-select: none;
+}
+
+.combobox-option:hover {
+    background: var(--bg-hover);
+}
+
+/* Highlight follows ArrowUp/ArrowDown (the completion-item .active grammar:
+   fill plus accent ink). */
+.combobox-option.active {
+    background: var(--bg-active);
+    color: var(--accent);
+}
+
+/* The control's current value inside the list (aria-selected carries it for
+   AT; the accent ink says it here). */
+.combobox-option[aria-selected="true"] {
+    color: var(--accent);
+}
+
+.combobox-empty {
+    padding: 4px 12px;
+    font-size: 0.845rem;
+    color: var(--text-muted);
 }
 
 /* ── Connection Status (composer action row) ────────────────────────────────
@@ -3754,10 +3867,10 @@ body.sidebar-resizing #tree-col-resize {
     flex: 1;
 }
 
-/* The syntax chooser (native select, house precedent #model-select): ghost
-   at rest like the foot's reload button -- and the accent face while an
-   override is in force, so a hand-painted sheet never masquerades as the
-   machine's guess. */
+/* The syntax chooser (native select -- the composer pills left this idiom for
+   searchable comboboxes 2026-11-15): ghost at rest like the foot's reload
+   button -- and the accent face while an override is in force, so a
+   hand-painted sheet never masquerades as the machine's guess. */
 .file-view-lang {
     max-width: 130px;
     padding: 2px 4px;
@@ -4094,10 +4207,10 @@ body.sidebar-resizing #tree-col-resize {
 
     #model-select,
     #profile-select {
+        /* Tighter chip cap on phones; the value span's ellipsis (base rule)
+           does the clipping inside the flex trigger. */
         max-width: 140px;
         min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
 }
 

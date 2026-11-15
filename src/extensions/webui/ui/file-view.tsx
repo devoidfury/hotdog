@@ -341,7 +341,9 @@ export function FileView(p: FileViewProps) {
         {p.onLang ? (
           // The paint list (owner request 2026-11-14): a NATIVE select --
           // the popup, keyboard and the selected-row highlight arrive free
-          // (house precedent: the composer's #model-select). `selected`
+          // (the composer's #model-select wore this idiom until the
+          // 2026-11-15 combobox migration; this chooser stays native, its
+          // list is short). `selected`
           // marks the current choice because this runtime has no
           // controlled-value plumbing: the option attribute is true on a
           // fresh mount and the diff patches it on a re-render. The Auto

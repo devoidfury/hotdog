@@ -1,7 +1,8 @@
 /// <reference lib="dom" />
 // THE app-wiring suite: app.tsx mounted on the dom-helper DOM with a
 // FakeWebSocket standing in for the server. Covers the interactive surface
-// (composer send/draft, tab completion, attachments, push-to-talk, selects,
+// (composer send/draft, tab completion, attachments, push-to-talk, the
+// profile/model comboboxes,
 // sidebar glue: create/switch/cancel/resize, context menus, the subagent
 // sidebar list and its main-view transcript, log-view header controls) plus
 // the auth lifecycle
@@ -366,10 +367,25 @@ describe("app boot (stored token)", () => {
   it("attach fills the header, selects, and sidebar", async () => {
     await attach();
     expect(el("#current-session-id").textContent).toBe(SID.slice(0, 8));
-    expect(el("#profile-select").querySelectorAll("option")).toHaveLength(2);
-    expect((el("#profile-select") as unknown as { value: string }).value).toBe("manager");
-    expect(el("#model-select").querySelectorAll("option")).toHaveLength(2);
-    expect((el("#model-select") as unknown as { value: string }).value).toBe("m1");
+    // The controls are searchable comboboxes now (the section below drives
+    // them): the trigger BUTTON shows the current value as its text, and the
+    // option list exists only inside the popup. Open once per control to
+    // enumerate, then toggle-close the way a user would.
+    expect(el("#profile-select").localName).toBe("button");
+    expect(el("#profile-select").textContent).toBe("manager");
+    el("#profile-select").click();
+    await tick();
+    expect(els("#profile-select-list [role=option]")).toHaveLength(2);
+    el("#profile-select").click();
+    await tick();
+    expect(document.querySelector(".combobox-popup")).toBeNull();
+    expect(el("#model-select").localName).toBe("button");
+    expect(el("#model-select").textContent).toBe("m1");
+    el("#model-select").click();
+    await tick();
+    expect(els("#model-select-list [role=option]")).toHaveLength(2);
+    el("#model-select").click();
+    await tick();
     expect(els(".session-item")).toHaveLength(1);
     expect(els(".log-item")).toHaveLength(1);
   });
@@ -949,31 +965,242 @@ describe("push-to-talk", () => {
   });
 });
 
-// ── Selects ─────────────────────────────────────────────────────────────────
+// ── Profile / model comboboxes (searchable dropdowns) ──────────────────────
+// The controls replaced their native <select>s; these pins ARE the contract:
+// open (click/keyboard), live substring filter, arrow highlight + Enter
+// dispatch (exactly once), Escape keeps the value, outside mousedown closes
+// clean, same-value no-op, server pushes move the display. The switch paths
+// underneath are the native selects' own (chat.switchProfile / the /model
+// slash command) -- the frame shapes are pinned here end to end.
 
-describe("profile / model controls", () => {
-  it("profile change switches the attached session's profile", async () => {
+const comboFilter = (): HTMLElement => el(".combobox-filter");
+const comboOptions = (id: string): HTMLElement[] => els(`#${id}-list [role=option]`);
+const comboOpen = (): HTMLElement | null => document.querySelector(".combobox-popup");
+function typeFilter(text: string): void {
+  const filter = comboFilter() as unknown as { value: string };
+  filter.value = text;
+  (filter as unknown as EventTarget).dispatchEvent({ type: "input", currentTarget: filter } as unknown as Event);
+}
+
+describe("profile / model comboboxes (searchable dropdowns)", () => {
+  it("click opens: listbox + options + a11y flags, and the caret lands in the filter", async () => {
     await attach();
-    const select = el("#profile-select");
-    (select as unknown as { value: string }).value = "coder";
-    select.dispatchEvent({ type: "change", currentTarget: select } as unknown as Event);
+    const trigger = el("#profile-select");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("listbox");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(trigger.getAttribute("aria-label")).toBe("Profile");
+    trigger.click();
     await tick();
-    const [msg] = sent<{ profileName: string }>("switchProfile");
-    expect(msg?.profileName).toBe("coder");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(trigger.getAttribute("aria-controls")).toBe("profile-select-list");
+    expect(el("#profile-select-list").getAttribute("role")).toBe("listbox");
+    expect(comboOptions("profile-select").map((o) => o.textContent)).toEqual(["manager", "coder"]);
+    // The current value enters selected AND highlighted (a bare Enter re-picks
+    // it -- the native "open and press Enter does nothing" shape).
+    expect(comboOptions("profile-select")[0]!.getAttribute("aria-selected")).toBe("true");
+    expect(comboOptions("profile-select")[0]!.classList.contains("active")).toBe(true);
+    // Keyboard-only operation: the popup took the caret to its filter input.
+    expect(document.activeElement).toBe(comboFilter());
+    // Trigger click toggles closed (same control, same value, nothing sent).
+    clearSent();
+    trigger.click();
+    await tick();
+    expect(comboOpen()).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(sent("switchProfile")).toHaveLength(0);
+    // Keyboard-only re-open: ArrowDown on the trigger (Enter/Space open via
+    // the button's native click activation, which .click() above already
+    // exercised).
+    key(trigger, "ArrowDown");
+    await tick();
+    expect(comboOpen()).not.toBeNull();
+    expect(document.activeElement).toBe(comboFilter());
+    key(comboFilter(), "Escape");
+    await tick();
+    expect(comboOpen()).toBeNull();
   });
 
-  it("model change rides the slash command; empty selection is inert", async () => {
-    const select = el("#model-select");
-    (select as unknown as { value: string }).value = "m2";
-    select.dispatchEvent({ type: "change", currentTarget: select } as unknown as Event);
+  it("typing filters live (case-insensitive substring); the control keeps its real value", async () => {
+    await attach();
+    el("#model-select").click();
     await tick();
-    expect(sent<{ command: string }>("command").at(-1)?.command).toBe("/model m2");
-    clearSent();
-    (select as unknown as { value: string }).value = "";
-    select.dispatchEvent({ type: "change", currentTarget: select } as unknown as Event);
+    typeFilter("M2");
+    await tick();
+    expect(comboOptions("model-select").map((o) => o.textContent)).toEqual(["m2"]);
+    // Filtering never mutates the control: the trigger still shows m1, and a
+    // current value that no longer matches the filter IS still the value.
+    expect(el("#model-select").textContent).toBe("m1");
+    typeFilter("nothing-matches");
+    await tick();
+    expect(comboOptions("model-select")).toHaveLength(0);
+    expect(comboOpen()).not.toBeNull();
+    expect(el("#model-select").textContent).toBe("m1");
+    typeFilter("");
+    await tick();
+    expect(comboOptions("model-select")).toHaveLength(2);
+    key(comboFilter(), "Escape");
+    await tick();
+    expect(comboOpen()).toBeNull();
     expect(sent("command")).toHaveLength(0);
   });
 
+  it("ArrowDown + Enter dispatches the profile switch EXACTLY once, then focus is back", async () => {
+    await attach();
+    clearSent();
+    el("#profile-select").click();
+    await tick();
+    key(comboFilter(), "ArrowDown");
+    await tick();
+    // Highlight (not native focus) moves; exactly one option carries it.
+    expect(comboOptions("profile-select").map((o) => o.classList.contains("active"))).toEqual([
+      false,
+      true,
+    ]);
+    expect(comboFilter().getAttribute("aria-activedescendant")).toBe("profile-select-opt-1");
+    key(comboFilter(), "Enter");
+    await tick();
+    const msgs = sent<{ profileName: string }>("switchProfile");
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]!.profileName).toBe("coder");
+    expect(comboOpen()).toBeNull();
+    expect(el("#profile-select").textContent).toBe("manager"); // display follows the SERVER, not the click
+    expect(document.activeElement).toBe(el("#profile-select"));
+  });
+
+  it("ArrowUp wraps, and Enter on the already-current value is a no-op (native change parity)", async () => {
+    await attach();
+    clearSent();
+    el("#profile-select").click();
+    await tick();
+    key(comboFilter(), "ArrowUp"); // from index 0 wrap to the last option
+    await tick();
+    const opts = comboOptions("profile-select");
+    expect(opts.map((o) => o.classList.contains("active"))).toEqual([false, true]);
+    // Wrap back down onto the current value and Enter: close WITHOUT a wire.
+    key(comboFilter(), "ArrowDown");
+    await tick();
+    key(comboFilter(), "Enter");
+    await tick();
+    expect(sent("switchProfile")).toHaveLength(0);
+    expect(comboOpen()).toBeNull();
+    expect(el("#profile-select").textContent).toBe("manager");
+  });
+
+  it("option mousedown selects, closes, and rides the existing slash command once", async () => {
+    await attach();
+    clearSent();
+    el("#model-select").click();
+    await tick();
+    typeFilter("2");
+    await tick();
+    const opt = comboOptions("model-select")[0]!;
+    opt.dispatchEvent({ type: "mousedown", preventDefault: () => {} } as unknown as Event);
+    await tick();
+    const cmds = sent<{ command: string }>("command");
+    expect(cmds).toHaveLength(1);
+    expect(cmds[0]!.command).toBe("/model m2");
+    expect(comboOpen()).toBeNull();
+    // Double-fire guard: in a real browser the picking mousedown is followed
+    // by a click on the same press. The options carry NO click listener (the
+    // pick is mousedown-only, completion-menu idiom), so the trailing click
+    // dispatches nothing.
+    opt.dispatchEvent({ type: "click" } as unknown as Event);
+    await tick();
+    expect(sent("command")).toHaveLength(1);
+    expect(el("#model-select").textContent).toBe("m1"); // display waits for the server like before
+  });
+
+  it("Escape closes without changing the value -- never commits, even on a NON-current highlight", async () => {
+    await attach();
+    clearSent();
+    el("#profile-select").click();
+    await tick();
+    // The mutation this pin exists for: Escape routed to the pick path. A
+    // filter that matched only the CURRENT value (or nothing) would make
+    // that commit a same-value no-op and the test vacuous -- so filter onto
+    // a NOT-current option and prove the highlight is genuinely on it:
+    // "cod" leaves one option (coder), and typing resets the highlight to
+    // it while the control's value is still manager.
+    typeFilter("cod");
+    await tick();
+    expect(comboOptions("profile-select").map((o) => o.textContent)).toEqual(["coder"]);
+    expect(comboOptions("profile-select")[0]!.classList.contains("active")).toBe(true);
+    expect(comboFilter().getAttribute("aria-activedescendant")).toBe("profile-select-opt-0");
+    expect(el("#profile-select").textContent).toBe("manager");
+    key(comboFilter(), "Escape");
+    await tick();
+    expect(comboOpen()).toBeNull();
+    expect(el("#profile-select").textContent).toBe("manager");
+    expect(sent("switchProfile")).toHaveLength(0);
+    expect(document.activeElement).toBe(el("#profile-select"));
+  });
+
+  it("mousedown outside closes without a change; mousedown inside does not", async () => {
+    await attach();
+    clearSent();
+    el("#model-select").click();
+    await tick();
+    // Inside: the filter input itself.
+    document.dispatchEvent({ type: "mousedown", target: comboFilter() } as unknown as Event);
+    expect(comboOpen()).not.toBeNull();
+    // Outside: anywhere else.
+    document.dispatchEvent({ type: "mousedown", target: document.body } as unknown as Event);
+    await tick();
+    expect(comboOpen()).toBeNull();
+    expect(sent("command")).toHaveLength(0);
+    expect(el("#model-select").textContent).toBe("m1");
+  });
+
+  it("opening one control closes the other (one popup app-wide)", async () => {
+    await attach();
+    el("#profile-select").click();
+    await tick();
+    // The real browser's sequence: mousedown lands outside the open popup
+    // first (closes it), then the click opens the new one.
+    document.dispatchEvent({
+      type: "mousedown",
+      target: el("#model-select"),
+    } as unknown as Event);
+    await tick();
+    expect(comboOpen()).toBeNull();
+    el("#model-select").click();
+    await tick();
+    expect(comboOptions("model-select")).toHaveLength(2);
+    key(comboFilter(), "Escape");
+    await tick();
+  });
+
+  it("server pushes move the control display (external value sync)", async () => {
+    await attach();
+    expect(el("#profile-select").textContent).toBe("manager");
+    ws.fireMessage({ type: "profileSwitched", sessionId: SID, profile: "coder", success: true });
+    await tick();
+    expect(el("#profile-select").textContent).toBe("coder");
+    ws.fireMessage({ type: "sessionState", sessionId: SID, key: "model", value: "m2" });
+    await tick();
+    expect(el("#model-select").textContent).toBe("m2");
+    // A push while OPEN repaints the trigger too (the filter text is its own
+    // space; the control's display is server truth either way). Escape here
+    // also lands on a NON-current highlight (filter "cod" highlighted coder,
+    // the push moved the value back to manager): zero wire after it is the
+    // second face of the Escape-never-commits pin.
+    clearSent();
+    el("#profile-select").click();
+    await tick();
+    typeFilter("cod");
+    ws.fireMessage({ type: "profileSwitched", sessionId: SID, profile: "manager", success: true });
+    await tick();
+    expect(el("#profile-select").textContent).toBe("manager");
+    key(comboFilter(), "Escape");
+    await tick();
+    expect(comboOpen()).toBeNull();
+    expect(sent("switchProfile")).toHaveLength(0);
+    // Put the fixture back for the sections behind this one.
+    await attach();
+  });
+});
+
+describe("composer send steering", () => {
   it("every webui send carries steering: true (the switch retired; the wire shape did not move)", async () => {
     // The composer's send site passes steer=true unconditionally; chat.ts
     // still ADDS the field conditionally (its default false is for other
@@ -1775,6 +2002,33 @@ describe("subagents sidebar and main-view transcript", () => {
     // The profile/model dropdowns unlock with the mode.
     expect(el("#profile-select").hasAttribute("disabled")).toBe(false);
     expect(el("#model-select").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("the selects lock refuses the comboboxes open and selection (a lock landing mid-open closes the popup)", async () => {
+    // The selects-locked posture (owner ruling 2026-11-13) now rides combobox
+    // trigger buttons. A popup open when the lock lands closes with it -- the
+    // pane that may not switch never keeps a live switcher -- and the wire
+    // stays clean throughout.
+    clearSent();
+    el("#profile-select").click();
+    await tick();
+    expect(comboOpen()).not.toBeNull();
+    await openSubagent(); // the row click locks the controls
+    expect(comboOpen()).toBeNull();
+    const trigger = el("#profile-select");
+    expect(trigger.hasAttribute("disabled")).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    // Refused open: mouse and keyboard. (The harness no-ops click() on a
+    // disabled control like a real browser; the handler re-checks anyway.)
+    trigger.click();
+    key(trigger, "ArrowDown");
+    await tick();
+    expect(comboOpen()).toBeNull();
+    expect(sent("switchProfile")).toHaveLength(0);
+    // Back to the canonical unlocked, attached shape for the sections behind.
+    el("#close-subagent-view-btn").click();
+    await attach();
+    expect(el("#profile-select").hasAttribute("disabled")).toBe(false);
   });
 
   it("the composer steers the viewed subagent (taskFollowup frame addressed to the task)", async () => {

@@ -5314,6 +5314,58 @@ describe("workbench file tree (real app wiring)", () => {
     expect(el(".file-view-error").textContent).toBe("binary file (9 bytes) -- not displayed");
     expect(document.querySelector(".file-view-more")).toBeNull();
   });
+
+  it("the foot bar names the syntax type: the override repaints, Auto gives the guess back", async () => {
+    await attach();
+    await openPane();
+    await closeTabs();
+    clearSent();
+    // A path NO earlier test has read: an already-viewed path must NOT
+    // re-request on activation (the reopen-must-not-wipe doctrine).
+    workbenchStore.open({ id: "/rootA/paint.sh", kind: "file", label: "paint.sh", dirty: false });
+    await tick();
+    // Activation is the read's owner (the store-open is a producer bypass).
+    els("#workbench-tabs [role=tab]").at(-1)!.click();
+    await tick();
+    const req = sent<{ requestId: number; path: string }>("readFile").pop()!;
+    ws.fireMessage({
+      type: "readFileResult",
+      requestId: req.requestId,
+      path: "/rootA/paint.sh",
+      content: "echo one\ncd /tmp\n",
+    });
+    await tick();
+    // The auto-guess paints (shell tokens) and the AUTO entry is the chosen
+    // option -- the selection IS the absence of an override.
+    expect(el(".file-line .tk-command").textContent).toBe("echo");
+    const sel = el(".file-view-lang");
+    const selectedValue = () =>
+      els(".file-view-lang option").find((o) => o.hasAttribute("selected"))?.getAttribute("value");
+    expect(selectedValue()).toBe("");
+    expect(sel.textContent).toContain("Auto (Shell)");
+    // Forced plain: the runs vanish and the override wears the accent.
+    (sel as unknown as { value: string }).value = "plain";
+    sel.dispatchEvent({ type: "change", currentTarget: sel } as unknown as Event);
+    await tick();
+    expect(document.querySelector(".file-line .tk-command")).toBeNull();
+    expect(selectedValue()).toBe("plain");
+    expect(el(".file-view-lang").classList.contains("is-overridden")).toBe(true);
+    // A different language: chosen, painted-with, still flagged.
+    const sel2 = el(".file-view-lang");
+    (sel2 as unknown as { value: string }).value = "go";
+    sel2.dispatchEvent({ type: "change", currentTarget: sel2 } as unknown as Event);
+    await tick();
+    expect(selectedValue()).toBe("go");
+    expect(el(".file-view-lang").classList.contains("is-overridden")).toBe(true);
+    // Auto back: the tokens return and the flag drops.
+    const sel3 = el(".file-view-lang");
+    (sel3 as unknown as { value: string }).value = "";
+    sel3.dispatchEvent({ type: "change", currentTarget: sel3 } as unknown as Event);
+    await tick();
+    expect(el(".file-line .tk-command").textContent).toBe("echo");
+    expect(el(".file-view-lang").classList.contains("is-overridden")).toBe(false);
+    expect(selectedValue()).toBe("");
+  });
 });
 
 // ── Workbench tab persistence (real app wiring) ─────────────────────────────

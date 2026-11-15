@@ -183,6 +183,14 @@ export function getTokenizer(lang: string): SyntaxTokenizer | undefined {
   return SYNTAXES.get(lang)?.tokenize;
 }
 
+/** The lang names a renderer can actually COLOR: every registered def that
+ *  carries a scanner, sorted for display. Guess-but-plain defs are absent
+ *  (offering a name that renders plain would lie); sinks with stateful
+ *  scanners -- markdown -- add themselves at the call site. */
+export function listRenderableLangs(): string[] {
+  return [...SYNTAXES.values()].filter((d) => d.tokenize !== undefined).map((d) => d.lang).sort();
+}
+
 /** Resolve a fence-info word to a canonical lang that HAS a tokenizer
  * (the word itself, or a registered alias; the caller owns any
  * lowercasing). Undefined means the fence renders as plain code. */

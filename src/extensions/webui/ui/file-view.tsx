@@ -25,7 +25,7 @@
 //   legitimately resolve to nothing until their page lands; revealLine
 //   returns false rather than guessing.
 
-import { getTokenizer, guessLangForBase, type SyntaxRun } from "@utils/syntax/index.ts";
+import { getTokenizer, guessLangForBase, listRenderableLangs, type SyntaxRun } from "@utils/syntax/index.ts";
 import { hasFrontmatter, tokenizeMarkdownDoc } from "@utils/syntax/markdown.ts";
 import type { ReadFileResultWire } from "@extensions/websocket/protocol.ts";
 import { IconReload } from "./icons.tsx";
@@ -82,6 +82,11 @@ export interface FileViewEntry {
   /** Honest one-line rejection, verbatim. A pager failure keeps the loaded
    *  lines on screen and stops the pager (refresh is the reload affordance). */
   error?: string;
+  /** The foot bar's PAINT override (owner request 2026-11-14): a registry
+   *  lang name -- "plain" forces the uncolored sheet -- or absent for the
+   *  auto-guess. It is how the user asked to LOOK at the file, not part of
+   *  the read: reload and paging preserve it, only setFileViewLang moves it. */
+  lang?: string;
 }
 
 export interface FileViewsState {
@@ -129,12 +134,19 @@ export function openFileView(
   return mintAndFetch(s, path, { status: "loading", lines: [], truncated: false });
 }
 
-/** Reload: drop the accumulated page(s) and re-read from the top. */
+/** Reload: drop the accumulated page(s) and re-read from the top. The
+ * chosen paint rides through: reload re-reads the BYTES, it does not
+ * forget how the user asked to see them. */
 export function reloadFileView(
   s: FileViewsState,
   path: string,
 ): { state: FileViewsState; fetch: FileFetch } {
-  return mintAndFetch(s, path, { status: "loading", lines: [], truncated: false });
+  return mintAndFetch(s, path, {
+    status: "loading",
+    lines: [],
+    truncated: false,
+    lang: s.views[path]?.lang,
+  });
 }
 
 /** Pager: fetch the next page from the first unread line. No-op while a
@@ -177,7 +189,7 @@ export function applyReadFile(
   const entry = s.views[path] ?? { status: "loading" as const, lines: [], truncated: false };
   if (result.error) {
     if (entry.lines.length === 0) {
-      return { ...s, pending, views: { ...s.views, [path]: { status: "error", lines: [], truncated: false, error: result.error } } };
+      return { ...s, pending, views: { ...s.views, [path]: { ...entry, status: "error", lines: [], truncated: false, error: result.error } } };
     }
     // Pager failure with content on screen: keep the lines, show the honest
     // text at the pager, stop paging (refresh re-reads from the top).
@@ -189,9 +201,26 @@ export function applyReadFile(
     pending,
     views: {
       ...s.views,
-      [path]: { status: "ready", lines, truncated: result.truncated === true },
+      [path]: { ...entry, status: "ready", lines, truncated: result.truncated === true },
     },
   };
+}
+
+/** The foot bar's paint override: repaint this path's sheet with a chosen
+ *  lang ("plain" forces the uncolored sheet), or null to hand it back to
+ *  the auto-guess. Views only: a path with no entry has nothing mounted to
+ *  recolor, and the same state object answers. */
+export function setFileViewLang(
+  s: FileViewsState,
+  path: string,
+  lang: string | null,
+): FileViewsState {
+  const entry = s.views[path];
+  if (!entry) return s;
+  const next: FileViewEntry = { ...entry };
+  if (lang === null) delete next.lang;
+  else next.lang = lang;
+  return { ...s, views: { ...s.views, [path]: next } };
 }
 
 // ── The reveal seam (Phase 7) ────────────────────────────────────────────────
@@ -224,6 +253,23 @@ export interface FileViewProps {
   onReload: (path: string) => void;
   /** Pager: fetch the next page (op no-ops while one is in flight). */
   onMore: (path: string) => void;
+  /** Foot-bar syntax chooser wiring (see FileViewEntry.lang): the app owns
+   *  the state, null answers "back to the auto-guess". Absent = no chooser
+   *  rendered -- a select that changes nothing is noise. */
+  onLang?: (path: string, lang: string | null) => void;
+}
+
+/** The chooser's language list: what the registry can actually color, plus
+ *  markdown (the one stateful sink the registry stays out of), sorted. The
+ *  Auto entry and "plain" are rendered around this list, not in it. */
+export function fileViewLangChoices(): string[] {
+  return [...new Set([...listRenderableLangs(), "markdown"])].sort();
+}
+
+/** Popup label for a lang name; names are single words, so the capital
+ *  first letter cannot lie about them. */
+function langLabel(lang: string): string {
+  return lang.charAt(0).toUpperCase() + lang.slice(1);
 }
 
 function LineRow({ n, text, runs }: { n: number; text: string; runs: SyntaxRun[] }) {
@@ -242,7 +288,13 @@ function LineRow({ n, text, runs }: { n: number; text: string; runs: SyntaxRun[]
 
 export function FileView(p: FileViewProps) {
   const view = p.view;
-  const lang = guessLang(p.path);
+  // PAINT: the foot bar's override wins over the guess (see
+  // FileViewEntry.lang). "plain" is no registry lang, so the tokenizer
+  // lookup misses it exactly like an unknown name -- one honest path to an
+  // uncolored sheet, no special case in the tokenizer plumbing.
+  const guessed = guessLang(p.path);
+  const override = view?.lang;
+  const lang = override ?? guessed;
   // Tokenized once per render pass, in line order: markdown carries
   // cross-line state (see tokenizeFileLines); everything else is the same
   // per-line registry path, just hoisted out of the row map.
@@ -286,6 +338,46 @@ export function FileView(p: FileViewProps) {
           while long files scroll under it -- chrome that never costs a line
           at the head. */}
       <div className="file-view-bar">
+        {p.onLang ? (
+          // The paint list (owner request 2026-11-14): a NATIVE select --
+          // the popup, keyboard and the selected-row highlight arrive free
+          // (house precedent: the composer's #model-select). `selected`
+          // marks the current choice because this runtime has no
+          // controlled-value plumbing: the option attribute is true on a
+          // fresh mount and the diff patches it on a re-render. The Auto
+          // entry leads (its selection IS the absence of an override); the
+          // auto-detected name carries the "(auto)" mark wherever it sits,
+          // and an override in force rides the accent (.is-overridden).
+          <select
+            className={
+              override !== undefined && override !== guessed
+                ? "file-view-lang is-overridden"
+                : "file-view-lang"
+            }
+            aria-label="Syntax highlighting language"
+            title={
+              override !== undefined && override !== guessed
+                ? `Painted as ${langLabel(override)}; auto-detected ${langLabel(guessed ?? "plain text")} (click to change)`
+                : `Painted as ${langLabel(guessed ?? "plain text")}, auto-detected (click to change)`
+            }
+            onChange={(e: Event) => {
+              const value = (e.currentTarget as unknown as { value: string }).value;
+              p.onLang!(p.path, value === "" ? null : value);
+            }}
+          >
+            <option value="" selected={override === undefined}>
+              {`Auto (${langLabel(guessed ?? "plain text")})`}
+            </option>
+            <option value="plain" selected={override === "plain"}>
+              {`Plain text${guessed === undefined ? " (auto)" : ""}`}
+            </option>
+            {fileViewLangChoices().map((l) => (
+              <option key={l} value={l} selected={override === l}>
+                {`${langLabel(l)}${l === guessed ? " (auto)" : ""}`}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <span className="file-view-status" role="status">{statusLine}</span>
         {!loading && view?.truncated ? (
           <button

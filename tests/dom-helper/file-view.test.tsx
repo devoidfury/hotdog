@@ -14,6 +14,7 @@ import {
   reloadFileView,
   moreFileView,
   applyReadFile,
+  setFileViewLang,
   guessLang,
   tokenizeLine,
   tokenizeFileLines,
@@ -34,6 +35,7 @@ function renderView(props: {
   view: FileViewsState["views"][string] | undefined;
   onReload?: (p: string) => void;
   onMore?: (p: string) => void;
+  onLang?: (p: string, lang: string | null) => void;
 }): HTMLElement {
   const host = document.createElement("div");
   current = mount(
@@ -42,6 +44,7 @@ function renderView(props: {
       view={props.view}
       onReload={props.onReload ?? noop}
       onMore={props.onMore ?? noop}
+      onLang={props.onLang}
     />,
     host as unknown as DomNode,
   );
@@ -411,6 +414,91 @@ describe("viewer rendering", () => {
     expect(text(part.querySelector(".file-view-status"))).toBe("1 line so far");
     const err = renderView({ view: { status: "error", lines: [], truncated: false, error: "x" } });
     expect(text(err.querySelector(".file-view-status"))).toBe("unread");
+  });
+
+  it("lang override state: set / clear; survives reload and every reply shape; viewless paths are inert", () => {
+    let s = openFileView(emptyFileViews(), PATH).state;
+    s = applyReadFile(s, 1, { type: "readFileResult", requestId: 1, path: PATH, content: "echo one", truncated: true });
+    s = setFileViewLang(s, PATH, "go");
+    expect(s.views[PATH]!.lang).toBe("go");
+    // Reload re-reads the BYTES; the chosen paint rides through.
+    const r = reloadFileView(s, PATH);
+    expect(r.state.views[PATH]!.lang).toBe("go");
+    const s2 = applyReadFile(r.state, r.fetch.requestId, {
+      type: "readFileResult",
+      requestId: r.fetch.requestId,
+      path: PATH,
+      content: "echo one\necho two",
+    });
+    expect(s2.views[PATH]!.lang).toBe("go");
+    // Back to the guess.
+    const cleared = setFileViewLang(s2, PATH, null);
+    expect(cleared.views[PATH]!.lang).toBeUndefined();
+    // A path with no entry has nothing mounted to repaint: same object back.
+    expect(setFileViewLang(cleared, "/rootA/never.txt", "go")).toBe(cleared);
+  });
+
+  it("foot-bar paint list: Auto leads, the guess is marked, overrides repaint and ride the accent", () => {
+    // PATH ends .sh -- shell is the honest guess, and the tokens prove it.
+    const auto = renderView({ view: { status: "ready", lines: ["echo one"], truncated: false }, onLang: () => {} });
+    expect(text(auto.querySelector(".file-line .tk-command")!)).toBe("echo");
+    const sel = auto.querySelector(".file-view-lang")!;
+    expect(sel.getAttribute("aria-label")).toBe("Syntax highlighting language");
+    const opts = Array.from(sel.querySelectorAll("option"));
+    const marked = opts.filter((o) => o.hasAttribute("selected"));
+    expect(marked).toHaveLength(1);
+    expect(marked[0]!.getAttribute("value")).toBe(""); // AUTO: the selection IS the no-override state
+    expect(text(marked[0]!)).toContain("Auto (Shell)");
+    expect(text(opts.find((o) => o.getAttribute("value") === "shell")!)).toContain("(auto)");
+    expect(opts.some((o) => o.getAttribute("value") === "plain" && text(o).includes("Plain text"))).toBe(true);
+
+    // Forced plain: the runs vanish, the plain option is chosen, the
+    // override reads at a glance (accent class).
+    const plain = renderView({ view: { status: "ready", lines: ["echo one"], truncated: false, lang: "plain" }, onLang: () => {} });
+    expect(plain.querySelector(".file-line .tk-command")).toBeNull();
+    expect(plain.querySelector(".file-view-lang")!.classList.contains("is-overridden")).toBe(true);
+    const plainMarked = Array.from(plain.querySelector(".file-view-lang")!.querySelectorAll("option")).filter((o) =>
+      o.hasAttribute("selected"),
+    );
+    expect(plainMarked).toHaveLength(1);
+    expect(plainMarked[0]!.getAttribute("value")).toBe("plain");
+
+    // A chosen lang paints a file the guess would leave plain...
+    const chosen = renderView({
+      path: "/rootA/notes.xyz",
+      view: { status: "ready", lines: ["echo one"], truncated: false, lang: "shell" },
+      onLang: () => {},
+    });
+    expect(text(chosen.querySelector(".file-line .tk-command")!)).toBe("echo");
+    expect(chosen.querySelector(".file-view-lang")!.classList.contains("is-overridden")).toBe(true);
+    // ...and a choice EQUAL to the guess is not an override (nothing to flag).
+    const same = renderView({ view: { status: "ready", lines: ["echo"], truncated: false, lang: "shell" }, onLang: () => {} });
+    expect(same.querySelector(".file-view-lang")!.classList.contains("is-overridden")).toBe(false);
+  });
+
+  it("chooser changes: the selection maps to the app, the empty value hands back the auto-guess", () => {
+    const asked: [string, string | null][] = [];
+    const root = renderView({
+      view: { status: "ready", lines: ["a"], truncated: false },
+      onLang: (p, lang) => {
+        asked.push([p, lang]);
+      },
+    });
+    const sel = root.querySelector(".file-view-lang")!;
+    (sel as unknown as { value: string }).value = "python";
+    sel.dispatchEvent({ type: "change", currentTarget: sel } as unknown as Event);
+    (sel as unknown as { value: string }).value = "";
+    sel.dispatchEvent({ type: "change", currentTarget: sel } as unknown as Event);
+    expect(asked).toEqual([
+      [PATH, "python"],
+      [PATH, null],
+    ]);
+  });
+
+  it("no wiring, no select: the foot keeps status, pager and reload alone", () => {
+    const root = renderView({ view: { status: "ready", lines: ["a"], truncated: true } });
+    expect(root.querySelector(".file-view-lang")).toBeNull();
+    expect(root.querySelector(".file-view-more")).toBeTruthy();
   });
 });
 

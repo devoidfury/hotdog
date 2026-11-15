@@ -761,8 +761,10 @@ export const MAX_LIST_DIR_ENTRIES = 500;
  *  longer than the cap is refused honestly, never sliced. */
 export const MAX_FILE_READ_CHARS = 256 * 1024;
 /** Lines returned when the request omits limit, and the hard clamp on a
- *  provided one (the char cap bounds bytes; this bounds line bookkeeping). */
-export const READ_LINES_DEFAULT = 200;
+ *  provided one (the char cap bounds bytes; this bounds line bookkeeping).
+ *  2000 so an ordinary source file lands complete in ONE read (the char cap
+ *  still cuts the page honestly on wide/long-line files). */
+export const READ_LINES_DEFAULT = 2000;
 export const MAX_READ_LINES = 5000;
 
 /** One entry of a directory listing. `path` is absolute (the roots listing

@@ -54,6 +54,9 @@ export interface WorkbenchFileViewsWire {
   views: Record<string, FileViewEntry>;
   onReload: (path: string) => void;
   onMore: (path: string) => void;
+  /** Foot-bar syntax override (see file-view.tsx FileViewEntry.lang).
+   *  Optional like the rest of the wire: no chooser without wiring. */
+  onLang?: (path: string, lang: string | null) => void;
 }
 
 /** The app's tab store. Tab producers (the phases that open files, settings,
@@ -394,6 +397,7 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
                 view={p.fileViews.views[bodyTab.id]}
                 onReload={p.fileViews.onReload}
                 onMore={p.fileViews.onMore}
+                onLang={p.fileViews.onLang}
               />
             ) : (
               <p className="workbench-placeholder">

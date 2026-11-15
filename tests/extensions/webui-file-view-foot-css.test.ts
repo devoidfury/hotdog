@@ -55,4 +55,9 @@ describe("file viewer: head is pure sheet, chrome rides the foot (styles.css)", 
     expect(body).toContain("background: var(--bg-secondary)");
     expect(body).toContain("border-top: 1px solid var(--border)");
   });
+
+  it("the syntax chooser ghosts at rest and flags overrides with the accent", () => {
+    expect(declarations(".file-view-lang")).toContain("background: transparent");
+    expect(declarations(".file-view-lang.is-overridden")).toContain("color: var(--accent)");
+  });
 });

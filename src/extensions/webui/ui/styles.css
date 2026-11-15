@@ -3679,6 +3679,30 @@ body.sidebar-resizing #tree-col-resize {
     flex: 1;
 }
 
+/* The syntax chooser (native select, house precedent #model-select): ghost
+   at rest like the foot's reload button -- and the accent face while an
+   override is in force, so a hand-painted sheet never masquerades as the
+   machine's guess. */
+.file-view-lang {
+    max-width: 130px;
+    padding: 2px 4px;
+    font: inherit;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.file-view-lang:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.file-view-lang.is-overridden {
+    color: var(--accent);
+}
+
 .file-view-btn {
     padding: 2px 8px;
     background: transparent;

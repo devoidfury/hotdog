@@ -61,6 +61,7 @@ import {
   reloadFileView,
   moreFileView,
   applyReadFile,
+  setFileViewLang,
   type FileViewsState,
   type FileFetch,
 } from "./file-view.tsx";
@@ -1744,6 +1745,13 @@ function onFileMore(path: string): void {
   dispatchFileFetch(fetch);
 }
 
+/** The foot bar's paint override: state only -- no wire traffic, the bytes
+ *  are already here; the re-render tokenizes with the chosen lang (null is
+ *  the auto-guess). See FileViewEntry.lang. */
+function onFileViewLang(path: string, lang: string | null): void {
+  fileViewsAtom(setFileViewLang(fileViewsAtom(), path, lang));
+}
+
 function onReadFileReply(requestId: number | undefined, result: ReadFileResultWire): void {
   fileViewsAtom(applyReadFile(fileViewsAtom(), requestId, result));
 }
@@ -3192,6 +3200,7 @@ function App() {
             views: fileViews.views,
             onReload: onFileReload,
             onMore: onFileMore,
+            onLang: onFileViewLang,
           }}
           onOpenFiles={openFilesTab}
           treePin={{

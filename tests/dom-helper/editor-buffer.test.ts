@@ -22,6 +22,7 @@ import {
   hitPos,
   indentTab,
   insertText,
+  markSaved,
   pressEnter,
   redo,
   selectAll,
@@ -363,5 +364,54 @@ describe("save/dirty machine + the cap twins", () => {
     expect(EDIT_CHAR_CAP).toBe(MAX_FILE_READ_CHARS);
     expect(MAX_FILE_WRITE_BYTES).toBe(MAX_FILE_READ_CHARS);
     expect(EDIT_PAGE_LINES).toBe(MAX_READ_LINES);
+  });
+});
+
+describe("content-based dirty (owner ruling 2026-11-16)", () => {
+  it("type a char then delete it: back to the baseline bytes means CLEAN", () => {
+    let b = bufferFromContent("ab\n");
+    expect(b.dirty).toBe(false); // the load seeds the baseline
+    b = insertText(b, "x", t(0));
+    expect(b.dirty).toBe(true);
+    b = backspace(b, 10);
+    expect(contentOf(b)).toBe("ab\n");
+    expect(b.dirty).toBe(false);
+  });
+
+  it("a multi-caret insert undoes to the baseline: clean; redo flips dirty; the stacks survive the clean transition", () => {
+    let b = bufferFromContent("aa\nbb\n");
+    b = {
+      ...b,
+      sels: [
+        { anchor: { line: 0, col: 1 }, head: { line: 0, col: 1 } },
+        { anchor: { line: 1, col: 1 }, head: { line: 1, col: 1 } },
+      ],
+      primary: 0,
+    };
+    b = insertText(b, "Z", t(0)); // one step, TWO edits
+    expect(b.dirty).toBe(true);
+    b = undo(b);
+    expect(contentOf(b)).toBe("aa\nbb\n");
+    expect(b.dirty).toBe(false);
+    expect(b.redo).toHaveLength(1); // undo/redo stacks do NOT reset on the flip
+    b = redo(b);
+    expect(b.dirty).toBe(true);
+  });
+
+  it("back to the baseline by another route (paste then retype) is clean too", () => {
+    let b = bufferFromContent("ab\ncd\n");
+    b = insertText(selectAll(b), "ab\nc", t(0)); // paste lands short of the baseline
+    expect(b.dirty).toBe(true);
+    b = insertText(b, "d", t(10)); // retype the tail: caret rides the edit
+    expect(contentOf(b)).toBe("ab\ncd\n");
+    expect(b.dirty).toBe(false);
+  });
+
+  it("markSaved re-seeds: the baseline moves to the saved text, so the pre-save edit turns dirty again on undo", () => {
+    let b = markSaved(insertText(bufferFromContent("x"), "y", t(0))); // save "yx"
+    expect(b.dirty).toBe(false);
+    b = undo(b); // "x" -- no longer the baseline
+    expect(contentOf(b)).toBe("x");
+    expect(b.dirty).toBe(true);
   });
 });

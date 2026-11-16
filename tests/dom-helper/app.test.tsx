@@ -7192,13 +7192,12 @@ describe("workbench editor (real app wiring)", () => {
     expect(els(".editor-line .editor-sel").length).toBe(2);
     key("Escape"); // collapse the range back to a caret for the pins below
     await tick();
-    // Leave the read cache INVALIDATED for the pins that reuse this path
-    // (the matched-pair idiom: space-then-backspace is the same bytes but
-    // dirty, and a SUCCESSFUL save drops the cache so the next openFile
-    // pays a fresh read instead of a zero-traffic cache reopen).
-    key(" ");
-    await tick();
-    key("Backspace");
+    // Leave the read cache INVALIDATED for the pins that reuse this path:
+    // content-based dirty makes a same-bytes space-then-backspace CLEAN and
+    // Ctrl+S honestly a no-op, so the exit needs a REAL edit -- a
+    // SUCCESSFUL save drops the cache (doctrine) so the next openFile pays
+    // a fresh read instead of a zero-traffic cache reopen.
+    key("x");
     await tick();
     clearSent();
     key("s", { ctrlKey: true });
@@ -7242,11 +7241,9 @@ describe("workbench editor (real app wiring)", () => {
     expect(els(".editor-line .editor-sel").length).toBe(2);
     key("Escape");
     await tick();
-    // Same cache-invalidation exit as the pin above (space + backspace are
-    // the original bytes; the successful save drops the read cache).
-    key(" ");
-    await tick();
-    key("Backspace");
+    // Same real-edit-then-save exit as the pin above (same bytes are now
+    // honestly CLEAN; the successful save drops the read cache).
+    key("x");
     await tick();
     clearSent();
     key("s", { ctrlKey: true });
@@ -7347,12 +7344,18 @@ describe("workbench editor (real app wiring)", () => {
     await tick();
     expect(els(".editor-match").length).toBe(0);
     // Cleanup INLINE (the shared openFile helper needs the NEXT test's read
-    // to actually ship): text-space then delete leaves the same bytes but
-    // dirty, and a SUCCESSFUL save drops the read cache (doctrine) so the
-    // next openFile re-reads instead of reopening zero-traffic off cache.
+    // to actually ship). First the new doctrine, observed: a same-bytes
+    // type-and-delete is CLEAN again (content-based dirty, the dot flips
+    // off). Then the cache exit: a clean Ctrl+S is a no-op, so a REAL edit
+    // goes in and its SUCCESSFUL save drops the read cache (doctrine) --
+    // the next openFile re-reads instead of reopening zero-traffic off cache.
     key(" ");
     await tick();
+    expect(el(".workbench-dirty")).toBeTruthy();
     key("Backspace");
+    await tick();
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    key("q");
     await tick();
     clearSent();
     key("s", { ctrlKey: true });

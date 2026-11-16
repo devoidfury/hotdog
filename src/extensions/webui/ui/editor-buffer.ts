@@ -110,9 +110,14 @@ export interface TextBuffer {
   primary: number;
   undo: UndoStep[];
   redo: UndoStep[];
-  /** Buffer differs from the last read/save baseline. Set by every commit,
-   *  cleared by markSaved (save success) -- an undo back to the saved text
-   *  still reads dirty; the dot lies toward "you might lose something". */
+  /** The exact serialized text (what contentOf produces) of the last
+   *  read/save: seeded by bufferFromContent, re-seeded by markSaved, and
+   *  re-seeded whenever a fresh buffer is built from disk text. */
+  baseline: string;
+  /** DERIVED at every commit, never a latch: current serialization !== the
+   *  baseline. Text changed back to the baseline -- by undo or by any other
+   *  route -- reads CLEAN (owner ruling 2026-11-16); the tab dot, the close
+   *  gate and the beforeunload veto all ride this flag's honesty. */
   dirty: boolean;
 }
 
@@ -175,13 +180,34 @@ export function bufferFromContent(content: string): TextBuffer {
     lines = parts;
   }
   const caret: SelRange = { anchor: { line: 0, col: 0 }, head: { line: 0, col: 0 } };
-  return { lines, endsNL, sels: [caret], primary: 0, undo: [], redo: [], dirty: false };
+  const baseline = joinContent(lines, endsNL);
+  return { lines, endsNL, baseline, sels: [caret], primary: 0, undo: [], redo: [], dirty: false };
 }
+
+/** The one serializer: lines + endsNL -> the exact bytes a save ships. */
+const joinContent = (lines: string[], endsNL: boolean): string =>
+  lines.join("\n") + (endsNL ? "\n" : "");
 
 /** The exact bytes to save. */
 export function contentOf(buf: TextBuffer): string {
-  return buf.lines.join("\n") + (buf.endsNL ? "\n" : "");
+  return joinContent(buf.lines, buf.endsNL);
 }
+
+/** Content-based dirty: serialization vs the baseline. Cheap guards first
+ *  (total char count -- a typed/deleted char changes it, line count rides
+ *  along -- then the full compare); the worst case is one join per commit
+ *  on a buffer already bounded by EDIT_CHAR_CAP. */
+function isDirty(buf: TextBuffer): boolean {
+  if (contentChars(buf.lines) + (buf.endsNL ? 1 : 0) !== buf.baseline.length) return true;
+  return contentOf(buf) !== buf.baseline;
+}
+
+/** Attach the derived flag to a mutation's fresh state (the undo/redo stacks
+ *  survive the clean transition untouched -- only the flag outcome moves). */
+const stampDirty = (buf: TextBuffer): TextBuffer => {
+  const dirty = isDirty(buf);
+  return buf.dirty === dirty ? buf : { ...buf, dirty };
+};
 
 /** Total chars the loaded lines occupy INCLUDING their line breaks (the
  *  unit the read cap counts). An empty entry list (never loaded) is 0. */
@@ -349,15 +375,7 @@ export function performTx(
   };
   const { sels: sorted, primary } = sortSels(after, primaryAfter);
   const undo = mergeUndoStep(buf.undo, step);
-  return {
-    ...buf,
-    lines,
-    sels: sorted,
-    primary,
-    undo,
-    redo: [],
-    dirty: true,
-  };
+  return stampDirty({ ...buf, lines, sels: sorted, primary, undo, redo: [] });
 }
 
 const normFrom = (r: SelRange): Pos => (cmpPos(r.anchor, r.head) <= 0 ? r.anchor : r.head);
@@ -481,7 +499,7 @@ export function dedentLines(buf: TextBuffer, time: number): TextBuffer {
     kind: "block",
     time,
   };
-  return { ...buf, lines, sels: step.selsAfter, undo: [...buf.undo, step], redo: [], dirty: true };
+  return stampDirty({ ...buf, lines, sels: step.selsAfter, undo: [...buf.undo, step], redo: [] });
 }
 
 /** Leading whitespace of a line. */
@@ -556,7 +574,7 @@ function applyCaretDeletes(buf: TextBuffer, edits: SelRange[], time: number): Te
     kind: "typing",
     time,
   };
-  return { ...buf, lines, sels: selsAfter, primary: buf.primary, undo: mergeUndoStep(buf.undo, step), redo: [], dirty: true };
+  return stampDirty({ ...buf, lines, sels: selsAfter, primary: buf.primary, undo: mergeUndoStep(buf.undo, step), redo: [] });
 }
 
 /** The code point boundary LEFT of p (surrogate pair counted whole). */
@@ -817,15 +835,14 @@ export function undo(buf: TextBuffer): TextBuffer {
     const inv = step.entries[i]!.inverse;
     lines = applyEdit(lines, inv.from, inv.to, inv.insert).lines;
   }
-  return {
+  return stampDirty({
     ...buf,
     lines,
     sels: step.selsBefore,
     primary: step.primaryBefore,
     undo: buf.undo.slice(0, -1),
     redo: [...buf.redo, step],
-    dirty: true,
-  };
+  });
 }
 
 export function redo(buf: TextBuffer): TextBuffer {
@@ -835,20 +852,23 @@ export function redo(buf: TextBuffer): TextBuffer {
   for (const entry of step.entries) {
     lines = applyEdit(lines, entry.edit.from, entry.edit.to, entry.edit.insert).lines;
   }
-  return {
+  return stampDirty({
     ...buf,
     lines,
     sels: step.selsAfter,
     primary: step.primaryAfter,
     undo: [...buf.undo, step],
     redo: buf.redo.slice(0, -1),
-    dirty: true,
-  };
+  });
 }
 
-/** Save landed: the buffer's content IS the file again. */
+/** Save landed: the buffer's content IS the file again -- the baseline
+ *  moves to the current serialization and the derived flag goes clean. */
 export function markSaved(buf: TextBuffer): TextBuffer {
-  return buf.dirty ? { ...buf, dirty: false } : buf;
+  const baseline = contentOf(buf);
+  return buf.baseline === baseline && !buf.dirty
+    ? buf
+    : { ...buf, baseline, dirty: false };
 }
 
 // ── Visual columns (hit-testing + caret/selection geometry) ─────────────────
@@ -906,14 +926,17 @@ export function hitPos(
 }
 
 // ── The save/dirty state machine ─────────────────────────────────────────────
-// States per path: clean (buffer == file, baseMtimeMs == file mtime) ->
-// dirty (any commit; the tab dot rides buffer.dirty) -> saving (exactly one
-// saveFile in flight, baseMtimeMs is what the frame carried) -> clean with
-// the reply's NEW mtime. A conflict refusal returns to dirty and hands the
-// app the fresh mtime: OVERWRITE = set base to it and resend (the server's
-// pinned flow), RELOAD = discard the buffer and re-read. The app owns the
-// dialogs; these functions own the transitions so the machine is testable
-// without a DOM.
+// States per path: clean (buffer == baseline, baseMtimeMs == file mtime) ->
+// dirty (a commit whose serialization differs from the baseline -- same-
+// bytes edits and undos back to the baseline stay clean; the tab dot rides
+// buffer.dirty) -> saving (exactly one saveFile in flight, baseMtimeMs is
+// what the frame carried) -> clean with the reply's NEW mtime and the
+// baseline re-seeded. A conflict refusal returns to dirty (the derivation
+// says so on its own: the text still differs from the baseline) and hands
+// the app the fresh mtime: OVERWRITE = set base to it and resend (the
+// server's pinned flow), RELOAD = discard the buffer and re-read. The app
+// owns the dialogs; these functions own the transitions so the machine is
+// testable without a DOM.
 
 export type SaveOutcome =
   | { type: "saved"; mtimeMs: number }
@@ -1076,15 +1099,14 @@ export function typeChar(buf: TextBuffer, ch: string, time: number): TextBuffer 
     kind: "typing",
     time,
   };
-  return {
+  return stampDirty({
     ...buf,
     lines,
     sels: collapsed.sels,
     primary: collapsed.primary,
     undo: mergeUndoStep(buf.undo, step),
     redo: [],
-    dirty: true,
-  };
+  });
 }
 
 /** Enter between an empty bracket pair `{|}`, `[|]`, `(|)`: THREE lines --
@@ -1165,15 +1187,14 @@ export function backspaceSmart(buf: TextBuffer, time: number): TextBuffer {
     kind: "typing",
     time,
   };
-  return {
+  return stampDirty({
     ...buf,
     lines,
     sels: after,
     primary: primaryAfter,
     undo: mergeUndoStep(buf.undo, step),
     redo: [],
-    dirty: true,
-  };
+  });
 }
 
 // ── Matched-bracket highlight ──────────────────────────────────────────────

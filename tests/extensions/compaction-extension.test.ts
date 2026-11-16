@@ -448,8 +448,10 @@ describe("Hook Integration", () => {
   it("should fail loudly when no contextLimit resolves (no silent window guess)", async () => {
     // Regression: strategies previously fell back to a hardcoded or
     // model-name-derived window size. With neither compaction.contextLimit
-    // nor a core contextLimit resolvable, the hook must surface a config
-    // error and leave the context untouched.
+    // nor an EFFECTIVE model window resolvable (no registry contextLimit,
+    // no agent.contextLimit -- and per R2 the model window is exactly what
+    // budgets the strategy now), the hook must surface a config error and
+    // leave the context untouched.
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -463,7 +465,7 @@ describe("Hook Integration", () => {
     const context = makeMessages(50, "x".repeat(500));
     const agent = createMockAgent(context);
     agent.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+      "test-model": { name: "test-model", temperature: null },
     };
     const messages = [{ role: "system", content: "" }, ...context];
 

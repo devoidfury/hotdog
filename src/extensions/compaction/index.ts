@@ -3,8 +3,8 @@ import { SummarizeStrategy, SUMMARIZE_SHORT_VARIANT } from "./strategies/summari
 import { DropStrategy } from "./strategies/drop.ts";
 import { TokenAwareStrategy } from "./strategies/token-aware.ts";
 import { TrimStrategy } from "./strategies/trim.ts";
-import { PassTheBatonStrategy, hasBatonNotice } from "./strategies/pass-the-baton.ts";
-import { shouldCompact, type WireRenderContext } from "./utils.ts";
+import { PassTheBatonStrategy, hasBatonNotice, isBatonNoticeMessage, recentWindow, mergeStashWindows } from "./strategies/pass-the-baton.ts";
+import { shouldCompact, estimatorFor, type WireRenderContext } from "./utils.ts";
 import { BATON_NOTICE_PROMPT } from "./prompts.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
@@ -29,8 +29,10 @@ interface CompactionSettings {
   userTurnGuardPrompt: string;
   /** System-notice text appended by pass-the-baton to order a handoff. */
   batonNoticePrompt: string;
-  /** Context window size in tokens; threaded from the core contextLimit unless overridden here. */
+  /** Context window size in tokens; resolved per run (see runSettings). */
   contextLimit?: number;
+  /** Runtime pop directive (overflow rescue / manual /compact); never a config key. */
+  batonPopNow?: boolean;
 }
 
 /**
@@ -57,16 +59,39 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
   /**
    * Per-run settings view: the live block for this generation plus the
-   * EFFECTIVE context window (compaction.contextLimit overrides the core
-   * resolved contextLimit). The old boot mutator
-   * (`settings.contextLimit ??= core.resolved?.contextLimit`) is deleted: it
-   * wrote the resolved value into the config block once at boot and froze
-   * it. strategies.ts pins that the CALLER resolves the window, so it is
-   * resolved here, per run, and the config block stays byte-untouched.
+   * EFFECTIVE context window. An explicit compaction.contextLimit always
+   * wins; otherwise callers that know the agent's resolved model config
+   * pass it and the window is the EFFECTIVE MODEL WINDOW -- the same
+   * resolveModelConfig value the shouldCompact trigger bills against. The
+   * core knob (core.resolved.contextLimit, default 128000) must NOT budget
+   * a larger-window model (2026-11-15 victim: a 262144-token model got a
+   * ~120k keep and a ~246k trigger). Only views with no agent context --
+   * the /compact <n> keep path and its debug dump -- fall back to
+   * core.resolved. strategies.ts pins that the CALLER resolves the window;
+   * the config block stays byte-untouched either way.
    */
-  function runSettings(): CompactionSettings {
+  function runSettings(modelConfig?: ModelConfig | null): CompactionSettings {
     const s = getExtensionConfig<CompactionSettings>(core, "compaction");
-    return { ...s, contextLimit: s.contextLimit ?? core.resolved?.contextLimit };
+    return {
+      ...s,
+      contextLimit:
+        s.contextLimit ?? (modelConfig ? modelConfig.contextLimit : core.resolved?.contextLimit),
+    };
+  }
+
+  /**
+   * getModelConfig, tolerant of duck-typed/embedded agents that resolve no
+   * window at all (no registry entry, no agent.contextLimit): null, so the
+   * settings view falls back to core.resolved exactly as before. The
+   * CONTEXT hook keeps the strict getModelConfig -- an unresolvable window
+   * there is a config error and must surface.
+   */
+  function tryModelConfig(agent: Agent): ModelConfig | null {
+    try {
+      return getModelConfig(agent);
+    } catch {
+      return null;
+    }
   }
 
   const strategyRegistry = new CompactionStrategyRegistry();
@@ -78,9 +103,10 @@ export function create(core: CoreContext): ExtensionInstance | null {
   strategyRegistry.register(new PassTheBatonStrategy());
 
   /**
-   * Live baton state per session: the tail popped by pass-the-baton, plus
-   * the flag set once the handoff has happened (via the handoff tool or a
-   * narrated final message) and the fresh context awaits the replay.
+   * Live baton state per session: the recent-window stash pass-the-baton
+   * hands the continuation (a popped tail, or the notice-append snapshot),
+   * plus the flag set once the handoff has happened (via the handoff tool
+   * or a narrated final message) and the fresh context awaits the replay.
    * Keyed by REAL sessionId only (M-26): this instance is shared across
    * every session, so a fallback key ("default") would let one agent
    * without a sessionId replay another's popped tail. Agents with no
@@ -121,9 +147,9 @@ export function create(core: CoreContext): ExtensionInstance | null {
    * tool-result part actually reaches the dump, where it then throws --
    * exactly like the wire would.
    */
-  function wireFor(agent: Agent, modelConfig: ModelConfig): WireRenderContext {
+  function wireFor(agent: Agent, modelConfig: ModelConfig | null): WireRenderContext {
     const client = agent.llmClient as
-      | { markerMangler?: WireRenderContext["mangler"]; resolveWireFormat?: (mc: ModelConfig) => WireRenderContext["wireFormat"] }
+      | { markerMangler?: WireRenderContext["mangler"]; resolveWireFormat?: (mc: ModelConfig | null) => WireRenderContext["wireFormat"] }
       | null
       | undefined;
     return {
@@ -241,30 +267,49 @@ export function create(core: CoreContext): ExtensionInstance | null {
         return false;
       }
 
-      // Tail-pop (pass-the-baton): stash the popped tail so the fresh
-      // context after the handoff can pick the recent turns back up — the
-      // narrating agent shed them to stay on the cached prefix, the
-      // incoming agent inherits them (see the TURN_END/CONTEXT replay
-      // below). The live map is the in-process path; the file is the
-      // cross-process/debug record. Best-effort: a failed write must not
+      // Tail-cut stash bookkeeping (pass-the-baton): whatever the strategy
+      // hands in result.batonStash -- the popped tail on a pop, the recent
+      // window snapshot on a notice-only append -- is mirrored to the live
+      // map and the <session-id>.baton.json file BEFORE the context is
+      // rewritten, so a handoff landing on this turn always has verbatim
+      // turns to replay. When a pop finds an older un-replayed stash (the
+      // model ignored the last pop and kept working), the old window is
+      // MERGED ahead of the new cut and re-capped to the newest budget
+      // window: timeline-wise the old popped tail sits between the kept
+      // prefix and this pop's messages, and dropping it would lose the
+      // newest narrated work. Best-effort mirror: a failed write must not
       // abort the baton itself.
       //
-      // Declined outright without a real sessionId: the pop is only safe
-      // because the stash can hand the tail back, and there is no safe
-      // shared key for sessionId-less agents (bare factory-built workers,
-      // embeds) on this shared instance. Losing the tail unrecoverably is
-      // worse than not compacting; callers degrade onward (the overflow
-      // rescue chains to trim/drop).
+      // Declined outright without a real sessionId when a pop would lose
+      // messages: the pop is only safe because the stash can hand the tail
+      // back, and there is no safe shared key for sessionId-less agents
+      // (bare factory-built workers, embeds) on this shared instance.
+      // Losing the tail unrecoverably is worse than not compacting;
+      // callers degrade onward (the overflow rescue chains to trim/drop).
+      // A notice-only append costs nothing to lose and still runs without
+      // a stash.
       if (tailCut && compactedCount > 0 && !agent.sessionId) {
         logger.warn(
           "[compaction] pass-the-baton declined: agent has no sessionId to stash the popped tail under",
         );
         return false;
       }
-      if (tailCut && compactedCount > 0) {
-        const popped = messages.slice(messages.length - compactedCount);
-        await stashBatonMessages(agent.sessionId, popped);
-        batonStash.set(agent.sessionId, { popped, replayPending: false });
+      if (tailCut) {
+        const fresh = result.batonStash ?? messages.slice(messages.length - compactedCount);
+        const prior = agent.sessionId ? batonStash.get(agent.sessionId) : undefined;
+        const source =
+          compactedCount > 0 && prior && !prior.replayPending
+            ? mergeStashWindows(prior.popped, fresh)
+            : fresh;
+        const maxKeep = result.metadata?.maxKeepTokens;
+        const stashed =
+          typeof maxKeep === "number"
+            ? recentWindow(source, estimatorFor(wire), maxKeep, result.appendNotice ?? "")
+            : source;
+        if (stashed.length > 0 && agent.sessionId) {
+          await stashBatonMessages(agent.sessionId, stashed);
+          batonStash.set(agent.sessionId, { popped: stashed, replayPending: false });
+        }
       }
 
       const newContext: Message[] = [...keptMessages];
@@ -479,11 +524,17 @@ export function create(core: CoreContext): ExtensionInstance | null {
       return { action: ACTIONS.ERROR, error: "No compaction strategy available." };
     }
 
-    if (!strategy.canCompact(nonSystemMessages, s)) {
+    // A manual /compact orders compaction NOW -- it is not the
+    // notice-first auto-trigger, so the baton pops (same directive the
+    // overflow rescue uses). The window is the effective model config
+    // when it resolves; duck-typed agents fall back to the core knob.
+    const run = { ...runSettings(tryModelConfig(agent)), batonPopNow: true };
+
+    if (!strategy.canCompact(nonSystemMessages, run)) {
       return { action: ACTIONS.DISPLAY, content: "Compaction not applicable with current settings." };
     }
 
-    await _performCompaction(agent, strategy, s);
+    await _performCompaction(agent, strategy, run);
 
     const resultContent = `Context compacted using '${s.strategy}' strategy.`;
     if (debug) {
@@ -493,7 +544,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         mode: "strategy",
         keep_requested: null,
         strategy: s.strategy,
-        settings: { ...s },
+        settings: { ...run },
         messages: {
           before: nonSystemMessages.length,
           after: agent.context.getNonSystem().length,
@@ -518,13 +569,15 @@ export function create(core: CoreContext): ExtensionInstance | null {
         (agent as { compactionRegistry?: typeof strategyRegistry }).compactionRegistry = strategyRegistry;
       },
 
-      // Runs before each LLM call; compacts in place when the token budget is exceeded.
+      // Runs before each LLM call; on an over-budget context drives the
+      // baton flow (notice-first append, then degrade pop once the model
+      // has demonstrably ignored the notice -- see the strategy doctrine).
       [HOOKS.CONTEXT]: async ({ messages, agent }) => {
         // Baton replay (first act of the fresh session): re-append the
-        // popped tail verbatim, right after the plan message the drain
-        // already placed in context (bus messages enter the context before
-        // this hook fires, so the order is always plan-then-tail). The
-        // boundary rule on the pop side guarantees the tail never starts
+        // stashed recent window verbatim, right after the plan message the
+        // drain already placed in context (bus messages enter the context
+        // before this hook fires, so the order is always plan-then-tail).
+        // The stash-side boundary rule guarantees the window never starts
         // with a tool result orphaned from its parent assistant turn.
         const st = agent?.sessionId ? batonStash.get(agent.sessionId) : undefined;
         if (st?.replayPending) {
@@ -534,17 +587,27 @@ export function create(core: CoreContext): ExtensionInstance | null {
           return { messages: agent.buildMessages() };
         }
 
-        // One live read per auto-trigger: an enabled on->off swap stops the
-        // NEXT trigger from compacting (a run already in flight finishes --
-        // P8's benign twin).
-        const s = runSettings();
-        if (!s.enabled) return;
+        // Live reads only: an enabled on->off swap stops the NEXT trigger
+        // from compacting (a run already in flight finishes -- P8's benign
+        // twin). Direct accessor calls per use (no block binding); the
+        // strategy view is the runSettings read below, once the model
+        // window is known.
+        if (!getExtensionConfig<CompactionSettings>(core, "compaction").enabled) return;
 
         const nonSystemMessages = messages.filter((m) => m.role !== "system");
 
-        if (nonSystemMessages.length <= s.keepRecentMessages * 2) return;
+        if (
+          nonSystemMessages.length <=
+          getExtensionConfig<CompactionSettings>(core, "compaction").keepRecentMessages * 2
+        )
+          return;
 
         const modelConfig = getModelConfig(agent);
+        // R2: the strategy budget is resolved against the EFFECTIVE model
+        // window -- the same value shouldCompact bills below -- not the
+        // core contextLimit (default 128000), which under-counts
+        // large-window models into an oversized pop.
+        const s = runSettings(modelConfig);
         // The trigger bills the FULL window: the system prompt (base prompt +
         // AGENTS.md + skill chunks) rides every request, so estimating only
         // the conversation under-counts and the provider overflows before
@@ -580,17 +643,31 @@ export function create(core: CoreContext): ExtensionInstance | null {
       },
 
       /**
-       * Baton handoff detection. After pass-the-baton fires there are two
-       * ways the session ends, and both must reach the same fresh context:
+       * Baton handoff detection -- where the notice is CONSUMED. After
+       * pass-the-baton appends its notice (notice-first: nothing popped)
+       * there are two ways the session ends, and both must reach the same
+       * fresh context:
        *
        *  A. The model calls the handoff tool. The handoff-tool extension
        *     (higher TURN_END priority, already run) clears the context and
-       *     enqueues its plan; we only mark the tail for replay.
+       *     enqueues its plan; we only mark the stash for replay. The
+       *     clear happened above us, so path A replays the LAST KNOWN
+       *     stash (the append-time snapshot or the last pop's tail) -- the
+       *     wrap-up itself lives inside the handoff plan.
        *  B. The model ignores the tool and just emits its handoff as a
        *     final summary message with stop ("completion"). We treat that
        *     the same: clear, restart on the summary as the plan (the same
        *     clear/ensureSystemPrompt/enqueue/claim sequence the handoff
-       *     tool runs, owned by us), and mark the tail for replay.
+       *     tool runs, owned by us), and mark the stash for replay.
+       *
+       * Stash-before-clear (R3): this clear wipes the context the recent
+       * turns live in, and the plan text promises "Its most recent turns
+       * are appended verbatim below". On path B nothing has popped yet
+       * (notice-first), so the replay copy must be taken NOW: the last
+       * stashed window merged with everything that arrived after the
+       * notice, re-capped to the newest budget window. On path A the
+       * context is already gone before this hook runs -- hence A's
+       * documented best-effort limitation above.
        *
        * The replay itself happens in the CONTEXT hook so it lands after
        * the enqueued plan message (drained into context before that hook
@@ -658,6 +735,35 @@ export function create(core: CoreContext): ExtensionInstance | null {
             ? message
             : "(The previous agent hit the context limit and stopped without a written summary. Its most recent turns are appended verbatim below.)";
         try {
+          // STASH BEFORE THE CLEAR (R3): merge the last stashed window
+          // with everything appended after the notice -- the work the
+          // model did while wrapping up -- re-capped to the newest budget
+          // window, and refresh the file mirror. If the window cannot be
+          // computed the handoff still proceeds on the previous stash; a
+          // stash problem must not strand the session mid-handoff.
+          try {
+            const live = agent.context.getMessages();
+            let noticeIdx = -1;
+            for (let i = live.length - 1; i >= 0; i--) {
+              if (isBatonNoticeMessage(live[i], notice)) {
+                noticeIdx = i;
+                break;
+              }
+            }
+            const mc = tryModelConfig(agent);
+            const rs = runSettings(mc);
+            const maxKeep = requireContextLimit(rs.contextLimit) - (rs.reserveTokens || 0);
+            const fresh = recentWindow(
+              mergeStashWindows(st.popped, live.slice(noticeIdx + 1)),
+              estimatorFor(wireFor(agent, mc)),
+              maxKeep,
+              notice,
+            );
+            st.popped = fresh;
+            await stashBatonMessages(agent.sessionId, fresh);
+          } catch (e: unknown) {
+            logger.warn(`[compaction] baton stash before handoff failed (keeping previous): ${formatError(e)}`);
+          }
           await agent.clearContext();
           await agent.ensureSystemPrompt();
           // The summary is model-authored, so it rides model provenance —
@@ -682,11 +788,16 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // roughly conversation-sized request, so a summarize pass (same size,
         // same window) would likely fail too. Chain, cheapest and
         // cache-friendliest first:
-        //  - pass-the-baton pops the newest messages and orders a handoff;
-        //    the kept window stays a byte-prefix of the failed prompt, so
-        //    prefix-matching runners re-read it from cache. Declined when a
-        //    baton notice is already present or the estimate says the
-        //    context fits.
+        //  - pass-the-baton POPS the newest messages immediately and orders a
+        //    handoff (batonPopNow below: the full-size request already
+        //    failed, there is no room for the notice-first round the auto
+        //    trigger uses). The kept window stays a byte-prefix of the
+        //    failed prompt, so prefix-matching runners re-read it from
+        //    cache, and the cut lands on a clean exchange. Declined when
+        //    no clean exchange boundary exists at a viable floor (a
+        //    tool-only worker transcript -> null, this chain moves on),
+        //    the estimate says the context fits, or there is no sessionId
+        //    to stash the popped tail under.
         //  - trim drops the minimum number of oldest messages; its own fit
         //    check returns null when the local estimate claims the context
         //    already fits (that estimate is exactly what lost the race).
@@ -700,7 +811,12 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // retries once and the retry is not itself re-caught.
         // One live read for the whole rescue chain: baton/trim/drop attempt the
         // same settings the overflow saw, and the NEXT rescue reads fresh.
-        const s = runSettings();
+        // R2: the window is the effective model config when it resolves,
+        // so the baton's keep budget matches the provider's real window.
+        const s: CompactionSettings = {
+          ...runSettings(tryModelConfig(agent)),
+          batonPopNow: true,
+        };
         let rescued = false;
         const baton = strategyRegistry.get("pass-the-baton");
         if (baton && baton.canCompact(agent.context.getMessages(), s)) {

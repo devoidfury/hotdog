@@ -20,7 +20,7 @@
         },
         "contextLimit": {
           "type": "number",
-          "description": "Context window size limit in tokens; defaults to the core contextLimit config"
+          "description": "Explicit context window size limit in tokens; when unset, strategy runs budget against the effective model window (resolved model/agent contextLimit), and window-less views (manual keep, debug dumps) fall back to the core contextLimit config"
         },
         "keepRecentMessages": {
           "type": "number",

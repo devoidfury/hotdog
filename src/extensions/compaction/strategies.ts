@@ -10,8 +10,11 @@ export interface CompactionSettings {
   keepRecentMessages: number;
   /**
    * Context window size in tokens. The caller (compaction extension)
-   * resolves this from compaction.contextLimit / the core contextLimit;
-   * strategies must never guess it. Guard with requireContextLimit().
+   * resolves this per run: explicit compaction.contextLimit, else the
+   * EFFECTIVE model window (resolveModelConfig -- the same value the
+   * shouldCompact trigger bills), else (views with no agent context) the
+   * core contextLimit. Strategies must never guess it. Guard with
+   * requireContextLimit().
    */
   contextLimit?: number;
   /**
@@ -20,6 +23,14 @@ export interface CompactionSettings {
    * lives in extension.json, BATON_NOTICE_PROMPT is the code-side fallback.
    */
   batonNoticePrompt?: string;
+  /**
+   * Runtime directive (injected by callers, NEVER a config key): pop the
+   * tail immediately even with no baton notice in the context. The
+   * PROVIDER_ERROR overflow rescue sets it (the full-size request already
+   * failed; there is no room for notice-first), and so does a manual
+   * /compact -- a user command orders compaction, not a wrap-up notice.
+   */
+  batonPopNow?: boolean;
 }
 
 /**
@@ -54,6 +65,16 @@ export interface CompactResult {
    * (pass-the-baton orders the model to wrap up and hand off).
    */
   appendNotice?: string | null;
+  /**
+   * Messages the tail-cut hands to the extension's stash for replay into
+   * the continuation session (pass-the-baton): the popped tail on a pop,
+   * or the current recent window on a notice-only append (nothing has
+   * popped yet, but a handoff this turn must still have verbatim recents
+   * to replay). The notice itself never rides. Mirrored to the live baton
+   * map and the <session-id>.baton.json file; the TURN_END paths arm the
+   * CONTEXT-hook replay with it.
+   */
+  batonStash?: Message[];
   metadata?: Record<string, unknown>;
 }
 

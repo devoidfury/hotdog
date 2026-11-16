@@ -60,6 +60,8 @@ export interface ExtensionMetadata {
     name: string;
     description: string;
     options: unknown[];
+    /** See SubcommandDefinition.skipRemoteModelFetch. */
+    skipRemoteModelFetch?: boolean;
   }>;
   cliFlags: Array<{
     short: string | null;

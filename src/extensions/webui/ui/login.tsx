@@ -32,6 +32,40 @@ export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
 }
 
+/** The desktop launcher opens the app at `/#tok=<session token>`; parse it
+ *  out of a location hash (pure part, testable without a live location). */
+export function parseHandoffHash(hash: string): string | null {
+  if (!hash || !hash.startsWith("#")) return null;
+  const tok = new URLSearchParams(hash.slice(1)).get("tok");
+  return tok ? tok : null;
+}
+
+/**
+ * Desktop handoff, consumed once at boot: the fragment never reaches the
+ * server (browsers keep it out of requests and logs), so it is the one
+ * URL-borne way to hand the window a token without a route. Scrub it from
+ * history so it stops existing in the address bar and (in app-mode browsers)
+ * the profile's history entry, persist it like a login submit so an in-app
+ * reload survives, and return it for the boot path to verify. A storage
+ * throw downgrades to memory-only for this boot; the token itself stays
+ * usable either way.
+ */
+export function consumeHandoffToken(): string | null {
+  // `typeof` guard: browsers always have location; non-browser hosts (bun
+  // tests import this module's boot path) do not, and a bare reference there
+  // would throw before the login screen ever renders.
+  const hash = typeof location === "undefined" ? "" : location.hash;
+  const tok = parseHandoffHash(hash);
+  if (!tok) return null;
+  try {
+    history.replaceState(null, "", location.pathname + location.search);
+    localStorage.setItem(TOKEN_STORAGE_KEY, tok);
+  } catch {
+    // localStorage can throw (quota, blocked storage); in-memory token stands.
+  }
+  return tok;
+}
+
 interface LoginProps {
   hidden: boolean;
   onToken: (token: string) => void;

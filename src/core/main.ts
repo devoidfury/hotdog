@@ -413,14 +413,25 @@ export async function main(): Promise<number> {
   // and doubling offline timeout pain. The memo lives inside main(), so
   // repeated main() calls (tests, embedded hosts) each build fresh.
   let bootBuild: ReturnType<typeof buildConfig> | null = null;
-  const buildConfigOnce = (cliArgv: CliArgv) => {
-    bootBuild ??= buildConfig(cliArgv, configRegistry);
+  const buildConfigOnce = (cliArgv: CliArgv, skipRemoteModelFetch = false) => {
+    bootBuild ??= buildConfig(cliArgv, configRegistry, { skipRemoteModelFetch });
     return bootBuild;
   };
 
+  // Seats that serve no local model (declared in extension.json via
+  // cli:subcommands[].skipRemoteModelFetch -- metadata, because the hook
+  // that could attach it only fires after this build) boot without the
+  // network half of the model registry: no fetchModels round trip, no
+  // offline timeout before the window opens. Handlers that DO serve models
+  // hydrate core.resolved.modelRegistry themselves (see the desktop
+  // extension's local mode).
+  const skipRemoteModelFetch =
+    !!cli.subcommand &&
+    cliSubcommandRegistry.get(cli.subcommand)?.skipRemoteModelFetch === true;
+
   let built;
   try {
-    built = await buildConfigOnce(cli as CliArgv);
+    built = await buildConfigOnce(cli as CliArgv, skipRemoteModelFetch);
   } catch (e) {
     logger.error(formatError(e));
     console.error("Run `hotdog rescue` for config diagnostics (paths, syntax, unknown keys).");

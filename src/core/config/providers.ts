@@ -443,6 +443,7 @@ export async function buildProviderModels(
 export async function buildModelRegistry(
   config: { providers?: ProviderDef[]; baseUrl?: string; apiKey?: string },
   contextLimit: number,
+  opts: { skipRemoteFetch?: boolean } = {},
 ): Promise<Record<string, ModelConfig>> {
   const registry: Record<string, ModelConfig> = {};
   // Probes concurrent, same doctrine as the health sweep: a dead backend
@@ -450,12 +451,22 @@ export async function buildModelRegistry(
   // timeout, not N. The merge keeps the sequential precedence -- providers
   // later in config order still win duplicate keys -- because results are
   // assigned in order after all settle.
+  //
+  // skipRemoteFetch passes a prefetched-empty catalog: buildProviderModels
+  // then uses static models with no request and no failure log. Subcommands
+  // that declare skipRemoteModelFetch boot through this (a remote window has
+  // no local model to serve); handlers that DO serve models hydrate later.
   const results = await Promise.all(
     (config.providers || []).map((provider) =>
-      buildProviderModels(provider, contextLimit, {
-        baseUrl: config.baseUrl,
-        apiKey: config.apiKey,
-      }),
+      buildProviderModels(
+        provider,
+        contextLimit,
+        {
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+        },
+        opts.skipRemoteFetch ? [] : undefined,
+      ),
     ),
   );
   for (const models of results) {

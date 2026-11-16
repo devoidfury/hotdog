@@ -145,6 +145,17 @@ export interface SubcommandDefinition {
   handler?: (cliArgs: CliArgv, core: CoreContext) => number | Promise<number>;
   description?: string;
   options?: Record<string, unknown>;
+  /**
+   * Boot without the network half of the model registry: providers'
+   * fetchModels /v1/models round trips are skipped entirely (static models
+   * only, no request, no timeout, no error log). For subcommands that serve
+   * no local model -- a bare window onto a remote server. The build happens
+   * BEFORE extension code loads, so this must be declared in extension.json
+   * metadata, not attached by the registration hook. A handler that does
+   * serve models hydrates core.resolved.modelRegistry itself
+   * (buildModelRegistry from @core/config/providers.ts) before use.
+   */
+  skipRemoteModelFetch?: boolean;
 }
 
 /**

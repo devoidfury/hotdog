@@ -50,6 +50,7 @@ Subcommands and CLI flags are declared in `extension.json`:
 | `name` | string | (required) | Subcommand name (e.g., "info", "show-prompt") |
 | `description` | string | "" | Short description shown in help text |
 | `options` | array | [] | Subcommand-specific options for help text |
+| `skipRemoteModelFetch` | boolean | false | Boot without the network half of the model registry: providers' `fetchModels` `/v1/models` round trips are skipped entirely (static models only, no request, no offline timeout). For seats that serve no local model -- the desktop subcommand declares it so a remote window opens instantly. Because `buildConfig` runs before extension code loads, this must be declared here in metadata, not attached by the registration hook; a handler that does serve models hydrates `core.resolved.modelRegistry` itself via `buildModelRegistry` (see the desktop extension's local mode). |
 
 ### Option Fields
 

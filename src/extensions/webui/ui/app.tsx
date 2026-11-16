@@ -24,6 +24,7 @@ import {
   focusLoginInput,
   getStoredToken,
   clearStoredToken,
+  consumeHandoffToken,
   loginAtoms,
 } from "./login.tsx";
 import { loadDraft, loadDraftCaret, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave, type DraftCaret } from "./draft.ts";
@@ -3967,7 +3968,7 @@ async function init(): Promise<void> {
     }
   });
 
-  const savedToken = getStoredToken();
+  const savedToken = consumeHandoffToken() ?? getStoredToken();
   if (savedToken) {
     if (await verifyToken(savedToken)) {
       activateToken(savedToken);

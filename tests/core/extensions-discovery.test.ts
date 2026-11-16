@@ -316,6 +316,23 @@ describe("registerExtensionMetadata", async () => {
     // Built-in extensions still register their subcommands.
     expect(Object.keys(subcommandRegistry._subcommands).length).toBeGreaterThan(0);
   });
+
+  it("carries skipRemoteModelFetch from extension.json into the registry", async () => {
+    // main() consults this BEFORE buildConfig (the hook that could attach it
+    // fires after), so the value must arrive via metadata registration.
+    // desktop declares it: its remote mode boots with zero model-network.
+    const config = {
+      extensionPaths: ["@extensions", "@experimental"],
+      extensionAutoload: true,
+      extensions: [],
+    };
+    const configRegistry = createMockConfigRegistry();
+    const subcommandRegistry = createMockSubcommandRegistry();
+    await registerExtensionMetadata(config, configRegistry, subcommandRegistry);
+    expect(subcommandRegistry._subcommands["desktop"]?.skipRemoteModelFetch).toBe(true);
+    // And undeclared subcommands stay on the fetched (default) path.
+    expect(subcommandRegistry._subcommands["webui"]?.skipRemoteModelFetch).toBeFalsy();
+  });
 });
 
 describe("extension.json manifest validation", async () => {

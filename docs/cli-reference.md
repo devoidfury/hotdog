@@ -28,6 +28,14 @@ hotdog extension validate <dir>  # Diagnose an extension (or a bundle root to sc
 hotdog extension validate <dir> --json
                                  # ...as a JSON envelope (per-extension reports, findings, totals)
 hotdog webui                     # Start the web UI server
+hotdog desktop                   # Experimental (@experimental): the WebUI in a desktop window. Hosts a private
+                                 # loopback server (ephemeral port, one-boot key, token handed to the window in
+                                 # the URL fragment); window closed = clean shutdown with the commit-point drain
+hotdog desktop https://host[:port]
+                                 # Experimental: window onto a REMOTE WebUI (no local server). https only;
+                                 # http only for loopback names (the ssh -L tunnel shape). No --allow-insecure
+                                 # on purpose: the webui token is bearer over cleartext. Self-signed certs:
+                                 # terminal TOFU prompt, or pin HOTDOG_DESKTOP_TRUST=<sha256-fingerprint>
 hotdog workflow validate <f> [--param key=value]...
                                  # Validate a .workflow.yaml graph (errors + warnings, exit code).
                                  # --param values resolve {{params.x}} refs

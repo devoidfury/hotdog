@@ -314,6 +314,51 @@ describe("buildConfig", () => {
     }
   });
 
+  it("skipRemoteModelFetch builds static-only catalogs with zero network", async () => {
+    // The remote-desktop seat (extension.json skipRemoteModelFetch): a
+    // fetchModels provider must not fire /v1/models at boot -- offline, that
+    // timeout is pure launch latency before a window that serves no model.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-skipmodels-'));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, 'defaults.json'),
+        JSON.stringify({
+          providers: [
+            {
+              name: "stubprov",
+              url: "http://127.0.0.1:9/v1",
+              fetchModels: true,
+              models: [{ name: "static-one" }],
+            },
+          ],
+        }),
+      );
+      const origFetch = globalThis.fetch;
+      let fetchCalls = 0;
+      globalThis.fetch = (async () => {
+        fetchCalls++;
+        throw new Error("stub: fetch must not run when skipped");
+      }) as unknown as typeof fetch;
+      try {
+        const skipped = await buildConfig({ configDir: tmpDir }, undefined, {
+          skipRemoteModelFetch: true,
+        });
+        expect(fetchCalls).toBe(0);
+        expect(Object.keys(skipped.modelRegistry)).toContain("stubprov/static-one");
+        expect(skipped.resolved.modelRegistry).toBe(skipped.modelRegistry);
+
+        // Control: without the flag the same config DOES hit the network
+        // (stub throws; buildModelRegistry swallows and keeps static models).
+        await buildConfig({ configDir: tmpDir });
+        expect(fetchCalls).toBeGreaterThan(0);
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("merges profile from file", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-config-test-'));
     try {

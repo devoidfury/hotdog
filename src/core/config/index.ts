@@ -303,6 +303,7 @@ export type BuildAgentConfig = CoreConfigWithExtensions & BuildAgentConfigExtra;
 export async function buildConfig(
   cliArgv: CliArgv,
   configRegistry?: ConfigRegistry,
+  opts: { skipRemoteModelFetch?: boolean } = {},
 ): Promise<{
   resolved: BuildAgentConfig;
   config: CoreConfigWithExtensions;
@@ -340,6 +341,11 @@ export async function buildConfig(
     defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string | null,
   });
 
+  // opts.skipRemoteModelFetch comes from the subcommand's metadata
+  // (SubcommandDefinition.skipRemoteModelFetch): the no-local-model seats
+  // (remote desktop window) must not pay a fetchModels timeout at boot.
+  // The registry stays a static-only catalog -- present, truthy, hydratable
+  // later via buildModelRegistry by a handler that does serve models.
   const modelRegistry = await buildModelRegistry(
     {
       providers: castAs<ProviderDef[]>(config.providers || []),
@@ -347,6 +353,7 @@ export async function buildConfig(
       apiKey: resolved.apiKey,
     },
     castAs<number>(resolved.contextLimit),
+    { skipRemoteFetch: opts.skipRemoteModelFetch === true },
   );
   resolved.modelRegistry = modelRegistry;
 

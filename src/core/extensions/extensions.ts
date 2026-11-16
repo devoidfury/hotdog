@@ -204,6 +204,7 @@ async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata
     name: (sc?.name as string) || "",
     description: (sc?.description as string) || "",
     options: Array.isArray(sc?.options) ? (sc.options as unknown[]) : [],
+    skipRemoteModelFetch: sc?.skipRemoteModelFetch === true,
   }));
 
   const cliFlags = fieldArray<Record<string, unknown>>(meta, "cli:flags", metaPath).map((flag) => ({
@@ -693,6 +694,9 @@ export async function registerExtensionMetadata(
           description: sc.description || "",
           options: (sc.options?.length ? { items: sc.options } : undefined) as
             Record<string, unknown> | undefined,
+          // Boot policy must ride the metadata because buildConfig runs
+          // before any hook can attach it.
+          skipRemoteModelFetch: sc.skipRemoteModelFetch === true,
           handler: undefined,
         });
       }

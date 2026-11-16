@@ -1,0 +1,15 @@
+{
+  "name": "desktop",
+  "provides": ["cli:subcommands"],
+  "loadOrder": 10,
+  "dependsOn": ["webui"],
+  "description": "Desktop app shell: WebUI in a native webview window (compiled WebKitGTK shim -- GTK4/webkitgtk-6.0 or GTK3/webkit2gtk-4.1, browser app-mode fallback). Serves a private local instance by default, or connects to a remote https WebUI",
+  "autoload": true,
+  "cli:subcommands": [
+    {
+      "name": "desktop",
+      "description": "Open hotdog as a desktop window (local app server by default; pass https://URL to connect to a remote WebUI)",
+      "skipRemoteModelFetch": true
+    }
+  ]
+}

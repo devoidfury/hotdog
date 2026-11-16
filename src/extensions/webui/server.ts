@@ -9,6 +9,10 @@ import { assertTrustedProxy, apiKeyEquals, createAuthRef, type AuthRef } from ".
 import { upgradeOriginAllowed, isLoopbackHost } from "../websocket/origin.ts";
 import { DDG_SOLVE_SERVICE } from "../web-search/index.ts";
 import { isSafeSessionId, sessionPath } from "@core/session/session-log.ts";
+import { basename } from "node:path";
+import { stat as fsStat } from "node:fs/promises";
+import { PathEscapeError } from "@utils/workspace.ts";
+import { workspaceFor } from "../websocket/handlers-files.ts";
 import { logger } from "@utils/logger.ts";
 import { CoreContext } from "@core/extensions/types.ts";
 
@@ -314,6 +318,66 @@ export async function createWebuiServer(
     });
   };
 
+  // ── Workspace file download (GET /download/<path>) ───────────────────────
+  // Streams ONE workspace file as an attachment for the file-tree menu. The
+  // auth posture MIRRORS /export above exactly -- same token sources (?token=
+  // for the plain-navigation anchor, justified the same way by the loopback
+  // default bind; x-hotdog-token for API clients), the same
+  // authRef.validateToken check, the same 401 { error: "Unauthorized" }
+  // BEFORE any workspace byte is touched. Containment is the websocket file
+  // handlers' own gate: Workspace.resolveSafe on the decoded path, via the
+  // same per-request workspaceFor (a config rebind is honored). Directories
+  // are refused. Bun.file streams the body -- no whole-file base64 anywhere,
+  // so nothing rides the websocket frame cap at all.
+  const downloadWorkspaceFile = async (req: Request): Promise<Response> => {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return Response.json({ error: "Method not allowed" }, { status: 405 });
+    }
+    const url = new URL(req.url);
+    const token = url.searchParams.get("token") ?? req.headers.get("x-hotdog-token") ?? "";
+    if (!authRef.validateToken(token)) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    let rawPath: string;
+    try {
+      rawPath = decodeURIComponent(url.pathname.slice("/download/".length));
+    } catch {
+      return Response.json({ error: "Invalid path" }, { status: 400 });
+    }
+    // resolveSafe BEFORE any fs call; its honest PathEscapeError rides the
+    // 400 body (the export route's containment-refusal shape). Anything else
+    // is a server-side surprise: log the stack, answer generically.
+    let resolved: string;
+    try {
+      resolved = workspaceFor(core).resolveSafe(rawPath);
+    } catch (err) {
+      if (err instanceof PathEscapeError) {
+        return Response.json({ error: err.message }, { status: 400 });
+      }
+      logger.warn(`[webui] download rejected path: ${formatError(err)}`);
+      return Response.json({ error: "Invalid path" }, { status: 400 });
+    }
+    // node fs stat: the directory verdict must come from a real stat (Bun's
+    // BunFile.stats carries no isDirectory).
+    const entryStat = await fsStat(resolved).catch(() => null);
+    if (entryStat === null) {
+      return Response.json({ error: "File not found" }, { status: 404 });
+    }
+    if (entryStat.isDirectory()) {
+      return Response.json({ error: `${basename(resolved)} is a directory` }, { status: 400 });
+    }
+    // A real filename has no SESSION_ID_RE-style alphabet, so sanitize the
+    // attachment name down to characters that cannot break the header
+    // (quotes, separators, controls, and non-ASCII all fold to "_").
+    const safeName = basename(resolved).replace(/[^A-Za-z0-9._~-]/g, "_") || "download";
+    return new Response(Bun.file(resolved), {
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${safeName}"`,
+      },
+    });
+  };
+
   // Optional extension routes: web-search mounts its DDG captcha solve page
   // here so challenges are solvable over the webui's existing port (and its
   // existing firewall/VPN reach) instead of a second server. The service is
@@ -333,6 +397,9 @@ export async function createWebuiServer(
 
       // Raw JSONL log download for the sidebar's Export (see exportSessionLog).
       "/export/*": exportSessionLog,
+
+      // Workspace file download for the file-tree menu (see downloadWorkspaceFile).
+      "/download/*": downloadWorkspaceFile,
 
       "/verify": async function (req: BunRequest) {
         const token = req.headers.get("x-hotdog-token");

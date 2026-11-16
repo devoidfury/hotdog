@@ -28,7 +28,8 @@
 import { getTokenizer, guessLangForBase, listRenderableLangs, type SyntaxRun } from "@utils/syntax/index.ts";
 import { hasFrontmatter, tokenizeMarkdownDoc } from "@utils/syntax/markdown.ts";
 import type { ReadFileResultWire } from "@extensions/websocket/protocol.ts";
-import { IconReload } from "./icons.tsx";
+import { IconReload, IconWhitespace } from "./icons.tsx";
+import { codeSpans } from "./ws-render.tsx";
 
 // ── Language guessing (display only) ────────────────────────────────────────
 // The registry owns the name metadata: every SyntaxDef names its own
@@ -223,6 +224,58 @@ export function setFileViewLang(
   return { ...s, views: { ...s.views, [path]: next } };
 }
 
+/** Rename landed: the entry MOVES with the file (tab identity follows the
+ *  file, and the viewer's held lines are the same bytes under the new
+ *  spelling -- the paint override rides too). In-flight requests for the OLD
+ *  path are dropped from the pending map so their reply cannot resurrect a
+ *  dead-keyed entry. A free path with no entry changes nothing (a never-
+ *  opened file has nothing to carry). */
+export function retargetFileView(
+  s: FileViewsState,
+  from: string,
+  to: string,
+): FileViewsState {
+  const entry = s.views[from];
+  if (!entry) return s;
+  const views = { ...s.views };
+  delete views[from];
+  views[to] = entry;
+  const pending = { ...s.pending };
+  for (const id of Object.keys(pending)) {
+    if (pending[id] === from) delete pending[id];
+  }
+  return { ...s, views, pending };
+}
+
+/** Delete (or rename-away) landed: forget the entry for `path` AND every
+ *  path under it (a deleted directory takes its open files' views with it),
+ *  plus any pending request pointing at a dead path -- the reply would
+ *  otherwise resurrect a view whose bytes no longer exist. */
+export function forgetFileViews(
+  s: FileViewsState,
+  path: string,
+): FileViewsState {
+  const under = (p: string): boolean =>
+    p === path || p.startsWith(`${path}/`) || p.startsWith(`${path}\\`);
+  let changed = false;
+  const views = { ...s.views };
+  for (const p of Object.keys(views)) {
+    if (under(p)) {
+      delete views[p];
+      changed = true;
+    }
+  }
+  const pending = { ...s.pending };
+  for (const id of Object.keys(pending)) {
+    if (under(pending[id]!)) {
+      delete pending[id];
+      changed = true;
+    }
+  }
+  if (!changed) return s;
+  return { ...s, views, pending };
+}
+
 // ── The reveal seam (Phase 7) ────────────────────────────────────────────────
 
 /**
@@ -257,6 +310,16 @@ export interface FileViewProps {
    *  the state, null answers "back to the auto-guess". Absent = no chooser
    *  rendered -- a select that changes nothing is noise. */
   onLang?: (path: string, lang: string | null) => void;
+  /** Whitespace marks (the shared ws-render decoration -- dots, tab arrows,
+   *  trailing highlight). A per-browser VIEW pref owned by the app; absent
+   *  renders exactly what the viewer always did. */
+  showWhitespace?: boolean;
+  /** Footer toggle button (the reload button's glyph idiom). Absent = no
+   *  button. */
+  onToggleWhitespace?: () => void;
+  /** One honest muted line under the head (the editor seam uses it for the
+   *  "over the edit cap" verdict on read-only fallbacks). */
+  note?: string;
 }
 
 /** The chooser's language list: what the registry can actually color, plus
@@ -268,18 +331,16 @@ export function fileViewLangChoices(): string[] {
 
 /** Popup label for a lang name; names are single words, so the capital
  *  first letter cannot lie about them. */
-function langLabel(lang: string): string {
+export function langLabel(lang: string): string {
   return lang.charAt(0).toUpperCase() + lang.slice(1);
 }
 
-function LineRow({ n, text, runs }: { n: number; text: string; runs: SyntaxRun[] }) {
+function LineRow({ n, text, runs, showWs }: { n: number; text: string; runs: SyntaxRun[]; showWs?: boolean }) {
   return (
     <div className="file-line" data-line={n}>
       <span className="file-ln" aria-hidden="true">{n}</span>
       <code className="file-code">
-        {runs.map((run, i) => (
-          <span key={i} className={`tk tk-${run.type}`}>{run.text}</span>
-        ))}
+        {codeSpans(runs, showWs === true, text)}
         {text === "" ? "\u00a0" : null}
       </code>
     </div>
@@ -319,13 +380,16 @@ export function FileView(p: FileViewProps) {
         // not found, ...). No content bytes exist client-side either.
         <div className="file-view-note file-view-error" role="alert">{view?.error}</div>
       ) : null}
+      {p.note ? (
+        <div className="file-view-note" role="status">{p.note}</div>
+      ) : null}
       {!loading && !failedHard && view && view.lines.length === 0 ? (
         <div className="file-view-note">(empty file)</div>
       ) : null}
       {!failedHard && view ? (
         <div className="file-view-rows">
           {view.lines.map((line, i) => (
-            <LineRow key={i + 1} n={i + 1} text={line} runs={rows[i]!} />
+            <LineRow key={i + 1} n={i + 1} text={line} runs={rows[i]!} showWs={p.showWhitespace} />
           ))}
         </div>
       ) : null}
@@ -389,6 +453,20 @@ export function FileView(p: FileViewProps) {
             onClick={() => p.onMore(p.path)}
           >
             Load more from line {view.lines.length + 1}
+          </button>
+        ) : null}
+        {p.onToggleWhitespace ? (
+          // The same per-browser whitespace mark the editor wears (shared
+          // ws-render decoration; the pref lives with the app/editor seam).
+          <button
+            type="button"
+            className={`file-reload-btn file-view-ws${p.showWhitespace ? " is-on" : ""}`}
+            title="Toggle visible whitespace"
+            aria-label="Toggle visible whitespace"
+            aria-pressed={p.showWhitespace ? "true" : "false"}
+            onClick={() => p.onToggleWhitespace!()}
+          >
+            <IconWhitespace />
           </button>
         ) : null}
         <button

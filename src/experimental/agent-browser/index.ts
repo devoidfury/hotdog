@@ -46,6 +46,8 @@ import type { ToolDef, ToolMetadata } from "@core/extensions/tool-registry.ts";
 import type { ToolContext } from "@core/extensions/tool-context.ts";
 import {
   getExtensionConfig,
+  readKnob,
+  type ConfigKnob,
   type CoreContext,
   type ExtensionInstance,
 } from "@core/extensions/types.ts";
@@ -362,8 +364,11 @@ export interface AgentBrowserToolOptions {
   allowLoopback: boolean;
   /** Injectable factory seam; production wires createBunWebView. */
   createView: ViewFactory;
-  /** True only when the user-gate extension is enabled (evaluate prompt surface). */
-  userGateEnabled: boolean;
+  /** True only when the user-gate extension is enabled (evaluate prompt
+   *  surface). A ConfigKnob: production passes a reader so a live
+   *  userGate flip reaches the point-of-use probe; pinned scalars stay for
+   *  test doubles. */
+  userGateEnabled: ConfigKnob<boolean>;
   /**
    * Per-op watchdog ceiling override, a tests-only constructor seam
    * (house precedent: mcp-client's killGraceMs), never a config knob;
@@ -378,7 +383,7 @@ export class AgentBrowserTool {
 
   #allowLoopback: boolean;
   #createView: ViewFactory;
-  #userGateEnabled: boolean;
+  #userGateEnabled: ConfigKnob<boolean>;
   #opTimeoutMs: number;
   /** sessionId -> view name -> view. Caller sessions survive tool calls. */
   #sessions = new Map<string, Map<string, OpenView>>();
@@ -973,7 +978,9 @@ export class AgentBrowserTool {
     sessionId: string,
     signal: AbortSignal | null,
   ): Promise<ToolResult> {
-    if (!this.#userGateEnabled) {
+    // Read the gate at the point of use: a boot-frozen probe missed a
+    // live userGate flip, refusing evaluate forever after.
+    if (!readKnob(this.#userGateEnabled)) {
       return ToolResult.err(
         "agent_browser: the evaluate action runs model-authored JavaScript inside whatever page is loaded, and there is no approval prompt surface here (the user-gate extension is not enabled). Refused.",
       ).withHint("Use snapshot for page structure, or enable user-gate (userGate.enabled: true) in an interactive session.");
@@ -1074,13 +1081,16 @@ export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{ allowLoopback: boolean }>(core, "agentBrowser");
   const allowLoopback = config.allowLoopback === true;
 
-  // Evaluate prompt-surface probe (ruling 4): read user-gate's own resolved
-  // block; absent or disabled means no interactive approval exists anywhere,
-  // so evaluate fails closed inside the tool rather than executing ungated.
-  const userGateEnabled =
-    getExtensionConfig<{ enabled?: boolean }>(core, "userGate").enabled === true;
-
-  const tool = new AgentBrowserTool({ allowLoopback, createView: createBunWebView, userGateEnabled });
+  // Evaluate prompt-surface probe (ruling 4): user-gate's own resolved block,
+  // read per call through the knob -- absent or disabled means no interactive
+  // approval exists anywhere, so evaluate fails closed inside the tool rather
+  // than executing ungated; a live enablement reaches an already-built tool
+  // without a restart (do not capture this once at create() time).
+  const tool = new AgentBrowserTool({
+    allowLoopback,
+    createView: createBunWebView,
+    userGateEnabled: () => getExtensionConfig<{ enabled?: boolean }>(core, "userGate").enabled === true,
+  });
 
   return {
     hooks: {

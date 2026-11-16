@@ -16,7 +16,7 @@ import {
   WORKBENCH_TABS_KEY,
   WorkbenchPanel,
 } from "@extensions/webui/ui/workbench.tsx";
-import { createWorkbenchStore, type WorkbenchStore } from "@extensions/webui/ui/workbench-state.ts";
+import { createWorkbenchStore, emptyWorkbenchState, openTab as openTabState, retargetTab, type WorkbenchStore } from "@extensions/webui/ui/workbench-state.ts";
 import { emptyFileTree } from "@extensions/webui/ui/file-tree.tsx";
 import { WORKBENCH_MAX_WIDTH } from "@extensions/webui/ui/utils.ts";
 import { createPanelResize, type PanelEnv, type PanelResize } from "@extensions/webui/ui/panel-resize.ts";
@@ -724,5 +724,38 @@ describe("workspace-tree dock pin (shell projection)", () => {
     bare.panel.toggle();
     bare.tabs.open({ id: "files", kind: "files", label: "Files", dirty: false });
     expect(bare.q("#tree-col-resize")).toBeNull(); // the shell mounts it ONLY when the app wires the seam
+  });
+});
+
+// ── retargetTab (rename: identity follows the file) ─────────────────────────
+
+describe("retargetTab", () => {
+  it("re-points the id + label IN PLACE (position/dirty kept, active follows)", () => {
+    let s = openTabState(emptyWorkbenchState(), { id: "a", kind: "file", label: "a", dirty: false });
+    s = openTabState(s, { id: "b", kind: "file", label: "b", dirty: true });
+    const t = retargetTab(s, "b", "b2", "b2");
+    expect(t.tabs.map((x) => x.id)).toEqual(["a", "b2"]); // same slot, order kept
+    expect(t.tabs[1]!.dirty).toBe(true); // state hung off the tab rides
+    expect(t.tabs[1]!.label).toBe("b2");
+    expect(t.activeId).toBe("b2"); // the active tab follows its identity
+  });
+
+  it("unknown id, self-retarget and ID COLLISION all change nothing (no double-keyed strip)", () => {
+    let s = openTabState(emptyWorkbenchState(), { id: "a", kind: "file", label: "a", dirty: false });
+    s = openTabState(s, { id: "b", kind: "file", label: "b", dirty: false });
+    expect(retargetTab(s, "ghost", "x")).toBe(s);
+    expect(retargetTab(s, "a", "a")).toBe(s);
+    expect(retargetTab(s, "a", "b")).toBe(s);
+  });
+
+  it("the store notifies exactly once per actual retarget, never on a no-op", () => {
+    const store = createWorkbenchStore();
+    store.open({ id: "a", kind: "file", label: "a", dirty: false });
+    let notifies = 0;
+    store.subscribe(() => notifies++);
+    store.retarget("a", "b", "b");
+    expect(notifies).toBe(1);
+    store.retarget("a", "c"); // stale id: no notify
+    expect(notifies).toBe(1);
   });
 });

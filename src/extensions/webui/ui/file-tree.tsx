@@ -291,7 +291,112 @@ export function applyListDir(
   return { ...s, pending, dirs: { ...s.dirs, [key]: dir } };
 }
 
+// ── Post-write subtree ops ───────────────────────────────────────────────────
+// The file ops (create/rename/delete, answered by fileOpResult) refresh ONLY
+// the affected subtree: one minted listDir for the touched directory, never
+// a whole-tree openFileTree. The minted id rides the SAME pending map, so a
+// superseded refresh drops exactly like every other fetch.
+
+/** Re-list ONE directory (expanded or not: an expanded row repaints, a
+ *  collapsed cache updates for the next expand), leaving everything else
+ *  untouched. This is the refresh an op runs after it lands. */
+export function refreshTreeDir(
+  s: FileTreeState,
+  path: string,
+): { state: FileTreeState; fetch: TreeFetch } {
+  const seq = s.seq + 1;
+  return {
+    state: {
+      ...s,
+      seq,
+      dirs: { ...s.dirs, [path]: { status: "loading", entries: [] } },
+      pending: { ...s.pending, [String(seq)]: path },
+    },
+    fetch: { requestId: seq, path },
+  };
+}
+
+/** A create landed under `path`: re-list it AND make sure it is expanded
+ *  (the doctrine's "expand it if collapsed"). Expansion persists to the
+ *  sessionStorage memory exactly like toggleDir's. */
+export function expandListedDir(
+  s: FileTreeState,
+  path: string,
+): { state: FileTreeState; fetch: TreeFetch } {
+  const expanded = { ...s.expanded, [path]: true };
+  persistExpanded(expanded);
+  const { state, fetch } = refreshTreeDir({ ...s, expanded }, path);
+  return { state, fetch };
+}
+
+/** Forget everything the tree holds for a path and its SUBTREE (dir cache,
+ *  expansion memory, a selection pointing inside): the op that ran is the
+ *  caller's business (delete removes the bytes; rename retires the old
+ *  spelling). The parent's re-list is a separate refreshTreeDir call -- ops
+ *  compose honestly instead of hiding effects in each other. */
+export function forgetTreePath(s: FileTreeState, path: string): FileTreeState {
+  const under = (p: string): boolean =>
+    p === path || p.startsWith(`${path}/`) || p.startsWith(`${path}\\`);
+  let changed = false;
+  const dirs = { ...s.dirs };
+  for (const p of Object.keys(dirs)) {
+    if (under(p)) {
+      delete dirs[p];
+      changed = true;
+    }
+  }
+  const expanded = { ...s.expanded };
+  for (const p of Object.keys(expanded)) {
+    if (under(p)) {
+      delete expanded[p];
+      changed = true;
+    }
+  }
+  if (changed) persistExpanded(expanded);
+  const selected = s.selected !== null && under(s.selected) ? null : s.selected;
+  if (!changed && selected === s.selected) return s;
+  return { ...s, dirs, expanded, selected };
+}
+
+// ── Menu plan ────────────────────────────────────────────────────────────────
+
+/** One row-menu entry the app renders (label + the danger paint Delete
+ *  wears). The plan is PURE so the grammar (which row kinds get which items,
+ *  and in which order) is pinned without booting the app. */
+export interface FileTreeMenuPlanItem {
+  id: "newFile" | "newFolder" | "rename" | "download" | "copyPath" | "delete";
+  label: string;
+  danger?: boolean;
+}
+
+/** The menu grammar per row kind. Roots are config, not content: no rename,
+ *  no delete, no download (directories refuse at the route) -- they create
+ *  and copy. Dirs create/rename/delete/copy. Files rename/delete/copy/
+ *  download. Delete last (danger), Copy path second-last (the safe default
+ *  the keyboard lands on). */
+export function fileTreeMenuPlan(kind: FileTreeRowKind): FileTreeMenuPlanItem[] {
+  const items: FileTreeMenuPlanItem[] = [];
+  if (kind !== "file") {
+    items.push({ id: "newFile", label: "New file" });
+    items.push({ id: "newFolder", label: "New folder" });
+  }
+  if (kind !== "root") {
+    items.push({ id: "rename", label: "Rename" });
+    if (kind === "file") items.push({ id: "download", label: "Download" });
+  }
+  items.push({ id: "copyPath", label: "Copy path" });
+  if (kind !== "root") items.push({ id: "delete", label: "Delete", danger: true });
+  return items;
+}
+
 // ── Rendering ────────────────────────────────────────────────────────────────
+
+/** Which menu grammar a row gets (the app's onFilePathMenu builds items from
+ *  it): root rows are workspace roots (config, not content -- never renamed
+ *  or deleted, and a directory does not download), dir rows add the create
+ *  pair, file rows add Download. Symlinks list as files (isDir false), so
+ *  they ride the file grammar; the server's gates are the authority anyway. */
+export type FileTreeRowKind = "root" | "dir" | "file";
 
 export interface FileTreeProps {
   tree: FileTreeState;
@@ -302,8 +407,9 @@ export interface FileTreeProps {
   /** Re-request the roots + expanded dirs (fresh ids invalidate in-flight). */
   onRefresh: () => void;
   /** Right-click (and Menu/Shift+F10) on any row: the app arms the ContextMenu
-   *  (Copy path; focus-return lives with the app's menu machinery). */
-  onContextMenu: (e: MouseEvent | KeyboardEvent, path: string, rowEl: HTMLElement) => void;
+   *  (items built from the row KIND, see fileTreeMenuActions; focus-return
+   *  lives with the app's menu machinery). */
+  onContextMenu: (e: MouseEvent | KeyboardEvent, path: string, rowEl: HTMLElement, kind: FileTreeRowKind) => void;
   /** Dock pin (the workbench wires it): a disclosure button riding to the
    *  right of Refresh that pins the tree as a fixed sidebar beside the
    *  workbench tabs, or releases it back to a plain tab (the panel owns the
@@ -324,17 +430,23 @@ export interface FileTreePin {
 }
 
 /** Row-level keyboard/contextmenu wiring shared by every row kind (the
- *  sessions.tsx row idiom: Menu key or Shift+F10 fires the menu too). */
-function rowEvents(path: string, onContextMenu: FileTreeProps["onContextMenu"]) {
+ *  sessions.tsx row idiom: Menu key or Shift+F10 fires the menu too). The
+ *  row KIND rides so the app builds the right grammar without digging the
+ *  row's classes back out of the DOM. */
+function rowEvents(
+  path: string,
+  kind: FileTreeRowKind,
+  onContextMenu: FileTreeProps["onContextMenu"],
+) {
   return {
     onContextmenu: (e: MouseEvent) => {
       e.preventDefault();
-      onContextMenu(e, path, e.currentTarget as unknown as HTMLElement);
+      onContextMenu(e, path, e.currentTarget as unknown as HTMLElement, kind);
     },
     onKeydown: (e: KeyboardEvent) => {
       if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
         e.preventDefault();
-        onContextMenu(e, path, e.currentTarget as unknown as HTMLElement);
+        onContextMenu(e, path, e.currentTarget as unknown as HTMLElement, kind);
       }
     },
   };
@@ -407,7 +519,7 @@ function TreeRow({ tree, entry, depth, onToggleDir, onOpenFile, onContextMenu }:
         title={title}
         aria-expanded={entry.isDir ? (expanded ? "true" : "false") : undefined}
         onClick={open}
-        {...rowEvents(entry.path, onContextMenu)}
+        {...rowEvents(entry.path, entry.isDir ? "dir" : "file", onContextMenu)}
       >
         <span className="ft-caret" aria-hidden="true">
           {entry.isDir ? (expanded ? "▾" : "▸") : "·"}
@@ -490,7 +602,7 @@ export function FileTree(p: FileTreeProps) {
                   title={root.path}
                   aria-expanded={expanded ? "true" : "false"}
                   onClick={() => p.onToggleDir(root.path)}
-                  {...rowEvents(root.path, p.onContextMenu)}
+                  {...rowEvents(root.path, "root", p.onContextMenu)}
                 >
                   <span className="ft-caret" aria-hidden="true">{expanded ? "▾" : "▸"}</span>
                   <span className="ft-name">{root.name}</span>

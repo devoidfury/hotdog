@@ -290,11 +290,19 @@ export function createMessageList(
   // and the next call has nothing streamed yet).
   let requestPending = false;
   let streamedVisible = false;
+  // PLAIN (non-reasoning) visible output of the CURRENT call -- text, tool
+  // calls, previews. The reasoning toggle re-derives streamedVisible from it
+  // on the set-hide path (the row covers the reasoning
+  // phase while reasoning is hidden, so hiding mid-call brings the row back
+  // unless plain content has already streamed).
+  let streamedPlain = false;
   // The session's "working" value as THIS view last saw it, and whether it
   // has seen one at all. Only a real idle->working edge opens a fresh model
-  // call; a mid-turn attach (or a reconnect) re-attests working, and there
-  // the replay burst is the authority on what that call already showed. Same
-  // doctrine as the turn clock's workingBaseline one flag below.
+  // call; a mid-turn attach (or reconnect) re-attests working, and there the
+  // row is derived from what THIS view holds UNCOMMITTED (see
+  // inFlightContent): the burst's committed rows are earlier calls of the
+  // turn, never evidence about the call actually running. Same doctrine as
+  // the turn clock's workingBaseline one flag below.
   let workingSeen = false;
   let workingValue = false;
   let thinkingRow: HTMLElement | null = null;
@@ -334,15 +342,35 @@ export function createMessageList(
     scrollBottom();
   }
 
-  /** Re-derive the row from the two flags. */
+  /** Re-derive the row from the flags -- the ONE evaluation every show/hide
+   *  decision rides (working edges, the send click, the reasoning toggle). */
   function syncThinkingRow(): void {
     setThinkingRow(requestPending && !streamedVisible);
   }
 
-  /** A tool call is streaming: its bubble takes over from the row. */
-  function noteVisibleOutput(): void {
+  /** Visible output landed for the current call; `plain` marks non-reasoning
+   *  content (text, committed tools, previews) -- the "content already
+   *  streaming" truth the reasoning toggle re-derives from. */
+  function noteVisibleOutput(plain: boolean): void {
     streamedVisible = true;
+    if (plain) streamedPlain = true;
     syncThinkingRow();
+  }
+
+  /** Attach-time truth: does THIS view show content that has not committed
+   *  yet (an open streaming row, a tool round awaiting its result, an in-
+   *  flight preview)? A fresh view's first working report is a mid-turn
+   *  attach/reconnect re-attestation, not a watched edge: the burst's
+   *  COMMITTED rows are EARLIER calls, so the row must be derived from the
+   *  uncommitted lanes only (the attach's partial flush lives there). With
+   *  `plainOnly` the visible-reasoning lane drops out -- the question the
+   *  hidden-reasoning phase answers. */
+  function inFlightContent(plainOnly: boolean): boolean {
+    if (currentAssistantEl !== null) return true;
+    if (pendingToolResults > 0) return true;
+    if (inflightSlots.length > 0) return true;
+    if (!plainOnly && !hideThinkingValue && currentThinkingEl?.textContent?.trim()) return true;
+    return false;
   }
 
   // Committed tool calls still waiting for their result: the round-closed
@@ -465,11 +493,18 @@ export function createMessageList(
       lastBarWorked = false;
       // Per-model-call tell. Only a transition THIS view watched (it saw the
       // turn idle, now it runs) opens a call with nothing streamed: a fresh
-      // view attaching mid-turn must trust its replay burst instead, which
-      // already said what the running call showed. Same doctrine as the turn
-      // clock's workingBaseline flag above.
+      // view attaching mid-turn re-derives the tell from what IT holds
+      // uncommitted (inFlightContent) -- the burst's committed rows are
+      // EARLIER calls of the turn, no evidence about the call running now.
+      // Same doctrine as the turn clock's workingBaseline flag above.
       requestPending = true;
-      if (workingSeen && !workingValue) streamedVisible = false;
+      if (workingSeen && !workingValue) {
+        streamedVisible = false;
+        streamedPlain = false;
+      } else if (!workingSeen) {
+        streamedVisible = inFlightContent(false);
+        streamedPlain = inFlightContent(true);
+      }
       workingSeen = true;
       workingValue = true;
       syncThinkingRow();
@@ -499,6 +534,7 @@ export function createMessageList(
     // stream (no final frame will ever land for it).
     requestPending = false;
     streamedVisible = false;
+    streamedPlain = false;
     workingSeen = true;
     workingValue = false;
     clearInflightToolCalls();
@@ -514,10 +550,14 @@ export function createMessageList(
     if (pending) {
       // Only a FRESH request re-opens the tell: a mid-run steer must not
       // resurrect it over the bytes still streaming from the running call.
-      if (!requestPending) streamedVisible = false;
+      if (!requestPending) {
+        streamedVisible = false;
+        streamedPlain = false;
+      }
       requestPending = true;
     } else {
       requestPending = false;
+      streamedPlain = false;
       // A stop ends the turn: nothing will ever stream into an in-flight
       // preview again, so it goes with it (no bubble stuck "in progress").
       clearInflightToolCalls();
@@ -527,7 +567,7 @@ export function createMessageList(
 
   function handleStreamingToolCall({ index, name, args }: StreamingToolCallMessage): void {
     // The preview bubble is the visible activity now: the row retires.
-    noteVisibleOutput();
+    noteVisibleOutput(true);
     let host = inflightToolHosts.get(index);
     if (!host) {
       host = document.createElement("div");
@@ -600,6 +640,14 @@ export function createMessageList(
    * click stayed in their old state -- history stayed visible after a "hide").
    * Creation-time honoring in `ensureThinkingEl` is unchanged: blocks that
    * arrive after a flip are born with the right class.
+   *
+   * Both flips RE-DERIVE the Thinking row (symmetric with
+   * the attach-time driving): the row covers the reasoning phase while
+   * reasoning is hidden, so the SET-HIDE path must re-evaluate a decision
+   * that already fired while the reasoning was visible -- a call in flight
+   * with no plain content streamed yet takes the row back; content already
+   * streaming keeps it down. The SET-SHOW path retires the row once reasoning
+   * blocks actually appear.
    */
   function setHideThinking(v: boolean): void {
     hideThinkingValue = v;
@@ -608,10 +656,13 @@ export function createMessageList(
     container.querySelectorAll(".thinking-block").forEach((el) => {
       el.classList.toggle("hidden", v);
     });
-    // Revealing reasoning mid-call puts real content on screen, so the row
-    // retires for it. The reverse flip deliberately does NOT bring the row
-    // back: one tell per model call, not a yo-yo on every preference toggle.
-    if (!v && currentThinkingEl?.textContent?.trim()) noteVisibleOutput();
+    if (v) {
+      streamedVisible = streamedPlain;
+      syncThinkingRow();
+    } else if (currentThinkingEl?.textContent?.trim()) {
+      // Revealing reasoning mid-call puts real content on screen.
+      noteVisibleOutput(false);
+    }
   }
 
   /**
@@ -894,7 +945,7 @@ export function createMessageList(
   function handleAssistantMessage({ content, ts, durationMs, ctx, callMs, callDerived }: AssistantMessage): void {
     // Committed response text IS visible content (the non-streaming shape and
     // every replay burst land here), so the live tell retires for it too.
-    noteVisibleOutput();
+    noteVisibleOutput(true);
     finalizeAssistant();
     if (!content?.trim()) {
       // A response with no text (tool calls and/or reasoning only). Replay
@@ -926,7 +977,7 @@ export function createMessageList(
   function handleStreamingChunk({ content }: StreamingChunk): void {
     // Plain response text is the visible tell par excellence: the row retires
     // for the rest of this model call.
-    noteVisibleOutput();
+    noteVisibleOutput(true);
     // If we've had tool calls since the last assistant message, start a new
     // assistant element so tool calls appear sequentially before the final text.
     if (hasToolCallsSinceLastAssistant) {
@@ -961,7 +1012,7 @@ export function createMessageList(
     // Visible reasoning IS visible activity, so the row retires for it. Under
     // the per-browser hideThinking preference the block renders nothing, so
     // the row stays up: hidden bytes are not activity the user can see.
-    if (!hideThinkingValue) noteVisibleOutput();
+    if (!hideThinkingValue) noteVisibleOutput(false);
     const el = ensureThinkingEl();
 
     if (!thinkingParser) {
@@ -1011,11 +1062,12 @@ export function createMessageList(
     // single row element makes a second one impossible).
     clearInflightToolCalls();
     streamedVisible = false;
+    streamedPlain = false;
     syncThinkingRow();
   }
 
   function handleThinking({ content }: ThinkingMessage): void {
-    if (!hideThinkingValue) noteVisibleOutput();
+    if (!hideThinkingValue) noteVisibleOutput(false);
     const el = ensureThinkingEl();
     const tree = parseMarkdown(content);
     el.innerHTML = mdTreeToHtml(tree);
@@ -1024,7 +1076,7 @@ export function createMessageList(
   function handleToolCall({ name, args, argsSummary, display, toolCallId }: ToolCallMessage): void {
     // A committed tool block is visible response content -- the row retires
     // whether or not a preview led it.
-    noteVisibleOutput();
+    noteVisibleOutput(true);
     // Finalize the current assistant message so tool calls appear as
     // separate blocks after the user message, not nested inside the assistant.
     // A text row closed here is a completed message (the model answered, then
@@ -1090,6 +1142,7 @@ export function createMessageList(
     if (pendingToolResults === 0) {
       clearInflightToolCalls();
       streamedVisible = false;
+      streamedPlain = false;
       syncThinkingRow();
     }
     if (!block) return; // orphan result: no matching call to attach to
@@ -1521,9 +1574,11 @@ export function createMessageList(
     // container is emptied above, so only the bookkeeping needs it).
     requestPending = false;
     streamedVisible = false;
+    streamedPlain = false;
     // The turn-observation flags are per-view too: a fresh manager (or a
     // switched-to session) watched no idle->working edge, so its first
-    // working:true is read as a mid-turn attach and trusts the replay burst.
+    // working:true is read as a mid-turn attach and re-derives the tell
+    // from the burst's UNCOMMITTED lanes (inFlightContent).
     workingSeen = false;
     workingValue = false;
     thinkingRow = null;

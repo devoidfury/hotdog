@@ -41,7 +41,15 @@ import {
   handleSearchLogs,
 } from "./handlers-logs.ts";
 import { handleConfigSnapshot, handleConfigKeySet, handleConfigListEdit } from "./handlers-config.ts";
-import { handleListDir, handleReadFile } from "./handlers-files.ts";
+import {
+  handleListDir,
+  handleReadFile,
+  handleCreateFile,
+  handleCreateDir,
+  handleRenamePath,
+  handleDeletePath,
+  handleSaveFile,
+} from "./handlers-files.ts";
 
 const MESSAGE_HANDLERS: Partial<Record<C2SType, MessageHandler>> = {
   [C2S.AUTH]: handleAuthMessage,
@@ -74,6 +82,11 @@ const MESSAGE_HANDLERS: Partial<Record<C2SType, MessageHandler>> = {
   [C2S.EDIT_CONFIG_LIST]: handleConfigListEdit,
   [C2S.LIST_DIR]: handleListDir,
   [C2S.READ_FILE]: handleReadFile,
+  [C2S.CREATE_FILE]: handleCreateFile,
+  [C2S.CREATE_DIR]: handleCreateDir,
+  [C2S.RENAME_PATH]: handleRenamePath,
+  [C2S.DELETE_PATH]: handleDeletePath,
+  [C2S.SAVE_FILE]: handleSaveFile,
 };
 
 export async function routeMessage(

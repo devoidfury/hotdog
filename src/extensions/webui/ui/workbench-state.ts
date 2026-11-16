@@ -82,6 +82,29 @@ export function setTabDirty(state: WorkbenchTabState, id: string, dirty: boolean
   return mapTab(state, id, () => ({ dirty }));
 }
 
+/**
+ * Re-point a tab's IDENTITY (rename on disk: the tab FOLLOWS the file --
+ * for "file" tabs the id IS the path, so the identity must move with it).
+ * Position, kind and dirty survive; the label rides the caller's new value
+ * (baseName of the new path). Unknown oldId changes nothing; a collision
+ * with an existing tab refuses rather than double-keying the strip.
+ */
+export function retargetTab(
+  state: WorkbenchTabState,
+  oldId: string,
+  newId: string,
+  newLabel?: string,
+): WorkbenchTabState {
+  if (oldId === newId) return state;
+  const tab = state.tabs.find((t) => t.id === oldId);
+  if (!tab) return state;
+  if (state.tabs.some((t) => t.id === newId)) return state;
+  const tabs = state.tabs.map((t) =>
+    t.id === oldId ? { ...t, id: newId, label: newLabel ?? t.label } : t,
+  );
+  return { tabs, activeId: state.activeId === oldId ? newId : state.activeId };
+}
+
 function mapTab(
   state: WorkbenchTabState,
   id: string,
@@ -106,6 +129,8 @@ export interface WorkbenchStore {
   activate(id: string): void;
   setLabel(id: string, label: string): void;
   setDirty(id: string, dirty: boolean): void;
+  /** Rename-on-disk: the tab FOLLOWS the file (see retargetTab). */
+  retarget(oldId: string, newId: string, newLabel?: string): void;
   /** Returns the unsubscribe. Listeners must throw nothing; they run inline. */
   subscribe(fn: () => void): () => void;
 }
@@ -127,6 +152,7 @@ export function createWorkbenchStore(initial: WorkbenchTabState = emptyWorkbench
     activate: (id) => apply(activateTab(state, id)),
     setLabel: (id, label) => apply(setTabLabel(state, id, label)),
     setDirty: (id, dirty) => apply(setTabDirty(state, id, dirty)),
+    retarget: (oldId, newId, newLabel) => apply(retargetTab(state, oldId, newId, newLabel)),
     subscribe(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);

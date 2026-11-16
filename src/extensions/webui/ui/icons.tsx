@@ -250,6 +250,18 @@ export function IconReload({ className }: { className?: string }): JsxChild {
   );
 }
 
+/** Visible-whitespace toggle (dot + tab arrow): the two marks the editor
+ *  paints, middle dot and the arrow to the tab stop. */
+export function IconWhitespace({ className }: { className?: string }): JsxChild {
+  return (
+    <Glyph strokeWidth={2} className={className}>
+      <path d="M4 12h0.01" />
+      <path d="M8 12h10" />
+      <path d="M15 8l4 4-4 4" />
+    </Glyph>
+  );
+}
+
 /** Sidebar search magnifier (header chip + panel bar). */
 export function IconSearch({ size = 16, className }: { size?: number; className?: string }): JsxChild {
   return (

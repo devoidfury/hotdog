@@ -1725,15 +1725,124 @@ describe("live activity: the Thinking row", () => {
     expect(shown()).toBe(true);
   });
 
-  it("revealing reasoning mid-call retires it, and hiding it again does not bring it back", () => {
-    // One tell per model call: the reveal put real text on screen, and the
-    // preference yo-yo after it must not re-arm the tell.
+  it("revealing reasoning mid-call retires it; hiding again re-derives the tell", () => {
+    // The row COVERS the reasoning phase while reasoning
+    // is hidden. The reveal puts real bytes on screen (the row retires for
+    // them); hiding re-evaluates from state -- no PLAIN content streamed this
+    // call, so the row comes back for the still-hidden reasoning phase.
     setup({ hideThinking: true });
     startTurn();
     ml.handleStreamingReasoningChunk({ content: "thoughts" });
     expect(shown()).toBe(true);
     ml.setHideThinking(false);
     expect(container.querySelector(".thinking-block")!.classList.contains("hidden")).toBe(false);
+    expect(shown()).toBe(false);
+    ml.setHideThinking(true);
+    expect(shown()).toBe(true);
+  });
+
+  // ── Reload/attach recovery: the row answers the
+  // ATTACHED state, not the momentary event. A fresh view's first working
+  // report is a mid-turn attach/reconnect re-attestation; the row is derived
+  // from what THIS view holds UNCOMMITTED (the burst's committed rows are
+  // earlier calls of the turn).
+
+  it("a mid-turn attach whose burst ended on committed rows re-arms the tell", () => {
+    // The reload-mid-turn case: the burst replays the turn's EARLIER calls
+    // (committed assistant prose), the call actually running has shown
+    // nothing yet, and the attach's working:true is this view's first
+    // report. The tell recovers from the working state.
+    ml.handleUserMessage({ content: "go" });
+    ml.handleAssistantMessage({ content: "earlier in the turn", ts: Date.now() });
+    expect(shown()).toBe(false);
+    ml.noteWorking(true);
+    expect(shown()).toBe(true);
+    // The running call's own bytes retire it as always.
+    ml.handleStreamingChunk({ content: "now streaming" });
+    expect(shown()).toBe(false);
+  });
+
+  it("a mid-turn attach ending on a closed tool round re-arms the tell", () => {
+    // Replay ends toolCall + toolResult (round closed, next call dispatched,
+    // nothing streamed yet): the same state-derived recovery.
+    ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c1" });
+    ml.handleToolResult({ name: "bash", output: "ok", toolCallId: "c1" });
+    ml.noteWorking(true);
+    expect(shown()).toBe(true);
+  });
+
+  it("a mid-turn attach with a flushed partial keeps the row down", () => {
+    // attach.ts flushes the running call's partial AFTER the log slice: that
+    // flush IS the running call's content, so nothing is fabricated over
+    // bytes already on screen.
+    ml.handleStreamingChunk({ content: "flushed partial" });
+    ml.noteWorking(true);
+    expect(shown()).toBe(false);
+  });
+
+  it("a mid-turn attach with a flushed HIDDEN partial re-arms the tell", () => {
+    setup({ hideThinking: true });
+    ml.handleStreamingReasoningChunk({ content: "hidden thoughts" });
+    ml.noteWorking(true);
+    expect(shown()).toBe(true);
+  });
+
+  it("attaching between calls (working:false) never fabricates the tell", () => {
+    // Honest absence: an idle attach -- committed rows land, working says
+    // false -- then a REAL idle->working edge this view watches arms it.
+    ml.handleAssistantMessage({ content: "old turn", ts: Date.now() });
+    ml.noteWorking(false);
+    expect(shown()).toBe(false);
+    ml.noteWorking(true);
+    expect(shown()).toBe(true);
+  });
+
+  // ── The reasoning toggle DURING a live phase: the
+  // header chip's set-path RE-DERIVES the row (one evaluation, both callers)
+  // instead of leaving the decision that fired when streaming began.
+
+  it("toggling OFF mid-reasoning takes the row back for the hidden phase", () => {
+    startTurn();
+    ml.handleStreamingReasoningChunk({ content: "thinking out loud" });
+    expect(shown()).toBe(false); // visible reasoning retired it
+    ml.setHideThinking(true);
+    expect(shown()).toBe(true); // hidden now: the row covers the phase
+    expect(container.querySelector(".thinking-block")!.classList.contains("hidden")).toBe(true);
+  });
+
+  it("toggling OFF while plain text streams leaves the row down", () => {
+    // "content already streaming" -- plain content outranks the toggle.
+    startTurn();
+    ml.handleStreamingChunk({ content: "plain answer prose" });
+    ml.handleStreamingReasoningChunk({ content: "and some reasoning" });
+    expect(shown()).toBe(false);
+    ml.setHideThinking(true);
+    expect(shown()).toBe(false);
+  });
+
+  it("toggling back ON mid-reasoning retires the row as blocks appear", () => {
+    startTurn();
+    ml.handleStreamingReasoningChunk({ content: "thinking out loud" });
+    ml.setHideThinking(true);
+    expect(shown()).toBe(true);
+    ml.setHideThinking(false);
+    expect(shown()).toBe(false);
+  });
+
+  it("the toggle never fabricates the row without a call in flight", () => {
+    // Idle: requestPending is false, so hiding re-derives to "no row" -- the
+    // row answers a request, not a preference.
+    ml.handleStreamingReasoningChunk({ content: "settled thoughts" });
+    ml.setHideThinking(true);
+    expect(shown()).toBe(false);
+  });
+
+  it("toggling OFF over an open tool round keeps the row down", () => {
+    // The round's committed call is plain content: hidden reasoning must not
+    // raise the tell over a screen full of running tools.
+    startTurn();
+    ml.handleToolCall({ name: "bash", args: "{}", toolCallId: "c1" });
+    ml.handleStreamingReasoningChunk({ content: "planning the next call" });
     expect(shown()).toBe(false);
     ml.setHideThinking(true);
     expect(shown()).toBe(false);

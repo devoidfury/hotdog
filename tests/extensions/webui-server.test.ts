@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import net from "node:net";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { TMP_PARENT } from "../mocks/io.ts";
 import { join } from "node:path";
 import { createWebuiServer as createWebuiServerServed, attachSocketPeerIp } from "@extensions/webui/server.ts";
@@ -616,6 +616,148 @@ describe("webui export route", () => {
     expect(res.headers.get("content-disposition")).toBe('attachment; filename="exp-cold.jsonl"');
     expect(res.headers.get("content-type")).toContain("application/x-ndjson");
     expect(await res.text()).toBe(body);
+  });
+});
+
+// ── Workspace file download route (GET /download/<path>) ───────────────────
+// AUTH PARITY with /export (the same validateToken, the same 401 shape, the
+// same before-any-byte posture) is pinned against the export section's own
+// expectations; containment is Workspace.resolveSafe on the decoded path.
+
+describe("webui download route", () => {
+  let result: Awaited<ReturnType<typeof createWebuiServer>> | null = null;
+  let baseUrl = "";
+  let TMP = "";
+
+  beforeEach(async () => {
+    TMP = mkdtempSync(join(TMP_PARENT, "hotdog-dl-"));
+  });
+
+  afterEach(async () => {
+    if (result) {
+      result.server.stop(true);
+      result.wsServer.stopCleanupLoop();
+      result.authMiddleware.stopCleanup();
+      result = null;
+    }
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  async function start(workspaceRoots: string[]): Promise<string> {
+    const core = createMockCore();
+    core.resolved.workspaceRoots = workspaceRoots;
+    result = await createWebuiServer(core, {
+      port: 0,
+      host: "127.0.0.1",
+      apiKey: "test-secret",
+      sessionTokenTtlMin: 60,
+    });
+    baseUrl = `http://127.0.0.1:${result.server.port}`;
+    return baseUrl;
+  }
+
+  async function getToken(base: string): Promise<string> {
+    const res = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "test-secret" }),
+    });
+    const { token } = await res.json();
+    return token as string;
+  }
+
+  it("auth parity with /export: anon and wrong-token get the SAME 401 refusal, no bytes", async () => {
+    const root = join(TMP, "root");
+    mkdirSync(root);
+    writeFileSync(join(root, "a.txt"), "CANARY-FILE-BYTES\n");
+    const base = await start([root]);
+
+    const anon = await fetch(`${base}/download/${encodeURIComponent(join(root, "a.txt"))}`);
+    expect(anon.status).toBe(401);
+    const anonBody = await anon.text();
+    expect(anonBody).toContain("Unauthorized"); // the export route's exact body shape
+    expect(anonBody).not.toContain("CANARY-FILE-BYTES");
+
+    const wrong = await fetch(`${base}/download/${encodeURIComponent(join(root, "a.txt"))}?token=nope`);
+    expect(wrong.status).toBe(401);
+
+    // The header auth works too (same posture as export).
+    const headerOk = await fetch(`${base}/download/${encodeURIComponent(join(root, "a.txt"))}`, {
+      headers: { "x-hotdog-token": await getToken(base) },
+    });
+    expect(headerOk.status).toBe(200);
+  });
+
+  it("streams the bytes with an attachment disposition and a sanitized filename", async () => {
+    const root = join(TMP, "root");
+    mkdirSync(join(root, "d"), { recursive: true });
+    writeFileSync(join(root, "d", "report file.txt"), "streamed\n");
+    const base = await start([root]);
+    const token = await getToken(base);
+
+    const res = await fetch(`${base}/download/${encodeURIComponent(join(root, "d", "report file.txt"))}?token=${token}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("streamed\n");
+    // Spaces/quotes fold to "_": the header cannot be quote-broken.
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="report_file.txt"');
+    expect(res.headers.get("content-type")).toContain("application/octet-stream");
+  });
+
+  it("refuses traversal, absolute-outside, denylisted targets and symlink escapes (400)", async () => {
+    const root = join(TMP, "root");
+    const outside = join(TMP, "outside");
+    mkdirSync(root);
+    mkdirSync(outside);
+    writeFileSync(join(outside, "secret.txt"), "OUTSIDE-BYTES\n");
+    writeFileSync(join(root, ".env"), "DENIED-BYTES\n");
+    symlinkSync(join(outside, "secret.txt"), join(root, "link-out"));
+    // Deny dir reached THROUGH an in-root link: the target EXISTS here, so
+    // resolveSafe's real-spelling deny recheck fires -- the download side of
+    // the landing-gate story (writes gate the parent; this gates the read).
+    mkdirSync(join(root, ".ssh"));
+    writeFileSync(join(root, ".ssh", "id_ed25519"), "DENIED-BYTES\n");
+    symlinkSync(".ssh", join(root, "sshlink"));
+    const base = await start([root]);
+    const token = await getToken(base);
+
+    for (const raw of [
+      "../outside/secret.txt",
+      join(outside, "secret.txt"),
+      join(root, ".env"),
+      join(root, "link-out"),
+      join(root, "sshlink", "id_ed25519"),
+    ]) {
+      const res = await fetch(`${base}/download/${encodeURIComponent(raw)}?token=${token}`);
+      expect(res.status).toBe(400);
+      expect(await res.text()).not.toContain("BYTES");
+    }
+  });
+
+  it("refuses a DIRECTORY (400) and 404s a valid-but-missing path", async () => {
+    const root = join(TMP, "root");
+    mkdirSync(join(root, "dir"), { recursive: true });
+    const base = await start([root]);
+    const token = await getToken(base);
+
+    const dir = await fetch(`${base}/download/${encodeURIComponent(join(root, "dir"))}?token=${token}`);
+    expect(dir.status).toBe(400);
+    expect(await dir.text()).toContain("is a directory");
+
+    const missing = await fetch(`${base}/download/${encodeURIComponent(join(root, "nope.txt"))}?token=${token}`);
+    expect(missing.status).toBe(404);
+  });
+
+  it("non-GET is 405; an undecodable path segment is 400", async () => {
+    const root = join(TMP, "root");
+    mkdirSync(root);
+    const base = await start([root]);
+    const token = await getToken(base);
+
+    const post = await fetch(`${base}/download/${encodeURIComponent(join(root, "x.txt"))}?token=${token}`, { method: "POST" });
+    expect(post.status).toBe(405);
+
+    const garbage = await fetch(`${base}/download/%zz?token=${token}`);
+    expect(garbage.status).toBe(400);
   });
 });
 

@@ -53,8 +53,71 @@ export function clearDraft(storage?: DraftStorage): void {
   if (!s) return;
   try {
     s.removeItem(DRAFT_STORAGE_KEY);
+    s.removeItem(DRAFT_CARET_STORAGE_KEY);
   } catch {
     // ignore
+  }
+}
+
+// ── Caret + focus record (saved alongside the draft text) ──────────────────
+// The composer's CARET and whether it HELD FOCUS survive a reload too, so a
+// mid-typing refresh lands where the user left off. A sibling key beside the
+// draft: the text record stays the raw string loadDraft hands back (wire
+// format unchanged), the caret rides its own record under the exact same
+// best-effort doctrine -- every access swallowed, garbage decodes to "no
+// restore" (a wrong caret is worse than none).
+
+const DRAFT_CARET_STORAGE_KEY = "hotdog-webui-draft-caret";
+export { DRAFT_CARET_STORAGE_KEY };
+
+export interface DraftCaret {
+  start: number;
+  end: number;
+  /** The composer held focus when the record was written. */
+  focused: boolean;
+}
+
+function decodeDraftCaret(raw: string | null): DraftCaret | null {
+  if (raw === null) return null;
+  try {
+    const v = JSON.parse(raw) as { s?: unknown; e?: unknown; f?: unknown };
+    if (
+      typeof v?.s !== "number" ||
+      typeof v?.e !== "number" ||
+      !Number.isInteger(v.s) ||
+      !Number.isInteger(v.e) ||
+      v.s < 0 ||
+      v.e < v.s
+    ) {
+      return null;
+    }
+    return { start: v.s, end: v.e, focused: v.f === 1 };
+  } catch {
+    return null;
+  }
+}
+
+export function loadDraftCaret(storage?: DraftStorage): DraftCaret | null {
+  const s = resolveStorage(storage);
+  if (!s) return null;
+  try {
+    return decodeDraftCaret(s.getItem(DRAFT_CARET_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function saveDraftCaret(caret: DraftCaret | null, storage?: DraftStorage): void {
+  const s = resolveStorage(storage);
+  if (!s) return;
+  try {
+    if (caret === null) s.removeItem(DRAFT_CARET_STORAGE_KEY);
+    else s.setItem(
+      DRAFT_CARET_STORAGE_KEY,
+      JSON.stringify({ s: caret.start, e: caret.end, f: caret.focused ? 1 : 0 }),
+    );
+  } catch {
+    // same swallow as the text: the caret costs the reload, never the app
   }
 }
 
@@ -74,11 +137,22 @@ function clearPendingTimer(): void {
 
 /**
  * Debounced save; rapid calls coalesce into one write. getText runs at fire
- * time, so the surviving save always carries the latest text.
+ * time, so the surviving save always carries the latest text. getCaret (when
+ * given) is read at the SAME moment: text, caret and the focus marker land in
+ * one coalesced write, so the pair can never disagree. An empty text takes
+ * the caret record with it (no draft, nothing to restore).
  */
-export function scheduleDraftSave(getText: () => string, storage?: DraftStorage): void {
+export function scheduleDraftSave(
+  getText: () => string,
+  storage?: DraftStorage,
+  getCaret?: () => DraftCaret | null,
+): void {
   clearPendingTimer();
-  pendingSave = () => saveDraft(getText(), storage);
+  pendingSave = () => {
+    const text = getText();
+    saveDraft(text, storage);
+    if (getCaret) saveDraftCaret(text === "" ? null : getCaret(), storage);
+  };
   pendingTimer = setTimeout(() => {
     pendingTimer = null;
     const run = pendingSave;

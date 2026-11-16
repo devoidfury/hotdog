@@ -23,7 +23,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { FakeWebSocket, SVG_NS, TEXTAREA_LINE_PX } from "./index.ts";
-import { DRAFT_STORAGE_KEY } from "@extensions/webui/ui/draft.ts";
+import { DRAFT_STORAGE_KEY, DRAFT_CARET_STORAGE_KEY } from "@extensions/webui/ui/draft.ts";
 import { ATTACHMENTS_STORAGE_KEY } from "@extensions/webui/ui/attachment-store.ts";
 import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts";
 import {
@@ -60,8 +60,12 @@ const prev = {
 const SEEDED_DRAFT = "restored draft\nsecond line of the draft\nthird";
 const store = new Map<string, string>([
   ["hotdog-webui-token", "tok"],
-  // The composer mounts with this draft restored (ref contract).
+  // The composer mounts with this draft restored (ref contract)...
   [DRAFT_STORAGE_KEY, SEEDED_DRAFT],
+  // ...and with the caret that went down with the reload (marker CLEAR: the
+  // selection hydrates, the composer must NOT grab focus at boot -- the
+  // no-steal matrix continues on the exported seam below).
+  [DRAFT_CARET_STORAGE_KEY, JSON.stringify({ s: 5, e: 9, f: 0 })],
   // ...and with one attachment staged by the previous page load.
   [
     ATTACHMENTS_STORAGE_KEY,
@@ -205,7 +209,9 @@ afterAll(() => {
 });
 
 const wsBase = FakeWebSocket.instances.length;
-await import("@extensions/webui/ui/app.tsx");
+// The app module object is kept for the caret-restore seam test at the end
+// of the file (single-booter doctrine: this file IS the app's importer).
+const appModule = await import("@extensions/webui/ui/app.tsx");
 await tick();
 const ws = FakeWebSocket.instances[wsBase]!;
 
@@ -343,9 +349,20 @@ describe("app boot (stored token)", () => {
     // chatInputRef brought the stored draft back, and the SAME autoResize the
     // input handler runs has ALREADY re-measured the connected node: a
     // restored multi-line draft is expanded at boot, before any key event.
-    const box = el("#chat-input") as unknown as { value: string; style: { height: string } };
+    const box = el("#chat-input") as unknown as {
+      value: string;
+      style: { height: string };
+      selectionStart: number | null;
+      selectionEnd: number | null;
+    };
     expect(box.value).toBe(SEEDED_DRAFT);
     expect(box.style.height).toBe(`${SEEDED_DRAFT.split("\n").length * TEXTAREA_LINE_PX}px`);
+    // The seeded caret record hydrates with the text (the reload lands where
+    // the typing left off), and the CLEARED focus marker means the composer
+    // took the selection but NOT the focus.
+    expect(box.selectionStart).toBe(5);
+    expect(box.selectionEnd).toBe(9);
+    expect(document.activeElement as unknown as HTMLElement).not.toBe(el("#chat-input"));
     // The steer switch is gone; nothing may resurrect it (steering-on is the
     // default; see the send pin below).
     expect(document.querySelector("#steer-checkbox")).toBeNull();
@@ -575,6 +592,37 @@ describe("composer", () => {
     el("#chat-input").dispatchEvent(new Event("input"));
     await tick();
     expect(store.has(DRAFT_STORAGE_KEY)).toBe(false);
+  });
+
+  it("the debounced save carries the caret and the focus marker in one write", async () => {
+    setComposer("caret work");
+    const box = el("#chat-input") as unknown as {
+      selectionStart: number | null;
+      selectionEnd: number | null;
+      focus(): void;
+      blur(): void;
+    };
+    box.selectionStart = 3;
+    box.selectionEnd = 5;
+    box.focus();
+    el("#chat-input").dispatchEvent(new Event("input"));
+    await tick();
+    expect(store.get(DRAFT_CARET_STORAGE_KEY)).toBeUndefined(); // debounced, same as the text
+    fireWin("beforeunload"); // the leave flush runs text+caret as ONE snapshot
+    expect(store.get(DRAFT_STORAGE_KEY)).toBe("caret work");
+    expect(store.get(DRAFT_CARET_STORAGE_KEY)).toBe(JSON.stringify({ s: 3, e: 5, f: 1 }));
+    // Focus given away WITHOUT a keystroke: the composer's blur write demotes
+    // the marker, so a reload must not re-grab focus the user abandoned.
+    box.blur(); // dom-helper moves activeElement without firing events...
+    el("#chat-input").dispatchEvent(new Event("blur")); // ...the handler is the event
+    fireWin("beforeunload");
+    expect(store.get(DRAFT_CARET_STORAGE_KEY)).toBe(JSON.stringify({ s: 3, e: 5, f: 0 }));
+    // An emptied box takes the caret record with the text (clearDraft clears
+    // both keys: no orphan marker waiting to focus an empty composer).
+    setComposer("");
+    el("#chat-input").dispatchEvent(new Event("input"));
+    expect(store.has(DRAFT_STORAGE_KEY)).toBe(false);
+    expect(store.has(DRAFT_CARET_STORAGE_KEY)).toBe(false);
   });
 });
 
@@ -5844,7 +5892,11 @@ describe("workbench file tree (real app wiring)", () => {
       content: "echo hi\nls\n",
     });
     await tick();
-    expect(els(".file-line").map((r) => r.getAttribute("data-line"))).toEqual(["1", "2"]);
+    // editor-core: a complete within-cap read now opens EDITABLE. The
+    // line-addressing seam SURVIVES the swap into the editor's own layer
+    // (data-line stays 1-based there), and the same tokenizer paints it.
+    expect(els(".editor-line").map((r) => r.getAttribute("data-line"))).toEqual(["1", "2"]);
+    expect(el(".editor-input")).toBeTruthy(); // the hidden capture owns focus/IME
     expect(el(".tk-command")!.textContent).toBe("echo");
 
     // Back to the tree, click the same file again: ONE tab (id = path), no
@@ -5888,19 +5940,20 @@ describe("workbench file tree (real app wiring)", () => {
     await tick();
     expect(el(".ft-error").textContent).toBe("Symlink escape rejected: link-etc");
 
-    // Right-click the root row: the app's Copy-path menu (ContextMenu idiom).
+    // Right-click the root row: the app's root-menu grammar (ContextMenu
+    // idiom). Roots create and copy; they never rename/delete/download.
     const rowBtn = el(".ft-root .ft-row-btn");
     rowBtn.dispatchEvent({ type: "contextmenu", currentTarget: rowBtn, clientX: 50, clientY: 50 } as unknown as Event);
     await tick();
     const items = els(".context-menu-item").map((i) => i.textContent);
-    expect(items).toEqual(["Copy path"]);
+    expect(items).toEqual(["New file", "New folder", "Copy path"]);
     const copied: string[] = [];
     document.execCommand = (): boolean => {
       const ta = document.querySelector("textarea[readonly]") as unknown as { value: string } | null;
       if (ta) copied.push(ta.value);
       return true;
     };
-    els(".context-menu-item")[0]!.click();
+    els(".context-menu-item")[2]!.click();
     await tick();
     expect(copied).toEqual(["/rootA"]);
     expect(el("#copy-toast").textContent).toBe("Path copied");
@@ -5929,9 +5982,11 @@ describe("workbench file tree (real app wiring)", () => {
     });
     await tick();
     expect(els(".file-line").length).toBe(2);
-    clearSent();
-    el(".file-view-more").click();
-    await tick();
+    // editor-core: a truncated within-cap read is AUTO-PAGED to full by the
+    // editability seam -- and the frame it mints carries the SAME loaded
+    // offset the manual pager sent (the pager's offset grammar is pinned
+    // here through its automatic caller; the manual "Load more" button
+    // stays the viewer's own affordance, pinned in file-view.test.tsx).
     const more = sent<{ requestId: number; offset: number }>("readFile").pop()!;
     expect(more.offset).toBe(2);
     ws.fireMessage({
@@ -5965,6 +6020,22 @@ describe("workbench file tree (real app wiring)", () => {
       requestId: req.requestId,
       path: "/rootA/paint.sh",
       content: "echo one\ncd /tmp\n",
+      truncated: true,
+    });
+    await tick();
+    // editor-core: the truncated page keeps the VIEWER mounted (editability
+    // is undecided until the read is full), and the seam auto-pages to
+    // finish -- answer its frame with the honest over-cap-line refusal so
+    // this path provably stays read-only, foot bar and paint override
+    // included. (Complete within-cap files open editable; the override
+    // rides the editor's paint too -- pinned in the editor-core section.)
+    const page2 = sent<{ requestId: number; offset: number }>("readFile").pop()!;
+    expect(page2.offset).toBe(2);
+    ws.fireMessage({
+      type: "readFileResult",
+      requestId: page2.requestId,
+      path: "/rootA/paint.sh",
+      error: "line 3 is longer than the 262144-char read cap",
     });
     await tick();
     // The auto-guess paints (shell tokens) and the AUTO entry is the chosen
@@ -5997,6 +6068,216 @@ describe("workbench file tree (real app wiring)", () => {
     expect(el(".file-line .tk-command").textContent).toBe("echo");
     expect(el(".file-view-lang").classList.contains("is-overridden")).toBe(false);
     expect(selectedValue()).toBe("");
+  });
+});
+
+// ── Workbench file ops (row menu write family, real app wiring) ─────────────
+// The menu grammar per row kind, confirm gating with honest recursive copy,
+// the create/rename/delete frames on the socket, the SUBTREE-ONLY refresh the
+// success reply lands (one listDir for the touched dir, never a whole-tree
+// re-open), the tab bookkeeping (rename follows the file, delete closes the
+// tabs it kills), the validation refusals, and the Download anchor's route.
+
+describe("workbench file-tree row menu (write ops)", () => {
+  const DIR_FIXTURE = [
+    { name: "src", path: "/rootA/src", isDir: true },
+    { name: "run.sh", path: "/rootA/run.sh", isDir: false, size: 9 },
+  ];
+  const closeTabs = async (): Promise<void> => {
+    for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
+    await tick();
+  };
+  const tabIds = (): string[] => workbenchStore.get().tabs.map((t) => t.id);
+
+  /** Open the tree with roots=[/rootA] and /rootA listing DIR_FIXTURE,
+   *  answering every minted request by shape (leftover expansions from
+   *  earlier sections re-request too -- the reply loop covers them). */
+  async function openTreeFixture(): Promise<void> {
+    await attach();
+    if (!document.querySelector("#workbench-panel")) {
+      el("#workbench-toggle").click();
+      await tick();
+    }
+    await closeTabs();
+    clearSent();
+    el("#workbench-open-files").click();
+    await tick();
+    for (const r of sent<{ requestId: number; path?: string }>("listDir")) {
+      ws.fireMessage(
+        r.path === undefined
+          ? { type: "listDirResult", requestId: r.requestId, roots: [{ name: "rootA", path: "/rootA" }] }
+          : { type: "listDirResult", requestId: r.requestId, path: r.path, entries: DIR_FIXTURE },
+      );
+    }
+    await tick();
+  }
+
+  async function rowMenu(path: string): Promise<void> {
+    const btn = els(".ft-row").find((r) => r.getAttribute("data-path") === path)?.querySelector(".ft-row-btn") as HTMLElement;
+    btn!.dispatchEvent({ type: "contextmenu", currentTarget: btn, clientX: 20, clientY: 20 } as unknown as Event);
+    await tick();
+  }
+
+  async function pickMenuItem(label: string): Promise<void> {
+    els(".context-menu-item").find((b) => b.textContent === label)!.click();
+    await tick();
+  }
+
+  afterEach(async () => {
+    await closeTabs();
+    if (document.querySelector("#workbench-panel")) {
+      el("#workbench-toggle").click();
+      await tick();
+    }
+    confirmAnswer = true;
+    promptAnswer = "renamed";
+  });
+
+  it("menu grammar: root rows create+copy, dir rows create+rename+delete+copy, file rows rename+download+delete+copy", async () => {
+    await openTreeFixture();
+    await rowMenu("/rootA");
+    expect(els(".context-menu-item").map((i) => i.textContent)).toEqual(["New file", "New folder", "Copy path"]);
+    await rowMenu("/rootA/src");
+    expect(els(".context-menu-item").map((i) => i.textContent)).toEqual(["New file", "New folder", "Rename", "Copy path", "Delete"]);
+    await rowMenu("/rootA/run.sh");
+    expect(els(".context-menu-item").map((i) => i.textContent)).toEqual(["Rename", "Download", "Copy path", "Delete"]);
+  });
+
+  it("Delete is confirm-gated; the refusal lands the parent refresh and closes the killed tabs", async () => {
+    await openTreeFixture();
+    workbenchStore.open({ id: "/rootA/run.sh", kind: "file", label: "run.sh", dirty: false });
+    workbenchStore.activate("files"); // the tree must be on screen to be right-clicked
+    await tick();
+    clearSent();
+
+    // Refused confirm: NOTHING rides the wire.
+    confirmSeen = [];
+    confirmAnswer = false;
+    await rowMenu("/rootA/run.sh");
+    await pickMenuItem("Delete");
+    expect(confirmSeen.join()).toContain("Delete run.sh");
+    expect(confirmSeen.join()).toContain("cannot be undone");
+    expect(sent("deletePath")).toHaveLength(0);
+
+    // Confirmed: the frame goes, the reply lands the refresh + tab close.
+    confirmAnswer = true;
+    await rowMenu("/rootA/run.sh");
+    await pickMenuItem("Delete");
+    const frame = sent<{ requestId: number; path: string }>("deletePath").pop()!;
+    expect(frame.path).toBe("/rootA/run.sh");
+    clearSent();
+    ws.fireMessage({ type: "fileOpResult", requestId: frame.requestId, path: "/rootA/run.sh" });
+    await tick();
+    expect(tabIds()).not.toContain("/rootA/run.sh"); // the killed tab closed
+    const refreshes = sent<{ requestId: number; path?: string }>("listDir");
+    expect(refreshes).toHaveLength(1); // SUBTREE-ONLY: just the parent
+    expect(refreshes[0]!.path).toBe("/rootA");
+  });
+
+  it("a DIRECTORY delete says the recursive truth in the confirm copy", async () => {
+    await openTreeFixture();
+    confirmSeen = [];
+    confirmAnswer = true;
+    await rowMenu("/rootA/src");
+    await pickMenuItem("Delete");
+    expect(confirmSeen.join()).toContain("EVERYTHING inside it");
+    expect(confirmSeen.join()).toContain("recursively");
+    expect(sent("deletePath")).toHaveLength(1);
+  });
+
+  it("New file: name -> createFile; the reply opens the tab, expands + re-lists the parent", async () => {
+    await openTreeFixture();
+    clearSent();
+    promptAnswer = "notes.txt";
+    await rowMenu("/rootA");
+    await pickMenuItem("New file");
+    const frame = sent<{ requestId: number; path: string }>("createFile").pop()!;
+    expect(frame.path).toBe("/rootA/notes.txt");
+    clearSent();
+    ws.fireMessage({ type: "fileOpResult", requestId: frame.requestId, path: "/rootA/notes.txt" });
+    await tick();
+    expect(tabIds()).toContain("/rootA/notes.txt"); // opens in the workbench
+    const refreshes = sent<{ requestId: number; path?: string }>("listDir");
+    expect(refreshes).toHaveLength(1);
+    expect(refreshes[0]!.path).toBe("/rootA"); // parent re-list (subtree-only)
+  });
+
+  it("name validation (empty / separator) refuses locally with an honest toast and ZERO wire", async () => {
+    await openTreeFixture();
+    clearSent();
+    promptAnswer = "   ";
+    await rowMenu("/rootA");
+    await pickMenuItem("New file");
+    expect(sent("createFile")).toHaveLength(0);
+    expect(el("#copy-toast").textContent).toContain("empty");
+    promptAnswer = "sneaky/../path";
+    await rowMenu("/rootA");
+    await pickMenuItem("New file");
+    expect(sent("createFile")).toHaveLength(0);
+    expect(el("#copy-toast").textContent).toContain("separator");
+  });
+
+  it("a server refusal (already exists) rides the toast VERBATIM; no refresh, no tab", async () => {
+    await openTreeFixture();
+    clearSent();
+    promptAnswer = "brand-new.txt";
+    await rowMenu("/rootA/src"); // /rootA/src is COLLAPSED here; its cache may be absent, the server is the authority
+    await pickMenuItem("New file");
+    const frame = sent<{ requestId: number; path: string }>("createFile").pop()!;
+    clearSent();
+    ws.fireMessage({ type: "fileOpResult", requestId: frame.requestId, error: "already exists: brand-new.txt" });
+    await tick();
+    expect(el("#copy-toast").textContent).toBe("already exists: brand-new.txt");
+    expect(sent("listDir")).toHaveLength(0); // a failed op re-lists nothing
+    expect(tabIds()).not.toContain("/rootA/src/brand-new.txt");
+  });
+
+  it("Rename retargets the open tab IN PLACE (identity follows the file) and re-lists the parent", async () => {
+    await openTreeFixture();
+    workbenchStore.open({ id: "/rootA/run.sh", kind: "file", label: "run.sh", dirty: false });
+    workbenchStore.activate("files"); // the tree must be on screen to be right-clicked
+    await tick();
+    clearSent();
+    promptAnswer = "start.sh";
+    await rowMenu("/rootA/run.sh");
+    await pickMenuItem("Rename");
+    const frame = sent<{ requestId: number; oldPath: string; newPath: string }>("renamePath").pop()!;
+    expect(frame.oldPath).toBe("/rootA/run.sh");
+    expect(frame.newPath).toBe("/rootA/start.sh");
+    clearSent();
+    ws.fireMessage({ type: "fileOpResult", requestId: frame.requestId, path: "/rootA/start.sh" });
+    await tick();
+    expect(tabIds()).toEqual(["files", "/rootA/start.sh"]); // MOVED in place: same slot, new identity
+    const tab = workbenchStore.get().tabs[1]!;
+    expect(tab.label).toBe("start.sh");
+    const refreshes = sent<{ requestId: number; path?: string }>("listDir");
+    expect(refreshes).toHaveLength(1); // one parent, subtree-only
+    expect(refreshes[0]!.path).toBe("/rootA");
+  });
+
+  it("Download points a hidden anchor at /download with the token (the export idiom)", async () => {
+    await openTreeFixture();
+    const created: HTMLElement[] = [];
+    const docAny = document as unknown as { createElement: (t: string) => HTMLElement };
+    const prevCreate = docAny.createElement;
+    docAny.createElement = (tag: string) => {
+      const made = prevCreate.call(document, tag);
+      if (tag === "a") created.push(made);
+      return made;
+    };
+    try {
+      await rowMenu("/rootA/run.sh");
+      await pickMenuItem("Download");
+    } finally {
+      docAny.createElement = prevCreate;
+    }
+    expect(created).toHaveLength(1);
+    const anchor = created[0] as unknown as { href: string; download: string };
+    expect(anchor.href.startsWith("/download/")).toBe(true);
+    expect(decodeURIComponent(anchor.href.split("?")[0]!)).toContain("/rootA/run.sh");
+    expect(anchor.href).toContain("token=");
+    expect(anchor.download).toBe("run.sh");
+    expect(sent("deletePath")).toHaveLength(0); // a download touches no other wire
   });
 });
 
@@ -6162,7 +6443,10 @@ describe("workbench tab persistence (real app wiring)", () => {
       error: "not found: /rootA/vanished.txt",
     });
     await tick();
-    expect(els(".file-line").map((r) => r.getAttribute("data-line"))).toEqual(["1", "2"]);
+    // editor-core: the restored complete read lands EDITABLE (the data-line
+    // seam carries into the editor layer); the vanished tab next door still
+    // renders the viewer's verbatim error.
+    expect(els(".editor-line").map((r) => r.getAttribute("data-line"))).toEqual(["1", "2"]);
     // The errored tab is one click away and renders the verbatim error --
     // no hang, no wedge, the pane keeps operating.
     els("#workbench-tabs [role=tab]").at(-1)!.click();
@@ -6175,6 +6459,1187 @@ describe("workbench tab persistence (real app wiring)", () => {
     session.set(WORKBENCH_TABS_KEY, "{not json");
     seedWorkbenchStoreFromStorage();
     expect(workbenchStore.get()).toEqual({ tabs: [], activeId: null });
+  });
+});
+
+// ── workbench EDITOR (editor-core, real app wiring) ────────────────────────
+// The hidden-textarea capture drives the buffer and the rendered layer;
+// Ctrl+S speaks saveFile with the recorded BASE and clears the tab dot; the
+// conflict refusal opens the honest Overwrite/Reload pair; close gates on
+// unsaved work; the whitespace pref persists and repaints; the read cap
+// keeps its files in the viewer with the honest note.
+
+describe("workbench editor (real app wiring)", () => {
+  const EDIT_PATH = "/rootA/wedit.txt";
+  const CONFLICT_PATH = "/rootA/wconf.txt";
+  const CLOSE_PATH = "/rootA/wclose.txt";
+  const WS_PATH = "/rootA/wsview.txt";
+  const CAP_PATH = "/rootA/wcap.txt";
+  const TREE_PATH = "/rootA/wtree.txt";
+  const KEEP_PATH = "/rootA/wkeep.txt";
+  const CUT_PATH = "/rootA/wcut.txt";
+  const WSTAB_PATH = "/rootA/wstab.txt";
+  const DIR_FIXTURE = [{ name: "wtree.txt", path: TREE_PATH, isDir: false, size: 4 }];
+
+  const openPane = async (): Promise<void> => {
+    if (!document.querySelector("#workbench-panel")) {
+      el("#workbench-toggle").click();
+      await tick();
+    }
+  };
+
+  /** Open a file tab DIRECTLY (the persistence section's producer idiom):
+   *  activation owns the first read, which stays UNANSWERED for the test
+   *  to reply to through answerRead. */
+  async function openFile(path: string): Promise<void> {
+    await attach();
+    await openPane();
+    clearSent();
+    workbenchStore.open({ id: path, kind: "file", label: path.split("/").pop()!, dirty: false });
+    await tick();
+    els("#workbench-tabs [role=tab]").at(-1)!.click();
+    await tick();
+    const req = sent<{ requestId: number; path: string; offset: number }>("readFile").pop()!;
+    expect(req.path).toBe(path);
+    expect(req.offset).toBe(0);
+  }
+
+  /** Answer the OPEN read (or the seam's next auto-page) for a path. */
+  async function answerRead(path: string, fields: Record<string, unknown>): Promise<void> {
+    const req = sent<{ requestId: number }>("readFile").pop()!;
+    ws.fireMessage({ type: "readFileResult", requestId: req.requestId, path, ...fields });
+    await tick();
+  }
+  const loadComplete = (path: string, content: string, mtimeMs = 1000): Promise<void> =>
+    answerRead(path, { offset: 0, content, mtimeMs });
+
+  /** Press a key on the hidden capture textarea; returns false when the
+   *  handler preventDefault'd (dispatchEvent reports !defaultPrevented). */
+  const key = (k: string, mods: Record<string, unknown> = {}): boolean =>
+    el(".editor-input").dispatchEvent({ type: "keydown", key: k, ...mods } as unknown as Event);
+  const taValue = (): string => (el(".editor-input") as unknown as { value: string }).value;
+  /** The editor's first rendered row, as plain text (nbsp-empty lines
+   *  normalize back to ""). */
+  const codeText = (): string => (el(".editor-code").textContent ?? "").replace(/\u00a0/g, "");
+
+  /** Fire the house leave event (pagehide / beforeunload) with a spy and
+   *  report whether a listener vetoed it (the dirty-buffer unload guard). */
+  const fireEditorLeave = (): boolean => {
+    let prevented = false;
+    const mk = (): Event =>
+      ({ type: "beforeunload", preventDefault: () => (prevented = true), returnValue: undefined }) as unknown as Event;
+    for (const type of ["pagehide", "beforeunload"]) {
+      for (const cb of [...(winListeners.get(type) ?? [])]) cb(mk());
+    }
+    return prevented;
+  };
+
+  async function openTreeFixture(): Promise<void> {
+    await attach();
+    await openPane();
+    for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
+    await tick();
+    clearSent();
+    el("#workbench-open-files").click();
+    await tick();
+    for (const r of sent<{ requestId: number; path?: string }>("listDir")) {
+      ws.fireMessage(
+        r.path === undefined
+          ? { type: "listDirResult", requestId: r.requestId, roots: [{ name: "rootA", path: "/rootA" }] }
+          : { type: "listDirResult", requestId: r.requestId, path: r.path, entries: DIR_FIXTURE },
+      );
+    }
+    await tick();
+  }
+
+  afterEach(async () => {
+    // Close tabs through the REAL close buttons with the confirm accepted:
+    // dirty buffers confirm and DROP exactly as they do for the user, so
+    // nothing leaks into the next test (paths stay exclusive regardless).
+    confirmAnswer = true;
+    promptAnswer = "renamed";
+    for (const b of [...els(".workbench-tab-close")]) {
+      confirmAnswer = true;
+      b.click();
+      await tick();
+    }
+    for (const t of [...workbenchStore.get().tabs]) workbenchStore.close(t.id);
+    await tick();
+    if (document.querySelector("#workbench-panel")) {
+      el("#workbench-toggle").click();
+      await tick();
+    }
+  });
+
+  it("typing edits buffer+layer; the tab dot lands; Ctrl+S saves with the read's mtime and clears dirty", async () => {
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "ab\n");
+    // EDITABLE posture: the editor is mounted, clean, and the data-line
+    // seam carried into the editor's own layer.
+    expect(el(".editor")).toBeTruthy();
+    expect(els(".editor-line").map((r) => r.getAttribute("data-line"))).toEqual(["1"]);
+    expect(codeText()).toBe("ab");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+
+    // Type: keydown intercepted BEFORE default; the buffer owns the text
+    // and the capture textarea STAYS EMPTY (the desync invariant).
+    key("End");
+    await tick();
+    key("c");
+    await tick();
+    expect(codeText()).toBe("abc");
+    expect(taValue()).toBe("");
+    expect(el(".workbench-dirty")).toBeTruthy();
+    expect(el(".file-view-status").textContent).toContain("edited");
+
+    // Ctrl+S: one saveFile frame, content rebuilt byte-exact (the trailing
+    // newline the read carried), BASE = the mtime the read reported.
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number; path: string; content: string; baseMtimeMs: number }>("saveFile").pop()!;
+    expect(save.path).toBe(EDIT_PATH);
+    expect(save.content).toBe("abc\n");
+    expect(save.baseMtimeMs).toBe(1000);
+
+    // Success: dot off, base moves to the file's NEW mtime -- the NEXT save
+    // carries it (the conflict gate's chain stays honest).
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: EDIT_PATH, mtimeMs: 2000 });
+    await tick();
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    expect(el(".file-view-status").textContent).toContain("saved");
+    clearSent();
+    key("!");
+    await tick();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save2 = sent<{ requestId: number; baseMtimeMs: number; content: string }>("saveFile").pop()!;
+    expect(save2.baseMtimeMs).toBe(2000);
+    expect(save2.content).toBe("abc!\n");
+    ws.fireMessage({ type: "fileOpResult", requestId: save2.requestId, path: EDIT_PATH, mtimeMs: 2500 });
+    await tick();
+  });
+
+  it("the conflict refusal offers Overwrite (resend with the fresh mtime), which lands clean", async () => {
+    await openFile(CONFLICT_PATH);
+    await loadComplete(CONFLICT_PATH, "mine\n");
+    key("End");
+    await tick();
+    key("X");
+    await tick();
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    // The server wrote NOTHING: conflict + the CURRENT mtime + the honest
+    // line. The dialog names BOTH doors.
+    confirmSeen = [];
+    confirmAnswer = true; // the Overwrite door
+    ws.fireMessage({
+      type: "fileOpResult",
+      requestId: save.requestId,
+      conflict: true,
+      mtimeMs: 5555,
+      error: "wconf.txt changed on disk since it was read -- reload or overwrite deliberately",
+    });
+    await tick();
+    expect(confirmSeen.join()).toContain("changed on disk");
+    expect(confirmSeen.join()).toContain("Overwrite");
+    expect(confirmSeen.join()).toContain("DISCARDS");
+    // Overwrite: the resend carries the FRESH mtime as its base (the
+    // server's pinned flow) and success clears the dirty state.
+    const again = sent<{ requestId: number; baseMtimeMs: number; content: string }>("saveFile").pop()!;
+    expect(again.baseMtimeMs).toBe(5555);
+    expect(again.content).toBe("mineX\n");
+    ws.fireMessage({ type: "fileOpResult", requestId: again.requestId, path: CONFLICT_PATH, mtimeMs: 6000 });
+    await tick();
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    expect(el(".file-view-status").textContent).toContain("saved");
+  });
+
+  it("conflict Cancel reloads from disk: the buffer rebuilds from the fresh bytes, dirty clears", async () => {
+    await openFile(CONFLICT_PATH);
+    await loadComplete(CONFLICT_PATH, "mine\n");
+    key("End");
+    await tick();
+    key("Z");
+    await tick();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    confirmSeen = [];
+    confirmAnswer = false; // the Cancel door: reload, discard
+    ws.fireMessage({
+      type: "fileOpResult",
+      requestId: save.requestId,
+      conflict: true,
+      mtimeMs: 5555,
+      error: "wconf.txt changed on disk since it was read -- reload or overwrite deliberately",
+    });
+    await tick();
+    expect(confirmSeen.join()).toContain("DISCARDS");
+    // The Cancel door reloads SYNCHRONOUSLY inside the reply (one confirm
+    // already said "DISCARDS", so onFileReload skips its own gate): the
+    // reload frame is already on the wire -- no clearSent here, it would
+    // eat the very request asserted below.
+    const reload = sent<{ requestId: number; path: string; offset: number }>("readFile").pop()!;
+    expect(reload.path).toBe(CONFLICT_PATH);
+    expect(reload.offset).toBe(0);
+    ws.fireMessage({
+      type: "readFileResult",
+      requestId: reload.requestId,
+      path: CONFLICT_PATH,
+      offset: 0,
+      content: "from disk\n",
+      mtimeMs: 5555,
+    });
+    await tick();
+    expect(codeText()).toBe("from disk");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("closing a dirty tab confirms; refused the tab stays, accepted the reopen re-reads fresh", async () => {
+    await openFile(CLOSE_PATH);
+    await loadComplete(CLOSE_PATH, "keep me\n");
+    key("End");
+    await tick();
+    key("d");
+    await tick();
+    expect(el(".workbench-dirty")).toBeTruthy();
+    // Refused: the tab (and its unsaved text) survive.
+    confirmSeen = [];
+    confirmAnswer = false;
+    el(".workbench-tab-close").click();
+    await tick();
+    expect(confirmSeen.join()).toContain("unsaved");
+    expect(workbenchStore.get().tabs.some((t) => t.id === CLOSE_PATH)).toBe(true);
+    expect(el(".editor")).toBeTruthy();
+    // Confirmed: the tab closes; reopening RE-READS (the discarded buffer's
+    // stale cache must not masquerade as the truth).
+    confirmAnswer = true;
+    el(".workbench-tab-close").click();
+    await tick();
+    expect(workbenchStore.get().tabs.some((t) => t.id === CLOSE_PATH)).toBe(false);
+    clearSent();
+    workbenchStore.open({ id: CLOSE_PATH, kind: "file", label: "wclose.txt", dirty: false });
+    await tick();
+    els("#workbench-tabs [role=tab]").at(-1)!.click();
+    await tick();
+    const req = sent<{ requestId: number }>("readFile").pop()!;
+    expect(req).toBeTruthy();
+    ws.fireMessage({ type: "readFileResult", requestId: req.requestId, path: CLOSE_PATH, offset: 0, content: "keep me\n", mtimeMs: 1000 });
+    await tick();
+    expect(codeText()).toBe("keep me");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("the whitespace toggle marks the editor and persists per browser (localStorage)", async () => {
+    await openFile(WS_PATH);
+    await loadComplete(WS_PATH, "a b\tc\n  ");
+    expect(els(".editor-line .ws").length).toBe(0);
+    // Toggle ON: middle dots + the tab arrow appear; the pref persists.
+    el(".editor-ws-btn").click();
+    await tick();
+    expect(store.get("hotdog-webui-show-ws")).toBe("1");
+    expect(els(".editor-line .ws-space").length).toBeGreaterThan(0);
+    expect(els(".editor-line .ws-tab").length).toBe(1);
+    expect(els(".editor-line .ws-trail").length).toBeGreaterThan(0);
+    expect(el(".editor-ws-btn").getAttribute("aria-pressed")).toBe("true");
+    // Toggle OFF: marks vanish, the key goes away too (remove, not "0").
+    el(".editor-ws-btn").click();
+    await tick();
+    expect(els(".editor-line .ws").length).toBe(0);
+    expect(store.has("hotdog-webui-show-ws")).toBe(false);
+  });
+
+  it("an over-cap read STAYS read-only with the honest note and no further auto-paging", async () => {
+    await openFile(CAP_PATH);
+    await answerRead(CAP_PATH, { offset: 0, content: "y".repeat(300000) + "\n", truncated: true, mtimeMs: 1 });
+    expect(document.querySelector(".editor")).toBeNull();
+    expect(els(".file-view-note").map((n) => n.textContent).join()).toContain("Over the 256 KiB edit cap");
+    // The seam STOPPED paging: the accumulation already proved the verdict.
+    clearSent();
+    await tick();
+    expect(sent("readFile")).toHaveLength(0);
+  });
+
+  it("IME composition commits ONCE at compositionend (keydown inert mid-composition, textarea cleared)", async () => {
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "");
+    const ta = el(".editor-input") as unknown as HTMLTextAreaElement;
+    ta.dispatchEvent({ type: "compositionstart" } as unknown as Event);
+    ta.value = "\u306b"; // the IME owns the textarea between start and end
+    key("x"); // inert while composing: nothing reaches the buffer
+    await tick();
+    expect(codeText()).toBe("");
+    ta.dispatchEvent({ type: "compositionend", data: "\u306b\u307b" } as unknown as Event);
+    await tick();
+    expect(codeText()).toBe("\u306b\u307b");
+    expect(taValue()).toBe("");
+    expect(el(".workbench-dirty")).toBeTruthy();
+  });
+
+  it("paste inserts clipboardData text as one block; Ctrl+C writes the selection through the copyText seam", async () => {
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "");
+    const ta = el(".editor-input") as unknown as HTMLTextAreaElement;
+    ta.dispatchEvent({
+      type: "paste",
+      clipboardData: { getData: () => "two\r\nlines" },
+    } as unknown as Event);
+    await tick();
+    expect(els(".editor-line").length).toBe(2);
+    expect(el(".editor-line").textContent).toContain("two");
+    expect(taValue()).toBe("");
+    // Select-all then Ctrl+C: the payload goes STRAIGHT to the clipboard
+    // seam (copyText) and the keydown is preventDefault'd. The old
+    // stage-the-textarea-and-let-the-native-copy-fire contract was a lie:
+    // our own copy handler wiped the value before the default action read
+    // it, and the fake DOM has no default action to see it. The textarea
+    // must stay clean throughout.
+    const copied: string[] = [];
+    const prevNav = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", {
+      value: { clipboard: { writeText: async (t: string) => { copied.push(t); } } },
+      configurable: true,
+    });
+    try {
+      key("a", { ctrlKey: true });
+      await tick();
+      // dispatchEvent returns !defaultPrevented, so false == claim accepted.
+      expect(key("c", { ctrlKey: true })).toBe(false);
+      await tick(); // copyText's writeText lands on the microtask queue
+      expect(copied).toEqual(["two\nlines"]);
+      expect(taValue()).toBe("");
+      // An EMPTY selection stays inert (the shipped Ctrl+X doctrine): no
+      // copyText call, NO preventDefault, buffer untouched.
+      key("End");
+      await tick();
+      expect(key("c", { ctrlKey: true })).toBe(true);
+      await tick();
+      expect(copied).toEqual(["two\nlines"]);
+      expect(codeText()).toBe("two");
+      // onCopy survives as the residue cleaner it now actually is: a stray
+      // copy event over composition residue still restores the invariant.
+      ta.value = "\u306b";
+      ta.dispatchEvent({ type: "copy" } as unknown as Event);
+      expect(taValue()).toBe("");
+    } finally {
+      if (prevNav) Object.defineProperty(globalThis, "navigator", prevNav);
+      else delete (globalThis as Record<string, unknown>).navigator;
+    }
+  });
+
+  it("rename follows the dirty tab: same seat, dot survives, save targets the NEW path", async () => {
+    await openTreeFixture();
+    clearSent();
+    workbenchStore.open({ id: TREE_PATH, kind: "file", label: "wtree.txt", dirty: false });
+    await tick();
+    els("#workbench-tabs [role=tab]").at(-1)!.click();
+    await tick();
+    const req = sent<{ requestId: number; path: string }>("readFile").pop()!;
+    ws.fireMessage({ type: "readFileResult", requestId: req.requestId, path: TREE_PATH, offset: 0, content: "src\n", mtimeMs: 7000 });
+    await tick();
+    key("End");
+    await tick();
+    key("t");
+    await tick();
+    expect(el(".workbench-dirty")).toBeTruthy();
+    // Back to the tree, rename the row (the prompt answers BEFORE the click:
+    // the menu action reads it synchronously and ships the frame).
+    els("#workbench-tabs [role=tab]")[0]!.click();
+    await tick();
+    promptAnswer = "wtree2.txt";
+    const btn = els(".ft-row").find((r) => r.getAttribute("data-path") === TREE_PATH)?.querySelector(".ft-row-btn") as HTMLElement;
+    btn!.dispatchEvent({ type: "contextmenu", currentTarget: btn, clientX: 20, clientY: 20 } as unknown as Event);
+    await tick();
+    els(".context-menu-item").find((b) => b.textContent === "Rename")!.click();
+    await tick();
+    const ren = sent<{ requestId: number; oldPath: string; newPath: string }>("renamePath").pop()!;
+    expect(ren.oldPath).toBe(TREE_PATH);
+    expect(ren.newPath).toBe("/rootA/wtree2.txt");
+    ws.fireMessage({ type: "fileOpResult", requestId: ren.requestId, path: "/rootA/wtree2.txt" });
+    await tick();
+    // The tab followed the file: SAME strip seat (index 0 is the tree), the
+    // file tab re-pointed, the dot STILL on (unsaved text survived), and
+    // Ctrl+S targets the NEW path with the ORIGINAL base.
+    expect(workbenchStore.get().tabs.some((t) => t.id === TREE_PATH)).toBe(false);
+    expect(workbenchStore.get().tabs.some((t) => t.id === "/rootA/wtree2.txt")).toBe(true);
+    expect(el(".workbench-dirty")).toBeTruthy();
+    // Back onto the followed tab: the EDITED text is still in the layer.
+    // (The label's textContent carries the dirty dot too -- match on the
+    // name only.)
+    els("#workbench-tabs [role=tab]").find((b) => (b.textContent ?? "").startsWith("wtree2.txt"))!.click();
+    await tick();
+    expect(el(".editor")).toBeTruthy();
+    expect(codeText()).toBe("srct");
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number; path: string; content: string; baseMtimeMs: number }>("saveFile").pop()!;
+    expect(save.path).toBe("/rootA/wtree2.txt");
+    expect(save.content).toBe("srct\n");
+    expect(save.baseMtimeMs).toBe(7000);
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: "/rootA/wtree2.txt", mtimeMs: 8000 });
+    await tick();
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("a clean close keeps the cache: zero-traffic reopen opens EDITABLE off the survived mtime; a save invalidates it", async () => {
+    await openFile(KEEP_PATH);
+    await loadComplete(KEEP_PATH, "stay\n", 4242);
+    expect(el(".editor")).toBeTruthy();
+    // CLEAN close: the discard gate never asks, and nothing goes on the wire.
+    confirmSeen = [];
+    els(".workbench-tab-close").at(-1)!.click();
+    await tick();
+    expect(confirmSeen).toHaveLength(0);
+    clearSent();
+    // Reopen: activation draws the cached view (the reopen-must-not-wipe
+    // doctrine holds) AND the editor mounts anyway -- activation is the
+    // cached ready view's "open editable" hook.
+    workbenchStore.open({ id: KEEP_PATH, kind: "file", label: "wkeep.txt", dirty: false });
+    await tick();
+    els("#workbench-tabs [role=tab]").at(-1)!.click();
+    await tick();
+    expect(sent("readFile")).toHaveLength(0);
+    expect(el(".editor")).toBeTruthy();
+    expect(codeText()).toBe("stay");
+    // The BASE survived the close: the save carries the read's mtime.
+    key("End");
+    await tick();
+    key("!");
+    await tick();
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number; content: string; baseMtimeMs: number }>("saveFile").pop()!;
+    expect(save.content).toBe("stay!\n");
+    expect(save.baseMtimeMs).toBe(4242);
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: KEEP_PATH, mtimeMs: 5000 });
+    await tick();
+    // A SUCCESSFUL SAVE invalidates the cached bytes (the disk is ahead now):
+    // the next reopen pays a fresh read, so it can never edit off stale text.
+    els(".workbench-tab-close").at(-1)!.click();
+    await tick();
+    clearSent();
+    workbenchStore.open({ id: KEEP_PATH, kind: "file", label: "wkeep.txt", dirty: false });
+    await tick();
+    els("#workbench-tabs [role=tab]").at(-1)!.click();
+    await tick();
+    expect(sent("readFile")).toHaveLength(1);
+  });
+
+  it("Ctrl+X with an EMPTY selection is inert: no char eaten, no dirty, no line join", async () => {
+    await openFile(CUT_PATH);
+    await loadComplete(CUT_PATH, "ab\ncd"); // caret at (0,0); two lines, trailing NL
+    key("End");
+    await tick();
+    expect(codeText()).toBe("ab");
+    clearSent();
+    key("x", { ctrlKey: true }); // caret at End of line 1, NOTHING selected
+    await tick();
+    // The cut is a copy THEN a delete: with no range it deletes nothing --
+    // NOT the character left of the caret (the pre-fix caret-backspace leak).
+    expect(codeText()).toBe("ab");
+    expect(els(".editor-line").length).toBe(2);
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    // No undo step was recorded, so Ctrl+Z stays inert too.
+    key("z", { ctrlKey: true });
+    await tick();
+    expect(codeText()).toBe("ab");
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+
+    // At column 0 the same chord must NOT join the two lines.
+    key("Home");
+    await tick();
+    key("x", { ctrlKey: true });
+    await tick();
+    expect(els(".editor-line").length).toBe(2);
+    expect(els(".editor-line").map((r) => r.getAttribute("data-line"))).toEqual(["1", "2"]);
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    // A REAL selection still cuts (the guard returns only when nothing is
+    // staged): select-all then Ctrl+X empties the buffer and dirties it.
+    key("a", { ctrlKey: true });
+    await tick();
+    key("x", { ctrlKey: true });
+    await tick();
+    expect(codeText()).toBe("");
+    expect(el(".workbench-dirty")).toBeTruthy();
+  });
+
+  it("an empty-area click below the content puts the caret at the buffer END", async () => {
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "ab\ncd");
+    // The full-height sheet paints empty space below the last row; a click
+    // there is the viewport's own (no row handled it), and it maps to the
+    // buffer's END -- the next typed character lands after "cd", not on a
+    // phantom row. (The test DOM has no layout, so we hit the viewport, not
+    // a phantom coordinate.)
+    const viewport = el(".editor-viewport");
+    viewport.dispatchEvent({ type: "mousedown", clientX: 40, clientY: 100000 } as unknown as Event);
+    await tick();
+    key("Z");
+    await tick();
+    expect(els(".editor-line").map((r) => r.textContent)).toEqual(["1ab", "2cdZ"]);
+    expect(el(".workbench-dirty")).toBeTruthy();
+  });
+
+  it("a save in flight followed by a rename: the reply clears the saving gate on the moved session", async () => {
+    await openTreeFixture();
+    clearSent();
+    workbenchStore.open({ id: TREE_PATH, kind: "file", label: "wtree.txt", dirty: false });
+    await tick();
+    els("#workbench-tabs [role=tab]").at(-1)!.click();
+    await tick();
+    const req = sent<{ requestId: number; path: string }>("readFile").pop()!;
+    ws.fireMessage({ type: "readFileResult", requestId: req.requestId, path: TREE_PATH, offset: 0, content: "src\n", mtimeMs: 7000 });
+    await tick();
+    key("End");
+    await tick();
+    key("t"); // "srct", dirty
+    await tick();
+    expect(el(".workbench-dirty")).toBeTruthy();
+
+    // Ctrl+S ships the save for the OLD path with the read's base; the reply
+    // stays IN FLIGHT (do not answer it yet).
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number; path: string; baseMtimeMs: number }>("saveFile").pop()!;
+    expect(save.path).toBe(TREE_PATH);
+    expect(save.baseMtimeMs).toBe(7000);
+    expect(el(".file-view-status").textContent).toContain("saving...");
+
+    // Rename the file WHILE the save is in flight, and let the rename reply
+    // land FIRST (the session moves to the new spelling).
+    els("#workbench-tabs [role=tab]")[0]!.click(); // back to the tree
+    await tick();
+    promptAnswer = "wtree2.txt";
+    const btn = els(".ft-row").find((r) => r.getAttribute("data-path") === TREE_PATH)?.querySelector(".ft-row-btn") as HTMLElement;
+    btn!.dispatchEvent({ type: "contextmenu", currentTarget: btn, clientX: 20, clientY: 20 } as unknown as Event);
+    await tick();
+    els(".context-menu-item").find((b) => b.textContent === "Rename")!.click();
+    await tick();
+    const ren = sent<{ requestId: number; oldPath: string; newPath: string }>("renamePath").pop()!;
+    expect(ren.oldPath).toBe(TREE_PATH);
+    ws.fireMessage({ type: "fileOpResult", requestId: ren.requestId, path: "/rootA/wtree2.txt" });
+    await tick();
+
+    // Now the save reply lands with an ERROR. Its pending record was
+    // retargeted to the MOVED session, so it clears `saving` there (before
+    // the retarget the OLD-path lookup missed and the gate stuck true
+    // forever -- every later Ctrl+S was silently refused).
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, error: "read-only filesystem" });
+    await tick();
+    // Back onto the followed tab: still dirty, NOT stuck on "saving...".
+    els("#workbench-tabs [role=tab]").find((b) => (b.textContent ?? "").startsWith("wtree2.txt"))!.click();
+    await tick();
+    expect(el(".editor")).toBeTruthy();
+    expect(codeText()).toBe("srct");
+    expect(el(".workbench-dirty")).toBeTruthy();
+    expect(el(".file-view-status").textContent).toContain("edited");
+
+    // Ctrl+S works again and ships for the NEW path with the PRE-RENAME base.
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save2 = sent<{ requestId: number; path: string; content: string; baseMtimeMs: number }>("saveFile").pop()!;
+    expect(save2.path).toBe("/rootA/wtree2.txt");
+    expect(save2.content).toBe("srct\n");
+    expect(save2.baseMtimeMs).toBe(7000);
+    // A successful save then lands it clean on the new path.
+    ws.fireMessage({ type: "fileOpResult", requestId: save2.requestId, path: "/rootA/wtree2.txt", mtimeMs: 8000 });
+    await tick();
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("a dirty buffer vetoes a page leave (the refresh would silently eat it); a clean one does not", async () => {
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "abc\n");
+    // Clean editor: the leave event is not vetoed (no nag).
+    expect(fireEditorLeave()).toBe(false);
+    // Type -> dirty: a refresh/close now shows the browser's prompt.
+    key("End");
+    await tick();
+    key("!");
+    await tick();
+    expect(el(".workbench-dirty")).toBeTruthy();
+    expect(fireEditorLeave()).toBe(true);
+    // Save it clean: the veto lifts.
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: EDIT_PATH, mtimeMs: 2000 });
+    await tick();
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    expect(fireEditorLeave()).toBe(false);
+  });
+
+  it("the veto guard ships on beforeunload, NOT the non-cancelable pagehide", async () => {
+    // pagehide is NOT cancelable in modern browsers -- a veto registered
+    // there is inert forever. The pin fires EACH event separately, so a
+    // guard that rode the shared DRAFT_LEAVE_EVENT (which is pagehide in a
+    // browser, where onpagehide exists) could not pass it.
+    const fireOne = (type: string): boolean => {
+      let prevented = false;
+      for (const cb of [...(winListeners.get(type) ?? [])])
+        cb({ type, preventDefault: () => (prevented = true), returnValue: undefined } as unknown as Event);
+      return prevented;
+    };
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "abc\n");
+    key("End");
+    await tick();
+    key("!");
+    await tick();
+    expect(el(".workbench-dirty")).toBeTruthy();
+    expect(fireOne("beforeunload")).toBe(true); // the cancelable event carries the veto
+    expect(fireOne("pagehide")).toBe(false); // nothing rides the inert one
+    // Clean it for the rest of the suite (same save dance as the pin above).
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: EDIT_PATH, mtimeMs: 2000 });
+    await tick();
+  });
+
+  it("mouse selection: row mousedown then drag across a line boundary selects", async () => {
+    // The repro ("unable to select text at all") only bites with real
+    // rects: the capture textarea sat one gutter LEFT of the caret and ate
+    // the next press. This pin drives the geometry a real browser reports
+    // (viewport at {left:100,top:50}, code at x=140 -- one gutter right)
+    // and asserts a row-anchored drag extends the selection across rows.
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "ab\ncd");
+    const viewport = el(".editor-viewport");
+    const rows = els(".editor-line");
+    const code0 = rows[0]!.querySelector(".editor-code")!;
+    const { charWidth } = await import("@extensions/webui/ui/editor.tsx");
+    const cw = charWidth();
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, right: left + width, bottom: top + height, width, height });
+    (viewport as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(100, 50, 600, 400);
+    (code0 as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(140, 50, 600, 20);
+    // Press inside row 0 at column 1.
+    rows[0]!.dispatchEvent({
+      type: "mousedown",
+      currentTarget: rows[0],
+      clientX: 140 + cw,
+      clientY: 60,
+    } as unknown as Event);
+    await tick();
+    // Drag to row 1, column 2 (buttons held).
+    viewport.dispatchEvent({
+      type: "mousemove",
+      currentTarget: viewport,
+      buttons: 1,
+      clientX: 140 + 2 * cw,
+      clientY: 80,
+    } as unknown as Event);
+    await tick();
+    // Both rows carry selection rects (the overlay painted the range)...
+    expect(els(".editor-line .editor-sel").length).toBe(2);
+    // ...and the NEXT keystroke replaces the cross-line range, proving the
+    // buffer's selection (not just the paint) moved: "b\ncd" -> "Z".
+    key("Z");
+    await tick();
+    expect(els(".editor-line").map((r) => r.textContent)).toEqual(["1aZ"]);
+    // Leave the buffer CLEAN for the pins that reuse this path (a dirty
+    // session would short-circuit the next openFile's readFile request).
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: EDIT_PATH, mtimeMs: 2100 });
+    await tick();
+  });
+
+  it("the FIRST gesture can be an empty-area drag: the drag x rides the LIVE code rect (real-Chromium repro)", async () => {
+    // The drag's x origin must ride the LIVE code rect: one captured at
+    // press time is 0 before the first-ever row
+    // press, so a page's first gesture -- drag from the empty sheet --
+    // lands a whole gutter RIGHT of the pointer. The pin injects the rects
+    // a real browser reports and drives the fresh-page sequence: viewport
+    // press (no row handler), one held move into row 2.
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "alpha\nbeta gamma\ndelta");
+    const viewport = el(".editor-viewport");
+    const { charWidth } = await import("@extensions/webui/ui/editor.tsx");
+    const cw = charWidth();
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, right: left + width, bottom: top + height, width, height });
+    (viewport as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(100, 50, 600, 400);
+    // Row 1's code origin sits at x=140 (one gutter right of the viewport).
+    const code0 = els(".editor-line")[0]!.querySelector(".editor-code")!;
+    (code0 as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(140, 50, 600, 20);
+    viewport.dispatchEvent({ type: "mousedown", currentTarget: viewport, clientX: 400, clientY: 250 } as unknown as Event);
+    await tick();
+    // Held move to row 2 ("beta gamma") at column 3, x read off the LIVE rect.
+    viewport.dispatchEvent({ type: "mousemove", currentTarget: viewport, buttons: 1, clientX: 140 + 3 * cw, clientY: 50 + 25 } as unknown as Event);
+    await tick();
+    viewport.dispatchEvent({ type: "mouseup", currentTarget: viewport } as unknown as Event);
+    await tick();
+    const caret = el(".editor-caret");
+    // The head is at (1,3): the caret paints on row 2 at 3 cells... a stale
+    // zero origin would instead land it past col 20 (x = clientX, no gutter).
+    expect(caret.getAttribute("style")).toContain(`left:${3 * cw}px`);
+    expect(caret.parentElement!.parentElement!.getAttribute("data-line")).toBe("2");
+    // ...and the anchor stayed at the buffer's END (the empty-area rule):
+    // the selection paints across rows 2 and 3.
+    expect(els(".editor-line .editor-sel").length).toBe(2);
+    key("Escape"); // collapse the range back to a caret for the pins below
+    await tick();
+    // Leave the read cache INVALIDATED for the pins that reuse this path
+    // (the matched-pair idiom: space-then-backspace is the same bytes but
+    // dirty, and a SUCCESSFUL save drops the cache so the next openFile
+    // pays a fresh read instead of a zero-traffic cache reopen).
+    key(" ");
+    await tick();
+    key("Backspace");
+    await tick();
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: EDIT_PATH, mtimeMs: 2100 });
+    await tick();
+  });
+
+  it("a wheel-scroll MID-DRAG does not shift the columns: the origin re-reads per move (real-Chromium repro)", async () => {
+    // Press a row (capturing codeLeft), wheel horizontally, keep dragging:
+    // with the captured origin every column
+    // lands scrollLeft/cw cells off. Injecting the shifted live rect and
+    // aiming at column 4 must land column 4, not column 0 (the stale x
+    // clamps negative once the content slid 40px past the old origin).
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "alpha\nbeta gamma");
+    const viewport = el(".editor-viewport");
+    const rows = els(".editor-line");
+    const { charWidth } = await import("@extensions/webui/ui/editor.tsx");
+    const cw = charWidth();
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, right: left + width, bottom: top + height, width, height });
+    (viewport as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(100, 50, 600, 400);
+    const code0 = rows[0]!.querySelector(".editor-code")!;
+    (code0 as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(140, 50, 600, 20);
+    // Press row 1 at column 2.
+    rows[0]!.dispatchEvent({ type: "mousedown", currentTarget: rows[0], clientX: 140 + 2 * cw, clientY: 60 } as unknown as Event);
+    await tick();
+    // The wheel slides the content 40px left: the LIVE code origin is now
+    // 100. The row-2 aim point for column 3 moves with it.
+    (code0 as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(100, 50, 600, 20);
+    viewport.dispatchEvent({ type: "mousemove", currentTarget: viewport, buttons: 1, clientX: 100 + 3 * cw, clientY: 80 } as unknown as Event);
+    await tick();
+    viewport.dispatchEvent({ type: "mouseup", currentTarget: viewport } as unknown as Event);
+    await tick();
+    const caret = el(".editor-caret");
+    expect(caret.getAttribute("style")).toContain(`left:${3 * cw}px`);
+    expect(caret.parentElement!.parentElement!.getAttribute("data-line")).toBe("2");
+    // Anchor survives at the press point (row 1, column 2).
+    expect(els(".editor-line .editor-sel").length).toBe(2);
+    key("Escape");
+    await tick();
+    // Same cache-invalidation exit as the pin above (space + backspace are
+    // the original bytes; the successful save drops the read cache).
+    key(" ");
+    await tick();
+    key("Backspace");
+    await tick();
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: EDIT_PATH, mtimeMs: 2200 });
+    await tick();
+  });
+
+  it("marks ON: a drag extends and the anchor row's rect starts AT the anchor column", async () => {
+    // The marks-on live repro ("it will not highlight or
+    // select anything"): the drag DOES reach
+    // the viewport and the buffer DOES extend -- the rects were painted ZERO PIXELS TALL
+    // (the empty abs child has no vertical extent, pinned structurally in
+    // webui-editor-layout-css), and the anchor row's rect painted from x=0
+    // no matter where the press landed. This pin drives the marks-on gesture
+    // with the real-browser rects injected: press to the RIGHT of a tab,
+    // drag across a row; the anchor row's rect must start at
+    // xForCol(anchor.col), and one keystroke must replace the range.
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "\tab\ncd");
+    const wasOn = el(".editor-ws-btn").getAttribute("aria-pressed") === "true";
+    if (!wasOn) {
+      el(".editor-ws-btn").click();
+      await tick();
+    }
+    const viewport = el(".editor-viewport");
+    const rows = els(".editor-line");
+    const code0 = rows[0]!.querySelector(".editor-code")!;
+    const { charWidth } = await import("@extensions/webui/ui/editor.tsx");
+    const cw = charWidth();
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, right: left + width, bottom: top + height, width, height });
+    (viewport as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(100, 50, 600, 400);
+    (code0 as unknown as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => rect(140, 50, 600, 20);
+    // Press at visual column 5 (right of the tab: code column 2), drag to
+    // row 2 column 2 with the button held.
+    rows[0]!.dispatchEvent({ type: "mousedown", currentTarget: rows[0], clientX: 140 + 5 * cw, clientY: 60 } as unknown as Event);
+    await tick();
+    viewport.dispatchEvent({ type: "mousemove", currentTarget: viewport, buttons: 1, clientX: 140 + 2 * cw, clientY: 80 } as unknown as Event);
+    await tick();
+    viewport.dispatchEvent({ type: "mouseup", currentTarget: viewport } as unknown as Event);
+    await tick();
+    const sels = els(".editor-line .editor-sel");
+    expect(sels.length).toBe(2);
+    // Anchor row: starts at xForCol(code col 2) = the tab's 4 cells + one.
+    expect(sels[0]!.getAttribute("style")).toContain(`left:${5 * cw}px`);
+    // Head row: ends at xForCol(code col 2) of "cd".
+    expect(sels[1]!.getAttribute("style")).toContain(`width:${2 * cw}px`);
+    if (!wasOn) {
+      el(".editor-ws-btn").click();
+      await tick();
+    }
+    // The selection is REAL: one keystroke replaces the cross-row range.
+    key("Z");
+    await tick();
+    expect(els(".editor-line").map((r) => r.textContent)).toEqual(["1\taZ"]);
+    // Same cache-invalidation exit as the pins above.
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: EDIT_PATH, mtimeMs: 2300 });
+    await tick();
+  });
+
+  it("alt+click adds carets and one keystroke edits at EVERY caret (DOM seam)", async () => {
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "ab\ncd");
+    const rows = els(".editor-line");
+    // The shipped CLICK-POINT rule: alt+click adds a caret where clicked
+    // (0,1) then (1,1); the base caret from the load rides along at (0,0).
+    rows[0]!.dispatchEvent({ type: "mousedown", altKey: true, currentTarget: rows[0], clientX: 8, clientY: 60 } as unknown as Event);
+    await tick();
+    rows[1]!.dispatchEvent({ type: "mousedown", altKey: true, currentTarget: rows[1], clientX: 8, clientY: 75 } as unknown as Event);
+    await tick();
+    // Three painted carets' worth of selection state -> type once, edits land at all.
+    key("X");
+    await tick();
+    expect(els(".editor-line").map((r) => r.textContent)).toEqual(["1XaXb", "2cXd"]);
+    // Leave the buffer CLEAN for the pins that reuse this path (a dirty
+    // session would short-circuit the next openFile's readFile request).
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: EDIT_PATH, mtimeMs: 2100 });
+    await tick();
+  });
+
+  it("the matched-pair tint appears on bracket adjacency and vanishes on move", async () => {
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "( ) x");
+    // Caret at (0,0) sits right of nothing but ADJACENT to "(" -> the pair
+    // (0,0)-(0,2) is tinted (one cell each side).
+    expect(els(".editor-match").length).toBe(2);
+    key("End"); // caret to the line end -- nothing adjacent anymore
+    await tick();
+    expect(els(".editor-match").length).toBe(0);
+    // Cleanup INLINE (the shared openFile helper needs the NEXT test's read
+    // to actually ship): text-space then delete leaves the same bytes but
+    // dirty, and a SUCCESSFUL save drops the read cache (doctrine) so the
+    // next openFile re-reads instead of reopening zero-traffic off cache.
+    key(" ");
+    await tick();
+    key("Backspace");
+    await tick();
+    clearSent();
+    key("s", { ctrlKey: true });
+    await tick();
+    const save = sent<{ requestId: number }>("saveFile").pop()!;
+    ws.fireMessage({ type: "fileOpResult", requestId: save.requestId, path: EDIT_PATH, mtimeMs: 2100 });
+    await tick();
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("a tab's whitespace mark occupies EXACTLY its tab-stop cells (marks add no advance)", async () => {
+    await openFile(WSTAB_PATH);
+    await loadComplete(WSTAB_PATH, "x\ty\nz = 1\n"); // 'x'=1, tab at visual 1 -> 3 cells -> stop 4
+    // Marks ON (then restore the per-browser pref for the rest of the suite).
+    const wasOn = el(".editor-ws-btn").getAttribute("aria-pressed") === "true";
+    if (!wasOn) {
+      el(".editor-ws-btn").click();
+      await tick();
+    }
+    // The marks are ZERO-IMPACT OVERLAYS: the
+    // wrapper carries the REAL whitespace character -- the flow advance
+    // equals the unmarked line's whatever face the browser paints (CSS
+    // tab-size still expands the tab to its stop) -- and the glyph is a
+    // separate aria-hidden span out of the flow. Arrow at the tab's cell
+    // start, dot over the space, and the DOM text stays honest. (In-flow
+    // mark glyphs ride raw fallback metrics -- the drift this shape makes
+    // impossible.)
+    const tabMark = els(".editor-line .ws-tab")[0]!;
+    expect(tabMark.textContent).toBe("\u2192\t"); // overlay arrow + the REAL tab
+    const spaceMark = els(".editor-line .ws-space")[0]!;
+    expect(spaceMark.textContent).toBe("\u00b7 "); // overlay dot + the REAL space
+    const glyphs = els(".editor-line .ws-glyph");
+    expect(glyphs.length).toBeGreaterThan(0);
+    for (const glyph of glyphs) expect(glyph.getAttribute("aria-hidden")).toBe("true");
+    if (!wasOn) {
+      el(".editor-ws-btn").click();
+      await tick();
+    }
+  });
+
+  it("the webfont settling re-measures the shared cell width and repaints the caret", async () => {
+    const ed = await import("@extensions/webui/ui/editor.tsx");
+    await openFile(EDIT_PATH);
+    await loadComplete(EDIT_PATH, "0123456789");
+    key("End"); // caret at column 10
+    await tick();
+    const caretStyle = (): string => el(".editor-caret").getAttribute("style") ?? "";
+    // No layout in the test DOM -> the deterministic fallback cell (8px).
+    expect(ed.charWidth()).toBe(8);
+    expect(caretStyle()).toContain("left:80px"); // 10 cells x 8
+    // The webfont finishes: the probe now measures a wider mono advance (a
+    // swapped-in Reddit Mono). document.fonts drives this in a real browser;
+    // the injected reader stands in for the probe's offsetWidth here.
+    expect(ed.remeasureCharWidth(() => 1200)).toBe(true); // 100 glyphs -> 12/cell
+    expect(ed.charWidth()).toBe(12);
+    await tick();
+    // Mounted editors repainted: the caret re-placed onto the new advance, and
+    // the click hit-test shares the SAME mapping (xForCol/colForX), so a click
+    // and the caret it lands on stay glued together -- no column drift.
+    expect(caretStyle()).toContain("left:120px"); // 10 cells x 12
+    // The font-settled wiring: a FontFaceSet whose set is ready re-measures.
+    let settled = false;
+    await ed.installFontRemeasure(
+      { ready: Promise.resolve(), load: () => (settled = true, Promise.resolve()) },
+      () => 800, // back to the fallback advance on settle
+    );
+    await tick();
+    expect(settled).toBe(true); // the exact code faces were requested
+    await tick();
+    expect(ed.charWidth()).toBe(8); // restored (ready re-measured to 8)
+  });
+
+  // ── the foot-bar caret readout + jump ────────────────────────────────────
+  // Dedicated paths throughout: a read-only pin leaves its path's cache
+  // WARM, so sharing EDIT_PATH (or itself) would silently short-circuit the
+  // next openFile's read -- one path per pin keeps every openFile paying
+  // (and answering) its own read, and afterEach's confirmed close drops
+  // whatever dirt the typing pins leave behind.
+
+  const GOTO_PATH = "/rootA/wgoto.txt";
+  const GOTO2_PATH = "/rootA/wgoto2.txt";
+  const GOTO3_PATH = "/rootA/wgoto3.txt";
+  const GOTO4_PATH = "/rootA/wgoto4.txt";
+  const GOTO5_PATH = "/rootA/wgoto5.txt";
+  const GOTO6_PATH = "/rootA/wgoto6.txt";
+  const GOTO7_PATH = "/rootA/wgoto7.txt";
+  const GOTO8_PATH = "/rootA/wgoto8.txt";
+
+  /** Write a spec into the open jump box and submit it with Enter. */
+  async function gotoType(spec: string): Promise<void> {
+    const box = el(".editor-goto-input") as unknown as HTMLElement & { value: string };
+    box.value = spec;
+    box.dispatchEvent({ type: "input" } as unknown as Event);
+    await tick();
+    box.dispatchEvent({ type: "keydown", key: "Enter" } as unknown as Event);
+    await tick();
+  }
+
+  it("the caret readout shows row:col, follows a click, and advances as you type", async () => {
+    await openFile(GOTO_PATH);
+    await loadComplete(GOTO_PATH, "hello world\nsecond line here");
+    const { charWidth } = await import("@extensions/webui/ui/editor.tsx");
+    const cw = charWidth();
+    expect(el(".editor-goto-btn").textContent).toBe("1:1");
+    // A click places the caret (row mousedown; the zero-rect fallback keeps
+    // x == the column's cell) and the readout rides the repaint for free.
+    const rows = els(".editor-line");
+    rows[1]!.dispatchEvent({ type: "mousedown", currentTarget: rows[1], clientX: 6 * cw, clientY: 75 } as unknown as Event);
+    await tick();
+    expect(el(".editor-goto-btn").textContent).toBe("2:7");
+    // Typing advances the column one cell per character.
+    key("z");
+    await tick();
+    expect(el(".editor-goto-btn").textContent).toBe("2:8");
+    key("z");
+    await tick();
+    expect(el(".editor-goto-btn").textContent).toBe("2:9");
+  });
+
+  it("clicking the readout swaps in a focused input seeded with the caret position", async () => {
+    await openFile(GOTO2_PATH);
+    await loadComplete(GOTO2_PATH, "seed text\nmore");
+    // SEAT: immediately LEFT of the whitespace toggle.
+    const bar = el(".editor-bar") as unknown as { children: HTMLElement[] };
+    const seats = bar.children.map((k) => k.className);
+    const wsSeat = seats.indexOf("file-reload-btn editor-ws-btn");
+    expect(wsSeat).toBeGreaterThan(0);
+    expect(seats[wsSeat - 1]).toBe("file-reload-btn editor-goto-btn");
+    el(".editor-goto-btn").click();
+    await tick();
+    // PINNED SHAPE: the readout becomes an INPUT carrying the caret value.
+    expect(document.querySelector(".editor-goto-btn")).toBeNull();
+    const box = el(".editor-goto-input") as unknown as HTMLElement & { value: string };
+    expect(box).toBeTruthy();
+    expect(box.value).toBe("1:1");
+    expect(document.activeElement).toBe(box as unknown as Element);
+  });
+
+  it("Enter jumps to N:M, collapses a multi-caret list to one, and closes the box", async () => {
+    const lines12 = Array.from({ length: 12 }, (_, i) => `line-${i + 1} padding`);
+    await openFile(GOTO3_PATH);
+    await loadComplete(GOTO3_PATH, lines12.join("\n") + "\n");
+    // Seed TWO carets through the alt+click seam (base at 0:1, added at 2:2).
+    els(".editor-line")[1]!.dispatchEvent({ type: "mousedown", altKey: true, currentTarget: els(".editor-line")[1], clientX: 8, clientY: 75 } as unknown as Event);
+    await tick();
+    el(".editor-goto-btn").click();
+    await tick();
+    await gotoType("10:5");
+    expect(document.querySelector(".editor-goto-input")).toBeNull();
+    expect(el(".editor-goto-btn").textContent).toBe("10:5");
+    const { charWidth } = await import("@extensions/webui/ui/editor.tsx");
+    const caret = el(".editor-caret");
+    expect(caret.parentElement!.parentElement!.getAttribute("data-line")).toBe("10");
+    expect(caret.getAttribute("style")).toContain(`left:${4 * charWidth()}px`);
+    // Focus returns to the capture textarea: the editor keeps the keystrokes.
+    expect(document.activeElement).toBe(el(".editor-input") as unknown as Element);
+    // SINGLE caret (pinned): one keystroke edits exactly ONE row -- the
+    // alt+click caret on row 2 is gone, so no second "Q" appears anywhere.
+    key("Q");
+    await tick();
+    const texts = els(".editor-line").map((r) => r.textContent);
+    expect(texts[9]).toBe("10lineQ-10 padding");
+    expect(texts.filter((t) => (t ?? "").includes("Q"))).toHaveLength(1);
+  });
+
+  it("bare N jumps to the line KEEPING the column, clamped to the target line's length", async () => {
+    const content = ["x".repeat(60), "pad", "pad", "pad", "pad", "pad", "xyz", "pad", "pad"].join("\n") + "\n";
+    await openFile(GOTO4_PATH);
+    await loadComplete(GOTO4_PATH, content);
+    const { charWidth } = await import("@extensions/webui/ui/editor.tsx");
+    const cw = charWidth();
+    // Park the caret at column 39 (readout 1:40) on the long line.
+    const row0 = els(".editor-line")[0]!;
+    row0.dispatchEvent({ type: "mousedown", currentTarget: row0, clientX: 39 * cw, clientY: 60 } as unknown as Event);
+    await tick();
+    expect(el(".editor-goto-btn").textContent).toBe("1:40");
+    el(".editor-goto-btn").click();
+    await tick();
+    await gotoType("7");
+    // Line 7 is "xyz" (3 chars): the kept column CLAMPS to its end, and the
+    // readout says so (col 3 -> 4 displayed).
+    expect(el(".editor-goto-btn").textContent).toBe("7:4");
+    const caret = el(".editor-caret");
+    expect(caret.parentElement!.parentElement!.getAttribute("data-line")).toBe("7");
+    expect(caret.getAttribute("style")).toContain(`left:${3 * cw}px`);
+  });
+
+  it("invalid specs refuse honestly: no jump, the box STAYS open, the buffer never moves", async () => {
+    await openFile(GOTO5_PATH);
+    await loadComplete(GOTO5_PATH, "abcdef\nghijkl\n");
+    el(".editor-goto-btn").click();
+    await tick();
+    for (const bad of ["abc", "0:5", "1:x", "1:2:3", ""]) {
+      await gotoType(bad);
+      const box = document.querySelector(".editor-goto-input") as unknown as (HTMLElement & { value: string }) | null;
+      // PINNED: a refused spec keeps the box open (fix it, do not reopen it).
+      expect(box).toBeTruthy();
+      expect(box!.value).toBe(bad);
+      expect(document.querySelector(".editor-goto-btn")).toBeNull();
+    }
+    // The caret never moved and nothing was edited.
+    expect(el(".editor-caret").parentElement!.parentElement!.getAttribute("data-line")).toBe("1");
+    expect(el(".editor-goto-btn")).toBeNull(); // still in input mode
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+  });
+
+  it("Escape cancels and a bare blur cancels: readout back, caret unmoved, editor refocused", async () => {
+    await openFile(GOTO6_PATH);
+    await loadComplete(GOTO6_PATH, "abcdef\nghijkl\nmnopqr\n");
+    // Blur WITHOUT submit: cancel, never a jump.
+    el(".editor-goto-btn").click();
+    await tick();
+    let box = el(".editor-goto-input") as unknown as HTMLElement & { value: string };
+    box.value = "3";
+    box.dispatchEvent({ type: "input" } as unknown as Event);
+    await tick();
+    box.dispatchEvent({ type: "blur" } as unknown as Event);
+    await tick();
+    expect(document.querySelector(".editor-goto-input")).toBeNull();
+    expect(el(".editor-goto-btn").textContent).toBe("1:1");
+    // Escape: same cancel, and focus lands back on the capture textarea.
+    el(".editor-goto-btn").click();
+    await tick();
+    box = el(".editor-goto-input") as unknown as HTMLElement & { value: string };
+    box.value = "2";
+    box.dispatchEvent({ type: "input" } as unknown as Event);
+    await tick();
+    box.dispatchEvent({ type: "keydown", key: "Escape" } as unknown as Event);
+    await tick();
+    expect(document.querySelector(".editor-goto-input")).toBeNull();
+    expect(el(".editor-goto-btn").textContent).toBe("1:1");
+    expect(document.activeElement).toBe(el(".editor-input") as unknown as Element);
+    // And the caret is where it was: the next keystroke lands at row 1 col 0.
+    key("Z");
+    await tick();
+    expect(els(".editor-line")[0]!.textContent).toBe("1Zabcdef");
+  });
+
+  it("keystrokes in the jump box never reach the buffer (native keydown isolation)", async () => {
+    await openFile(GOTO7_PATH);
+    await loadComplete(GOTO7_PATH, "unchanged\n");
+    el(".editor-goto-btn").click();
+    await tick();
+    const box = el(".editor-goto-input") as unknown as HTMLElement;
+    // Ordinary chars, chords, even the editor's own keys -- the editor's
+    // handler rides the textarea, so the box's keystrokes die with the box.
+    // Ordinary chars, chords, even the editor's own editing keys -- the
+    // editor's handler rides the textarea, so the box's keystrokes die with
+    // the box (Enter is deliberately absent: that chord belongs to the box,
+    // pinned by the jump tests above).
+    for (const k of ["x", "Backspace", "Delete", "Tab", "ArrowDown"]) {
+      box.dispatchEvent({ type: "keydown", key: k } as unknown as Event);
+    }
+    box.dispatchEvent({ type: "keydown", key: "a", ctrlKey: true } as unknown as Event);
+    await tick();
+    expect(codeText()).toBe("unchanged");
+    expect(els(".editor-line").length).toBe(1);
+    expect(document.querySelector(".workbench-dirty")).toBeNull();
+    expect(document.querySelector(".editor-goto-input")).toBeTruthy();
+  });
+
+  it("a jump to an off-screen line scrolls the windowed slice along (viewport scrollTop)", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => `row ${i + 1}`).join("\n") + "\n";
+    await openFile(GOTO8_PATH);
+    await loadComplete(GOTO8_PATH, many);
+    // Give the viewport a real height (400px = 20 rows) through the scroll
+    // event, the same channel the browser uses; the window is rows 1..32.
+    const viewport = el(".editor-viewport") as unknown as HTMLElement & { clientHeight: number; scrollTop: number };
+    viewport.clientHeight = 400;
+    viewport.scrollTop = 0;
+    viewport.dispatchEvent({ type: "scroll", currentTarget: viewport } as unknown as Event);
+    await tick();
+    const visible = (): string[] => els(".editor-line").map((r) => r.getAttribute("data-line")!);
+    expect(visible()).toContain("1");
+    expect(visible()).not.toContain("50");
+    el(".editor-goto-btn").click();
+    await tick();
+    await gotoType("50");
+    // THE WINDOWING PIN: the slice followed the caret (scrollIntoView has no
+    // other path here -- the caret paints inside the rendered window).
+    expect(visible()).toContain("50");
+    expect(visible()).not.toContain("1");
+    const caret = el(".editor-caret");
+    expect(caret.parentElement!.parentElement!.getAttribute("data-line")).toBe("50");
+    expect(el(".editor-goto-btn").textContent).toBe("50:1");
+    // The viewport itself carries the jump: row 50 bottom-aligned (50*20+20-400).
+    expect(viewport.scrollTop).toBe(600);
   });
 });
 
@@ -6350,5 +7815,100 @@ describe("auth lifecycle", () => {
     document.dispatchEvent({ type: "keydown", ctrlKey: true, shiftKey: true, key: "l", preventDefault: () => {} } as unknown as Event);
     await tick();
     expect(loginHidden()).toBe(false);
+  });
+});
+
+// ── Composer caret restore seam: the no-steal matrix ────────────────────────
+// The boot pin above drove the mount-time hydrate end-to-end (seeded text +
+// caret record landed; the CLEARED marker took the selection but no focus).
+// main-ui is only class-hidden, so there is no in-file remount route -- the
+// matrix runs the SAME exported seam the mount ref calls
+// (seedWorkbenchStoreFromStorage precedent: the test calls the exact routine).
+
+describe("composer caret restore seam (no-steal matrix)", () => {
+  const restoreComposerCaret = appModule.restoreComposerCaret as (
+    el: HTMLElement,
+    caret: { start: number; end: number; focused: boolean },
+  ) => void;
+  const composer = () =>
+    el("#chat-input") as unknown as {
+      value: string;
+      selectionStart: number | null;
+      selectionEnd: number | null;
+    };
+  const active = () => document.activeElement as unknown as HTMLElement | null;
+  const unfocus = () => {
+    (active() as { blur?: () => void } | null)?.blur?.();
+  };
+
+  it("marker set + nobody owns focus: selection AND focus land", () => {
+    unfocus();
+    composer().value = "focus me please";
+    restoreComposerCaret(el("#chat-input"), { start: 2, end: 6, focused: true });
+    expect(composer().selectionStart).toBe(2);
+    expect(composer().selectionEnd).toBe(6);
+    expect(active()).toBe(el("#chat-input"));
+  });
+
+  it("marker clear: the selection lands, focus stays put", () => {
+    unfocus();
+    composer().value = "selection only";
+    restoreComposerCaret(el("#chat-input"), { start: 4, end: 4, focused: false });
+    expect(composer().selectionStart).toBe(4);
+    expect(active()).not.toBe(el("#chat-input"));
+  });
+
+  it("no steal: an element holding focus keeps it, marker or not", () => {
+    unfocus();
+    composer().value = "stay away";
+    el("#search-btn").focus();
+    restoreComposerCaret(el("#chat-input"), { start: 1, end: 1, focused: true });
+    expect(composer().selectionStart).toBe(1); // the selection still lands
+    expect(active()).toBe(el("#search-btn"));
+  });
+
+  it("no steal while the SEARCH panel owns focus (openSearch focuses deliberately)", async () => {
+    unfocus();
+    composer().value = "search guard";
+    el("#search-btn").click();
+    await tick();
+    expect(active()).toBe(el("#search-input")); // the a11y batch's own handoff
+    restoreComposerCaret(el("#chat-input"), { start: 3, end: 3, focused: true });
+    expect(composer().selectionStart).toBe(3);
+    expect(active()).toBe(el("#search-input"));
+    key(el("#search-input"), "Escape");
+    await tick();
+    expect(document.querySelector("#search-panel")).toBeNull();
+  });
+
+  it("no steal while the SETTINGS dialog owns focus (openSettings focuses deliberately)", async () => {
+    unfocus();
+    composer().value = "settings guard";
+    el("#settings-btn").click();
+    await tick();
+    expect(active()).toBe(el("#settings-view"));
+    restoreComposerCaret(el("#chat-input"), { start: 3, end: 3, focused: true });
+    expect(composer().selectionStart).toBe(3);
+    expect(active()).toBe(el("#settings-view"));
+    key(el("#settings-view"), "Escape");
+    await tick();
+    expect(document.querySelector("#settings-view")).toBeNull();
+    unfocus();
+  });
+
+  it("a caret past the text clamps into the value (record vs. drifted draft)", () => {
+    unfocus();
+    composer().value = "short";
+    restoreComposerCaret(el("#chat-input"), { start: 40, end: 50, focused: false });
+    expect(composer().selectionStart).toBe(5);
+    expect(composer().selectionEnd).toBe(5);
+  });
+
+  it("a reversed record clamps to a sane range (e < s can never happen live)", () => {
+    unfocus();
+    composer().value = "abcdef";
+    restoreComposerCaret(el("#chat-input"), { start: 4, end: 2, focused: false });
+    expect(composer().selectionStart).toBe(4);
+    expect(composer().selectionEnd).toBe(4);
   });
 });

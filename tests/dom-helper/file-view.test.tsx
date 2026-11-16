@@ -15,12 +15,16 @@ import {
   moreFileView,
   applyReadFile,
   setFileViewLang,
+  retargetFileView,
+  forgetFileViews,
   guessLang,
   tokenizeLine,
   tokenizeFileLines,
   revealLine,
   type FileViewsState,
 } from "@extensions/webui/ui/file-view.tsx";
+import { FileEditor } from "@extensions/webui/ui/editor.tsx";
+import { bufferFromContent, type EditorSession } from "@extensions/webui/ui/editor-buffer.ts";
 import { mount, type DomNode, type Mounted } from "@utils/jsx";
 
 const noop = (): void => {};
@@ -311,6 +315,30 @@ describe("viewer state ops", () => {
     expect(p.views[PATH]!.error).toBe("not found: gone");
     expect(moreFileView(p, PATH).fetch).toBeNull();
   });
+
+  it("retargetFileView MOVES the entry with its lines + lang and drops stale pending; forgetFileViews sweeps the subtree", () => {
+    let p = openFileView(emptyFileViews(), PATH).state;
+    p = applyReadFile(p, 1, { type: "readFileResult", requestId: 1, path: PATH, content: "a\nb\n" });
+    p = setFileViewLang(p, PATH, "go");
+    const moved = retargetFileView(p, PATH, "/rootA/renamed.ts");
+    expect(moved.views[PATH]).toBeUndefined();
+    expect(moved.views["/rootA/renamed.ts"]!.lines).toEqual(["a", "b"]);
+    expect(moved.views["/rootA/renamed.ts"]!.lang).toBe("go"); // the paint override rides
+    // An in-flight request for the OLD path drops (no resurrection).
+    let q = openFileView(emptyFileViews(), PATH).state;
+    expect(Object.keys(q.pending)).toHaveLength(1);
+    q = retargetFileView(q, PATH, "/rootA/moved.ts");
+    expect(Object.keys(q.pending)).toHaveLength(0);
+    const dead = applyReadFile(q, 1, { type: "readFileResult", requestId: 1, content: "ghost\n" });
+    expect(dead.views[PATH]).toBeUndefined();
+    // forgetFileViews: the deleted dir takes every under-path view with it.
+    let f = openFileView(emptyFileViews(), "/rootA/dir/a.ts").state;
+    f = openFileView(f, "/rootA/dir/deep/b.ts").state;
+    f = openFileView(f, "/rootA/keep.ts").state;
+    f = forgetFileViews(f, "/rootA/dir");
+    expect(Object.keys(f.views)).toEqual(["/rootA/keep.ts"]);
+    expect(forgetFileViews(f, "/rootA/dir")).toBe(f); // no-op: same object
+  });
 });
 
 // ── Rendering ────────────────────────────────────────────────────────────────
@@ -564,5 +592,89 @@ describe("markdown file rendering (frontmatter behind prescan)", () => {
     expect(tokenizeFileLines(['{"k": 1}'], "json")[0]!.some((r) => r.type === "key")).toBe(true);
     expect(tokenizeFileLines(["x"], undefined)).toEqual([[{ type: "default", text: "x" }]]);
     expect(tokenizeFileLines([], "markdown")).toEqual([]);
+  });
+});
+
+// ── Editor foot bar syntax chooser ──────────────────────────────────────────
+// The paint override must live in BOTH bars: when the
+// editor took over editable files the chooser vanished with the read-only
+// bar. These pins keep the editor bar from silently dropping the
+// affordance: same choices, same marks, same store seam as the viewer.
+
+describe("editor foot bar syntax chooser", () => {
+  const session = (): EditorSession => ({
+    path: PATH,
+    buffer: bufferFromContent("echo one"),
+    baseMtimeMs: 1,
+    saving: false,
+  });
+
+  function renderEditor(props: {
+    lang: string | undefined;
+    guessed: string | undefined;
+    override?: string;
+    onLang?: (p: string, lang: string | null) => void;
+  }): HTMLElement {
+    const host = document.createElement("div");
+    current = mount(
+      <FileEditor
+        path={PATH}
+        session={session()}
+        lang={props.lang}
+        guessed={props.guessed}
+        override={props.override}
+        onLang={props.onLang ?? noop}
+        showWs={false}
+        onCommit={noop}
+        onSave={noop}
+        onReload={noop}
+        onToggleWs={noop}
+      />,
+      host as unknown as DomNode,
+    );
+    return host.querySelector(".editor") as unknown as HTMLElement;
+  }
+
+  it("the bar carries the chooser: Auto leads and is selected, the guess is marked, tokens prove the lang", () => {
+    const auto = renderEditor({ lang: "shell", guessed: "shell" });
+    const sel = auto.querySelector(".editor-bar .file-view-lang");
+    expect(sel).not.toBeNull();
+    expect(sel!.getAttribute("aria-label")).toBe("Syntax highlighting language");
+    const opts = Array.from(sel!.querySelectorAll("option"));
+    const marked = opts.filter((o) => o.hasAttribute("selected"));
+    expect(marked).toHaveLength(1);
+    expect(marked[0]!.getAttribute("value")).toBe("");
+    expect(text(marked[0]!)).toContain("Auto (Shell)");
+    expect(text(opts.find((o) => o.getAttribute("value") === "shell")!)).toContain("(auto)");
+    // The paint lang folds into the line layer through the shared tokenizer.
+    expect(text(auto.querySelector(".editor-line .tk-command")!)).toBe("echo");
+  });
+
+  it("an override repaints and rides the accent; a choice equal to the guess does not flag", () => {
+    const plain = renderEditor({ lang: "plain", guessed: "shell", override: "plain" });
+    expect(plain.querySelector(".editor-line .tk-command")).toBeNull();
+    expect(plain.querySelector(".file-view-lang")!.classList.contains("is-overridden")).toBe(true);
+    const same = renderEditor({ lang: "shell", guessed: "shell", override: "shell" });
+    expect(same.querySelector(".file-view-lang")!.classList.contains("is-overridden")).toBe(false);
+  });
+
+  it("chooser changes route to the shared seam: named lang, and the empty value hands back the guess", () => {
+    const asked: [string, string | null][] = [];
+    const root = renderEditor({
+      lang: "shell",
+      guessed: "shell",
+      onLang: (p, lang) => {
+        asked.push([p, lang]);
+      },
+    });
+    const sel = root.querySelector(".file-view-lang")!;
+    (sel as unknown as { value: string }).value = "python";
+    sel.dispatchEvent({ type: "change", currentTarget: sel } as unknown as Event);
+    (sel as unknown as { value: string }).value = "";
+    sel.dispatchEvent({ type: "change", currentTarget: sel } as unknown as Event);
+    expect(asked).toEqual([
+      [PATH, "python"],
+      [PATH, null],
+    ]);
   });
 });

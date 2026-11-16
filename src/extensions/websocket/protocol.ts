@@ -75,6 +75,43 @@ export const C2S = {
   // byte-identical. Binary files are refused honestly with zero content
   // bytes. Replied with READ_FILE_RESULT, requesting socket only.
   READ_FILE: "readFile",
+  // Create an EMPTY file: { type, requestId, path }. Refuses if the target
+  // exists (file, dir or symlink -- nothing is clobbered) and if the parent
+  // directory does not already exist (NO mkdir -p); the parent dir passes
+  // resolveSafe like every other path. Replied with FILE_OP_RESULT.
+  CREATE_FILE: "createFile",
+  // Create a directory: { type, requestId, path }. Same gates as createFile
+  // (no parents invented). Replied with FILE_OP_RESULT.
+  CREATE_DIR: "createDir",
+  // Rename/move within the workspace: { type, requestId, oldPath, newPath }.
+  // BOTH paths pass resolveSafe; refuses a missing source, an existing
+  // target (nothing is clobbered), and renaming a workspace ROOT itself.
+  // Renaming a directory carries its subtree: resolveSafe runs on the target,
+  // so descendants land wherever roots/deny say the NEW spelling does (a move
+  // whose destination is denylisted/outside is refused before anything moves).
+  // Replied with FILE_OP_RESULT.
+  RENAME_PATH: "renamePath",
+  // Delete a file, symlink or directory: { type, requestId, path }.
+  // resolveSafe'd; refuses the workspace root. Directories are deleted
+  // RECURSIVELY (the UI confirms with honest copy first; the server just
+  // deletes). Symlinked entries are unlinked, never followed into their
+  // target. Replied with FILE_OP_RESULT.
+  DELETE_PATH: "deletePath",
+  // Write a text file (the editor's save seam): { type, requestId, path,
+  // content, baseMtimeMs? }. resolveSafe'd; refuses directories and symlink
+  // targets at the path itself (O_NOFOLLOW posture -- never write THROUGH a
+  // link). The content is capped (see MAX_FILE_WRITE_BYTES) and written
+  // ATOMICALLY (per-op temp + rename in the same directory; the temp is
+  // removed on failure). Same-path saves are SERIALIZED server-side (whole
+  // gate+write+rename section), so two racing writers sharing one base get
+  // exactly ONE ok and ONE conflict -- never two oks over a lost write.
+  // Conflict gate: when the file exists and its current
+  // mtimeMs differs from baseMtimeMs (a create-then-save flow sends 0 or
+  // omits it), the reply carries conflict:true + the CURRENT mtimeMs and
+  // NOTHING is written -- the editor offers overwrite (resend with the fresh
+  // mtime) or reload. Success carries the new mtimeMs. Replied with
+  // FILE_OP_RESULT.
+  SAVE_FILE: "saveFile",
   // Edit ONE config value (settings editor, every setting the CONFIG FILE can
   // affect): { type, requestId, keyPath, value?, valueText? }. keyPath is a
   // dotted CONFIG PATH that may address array elements by index
@@ -142,6 +179,11 @@ export const S2C = {
   // Reply to C2S READ_FILE (requesting socket only), correlated by requestId.
   // Same error-field doctrine as LIST_DIR_RESULT.
   READ_FILE_RESULT: "readFileResult",
+  // Reply to C2S createFile / createDir / renamePath / deletePath / saveFile
+  // (requesting socket only), correlated by requestId. One envelope for the
+  // whole write family: the id already says which op it answers, and every
+  // refusal is the same honest one-liner in `error` (see FileOpResultWire).
+  FILE_OP_RESULT: "fileOpResult",
   // Replied to C2S SET_CONFIG_KEY (requesting socket only), correlated by
   // requestId. ok:true carries the persisted value echo + needsRestart:true
   // (the running server still uses the pre-edit value until restart);
@@ -743,14 +785,17 @@ export type EditConfigListResultWire = {
   needsRestart?: boolean;
 };
 
-// ── Workspace file tree + text reader (C2S listDir/readFile → S2C replies) ─
-// The webui workbench's read path (see ./handlers-files.ts). READ-ONLY: zero
-// writes, zero new config keys. CONFINEMENT: every path that arrives off the
-// wire passes Workspace.resolveSafe BEFORE any fs call (no pre-stat, no
-// pre-read), and listings omit entries the denylist would reject -- the tree
-// never offers a dead end. Rejections are honest one-line strings carried in
-// the reply's `error` field (still requestId-correlated); stacks stay
-// server-side (errorFrame covers the unexpected).
+// ── Workspace file tree, text reader, and file ops (C2S listDir/readFile/
+//    createFile/createDir/renamePath/deletePath/saveFile → S2C replies) ──────
+// The webui workbench's file path (see ./handlers-files.ts). Reads are pure;
+// the write family (create/rename/delete/save) is confined the same way and
+// never invents parents or clobbers targets. Zero new config keys.
+// CONFINEMENT: every path that arrives off the wire passes
+// Workspace.resolveSafe BEFORE any fs call (no pre-stat, no pre-read), and
+// listings omit entries the denylist would reject -- the tree never offers a
+// dead end. Rejections are honest one-line strings carried in the reply's
+// `error` field (still requestId-correlated); stacks stay server-side
+// (errorFrame covers the unexpected).
 
 /** Ceiling on entries per directory listing (MAX_CONFIG_ROWS idiom: count
  *  rows, set truncated when the cap cuts). 500 covers a real source dir at
@@ -769,6 +814,14 @@ export const MAX_FILE_READ_CHARS = 256 * 1024;
  *  still cuts the page honestly on wide/long-line files). */
 export const READ_LINES_DEFAULT = 2000;
 export const MAX_READ_LINES = 5000;
+/** Ceiling on the UTF-8 byte length of one saveFile content. DERIVED from
+ *  the read cap, at its SAME numeric ceiling measured in BYTES: the read cap
+ *  counts 256 KiB of UTF-16 chars, and UTF-8 expands a char to at most 4
+ *  bytes, so bytes are the tighter, honest unit to gate a write with -- any
+ *  content that passes 262144 BYTES is also under the char cap for reading
+ *  back (ASCII equality, multibyte strictly under). One number on the seam:
+ *  MAX_FILE_WRITE_BYTES === MAX_FILE_READ_CHARS, pinned in tests. */
+export const MAX_FILE_WRITE_BYTES = MAX_FILE_READ_CHARS;
 
 /** One entry of a directory listing. `path` is absolute (the roots listing
  *  already exposes absolute spellings; the tree walks down from there). */
@@ -825,9 +878,38 @@ export type ReadFileResultWire = {
   content?: string;
   /** More lines exist past this window (line limit or char cap cut it). */
   truncated?: boolean;
+  /** The file's mtime at read time, epoch ms (rounded, same rounding as the
+   *  saveFile conflict gate). The editor records it as the buffer's BASE:
+   *  a later saveFile carries it back, and a mismatch is the conflict.
+   *  Additive: absent on error replies (there is no file to timestamp). */
+  mtimeMs?: number;
   /** Honest one-line rejection (outside roots, denied, not found, is a
    *  directory -- use listDir, binary file (N bytes), line over the char
    *  cap). When set, content/truncated ride absent. */
+  error?: string;
+};
+
+export type FileOpResultWire = {
+  type: "fileOpResult";
+  /** Echo of the C2S request id -- the id already names WHICH op answered. */
+  requestId?: number;
+  /** Success only: the op's primary path, resolved absolute (for renamePath
+   *  the NEW path). */
+  path?: string;
+  /** Success on saveFile: the file's NEW mtime, epoch ms (rounded) -- the
+   *  editor's new base. Conflict refusal: the CURRENT on-disk mtime, so an
+   *  overwrite can be re-sent with it WITHOUT a reload round-trip. */
+  mtimeMs?: number;
+  /** saveFile refusal because the on-disk mtime moved past the caller's
+   *  baseMtimeMs (or the file appeared while it sent 0/absent). Set means
+   *  NOTHING was written and `mtimeMs` holds the fresh value; the editor
+   *  offers overwrite (resend with that mtime) or reload. A plain `error`
+   *  string rides alongside, so a client that ignores conflict still says
+   *  something honest. */
+  conflict?: boolean;
+  /** Honest one-line rejection (escape, denied, exists, parent missing,
+   *  root refused, over the write cap, ...). When set, path/mtimeMs ride
+   *  absent EXCEPT on conflict (which carries the fresh mtimeMs). */
   error?: string;
 };
 

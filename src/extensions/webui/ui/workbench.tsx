@@ -36,7 +36,8 @@ import {
   type WorkbenchTab,
   type WorkbenchTabState,
 } from "./workbench-state.ts";
-import { FileTree, type FileTreePin, type FileTreeState } from "./file-tree.tsx";
+import type { JsxChild } from "@utils/jsx";
+import { FileTree, type FileTreePin, type FileTreeProps, type FileTreeState } from "./file-tree.tsx";
 import { FileView, type FileViewEntry } from "./file-view.tsx";
 
 /** Body wiring for the two real tab kinds; app.tsx owns the state and the
@@ -47,7 +48,9 @@ export interface WorkbenchFileTreeWire {
   onToggleDir: (path: string) => void;
   onOpenFile: (path: string) => void;
   onRefresh: () => void;
-  onContextMenu: (e: MouseEvent | KeyboardEvent, path: string, rowEl: HTMLElement) => void;
+  /** Row-kind aware (see file-tree.tsx FileTreeRowKind): the app builds the
+   *  menu grammar from the kind the row hands over. */
+  onContextMenu: FileTreeProps["onContextMenu"];
 }
 
 export interface WorkbenchFileViewsWire {
@@ -57,6 +60,13 @@ export interface WorkbenchFileViewsWire {
   /** Foot-bar syntax override (see file-view.tsx FileViewEntry.lang).
    *  Optional like the rest of the wire: no chooser without wiring. */
   onLang?: (path: string, lang: string | null) => void;
+  /** The app's file-body projection (editor-core): when wired, the panel
+   *  hands the tab's path + view state to it and renders the result
+   *  INSTEAD of the built-in FileView -- that is how editable files swap in
+   *  the editor while refused/over-cap files keep the viewer, without the
+   *  panel learning what an editor is. Absent = the built-in viewer,
+   *  byte-identical. */
+  renderBody?: (path: string, view: FileViewEntry | undefined) => JsxChild;
 }
 
 /** The app's tab store. Tab producers (the phases that open files, settings,
@@ -392,13 +402,17 @@ export function WorkbenchPanel(p: WorkbenchPanelProps) {
                 pin={treePin}
               />
             ) : bodyTab.kind === "file" && p.fileViews ? (
-              <FileView
-                path={bodyTab.id}
-                view={p.fileViews.views[bodyTab.id]}
-                onReload={p.fileViews.onReload}
-                onMore={p.fileViews.onMore}
-                onLang={p.fileViews.onLang}
-              />
+              p.fileViews.renderBody ? (
+                p.fileViews.renderBody(bodyTab.id, p.fileViews.views[bodyTab.id])
+              ) : (
+                <FileView
+                  path={bodyTab.id}
+                  view={p.fileViews.views[bodyTab.id]}
+                  onReload={p.fileViews.onReload}
+                  onMore={p.fileViews.onMore}
+                  onLang={p.fileViews.onLang}
+                />
+              )
             ) : (
               <p className="workbench-placeholder">
                 {bodyTab.label} -- placeholder body; real tab content ships with the tab kinds.

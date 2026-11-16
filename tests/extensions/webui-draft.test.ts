@@ -2,8 +2,10 @@
 import { describe, expect, it, jest } from "bun:test";
 import {
   DRAFT_STORAGE_KEY,
+  DRAFT_CARET_STORAGE_KEY,
   type DraftStorage,
   loadDraft,
+  loadDraftCaret,
   saveDraft,
   clearDraft,
   scheduleDraftSave,
@@ -141,6 +143,152 @@ describe("storage failures never propagate", () => {
       jest.advanceTimersByTime(250);
       flushDraftSave();
       scheduleDraftSave(() => "text", s);
+      expect(() => flushDraftSave()).not.toThrow();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+// ── Caret + focus record (saved alongside the text) ────
+// Sibling key beside the draft: the text wire format stays raw, the caret
+// rides its own strict-decoded record. Written ONLY through the debounced
+// save path (the composer's own seam) -- the same coalesced snapshot, so
+// text and caret can never disagree.
+
+describe("caret record: debounced roundtrip", () => {
+  it("the debounced save writes text + caret + marker together", () => {
+    jest.useFakeTimers();
+    try {
+      const s = new FakeStorage();
+      scheduleDraftSave(() => "half typed", s, () => ({ start: 4, end: 9, focused: true }));
+      jest.advanceTimersByTime(250);
+      expect(s.map.get(DRAFT_STORAGE_KEY)).toBe("half typed");
+      expect(loadDraftCaret(s)).toEqual({ start: 4, end: 9, focused: true });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("coalesced schedules carry the LATEST text and the LATEST caret", () => {
+    jest.useFakeTimers();
+    try {
+      const s = new FakeStorage();
+      let text = "o";
+      let caret = { start: 1, end: 1, focused: false };
+      scheduleDraftSave(() => text, s, () => caret);
+      text = "on";
+      caret = { start: 2, end: 2, focused: true };
+      scheduleDraftSave(() => text, s, () => caret);
+      jest.advanceTimersByTime(250);
+      expect(loadDraft(s)).toBe("on");
+      expect(loadDraftCaret(s)).toEqual({ start: 2, end: 2, focused: true });
+      expect(s.writes).toBe(2); // one text key + one caret key, one coalesced write
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("the unload flush carries the caret too (fire-time read, latest posture)", () => {
+    jest.useFakeTimers();
+    try {
+      const s = new FakeStorage();
+      let focused = true;
+      scheduleDraftSave(() => "typo fixed", s, () => ({ start: 3, end: 3, focused }));
+      focused = false; // the user clicked away before the page died
+      flushDraftSave();
+      expect(loadDraft(s)).toBe("typo fixed");
+      expect(loadDraftCaret(s)).toEqual({ start: 3, end: 3, focused: false });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("empty text takes the caret record with the draft", () => {
+    jest.useFakeTimers();
+    try {
+      const s = new FakeStorage();
+      scheduleDraftSave(() => "typed", s, () => ({ start: 2, end: 2, focused: true }));
+      jest.advanceTimersByTime(250);
+      expect(loadDraftCaret(s)).not.toBeNull();
+      scheduleDraftSave(() => "", s, () => ({ start: 2, end: 2, focused: true }));
+      jest.advanceTimersByTime(250);
+      expect(s.map.has(DRAFT_STORAGE_KEY)).toBe(false);
+      expect(s.map.has(DRAFT_CARET_STORAGE_KEY)).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("a caller without a caret getter leaves the caret record alone", () => {
+    jest.useFakeTimers();
+    try {
+      const s = new FakeStorage();
+      scheduleDraftSave(() => "typed", s, () => ({ start: 2, end: 2, focused: true }));
+      jest.advanceTimersByTime(250);
+      scheduleDraftSave(() => "retyped", s); // no getter: text-only write
+      jest.advanceTimersByTime(250);
+      expect(loadDraft(s)).toBe("retyped");
+      expect(loadDraftCaret(s)).toEqual({ start: 2, end: 2, focused: true });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("cancelDraftSave drops the caret write with the text write", () => {
+    jest.useFakeTimers();
+    try {
+      const s = new FakeStorage();
+      scheduleDraftSave(() => "sent", s, () => ({ start: 1, end: 1, focused: true }));
+      cancelDraftSave();
+      jest.advanceTimersByTime(1000);
+      flushDraftSave();
+      expect(s.writes).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe("caret record: strict decode + clear + throwing storage", () => {
+  it("loadDraftCaret: missing key means no restore", () => {
+    expect(loadDraftCaret(new FakeStorage())).toBeNull();
+  });
+
+  it("garbage records decode to null (a wrong caret is worse than none)", () => {
+    const junk = ["not json", "42", '"a string"', "null", "[1,2]", "{}", '{"s":1}', '{"s":1,"e":0}', '{"s":-1,"e":2}', '{"s":1.5,"e":2}', '{"s":"1","e":"2"}'];
+    for (const raw of junk) {
+      const s = new FakeStorage();
+      s.map.set(DRAFT_CARET_STORAGE_KEY, raw);
+      expect(loadDraftCaret(s)).toBeNull();
+    }
+  });
+
+  it("focused is strictly the 1 marker: absent/0/garbage reads false", () => {
+    for (const f of [undefined, 0, true, "1", 2]) {
+      const s = new FakeStorage();
+      s.map.set(DRAFT_CARET_STORAGE_KEY, JSON.stringify({ s: 1, e: 2, ...(f === undefined ? {} : { f }) }));
+      expect(loadDraftCaret(s)).toEqual({ start: 1, end: 2, focused: f === 1 });
+    }
+  });
+
+  it("clearDraft removes BOTH keys", () => {
+    const s = new FakeStorage();
+    saveDraft("text", s);
+    s.map.set(DRAFT_CARET_STORAGE_KEY, JSON.stringify({ s: 1, e: 1, f: 1 }));
+    clearDraft(s);
+    expect(s.map.has(DRAFT_STORAGE_KEY)).toBe(false);
+    expect(s.map.has(DRAFT_CARET_STORAGE_KEY)).toBe(false);
+  });
+
+  it("a throwing storage swallows every caret path (private-mode Safari)", () => {
+    jest.useFakeTimers();
+    try {
+      const s = new ThrowingStorage();
+      expect(loadDraftCaret(s)).toBeNull();
+      scheduleDraftSave(() => "text", s, () => ({ start: 1, end: 1, focused: true }));
+      expect(() => jest.advanceTimersByTime(250)).not.toThrow();
+      scheduleDraftSave(() => "text", s, () => ({ start: 1, end: 1, focused: true }));
       expect(() => flushDraftSave()).not.toThrow();
     } finally {
       jest.useRealTimers();

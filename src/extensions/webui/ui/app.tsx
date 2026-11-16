@@ -26,7 +26,7 @@ import {
   clearStoredToken,
   loginAtoms,
 } from "./login.tsx";
-import { loadDraft, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave } from "./draft.ts";
+import { loadDraft, loadDraftCaret, clearDraft, scheduleDraftSave, flushDraftSave, cancelDraftSave, type DraftCaret } from "./draft.ts";
 import {
   applyStoredTheme,
   applyThemeId,
@@ -37,7 +37,7 @@ import {
 import { loadAttachments, saveAttachments, type PendingAttachment } from "./attachment-store.ts";
 import { Sidebar, ContextMenu, clampMenuAnchor, scrollHitIntoView, type ContextMenuItem, type ContextMenuState, type SessionInfo, type LogInfo, type SearchState } from "./sessions.tsx";
 import { Combobox, ComboboxPopup, comboboxAtom } from "./combobox.tsx";
-import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire } from "./chat.ts";
+import type { SearchHitWire, ConfigSnapshotResultWire, SetConfigKeyResultWire, ListDirResultWire, ReadFileResultWire, FileOpResultWire } from "./chat.ts";
 import type { ConfigKeyEditWire, EditConfigListResultWire, TaskInfoWire } from "@extensions/websocket/protocol.ts";
 import { chipLabel, openTargetFor } from "./subagents.tsx";
 import {
@@ -52,7 +52,13 @@ import {
   revealDir,
   toggleDir,
   applyListDir,
+  refreshTreeDir,
+  expandListedDir,
+  forgetTreePath,
+  fileTreeMenuPlan,
   filesTab,
+  type FileTreeMenuPlanItem,
+  type FileTreeRowKind,
   type FileTreeState,
   type TreeFetch,
 } from "./file-tree.tsx";
@@ -63,9 +69,25 @@ import {
   moreFileView,
   applyReadFile,
   setFileViewLang,
+  retargetFileView,
+  forgetFileViews,
+  guessLang,
+  FileView,
+  type FileViewEntry,
   type FileViewsState,
   type FileFetch,
 } from "./file-view.tsx";
+import { FileEditor, loadShowWs, saveShowWs } from "./editor.tsx";
+import {
+  applySaveResult,
+  bufferFromContent,
+  confirmDiscard,
+  contentChars,
+  contentOf,
+  EDIT_CHAR_CAP,
+  EDIT_PAGE_LINES,
+  type EditorSession,
+} from "./editor-buffer.ts";
 import {
   SettingsViewer,
   initialSettingsPanelState,
@@ -666,6 +688,64 @@ function flushDraftOnLeave(): void {
   flushDraftSave();
 }
 
+// The workbench tab strip persists to sessionStorage, so after a reload the
+// strip LOOKS restored while every unsaved editor buffer evaporated with zero
+// prompt. That is the one silent-data-loss path a refresh reaches, so reuse
+// the house leave event to veto it: on fire, if ANY editor session is dirty,
+// preventDefault (and set returnValue for the beforeunload fallback) so the
+// browser shows its own prompt. The predicate is checked on every fire -- no
+// new state, and a clean editor never nags. The custom copy is not honored by
+// modern browsers, so we do not fight it. REGISTERED ON beforeunload
+// UNCONDITIONALLY, not DRAFT_LEAVE_EVENT: a VETO needs a cancelable event,
+// and pagehide is not (its preventDefault/returnValue are no-ops in every
+// modern browser -- the flush-on-pagehide idiom above stays correct because a
+// flush needs no cancellation). The dom-helper window has no onpagehide, so
+// the shared-constant spelling would let tests exercise a branch production
+// never takes.
+function guardUnsavedEditorsOnLeave(e: Event): void {
+  if (!Object.values(editorSessionsAtom()).some((s) => s.buffer.dirty)) return;
+  e.preventDefault();
+  // beforeunload reads returnValue (a string) in addition to preventDefault.
+  (e as unknown as { returnValue?: unknown }).returnValue = "";
+}
+window.addEventListener("beforeunload", guardUnsavedEditorsOnLeave);
+
+// Reload caret restore: a mid-typing refresh must not lose the caret, nor
+// the composer's focus. The selection always lands with
+// the draft; focus only when the persisted marker says it belonged HERE and
+// nothing owns focus: an open settings dialog / search panel / context menu
+// / completion popup owns it (openSettings, openSearch, armContextMenu and
+// the composer's own Tab completion all focus deliberately -- the a11y batch
+// rules), and so does any live activeElement. Never steal, never guess.
+// Exported for the reload-restore pin (single-booter doctrine: app.test.tsx
+// is the only importer; the mount ref below is the production caller).
+export function restoreComposerCaret(el: HTMLTextAreaElement, caret: DraftCaret): void {
+  const len = el.value.length;
+  const start = Math.min(Math.max(0, caret.start), len);
+  const end = Math.min(Math.max(start, caret.end), len);
+  el.setSelectionRange(start, end);
+  if (!caret.focused) return;
+  if (settingsAtom().open || searchAtom().open || contextMenuAtom() !== null || completionAtom() !== null) return;
+  const active = document.activeElement as unknown as Node | null;
+  if (active && active !== document.body) return;
+  el.focus();
+}
+
+/** The composer's caret + focus posture, read live for the debounced save
+ *  (draft.ts runs it at fire time, in the same coalesced write as the text).
+ *  A detached composer answers null: the save drops the record rather than
+ *  persisting a caret that pointed at nothing. */
+function composerCaret(): DraftCaret | null {
+  const el = chatInputEl;
+  if (!el) return null;
+  const active = document.activeElement as unknown as Node | null;
+  return {
+    start: el.selectionStart ?? el.value.length,
+    end: el.selectionEnd ?? el.value.length,
+    focused: active === (el as unknown as Node),
+  };
+}
+
 // Stable ref identities. Inline closures would be new every render, making
 // patch() detach (null) and re-attach every ref on every render.
 const chatInputRef = domRef<HTMLTextAreaElement>((el) => {
@@ -678,6 +758,11 @@ const chatInputRef = domRef<HTMLTextAreaElement>((el) => {
     if (draft !== null && el.value === "") {
       el.value = draft;
       autoResize(el);
+      // The caret/focus record hydrates with the text it belongs to (its own
+      // strict decode: no record, no restore -- a wrong caret is worse than
+      // none). Same detached-mount math as autoResize: selection/focus land
+      // one microtask later, once the subtree is inserted.
+      const caret = loadDraftCaret();
       // create() fires refs while the node is still detached, and a detached
       // textarea measures scrollHeight 0 (verified in headless Chromium), so
       // the call above pins height:"0px" -- CSS min-height then clamps it to
@@ -686,7 +771,9 @@ const chatInputRef = domRef<HTMLTextAreaElement>((el) => {
       // patch has inserted the subtree by then, so scrollHeight is real. The
       // identity guard skips a composer unmounted before the microtask ran.
       queueMicrotask(() => {
-        if (chatInputEl === el) autoResize(el);
+        if (chatInputEl !== el) return;
+        autoResize(el);
+        if (caret) restoreComposerCaret(el, caret);
       });
     }
     // Same reload-survival for staged attachments (never clobber live ones).
@@ -1630,6 +1717,59 @@ function syncWorkbenchWidth(): void {
 const fileTreeAtom = reactiveState<FileTreeState>(emptyFileTree());
 const fileViewsAtom = reactiveState<FileViewsState>(emptyFileViews());
 
+// ── Editor sessions (editor-core) ──────────────────────────────────────────
+// One session per path whose read came back COMPLETE and within the edit
+// cap; everything else (loading, binary/error, over-cap) stays in the
+// read-only viewer. The pure machine (buffer, undo, dirty, save outcomes)
+// is editor-buffer.ts; this layer only owns the map, the tab dot, and the
+// wire. Tab switches never lose a buffer; only closes/reloads/deletes drop
+// them, and those gates confirm.
+const editorSessionsAtom = reactiveState<Record<string, EditorSession>>({});
+const whitespaceOnAtom = reactiveState<boolean>(loadShowWs());
+
+// Read facts the buffer needs that FileViewEntry deliberately does NOT
+// carry (the viewer's state shape stays untouched): the mtime the read
+// reported (saveFile's BASE) and whether the bytes ended with \n (the
+// exact-bytes save round-trip). Keyed per path; refreshed on every
+// successful reply, so the newest full read always owns both.
+const fileReadMeta = new Map<string, { mtimeMs: number; endsNL: boolean }>();
+
+function setSession(path: string, next: EditorSession): void {
+  editorSessionsAtom({ ...editorSessionsAtom(), [path]: next });
+  // The tab dot mirrors buffer.dirty -- one writer, and the store's no-op
+  // guard keeps unchanged flags from notifying.
+  workbenchStore.setDirty(path, next.buffer.dirty);
+}
+
+function dropSession(path: string): void {
+  const cur = editorSessionsAtom();
+  if (cur[path] === undefined) return;
+  const rest = { ...cur };
+  delete rest[path];
+  editorSessionsAtom(rest);
+  workbenchStore.setDirty(path, false);
+  // The buffer dies, so its (now stale) viewer cache dies with it: a dirty
+  // discard must not let a reopen show the pre-edit bytes as if nothing
+  // happened. A CLEAN drop keeps cache AND meta (reopen-must-not-wipe reads
+  // stay a zero-traffic no-op, and the kept mtime is the reopen's honest
+  // save base).
+  const entry = fileViewsAtom().views[path];
+  if (entry !== undefined && cur[path]!.buffer.dirty) {
+    fileViewsAtom(forgetFileViews(fileViewsAtom(), path));
+    fileReadMeta.delete(path);
+  }
+}
+
+/** Whitespace marks (dots/arrows/trailing) are a per-BROWSER view pref
+ *  (localStorage via editor.tsx, theme-pref's guard) -- one toggle serves
+ *  the editor AND the read-only fallbacks immediately, no server, no
+ *  config key. */
+function onToggleWhitespace(): void {
+  const next = !whitespaceOnAtom();
+  whitespaceOnAtom(next);
+  saveShowWs(next);
+}
+
 function dispatchTreeFetches(fetches: TreeFetch[]): void {
   for (const f of fetches) chat?.listDir(f.requestId, f.path);
 }
@@ -1690,12 +1830,29 @@ function ensureFileView(path: string): void {
   const { state, fetch } = openFileView(fileViewsAtom(), path);
   fileViewsAtom(state);
   dispatchFileFetch(fetch);
+  // A CACHED ready view never gets a reply to trigger maintainEditor, so
+  // activation is its "open editable" hook (zero traffic, the base mtime
+  // survived the close). A fresh fetch bails on status/loading here and
+  // lands through the reply instead.
+  maintainEditor(path, state.views[path]);
 }
 
 function onActivateWorkbenchTab(id: string): void {
   workbenchStore.activate(id);
   const tab = workbenchStore.get().tabs.find((t) => t.id === id);
   if (tab?.kind === "file") ensureFileView(id);
+}
+
+/** Tab close, with the editor's honest gate: a dirty buffer confirms
+ *  before it dies (window.confirm precedent). Closing is the ONE way an
+ *  unsaved buffer leaves -- activation just hides it. */
+function onCloseWorkbenchTab(id: string): void {
+  const s = editorSessionsAtom()[id];
+  if (s !== undefined && !confirmDiscard(s, baseName(id), (m) => confirm(m))) return;
+  // dropSession owns the stale-bytes cleanup (dirty drops cache + meta; a
+  // clean close keeps both for the zero-traffic reopen).
+  dropSession(id);
+  workbenchStore.close(id);
 }
 
 /** Tree file click: open the "file" tab (id = path, so re-clicking reuses
@@ -1715,7 +1872,15 @@ function dispatchFileFetch(fetch: FileFetch | null): void {
   if (fetch) chat?.readFile(fetch.requestId, fetch.path, fetch.offset);
 }
 
-function onFileReload(path: string): void {
+/** Reload from disk. A dirty buffer must not vanish silently (the reload
+ *  IS a discard); `discardConfirmed` is the conflict dialog's Cancel door,
+ *  which already said the quiet part. */
+function onFileReload(path: string, discardConfirmed = false): void {
+  const s = editorSessionsAtom()[path];
+  if (s?.buffer.dirty && !discardConfirmed && !confirm(`Reload ${baseName(path)} from disk? Your unsaved changes will be lost.`)) {
+    return;
+  }
+  dropSession(path);
   const { state, fetch } = reloadFileView(fileViewsAtom(), path);
   fileViewsAtom(state);
   dispatchFileFetch(fetch);
@@ -1736,25 +1901,405 @@ function onFileViewLang(path: string, lang: string | null): void {
 
 function onReadFileReply(requestId: number | undefined, result: ReadFileResultWire): void {
   fileViewsAtom(applyReadFile(fileViewsAtom(), requestId, result));
+  if (result.path !== undefined && result.error === undefined) {
+    const prev = fileReadMeta.get(result.path);
+    fileReadMeta.set(result.path, {
+      // The newest page's mtime (or the last known one) is the buffer's
+      // BASE; a reply that carried none (older server) leaves 0, which the
+      // conflict gate honestly refuses against any real file.
+      mtimeMs: result.mtimeMs ?? prev?.mtimeMs ?? 0,
+      endsNL: (result.content ?? "").endsWith("\n"),
+    });
+    maintainEditor(result.path, fileViewsAtom().views[result.path]);
+  }
+}
+
+/** Read-side maintenance for the editor seam. An editable buffer needs the
+ *  WHOLE file, and the honest way to know whether the file FITS is the
+ *  accumulation itself: every page the server sends is capped, so paging
+ *  stops the moment the loaded chars pass the cap (the path then stays in
+ *  the viewer with the "over the edit cap" note, and NO further pages), or
+ *  ends when the server says nothing more exists (truncated=false) -- a
+ *  within-cap file is then fully here and opens editable. Bounded: total
+ *  bytes fetched stay ~2x the cap whatever the shape of the file. An
+ *  existing session (possibly dirty) is never rebuilt from a late page. */
+function maintainEditor(path: string, entry: FileViewEntry | undefined): void {
+  if (!entry || entry.status !== "ready" || entry.error !== undefined) return;
+  const chars = contentChars(entry.lines);
+  if (chars > EDIT_CHAR_CAP) return; // over the edit cap: the viewer keeps it
+  if (entry.truncated) {
+    const { state, fetch } = moreFileView(fileViewsAtom(), path);
+    fileViewsAtom(state);
+    if (fetch) chat?.readFile(fetch.requestId, fetch.path, fetch.offset, EDIT_PAGE_LINES);
+    return;
+  }
+  if (editorSessionsAtom()[path]) return;
+  const meta = fileReadMeta.get(path);
+  const buffer = bufferFromContent(entry.lines.join("\n") + (meta?.endsNL ? "\n" : ""));
+  setSession(path, { path, buffer, baseMtimeMs: meta?.mtimeMs ?? 0, saving: false });
+}
+
+/** Ctrl/Cmd+S (the editor claims the chord and calls this) and nothing
+ *  else: one saveFile in flight per path, carrying the recorded BASE. */
+function requestSave(path: string): void {
+  const s = editorSessionsAtom()[path];
+  if (!s || s.saving || !s.buffer.dirty) return;
+  const content = contentOf(s.buffer);
+  const base = s.baseMtimeMs;
+  const requestId = ++fileOpSeq;
+  sendPathOp(requestId, (id) => chat?.saveFile(id, path, content, base), { kind: "save", path });
+  setSession(path, { ...s, saving: true });
+}
+
+/** The editor's commit channel: buffer edits, caret moves, and scroll pokes
+ *  all land here; the tab dot follows buffer.dirty (store no-op on
+ *  everything but an actual flip). A commit for a path with no session is a
+ *  GHOST -- the tab closed (or the editor unmounted) while a paint poke was
+ *  queued, e.g. a font-settled re-measure -- and must NOT resurrect it: the
+ *  session was dropped exactly because the buffer is gone. */
+function onEditorCommit(path: string, next: EditorSession): void {
+  if (editorSessionsAtom()[path] === undefined) return;
+  setSession(path, next);
+}
+
+// ── File ops (create / rename / delete / download) ──────────────────────────
+// The write family's app-side half. Correlation is the settings-editor
+// idiom: an OWN sequence, replies matched against a pending map, unknown
+// ids dropped. One pending record per in-flight op; the reply (success OR
+// refusal) consumes it, so rapid repeats never cross wires. Success
+// refreshes ONLY the affected subtree (one minted listDir, never a
+// whole-tree reopen) and lands the local bookkeeping the op promises (tab
+// follows a rename, tabs die with a delete, the parent expands for a
+// create). Refusals surface the server's honest one-liner on the shared
+// ephemeral toast -- there is no row state to render them into, and the
+// transcript stays clean (the copy-toast precedent, not handleSystemMessage).
+
+/** What a reply must do when it lands. The wire op is named by the id; the
+ *  record carries only the follow-through (paths as the user asked). */
+type PendingPathOp =
+  | { kind: "createFile"; path: string; parent: string }
+  | { kind: "createDir"; path: string; parent: string }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "delete"; path: string; parent: string; isDir: boolean }
+  | { kind: "save"; path: string };
+
+let fileOpSeq = 0;
+const pendingPathOps = new Map<string, PendingPathOp>();
+
+function sendPathOp(requestId: number, send: (id: number) => void, record: PendingPathOp): void {
+  pendingPathOps.set(String(requestId), record);
+  send(requestId);
+}
+
+/** Honest one-liner on the bottom-center toast (copy-toast chrome reused;
+ *  the transcript is the wrong home for a failed click). */
+function showOpNotice(text: string): void {
+  showCopyToast(text);
+}
+
+/** The tree lives in absolute POSIX-ish paths (the server's join built
+ *  them); parent/child arithmetic stays string-level -- it only ever feeds
+ *  resolveSafe, which re-decides everything server-side. */
+const parentOf = (p: string): string => {
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return i <= 0 ? p : p.slice(0, i);
+};
+const childOf = (dir: string, name: string): string =>
+  `${dir.replace(/[/\\]+$/, "")}/${name}`;
+const underPath = (p: string, dir: string): boolean =>
+  p === dir || p.startsWith(`${dir}/`) || p.startsWith(`${dir}\\`);
+
+/** name-entry validation (New file / New folder / Rename): non-empty, no
+ *  separators (a name walks nothing; the server joins zero parents), no
+ *  dot-walks. Returns the trimmed name or null (having said the why). */
+function validateEntryName(raw: string | null, parent: string): string | null {
+  if (raw === null) return null; // prompt cancelled
+  const name = raw.trim();
+  if (name === "") {
+    showOpNotice("Name is empty.");
+    return null;
+  }
+  if (name.includes("/") || name.includes("\\")) {
+    showOpNotice("Name cannot contain a path separator.");
+    return null;
+  }
+  if (name === "." || name === "..") {
+    showOpNotice("Name cannot walk the tree.");
+    return null;
+  }
+  // Overwrite check against the CACHED listing when the dir has one (the
+  // common case -- you create next to what you can see). A raced create
+  // still meets the server's "already exists"; the cache is a courtesy,
+  // not an authority.
+  const cached = fileTreeAtom().dirs[parent];
+  if (cached && cached.status === "ok" && cached.entries.some((e) => e.name === name)) {
+    showOpNotice(`already exists: ${name}`);
+    return null;
+  }
+  return name;
+}
+
+/** Refresh ONE dir slot (subtree-only doctrine) and dispatch the minted
+ *  listDir. expand=true is the create follow-through ("expand it if
+ *  collapsed"). */
+function refreshTreeSubtree(path: string, expand: boolean): void {
+  const { state, fetch } = expand
+    ? expandListedDir(fileTreeAtom(), path)
+    : refreshTreeDir(fileTreeAtom(), path);
+  fileTreeAtom(state);
+  chat?.listDir(fetch.requestId, fetch.path);
+}
+
+function runFileTreeMenuAction(
+  action: FileTreeMenuPlanItem["id"],
+  path: string,
+  kind: FileTreeRowKind,
+): void {
+  switch (action) {
+    case "copyPath":
+      // Absolute path on the clipboard (the sessions "copy log file path"
+      // precedent: honest toast, clipboard fallback inside copyText).
+      copyRowValue(path, "Path");
+      return;
+    case "download": {
+      // Plain navigation to the webui /download route (same hidden-anchor
+      // idiom as exportSessionLog; the route checks the token before any
+      // workspace byte). a.download names the save; the server's sanitized
+      // Content-Disposition rides the same basename.
+      const a = document.createElement("a");
+      a.href = `/download/${encodeURIComponent(path)}?token=${encodeURIComponent(token ?? "")}`;
+      a.download = baseName(path);
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+    case "newFile":
+    case "newFolder": {
+      const isFile = action === "newFile";
+      const raw = prompt(isFile ? `New file in ${baseName(path)}:` : `New folder in ${baseName(path)}:`, "");
+      const name = validateEntryName(raw, path);
+      if (name === null) return;
+      const target = childOf(path, name);
+      const requestId = ++fileOpSeq;
+      sendPathOp(requestId, (id) => (isFile ? chat?.createFile(id, target) : chat?.createDir(id, target)), {
+        kind: isFile ? "createFile" : "createDir",
+        path: target,
+        parent: path,
+      });
+      return;
+    }
+    case "rename": {
+      const raw = prompt(`Rename ${baseName(path)} to:`, baseName(path));
+      const name = validateEntryName(raw, parentOf(path));
+      if (name === null) return;
+      const target = childOf(parentOf(path), name);
+      if (target === path) return; // same spelling: no op, no noise
+      const requestId = ++fileOpSeq;
+      sendPathOp(requestId, (id) => chat?.renamePath(id, path, target), {
+        kind: "rename",
+        from: path,
+        to: target,
+      });
+      return;
+    }
+    case "delete": {
+      // Honest copy: a directory delete IS recursive (the server rm -r's
+      // it -- the confirmation is the user's only warning).
+      const ok = kind === "file"
+        ? confirm(`Delete ${baseName(path)}? This cannot be undone.`)
+        : confirm(`Delete ${baseName(path)} and EVERYTHING inside it? The folder is removed recursively. This cannot be undone.`);
+      if (!ok) return;
+      // Second honest door (editor-core): open tabs under this path with
+      // UNSAVED edits die with it -- said BEFORE the op, not after the
+      // bytes are gone (the reply's close is then unconditional; the file
+      // is already deleted, a refused close would strand a dead row).
+      const sessions = editorSessionsAtom();
+      const dirtyTabs = workbenchStore
+        .get()
+        .tabs.filter((t) => t.kind === "file" && underPath(t.id, path) && sessions[t.id]?.buffer.dirty);
+      if (
+        dirtyTabs.length > 0 &&
+        !confirm(
+          `${dirtyTabs.map((t) => t.label).join(", ")} ${dirtyTabs.length === 1 ? "has" : "have"} unsaved changes -- deleting removes the ${dirtyTabs.length === 1 ? "file" : "files"} AND those edits. Delete anyway?`,
+        )
+      ) {
+        return;
+      }
+      const requestId = ++fileOpSeq;
+      sendPathOp(requestId, (id) => chat?.deletePath(id, path), {
+        kind: "delete",
+        path,
+        parent: parentOf(path),
+        isDir: kind !== "file",
+      });
+      return;
+    }
+  }
+}
+
+/** fileOpResult reply: consume the pending record, then the follow-through.
+ *  saveFile's conflict refusal (conflict:true + the fresh mtime, ZERO bytes
+ *  written) is the one error that is not a dead end -- it routes into the
+ *  reload-vs-overwrite choice below; every other refusal is the server's
+ *  honest one-liner on the toast, verbatim. */
+function onFileOpReply(requestId: number | undefined, result: FileOpResultWire): void {
+  const key = requestId !== undefined ? String(requestId) : "";
+  const record = pendingPathOps.get(key);
+  if (record === undefined) return; // stale / foreign / already answered
+  pendingPathOps.delete(key);
+  if (result.error !== undefined && !(result.conflict === true && record.kind === "save")) {
+    showOpNotice(result.error); // the server's line, verbatim
+    if (record.kind === "save") {
+      const s = editorSessionsAtom()[record.path];
+      if (s) setSession(record.path, { ...s, saving: false });
+    }
+    return;
+  }
+  switch (record.kind) {
+    case "save": {
+      const s = editorSessionsAtom()[record.path];
+      if (!s) return; // the buffer died with its tab/reload mid-flight
+      const { session, outcome } = applySaveResult(s, result);
+      if (outcome.type === "saved") {
+        setSession(record.path, session); // clean, dot off, base = NEW mtime
+        // The disk is ahead of every cached byte now (the write's content
+        // was a snapshot, and edits may have landed mid-flight): forget the
+        // viewer cache AND the read meta wholesale, so a reopen re-reads
+        // fresh bytes against a fresh mtime instead of serving stale text
+        // off a base that would fake a conflict.
+        fileViewsAtom(forgetFileViews(fileViewsAtom(), record.path));
+        fileReadMeta.delete(record.path);
+        return;
+      }
+      if (outcome.type === "error") {
+        showOpNotice(outcome.error);
+        setSession(record.path, session);
+        return;
+      }
+      // Conflict. The minimal honest UI is the window.confirm precedent,
+      // BOTH doors named: OK = Overwrite = resend saveFile with the fresh
+      // mtime the refusal carried (the server's pinned flow, no reload
+      // round-trip); Cancel = Reload from disk, which DISCARDS the unsaved
+      // buffer -- said out loud, no silent third door.
+      setSession(record.path, session);
+      const overwrite = confirm(
+        `${outcome.error} Overwrite the file on disk with the editor's contents? Cancel reloads the file from disk and DISCARDS your unsaved edits.`,
+      );
+      if (overwrite) {
+        const cur = editorSessionsAtom()[record.path];
+        if (cur) setSession(record.path, { ...cur, baseMtimeMs: outcome.mtimeMs });
+        requestSave(record.path);
+      } else {
+        dropSession(record.path);
+        onFileReload(record.path, true);
+      }
+      return;
+    }
+    case "createFile":
+      refreshTreeSubtree(record.parent, true);
+      // The empty file opens in the workbench; the read answers honestly on
+      // a zero-byte file and the editor seam opens it as an empty buffer.
+      onOpenFilePath(record.path);
+      return;
+    case "createDir":
+      refreshTreeSubtree(record.parent, true);
+      return;
+    case "rename": {
+      // The tree forgets the old spelling and re-lists BOTH affected dirs
+      // (they differ when the rename crossed one -- still subtree-only).
+      let state = forgetTreePath(fileTreeAtom(), record.from);
+      const fetches: TreeFetch[] = [];
+      const fromParent = parentOf(record.from);
+      const toParent = parentOf(record.to);
+      let r = refreshTreeDir(state, fromParent);
+      state = r.state;
+      fetches.push(r.fetch);
+      if (toParent !== fromParent) {
+        r = refreshTreeDir(state, toParent);
+        state = r.state;
+        fetches.push(r.fetch);
+      }
+      fileTreeAtom(state);
+      dispatchTreeFetches(fetches);
+      // Tab identity FOLLOWS the file: the tab is re-pointed in place (same
+      // strip slot, new label), and the viewer entry moves with it.
+      workbenchStore.retarget(record.from, record.to, baseName(record.to));
+      fileViewsAtom(retargetFileView(fileViewsAtom(), record.from, record.to));
+      // The editor session follows too (dirty text survives, the dot rides
+      // the retargeted tab untouched, and the next save targets the NEW
+      // path). A save in flight for the OLD spelling must follow the SAME
+      // way the session did: its pending record still names record.from, so
+      // its reply would resolve editorSessionsAtom()[from] to the vacated
+      // slot, miss, and leave `saving` stuck true on the moved session --
+      // the gate then silently refuses every later Ctrl+S. Rewriting the
+      // record to record.to lands the reply on the moved session, which
+      // clears the gate (and a conflict there offers both doors on the NEW
+      // path, the buffer's base unchanged across a pure rename).
+      const sessions = editorSessionsAtom();
+      const moved = sessions[record.from];
+      if (moved !== undefined) {
+        const rest = { ...sessions };
+        delete rest[record.from];
+        editorSessionsAtom({ ...rest, [record.to]: { ...moved, path: record.to } });
+      }
+      for (const [id, pending] of pendingPathOps) {
+        if (pending.kind === "save" && pending.path === record.from) {
+          pendingPathOps.set(id, { ...pending, path: record.to });
+        }
+      }
+      const meta = fileReadMeta.get(record.from);
+      if (meta !== undefined) {
+        fileReadMeta.delete(record.from);
+        fileReadMeta.set(record.to, meta);
+      }
+      return;
+    }
+    case "delete": {
+      let state = forgetTreePath(fileTreeAtom(), record.path);
+      const r = refreshTreeDir(state, record.parent);
+      fileTreeAtom(r.state);
+      chat?.listDir(r.fetch.requestId, r.fetch.path);
+      // Tabs the delete killed: the file itself, or everything under the
+      // deleted dir. The dirty tabs were confirmed BEFORE the op shipped
+      // (you cannot un-delete), so the close here is unconditional -- and
+      // their sessions die with them.
+      for (const t of workbenchStore.get().tabs) {
+        if (t.kind === "file" && underPath(t.id, record.path)) {
+          dropSession(t.id);
+          fileReadMeta.delete(t.id);
+          workbenchStore.close(t.id);
+        }
+      }
+      fileViewsAtom(forgetFileViews(fileViewsAtom(), record.path));
+      return;
+    }
+  }
 }
 
 /** Tree-row menu (ContextMenu idiom: the app owns the atom + focus-return,
- *  the rows just hand over (event, path, el); the viewer has no menu by
- *  design). "Quote into composer" is DEFERRED: no composer-insert seam exists
+ *  the rows hand over (event, path, el, kind); the viewer has no menu by
+ *  design). The grammar comes from fileTreeMenuPlan (root/dir/file).
+ *  "Quote into composer" stays DEFERRED: no composer-insert seam exists
  *  (draft.ts is persistence-only, chat.ts owns the socket, the textarea is
  *  app-internal), so wiring it here would be surgery on app.tsx's #chat-input
  *  -- see the phase notes. */
-function onFilePathMenu(e: MouseEvent | KeyboardEvent, path: string, rowEl: HTMLElement): void {
+function onFilePathMenu(
+  e: MouseEvent | KeyboardEvent,
+  path: string,
+  rowEl: HTMLElement,
+  kind: FileTreeRowKind,
+): void {
   const { x, y } = rowMenuPoint(e, rowEl);
-  const items: ContextMenuItem[] = [
-    {
-      label: "Copy path",
-      onSelect: () => {
-        copyRowValue(path, "Path"); // honest toast: "Path copied" / "Copy failed: clipboard unavailable"
-        dismissContextMenu();
-      },
+  const items: ContextMenuItem[] = fileTreeMenuPlan(kind).map((plan) => ({
+    label: plan.label,
+    ...(plan.danger ? { danger: true } : {}),
+    onSelect: () => {
+      dismissContextMenu();
+      runFileTreeMenuAction(plan.id, path, kind);
     },
-  ];
+  }));
   contextMenuAtom({ x, y, items });
   armContextMenu(rowEl);
 }
@@ -1840,6 +2385,7 @@ function startChat(): void {
     onEditConfigList,
     onListDir: onListDirReply,
     onReadFile: onReadFileReply,
+    onFileOp: onFileOpReply,
     onAuthFailure: handleAuthFailure,
     onWorkingMapChange: () => {
       // Re-poll so the sidebar's per-session working indicators refresh.
@@ -2083,7 +2629,7 @@ function onComposerPaste(e: ClipboardEvent): void {
     el.value = el.value.slice(0, start) + text + el.value.slice(end);
     el.setSelectionRange(start + text.length, start + text.length);
     autoResize(el);
-    scheduleDraftSave(() => el.value);
+    scheduleDraftSave(() => el.value, undefined, composerCaret);
   }
   void stageFiles(files);
 }
@@ -2557,6 +3103,8 @@ function App() {
   // replies; the coalesced render repaints the pane).
   const fileTree = fileTreeAtom();
   const fileViews = fileViewsAtom();
+  const editorSessions = editorSessionsAtom();
+  const showWs = whitespaceOnAtom();
   // Dock-pin gate (see workbenchSizeAtom): the preference is the want, the
   // pane width is the can. Both flags ride the panel; the button appears
   // exactly when the gate allows it and the aria carries the EFFECTIVE
@@ -2987,10 +3535,16 @@ function App() {
                     cancelDraftSave();
                     clearDraft();
                   } else {
-                    scheduleDraftSave(() => chatInputEl?.value ?? "");
+                    scheduleDraftSave(() => chatInputEl?.value ?? "", undefined, composerCaret);
                   }
                 }}
-                onBlur={dismissCompletion}
+                onBlur={() => {
+                  dismissCompletion();
+                  // Focus is a saved fact: leaving the composer without a
+                  // keystroke must still demote the marker, or a reload
+                  // would hand focus back that the user already gave away.
+                  scheduleDraftSave(() => chatInputEl?.value ?? "", undefined, composerCaret);
+                }}
                 onPaste={onComposerPaste}
                 onKeydown={onChatKeydown}
               />
@@ -3156,7 +3710,7 @@ function App() {
           max={workbenchPanel.maxSize()}
           state={workbenchStore.get()}
           onActivate={(id) => onActivateWorkbenchTab(id)}
-          onCloseTab={(id) => workbenchStore.close(id)}
+          onCloseTab={(id) => onCloseWorkbenchTab(id)}
           onResizeStart={workbenchPanel.onPointerDown}
           onResizeMove={workbenchPanel.onPointerMove}
           // The three gestures that LAND a size also bump the render's width
@@ -3183,9 +3737,53 @@ function App() {
           }}
           fileViews={{
             views: fileViews.views,
-            onReload: onFileReload,
+            onReload: (path: string) => onFileReload(path),
             onMore: onFileMore,
             onLang: onFileViewLang,
+            // The editor-core projection: a path with a LIVE session (its
+            // read came back complete and within the cap) renders the
+            // editor; everything else keeps the read-only viewer, with an
+            // honest "over the edit cap" note once the accumulation proved
+            // the file too big to edit. Whitespace marks ride the shared
+            // pref in BOTH bodies.
+            renderBody: (path: string, view: FileViewEntry | undefined) => {
+              const session = editorSessions[path];
+              if (session !== undefined) {
+                return (
+                  <FileEditor
+                    path={path}
+                    session={session}
+                    lang={view?.lang ?? guessLang(path)}
+                    guessed={guessLang(path)}
+                    override={view?.lang}
+                    onLang={onFileViewLang}
+                    showWs={showWs}
+                    onCommit={onEditorCommit}
+                    onSave={requestSave}
+                    onReload={onFileReload}
+                    onToggleWs={onToggleWhitespace}
+                  />
+                );
+              }
+              const overCap =
+                view !== undefined && view.truncated && contentChars(view.lines) > EDIT_CHAR_CAP;
+              return (
+                <FileView
+                  path={path}
+                  view={view}
+                  onReload={(p: string) => onFileReload(p)}
+                  onMore={onFileMore}
+                  onLang={onFileViewLang}
+                  showWhitespace={showWs}
+                  onToggleWhitespace={onToggleWhitespace}
+                  note={
+                    overCap
+                      ? "Over the 256 KiB edit cap -- this file stays read-only (Load more still pages the viewer)."
+                      : undefined
+                  }
+                />
+              );
+            },
           }}
           onOpenFiles={openFilesTab}
           treePin={{
@@ -3357,6 +3955,8 @@ async function init(): Promise<void> {
     settingsAtom,
     fileTreeAtom,
     fileViewsAtom,
+    editorSessionsAtom,
+    whitespaceOnAtom,
     themeIdAtom,
   ]);
 

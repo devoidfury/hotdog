@@ -594,6 +594,29 @@ describe("evaluate gating", () => {
       expect.stringContaining("big"),
     ]);
   });
+
+  it("gate probe is LIVE: a userGate flip after create() reaches evaluate (no boot freeze)", async () => {
+    const hooks = new HookSystem();
+    const config: Record<string, unknown> = { agentBrowser: {} };
+    const core = { hooks, config } as unknown as CoreContext;
+    const instance = create(core);
+    const tool = (instance as unknown as { agentBrowserTool: AgentBrowserTool }).agentBrowserTool;
+    try {
+      // Boot posture: no userGate block -> evaluate fails closed.
+      const refused = await tool.execute({ action: "evaluate", script: "1+1" }, ctxFor("gate-cold"));
+      expect(refused.error).toContain("no approval prompt surface");
+      // A store-generation swap: core.config is a live accessor in production
+      // (main.ts), so the reader knob answers from the CURRENT block -- the
+      // create()-time capture pinned this answer at boot forever.
+      config.userGate = { enabled: true };
+      const past = await tool.execute({ action: "evaluate", script: "1+1" }, ctxFor("gate-cold"));
+      expect(past.error).not.toContain("no approval prompt surface");
+      // The gate let it through; only the missing view stops it here.
+      expect(past.error).toContain('no view "main" is open');
+    } finally {
+      tool.closeSession("gate-cold");
+    }
+  });
 });
 
 // ── Screenshot budget ───────────────────────────────────────────────────────

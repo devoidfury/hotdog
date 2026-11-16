@@ -16,6 +16,10 @@ import {
   revealDir,
   toggleDir,
   applyListDir,
+  refreshTreeDir,
+  expandListedDir,
+  forgetTreePath,
+  fileTreeMenuPlan,
   filesTab,
   FILES_TAB_ID,
   FILE_TREE_EXPANDED_STORAGE_KEY,
@@ -313,21 +317,35 @@ describe("file tree rendering", () => {
     expect(link.querySelector(".ft-row-btn")!.getAttribute("title")).toContain("target not resolved");
   });
 
-  it("right-click and Menu/Shift+F10 hand (event, path, rowEl) to the app's menu", () => {
+  it("right-click and Menu/Shift+F10 hand (event, path, rowEl, KIND) to the app's menu", () => {
     const seen: string[] = [];
     const root = renderTree({
       tree: treeWith({
         roots: { status: "ok", entries: [{ name: "rootA", path: "/rootA" }] },
+        expanded: { "/rootA": true },
+        dirs: {
+          "/rootA": {
+            status: "ok",
+            entries: [
+              { name: "sub", path: "/rootA/sub", isDir: true },
+              { name: "f.txt", path: "/rootA/f.txt", isDir: false },
+            ],
+          },
+        },
       }),
-      onContextMenu: (e, path) => {
-        seen.push(`${e.type}:${path}`);
+      onContextMenu: (e, path, _el, kind) => {
+        seen.push(`${e.type}:${path}:${kind}`);
       },
     });
     const rowBtn = root.querySelector(".ft-root .ft-row-btn")!;
     expect(contextEvent(rowBtn)).toBe(false); // prevented
     contextEvent(rowBtn, "keydown", "ContextMenu");
     contextEvent(rowBtn, "keydown", "x"); // strangers pass
-    expect(seen).toEqual(["contextmenu:/rootA", "keydown:/rootA"]);
+    expect(seen).toEqual(["contextmenu:/rootA:root", "keydown:/rootA:root"]);
+    // Nested rows carry their own kind (dir vs file).
+    contextEvent(root.querySelector('.ft-dir[data-path="/rootA/sub"] .ft-row-btn')!);
+    contextEvent(root.querySelector('.ft-file .ft-row-btn')!);
+    expect(seen.slice(2)).toEqual(["contextmenu:/rootA/sub:dir", "contextmenu:/rootA/f.txt:file"]);
   });
 
   it("Refresh: glyph-only button (title + aria-label carry it) re-issues", () => {
@@ -537,5 +555,71 @@ describe("file tree expansion memory", () => {
     emptyFileTree();
     openFileTree(emptyFileTree());
     expect(calls).toEqual([]);
+  });
+});
+
+// ── Post-write subtree ops + the menu plan ──────────────────────────────────
+
+describe("post-write subtree ops", () => {
+  it("refreshTreeDir re-lists ONE dir with a fresh id and touches nothing else", () => {
+    const base: FileTreeState = {
+      ...emptyFileTree(),
+      dirs: {
+        "/rootA": { status: "ok", entries: [] },
+        "/rootB": { status: "ok", entries: [{ name: "keep", path: "/rootB/keep", isDir: false }] },
+      },
+    };
+    const { state, fetch } = refreshTreeDir(base, "/rootA");
+    expect(fetch).toEqual({ requestId: 1, path: "/rootA" });
+    expect(state.dirs["/rootA"]!.status).toBe("loading");
+    expect(state.dirs["/rootB"]).toBe(base.dirs["/rootB"]!); // untouched: same object
+    expect(state.pending).toEqual({ "1": "/rootA" });
+    // The reply lands through the SAME apply machinery as any listing.
+    const done = applyListDir(state, 1, { type: "listDirResult", requestId: 1, path: "/rootA", entries: [] });
+    expect(done.dirs["/rootA"]!.status).toBe("ok");
+    expect(done.pending).toEqual({});
+  });
+
+  it("expandListedDir expands AND re-lists; the expansion persists to sessionStorage", () => {
+    const store = fakeSession();
+    const { state, fetch } = expandListedDir(emptyFileTree(), "/rootA");
+    expect(state.expanded["/rootA"]).toBe(true);
+    expect(state.dirs["/rootA"]!.status).toBe("loading");
+    expect(fetch.path).toBe("/rootA");
+    expect(JSON.parse(store.get(FILE_TREE_EXPANDED_STORAGE_KEY)!)).toEqual(["/rootA"]);
+  });
+
+  it("forgetTreePath drops the path AND its subtree (cache + expansion + selection); unrelated dirs ride", () => {
+    const base: FileTreeState = {
+      ...emptyFileTree(),
+      dirs: {
+        "/rootA": { status: "ok", entries: [] },
+        "/rootA/deep": { status: "ok", entries: [] },
+        "/other": { status: "ok", entries: [] },
+      },
+      expanded: { "/rootA": true, "/rootA/deep": true, "/other": true },
+      selected: "/rootA/deep/x.txt",
+    };
+    const s = forgetTreePath(base, "/rootA");
+    expect(s.dirs).toEqual({ "/other": base.dirs["/other"]! });
+    expect(s.expanded).toEqual({ "/other": true });
+    expect(s.selected).toBeNull(); // the selection pointed inside the dead subtree
+    // No-op: a path the tree holds nothing for returns the SAME object.
+    expect(forgetTreePath(s, "/ghost")).toBe(s);
+  });
+});
+
+describe("fileTreeMenuPlan", () => {
+  it("root rows create+copy only; dir rows add rename/delete; file rows swap the create pair for download", () => {
+    expect(fileTreeMenuPlan("root").map((i) => i.id)).toEqual(["newFile", "newFolder", "copyPath"]);
+    expect(fileTreeMenuPlan("dir").map((i) => i.id)).toEqual(["newFile", "newFolder", "rename", "copyPath", "delete"]);
+    expect(fileTreeMenuPlan("file").map((i) => i.id)).toEqual(["rename", "download", "copyPath", "delete"]);
+    // Delete is the danger item and it rides LAST in every grammar.
+    for (const kind of ["root", "dir", "file"] as const) {
+      const plan = fileTreeMenuPlan(kind);
+      const dangers = plan.filter((i) => i.danger).map((i) => i.id);
+      expect(dangers.length <= 1).toBe(true);
+      if (dangers.length === 1) expect(plan[plan.length - 1]!.id).toBe("delete");
+    }
   });
 });

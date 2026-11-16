@@ -3,7 +3,7 @@
 // The chat opens a socket at construction; tests grab it from
 // FakeWebSocket.instances (reset before each test by useFakeWebSocket()).
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, beforeEach } from "bun:test";
 import { createChat, type ChatController } from "@extensions/webui/ui/chat.ts";
 import { HIDE_THINKING_STORAGE_KEY } from "@extensions/webui/ui/thinking-pref.ts";
 import { FakeWebSocket, useFakeWebSocket } from "../dom-helper/index.ts";
@@ -618,6 +618,39 @@ describe("reasoning visibility preference (chat driver)", () => {
     ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "hideThinking", value: false });
     expect(hiddenFlags(container)).toEqual([true, true]);
   });
+
+  it("the chip's hide flip RE-DERIVES the Thinking row mid-reasoning", () => {
+    storageWith();
+    const { chat, container, ws } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    // A live turn, reasoning streaming VISIBLE: the row retired when the
+    // first reasoning chunk landed.
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: true });
+    ws.fireMessage({ type: "streamingReasoningChunk", sessionId: "s1", content: "pondering" });
+    expect(container.querySelectorAll(".thinking-live")).toHaveLength(0);
+    // The header chip flips to HIDE: the row covers the reasoning phase while
+    // reasoning is hidden, so the set-path re-evaluates -- call in flight, no
+    // plain content streamed -- the row appears.
+    chat.toggleHideThinking();
+    expect(container.querySelectorAll(".thinking-live")).toHaveLength(1);
+    expect(hiddenFlags(container)).toEqual([true]);
+    // Toggling back ON retires it as the reasoning blocks become visible.
+    chat.toggleHideThinking();
+    expect(container.querySelectorAll(".thinking-live")).toHaveLength(0);
+  });
+
+  it("the chip's hide flip keeps the row down once plain text has streamed", () => {
+    storageWith();
+    const { chat, container, ws } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: true });
+    ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "the answer is" });
+    ws.fireMessage({ type: "streamingReasoningChunk", sessionId: "s1", content: "and why" });
+    chat.toggleHideThinking();
+    expect(container.querySelectorAll(".thinking-live")).toHaveLength(0); // content already streaming
+  });
 });
 
 // ── Live activity: the Thinking row and the in-flight tool preview ──────────
@@ -679,5 +712,206 @@ describe("live activity tell + in-flight tool preview routing", () => {
     ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "not in the log window" });
     expect(rows(container)).toHaveLength(0);
     expect(bubbles(container)).toHaveLength(0);
+  });
+});
+
+// ── Reload recovery of the "Thinking" row (chat routing)
+// The row answers the ATTACHED state: the attach burst ends by re-posting
+// this session's working value, and a view whose replay burst committed only
+// EARLIER calls must take the tell back (message-list owns the derivation;
+// this pins the chat-side routing of that state).
+
+describe("thinking row recovery from the attach's working state", () => {
+  it("a mid-turn reload re-arms the row after the replayed committed rows", () => {
+    const { ws, chat, container } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    // The burst replays the turn's earlier committed prose, then the burst's
+    // working frame says: still running. No bytes of the RUNNING call have
+    // landed in this view -- the row recovers.
+    ws.fireMessage({ type: "userMessage", sessionId: "s1", content: "go" });
+    ws.fireMessage({ type: "assistantMessage", sessionId: "s1", content: "thinking out loud earlier" });
+    expect(container.querySelectorAll(".thinking-live")).toHaveLength(0);
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: true });
+    expect(container.querySelectorAll(".thinking-live")).toHaveLength(1);
+    // The running call's first chunk retires it, exactly like a live turn.
+    ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "now streaming" });
+    expect(container.querySelectorAll(".thinking-live")).toHaveLength(0);
+  });
+
+  it("attaching to an idle session never fabricates the row", () => {
+    const { ws, chat, container } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    ws.fireMessage({ type: "assistantMessage", sessionId: "s1", content: "done a while ago" });
+    // The attach's honest working:false -- between calls, nothing in flight.
+    ws.fireMessage({ type: "sessionState", sessionId: "s1", key: "working", value: false });
+    expect(container.querySelectorAll(".thinking-live")).toHaveLength(0);
+  });
+});
+
+// ── Viewed-subagent pointer persistence (sessionStorage, per TAB) ──────────
+// hotdog-viewed-task records the main-pane browse pointer. A reload re-plays
+// it EXACTLY ONCE, through the same viewSubagent open, once the task hydrates
+// into the feed; a full snapshot without the id clears the key (unknown/gone
+// degrades to today's boot); navigation writes the NEW pointer, never a stale
+// one. Storage is the workbench-tab stub idiom -- installed before createChat,
+// resolved per call, no mock.module.
+
+describe("viewed-subagent pointer persistence (reload restore)", () => {
+  let session: Map<string, string>;
+  let prevSessionStorage: unknown;
+
+  beforeEach(() => {
+    session = new Map([["hotdog-viewed-task", "task-9"]]);
+    prevSessionStorage = (window as unknown as Record<string, unknown>).sessionStorage;
+    (window as unknown as Record<string, unknown>).sessionStorage = {
+      getItem: (k: string) => session.get(k) ?? null,
+      setItem: (k: string, v: string) => void session.set(k, String(v)),
+      removeItem: (k: string) => void session.delete(k),
+    };
+  });
+  afterEach(() => {
+    if (prevSessionStorage === undefined) {
+      delete (window as unknown as Record<string, unknown>).sessionStorage;
+    } else {
+      (window as unknown as Record<string, unknown>).sessionStorage = prevSessionStorage;
+    }
+  });
+
+  const task = (over: Record<string, unknown> = {}) => ({
+    taskId: "task-9",
+    description: "do the delegated thing",
+    sessionId: "s1",
+    status: "running",
+    createdAt: 1,
+    startedAt: 1,
+    endedAt: null,
+    activeMs: 0,
+    inRun: true,
+    turnStartedAt: 1,
+    ...over,
+  });
+
+  it("pointer applied exactly once, through viewSubagent, when the task hydrates", () => {
+    const { chat, ws, container } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    // The attach cleared the live pointer; the candidate waits in memory.
+    expect(chat.viewedTaskIdAtom()).toBeNull();
+    expect(session.get("hotdog-viewed-task")).toBe("task-9");
+
+    // Hydration WITHOUT the id must not apply anything yet... and a full
+    // snapshot that DENIES the id is handled in its own test. Here the
+    // snapshot carries the task: the pointer lands.
+    ws.fireMessage({ type: "taskList", tasks: [task()] });
+    expect(chat.viewedTaskIdAtom()).toBe("task-9");
+    // Same open path: the delegated-prompt seed paints, and the transcript
+    // request rides (open semantics, not a bare pointer write).
+    expect(container.textContent).toContain("do the delegated thing");
+    expect(ws.sent.some((s) => (JSON.parse(s) as Sent).type === "taskActivityRequest")).toBe(true);
+
+    // Exactly once: a later snapshot containing the id never re-opens (no
+    // second clear, no second request).
+    const requestsBefore = ws.sent.filter((s) => (JSON.parse(s) as Sent).type === "taskActivityRequest").length;
+    ws.fireMessage({ type: "taskList", tasks: [task()] });
+    const requestsAfter = ws.sent.filter((s) => (JSON.parse(s) as Sent).type === "taskActivityRequest").length;
+    expect(requestsAfter).toBe(requestsBefore);
+    expect(chat.viewedTaskIdAtom()).toBe("task-9");
+  });
+
+  it("a taskActivity or taskUpdate frame for the candidate also hydrates it (once)", () => {
+    const { chat, ws } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    ws.fireMessage({
+      type: "taskActivity",
+      taskId: "task-9",
+      activity: { kind: "text", content: "streamed bytes" },
+    });
+    expect(chat.viewedTaskIdAtom()).toBe("task-9");
+    expect(session.get("hotdog-viewed-task")).toBe("task-9");
+    // The restore paints this frame's block via the buffer -- and a later
+    // taskUpdate never re-opens.
+    ws.fireMessage({ type: "taskUpdate", task: task({ status: "completed", inRun: false }) });
+    expect(chat.viewedTaskIdAtom()).toBe("task-9");
+  });
+
+  it("a full snapshot WITHOUT the id clears the key and behaves as today", () => {
+    const { chat, ws, container } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    ws.fireMessage({ type: "assistantMessage", sessionId: "s1", content: "the parent transcript" });
+    ws.fireMessage({ type: "taskList", tasks: [task({ taskId: "other-task" })] });
+    expect(chat.viewedTaskIdAtom()).toBeNull();
+    expect(session.has("hotdog-viewed-task")).toBe(false);
+    // The parent's transcript paints un-suppressed, exactly as a boot that
+    // never had a pointer.
+    ws.fireMessage({ type: "streamingChunk", sessionId: "s1", content: "live into the log" });
+    expect(container.textContent).toContain("live into the log");
+  });
+
+  it("a candidate whose manager is not built yet waits for the next feed frame", () => {
+    // taskList broadcast can beat the attach: no manager, no open, candidate
+    // intact -- the burst's own snapshot (after sessionCreated/setSession)
+    // decides.
+    const { chat, ws } = makeChat();
+    ws.fireMessage({ type: "taskList", tasks: [task()] });
+    expect(chat.viewedTaskIdAtom()).toBeNull();
+    expect(session.get("hotdog-viewed-task")).toBe("task-9");
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    ws.fireMessage({ type: "taskList", tasks: [task()] });
+    expect(chat.viewedTaskIdAtom()).toBe("task-9");
+  });
+
+  it("navigation persists the NEW pointer, never a stale one", () => {
+    const { chat, ws } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    ws.fireMessage({ type: "taskList", tasks: [task()] });
+    expect(session.get("hotdog-viewed-task")).toBe("task-9");
+
+    // Open ANOTHER task: the key moves with the pointer.
+    ws.fireMessage({ type: "taskList", tasks: [task(), task({ taskId: "task-10" })] });
+    chat.viewSubagent("task-10");
+    expect(chat.viewedTaskIdAtom()).toBe("task-10");
+    expect(session.get("hotdog-viewed-task")).toBe("task-10");
+
+    // Close the view: the key goes.
+    chat.closeSubagentView();
+    expect(chat.viewedTaskIdAtom()).toBeNull();
+    expect(session.has("hotdog-viewed-task")).toBe(false);
+
+    // Re-open, then navigate to another session / a cold log / a fresh one:
+    // each route persists "no pointer".
+    chat.viewSubagent("task-9");
+    expect(session.get("hotdog-viewed-task")).toBe("task-9");
+    chat.switchSession("s2");
+    expect(chat.viewedTaskIdAtom()).toBeNull();
+    expect(session.has("hotdog-viewed-task")).toBe(false);
+
+    chat.viewSubagent("task-9");
+    ws.fireMessage({ type: "logViewed", logId: "l1", entries: [] });
+    expect(chat.viewedTaskIdAtom()).toBeNull();
+    expect(session.has("hotdog-viewed-task")).toBe(false);
+
+    chat.viewSubagent("task-9");
+    chat.createSession();
+    expect(chat.viewedTaskIdAtom()).toBeNull();
+    expect(session.has("hotdog-viewed-task")).toBe(false);
+  });
+
+  it("clearTasks (logout) kills the candidate and the key", () => {
+    const { chat, ws } = makeChat();
+    ws.fireMessage({ type: "sessionCreated", sessionId: "s1" });
+    chat.setSession("s1");
+    // Candidate pending, never hydrated: logout must not leave it for the
+    // next login's taskList to resurrect.
+    chat.clearTasks();
+    expect(session.has("hotdog-viewed-task")).toBe(false);
+    ws.fireMessage({ type: "taskList", tasks: [task()] });
+    // A fresh taskList after logout never restores the old candidate.
+    expect(chat.viewedTaskIdAtom()).toBeNull();
   });
 });

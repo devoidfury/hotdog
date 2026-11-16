@@ -23,6 +23,7 @@ import type {
   EditConfigListResultWire,
   ListDirResultWire,
   ReadFileResultWire,
+  FileOpResultWire,
 } from "@extensions/websocket/protocol.ts";
 
 export type { UploadFileWire };
@@ -34,6 +35,7 @@ export type { ConfigListOp };
 export type { EditConfigListResultWire };
 export type { ListDirResultWire };
 export type { ReadFileResultWire };
+export type { FileOpResultWire };
 
 // The core logger touches process.*, which doesn't exist in the browser.
 const logger = {
@@ -71,6 +73,64 @@ const tasksAtom = reactiveState<TaskInfoWire[]>([]);
 // mode. The client-side browse pointer (the app renders the header label and
 // the composer's read-only posture from it); attach ends the mode.
 const viewedTaskIdAtom = reactiveState<string | null>(null);
+
+// ── Browse-pointer persistence (sessionStorage, per TAB) ───────────────────
+// WHICH subagent transcript was on screen survives an in-tab reload, so the
+// attach lands back on the task instead of painting the parent's transcript.
+// sessionStorage, never localStorage: localStorage is
+// shared across tabs, so tab B's pointer would retarget tab A's reload (the
+// hotdog-active-session doctrine). The workbench-tab precedent holds too:
+// storage resolves PER CALL, never cached -- tests install and tear down the
+// stub -- and every access is swallowed at this boundary.
+//
+// The persisted id is a RELOAD CANDIDATE, not a second source of truth:
+// `pendingViewedTaskId` is read once when the socket is created, and re-plays
+// through the SAME open path (viewSubagent) the moment the task exists in the
+// hydrated feed -- so the settled/live authority rules keep holding. Unknown
+// id in a taskList snapshot: the key is dropped and the boot behaves exactly
+// as today (the parent's transcript). Navigation clears go through
+// setViewedTaskPointer so the key always mirrors the pointer, never a stale
+// one behind it.
+const VIEWED_TASK_STORAGE_KEY = "hotdog-viewed-task";
+export { VIEWED_TASK_STORAGE_KEY };
+
+function viewedTaskStorage(): Storage | null {
+  return typeof window !== "undefined" && "sessionStorage" in window
+    ? (window as unknown as { sessionStorage: Storage }).sessionStorage
+    : null;
+}
+
+function saveViewedTaskId(taskId: string | null): void {
+  const storage = viewedTaskStorage();
+  if (!storage) return;
+  try {
+    if (taskId) storage.setItem(VIEWED_TASK_STORAGE_KEY, taskId);
+    else storage.removeItem(VIEWED_TASK_STORAGE_KEY);
+  } catch {
+    // blocked / quota'd storage: the pointer costs the reload, never the app
+  }
+}
+
+function loadViewedTaskId(): string | null {
+  const storage = viewedTaskStorage();
+  if (!storage) return null;
+  try {
+    return storage.getItem(VIEWED_TASK_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** The reload candidate, consumed exactly once (restore, gone-drop, or any
+ *  user navigation). Owned by the createChat instance that reads it. */
+let pendingViewedTaskId: string | null = null;
+
+/** THE write to the browse pointer: atom + persisted key move together, so
+ *  the key can never lag a clear (navigation away persists the NEW pointer). */
+function setViewedTaskPointer(taskId: string | null): void {
+  viewedTaskIdAtom(taskId);
+  saveViewedTaskId(taskId);
+}
 
 /** Accumulated display blocks: consecutive same-kind deltas merge into one block. */
 export type TaskActivityBlock =
@@ -448,8 +508,11 @@ function clearTasks(): void {
   settledTasks.clear();
   pendingFollowups.clear();
   // The module-global feed must not outlive the socket: a stale viewed-task
-  // pointer (or any residue) would blind the next login's serial run.
-  viewedTaskIdAtom(null);
+  // pointer (or any residue) would blind the next login's serial run -- the
+  // persisted candidate and its key die with it, or the next login's taskList
+  // would restore a transcript nobody asked for.
+  pendingViewedTaskId = null;
+  setViewedTaskPointer(null);
 }
 // Explicit session name for the active session; null = show the short id.
 const sessionTitleAtom = reactiveState<string | null>(null);
@@ -836,6 +899,7 @@ type ServerMessage =
   | EditConfigListResultWire
   | ListDirResultWire
   | ReadFileResultWire
+  | FileOpResultWire
   | AuthRequiredMessage
   | AuthOkMessage
   | AuthErrorMessage
@@ -895,6 +959,10 @@ interface ChatConfig {
   onListDir?: (requestId: number | undefined, result: ListDirResultWire) => void;
   /** Reply to readFile (workbench file viewer); same stale-drop doctrine. */
   onReadFile?: (requestId: number | undefined, result: ReadFileResultWire) => void;
+  /** Reply to the write family (createFile/createDir/renamePath/deletePath/
+   *  saveFile); one envelope, the request id names the op. The app matches
+   *  replies against its own op sequence (the settings-editor precedent). */
+  onFileOp?: (requestId: number | undefined, result: FileOpResultWire) => void;
   /** Broadcast notice that a session died (the app drops its stale pin). */
   onSessionDeleted?: (sessionId: string) => void;
   onAuthFailure?: () => void;
@@ -956,6 +1024,20 @@ export interface ChatController {
   listDir: (requestId: number, path?: string) => void;
   /** Read a line-window page of a text file (workbench viewer); arrives via onReadFile. */
   readFile: (requestId: number, path: string, offset?: number, limit?: number) => void;
+  /** Create an EMPTY file (no clobber, no invented parents); arrives via onFileOp. */
+  createFile: (requestId: number, path: string) => void;
+  /** Create a directory (no clobber, no invented parents); arrives via onFileOp. */
+  createDir: (requestId: number, path: string) => void;
+  /** Rename/move within the workspace (both sides resolveSafe'd, no clobber);
+   *  arrives via onFileOp. */
+  renamePath: (requestId: number, oldPath: string, newPath: string) => void;
+  /** Delete a file/symlink/dir (dirs recursively -- the UI confirms first);
+   *  arrives via onFileOp. */
+  deletePath: (requestId: number, path: string) => void;
+  /** Write a text file atomically (workbench save seam). `baseMtimeMs` is the
+   *  readFile stamp the buffer was built from; a mismatch answers
+   *  conflict:true on onFileOp and writes nothing. Omit/0 for a create. */
+  saveFile: (requestId: number, path: string, content: string, baseMtimeMs?: number) => void;
   sendCommand: (command: string) => void;
   sendQuestionAnswer: (answers: Record<string, string>) => void;
   requestCompletions: (
@@ -1041,6 +1123,7 @@ export function createChat({
   onEditConfigList,
   onListDir,
   onReadFile,
+  onFileOp,
   onSessionDeleted,
   onAuthFailure,
   onWorkingMapChange,
@@ -1120,6 +1203,15 @@ export function createChat({
   let attachCursor: number | null = null; // full log length at last attach
   let replayPending = false; // between sessionCreated and its cursor report
   let dirtySinceAttach = false; // live events arrived after the last attach
+
+  // Reload restore (see VIEWED_TASK_STORAGE_KEY): adopt the persisted per-tab
+  // browse pointer as THIS socket's candidate. It lands exactly once, when
+  // the task hydrates into the feed (taskList/taskUpdate/taskActivity). The
+  // attach's sessionCreated clear is NOT a navigation and does not consume
+  // it; the open itself routes through viewSubagent, so the settled/live
+  // authority rules keep holding. A full snapshot without the id drops the
+  // candidate and the key (unknown/gone = today's boot, nothing more).
+  pendingViewedTaskId = loadViewedTaskId();
 
   // Log-view mode: the cold log on screen, or null in live mode. The socket
   // stays attached to its live session while a log is browsed (viewLog only
@@ -1205,16 +1297,22 @@ export function createChat({
         dirtySinceAttach = false;
         // An attach (switch-back, resume, or reconnect) replaces the visible
         // context; log view ends with it (app.onSessionCreated clears its
-        // mirror of this state), and so does a subagent transcript.
+        // mirror of this state), and so does a subagent transcript. The
+        // POINTER atom clears (the parent transcript owns the pane now) but
+        // the persisted key does NOT: this frame is a re-attach, not a
+        // navigation. The reload candidate lives in memory until it lands or
+        // a full snapshot denies the id; navigation entry points (switch /
+        // create / viewLog / closeSubagentView) are what persist a new
+        // pointer over the old one.
         viewedLogId = null;
         viewedTaskIdAtom(null);
         // On page reload the server can send working state before
         // sessionCreated, so restore it from the map here. The chat-log tell
         // needs no restore of its own: the attach burst ends by re-posting
         // this session's working value (attach.ts), which noteWorking sees
-        // once setSession below has built the manager -- and the replayed
-        // rows ahead of it are exactly what retires the tell when the call
-        // already has something on screen.
+        // once setSession below has built the manager -- and it re-derives
+        // the row from what the view holds UNCOMMITTED (the running call's
+        // flushed partial, if any; committed rows are earlier calls).
         const createdSid = data.sessionId;
         if (sessionWorkingMap.has(createdSid)) {
           workingAtom(sessionWorkingMap.get(createdSid) ?? false);
@@ -1272,7 +1370,10 @@ export function createChat({
         // A subagent transcript on screen ends here too -- the task feed must
         // not keep painting into the log window (browse modes are exclusive).
         viewedLogId = data.logId;
-        viewedTaskIdAtom(null);
+        // Navigation away from a subagent transcript persists the change:
+        // the log window owns the pane now, no stale pointer behind it.
+        setViewedTaskPointer(null);
+        pendingViewedTaskId = null;
         onLogViewed?.(data.logId, data.entries);
         return;
       case "logDeleted":
@@ -1310,6 +1411,12 @@ export function createChat({
       case "readFileResult":
         // The workbench file viewer's page reply; same doctrine.
         onReadFile?.(data.requestId, data);
+        return;
+      case "fileOpResult":
+        // The write family's reply (create/rename/delete/save); the app
+        // matches it by its own op id. No transcript side effects --
+        // rejections ride the payload's error field, correlated.
+        onFileOp?.(data.requestId, data);
         return;
       case "authRequired":
         // Expected: the upgrade carries no token, so the server holds the
@@ -1352,10 +1459,24 @@ export function createChat({
         // flip still knows which rows read from the durable log.
         for (const info of data.tasks) noteTaskSettled(info.taskId, info.status);
         tasksAtom(data.tasks.slice());
+        {
+          const candidate = pendingViewedTaskId;
+          if (candidate !== null && !data.tasks.some((t) => t.taskId === candidate)) {
+            // The authoritative full snapshot has no such task: honest
+            // degradation -- drop the candidate AND the persisted key, the
+            // boot behaves exactly as a boot that never had a pointer.
+            pendingViewedTaskId = null;
+            saveViewedTaskId(null);
+          } else {
+            tryRestoreViewedTask();
+          }
+        }
         return;
       case "taskUpdate": {
         const flipped = noteTaskSettled(data.task.taskId, data.task.status);
         upsertTask(data.task);
+        // The upsert may BE the hydration the reload candidate waits for.
+        tryRestoreViewedTask();
         // Turn boundary for the task on screen: inRun=false means the
         // streamed row has committed (noteWorking(false) idiom -- client
         // clock ts, footer honest with no duration segment (no turn clock
@@ -1395,6 +1516,10 @@ export function createChat({
       }
       case "taskActivity": {
         appendTaskActivity(data.taskId, data.activity);
+        // The reload candidate's hydration signal (2): if THIS frame names
+        // the pending task, the restore's open paints the whole buffer (this
+        // activity included), so skip the direct feed for this frame.
+        if (data.taskId === pendingViewedTaskId && tryRestoreViewedTask(true)) return;
         if (data.taskId === viewedTaskIdAtom() && messageList) {
           feedTaskActivity(messageList, data.activity);
         }
@@ -1774,11 +1899,20 @@ export function createChat({
   }
 
   function createSession(opts: Record<string, unknown> = {}): void {
+    // Navigation to a fresh session: the pane's NEW pointer is "none" (the
+    // new session attaches live), so the persisted pointer moves with it.
+    pendingViewedTaskId = null;
+    setViewedTaskPointer(null);
     const profile = (opts.profile as string | undefined) || currentProfileAtom();
     send({ type: "createSession", ...opts, profile });
   }
 
   function switchSession(sessionId: string): void {
+    // Navigation away from a subagent transcript (when one is open): the
+    // pane's NEW pointer is "none" -- persist it now, not the stale one, and
+    // consume any reload candidate with it.
+    pendingViewedTaskId = null;
+    setViewedTaskPointer(null);
     send({ type: "switchSession", sessionId });
     sessionIdAtom(sessionId);
     messageList?.clear();
@@ -2043,22 +2177,50 @@ export function createChat({
    *
    *  The buffer opens on the delegated prompt: an UNSETTLED task gets the
    *  client seed (see seedTaskPromptBlock -- a queued task shows the prompt
-   *  alone), a SETTLED task's fold leads with the log's own prompt row. */
+   *  alone), a SETTLED task's fold leads with the log's own prompt row.
+   *
+   *  THE open path for every pointer move -- click AND the reload restore
+   *  (tryRestoreViewedTask) -- so the pointer write (atom + persisted key)
+   *  and the authority rules below apply to both identically. */
   function viewSubagent(taskId: string): void {
     if (!messageList) return;
     viewedLogId = null; // browse modes are exclusive (see viewedLogId)
-    viewedTaskIdAtom(taskId);
+    // An open (user click or restore) owns the pointer from here: a pending
+    // reload candidate is no longer anyone's intent.
+    pendingViewedTaskId = null;
+    setViewedTaskPointer(taskId);
     messageList.clear();
     seedTaskPromptBlock(taskId);
     if (!hasFedActivity(taskId) || settledTasks.has(taskId)) requestTaskActivity(taskId);
     renderTaskTranscript(taskId);
   }
 
+  /** Reload restore: when the persisted pointer's task shows up in the
+   *  hydrated feed, open it through viewSubagent EXACTLY ONCE (the candidate
+   *  is consumed on the way in, so later snapshots/frames never re-open it).
+   *  `feedHydrated` proves existence for callers whose very frame is the
+   *  hydration signal (a taskActivity delta); snapshot/flush callers leave it
+   *  false and are gated on the task feed itself. Returns whether the open
+   *  happened; false leaves the candidate pending (manager not built yet, or
+   *  the task has not hydrated -- a later feed frame or the taskList
+   *  gone-clear decides). */
+  function tryRestoreViewedTask(feedHydrated = false): boolean {
+    const candidate = pendingViewedTaskId;
+    if (candidate === null) return false;
+    if (!messageList) return false; // setSession builds it on attach
+    if (!feedHydrated && !tasksAtom().some((t) => t.taskId === candidate)) return false;
+    viewSubagent(candidate);
+    return true;
+  }
+
   /** Drop the browse pointer; the app follows with a re-switch to the
    *  manager (the onCloseLogView idiom) which replays the live transcript,
-   *  and the sessionCreated case resets suppression on the attach burst. */
+   *  and the sessionCreated case resets suppression on the attach burst.
+   *  Navigation: the key follows the pointer (and a never-yet-applied reload
+   *  candidate dies with the intent it represented). */
   function closeSubagentView(): void {
-    viewedTaskIdAtom(null);
+    pendingViewedTaskId = null;
+    setViewedTaskPointer(null);
   }
 
   /**
@@ -2197,6 +2359,35 @@ export function createChat({
     });
   }
 
+  // Write family (workbench file ops): one additive frame per op, all
+  // answered by fileOpResult with the same id. Optional fields ride spread,
+  // absent-not-null (the readFile idiom).
+  function createFile(requestId: number, path: string): void {
+    send({ type: "createFile", requestId, path });
+  }
+
+  function createDir(requestId: number, path: string): void {
+    send({ type: "createDir", requestId, path });
+  }
+
+  function renamePath(requestId: number, oldPath: string, newPath: string): void {
+    send({ type: "renamePath", requestId, oldPath, newPath });
+  }
+
+  function deletePath(requestId: number, path: string): void {
+    send({ type: "deletePath", requestId, path });
+  }
+
+  function saveFile(requestId: number, path: string, content: string, baseMtimeMs?: number): void {
+    send({
+      type: "saveFile",
+      requestId,
+      path,
+      content,
+      ...(baseMtimeMs !== undefined ? { baseMtimeMs } : {}),
+    });
+  }
+
   return {
     connect,
     disconnect,
@@ -2221,6 +2412,11 @@ export function createChat({
     editConfigList,
     listDir,
     readFile,
+    createFile,
+    createDir,
+    renamePath,
+    deletePath,
+    saveFile,
     sendCommand,
     sendQuestionAnswer,
     requestCompletions,

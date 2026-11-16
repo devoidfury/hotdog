@@ -498,13 +498,17 @@ body {
     display: none;
 }
 
-/* Sidebar resize handle: a 6px strip straddling the right border, with a
-   ::after hit pad widening the touch target to ~14px. Keyboard-operable
-   (see onSidebarResizeKey in app.tsx). */
+/* Sidebar resize handle: a 6px strip starting AT the right border and
+   extending onto the (non-scrolling) chat side -- the session list's 6px
+   scrollbar track sits INSIDE the sidebar, so a straddling strip (the old
+   right:-3px) covered half the track and its ::after pad ate the rest: a
+   thumb press landed on the handle instead. The
+   ::after hit pad widens OUTWARD only (left:0), keeping a ~14px target off
+   the track. Keyboard-operable (see onSidebarResizeKey in app.tsx). */
 #sidebar-resize {
     position: absolute;
     top: 0;
-    right: -3px;
+    right: -6px;
     width: 6px;
     height: 100%;
     cursor: col-resize;
@@ -518,19 +522,21 @@ body {
     position: absolute;
     top: 0;
     bottom: 0;
-    left: -4px;
-    right: -4px;
+    left: 0;
+    right: -8px;
 }
 
+/* The highlight is a 2px line at the border edge, not a full-strip paint
+   (the 6px slab reads as a layout edge; the line names the
+   seam without pretending to be one). focus-visible paints the SAME line
+   at full strength -- no outline box around the invisible strip. */
 #sidebar-resize:hover,
 body.sidebar-resizing #sidebar-resize {
-    background: var(--accent-soft);
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)) left/2px 100% no-repeat;
 }
 
 #sidebar-resize:focus-visible {
-    background: var(--accent-soft);
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
+    background: linear-gradient(var(--accent), var(--accent)) left/2px 100% no-repeat;
 }
 
 /* While dragging: consistent cursor everywhere, no accidental selection. */
@@ -773,7 +779,8 @@ body.sidebar-resizing {
        (the raw session id is no longer displayed; it stays a key only; the
         client count is a plug icon, never text; the row's visible menu
         button inlines at the very end of this line -- never its own row --
-        revealed on hover/focus, see .row-menu-btn)
+        revealed on hover/focus and always shown on the active row, see
+        .row-menu-btn)
    Separators are middle dots (·, U+00B7), vertically centered by the font's
    em box. No literal parens: status is a glyph badge (.row-glyph, inline
    SVG tinted by currentColor), profile quiet muted text. */
@@ -936,8 +943,10 @@ body.sidebar-resizing {
 /* Visible menu affordance, the twin of the right-click (owner: make the
    trigger seeable). Trails the card bottom-right behind the plug; hidden
    until the row is hovered or keyboard-focused (visibility drops it from
-   the tab order while invisible -- no phantom stops). Bare-icon idiom like
-   the section-header chips. */
+   the tab order while invisible -- no phantom stops), with one exception:
+   the ACTIVE (viewed) row shows it always (same treatment as the subagent
+   rows -- there the menu is the working affordance,
+   not a discovery hunt). Bare-icon idiom like the section-header chips. */
 .row-menu-btn {
     flex: 0 0 auto;
     /* Pin right: the button owns the auto margin when it trails metrics
@@ -958,14 +967,20 @@ body.sidebar-resizing {
     position: relative;
 }
 
-/* Hit target >= 24px (the audit's own minimum-touch doctrine) without a
-   layout footprint: an absolutely-positioned pseudo extends the button's
-   clickable box into the surrounding flex gap -- the glyph stays line-
-   sized, the pointer zone grows. */
+/* Row-menu affordance sizing (shared idiom, subagent rows first):
+   the 12px glyph read as invisible -- a 15px glyph, and the hit target
+   >= ~31px: an absolutely-positioned pseudo extends the button's clickable
+   box into the surrounding flex gap -- the glyph rides the line, the
+   pointer zone grows. */
+.row-menu-btn svg {
+    width: 15px;
+    height: 15px;
+}
+
 .row-menu-btn::after {
     content: "";
     position: absolute;
-    inset: -6px;
+    inset: -8px;
 }
 
 .row-clients + .row-menu-btn {
@@ -974,8 +989,10 @@ body.sidebar-resizing {
 
 .session-item:hover .row-menu-btn,
 .session-item:focus-within .row-menu-btn,
+.session-item.active .row-menu-btn,
 .log-item:hover .row-menu-btn,
-.log-item:focus-within .row-menu-btn {
+.log-item:focus-within .row-menu-btn,
+.log-item.active .row-menu-btn {
     visibility: visible;
     opacity: 1;
 }
@@ -2872,6 +2889,12 @@ body.logs-resizing .sidebar-header-resize {
 
 .attachment-box {
     background: var(--bg-secondary);
+    /* The box owns a dark surface inside a parent whose ink may be
+       inverse-oriented (the user bubble carries --text-inverse, dark in the
+       hotdog palette where it serves the mustard fills). Inheriting that put
+       near-black ink on the near-black sheet; the surface carries its own
+       ink instead, true for every palette. */
+    color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius, 8px);
     padding: 6px 12px;
@@ -3322,9 +3345,10 @@ body.logs-resizing .sidebar-header-resize {
     overflow-y: auto;
     /* Rides right up at the top like the SESSIONS header band (4px above
        it, not the body's 12 -- the column header IS a pane header, not
-       body content); the 12px left rail matches .sidebar-header's, and
-       the column's right border keeps the dock seam (owner ruling: stays). */
-    padding: 4px 12px 12px;
+       body content); side rails 6px (tighter
+       tree), and the column's right border keeps the dock seam (deliberate:
+       it stays). */
+    padding: 4px 6px 12px;
     border-right: 1px solid var(--border);
 }
 
@@ -3461,7 +3485,7 @@ body.logs-resizing .sidebar-header-resize {
 #workbench-resize {
     position: absolute;
     top: 0;
-    left: -3px;
+    left: 0;
     width: 6px;
     height: 100%;
     cursor: col-resize;
@@ -3470,24 +3494,25 @@ body.logs-resizing .sidebar-header-resize {
     z-index: 10;
 }
 
+/* Same idiom as #sidebar-resize: the strip starts at the border and rides
+   the WORKBENCH side -- the chat's scrollbar track sits just outside this
+   edge -- and the hit pad widens outward only. Highlight: 2px line. */
 #workbench-resize::after {
     content: "";
     position: absolute;
     top: 0;
     bottom: 0;
-    left: -4px;
-    right: -4px;
+    left: 0;
+    right: -8px;
 }
 
 #workbench-resize:hover,
 body.workbench-resizing #workbench-resize {
-    background: var(--accent-soft);
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)) left/2px 100% no-repeat;
 }
 
 #workbench-resize:focus-visible {
-    background: var(--accent-soft);
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
+    background: linear-gradient(var(--accent), var(--accent)) left/2px 100% no-repeat;
 }
 
 body.workbench-resizing {
@@ -3528,17 +3553,22 @@ body.workbench-resizing {
 }
 
 #dock-resize {
-    /* Straddles the block's left border: the block is the last D pixels of
-       the row (see the CHAT/EDITOR MODE block). */
-    right: calc(var(--editor-dock-width, 720px) - 3px);
+    /* Starts at the block's left border: the block is the last D pixels of
+       the row (see the CHAT/EDITOR MODE block). Same doctrine as
+       #sidebar-resize: the strip starts AT the border and rides
+       the dock side -- the chat's scrollbar track sits just left of the
+       border -- so the handle no longer covers the track. */
+    right: calc(var(--editor-dock-width, 720px) - 6px);
 }
 
 #tree-col-resize {
-    /* Straddles the tree column's right border: the column's flex-basis is
+    /* Starts at the tree column's right border: the column's flex-basis is
        exactly --tree-col-used (the seam's number, dock-capped -- see the
        pinned-panel rule), and the handle reads the SAME variable, so a
-       dock-capped column and its handle agree. */
-    left: calc(var(--tree-col-used) - 3px);
+       dock-capped column and its handle agree. Off the track:
+       the strip rides the FILE-VIEWER side, since the tree's
+       own scrollbar track lives just left of the border. */
+    left: var(--tree-col-used);
 }
 
 /* The tree column's handle belongs to every DESKTOP shape: chat mode's dock
@@ -3556,30 +3586,26 @@ body.workbench-resizing {
     position: absolute;
     top: 0;
     bottom: 0;
-    left: -4px;
-    right: -4px;
+    left: 0;
+    right: -8px;
 }
 
 #dock-resize:hover,
 body.workbench-resizing #dock-resize {
-    background: var(--accent-soft);
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)) left/2px 100% no-repeat;
 }
 
 #dock-resize:focus-visible {
-    background: var(--accent-soft);
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
+    background: linear-gradient(var(--accent), var(--accent)) left/2px 100% no-repeat;
 }
 
 #tree-col-resize:hover,
 body.sidebar-resizing #tree-col-resize {
-    background: var(--accent-soft);
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)) left/2px 100% no-repeat;
 }
 
 #tree-col-resize:focus-visible {
-    background: var(--accent-soft);
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
+    background: linear-gradient(var(--accent), var(--accent)) left/2px 100% no-repeat;
 }
 
 /* Tab strip: scrolls sideways instead of overflowing; the active tab lifts
@@ -3656,20 +3682,44 @@ body.sidebar-resizing #tree-col-resize {
     min-width: 0;
     min-height: 0;
     overflow-y: auto;
-    padding: 12px;
+    padding: 0;
 }
 
-/* Full-bleed code (owner ruling): when the body holds a FILE tab, the pane's
-   12px gutter does not surround the dark code block -- the block runs edge
-   to edge, and since the head chrome died (2026-11-14: the tab already names
-   the file) the tab strip's own hairline is its top line. The gutter does
-   not disappear, it MOVES onto the file view's own parts (the notes and the
-   sticky foot bar), so every other body -- the tree tab, the empty line, a
-   placeholder -- keeps the padding it has always had. :has() is the honest
-   selector for "the body that holds one" (precedent: the fold-chevron rules
-   on the tool boxes). */
+/* FULL-HEIGHT FILE TABS. A file tab -- the editor
+   or the read-only viewer -- owns the WHOLE pane: the code sheet runs the
+   full height, its own surface scrolls, and the foot bar pins the bottom even
+   on a three-line file. So #workbench-body must NOT be the scroller for those
+   two kinds (it would add a second scrollbar and let --bg-secondary show under
+   a short sheet). The height is a pure flex chain, never a magic number: the
+   panel is a definite-height flex column -> #workbench-body is flex:1 (its
+   used height is definite) -> the tab body is flex:1 -> the sheet is flex:1 ->
+   the surface scrolls and the bar is the column's last row. Only individual
+   rows carry a pixel height (EDIT_LINE_H, hit-test-trusted); the fill is
+   all ratios. The workspace-tree tab and the empty/placeholder bodies keep
+   riding #workbench-body's own y-scroll (unchanged). :has() is the same tool
+   the editor-mode dock already uses. */
+#workbench-body:has(.editor),
 #workbench-body:has(.file-view) {
-    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#workbench-body:has(.editor) .workbench-tab-body,
+#workbench-body:has(.file-view) .workbench-tab-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+/* Full-bleed by default: the code sheet and the editor's line layer run
+   edge to edge, the tab strip's hairline is their top line, and the gutters
+   live on the parts that need one -- the file view's notes and sticky foot
+   bar (their own padding), the empty line and placeholders (their own
+   margin), and the tree tab below. */
+#workbench-body .file-tree {
+    padding: 12px;
 }
 
 .workbench-empty,
@@ -3735,8 +3785,8 @@ body.sidebar-resizing #tree-col-resize {
    border keeps its 1px width transparent at rest, so hover/focus never
    shifts the layout. */
 .file-reload-btn {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-muted);
@@ -3825,7 +3875,7 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 .ft-children {
-    padding-left: 12px;
+    padding-left: 8px;
 }
 
 .ft-note {
@@ -3842,6 +3892,15 @@ body.sidebar-resizing #tree-col-resize {
 
 .file-view {
     font-size: 14px;
+    /* Full-height flex column (paired with the :has(.file-view) chain on
+       #workbench-body): the sheet owns the pane, its rows scroll, the foot
+       bar rides the bottom. --bg-base on the root so the area under the last
+       line stays the code sheet, never the panel's --bg-secondary. */
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    background: var(--bg-base);
 }
 
 /* The viewer's WHOLE chrome (owner ruling 2026-11-14): the tab names the
@@ -3856,10 +3915,11 @@ body.sidebar-resizing #tree-col-resize {
     bottom: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 4px 12px;
+    gap: 6px;
+    padding: 2px 4px;
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
 }
 
 .file-view-status {
@@ -3923,16 +3983,22 @@ body.sidebar-resizing #tree-col-resize {
 
 .file-view-rows {
     display: block;
+    /* The scrollable sheet: flex:1 fills the pane, min-height:0 lets it
+       shrink (so it scrolls instead of pushing the foot bar out of view),
+       and it owns the y-scroll now that #workbench-body no longer scrolls a
+       file tab. overflow:auto keeps the horizontal scroll long lines had. */
+    flex: 1 1 auto;
+    min-height: 0;
     font-family: var(--font-mono);
     background: var(--bg-base);
     /* Full-bleed (owner ruling): the sheet runs edge to edge with NO frame of
        its own -- no radius, no side/bottom border, and no top border either
        since the head chrome died (2026-11-14): the tab strip's own
-       border-bottom is the hairline the code starts under, and the sticky
-       foot bar (.file-view-bar) owns the bottom seam; a border-top here would
-       draw that line twice. See the :has(.file-view) rule on #workbench-body
-       for the gutter's home. */
-    overflow-x: auto;
+       border-bottom is the hairline the code starts under, and the foot bar
+       (.file-view-bar) owns the bottom seam; a border-top here would draw that
+       line twice. Now y-scrolls too (flex:1 above), so a long sheet scrolls
+       under its own foot instead of scrolling the whole workbench body. */
+    overflow: auto;
 }
 
 .file-line {
@@ -3958,6 +4024,14 @@ body.sidebar-resizing #tree-col-resize {
 .file-code {
     white-space: pre;
     color: var(--text-primary);
+    /* Same UA-override cure as .editor-code above: the viewer and the editor
+       must paint the same face (and the same cell) for the same bytes. */
+    font-family: var(--font-mono);
+    /* Same stop as the editor's model (TAB_STOP=4) -- viewer and editor must
+       paint a tab identically. */
+    tab-size: 4;
+    -moz-tab-size: 4;
+    -o-tab-size: 4;
 }
 
 /* Token classes: sinks own the coloring (see @utils/syntax). The file view
@@ -4050,6 +4124,294 @@ body.sidebar-resizing #tree-col-resize {
 .tk-code_block { color: var(--text-secondary); }
 .tk-strong { font-weight: 600; }
 .tk-code { color: var(--warning); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EDITOR (ui/editor.tsx) -- hidden-textarea capture + rendered line layer
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Full-height column flex (the :has(.editor) chain on #workbench-body makes
+   the tab body definite-height, so flex:1 fills the WHOLE pane): the viewport
+   scrolls and its --bg-base sheet paints the empty area under the last line,
+   the foot bar (shared .file-view-bar chrome) is the column's last row and so
+   sits at the pane's bottom on short AND long files. The height is ratios all
+   the way down -- no magic px. The row box is exactly EDIT_LINE_H px, the ONE
+   pixel number here: JS hit-testing and the caret/selection overlay trust it;
+   never set a per-line height elsewhere. */
+.editor {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    font-size: 14px;
+    /* The caret/hit cell model assumes one code unit == one fixed advance.
+       That is only true for a MONOSPACE face with NO ligatures (a ligature
+       like "==" collapses two code units into one cell) and no letter-spacing.
+       --font-mono + these switches make
+       the rendered advance match the probe's, which measures the same chain
+       (inheriting the UI face is the caret-drift trap). */
+    font-family: var(--font-mono);
+    font-weight: 400;
+    letter-spacing: normal;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0;
+}
+
+.editor-viewport {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    background: var(--bg-base);
+    line-height: 20px;
+    outline: none;
+}
+
+/* The scroll spacer sized to the WHOLE buffer; the windowed rows ride the
+   absolutely positioned slice. */
+.editor-canvas {
+    position: relative;
+}
+
+.editor-window {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+}
+
+.editor-line {
+    display: flex;
+    align-items: baseline;
+    height: 20px;
+}
+
+.editor-line:hover {
+    background: var(--bg-secondary);
+}
+
+/* Block + min-width: the row spans at least the viewport, so a full-line
+   selection rect reaches the right edge, while white-space:pre keeps long
+   lines scrollable instead of wrapping (a real editor's geometry). */
+.editor-code {
+    display: block;
+    flex: 1 0 auto;
+    min-width: 100%;
+    position: relative;
+    white-space: pre;
+    color: var(--text-primary);
+    /* The probe/paint parity, ENFORCED: the UA
+       stylesheet gives every code element a SPECIFIED monospace font family,
+       which beats the --font-mono inherited from .editor -- so without this
+       the rows rendered in the system mono while .editor-measure measured the
+       house face. Weight-400 advances happened to match, but the tokenizer's
+       600-weight runs (tk-key, tk-section, ...) fell through per-glyph
+       fallbacks at a different advance (measured live: 7.33px vs the model's
+       8.00), so every semibold glyph dragged the caret LEFT of the clicked
+       column, growing from the line start. Pin the face on the element the UA
+       would otherwise claim. */
+    font-family: var(--font-mono);
+    /* The model counts TAB_STOP=4 cells (editor-buffer.ts); CSS tabs default
+       to 8, so raw tabs must be pinned to the model's stop or every
+       tab-indented file paints mid-glyph carets and mis-hit columns. */
+    tab-size: 4;
+    -moz-tab-size: 4;
+    -o-tab-size: 4;
+}
+
+/* The capture textarea: focus + IME only. Transparent, parked under the
+   caret inside the canvas (its coordinates never exceed what the rows
+   already size), one cell wide -- the invariant is empty text, the keydown
+   layer owns everything else. */
+.editor-input {
+    position: absolute;
+    z-index: 3;
+    /* NEVER a mouse target: parked under the caret it would otherwise swallow
+       the next press, and the empty-area handler would teleport the caret to
+       buffer END. Focus/IME ride programmatic focus() only. */
+    pointer-events: none;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: transparent;
+    caret-color: transparent;
+    width: 2em;
+    height: 20px;
+    overflow: hidden;
+    resize: none;
+    font: inherit;
+    font-family: var(--font-mono);
+    line-height: 20px;
+    white-space: pre;
+    opacity: 0;
+}
+
+/* Blinking caret -- one cell at the primary head; hidden mid-composition
+   (the IME paints its own in-flight text through the textarea). */
+.editor-caret {
+    position: absolute;
+    width: 1px;
+    background: var(--text-primary);
+    pointer-events: none;
+    animation: editor-blink 1.1s steps(1) infinite;
+}
+
+@keyframes editor-blink {
+    50% {
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .editor-caret {
+        animation: none;
+    }
+}
+
+.editor-sel {
+    position: absolute;
+    background: var(--accent-soft);
+    pointer-events: none;
+    /* The rect is an EMPTY abs child: with no vertical extent Blink paints it
+       ZERO pixels tall -- the selection was mathematically correct and
+       invisible the whole time (the live repro's "nothing highlights"). The
+       caret's own recipe (no top: the static position; explicit row-height
+       extent) gives every rect the exact vertical box the caret uses. */
+    height: 20px;
+}
+
+/* Matched-bracket pair tint (VS Code's bracket-pair highlight): one cell on
+   each side of the pair, driven by matchBracket in the render layer. Theme
+   vars only (rides --accent like the selection); pointer-events off so the
+   paint never steals a click. */
+.editor-match {
+    position: absolute;
+    background: var(--accent-glow);
+    outline: 1px solid var(--accent);
+    pointer-events: none;
+    /* Same zero-height abs-child cure as .editor-sel (the tint rides the
+       caret's vertical box: static position, one row tall). */
+    height: 20px;
+}
+
+/* The 100-glyph probe that measures the char width once (never painted). */
+.editor-measure {
+    position: absolute;
+    left: -99999px;
+    top: 0;
+    white-space: pre;
+    opacity: 0;
+    pointer-events: none;
+    /* MUST equal the code spans' computed font EXACTLY -- the caret/hit cell
+       is derived from this measurement, so any face/size/weight/letter-spacing
+       divergence between probe and paint re-introduces column drift. Mirrors
+       the .editor chain verbatim (mono, 14px, weight 400, no letter-spacing,
+       ligatures off); it sits inside .editor and so inherits the same, but the
+       explicit copy pins the invariant against a future .editor edit. */
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: normal;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0;
+    line-height: 20px;
+    /* Probe/paint parity: the painted rows tab at 4 (.editor-code), so the
+       probe must agree (its own comment's invariant). */
+    tab-size: 4;
+    -moz-tab-size: 4;
+    -o-tab-size: 4;
+}
+
+/* The foot bar rides the viewer's (sticky chrome is harmless with the
+   viewport's own scroll: the editor column never y-scrolls itself). */
+.editor-bar .file-view-status {
+    font-size: 12px;
+}
+
+/* The caret readout + jump box: a foot-bar cell that
+   swaps button<->input at ONE seat, so both twins share height, font, and
+   padding and the swap never shifts the bar. Max 24px tall inside the 2px
+   bar (the 28px reload chrome would outgrow it); mono tabular digits so the
+   readout never jitters as the caret moves. */
+.editor-goto-btn,
+.editor-goto-input {
+    height: 22px;
+    padding: 0 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+
+.editor-goto-btn {
+    min-width: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.editor-goto-btn:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.editor-goto-btn:focus-visible,
+.editor-goto-input:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.editor-goto-input {
+    /* one full row:col spec of room (the file cap is six digits); longer
+       input scrolls inside the box instead of widening the bar */
+    width: 10ch;
+    background: var(--bg-base);
+    border-color: var(--border);
+    outline-offset: -1px;
+}
+
+/* Whitespace marks (the shared ws-render decoration -- faint dots/arrows;
+   trailing runs get the subtle wash). FONT-PROOF BY CONSTRUCTION: the REAL
+   whitespace character stays in the text flow (the
+   advance equals the unmarked line's, whatever face is loaded -- CSS tab-size
+   still expands the tab), and the MARK is an absolutely positioned glyph that
+   contributes zero width (out of flow, pointer-events off, aria-hidden). Dot
+   at cell center, arrow at cell start. */
+.ws {
+    position: relative;
+    color: var(--text-muted);
+    opacity: 0.4;
+}
+
+.ws-glyph {
+    position: absolute;
+    left: 0;
+    /* top stays AUTO: the static position puts the glyph on the line's
+       baseline, exactly like the plain characters around it. */
+    pointer-events: none;
+}
+
+.ws-space .ws-glyph {
+    /* the dot rides the MIDDLE of its one-cell wrapper */
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.ws-trail {
+    background: var(--bg-hover);
+}
+
+/* The toggle wears the reload button's chrome; the accent face means the
+   marks are ON (same "override in force" signal as .file-view-lang). */
+.editor-ws-btn.is-on,
+.file-view-ws.is-on {
+    color: var(--accent);
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    RESPONSIVE
@@ -4605,11 +4967,14 @@ body.sidebar-resizing #tree-col-resize {
 }
 
 /* The task row's context-menu kebab: the shared .row-menu-btn treatment,
-   revealed with the row (same hover/focus rule the session/log rows use).
-   The elapsed clock keeps the auto margin, so the button rides tight off
-   its shoulder (.row-clients + .row-menu-btn idiom). */
+   revealed with the row -- hover/focus like the
+   session/log rows, plus always shown on the ACTIVE (viewed) row.
+   The elapsed clock keeps the auto margin, so the
+   button rides tight off its shoulder (.row-clients + .row-menu-btn
+   idiom). */
 .subagent-row:hover .row-menu-btn,
-.subagent-row:focus-within .row-menu-btn {
+.subagent-row:focus-within .row-menu-btn,
+.subagent-row.active .row-menu-btn {
     visibility: visible;
     opacity: 1;
 }

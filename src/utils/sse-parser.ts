@@ -83,10 +83,7 @@ export class SseParser {
               try {
                 const data = JSON.parse(jsonBuffer);
                 if (isObjectData(data)) yield data;
-                else
-                  this.#onWarning(
-                    `[sse] non-object JSON at event boundary: ${jsonBuffer.slice(0, 80)}`,
-                  );
+                else this.#onWarning(`[sse] non-object JSON at event boundary: ${jsonBuffer.slice(0, 80)}`);
               } catch {
                 this.#onWarning(
                   `[sse] malformed JSON at event boundary (${jsonBuffer.length} chars): ${jsonBuffer.slice(0, 100)}...`,
@@ -115,9 +112,7 @@ export class SseParser {
                 const data = JSON.parse(jsonBuffer);
                 if (isObjectData(data)) yield data;
               } catch {
-                this.#onWarning(
-                  `[sse] malformed JSON on [DONE] flush (${jsonBuffer.length} chars)`,
-                );
+                this.#onWarning(`[sse] malformed JSON on [DONE] flush (${jsonBuffer.length} chars)`);
               }
               jsonBuffer = "";
             }
@@ -126,10 +121,7 @@ export class SseParser {
           try {
             const data = JSON.parse(payload);
             if (isObjectData(data)) yield data;
-            else
-              this.#onWarning(
-                `[sse] non-object JSON data payload ignored: ${payload.slice(0, 80)}`,
-              );
+            else this.#onWarning(`[sse] non-object JSON data payload ignored: ${payload.slice(0, 80)}`);
           } catch {
             jsonBuffer += payload;
             try {
@@ -153,9 +145,7 @@ export class SseParser {
           const data = JSON.parse(jsonBuffer);
           if (isObjectData(data)) yield data;
         } catch {
-          this.#onWarning(
-            `[sse] truncated JSON at EOF (${jsonBuffer.length} chars)`,
-          );
+          this.#onWarning(`[sse] truncated JSON at EOF (${jsonBuffer.length} chars)`);
         }
       }
     } finally {

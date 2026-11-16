@@ -43,15 +43,13 @@ function withinOneEdit(a: string, b: string): boolean {
 }
 
 /**
- * Fuzzy "did you mean" suggestions shared by every unknown-input path (CLI
- * flags, tool names, subcommands): normalized exact match, then prefix/
- * substring near-matches, then one-edit typos (a dropped char like "modl"
- * for "model" defeats substring matching alone). The highest-confidence
- * tier that yields anything wins, capped at `limit`.
+ * Fuzzy "did you mean" suggestions shared by every unknown-input path (CLI flags,
+ * tool names, subcommands): normalized exact match, then prefix/substring near-matches,
+ * then one-edit typos (a dropped char like "modl" for "model" defeats substring matching alone).
+ * The highest-confidence tier that yields anything wins, capped at `limit`.
  *
- * `normalize` maps the target and each candidate to a comparison key (e.g.
- * lowercase, strip separators/flag dashes); candidates keep their given
- * order in the result.
+ * `normalize` maps the target and each candidate to a comparison key (e.g. lowercase,
+ * strip separators/flag dashes); candidates keep their given order in the result.
  */
 export function suggestCandidates(
   target: string,

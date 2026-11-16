@@ -1,12 +1,4 @@
-/**
- * Speech-to-text client for OpenAI-compatible audio transcriptions endpoints
- * (multipart/form-data POST -> { "text": "..." }), e.g. a whisper.cpp
- * llama-swap entry at http://localhost:8080/v1/audio/transcriptions.
- *
- * No config imports: callers pass resolved url/model values
- * (centralized-defaults rule). Consumed by the websocket server's
- * `transcribe` handler and (later) CLI dictation.
- */
+/** Speech-to-text client for OpenAI-compatible audio transcriptions endpoints. */
 
 import { hotdogFetch } from "./fetch.ts";
 
@@ -18,8 +10,8 @@ export interface TranscribeAudioOptions {
    */
   url: string;
   /**
-   * Authorization header for the endpoint (e.g. `Bearer <provider key>` from
-   * the model registry). Wins over userinfo embedded in the URL.
+   * Authorization header for the endpoint (e.g. `Bearer <provider key>`).
+   * Wins over userinfo embedded in the URL.
    */
   authHeader?: string | null;
   /** Model name sent as the `model` form field; omitted when null/undefined. */
@@ -51,9 +43,9 @@ function audioExtension(mimeType: string): string {
 }
 
 // Credentials embedded in the endpoint URL (`http://:KEY@host/v1/...`) are
-// stripped from the request URL and re-sent as an HTTP Basic Authorization
-// header: Bun's fetch drops userinfo silently, and llama-swap (the lab
-// backend) accepts Basic. Keeps sttUrl a single self-contained config key.
+// stripped from the request URL and re-sent as an HTTP Basic Authorization header:
+// Bun's fetch drops userinfo silently, and llama-swap (the lab backend) accepts Basic.
+// Keeps sttUrl a single self-contained config key.
 function splitUrlAuth(rawUrl: string): { url: string; authHeader?: string } {
   let parsed: URL;
   try {
@@ -72,15 +64,13 @@ function splitUrlAuth(rawUrl: string): { url: string; authHeader?: string } {
 }
 
 /** Transcribe one audio clip; resolves with the recognized text. */
-export async function transcribeAudio(
-  opts: TranscribeAudioOptions,
-): Promise<string> {
+export async function transcribeAudio(opts: TranscribeAudioOptions): Promise<string> {
   const mimeType = opts.mimeType || "application/octet-stream";
   const filename = opts.filename || `audio.${audioExtension(mimeType)}`;
 
   const form = new FormData();
-  // slice() normalizes to an ArrayBuffer-backed copy (Uint8Array<ArrayBufferLike>
-  // is not a BlobPart); the copy is noise next to the upload itself.
+  // slice() normalizes to an ArrayBuffer-backed copy (Uint8Array<ArrayBufferLike> is not a BlobPart);
+  // the copy is noise next to the upload itself.
   form.append("file", new Blob([opts.audio.slice()], { type: mimeType }), filename);
   if (opts.model) form.append("model", opts.model);
 
@@ -94,9 +84,7 @@ export async function transcribeAudio(
   if (!resp.ok) {
     // Body snippet keeps the failure readable (backends explain themselves).
     const body = (await resp.text().catch(() => "")).slice(0, 500).trim();
-    throw new Error(
-      `STT request failed: ${resp.status} ${resp.statusText}${body ? `: ${body}` : ""}`,
-    );
+    throw new Error(`STT request failed: ${resp.status} ${resp.statusText}${body ? `: ${body}` : ""}`);
   }
 
   let json: unknown;

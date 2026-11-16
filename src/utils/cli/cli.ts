@@ -90,27 +90,25 @@ export interface CliOutputSinkOptions {
   hideUserMessage?: boolean;
   showTokenUse?: boolean;
   /**
-   * Resolves a tool's per-parameter display hints (its metadata's
-   * argDisplay). Unwired = plain summarization for every tool. The
-   * interactive UI wires this from the tool registry so tools can declare
-   * value folding (first-line previews) and syntax highlighters.
+   * Resolves a tool's per-parameter display hints (its metadata's argDisplay).
+   * Unwired = plain summarization for every tool. The interactive UI wires this from the
+   * tool registry so tools can declare value folding (first-line previews) and syntax highlighters.
    */
   argDisplay?: (toolName: string) => Record<string, ArgDisplay> | undefined;
   /**
-   * Resolves a tool's declared display parts (its metadata's `display`). The
-   * sibling of `argDisplay` one level up: where the hints fold a single
-   * argument, a part declares what a whole call renders as -- today only
-   * kind "diff" has a terminal renderer (the core write tools declare it), and
-   * a tool that declares nothing keeps the generic result posture. The sink
-   * never keys off a tool name. Unwired = every result renders generically.
+   * Resolves a tool's declared display parts (its metadata's `display`).
+   * The sibling of `argDisplay` one level up: where the hints fold a single argument,
+   * a part declares what a whole call renders as -- today only kind "diff" has a
+   * terminal renderer (the core write tools declare it), and a tool that declares
+   * nothing keeps the generic result posture. The sink never keys off a tool name.
+   * Unwired = every result renders generically.
    */
   display?: (toolName: string) => ToolDisplaySpec[] | undefined;
   /**
-   * Markdown prose highlighting (split renderer only, wired by
-   * ui-interactive-cli): Default-mode text is emitted spoof-neutralized and
-   * otherwise RAW (no final_response wash) and the bridge paints whole lines
-   * with the markdown tokenizer -- completed lines once at the newline commit, the in-flight row on every
-   * frame repaint. Never set on the legacy/one-shot path (byte-identity).
+   * Markdown prose highlighting: Default-mode text is emitted spoof-neutralized and
+   * otherwise RAW (no final_response wash) and the bridge paints whole lines with the markdown tokenizer --
+   * completed lines once at the newline commit, the in-flight row on every frame repaint.
+   * Never set on the legacy/one-shot path (byte-identity).
    */
   markdownHighlight?: boolean;
   /** Output-mode transition observer (same wiring as markdownHighlight). */
@@ -122,11 +120,8 @@ export function formatCompacting(messageCount: number, keepRecent: number): stri
 }
 
 /**
- * Visual cue for an unconfigured tool-call line. Kept in the sink (not the
- * schema) so a schema default cannot shadow the CLI's own choice:
- * template > `prefix + name args`. The value matches the historic
- * `toolCallDisplayFormat: " 🔧 {} {}"` default, so an unset knob renders
- * exactly what that template rendered.
+ * Visual cue for an unconfigured tool-call line. Kept in the sink (not the schema)
+ * so a schema default cannot shadow the CLI's own choice: template > `prefix + name args`.
  */
 const TOOL_CALL_PREFIX = " 🔧 ";
 
@@ -134,11 +129,10 @@ const TOOL_CALL_PREFIX = " 🔧 ";
 const INFLIGHT_PREVIEW_RUNES = 80;
 
 /**
- * The stream-reset marker: one line at the duplication point, printed when a
- * mid-stream retry retracts a dead attempt that actually showed bytes. A print
- * stream cannot retract scrollback, so the repeated prose stays -- this names
- * why. Constant text (spoof-safe by construction); both CLI sinks print this
- * exact line (legacy inline in the sink, the split bridge as a committed row),
+ * The stream-reset marker: one line at the duplication point, printed when a mid-stream retry
+ * retracts a dead attempt that actually showed bytes. A print stream cannot retract scrollback,
+ * so the repeated prose stays -- this names why. Constant text (spoof-safe by construction);
+ * both CLI sinks print this exact line (legacy inline in the sink, the split bridge as a committed row),
  * so tests and notes can pin one string.
  */
 export const STREAM_RETRY_MARKER = "-- stream failed mid-response; retrying --";
@@ -376,9 +370,7 @@ export class CliOutputSink extends OutputSink {
     this.altStream = process.stderr;
   }
 
-  /**
-   * Flush buffered newlines to the given stream.
-   */
+  /** Flush buffered newlines to the given stream. */
   _flushNl(): void {
     if (this.#nlBuf > 0) {
       const mode = this.#outputMode ?? Modes.Default;
@@ -390,9 +382,7 @@ export class CliOutputSink extends OutputSink {
     }
   }
 
-  /**
-   * Flush the given text or pending text buffer to the given stream.
-   */
+  /** Flush the given text or pending text buffer to the given stream. */
   _flushText(): void {
     if (this.#textBuf) {
       const mode = this.#outputMode ?? Modes.Default;

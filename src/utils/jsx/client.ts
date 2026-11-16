@@ -20,12 +20,12 @@ import {
   EVENT_ATTR,
   Fragment,
   MAX_RENDER_DEPTH,
-  URL_ATTRS,
   VALID_ATTR_NAME,
   VALID_TAG_NAME,
   VOID_ELEMENTS,
   childrenPresent,
   isSafeUrl,
+  isUrlAttr,
   serializeValue,
   type ComponentProps,
   type JsxChild,
@@ -87,14 +87,20 @@ export type Ref = (el: DomElement | null) => void;
 type HostUnit = { kind: "host"; vnode: JsxNode };
 type Unit = { kind: "text"; value: string } | { kind: "placeholder" } | HostUnit;
 
+// Shared empty props for the initial applyProps pass on create (no old props to un-apply).
+const EMPTY_PROPS: ComponentProps = {};
+
 // Falsy children (`{cond && <x/>}`, `{null}`) get a comment placeholder instead of nothing
-// so positional diffing keeps siblings aligned across renders.
+// so positional diffing keeps siblings aligned across renders. The unit carries no payload,
+// so one shared instance serves every placeholder slot.
+const PLACEHOLDER: Unit = { kind: "placeholder" };
+
 function flatten(node: JsxChild, depth: number, out: Unit[]): void {
   if (depth > MAX_RENDER_DEPTH) {
     throw new Error(`Maximum JSX render depth exceeded (${MAX_RENDER_DEPTH})`);
   }
   if (node == null || typeof node === "boolean") {
-    out.push({ kind: "placeholder" });
+    out.push(PLACEHOLDER);
     return;
   }
   if (typeof node === "string" || typeof node === "number") {
@@ -117,7 +123,7 @@ function flatten(node: JsxChild, depth: number, out: Unit[]): void {
   if (typeof type === "string") {
     if (!VALID_TAG_NAME.test(String(type))) {
       console.warn(`[jsx] dropped invalid tag name: ${JSON.stringify(String(type).slice(0, 80))}`);
-      out.push({ kind: "placeholder" });
+      out.push(PLACEHOLDER);
       return;
     }
     out.push({ kind: "host", vnode: node });
@@ -145,7 +151,11 @@ interface Entry {
   events?: Map<string, DomListener>; // host elements only, keyed by DOM event type (evtType(propName))
   warned?: Set<string>; // host elements only: warning names already emitted
   ref?: Ref; // host elements only: current callback ref (invoked null on removal)
+  st?: number; // reconcile generation stamp: marks entries consumed this frame (spares a Set per reconcile)
 }
+
+// Monotonic counter for Entry.st; single-threaded runtime, no wraparound concern at 2^53.
+let reconcileGen = 0;
 
 // Each warning fires at most once per node, so a static tree with an ignored prop does not re-warn on every render.
 function warnOnce(entry: Entry, key: string, message: string): void {
@@ -171,12 +181,14 @@ function warnDupKey(parent: DomNode, key: string): void {
 }
 
 function checkDupKeys(parent: DomNode, units: Unit[]): void {
-  const seen = new Set<string>();
+  // Allocated on the first keyed unit: keyless children (the common case) pay nothing.
+  let seen: Set<string> | undefined;
   for (const u of units) {
     const k = unitKey(u);
     if (k == null) continue;
-    if (seen.has(k)) warnDupKey(parent, k);
-    seen.add(k);
+    const s = (seen ??= new Set<string>());
+    if (s.has(k)) warnDupKey(parent, k);
+    s.add(k);
   }
 }
 
@@ -188,8 +200,8 @@ function create(u: Unit, doc: DomDocument, depth: number, ns: string | null): En
   const tag = String(u.vnode.type).toLowerCase();
   ns = tag === "svg" ? SVG_NS : ns;
   const el = ns === null ? doc.createElement(tag) : doc.createElementNS(ns, tag);
-  const entry: Entry = { unit: u, dom: el, kids: [], events: new Map() };
-  applyProps(el, {}, u.vnode.props, entry, tag);
+  const entry: Entry = { unit: u, dom: el };
+  applyProps(el, EMPTY_PROPS, u.vnode.props, entry, tag);
   const ref = u.vnode.props.ref as Ref | undefined;
   if (typeof ref === "function") {
     entry.ref = ref;
@@ -200,14 +212,16 @@ function create(u: Unit, doc: DomDocument, depth: number, ns: string | null): En
     // void elements never carry child nodes, so warn and drop.
     if (childrenPresent(u.vnode.props.children)) warnVoidDropped(entry, tag);
   } else if (u.vnode.props.children !== undefined) {
-    const kids: Unit[] = [];
-    flatten(u.vnode.props.children as JsxChild, depth + 1, kids);
-    checkDupKeys(el, kids);
-    for (const ku of kids) {
+    const kidUnits: Unit[] = [];
+    flatten(u.vnode.props.children as JsxChild, depth + 1, kidUnits);
+    checkDupKeys(el, kidUnits);
+    const kids: Entry[] = [];
+    for (const ku of kidUnits) {
       const kid = create(ku, doc, depth + 1, ns);
       el.insertBefore(kid.dom, null);
-      entry.kids!.push(kid);
+      kids.push(kid);
     }
+    entry.kids = kids;
   }
   return entry;
 }
@@ -224,42 +238,56 @@ const evtType = (propName: string): string => {
 // Sync attributes and event listeners from old props to new props, in place.
 // Attribute rules mirror renderToString (renames, booleans, invalid names, unsafe URLs);
 // `on*` props become real listeners instead of being dropped.
+//
+// Perf: re-applying unchanged props is the streaming hot path (every frame used to
+// setAttribute every attribute again, firing DOM mutations for identical values).
+// A prop with an identical (own, ===) value in oldProps produced identical DOM on the
+// last pass, so it is skipped -- until this frame performs any removeAttribute: a removed
+// prop that rename/case-collides onto some attribute (`className` vs `class`, `HREF` vs
+// `href`, one null and the other unchanged) just wiped that attribute, so from then on
+// the bag re-applies in full for the frame.
 function applyProps(el: DomElement, oldProps: ComponentProps, newProps: ComponentProps, entry: Entry, tag: string): void {
-  const events = entry.events!;
-  for (const [name, value] of Object.entries(oldProps)) {
+  if (oldProps === newProps) return; // same props object (memoized element): nothing can have changed
+  let anyRemoved = false;
+  for (const name of Object.keys(oldProps)) {
     if (name === "children" || name === "key" || name === "ref" || name === "dangerouslySetInnerHTML") continue;
+    const oldValue = oldProps[name];
     if (EVENT_ATTR.test(name)) {
-      if (typeof value === "function" && newProps[name] !== value) {
+      if (typeof oldValue === "function" && newProps[name] !== oldValue) {
         const type = evtType(name);
-        const h = events.get(type);
+        const h = entry.events?.get(type);
         if (h) {
           el.removeEventListener(type, h);
-          events.delete(type);
+          entry.events!.delete(type);
         }
       }
       continue;
     }
+    if (name in newProps) continue;
     const attr = ATTR_RENAMES[name] ?? name;
     if (!VALID_ATTR_NAME.test(attr)) continue;
-    if (!(name in newProps)) el.removeAttribute(attr);
+    el.removeAttribute(attr);
+    anyRemoved = true;
   }
 
-  for (const [name, value] of Object.entries(newProps)) {
+  for (const name of Object.keys(newProps)) {
     if (name === "children" || name === "key" || name === "ref") continue;
+    const value = newProps[name];
     if (name === "dangerouslySetInnerHTML") {
       warnOnce(entry, "rawHtml", "[jsx] dangerouslySetInnerHTML is ignored by client mount");
       continue;
     }
+    if (!anyRemoved && Object.hasOwn(oldProps, name) && oldProps[name] === value) continue; // unchanged
     if (EVENT_ATTR.test(name)) {
       if (typeof value === "function" && oldProps[name] !== value) {
         // Keyed by DOM event type, not prop name: `onClick` and `onclick` map to
         // the same "click" listener slot, so the last one wins instead of both firing.
         const type = evtType(name);
+        const events = (entry.events ??= new Map());
         const prev = events.get(type);
         if (prev) el.removeEventListener(type, prev);
-        const handler = value as DomListener;
-        events.set(type, handler);
-        el.addEventListener(type, handler);
+        events.set(type, value as DomListener);
+        el.addEventListener(type, value as DomListener);
       }
       continue;
     }
@@ -267,18 +295,20 @@ function applyProps(el: DomElement, oldProps: ComponentProps, newProps: Componen
     if (!VALID_ATTR_NAME.test(attr)) continue;
     if (value == null || value === false || typeof value === "function") {
       el.removeAttribute(attr);
+      anyRemoved = true; // a later prop renaming onto this attr (className/class) must not skip its re-apply
       continue;
     }
     if (typeof value === "boolean") {
       el.setAttribute(attr, BOOLEAN_ATTRS.has(attr) ? "" : "true");
       continue;
     }
-    const text = serializeValue(name, value);
-    // Case-insensitive lookup: browsers normalize attribute names, so setAttribute("HREF", ...)
+    const text = typeof value === "string" ? value : serializeValue(name, value);
+    // Case-insensitive guard: browsers normalize attribute names, so setAttribute("HREF", ...)
     // lands as `href` and must pass the same scheme guard (see core.ts URL_ATTRS).
-    if (URL_ATTRS.has(attr.toLowerCase()) && !isSafeUrl(text, tag)) {
+    if (isUrlAttr(attr) && !isSafeUrl(text, tag)) {
       console.warn(`[jsx] dropped unsafe url in ${attr}: ${JSON.stringify(text.slice(0, 80))}`);
       el.removeAttribute(attr);
+      anyRemoved = true;
       continue;
     }
     el.setAttribute(attr, text);
@@ -309,10 +339,14 @@ function patch(e: Entry, u: Unit, doc: DomDocument, depth: number, ns: string | 
     return e;
   }
   const el = e.dom as DomElement;
+  const old = e.unit as HostUnit;
+  // Same element object patched onto itself (a memoized/reused node): same props, same
+  // children, same refs -- the DOM already matches. Bailout like React's identical-element skip;
+  // assumes element trees are immutable values, as the transform emits them.
+  if (old.vnode === u.vnode) return e;
   const tag = String(u.vnode.type).toLowerCase();
   // reconcile() only patches compatible units -- for hosts that means the same tag
   // -- so e is always a host entry here.
-  const old = e.unit as HostUnit;
   applyProps(el, old.vnode.props, u.vnode.props, e, tag);
   const ref = u.vnode.props.ref as Ref | undefined;
   if (ref !== e.ref) {
@@ -348,47 +382,56 @@ function reconcile(
   // `undefined` only becomes a placeholder when it is an explicit entry in a children array.
   if (child !== undefined) flatten(child, depth + 1, units);
 
-  const byKey = new Map<string, Entry>();
+  // Built only when some old entry carries a key: keyless lists never touch it.
+  let byKey: Map<string, Entry> | undefined;
   for (const e of oldKids) {
     const k = unitKey(e.unit);
-    if (k != null) byKey.set(k, e);
+    if (k != null) (byKey ??= new Map()).set(k, e);
   }
 
   checkDupKeys(parent, units);
 
   const newKids: Entry[] = [];
-  const consumed = new Set<Entry>();
+  const gen = ++reconcileGen; // Entry.st === gen => consumed by this reconcile
+  // True while every unit reused exactly oldKids[i]: then nothing was removed and
+  // the sibling order cannot have changed, so both the removal and order passes can
+  // be skipped (the common frame for static chrome around a streaming text node).
+  let inOrder = units.length === oldKids.length;
   for (let i = 0; i < units.length; i++) {
     const u = units[i]!;
     const key = unitKey(u);
     let reuse: Entry | undefined;
     if (key != null) {
-      const c = byKey.get(key);
-      if (c && !consumed.has(c) && compatible(c.unit, u)) reuse = c;
+      const c = byKey?.get(key);
+      if (c && c.st !== gen && compatible(c.unit, u)) reuse = c;
     } else {
       // Positional fallback may only consume UNKEYED old entries: a keyed entry
       // is reserved for its key, so a keyless unit cannot hijack its node
       // (otherwise the later keyed unit finds it consumed and gets a fresh node,
       // and node identity lands on the wrong logical item).
       const c = oldKids[i];
-      if (c && unitKey(c.unit) == null && !consumed.has(c) && compatible(c.unit, u)) reuse = c;
+      if (c && unitKey(c.unit) == null && c.st !== gen && compatible(c.unit, u)) reuse = c;
     }
-    // Track it so a later unit in this same reconcile cannot reuse the same entry (an old child can match a new one by key AND by position)
-    //  and the removal pass below does not drop it even though it was just patched.
-    if (reuse) consumed.add(reuse);
+    // Stamp it so a later unit in this same reconcile cannot reuse the same entry
+    // (an old child can match a new one by key AND by position) and the removal pass
+    // below does not drop it even though it was just patched.
+    if (reuse) reuse.st = gen;
+    if (reuse !== oldKids[i]) inOrder = false;
     newKids.push(reuse ? patch(reuse, u, doc, depth + 1, ns) : create(u, doc, depth + 1, ns));
   }
 
-  for (const e of oldKids) {
-    if (!consumed.has(e)) removeEntry(e);
-  }
+  if (!inOrder) {
+    for (const e of oldKids) {
+      if (e.st !== gen) removeEntry(e);
+    }
 
-  // Order pass: walk the new list and insert each dom at position i. Nothing moves when the order already matches; each mismatch is one insertBefore.
-  let prev: DomNode | null = null;
-  for (const e of newKids) {
-    const expected: DomNode | null = prev ? prev.nextSibling : parent.firstChild;
-    if (e.dom !== expected) parent.insertBefore(e.dom, expected);
-    prev = e.dom;
+    // Order pass: walk the new list and insert each dom at position i. Nothing moves when the order already matches; each mismatch is one insertBefore.
+    let prev: DomNode | null = null;
+    for (const e of newKids) {
+      const expected: DomNode | null = prev ? prev.nextSibling : parent.firstChild;
+      if (e.dom !== expected) parent.insertBefore(e.dom, expected);
+      prev = e.dom;
+    }
   }
   return newKids;
 }

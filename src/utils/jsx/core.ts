@@ -194,8 +194,8 @@ function renderAttrs(props: ComponentProps, tag: string): string {
       out += BOOLEAN_ATTRS.has(attr) ? ` ${attr}` : ` ${attr}="true"`;
       continue;
     }
-    const text = serializeValue(name, value);
-    if (URL_ATTRS.has(attr.toLowerCase()) && !isSafeUrl(text, tag)) {
+    const text = typeof value === "string" ? value : serializeValue(name, value);
+    if (isUrlAttr(attr) && !isSafeUrl(text, tag)) {
       console.warn(`[jsx] dropped unsafe url in ${attr}: ${JSON.stringify(text.slice(0, 80))}`);
       continue;
     }
@@ -209,10 +209,17 @@ export function isSafeUrl(value: string, tag = ""): boolean {
   return checkSafeUrl(value, SAFE_DATA_IMG_TAGS.has(tag.toLowerCase()) ? SAFE_URL_POLICY_IMG : SAFE_URL_POLICY);
 }
 
+// Hot-path URL-attribute lookup: browsers normalize attribute names, so `HREF` hits the guard too,
+// but the common all-lowercase name must not pay a `toLowerCase()` allocation per attribute.
+const HAS_UPPER = /[A-Z]/;
+export function isUrlAttr(attr: string): boolean {
+  return URL_ATTRS.has(attr) || (HAS_UPPER.test(attr) && URL_ATTRS.has(attr.toLowerCase()));
+}
+
 export function serializeValue(name: string, value: unknown): string {
-  // Case-insensitive: browsers normalize attribute names, so a spread's `STYLE`
-  // lands as the style attribute too and deserves the same object serialization.
-  if (name.toLowerCase() === "style" && value != null && typeof value === "object") {
+  // Object values only: the name.toLowerCase() style probe must not run for the common string/number prop.
+  // Case-insensitive (browsers normalize names, so a spread's `STYLE` lands as style too).
+  if (typeof value === "object" && value !== null && name.toLowerCase() === "style") {
     // Minimal CSS from a style object: kebab-cased keys, no unit inference.
     // Known ceiling: numbers are emitted as-is (no auto-px).
     return Object.entries(value as Record<string, unknown>)

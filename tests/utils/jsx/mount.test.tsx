@@ -141,6 +141,73 @@ describe("mount", () => {
     expect(calls).toEqual(["dbl", "again"]);
   });
 
+  it("does not rebind a listener whose function identity is unchanged", () => {
+    const { container } = setup();
+    const calls: string[] = [];
+    const handler = () => calls.push("x");
+    const m = mount(<button onClick={handler} />, container);
+    const btn = container.children[0] as FElement;
+    m.render(<button onClick={handler} />);
+    expect(btn.listeners.get("click")?.size).toBe(1);
+    btn.dispatch("click");
+    expect(calls).toEqual(["x"]);
+  });
+
+  it("keeps an attribute when a rename-colliding prop is removed", () => {
+    // className renames onto `class`: removing it must not wipe the still-present
+    // class="b", even though that prop's value is unchanged and normally skipped.
+    const { container, html } = setup();
+    const m = mount(createNode("div", { className: "a", class: "b" }), container);
+    expect(html()).toBe('<div class="b"></div>');
+    m.render(createNode("div", { class: "b" }));
+    expect(html()).toBe('<div class="b"></div>');
+  });
+
+  it("re-applies an unchanged rename source after a sibling prop wipes the attribute", () => {
+    // {class: null, className: "a"}: the null drops `class`, then the unchanged
+    // className must re-establish class="a" (pre-skip order semantics preserved).
+    const { container, html } = setup();
+    const m = mount(createNode("div", { className: "a", class: "b" }), container);
+    expect(html()).toBe('<div class="b"></div>');
+    m.render(createNode("div", { class: null, className: "a" }));
+    expect(html()).toBe('<div class="a"></div>');
+  });
+
+  it("reapplies an attribute when a case-variant prop is removed", () => {
+    // Browsers normalize attribute names, so the removed TITLe and the kept `title`
+    // collide the same way className/class do.
+    const { container, html } = setup();
+    const m = mount(createNode("div", { TITLe: "x" }), container);
+    m.render(createNode("div", { title: "x" }));
+    expect(html()).toBe('<div title="x"></div>');
+  });
+
+  it("does not re-setAttribute unchanged props on re-render", () => {
+    const { container, html } = setup();
+    const m = mount(<div className="a" data-x={1} disabled title="t">v1</div>, container);
+    const el = container.children[0] as FElement;
+    const spy = spyOn(el, "setAttribute");
+    m.render(<div className="a" data-x={1} disabled title="t">v2</div>);
+    expect(spy).not.toHaveBeenCalled();
+    expect(html()).toBe('<div class="a" data-x="1" disabled title="t">v2</div>');
+    // A changed or removed prop still goes through.
+    m.render(<div className="a" data-x={2} title="t">v2</div>);
+    expect(html()).toBe('<div class="a" data-x="2" title="t">v2</div>');
+  });
+
+  it("bails out entirely on an identical (memoized) element", () => {
+    const { container, html } = setup();
+    const shared = <div className="s"><span className="i">unchanged</span></div>;
+    const m = mount(shared, container);
+    const el = container.children[0] as FElement;
+    const spy = spyOn(el, "setAttribute");
+    const spySpan = spyOn(el.children[0] as unknown as FElement, "setAttribute");
+    m.render(shared);
+    expect(spy).not.toHaveBeenCalled();
+    expect(spySpan).not.toHaveBeenCalled();
+    expect(html()).toBe('<div class="s"><span class="i">unchanged</span></div>');
+  });
+
   it("reuses DOM nodes across renders and updates text in place", () => {
     const { container, html } = setup();
     const m = mount(<div><span>a</span><em>b</em></div>, container);

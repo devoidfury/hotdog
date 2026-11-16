@@ -1,9 +1,4 @@
-import {
-  toolDef,
-  param,
-  ToolResult,
-  parseToolInput,
-} from "@core/extensions/tool-utils.ts";
+import { toolDef, param, ToolResult, parseToolInput } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import type { ModelRegistry } from "@core/agent.ts";
 import { ToolContext } from "@core/extensions/tool-context.ts";
@@ -42,10 +37,7 @@ export class ModelTool {
     });
   }
 
-  async execute(
-    input: string | Record<string, unknown> | null,
-    ctx?: ToolContext,
-  ): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
     const args = parseArgs(input);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
@@ -55,9 +47,7 @@ export class ModelTool {
 
     if (name === "list") {
       const models = selectableModelKeys(this.modelRegistry);
-      return ToolResult.ok(
-        models.length > 0 ? models.join("\n") : "No models registered.",
-      ).withEntries({
+      return ToolResult.ok(models.length > 0 ? models.join("\n") : "No models registered.").withEntries({
         model_count: String(models.length),
       });
     }
@@ -65,25 +55,17 @@ export class ModelTool {
     // Validate model exists
     if (!this.modelRegistry[name]) {
       const available = selectableModelKeys(this.modelRegistry);
-      return ToolResult.err(
-        `Unknown model '${name}'. Available models: ${available.join(", ")}`,
-      );
+      return ToolResult.err(`Unknown model '${name}'. Available models: ${available.join(", ")}`);
     }
     if (!isTextGenerative(this.modelRegistry[name])) {
-      return ToolResult.err(
-        `Model '${name}' is not text-in/text-out and cannot be used as the main model.`,
-      );
+      return ToolResult.err(`Model '${name}' is not text-in/text-out and cannot be used as the main model.`);
     }
 
-    const onSwitchModel = ctx?.get("onSwitchModel") as
-      OnSwitchModel | undefined;
+    const onSwitchModel = ctx?.get("onSwitchModel") as OnSwitchModel | undefined;
     if (onSwitchModel) {
       try {
         await onSwitchModel(name);
-        return ToolResult.ok(`Switched to model: ${name}`).withEntry(
-          "model",
-          name,
-        );
+        return ToolResult.ok(`Switched to model: ${name}`).withEntry("model", name);
       } catch (e: unknown) {
         return ToolResult.err(`Error switching model: ${(e as Error).message}`);
       }
@@ -98,9 +80,7 @@ export class ModelTool {
 /**
  * Parse model tool arguments.
  */
-function parseArgs(
-  input: string | Record<string, unknown> | null,
-): { name: string } | null {
+function parseArgs(input: string | Record<string, unknown> | null): { name: string } | null {
   const json = parseToolInput(input);
   if (!json) return null;
 

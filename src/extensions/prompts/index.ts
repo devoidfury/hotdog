@@ -1,29 +1,21 @@
-// Prompts Extension
-// Manages prompt templates loading and execution.
+// Prompts Extension - Manages prompt templates loading and execution.
 
 import { HOOKS } from "@core/hooks.ts";
 import { logger } from "@utils/logger.ts";
 import { PromptsLoader } from "./loader.ts";
-import {
-  getExtensionConfig,
-  type CoreContext,
-  type ExtensionInstance,
-} from "@core/extensions/types.ts";
+import { getExtensionConfig, type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
 import { matcher, completion } from "./completions.ts";
 
-/**
- * Create the prompts extension.
- */
+/** Create the prompts extension. */
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
-  // B7 (§4.1/§4.3 prompts row): ONE split, stated honestly.
-  //  - `displayPrompt` is a LIVE knob: the loader holds a reader and resolves
-  //    it per prompt execution (`prompt:<name>` answers the current value).
-  //  - `path` (and the deprecated top-level `promptsPath` compat below) is
-  //    loader lifecycle: the fs import list is activation machinery, so a
-  //    published path change reaches the NEXT session, never the running one
-  //    -- the loader keeps the dirs it imported from and nothing yanks them
-  //    out mid-conversation. Reading them here at create is therefore the
-  //    correct scope, not a stale capture (see the no-stale-capture allow-list).
+  // - `displayPrompt` is a LIVE knob: the loader holds a reader and resolves it
+  //   per prompt execution(`prompt:<name>` answers the current value).
+  //
+  // - `path` (and the deprecated top-level `promptsPath` compat below) is loader lifecycle:
+  //   the fs import list is activation machinery, so a published path change reaches the NEXT session,
+  //   never the running one -- the loader keeps the dirs it imported from and nothing yanks them
+  //   out mid-conversation. Reading them here at create is therefore the correct scope,
+  //   not a stale capture (see the no-stale-capture allow-list).
   const boot = getExtensionConfig<{
     path?: string;
     promptsPath?: string;
@@ -55,8 +47,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         registry.register("prompt", {
           description: "Execute a prompt template (prompt:<name> [args])",
-          matches: (cmd: string) =>
-            cmd.startsWith("prompt:") || cmd.startsWith("prompt "),
+          matches: (cmd: string) => cmd.startsWith("prompt:") || cmd.startsWith("prompt "),
           handler: loader.promptHandler.bind(loader),
           completion,
         });

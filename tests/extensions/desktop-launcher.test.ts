@@ -10,10 +10,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  BROWSER_CANDIDATES_MACOS,
   browserLaunchArgs,
   compileShimArgs,
   launcherOrder,
+  MACOS_ATS_PLIST,
+  MACOS_SHIM_FLAGS,
+  macosSectcreateFlag,
   planLauncher,
+  planMacosShim,
   shimCacheKey,
   splitPkgConfigFlags,
   type LauncherProbe,
@@ -76,6 +81,23 @@ describe("launcher planning", () => {
     expect(args).toContain("--app=http://127.0.0.1:9/#tok=x");
     expect(args).toContain("--user-data-dir=/prof");
     expect(args).toContain("--no-first-run");
+    expect(splitPkgConfigFlags("  -la  -lb \n -lc ")).toEqual(["-la", "-lb", "-lc"]);
+    // The darwin compile invocation, assembled: one argv token for the
+    // sectcreate triplet (comma-joined), the plist path verbatim.
+    expect(
+      compileShimArgs("clang", "/s.macos.m", "/out", [
+        ...MACOS_SHIM_FLAGS,
+        macosSectcreateFlag("/tmp/build.info.plist"),
+      ]),
+    ).toEqual([
+      "clang",
+      "-O2",
+      "-o",
+      "/out",
+      "/s.macos.m",
+      ...MACOS_SHIM_FLAGS,
+      "-Wl,-sectcreate,__TEXT,__info_plist,/tmp/build.info.plist",
+    ]);
     expect(splitPkgConfigFlags("  -la  -lb \n -lc ")).toEqual(["-la", "-lb", "-lc"]);
   });
 
@@ -146,6 +168,85 @@ describe("launcher planning", () => {
     );
     expect(launcherOrder(full)).toEqual(["shim", "browser", "print"]);
     expect(launcherOrder(await planLauncher(fakeProbe(), "/s.c"))).toEqual(["print"]);
+  });
+
+  // ── darwin shim planning (pure; the real compile is the gated smoke file) ──
+
+  it("darwin + clang -> macos shim plan: fixed flags, ATS plist, cache name", async () => {
+    const plan = await planLauncher(
+      fakeProbe({
+        platform: "darwin",
+        arch: "arm64",
+        which: (n) => (n === "clang" || n === "codesign" ? "/usr/bin/" + n : null),
+      }),
+      "/src/linux.c", // the chain's single arg: macos.m is derived next to it
+    );
+    expect(plan.shim).not.toBeNull();
+    expect(plan.shim!.sourcePath).toBe("/src/macos.m");
+    expect(plan.shim!.cc).toBe("clang");
+    expect(plan.shim!.flags).toEqual(MACOS_SHIM_FLAGS);
+    expect(MACOS_SHIM_FLAGS).toContain("-fobjc-arc"); // ARC is not optional under a memory-owning shim
+    // 11.3, not 11.0: the whole WKDownload class is macos(11.3) (verified
+    // against WKDownload.h's WK_CLASS_AVAILABLE), so a lower floor makes
+    // the download delegates availability errors at compile.
+    expect(MACOS_SHIM_FLAGS).toContain("-mmacosx-version-min=11.3");
+    expect(MACOS_SHIM_FLAGS).toContain("Security"); // SecTrust symbols: ld64 needs it spelled out
+    expect(plan.shim!.outPath).toContain("shim-macos-"); // distinct from the linux cache namespace
+    expect(plan.shim!.atsPlist).toBe(MACOS_ATS_PLIST);
+    expect(plan.shim!.codesign).toBe(true); // arm64: unsigned main binary => no WKWebProcess
+  });
+
+  it("darwin ATS plist: local networking only, never arbitrary loads", () => {
+    expect(MACOS_ATS_PLIST).toContain("NSAppTransportSecurity");
+    expect(MACOS_ATS_PLIST).toContain("NSAllowsLocalNetworking");
+    expect(MACOS_ATS_PLIST).not.toContain("NSAllowsArbitraryLoads"); // https posture stays whole
+  });
+
+  it("darwin: no clang / unreadable source -> no shim; codesign absence is NOT a planning refusal", async () => {
+    const clang = { platform: "darwin", which: (n: string) => (n === "clang" ? "/usr/bin/clang" : null) };
+    const ok = await planMacosShim(fakeProbe(clang), "/s/macos.m");
+    expect(ok).not.toBeNull();
+    expect(ok!.codesign).toBe(false); // absence lands as a warning at build time, not a plan veto
+    expect((await planMacosShim(fakeProbe({ platform: "darwin" }), "/s/macos.m"))).toBeNull();
+    expect(
+      (await planMacosShim(fakeProbe({ ...clang, readFile: async () => { throw new Error("gone"); } }), "/s/macos.m")),
+    ).toBeNull();
+  });
+
+  it("darwin cache key: source/flags/arch changes rebuild, repeats hit (stable path, cached flag)", async () => {
+    const read = (s: string) => async () => new TextEncoder().encode(s);
+    const a = await planMacosShim(fakeProbe({ platform: "darwin", which: (n) => (n === "clang" ? "/c" : null), readFile: read("SRC-A") }), "/s.m");
+    const b = await planMacosShim(fakeProbe({ platform: "darwin", which: (n) => (n === "clang" ? "/c" : null), readFile: read("SRC-A") }), "/s.m");
+    const c = await planMacosShim(fakeProbe({ platform: "darwin", which: (n) => (n === "clang" ? "/c" : null), readFile: read("SRC-B") }), "/s.m");
+    const arm = await planMacosShim(
+      fakeProbe({ platform: "darwin", arch: "arm64", which: (n) => (n === "clang" ? "/c" : null), readFile: read("SRC-A") }),
+      "/s.m",
+    );
+    expect(a!.outPath).toBe(b!.outPath);
+    expect(c!.outPath).not.toBe(a!.outPath);
+    expect(arm!.outPath).not.toBe(a!.outPath);
+    const cached = await planMacosShim(
+      fakeProbe({ platform: "darwin", which: (n) => (n === "clang" ? "/c" : null), readFile: read("SRC-A"), exists: async () => true }),
+      "/s.m",
+    );
+    expect(cached!.cached).toBe(true);
+  });
+
+  it("darwin browser: absolute .app candidates probed via exists(), first hit wins; Safari is not a candidate", async () => {
+    const plan = await planLauncher(
+      fakeProbe({
+        platform: "darwin",
+        which: () => null, // PATH names mean nothing for app bundles
+        exists: async (p) => p.includes("Brave") || p.includes("Chrome"),
+      }),
+      "/s.c",
+    );
+    expect(plan.browser).toBe(BROWSER_CANDIDATES_MACOS[0]!); // Chrome beats Brave by order
+    expect(BROWSER_CANDIDATES_MACOS.some((c) => c.includes("Safari"))).toBe(false); // no app mode
+
+    const none = await planLauncher(fakeProbe({ platform: "darwin", exists: async () => false }), "/s.c");
+    expect(none.browser).toBeNull();
+    expect(launcherOrder(none)).toEqual(["print"]);
   });
 });
 

@@ -1,11 +1,14 @@
-// launcher.ts — window opening for `hotdog desktop` (Linux first).
+// launcher.ts — window opening for `hotdog desktop` (Linux and macOS).
 //
 // Resolution chain, first rung that holds wins, no retries back up:
-//   1. A WebKitGTK shim compiled on demand from shims/linux.c (GTK4 +
-//      webkitgtk-6.0, else GTK3 + webkit2gtk-4.1; mutually exclusive
-//      stacks, probed in order). The
+//   1. A webview shim compiled on demand: on Linux from shims/linux.c
+//      (GTK4 + webkitgtk-6.0, else GTK3 + webkit2gtk-4.1; mutually
+//      exclusive stacks, probed in order), on macOS from shims/macos.m
+//      (clang + Cocoa/WebKit; no pkg-config on macOS, and the binary gets
+//      an ad-hoc codesign because Apple Silicon refuses to launch
+//      WKWebProcess against an unsigned main binary). The
 //      binary is cached under the data dir keyed by a hash of (source bytes
-//      + pkg-config flags + arch), so a rebuild happens only when what it
+//      + flags + arch), so a rebuild happens only when what it
 //      compiles against actually changed.
 //   2. Any Chromium-family browser in app mode on a dedicated profile dir —
 //      a real app window (no address bar, own taskbar entry) and the browser
@@ -23,11 +26,11 @@
 // fragment from history on boot. The browser fallback necessarily passes the
 // URL in argv — visible to same-uid processes, and to that profile's own
 // storage. That is the documented cost of the fallback rung; the shim is the
-// chain's default on Linux.
+// chain's default on Linux and macOS.
 
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { arch as osArch } from "node:os";
 
 import { formatError } from "@core/error.ts";
@@ -82,6 +85,55 @@ export const BROWSER_CANDIDATES = [
   "brave-browser",
 ];
 
+// darwin: Bun.which never resolves inside .app bundles, so the fallback
+// browsers are probed by absolute executable path (exists() seam). Safari
+// has no app mode, so it is not a candidate.
+export const BROWSER_CANDIDATES_MACOS = [
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+];
+
+// darwin shim: no pkg-config on macOS, so the flags are fixed. The
+// sectcreate flag embeds the ATS plist at link time (its path argument is
+// filled in by the compile step, which writes the plist next to the build
+// tmp); the cache key hashes the flag list WITHOUT the volatile path, so a
+// rebuild rides only on real source/flags/arch changes.
+export const MACOS_SHIM_SOURCE = "macos.m";
+export const MACOS_SHIM_FLAGS = [
+  "-fobjc-arc",
+  // 11.3, not 11.0: the entire WKDownload class is macos(11.3) (header-
+  // verified WK_CLASS_AVAILABLE), and the download policy enums too. A
+  // lower min turns those delegate signatures into availability errors.
+  "-mmacosx-version-min=11.3",
+  "-framework",
+  "Cocoa",
+  "-framework",
+  "WebKit",
+  // SecTrust*/SecCertificate symbols (the TOFU fingerprint path) live here;
+  // ld64 will not pull them transitively through WebKit's .tbd.
+  "-framework",
+  "Security",
+];
+
+/** Minimal ATS plist: http on loopback only (NSAllowsLocalNetworking) —
+ *  local mode's http://127.0.0.1:<port> and ssh -L tunnels. Every other
+ *  load keeps Apple's full ATS posture; there is no NSAllowsArbitraryLoads
+ *  here and there must never be one. */
+export const MACOS_ATS_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>NSAppTransportSecurity</key>
+\t<dict>
+\t\t<key>NSAllowsLocalNetworking</key>
+\t\t<true/>
+\t</dict>
+</dict>
+</plist>
+`;
+
 // ── Pure pieces ─────────────────────────────────────────────────────────────
 
 export function shimCacheKey(source: Uint8Array, pkgConfigFlags: string, archName: string): string {
@@ -95,8 +147,8 @@ export function shimCacheKey(source: Uint8Array, pkgConfigFlags: string, archNam
     .slice(0, 20);
 }
 
-export function shimCachePath(key: string): string {
-  return joinDataDir("desktop", `shim-${key}`);
+export function shimCachePath(key: string, name = "shim"): string {
+  return joinDataDir("desktop", `${name}-${key}`);
 }
 
 export function browserProfileDir(): string {
@@ -128,17 +180,59 @@ export function splitPkgConfigFlags(stdout: string): string[] {
   return stdout.split(/\s+/).filter(Boolean);
 }
 
+/** ATS exception embedding: ld64's -sectcreate splices the plist file into
+ *  __TEXT,__info_plist, which is how a bundleless binary gets an ATS
+ *  posture. Exposed (path-parameterized) so compileShim and the gated
+ *  compile smoke build the identical invocation. Ceiling: a comma in the
+ *  plist path would split the -Wl, argument -- the path lives under the
+ *  hotdog data dir, which we control. */
+export function macosSectcreateFlag(plistPath: string): string {
+  return `-Wl,-sectcreate,__TEXT,__info_plist,${plistPath}`;
+}
+
 export interface ShimPlan {
   sourcePath: string;
   outPath: string;
   cc: string;
   flags: string[];
   cached: boolean;
+  /** darwin only: plist content the compile step writes next to the build
+   *  tmp and passes via -Wl,-sectcreate (ATS local-networking exception). */
+  atsPlist?: string;
+  /** darwin only: set when `codesign` answered to probe.which. The compile
+   *  step ad-hoc-signs (--force --sign -) after a successful build; absence
+   *  or failure is a warning, not a fall-through. */
+  codesign?: boolean;
+}
+
+/** The darwin shim plan: fixed flags (no pkg-config), cache name
+ *  `shim-macos-<hash>`, ATS plist carried for the compile step. `clang`
+ *  probed via which (Command Line Tools put it on PATH; a machine without
+ *  it falls to the browser/print rungs like any missing toolchain). */
+export async function planMacosShim(
+  probe: LauncherProbe,
+  shimSourcePath: string,
+): Promise<ShimPlan | null> {
+  const cc = "clang";
+  if (!probe.which(cc)) return null;
+  const source = await probe.readFile(shimSourcePath).catch(() => null);
+  if (!source) return null; // vendored source missing: no compile possible
+  const outPath = shimCachePath(shimCacheKey(source, MACOS_SHIM_FLAGS.join(" "), probe.arch), "shim-macos");
+  return {
+    sourcePath: shimSourcePath,
+    outPath,
+    cc,
+    flags: [...MACOS_SHIM_FLAGS],
+    cached: await probe.exists(outPath),
+    atsPlist: MACOS_ATS_PLIST,
+    codesign: probe.which("codesign") !== null,
+  };
 }
 
 /** What this machine can do, computed from probe answers only. `null` shim
- *  means "no shim path here" (not Linux, no cc, no frameworks, unreadable
- *  source); `null` browser means no Chromium-family binary on PATH. */
+ *  means "no shim path here" (unsupported platform, no compiler, missing
+ *  frameworks, unreadable source); `null` browser means no Chromium-family
+ *  binary was found. */
 export interface LauncherPlan {
   shim: ShimPlan | null;
   browser: string | null;
@@ -181,12 +275,29 @@ export async function planLauncher(
         // series (two series can coexist where only one toolchain agrees)
       }
     }
+  } else if (probe.platform === "darwin") {
+    // The macOS shim lives next to the Linux one; the chain's single
+    // shimSourcePath argument derives it (dirname + macos.m) so the
+    // launcher's shape never changed for the second platform.
+    shim = await planMacosShim(probe, join(dirname(shimSourcePath), MACOS_SHIM_SOURCE));
   }
   let browser: string | null = null;
-  for (const candidate of BROWSER_CANDIDATES) {
-    if (probe.which(candidate)) {
-      browser = candidate;
-      break;
+  if (probe.platform === "darwin") {
+    // Absolute bundle paths: Bun.which sees PATH only, and browsers on
+    // macOS live in .app bundles. exists() is the seam that answers for a
+    // real file.
+    for (const candidate of BROWSER_CANDIDATES_MACOS) {
+      if (await probe.exists(candidate)) {
+        browser = candidate;
+        break;
+      }
+    }
+  } else {
+    for (const candidate of BROWSER_CANDIDATES) {
+      if (probe.which(candidate)) {
+        browser = candidate;
+        break;
+      }
     }
   }
   return { shim, browser };
@@ -244,15 +355,27 @@ async function spawnShim(plan: ShimPlan, url: string): Promise<WindowHandle | nu
   return childHandle("shim", child);
 }
 
-async function compileShim(plan: ShimPlan): Promise<string | null> {
+/** Compiled on demand by the launcher chain; exported for the gated
+ *  compile smoke test (tests/extensions/desktop-shim-macos-smoke.test.ts). */
+export async function compileShim(plan: ShimPlan): Promise<string | null> {
   await mkdir(join(plan.outPath, ".."), { recursive: true });
   const tmp = `${plan.outPath}.tmp-${randomBytes(4).toString("hex")}`;
-  logger.info(
-    `[desktop] compiling the webview shim (first run; cc + ${SHIM_SERIES.map((s) => s.pkgConfig).join(" or ")} required)`,
-  );
+  logger.info(`[desktop] compiling the webview shim (first run; ${plan.cc}, one-off)`);
+  let plistPath: string | null = null;
   try {
+    const flags = [...plan.flags];
+    if (plan.atsPlist !== undefined) {
+      // -Wl,-sectcreate embeds the plist as the binary's __info_plist
+      // section: a bare CLI binary has no .app bundle to carry an ATS
+      // exception, and without it WKWebView refuses http on loopback
+      // (local mode and ssh -L tunnels would never load). The plist rides
+      // next to the build tmp and dies with it.
+      plistPath = `${tmp}.info.plist`;
+      await writeFile(plistPath, plan.atsPlist);
+      flags.push(macosSectcreateFlag(plistPath));
+    }
     const proc = Bun.spawn({
-      cmd: compileShimArgs(plan.cc, plan.sourcePath, tmp, plan.flags),
+      cmd: compileShimArgs(plan.cc, plan.sourcePath, tmp, flags),
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -266,10 +389,37 @@ async function compileShim(plan: ShimPlan): Promise<string | null> {
       return null;
     }
     await rename(tmp, plan.outPath);
+    if (plan.codesign) await adhocSign(plan.outPath);
     return plan.outPath;
   } catch (err) {
     logger.warn(`[desktop] shim compile could not run: ${formatError(err)}`);
     return null;
+  } finally {
+    if (plistPath) await unlink(plistPath).catch(() => {});
+  }
+}
+
+/** Ad-hoc codesign (Apple Silicon: WKWebProcess refuses to launch against
+ *  an unsigned main binary). Non-fatal by design: Intel Macs run unsigned
+ *  fine, a missing/failing codesign downgrades to "shim may not spawn",
+ *  and the spawn failure still falls through the chain — the warning says
+ *  what to do. */
+async function adhocSign(binPath: string): Promise<void> {
+  try {
+    const proc = Bun.spawn({
+      cmd: ["codesign", "--force", "--sign", "-", binPath],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stderr = await new Response(proc.stderr).text();
+    if ((await proc.exited) !== 0) {
+      logger.warn(
+        `[desktop] ad-hoc codesign of the shim failed (exit nonzero): ${stderr.trim().slice(0, 200) || "(no output)"} ` +
+          `-- on Apple Silicon the webview process may refuse to start.`,
+      );
+    }
+  } catch (err) {
+    logger.warn(`[desktop] ad-hoc codesign could not run: ${formatError(err)}`);
   }
 }
 
@@ -296,7 +446,7 @@ function printHandle(url: string): WindowHandle {
   console.warn(
     `[desktop] no window launcher available (the shim needs cc + ${SHIM_SERIES.map(
       (s) => s.pkgConfig,
-    ).join(" or ")}; app mode needs a Chromium-family browser)`,
+    ).join(" or ")} on Linux or clang + CLT on macOS; app mode needs a Chromium-family browser)`,
   );
   console.log(`Open this URL directly:\n  ${url}`);
   return { kind: "print", exited: new Promise<number>(() => {}), close: () => {} };

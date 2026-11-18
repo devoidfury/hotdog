@@ -771,6 +771,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             totalTokens?: number;
             contextWindow?: number;
             durationMs?: number;
+            estimatedContextTokens?: number;
           };
           const sessionId = agent.sessionId || "unknown";
           // Restore replays re-emit every historical record through this
@@ -796,6 +797,11 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             completionTokens: d.completionTokens ?? 0,
             totalTokens: d.totalTokens ?? 0,
             contextWindow: d.contextWindow ?? 0,
+            // The image-aware local estimate (agent.ts emit). Omitted when
+            // unattested so old producers keep the pre-estimate record shape.
+            ...(typeof d.estimatedContextTokens === "number" && Number.isFinite(d.estimatedContextTokens) && d.estimatedContextTokens >= 0
+              ? { estimatedContextTokens: d.estimatedContextTokens }
+              : {}),
             // The producing call's wall time (agent.ts measured span),
             // beside the other usage numbers. Absent/non-finite on the
             // event means nothing was measured: the field is omitted, so
@@ -807,10 +813,21 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           await queuedAppend(sessionId, logPath, JSON.stringify(entry) + "\n", LOG_SOURCE.TOKEN_USAGE);
           // Mirror the sidebar's ctx numbers into the index so cold-log rows
           // carry them without a log scan (absolute values: idempotent).
+          // used = max(reported, image-aware estimate): the honest floor when
+          // the provider excludes image payloads from its numbers.
+          const reportedUsed = (d.totalTokens ?? 0) > 0 ? d.totalTokens! : undefined;
+          const estimatedUsed =
+            typeof d.estimatedContextTokens === "number" && Number.isFinite(d.estimatedContextTokens) && d.estimatedContextTokens > 0
+              ? d.estimatedContextTokens
+              : undefined;
+          const honestUsed =
+            reportedUsed !== undefined && estimatedUsed !== undefined
+              ? Math.max(reportedUsed, estimatedUsed)
+              : reportedUsed ?? estimatedUsed ?? null;
           await safeIndex("token_usage", () =>
             indexTokenUsage(
               sessionId,
-              (d.totalTokens ?? 0) > 0 ? d.totalTokens! : null,
+              honestUsed,
               (d.contextWindow ?? 0) > 0 ? d.contextWindow! : null,
             ),
           );

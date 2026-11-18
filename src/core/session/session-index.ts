@@ -546,6 +546,10 @@ export function deriveModelProfileFromLog(
  * totalTokens (the number the chat's token bubble shows) and its
  * contextWindow. Absent window/0 means the log attests nothing usable;
  * resume display omits the segment rather than inventing a denominator.
+ * `used` is the max of the reported total and the image-aware local
+ * estimate (attestedCtxUsed in @utils/session-turns.ts shares the rule for
+ * the live footers): providers may exclude image payloads from reported
+ * usage while still billing them.
  */
 export function deriveCtxFromLog(
   entries: LogEntry[],
@@ -554,10 +558,15 @@ export function deriveCtxFromLog(
   let ctxTotal: number | null = null;
   for (const e of entries) {
     if (e.source !== LOG_SOURCE.TOKEN_USAGE) continue;
-    const used = (e as Record<string, unknown>).totalTokens;
-    const window = (e as Record<string, unknown>).contextWindow;
-    ctxUsed = typeof used === "number" && Number.isFinite(used) && used > 0 ? used : null;
-    ctxTotal = typeof window === "number" && Number.isFinite(window) && window > 0 ? window : null;
+    const d = e as Record<string, unknown>;
+    const reported = typeof d.totalTokens === "number" && Number.isFinite(d.totalTokens) && d.totalTokens > 0 ? d.totalTokens : undefined;
+    const estimated = typeof d.estimatedContextTokens === "number" && Number.isFinite(d.estimatedContextTokens) && d.estimatedContextTokens > 0
+      ? d.estimatedContextTokens
+      : undefined;
+    const used = reported !== undefined && estimated !== undefined ? Math.max(reported, estimated) : reported ?? estimated;
+    const window = typeof d.contextWindow === "number" && Number.isFinite(d.contextWindow) && d.contextWindow > 0 ? d.contextWindow : null;
+    ctxUsed = used !== undefined ? used : null;
+    ctxTotal = window;
   }
   return { ctxUsed, ctxTotal };
 }

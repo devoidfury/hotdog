@@ -4,7 +4,7 @@ import { DropStrategy } from "./strategies/drop.ts";
 import { TokenAwareStrategy } from "./strategies/token-aware.ts";
 import { TrimStrategy } from "./strategies/trim.ts";
 import { PassTheBatonStrategy, hasBatonNotice, isBatonNoticeMessage, recentWindow, mergeStashWindows } from "./strategies/pass-the-baton.ts";
-import { shouldCompact, estimatorFor, type WireRenderContext } from "./utils.ts";
+import { shouldCompact, estimateContextTokens, estimatorFor, downgradeOlderImages, type WireRenderContext } from "./utils.ts";
 import { BATON_NOTICE_PROMPT } from "./prompts.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { ACTIONS } from "@core/commands.ts";
@@ -20,6 +20,16 @@ import { resolveModelConfig, type ModelConfig } from "@core/config/providers.ts"
 import { matcher, completion } from "./completions.ts";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+
+/**
+ * Images kept (payload intact) by the overflow-rescue downgrade: the newest
+ * N image payloads in the context survive, everything older is replaced by
+ * the placeholder text. Aggressive on purpose -- on the rescue path the
+ * full-size request already failed once, and the freshest screenshots are
+ * the only pixels the model plausibly still needs (older captures keep
+ * their on-disk path in the tool-result text and stay re-readable).
+ */
+export const RESCUE_KEEP_RECENT_IMAGES = 2;
 
 interface CompactionSettings {
   enabled: boolean;
@@ -817,10 +827,76 @@ export function create(core: CoreContext): ExtensionInstance | null {
           ...runSettings(tryModelConfig(agent)),
           batonPopNow: true,
         };
+
+        // Plausibility gate before touching anything: a real overflow is
+        // physically large, so at least one measurement of THIS transcript
+        // must sit at/over the billed budget. An error body that merely
+        // QUOTES an overflow phrase (gateway wraps, upstream echoes) would
+        // otherwise route a comfortably-fitting session into the chain --
+        // and drop's gate is a message COUNT, so a long-but-fitting session
+        // gets shredded (2026-11-18 victim: a transient 5xx quoting
+        // "maximum context length" at 52% of the window, provider-reported
+        // input 136,093/262,144, local chars/4 estimate also under budget).
+        // Window unresolvable -> no gate, exactly as before (the strategies'
+        // own requireContextLimit is the loud failure then).
+        const beforeMessages = agent.context.getMessages();
+        const usage = agent.context.getTokenUsage?.();
+        const actualPromptTokens = usage ? (usage.promptTokens ?? 0) + (usage.cachedTokens ?? 0) : 0;
+        let budget: number | null = null;
+        let estimated = 0;
+        try {
+          budget = requireContextLimit(s.contextLimit) - (s.reserveTokens || 0);
+          // The estimate is image-aware: providers that bill image tokens
+          // OUTSIDE their reported usage make `actualPromptTokens` a number
+          // that can never see the overflow (2026-11-18 victim: gauge
+          // 67k/262k, provider input 66,569, real request >262,144 with
+          // ~7.9 MB of base64 screenshots). A session whose image-inclusive
+          // estimate is over the budget therefore PASSES this gate even when
+          // the provider number sits comfortably under it.
+          estimated = estimateContextTokens(beforeMessages);
+          if (estimated < budget && actualPromptTokens < budget) {
+            logger.warn(
+              `[compaction] provider error quoted an overflow phrase, but session ${agent.sessionId} fits the budget on both sources (estimate ${estimated}, provider ${actualPromptTokens} < ${budget}); surfacing the error`,
+            );
+            return;
+          }
+        } catch {
+          // Unresolved window: fall through, same posture as the chain below.
+        }
+
+        // IMAGE DOWNGRADE before anything else: images are compactible
+        // weight, and on the rescue path the doctrine is aggressive -- strip
+        // every image payload except the newest few (their text survives,
+        // placeholder in place, and tool results carry the on-disk path so a
+        // needed screenshot is still re-readable). Text-only reduction
+        // "removing" image-dominated messages barely touches the bytes, and
+        // the provider-side image accounting is unknowable from here, so
+        // when the image-inclusive estimate is over budget, stale pixels go
+        // first (2026-11-18 incident: the chain cut 40->6 messages every
+        // turn while the 26 surviving payloads kept the request over the
+        // limit; see tests/extensions/compaction-image-rescue.test.ts).
         let rescued = false;
-        const baton = strategyRegistry.get("pass-the-baton");
-        if (baton && baton.canCompact(agent.context.getMessages(), s)) {
-          rescued = await _performCompaction(agent, baton, s);
+        if (budget !== null && estimated > budget) {
+          const { messages: downgraded, strippedImages } = downgradeOlderImages(
+            beforeMessages,
+            RESCUE_KEEP_RECENT_IMAGES,
+          );
+          if (strippedImages > 0) {
+            agent.replaceContext(downgraded);
+            logger.warn(
+              `[compaction] overflow rescue: stripped ${strippedImages} stale image payloads (kept the newest ${RESCUE_KEEP_RECENT_IMAGES}) for session ${agent.sessionId}`,
+            );
+            // The strip alone cleared the budget: every message survives
+            // with its text, no message-dropping chain needed.
+            rescued = estimateContextTokens(downgraded) <= budget;
+          }
+        }
+
+        if (!rescued) {
+          const baton = strategyRegistry.get("pass-the-baton");
+          if (baton && baton.canCompact(agent.context.getMessages(), s)) {
+            rescued = await _performCompaction(agent, baton, s);
+          }
         }
         if (!rescued) {
           // trim stays ungated (as before): its execute self-checks the fit,
@@ -839,6 +915,29 @@ export function create(core: CoreContext): ExtensionInstance | null {
           logger.warn(
             `[compaction] context overflow but no strategy could compact session ${agent.sessionId}; surfacing the error`,
           );
+          return;
+        }
+
+        // Honest notice: a strategy can report success while removing
+        // nothing (e.g. trim's orphan-safe boundary rewind walking back to
+        // zero). Claiming "compacted the conversation" then is a lie, and
+        // re-issuing the unchanged context behind it cannot heal an
+        // overflow -- the retry only follows a real reduction. A reduction
+        // is measured in context weight, not only message count: an image
+        // downgrade removes bytes while keeping every message (a plain
+        // length compare would call that "nothing reduced").
+        const afterMessages = agent.context.getMessages();
+        const reduced =
+          afterMessages.length < beforeMessages.length ||
+          (budget !== null && estimateContextTokens(afterMessages) < estimated);
+        if (!reduced) {
+          logger.warn(
+            `[compaction] context overflow but compaction reduced nothing for session ${agent.sessionId}; surfacing the error`,
+          );
+          agent.sink?.emit({
+            type: OUTPUT_EVENT.SYSTEM_MESSAGE,
+            content: "Context overflow: compaction found nothing eligible to compact; surfacing the error.",
+          });
           return;
         }
 

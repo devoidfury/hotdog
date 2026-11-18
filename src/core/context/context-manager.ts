@@ -89,6 +89,19 @@ export class ContextManager {
     return estimateContextTokens(msgs);
   }
 
+  /**
+   * Image-inclusive chars/4 estimate of the FULL outgoing request context
+   * (system prompt + log). The ctx consumers bill this against the
+   * provider-reported number with a max(): some providers exclude image
+   * payloads from reported usage (2026-11-18 incident: 66,569 reported vs
+   * a >262,144 request once the ~7.9 MB of base64 screenshots were billed),
+   * so neither source alone is a trustworthy gauge -- the larger of the two
+   * is the honest floor.
+   */
+  estimateRequestTokens(): number {
+    return estimateContextTokens(this.buildForLlmCall());
+  }
+
   buildForLlmCall(): Message[] {
     const systemPrompt = this.#systemPromptBuilder.getPrompt();
     return this.#log.buildMessages(systemPrompt);

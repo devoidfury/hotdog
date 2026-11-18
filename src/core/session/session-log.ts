@@ -736,6 +736,11 @@ export function replayEntriesIntoContext(
           completionTokens: d.completionTokens as number,
           totalTokens: d.totalTokens as number,
           contextWindow: d.contextWindow as number,
+          // Image-aware local estimate (absent on pre-estimate records):
+          // rides the re-emission so live ctx views re-derive the honest max.
+          ...(typeof d.estimatedContextTokens === "number"
+            ? { estimatedContextTokens: d.estimatedContextTokens }
+            : {}),
         });
         break;
       }

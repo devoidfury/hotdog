@@ -81,12 +81,28 @@ interface CtxRecordFields {
   promptTokens?: unknown;
   completionTokens?: unknown;
   durationMs?: unknown;
+  estimatedContextTokens?: unknown;
 }
 
 /** A recorded usage number counts as attested only when finite and > 0;
  *  0/absent means the provider (or a legacy record) said nothing. */
 function attested(n: unknown): number | undefined {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * The honest ctx-used number of one usage record: the MAX of the
+ * provider-reported total and the image-aware local estimate. Some
+ * providers exclude image payloads from reported usage while still
+ * enforcing them (2026-11-18 incident: gauge 67k/262k on a request over
+ * 262,144), so the larger attested number is the honest floor; records
+ * predating the estimate field behave exactly as before.
+ */
+function attestedCtxUsed(record: CtxRecordFields): number | undefined {
+  const reported = attested(record.totalTokens);
+  const estimated = attested(record.estimatedContextTokens);
+  if (reported !== undefined && estimated !== undefined) return Math.max(reported, estimated);
+  return reported ?? estimated;
 }
 
 /** A bare breakdown number: 0 is a real value here (e.g. nothing cached), so
@@ -117,7 +133,7 @@ export function ctxByIndex(
     if (e.source === "llm") {
       pending = i;
     } else if (e.source === "token_usage" && pending >= 0) {
-      const used = attested(e.totalTokens);
+      const used = attestedCtxUsed(e);
       if (used === undefined) continue; // attests nothing; the entry stays open
       const total = attested(e.contextWindow);
       const cached = recorded(e.cachedTokens);

@@ -6,7 +6,7 @@ import {
   type MessageLike as EstimatableMessageLike,
   type ToolResultEstimator,
 } from "@utils/token-estimate.ts";
-import { contentToText, type Message } from "@core/context/message.ts";
+import { contentToText, Message, type ImageAttachment } from "@core/context/message.ts";
 import { isWrapperPart, renderWrapperForWire } from "@core/context/wrappers.ts";
 import type { WireFormat } from "@core/extensions/wire-format.ts";
 import type { MarkerMangler } from "@core/marker-mangler.ts";
@@ -75,6 +75,65 @@ export function shouldCompact(
   // prefix; treat it as a second opinion, not a replacement (a fresh turn's
   // usage predates whatever was appended since).
   return (actualPromptTokens ?? 0) > gate;
+}
+
+// ── Image downgrade (overflow rescue) ───────────────────────────────────────
+
+/** Placeholder text left where a stripped image payload used to ride. */
+export const IMAGE_OMITTED_NOTICE = "[image omitted by compaction]";
+
+/**
+ * Replace the payloads of all but the NEWEST `keepRecentImages` images with
+ * a text placeholder, keeping every message (and its text) in place. Old
+ * screenshots are ephemeral -- tool results record the on-disk path, so the
+ * model can still re-read one it genuinely needs -- while their base64 is
+ * the weight the estimator can least calibrate against the provider.
+ *
+ * Returns the rewritten array and how many image payloads were dropped;
+ * `strippedImages === 0` means the array came back untouched (nothing to
+ * downgrade). Messages are rebuilt, never mutated: context messages are
+ * shared with the session log and anything else holding the reference.
+ */
+export function downgradeOlderImages(
+  messages: Message[],
+  keepRecentImages: number,
+): { messages: Message[]; strippedImages: number } {
+  // Count images from the newest end; everything past the budget goes.
+  let seen = 0;
+  const keepFrom: number[] = []; // per-message index where kept images start
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const images = messages[i]!.images;
+    if (!images || images.length === 0) continue;
+    const remaining = Math.max(0, keepRecentImages - seen);
+    keepFrom[i] = images.length - Math.min(images.length, remaining);
+    seen += images.length;
+  }
+  if (seen <= keepRecentImages) return { messages, strippedImages: 0 };
+
+  let strippedImages = 0;
+  const out = messages.map((msg, i) => {
+    const images = msg.images;
+    if (!images || images.length === 0) return msg;
+    const from = keepFrom[i] ?? images.length;
+    if (from === 0) return msg; // fully inside the recent-image budget
+    strippedImages += from;
+    const kept: ImageAttachment[] | undefined = images.slice(from);
+    const text = `\n${IMAGE_OMITTED_NOTICE}`;
+    let content: Message["content"];
+    if (typeof msg.content === "string") content = msg.content + text;
+    else if (Array.isArray(msg.content)) content = [...msg.content, { type: "text", text: IMAGE_OMITTED_NOTICE }];
+    else content = IMAGE_OMITTED_NOTICE;
+    return new Message({
+      role: msg.role,
+      content,
+      reasoningContent: msg.reasoningContent,
+      toolCalls: msg.toolCalls,
+      toolCallId: msg.toolCallId,
+      images: kept.length > 0 ? kept : undefined,
+      source: msg.source,
+    });
+  });
+  return { messages: out, strippedImages };
 }
 
 // ── Model-facing wire render ────────────────────────────────────────────────

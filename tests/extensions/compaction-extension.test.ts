@@ -1461,6 +1461,96 @@ describe("Compaction Extension — context-overflow rescue", () => {
     expect(result).toBeUndefined();
   });
 
+  it("does not enter the rescue when both usage sources say the context fits (misclassified transient 5xx)", async () => {
+    // Incident shape (2026-11-18, manager session 9acafaaf, 09:22 local): a
+    // transient gateway 5xx whose body QUOTES "maximum context length" routed
+    // the request into the overflow rescue while the provider's own last
+    // successful call reported 136,093 input tokens -- 52% of the 262,144
+    // window (footer gauge read 137k/262k). Both the provider's count and the
+    // local estimate fit the billed budget, so no compaction may run, no
+    // notice may fire, and no retry may be ordered: the error must surface.
+    const agent = createMockAgent(makeMessages(40, "x".repeat(20)), "test-model", {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 1000 },
+    });
+    agent.cancelled = false;
+    // Scaled incident ratio: provider last-input 520/1000 (~52%), estimate 200/1000.
+    agent.usageShim.promptTokens = 12;
+    agent.usageShim.cachedTokens = 508;
+    const systemMessages: string[] = [];
+    agent.sink = { emit: (e: { type: number; content?: string }) => {
+      if (e.type === 15 /* SYSTEM_MESSAGE */) systemMessages.push(e.content!);
+    } };
+    const core = {
+      ...createMockCore({ reserveTokens: 0 }),
+      resolved: { contextLimit: 1000 },
+    };
+    const ext = createCompactionExtension(core) as any;
+    const params = { messages: [...agent.log.getAll()], modelConfig: {}, toolDefs: [] };
+
+    const result = await ext.hooks[HOOKS.PROVIDER_ERROR]({
+      error: LlmError.Api(
+        'HTTP 500 (body: {"error":{"message":"upstream rejected the request; see docs re: maximum context length limits","type":"server_error"}})',
+        500,
+      ),
+      params,
+      agent,
+      retry: false,
+    });
+
+    expect(result).toBeUndefined();
+    expect(agent.log.getAll().length).toBe(40);
+    expect(params.messages).toHaveLength(40);
+    expect(systemMessages).toEqual([]);
+  });
+
+  it("does not claim compaction when a success reduced nothing (no-op honesty)", async () => {
+    // Tool-heavy transcript: the trim boundary cannot drop the leading tool
+    // run without orphaning, so its safe-cut rewind lands at zero -- a
+    // reported success that removed NOTHING. The notice must not claim the
+    // conversation was compacted, and the identical request must not be
+    // re-issued behind it (retry only when compaction actually reduced).
+    const messages = [
+      new Message({ role: "user", content: "start" }),
+      ...Array.from({ length: 20 }, (_, i) =>
+        new Message({ role: "tool", content: "y".repeat(400), toolCallId: `call_${i}` })),
+      new Message({ role: "assistant", content: "a1" }),
+      new Message({ role: "user", content: "u1" }),
+      new Message({ role: "assistant", content: "a2" }),
+      new Message({ role: "user", content: "u2" }),
+      new Message({ role: "assistant", content: "a3" }),
+      new Message({ role: "user", content: "u3" }),
+    ];
+    const agent = createMockAgent(messages, "test-model", {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 1000 },
+    });
+    agent.cancelled = false;
+    const systemMessages: string[] = [];
+    agent.sink = { emit: (e: { type: number; content?: string }) => {
+      if (e.type === 15 /* SYSTEM_MESSAGE */) systemMessages.push(e.content!);
+    } };
+    const core = {
+      ...createMockCore({ reserveTokens: 0 }),
+      resolved: { contextLimit: 1000 },
+    };
+    const ext = createCompactionExtension(core) as any;
+    const params = { messages: [...agent.log.getAll()], modelConfig: {}, toolDefs: [] };
+
+    const result = await ext.hooks[HOOKS.PROVIDER_ERROR]({
+      error: overflowError(),
+      params,
+      agent,
+      retry: false,
+    });
+
+    // No retry: re-issuing an unchanged context cannot heal an overflow.
+    expect(result).toBeUndefined();
+    // The transcript is intact (nothing was compacted, nothing was rewritten).
+    expect(agent.log.getAll().length).toBe(27);
+    expect(params.messages).toHaveLength(27);
+    // Any notice must not claim the conversation was compacted.
+    expect(systemMessages.join(" ")).not.toContain("compacted");
+  });
+
   it("does not rewrite a young comfortably-fitting session (drop gate vs misclassification)", async () => {
     // A generic error body that merely QUOTES an overflow phrase (e.g. echoes
     // prompt text) still classifies as overflow; the drop fallback must not

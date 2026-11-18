@@ -1171,7 +1171,7 @@ export async function runInteractiveSession(
           // A committed response is visible too: the row's number follows it.
           if (ev.type === OUTPUT_EVENT.ASSISTANT_MESSAGE) refreshIndex();
           return;
-        case OUTPUT_EVENT.TOKEN_USAGE:
+        case OUTPUT_EVENT.TOKEN_USAGE: {
           // The producing call completed: its streamed text is a committed
           // response now, so a later reset cannot claim it as dead.
           bridge.endAttemptOutput();
@@ -1181,22 +1181,27 @@ export async function runInteractiveSession(
             completionTokens: ev.sessionCompletionTokens,
           };
           // Footer-style segments from the same in-process frame the webui
-          // reads (no wire/protocol path): ctx used = the call's own
-          // totalTokens and total = contextWindow -- exactly the pair the
-          // sidebar gauge caches (@extensions/websocket/session-registry.ts
-          // #trackUsage) -- and call = durationMs, the agent's measured
-          // span (agent.ts run()). Unattested fields patch NOTHING: the
-          // last honest value held this turn stays (webui's rule), and a
-          // frame with no usable used-number renders no gauge.
+          // reads (no wire/protocol path): ctx used/total and call =
+          // durationMs, the agent's measured span (agent.ts run()).
+          // Unattested fields patch NOTHING: the last honest value held this
+          // turn stays (webui's rule), and a frame with no usable
+          // used-number renders no gauge. used = max(reported totalTokens,
+          // image-aware estimate) -- the honest floor when the provider
+          // excludes image payloads from its numbers (2026-11-18 incident),
+          // same rule as the sidebar's #trackUsage cache.
+          const attested = (n: unknown): number =>
+            typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
+          const honestCtxUsed = Math.max(attested(ev.totalTokens), attested(ev.estimatedContextTokens));
           bridge.updateStatus({
             cost: sessionCost(),
-            ...(Number.isFinite(ev.totalTokens) && ev.totalTokens > 0 ? { ctxUsed: ev.totalTokens } : {}),
+            ...(honestCtxUsed > 0 ? { ctxUsed: honestCtxUsed } : {}),
             ...(Number.isFinite(ev.contextWindow) && ev.contextWindow > 0 ? { ctxTotal: ev.contextWindow } : {}),
             ...(typeof ev.durationMs === "number" && Number.isFinite(ev.durationMs) && ev.durationMs >= 0
               ? { callMs: ev.durationMs }
               : {}),
           });
           return;
+        }
         case OUTPUT_EVENT.QUEUE_UPDATE:
           bridge.setQueueChip(ev.pending, ev.preview);
           return;

@@ -139,6 +139,14 @@ export interface TokenUsageEvent extends UsageTotals {
   /** The model's context window size, shown as total/contextWindow. */
   contextWindow: number;
   /**
+   * Image-aware local (chars/4 + capped image payloads) estimate of the
+   * outgoing request context. Ctx displays bill max(reported, estimated):
+   * providers may exclude image tokens from reported usage while still
+   * enforcing them (2026-11-18 incident). Absent on re-emissions of
+   * pre-record estimates and callers that measure nothing.
+   */
+  estimatedContextTokens?: number;
+  /**
    * Wall-clock ms of the LLM call this usage came from (see agent.ts: call start through stream completion, retries included).
    * Absent on re-emissions of pre-durationMs records and on callers that measure nothing.
    */

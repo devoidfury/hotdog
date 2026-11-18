@@ -995,9 +995,18 @@ export class Agent implements AgentLike {
       // once -- no consumer may paper over it with a constant.
       // durationMs is this call's own wall time (measured span in run());
       // absent stays absent -- an unmeasured emit rides no field.
+      // estimatedContextTokens is the image-aware local estimate of the
+      // outgoing request; ctx consumers max it against the provider
+      // numbers, which can exclude image billing entirely.
+      const estimatedContextTokens = this.context.estimateRequestTokens?.();
       this.emitOutput("token_usage", {
         ...usage,
         contextWindow: this.contextLimit,
+        ...(typeof estimatedContextTokens === "number" &&
+        Number.isFinite(estimatedContextTokens) &&
+        estimatedContextTokens > 0
+          ? { estimatedContextTokens }
+          : {}),
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
     });

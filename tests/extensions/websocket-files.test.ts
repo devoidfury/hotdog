@@ -22,6 +22,7 @@ import {
   writeFileSync,
   symlinkSync,
   chmodSync,
+  readdirSync,
   rmSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -495,6 +496,22 @@ describe("file handlers degraded fs paths", () => {
     mkdirSync(lockbox);
     chmodSync(lockbox, 0o000);
     try {
+      // Host-enforcement probe (same doctrine as the AS_ROOT skip): if this
+      // host lets our own process readdir a 000 dir, the refusal under test
+      // cannot exist here, and asserting it would be vacuous. GitHub macOS
+      // runners are such hosts (mode bits do not bite); Linux gates do.
+      let hostDenies = false;
+      try {
+        readdirSync(lockbox);
+      } catch {
+        hostDenies = true;
+      }
+      if (!hostDenies) {
+        process.stderr.write(
+          "[websocket-files] chmod 000 does not deny readdir on this host: permission-line test is VACUOUS here, skipping\n",
+        );
+        return;
+      }
       const reply = parse<ListDirResultWire>(
         (await send(createWsMockWs(), { type: C2S.LIST_DIR, requestId: 84, path: "lockbox" }))[0]!,
       );

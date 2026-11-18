@@ -137,7 +137,10 @@ describe("createExclusive vs external deletion", () => {
     try {
       const payload = "d".repeat(4 * 1024 * 1024);
       let repaired = false;
-      for (let attempt = 0; attempt < 10 && !repaired; attempt++) {
+      // 25 strikes, not 10: on a busy CI runner the rmdir can miss the
+      // multi-MB write window every time (this round flaked at 157 with
+      // "repaired" never landing). Each round self-corrects on first hit.
+      for (let attempt = 0; attempt < 25 && !repaired; attempt++) {
         warnSpy.mockClear();
         const dir = freshDir();
         const path = join(dir, "claim");

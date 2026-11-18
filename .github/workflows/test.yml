@@ -41,7 +41,27 @@ jobs:
         run: bun run loud-test
 
       - name: "Run tests with coverage"
-        run: bun run coverage
+        shell: bash
+        run: |
+          set -o pipefail
+          bun run coverage 2>&1 | tee coverage-report.txt
+
+      # bun's coverageThreshold gate is silent (exit 1 with "0 fail" and no
+      # message), so a per-file miss otherwise reads as a phantom failure.
+      # When the coverage run goes red, extract the table rows under the
+      # bunfig floor and annotate them: named files, real verdict.
+      - name: "Coverage floor: annotate files under 80% (on failure)"
+        if: failure()
+        shell: bash
+        run: |
+          [ -f coverage-report.txt ] || exit 0
+          awk -F'|' '/\| *[0-9]+\.[0-9]+ *\| *[0-9]+\.[0-9]+ *\|/ {
+            f=$1; gsub(/^ +| +$/,"",f); fu=$2; li=$3;
+            gsub(/ /,"",fu); gsub(/ /,"",li);
+            if (f != "" && f != "File" && f != "All files" && (fu+0 < 80 || li+0 < 80))
+              printf "::error file=%s::coverage floor: funcs=%s%% lines=%s%% (bunfig coverageThreshold 0.80)\n", f, fu, li
+          }' coverage-report.txt | head -40
+          exit 0
 
       - name: "Run type check"
         run: bun i --no-save && bun run check

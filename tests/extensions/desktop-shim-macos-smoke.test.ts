@@ -14,15 +14,17 @@
 // manual: there is no window server to talk to in CI.
 
 import { afterAll, describe, expect, it } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   compileShim,
+  compileShimArgs,
   MACOS_ATS_PLIST,
   MACOS_SHIM_FLAGS,
+  macosSectcreateFlag,
   type ShimPlan,
 } from "@experimental/desktop/launcher.ts";
 
@@ -62,8 +64,28 @@ suite(`macos shim compile smoke (flags + ATS sectcreate + ad-hoc codesign + stdi
         codesign: true,
       };
       const bin = await compileShim(plan);
-      expect(bin).not.toBeNull();
-      expect((await stat(bin!)).size).toBeGreaterThan(0);
+      if (bin === null) {
+        // compileShim logs the compiler's stderr to the logger, which the
+        // test preload stubs -- a bare "Received: null" tells CI nothing
+        // about WHY the SDK refused. Replay the exact clang invocation and
+        // let the compiler speak in the failure text.
+        const plistPath = join(workDir, "diag.info.plist");
+        writeFileSync(plistPath, MACOS_ATS_PLIST);
+        const diag = Bun.spawnSync({
+          cmd: compileShimArgs("clang", SHIM_SOURCE, join(workDir, "diag-bin"), [
+            ...MACOS_SHIM_FLAGS,
+            macosSectcreateFlag(plistPath),
+          ]),
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const text = new TextDecoder().decode(diag.stderr);
+        throw new Error(
+          `compileShim returned null; replayed clang exited ${diag.exitCode}: ` +
+            `${text.slice(0, 4000) || "(no stderr)"}`,
+        );
+      }
+      expect((await stat(bin)).size).toBeGreaterThan(0);
 
       // The ATS exception really landed in __TEXT,__info_plist (the local-
       // mode http posture rides on this; a silently dropped sectcreate

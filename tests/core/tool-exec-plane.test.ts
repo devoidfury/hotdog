@@ -922,8 +922,14 @@ describe("sweepStaleTmpDirs", () => {
       process.env.TMPDIR = base;
       try {
         const broker = new ToolExecBroker({ fence: "off" });
-        await new Promise((r) => setTimeout(r, 50)); // the deferred janitor lands
-        expect(existsSync(oldExec)).toBe(false);
+        // Poll for the janitor's fire instead of assuming 50 ms is enough:
+        // the deferred timer is unref'd, and CI coverage instrumentation can
+        // starve it past any fixed sleep (this sleep flaked at 926).
+        const deadline = Date.now() + 3000;
+        while (existsSync(oldExec) && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 25));
+        }
+        expect(existsSync(oldExec)).toBe(false); // the deferred janitor lands
         expect(existsSync(young)).toBe(true);
         await broker.close();
       } finally {

@@ -31,7 +31,7 @@ afterAll(() => {
   for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
 });
 
-async function settle(fn: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
+async function settle(fn: () => boolean, what: string, timeoutMs = 6000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!fn()) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);

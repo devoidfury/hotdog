@@ -5,7 +5,8 @@
 // the launcher is a constructor seam).
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -252,6 +253,30 @@ describe("launcher planning", () => {
 
 // ── single-instance lock ────────────────────────────────────────────────────
 
+// Host probe (computed once at module load): some hosts let the owner
+// read/write/delete through mode bits (the GitHub macOS runner); the
+// refusal-path tests below would be vacuous there, so they skip with a
+// note (same doctrine as the AS_ROOT skips elsewhere).
+const MODE_BITES = (() => {
+  const d = mkdtempSync(join(tmpdir(), "hotdog-lock-probe-"));
+  const f = join(d, "f");
+  writeFileSync(f, "x");
+  chmodSync(f, 0o000);
+  let denied = false;
+  try {
+    readFileSync(f, "utf8");
+  } catch {
+    denied = true;
+  }
+  chmodSync(f, 0o644);
+  rmSync(d, { recursive: true, force: true });
+  return denied;
+})();
+const noteVacuous = () =>
+  process.stderr.write(
+    "[desktop-lock] mode bits do not bite on this host: refusal-path tests are VACUOUS here, skipping\n",
+  );
+
 describe("desktop instance lock", () => {
   let dataDir: string;
   const savedEnv = process.env.HOTDOG_DATA_DIR;
@@ -295,6 +320,61 @@ describe("desktop instance lock", () => {
     await writeFile(lockFilePath(), JSON.stringify({ pid: 2_000_000_000, port: 9 }));
     await releaseInstanceLock();
     expect(await readFile(lockFilePath(), "utf8")).toContain("2000000000");
+  });
+
+  it("unreadable held file: treated as stale garbage -- read catch answers, the claim is taken", async () => {
+    if (!MODE_BITES) return void noteVacuous();
+    // EEXIST, the read fails (mode 000), the catch says "", parseInfo says
+    // nothing -- an unparseable/unreadable holder is indistinguishable from
+    // stale, so the rm+steal path wins and the file becomes OURS.
+    await mkdir(join(lockFilePath(), ".."), { recursive: true });
+    await writeFile(lockFilePath(), "unread {{{");
+    chmodSync(lockFilePath(), 0o000);
+    try {
+      const result = await acquireInstanceLock();
+      expect(result.ok).toBe(true); // stolen through the read-catch -> null shape
+      chmodSync(lockFilePath(), 0o644);
+      expect(JSON.parse(await readFile(lockFilePath(), "utf8")).pid).toBe(process.pid);
+    } finally {
+      chmodSync(lockFilePath(), 0o644);
+      await releaseInstanceLock();
+    }
+  });
+
+  it("unreadable lock file makes the port refresh and the release honest no-ops", async () => {
+    if (!MODE_BITES) return void noteVacuous();
+    expect((await acquireInstanceLock()).ok).toBe(true);
+    const saved = await readFile(lockFilePath(), "utf8");
+    chmodSync(lockFilePath(), 0o000);
+    try {
+      await updateInstanceLockPort(9999); // read catch -> not ours -> no write attempt
+      await releaseInstanceLock(); // read catch -> nothing to claim -> leaves it alone
+      chmodSync(lockFilePath(), 0o644);
+      expect(await readFile(lockFilePath(), "utf8")).toBe(saved); // byte-identical
+    } finally {
+      chmodSync(lockFilePath(), 0o644);
+      await releaseInstanceLock();
+    }
+  });
+
+  it("unwritable lock dir: port refresh and release fail soft, never throw", async () => {
+    if (!MODE_BITES) return void noteVacuous();
+    // Claim cleanly, then make the DIRECTORY unwritable: the update's
+    // rewrite and the release's unlink both hit EACCES and must swallow
+    // ("best effort" is the documented posture -- a failed refresh never
+    // takes the app down).
+    expect((await acquireInstanceLock()).ok).toBe(true);
+    const dir = join(lockFilePath(), "..");
+    chmodSync(dir, 0o555);
+    try {
+      await updateInstanceLockPort(9999); // must not throw
+      await releaseInstanceLock(); // must not throw
+      // The lock file survived both soft failures.
+      expect(JSON.parse(await readFile(lockFilePath(), "utf8")).pid).toBe(process.pid);
+    } finally {
+      chmodSync(dir, 0o755);
+      await releaseInstanceLock();
+    }
   });
 });
 

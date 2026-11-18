@@ -2,6 +2,8 @@
 // OpenAI-compatible /v1/audio/transcriptions endpoint spun up with Bun.serve.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { createServer } from "node:net";
+import type { AddressInfo } from "node:net";
 import { transcribeAudio } from "@utils/stt.ts";
 
 interface CapturedRequest {
@@ -14,8 +16,26 @@ interface CapturedRequest {
   fileText: string;
 }
 
-let mode: "ok" | "error" | "bodyfail" | "notjson" | "notext" = "ok";
+let mode: "ok" | "error" | "notjson" | "notext" = "ok";
 let lastRequest: CapturedRequest | null = null;
+
+// The dying-body case gets its own raw listener: rejecting a pull inside a
+// Bun.serve response stream surfaces as a process-level error (bun test
+// exits 1 under --coverage even with every test passing). node:net spells
+// "headers flushed, body truncated" directly: announce 100 bytes, send the
+// opening chunk, destroy the socket 15 ms later.
+const bodyfailServer = createServer((sock) => {
+  sock.once("data", () => {
+    sock.write(
+      "HTTP/1.1 502 Bad Gateway\r\n" +
+        "content-type: application/json\r\n" +
+        "content-length: 100\r\n\r\n" +
+        '{"partial":',
+    );
+    setTimeout(() => sock.destroy(), 15);
+  });
+});
+await bodyfailServer.listen(0, "127.0.0.1");
 
 const fakeStt = Bun.serve({
   port: 0,
@@ -43,20 +63,6 @@ const fakeStt = Bun.serve({
         { status: 500 },
       );
     }
-    if (mode === "bodyfail") {
-      // Headers land, the body dies mid-stream (the first chunk flushes, a
-      // later pull rejects): a client-side body read rejects with ECONNRESET
-      // and the status error must still ride without a snippet.
-      const stream = new ReadableStream({
-        start(c) {
-          c.enqueue(new TextEncoder().encode('{"partial":'));
-        },
-        pull() {
-          return new Promise((_, rej) => setTimeout(() => rej(new Error("body died")), 15));
-        },
-      });
-      return new Response(stream, { status: 502 });
-    }
     if (mode === "notjson") return new Response("<html>not json</html>");
     if (mode === "notext") return Response.json({ result: "wrong shape" });
     return Response.json({ text: "hello transcription" });
@@ -64,6 +70,8 @@ const fakeStt = Bun.serve({
 });
 
 const endpoint = () => `http://localhost:${fakeStt.port}/v1/audio/transcriptions`;
+const bodyfailEndpoint = () =>
+  `http://127.0.0.1:${(bodyfailServer.address() as AddressInfo).port}/v1/audio/transcriptions`;
 
 beforeAll(() => {
   expect(fakeStt.port).toBeGreaterThan(0);
@@ -71,6 +79,7 @@ beforeAll(() => {
 
 afterAll(() => {
   fakeStt.stop(true);
+  bodyfailServer.close();
 });
 
 beforeEach(() => {
@@ -140,10 +149,10 @@ describe("transcribeAudio", () => {
 
   it("a failed body read on a non-ok response still throws the status error", async () => {
     // The snippet read is best-effort (catch(() => "")): a body that dies
-    // mid-stream must not swallow the status line the operator needs.
-    mode = "bodyfail";
+    // mid-stream (headers land, the socket dies mid-chunk) must not swallow
+    // the status line the operator needs.
     expect(
-      transcribeAudio({ url: endpoint(), audio: new TextEncoder().encode("x") }),
+      transcribeAudio({ url: bodyfailEndpoint(), audio: new TextEncoder().encode("x") }),
     ).rejects.toThrow(/STT request failed: 502/);
   });
 

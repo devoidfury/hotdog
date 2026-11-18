@@ -687,6 +687,9 @@ export async function runInteractiveSession(
           knob: uiCli.renderer,
           stdinIsTTY: process.stdin.isTTY,
           stdoutIsTTY: process.stdout.isTTY,
+          // Status bar chrome: the session palette (colors off / NO_COLOR
+          // arrives here as use_colors=false -> plain rows).
+          statusPalette: palette,
         });
   uiBridge = bridge;
   if (bridge) {

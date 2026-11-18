@@ -238,7 +238,10 @@ stdin+stdout, TERM not `dumb`):
   input. Ctrl-D on an empty buffer quits.
 - **Status line** (top frame row) mirrors the webui footer, with every
   segment gated on what the session has actually attested (no number is
-  ever invented). It leads with the visible-message index (`#N`, the newest
+  ever invented). The row paints as a full-width bar (palette `status_bar`:
+  cyan ground on dark/light, inverse on monochrome) so it reads as chrome,
+  not transcript content.
+  It leads with the visible-message index (`#N`, the newest
   message's number in the USER_INPUT + ASSISTANT_RESPONSE counting described
   above -- owner ruling: the row's number counts those messages, and it is
   the number `/rewind N` / `/rewind -N` / `/fork N` / `/fork -N`

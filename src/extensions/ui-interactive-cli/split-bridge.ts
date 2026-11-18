@@ -13,7 +13,7 @@
 import { EventEmitter } from "node:events";
 import { formatError } from "@core/error.ts";
 import { STREAM_RETRY_MARKER } from "@utils/cli/cli.ts";
-import { applyMarkdown, type ColorPalette } from "@utils/cli/colors.ts";
+import { applyColor, applyMarkdown, type ColorPalette } from "@utils/cli/colors.ts";
 import {
   newMdStreamState,
   tokenizeMarkdownLine,
@@ -26,7 +26,7 @@ import { ProcessTerminal } from "@utils/cli/renderer/terminal.ts";
 import { SystemClock } from "@utils/cli/renderer/clock.ts";
 import { TeardownGuard } from "@utils/cli/renderer/teardown.ts";
 import { StdinBuffer } from "@utils/cli/renderer/stdin-buffer.ts";
-import { wrapToWidth } from "@utils/cli/renderer/width.ts";
+import { visibleWidth, wrapToWidth } from "@utils/cli/renderer/width.ts";
 import { EditorView, type EditorEvent } from "@utils/cli/renderer/editor-view.ts";
 import type { Completion } from "@utils/cli/renderer/popup.ts";
 import type { Clock, KeySource, SignalHost, Terminal } from "@utils/cli/renderer/seams.ts";
@@ -267,6 +267,8 @@ export interface OutputBridgeOptions {
   terminal: Terminal;
   clock: Clock;
   signalHost: SignalHost;
+  /** Palette for the status bar (omitted = plain text rows, the rig default). */
+  statusPalette?: ColorPalette | null;
 }
 
 /** The stdin slice suspend() needs; process.stdin satisfies it structurally. */
@@ -431,6 +433,31 @@ export function statusRowText(s: FrameStatus): string | null {
 }
 
 /**
+ * The status row as PAINTED frame rows. With a palette, each wrapped row is
+ * one self-contained bar: a one-cell inner margin, the text, and space
+ * padding INSIDE the color span out to the full terminal width, so the
+ * background reads as a bar rather than a floating patch of color (the
+ * per-row span means a wrap on a narrow terminal never loses the style).
+ * The default color is `bg_cyan` -- the CLI's cyan accent as the bar's
+ * ground -- overridable to `inverse` or any ANSI name. Null palette, colors
+ * off, or an empty `status_bar` name leave the plain wrapped rows
+ * (byte-identical rig and NO_COLOR path). Full-width padded rows land
+ * exactly on the wrapped-row byte shape the commit protocol already emits
+ * (pending-wrap EL semantics), and repaint re-derives the width so a resize
+ * re-pads the bar.
+ */
+export function styleStatusRow(text: string, width: number, palette: ColorPalette | null): string[] {
+  if (palette === null || !palette.use_colors || palette.status_bar === "") {
+    return wrapToWidth(text, width);
+  }
+  const lead = width > 1 ? " " : "";
+  return wrapToWidth(text, Math.max(1, width - lead.length)).map((row) => {
+    const pad = " ".repeat(Math.max(0, width - lead.length - visibleWidth(row)));
+    return applyColor(lead + row + pad, palette.status_bar, true);
+  });
+}
+
+/**
  * The queue-chip row text (steer affordance): `↑ queued: <first 40 runes>`
  * plus the extra count. Null when nothing is pending. Rune-safe truncation
  * (codepoints, surrogate-safe via Array.from); newlines collapse so the chip
@@ -484,6 +511,8 @@ export class OutputBridge {
   #lastBlockRows: string[] = [];
   /** Status-line state (all attestation-gated; see FrameStatus). */
   #status: FrameStatus = { messageIndex: null, working: false, laneWait: false, cost: null };
+  /** Palette for the status bar; null = plain rows (rig/unstyled default). */
+  #statusPalette: ColorPalette | null;
   /** The 1s live-tick handle while working; null when idle (no interval
    * ever runs outside a working edge -- it cannot leak across teardown). */
   #tickHandle: unknown = null;
@@ -521,6 +550,7 @@ export class OutputBridge {
   #outLineProse = false;
 
   constructor(private readonly opts: OutputBridgeOptions) {
+    this.#statusPalette = opts.statusPalette ?? null;
     this.core = new RendererCore({
       terminal: opts.terminal,
       clock: opts.clock,
@@ -1184,7 +1214,7 @@ export class OutputBridge {
     // row wraps like the other chrome rows -- a footer-style row on a narrow
     // terminal must never clip into the frame's geometry.
     const statusText = statusRowText(this.#status);
-    const status = statusText ? wrapToWidth(statusText, width) : [];
+    const status = statusText ? styleStatusRow(statusText, width, this.#statusPalette) : [];
     const chip = this.#chipText;
     const inflight = this.#inflightRows(width);
     const popup = editor.popupRows(width);
@@ -1341,6 +1371,8 @@ export interface SplitMountOptions {
   env?: Record<string, string | undefined>;
   /** Process surface to patch; defaults to the real process (tests inject). */
   host?: IoPatchHost;
+  /** Palette for the status bar (omitted = plain text rows). */
+  statusPalette?: ColorPalette | null;
 }
 
 /** Process surface the crash route needs; tests inject a fake emitter. */
@@ -1459,6 +1491,7 @@ export function mountSplitRenderer(options: SplitMountOptions): OutputBridge | n
     terminal,
     clock: new SystemClock(),
     signalHost: processSignalHost,
+    statusPalette: options.statusPalette,
   });
   bridge.mount();
   const host: IoPatchHost = options.host ?? {

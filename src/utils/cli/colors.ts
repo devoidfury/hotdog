@@ -36,6 +36,13 @@ export interface PaletteOptions {
   /** Markdown fence rule lines (the ``` themselves). */
   md_fence?: string;
   /**
+   * The interactive status bar (split renderer). Defaults to `bg_cyan`:
+   * the CLI's cyan accent as the bar's background (black pinned fg), with
+   * the full row padded so it reads as a bar. `inverse` and any other ANSI
+   * name work too; empty leaves the row plain.
+   */
+  status_bar?: string;
+  /**
    * Terminal colors for the syntax registry's token classes (fenced code in
    * assistant prose, any registered language). Keyed by the tokenizer class
    * name (keyword/string/comment/...; the union of the per-tokenizer closed
@@ -72,6 +79,7 @@ export class ColorPalette {
   md_code: string;
   md_marker: string;
   md_fence: string;
+  status_bar: string;
   syntax: SyntaxPalette;
   use_colors: boolean;
 
@@ -99,6 +107,10 @@ export class ColorPalette {
     this.md_code = options.md_code ?? "red";
     this.md_marker = options.md_marker ?? "";
     this.md_fence = options.md_fence ?? "bright_black";
+    // The status bar rides the cyan accent as a background by default; an
+    // empty name (or colors off) leaves the row plain. Monochrome keeps the
+    // hue-free inverse.
+    this.status_bar = options.status_bar ?? "bg_cyan";
     // Syntax classes: the theme's map wins whole-key; the dark defaults back
     // whatever a hand-built partial omits (light/mono themes ship the full
     // key set, so nothing leaks through there).
@@ -252,6 +264,7 @@ export function dark_palette(): PaletteOptions {
     md_code: "red",
     md_marker: "",
     md_fence: "bright_black",
+    status_bar: "bg_cyan",
     syntax: { ...SYNTAX_DARK },
     use_colors: true,
   };
@@ -280,6 +293,7 @@ export function light_palette(): PaletteOptions {
     md_code: "red",
     md_marker: "",
     md_fence: "bright_black",
+    status_bar: "bg_cyan",
     syntax: { ...SYNTAX_LIGHT },
     use_colors: true,
   };
@@ -310,6 +324,7 @@ export function monochrome_palette(): PaletteOptions {
     md_code: "underline",
     md_marker: "",
     md_fence: "dim",
+    status_bar: "inverse",
     syntax: { ...SYNTAX_MONO },
     use_colors: true,
   };
@@ -336,6 +351,14 @@ const COLOR_MAP: Record<string, string> = {
   bold: "1",
   dim: "2",
   underline: "4",
+  // Reverse video: swap the terminal's fg/bg. Calmer status-bar fallback for
+  // hue-free themes -- legible on every host palette (dark, light, custom).
+  inverse: "7",
+  // Status-bar default: cyan ground with a pinned black foreground -- the
+  // CLI's cyan accent (36) moved to the bg slot. The fg is pinned because
+  // the terminal's default fg is a light gray on dark themes, which reads
+  // poorly on cyan; black works on light and dark alike.
+  bg_cyan: "46;30",
   // 256-color orange: the heading accent the basic 8 cannot name. Terminals
   // without 256-color support print the sequence's text unstyled-at-worst.
   orange: "38;5;208",
@@ -371,6 +394,7 @@ export function mergePalette(base: ColorPalette, custom: PaletteOptions): ColorP
     md_code: custom.md_code !== undefined ? custom.md_code : base.md_code,
     md_marker: custom.md_marker !== undefined ? custom.md_marker : base.md_marker,
     md_fence: custom.md_fence !== undefined ? custom.md_fence : base.md_fence,
+    status_bar: custom.status_bar !== undefined ? custom.status_bar : base.status_bar,
     // Per-key merge like the string fields: a custom file overrides the
     // classes it names and keeps the theme's choices for the rest.
     syntax: { ...base.syntax, ...(custom.syntax ?? {}) },

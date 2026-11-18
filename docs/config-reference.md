@@ -537,8 +537,10 @@ Trace hook execution. Requires the debug log level: `HOTDOG_LOG_LEVEL=debug` or 
 UI theme. Built-in options: `dark`, `light`, `monochrome`. Also accepts a file path to a custom theme
 -- a JSON file of `ColorPalette` overrides (merged over `dark`): `thinking`, `tool_call`, `tool_result`,
 `final_response`, `compacting`, `progress`, `arg_key`, `shell_command`, `shell_operator`, `arg_separator`,
-and the tool-result diff classes `diff_add` (green), `diff_del` (red), `diff_ctx` (bright_black), `diff_meta`
-(the diff's path/stat header and elision line).
+the tool-result diff classes `diff_add` (green), `diff_del` (red), `diff_ctx` (bright_black), `diff_meta`
+(the diff's path/stat header and elision line), and `status_bar` (the interactive status bar; dark/light
+default to `bg_cyan` -- the cyan accent as the bar's background with a pinned black foreground -- and the
+monochrome theme keeps `inverse`; any ANSI class name works, `""` gives a plain text row).
 Color names are ANSI classes (`cyan`, `bright_black`, `bold_white`, ...); an empty or unknown name leaves
 that class unstyled.
 

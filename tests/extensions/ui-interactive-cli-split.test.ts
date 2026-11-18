@@ -18,11 +18,12 @@ import {
   CaptureStream,
   mountSplitRenderer,
   OutputBridge,
+  styleStatusRow,
   type IoPatchHost,
 } from "@extensions/ui-interactive-cli/split-bridge.ts";
 import { ClipboardPasteInterceptor } from "@extensions/ui-interactive-cli/clipboard-paste.ts";
 import { CliOutputSink, STREAM_RETRY_MARKER } from "@utils/cli/cli.ts";
-import { applyFinalResponse } from "@utils/cli/colors.ts";
+import { applyFinalResponse, ColorPalette, dark_palette, light_palette, monochrome_palette } from "@utils/cli/colors.ts";
 import { OUTPUT_EVENT, type OutputEvent } from "@core/context/output.ts";
 import { GridTerminal, FakeClock, MemoryKeySource } from "@utils/cli/renderer/index.ts";
 import type { SignalHost } from "@utils/cli/renderer/index.ts";
@@ -1197,6 +1198,7 @@ interface SessionRigOptions {
   resolvedExtra?: Record<string, unknown>;
   completion?: ReturnType<typeof createCompletionService>;
   hooks?: unknown;
+  statusPalette?: ColorPalette | null;
   dictation?: { capture?: CaptureFactory; transcribe?: (audio: Uint8Array) => Promise<string> };
 }
 
@@ -1204,7 +1206,7 @@ function makeSessionRig(opts: SessionRigOptions = {}) {
   const term = new GridTerminal({ rows: 24, cols: 80 });
   const clock = new FakeClock();
   const sig = new FakeSignalHost();
-  const bridge = new OutputBridge({ terminal: term, clock, signalHost: sig });
+  const bridge = new OutputBridge({ terminal: term, clock, signalHost: sig, statusPalette: opts.statusPalette });
   // mountSplitRenderer mounts before the session starts; injected rigs do
   // the same (mountEditorInput would refuse input on an unmounted bridge
   // modes, and the exit-pairing counts start from the mount enable).
@@ -2674,6 +2676,78 @@ describe("status row: pure shape", () => {
     expect(queueChipText(1, "🙂".repeat(45))).toBe(`↑ queued: ${"🙂".repeat(40)}…`);
     // Multi-line previews collapse: the chip is always one frame row.
     expect(queueChipText(1, "line1\nline2")).toBe("↑ queued: line1 line2");
+  });
+});
+
+describe("status bar: styled rows", () => {
+  const dark = new ColorPalette(dark_palette());
+  const ON = "\x1b[46;30m"; // bg_cyan: the dark theme's status_bar default
+  const OFF = "\x1b[0m";
+
+  it("null palette, colors off, or empty status_bar -> plain wrapped rows, no padding", () => {
+    expect(styleStatusRow("#4 · working", 80, null)).toEqual(["#4 · working"]);
+    expect(styleStatusRow("#4 · working", 80, new ColorPalette({ use_colors: false }))).toEqual(["#4 · working"]);
+    expect(styleStatusRow("#4 · working", 80, new ColorPalette({ status_bar: "" }))).toEqual(["#4 · working"]);
+    // Plain wrapping still wraps at the full width (no margin is reserved).
+    expect(styleStatusRow("x".repeat(10), 5, null)).toEqual(["xxxxx", "xxxxx"]);
+  });
+
+  it("styled row: inner margin + text + full-width padding inside one bg_cyan span", () => {
+    const row = styleStatusRow("#4 · working", 40, dark)[0]!;
+    expect(row.startsWith(ON + " #4 · working")).toBe(true);
+    expect(row.endsWith(OFF)).toBe(true);
+    expect(visibleWidth(row)).toBe(40);
+    expect(row).toContain("#4 · working");
+  });
+
+  it("wrap: every row is its own full-width span (no style leaks across rows)", () => {
+    const rows = styleStatusRow("w".repeat(45), 20, dark);
+    expect(rows.length).toBe(3); // width - the 1-cell margin per row: 19 + 19 + 7
+    for (const r of rows) {
+      expect(r.startsWith(ON)).toBe(true);
+      expect(r.endsWith(OFF)).toBe(true);
+      expect(visibleWidth(r)).toBe(20);
+    }
+  });
+
+  it("exact-fit text (width - margin) pads zero cells; wide glyphs pad by CELLS", () => {
+    expect(styleStatusRow("x".repeat(39), 40, dark)[0]).toBe(`${ON} ${"x".repeat(39)}${OFF}`);
+    expect(visibleWidth(styleStatusRow("🙂", 10, dark)[0]!)).toBe(10);
+  });
+
+  it("degenerate width 1: no margin, the bar never exceeds one cell", () => {
+    const rows = styleStatusRow("ab", 1, dark);
+    expect(rows).toEqual([`${ON}a${OFF}`, `${ON}b${OFF}`]);
+  });
+
+  it("session frame: a styled bridge paints the padded bar (Grid strips SGR, bytes prove it)", async () => {
+    const rig = makeSessionRig({ statusPalette: dark });
+    await rig.done;
+    // The Grid's snapshot trims trailing cells, so the padding can only be
+    // proven on the raw write stream; the screen still proves the text lands.
+    const raw: string[] = [];
+    const origWrite = rig.term.write.bind(rig.term);
+    rig.term.write = (s: string): void => {
+      raw.push(s);
+      origWrite(s);
+    };
+    rig.emitEvent({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: true });
+    expect(rig.screenRows().some((r) => r.startsWith(" working · 00:00"))).toBe(true);
+    const spans = raw.join("").match(/\x1b\[46;30m[^\x1b]*\x1b\[0m/g) ?? [];
+    expect(spans.length).toBeGreaterThan(0);
+    // One span, one bar: margin + text + padding out to the full 80 cells.
+    expect(visibleWidth(spans[spans.length - 1]!)).toBe(80);
+  });
+
+  it("theme defaults: cyan ground for dark/light, inverse for the hue-free monochrome", () => {
+    expect(new ColorPalette(dark_palette()).status_bar).toBe("bg_cyan");
+    expect(new ColorPalette(light_palette()).status_bar).toBe("bg_cyan");
+    expect(new ColorPalette(monochrome_palette()).status_bar).toBe("inverse");
+    // The monochrome bar still renders, with the reverse-video span:
+    // margin(1) + text(7) + padding(2) = 10 cells.
+    expect(styleStatusRow("working", 10, new ColorPalette(monochrome_palette()))[0]).toBe(
+      "\x1b[7m working  \x1b[0m",
+    );
   });
 });
 

@@ -242,6 +242,12 @@ describe("configSnapshot findings", () => {
     const removed = payload.findings.find((f) => f.type === "removed-key" && f.key === "maxToolOutputLines");
     expect(removed).toBeDefined();
     expect(removed!.message).toContain("maxToolResultChars");
+    // Owner ruling 2026-11-18: the WEBUI finding is plain user copy -- the
+    // tombstone's note states what changed in today's terms, never
+    // retirement archaeology (no surface may read like commit history).
+    expect(removed!.message).toContain("tool output is capped centrally by maxToolResultChars now");
+    expect(removed!.message).not.toContain("retired");
+    expect(removed!.message).not.toContain("shipped broken");
   });
 
   it("broken JSONC file: status broken, kinds + line numbers, fixable", async () => {

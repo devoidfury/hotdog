@@ -221,10 +221,13 @@ function warnRemovedConfigKeys(raw: unknown): void {
     const norm = normalizeRemovedKey(key);
     if (warnedRemovedKeys.has(norm)) continue;
     warnedRemovedKeys.add(norm);
-    // Name the key as the user wrote it (rescue's style), explain with the tombstone.
+    // Name the key as the user wrote it (rescue's style), explain with the
+    // tombstone's plain user note (owner ruling 2026-11-18: the boot nudge
+    // is user output and never speaks retirement archaeology).
     logger.warn(
       `config key "${key}" is removed and ignored - replaced by ${hit.replacement}. ` +
-        `${hit.note ?? ""} Run \`hotdog rescue\` for the line.`,
+        (hit.note ? `${hit.note} ` : "") +
+        "Run `hotdog rescue` for the line.",
     );
   }
 }

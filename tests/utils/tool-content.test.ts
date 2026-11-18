@@ -2,7 +2,7 @@
 // (CLI, websocket bridge, web log view). Display, not a wire format.
 
 import { describe, it, expect } from 'bun:test';
-import { toolContentMeta, toolContentSuccess, toolContentText, wrapperContentText, splitFileIncludes } from '@utils/tool-content.ts';
+import { toolContentMeta, toolContentMetaAll, toolContentSuccess, toolContentText, wrapperContentText, splitFileIncludes } from '@utils/tool-content.ts';
 import type { ToolResultPart } from '@core/context/wrappers.ts';
 
 const part = (over: Partial<ToolResultPart> = {}): ToolResultPart => ({
@@ -47,6 +47,28 @@ describe('toolContentText', () => {
   it('META preserves declaration order and rides even when the payload is empty', () => {
     const p = part({ output: '', meta: [['b', '2'], ['a', '1']] });
     expect(toolContentText([p])).toBe('META: {"b":"2","a":"1"}');
+  });
+
+  it('omitMeta drops the envelope line only; chrome lines and the default posture stay', () => {
+    const p = part({
+      status: 'failure',
+      output: 'partial',
+      error: 'boom',
+      hint: 'again',
+      meta: [['exit_code', '1']],
+    });
+    // Chat surfaces (webui transcript + log view): the envelope is gone,
+    // Error:/HINT: are real information and stay.
+    expect(toolContentText([p], undefined, { omitMeta: true })).toBe(
+      'partial\nError: boom\nHINT: again',
+    );
+    // Meta-only payload flattens to nothing once the envelope drops.
+    expect(toolContentText([part({ output: '', meta: [['k', 'v']] })], undefined, { omitMeta: true })).toBe('');
+    // paint posture is unaffected: part bytes painted, chrome raw.
+    const paint = (s: string) => `[${s}]`;
+    expect(toolContentText([part({ output: 'x', meta: [['k', 'v']] })], paint, { omitMeta: true })).toBe('[x]');
+    // Default (no opts) keeps the full dump: CLI/replay audit posture.
+    expect(toolContentText([part({ output: 'x', meta: [['k', 'v']] })])).toBe('x\nMETA: {"k":"v"}');
   });
 
   it('paint transforms each part\'s own bytes only: chrome and harness strings stay raw', () => {
@@ -167,6 +189,24 @@ describe('toolContentMeta', () => {
     expect(
       toolContentMeta([part({ meta: [['start_line', '5']] }), part({ meta: [['start_line', '9']] })], 'start_line'),
     ).toBe('5');
+  });
+});
+
+describe('toolContentMetaAll', () => {
+  it('merges every stored entry, keeping insertion order (later parts win on a collision)', () => {
+    const all = toolContentMetaAll([
+      part({ meta: [['command', 'ls'], ['exit_code', '0']] }),
+      part({ meta: [['exit_code', '1'], ['truncated', 'true']] }),
+    ])!;
+    expect(Object.keys(all)).toEqual(['command', 'exit_code', 'truncated']);
+    expect(all.exit_code).toBe('1');
+  });
+
+  it('null when NOTHING is stored (no envelope, no strip) and for the degrade shapes', () => {
+    expect(toolContentMetaAll([part({ meta: [] })])).toBeNull();
+    expect(toolContentMetaAll('plain')).toBeNull();
+    expect(toolContentMetaAll(null)).toBeNull();
+    expect(toolContentMetaAll([{ type: 'other', meta: [['a', '1']] }])).toBeNull();
   });
 });
 

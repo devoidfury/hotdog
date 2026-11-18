@@ -16,6 +16,7 @@ import {
   codeRuns,
   proseHtml,
   splitPath,
+  metaFacts,
   ToolBlock,
   ToolBlockController,
   MAX_INLINE_DIFF_LINES,
@@ -503,7 +504,7 @@ describe("auto-expand (owner ruling 2026-11-05)", () => {
 });
 
 describe("ToolBlock SSR", () => {
-  const base = { expanded: false, raw: false, fullResult: false, boxes: {}, unfolded: {} };
+  const base = { expanded: false, raw: false, fullResult: false, boxes: {}, unfolded: {}, envelope: false };
 
   it("renders the static header row with pending status and no args box", () => {
     const html = renderToString(
@@ -514,6 +515,7 @@ describe("ToolBlock SSR", () => {
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
+        onToggleEnvelope: () => {},
       }),
     );
     expect(html).toContain('class="tool-call-block status-pending"');
@@ -533,6 +535,7 @@ describe("ToolBlock SSR", () => {
           onShowFull: () => {},
           onToggleBox: () => {},
           onUnfold: () => {},
+          onToggleEnvelope: () => {},
         }),
       );
     // The server's hint-driven fold wins.
@@ -550,6 +553,7 @@ describe("ToolBlock SSR", () => {
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
+        onToggleEnvelope: () => {},
       }),
     );
     // "" is the server saying "no summary, the parts are the story": the
@@ -567,6 +571,7 @@ describe("ToolBlock SSR", () => {
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
+        onToggleEnvelope: () => {},
       }),
     );
     expect(html).not.toContain("<img src=x");
@@ -588,6 +593,7 @@ describe("ToolBlock SSR", () => {
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
+        onToggleEnvelope: () => {},
       }),
     );
     expect(html).toContain("status-error");
@@ -612,6 +618,7 @@ describe("ToolBlock SSR", () => {
         onShowFull: () => {},
         onToggleBox: () => {},
         onUnfold: () => {},
+        onToggleEnvelope: () => {},
       }),
     );
     expect(html).toContain("tool-result-box");
@@ -1506,5 +1513,53 @@ describe("diff gutters follow the result's startLine (DOM)", () => {
     ctrl.setResult({ output: "ok" });
     const rows = Array.from(block.querySelectorAll(".diff-row"));
     expect(rows.map((r) => r.querySelector(".diff-ln-old")!.textContent)).toEqual(["1", "2", "", "3"]);
+  });
+});
+
+// ── metaFacts: the curated envelope strip (owner ruling 2026-11-18) ─────────
+// One table, every key the house tools actually stamp. The contract: a fact
+// renders only when the envelope CARRIES it (absent = omitted, never
+// invented), keys the block header already says never appear, and the
+// ordering is the strip's fixed register.
+
+describe("metaFacts (curated envelope facts)", () => {
+  it("speaks only what is carried: bash exit + truncation, error tint on nonzero", () => {
+    expect(metaFacts({ command: "ls", exit_code: "0" })).toEqual([{ text: "exit 0", err: false }]);
+    expect(metaFacts({ exit_code: "1", truncated: "true" })).toEqual([
+      { text: "exit 1", err: true },
+      { text: "truncated", err: false },
+    ]);
+  });
+
+  it("the read window speaks its lines once; a bare total only rides alone", () => {
+    expect(metaFacts({ showing: "1-120 (of 945 total)", total_lines: "945" })).toEqual([
+      { text: "lines 1-120 of 945", err: false },
+    ]);
+    expect(metaFacts({ total_lines: "12" })).toEqual([{ text: "12 lines", err: false }]);
+    // An unparsable window still speaks (verbatim), never silently drops.
+    expect(metaFacts({ showing: "all" })).toEqual([{ text: "lines all", err: false }]);
+  });
+
+  it("edit-family and the byte facts carry their honest labels", () => {
+    expect(metaFacts({ match_count: "2", lines_replaced: "5", start_line: "42", path: "/p" })).toEqual([
+      { text: "2 matches", err: false },
+      { text: "-> 5 lines", err: false },
+    ]);
+    expect(metaFacts({ duration_ms: "12", output_lines: "3", output_bytes: "90", body_length: "90" })).toEqual([
+      { text: "12 ms", err: false },
+      { text: "3 lines", err: false },
+      { text: "90 bytes", err: false },
+      { text: "90 bytes", err: false },
+    ]);
+  });
+
+  it("an envelope of only-uncarated keys speaks NOTHING (but still exists: the disclosure covers it)", () => {
+    // path/command/pattern are the header's beat; offset/limit are subsumed
+    // by the window. None of them get a segment.
+    expect(metaFacts({ path: "/p", command: "ls", pattern: "x", offset: "0", limit: "10" })).toEqual([]);
+  });
+
+  it("undefined envelope, undefined facts", () => {
+    expect(metaFacts(undefined)).toEqual([]);
   });
 });

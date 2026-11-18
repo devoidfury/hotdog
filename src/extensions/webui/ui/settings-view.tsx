@@ -2293,7 +2293,7 @@ export function SettingsViewer({
         >
           <IconReload className="file-reload-glyph" />
         </button>
-        <button type="button" className="settings-btn settings-close" title="Close (Esc)" onClick={onClose}>
+        <button type="button" className="settings-btn settings-close" title="Close (Esc)" aria-label="Close settings" onClick={onClose}>
           ✕
         </button>
       </div>

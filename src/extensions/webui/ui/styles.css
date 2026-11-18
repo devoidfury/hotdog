@@ -749,6 +749,15 @@ body.sidebar-resizing {
     padding: 0 1px;
 }
 
+/* Search peek landing (message-list revealMatch): the row the hit landed ON
+   gets this transient class (removed on a timer) -- a flash, not a
+   permanent mark. */
+.message.search-flash {
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 1px var(--accent-glow);
+    border-radius: var(--radius);
+}
+
 #session-list {
     flex: 1;
     overflow-y: auto;
@@ -1190,6 +1199,31 @@ body.logs-resizing .sidebar-header-resize {
     display: none;
 }
 
+/* Day-section labels (owner ruling 2026-11-18): light type, no surface -- the list
+   deepens into named days ("TODAY", "YESTERDAY", then YYYY-MM-DD) and the
+   pinned block reads as its own section above them. No border, no fill:
+   the rows keep being the only surfaces in here (clean-surface ruling). */
+.log-section-label {
+    font-size: 0.725rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    opacity: 0.75;
+    padding: 6px 12px 3px;
+    user-select: none;
+}
+
+/* The header's "first date of what follows" (see logsHeaderDate): quieter
+   than the title it hangs off, same uppercase grammar by inheritance. */
+.logs-header-date {
+    margin-left: 8px;
+    font-weight: 400;
+    font-size: 0.78rem;
+    letter-spacing: 0.6px;
+    opacity: 0.7;
+}
+
 .log-item {
     padding: 10px 12px;
     border-radius: var(--radius);
@@ -1351,7 +1385,8 @@ body.logs-resizing .sidebar-header-resize {
 }
 
 /* Log view indicator */
-#log-view-label {
+#log-view-label,
+#peek-view-label {
     color: var(--warning);
     font-weight: 500;
     font-size: 0.875rem;
@@ -1364,13 +1399,39 @@ body.logs-resizing .sidebar-header-resize {
     border: 1px solid rgba(251, 191, 36, 0.3);
 }
 
-#current-log-id {
+#current-log-id,
+#current-peek-id {
     color: var(--warning);
     font-family: var(--font-mono);
     font-size: 0.825rem;
 }
 
-#close-log-view-btn {
+/* The seek's honest footnote inside a read-only banner (e.g. a search
+   match that turned out to be past the reachable history). */
+.view-note {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+/* The peek's explicit claim: the ONE action that turns the read-only view
+   into an attach. Accent-styled so it reads as the decision it is. */
+#peek-takeover-btn {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    padding: 1px 8px;
+    cursor: pointer;
+}
+
+#peek-takeover-btn:hover {
+    background: var(--accent-glow);
+}
+
+#close-log-view-btn,
+#close-peek-view-btn,
+#close-subagent-view-btn {
     background: none;
     border: none;
     color: var(--warning);
@@ -1382,8 +1443,27 @@ body.logs-resizing .sidebar-header-resize {
     transition: opacity 0.15s;
 }
 
-#close-log-view-btn:hover {
+#close-log-view-btn:hover,
+#close-peek-view-btn:hover,
+#close-subagent-view-btn:hover {
     opacity: 1;
+}
+
+/* Keyboard focus on the read-only banners' controls (owner ruling
+   2026-11-18): the buttons are real, so Tab reaches them; the house focus
+   grammar (an inset accent outline, zero layout shift) names the seat.
+   Mouse posture is untouched. */
+#close-log-view-btn:focus-visible,
+#close-peek-view-btn:focus-visible,
+#close-subagent-view-btn:focus-visible {
+    opacity: 1;
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+#peek-takeover-btn:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
 }
 
 /* Disabled input area for read-only log view */
@@ -1876,6 +1956,47 @@ body.logs-resizing .sidebar-header-resize {
 
 .message .content {
     white-space: pre-wrap;
+}
+
+/* Long user prompts fold to ~4 lines (message-list USER_PROMPT_FOLD_LINES).
+   A clamp, not a truncation: the full text stays in the DOM (the search
+   scan reads it), and revealMatch opens the fold when the hit lands inside
+   it. max-height is the engine-without-line-clamp fallback, matching the
+   bubble's 1.55 line-height. */
+.message.user .content.prompt-folded {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    max-height: calc(4 * 1.55em);
+}
+
+/* The fold disclosure: a quiet chevron at the foot of the amber bubble,
+   .fold-chevron family (180° rotation attested by aria-expanded, hover
+   lifts to full -- on the accent gradient the lift IS the accent step). */
+.user-fold-toggle {
+    display: block;
+    border: none;
+    background: none;
+    padding: 4px 0 0;
+    margin: 0 auto;
+    color: inherit;
+    opacity: 0.7;
+    line-height: 0;
+    cursor: pointer;
+}
+
+.user-fold-toggle:hover,
+.user-fold-toggle:focus-visible {
+    opacity: 1;
+}
+
+.user-fold-toggle .fold-chevron {
+    margin-left: 0;
+}
+
+.user-fold-toggle[aria-expanded="true"] .fold-chevron {
+    transform: rotate(180deg);
 }
 
 /* ── Assistant Message Footer ───────────────────────────────────────────────
@@ -2489,6 +2610,43 @@ body.logs-resizing .sidebar-header-resize {
     text-decoration: underline;
 }
 
+/* The result meta strip (owner ruling 2026-11-18): one muted line under
+   the result block in the assistant-footer register -- quiet mono, quiet
+   color, no surface. Curated envelope facts only; a failing fact (nonzero
+   exit) takes the house error tint, and the FULL raw envelope stays
+   reachable behind the "envelope" disclosure in the same toggle idiom. */
+.tool-result-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 var(--space-lg) var(--space-xs);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.75;
+}
+
+.tool-result-meta .tool-meta-fact {
+    white-space: nowrap;
+}
+
+.tool-result-meta .tool-meta-err {
+    color: var(--error);
+}
+
+.tool-result-meta .tool-raw-toggle {
+    margin-top: 0;
+}
+
+.tool-result-meta .tool-meta-envelope {
+    flex-basis: 100%;
+    margin: 2px 0 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
 /* DIFF part: primary inline content on the block surface -- the GitHub body:
    [old-no][new-no][sign][text]. The semantic hue carries the meaning, but as
    GitHub wears it: a whisper of tint on the row (fill spans the FULL row,
@@ -3072,6 +3230,67 @@ body.logs-resizing .sidebar-header-resize {
     color: var(--error);
 }
 
+/* Honest failed-subagent-attach card (owner ruling 2026-11-18): a NEUTRAL notice, not an error
+   row -- the worker may be fine, only the live tail is unreachable. Two
+   real actions, never a dead end. */
+.message.attach-fallback .bubble {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.attach-fallback-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.attach-fallback-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: inherit;
+    border-radius: var(--radius-sm);
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.attach-fallback-btn:hover {
+    border-color: var(--warning);
+}
+
+/* Owner ruling 2026-11-18: client/daemon build-skew strip (see ui/build-info.ts). Warning
+   chrome, one sentence, and a real ✕ (a button, focusable like every
+   close affordance since the a11y batch). */
+#version-skew-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex: 0 0 auto;
+    padding: 6px 14px;
+    background: rgba(251, 191, 36, 0.1);
+    border-bottom: 1px solid rgba(251, 191, 36, 0.3);
+    color: var(--warning);
+    font-size: 0.85rem;
+}
+
+#version-skew-banner button {
+    background: none;
+    border: none;
+    color: var(--warning);
+    cursor: pointer;
+    font-size: 1.025rem;
+    line-height: 1;
+    padding: 0 2px;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+}
+
+#version-skew-banner button:hover {
+    opacity: 1;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    INPUT AREA
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -3240,6 +3459,32 @@ body.logs-resizing .sidebar-header-resize {
        so without wrap the send button rides off-screen. */
     flex-wrap: wrap;
 }
+
+/* Min-width discipline (owner ruling + screenshot 2026-11-18): the
+   wrap lands on UNIT boundaries, never mid-control. Icon buttons and the
+   right-anchored Send/Stop pair never squeeze below their hit areas; the
+   two pills are the ONLY shrinkable segments and they degrade through
+   their own value ellipsis (the existing .combobox-value overflow idiom),
+   never by pushing Send off-screen; the disconnected stamp never folds
+   its two words. */
+#composer-actions #attach-btn,
+#composer-actions #mic-btn,
+#composer-actions #cancel-btn,
+#composer-actions #send-btn,
+#composer-actions #connection-status {
+    flex-shrink: 0;
+}
+
+#composer-actions #connection-status {
+    white-space: nowrap;
+}
+
+#chat-form {
+    min-width: 0;
+}
+
+/* Phone tier (below the existing 768 pill-shrink tier): see the collapse
+   tiers at the foot of this sheet (END RESPONSIVE COLLAPSE). */
 
 #send-btn {
     margin-left: auto;
@@ -3960,11 +4205,32 @@ body.sidebar-resizing #tree-col-resize {
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
+    /* Narrow-column discipline (owner screenshot 2026-11-18): the foot
+       bar NEVER wraps -- a two-row pile of pills is the garbled band. It
+       fits, ellipsizes, or progressively drops segments (container queries
+       below: they follow the COLUMN, which a dock drag narrows without the
+       viewport moving). Save always rides: the status segment carries the
+       save state ("saving.../edited/saved") and Ctrl+S is keyboard-owned,
+       invisible to any of this. */
+    flex-wrap: nowrap;
 }
 
+/* The status segment is the ellipsis seat: "8 Lines" reads on ONE line,
+   the long tail ("· saved", sizes) gives way, never the wrap. */
 .file-view-status {
     color: var(--text-muted);
     flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The foot bars are query containers: collapse follows the column width,
+   not the viewport (editor dock dragged thin, sidebar pushed wide). */
+.editor,
+.file-view {
+    container-type: inline-size;
 }
 
 /* The syntax chooser (native select -- the composer pills left this idiom for
@@ -3972,7 +4238,11 @@ body.sidebar-resizing #tree-col-resize {
    button -- and the accent face while an override is in force, so a
    hand-painted sheet never masquerades as the machine's guess. */
 .file-view-lang {
-    max-width: 130px;
+    /* 16ch fits "Auto (Markdown)" without clipping -- the reported
+       "Auto (Markdow" tell -- while staying well inside the fold before
+       the 340px collapse tier (END RESPONSIVE COLLAPSE) hides the chooser
+       outright rather than truncating mid-word. */
+    max-width: 16ch;
     padding: 2px 4px;
     font: inherit;
     color: var(--text-muted);
@@ -5365,6 +5635,46 @@ body.sidebar-resizing #tree-col-resize {
     font-style: italic;
 }
 
+/* Secret-row layout (owner ruling + screenshot 2026-11-18): "set
+   (redacted)" is a fixed short phrase -- it reads as ONE right-aligned
+   badge, never wrapped mid-phrase inside the row. The write-only REPLACE
+   field keeps a real minimum so its placeholder stops clipping against the
+   Set button, and the Set button never shrinks. When the control column
+   gets narrower than the pair, the whole REPLACE box wraps to its own row
+   (the outer control row wraps as units); the badge keeps the right edge.
+   No DOM change: this is the row the server already ships. */
+.settings-row-control {
+    flex-wrap: wrap;
+    row-gap: 6px;
+}
+
+.settings-row-redacted .settings-value {
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.settings-row-control .settings-file-hint {
+    flex-shrink: 0;
+}
+
+/* The secret pair stays ONE unit: input + Set never split across rows. */
+.settings-edit.settings-edit-secret-wrap {
+    flex-wrap: nowrap;
+}
+
+/* (two classes each: the base .settings-edit-input rule ships min-width:0
+   later in the sheet; the pair must win over it without ordering luck) */
+.settings-edit-secret-wrap .settings-edit-input.settings-edit-secret {
+    flex: 1 1 170px;
+    min-width: 120px;
+    max-width: 220px;
+}
+
+.settings-edit-secret-wrap .settings-save {
+    flex-shrink: 0;
+}
+
 .settings-badge {
     font-size: 0.745rem;
     text-transform: uppercase;
@@ -5794,4 +6104,61 @@ body.sidebar-resizing #tree-col-resize {
     padding: 18px 4px;
     color: var(--text-muted);
     font-size: 0.945rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   END RESPONSIVE COLLAPSE (owner screenshots 2026-11-18)
+   ───────────────────────────────────────────────────────────────────────────
+   Deliberately at the FOOT of the sheet: the collapse rules must win over
+   every base rule above (cascade order is their whole mechanism), and the
+   structural test helpers read FIRST-MATCH selector bodies -- a collapse
+   body must never shadow a base body.
+
+   Editor/viewer foot bars (container = .editor / .file-view): progressive,
+   light to heavy. The OPTIONAL toggles go first (visible whitespace, reload
+   -- both live in the tab's context menu and the file tree), then the syntax
+   chooser (auto-detect keeps painting; the override UI returns one step
+   wider), then the caret readout (Ctrl+G still opens the jump input, which
+   stays visible). The status segment -- the save-state seat ("saving.../
+   edited/saved") -- is NEVER hidden, and Ctrl+S is keyboard-owned, invisible
+   to any of this: Save stays reachable at every width.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@container (max-width: 440px) {
+    .file-view-bar .editor-ws-btn,
+    .file-view-bar .file-view-ws,
+    .file-view-bar .file-bar-reload {
+        display: none;
+    }
+}
+
+@container (max-width: 340px) {
+    .file-view-bar .file-view-lang {
+        display: none;
+    }
+}
+
+@container (max-width: 250px) {
+    .file-view-bar .editor-goto-btn {
+        display: none;
+    }
+}
+
+/* Composer phone tiers (below the existing 768 pill-shrink tier): the row
+   gives up its OPTIONAL segments before the band becomes the owner's
+   garbled pile -- the mic first (its "● Recording" text is the widest
+   transient in there), then the profile pill; both re-appear one tier up.
+   What survives at the floor: attach, the model pill (its value ellipsizes
+   through the existing .combobox-value idiom), Stop/Send right-anchored --
+   the message path itself never collapses. */
+@media (max-width: 480px) {
+    #composer-actions #mic-btn {
+        display: none;
+    }
+}
+
+@media (max-width: 400px) {
+    #composer-actions #profile-selector {
+        display: none;
+    }
 }

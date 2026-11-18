@@ -22,9 +22,13 @@ import {
   Sidebar,
   ContextMenu,
   clampMenuAnchor,
+  daySectionLabel,
   formatDateTime,
+  logSections,
+  logsHeaderDate,
   scrollHitIntoView,
   sortPinned,
+  PINNED_LOGS_LABEL,
   type SessionInfo,
   type LogInfo,
   type SearchState,
@@ -46,14 +50,14 @@ const noop = (): void => {};
 // Search closed by default; individual search tests override `search`.
 const CLOSED_SEARCH = { open: false, query: "", pending: false, results: null } as const;
 
-function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; logsCollapsed?: boolean; tasks?: TaskInfoWire[]; subagentsCollapsed?: boolean; now?: number }): Mounted {
+function mountSidebar(container: Element, opts: { sessions?: SessionInfo[]; logs?: LogInfo[]; working?: Map<string, boolean>; pinned?: Set<string>; search?: SearchState; logsCollapsed?: boolean; tasks?: TaskInfoWire[]; subagentsCollapsed?: boolean; now?: number; activeSessionId?: string | null; activeLogId?: string | null }): Mounted {
   return mount(
     <Sidebar
       sessions={opts.sessions ?? []}
-      activeSessionId={null}
+      activeSessionId={opts.activeSessionId ?? null}
       workingMap={opts.working ?? new Map()}
       logs={opts.logs ?? []}
-      activeLogId={null}
+      activeLogId={opts.activeLogId ?? null}
       pinnedIds={opts.pinned ?? new Set()}
       sidebarWidth={300}
       sidebarMax={520}
@@ -1418,5 +1422,176 @@ describe("Cold-row Subagents section", () => {
     expect(rows[0]!.getAttribute("title")).not.toContain("transcript not on record");
     (rows[1]!.querySelector(".row-menu-btn") as HTMLElement).click();
     expect(calls).toEqual(["openTask:joined#1", "taskMenu:prejoin#2"]);
+  });
+});
+
+// ── RECENT LOGS day sections (owner ruling 2026-11-18) ──────────────────────────────────
+// The unbounded flat list got light section labels: "Today", "Yesterday",
+// then YYYY-MM-DD, with the pinned block grouped as its own section ABOVE
+// the days (pinned-first rides through unchanged). The header quotes the
+// first date of what follows. Labels are presentation-role: the rows stay
+// the list's items.
+
+describe("RECENT LOGS day sections", () => {
+  // Noon anchor: the day labels never sit near a midnight boundary a CI
+  // millisecond could flip. Local constructors -- TZ-honest like STAMP.
+  const NOON = new Date(CURRENT_YEAR, 5, 15, 12, 0).getTime();
+  const day = (offset: number, hour = 9): number =>
+    new Date(CURRENT_YEAR, 5, 15 - offset, hour, 0).getTime();
+  const log = (id: string, createdAt: number): LogInfo => ({ ...coldLog(), id, createdAt });
+
+  it("daySectionLabel: Today / Yesterday / YYYY-MM-DD on LOCAL calendar days", () => {
+    expect(daySectionLabel(day(0), NOON)).toBe("Today");
+    expect(daySectionLabel(day(1), NOON)).toBe("Yesterday");
+    expect(daySectionLabel(day(2), NOON)).toBe(`${CURRENT_YEAR}-06-13`);
+    // Calendar days, not rolling 24h: 23:50 yesterday is still Yesterday
+    // twelve and a half hours later, and 00:05 today is already Today.
+    expect(daySectionLabel(new Date(CURRENT_YEAR, 5, 14, 23, 55).getTime(), NOON)).toBe("Yesterday");
+    expect(daySectionLabel(new Date(CURRENT_YEAR, 5, 15, 0, 5).getTime(), NOON)).toBe("Today");
+    // Month and year edges keep their calendar arithmetic (set-day
+    // subtraction, not a 24h subtraction off the clock).
+    const newYear = new Date(CURRENT_YEAR + 1, 0, 1, 12, 0).getTime();
+    expect(daySectionLabel(new Date(CURRENT_YEAR, 11, 31, 23, 30).getTime(), newYear)).toBe("Yesterday");
+    expect(daySectionLabel(new Date(CURRENT_YEAR + 1, 0, 1, 0, 10).getTime(), newYear)).toBe("Today");
+    expect(daySectionLabel(new Date(CURRENT_YEAR, 11, 30, 12, 0).getTime(), newYear)).toBe(`${CURRENT_YEAR}-12-30`);
+  });
+
+  it("logSections: pinned block first, then day runs; order is never re-decided", () => {
+    const rows = [log("a", day(0)), log("b", day(1)), log("c", day(0)), log("p1", day(40)), log("p2", day(80))];
+    const sections = logSections(rows, new Set(["p1", "p2"]), NOON);
+    // Pinned rows lift OUT of the day grouping into their own block (in
+    // their incoming order); an out-of-order day re-opens its label lower
+    // down rather than shuffling anyone.
+    expect(sections.map((s) => [s.label, s.logs.map((l) => l.id)])).toEqual([
+      [PINNED_LOGS_LABEL, ["p1", "p2"]],
+      ["Today", ["a"]],
+      ["Yesterday", ["b"]],
+      ["Today", ["c"]],
+    ]);
+    expect(logSections([], new Set(), NOON)).toEqual([]);
+  });
+
+  it("logsHeaderDate quotes the FIRST date of what follows (pin included)", () => {
+    expect(logsHeaderDate([], new Set(), NOON)).toBeNull();
+    expect(logsHeaderDate([log("a", day(0)), log("y", day(1))], new Set(), NOON)).toBe("Today");
+    expect(logsHeaderDate([log("y", day(1))], new Set(), NOON)).toBe("Yesterday");
+    // The pinned row rides first, so the header names ITS day.
+    expect(logsHeaderDate([log("a", day(0)), log("p", day(40))], new Set(["p"]), NOON)).toBe(
+      daySectionLabel(day(40), NOON),
+    );
+  });
+
+  it("DOM: section labels between rows, pinned first, header carries the first date", () => {
+    const root = render({
+      logs: [log("a", day(0)), log("b", day(1)), log("p", day(40))],
+      pinned: new Set(["p"]),
+      now: NOON,
+    });
+    expect(
+      Array.from(root.querySelectorAll("#log-list .log-section-label")).map((n) => n.textContent),
+    ).toEqual([PINNED_LOGS_LABEL, "Today", "Yesterday"]);
+    // The rows stay the list's items; the labels present (they restate the
+    // row's own line-3 date, so nothing is lost to a reader).
+    expect(root.querySelector("#log-list .log-section-label")!.getAttribute("role")).toBe("presentation");
+    // And the row order is still: pinned, then the days below.
+    expect(
+      Array.from(root.querySelectorAll("#log-list .log-item")).map((n) => n.getAttribute("data-sid")),
+    ).toEqual(["p", "a", "b"]);
+    const header = root.querySelector(".sidebar-header-secondary h2")!;
+    expect(header.textContent).toContain("Recent Logs");
+    expect(root.querySelector(".logs-header-date")!.textContent).toBe(daySectionLabel(day(40), NOON));
+  });
+
+  it("DOM: nothing dated when the section is empty, or folded up", () => {
+    const root = render({ logs: [] });
+    expect(root.querySelector(".logs-header-date")).toBeNull();
+    expect(root.querySelectorAll("#log-list .log-section-label")).toHaveLength(0);
+    expect(root.textContent).toContain("No recent logs");
+    // A collapsed section shows nothing following, so it dates nothing.
+    const folded = render({ logs: [log("a", day(0))], logsCollapsed: true });
+    expect(folded.querySelector(".logs-header-date")).toBeNull();
+  });
+});
+
+// ── Subagents section: the pane's subject selects (owner ruling 2026-11-18) ──────────
+// Two field failures from the day-grouping batch's own surface:
+// (1) viewing a parent's LIVE worker (its sid attached and on screen) must not
+//     cost the parent card its Subagents section -- the section is the menu
+//     that hops between siblings, and the Sidebar owns no predicate that may
+//     key it off the viewed id.
+// (2) a COLD subagent opened from the lineage (its worker log observed, so
+//     activeLogId names the pane) must carry the SAME selected treatment the
+//     live rows get -- the house idiom (.active + aria-current="true"), not a
+//     bespoke weaker one. The section keys one id: the pane's subject.
+
+const liveTask = (over: Partial<TaskInfoWire> = {}): TaskInfoWire => ({
+  taskId: "run:live#1",
+  description: "live step",
+  sessionId: "mgr-1",
+  status: "running",
+  createdAt: STAMP - 5000,
+  startedAt: STAMP - 4000,
+  endedAt: null,
+  activeMs: 1000,
+  inRun: true,
+  turnStartedAt: STAMP - 1000,
+  agentSessionId: "worker-live",
+  ...over,
+});
+
+describe("Subagents section follows the pane's subject", () => {
+  it("viewing a parent's LIVE worker keeps the Subagents section and its rows", () => {
+    const root = render({
+      sessions: [liveSession({ id: "mgr-1" })],
+      tasks: [liveTask(), liveTask({ taskId: "run:sib#2", createdAt: STAMP - 9000, agentSessionId: "worker-sib" })],
+      // The pane shows the worker's session: the ATTACHED id is the worker's,
+      // not the manager's. The section is the menu that hops between
+      // siblings -- selecting a child must not hide it.
+      activeSessionId: "worker-live",
+    });
+    expect(root.querySelectorAll("#session-list .subagents-section")).toHaveLength(1);
+    const rows = root.querySelectorAll("#session-list .subagent-row");
+    expect(Array.from(rows).map((r) => r.getAttribute("data-task-id"))).toEqual([
+      "run:live#1",
+      "run:sib#2",
+    ]);
+    // The viewed row carries the active mark; its sibling does not.
+    expect(rows[0]!.getAttribute("class")).toContain("active");
+    expect(rows[0]!.getAttribute("aria-current")).toBe("true");
+    expect(rows[1]!.getAttribute("class")).not.toContain("active");
+  });
+
+  it("a selected COLD subagent row carries the live rows' selected treatment (parity)", () => {
+    const lineage = coldLog({
+      id: "cold-mgr",
+      subagents: [
+        durableRow({ taskId: "run:done#1", status: "completed", agentSessionId: "worker-a" }),
+        durableRow({ taskId: "run:gone#2", createdAt: STAMP - 400_000 }),
+      ],
+    });
+    // The cold subagent on screen: its worker log is OBSERVED, so the pane's
+    // subject is the LOG id (activeLogId), while the socket stays attached to
+    // an unrelated live session.
+    const cold = render({ logs: [lineage], activeLogId: "worker-a", activeSessionId: FULL_ID });
+    // The parity reference: the same section idiom on the LIVE side, where
+    // the worker session is attached.
+    const live = render({
+      sessions: [liveSession({ id: "mgr-1" })],
+      tasks: [liveTask()],
+      activeSessionId: "worker-live",
+    });
+    const coldRow = cold.querySelector('#log-list .subagent-row[data-task-id="run:done#1"]')!;
+    const liveRow = live.querySelector('#session-list .subagent-row[data-task-id="run:live#1"]')!;
+    // THE parity: identical aria-current, and the shared house active class
+    // (the .subagent-row.active rule) on both.
+    expect(liveRow.getAttribute("aria-current")).toBe("true");
+    expect(liveRow.getAttribute("class")).toContain("active");
+    expect(coldRow.getAttribute("aria-current")).toBe(liveRow.getAttribute("aria-current"));
+    expect(coldRow.getAttribute("class")).toContain("active");
+    // The cold row's untouched sibling stays unselected (the mark follows the
+    // subject, not the section).
+    const other = cold.querySelector('#log-list .subagent-row[data-task-id="run:gone#2"]')!;
+    expect(other.getAttribute("class")).not.toContain("active");
+    expect(other.getAttribute("aria-current")).toBeNull();
   });
 });

@@ -46,6 +46,11 @@ export interface ToolResultData {
    *  `start_line` meta, forwarded on the TOOL_RESULT frame). Numbers the
    *  diff gutters with real file lines; absent -> snippet-relative 1..N. */
   startLine?: number;
+  /** The result part's meta envelope, structured (owner ruling 2026-11-18):
+   *  the block curates its facts into one muted strip under the result and
+   *  keeps the FULL envelope reachable behind the expand idiom. Absent =
+   *  no envelope, no strip -- never an invented one. */
+  meta?: Record<string, string>;
 }
 
 export interface ToolBlockState {
@@ -73,6 +78,8 @@ export interface ToolBlockState {
   boxes: Record<string, boolean>;
   /** Lists showing everything: diff folds "d<i>", capped files "ff<i>". */
   unfolded: Record<string, boolean>;
+  /** The raw meta envelope disclosure is open below the result strip. */
+  envelope: boolean;
 }
 
 /** Beyond this many chars the result shows a preview + "show full" button. */
@@ -103,6 +110,41 @@ const underAutoExpand = (text: string): boolean =>
 function oneLine(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? flat.slice(0, max) + "…" : flat;
+}
+
+/**
+ * The curated envelope facts for the muted strip under a result block
+ * (owner ruling 2026-11-18): one table of the keys the house tools
+ * actually stamp, in the order the strip speaks them. A fact renders only
+ * when the envelope ACTUALLY carries it -- absent fields are omitted,
+ * never invented (durations and byte counts are simply not stamped yet,
+ * and an omitted segment beats a lying one). Keys outside this table stay
+ * reachable behind the envelope disclosure; the ones the header already
+ * says (path, command) are never repeated here.
+ */
+export function metaFacts(
+  meta: Record<string, string> | undefined,
+): Array<{ text: string; err: boolean }> {
+  if (!meta) return [];
+  const has = (k: string): boolean => meta[k] !== undefined && meta[k] !== "";
+  const facts: Array<{ text: string; err: boolean }> = [];
+  if (has("exit_code")) facts.push({ text: `exit ${meta.exit_code}`, err: meta.exit_code !== "0" });
+  if (has("duration_ms")) facts.push({ text: `${meta.duration_ms} ms`, err: false });
+  if (has("output_lines")) facts.push({ text: `${meta.output_lines} lines`, err: false });
+  if (has("output_bytes")) facts.push({ text: `${meta.output_bytes} bytes`, err: false });
+  if (has("body_length")) facts.push({ text: `${meta.body_length} bytes`, err: false });
+  // read's window already names the total ("1-120 (of 945 total)"); plain
+  // total_lines only rides when there is no window beside it.
+  const showing = meta.showing ?? "";
+  const win = /^(\d+-\d+) \(of (\d+) total\)$/.exec(showing);
+  if (win) facts.push({ text: `lines ${win[1]} of ${win[2]}`, err: false });
+  else if (has("showing")) facts.push({ text: `lines ${showing}`, err: false });
+  else if (has("total_lines")) facts.push({ text: `${meta.total_lines} lines`, err: false });
+  if (has("match_count")) facts.push({ text: `${meta.match_count} matches`, err: false });
+  if (has("total_count")) facts.push({ text: `${meta.total_count} matches`, err: false });
+  if (has("lines_replaced")) facts.push({ text: `-> ${meta.lines_replaced} lines`, err: false });
+  if (has("truncated")) facts.push({ text: "truncated", err: false });
+  return facts;
 }
 
 function basename(path: string): string {
@@ -741,9 +783,11 @@ interface BlockProps {
    *  included), so the first click on an auto-opened body collapses it. */
   onToggleBox: (key: string, current: boolean) => void;
   onUnfold: (key: string) => void;
+  /** Open/close the raw meta envelope disclosure under the result strip. */
+  onToggleEnvelope: () => void;
 }
 
-export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBox, onUnfold }: BlockProps) {
+export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBox, onUnfold, onToggleEnvelope }: BlockProps) {
   const status = statusOf(state);
   const result = state.result;
   const specs = state.display ?? [];
@@ -798,12 +842,41 @@ export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBo
 
   const images = result?.images && result.images.length > 0 ? <ImagesView images={result.images} /> : null;
 
+  // The muted facts strip (owner ruling 2026-11-18): one quiet line under
+  // the result block -- curated envelope facts in the assistant-footer
+  // register, with the FULL raw envelope behind the same disclosure idiom
+  // the prose posture uses for json. No envelope, no strip, never a
+  // fabricated one; nothing here restates the block header.
+  const facts = metaFacts(result?.meta);
+  const hasEnvelope = result?.meta !== undefined && Object.keys(result.meta).length > 0;
+  const metaStrip = hasEnvelope ? (
+    <div className="tool-result-meta">
+      {facts.map((f, i) => (
+        <span key={i} className={"tool-meta-fact" + (f.err ? " tool-meta-err" : "")}>
+          {f.text}
+        </span>
+      ))}
+      <button
+        type="button"
+        className="tool-raw-toggle"
+        aria-expanded={state.envelope ? "true" : "false"}
+        onClick={onToggleEnvelope}
+      >
+        {state.envelope ? "hide envelope" : "envelope"}
+      </button>
+      {state.envelope ? (
+        <pre className="tool-meta-envelope">{JSON.stringify(result?.meta, null, 2)}</pre>
+      ) : null}
+    </div>
+  ) : null;
+
   if (prosePosture) {
     // Slim raw disclosure so the wire JSON stays reachable under prose.
     return (
       <div className={`tool-call-block posture-prose status-${status}`}>
         {parts}
         {genericBox}
+        {metaStrip}
         <div className="tool-prose-raw">
           <button type="button" className="tool-raw-toggle" onClick={onToggle}>
             {state.expanded ? "hide json" : "json"}
@@ -836,6 +909,7 @@ export function ToolBlock({ state, onToggle, onToggleRaw, onShowFull, onToggleBo
       {parts}
       {genericBox}
       {images}
+      {metaStrip}
     </div>
   );
 }
@@ -853,7 +927,7 @@ export class ToolBlockController {
     host: DomNode,
     init: { name: string; args: string; argsSummary?: string; display?: ToolDisplayWire[] },
   ) {
-    this.#state = { ...init, expanded: false, raw: false, fullResult: false, boxes: {}, unfolded: {} };
+    this.#state = { ...init, expanded: false, raw: false, fullResult: false, boxes: {}, unfolded: {}, envelope: false };
     this.#mounted = mount(this.#el(), host);
   }
 
@@ -866,6 +940,7 @@ export class ToolBlockController {
         onShowFull={this.#showFull}
         onToggleBox={this.#toggleBox}
         onUnfold={this.#unfold}
+        onToggleEnvelope={this.#toggleEnvelope}
       />
     );
   }
@@ -895,6 +970,11 @@ export class ToolBlockController {
 
   #unfold = (key: string): void => {
     this.#state = { ...this.#state, unfolded: { ...this.#state.unfolded, [key]: true } };
+    this.#mounted.render(this.#el());
+  };
+
+  #toggleEnvelope = (): void => {
+    this.#state = { ...this.#state, envelope: !this.#state.envelope };
     this.#mounted.render(this.#el());
   };
 

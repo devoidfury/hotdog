@@ -117,4 +117,29 @@ describe("task delivery of a stopLoop tool's content", () => {
 
     expect(delivered).toBe("Task completed via tool return: return");
   });
+
+  it("the delivered summary carries no META envelope: stop-tool meta cannot restate itself into the manager's chat", async () => {
+    let delivered = "";
+    const manager = managerFor(
+      stoppingWorker(
+        new MockTool({
+          name: "handoff",
+          execute: async () =>
+            ToolResult.stop("Handoff prepared. Title: parser phase.").withEntries({
+              status: "handoff_ready",
+              title: "parser phase",
+            }),
+        }),
+        (r) => { delivered = r; },
+      ),
+    );
+
+    await manager.spawnTask("t-meta", "work");
+    await settle(() => manager.taskStatus("t-meta") === TASK_STATUS.COMPLETED, "t-meta -> COMPLETED");
+
+    expect(delivered).toContain("Handoff prepared. Title: parser phase.");
+    // The envelope restates that prose (status == "Handoff prepared", title
+    // is spelled out above); the raw parts stay persisted for audit.
+    expect(delivered).not.toContain("META:");
+  });
 });

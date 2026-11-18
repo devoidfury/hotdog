@@ -176,7 +176,11 @@ export class TaskExecution {
       } else if (runResult?.type === "tool_return") {
         // The stopping tool's content IS the result (a handoff summary or a
         // wait note); the bare outcome word read as a fault to the manager.
-        const content = toolContentText(runResult.content);
+        // omitMeta (see utils/tool-content.ts): this string is delivered as
+        // the manager's task result AND renders in its transcript, and a
+        // stop-tool meta envelope (handoff's status/title) only restates the
+        // prose it sits under -- the same ruling that zeroed wait's meta.
+        const content = toolContentText(runResult.content, undefined, { omitMeta: true });
         turn = {
           status: "completed",
           result: content

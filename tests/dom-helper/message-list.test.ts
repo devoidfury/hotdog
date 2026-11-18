@@ -586,13 +586,15 @@ describe("session log replay", () => {
     ]);
     // The entry carries no tool_name: the stored part names the tool, which
     // matches the pending call. The opened body shows the flattened fields,
-    // not markup or at-rest JSON.
+    // not markup or at-rest JSON -- minus the META envelope, which never
+    // reaches a chat surface (owner ruling 2026-11-18): the fact it carries either
+    // renders structured (start_line) or restates the call header.
     openResult(container.querySelector(".tool-call-block")!);
     const pre = container.querySelector(".tool-result-pre")!;
     expect(pre.textContent).toContain("partial");
     expect(pre.textContent).toContain("Error: boom");
     expect(pre.textContent).toContain("HINT: check the path");
-    expect(pre.textContent).toContain('META: {"exit_code":"1"}');
+    expect(pre.textContent).not.toContain("META:");
   });
 
   it("reads wire-shaped tool_calls from the file log ({function:{name,arguments}})", () => {
@@ -2393,5 +2395,198 @@ describe("jump-to-bottom button", () => {
     expect(jumpBtn(host)).not.toBeNull();
     ml.destroy();
     expect(jumpBtn(host)).toBeNull();
+  });
+});
+
+describe("long user prompt fold (owner ruling 2026-11-18)", () => {
+  const fourLines = "one\ntwo\nthree\nfour";
+  const longPrompt = "TASK header line\nbody b\nc\nd\ne\nthe tail needle";
+
+  it("folds prompts past 4 source lines with a chevron toggle; short ones stay alone", () => {
+    ml.handleUserMessage({ content: fourLines });
+    ml.handleUserMessage({ content: longPrompt });
+    const rows = container.querySelectorAll(".message.user");
+    expect(rows).toHaveLength(2);
+    // Exactly 4 lines is not "long": no clamp, no toggle.
+    expect(rows[0]!.querySelector(".content.prompt-folded")).toBeNull();
+    expect(rows[0]!.querySelector(".user-fold-toggle")).toBeNull();
+    const content = rows[1]!.querySelector(".content")!;
+    expect(content.classList.contains("prompt-folded")).toBe(true);
+    const toggle = rows[1]!.querySelector(".user-fold-toggle")!;
+    expect(toggle.tagName.toLowerCase()).toBe("button");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    // The full text stays in the DOM: the fold is a clamp, not a truncation
+    // (the search scan reads row.textContent with the hidden part included).
+    expect(content.textContent).toBe(longPrompt);
+  });
+
+  it("the toggle opens and closes the fold, keeping the aria pair honest", () => {
+    ml.handleUserMessage({ content: longPrompt });
+    const row = container.querySelector(".message.user")!;
+    const toggle = row.querySelector(".user-fold-toggle") as HTMLElement;
+    toggle.click();
+    expect(row.querySelector(".content")!.classList.contains("prompt-folded")).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    toggle.click();
+    expect(row.querySelector(".content")!.classList.contains("prompt-folded")).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("revealMatch opens a folded prompt whose hit hides behind the clamp", () => {
+    ml.handleUserMessage({ content: "unrelated row" });
+    ml.handleUserMessage({ content: longPrompt });
+    expect(ml.revealMatch("tail needle")).toBe(true);
+    const row = container.querySelectorAll(".message.user")[1]!;
+    expect(row.classList.contains("search-flash")).toBe(true);
+    expect(row.querySelector(".content")!.classList.contains("prompt-folded")).toBe(false);
+    const toggle = row.querySelector(".user-fold-toggle")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.getAttribute("aria-label")).toBe("Collapse full prompt");
+    // The untouched row keeps its posture (no flash, no fold side effects).
+    const first = container.querySelectorAll(".message.user")[0]!;
+    expect(first.classList.contains("search-flash")).toBe(false);
+    expect(first.querySelector(".user-fold-toggle")).toBeNull();
+  });
+
+  it("log-view user entries fold through the same path", () => {
+    ml.renderLogEntries([{ source: "input", content: longPrompt }]);
+    const row = container.querySelector(".message.user")!;
+    expect(row.querySelector(".content")!.classList.contains("prompt-folded")).toBe(true);
+    expect(row.querySelector(".user-fold-toggle")).not.toBeNull();
+  });
+
+  it("assistant messages never fold, however long", () => {
+    ml.handleAssistantMessage({ content: `${longPrompt}\nmore\nlines` });
+    expect(container.querySelector(".prompt-folded")).toBeNull();
+    expect(container.querySelector(".user-fold-toggle")).toBeNull();
+  });
+});
+
+describe("revealMatch (search peek landing seam)", () => {
+  it("flashes + scrolls the FIRST message row containing the needle (case-insensitive)", () => {
+    ml.handleUserMessage({ content: "first line" });
+    ml.handleAssistantMessage({ content: "a Needle sits deep" });
+    ml.handleUserMessage({ content: "another NEEDLE line" });
+    expect(ml.revealMatch("needle")).toBe(true);
+    const flashed = [...container.querySelectorAll(".search-flash")];
+    expect(flashed).toHaveLength(1);
+    expect(flashed[0]!.textContent).toContain("a Needle sits deep");
+    expect(
+      (flashed[0] as unknown as { scrollIntoViewCalls: unknown[] }).scrollIntoViewCalls,
+    ).toEqual([{ block: "center" }]);
+  });
+
+  it("never lands on non-message rows (the search corpus is user+assistant text)", () => {
+    ml.handleThinking({ content: "a needle hidden in the reasoning" });
+    expect(ml.revealMatch("needle")).toBe(false);
+    expect(container.querySelectorAll(".search-flash")).toHaveLength(0);
+  });
+
+  it("an empty needle never lands", () => {
+    ml.handleUserMessage({ content: "anything at all" });
+    expect(ml.revealMatch("")).toBe(false);
+  });
+});
+
+// ── Tool result meta strip (owner ruling 2026-11-18) ────────────────────────
+// The raw META line never reaches a chat surface; the facts it carried ride
+// STRUCTURED on the frame (additive `meta`) and render as ONE muted strip
+// under the result block. Contract pinned here: fields the envelope ACTUALLY
+// carries speak, absent ones stay silent (never invented), the header's own
+// facts (path, command) are not repeated, nothing raw leaks, and the FULL
+// envelope stays reachable behind the disclosure -- live AND cold replay.
+
+describe("tool result meta strip (owner ruling 2026-11-18)", () => {
+  function bashCall(toolCallId: string): void {
+    ml.handleToolCall({ name: "bash", args: JSON.stringify({ command: "ls" }), toolCallId });
+  }
+
+  it("speaks the facts the envelope carries; unstamped facts stay silent", () => {
+    bashCall("m1");
+    ml.handleToolResult({
+      name: "bash", output: "a\nb", toolCallId: "m1",
+      meta: { command: "ls", exit_code: "0", truncated: "true" },
+    });
+    const strip = container.querySelector(".tool-result-meta")!;
+    expect(strip.textContent).toContain("exit 0");
+    expect(strip.textContent).toContain("truncated");
+    // Durations and byte counts are not stamped by the house tools today:
+    // an absent fact is omitted, not guessed at.
+    expect(strip.textContent).not.toMatch(/ms\b/);
+    expect(strip.textContent).not.toMatch(/bytes\b/);
+    // No header echo (command lives in the block header) and no raw envelope.
+    expect(strip.textContent).not.toContain("command");
+    expect(container.textContent).not.toContain("META: ");
+  });
+
+  it("a failing exit code rides the house error tint", () => {
+    bashCall("m2");
+    ml.handleToolResult({
+      name: "bash", output: "", error: "boom", toolCallId: "m2",
+      meta: { exit_code: "1" },
+    });
+    const err = container.querySelector(".tool-result-meta .tool-meta-err")!;
+    expect(err.textContent).toBe("exit 1");
+  });
+
+  it("read speaks its line window once; the path is the header's beat", () => {
+    ml.handleToolCall({ name: "read", args: JSON.stringify({ path: "/p/a.md" }), toolCallId: "m3" });
+    ml.handleToolResult({
+      name: "read", output: "x", toolCallId: "m3",
+      meta: { path: "/p/a.md", total_lines: "945", offset: "0", limit: "120", showing: "1-120 (of 945 total)" },
+    });
+    const strip = container.querySelector(".tool-result-meta")!;
+    expect(strip.textContent).toContain("lines 1-120 of 945");
+    expect(strip.textContent).not.toContain("/p/a.md");
+    // The window already names the total: no second bare "945 lines" segment.
+    expect(strip.textContent).not.toContain("945 lines");
+  });
+
+  it("no envelope, no strip (honest absence)", () => {
+    ml.handleToolCall({ name: "touch", args: "{}", toolCallId: "m4" });
+    ml.handleToolResult({ name: "touch", output: "done", toolCallId: "m4" });
+    expect(container.querySelector(".tool-result-meta")).toBeNull();
+  });
+
+  it("the disclosure reveals the FULL raw envelope and collapses again", () => {
+    bashCall("m5");
+    ml.handleToolResult({
+      name: "bash", output: "a", toolCallId: "m5",
+      meta: { command: "ls", exit_code: "0" },
+    });
+    const block = container.querySelector(".tool-call-block")!;
+    const toggle = block.querySelector(".tool-result-meta button") as HTMLElement;
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(block.querySelector(".tool-meta-envelope")).toBeNull();
+    toggle.click();
+    const pre = block.querySelector(".tool-meta-envelope")!;
+    expect(pre.textContent).toContain('"command": "ls"');
+    expect(pre.textContent).toContain('"exit_code": "0"');
+    expect((block.querySelector(".tool-result-meta button") as HTMLElement).getAttribute("aria-expanded")).toBe("true");
+    (block.querySelector(".tool-result-meta button") as HTMLElement).click();
+    expect(block.querySelector(".tool-meta-envelope")).toBeNull();
+  });
+
+  it("cold log replay renders the SAME strip (parity)", () => {
+    ml.renderLogEntries([
+      { source: "llm", content: "", tool_calls: [{ id: "1", name: "bash", args: { command: "ls" } }] },
+      {
+        source: "tool_result",
+        content: [
+          {
+            type: "tool-result", tool: "bash", status: "success",
+            meta: [["command", "ls"], ["exit_code", "0"], ["truncated", "true"]],
+            error: null, hint: null, output: "a\nb",
+          },
+        ],
+      },
+    ]);
+    const strip = container.querySelector(".tool-result-meta")!;
+    expect(strip.textContent).toContain("exit 0");
+    expect(strip.textContent).toContain("truncated");
+    expect(container.textContent).not.toContain("META: ");
+    (strip.querySelector("button") as HTMLElement).click();
+    expect(container.querySelector(".tool-meta-envelope")!.textContent).toContain('"exit_code": "0"');
   });
 });

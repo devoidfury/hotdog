@@ -258,6 +258,58 @@ export function sortPinned<T extends { id: string }>(rows: T[], pinned: Set<stri
   return [...rows].sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)));
 }
 
+/** Section label for RECENT LOGS day grouping (owner ruling 2026-11-18): "Today" and
+ *  "Yesterday" for the LOCAL calendar day (not a rolling 24h -- 23:50 and
+ *  00:10 are different days), otherwise the ISO-style YYYY-MM-DD so a stale
+ *  run reads unambiguously. `now` is the caller's wall clock (the sidebar's
+ *  ticking `now` prop), keeping the function pure and TZ-honest. */
+export function daySectionLabel(ts: number, now: number): string {
+  const d = new Date(ts);
+  const n = new Date(now);
+  const sameDay = (a: Date, b: Date): boolean =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(d, n)) return "Today";
+  if (sameDay(d, new Date(n.getFullYear(), n.getMonth(), n.getDate() - 1))) return "Yesterday";
+  const p = (x: number): string => x.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** The pinned group's label. Pinned rows stay FIRST (sortPinned's untouched
+ *  order), grouped as one section of their own -- they ride THROUGH the day
+ *  grouping, they are never sorted into it. */
+export const PINNED_LOGS_LABEL = "Pinned";
+
+export interface LogSection {
+  label: string;
+  logs: LogInfo[];
+}
+
+/** Split the (pinned-first sorted) Recent Logs list into labelled sections:
+ *  the pinned block under PINNED_LOGS_LABEL, then day runs under
+ *  daySectionLabel. Runs are CONSECUTIVE: the list's order is never
+ *  re-decided here, so an out-of-order timestamp (a pinned demotion, a
+ *  server quirk) simply re-opens its day's label lower down -- the label
+ *  always states what the rows under it show. */
+export function logSections(logs: LogInfo[], pinnedIds: Set<string>, now: number): LogSection[] {
+  const out: LogSection[] = [];
+  for (const log of sortPinned(logs, pinnedIds)) {
+    const label = pinnedIds.has(log.id) ? PINNED_LOGS_LABEL : daySectionLabel(log.createdAt, now);
+    const last = out[out.length - 1];
+    if (last !== undefined && last.label === label) last.logs.push(log);
+    else out.push({ label, logs: [log] });
+  }
+  return out;
+}
+
+/** What the RECENT LOGS header quotes as the first date of what follows:
+ *  the day label of the FIRST rendered row (the pinned block's first row
+ *  when there is one). Empty list -- or a collapsed panel showing nothing
+ *  -- says nothing. */
+export function logsHeaderDate(logs: LogInfo[], pinnedIds: Set<string>, now: number): string | null {
+  const first = sortPinned(logs, pinnedIds)[0];
+  return first ? daySectionLabel(first.createdAt, now) : null;
+}
+
 /**
  * Scroll the sidebar row a search hit names into view (owner QoL
  * 2026-11-05): the click activates elsewhere, and the row can sit below the
@@ -443,10 +495,11 @@ function SearchHitRow(p: { hit: SearchHitWire; query: string; onActivate: () => 
   const name = hit.profile || shortId(hit.logId);
   line1.push(<span className="row-profile">{name}</span>);
   if (hit.model) line1.push(<span className="row-sep">·</span>, <span className="row-model">{hit.model}</span>);
-  // live/cold rides a quiet glyph-adjacent tag; the app opens it with the verb
-  // this badge names, so it never lies about what a click will do.
+  // live/cold rides a quiet glyph-adjacent tag; a click NEVER attaches
+  // (owner ruling 2026-11-18): live opens a read-only peek with an explicit Take over, cold
+  // observes the log. The tag's title states that honestly for both.
   line1.push(
-    <span className={`search-scope${hit.live ? " search-scope-live" : ""}`} title={hit.live ? "Live session" : "Archived log"}>
+    <span className={`search-scope${hit.live ? " search-scope-live" : ""}`} title={hit.live ? "Live session -- opens read-only (Take over to write)" : "Archived log -- opens read-only"}>
       {hit.live ? "live" : "log"}
     </span>,
   );
@@ -517,7 +570,7 @@ function SearchPanel(p: {
           onInput={(e: Event) => p.onQuery((e.currentTarget as HTMLInputElement).value)}
           onKeydown={p.onKeydown}
         />
-        <button id="search-clear" title="Close search (Esc)" onClick={p.onClose}>✕</button>
+        <button id="search-clear" type="button" title="Close search (Esc)" aria-label="Close search" onClick={p.onClose}>✕</button>
       </div>
       <div id="search-results">{body}</div>
     </div>
@@ -534,6 +587,15 @@ export function Sidebar(p: SidebarProps) {
   ]
     .filter(Boolean)
     .join(" ");
+  // The header's first date of what follows, computed once per render.
+  const headerDate = logsHeaderDate(p.logs, p.pinnedIds, p.now);
+  // The subagent rows' selected key: the PANE's subject. A log view names
+  // the screen while one is open (a cold row, a settled/durable subagent
+  // transcript -- worker logs ride their worker sid); otherwise the attached
+  // session does. Keying only activeSessionId left an observed cold subagent
+  // row unmarked (owner ruling 2026-11-18: same selected treatment live and
+  // cold).
+  const viewedSubjectId = p.activeLogId ?? p.activeSessionId;
   return (
     <aside id="sidebar" className={classes}>
       <div className="sidebar-header">
@@ -541,7 +603,9 @@ export function Sidebar(p: SidebarProps) {
         <div className="sidebar-header-actions">
           <button
             id="search-btn"
+            type="button"
             title={p.search.open ? "Close search" : "Search logs"}
+            aria-label={p.search.open ? "Close search" : "Search all session logs"}
             aria-pressed={p.search.open}
             className={p.search.open ? "active" : undefined}
             onClick={() => (p.search.open ? p.onCloseSearch() : p.onOpenSearch())}
@@ -620,7 +684,7 @@ export function Sidebar(p: SidebarProps) {
                 tasks={owned}
                 now={p.now}
                 collapsed={p.subagentsCollapsed}
-                viewedSessionId={p.activeSessionId}
+                viewedSessionId={viewedSubjectId}
                 onToggle={p.onToggleSubagents}
                 onOpenTask={p.onOpenTask}
                 onTaskMenu={p.onTaskMenu}
@@ -657,7 +721,16 @@ export function Sidebar(p: SidebarProps) {
         onKeydown={p.onLogsResizeKey}
         onDblclick={p.onLogsResizeReset}
       >
-        <h2>Recent Logs</h2>
+        <h2>
+          Recent Logs
+          {/* The first date of what follows (owner ruling 2026-11-18): the list can run
+              hundreds of rows deep, and the header names the day the top of
+              it belongs to. Quiet chrome, not a second title. A COLLAPSED
+              section shows nothing following, so it dates nothing. */}
+          {!p.logsCollapsed && headerDate !== null ? (
+            <span className="logs-header-date">{headerDate}</span>
+          ) : null}
+        </h2>
         {/* Chevron: down while expanded (click folds the list up), up while
             collapsed (click opens it back down). The button swallows its own
             pointerdown and dblclick, so a press on it is never a drag and a
@@ -689,7 +762,17 @@ export function Sidebar(p: SidebarProps) {
             No recent logs
           </div>
         ) : (
-          sortPinned(p.logs, p.pinnedIds).flatMap((log) => [
+          // Day sections (owner ruling 2026-11-18): the flat 200-row list got light date
+          // labels -- "Today", "Yesterday", then YYYY-MM-DD -- with the
+          // pinned block grouped as its own section ABOVE them (the existing
+          // pinned-first order rides through unchanged; see logSections).
+          // The labels are presentation-role: they restate what every row's
+          // own line-3 date already says, so the list's items stay the rows.
+          logSections(p.logs, p.pinnedIds, p.now).flatMap((section, si) => [
+            <div key={`log-section-${si}`} className="log-section-label" role="presentation">
+              {section.label}
+            </div>,
+            ...section.logs.flatMap((log) => [
             <SidebarRow
               key={log.id}
               kindClass="log-item"
@@ -721,12 +804,13 @@ export function Sidebar(p: SidebarProps) {
                 tasks={log.subagents}
                 now={p.now}
                 collapsed={p.subagentsCollapsed}
-                viewedSessionId={p.activeSessionId}
+                viewedSessionId={viewedSubjectId}
                 onToggle={p.onToggleSubagents}
                 onOpenTask={p.onOpenTask}
                 onTaskMenu={p.onTaskMenu}
               />
             ) : null,
+            ]),
           ])
         )}
       </div>

@@ -1918,6 +1918,18 @@ describe("subagents sidebar and main-view transcript", () => {
     await tick();
   }
 
+  /** Leave an open worker view BEFORE shipping the MANAGER's task snapshot:
+   *  the daemon scopes attach-burst snapshots to the ATTACHED session, so a
+   *  manager-scoped taskList frame only ever arrives while the manager owns
+   *  the pane (a worker attach ships its own scoped one, which never
+   *  re-attests the board -- owner ruling 2026-11-18). */
+  async function toManagerView(): Promise<void> {
+    if (document.querySelector("#close-subagent-view-btn")) {
+      el("#close-subagent-view-btn").click();
+      await attach();
+    }
+  }
+
   it("sidebar rows scope to the attached session; null-parent tasks never show", async () => {
     await attach();
     ws.fireMessage({
@@ -2137,12 +2149,9 @@ describe("subagents sidebar and main-view transcript", () => {
     // A task id of its own: reopening is a fresh attach, and the transcript
     // is painted from the worker session's OWN replay -- no second render
     // path, no DOM survivor.
+    await toManagerView(); // the manager's snapshot ships only in the manager's pane
     ws.fireMessage({ type: "taskList", tasks: [task({ taskId: "task-echo", inRun: true })] });
     await tick();
-    if (document.querySelector("#close-subagent-view-btn")) {
-      el("#close-subagent-view-btn").click();
-      await attach();
-    }
     els(".subagent-row")[0]!.click();
     await tick();
     workerAttach();
@@ -2178,6 +2187,7 @@ describe("subagents sidebar and main-view transcript", () => {
     // pane's Stop affordance belongs to the task on screen (owner ruling
     // 2026-11-13 -- "the send/stop buttons you see are for THAT subagent
     // session, not the parent session").
+    await toManagerView();
     ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: false });
     ws.fireMessage({ type: "taskList", tasks: [task({ inRun: true })] });
     await tick();
@@ -2216,6 +2226,7 @@ describe("subagents sidebar and main-view transcript", () => {
   });
 
   it("a refused task Stop lands the server's text in the viewed transcript", async () => {
+    await toManagerView();
     ws.fireMessage({ type: "taskList", tasks: [task({ inRun: true })] });
     await tick();
     els(".subagent-row")[0]!.click(); // the one and only row: task-1
@@ -2240,6 +2251,7 @@ describe("subagents sidebar and main-view transcript", () => {
   it("the working posture tracks the VIEWED task, never the hidden manager", async () => {
     // Manager busy, viewed task parked (no turn in flight): the pane is the
     // task's, and a parked task has nothing to stop -- no Stop.
+    await toManagerView();
     ws.fireMessage({ type: "sessionState", sessionId: SID, key: "working", value: true });
     ws.fireMessage({ type: "taskList", tasks: [task({ inRun: false })] });
     await tick();
@@ -2379,6 +2391,7 @@ describe("subagents sidebar and main-view transcript", () => {
     // Four shapes: LIVE task with every field; SETTLED task with the worker
     // session but no run dir; QUEUED engine task whose agent never built
     // (no worker session, runDir present); plain delegate task (nothing).
+    await toManagerView(); // the previous section ended inside a worker view
     ws.fireMessage({
       type: "taskList",
       tasks: [
@@ -2483,6 +2496,7 @@ describe("subagents sidebar and main-view transcript", () => {
 
   it("Reveal run directory opens/focuses the tree tab, expands the chain, selects the dir", async () => {
     const RUN = "/wsfxA/runs/run-c";
+    await toManagerView(); // the manager's snapshot ships only in the manager's pane
     ws.fireMessage({
       type: "taskList",
       tasks: [task({ taskId: "run-c:fix#1", runDir: RUN })],
@@ -2570,6 +2584,7 @@ describe("subagents sidebar and main-view transcript", () => {
   });
 
   it("running rows tick; the last live task ending freezes the clocks", async () => {
+    await toManagerView();
     ws.fireMessage({ type: "taskList", tasks: [task()] });
     await tick();
     const before = el(".subagent-row-elapsed").textContent;
@@ -3093,6 +3108,77 @@ describe("subagents sidebar and main-view transcript", () => {
   });
 });
 
+// ── Viewing a live worker keeps the parent's Subagents board (owner ruling 2026-11-18) ──
+// The attach burst ends with the socket's task-list snapshot (attach.ts),
+// scoped to the ATTACHED session -- and a worker attach ships an empty one,
+// because every task row carries the MANAGER's sessionId. Taking that empty
+// snapshot at face value deletes the parent card's Subagents section: the
+// very menu that hops between siblings, hidden the moment a child is picked.
+// The worker attach therefore must not re-attest the manager's board.
+
+describe("worker view keeps the parent's Subagents section", () => {
+  const boardTask = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    taskId: "task-1",
+    description: "do the thing",
+    sessionId: SID,
+    status: "running",
+    createdAt: Date.now() - 1000,
+    startedAt: Date.now() - 900,
+    endedAt: null,
+    activeMs: 100,
+    inRun: true,
+    turnStartedAt: Date.now() - 100,
+    agentSessionId: "wsess-1",
+    ...over,
+  });
+
+  /** The burst the daemon ships for a worker-row attach (attach.ts order):
+   *  sessionCreated(kind) -> cursor -> working -> the scoped TASK_LIST. */
+  function workerBurst(workerSid: string): void {
+    ws.fireMessage({ type: "sessionCreated", sessionId: workerSid, kind: "subagent", parentSessionId: SID });
+    ws.fireMessage({ type: "sessionState", sessionId: workerSid, key: "cursor", value: 2 });
+    ws.fireMessage({ type: "sessionState", sessionId: workerSid, key: "working", value: true });
+    ws.fireMessage({ type: "taskList", tasks: [] }); // scoped to the worker: no rows are its own
+  }
+
+  it("the scoped snapshot of a worker attach leaves the board and its selection intact", async () => {
+    await attach();
+    ws.fireMessage({
+      type: "taskList",
+      tasks: [boardTask(), boardTask({ taskId: "task-sib", createdAt: Date.now() - 9000, agentSessionId: "wsess-2" })],
+    });
+    await tick();
+    expect(els(".subagents-section")).toHaveLength(1);
+    expect(els(".subagent-row")).toHaveLength(2);
+    clearSent();
+    els(".subagent-row")[0]!.click();
+    await tick();
+    expect(sent<{ sessionId: string }>("switchSession")[0]?.sessionId).toBe("wsess-1");
+    workerBurst("wsess-1");
+    await tick();
+    // The menu that hops between siblings SURVIVES the child's attach: the
+    // parent's section is still there with both rows...
+    expect(els(".subagents-section")).toHaveLength(1);
+    expect(els(".subagent-row")).toHaveLength(2);
+    // ...and the viewed row carries the active mark (the selection the
+    // section had before the attach, kept through it).
+    const viewed = els('.subagent-row[data-task-id="task-1"]')[0]!;
+    expect(viewed.getAttribute("class")).toContain("active");
+    expect(viewed.getAttribute("aria-current")).toBe("true");
+    expect(els('.subagent-row[data-task-id="task-sib"]')[0]!.getAttribute("class")).not.toContain("active");
+    // Leave back to the manager: a NON-worker attach re-attests the board
+    // wholesale exactly as before (the guard rides the worker view only).
+    el("#close-subagent-view-btn").click();
+    await tick();
+    await attach();
+    ws.fireMessage({ type: "taskList", tasks: [boardTask({ taskId: "task-only" })] });
+    await tick();
+    expect(els(".subagent-row")).toHaveLength(1);
+    expect(els(".subagent-row")[0]!.getAttribute("data-task-id")).toBe("task-only");
+    clearSent();
+  });
+});
+
 // ── Log-view header controls ────────────────────────────────────────────────
 
 describe("log-view controls", () => {
@@ -3112,6 +3198,221 @@ describe("log-view controls", () => {
     await attach(); // server answers with the re-attach burst
     expect(el("#chat-input").hasAttribute("disabled")).toBe(false);
     expect(document.querySelector("#log-view-label")).toBeNull();
+  });
+});
+
+// ── Search hits peek (owner ruling 2026-11-18): read-only open, honest banner, explicit claim ──
+// A click on a hit must NEVER silently re-attach the client (owner ruling 2026-11-18).
+// A LIVE hit opens the named PEEKING state (viewLog read of the durable
+// log; the socket keeps its session; the composer is locked; the banner
+// names the subject and offers Take over + close); a COLD hit OBSERVES.
+// The hit's query rides as the seek needle: a landed match gets the
+// transient flash; a match the reachable history never ships is said so.
+
+describe("search hits peek: read-only open, claim, honest seek", () => {
+  const P1 = "s-peek-9001"; // a live session OTHER than the attached SID
+
+  async function hitSearch(query: string, results: Array<Record<string, unknown>>): Promise<void> {
+    el("#search-btn").click();
+    await tick();
+    const input = el("#search-input");
+    (input as unknown as { value: string }).value = query;
+    input.dispatchEvent({ type: "input", currentTarget: input } as unknown as Event);
+    clearSent();
+    await sleep(300); // the search debounce
+    const [req] = sent<{ requestId: number }>("searchLogs");
+    ws.fireMessage({ type: "searchResults", requestId: req!.requestId, query, results });
+    await tick();
+  }
+
+  it("a LIVE hit opens a read-only peek: viewLog read, ZERO attach frames", async () => {
+    await attach();
+    await hitSearch("needle", [
+      { logId: P1, lastActivityAt: 2, matchCount: 1, profile: "other", live: true, snippets: ["a needle line"] },
+    ]);
+    el(".search-hit").click();
+    await tick();
+    // THE point: no silent attach; the peek rides the durable-log read.
+    expect(sent("switchSession")).toHaveLength(0);
+    expect(sent<{ logId: string }>("viewLog")[0]?.logId).toBe(P1);
+    clearSent();
+    ws.fireMessage({
+      type: "logViewed",
+      logId: P1,
+      entries: [{ source: "prompt", content: "the needle line, rendered" }],
+    });
+    await tick();
+    // Banner: the named state, the subject id, the read-only word, and
+    // BOTH controls (claim + close).
+    const label = el("#peek-view-label");
+    expect(label.textContent).toContain(P1.slice(0, 8));
+    expect(label.textContent).toContain("read only");
+    expect(el("#peek-takeover-btn")).toBeTruthy();
+    expect(el("#close-peek-view-btn")).toBeTruthy();
+    // Composer locked; the pane shows the peeked transcript; the seek
+    // LANDED on the matched row (flash + scroll) in the peeking pane.
+    expect(composerDisabled()).toBe(true);
+    expect((el("#input-area").getAttribute("class") ?? "")).toContain("read-only");
+    expect(el("#message-list").textContent).toContain("the needle line, rendered");
+    const flashed = document.querySelectorAll(".search-flash");
+    expect(flashed).toHaveLength(1);
+    expect(
+      (flashed[0] as unknown as { scrollIntoViewCalls: unknown[] }).scrollIntoViewCalls,
+    ).toEqual([{ block: "center" }]);
+    // Focus: the peek's arrival hands the claim the focus the chip held.
+    expect(document.activeElement).toBe(el("#peek-takeover-btn"));
+    // The manager did not move: its own row stays the highlighted session.
+    expect(activeRows(".session-item")).toHaveLength(1);
+  });
+
+  it("Take over performs exactly ONE attach and restores the live composer", async () => {
+    // Continues from the open peek above (ordered suite).
+    clearSent();
+    const claim = el("#peek-takeover-btn");
+    claim.click();
+    claim.click(); // a double-click cannot double-attach
+    const sw = sent<{ sessionId: string }>("switchSession");
+    expect(sw).toHaveLength(1);
+    expect(sw[0]?.sessionId).toBe(P1);
+    // The server answers the claim with the normal attach burst.
+    ws.fireMessage({ type: "sessionCreated", sessionId: P1, profile: "other", title: null, currentModel: "m1", models: ["m1"] });
+    ws.fireMessage({ type: "userMessage", content: "peeked hello now mine" });
+    ws.fireMessage({ type: "sessionState", sessionId: P1, key: "cursor", value: 1 });
+    await tick();
+    expect(document.querySelector("#peek-view-label")).toBeNull();
+    expect(composerDisabled()).toBe(false);
+    expect(el("#message-list").textContent).toContain("peeked hello now mine");
+  });
+
+  it("a COLD hit observes with the honest state name and lands the match", async () => {
+    await attach();
+    await hitSearch("needle", [
+      { logId: L1, lastActivityAt: 2, matchCount: 1, profile: "manager", live: false, snippets: ["a needle line"] },
+    ]);
+    el(".search-hit").click();
+    await tick();
+    expect(sent("switchSession")).toHaveLength(0);
+    ws.fireMessage({ type: "logViewed", logId: L1, entries: [{ source: "prompt", content: "cold line with a needle" }] });
+    await tick();
+    const label = el("#log-view-label");
+    expect(label.textContent).toContain("Observing log"); // the state NAME, not a euphemism
+    expect(label.textContent).toContain(L1.slice(0, 8));
+    expect(document.querySelector("#peek-view-label")).toBeNull();
+    expect(composerDisabled()).toBe(true);
+    expect(document.querySelectorAll(".search-flash")).toHaveLength(1);
+    // Close: optimistic unlock (the re-attach re-attests), like the old
+    // log-view close.
+    el("#close-log-view-btn").click();
+    await tick();
+    expect(document.querySelector("#log-view-label")).toBeNull();
+    expect(composerDisabled()).toBe(false);
+  });
+
+  it("a hit whose match is past the reachable history SAYS SO in the banner", async () => {
+    await attach();
+    await hitSearch("ghost", [
+      { logId: P1, lastActivityAt: 2, matchCount: 1, profile: "other", live: true, snippets: ["..."] },
+    ]);
+    el(".search-hit").click();
+    await tick();
+    // The whole epoch fits the first page (no hasOlder) and the needle is
+    // not in it: the peek opens, says the match is unreachable, and shows
+    // no flash (never the head pretending to be the answer).
+    ws.fireMessage({ type: "logViewed", logId: P1, entries: [{ source: "prompt", content: "nothing matching here" }] });
+    await tick();
+    expect(el("#peek-view-label").textContent).toContain("search match not in reachable history");
+    expect(document.querySelectorAll(".search-flash")).toHaveLength(0);
+    // Leave cleanly for the suites that follow.
+    el("#close-peek-view-btn").click();
+    await attach();
+    expect(composerDisabled()).toBe(false);
+  });
+});
+
+// ── Read-only view chips: keyboard-accessible controls (owner ruling 2026-11-18) ────────
+// The field pass found the "Viewing log" chip's ✕ outside the interactive
+// set. The controls are real BUTTONs now: they sit in the standard
+// interactive set, carry a spoken name (the ✕ glyph is decoration, never a
+// label), are type="button" (a chip close must never be a form submit),
+// take focus, and activation -- Enter/Space turning into a click is native
+// button semantics -- runs the same close/claim path the mouse runs.
+
+describe("read-only view chips are keyboard-accessible (owner ruling 2026-11-18)", () => {
+  const INTERACTIVE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  const interactiveSet = (): Set<Element> => new Set(Array.from(document.querySelectorAll(INTERACTIVE)));
+
+  const assertControl = (node: HTMLElement, named: boolean): void => {
+    expect(node.tagName).toBe("BUTTON");
+    expect(node.getAttribute("type")).toBe("button");
+    if (named) expect((node.getAttribute("aria-label") ?? "").length).toBeGreaterThan(3);
+    expect(node.getAttribute("tabindex")).toBeNull(); // focusable by default, never exiled
+    expect(interactiveSet().has(node)).toBe(true);
+    node.focus();
+    expect(document.activeElement).toBe(node);
+  };
+
+  async function openObserved(): Promise<void> {
+    await attach();
+    clearSent();
+    el("#log-list .log-item").click(); // cold row -> the durable-log read
+    await tick();
+    ws.fireMessage({ type: "logViewed", logId: L1, entries: [{ source: "prompt", content: "cold line" }] });
+    await tick();
+  }
+
+  it("the observing chip: close is a named focusable button and activates", async () => {
+    await openObserved();
+    expect(el("#log-view-label")).toBeTruthy();
+    const close = el("#close-log-view-btn");
+    assertControl(close, true);
+    close.click(); // what Enter/Space fire natively on a focused button
+    await tick();
+    expect(document.querySelector("#log-view-label")).toBeNull();
+  });
+
+  async function openPeek(): Promise<void> {
+    await attach();
+    el("#search-btn").click();
+    await tick();
+    const input = el("#search-input");
+    (input as unknown as { value: string }).value = "needle";
+    input.dispatchEvent({ type: "input", currentTarget: input } as unknown as Event);
+    clearSent();
+    await sleep(300); // the search debounce
+    const [req] = sent<{ requestId: number }>("searchLogs");
+    ws.fireMessage({
+      type: "searchResults",
+      requestId: req!.requestId,
+      query: "needle",
+      results: [{ logId: "s-peek-9002", lastActivityAt: 2, matchCount: 1, profile: "other", live: true, snippets: ["a needle line"] }],
+    });
+    await tick();
+    el(".search-hit").click();
+    await tick();
+    ws.fireMessage({ type: "logViewed", logId: "s-peek-9002", entries: [{ source: "prompt", content: "the needle line" }] });
+    await tick();
+  }
+
+  it("the peek chip: claim AND close are named focusable buttons", async () => {
+    await openPeek();
+    expect(el("#peek-view-label")).toBeTruthy();
+    assertControl(el("#peek-takeover-btn"), false); // its text IS the name
+    assertControl(el("#close-peek-view-btn"), true);
+    // Leave cleanly for the suites that follow.
+    el("#close-peek-view-btn").click();
+    await attach();
+    await tick();
+    expect(composerDisabled()).toBe(false);
+  });
+
+  it("the header chips keep their pressed-state grammar (toggle chips stay buttons)", () => {
+    for (const id of ["#sidebar-toggle", "#thinking-toggle", "#tool-exec-status", "#search-btn"]) {
+      const node = document.querySelector(id) as HTMLElement | null;
+      if (!node) continue; // posture-dependent (the fence chip speaks only when the server does)
+      expect(node.tagName).toBe("BUTTON");
+      expect(node.getAttribute("type")).toBe("button");
+      expect((node.getAttribute("aria-label") ?? "").length).toBeGreaterThan(3);
+    }
   });
 });
 

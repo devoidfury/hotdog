@@ -11,7 +11,7 @@ import {
   type FeedResult,
   type MdDocument,
 } from "@utils/md-parser.ts";
-import { toolContentMeta, toolContentText, wrapperContentText, splitFileIncludes } from "@utils/tool-content.ts";
+import { toolContentMeta, toolContentMetaAll, toolContentText, wrapperContentText, splitFileIncludes } from "@utils/tool-content.ts";
 import { ctxByIndex, deriveCallDurationsByIndex, parseEntryTs, turnFinalDurationsByIndex, type CtxUsage } from "@utils/session-turns.ts";
 import { ToolBlockController, type ToolDisplayWire } from "./tool-block.tsx";
 import type { DomNode } from "@utils/jsx";
@@ -57,6 +57,21 @@ export interface UiImage {
 }
 
 interface UserMessage { content: string; images?: UiImage[]; files?: Array<{ path: string; content: string }>; }
+
+/**
+ * Long user prompts (workflow task descriptions, pasted docs) render folded
+ * to this many SOURCE lines with a chevron toggle (owner ruling 2026-11-18: one message
+ * ate a viewport). Folding is a CSS clamp: the full text stays in the DOM,
+ * so the row's textContent search still sees the hit, and revealMatch opens
+ * the fold before flashing (expand-on-hit). User messages only -- assistant
+ * prose is structured markdown, and attachments already ride details boxes.
+ */
+const USER_PROMPT_FOLD_LINES = 4;
+/** Fold-toggle chevron: the jump-button glyph in the .fold-chevron family
+ *  (open state rotates 180°, CSS-attested by aria-expanded). */
+const ICON_CHEVRON_FOLD =
+  '<svg class="fold-chevron" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" tabindex="-1">' +
+  '<path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 /**
  * A committed assistant message. The optional footer meta is data the wire
  * path carries: `ts` (epoch ms, when the message completed), `durationMs`
@@ -91,7 +106,7 @@ interface ToolCallMessage { name: string; args: string; argsSummary?: string; di
  * partial text, so each frame REPLACES the preview (never appends).
  */
 interface StreamingToolCallMessage { index: number; name: string; args: string; }
-interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; toolCallId?: string; startLine?: number; }
+interface ToolResultMessage { name: string; output?: string; error?: string; images?: UiImage[]; toolCallId?: string; startLine?: number; meta?: Record<string, string>; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
 
@@ -254,6 +269,15 @@ export interface MessageListManager {
   setHideThinking: (hide: boolean) => void;
   handleError: (data: ErrorMessage) => void;
   /**
+   * Honest fallback for a FAILED subagent live attach: the pane shows
+   * the fact ("Live tail unavailable for this subagent") plus two real
+   * actions -- "View log" (the B4 settled view of the worker's own durable
+   * log) and "Close" (removes the card). Never a raw error bubble, never
+   * another session's transcript. One card at a time; the next attach or
+   * view replaces the pane, and clear() drops it with everything else.
+   */
+  showAttachUnavailable: (opts: { onViewLog: () => void }) => void;
+  /**
    * Close the in-flight streaming row. Pass `end` when the row committed as
    * a COMPLETED message (turn end / tool boundary): the footer (timestamp +
    * copy, with the ctx gauge and duration when known) rides the completion,
@@ -282,6 +306,13 @@ export interface MessageListManager {
    *  content, then restore `scrollTop += heightDelta` and mark the restore
    *  so the scroll listener never reads it as the user scrolling. */
   renderOlderEntries: (entries: LogEntry[]) => void;
+  /** Search peek seam: scroll the FIRST user/assistant row whose
+   *  rendered text contains `needle` (case-insensitive -- the search
+   *  corpus's own rule) into view and flash it (`.search-flash`, removed
+   *  after a beat). True when the match landed. Scoped to `.message` rows
+   *  -- the user/assistant lanes the server searches -- so a tool block or
+   *  a thinking fold can never steal the landing. */
+  revealMatch: (needle: string) => boolean;
 }
 
 export function createMessageList(
@@ -937,6 +968,19 @@ export function createMessageList(
   }
 
   // ── Message Handlers ──────────────────────────────────────────────────────
+  /** Open/close a folded user prompt: the one owner of the clamp class and
+   *  the toggle's aria pair (click handler and revealMatch both ride it). */
+  function setPromptFolded(row: HTMLElement, folded: boolean): void {
+    const content = row.querySelector(".content");
+    if (!content) return;
+    content.classList.toggle("prompt-folded", folded);
+    const toggle = row.querySelector(".user-fold-toggle");
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", folded ? "false" : "true");
+      toggle.setAttribute("aria-label", folded ? "Expand full prompt" : "Collapse full prompt");
+    }
+  }
+
   function handleUserMessage({ content, images, files }: UserMessage): void {
     // Close any in-flight assistant/thinking element first in case an interruption occurred;
     // without this the next turn's streaming chunks resume the stale element above this message.
@@ -950,9 +994,25 @@ export function createMessageList(
     const contentEl = document.createElement("div");
     contentEl.className = "content";
     contentEl.textContent = content;
+    // Fold at the source-line count (see USER_PROMPT_FOLD_LINES): cheap,
+    // layout-free, and identical live and in a replayed log view.
+    const folded = content.split("\n").length > USER_PROMPT_FOLD_LINES;
+    if (folded) contentEl.classList.add("prompt-folded");
     bubble.appendChild(contentEl);
     appendImages(bubble, images);
     appendAttachments(bubble, files);
+    if (folded) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "user-fold-toggle";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-label", "Expand full prompt");
+      toggle.innerHTML = ICON_CHEVRON_FOLD;
+      toggle.addEventListener("click", () =>
+        setPromptFolded(el, !contentEl.classList.contains("prompt-folded")),
+      );
+      bubble.appendChild(toggle);
+    }
     el.appendChild(bubble);
 
     container.appendChild(el);
@@ -1144,7 +1204,7 @@ export function createMessageList(
     scrollBottom();
   }
 
-  function handleToolResult({ name, output, error, images, toolCallId, startLine }: ToolResultMessage): void {
+  function handleToolResult({ name, output, error, images, toolCallId, startLine, meta }: ToolResultMessage): void {
     // The response behind the preceding usage record is fully closed here.
     // Log-order replay puts the usage frame BEFORE the next entry's tool
     // frames, so a held flag must not survive into a later response's bar.
@@ -1182,6 +1242,7 @@ export function createMessageList(
       ...(error !== undefined ? { error } : {}),
       ...(images ? { images } : {}),
       ...(startLine !== undefined ? { startLine } : {}),
+      ...(meta ? { meta } : {}),
     });
     scrollBottom();
   }
@@ -1516,6 +1577,45 @@ export function createMessageList(
     scrollBottom();
   }
 
+  // The failed-attach card: the one shown at a time; Close detaches it,
+  // and any pane replacement (clear) forgets the handle with the DOM.
+  let attachFallbackEl: HTMLElement | null = null;
+
+  function showAttachUnavailable({ onViewLog }: { onViewLog: () => void }): void {
+    attachFallbackEl?.remove();
+    const el = document.createElement("div");
+    el.className = "message attach-fallback";
+    el.setAttribute("role", "alert");
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    const contentEl = document.createElement("div");
+    contentEl.className = "content";
+    contentEl.textContent = "Live tail unavailable for this subagent.";
+    bubble.appendChild(contentEl);
+    const actions = document.createElement("div");
+    actions.className = "attach-fallback-actions";
+    const viewBtn = document.createElement("button");
+    viewBtn.setAttribute("type", "button");
+    viewBtn.className = "attach-fallback-btn";
+    viewBtn.textContent = "View log";
+    viewBtn.addEventListener("click", () => onViewLog());
+    const closeBtn = document.createElement("button");
+    closeBtn.setAttribute("type", "button");
+    closeBtn.className = "attach-fallback-btn";
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", () => {
+      el.remove();
+      if (attachFallbackEl === el) attachFallbackEl = null;
+    });
+    actions.appendChild(viewBtn);
+    actions.appendChild(closeBtn);
+    bubble.appendChild(actions);
+    el.appendChild(bubble);
+    attachFallbackEl = el;
+    container.appendChild(el);
+    scrollBottom();
+  }
+
   function finalizeAssistant(end?: { ts: number; durationMs?: number; ctx?: CtxUsage; callMs?: number }): void {
     dbg("finalizeAssistant", { hadAssistant: !!currentAssistantEl, streamingBlockCount, thinkingBlockCount });
     let rowCommitted = false;
@@ -1653,6 +1753,9 @@ export function createMessageList(
 
   function clear(): void {
     container.innerHTML = "";
+    // The card's DOM is gone with the pane; drop the handle so a stale
+    // reference never blocks a later replacement.
+    attachFallbackEl = null;
     followBottom = true;
     syncJumpButton();
     // The lazy-history trigger is per-view: the chat layer re-attests
@@ -1749,7 +1852,10 @@ export function createMessageList(
           : typeof entry.content === "string"
             ? entry.content
             : isTool
-              ? toolContentText(entry.content)
+              ? // Same posture as the live wire (s2cToolResult): the META
+                // envelope never reaches a chat surface; start_line rides
+                // structured via toolContentMeta below.
+                toolContentText(entry.content, undefined, { omitMeta: true })
               : wrapperContentText(entry.content);
       switch (entry.source) {
         case "input":
@@ -1817,8 +1923,12 @@ export function createMessageList(
         }
         case "tool_result": {
           // Cold parity with the live TOOL_RESULT frame: the stored parts'
-          // start_line meta numbers the diff gutters with real file lines.
+          // start_line meta numbers the diff gutters with real file lines,
+          // and the whole envelope rides structured for the muted facts
+          // strip (owner ruling 2026-11-18) -- a browsed log renders the
+          // exact same posture as the live transcript.
           const metaStartLine = Number(toolContentMeta(entry.content, "start_line"));
+          const envelope = toolContentMetaAll(entry.content);
           handleToolResult({
             name:
               (entry as { tool_name?: string | null }).tool_name || extractToolNameFromEntry(entry),
@@ -1826,6 +1936,7 @@ export function createMessageList(
             images: entry.images,
             toolCallId: (entry as { tool_call_id?: string | null }).tool_call_id || undefined,
             ...(Number.isInteger(metaStartLine) && metaStartLine > 0 ? { startLine: metaStartLine } : {}),
+            ...(envelope ? { meta: envelope } : {}),
           });
           break;
         }
@@ -1871,6 +1982,33 @@ export function createMessageList(
     // the page height, so the next genuine scroll-up INTO the zone edges --
     // the restore itself never counts (see the restoreTarget guard).
     nearTopInside = container.scrollTop > TOP_TRIGGER_PX ? false : nearTopInside;
+  }
+
+  /** See MessageListManager.revealMatch. The seek driver (chat.ts) calls
+   *  this after every page lands; a miss means "page older", not "retry". */
+  function revealMatch(needle: string): boolean {
+    if (needle === "") return false;
+    const lower = needle.toLowerCase();
+    // Guarded: the headless test double for the container may not carry a
+    // live children collection; a container without rows never lands.
+    const rows = Array.from(
+      (container as unknown as { children?: ArrayLike<HTMLElement> }).children ?? [],
+    );
+    for (const row of rows) {
+      if (!row.classList.contains("message")) continue;
+      if (!(row.textContent ?? "").toLowerCase().includes(lower)) continue;
+      // A hit inside a folded user prompt hides behind the clamp (the text
+      // is in the DOM, which is why the scan found it): open the fold first
+      // so the flash lands on readable text (expand-on-hit).
+      if (row.querySelector(".content.prompt-folded")) setPromptFolded(row, false);
+      row.scrollIntoView({ block: "center" });
+      row.classList.add("search-flash");
+      // Transient: the flash marks WHERE the hit landed, then lets the row
+      // read like the rest of the transcript again.
+      setTimeout(() => row.classList.remove("search-flash"), 2500);
+      return true;
+    }
+    return false;
   }
 
   function setHasOlder(hasOlder: boolean): void {
@@ -1931,6 +2069,7 @@ export function createMessageList(
     handleSessionState,
     setHideThinking,
     handleError,
+    showAttachUnavailable,
     finalizeAssistant,
     noteWorking,
     clear,
@@ -1940,5 +2079,6 @@ export function createMessageList(
     renderLogEntries,
     renderOlderEntries,
     setHasOlder,
+    revealMatch,
   };
 }

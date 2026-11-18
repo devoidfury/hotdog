@@ -446,7 +446,10 @@ export class AgentSessions {
       if (event.type !== OUTPUT_EVENT.TOKEN_USAGE) return;
       const meta = this.#metadata.get(sessionId);
       if (!meta) return;
-      meta.ctxUsed = event.totalTokens || 0;
+      // Honest floor: max of the provider-reported call total and the
+      // image-aware local estimate (providers may exclude image payloads
+      // from reported usage -- 2026-11-18 incident).
+      meta.ctxUsed = Math.max(event.totalTokens || 0, event.estimatedContextTokens || 0);
       if (typeof event.contextWindow === "number" && Number.isFinite(event.contextWindow)) {
         meta.ctxTotal = event.contextWindow;
       }

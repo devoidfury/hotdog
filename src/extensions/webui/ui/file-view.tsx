@@ -471,7 +471,7 @@ export function FileView(p: FileViewProps) {
         ) : null}
         <button
           type="button"
-          className="file-reload-btn"
+          className="file-reload-btn file-bar-reload"
           title="Re-read the file from the top"
           aria-label="Reload"
           onClick={() => p.onReload(p.path)}

@@ -284,12 +284,53 @@ describe("s2cToolResult startLine", () => {
     output: "ok",
   });
 
-  it("forwards the part's start_line meta as a number", () => {
+  it("forwards the part's start_line meta as a number; the META envelope stays off the wire", () => {
     const msg = s2cToolResult("s1", { name: "edit", content: [editPart([["start_line", "207"]])] });
     expect(msg.startLine).toBe(207);
-    // The flattened output still carries the META dump (no information lost
-    // on the model-facing/audit side).
-    expect(msg.output).toContain('META: {"start_line":"207"}');
+    // The envelope line would restate itself under the block that already
+    // renders the call header; the fact the chat surface reads travels as
+    // startLine above (owner ruling 2026-11-18: no literal META: rows in the transcript).
+    expect(msg.output).toBe("ok");
+  });
+
+  it("flattens Error:/HINT: but never the META envelope (real info stays, noise dies)", () => {
+    const msg = s2cToolResult("s1", {
+      name: "bash",
+      content: [
+        {
+          type: "tool-result",
+          tool: "bash",
+          status: "success",
+          meta: [
+            ["command", "ls"],
+            ["exit_code", "0"],
+          ],
+          error: null,
+          hint: "note",
+          output: "done",
+        },
+      ],
+    });
+    expect(msg.output).toBe("done\nHINT: note");
+  });
+
+  it("rides the envelope STRUCTURED (additive meta); no envelope, no field", () => {
+    // Owner ruling 2026-11-18: the text loses the META line, the frame
+    // gains the same facts structured -- the block curates them into its
+    // muted strip and keeps the full envelope behind the disclosure.
+    const msg = s2cToolResult("s1", {
+      name: "bash",
+      content: [{
+        type: "tool-result", tool: "bash", status: "success",
+        meta: [["command", "ls"], ["exit_code", "0"]],
+        error: null, hint: null, output: "done",
+      }],
+    });
+    expect(msg.meta).toEqual({ command: "ls", exit_code: "0" });
+    expect(msg.output).toBe("done");
+    // An envelope-less result ships no meta field at all (honest absence).
+    expect("meta" in s2cToolResult("s1", { name: "touch", content: [editPart([])] })).toBe(false);
+    expect("meta" in s2cToolResult("s1", { name: "touch", content: "plain" })).toBe(false);
   });
 
   it("drops non-integer, non-positive, and missing values (blank beats a fake)", () => {

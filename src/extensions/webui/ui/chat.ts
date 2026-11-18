@@ -3,6 +3,7 @@
 
 import { reactiveState, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
+import { versionSkews } from "./build-info.ts";
 import { loadHideThinking, saveHideThinking } from "./thinking-pref.ts";
 import type { UiImage } from "./message-list.ts";
 import type { CtxUsage } from "@utils/session-turns.ts";
@@ -92,6 +93,88 @@ function clearTasks(): void {
 // Explicit session name for the active session; null = show the short id.
 const sessionTitleAtom = reactiveState<string | null>(null);
 
+// ── Session view state (the one named view-vs-attach surface) ──────────────
+// The owner ruling 2026-11-18: all of it is "what is on screen vs what would I be
+// writing to" confusion. One named state ends the ad-hoc pairing of flags:
+// attached is the socket's live session (the default), peeking is a
+// read-only view of ANOTHER live session's history opened from a search hit
+// (the socket never moved), observing is a durable-log read (cold row,
+// settled subagent, cold search hit). The composer capability is a PURE
+// function of it -- unit-testable with no DOM, and the only source the
+// chrome may read to decide enabled/placeholder/actions.
+export type SessionViewMode = "attached" | "peeking" | "observing";
+
+export interface SessionViewState {
+  mode: SessionViewMode;
+  /** The socket's attached session (what a send would target); null = none. */
+  attachedId: string | null;
+  /** peeking/observing: the session or log on screen; null when attached. */
+  subjectId: string | null;
+  /** The attached session is a subagent worker row (the composer steers). */
+  workerView: boolean;
+  /** Honest note for the current view (e.g. a search match that turned out
+   *  to be past the reachable history). Null when there is nothing to say. */
+  note: string | null;
+}
+
+/** The idle/no-socket view: attached to nothing, composer honest-empty. */
+export const ATTACHED_VIEW: SessionViewState = {
+  mode: "attached",
+  attachedId: null,
+  subjectId: null,
+  workerView: false,
+  note: null,
+};
+
+export interface ComposerCapability {
+  enabled: boolean;
+  placeholder: string;
+  actions: {
+    send: boolean;
+    stop: boolean;
+    attach: boolean;
+    takeover: boolean;
+  };
+}
+
+/** The ONE composer rule (owner ruling 2026-11-18): attached writes -- interactive sends,
+ *  worker rows steer the task; peeking and observing never write, and only
+ *  peeking offers the explicit take-over. Pure: view state in, capability
+ *  out. */
+export function composerForView(view: SessionViewState): ComposerCapability {
+  if (view.mode === "peeking") {
+    return {
+      enabled: false,
+      placeholder: "Read-only peek -- Take over to write",
+      actions: { send: false, stop: false, attach: false, takeover: true },
+    };
+  }
+  if (view.mode === "observing") {
+    return {
+      enabled: false,
+      placeholder: "Read-only log view",
+      actions: { send: false, stop: false, attach: false, takeover: false },
+    };
+  }
+  return view.workerView
+    ? {
+        enabled: true,
+        placeholder: "Steer the subagent...",
+        actions: { send: true, stop: true, attach: false, takeover: false },
+      }
+    : {
+        enabled: true,
+        placeholder: "Type a message...",
+        actions: { send: true, stop: true, attach: true, takeover: false },
+      };
+}
+
+/** The note a peek/observe view carries when a search seek walked the whole
+ *  reachable history and never landed the match (the bytes are below the
+ *  epoch view, or in a lane the corpus reads but the window never ships --
+ *  the peek says so instead of quietly showing the head). */
+export const MATCH_UNREACHABLE_NOTE = "search match not in reachable history";
+
 // Transcript-changing events (server to client). Any arriving after an
 // attach's cursor report marks the transcript dirty: the next reconnect does
 // a full replay, not a delta from the stored cursor.
@@ -147,6 +230,8 @@ const LOG_VIEW_SINK: MessageListManager = {
   renderLogEntries: () => {},
   renderOlderEntries: () => {},
   setHasOlder: () => {},
+  revealMatch: () => false,
+  showAttachUnavailable: () => {},
 };
 
 interface SessionCreatedMessage {
@@ -285,6 +370,10 @@ interface AuthRequiredMessage {
 
 interface AuthOkMessage {
   type: "authOk";
+  /** Additive version-skew stamp (owner ruling 2026-11-18): the daemon's package version at
+   *  connect. Absent on a daemon older than the banner itself -- which IS
+   *  the skew the banner exists for. */
+  version?: string;
 }
 
 interface AuthErrorMessage {
@@ -341,6 +430,10 @@ interface ToolResultMessage {
   /** Where the edit landed (server-extracted from the result's meta);
    *  numbers the diff gutters with real file lines. */
   startLine?: number;
+  /** The result's meta envelope, structured (additive frame field; owner
+   *  ruling 2026-11-18): drives the muted facts strip under the result
+   *  block, with the full envelope behind the block's expand idiom. */
+  meta?: Record<string, string>;
 }
 
 interface CompactingMessage {
@@ -596,7 +689,10 @@ export interface ChatController {
   /** Flip the attached session's exec-fence policy (header strip toggle). */
   setExecFencePolicy: (policy: "off" | "probe") => void;
   createSession: (opts?: Record<string, unknown>) => void;
-  switchSession: (sessionId: string) => void;
+  /** Attach the socket (and the pane) to a live session. `subagent: true`
+   *  marks a worker-row open: if the attach fails, the pane shows the honest
+   *  fallback card (View log / Close) instead of a raw error bubble. */
+  switchSession: (sessionId: string, opts?: { subagent?: boolean }) => void;
   deleteSession: (sessionId: string) => void;
   /** Tear down an idle live session; the log survives and the row demotes to Recent Logs. */
   dismissSession: (sessionId: string) => void;
@@ -606,7 +702,23 @@ export interface ChatController {
   listSessions: () => void;
   listLogs: () => void;
   loadLog: (logId: string) => void;
-  viewLog: (logId: string) => void;
+  /** Read a durable log (cold OR live-by-id) into the pane: OBSERVING mode
+   *  unless a peek is armed for this id. Optional seekText = land the view
+   *  ON the first message containing that text (search-hit peeks), paging the
+   *  loadOlder seam until it renders or the history is exhausted. */
+  viewLog: (logId: string, seekText?: string) => void;
+  /** PEEK at another session's history read-only (a live search hit): the
+   *  same durable-log read, but the pane opens in peeking mode -- nothing
+   *  attaches, the composer stays locked, and "Take over" is the explicit
+   *  write claim. */
+  peekSession: (logId: string, seekText?: string) => void;
+  /** Take over the peeked session: exactly what a normal attach does (one
+   *  switchSession + its sidebar refresh). No-op unless peeking; re-entries
+   *  while the attach is in flight are swallowed (exactly one attach). */
+  takeOver: () => void;
+  /** Close-control half of leaving peek/observe: optimistically flips the
+   *  view state back to attached (pairs with the app's re-attach). */
+  clearView: () => void;
   deleteLog: (logId: string) => void;
   /** Full-text search across all session logs; results arrive via onSearchResults. */
   searchLogs: (query: string, requestId: number) => void;
@@ -676,12 +788,18 @@ export interface ChatController {
   send: (obj: Record<string, unknown>) => void;
   ws: WebSocket | null;
   sessionIdAtom: Atom<string | null>;
+  /** The one named session-view state (attached / peeking / observing);
+   *  feed it to composerForView for the composer's posture. */
+  sessionViewAtom: Atom<SessionViewState>;
   sessionTitleAtom: Atom<string | null>;
   currentModelAtom: Atom<string>;
   modelsAtom: Atom<string[]>;
   profilesAtom: Atom<Record<string, ProfileInfo>>;
   currentProfileAtom: Atom<string>;
   connectedAtom: Atom<boolean>;
+  /** Owner ruling 2026-11-18: client bundle vs daemon build stamp mismatch (attested per
+   *  handshake; false until the first authOk of a connection). */
+  versionSkewAtom: Atom<boolean>;
   workingAtom: Atom<boolean>;
   // Per-session working state for the sidebar indicators.
   sessionWorkingMap: Map<string, boolean>;
@@ -744,6 +862,13 @@ export function createChat({
 }: ChatConfig): ChatController {
   let ws: WebSocket | null = null;
   let messageList: MessageListManager | null = null;
+  // The worker sid of an IN-FLIGHT subagent-row attach (set by
+  // switchSession's hint, cleared by that session's sessionCreated, any
+  // view change, or the first error frame). While set, an error frame IS
+  // the attach failure: the pane gets the honest card instead of a bare
+  // error bubble, and never another session's transcript (the server's
+  // switchSession refusal attaches nowhere).
+  let pendingSubagentAttach: string | null = null;
   // R3 read-only intent, held across manager (re)construction: a worker
   // attach landing before the app builds the manager must still land
   // read-only on the manager it builds.
@@ -755,6 +880,11 @@ export function createChat({
   const currentModelAtom = reactiveState<string>("");
   const modelsAtom = reactiveState<string[]>([]);
   const connectedAtom = reactiveState<boolean>(false);
+  // True when the connected daemon's authOk version stamp disagrees
+  // with this bundle's build stamp (a daemon that reports nothing is
+  // older than the report itself). Set per handshake; cleared on every
+  // connect so the banner never rides a socket that has not spoken yet.
+  const versionSkewAtom = reactiveState<boolean>(false);
   const workingAtom = reactiveState<boolean>(false);
 
   // Per-session working state; kept across switches so the sidebar stays accurate.
@@ -831,6 +961,24 @@ export function createChat({
   // suppressed tail once (no duplicates, no gaps).
   let viewedLogId: string | null = null;
 
+  // ── View state / peek / search seek (closure side) ──────────────────────
+  // The single named state (see SessionViewMode above). Owned here because
+  // every transition is a wire fact: sessionCreated attaches, logViewed
+  // opens a peek or an observe, log-deletion / any attach closes them.
+  const sessionViewAtom = reactiveState<SessionViewState>({ ...ATTACHED_VIEW });
+  // A peek armed and waiting for its logViewed reply: the reply for THIS id
+  // opens peeking mode; any other logViewed is a plain observe.
+  let peekTargetId: string | null = null;
+  // A take-over in flight (the claim stays one attach: the button may be
+  // clicked twice before the server answers). Cleared by sessionCreated.
+  let takeoverPending = false;
+  // Search seek: land the opened view ON the matched message by paging the
+  // loadOlder seam (requestOlderHistory) until the needle renders. Cleared
+  // on landing, on an open without a seek, and on any attach. Termination is
+  // structural: every hasOlder-true page strictly decreases the held
+  // oldestIndex, and an exhausted seam or a refusal ends the seek.
+  let seek: { id: string; needle: string } | null = null;
+
   // Lazy history window (see websocket/history-window.ts): the id of the
   // transcript currently on screen whose head the server attested as
   // non-durable (a cold log id OR the live session id), the epoch-log index
@@ -903,6 +1051,9 @@ export function createChat({
     // Session-management messages are handled even before messageList is ready.
     switch (data.type) {
       case "sessionCreated":
+        // The attach landed (of whatever kind): the failed-attach window is
+        // over; later error frames are real turn errors again.
+        pendingSubagentAttach = null;
         sessionIdAtom(data.sessionId);
         sessionTitleAtom(data.title ?? null);
         currentModelAtom(data.currentModel || "");
@@ -932,6 +1083,20 @@ export function createChat({
         const viewKind = data.kind === "subagent" ? "subagent" : null;
         sessionKindAtom(viewKind);
         sessionParentAtom(typeof data.parentSessionId === "string" ? data.parentSessionId : null);
+        // The named view state follows the attach: an in-flight peek or
+        // search seek dies with it (the pane now shows the attached
+        // session's transcript -- same fact as viewedLogId above), and the
+        // worker-row kind IS the steer posture of the composer.
+        peekTargetId = null;
+        takeoverPending = false;
+        seek = null;
+        sessionViewAtom({
+          mode: "attached",
+          attachedId: data.sessionId,
+          subjectId: null,
+          workerView: viewKind === "subagent",
+          note: null,
+        });
         // R3: a watcher sees a worker's question but can never answer it --
         // the card renders read-only, awaiting the delegating manager. The
         // flag also lands on the manager the app's onSessionCreated callback
@@ -985,6 +1150,13 @@ export function createChat({
           saveSessionId(null);
           attachCursor = null;
           dirtySinceAttach = false;
+          // The view cannot keep naming a dead attachment: attached views
+          // fall back to "attached to nothing"; a peek/observe keeps its
+          // subject on screen with the attach honestly shown as gone.
+          {
+            const v = sessionViewAtom();
+            sessionViewAtom(v.mode === "attached" ? { ...ATTACHED_VIEW } : { ...v, attachedId: null });
+          }
         }
         return;
       case "sessions": {
@@ -1023,6 +1195,23 @@ export function createChat({
         // worker's stream must not keep painting into the log window
         // (browse modes are exclusive).
         viewedLogId = data.logId;
+        // The named state flips BEFORE the app callback (the app renders
+        // the pane and its banner from the same render pass): this read
+        // opened a PEEK if and only if one was armed for this exact id (a
+        // search hit on a live session); every other logViewed is a plain
+        // OBSERVE. The socket's attached session is deliberately NOT
+        // touched -- that is the whole point of peek.
+        {
+          const peeking = peekTargetId === data.logId;
+          peekTargetId = null;
+          sessionViewAtom({
+            mode: peeking ? "peeking" : "observing",
+            attachedId: sessionIdAtom(),
+            subjectId: data.logId,
+            workerView: sessionViewAtom().workerView,
+            note: null,
+          });
+        }
         onLogViewed?.(data.logId, data.entries);
         // Lazy history (after the app clear+render, which resets the
         // manager's trigger state): the window head and its epoch token are
@@ -1037,6 +1226,9 @@ export function createChat({
             : null;
         olderInFlight = null;
         messageList?.setHasOlder(historyWindow !== null);
+        // Search seek: land ON the matched message (or page to it, or say
+        // it never lands) now that the window's first page is rendered.
+        if (seek !== null && seek.id === data.logId) advanceSeek();
         return;
       case "loadOlderResult": {
         // Older-page reply, correlated by requestId (the searchLogs
@@ -1058,11 +1250,16 @@ export function createChat({
             logger.warn("[chat] loadOlder epoch moved; seam closed:", data.error);
             historyWindow = null;
             messageList?.setHasOlder(false);
+            // A closed seam ends the seek too -- honestly, not silently.
+            settleSeekUnreachable(held.id);
             return;
           }
           // Honest refusal (bad index / dead log): the window stands, the
           // in-flight slot is free, and the next scroll-up edge retries.
+          // A seek in flight on this id ends the same way: the match cannot
+          // be reached, and the view says so.
           logger.warn("[chat] loadOlder refused:", data.error ?? "malformed reply");
+          settleSeekUnreachable(held.id);
           return;
         }
         if (data.entries.length > 0) messageList?.renderOlderEntries(data.entries);
@@ -1075,10 +1272,26 @@ export function createChat({
               }
             : null;
         messageList?.setHasOlder(historyWindow !== null);
+        // Seek continues through the pages: land if the needle rendered,
+        // page once more while the seam is open, else say it never lands.
+        if (seek !== null && seek.id === held.id) advanceSeek();
         return;
       }
       case "logDeleted":
-        if (data.logId === viewedLogId) viewedLogId = null;
+        if (data.logId === viewedLogId) {
+          viewedLogId = null;
+          // The viewed subject died: the named state falls back to the
+          // socket's attachment (the app re-attaches on this same event),
+          // and a seek against the dead log ends honestly.
+          settleSeekUnreachable(data.logId);
+          sessionViewAtom({
+            mode: "attached",
+            attachedId: sessionIdAtom(),
+            subjectId: null,
+            workerView: sessionViewAtom().workerView,
+            note: null,
+          });
+        }
         onLogDeleted?.(data.logId);
         return;
       case "searchResults":
@@ -1139,6 +1352,10 @@ export function createChat({
         // (listProfiles, listSessions) are only legal after AUTH. The
         // server may already be attaching a session; sessionCreated
         // drives the rest.
+        // Version skew first: the additive version stamp decides the skew banner
+        // before anything else renders (an old daemon is the diagnosis
+        // for every mystery error behind it).
+        versionSkewAtom(versionSkews(data.version));
         connectedAtom(true);
         listLogs();
         return;
@@ -1155,7 +1372,16 @@ export function createChat({
       // MessageListManager (imperative DOM path -- no App repaint, see the
       // feed state block above).
       case "taskList":
-        tasksAtom(data.tasks.slice());
+        // The attach burst ends with the socket's task snapshot, scoped to
+        // the ATTACHED session -- but task rows carry the MANAGER's id, so a
+        // WORKER-row attach ships an empty one. Accepting it deletes the
+        // parent card's Subagents section: the menu that hops between
+        // siblings, gone the moment a child is picked (owner ruling
+        // 2026-11-18). While a worker row is the view the board stands as
+        // last attested; every non-worker attach re-attests it wholesale.
+        // (Known ceiling: a page-load whose reconnect identity IS a worker
+        // attaches without ever having seen the manager's board.)
+        if (!sessionViewAtom().workerView) tasksAtom(data.tasks.slice());
         return;
       case "taskUpdate":
         upsertTask(data.task);
@@ -1331,13 +1557,25 @@ export function createChat({
         // the header chip drives it now, not the server.
         if (data.key !== "hideThinking") list.handleSessionState(data);
         break;
-      case "error":
+      case "error": {
+        if (pendingSubagentAttach !== null) {
+          // The subagent-row attach failed (any error): honest card in the
+          // empty pane -- the worker's own durable log stays one click away
+          // (B4's settled view keys on the SAME id the attach used), and no
+          // raw "Session not found" bubble enters the transcript. Not a run
+          // error: no aria-live terminal edge, no working flip.
+          const failedSid = pendingSubagentAttach;
+          pendingSubagentAttach = null;
+          messageList?.showAttachUnavailable({ onViewLog: () => viewLog(failedSid) });
+          break;
+        }
         // Terminal marker first, flip second: the working-effect that rides
         // the flip must see WHY the turn ended (aria-live, see app.tsx).
         onRunError?.();
         workingAtom(false);
         list.handleError(data);
         break;
+      }
 
       default:
         console.warn("[chat] Unknown message type:", (data as { type: string }).type);
@@ -1350,6 +1588,9 @@ export function createChat({
       ws = null;
     }
     authFailed = false;
+    // The next handshake re-attests the skew; a banner must not ride a
+    // socket that has not spoken to this daemon yet.
+    versionSkewAtom(false);
 
     try {
       ws = new WebSocket(connectUrl());
@@ -1505,7 +1746,8 @@ export function createChat({
     send({ type: "createSession", ...opts, profile });
   }
 
-  function switchSession(sessionId: string): void {
+  function switchSession(sessionId: string, opts?: { subagent?: boolean }): void {
+    pendingSubagentAttach = opts?.subagent === true ? sessionId : null;
     send({ type: "switchSession", sessionId });
     sessionIdAtom(sessionId);
     messageList?.clear();
@@ -1666,8 +1908,101 @@ export function createChat({
     send({ type: "loadLog", logId });
   }
 
-  function viewLog(logId: string): void {
+  /**
+   * The close control's optimistic half: flip the DISPLAY state back to
+   * attached so the composer unlocks with the click (the existing
+   * clear-on-close doctrine). The caller pairs it with the re-attach
+   * switchSession; transcript-suppression bookkeeping stays with
+   * sessionCreated (the replay must land before live events render, or the
+   * tail would double).
+   */
+  function clearView(): void {
+    peekTargetId = null;
+    seek = null;
+    // A failed claim (refused switch, no sessionCreated) must not leave the
+    // button dead: closing the view re-arms it for the next peek.
+    takeoverPending = false;
+    const v = sessionViewAtom();
+    if (v.mode === "attached") return;
+    sessionViewAtom({
+      mode: "attached",
+      attachedId: sessionIdAtom(),
+      subjectId: null,
+      workerView: v.workerView,
+      note: null,
+    });
+  }
+
+  function viewLog(logId: string, seekText?: string): void {
+    // A view change ends any in-flight subagent-attach window too (a late
+    // error frame must not card the log view).
+    pendingSubagentAttach = null;
+    startSeek(logId, seekText);
     send({ type: "viewLog", logId });
+  }
+
+  /**
+   * PEEK at another session's history, read-only (a live search hit).
+   * Rides the SAME viewLog read: the log is durable and addressable by id
+   * whether the session is live or cold, so NOTHING attaches -- the socket
+   * keeps its session, live transcript events keep rendering nowhere
+   * (LOG_VIEW_SINK), and the composer stays locked by the view capability.
+   * The pane's banner carries the explicit claim: takeOver().
+   */
+  function peekSession(logId: string, seekText?: string): void {
+    peekTargetId = logId;
+    viewLog(logId, seekText);
+  }
+
+  /**
+   * Take over the peek: exactly what a normal attach does (switchSession +
+   * its sidebar refresh -- the server replays, sessionCreated flips the view
+   * back to attached). Guarded so a stray double-click can never fire a
+   * second attach, and an observe view (a cold log) can never claim a
+   * session it did not peek.
+   */
+  function takeOver(): void {
+    if (takeoverPending) return;
+    const view = sessionViewAtom();
+    if (view.mode !== "peeking" || view.subjectId === null) return;
+    takeoverPending = true;
+    switchSession(view.subjectId);
+  }
+
+  /** Arm (or clear) a search seek for the view this open is about to show. */
+  function startSeek(logId: string, seekText?: string): void {
+    const needle = seekText?.trim().toLowerCase() ?? "";
+    seek = needle === "" ? null : { id: logId, needle };
+  }
+
+  /**
+   * One seek step, run after each page lands in the pane: scroll-land on
+   * the match if it renders; else page once more while the seam is open;
+   * an exhausted seam ends it with the honest note. Terminates by
+   * construction -- windowOlderThan's hasOlder-true pages strictly decrease
+   * the held oldestIndex, the once-per-gap guard keeps one page in flight,
+   * and every end (found / exhausted / refused / epoch moved / any attach)
+   * clears the seek. No invented retry loop.
+   */
+  function advanceSeek(): void {
+    if (seek === null) return;
+    if (messageList?.revealMatch(seek.needle) === true) {
+      seek = null;
+      return;
+    }
+    if (historyWindow !== null) {
+      requestOlderHistory();
+      return;
+    }
+    seek = null;
+    sessionViewAtom({ ...sessionViewAtom(), note: MATCH_UNREACHABLE_NOTE });
+  }
+
+  /** End a seek whose seam closed on a refusal for this exact view id. */
+  function settleSeekUnreachable(id: string): void {
+    if (seek === null || seek.id !== id) return;
+    seek = null;
+    sessionViewAtom({ ...sessionViewAtom(), note: MATCH_UNREACHABLE_NOTE });
   }
 
   /**
@@ -1808,6 +2143,9 @@ export function createChat({
     listLogs,
     loadLog,
     viewLog,
+    peekSession,
+    takeOver,
+    clearView,
     deleteLog,
     searchLogs,
     requestConfigSnapshot,
@@ -1830,12 +2168,14 @@ export function createChat({
     send,
     ws,
     sessionIdAtom,
+    sessionViewAtom,
     sessionTitleAtom,
     currentModelAtom,
     modelsAtom,
     profilesAtom,
     currentProfileAtom,
     connectedAtom,
+    versionSkewAtom,
     workingAtom,
     sessionWorkingMap,
     messageListAtom: () => messageList,

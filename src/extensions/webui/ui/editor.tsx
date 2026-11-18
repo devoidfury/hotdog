@@ -1092,7 +1092,7 @@ export function FileEditor(p: FileEditorProps): JsxChild {
         </button>
         <button
           type="button"
-          className="file-reload-btn"
+          className="file-reload-btn file-bar-reload"
           title="Re-read the file from the top"
           aria-label="Reload"
           onClick={() => p.onReload(p.path)}

@@ -18,7 +18,7 @@ import {
 } from "./icons.tsx";
 import { reactiveState, effect, shortId, copyText, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, LOGS_DEFAULT_HEIGHT, LOGS_MIN_HEIGHT, LOGS_MAX_HEIGHT, LOGS_VIEWPORT_RESERVE, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH, WORKBENCH_DEFAULT_WIDTH, WORKBENCH_TREE_PIN_MIN_WIDTH, WORKBENCH_VIEWER_MIN_WIDTH, CHAT_DOCK_MIN_WIDTH, EDITOR_DOCK_DEFAULT_WIDTH, EDITOR_DOCK_MIN_WIDTH, EDITOR_DOCK_MAX_WIDTH, TREE_COL_MIN_WIDTH, TREE_COL_MAX_WIDTH, TREE_COL_DEFAULT_WIDTH } from "./utils.ts";
 import { createPanelResize, decodeCollapsed, encodeCollapsed } from "./panel-resize.ts";
-import { createChat, type ChatController, type CompletionItem } from "./chat.ts";
+import { createChat, composerForView, ATTACHED_VIEW, type ChatController, type CompletionItem } from "./chat.ts";
 import {
   LoginScreen,
   focusLoginInput,
@@ -130,6 +130,11 @@ const sessionsAtom = reactiveState<SessionInfo[]>([]);
 const logsAtom = reactiveState<LogInfo[]>([]);
 const activeLogIdAtom = reactiveState<string | null>(null);
 const contextMenuAtom = reactiveState<ContextMenuState | null>(null);
+
+// Owner ruling 2026-11-18: the version-skew banner's dismissal. Per page-load on purpose -- a
+// fresh reload re-attests the handshake and re-raises the banner if the
+// daemon is still old (dismissing hides the strip, not the diagnosis).
+const versionSkewDismissedAtom = reactiveState<boolean>(false);
 
 // Screen-reader announcements for the streaming reply the transcript renders
 // imperatively (audit 1.1). Kept deliberately coarse: the attached session's
@@ -251,33 +256,39 @@ function onSearchKeydown(e: KeyboardEvent): void {
 }
 
 function onActivateHit(hit: SearchHitWire): void {
-  // live → attach to the running session; cold → read-only log view. Both
-  // land in the lazy-history window (the trailing K messages; older pages
-  // through loadOlder). HITS DO NOT POSITION: today's click already just
-  // OPENS the log (no scroll-to-match existed before windowing, and none
-  // does now), so a jumped-to match can never land in a window that does
-  // not contain it -- and scrolling up pages the same loadOlder seam until
-  // any hit's context is on screen (reachability pinned server-side in
-  // tests/extensions/websocket-history-window.test.ts).
+  // NO hit ever attaches (owner ruling 2026-11-18). A LIVE hit opens a read-only PEEK at that
+  // session's history (viewLog reads the durable log by id; the socket keeps
+  // its own session and the composer stays locked); a COLD hit opens the
+  // same read as OBSERVING. The hit's query rides as the seek needle: the
+  // peek pages the B3 loadOlder seam until the matched message renders, then
+  // scrolls it into view with a transient flash -- and if the history runs
+  // out first (compacted away), the banner says so instead of quietly
+  // showing the head.
+  const query = searchAtom().query;
   if (hit.live) {
-    chat?.switchSession(hit.logId);
-  } else {
-    // A cold hit's row lives in the log list: a collapsed section has no
-    // scroll box to reveal it in, so expand first (the height the user left
-    // is already stored; expand just shows it).
-    if (logsPanel.collapsed()) logsPanel.toggle();
-    chat?.viewLog(hit.logId);
+    chat?.peekSession(hit.logId, query);
+    closeSearch();
+    // Focus: the chip stands in immediately (the panel unmounts; <body> is
+    // not an option), and the peek's arrival upgrades the handoff to the
+    // Take over claim (see onLogViewed). If the read never lands, the chip
+    // keeps the focus it was given -- Escape's own handoff.
+    queueMicrotask(() => refocusSearchChip());
+    return;
   }
+  // A cold hit's row lives in the log list: a collapsed section has no
+  // scroll box to reveal it in, so expand first (the height the user left
+  // is already stored; expand just shows it).
+  if (logsPanel.collapsed()) logsPanel.toggle();
+  chat?.viewLog(hit.logId, query);
   closeSearch();
-  // Then bring the selected row into view AND hand it focus: closing search
-  // re-mounts the lists, and the hit row that was just clicked unmounted with
-  // the panel -- dropping focus to <body> would force a Tab walk from the
-  // page top. closeSearch's atom render is already queued ahead of this
-  // microtask (the openSearch focus idiom), so the rows exist by the time we
-  // look. Missing row (session ended mid-click) is quiet for the scroll and
-  // falls back to the search chip for focus.
+  // Reveal and focus the sidebar row as before (the read-only observe pane
+  // has no action of its own): closing search re-mounts the lists, and the
+  // hit row that was just clicked unmounted with the panel. closeSearch's
+  // atom render is already queued ahead of this microtask (the openSearch
+  // focus idiom), so the rows exist by the time we look. Missing row (log
+  // deleted mid-click) is quiet for the scroll and falls back to the chip.
   queueMicrotask(() => {
-    const row = scrollHitIntoView(document, hit.live, hit.logId);
+    const row = scrollHitIntoView(document, false, hit.logId);
     if (row) row.focus();
     else refocusSearchChip();
   });
@@ -652,12 +663,15 @@ function viewedWorkerTask(): TaskInfoWire | null {
 }
 
 /** The main pane shows something other than the interactive transcript
- *  (a browsed cold log or a worker-session view): file drops and the fence
- *  toggle stay inert in both -- the actions they trigger are refused for the
- *  pane's subject. The composer differs by mode (see App's composerLocked):
- *  a cold log locks it, a subagent view steers the task. */
+ *  (a peek at another session, a browsed cold log, or a worker-session
+ *  view): file drops and the fence toggle stay inert in all of them -- the
+ *  actions they trigger are refused for the pane's subject. The composer's
+ *  own posture is NOT read here: it comes from composerForView(view) alone
+ *  (peek/observe lock it; a worker view steers the task). */
 function inBrowseView(): boolean {
-  return activeLogIdAtom() !== null || inSubagentView();
+  const view = chat?.sessionViewAtom() ?? null;
+  if (view === null) return false;
+  return view.mode !== "attached" || view.workerView;
 }
 
 // Tab-completion popup for the composer (server-driven, see C2S.COMPLETE).
@@ -932,17 +946,32 @@ function activateToken(newToken: string): void {
 
 function clearLogView(): void {
   activeLogIdAtom(null);
+  // The named view state follows the close optimistically (same as the old
+  // activeLogId mirror): the click's target is the ATTACHED session, and
+  // the re-attach re-attests everything.
+  chat?.clearView();
   // Remove the active-log highlight.
   chat?.listLogs();
 }
 
 function onCloseLogView(): void {
   clearLogView();
-  // Re-switching to the same session makes the server replay history.
+  // Re-switching to the same session makes the server replay history. This
+  // is ALSO the peek-close action: the peek never moved the socket, so
+  // sessionIdAtom() is the session to return to, and the re-attach flips
+  // the view state back to attached.
   const currentSessionId = chat?.sessionIdAtom();
   if (currentSessionId && chat) {
     chat.switchSession(currentSessionId);
   }
+}
+
+/** CLAIM the peeked session (the banner's explicit action): chat.takeOver()
+ *  performs exactly what a normal attach does (one switchSession + the
+ *  sidebar refresh), is guarded to peeking mode, and cannot double-fire
+ *  while the attach is in flight. */
+function onTakeOverPeek(): void {
+  chat?.takeOver();
 }
 
 /** Leave the worker-session view: back to the delegating manager (the
@@ -1293,7 +1322,9 @@ function openTaskRow(t: TaskInfoWire): void {
   // Browsing a cold log ends in the SAME click so the header never carries
   // both labels (and the log row drops its highlight).
   if (activeLogIdAtom() !== null) clearLogView();
-  chat?.switchSession(target.sessionId);
+  // The subagent hint: if this live-row attach fails, the pane owes the
+  // honest fallback card, not a raw error bubble (owner ruling 2026-11-18).
+  chat?.switchSession(target.sessionId, { subagent: true });
 }
 
 /**
@@ -2503,6 +2534,12 @@ function startChat(): void {
         messageList.clear();
         messageList.renderLogEntries(entries);
       }
+      // A PEEK just landed: hand focus to the Take over claim, the one
+      // decision the pane offers (it rides the atom flipped BEFORE this
+      // callback; the search-hit path gave the chip the interim focus).
+      if ((chat?.sessionViewAtom() ?? ATTACHED_VIEW).mode === "peeking") {
+        queueMicrotask(() => document.getElementById("peek-takeover-btn")?.focus());
+      }
     },
     onLogDeleted: (logId) => {
       dropPinnedId(logId);
@@ -2615,6 +2652,9 @@ function onChatSubmit(e: Event): void {
   e.preventDefault();
   const el = chatInputEl;
   if (!el) return;
+  // The capability is the gate, not the disabled attribute: a read-only
+  // view (peek/observe) never writes, whatever path reached the submit.
+  if (!composerForView(chat?.sessionViewAtom() ?? ATTACHED_VIEW).enabled) return;
   const text = el.value.trim();
   const attachments = attachmentsAtom();
   if (!text && attachments.length === 0) return;
@@ -3195,15 +3235,19 @@ function App() {
   // server never attested (deliberately not optimistic: taskInterrupt can be
   // refused, and a refused Stop must not leave a lying button).
   const working = chat?.workingAtom() ?? false;
-  // A cold log is a read-only record: it locks the composer. A worker-session
-  // view is a LIVE view (owner ruling 2026-11-13): the composer stays
-  // operable and STEERS the task. fence/drops stay inert in both browse
-  // modes alike (both target the attached session, not the pane's subject
-  // or the refused surface).
-  const composerLocked = activeLogId !== null;
-  // Either browse mode keeps the fence strip and file drops inert: both act
-  // on the ATTACHED session, which is not what the pane is showing.
-  const browseView = activeLogId !== null || subagentView;
+  // THE named session-view state (chat.ts): attached (live session, the
+  // default), peeking (read-only look at another live session's history),
+  // observing (durable-log read). Every read-only decision -- composer,
+  // banner, fence strip, file drops -- derives from this ONE state via the
+  // pure composerForView; no parallel ad-hoc disables exist any more.
+  const view = chat?.sessionViewAtom() ?? ATTACHED_VIEW;
+  const composer = composerForView(view);
+  // A cold log / a peek is a read-only record; a worker-session view is a
+  // LIVE view (owner ruling 2026-11-13): the composer stays operable and
+  // STEERS the task. The fence strip and file drops stay inert in every
+  // non-writing view: they act on the ATTACHED session, which is not what
+  // the pane is showing (and are refused for a worker row outright).
+  const browseView = view.mode !== "attached" || view.workerView;
   const sessionId = chat?.sessionIdAtom() ?? null;
   // The header identity is the ATTACHED session's id (the pane's subject is
   // the session since B4 -- a worker view names the worker's OWN session id,
@@ -3279,6 +3323,25 @@ function App() {
         >
           {liveAnnounceAtom()}
         </div>
+        {/* Owner ruling 2026-11-18: client/daemon build skew (bundle stamp vs the daemon's
+            additive authOk version). Visible warning, honest sentence,
+            dismissible for this page-load; re-attested on every handshake.
+            Never renders when the two agree. */}
+        {chat?.versionSkewAtom() && !versionSkewDismissedAtom() ? (
+          <div id="version-skew-banner" role="alert">
+            <span>
+              Web client was updated but the daemon is running an older build - restart the daemon.
+            </span>
+            <button
+              type="button"
+              aria-label="Dismiss version warning"
+              title="Dismiss"
+              onClick={() => versionSkewDismissedAtom(true)}
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
         <div id="session-info">
           <span className="header-status-group">
             {/* Settings viewer: a live-at-open read of the resolved config
@@ -3473,7 +3536,7 @@ function App() {
                   while the pane is a cold record, so it must read as
                   not-the-subject; in a subagent view the badge IS the
                   subject, so it never dims. */}
-              <span id="session-label" style={activeLogId !== null ? { opacity: "0.5" } : undefined}>
+              <span id="session-label" style={view.mode !== "attached" ? { opacity: "0.5" } : undefined}>
                 {subagentView ? "Subagent:" : "Session:"}{" "}
                 <button
                   type="button"
@@ -3503,10 +3566,50 @@ function App() {
                   <IconCheck className="session-copy-check" />
                 </button>
               </span>
-              {activeLogId ? (
+              {/* The read-only banners, one per named view (the honest state
+                  NAME is the copy): OBSERVING a durable log, or a PEEK at
+                  another live session -- the peek adds the explicit claim
+                  ("Take over" performs exactly what a normal attach does)
+                  beside its close control. A seek that never landed the
+                  match says so in the banner instead of silently showing
+                  the head. */}
+              {view.mode === "observing" && view.subjectId !== null ? (
                 <span id="log-view-label">
-                  Viewing log: <span id="current-log-id">{activeLogId.slice(0, 8)}</span>{" "}
-                  <button id="close-log-view-btn" title="Close log view" onClick={onCloseLogView}>
+                  Observing log: <span id="current-log-id">{view.subjectId.slice(0, 8)}</span> -- read only
+                  {view.note ? <span className="view-note">({view.note})</span> : null}{" "}
+                  <button
+                    type="button"
+                    id="close-log-view-btn"
+                    title="Close log view"
+                    aria-label="Close log view (back to the attached session)"
+                    onClick={onCloseLogView}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ) : view.mode === "peeking" && view.subjectId !== null ? (
+                <span id="peek-view-label">
+                  Viewing session:{" "}
+                  <span id="current-peek-id" title={view.subjectId}>
+                    {view.subjectId.slice(0, 8)}
+                  </span>{" "}
+                  -- read only
+                  {view.note ? <span className="view-note">({view.note})</span> : null}{" "}
+                  <button
+                    type="button"
+                    id="peek-takeover-btn"
+                    title={`Attach to ${view.subjectId} and write to it -- the peek ends and the session attaches`}
+                    onClick={onTakeOverPeek}
+                  >
+                    Take over
+                  </button>{" "}
+                  <button
+                    type="button"
+                    id="close-peek-view-btn"
+                    title="Close peek (back to the attached session)"
+                    aria-label="Close peek (back to the attached session)"
+                    onClick={onCloseLogView}
+                  >
                     ✕
                   </button>
                 </span>
@@ -3528,8 +3631,10 @@ function App() {
                     )}
                   </span>{" "}
                   <button
+                    type="button"
                     id="close-subagent-view-btn"
                     title="Close subagent view"
+                    aria-label="Close subagent view"
                     onClick={onCloseSubagentView}
                   >
                     ✕
@@ -3571,6 +3676,7 @@ function App() {
                 // rides the aria-label and the "Sandbox Mode: ..." sentence
                 // the title (fenceTitle) -- nothing is icon-decoded.
                 <button
+                  type="button"
                   id="tool-exec-status"
                   className={[
                     "header-btn",
@@ -3599,7 +3705,7 @@ function App() {
           <div
             id="input-area"
             ref={inputAreaRef}
-            className={composerLocked ? "read-only" : undefined}
+            className={composer.enabled ? undefined : "read-only"}
           >
             <form
               id="chat-form"
@@ -3646,10 +3752,10 @@ function App() {
               </div>
               <textarea
                 id="chat-input"
-                placeholder={subagentView ? "Steer the subagent..." : "Type a message..."}
+                placeholder={composer.placeholder}
                 autocomplete="off"
                 rows="1"
-                disabled={composerLocked}
+                disabled={!composer.enabled}
                 ref={chatInputRef}
                 onInput={() => {
                   if (chatInputEl) autoResize(chatInputEl);
@@ -3681,16 +3787,16 @@ function App() {
                   ref={fileInputRef}
                   onChange={onFilesPicked}
                 />
-                {/* Attachments are refused for a worker row server-side, so
-                    the affordance is absent in a worker view (N2): hidden,
-                    never disabled-and-tempting. */}
-                {subagentView ? null : (
+                {/* Attachments ride the composer capability: refused
+                    for a worker row server-side (N2) and meaningless in a
+                    read-only view -- hidden when not allowed, never
+                    disabled-and-tempting. */}
+                {composer.actions.attach ? (
                   <button
                     type="button"
                     id="attach-btn"
                     title="Attach files to the next message"
                     aria-label="Attach files to the next message"
-                    disabled={composerLocked}
                     onClick={() => fileInputEl?.click()}
                   >
                     {/* currentColor idiom from icons.tsx; 1.8 stroke for the weight. */}
@@ -3698,7 +3804,7 @@ function App() {
                       <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                     </svg>
                   </button>
-                )}
+                ) : null}
                 {chat?.sttEnabledAtom() ? (
                   <button
                     type="button"
@@ -3708,7 +3814,7 @@ function App() {
                     aria-label="Hold to record; the transcript is inserted into the input"
                     // The mic only EDITS the box, so it keeps working in a
                     // subagent view (the text it inserts steers the task).
-                    disabled={composerLocked || sttPhase === "transcribing"}
+                    disabled={!composer.enabled || sttPhase === "transcribing"}
                     onMousedown={onMicMousedown}
                   >
                     {/* Idle = glyph only: aria-label + title carry the name.
@@ -3776,7 +3882,12 @@ function App() {
                     Disconnected
                   </span>
                 )}
-                {working ? (
+                {/* Stop rides the composer capability too: while a
+                    peek/observe is open the ATTACHED session's turn is not
+                    what is on screen, so the pane offers no Stop aimed at
+                    an unseen subject -- the sidebar row keeps its own
+                    Cancel for that session. */}
+                {working && composer.actions.stop ? (
                   // type=button: it lives inside #chat-form; without it the
                   // click would submit the composer before cancelling. The
                   // in-button spinner is the chat column's only busy tell.

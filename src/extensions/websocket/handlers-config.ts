@@ -1231,7 +1231,11 @@ function buildFindings(usableText: string, unified: ConfigSchema, configParamKey
       type: "removed-key",
       key: hit.key,
       line: hit.line,
-      message: `"${hit.key}" is no longer read; replaced by "${r.replacement}"${r.note ? ` (${r.note})` : ""}`,
+      // Plain user-facing copy only (owner ruling 2026-11-18): the
+      // replacement, plus the tombstone's user note when it has one.
+      message:
+        `"${hit.key}" is no longer read; replaced by "${r.replacement}"` +
+        (r.note ? ` (${r.note})` : ""),
     });
   }
   return { findings, truncated };

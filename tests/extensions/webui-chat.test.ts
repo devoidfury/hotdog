@@ -6,6 +6,9 @@
 import { describe, it, expect, afterEach, spyOn } from "bun:test";
 import {
   createChat,
+  composerForView,
+  ATTACHED_VIEW,
+  MATCH_UNREACHABLE_NOTE,
   type ChatController,
   type CompletionItem,
   type TaskInfoWire,
@@ -308,6 +311,26 @@ describe("createChat subagent ticker", () => {
     expect(chat.tasksAtom().map((t) => t.taskId)).toEqual(["a", "b"]);
     ws.emit({ type: "taskList", tasks: [taskInfo("c")] });
     expect(chat.tasksAtom().map((t) => t.taskId)).toEqual(["c"]);
+  });
+
+  it("a WORKER attach's scoped taskList does not re-attest the manager's board", () => {
+    const { chat, ws } = makeTaskChat();
+    ws.emit({ type: "taskList", tasks: [taskInfo("a")] });
+    // The worker-row attach (owner ruling 2026-11-18): its burst ends with
+    // the socket's task snapshot, scoped to the ATTACHED id -- and task rows
+    // carry the MANAGER's id, so it ships empty. Accepting it deletes the
+    // sidebar's Subagents board, the menu that hops between siblings.
+    ws.emit({ type: "sessionCreated", sessionId: "w-1", kind: "subagent", parentSessionId: "m-1" });
+    expect(chat.sessionViewAtom().workerView).toBe(true);
+    ws.emit({ type: "taskList", tasks: [] });
+    expect(chat.tasksAtom().map((t) => t.taskId)).toEqual(["a"]);
+    // The guard rides the worker view ONLY: a plain attach re-attests the
+    // board wholesale (empty lists included) exactly as before.
+    ws.emit({ type: "sessionCreated", sessionId: "m-1" });
+    ws.emit({ type: "taskList", tasks: [taskInfo("c")] });
+    expect(chat.tasksAtom().map((t) => t.taskId)).toEqual(["c"]);
+    ws.emit({ type: "taskList", tasks: [] });
+    expect(chat.tasksAtom()).toHaveLength(0);
   });
 
   it("taskUpdate inserts a new task and replaces one with the same id", () => {
@@ -945,5 +968,286 @@ describe("createChat reconnect identity", () => {
     chat!.disconnect();
     chat!.connect();
     expect(new URL(lastWs().url).searchParams.get("session")).toBeNull();
+  });
+});
+
+// ── Session view state (attached / peeking / observing) ───────────────────
+// The ONE named state (owner ruling 2026-11-18): a peek NEVER moves the socket, the
+// composer's posture is a pure function of the state, take-over is exactly
+// one attach, and the search seek paginates the loadOlder seam until the
+// match renders -- terminating on found / exhausted / refused, never
+// looping.
+
+describe("composerForView (pure composer capability)", () => {
+  const attached = { ...ATTACHED_VIEW, attachedId: "s1" };
+
+  it("attached: interactive composer, everything offered", () => {
+    const c = composerForView(attached);
+    expect(c.enabled).toBe(true);
+    expect(c.placeholder).toBe("Type a message...");
+    expect(c.actions).toEqual({ send: true, stop: true, attach: true, takeover: false });
+  });
+
+  it("attached worker row: live steer, no attachments", () => {
+    const c = composerForView({ ...attached, workerView: true });
+    expect(c.enabled).toBe(true);
+    expect(c.placeholder).toBe("Steer the subagent...");
+    expect(c.actions.send).toBe(true);
+    expect(c.actions.attach).toBe(false);
+    expect(c.actions.takeover).toBe(false);
+  });
+
+  it("peeking: locked, but the explicit claim is offered", () => {
+    const c = composerForView({
+      mode: "peeking",
+      attachedId: "s1",
+      subjectId: "s2",
+      workerView: false,
+      note: null,
+    });
+    expect(c.enabled).toBe(false);
+    expect(c.actions.send).toBe(false);
+    expect(c.actions.attach).toBe(false);
+    expect(c.actions.takeover).toBe(true);
+  });
+
+  it("observing: locked, nothing offered (a cold log cannot be claimed)", () => {
+    const c = composerForView({
+      mode: "observing",
+      attachedId: "s1",
+      subjectId: "log-9",
+      workerView: false,
+      note: null,
+    });
+    expect(c.enabled).toBe(false);
+    expect(c.actions.takeover).toBe(false);
+  });
+});
+
+describe("createChat session view state (wire side)", () => {
+  const RealWebSocket = globalThis.WebSocket;
+  let chat: ChatController | null = null;
+
+  afterEach(() => {
+    chat?.disconnect();
+    chat = null;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = RealWebSocket;
+  });
+
+  /** A chat parked on a live interactive attach (cursor reported, sent
+   *  log cleared so each test counts only its own frames). */
+  function makeViewChat(): { ws: FakeWebSocket } {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const container = makeContainer();
+    chat = createChat({
+      token: null,
+      host: "localhost",
+      getMessageListContainer: () => container as unknown as HTMLElement,
+      onSessionCreated: (d) => chat!.setSession(d.sessionId, d.replayDelta === true),
+    });
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+    ws.emit({ type: "sessionCreated", sessionId: "manager-1" });
+    ws.emit({ type: "sessionState", sessionId: "manager-1", key: "cursor", value: 3 });
+    ws.sent.length = 0;
+    return { ws };
+  }
+
+  const sentOfType = (ws: FakeWebSocket, type: string): Array<Record<string, unknown>> =>
+    ws.sent.filter((m) => m.type === type);
+
+  it("NEGATIVE (a): peeking a live session does not change the manager's attached session", () => {
+    const { ws } = makeViewChat();
+    chat!.peekSession("live-2");
+    // The peek rides the durable-log READ; the attach frame never fires.
+    expect(sentOfType(ws, "viewLog")).toEqual([{ type: "viewLog", logId: "live-2" }]);
+    expect(sentOfType(ws, "switchSession")).toHaveLength(0);
+    ws.emit({ type: "logViewed", logId: "live-2", entries: [] });
+    const view = chat!.sessionViewAtom();
+    expect(view.mode).toBe("peeking");
+    expect(view.subjectId).toBe("live-2");
+    expect(view.attachedId).toBe("manager-1");
+    // The manager itself never moved.
+    expect(chat!.sessionIdAtom()).toBe("manager-1");
+  });
+
+  it("NEGATIVE (b): composer disabled in peeking AND observing, enabled in attached", () => {
+    const { ws } = makeViewChat();
+    expect(composerForView(chat!.sessionViewAtom()).enabled).toBe(true); // attached
+    chat!.viewLog("log-9");
+    ws.emit({ type: "logViewed", logId: "log-9", entries: [] });
+    expect(chat!.sessionViewAtom().mode).toBe("observing");
+    expect(composerForView(chat!.sessionViewAtom()).enabled).toBe(false);
+    chat!.peekSession("live-2");
+    ws.emit({ type: "logViewed", logId: "live-2", entries: [] });
+    expect(chat!.sessionViewAtom().mode).toBe("peeking");
+    expect(composerForView(chat!.sessionViewAtom()).enabled).toBe(false);
+    // The close control's optimistic flip + the re-attach unlock it again.
+    chat!.clearView();
+    ws.emit({ type: "sessionCreated", sessionId: "manager-1" });
+    ws.emit({ type: "sessionState", sessionId: "manager-1", key: "cursor", value: 4 });
+    expect(chat!.sessionViewAtom().mode).toBe("attached");
+    expect(chat!.sessionViewAtom().subjectId).toBeNull();
+    expect(composerForView(chat!.sessionViewAtom()).enabled).toBe(true);
+  });
+
+  it("worker-row attach stays ATTACHED with the steer capability (not a lock)", () => {
+    makeViewChat();
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+    ws.sent.length = 0;
+    ws.emit({
+      type: "sessionCreated",
+      sessionId: "worker-1",
+      kind: "subagent",
+      parentSessionId: "manager-1",
+    });
+    const view = chat!.sessionViewAtom();
+    expect(view.mode).toBe("attached");
+    expect(view.workerView).toBe(true);
+    const c = composerForView(view);
+    expect(c.enabled).toBe(true);
+    expect(c.placeholder).toBe("Steer the subagent...");
+  });
+
+  it("NEGATIVE (c): take-over performs exactly one attach and returns to attached", () => {
+    const { ws } = makeViewChat();
+    chat!.peekSession("live-2");
+    ws.emit({ type: "logViewed", logId: "live-2", entries: [] });
+    ws.sent.length = 0;
+    chat!.takeOver();
+    chat!.takeOver(); // a double-click cannot double-attach
+    expect(sentOfType(ws, "switchSession")).toEqual([
+      { type: "switchSession", sessionId: "live-2" },
+    ]);
+    ws.emit({ type: "sessionCreated", sessionId: "live-2" });
+    ws.emit({ type: "sessionState", sessionId: "live-2", key: "cursor", value: 9 });
+    const view = chat!.sessionViewAtom();
+    expect(view.mode).toBe("attached");
+    expect(view.attachedId).toBe("live-2");
+    expect(view.subjectId).toBeNull();
+    expect(composerForView(view).enabled).toBe(true);
+  });
+
+  it("take-over is a no-op outside peeking (an observing view cannot claim)", () => {
+    const { ws } = makeViewChat();
+    chat!.viewLog("log-9");
+    ws.emit({ type: "logViewed", logId: "log-9", entries: [] });
+    ws.sent.length = 0;
+    chat!.takeOver();
+    expect(sentOfType(ws, "switchSession")).toHaveLength(0);
+  });
+
+  it("NEGATIVE (d): search seek pages the loadOlder seam and STOPS when the match lands", () => {
+    const { ws } = makeViewChat();
+    const list = chat!.messageListAtom()!;
+    const reveal = spyOn(list, "revealMatch").mockImplementation(() => false);
+    chat!.peekSession("live-2", "needle");
+    ws.sent.length = 0;
+    // First page: no match, older history exists -> exactly ONE page ask.
+    ws.emit({
+      type: "logViewed",
+      logId: "live-2",
+      entries: [],
+      hasOlder: true,
+      oldestIndex: 12,
+      epochToken: 0,
+    });
+    expect(sentOfType(ws, "loadOlder")).toEqual([
+      { type: "loadOlder", requestId: 1, logId: "live-2", olderThan: 12, epochToken: 0 },
+    ]);
+    // The next page carries the match -> land, and NEVER page again even
+    // though older history still existed.
+    reveal.mockImplementation(() => true);
+    ws.emit({
+      type: "loadOlderResult",
+      requestId: 1,
+      logId: "live-2",
+      entries: [],
+      oldestIndex: 6,
+      hasOlder: true,
+    });
+    expect(sentOfType(ws, "loadOlder")).toHaveLength(1);
+    expect(chat!.sessionViewAtom().note).toBeNull();
+    expect(reveal).toHaveBeenCalledTimes(2);
+  });
+
+  it("NEGATIVE (d): seek TERMINATES on exhausted history and notes it honestly", () => {
+    const { ws } = makeViewChat();
+    chat!.peekSession("live-2", "ghost");
+    ws.sent.length = 0;
+    ws.emit({
+      type: "logViewed",
+      logId: "live-2",
+      entries: [],
+      hasOlder: true,
+      oldestIndex: 12,
+      epochToken: 0,
+    });
+    ws.emit({
+      type: "loadOlderResult",
+      requestId: 1,
+      logId: "live-2",
+      entries: [],
+      oldestIndex: 6,
+      hasOlder: true,
+    });
+    ws.emit({
+      type: "loadOlderResult",
+      requestId: 2,
+      logId: "live-2",
+      entries: [],
+      oldestIndex: 0,
+      hasOlder: false,
+    });
+    // Two pages asked, seam closed -- silence, never a third request.
+    expect(sentOfType(ws, "loadOlder")).toHaveLength(2);
+    const view = chat!.sessionViewAtom();
+    expect(view.mode).toBe("peeking"); // the peek stays open...
+    expect(view.note).toBe(MATCH_UNREACHABLE_NOTE); // ...with the honest word
+  });
+
+  it("a refusal mid-seek ends the seek honestly (no retry loop)", () => {
+    const { ws } = makeViewChat();
+    chat!.peekSession("live-2", "ghost");
+    ws.sent.length = 0;
+    ws.emit({
+      type: "logViewed",
+      logId: "live-2",
+      entries: [],
+      hasOlder: true,
+      oldestIndex: 12,
+      epochToken: 0,
+    });
+    ws.emit({
+      type: "loadOlderResult",
+      requestId: 1,
+      logId: "live-2",
+      code: "epoch_moved",
+      error: "the epoch moved",
+    });
+    expect(sentOfType(ws, "loadOlder")).toHaveLength(1);
+    expect(chat!.sessionViewAtom().note).toBe(MATCH_UNREACHABLE_NOTE);
+  });
+
+  it("a first page with no older history and no match notes it at once", () => {
+    const { ws } = makeViewChat();
+    chat!.peekSession("live-2", "ghost");
+    ws.sent.length = 0;
+    // Real revealMatch on the headless container (no children collection):
+    // must not throw, must miss, must end the seek with the note.
+    ws.emit({ type: "logViewed", logId: "live-2", entries: [] });
+    expect(sentOfType(ws, "loadOlder")).toHaveLength(0);
+    expect(chat!.sessionViewAtom().note).toBe(MATCH_UNREACHABLE_NOTE);
+  });
+
+  it("deleting the viewed log falls the state back to attached", () => {
+    const { ws } = makeViewChat();
+    chat!.peekSession("live-2");
+    ws.emit({ type: "logViewed", logId: "live-2", entries: [] });
+    ws.emit({ type: "logDeleted", logId: "live-2" });
+    const view = chat!.sessionViewAtom();
+    expect(view.mode).toBe("attached");
+    expect(view.attachedId).toBe("manager-1");
+    expect(composerForView(view).enabled).toBe(true);
   });
 });

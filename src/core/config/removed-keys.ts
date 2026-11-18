@@ -17,22 +17,26 @@
 export interface RemovedKeyTombstone {
   key: string;
   replacement: string;
+  /** Plain user-facing one-liner for every surface that quotes the tombstone
+   *  (the SETTINGS diagnostics, the boot nudge, `hotdog rescue`'s verdict):
+   *  states what changed in today's terms, never retirement archaeology
+   *  (owner ruling 2026-11-18 -- no surface may read like commit history).
+   *  Falls back to nothing: a bare "no longer read; replaced by X" is
+   *  already complete. */
   note?: string;
   topLevelOnly?: boolean;
 }
 
 const THINKER_TOMBSTONE = {
   replacement: "the built-in '[Thinking: ...]' display (hideThinking drops thinking output)",
-  note: "the CLI think-format knob retired -- the {} format string shipped broken",
+  note: "thinking output uses the built-in display now; set hideThinking to drop it",
 };
 
 export const REMOVED_KEYS: RemovedKeyTombstone[] = [
   {
     key: "maxToolOutputLines",
     replacement: "maxToolResultChars",
-    note:
-      "line-shaping knobs retired for one central char cap on every tool result " +
-      "(the tools keep internal line shaping below it)",
+    note: "tool output is capped centrally by maxToolResultChars now",
   },
   {
     key: "temperature",

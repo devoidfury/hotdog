@@ -182,6 +182,10 @@ describe("rescue removed-key tombstone (thinker / thinkerFormat)", () => {
       expect(stdout).toContain('REMOVED key: "thinker" (line 2)');
       expect(stdout).toContain('REMOVED key: "thinker_format" (line 3)');
       expect(stdout).toContain("[Thinking: ...]");
+      // Owner ruling 2026-11-18: EVERY tombstone surface speaks plain user
+      // copy -- the rescue verdict included, no retirement archaeology.
+      expect(stdout).not.toContain("shipped broken");
+      expect(stdout).not.toContain("knob retired");
       expect(stdout).not.toContain('UNKNOWN key: "thinker"');
       expect(stdout).not.toContain('UNKNOWN key: "thinker_format"');
     });

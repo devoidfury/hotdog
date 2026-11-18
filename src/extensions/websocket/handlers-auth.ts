@@ -2,6 +2,7 @@
 
 import { formatError } from "@core/error.ts";
 import { logger } from "@utils/logger.ts";
+import pkg from "@package.json" with { type: "json" };
 import { S2C } from "./protocol.ts";
 import { attachResumedSession, attachToMostRecentSession, fallbackAttach } from "./attach.ts";
 import { createAndAttachSession } from "./resume.ts";
@@ -32,7 +33,7 @@ export async function handleAuthMessage(ctx: RouteContext): Promise<void> {
   // Authed sockets join the broadcast group (no-op if already
   // registered via a token upgrade).
   registry.registerConnection(ws);
-  ws.send(JSON.stringify({ type: S2C.AUTH_OK }));
+  ws.send(JSON.stringify({ type: S2C.AUTH_OK, version: pkg.version }));
   // The task snapshot rides the attach paths below. A client that
   // remembers its session (upgrade ?session=...) gets it back
   // instead of the most recent one. attachStarted covers an

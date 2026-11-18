@@ -244,7 +244,9 @@ describe("replaySessionHistory", () => {
       new Message({ role: "tool", content: "orphaned" }),
     ]);
     const matched = out.filter((m) => m.type === S2C.TOOL_RESULT)[0]!;
-    expect(matched).toMatchObject({ name: "mystery", output: "out\nHINT: try again\nMETA: {\"exit\":\"1\"}", toolCallId: "c2" });
+    // The META envelope never reaches the wire (chat surfaces, owner ruling 2026-11-18);
+    // HINT: is real information and stays.
+    expect(matched).toMatchObject({ name: "mystery", output: "out\nHINT: try again", toolCallId: "c2" });
     const orphan = out.filter((m) => m.type === S2C.TOOL_RESULT)[1]!;
     expect(orphan).toMatchObject({ name: "unknown", output: "orphaned" });
     expect(orphan.toolCallId).toBeUndefined();

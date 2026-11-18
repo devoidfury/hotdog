@@ -20,6 +20,7 @@ import { isToolResultPart, isWrapperPart, type ToolResultContent } from "@core/c
 export function toolContentText(
   content: ToolResultContent | Array<unknown> | null | undefined,
   paint?: (body: string) => string,
+  opts?: { omitMeta?: boolean },
 ): string {
   if (content == null) return "";
   if (typeof content === "string") return content;
@@ -34,7 +35,13 @@ export function toolContentText(
     if (part.hint !== null) lines.push(`HINT: ${part.hint}`);
     // Metadata is part of the result (exit codes, pagination, durations);
     // a display surface that shows the answer shows the facts about it too.
-    if (part.meta.length > 0) lines.push(`META: ${JSON.stringify(Object.fromEntries(part.meta))}`);
+    // Chat surfaces (webui transcript + log view) pass omitMeta: the envelope
+    // line restates the call header there, and every meta fact the UI
+    // consumes travels STRUCTURED beside the text (the TOOL_RESULT frame's
+    // startLine), so dropping the line drops no information -- the raw parts
+    // persist for audit either way.
+    if (part.meta.length > 0 && opts?.omitMeta !== true)
+      lines.push(`META: ${JSON.stringify(Object.fromEntries(part.meta))}`);
   }
   return lines.join("\n");
 }
@@ -59,6 +66,29 @@ export function toolContentMeta(
     }
   }
   return null;
+}
+
+/**
+ * Every stored meta entry as a plain object (later parts win on a key
+ * collision; insertion order is kept). The webui's result strip reads its
+ * curated facts from here instead of parsing the flattened `META:` text,
+ * and the full envelope stays reachable behind the block's expand idiom.
+ * null when nothing is stored (same degrade postures as toolContentMeta).
+ */
+export function toolContentMetaAll(
+  content: ToolResultContent | Array<unknown> | null | undefined,
+): Record<string, string> | null {
+  if (content == null || typeof content === "string" || !Array.isArray(content)) return null;
+  const all: Record<string, string> = {};
+  let any = false;
+  for (const part of content) {
+    if (!isToolResultPart(part)) continue;
+    for (const [k, v] of part.meta) {
+      all[k] = v;
+      any = true;
+    }
+  }
+  return any ? all : null;
 }
 
 /**

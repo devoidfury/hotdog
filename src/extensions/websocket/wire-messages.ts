@@ -7,7 +7,7 @@
 import { OUTPUT_EVENT, type FileAttachmentView, type OutputEvent } from "@core/context/output.ts";
 import { summarizeHeaderArgs, summarizeToolArgs } from "@core/extensions/tool-utils.ts";
 import type { ArgDisplay, ToolDisplaySpec } from "@core/extensions/tool-registry.ts";
-import { toolContentMeta, toolContentText } from "@utils/tool-content.ts";
+import { toolContentMeta, toolContentMetaAll, toolContentText } from "@utils/tool-content.ts";
 import type { CtxUsage } from "@utils/session-turns.ts";
 import { trySessionPath } from "@core/session/session-log.ts";
 import type { TaskInfo } from "@core/session/task-types.ts";
@@ -234,17 +234,24 @@ export function s2cToolResult(
   // the real file line instead of the snippet's 1..N. Anything not a
   // positive integer is dropped -- a blank rail beats a fake number.
   const startLine = Number(toolContentMeta(o.content, "start_line"));
+  const envelope = toolContentMetaAll(o.content);
   return {
     type: S2C.TOOL_RESULT,
     sessionId,
     name: o.name,
     // Content parts travel as text on this transport: the browser has no
     // part renderer, so flatten the fields here (display, not a format).
-    output: toolContentText(o.content),
+    // The META LINE is left out of the text (owner ruling 2026-11-18): the
+    // envelope instead rides structured below, where the block renders its
+    // curated facts (exit code, durations, truncation) as one muted strip
+    // and keeps the full envelope behind the expand idiom. startLine stays
+    // its own field: the diff rails consume it as a number.
+    output: toolContentText(o.content, undefined, { omitMeta: true }),
     ...(o.toolCallId ? { toolCallId: o.toolCallId } : {}),
     ...(o.error !== undefined ? { error: o.error } : {}),
     ...(imgs ? { images: imgs } : {}),
     ...(Number.isInteger(startLine) && startLine > 0 ? { startLine } : {}),
+    ...(envelope ? { meta: envelope } : {}),
   };
 }
 

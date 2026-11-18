@@ -266,6 +266,11 @@ describe("loadConfig", () => {
       expect(warnings.length).toBe(1);
       expect(warnings[0]).toContain('config key "thinker" is removed and ignored');
       expect(warnings[0]).toContain("[Thinking: ...]");
+      // Owner ruling 2026-11-18: the boot nudge is USER output -- it speaks
+      // in today's terms, never retirement archaeology.
+      expect(warnings[0]).toContain("thinking output uses the built-in display now");
+      expect(warnings[0]).not.toContain("shipped broken");
+      expect(warnings[0]).not.toContain("retired");
     } finally {
       logger.warn = origWarn;
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
